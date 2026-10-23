@@ -12,6 +12,7 @@ from orbit.agent import SqliteStore, WorkspaceRegistry
 from orbit.protocol import (
     BUSY,
     GIT_FAILED,
+    INVALID,
     AddWorkspace,
     Catalog,
     CommandAccepted,
@@ -19,7 +20,7 @@ from orbit.protocol import (
     WorkspaceCloning,
 )
 from tests.connection_helpers import say, taken
-from tests.git_repo import bare_repository, init_repo, started
+from tests.git_repo import bare_repository, commit_file, git, init_repo, started
 from tests.plane_fakes import payloads, refused, welcomed
 from tests.process_checks import gone
 from tests.serving import serving, until
@@ -116,6 +117,28 @@ async def test_a_url_that_fails_is_told_as_git_failed_leaving_no_directory(
     error = events[-1]
     assert isinstance(error, ErrorOccurred) and error.code == GIT_FAILED
     assert error.message.startswith(f"Couldn't clone {url}: ")
+    assert list(clones.iterdir()) == []
+
+
+async def test_a_clone_that_cant_be_served_is_removed(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path
+) -> None:
+    source = init_repo(tmp_path / "source")
+    (source / ".orbit").mkdir()
+    commit_file(source, ".orbit/config.toml", "roles = 1\n", "configure")
+    git(tmp_path, "clone", "-q", "--bare", str(source), str(tmp_path / "proj.git"))
+    clones = tmp_path / "clones"
+    plane = serving(stack, store, clones)
+    connection = await welcomed(plane)
+
+    await say(connection, "add", AddWorkspace(url=(tmp_path / "proj.git").as_uri()))
+    events = await asyncio.wait_for(until(connection, ErrorOccurred), 30)
+    await plane.close()
+    stack.close()
+
+    error = events[-1]
+    assert isinstance(error, ErrorOccurred) and error.code == INVALID
+    assert error.message.startswith(f"Can't add {clones / 'proj'}: ")
     assert list(clones.iterdir()) == []
 
 

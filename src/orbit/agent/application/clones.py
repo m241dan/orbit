@@ -32,7 +32,7 @@ class Clones:
         refusing to serve it gives, or as ``internal`` if orbit fails; ``url`` is free to clone
         again once it's done."""
         try:
-            await serve(await cloner.clone(url, self._tell))
+            await _served(await cloner.clone(url, self._tell), cloner, serve)
         except CloneFailed as exc:
             self._tell(ErrorOccurred(code=GIT_FAILED, message=str(exc)))
         except Refused as refusal:
@@ -51,3 +51,13 @@ class Clones:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _served(path: str, cloner: Cloner, serve: Callable[[str], Awaitable[None]]) -> None:
+    """``serve`` the clone ``cloner`` made at ``path``, having ``cloner`` remove it if that fails
+    or is cancelled, once ``serve`` has let go of it, so a failed clone leaves nothing behind."""
+    try:
+        await serve(path)
+    except BaseException:
+        await cloner.remove(path)
+        raise

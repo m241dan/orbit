@@ -42,6 +42,10 @@ class Cloner:
             raise
         return str(directory)
 
+    async def remove(self, path: str) -> None:
+        """Remove the clone at ``path``, as far as it can, off the event loop."""
+        await asyncio.to_thread(shutil.rmtree, path, ignore_errors=True)
+
     def _claimed(self, url: str) -> Path:
         """A new, empty directory in the clone directory for the clone of ``url``, named for it
         or, if that's taken, numbered. Raises :class:`CloneFailed` if it can't be made."""

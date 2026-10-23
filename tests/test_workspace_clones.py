@@ -46,6 +46,12 @@ async def cloning(source: FakeSource) -> None:
         await asyncio.sleep(0.01)
 
 
+async def removed(source: FakeSource) -> None:
+    """Wait until ``source`` has removed a clone."""
+    while not source.removed:
+        await asyncio.sleep(0.01)
+
+
 async def test_a_url_is_accepted_at_once_then_cloned_and_served_managed() -> None:
     source = FakeSource()
     plane = ControlPlane([workspace("a")], workspaces=source)
@@ -62,6 +68,7 @@ async def test_a_url_is_accepted_at_once_then_cloned_and_served_managed() -> Non
     assert (progress.workspace, progress.session) == (None, None)
     assert ids(catalog.payload) == ["a", "proj.git"]
     assert source.managed == ["/clones/proj.git"]
+    assert source.removed == []
 
 
 async def test_a_clones_news_reaches_connections_attached_too() -> None:
@@ -123,6 +130,7 @@ async def test_a_clone_that_cant_be_served_is_told_with_the_refusals_code() -> N
 
     message = "Can't add /clones/proj.git: Its configuration is invalid."
     assert error == ErrorOccurred(code=INVALID, message=message)
+    assert source.removed == ["/clones/proj.git"]
 
 
 async def test_a_clone_whose_serving_fails_is_told_as_internal() -> None:
@@ -145,6 +153,7 @@ async def test_a_clone_whose_serving_fails_is_told_as_internal() -> None:
     message = f"Orbit failed to serve the clone of {URL}: The store is gone."
     assert error == ErrorOccurred(code=INTERNAL, message=message)
     assert source.flags == [("proj.git", False)]
+    assert source.removed == ["/clones/proj.git"]
 
 
 async def test_a_url_being_cloned_already_is_refused_as_busy() -> None:
@@ -263,3 +272,38 @@ async def test_closing_the_control_plane_stops_a_clone_under_way() -> None:
     await asyncio.wait_for(plane.close(), 5)
 
     assert source.opened == []
+
+
+async def test_closing_while_a_clone_waits_to_be_served_removes_it() -> None:
+    source = FakeSource()
+    source.gate = asyncio.Event()
+    plane = ControlPlane(workspaces=source)
+    connection = await welcomed(plane)
+    adding = asyncio.create_task(say(connection, "add", AddWorkspace(path="/src/c")))
+    while not source.opened:
+        await asyncio.sleep(0.01)
+
+    await say(connection, "clone", AddWorkspace(url=URL))
+    await received_until(connection, WorkspaceCloning)
+    closing = asyncio.create_task(plane.close())
+    await asyncio.wait_for(removed(source), 5)
+    source.gate.set()
+    await asyncio.gather(adding, closing)
+
+    assert source.removed == ["/clones/proj.git"]
+    assert source.opened == ["/src/c"]
+
+
+async def test_a_workspace_added_by_path_that_cant_be_served_isnt_removed() -> None:
+    source = FakeSource()
+    source.unavailable = "Its configuration is invalid."
+    plane = ControlPlane(workspaces=source)
+    connection = await welcomed(plane)
+
+    await say(connection, "add", AddWorkspace(path="/src/c"))
+    outcome = payloads(taken(connection))
+    await plane.close()
+
+    message = "Can't add /src/c: Its configuration is invalid."
+    assert outcome == [refused("add", INVALID, message)]
+    assert source.removed == []

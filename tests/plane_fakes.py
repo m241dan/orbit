@@ -89,7 +89,8 @@ class FakeSource:
     and the ``flags`` set, each waiting for ``flag_gate``, if given, and failing as
     ``unflag_fails`` says, if it does, when it's cleared. Each URL ``cloning`` is cloned to
     ``/clones/<its last part>``, reporting one step of progress, then waiting for
-    ``clone_gate``, if given, and failing as ``clone_fails`` says, if it does. Purging a
+    ``clone_gate``, if given, and failing as ``clone_fails`` says, if it does; the clones
+    ``removed`` are noted, by path. Purging a
     workspace would lose what ``lost`` says, by id, failing as ``losses_fail`` says, if it
     does; those ``purged`` are noted, failing as ``purge_fails`` says, if it does. The workspace
     added last is at ``latest``, if any, unless finding it fails as ``latest_fails`` says."""
@@ -102,6 +103,7 @@ class FakeSource:
         self.cloning: list[str] = []
         self.clone_gate: asyncio.Event | None = None
         self.clone_fails: str | None = None
+        self.removed: list[str] = []
         self.managed: list[str] = []
         self.kinds = kinds or {}
         self.tops = tops or {}
@@ -135,6 +137,9 @@ class FakeSource:
         if self.clone_fails is not None:
             raise CloneFailed(self.clone_fails)
         return f"/clones/{PurePath(url).name}"
+
+    async def remove(self, path: str) -> None:
+        self.removed.append(path)
 
     async def open(self, root: str, *, managed: bool = False) -> WorkspaceHost:
         self.opened.append(root)

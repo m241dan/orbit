@@ -84,6 +84,9 @@ class GatedSource:
     async def clone(self, url: str, progress: Callable[[WorkspaceCloning], None]) -> str:
         raise CloneFailed("Nothing is cloned here.")
 
+    async def remove(self, path: str) -> None:
+        pass
+
     async def open(self, root: str, *, managed: bool = False) -> WorkspaceHost:
         source = self
 

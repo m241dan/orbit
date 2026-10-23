@@ -197,6 +197,10 @@ class ServedWorkspaces:
         """The path of a new clone of the repository at ``url``, as the cloner makes it."""
         return await self._cloner.clone(url, progress)
 
+    async def remove(self, path: str) -> None:
+        """Remove the clone at ``path``, as the cloner does."""
+        await self._cloner.remove(path)
+
     async def open(self, root: str, *, managed: bool = False) -> WorkspaceHost:
         """The host of the workspace at ``root``, registered or found, flagged served and, if
         ``managed``, marked as a clone orbit made, its lock taken if it's free. Raises

@@ -77,6 +77,10 @@ class Cloner(Protocol):
         ends."""
         ...
 
+    async def remove(self, path: str) -> None:
+        """Remove the clone at ``path``, one it made that couldn't be served, as far as it can."""
+        ...
+
 
 class DirectoryLister(Protocol):
     """What reads the directories on the server's host for frontends browsing them."""
