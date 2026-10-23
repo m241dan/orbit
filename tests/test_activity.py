@@ -45,9 +45,12 @@ def test_several_at_once_refuse_with_the_first_in_order(activity: Activity, refu
 @pytest.mark.parametrize(
     ("activity", "kind"),
     [
-        (Activity(tasks=True, review=True, planner=True), Running.TASKS),
-        (Activity(review=True, planner=True), Running.REVIEW),
+        (Activity(tasks=True), Running.TASKS),
+        (Activity(review=True), Running.REVIEW),
         (Activity(planner=True), Running.PLANNER),
+        (Activity(tasks=True, review=True, planner=True), Running.TASKS),
+        (Activity(tasks=True, planner=True), Running.TASKS),
+        (Activity(review=True, planner=True), Running.REVIEW),
         (Activity(startup_check=True), None),
     ],
 )
@@ -60,9 +63,11 @@ def test_the_first_running_kind_is_in_order_and_ignores_the_startup_check(
 @pytest.mark.parametrize(
     ("activity", "work"),
     [
+        (Activity(tasks=True), "tasks are running"),
+        (Activity(review=True), "a review is running"),
+        (Activity(planner=True), "the planner is answering"),
         (Activity(tasks=True, review=True, planner=True), "tasks are running"),
         (Activity(review=True, planner=True), "a review is running"),
-        (Activity(planner=True), "the planner is answering"),
         (Activity(startup_check=True), None),
     ],
 )

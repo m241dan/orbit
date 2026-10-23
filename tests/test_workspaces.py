@@ -2,7 +2,7 @@
 
 import pytest
 
-from orbit.agent.domain.activity import Activity
+from orbit.agent.domain.activity import Activity, switch_refusal
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.workspaces import (
     ATTACH_FIRST,
@@ -106,16 +106,22 @@ def test_a_file_is_invalid() -> None:
     assert refusal(error) == (INVALID, "Can't add /src/c: it isn't a directory.")
 
 
-def test_an_idle_workspace_no_one_else_views_may_be_removed() -> None:
-    check_removable("/src/c", Activity(startup_check=True), ())
+def test_the_startup_check_alone_leaves_a_workspace_idle_for_switching_and_removal() -> None:
+    activity = Activity(startup_check=True)
+
+    check_removable("/src/c", activity, ())
+    assert (switch_refusal(activity), activity.running) == (None, False)
 
 
 @pytest.mark.parametrize(
     ("activity", "work"),
     [
-        (Activity(tasks=True, review=True), "tasks are running"),
-        (Activity(review=True, planner=True), "a review is running"),
+        (Activity(tasks=True), "tasks are running"),
+        (Activity(review=True), "a review is running"),
         (Activity(planner=True), "the planner is answering"),
+        (Activity(tasks=True, review=True, planner=True), "tasks are running"),
+        (Activity(tasks=True, planner=True), "tasks are running"),
+        (Activity(review=True, planner=True), "a review is running"),
     ],
 )
 def test_a_workspace_running_work_is_busy_naming_it(activity: Activity, work: str) -> None:
