@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -24,7 +25,7 @@ from orbit.agent.application.work_turns import (
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.endings import STOPPED_BY_YOU
 from orbit.agent.domain.refusals import Refused
-from orbit.agent.domain.usage_limits import RESUMING_NOTE
+from orbit.agent.domain.usage_limits import RESUMING_NOTE, paused_note
 from orbit.protocol import (
     BUSY,
     CONFIGURATOR,
@@ -46,37 +47,41 @@ TASK = TaskSpec(prompt="Add a flag.", settings=Settings(model="opus"))
 
 class StopsCounted(WorkLane):
     """A work lane that counts the times it was told the user stopped its run, and whose runs
-    stop at once at the usage limit while ``limited``."""
+    end at once as ``ends`` says, if set."""
 
     stops = 0
-    limited = False
+    ends: RunEnd | None = None
 
     def stopped_by_user(self) -> bool:
         self.stops += 1
         return super().stopped_by_user()
 
     async def run(self) -> RunEnd:
-        if self.limited:
-            return "limited"
+        if self.ends is not None:
+            return self.ends
         return await super().run()
 
 
 class Sleeps:
-    """A pause whose clock stands at :data:`START` and whose sleeps last until released, then
-    raise ``error``, if set."""
+    """A pause whose clock stands at ``now``, :data:`START` until a test moves it, and whose
+    sleeps note the time they last ``until``, then last until released and raise ``error``, if
+    set."""
 
     def __init__(self) -> None:
         self.release = asyncio.Event()
         self.error: Exception | None = None
+        self.now = START
+        self.until: list[datetime] = []
 
     async def sleep(self, seconds: float) -> None:
+        self.until.append(self.now + timedelta(seconds=seconds))
         await self.release.wait()
         if self.error is not None:
             raise self.error
 
     @property
     def pause(self) -> LimitPause:
-        return LimitPause(now=lambda: START, sleep=self.sleep)
+        return LimitPause(now=lambda: self.now, sleep=self.sleep)
 
 
 HALTED_MESSAGE = "The session is halted."
@@ -395,10 +400,10 @@ async def settled() -> None:
 async def limited(lane: Lane) -> None:
     """Run a task the usage limit stops, leaving the run waiting to start again."""
     await add(lane)
-    lane.work.limited = True
+    lane.work.ends = "limited"
     await lane.turns.run_tasks()
     await turn_ended(lane)
-    lane.work.limited = False
+    lane.work.ends = None
     await settled()
 
 
@@ -473,3 +478,28 @@ async def test_closing_while_waiting_leaves_no_task_running(lane: Lane) -> None:
     await limited(lane)
     await lane.turns.close()
     assert asyncio.all_tasks() == {asyncio.current_task()}
+
+
+async def test_configuring_while_waiting_to_start_again_cancels_the_wait(lane: Lane) -> None:
+    await limited(lane)
+    lane.work.ends = "finished"
+    await lane.turns.configure_checks()
+    await turn_ended(lane)
+    lane.sleeps.release.set()
+    await settled()
+    assert not lane.turns.running
+    assert RESUMING_NOTE not in notes(lane)
+
+
+async def test_a_configurator_run_limited_again_starts_again_at_the_new_reset(
+    lane: Lane,
+) -> None:
+    await limited(lane)
+    lane.sleeps.now = START + timedelta(minutes=5)
+    lane.work.ends = "limited"
+    await lane.turns.configure_checks()
+    await turn_ended(lane)
+    await settled()
+    reset = START + timedelta(minutes=20)
+    assert notes(lane)[-1] == paused_note(reset)
+    assert lane.sleeps.until == [START + timedelta(minutes=15), reset]

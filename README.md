@@ -500,8 +500,8 @@ minutes later, when a limit still reached stops it again at once. The conversati
 (`Claude's usage limit is reached, so the run stopped. It starts again by itself at Wed 21 Oct
 18:01 UTC; ctrl+r starts it now and ctrl+s cancels that.`) and again as it starts. The task that
 hit the limit runs again first, afresh, as any rerun does. While the run waits, `ctrl+r` starts it
-at once, `ctrl+s` cancels the wait (`The run won't start again by itself.`), and switching sessions
-or quitting drops it. [docs/00016-bugfix-fix-chains-and-usage-limits.md](docs/00016-bugfix-fix-chains-and-usage-limits.md)
+at once, as does a confirmed `ctrl+e`, configurator first; `ctrl+s` cancels the wait (`The run
+won't start again by itself.`), and switching sessions or quitting drops it. [docs/00016-bugfix-fix-chains-and-usage-limits.md](docs/00016-bugfix-fix-chains-and-usage-limits.md)
 records the requirements.
 
 Edge cases:

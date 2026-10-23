@@ -62,10 +62,10 @@ class WorkTurns:
     The user's :meth:`run_tasks` starts a run, refused while one runs; :meth:`hold` cancels it
     and keeps :meth:`wake`, a review's request, from starting another until the user asks
     again. While the session is halted, :meth:`wake` starts nothing either. A run Claude's
-    usage limit stopped starts again by itself once the limit resets, unless the user runs or
-    holds the work first, or :meth:`forget_wait` is called as the session is left; a halt's
-    :meth:`stop_turn` keeps the wait, and one ending while halted starts the run once
-    :meth:`lifted` is called. Once :meth:`close` is called, nothing starts.
+    usage limit stopped starts again by itself once the limit resets, unless the user runs the
+    work, sets up checks or holds it first, or :meth:`forget_wait` is called as the session is
+    left; a halt's :meth:`stop_turn` keeps the wait, and one ending while halted starts the run
+    once :meth:`lifted` is called. Once :meth:`close` is called, nothing starts.
     """
 
     def __init__(self, parts: WorkParts) -> None:
@@ -87,14 +87,12 @@ class WorkTurns:
         """Start a run for the user, lifting a hold; refused without agents, or while one
         runs."""
         self.check_run_tasks()
-        self.forget_wait()
-        if self._parts.lane is not None:
-            self._parts.lane.kick()
-        await self._start(asked=True)
+        await self._start_asked()
 
     async def configure_checks(self) -> None:
-        """Queue a configurator first and run it, unless work is running already (then it goes
-        next); refused without verification or while one is queued or running."""
+        """Queue a configurator first and run it, in place of a wait to start again, unless work
+        is running already (then it goes next); refused without verification or while one is
+        queued or running."""
         self.check_configure_checks()
         desk, verifier = self._parts.desk, self._parts.verifier
         assert desk is not None and verifier is not None  # Checked just now.
@@ -104,7 +102,7 @@ class WorkTurns:
         task = _configurator_task(desk.agents, verifier)
         await self._parts.tasks.change(lambda board: board.add_first(task))
         if not self.running:
-            await self._start(asked=True)
+            await self._start_asked()
 
     def check_run_tasks(self) -> None:
         """Refuse :meth:`run_tasks` if it couldn't start a run at all: without agents."""
@@ -170,6 +168,15 @@ class WorkTurns:
         """Whether work not asked for waits: held, already running, waiting to start again or
         halted."""
         return self._held or self.running or self._waiting or self._parts.gate.halted()
+
+    async def _start_asked(self) -> None:
+        """Start a run the user asked for: drop the wait to start again of a run the usage limit
+        stopped, which this run replaces, run the reviews waiting, and start the work lane's
+        turn, lifting a hold."""
+        self.forget_wait()
+        if self._parts.lane is not None:
+            self._parts.lane.kick()
+        await self._start(asked=True)
 
     async def _start(self, *, asked: bool) -> None:
         """Start the work lane's turn if there is work, unless closed. The user ``asked`` lifts a
