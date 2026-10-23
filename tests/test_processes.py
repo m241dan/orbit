@@ -166,6 +166,27 @@ async def test_cancelling_while_starting_stops_what_the_child_started(
     assert await gone(grandchild)
 
 
+async def test_cancelling_again_while_starting_still_stops_what_the_child_started(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gate = asyncio.Event()
+    gated_start(monkeypatch, gate, fails=False)
+    pid_file = tmp_path / "pid"
+    env = {**os.environ, "PID_FILE": str(pid_file)}
+    script = 'sleep 30 & echo $! > "$PID_FILE"; wait'
+    task = asyncio.create_task(run_process(("sh", "-c", script), tmp_path, env=env))
+    grandchild = int(await recorded_line(pid_file))
+    # A second cancellation, as from a timeout and a task group together, or at shutdown,
+    # lands while the cancel path waits for the held start.
+    for _ in range(2):
+        task.cancel()
+        await asyncio.sleep(0)
+    gate.set()
+    await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5)
+    assert task.cancelled()
+    assert await gone(grandchild)
+
+
 async def test_cancelling_a_start_that_then_fails_stays_cancelled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
