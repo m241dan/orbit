@@ -6,6 +6,8 @@ import asyncio
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
+
 from orbit.agent import CloneFailed, ControlPlane, PathKind, SqliteStore, WorkspaceHost
 from orbit.agent.application.outbox import SEQ_BLOCK
 from orbit.agent.application.seq_mark import MarkReservations
@@ -219,3 +221,40 @@ async def test_nothing_is_reserved_once_closed() -> None:
     await asyncio.sleep(0.01)
 
     assert mark.reservations == []
+
+
+class BrokenMark(FakeStore):
+    """A mark whose first reservation fails unexpectedly, as a bug would."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.bug_pending = True
+
+    async def reserve(self, seq: int) -> None:
+        if self.bug_pending:
+            self.bug_pending = False
+            raise RuntimeError("a bug")
+        await super().reserve(seq)
+
+
+async def test_an_unexpected_failure_reserving_is_raised_as_it_closes() -> None:
+    mark = BrokenMark()
+    reservations = MarkReservations(mark)
+
+    reservations.reserve(100)
+    await asyncio.sleep(0.01)
+    reservations.reserve(200)
+    await asyncio.sleep(0.01)
+
+    with pytest.raises(RuntimeError, match="a bug"):
+        await reservations.close()
+    assert mark.reservations == [200]
+
+
+async def test_an_unexpected_failure_of_the_last_reservation_is_raised_as_it_closes() -> None:
+    reservations = MarkReservations(BrokenMark())
+
+    reservations.reserve(100)
+
+    with pytest.raises(RuntimeError, match="a bug"):
+        await reservations.close()

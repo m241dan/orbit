@@ -2,16 +2,18 @@
 
 import asyncio
 from collections.abc import Sequence
+from functools import partial
 
 import pytest
 
 from orbit.agent.application.ports import ProposalDecision
 from orbit.agent.application.proposal_trial import ProposalTrial, Verdict
+from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.verifier import Failure
 from orbit.agent.domain.agent_task import AgentTask, Limits
 from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.verification import VerificationStep
-from orbit.protocol import TaskSpec
+from orbit.protocol import Event, TaskSpec
 
 LINT = VerificationStep(name="Lint", command=("ruff", "check"))
 TESTS = VerificationStep(name="Tests", command=("pytest",))
@@ -49,6 +51,10 @@ class User:
                 raise
         assert self.decision is not None
         return self.decision
+
+
+async def shown(event: Event) -> None:
+    """Publishes nothing anywhere."""
 
 
 def proposing() -> AgentTask:
@@ -141,3 +147,14 @@ async def test_cancelling_the_trial_stops_asking_the_user() -> None:
         await trial
     await asyncio.sleep(0)
     assert user.cancelled
+
+
+async def test_the_agent_exiting_withdraws_the_proposal_before_the_trial_returns() -> None:
+    review = FrontendReview(publish=shown, agent_of=lambda task_id: "agent-1")
+    exited = alive()
+    exited.set_result(None)
+    trial = ProposalTrial(proposing(), Steps(), partial(review.review, "t-1"), exited)
+
+    await trial.decide(CHECKS)
+
+    assert review.waiting == ()

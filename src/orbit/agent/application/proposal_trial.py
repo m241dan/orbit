@@ -55,13 +55,16 @@ class ProposalTrial:
         return Verdict(self._work.ended())
 
     async def _review(self, checks: ChecksProposal) -> ProposalDecision | None:
-        """The user's decision on ``checks``; ``None`` if the agent exits before they decide."""
+        """The user's decision on ``checks``; ``None`` if the agent exits before they decide, once
+        asking them has stopped."""
         decision = asyncio.ensure_future(self._ask(checks))
         try:
             await asyncio.wait({decision, self._exited}, return_when=asyncio.FIRST_COMPLETED)
         finally:
             decision.cancel()
-        return decision.result() if decision.done() else None
+            # Waits for the ask to clean up without raising its cancellation, only the caller's.
+            await asyncio.wait({decision})
+        return None if decision.cancelled() else decision.result()
 
     async def _try(self, checks: ChecksProposal) -> Failure | None:
         """Run ``checks``' setup, then each step; returns the first failure."""
