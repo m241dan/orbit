@@ -391,3 +391,46 @@ async def test_a_session_that_fails_to_build_raises_on_send_and_events() -> None
 
     assert isinstance(sent.value.__cause__, OSError)
     assert isinstance(collected.value.__cause__, OSError)
+
+
+async def test_close_during_the_build_returns_once_it_completes_and_closes_it() -> None:
+    gate = threading.Event()
+    built: list[FakeSession] = []
+
+    def make() -> SharedSession:
+        gate.wait()
+        built.append(FakeSession())
+        return built[-1]
+
+    session = ThreadedSession(make)
+    starting = asyncio.create_task(asyncio.to_thread(session.start))
+    await asyncio.sleep(0.05)
+    closing = asyncio.create_task(session.close())
+    await asyncio.sleep(0.05)
+
+    assert not closing.done()
+    gate.set()
+    await asyncio.wait_for(closing, 5)
+    await starting
+    [inner] = built
+    assert inner.closes == 1
+    assert not inner.thread.is_alive()
+
+
+async def test_close_during_a_build_that_fails_returns() -> None:
+    gate = threading.Event()
+
+    def make() -> SharedSession:
+        gate.wait()
+        raise OSError("no backend")
+
+    session = ThreadedSession(make)
+    starting = asyncio.create_task(asyncio.to_thread(session.start))
+    await asyncio.sleep(0.05)
+    closing = asyncio.create_task(session.close())
+    await asyncio.sleep(0.05)
+    gate.set()
+
+    await asyncio.wait_for(closing, 5)
+    with pytest.raises(RuntimeError, match="couldn't be built"):
+        await starting

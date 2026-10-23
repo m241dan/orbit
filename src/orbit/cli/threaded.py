@@ -81,17 +81,20 @@ class ThreadedSession:
             _cancel_on(backend.loop, pump)
 
     async def close(self) -> None:
-        """Close the inner session on its loop, then stop the backend thread and wait for it."""
+        """Close the inner session on its loop, once it's built, then stop the backend thread
+        and wait for it, each waited for on another thread so the caller's loop keeps
+        running."""
         if self._closed:
             return
         self._closed = True
         if self._thread is None:
             return
         try:
+            await asyncio.to_thread(self._ready.wait)
             if self._backend is not None:
                 await self._on_backend(self._backend, self._backend.shared.close())
         finally:
-            self._stop(self._thread)
+            await asyncio.to_thread(self._stop, self._thread)
 
     def _running(self) -> _Backend:
         """The running backend, started first if it hasn't been."""
@@ -127,7 +130,8 @@ class ThreadedSession:
         await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(work, backend.loop))
 
     def _stop(self, thread: threading.Thread) -> None:
-        """Have the backend's loop stop, and wait for ``thread`` to end."""
+        """Have the backend's loop stop, once it's built, and wait for ``thread`` to end."""
+        self._ready.wait()
         if self._backend is not None:
             self._backend.loop.call_soon_threadsafe(self._stopping.set)
         thread.join()
