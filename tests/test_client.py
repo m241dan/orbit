@@ -39,6 +39,7 @@ from orbit.protocol import (
     Snapshot,
     Stopped,
     TokenRefused,
+    Watch,
     Welcome,
     decode_command,
     encode,
@@ -52,6 +53,8 @@ HELLO = CommandEnvelope(
 )
 RUN = CommandEnvelope(command_id="run", payload=RunTasks())
 ATTACH = CommandEnvelope(command_id="attach", payload=Attach(workspace="w1", session="earlier"))
+WATCH = CommandEnvelope(command_id="watch", payload=Watch(streams=("control_plane",)))
+UNWATCH = CommandEnvelope(command_id="unwatch", payload=Watch())
 
 
 @pytest.fixture(autouse=True)
@@ -514,6 +517,57 @@ async def test_an_answer_to_another_command_leaves_the_view_to_attach_again() ->
         _, again = await reconnecting(fake, session)
 
     assert [type(c.payload) for c in again] == [Hello, Attach]
+
+
+async def test_a_reconnecting_client_watches_the_streams_it_last_watched_again() -> None:
+    async with viewing() as (fake, session, events, first):
+        await session.send(WATCH)
+        assert await fake.command() == WATCH
+        await drop_after(first, events)
+        _, again = await reconnecting(fake, session)
+
+    assert again[1:] == [ATTACH, WATCH] and isinstance(again[0].payload, Hello)
+
+
+async def test_a_reconnecting_client_never_attached_watches_again_after_the_hello() -> None:
+    async with plane() as (fake, url):
+        session, _ = client(url)
+        events = session.events()
+        await session.send(HELLO)
+        first = await fake.connection()
+        await fake.command()
+        await session.send(WATCH)
+        await fake.command()
+        await drop_after(first, events, event(1))
+        _, again = await reconnecting(fake, session)
+        await session.close()
+
+    assert again[1:] == [WATCH]
+
+
+async def test_a_reconnecting_client_that_stopped_watching_sends_no_watch() -> None:
+    async with viewing() as (fake, session, events, first):
+        await session.send(WATCH)
+        await fake.command()
+        await session.send(UNWATCH)
+        assert await fake.command() == UNWATCH
+        await drop_after(first, events)
+        _, again = await reconnecting(fake, session)
+
+    assert [type(c.payload) for c in again] == [Hello, Attach]
+
+
+async def test_a_watch_sent_while_disconnected_is_sent_on_connecting() -> None:
+    async with plane() as (fake, url):
+        fake.status = 503
+        session, states = client(url)
+        await session.send(HELLO)
+        await states.until(Reconnecting)
+        await session.send(WATCH)  # Kept for when it connects.
+        fake.status = None
+        assert await fake.command() == HELLO
+        assert await fake.command() == WATCH
+        await session.close()
 
 
 async def test_a_command_sent_while_disconnected_raises_not_connected() -> None:

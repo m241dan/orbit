@@ -7,7 +7,8 @@ which reconnecting would only repeat; on reconnecting, the last ``Hello`` is sen
 ``since`` the last ``seq`` received, then, once an ``Attach`` was sent, that one again until a
 ``Snapshot`` answers it or it's refused, and after that one for the workspace and session the
 last ``Snapshot`` showed, so the connection views that session again and the control plane
-resends what was missed of it. How the link stands is reported to whoever watches
+resends what was missed of it, and then the last ``Watch``, unless it watched nothing, as a new
+connection watches nothing already. How the link stands is reported to whoever watches
 it.
 """
 
@@ -48,6 +49,7 @@ from orbit.protocol import (
     Snapshot,
     Stopped,
     TokenRefused,
+    Watch,
     decode_event,
     encode,
 )
@@ -108,7 +110,8 @@ class WebSocketSession:
 
     Raises :class:`PlaintextRefused` for a ``ws://`` URL to a host beyond loopback, before
     connecting. It connects once it's first used. While the connection is down, :meth:`send` raises
-    :class:`NotConnected`, but for a ``Hello``, which is kept to be sent on connecting.
+    :class:`NotConnected`, but for a ``Hello`` or a ``Watch``, which is kept to be sent on
+    connecting.
     """
 
     def __init__(
@@ -127,6 +130,7 @@ class WebSocketSession:
         self._websocket: ClientConnection | None = None  # While connected.
         self._hello: CommandEnvelope | None = None  # The last Hello sent.
         self._attach: CommandEnvelope | None = None  # The last Attach sent.
+        self._watch: CommandEnvelope | None = None  # The last Watch sent.
         self._pending = False  # Whether the last Attach sent is yet to be shown or refused.
         self._accepted = False  # Whether the last Attach sent was accepted.
         self._viewed: Attach | None = None  # The session the last Snapshot received showed.
@@ -143,12 +147,17 @@ class WebSocketSession:
 
     async def send(self, envelope: CommandEnvelope) -> None:
         """Send ``envelope``; raises :class:`NotConnected` while the connection is down, unless
-        it holds a ``Hello``, which is sent on connecting."""
+        it holds a ``Hello`` or a ``Watch``, which is sent on connecting."""
         self._start()
         if isinstance(envelope.payload, Hello):
             self._hello = envelope
             with suppress(NotConnected):  # Sent again on reconnecting.
                 await self._send_now(self._greeting(envelope))
+            return
+        if isinstance(envelope.payload, Watch):
+            self._watch = envelope
+            with suppress(NotConnected):  # Sent again on reconnecting.
+                await self._send_now(envelope)
             return
         if isinstance(envelope.payload, Attach):
             await self._send_attach(envelope)
@@ -326,12 +335,21 @@ class WebSocketSession:
 
     async def _greet(self, websocket: ClientConnection) -> None:
         """Send the last ``Hello`` on ``websocket``, if any, then, if an ``Attach`` was sent,
-        the one attaching the connection again to what it viewed."""
+        the one attaching the connection again to what it viewed, then the last ``Watch``, unless
+        none was sent or it watched nothing, as a new connection watches nothing already."""
         if self._hello is None:
             return
         await websocket.send(encode(self._greeting(self._hello)))
         if self._attach is not None:
             await websocket.send(encode(self._reattach(self._attach)))
+        if self._watch is not None and self._watching(self._watch):
+            await websocket.send(encode(self._watch))
+
+    @staticmethod
+    def _watching(watch: CommandEnvelope) -> bool:
+        """Whether ``watch``, a ``Watch``, names any stream."""
+        assert isinstance(watch.payload, Watch)  # Only a Watch is kept as one.
+        return bool(watch.payload.streams)
 
     def _reattach(self, attach: CommandEnvelope) -> CommandEnvelope:
         """``attach``, the last ``Attach`` sent, as it was until a ``Snapshot`` answers it or it's
