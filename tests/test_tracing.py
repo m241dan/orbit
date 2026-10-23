@@ -14,6 +14,7 @@ from orbit.tracing import (
     Span,
     Telemetry,
     current_span,
+    no_span,
     span_block,
     use_span,
 )
@@ -27,6 +28,14 @@ def test_outside_any_block_the_current_span_is_a_no_op_span() -> None:
 
 def test_a_span_block_makes_its_span_current_inside_it() -> None:
     with TELEMETRY.span("orbit.task") as span:
+        assert current_span() is span
+
+
+def test_a_no_span_block_makes_none_current_and_restores_the_one_before() -> None:
+    outside = current_span()
+    with TELEMETRY.span("orbit.task") as span:
+        with no_span():
+            assert current_span() is outside
         assert current_span() is span
 
 

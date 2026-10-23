@@ -1,6 +1,7 @@
 """What the lanes share: a failure that escapes one is reported to the user, not lost with the
 background task that ran it, a busy lane's turns are run one at a time, and the session's gate
-says whether work may start."""
+says whether work may start. A lane's work outlives whatever started it, so it starts with no
+span current: it doesn't record on its starter's, such as the task that landed what it reviews."""
 
 import asyncio
 from collections.abc import Callable, Coroutine
@@ -12,6 +13,7 @@ from orbit.agent.application.outcomes import cancelling
 from orbit.agent.application.ports import Publish
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import BUSY, INTERNAL, BusyChanged, BusyLane, ErrorOccurred, Event
+from orbit.tracing import no_span
 
 
 def _never() -> bool:
@@ -67,6 +69,13 @@ def _unwatched() -> None:
     """Note an end no one watches."""
 
 
+def _detached[T](work: Coroutine[Any, Any, T]) -> "asyncio.Task[T]":
+    """``work`` as a task of its own that sees no span current: a task copies the context it's
+    created in, and this one outlives whatever started it."""
+    with no_span():
+        return asyncio.create_task(work)
+
+
 class Background:
     """Runs one piece of work at a time in the background for lane ``name``. A failure that
     escapes the work is reported once with ``publish``, as it happens, and never raised;
@@ -87,7 +96,7 @@ class Background:
         if self.running:
             work.close()
             return
-        self._task = asyncio.create_task(self._guarded(work))
+        self._task = _detached(self._guarded(work))
         # Work cancelled before it starts is closed, not left never awaited.
         self._task.add_done_callback(lambda _: work.close())
         self._task.add_done_callback(lambda _: self.ended())
@@ -135,7 +144,7 @@ class TurnSlot:
         if self.running:
             work.close()
             raise Refused(BUSY, self._refusal)
-        self._turn = asyncio.create_task(work)
+        self._turn = _detached(work)
         # A callback, so it also runs if the work is cancelled before it starts.
         self._turn.add_done_callback(self._ended)
         # Posted once the turn is running, so what it reaches sees the lane busy.

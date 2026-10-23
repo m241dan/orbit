@@ -2,6 +2,7 @@
 wait for a coder and its run as children, exported through the OpenTelemetry SDK."""
 
 import asyncio
+import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -43,6 +44,8 @@ from tests.agent_fakes import (
     run,
     send,
     session_for,
+    settle,
+    start,
     verified,
 )
 
@@ -209,6 +212,27 @@ async def test_a_task_that_gives_up_says_why_and_has_its_event() -> None:
     assert attributes(task)["orbit.task.reason"] == "Gave up: The task contradicts the code."
     assert [event.name for event in task.events] == ["orbit.task.gave_up"]
     assert task.status.status_code is StatusCode.UNSET
+
+
+async def test_a_review_of_landed_work_records_nothing_on_the_tasks_span(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    traced = Traced()
+    session, _, _ = session_for(
+        claims_done,
+        reviewers=(gives_up,),
+        tree=FakeTree(),
+        review=True,
+        telemetry=traced.telemetry,
+    )
+    with caplog.at_level(logging.WARNING, logger="opentelemetry"):
+        await start(session)
+        await asyncio.wait_for(settle(session), 10)
+
+    task = traced.task()
+    assert attributes(task)["orbit.task.status"] == "completed"
+    assert [event.name for event in task.events] == []
+    assert caplog.records == []
 
 
 async def test_a_task_that_errors_has_error_status_and_an_exception_event() -> None:

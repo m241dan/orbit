@@ -12,6 +12,7 @@ from orbit.agent.application.lanes import Background, TurnSlot, stop
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import BUSY as BUSY_CODE
 from orbit.protocol import INTERNAL, BusyChanged, ErrorOccurred, Event
+from orbit.tracing import NoSpan, Span, current_span, use_span
 from tests.agent_fakes import logged_with_traceback
 
 
@@ -104,6 +105,30 @@ async def test_start_runs_the_work_in_the_background() -> None:
     work.gate.set()
     await lane.close()
     assert not lane.running and events.empty()
+
+
+class NotesSpan:
+    """Work that notes the span current as it runs, then is ``done``."""
+
+    def __init__(self) -> None:
+        self.seen: list[Span] = []
+        self.done = asyncio.Event()
+
+    async def __call__(self) -> None:
+        self.seen.append(current_span())
+        self.done.set()
+
+
+async def test_work_started_inside_a_span_runs_with_no_span_current() -> None:
+    lane, _ = background()
+    work = NotesSpan()
+
+    with use_span(NoSpan("task")):
+        lane.start(work())
+    await work.done.wait()
+    await lane.close()
+
+    assert work.seen == [current_span()]  # The no-op span current outside any block.
 
 
 async def test_ended_is_called_once_the_work_has_stopped() -> None:
@@ -218,6 +243,18 @@ async def test_a_crash_is_reported_once_and_close_does_not_raise_it(
 def slot() -> tuple[TurnSlot, list[Event]]:
     posted: list[Event] = []
     return TurnSlot("planner", "Busy already.", posted.append), posted
+
+
+async def test_a_turn_started_inside_a_span_runs_with_no_span_current() -> None:
+    turns, _ = slot()
+    work = NotesSpan()
+
+    with use_span(NoSpan("task")):
+        await turns.start(work())
+    await work.done.wait()
+    await turns.close()
+
+    assert work.seen == [current_span()]
 
 
 BUSY = BusyChanged(busy=True, lane="planner")

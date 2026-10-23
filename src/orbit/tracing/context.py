@@ -55,6 +55,15 @@ def use_span[S: Span](span: S) -> Iterator[S]:
 
 
 @contextmanager
+def no_span() -> Iterator[None]:
+    """Make no span current for a block, as outside any, restoring the one before after it:
+    for starting work that outlives the block, such as a background task, which must not
+    record on its starter's span."""
+    with use_span(_NONE):
+        yield
+
+
+@contextmanager
 def span_block[H: SpanHandle](handle: H) -> Iterator[H]:
     """Make ``handle`` the current span for a block and end it on leaving, recording an error
     escaping the block on it and re-raising it."""
