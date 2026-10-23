@@ -28,7 +28,7 @@ from orbit.agent.external.session_import import ImportBlocked
 from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.agent.external.store_startup import OpenedStore, open_workspace_store
-from orbit.agent.external.workspace_lock import LOCK_FILE, WorkspaceLock
+from orbit.agent.external.workspace_lock import WorkspaceLock
 from orbit.agent.external.workspace_purge import purge_losses, purge_workspace
 from orbit.agent.external.workspace_registry import WorkspaceRegistry
 from orbit.protocol import INTERNAL, WorkspaceCloning
@@ -72,14 +72,14 @@ class OpenedWorkspace:
 class Opening:
     """How a workspace is opened: checked for a git identity if ``identity``, flagged served if
     ``flag``, its lock naming the server's ``url`` if it's known, and marked as a clone orbit
-    made if ``managed``; whichever of the ``held`` locks is on its repository is kept rather than
+    made if ``managed``; the lock this server still ``held`` for it, if any, is kept rather than
     another taken."""
 
     identity: bool
     flag: bool
     url: str | None = None
     managed: bool = False
-    held: tuple[WorkspaceLock, ...] = ()
+    held: WorkspaceLock | None = None
 
 
 async def open_workspace(
@@ -122,13 +122,11 @@ def _prepared(root: Path, make_host: HostMaker, opening: Opening) -> _Prepared:
 
 
 def _locked_served(root: Path, opening: Opening) -> ServedWorkspace:
-    """The workspace at ``root`` with whichever of ``opening``'s held locks is on its
-    repository, kept, or else its own lock, taken if it's free. Raises
-    :class:`WorkspaceUnavailable` as :func:`locked` says."""
-    path = _orbit_dir(root) / LOCK_FILE
-    kept = next((lock for lock in opening.held if lock.path == path), None)
-    if kept is not None:
-        return ServedWorkspace(root, None, kept, kept=True)
+    """The workspace at ``root`` with the lock ``opening`` says is still held for it, kept, or
+    else its own lock, taken if it's free. Raises :class:`WorkspaceUnavailable` as
+    :func:`locked` says."""
+    if opening.held is not None:
+        return ServedWorkspace(root, None, opening.held, kept=True)
     lock, owner = locked(root, opening.url)
     return ServedWorkspace(root, owner, lock)
 
@@ -138,8 +136,9 @@ class ServedWorkspaces:
     ``make_host``, checked for a git identity if the coder works in a ``worktree``, and its
     workspace lock held, if it's free, until it's removed or :meth:`let_go`: those it starts
     with, as :meth:`served` serves them, and those frontends add, by their paths or as clones
-    ``cloner`` makes, as a control plane's ``WorkspaceSource``; one added again while its lock
-    is still held, as it is when unflagging it failed, keeps that lock. Once the server's
+    ``cloner`` makes, as a control plane's ``WorkspaceSource``; one added again at the same root
+    while its lock is still held, as it is when unflagging it failed, keeps that lock, while
+    another worktree of its repository takes a lock of its own. Once the server's
     ``url`` is known, the locks taken name it."""
 
     def __init__(
@@ -150,6 +149,7 @@ class ServedWorkspaces:
         self._cloner = cloner
         self._worktree = worktree
         self._locks: dict[str, WorkspaceLock] = {}
+        self._roots: dict[str, Path] = {}
         self._fresh: list[str] = []
         self.url: str | None = None
 
@@ -234,14 +234,26 @@ class ServedWorkspaces:
         let go, naming the server's URL if it's known by then. Raises
         :class:`WorkspaceUnavailable` as :meth:`open` says, or as ``INTERNAL`` if the lock can't
         name the URL, having let it go."""
-        held = tuple(lock for lock in self._locks.values() if lock.held)
-        opening = replace(opening, url=self.url, held=held)
+        opening = replace(opening, url=self.url, held=self._held(root))
         opened = await open_workspace(self._store, root, self._make_host, opening)
         # The server may have started listening while the workspace was opened.
         if self.url is not None and self.url != opening.url:
             await self._named(opened, self.url, flagged=opening.flag)
         self._locks[opened.workspace_id] = opened.served.lock
+        self._roots[opened.workspace_id] = root
         return opened.served, opened.make
+
+    def _held(self, root: Path) -> WorkspaceLock | None:
+        """The lock still held for the workspace at ``root``, if any; worktrees of one
+        repository share a lock file, but each takes its own lock, as only one holds it."""
+        return next(
+            (
+                lock
+                for workspace_id, lock in self._locks.items()
+                if lock.held and self._roots[workspace_id] == root
+            ),
+            None,
+        )
 
     async def _named(self, opened: OpenedWorkspace, url: str, *, flagged: bool) -> None:
         """Have the lock of the workspace ``opened`` name the server's ``url``. Raises
@@ -277,6 +289,7 @@ class ServedWorkspaces:
     async def close(self, workspace_id: str) -> None:
         """Stop serving the workspace ``workspace_id`` and let go of its lock, leaving its flag
         as it is."""
+        self._roots.pop(workspace_id)
         self._locks.pop(workspace_id).close()
 
     async def losses(self, workspace_id: str) -> list[str]:
@@ -304,6 +317,7 @@ class ServedWorkspaces:
         for lock in self._locks.values():
             lock.close()
         self._locks.clear()
+        self._roots.clear()
 
 
 def _unshown(progress: WorkspaceCloning) -> None:

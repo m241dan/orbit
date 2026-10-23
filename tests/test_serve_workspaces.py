@@ -469,6 +469,52 @@ def test_a_workspace_whose_unflagging_failed_is_served_again_owned_and_freed_onc
     assert free(root) and source.locks == ()
 
 
+def linked_worktree(tmp_path: Path) -> tuple[Path, Path]:
+    """A repository with a commit, and a linked worktree of it, which shares its lock."""
+    root = directory(tmp_path)
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    commit = ["git", "-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-q"]
+    subprocess.run([*commit, "--allow-empty", "-m", "Start"], cwd=root, check=True)
+    linked = tmp_path / "linked"
+    subprocess.run(["git", "worktree", "add", "-q", str(linked)], cwd=root, check=True)
+    return root, linked
+
+
+async def test_a_linked_worktree_of_a_repository_served_owned_is_served_read_only(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path
+) -> None:
+    root, linked = linked_worktree(tmp_path)
+    source = workspaces(stack, store)
+    first = await source.open(str(root))
+    await first.close()
+
+    second = await source.open(str(linked))
+    await second.close()
+    locks = source.locks
+    stack.close()
+
+    assert not first.read_only and second.read_only
+    assert len(locks) == 2 and locks[0] is not locks[1]
+
+
+async def test_removing_a_linked_worktree_leaves_the_repository_served_locked(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path
+) -> None:
+    root, linked = linked_worktree(tmp_path)
+    source = workspaces(stack, store)
+    first = await source.open(str(root))
+    await first.close()
+    second = await source.open(str(linked))
+    await second.close()
+
+    await source.set_served(second.workspace_id, False)
+    await source.close(second.workspace_id)
+    held = not free(root) and source.serves(first.workspace_id)
+    stack.close()
+
+    assert held and free(root)
+
+
 async def test_a_failed_add_of_a_workspace_whose_lock_is_held_leaves_it_held(
     stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
