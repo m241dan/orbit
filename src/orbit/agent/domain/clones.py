@@ -74,11 +74,17 @@ def clone_progress(url: str, line: str) -> WorkspaceCloning | None:
     )
 
 
+def couldnt_clone(url: str, why: str) -> str:
+    """What's said when the clone of ``url`` fails for the reason ``why``, as frontends tell
+    which clone failed by: ``Couldn't clone <url>: <why>``."""
+    return f"Couldn't clone {url}: {why}"
+
+
 def clone_failure(url: str, said: Sequence[str]) -> str:
     """What's said when the clone of ``url`` fails: git's last lines of those it ``said``,
     other than its progress, and :data:`AUTH_HINT` when they look like it lacked credentials."""
     message = "\n".join(said[-_LAST_LINES:]) or "git said nothing."
-    failure = f"Couldn't clone {url}: {message}"
+    failure = couldnt_clone(url, message)
     if _AUTH.search(message):
         return f"{failure}\n{AUTH_HINT}"
     return failure

@@ -158,14 +158,15 @@ async def test_a_clone_that_cant_be_served_is_removed(
     plane = serving(stack, store, clones)
     connection = await welcomed(plane)
 
-    await say(connection, "add", AddWorkspace(url=(tmp_path / "proj.git").as_uri()))
+    url = (tmp_path / "proj.git").as_uri()
+    await say(connection, "add", AddWorkspace(url=url))
     events = await asyncio.wait_for(until(connection, ErrorOccurred), 30)
     await plane.close()
     stack.close()
 
     error = events[-1]
     assert isinstance(error, ErrorOccurred) and error.code == INVALID
-    assert error.message.startswith(f"Can't add {clones / 'proj'}: ")
+    assert error.message.startswith(f"Couldn't clone {url}: Can't add {clones / 'proj'}: ")
     assert list(clones.iterdir()) == []
 
 

@@ -208,7 +208,8 @@ def _listed(clone: WorkspaceCloning, labels: Sequence[str]) -> bool:
 
 
 def clone_failed(message: str, url: str) -> bool:
-    """Whether a ``git_failed`` error's ``message`` says the clone of ``url`` failed."""
+    """Whether an error's ``message`` says the clone of ``url`` failed, whatever its code: git
+    failing, serving the clone refused, or orbit failing to serve it."""
     return message.startswith(f"Couldn't clone {url}: ")
 
 

@@ -10,6 +10,7 @@ from orbit.protocol import (
     BUSY,
     CONTROL_PLANE_STREAM,
     GIT_FAILED,
+    INTERNAL,
     INVALID,
     UNKNOWN,
     Activity,
@@ -20,10 +21,12 @@ from orbit.protocol import (
     Catalog,
     CommandAccepted,
     CommandRefused,
+    Connected,
     DirectoryListing,
     ErrorOccurred,
     ListDirectory,
     NewSession,
+    Reconnecting,
     RemoveWorkspace,
     SessionRef,
     SessionStateChanged,
@@ -41,6 +44,7 @@ from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.workspaces import PATH_HINT, STARTUP_HINT
 from orbit.tui.widgets import ChoiceScreen
 from orbit.tui.workspaces import WorkspacesScreen
+from tests.server_fakes import URL
 from tests.tui_fakes import FakeLink, FakeSession, changes, feed_events, opened, watches
 
 TODAY_A = SessionSummary(id="a1", name="today", active=True)
@@ -336,6 +340,47 @@ async def test_a_clone_failing_with_the_picker_closed_drops_its_row() -> None:
         failed = f"Couldn't clone {PROJ_URL}: Repository not found."
         await feed_events(session, pilot, ErrorOccurred(code=GIT_FAILED, message=failed))
         await pilot.press("ctrl+w")
+        assert rows(workspaces(app)) == [B_ROW, A_ROW, "Add a path or URL…"]
+
+
+@pytest.mark.parametrize(
+    ("code", "why"),
+    [
+        (INVALID, "Can't add /srv/clones/proj: Its configuration is invalid."),
+        (INTERNAL, "Orbit failed to serve the clone: The store is gone."),
+    ],
+)
+async def test_a_clone_that_fails_to_be_served_drops_its_row_and_shows_why(
+    code: str, why: str
+) -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        session = session_of(app)
+        await feed_events(session, pilot, SERVED)
+        await typing(app, pilot)
+        await pilot.press(*PROJ_URL, "enter")
+        await accept_last(app, pilot)
+        await feed_events(session, pilot, WorkspaceCloning(url=PROJ_URL, phase="Resolving"))
+        failed = f"Couldn't clone {PROJ_URL}: {why}"
+        await feed_events(session, pilot, ErrorOccurred(code=code, message=failed))
+        screen = workspaces(app)
+        assert rows(screen) == [B_ROW, A_ROW, "Add a path or URL…"]
+        field = screen.query_one(Input)
+        assert field.display and field.value == PROJ_URL
+        assert field.border_subtitle == failed
+
+
+async def test_reconnecting_drops_the_clones_from_before() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        session = session_of(app)
+        await feed_events(session, pilot, SERVED)
+        await feed_events(session, pilot, WorkspaceCloning(url=PROJ_URL, phase="Resolving"))
+        link = app._link
+        assert isinstance(link, FakeLink)
+        await link.move(pilot, Reconnecting(URL, app.clock()))
+        assert rows(workspaces(app))[2] == "Cloning proj… Resolving"
+        await link.move(pilot, Connected(URL))
         assert rows(workspaces(app)) == [B_ROW, A_ROW, "Add a path or URL…"]
 
 

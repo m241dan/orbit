@@ -12,7 +12,6 @@ from textual.widgets import Input, OptionList, Static
 
 from orbit.protocol import (
     CONTROL_PLANE_STREAM,
-    GIT_FAILED,
     AddWorkspace,
     AgentRef,
     AgentsChanged,
@@ -241,7 +240,7 @@ class WorkspacesScreen(TypingListScreen[str | None]):
         self._pick_added()
 
     def clone_failed(self, message: str) -> None:
-        """Show ``message``, git's on a clone failing, in the path box's hint, with the URL
+        """Show ``message``, why a clone failed, in the path box's hint, with the URL
         back in the box to change, if it's the clone this picker asked for."""
         url = self._cloning
         if url is None or not clone_failed(message, url):
@@ -294,11 +293,11 @@ class WorkspacesHost:
     """Keeps the workspaces the latest ``Catalog`` lists, as ``SessionStateChanged`` changes
     their sessions, and shows them with ``push`` when asked, for the ``repository`` the
     frontend runs in, refreshing the picker while it's shown, and the clones under way, as
-    ``WorkspaceCloning`` reports them, until they're listed or fail, and the agents running, as
-    ``AgentsChanged`` reports them while the picker watches for them, and the directories
-    ``DirectoryListing`` lists, in its explorer. ``change`` sends adding and removing
-    workspaces, the streams to watch and listing directories, and ``chosen`` takes the workspace
-    picked."""
+    ``WorkspaceCloning`` reports them, until they're listed or fail or the link is back, and
+    the agents running, as ``AgentsChanged`` reports them while the picker watches for them,
+    and the directories ``DirectoryListing`` lists, in its explorer. ``change`` sends adding
+    and removing workspaces, the streams to watch and listing directories, and ``chosen``
+    takes the workspace picked."""
 
     def __init__(
         self,
@@ -331,13 +330,18 @@ class WorkspacesHost:
         self._refresh()
 
     def follow_error(self, error: ErrorOccurred) -> None:
-        """Drop the clone ``error`` says failed, if it's a clone's, telling the picker shown."""
-        if error.code != GIT_FAILED:
-            return
+        """Drop the clone ``error`` says failed, if it names one, whatever its code, telling the
+        picker shown."""
         self.cloning = tuple(c for c in self.cloning if not clone_failed(error.message, c.url))
         self._refresh()
         if self.shown is not None:
             self.shown.clone_failed(error.message)
+
+    def reconnected(self) -> None:
+        """Drop every clone, now the link to the control plane is back, as clones under way
+        don't survive the control plane stopping."""
+        self.cloning = ()
+        self._refresh()
 
     def follow_state(self, changed: SessionStateChanged) -> None:
         """Note ``changed``'s session's state."""

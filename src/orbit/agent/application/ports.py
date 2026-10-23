@@ -64,7 +64,8 @@ class ConfigWriteFailed(Exception):
 
 
 class CloneFailed(Exception):
-    """Cloning a repository failed, as the message says: git's message, perhaps with a hint."""
+    """Cloning a repository failed, as the message says, starting ``Couldn't clone <url>: ``:
+    git's message, perhaps with a hint."""
 
 
 class Cloner(Protocol):

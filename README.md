@@ -120,7 +120,9 @@ workspace picker and opens on that repository. The picker lists:
   The workspace of the repository the chat runs in, on a server on this machine, is
   highlighted, else the first.
 - A row for each clone under way, `Cloning <name>… 42%` (or git's phase while it gives no
-  percentage), until the clone is served and listed in its place.
+  percentage), until the clone is served and listed in its place. It goes if the clone fails,
+  or the server refuses or fails to serve it, and every clone's row goes once a lost link to
+  the server is back, as clones under way stop with the server.
 - `Add a path or URL…`: `enter` opens the explorer (below).
 
 `enter` on a workspace opens its session picker, `Resume <name>` first (see
@@ -150,7 +152,8 @@ as it was. A directory holding more than 2,000 directories lists 2,000, with a l
 how many more there are, to be typed in the field instead.
 
 In the field, `enter` adds what's typed: a repository's URL (`https://`, `ssh://`, `file://`
-or `user@host:path`) is cloned, back in the list, where its `Cloning` row shows how it goes;
+or `user@host:path`) is cloned, back in the list, where its `Cloning` row shows how it goes,
+and if it fails, why shows in the field's hint, with the URL back in the field;
 anything else is added as a path on the server's host, then opens the added workspace's session
 picker, as `a` does. A refusal shows in the field's hint. `tab` completes the path's last
 directory name, from the listing shown when the path is in its directory, else from a listing
@@ -1054,7 +1057,8 @@ place). Clones go to `clone_dir` in `[server]`, by default `workspaces` in the s
 each in a directory named after the URL's last part without `.git` (`proj` for
 `git@github.com:o/proj.git`), or `proj-2`, `proj-3` and so on when that's taken; orbit marks
 these workspaces as managed, clones it made. A clone that fails says git's message (`orbit serve
---add` stops with status 2) and leaves nothing behind, as does a clone `orbit serve --add` made
+--add` stops with status 2), and one a frontend added that then can't be served says why,
+both starting `Couldn't clone <url>: `; either leaves nothing behind, as does a clone `orbit serve --add` made
 that it then can't serve, along with every other clone it made that run; one still under way
 when the server stops is stopped and removed. The same URL can't be cloned twice at once.
 `--add <url>` clones every time it's given, even a URL an earlier run cloned and still serves,

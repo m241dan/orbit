@@ -5,6 +5,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 
 from orbit.agent.application.ports import CloneFailed, Cloner
+from orbit.agent.domain.clones import couldnt_clone
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import BUSY, GIT_FAILED, INTERNAL, ErrorOccurred, Event
 
@@ -28,17 +29,17 @@ class Clones:
         self, url: str, cloner: Cloner, serve: Callable[[str], Awaitable[None]]
     ) -> None:
         """Have ``cloner`` clone the repository at ``url``, then ``serve`` the clone, telling
-        every connection if either fails: as ``git_failed`` if the clone does, with the code
-        refusing to serve it gives, or as ``internal`` if orbit fails; ``url`` is free to clone
-        again once it's done."""
+        every connection if either fails, in a message starting ``Couldn't clone <url>: ``: as
+        ``git_failed`` if the clone does, with the code refusing to serve it gives, or as
+        ``internal`` if orbit fails; ``url`` is free to clone again once it's done."""
         try:
             await _served(await cloner.clone(url, self._tell), cloner, serve)
-        except CloneFailed as exc:
+        except CloneFailed as exc:  # Its message names the URL already.
             self._tell(ErrorOccurred(code=GIT_FAILED, message=str(exc)))
         except Refused as refusal:
-            self._tell(ErrorOccurred(code=refusal.code, message=str(refusal)))
+            self._tell(ErrorOccurred(code=refusal.code, message=couldnt_clone(url, str(refusal))))
         except Exception as exc:  # A bug mustn't go unreported, as no command waits on it.
-            message = f"Orbit failed to serve the clone of {url}: {exc}"
+            message = couldnt_clone(url, f"Orbit failed to serve the clone: {exc}")
             self._tell(ErrorOccurred(code=INTERNAL, message=message))
         finally:
             # Freed here, not as the task ends a step later, so a frontend shown the clone's

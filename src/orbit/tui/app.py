@@ -34,6 +34,7 @@ from orbit.protocol import (
     ChecksProposed,
     Command,
     CommandRefused,
+    Connected,
     DecideProposal,
     DirectoryListing,
     EditTask,
@@ -645,6 +646,8 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _follow_link(self, state: LinkState) -> None:
         self._link_host.follow(state, self.clock())
+        if isinstance(state, Connected):
+            self._workspaces.reconnected()
 
     def _render_session(self, event: SessionEvent) -> None:
         """Rule off the planner's conversation where it was reset, show a snapshot of the session

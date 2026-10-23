@@ -128,7 +128,7 @@ async def test_a_clone_that_cant_be_served_is_told_with_the_refusals_code() -> N
     [*_, error] = payloads(await received_until(connection, ErrorOccurred))
     await plane.close()
 
-    message = "Can't add /clones/proj.git: Its configuration is invalid."
+    message = f"Couldn't clone {URL}: Can't add /clones/proj.git: Its configuration is invalid."
     assert error == ErrorOccurred(code=INVALID, message=message)
     assert source.removed == ["/clones/proj.git"]
 
@@ -150,7 +150,7 @@ async def test_a_clone_whose_serving_fails_is_told_as_internal() -> None:
     [*_, error] = payloads(await received_until(connection, ErrorOccurred))
     await plane.close()
 
-    message = f"Orbit failed to serve the clone of {URL}: The store is gone."
+    message = f"Couldn't clone {URL}: Orbit failed to serve the clone: The store is gone."
     assert error == ErrorOccurred(code=INTERNAL, message=message)
     assert source.flags == [("proj.git", False)]
     assert source.removed == ["/clones/proj.git"]
