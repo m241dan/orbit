@@ -187,3 +187,47 @@ async def test_a_seat_takes_its_workspaces_open_session_slots() -> None:
     assert await task
     seat.release()
     assert shared.taken == 0
+
+
+async def test_a_waiter_cancelled_before_a_release_passes_the_slot_to_the_next() -> None:
+    changes = Changes()
+    slots = CoderSlots(1, changes)
+    await slots.acquire("a", "s")
+    b = await waiting(slots, "b")
+    c = await waiting(slots, "c")
+    b.cancel()
+    slots.release()
+
+    with pytest.raises(asyncio.CancelledError):
+        await b
+    assert await c
+    assert slots.taken == 1
+    assert changes.count == 3
+
+
+async def test_a_lone_waiter_cancelled_before_a_release_leaves_the_slot_free() -> None:
+    slots = CoderSlots(1)
+    await slots.acquire("a", "s")
+    b = await waiting(slots, "b")
+    b.cancel()
+    slots.release()
+
+    with pytest.raises(asyncio.CancelledError):
+        await b
+    assert slots.taken == 0
+    assert slots.open
+
+
+async def test_a_waiter_cancelled_before_its_workspace_is_dropped_takes_nothing() -> None:
+    changes = Changes()
+    slots = CoderSlots(1, changes)
+    await slots.acquire("a", "s")
+    b = await waiting(slots, "b")
+    b.cancel()
+    slots.drop("b")
+
+    with pytest.raises(asyncio.CancelledError):
+        await b
+    assert slots.taken == 1
+    assert slots.waiting == 0
+    assert changes.count == 2

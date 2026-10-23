@@ -90,7 +90,8 @@ class CoderSlots:
         dropped = [place for place in self._line if place.at(workspace, session)]
         for place in dropped:
             self._line.remove(place)
-            place.granted.set_result(False)
+            if not place.granted.done():
+                place.granted.set_result(False)
         if dropped:
             self.changed()
 
@@ -99,13 +100,16 @@ class CoderSlots:
         return self._limit == 0 or self._taken < self._limit
 
     def _grant(self) -> None:
-        """Grant the free slots to those first in line."""
-        granted = False
+        """Grant the free slots to those first in line, passing over those whose wait was
+        cancelled but who haven't left the line yet."""
+        moved = False
         while self._line and self._free:
-            self._line.pop(0).granted.set_result(True)
-            self._taken += 1
-            granted = True
-        if granted:
+            place = self._line.pop(0)
+            moved = True
+            if not place.granted.done():
+                place.granted.set_result(True)
+                self._taken += 1
+        if moved:
             self.changed()
 
     def _left(self, place: _Place) -> None:
@@ -114,7 +118,7 @@ class CoderSlots:
         if place in self._line:
             self._line.remove(place)
             self.changed()
-        elif place.granted.result():
+        elif not place.granted.cancelled() and place.granted.result():
             self.release()
 
 
