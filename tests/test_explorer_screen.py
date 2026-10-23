@@ -459,7 +459,9 @@ async def test_enter_in_the_field_adds_a_url_and_returns_to_the_list_picker() ->
         await answer(app, pilot)
         await pilot.pause()
         assert isinstance(app.screen, WorkspacesScreen)
-        cloning = WorkspaceCloning(url="https://github.com/o/r", phase="Receiving objects")
+        cloning = WorkspaceCloning(
+            url="https://github.com/o/r", name="r", phase="Receiving objects"
+        )
         await feed_events(session_of(app), pilot, cloning)
         options = app.screen.query_one(OptionList)
         labels = [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]

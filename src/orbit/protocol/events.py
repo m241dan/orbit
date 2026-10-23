@@ -159,13 +159,15 @@ class VerificationFinished(_Message):
 
 class ErrorOccurred(_Message):
     """An error with no command behind it, of the kind ``code`` names (one of the error codes,
-    such as :data:`AGENT_FAILED`, or a refusal code where it fits), and ``message`` says what."""
+    such as :data:`AGENT_FAILED`, or a refusal code where it fits), and ``message`` says what;
+    ``url`` names the repository whose clone failed, if that's the error."""
 
     type: Literal["error_occurred"] = "error_occurred"
     turn_id: str | None = None
     agent_id: str | None = None
     code: str
     message: str
+    url: str | None = None
 
 
 class CommandAccepted(_Message):
@@ -476,14 +478,18 @@ def with_state(summary: SessionSummary, changed: SessionStateChanged) -> Session
 
 
 class WorkspaceCloning(_Message):
-    """The repository at ``url``, which ``AddWorkspace`` asked to serve, is being cloned: git is
-    at ``phase``, such as ``Receiving objects``, ``percent`` of the way through it if git says.
-    A control-plane event, sent to every connection and never logged."""
+    """The repository at ``url``, which ``AddWorkspace`` asked to serve, is being cloned, as
+    ``name``, the name its directory is given: git is at ``phase``, such as ``Receiving
+    objects``, ``percent`` of the way through it if git says. The last, once the clone is
+    served, gives the ``workspace`` it's served as. A control-plane event, sent to every
+    connection and never logged."""
 
     type: Literal["workspace_cloning"] = "workspace_cloning"
     url: str
+    name: str | None = None
     phase: str
     percent: int | None = None
+    workspace: str | None = None
 
 
 class WorkspaceEntry(_Message):

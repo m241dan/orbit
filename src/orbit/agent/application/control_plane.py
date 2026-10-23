@@ -512,9 +512,9 @@ class ControlPlane:
         already."""
         self._check_open()
 
-        async def serve(path: str) -> None:
+        async def serve(path: str) -> str:
             async with self._locked():
-                await self._add(path, None, workspaces, managed=True)
+                return await self._add(path, None, workspaces, managed=True)
 
         self._clones.start(url, workspaces, serve)
 
@@ -524,9 +524,9 @@ class ControlPlane:
         connection: SessionConnection | None,
         workspaces: WorkspaceSource,
         managed: bool = False,
-    ) -> None:
-        """Serve the workspace at ``path``, from ``workspaces``, as a clone orbit made if
-        ``managed``, unless it's served already: start its host, opening its most recently
+    ) -> str:
+        """The id of the workspace at ``path``, served from ``workspaces``, as a clone orbit
+        made if ``managed``, unless it's served already: start its host, opening its most recently
         active session and its background work, and send the catalog to ``connection``, if one
         asked, and every listening connection, or let it go again if that fails or is
         cancelled, raising what failed even if clearing its flag fails; refused unless ``path``
@@ -536,8 +536,9 @@ class ControlPlane:
         await self._confine(path, managed)
         check_directory(path, await workspaces.kind(path))
         root = await workspaces.top_level(path)
-        if any(host.path == root for host in self._hosts.values()):
-            return
+        served = self._served_at(root)
+        if served is not None:
+            return served
         try:
             host = await workspaces.open(root, managed=managed)
         except WorkspaceUnavailable as exc:
@@ -550,6 +551,11 @@ class ControlPlane:
             finally:
                 await self._let_go(host, workspaces)
             raise
+        return host.workspace_id
+
+    def _served_at(self, root: str) -> str | None:
+        """The id of the workspace served at ``root``, if any."""
+        return next((host.workspace_id for host in self._hosts.values() if host.path == root), None)
 
     async def _start(self, host: WorkspaceHost, connection: SessionConnection | None) -> None:
         """Serve ``host``, as :meth:`_begin` does, and send the catalog to ``connection``, if

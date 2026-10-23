@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from orbit.agent import SqliteStore, WorkspaceRegistry
+from orbit.agent.application.connection import SessionConnection
 from orbit.protocol import (
     BUSY,
     GIT_FAILED,
@@ -18,6 +19,7 @@ from orbit.protocol import (
     Catalog,
     CommandAccepted,
     ErrorOccurred,
+    Event,
     WorkspaceCloning,
 )
 from tests.connection_helpers import say, taken
@@ -30,6 +32,20 @@ from tests.serving import serving, until
 @pytest.fixture
 def stack() -> ExitStack:
     return ExitStack()
+
+
+async def served(connection: SessionConnection) -> list[Event]:
+    """What's queued for ``connection`` up to a clone's last news, once it's served."""
+    events: list[Event] = []
+    while not any(isinstance(event, WorkspaceCloning) and event.workspace for event in events):
+        await asyncio.sleep(0.01)
+        events += payloads(taken(connection))
+    return events
+
+
+def last_catalog(events: list[Event]) -> Catalog:
+    """The last of ``events`` that's a ``Catalog``."""
+    return [event for event in events if isinstance(event, Catalog)][-1]
 
 
 def managed(connection: sqlite3.Connection) -> list[tuple[str, int]]:
@@ -47,15 +63,16 @@ async def test_a_url_is_cloned_then_served_flagged_and_managed(
 
     await say(connection, "add", AddWorkspace(url=url))
     accepted = payloads(taken(connection))
-    events = await asyncio.wait_for(until(connection, Catalog), 30)
+    events = await asyncio.wait_for(served(connection), 30)
     await plane.close()
     stack.close()
 
     assert accepted == [CommandAccepted(command_id="add")]
     assert any(isinstance(event, WorkspaceCloning) for event in events)
-    catalog = events[-1]
-    assert isinstance(catalog, Catalog)
-    [entry] = catalog.workspaces
+    [entry] = last_catalog(events).workspaces
+    done = events[-1]
+    assert isinstance(done, WorkspaceCloning)
+    assert (done.url, done.name, done.workspace) == (url, "proj", entry.id)
     assert entry.path == str(clones / "proj") and entry.managed
     assert await WorkspaceRegistry(store).served() == [(entry.id, str(clones / "proj"))]
     assert await store.run("Couldn't list", managed) == [(str(clones / "proj"), 1)]
@@ -100,9 +117,7 @@ async def test_a_clone_that_re_attaches_to_a_gone_managed_workspace_stays_manage
     await plane.close()
     stack.close()
 
-    catalog = events[-1]
-    assert isinstance(catalog, Catalog)
-    [entry] = catalog.workspaces
+    [entry] = last_catalog(events).workspaces
     assert (entry.id, entry.path, entry.managed) == (workspace_id, str(clones / "proj"), True)
     assert await store.run("Couldn't list", managed) == [(str(clones / "proj"), 1)]
 
@@ -122,9 +137,7 @@ async def test_a_second_clone_of_a_name_taken_lands_beside_it(
     await plane.close()
     stack.close()
 
-    catalog = events[-1]
-    assert isinstance(catalog, Catalog)
-    paths = sorted(str(entry.path) for entry in catalog.workspaces)
+    paths = sorted(str(entry.path) for entry in last_catalog(events).workspaces)
     assert paths == [str(clones / "proj"), str(clones / "proj-2")]
 
 

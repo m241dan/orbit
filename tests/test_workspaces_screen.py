@@ -244,18 +244,42 @@ PROJ_URL = "https://github.com/o/proj.git"
 PROJ = WorkspaceEntry(id="P", label="proj", path="/srv/clones/proj", managed=True, sessions=())
 
 
-async def test_a_clones_progress_shows_in_its_row_until_the_catalog_lists_it() -> None:
+def cloned(
+    phase: str, percent: int | None = None, workspace: str | None = None
+) -> WorkspaceCloning:
+    """The news of the clone of ``PROJ_URL``: at ``phase``, ``percent`` through it, or served as
+    ``workspace``."""
+    return WorkspaceCloning(
+        url=PROJ_URL, name="proj", phase=phase, percent=percent, workspace=workspace
+    )
+
+
+async def test_a_clones_progress_shows_in_its_row_until_it_is_served() -> None:
     app = connected()
     async with app.run_test() as pilot:
         session = session_of(app)
         await feed_events(session, pilot, SERVED)
-        await feed_events(session, pilot, WorkspaceCloning(url=PROJ_URL, phase="Counting objects"))
+        await feed_events(session, pilot, cloned("Counting objects"))
         assert rows(workspaces(app))[2] == "Cloning proj… Counting objects"
-        progress = WorkspaceCloning(url=PROJ_URL, phase="Receiving objects", percent=42)
-        await feed_events(session, pilot, progress)
+        await feed_events(session, pilot, cloned("Receiving objects", percent=42))
         assert rows(workspaces(app)) == [B_ROW, A_ROW, "Cloning proj… 42%", "Add a path or URL…"]
         await feed_events(session, pilot, catalog(B, A, PROJ))
+        await feed_events(session, pilot, cloned("Done", percent=100, workspace="P"))
         assert rows(workspaces(app))[2:] == ["proj · /srv/clones/proj", "Add a path or URL…"]
+
+
+async def test_another_workspace_labelled_as_a_clone_leaves_its_row() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        session = session_of(app)
+        await feed_events(session, pilot, SERVED)
+        await feed_events(session, pilot, cloned("Resolving"))
+        await feed_events(session, pilot, catalog(B, A, PROJ))
+        assert rows(workspaces(app))[2:] == [
+            "proj · /srv/clones/proj",
+            "Cloning proj… Resolving",
+            "Add a path or URL…",
+        ]
 
 
 async def test_enter_on_a_clones_row_does_nothing() -> None:
@@ -263,7 +287,7 @@ async def test_enter_on_a_clones_row_does_nothing() -> None:
     async with app.run_test() as pilot:
         session = session_of(app)
         await feed_events(session, pilot, SERVED)
-        await feed_events(session, pilot, WorkspaceCloning(url=PROJ_URL, phase="Resolving"))
+        await feed_events(session, pilot, cloned("Resolving"))
         await pilot.press("j", "enter", "x")
         screen = workspaces(app)
         assert app.screen is screen and not screen.query_one(Input).display
@@ -276,7 +300,7 @@ async def test_a_clone_under_way_shows_in_a_picker_opened_later() -> None:
         session = session_of(app)
         await feed_events(session, pilot, SERVED)
         await pilot.press("enter", "enter")
-        await feed_events(session, pilot, WorkspaceCloning(url=PROJ_URL, phase="Resolving"))
+        await feed_events(session, pilot, cloned("Resolving"))
         await pilot.press("ctrl+w")
         assert rows(workspaces(app))[2] == "Cloning proj… Resolving"
 
@@ -303,9 +327,11 @@ async def test_a_clone_failing_drops_its_row_and_shows_gits_message_in_the_field
         await typing(app, pilot)
         await pilot.press(*PROJ_URL, "enter")
         await accept_last(app, pilot)
-        await feed_events(session, pilot, WorkspaceCloning(url=PROJ_URL, phase="Resolving"))
+        await feed_events(session, pilot, cloned("Resolving"))
         failed = f"Couldn't clone {PROJ_URL}: Repository not found."
-        await feed_events(session, pilot, ErrorOccurred(code=GIT_FAILED, message=failed))
+        await feed_events(
+            session, pilot, ErrorOccurred(code=GIT_FAILED, message=failed, url=PROJ_URL)
+        )
         screen = workspaces(app)
         assert rows(screen) == [B_ROW, A_ROW, "Add a path or URL…"]
         field = screen.query_one(Input)
@@ -321,9 +347,10 @@ async def test_another_clone_failing_or_another_error_leaves_the_field_alone() -
         await typing(app, pilot)
         await pilot.press(*PROJ_URL, "enter")
         await accept_last(app, pilot)
-        await feed_events(session, pilot, WorkspaceCloning(url=PROJ_URL, phase="Resolving"))
+        await feed_events(session, pilot, cloned("Resolving"))
         other = "Couldn't clone git@host:o/other.git: denied"
-        await feed_events(session, pilot, ErrorOccurred(code=GIT_FAILED, message=other))
+        failed = ErrorOccurred(code=GIT_FAILED, message=other, url="git@host:o/other.git")
+        await feed_events(session, pilot, failed)
         await feed_events(session, pilot, ErrorOccurred(code=UNKNOWN, message=f"{PROJ_URL}: "))
         screen = workspaces(app)
         assert rows(screen)[2] == "Cloning proj… Resolving"
@@ -336,9 +363,11 @@ async def test_a_clone_failing_with_the_picker_closed_drops_its_row() -> None:
         session = session_of(app)
         await feed_events(session, pilot, SERVED)
         await pilot.press("enter", "enter")
-        await feed_events(session, pilot, WorkspaceCloning(url=PROJ_URL, phase="Resolving"))
+        await feed_events(session, pilot, cloned("Resolving"))
         failed = f"Couldn't clone {PROJ_URL}: Repository not found."
-        await feed_events(session, pilot, ErrorOccurred(code=GIT_FAILED, message=failed))
+        await feed_events(
+            session, pilot, ErrorOccurred(code=GIT_FAILED, message=failed, url=PROJ_URL)
+        )
         await pilot.press("ctrl+w")
         assert rows(workspaces(app)) == [B_ROW, A_ROW, "Add a path or URL…"]
 
@@ -360,9 +389,9 @@ async def test_a_clone_that_fails_to_be_served_drops_its_row_and_shows_why(
         await typing(app, pilot)
         await pilot.press(*PROJ_URL, "enter")
         await accept_last(app, pilot)
-        await feed_events(session, pilot, WorkspaceCloning(url=PROJ_URL, phase="Resolving"))
+        await feed_events(session, pilot, cloned("Resolving"))
         failed = f"Couldn't clone {PROJ_URL}: {why}"
-        await feed_events(session, pilot, ErrorOccurred(code=code, message=failed))
+        await feed_events(session, pilot, ErrorOccurred(code=code, message=failed, url=PROJ_URL))
         screen = workspaces(app)
         assert rows(screen) == [B_ROW, A_ROW, "Add a path or URL…"]
         field = screen.query_one(Input)
@@ -375,7 +404,7 @@ async def test_reconnecting_drops_the_clones_from_before() -> None:
     async with app.run_test() as pilot:
         session = session_of(app)
         await feed_events(session, pilot, SERVED)
-        await feed_events(session, pilot, WorkspaceCloning(url=PROJ_URL, phase="Resolving"))
+        await feed_events(session, pilot, cloned("Resolving"))
         link = app._link
         assert isinstance(link, FakeLink)
         await link.move(pilot, Reconnecting(URL, app.clock()))

@@ -47,7 +47,10 @@ async def test_a_repository_is_cloned_into_a_directory_named_for_it_reporting_pr
 
     assert path == str(tmp_path / "clones" / "proj")
     assert (Path(path) / "a.txt").read_text() == "one\n"
-    assert WorkspaceCloning(url=url, phase="Receiving objects", percent=100) in progress.events
+    assert (
+        WorkspaceCloning(url=url, name="proj", phase="Receiving objects", percent=100)
+        in progress.events
+    )
     assert len(progress.events) == len(set(progress.events))
 
 

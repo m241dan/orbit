@@ -40,8 +40,6 @@ from orbit.tui.view.workspaces import (
     WorkspaceRow,
     add_command,
     added_workspace,
-    clone_failed,
-    clones_left,
     preselected,
     removal,
     remove_choices,
@@ -50,6 +48,7 @@ from orbit.tui.view.workspaces import (
     row_label,
     with_clone,
     with_states,
+    without_clone,
     workspace_rows,
 )
 from orbit.tui.widgets import ChoiceScreen, TypingListScreen
@@ -239,11 +238,10 @@ class WorkspacesScreen(TypingListScreen[str | None]):
         self._adding = adding.path
         self._pick_added()
 
-    def clone_failed(self, message: str) -> None:
-        """Show ``message``, why a clone failed, in the path box's hint, with the URL
-        back in the box to change, if it's the clone this picker asked for."""
-        url = self._cloning
-        if url is None or not clone_failed(message, url):
+    def clone_failed(self, url: str, message: str) -> None:
+        """Show ``message``, why the clone of ``url`` failed, in the path box's hint, with the
+        URL back in the box to change, if it's the clone this picker asked for."""
+        if url != self._cloning:
             return
         self._cloning = None
         self._typing(PATH_HINT, url)
@@ -293,7 +291,7 @@ class WorkspacesHost:
     """Keeps the workspaces the latest ``Catalog`` lists, as ``SessionStateChanged`` changes
     their sessions, and shows them with ``push`` when asked, for the ``repository`` the
     frontend runs in, refreshing the picker while it's shown, and the clones under way, as
-    ``WorkspaceCloning`` reports them, until they're listed or fail or the link is back, and
+    ``WorkspaceCloning`` reports them, until they're served or fail or the link is back, and
     the agents running, as ``AgentsChanged`` reports them while the picker watches for them,
     and the directories ``DirectoryListing`` lists, in its explorer. ``change`` sends adding
     and removing workspaces, the streams to watch and listing directories, and ``chosen``
@@ -319,23 +317,24 @@ class WorkspacesHost:
         return self._picker.showing
 
     def follow(self, catalog: Catalog) -> None:
-        """List the workspaces in ``catalog``, in place of the clones it lists."""
-        self.cloning = clones_left(self.cloning, self.workspaces, catalog.workspaces)
+        """List the workspaces in ``catalog``."""
         self.workspaces = catalog.workspaces
         self._refresh()
 
     def follow_cloning(self, progress: WorkspaceCloning) -> None:
-        """Note how far the clone ``progress`` is about has got."""
+        """Note how far the clone ``progress`` is about has got, dropping it once it's served."""
         self.cloning = with_clone(self.cloning, progress)
         self._refresh()
 
     def follow_error(self, error: ErrorOccurred) -> None:
-        """Drop the clone ``error`` says failed, if it names one, whatever its code, telling the
-        picker shown."""
-        self.cloning = tuple(c for c in self.cloning if not clone_failed(error.message, c.url))
+        """Drop the clone ``error`` says failed, if it names one by its URL, whatever its code,
+        telling the picker shown."""
+        if error.url is None:
+            return
+        self.cloning = without_clone(self.cloning, error.url)
         self._refresh()
         if self.shown is not None:
-            self.shown.clone_failed(error.message)
+            self.shown.clone_failed(error.url, error.message)
 
     def reconnected(self) -> None:
         """Drop every clone, now the link to the control plane is back, as clones under way

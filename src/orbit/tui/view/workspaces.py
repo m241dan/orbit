@@ -44,8 +44,6 @@ ROLE_ORDER = (CODER, CONFIGURATOR, REVIEWER, SUPER_REVIEWER, PLANNER)
 # What a repository's URL starts with, as against a path: a scheme git clones over, or the
 # user and host of a scp-style ``user@host:path``.
 _URL = re.compile(r"(?:https|ssh|file)://|[^\s/@:]+@[^\s/:]+:")
-# What a clone's directory name can't hold, as the server names it.
-_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 WorkspaceRow = WorkspaceEntry | AddWorkspace | WorkspaceCloning | Literal["add_path"]
 """A row of the picker: a workspace served, adding the repository the frontend runs in, a clone
@@ -162,55 +160,28 @@ def wait_note(activity: Sequence[Activity]) -> str | None:
 
 
 def clone_label(cloning: WorkspaceCloning) -> str:
-    """A clone's row: its name and how far through its phase git is, or the phase while git
-    doesn't say: ``Cloning proj… 42%``."""
+    """A clone's row: the name the server gives it, else its URL, and how far through its phase
+    git is, or the phase while git doesn't say: ``Cloning proj… 42%``."""
     progress = cloning.phase if cloning.percent is None else f"{cloning.percent}%"
-    return f"Cloning {clone_name(cloning.url)}… {progress}"
-
-
-def clone_name(url: str) -> str:
-    """The name the server gives the directory a clone of ``url`` goes to: its last part,
-    without ``.git``, with what isn't a letter, digit, dot, dash or underscore made a dash, and
-    no leading or trailing dots or dashes; ``repository`` if nothing's left."""
-    last = re.split(r"[/:]", url.rstrip("/"))[-1]
-    name = _UNSAFE.sub("-", last.removesuffix(".git")).strip(".-")
-    return name or "repository"
+    return f"Cloning {cloning.name or cloning.url}… {progress}"
 
 
 def with_clone(
     cloning: Sequence[WorkspaceCloning], progress: WorkspaceCloning
 ) -> tuple[WorkspaceCloning, ...]:
     """The clones ``cloning``, with ``progress`` in place of the last of its URL's, or after
-    them for a clone new since."""
+    them for a clone new since; without its URL's once ``progress`` says it's served, as the
+    workspace listed takes its place."""
+    if progress.workspace is not None:
+        return without_clone(cloning, progress.url)
     if all(clone.url != progress.url for clone in cloning):
         return (*cloning, progress)
     return tuple(progress if clone.url == progress.url else clone for clone in cloning)
 
 
-def clones_left(
-    cloning: Sequence[WorkspaceCloning],
-    before: Sequence[WorkspaceEntry],
-    after: Sequence[WorkspaceEntry],
-) -> tuple[WorkspaceCloning, ...]:
-    """The clones of ``cloning`` still under way once the workspaces ``before`` are listed as
-    ``after``: those no new workspace is labelled for, by the clone's name, numbered or not, as
-    the server names a clone's directory."""
-    known = {entry.id for entry in before}
-    new = [entry.label for entry in after if entry.id not in known]
-    return tuple(clone for clone in cloning if not _listed(clone, new))
-
-
-def _listed(clone: WorkspaceCloning, labels: Sequence[str]) -> bool:
-    """Whether one of the workspaces ``labels`` label may be ``clone``'s, named for it,
-    numbered or not."""
-    named = re.compile(rf"{re.escape(clone_name(clone.url))}(?:-\d+)?")
-    return any(named.fullmatch(label) for label in labels)
-
-
-def clone_failed(message: str, url: str) -> bool:
-    """Whether an error's ``message`` says the clone of ``url`` failed, whatever its code: git
-    failing, serving the clone refused, or orbit failing to serve it."""
-    return message.startswith(f"Couldn't clone {url}: ")
+def without_clone(cloning: Sequence[WorkspaceCloning], url: str) -> tuple[WorkspaceCloning, ...]:
+    """The clones ``cloning`` but that of ``url``."""
+    return tuple(clone for clone in cloning if clone.url != url)
 
 
 def remove_title(entry: WorkspaceEntry) -> str:

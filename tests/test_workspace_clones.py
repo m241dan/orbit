@@ -9,6 +9,7 @@ import pytest
 from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.agent.application.clones import Clones
 from orbit.agent.application.connection import SessionConnection
+from orbit.agent.domain.clones import clone_served
 from orbit.agent.domain.workspaces import LOCAL_ONLY
 from orbit.protocol import (
     BUSY,
@@ -40,6 +41,18 @@ async def received_until(connection: SessionConnection, kind: type[Event]) -> li
     return envelopes
 
 
+async def received_served(connection: SessionConnection) -> list[EventEnvelope]:
+    """The envelopes queued for ``connection`` up to the clone's last news, once it's served."""
+    envelopes: list[EventEnvelope] = []
+    while not any(
+        isinstance(envelope.payload, WorkspaceCloning) and envelope.payload.workspace
+        for envelope in envelopes
+    ):
+        await asyncio.sleep(0.01)
+        envelopes += taken(connection)
+    return envelopes
+
+
 async def cloning(source: FakeSource) -> None:
     """Wait until ``source`` has started cloning."""
     while not source.cloning:
@@ -59,14 +72,16 @@ async def test_a_url_is_accepted_at_once_then_cloned_and_served_managed() -> Non
 
     await say(connection, "add", AddWorkspace(url=URL))
     accepted = payloads(taken(connection))
-    envelopes = await received_until(connection, Catalog)
+    envelopes = await received_served(connection)
     await plane.close()
 
     assert accepted == [CommandAccepted(command_id="add")]
-    progress, catalog = envelopes
+    progress, catalog, served = envelopes
     assert progress.payload == PROGRESS
     assert (progress.workspace, progress.session) == (None, None)
     assert ids(catalog.payload) == ["a", "proj.git"]
+    assert served.payload == clone_served(URL, "proj.git")
+    assert (served.workspace, served.session) == (None, None)
     assert source.managed == ["/clones/proj.git"]
     assert source.removed == []
 
@@ -84,7 +99,7 @@ async def test_a_clones_news_reaches_connections_attached_too() -> None:
     await plane.close()
 
     assert seen[0] == PROGRESS
-    assert ids(seen[-1]) == ["a", "proj.git"]
+    assert ids(next(event for event in seen if isinstance(event, Catalog))) == ["a", "proj.git"]
 
 
 async def test_a_clones_news_doesnt_reach_a_connection_before_its_hello() -> None:
@@ -113,7 +128,7 @@ async def test_a_clone_that_fails_is_told_as_git_failed_and_serves_nothing() -> 
     assert seen == [
         CommandAccepted(command_id="add"),
         PROGRESS,
-        ErrorOccurred(code=GIT_FAILED, message="Couldn't clone it: not found"),
+        ErrorOccurred(code=GIT_FAILED, message="Couldn't clone it: not found", url=URL),
     ]
     assert source.opened == []
 
@@ -129,7 +144,7 @@ async def test_a_clone_that_cant_be_served_is_told_with_the_refusals_code() -> N
     await plane.close()
 
     message = f"Couldn't clone {URL}: Can't add /clones/proj.git: Its configuration is invalid."
-    assert error == ErrorOccurred(code=INVALID, message=message)
+    assert error == ErrorOccurred(code=INVALID, message=message, url=URL)
     assert source.removed == ["/clones/proj.git"]
 
 
@@ -151,7 +166,7 @@ async def test_a_clone_whose_serving_fails_is_told_as_internal() -> None:
     await plane.close()
 
     message = f"Couldn't clone {URL}: Orbit failed to serve the clone: The store is gone."
-    assert error == ErrorOccurred(code=INTERNAL, message=message)
+    assert error == ErrorOccurred(code=INTERNAL, message=message, url=URL)
     assert source.flags == [("proj.git", False)]
     assert source.removed == ["/clones/proj.git"]
 
@@ -181,8 +196,9 @@ async def test_a_url_is_free_again_as_soon_as_its_clone_is_served() -> None:
     clones = Clones(lambda _: None)
     served = asyncio.Event()
 
-    async def serve(_: str) -> None:
+    async def serve(_: str) -> str:
         served.set()  # Whoever this wakes, as a catalog would, runs before the clone's task ends.
+        return "proj"
 
     clones.start(URL, FakeSource(), serve)
     await served.wait()

@@ -70,13 +70,24 @@ def clone_progress(url: str, line: str) -> WorkspaceCloning | None:
         return None
     percent = found["percent"]
     return WorkspaceCloning(
-        url=url, phase=found["phase"], percent=None if percent is None else int(percent)
+        url=url,
+        name=clone_name(url),
+        phase=found["phase"],
+        percent=None if percent is None else int(percent),
+    )
+
+
+def clone_served(url: str, workspace: str) -> WorkspaceCloning:
+    """The last news of the clone of ``url``: it's done, served as the workspace
+    ``workspace``."""
+    return WorkspaceCloning(
+        url=url, name=clone_name(url), phase="Done", percent=100, workspace=workspace
     )
 
 
 def couldnt_clone(url: str, why: str) -> str:
-    """What's said when the clone of ``url`` fails for the reason ``why``, as frontends tell
-    which clone failed by: ``Couldn't clone <url>: <why>``."""
+    """What's said when the clone of ``url`` fails for the reason ``why``:
+    ``Couldn't clone <url>: <why>``."""
     return f"Couldn't clone {url}: {why}"
 
 

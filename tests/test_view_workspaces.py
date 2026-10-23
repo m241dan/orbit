@@ -23,10 +23,7 @@ from orbit.tui.view.workspaces import (
     add_command,
     added_workspace,
     agents_summary,
-    clone_failed,
     clone_label,
-    clone_name,
-    clones_left,
     preselected,
     removal,
     remove_choices,
@@ -35,6 +32,7 @@ from orbit.tui.view.workspaces import (
     row_label,
     with_clone,
     with_states,
+    without_clone,
     workspace_at,
     workspace_label,
     workspace_rows,
@@ -45,7 +43,11 @@ EARLIER = SessionSummary(id="e", name="earlier")
 A = WorkspaceEntry(id="a", label="repoA", path="/src/repoA", sessions=(EARLIER, TODAY))
 B = WorkspaceEntry(id="b", label="repoB", path="/src/repoB", sessions=())
 CLONE = WorkspaceEntry(id="c", label="proj", path="/srv/clones/proj", managed=True, sessions=())
-CLONING = WorkspaceCloning(url="https://github.com/o/proj.git", phase="Receiving objects")
+CLONING = WorkspaceCloning(
+    url="https://github.com/o/proj.git", name="proj", phase="Receiving objects"
+)
+# Another clone the server names as it does CLONING.
+NAMESAKE = WorkspaceCloning(url="git@host:o/proj.git", name="proj", phase="Counting objects")
 
 
 def test_rows_list_the_served_workspaces_then_adding_a_path() -> None:
@@ -175,23 +177,14 @@ def test_other_text_is_added_as_a_path(text: str) -> None:
     assert add_command(text) == AddWorkspace(path=text)
 
 
-@pytest.mark.parametrize(
-    ("url", "name"),
-    [
-        ("https://github.com/o/proj.git", "proj"),
-        ("git@github.com:proj", "proj"),
-        ("file:///x/my proj/", "my-proj"),
-        ("https://host/", "host"),
-        ("https://host/.git", "repository"),
-    ],
-)
-def test_a_clone_is_named_as_the_server_names_its_directory(url: str, name: str) -> None:
-    assert clone_name(url) == name
-
-
 def test_a_clone_shows_how_far_through_its_phase_it_is() -> None:
     progress = CLONING.model_copy(update={"percent": 42})
     assert clone_label(progress) == "Cloning proj… 42%"
+
+
+def test_a_clone_the_server_doesnt_name_shows_its_url() -> None:
+    unnamed = CLONING.model_copy(update={"name": None})
+    assert clone_label(unnamed) == "Cloning https://github.com/o/proj.git… Receiving objects"
 
 
 def test_a_clones_progress_takes_the_place_of_its_last() -> None:
@@ -205,25 +198,18 @@ def test_a_new_clones_progress_goes_after_the_others() -> None:
     assert with_clone((CLONING,), other) == (CLONING, other)
 
 
-def test_a_clone_is_done_once_a_new_workspace_with_its_name_is_listed() -> None:
-    other = WorkspaceCloning(url="git@host:o/other.git", phase="Counting objects")
-    assert clones_left((CLONING, other), (A,), (A, CLONE)) == (other,)
+def test_a_clone_served_drops_its_urls_row_alone() -> None:
+    served = CLONING.model_copy(update={"workspace": "c"})
+    assert with_clone((CLONING, NAMESAKE), served) == (NAMESAKE,)
 
 
-def test_a_clone_numbered_beside_one_of_its_name_is_done_once_listed() -> None:
-    numbered = CLONE.model_copy(update={"id": "d", "label": "proj-2"})
-    assert clones_left((CLONING,), (CLONE,), (CLONE, numbered)) == ()
+def test_a_clone_served_that_has_no_row_adds_none() -> None:
+    served = CLONING.model_copy(update={"workspace": "c"})
+    assert with_clone((NAMESAKE,), served) == (NAMESAKE,)
 
 
-def test_a_clone_is_under_way_while_only_an_old_workspace_has_its_name() -> None:
-    other = A.model_copy(update={"id": "e", "label": "projector"})
-    assert clones_left((CLONING,), (CLONE,), (CLONE, other)) == (CLONING,)
-
-
-def test_a_failure_belongs_to_the_clone_of_the_url_it_names() -> None:
-    url = "https://github.com/o/proj"
-    assert clone_failed(f"Couldn't clone {url}: not found", url)
-    assert not clone_failed(f"Couldn't clone {url}2: not found", url)
+def test_a_clone_failing_drops_its_urls_row_alone() -> None:
+    assert without_clone((CLONING, NAMESAKE), CLONING.url) == (NAMESAKE,)
 
 
 def test_removing_asks_about_the_workspace_by_its_label() -> None:

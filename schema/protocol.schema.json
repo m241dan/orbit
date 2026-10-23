@@ -1034,7 +1034,7 @@
       "type": "object"
     },
     "ErrorOccurred": {
-      "description": "An error with no command behind it, of the kind ``code`` names (one of the error codes,\nsuch as :data:`AGENT_FAILED`, or a refusal code where it fits), and ``message`` says what.",
+      "description": "An error with no command behind it, of the kind ``code`` names (one of the error codes,\nsuch as :data:`AGENT_FAILED`, or a refusal code where it fits), and ``message`` says what;\n``url`` names the repository whose clone failed, if that's the error.",
       "properties": {
         "agent_id": {
           "anyOf": [
@@ -1073,6 +1073,18 @@
           "default": "error_occurred",
           "title": "Type",
           "type": "string"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
         }
       },
       "required": [
@@ -3297,8 +3309,20 @@
       "type": "object"
     },
     "WorkspaceCloning": {
-      "description": "The repository at ``url``, which ``AddWorkspace`` asked to serve, is being cloned: git is\nat ``phase``, such as ``Receiving objects``, ``percent`` of the way through it if git says.\nA control-plane event, sent to every connection and never logged.",
+      "description": "The repository at ``url``, which ``AddWorkspace`` asked to serve, is being cloned, as\n``name``, the name its directory is given: git is at ``phase``, such as ``Receiving\nobjects``, ``percent`` of the way through it if git says. The last, once the clone is\nserved, gives the ``workspace`` it's served as. A control-plane event, sent to every\nconnection and never logged.",
       "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
         "percent": {
           "anyOf": [
             {
@@ -3324,6 +3348,18 @@
         "url": {
           "title": "Url",
           "type": "string"
+        },
+        "workspace": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workspace"
         }
       },
       "required": [

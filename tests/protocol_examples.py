@@ -236,6 +236,7 @@ EVENTS: tuple[EventEnvelope, ...] = (
     event(VerificationSkipped(task_id="t1", reason="no_changes")),
     event(VerificationFinished(task_id="t1", step=2, passed=True)),
     event(ErrorOccurred(turn_id="turn-1", agent_id="agent-1", code="internal", message="boom")),
+    event(ErrorOccurred(code="git_failed", message="Couldn't clone x: denied", url="x")),
     event(AgentStarted(agent_id="agent-1", role="coder", task_id="t1")),
     event(
         AgentRequest(
@@ -331,7 +332,18 @@ EVENTS: tuple[EventEnvelope, ...] = (
         )
     ),
     event(
-        WorkspaceCloning(url="git@github.com:o/orbit.git", phase="Receiving objects", percent=42)
+        WorkspaceCloning(
+            url="git@github.com:o/orbit.git", name="orbit", phase="Receiving objects", percent=42
+        )
+    ),
+    event(
+        WorkspaceCloning(
+            url="git@github.com:o/orbit.git",
+            name="orbit",
+            phase="Done",
+            percent=100,
+            workspace="w1",
+        )
     ),
     event(
         AgentsChanged(

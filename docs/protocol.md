@@ -232,22 +232,27 @@ prompts: frontends never send credentials.
 {"workspace":null,"traceparent":null,"tracestate":null,"command_id":"b52d10","session":null,"payload":{"type":"add_workspace","path":null,"url":"git@github.com:o/proj.git"}}
 ```
 
-As git clones, `WorkspaceCloning(url, phase, percent)` events report its progress: the `phase`
-git is in, such as `Receiving objects`, and how far through it it is, `percent`, when git says
-(`null` when it doesn't). Once the clone is made, it's served as one added by its path is,
-marked in the registry as managed, a clone orbit made, and a `Catalog` listing it follows. If
-the clone fails, an `ErrorOccurred` coded `git_failed` gives git's last lines, such as
-`Couldn't clone git@github.com:o/proj.git: ERROR: Repository not found.`, with, when they look
-like git lacked credentials, the hint `The server's account needs access to this repository: an
-SSH key or a git credential helper.`, and what was cloned is removed; if the clone can't be
-served, the `ErrorOccurred` carries the code adding its path would be refused with. The
-progress, the failure and that `Catalog` reach every connection that's listening and every one
+As git clones, `WorkspaceCloning(url, name, phase, percent, workspace)` events report its
+progress: the `name` its directory is given (`proj`, unnumbered), the `phase` git is in, such as
+`Receiving objects`, and how far through it it is, `percent`, when git says (`null` when it
+doesn't), with `workspace` `null`. Once the clone is made, it's served as one added by its path
+is, marked in the registry as managed, a clone orbit made, a `Catalog` listing it follows, and
+then a last `WorkspaceCloning`, with `phase` `Done` and `percent` 100, gives in `workspace` the
+id it's served as. If the clone fails, an `ErrorOccurred` whose `url` names the repository (the
+`url` the `AddWorkspace` gave; `null` on every other error) coded `git_failed` gives git's last
+lines, such as `Couldn't clone git@github.com:o/proj.git: ERROR: Repository not found.`, with,
+when they look like git lacked credentials, the hint `The server's account needs access to this
+repository: an SSH key or a git credential helper.`, and what was cloned is removed; if the
+clone can't be served, the `ErrorOccurred` carries the code adding its path would be refused
+with. Either way, frontends tell which clone ended by its `url`, never by a workspace's label or
+the message's wording. The progress, the end and that `Catalog` reach every connection that's listening and every one
 welcomed but attached to no workspace, as whichever asked may not be attached yet; they carry
 no workspace and no session, and aren't logged. A clone still under way when the server stops
 is stopped, and what it cloned removed.
 
 ```json
-{"workspace":null,"traceparent":null,"tracestate":null,"seq":57,"session":null,"payload":{"type":"workspace_cloning","url":"git@github.com:o/proj.git","phase":"Receiving objects","percent":42}}
+{"workspace":null,"traceparent":null,"tracestate":null,"seq":57,"session":null,"payload":{"type":"workspace_cloning","url":"git@github.com:o/proj.git","name":"proj","phase":"Receiving objects","percent":42,"workspace":null}}
+{"workspace":null,"traceparent":null,"tracestate":null,"seq":60,"session":null,"payload":{"type":"workspace_cloning","url":"git@github.com:o/proj.git","name":"proj","phase":"Done","percent":100,"workspace":"7d2e91b4"}}
 ```
 
 `RemoveWorkspace(workspace)` stops serving the workspace whose id is `workspace`: its host
@@ -505,7 +510,9 @@ A refused command changed nothing, except one refused as `internal`: orbit faile
 through handling it, so it may have changed something.
 
 `ErrorOccurred` reports an error no command caused, such as an agent failing during a task
-run, with `code`, one of the error codes below or a refusal code where it fits, and `message`.
+run, with `code`, one of the error codes below or a refusal code where it fits, and `message`;
+`url` names the repository whose clone failed, when that's the error (see
+[Workspaces](#workspaces)), and is `null` otherwise.
 
 ## Sequencing and reconnecting
 

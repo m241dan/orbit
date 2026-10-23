@@ -10,6 +10,7 @@ from orbit.agent.domain.clones import (
     clone_name,
     clone_names,
     clone_progress,
+    clone_served,
     looks_like_url,
 )
 from orbit.agent.domain.refusals import Refused
@@ -95,7 +96,13 @@ def test_a_name_taken_is_numbered_from_2() -> None:
 def test_gits_progress_lines_are_its_phase_and_percent(
     line: str, phase: str, percent: int | None
 ) -> None:
-    assert clone_progress(URL, line) == WorkspaceCloning(url=URL, phase=phase, percent=percent)
+    expected = WorkspaceCloning(url=URL, name="proj", phase=phase, percent=percent)
+    assert clone_progress(URL, line) == expected
+
+
+def test_a_clone_served_ends_with_the_workspace_it_is_served_as() -> None:
+    served = WorkspaceCloning(url=URL, name="proj", phase="Done", percent=100, workspace="w1")
+    assert clone_served(URL, "w1") == served
 
 
 @pytest.mark.parametrize(
