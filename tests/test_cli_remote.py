@@ -42,6 +42,24 @@ def test_a_remote_is_connected_to_with_its_url_and_the_default_token(config: Pat
     assert tui.opening.command == NewSession() and tui.ran
 
 
+def test_a_remote_beyond_loopback_offers_no_workspace_from_here(config: Path) -> None:
+    _remotes(config, '[remotes.work]\nurl = "wss://orbit.example.lan:7433/"\n')
+    result = runner.invoke(app, ["chat", "--remote", "work"])
+    assert result.exit_code == 0, result.output
+    assert FakeApp.built[0].opening.repository is None
+
+
+def test_a_remote_on_loopback_opens_on_the_workspace_of_the_repository_here(
+    config: Path, tmp_path: Path
+) -> None:
+    _remotes(config, f'[remotes.home]\nurl = "{URL}"\n')
+    project = tmp_path / "project"
+    project.mkdir()
+    result = runner.invoke(app, ["chat", "--remote", "home", "-C", str(project)])
+    assert result.exit_code == 0, result.output
+    assert FakeApp.built[0].opening.repository == str(project.resolve())
+
+
 def test_a_remotes_token_file_is_shown(config: Path) -> None:
     (config / "work-token").write_text("work\n")
     _remotes(config, f'[remotes.work]\nurl = "{URL}"\ntoken_file = "work-token"\n')

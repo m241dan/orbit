@@ -7,6 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 from orbit.cli import app
+from orbit.cli.chat import on_this_machine
 from orbit.client import WebSocketSession, messages
 from orbit.protocol import NewSession
 from tests.cli_fakes import FakeApp, FakeClient
@@ -44,6 +45,27 @@ def test_connect_opens_on_the_workspace_of_the_repository_it_runs_in(tmp_path: P
     result = runner.invoke(app, ["chat", "--connect", URL, "-C", str(project)])
     assert result.exit_code == 0, result.output
     assert FakeApp.built[0].opening.repository == str(project.resolve())
+
+
+@pytest.mark.usefixtures("token_file")
+def test_connect_beyond_loopback_offers_no_workspace_from_here() -> None:
+    result = runner.invoke(app, ["chat", "--connect", "wss://orbit.example.lan:7433/"])
+    assert result.exit_code == 0, result.output
+    assert FakeApp.built[0].opening.repository is None
+
+
+@pytest.mark.parametrize(
+    "url", ["ws://127.0.0.1:7433/", "wss://localhost:7433/", "ws://[::1]:7433/", "ws://127.0.0.2/"]
+)
+def test_a_loopback_url_is_on_this_machine(url: str) -> None:
+    assert on_this_machine(url)
+
+
+@pytest.mark.parametrize(
+    "url", ["wss://orbit.example.lan:7433/", "ws://192.168.1.20:7433/", "wss://[2001:db8::1]/"]
+)
+def test_any_other_url_is_not_on_this_machine(url: str) -> None:
+    assert not on_this_machine(url)
 
 
 def test_the_token_file_option_names_another_file(tmp_path: Path) -> None:

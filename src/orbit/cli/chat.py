@@ -7,6 +7,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import typer
 
@@ -62,6 +63,7 @@ from orbit.client import (
 )
 from orbit.profiling import profiled
 from orbit.protocol import NewSession
+from orbit.protocol.transport import is_loopback
 from orbit.telemetry import TelemetryRun
 from orbit.tui import Opening, OrbitApp
 
@@ -114,7 +116,8 @@ def chat(
         _refuse_local(local, target.flag)
         joining = _joining(ctx, target.files, user_config, _opening(flags))
         where = f"not orbit chat {target.flag}"
-        _join(replace(joining, repository=str(_workspace(workspace))), target.url, where)
+        repository = _repository_for(target.url, workspace)
+        _join(replace(joining, repository=repository), target.url, where)
         return
     state = resolve_state_dir(state, os.environ)
     root = _workspace(workspace)
@@ -192,6 +195,18 @@ def _target(
         raise typer.Exit(2)
     configured = _remote(config_dir, remote)
     return _Target(configured.url, given.over(_remote_files(configured)), "--remote")
+
+
+def on_this_machine(url: str) -> bool:
+    """Whether the control plane at ``url`` runs on this machine, as its host is loopback, so
+    a path here names the same directory there."""
+    return is_loopback(urlsplit(url).hostname or "")
+
+
+def _repository_for(url: str, workspace: Path) -> str | None:
+    """The repository at ``workspace`` for the workspace picker of the control plane at ``url``
+    to offer; ``None`` unless it runs on this machine, where the path names the same one."""
+    return str(_workspace(workspace)) if on_this_machine(url) else None
 
 
 def _connect_url(url: str) -> str:

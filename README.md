@@ -106,14 +106,19 @@ again later. A chat running its own control plane works on its repository alone,
 workspace picker and opens on that repository. The picker lists:
 
 - `Add <path>` first, when the repository the chat runs in isn't among the workspaces served:
-  `enter` adds it, then goes on as for a workspace served.
+  `enter` adds it, then goes on as for a workspace served. Only a server on this machine is
+  offered it: one the chat found running here, or one it joins by a URL whose host is loopback
+  (`127.0.0.1`, `::1`, `localhost`). A path here means nothing to a server on another host, so
+  joined by any other URL, with `--connect` or `--remote`, the picker neither offers it nor
+  highlights the workspace at it.
 - The workspaces served, each with its label, its path, its active session's name and whether
   that one is `running` or `idle`, the agents running in it by role (`2 coders · 1 reviewer`,
   nothing while none runs), where its active session waits in line for a coder (`waiting: 2nd`,
   `waiting: next`; see Taking turns in [Serving the control plane](#serving-the-control-plane)),
   and `read-only` while another orbit owns its repository. The picker watches the server's
   control-plane stream while it's open, so the agents stay current, and stops when it closes.
-  The workspace of the repository the chat runs in is highlighted, else the first.
+  The workspace of the repository the chat runs in, on a server on this machine, is
+  highlighted, else the first.
 - A row for each clone under way, `Cloning <name>… 42%` (or git's phase while it gives no
   percentage), until the clone is served and listed in its place.
 - `Add a path or URL…`: `enter` opens the explorer (below).
