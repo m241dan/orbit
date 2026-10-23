@@ -33,7 +33,6 @@ from orbit.agent import (
     TokenFile,
     WorkspaceLock,
     local_tls,
-    looks_like_url,
     read_server,
     resolve_config_dir,
     resolve_state_dir,
@@ -63,6 +62,7 @@ from orbit.cli.options import (
 from orbit.cli.served import Added, _serving
 from orbit.cli.telemetry import _telemetry
 from orbit.profiling import profiled
+from orbit.protocol import looks_like_url
 from orbit.telemetry import TelemetryRun
 
 logger = logging.getLogger(__name__)

@@ -10,7 +10,7 @@ import pytest
 from orbit.agent import CloneFailed, Cloner
 from orbit.agent.domain.clones import AUTH_HINT
 from orbit.agent.external.cloner import ssh_command
-from orbit.protocol import WorkspaceCloning
+from orbit.protocol import WorkspaceCloning, clone_name, failed_clone
 from tests.git_repo import bare_repository, started
 from tests.process_checks import gone
 
@@ -45,7 +45,7 @@ async def test_a_repository_is_cloned_into_a_directory_named_for_it_reporting_pr
 
     path = await Cloner(tmp_path / "clones").clone(url, progress)
 
-    assert path == str(tmp_path / "clones" / "proj")
+    assert path == str(tmp_path / "clones" / clone_name(url))
     assert (Path(path) / "a.txt").read_text() == "one\n"
     assert (
         WorkspaceCloning(url=url, name="proj", phase="Receiving objects", percent=100)
@@ -73,7 +73,7 @@ async def test_a_failed_clone_gives_gits_message_and_leaves_no_directory(
     with pytest.raises(CloneFailed) as failed:
         await Cloner(clones).clone(url, Progress())
 
-    assert str(failed.value).startswith(f"Couldn't clone {url}: ")
+    assert failed_clone(str(failed.value), url)
     assert "does not appear to be a git repository" in str(failed.value)
     assert list(clones.iterdir()) == []
 
@@ -101,9 +101,12 @@ async def test_a_clone_when_git_cant_start_fails_and_leaves_no_directory(
     monkeypatch.setenv("PATH", str(tmp_path / "no-bin"))
     clones = tmp_path / "clones"
 
-    with pytest.raises(CloneFailed, match="Couldn't clone /srv/proj: git failed to start: "):
+    with pytest.raises(
+        CloneFailed, match="Couldn't clone /srv/proj: git failed to start: "
+    ) as failed:
         await Cloner(clones).clone("/srv/proj", Progress())
 
+    assert failed_clone(str(failed.value), "/srv/proj")
     assert list(clones.iterdir()) == []
 
 
@@ -113,8 +116,9 @@ async def test_a_clone_directory_that_cant_be_made_fails(tmp_path: Path) -> None
 
     with pytest.raises(
         CloneFailed, match=f"Couldn't clone /srv/proj: couldn't make a directory in {clones}: "
-    ):
+    ) as failed:
         await Cloner(clones).clone("/srv/proj", Progress())
+    assert failed_clone(str(failed.value), "/srv/proj")
 
 
 async def test_ssh_never_prompts(tmp_path: Path, isolated_git: Path) -> None:

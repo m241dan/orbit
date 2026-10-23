@@ -6,15 +6,19 @@ import re
 from collections.abc import Iterator, Sequence
 
 from orbit.agent.domain.refusals import Refused
-from orbit.protocol import INVALID, WorkspaceCloning
+from orbit.protocol import (
+    INVALID,
+    WorkspaceCloning,
+    clone_failure_message,
+    clone_name,
+    looks_like_url,
+)
 
 AUTH_HINT = (
     "The server's account needs access to this repository: an SSH key or a git credential helper."
 )
 """What a clone that failed for want of credentials adds to git's message."""
 
-_URL = re.compile(r"(?:https|ssh|file)://\S+|[^@/:\s]+@[^@/:\s]+:\S+")
-_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 _PROGRESS = re.compile(
     r"(?:remote: )?(?P<phase>[A-Z][a-z]+(?: [a-z]+)*): +(?:(?P<percent>\d{1,3})% )?\(?\d"
 )
@@ -24,12 +28,6 @@ _AUTH = re.compile(
     re.IGNORECASE,
 )
 _LAST_LINES = 5
-
-
-def looks_like_url(text: str) -> bool:
-    """Whether ``text`` is an ``https://``, ``ssh://`` or ``file://`` URL or a scp-style
-    ``user@host:path``, rather than a path."""
-    return _URL.fullmatch(text) is not None
 
 
 def added_url(path: str | None, url: str | None) -> str | None:
@@ -45,15 +43,6 @@ def added_url(path: str | None, url: str | None) -> str | None:
             " absolute path.",
         )
     return url
-
-
-def clone_name(url: str) -> str:
-    """The name of the directory a clone of ``url`` goes to: its last part, without ``.git``,
-    with what isn't a letter, digit, dot, dash or underscore made a dash, and no leading or
-    trailing dots or dashes; ``repository`` if nothing's left."""
-    last = re.split(r"[/:]", url.rstrip("/"))[-1]
-    name = _UNSAFE.sub("-", last.removesuffix(".git")).strip(".-")
-    return name or "repository"
 
 
 def clone_names(name: str) -> Iterator[str]:
@@ -85,17 +74,11 @@ def clone_served(url: str, workspace: str) -> WorkspaceCloning:
     )
 
 
-def couldnt_clone(url: str, why: str) -> str:
-    """What's said when the clone of ``url`` fails for the reason ``why``:
-    ``Couldn't clone <url>: <why>``."""
-    return f"Couldn't clone {url}: {why}"
-
-
 def clone_failure(url: str, said: Sequence[str]) -> str:
     """What's said when the clone of ``url`` fails: git's last lines of those it ``said``,
     other than its progress, and :data:`AUTH_HINT` when they look like it lacked credentials."""
     message = "\n".join(said[-_LAST_LINES:]) or "git said nothing."
-    failure = couldnt_clone(url, message)
+    failure = clone_failure_message(url, message)
     if _AUTH.search(message):
         return f"{failure}\n{AUTH_HINT}"
     return failure

@@ -1,7 +1,6 @@
 """The list of workspaces a control plane serves, to pick one from, add one or remove one."""
 
 import posixpath
-import re
 from collections.abc import Sequence
 from pathlib import PurePosixPath
 from typing import Literal
@@ -19,6 +18,7 @@ from orbit.protocol import (
     SessionStateChanged,
     WorkspaceCloning,
     WorkspaceEntry,
+    looks_like_url,
     with_state,
 )
 from orbit.tui.view.common import ListHints, active_session, counted, ordinal
@@ -41,10 +41,6 @@ WORKSPACES_HINTS = ListHints(closing=LIST_HINT, quitting=STARTUP_HINT)
 ROLE_ORDER = (CODER, CONFIGURATOR, REVIEWER, SUPER_REVIEWER, PLANNER)
 """The order the agents summary counts the built-in roles in, before any others."""
 
-# What a repository's URL starts with, as against a path: a scheme git clones over, or the
-# user and host of a scp-style ``user@host:path``.
-_URL = re.compile(r"(?:https|ssh|file)://|[^\s/@:]+@[^\s/:]+:")
-
 WorkspaceRow = WorkspaceEntry | AddWorkspace | WorkspaceCloning | Literal["add_path"]
 """A row of the picker: a workspace served, adding the repository the frontend runs in, a clone
 under way, or adding a path or URL typed in."""
@@ -64,10 +60,9 @@ def workspace_rows(
 
 
 def add_command(text: str) -> AddWorkspace:
-    """Adding what the user typed, ``text``: by its ``url`` if it starts as a repository's URL
-    does (``https://``, ``ssh://``, ``file://`` or a scp-style ``user@host:path``), else by its
-    ``path``."""
-    if _URL.match(text):
+    """Adding what the user typed, ``text``: by its ``url`` if it's a repository's URL, as the
+    server takes one (:func:`looks_like_url`), else by its ``path``."""
+    if looks_like_url(text):
         return AddWorkspace(url=text)
     return AddWorkspace(path=text)
 

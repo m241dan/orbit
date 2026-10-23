@@ -5,9 +5,16 @@ import asyncio
 from collections.abc import Awaitable, Callable
 
 from orbit.agent.application.ports import CloneFailed, Cloner
-from orbit.agent.domain.clones import clone_served, couldnt_clone
+from orbit.agent.domain.clones import clone_served
 from orbit.agent.domain.refusals import Refused
-from orbit.protocol import BUSY, GIT_FAILED, INTERNAL, ErrorOccurred, Event
+from orbit.protocol import (
+    BUSY,
+    GIT_FAILED,
+    INTERNAL,
+    ErrorOccurred,
+    Event,
+    clone_failure_message,
+)
 
 
 class Clones:
@@ -39,10 +46,10 @@ class Clones:
         except CloneFailed as exc:  # Its message names the URL already.
             self._failed(url, GIT_FAILED, str(exc))
         except Refused as refusal:
-            self._failed(url, refusal.code, couldnt_clone(url, str(refusal)))
+            self._failed(url, refusal.code, clone_failure_message(url, str(refusal)))
         except Exception as exc:  # A bug mustn't go unreported, as no command waits on it.
             self._failed(
-                url, INTERNAL, couldnt_clone(url, f"Orbit failed to serve the clone: {exc}")
+                url, INTERNAL, clone_failure_message(url, f"Orbit failed to serve the clone: {exc}")
             )
         else:
             self._tell(clone_served(url, workspace))

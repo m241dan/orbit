@@ -11,6 +11,7 @@ from orbit.protocol import (
     SessionSummary,
     WorkspaceCloning,
     WorkspaceEntry,
+    looks_like_url,
 )
 from orbit.tui.view.common import kept_highlight, picker_hint
 from orbit.tui.view.workspaces import (
@@ -166,14 +167,20 @@ def test_a_clones_row_is_keyed_by_its_url() -> None:
 
 
 @pytest.mark.parametrize(
-    "text", ["https://github.com/o/r", "git@github.com:o/r.git", "file:///x/r.git", "ssh://h/r"]
+    "text",
+    ["https://github.com/o/r", "git@github.com:o/r.git", "/srv/repo", "git@host:", "https://x y"],
 )
-def test_text_that_looks_like_a_url_is_added_as_one(text: str) -> None:
-    assert add_command(text) == AddWorkspace(url=text)
+def test_text_is_added_as_a_url_exactly_when_the_server_takes_it_as_one(text: str) -> None:
+    expected = AddWorkspace(url=text) if looks_like_url(text) else AddWorkspace(path=text)
+    assert add_command(text) == expected
 
 
-@pytest.mark.parametrize("text", ["/srv/repo", "~/repo", "/srv/a@b:c", "repo:2"])
-def test_other_text_is_added_as_a_path(text: str) -> None:
+def test_a_url_is_added_as_one() -> None:
+    assert add_command("git@github.com:o/r.git") == AddWorkspace(url="git@github.com:o/r.git")
+
+
+@pytest.mark.parametrize("text", ["/srv/repo", "git@host:", "https://x y"])
+def test_a_path_or_partial_url_is_added_as_a_path(text: str) -> None:
     assert add_command(text) == AddWorkspace(path=text)
 
 

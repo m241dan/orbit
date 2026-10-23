@@ -7,14 +7,12 @@ from orbit.agent.domain.clones import (
     AUTH_HINT,
     added_url,
     clone_failure,
-    clone_name,
     clone_names,
     clone_progress,
     clone_served,
-    looks_like_url,
 )
 from orbit.agent.domain.refusals import Refused
-from orbit.protocol import INVALID, WorkspaceCloning
+from orbit.protocol import INVALID, WorkspaceCloning, clone_name, failed_clone
 
 URL = "https://github.com/o/proj.git"
 
@@ -28,14 +26,8 @@ URL = "https://github.com/o/proj.git"
         "git@github.com:o/proj.git",
     ],
 )
-def test_urls_and_scp_style_addresses_look_like_urls(url: str) -> None:
-    assert looks_like_url(url)
+def test_urls_and_scp_style_addresses_may_be_cloned(url: str) -> None:
     assert added_url(None, url) == url
-
-
-@pytest.mark.parametrize("text", ["/srv/repos/proj", "proj", "github.com:o/proj", "ftp://x"])
-def test_paths_and_other_schemes_dont_look_like_urls(text: str) -> None:
-    assert not looks_like_url(text)
 
 
 def test_an_absolute_path_may_be_cloned() -> None:
@@ -46,7 +38,9 @@ def test_a_path_alone_is_added_by_its_path() -> None:
     assert added_url("/src/orbit", None) is None
 
 
-@pytest.mark.parametrize("url", ["ftp://x", "proj", "http://github.com/o/proj", "https://"])
+@pytest.mark.parametrize(
+    "url", ["ftp://x", "proj", "http://github.com/o/proj", "https://", "git@host:", "https://x y"]
+)
 def test_another_source_is_refused_as_invalid(url: str) -> None:
     with pytest.raises(Refused) as refused:
         added_url(None, url)
@@ -66,18 +60,12 @@ def test_both_or_neither_of_a_path_and_a_url_is_refused_as_invalid(
 
 
 @pytest.mark.parametrize(
-    ("url", "name"),
-    [
-        ("https://github.com/o/proj.git", "proj"),
-        ("https://github.com/o/proj/", "proj"),
-        ("git@github.com:proj.git", "proj"),
-        ("file:///srv/repos/my%20proj!.git", "my-20proj"),
-        ("/srv/repos/.hidden", "hidden"),
-        ("/srv/repos/proj/.git", "repository"),
-    ],
+    "url", [URL, "git@github.com:proj.git", "file:///srv/repos/my%20proj!.git", "/srv/p/.git"]
 )
-def test_a_clone_is_named_for_the_urls_last_part_made_safe(url: str, name: str) -> None:
-    assert clone_name(url) == name
+def test_a_clones_progress_and_last_news_name_it_as_the_shared_rule_does(url: str) -> None:
+    progress = clone_progress(url, "Receiving objects:  45% (450/1000)")
+    assert progress is not None
+    assert progress.name == clone_served(url, "w1").name == clone_name(url)
 
 
 def test_a_name_taken_is_numbered_from_2() -> None:
@@ -121,6 +109,11 @@ def test_other_lines_are_no_progress(line: str) -> None:
 def test_a_failure_gives_gits_last_lines() -> None:
     said = [f"line {n}" for n in range(8)]
     assert clone_failure(URL, said) == f"Couldn't clone {URL}: " + "\n".join(said[-5:])
+
+
+@pytest.mark.parametrize("said", [[], ["fatal: not found"], ["Permission denied (publickey)."]])
+def test_a_failure_is_told_as_the_shared_rule_tells_one(said: list[str]) -> None:
+    assert failed_clone(clone_failure(URL, said), URL)
 
 
 def test_a_failure_git_said_nothing_of_says_so() -> None:

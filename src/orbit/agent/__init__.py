@@ -33,7 +33,6 @@ from orbit.agent.application.verifier import Verification
 from orbit.agent.application.workspace_host import WorkspaceHost
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.checks import ChecksProposal, Setup
-from orbit.agent.domain.clones import looks_like_url
 from orbit.agent.domain.config import OrbitConfig
 from orbit.agent.domain.config_errors import INVALID_CONFIG, ConfigError
 from orbit.agent.domain.ownership import WorkspaceOwner
@@ -162,7 +161,6 @@ __all__ = [
     "has_git_identity",
     "in_git_work_tree",
     "local_tls",
-    "looks_like_url",
     "open_workspace",
     "open_workspace_store",
     "orbit_dir",

@@ -152,8 +152,8 @@ added workspace's session picker; `.` shows or hides hidden directories (hidden 
 as it was. A directory holding more than 2,000 directories lists 2,000, with a last line saying
 how many more there are, to be typed in the field instead.
 
-In the field, `enter` adds what's typed: a repository's URL (`https://`, `ssh://`, `file://`
-or `user@host:path`) is cloned, back in the list, where its `Cloning` row shows how it goes,
+In the field, `enter` adds what's typed: a repository's whole URL, without spaces, as the server
+takes one (`https://…`, `ssh://…`, `file://…` or `user@host:path`), is cloned, back in the list, where its `Cloning` row shows how it goes,
 and if it fails, why shows in the field's hint, with the URL back in the field;
 anything else is added as a path on the server's host, then opens the added workspace's session
 picker, as `a` does. A refusal shows in the field's hint. `tab` completes the path's last

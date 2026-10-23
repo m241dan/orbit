@@ -1,5 +1,11 @@
 """Shared contract between the frontend and the backend."""
 
+from orbit.protocol.clones import (
+    clone_failure_message,
+    clone_name,
+    failed_clone,
+    looks_like_url,
+)
 from orbit.protocol.codes import (
     AGENT_FAILED,
     BUSY,
@@ -366,11 +372,15 @@ __all__ = [
     "WorkspaceUsage",
     "bearer_header",
     "bearer_token",
+    "clone_failure_message",
+    "clone_name",
     "command_adapter",
     "decode_command",
     "decode_event",
     "encode",
     "event_adapter",
+    "failed_clone",
+    "looks_like_url",
     "trace_carrier",
     "with_state",
     "with_trace_carrier",
