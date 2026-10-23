@@ -50,6 +50,8 @@ async def test_new_task_editor_defaults_to_session_settings() -> None:
         assert app.focused is None
         assert editor(app).query_one(PromptInput).border_title == "Title"
         assert editor(app).query_one(PromptBox).border_title == "Prompt"
+        assert editor(app).query_one("#task-model").border_title == "Model"
+        assert editor(app).query_one("#task-tools").border_title == "Tool access"
 
 
 async def test_editor_builds_a_task_with_vim_keys() -> None:

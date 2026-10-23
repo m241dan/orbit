@@ -6,6 +6,8 @@ from textual.app import App
 
 from orbit.protocol import Settings
 from orbit.tui.view.settings import (
+    MODEL_TITLE,
+    TOOL_ACCESS_TITLE,
     model_choices,
     model_options,
     picked_model,
@@ -27,8 +29,8 @@ class SettingsPickers:
     """
 
     def __init__(self) -> None:
-        self.model_picker = PickerScreen("Model", model_options(())[1])
-        self.tool_picker = PickerScreen("Tool access", tool_access_labels())
+        self.model_picker = PickerScreen(MODEL_TITLE, model_options(())[1])
+        self.tool_picker = PickerScreen(TOOL_ACCESS_TITLE, tool_access_labels())
         self.model_choices: tuple[str, ...] = ()
 
     def install(self, app: App[None]) -> None:

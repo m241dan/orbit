@@ -270,7 +270,7 @@ The Conversation window's title ends with the open session's name, cut to 30 cha
 
 The task list queues prompts to run later. Each task has its own prompt, model and tool access, set
 in the task editor's four fields: **Title**, the prompt's first line, which is what the task list
-shows; **Prompt**, the rest of it, in a box that scrolls; **Model** and **Tools**. `j`/`k` pick a
+shows; **Prompt**, the rest of it, in a box that scrolls; **Model** and **Tool access**. `j`/`k` pick a
 field, `J`/`K` scroll the prompt box one line at a time (whichever field is selected), `i` types in
 the title or prompt (`esc` stops; `enter` stops in the title and adds a line in the prompt),
 `enter` on model or tools opens a picker, `ctrl+s` saves (from anywhere, even while typing) and

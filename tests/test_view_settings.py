@@ -2,6 +2,8 @@ from orbit.protocol import (
     Settings,
 )
 from orbit.tui.view.settings import (
+    MODEL_TITLE,
+    TOOL_ACCESS_TITLE,
     model_choices,
     model_options,
     picked_model,
@@ -18,6 +20,10 @@ def test_settings_summary_names_the_model_and_new_tasks_tool_access() -> None:
     assert (
         settings_summary(full) == "planner's model: opus · new tasks' tools: full (auto-approved)"
     )
+
+
+def test_the_settings_are_titled_model_and_tool_access() -> None:
+    assert (MODEL_TITLE, TOOL_ACCESS_TITLE) == ("Model", "Tool access")
 
 
 def test_model_options_offer_only_the_default_without_choices() -> None:

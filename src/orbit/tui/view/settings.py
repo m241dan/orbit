@@ -6,6 +6,8 @@ from typing import get_args
 from orbit.protocol import Settings, ToolAccess
 from orbit.tui.view.common import model_label
 
+MODEL_TITLE = "Model"
+TOOL_ACCESS_TITLE = "Tool access"
 TOOL_ACCESS_OPTIONS: tuple[ToolAccess, ...] = get_args(ToolAccess)
 TOOL_ACCESS_LABELS: dict[ToolAccess, str] = {
     "off": "off",
