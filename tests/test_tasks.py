@@ -1,5 +1,7 @@
 """The task board as the application changes it: each change through it is published whole."""
 
+import asyncio
+
 import pytest
 
 from orbit.agent.application.tasks import Tasks
@@ -159,3 +161,25 @@ async def test_a_change_made_elsewhere_is_acted_on_with_nothing_published() -> N
     await Tasks(TaskBoard(), publish, changed).changed_elsewhere()
 
     assert (acted, published) == (["changed"], [])
+
+
+async def test_a_wait_for_a_change_ends_once_the_board_is_published() -> None:
+    tasks = tasks_on([])
+    waits = asyncio.create_task(tasks.moved())
+    await asyncio.sleep(0)
+    assert not waits.done()
+
+    await tasks.change(adds)
+
+    await asyncio.wait_for(waits, 1)
+
+
+async def test_a_wait_begun_after_a_change_waits_for_the_next() -> None:
+    tasks = tasks_on([])
+    await tasks.change(adds)
+
+    waits = asyncio.create_task(tasks.moved())
+    await asyncio.sleep(0)
+
+    assert not waits.done()
+    waits.cancel()

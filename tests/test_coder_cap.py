@@ -15,6 +15,7 @@ from orbit.protocol import (
     Activity,
     AddTask,
     CancelTurn,
+    EditTask,
     RemoveTask,
     RunTasks,
     SendMessage,
@@ -257,25 +258,6 @@ async def test_cancelling_a_waiting_run_leaves_the_line_and_holds_it() -> None:
     await plane.close()
 
 
-async def test_a_task_removed_while_it_waits_takes_no_turn() -> None:
-    gates = Gates()
-    a, _ = workspace("a", gates.script("a1"))
-    b, _ = workspace("b", gates.script("b1"))
-    plane = capped(1, a, b)
-    in_a, in_b = await joined(plane, host=a), await joined(plane, host=b)
-    await runs(in_a, task())
-    await gates.until_started("a1")
-    await runs(in_b, task())
-    await until(lambda: b.activity.waiting_for_coder == 1)
-    await say(in_b, "remove", RemoveTask(task_id="1"))
-    gates.let("a1")
-
-    await asyncio.wait_for(idle(in_b), 5)
-    assert gates.started == ["a1"]
-    assert plane.coders_running == 0
-    await plane.close()
-
-
 async def test_closing_while_a_run_waits_leaves_no_slot_taken() -> None:
     gates = Gates()
     a, _ = workspace("a", gates.script("a1"))
@@ -347,4 +329,54 @@ async def test_no_cap_never_waits() -> None:
     assert plane.coders_running == 3
     gates.let("a", "b", "c")
     await until(lambda: plane.coders_running == 0)
+    await plane.close()
+
+
+async def test_removing_the_only_waiting_task_leaves_the_line_at_once() -> None:
+    gates = Gates()
+    a, _ = workspace("a", gates.script("a1"))
+    b, _ = workspace("b", gates.script("b1"))
+    plane = capped(1, a, b)
+    in_a, in_b = await joined(plane, host=a), await joined(plane, host=b)
+    await runs(in_a, task())
+    await gates.until_started("a1")
+    await runs(in_b, task())
+    await until(lambda: b.activity.waiting_for_coder == 1)
+    await say(in_b, "remove", RemoveTask(task_id="1"))
+
+    await asyncio.wait_for(idle(in_b), 5)
+    assert b.activity.waiting_for_coder is None
+    assert plane.coders_running == 1
+    gates.let("a1")
+    await asyncio.wait_for(idle(in_a), 5)
+    assert gates.started == ["a1"]
+    assert plane.coders_running == 0
+    await plane.close()
+
+
+async def test_a_coder_task_put_ahead_of_a_waiting_one_runs_on_its_turn() -> None:
+    gates = Gates()
+    a, _ = workspace("a", gates.script("a1"))
+    b, _ = workspace("b", gives_up, gates.script("b1-again"), gates.script("b2"))
+    c, _ = workspace("c", gates.script("c1"))
+    plane = capped(1, a, b, c)
+    in_a, in_b, in_c = [await joined(plane, host=host) for host in (a, b, c)]
+    await runs(in_b, task("First."))
+    await asyncio.wait_for(idle(in_b), 5)
+    await runs(in_a, task())
+    await gates.until_started("a1")
+    await runs(in_b, task("Second."))
+    await until(lambda: b.activity.waiting_for_coder == 1)
+    await runs(in_c, task())
+    await until(lambda: c.activity.waiting_for_coder == 2)
+    await say(in_b, "edit", EditTask(task_id="1", task=task("First, again.")))
+    gates.let("a1")
+
+    await gates.until_started("a1", "b1-again")
+    gates.let("b1-again")
+    await gates.until_started("a1", "b1-again", "c1")
+    gates.let("c1", "b2")
+    await asyncio.wait_for(idle(in_b), 5)
+    assert gates.started == ["a1", "b1-again", "c1", "b2"]
+    assert plane.coders_running == 0
     await plane.close()

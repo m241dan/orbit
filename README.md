@@ -1222,7 +1222,10 @@ in line (`waiting_for_coder`, see [docs/protocol.md](docs/protocol.md#session-st
 session picker, the line above the prompt of a session viewed read-only, the task list and the
 workspace picker show (`waiting for a coder: 2nd in line`, `⏳ waiting: 4 coders busy`,
 `waiting: 2nd`);
-`ctrl+s` takes it out of line and holds it, as it stops any run. Reviews, super reviews and the
+`ctrl+s` takes it out of line and holds it, as it stops any run. A run waiting follows its
+board: it leaves the line as soon as its next task no longer takes a slot (removed, or one taking
+none put ahead), running that task or finishing, and keeps its place, and then its slot, for a coder
+task put ahead of the one it waited for. Reviews, super reviews and the
 planner don't count and never wait, and a run stopped at the usage limit holds no slot until it
 starts again. A local `orbit chat` serves one workspace and has no cap.
 

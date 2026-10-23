@@ -91,7 +91,7 @@ class WorkLane:
         self._gate = beside.gate
         self._coders = beside.coders
         self._tracing = beside.tracing
-        self._seated = False  # The task about to run or running took a coder's slot.
+        self._seated = False  # The run holds a coder's slot, for the task about to run or running.
         self._landed: dict[str, str] = {}  # Task id -> the commit it landed, until reported.
         self._starts: dict[str, str] = {}  # Task id -> the tree's head when it started.
         # Fixes queued per step along each chain, kept across runs so a restart can't reset
@@ -164,14 +164,17 @@ class WorkLane:
     async def _run_tasks(self) -> RunEnd:
         """Run the tasks waiting, as :meth:`run` does; returns why the run ended."""
         tried: set[str] = set()
-        while (task_id := self.next_work(tried)) is not None:
-            if self._gate.halted():  # It may have halted as the last task ended.
-                return "cancelled"
-            with self._tracing.task(self._board, task_id, self._model(task_id)):
-                end = await self._take(task_id, tried)
-            if end is not None:
-                return end
-        return "finished"
+        try:
+            while (task_id := self.next_work(tried)) is not None:
+                if self._gate.halted():  # It may have halted as the last task ended.
+                    return "cancelled"
+                with self._tracing.task(self._board, task_id, self._model(task_id)):
+                    end = await self._take(task_id, tried)
+                if end is not None:
+                    return end
+            return "finished"
+        finally:
+            self._unseat()  # A slot kept for a task that never ran.
 
     def _model(self, task_id: str) -> str | None:
         """The model task ``task_id`` runs on: its own, or else its role's; none if neither
@@ -182,25 +185,48 @@ class WorkLane:
 
     async def _take(self, task_id: str, tried: set[str]) -> RunEnd | None:
         """Seat task ``task_id`` and run it, as :meth:`_run_seated` does; the run ends cancelled
-        if the user stopped it as it waited for a slot."""
-        if not await self._seat(task_id):
-            return "cancelled"
+        if the user stopped it as it waited for a slot, and goes on, picking its next task
+        again, if the board stopped needing one. A slot is given back once a task has run, and
+        kept for the next task if this one didn't."""
+        if not await self._seat(task_id, tried):
+            return "cancelled" if self._stopped else None
         try:
             return await self._run_seated(task_id, tried)
         finally:
-            self._unseat()
+            if task_id in tried:
+                self._unseat()
 
-    async def _seat(self, task_id: str) -> bool:
+    async def _seat(self, task_id: str, tried: set[str]) -> bool:
         """Take a coder's slot for task ``task_id``, waiting in line for one, if its role takes
-        one; returns whether it may run, false if the user stopped the run as it waited."""
+        one and no slot is held already, or else give back any held; returns whether it may
+        run, false if the run's place in line was dropped: the user stopped the run, or the
+        board's next task, among those not ``tried``, no longer takes a slot."""
         coders = self._coders
-        if coders is None or self._board.get(task_id).task.role not in CODER_ROLES:
+        if coders is None or not self._takes_slot(task_id):
+            self._unseat()
             return True
-        self._seated = await self._tracing.seat(coders)
+        if self._seated:
+            return True
+        watch = asyncio.create_task(self._leave_line_unneeded(coders, tried))
+        try:
+            self._seated = await self._tracing.seat(coders)
+        finally:
+            watch.cancel()
         return self._seated
 
+    async def _leave_line_unneeded(self, coders: CoderSeat, tried: set[str]) -> None:
+        """Drop the run's place in line at ``coders`` once the board's next task, among those
+        not ``tried``, takes no slot."""
+        while self._takes_slot(self.next_work(tried)):
+            await self._tasks.moved()
+        coders.drop()
+
+    def _takes_slot(self, task_id: str | None) -> bool:
+        """Whether task ``task_id``, if any, is of a role that takes a coder's slot."""
+        return task_id is not None and self._board.get(task_id).task.role in CODER_ROLES
+
     def _unseat(self) -> None:
-        """Give back the coder's slot the task that ran took, if it took one."""
+        """Give back the coder's slot held, if any."""
         if self._seated:
             assert self._coders is not None  # Only a seat takes slots.
             self._seated = False

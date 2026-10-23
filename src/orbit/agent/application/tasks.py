@@ -1,6 +1,7 @@
 """The task board as the application changes it: published whole after each change, so the
 frontend never shows it stale."""
 
+import asyncio
 from collections.abc import Awaitable, Callable
 
 from orbit.agent.application.ports import Publish
@@ -24,6 +25,7 @@ class Tasks:
         self._board = board
         self._publish = publish
         self._changed = changed
+        self._moved = asyncio.Event()  # Set, then replaced, as the board is published.
 
     @property
     def board(self) -> TaskBoard:
@@ -50,7 +52,13 @@ class Tasks:
     async def publish(self) -> None:
         """Publish the board as it is now."""
         await self._publish(TasksChanged(tasks=self._board.tasks))
+        self._moved.set()
+        self._moved = asyncio.Event()
         await self._changed()
+
+    async def moved(self) -> None:
+        """Wait until the board is next published."""
+        await self._moved.wait()
 
     async def changed_elsewhere(self) -> None:
         """Act on a change made outside the board, as on one made to it."""
