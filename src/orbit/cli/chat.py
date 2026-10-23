@@ -45,7 +45,7 @@ from orbit.cli.options import (
     WorkspaceOption,
     WorktreeOption,
 )
-from orbit.cli.telemetry import _telemetry
+from orbit.cli.telemetry import _refuse_console, _telemetry
 from orbit.cli.threaded import ThreadedSession
 from orbit.client import (
     CaUnreadable,
@@ -106,6 +106,7 @@ def chat(
     and failures go back to it to fix.
     """
     user_config = resolve_config_dir(config_dir, os.environ)
+    _refuse_console(user_config)
     given = _ClientFiles(token_file, ca, cert, key)
     flags = _Backend(model, tools, verify, worktree, review, usage, new, name)
     target = _target(connect, remote, user_config, given)

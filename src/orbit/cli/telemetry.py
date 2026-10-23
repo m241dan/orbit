@@ -5,6 +5,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+import typer
+
 from orbit.agent import ConfigError, read_user_config
 from orbit.cli.errors import _configured, _exit_on
 from orbit.telemetry import (
@@ -25,6 +27,19 @@ def _telemetry_settings(config_dir: Path) -> TelemetrySettings:
     Exits with status 2 if the file is invalid.
     """
     return _configured(lambda: read_user_config(config_dir, _load, TelemetrySettings()))
+
+
+def _refuse_console(config_dir: Path) -> None:
+    """Exit with status 2 if the user config in ``config_dir`` sends spans to the console,
+    which the TUI uses, or is invalid."""
+    if _telemetry_settings(config_dir).exporter != "console":
+        return
+    typer.echo(
+        "The console exporter writes to the terminal, which the TUI uses; use it with orbit "
+        'serve, or set exporter = "file".',
+        err=True,
+    )
+    raise typer.Exit(2)
 
 
 def _load(data: dict[str, Any]) -> TelemetrySettings:

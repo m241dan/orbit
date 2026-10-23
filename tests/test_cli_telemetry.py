@@ -68,12 +68,12 @@ def test_chat_hands_its_backend_the_telemetry_it_starts_and_closes_it_on_exit(
     config_dir: Path,
     state: Path,
 ) -> None:
-    _configure(config_dir, 'exporter = "console"')
+    _configure(config_dir, 'exporter = "file"')
 
     assert runner.invoke(app, ["chat"]).exit_code == 0
 
     [telemetry] = started_telemetry
-    assert telemetry.settings.exporter == "console"
+    assert telemetry.settings.exporter == "file"
     assert telemetry.run.namespace == "orbit-chat"
     assert (telemetry.run.config_dir, telemetry.run.state_dir) == (config_dir, state)
     assert [host.telemetry for host in hosts] == [telemetry]
@@ -89,6 +89,25 @@ def test_chat_with_the_file_exporter_traces_with_opentelemetry(
 
     [host] = hosts
     assert isinstance(host.telemetry, OtelTelemetry)
+
+
+@pytest.mark.parametrize("flags", [[], ["--local"], ["--connect", "ws://127.0.0.1:1"]])
+def test_the_console_exporter_stops_chat_before_the_tui_starts(
+    hosts: list[WorkspaceHost],
+    started_telemetry: list[StartedTelemetry],
+    config_dir: Path,
+    flags: list[str],
+) -> None:
+    _configure(config_dir, 'exporter = "console"')
+
+    result = runner.invoke(app, ["chat", *flags])
+
+    assert result.exit_code == 2
+    assert result.stderr == (
+        "The console exporter writes to the terminal, which the TUI uses; use it with orbit "
+        'serve, or set exporter = "file".\n'
+    )
+    assert (hosts, LocalApp.launched, started_telemetry) == ([], [], [])
 
 
 @pytest.mark.parametrize(
