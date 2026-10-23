@@ -33,7 +33,7 @@ from tests.agent_fakes import (
     publish,
     served,
 )
-from tests.plane_fakes import taken
+from tests.connection_helpers import taken
 from tests.session_builders import OPEN, store_logging
 from tests.store_views import OwnView, database, open_view
 

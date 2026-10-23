@@ -55,17 +55,14 @@ from tests.attach_fakes import (
     SAVED_TASK,
     TASK,
     WHEN,
-    envelopes,
-    joined,
     outcome,
-    say,
     snapshot_in,
     states,
     stored,
-    taken,
     viewing,
     workspace,
 )
+from tests.connection_helpers import envelopes, joined, received, say
 
 LATER = "later"
 """The id of another saved session that isn't open."""
@@ -77,9 +74,9 @@ NOT_ACTIVE_MESSAGE = (
 
 async def test_attaching_to_a_saved_session_answers_with_its_read_only_view() -> None:
     session = workspace(stored())
-    viewer = await joined(session, "viewer")
+    viewer = await joined(session, "viewer", read=True)
     await say(viewer, "attach", Attach(workspace=WORKSPACE, session=EARLIER))
-    events = await taken(viewer)
+    events = await received(viewer)
     await session.close()
 
     snapshot = snapshot_in(events)
@@ -95,13 +92,13 @@ async def test_attaching_to_a_saved_session_answers_with_its_read_only_view() ->
 async def attached_view(session: WorkspaceHost, viewer: SessionConnection) -> Snapshot:
     """The read-only view of ``earlier`` that ``viewer`` gets for attaching to it."""
     await say(viewer, "attach", Attach(workspace=WORKSPACE, session=EARLIER))
-    return snapshot_in(await taken(viewer))
+    return snapshot_in(await received(viewer))
 
 
 async def test_a_saved_sessions_view_carries_the_same_fields_as_ever() -> None:
     store = stored()
     session = workspace(store)
-    viewer = await joined(session, "viewer")
+    viewer = await joined(session, "viewer", read=True)
     snapshot = await attached_view(session, viewer)
     await session.close()
 
@@ -126,10 +123,10 @@ async def test_a_saved_sessions_view_carries_the_same_fields_as_ever() -> None:
 async def test_a_saved_sessions_view_taken_while_storage_is_halted_carries_the_halt() -> None:
     store = stored()
     session = workspace(store)
-    first = await joined(session, "first")
+    first = await joined(session, "first", read=True)
     store.failure = "Disk full."
     await say(first, "add", AddTask(task=TASK))
-    errors = [e for e in await taken(first) if isinstance(e, ErrorOccurred)]
+    errors = [e for e in await received(first) if isinstance(e, ErrorOccurred)]
     viewer = connect(session)
     await say(viewer, "viewer", HELLO)
     snapshot = await attached_view(session, viewer)
@@ -152,9 +149,9 @@ async def test_a_saved_sessions_view_taken_while_ownership_is_offered_says_so() 
         lock=lock,
         lock_retry=LOCK_RETRY,
     )
-    viewer = await joined(session, "viewer")
+    viewer = await joined(session, "viewer", read=True)
     lock.free = True
-    offers = [e for e in await taken(viewer) if isinstance(e, OwnershipOffered)]
+    offers = [e for e in await received(viewer) if isinstance(e, OwnershipOffered)]
     snapshot = await attached_view(session, viewer)
     await session.close()
 
@@ -165,7 +162,7 @@ async def test_a_saved_sessions_view_taken_while_ownership_is_offered_says_so() 
 async def test_a_views_answers_belong_to_the_viewed_session_and_are_never_logged() -> None:
     store = stored()
     session = workspace(store)
-    viewer = await joined(session, "viewer")
+    viewer = await joined(session, "viewer", read=True)
     await say(viewer, "attach", Attach(workspace=WORKSPACE, session=EARLIER))
     answers = [e for e in await envelopes(viewer) if not isinstance(e.payload, SessionStateChanged)]
     await session.close()
@@ -177,12 +174,12 @@ async def test_a_views_answers_belong_to_the_viewed_session_and_are_never_logged
 async def test_a_viewer_no_longer_gets_the_open_sessions_events_while_others_still_do() -> None:
     session = workspace(stored())
     viewer = await viewing(session, "viewer")
-    other = await joined(session, "other")
-    await taken(viewer)
+    other = await joined(session, "other", read=True)
+    await received(viewer)
 
     await say(other, "add", AddTask(task=TASK))
-    seen_by_other = await taken(other)
-    seen_by_viewer = await taken(viewer)
+    seen_by_other = await received(other)
+    seen_by_viewer = await received(viewer)
     await session.close()
 
     assert any(isinstance(e, TasksChanged) for e in seen_by_other)
@@ -191,11 +188,11 @@ async def test_a_viewer_no_longer_gets_the_open_sessions_events_while_others_sti
 
 async def test_the_open_sessions_snapshot_is_active_and_counts_its_viewers() -> None:
     session = workspace(stored())
-    await joined(session, "first")
+    await joined(session, "first", read=True)
     second = connect(session)
     await say(second, "second", HELLO)
     await say(second, "second-attach", attach_to(session))
-    snapshot = snapshot_in(await taken(second))
+    snapshot = snapshot_in(await received(second))
     await session.close()
 
     assert (snapshot.active, snapshot.viewers) == (True, 2)
@@ -206,9 +203,9 @@ async def test_attaching_back_to_the_open_session_makes_it_live_again() -> None:
     session = workspace(stored())
     viewer = await viewing(session, "viewer")
     await say(viewer, "back", Attach(workspace=WORKSPACE, session=OPEN))
-    back = await taken(viewer)
+    back = await received(viewer)
     await say(viewer, "add", AddTask(task=TASK))
-    added = await taken(viewer)
+    added = await received(viewer)
     await session.close()
 
     snapshot = snapshot_in(back)
@@ -220,13 +217,13 @@ async def test_attaching_back_to_the_open_session_makes_it_live_again() -> None:
 
 async def test_attaching_publishes_the_viewers_of_both_sessions_to_every_connection() -> None:
     session = workspace(stored())
-    viewer = await joined(session, "viewer")
-    other = await joined(session, "other")
-    await taken(viewer)
+    viewer = await joined(session, "viewer", read=True)
+    other = await joined(session, "other", read=True)
+    await received(viewer)
 
     await say(viewer, "attach", Attach(workspace=WORKSPACE, session=EARLIER))
-    await taken(viewer)
-    seen = await taken(other)
+    await received(viewer)
+    seen = await received(other)
     await session.close()
 
     assert states(seen) == [(EARLIER, False, 1), (OPEN, True, 1)]
@@ -237,7 +234,7 @@ async def test_a_joining_connections_catalog_counts_the_viewers_but_not_itself()
     await viewing(session, "viewer")
     joining = connect(session)
     await say(joining, "joining", HELLO)
-    events = await taken(joining)
+    events = await received(joining)
     await session.close()
 
     [catalog] = [e for e in events if isinstance(e, Catalog)]
@@ -248,9 +245,9 @@ async def test_a_joining_connections_catalog_counts_the_viewers_but_not_itself()
 
 async def test_attaching_to_a_session_there_is_none_of_is_refused_as_unknown() -> None:
     session = workspace(stored())
-    connection = await joined(session, "first")
+    connection = await joined(session, "first", read=True)
     await say(connection, "attach", Attach(workspace=WORKSPACE, session="nowhere"))
-    events = await taken(connection)
+    events = await received(connection)
     await session.close()
 
     message = "There's no saved session 'nowhere'."
@@ -261,9 +258,9 @@ async def test_attaching_to_an_unreadable_session_is_refused_as_invalid() -> Non
     store = stored()
     store.broken["broken"] = "it isn't JSON"
     session = workspace(store)
-    connection = await joined(session, "first")
+    connection = await joined(session, "first", read=True)
     await say(connection, "attach", Attach(workspace=WORKSPACE, session="broken"))
-    events = await taken(connection)
+    events = await received(connection)
     await session.close()
 
     message = "Can't view the session broken: it isn't JSON."
@@ -273,13 +270,13 @@ async def test_attaching_to_an_unreadable_session_is_refused_as_invalid() -> Non
 async def test_attaching_when_the_sessions_cant_be_listed_changes_nothing() -> None:
     store = stored()
     session = workspace(store)
-    connection = await joined(session, "first")
+    connection = await joined(session, "first", read=True)
     store.list_failure = StoreFailed("The store is gone.")
     await say(connection, "attach", Attach(workspace=WORKSPACE, session=EARLIER))
-    events = await taken(connection)
+    events = await received(connection)
     store.list_failure = None
     await say(connection, "add", AddTask(task=TASK))
-    added = await taken(connection)
+    added = await received(connection)
     await session.close()
 
     assert not any(isinstance(e, Snapshot) for e in events)
@@ -291,7 +288,7 @@ async def test_a_view_refuses_work_as_not_active_naming_both_sessions() -> None:
     session = workspace(stored())
     viewer = await viewing(session, "viewer")
     await say(viewer, "run", RunTasks())
-    events = await taken(viewer)
+    events = await received(viewer)
     await session.close()
 
     assert events == [CommandRefused(command_id="run", code=NOT_ACTIVE, message=NOT_ACTIVE_MESSAGE)]
@@ -302,11 +299,11 @@ async def halted_with_a_view(store: FakeStore) -> tuple[WorkspaceHost, SessionCo
     connection viewing ``earlier`` that has read what the halt brought."""
     session = workspace(store)
     viewer = await viewing(session, "viewer")
-    other = await joined(session, "other")
+    other = await joined(session, "other", read=True)
     store.failure = "Disk full."
     await say(other, "add", AddTask(task=TASK))
-    await taken(other)
-    await taken(viewer)
+    await received(other)
+    await received(viewer)
     return session, viewer
 
 
@@ -315,7 +312,7 @@ async def test_a_view_resuming_storage_once_writing_works_lifts_the_halt() -> No
     session, viewer = await halted_with_a_view(store)
     store.failure = None
     await say(viewer, "resume", ResumeStorage())
-    resumed = await taken(viewer)
+    resumed = await received(viewer)
     halt = (await session._snapshot()).snapshot.storage_halt
     await session.close()
 
@@ -326,7 +323,7 @@ async def test_a_view_resuming_storage_once_writing_works_lifts_the_halt() -> No
 async def test_a_view_resuming_storage_while_writing_still_fails_is_refused_as_halted() -> None:
     session, viewer = await halted_with_a_view(stored())
     await say(viewer, "resume", ResumeStorage())
-    refused = outcome(await taken(viewer))
+    refused = outcome(await received(viewer))
     halt = (await session._snapshot()).snapshot.storage_halt
     await session.close()
 
@@ -338,7 +335,7 @@ async def test_a_view_resuming_storage_while_writing_still_fails_is_refused_as_h
 async def test_a_view_still_refuses_work_as_not_active_while_storage_is_halted() -> None:
     session, viewer = await halted_with_a_view(stored())
     await say(viewer, "run", RunTasks())
-    events = await taken(viewer)
+    events = await received(viewer)
     await session.close()
 
     assert events == [CommandRefused(command_id="run", code=NOT_ACTIVE, message=NOT_ACTIVE_MESSAGE)]
@@ -348,7 +345,7 @@ async def test_a_view_answers_history_with_the_viewed_sessions_events() -> None:
     session = workspace(stored())
     viewer = await viewing(session, "viewer")
     await say(viewer, "history", History(session=EARLIER, before_seq=2))
-    events = await taken(viewer)
+    events = await received(viewer)
     await session.close()
 
     [page] = [e for e in events if isinstance(e, HistoryPage)]
@@ -361,7 +358,7 @@ async def test_a_view_renames_the_session_it_views() -> None:
     session = workspace(store)
     viewer = await viewing(session, "viewer")
     await say(viewer, "rename", RenameSession(session_id=EARLIER, name="older work"))
-    events = await taken(viewer)
+    events = await received(viewer)
     await session.close()
 
     assert outcome(events) == CommandAccepted(command_id="rename")
@@ -377,9 +374,9 @@ async def test_a_view_refuses_work_naming_the_session_as_the_viewer_renamed_it()
     session = workspace(stored())
     viewer = await viewing(session, "viewer")
     await say(viewer, "rename", RenameSession(session_id=EARLIER, name="older work"))
-    await taken(viewer)
+    await received(viewer)
     await say(viewer, "run", RunTasks())
-    events = await taken(viewer)
+    events = await received(viewer)
     await session.close()
 
     assert events == [CommandRefused(command_id="run", code=NOT_ACTIVE, message=RENAMED_MESSAGE)]
@@ -388,12 +385,12 @@ async def test_a_view_refuses_work_naming_the_session_as_the_viewer_renamed_it()
 async def test_a_view_refuses_work_naming_the_session_as_another_renamed_it() -> None:
     session = workspace(stored())
     viewer = await viewing(session, "viewer")
-    other = await joined(session, "other")
+    other = await joined(session, "other", read=True)
     await say(other, "rename", RenameSession(session_id=EARLIER, name="  older work "))
-    await taken(other)
-    await taken(viewer)
+    await received(other)
+    await received(viewer)
     await say(viewer, "run", RunTasks())
-    events = await taken(viewer)
+    events = await received(viewer)
     await session.close()
 
     assert events == [CommandRefused(command_id="run", code=NOT_ACTIVE, message=RENAMED_MESSAGE)]
@@ -403,7 +400,7 @@ async def test_a_command_for_another_session_than_the_one_viewed_is_wrong_sessio
     session = workspace(stored())
     viewer = await viewing(session, "viewer")
     await say(viewer, "history", History(session=EARLIER, before_seq=2), session=OPEN)
-    events = await taken(viewer)
+    events = await received(viewer)
     await session.close()
 
     message = f"Session {OPEN!r} isn't the one viewed; this connection views {EARLIER}."
@@ -414,7 +411,7 @@ async def test_a_command_naming_the_viewed_session_is_taken() -> None:
     session = workspace(stored())
     viewer = await viewing(session, "viewer")
     await say(viewer, "history", History(session=EARLIER, before_seq=2), session=EARLIER)
-    events = await taken(viewer)
+    events = await received(viewer)
     await session.close()
 
     assert outcome(events) == CommandAccepted(command_id="history")
@@ -424,9 +421,9 @@ async def test_deleting_a_session_another_connection_views_is_refused_as_busy() 
     store = stored()
     session = workspace(store)
     await viewing(session, "viewer")
-    other = await joined(session, "other")
+    other = await joined(session, "other", read=True)
     await say(other, "delete", DeleteSession(session_id=EARLIER))
-    events = await taken(other)
+    events = await received(other)
     await session.close()
 
     message = 'Can\'t delete "old work": 1 other frontend views it.'
@@ -438,9 +435,9 @@ async def test_deleting_a_session_two_connections_view_names_them_both() -> None
     session = workspace(stored())
     await viewing(session, "first")
     await viewing(session, "second")
-    other = await joined(session, "other")
+    other = await joined(session, "other", read=True)
     await say(other, "delete", DeleteSession(session_id=EARLIER))
-    events = await taken(other)
+    events = await received(other)
     await session.close()
 
     message = 'Can\'t delete "old work": 2 other frontends view it.'
@@ -452,7 +449,7 @@ async def test_a_session_only_the_deleting_connection_views_is_deleted() -> None
     session = workspace(store)
     viewer = await viewing(session, "viewer")
     await say(viewer, "delete", DeleteSession(session_id=EARLIER))
-    events = await taken(viewer)
+    events = await received(viewer)
     await session.close()
 
     assert outcome(events) == CommandAccepted(command_id="delete")
@@ -463,9 +460,9 @@ async def test_deleting_the_viewed_session_moves_the_connection_to_the_open_one(
     session = workspace(stored())
     viewer = await viewing(session, "viewer")
     await say(viewer, "delete", DeleteSession(session_id=EARLIER))
-    deleted = await taken(viewer)
+    deleted = await received(viewer)
     await say(viewer, "add", AddTask(task=TASK))
-    added = await taken(viewer)
+    added = await received(viewer)
     await session.close()
 
     snapshot = snapshot_in(deleted)
@@ -478,10 +475,10 @@ async def test_deleting_the_viewed_session_publishes_it_left_with_no_viewers() -
     session = workspace(stored())
     viewer = await viewing(session, "viewer")
     await say(viewer, "delete", DeleteSession(session_id=EARLIER))
-    deleted = await taken(viewer)
+    deleted = await received(viewer)
     joining = connect(session)
     await say(joining, "joining", HELLO)
-    [catalog] = [e for e in await taken(joining) if isinstance(e, Catalog)]
+    [catalog] = [e for e in await received(joining) if isinstance(e, Catalog)]
     await session.close()
 
     assert states(deleted) == [(EARLIER, False, 0), (OPEN, True, 1)]
@@ -492,8 +489,8 @@ async def test_deleting_the_viewed_session_publishes_it_left_with_no_viewers() -
 async def test_a_connection_attaching_while_its_session_is_deleted_views_the_open_one() -> None:
     store = stored()
     session = workspace(store)
-    deleting = await joined(session, "deleting")
-    attaching = await joined(session, "attaching")
+    deleting = await joined(session, "deleting", read=True)
+    attaching = await joined(session, "attaching", read=True)
     release = asyncio.Event()
 
     async def held() -> None:
@@ -505,7 +502,7 @@ async def test_a_connection_attaching_while_its_session_is_deleted_views_the_ope
     await say(attaching, "attach", Attach(workspace=WORKSPACE, session=EARLIER))
     release.set()
     await delete
-    events = await taken(attaching)
+    events = await received(attaching)
     await session.close()
 
     assert store.deleted == [EARLIER]
@@ -519,8 +516,8 @@ async def attached_meanwhile(meanwhile: Command) -> tuple[SessionConnection, lis
     sessions are listed for it, and what reached it."""
     store = stored()
     session = workspace(store)
-    other = await joined(session, "other")
-    attaching = await joined(session, "attaching")
+    other = await joined(session, "other", read=True)
+    attaching = await joined(session, "attaching", read=True)
 
     async def sent() -> None:
         store.on_list = None
@@ -528,7 +525,7 @@ async def attached_meanwhile(meanwhile: Command) -> tuple[SessionConnection, lis
 
     store.on_list = sent
     await say(attaching, "attach", Attach(workspace=WORKSPACE, session=EARLIER))
-    events = await taken(attaching)
+    events = await received(attaching)
     await session.close()
     assert store.on_list is None
     return attaching, events
@@ -568,7 +565,7 @@ async def attached_while_read(meanwhile: Command) -> tuple[SessionConnection, li
     transcript is read for the view, and the snapshots that reached it."""
     store = stored()
     session = workspace(store)
-    other = await joined(session, "other")
+    other = await joined(session, "other", read=True)
     attaching = connect(session)
     await say(attaching, "attaching", HELLO)
 
@@ -578,7 +575,7 @@ async def attached_while_read(meanwhile: Command) -> tuple[SessionConnection, li
 
     store.on_recent = sent
     await say(attaching, "attach", Attach(workspace=WORKSPACE, session=EARLIER))
-    events = await taken(attaching)
+    events = await received(attaching)
     await session.close()
     assert store.on_recent is None
     return attaching, [e for e in events if isinstance(e, Snapshot)]
@@ -603,10 +600,10 @@ async def test_a_viewed_session_gone_from_the_list_is_named_by_its_id() -> None:
     store = stored()
     session = workspace(store)
     await viewing(session, "viewer")
-    other = await joined(session, "other")
+    other = await joined(session, "other", read=True)
     store.saved.clear()
     await say(other, "delete", DeleteSession(session_id=EARLIER))
-    events = await taken(other)
+    events = await received(other)
     await session.close()
 
     message = f'Can\'t delete "{EARLIER}": 1 other frontend views it.'
@@ -621,13 +618,13 @@ async def failed_change(
     viewing the open session gets meanwhile."""
     session = workspace(store)
     viewer = await viewing(session, "viewer")
-    watcher = await joined(session, "watcher")
+    watcher = await joined(session, "watcher", read=True)
     breaking()
     await say(viewer, "change", command)
-    changed = await taken(viewer)
+    changed = await received(viewer)
     await say(viewer, "run", RunTasks())
-    ran = await taken(viewer)
-    watched = await taken(watcher)
+    ran = await received(viewer)
+    watched = await received(watcher)
     await session.close()
     return changed, ran, watched
 
@@ -687,8 +684,8 @@ async def test_a_rename_that_cant_claim_the_session_leaves_the_view_naming_the_o
 async def test_attaching_to_a_session_opened_while_its_record_is_held_attaches_live() -> None:
     store = stored()
     session = workspace(store)
-    other = await joined(session, "other")
-    attaching = await joined(session, "attaching")
+    other = await joined(session, "other", read=True)
+    attaching = await joined(session, "attaching", read=True)
     release = asyncio.Event()
 
     async def held() -> None:
@@ -703,7 +700,7 @@ async def test_attaching_to_a_session_opened_while_its_record_is_held_attaches_l
     await say(other, "activate", ActivateSession(session=EARLIER))
     release.set()
     await attach
-    events = await taken(attaching)
+    events = await received(attaching)
     await session.close()
 
     assert answer(events) == CommandAccepted(command_id="attach")
@@ -736,13 +733,13 @@ async def attach_held(
 async def test_a_session_opened_while_its_view_is_held_leaves_the_viewer_live() -> None:
     store = stored()
     session = workspace(store)
-    other = await joined(session, "other")
-    attaching = await joined(session, "attaching")
+    other = await joined(session, "other", read=True)
+    attaching = await joined(session, "attaching", read=True)
     attach, release = await attach_held(store, attaching)
     await say(other, "activate", ActivateSession(session=EARLIER))
     release.set()
     await attach
-    snapshots = [e for e in await taken(attaching) if isinstance(e, Snapshot)]
+    snapshots = [e for e in await received(attaching) if isinstance(e, Snapshot)]
     await session.close()
 
     assert attaching.viewing is None
@@ -754,12 +751,12 @@ async def test_viewing_another_session_while_a_view_is_held_ends_on_the_other() 
     store = stored()
     store.saved.append(SessionRecord(id=LATER, name="new work", created=WHEN, last_active=WHEN))
     session = workspace(store)
-    attaching = await joined(session, "attaching")
+    attaching = await joined(session, "attaching", read=True)
     attach, release = await attach_held(store, attaching)
     await say(attaching, "later", Attach(workspace=WORKSPACE, session=LATER))
     release.set()
     await attach
-    snapshots = [e for e in await taken(attaching) if isinstance(e, Snapshot)]
+    snapshots = [e for e in await received(attaching) if isinstance(e, Snapshot)]
     await session.close()
 
     assert attaching.viewing == SessionRef(id=LATER, name="new work")

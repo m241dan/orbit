@@ -53,6 +53,7 @@ from tests.agent_fakes import (
     statuses,
     verified,
 )
+from tests.connection_helpers import quiet
 
 LIMIT = "You've hit your session limit · resets 6pm (UTC)"
 
@@ -88,17 +89,6 @@ def limited(
     session, _, launcher = session_for(errs, *scripts, pause=waits.pause, store=store, usage=usage)
     launcher.turn_errors.append(LIMIT)
     return session, launcher
-
-
-async def drained(session: WorkspaceHost) -> list[Event]:
-    """The session's events until none comes for a moment."""
-    events: list[Event] = []
-    stream = payloads(session)
-    try:
-        while True:
-            events.append(await asyncio.wait_for(anext(stream), 0.05))
-    except TimeoutError:
-        return events
 
 
 def notes(events: list[Event]) -> list[str]:
@@ -146,7 +136,7 @@ async def test_stopping_a_waiting_run_cancels_its_restart() -> None:
     await asyncio.wait_for(run(session), 5)
     await send(session, CancelTurn())
     waits.release.set()
-    events = await drained(session)
+    events = await quiet(payloads(session))
     await session.close()
 
     assert WAIT_CANCELLED_NOTE in notes(events)
@@ -161,7 +151,7 @@ async def test_running_while_waiting_starts_at_once_and_drops_the_wait() -> None
     await send(session, RunTasks())
     events = await asyncio.wait_for(events_until(session, idle()), 5)
     waits.release.set()
-    events += await drained(session)
+    events += await quiet(payloads(session))
     await session.close()
 
     assert statuses(events) == ["completed"]
@@ -174,7 +164,7 @@ async def test_a_reviews_wake_while_waiting_starts_nothing_early() -> None:
     session, launcher = limited(claims_done, waits=waits)
     await asyncio.wait_for(run(session), 5)
     await session._turns.wake()
-    events = await drained(session)
+    events = await quiet(payloads(session))
     await session.close()
 
     assert len(launcher.launches) == 1
@@ -187,7 +177,7 @@ async def test_a_wait_ending_with_no_work_left_starts_nothing_and_says_nothing()
     await asyncio.wait_for(run(session), 5)
     await send(session, RemoveTask(task_id="1"))
     waits.release.set()
-    events = await drained(session)
+    events = await quiet(payloads(session))
     await session.close()
 
     assert len(launcher.launches) == 1
@@ -201,7 +191,7 @@ async def test_switching_sessions_drops_the_wait() -> None:
     await asyncio.wait_for(run(session), 5)
     await send(session, NewSession(name="other"))
     waits.release.set()
-    events = await drained(session)
+    events = await quiet(payloads(session))
     await session.close()
 
     assert len(launcher.launches) == 1
@@ -250,7 +240,7 @@ async def halt(session: WorkspaceHost, store: FakeStore) -> list[Event]:
     """Halt the session with a failing append to ``store``, and its events until it settles."""
     store.append_failure = "disk full"
     await publish(session, Notice(message="n"))
-    return await drained(session)
+    return await quiet(payloads(session))
 
 
 async def resume(session: WorkspaceHost, store: FakeStore) -> list[Event]:
@@ -258,7 +248,7 @@ async def resume(session: WorkspaceHost, store: FakeStore) -> list[Event]:
     settles."""
     store.append_failure = None
     await send(session, ResumeStorage())
-    return await drained(session)
+    return await quiet(payloads(session))
 
 
 async def test_a_wait_kept_through_a_halt_starts_the_run_at_the_reset() -> None:
@@ -281,7 +271,7 @@ async def test_a_wait_ending_while_halted_starts_the_run_once_the_halt_lifts() -
     await asyncio.wait_for(run(session), 5)
     await halt(session, store)
     waits.release.set()
-    halted = await drained(session)
+    halted = await quiet(payloads(session))
     assert RESUMING_NOTE not in notes(halted)
     assert len(launcher.launches) == 1
 
@@ -301,7 +291,7 @@ async def test_a_wait_ending_while_halted_starts_nothing_and_says_nothing() -> N
     await asyncio.wait_for(run(session), 5)
     await halt(session, store)
     waits.release.set()
-    events = await drained(session)
+    events = await quiet(payloads(session))
 
     assert session.storage_halted
     assert not session._turns.running
@@ -327,7 +317,7 @@ async def test_a_wait_ended_while_halted_starts_nothing_while_a_resume_halts_aga
     await asyncio.wait_for(run(session), 5)
     await halt(session, store)
     waits.release.set()
-    await drained(session)
+    await quiet(payloads(session))
     fails_as_lifted(session)
     events = await resume(session, store)
 
@@ -345,7 +335,7 @@ async def test_stopping_a_wait_kept_through_a_halt_cancels_its_restart() -> None
     await resume(session, store)
     await send(session, CancelTurn())
     waits.release.set()
-    events = await drained(session)
+    events = await quiet(payloads(session))
     await session.close()
 
     assert WAIT_CANCELLED_NOTE in notes(events)

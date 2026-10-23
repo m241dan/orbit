@@ -23,7 +23,6 @@ from orbit.protocol import (
     CommandEnvelope,
     CommandRefused,
     ErrorOccurred,
-    Event,
     Hello,
     Notice,
     RunTasks,
@@ -55,6 +54,7 @@ from tests.agent_fakes import (
     send,
     session_for,
 )
+from tests.connection_helpers import published
 
 
 async def send_as(
@@ -63,12 +63,6 @@ async def send_as(
     """Send ``command`` to ``session`` as ``command_id``, with the envelope's other ``fields``,
     greeted or not."""
     await frontend(session).send(CommandEnvelope(command_id=command_id, payload=command, **fields))
-
-
-async def published(session: WorkspaceHost, count: int) -> list[Event]:
-    """The next ``count`` events ``session`` publishes."""
-    stream = frontend(session).events()
-    return [(await asyncio.wait_for(anext(stream), 1)).payload for _ in range(count)]
 
 
 async def silent(session: WorkspaceHost) -> bool:

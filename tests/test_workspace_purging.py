@@ -3,17 +3,8 @@ its records are deleted once it's let go, unless that would lose a clone's work.
 
 from orbit.agent import ControlPlane
 from orbit.protocol import BUSY, INTERNAL, INVALID, CommandAccepted, RemoveWorkspace
-from tests.plane_fakes import (
-    FakeSource,
-    ids,
-    joined,
-    payloads,
-    refused,
-    say,
-    taken,
-    welcomed,
-    workspace,
-)
+from tests.connection_helpers import joined, say, taken
+from tests.plane_fakes import FakeSource, ids, payloads, refused, welcomed, workspace
 
 PURGE = RemoveWorkspace(workspace="c", purge=True)
 
@@ -81,7 +72,7 @@ async def test_a_busy_workspace_is_refused_before_its_losses_are_counted() -> No
     source = FakeSource()
     source.losses_fail = "Never asked."
     plane = ControlPlane([host], workspaces=source)
-    await joined(plane, host)
+    await joined(plane, host=host)
     connection = await welcomed(plane)
 
     await say(connection, "purge", PURGE)

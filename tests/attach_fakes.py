@@ -1,6 +1,5 @@
 """Fakes for connections that attach to a workspace host's sessions."""
 
-import asyncio
 from datetime import UTC, datetime
 
 from orbit.agent import WorkspaceHost
@@ -9,9 +8,7 @@ from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
     AssistantMessage,
     Attach,
-    Command,
     CommandAccepted,
-    CommandEnvelope,
     CommandRefused,
     Event,
     EventEnvelope,
@@ -20,7 +17,8 @@ from orbit.protocol import (
     TaskSpec,
     TaskState,
 )
-from tests.agent_fakes import HELLO, WORKSPACE, FakeStore, Ticks, attach_to, connect
+from tests.agent_fakes import WORKSPACE, FakeStore, Ticks
+from tests.connection_helpers import joined, received, say
 
 OPEN = "today-id"
 """The id of the workspace's open session."""
@@ -62,45 +60,12 @@ def workspace(store: FakeStore) -> WorkspaceHost:
     return WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: OPEN, name="today")
 
 
-async def say(
-    connection: SessionConnection, command_id: str, command: Command, session: str | None = None
-) -> None:
-    envelope = CommandEnvelope(command_id=command_id, payload=command, session=session)
-    await connection.send(envelope)
-
-
-async def envelopes(connection: SessionConnection) -> list[EventEnvelope]:
-    """What reached ``connection`` until nothing more comes for a moment."""
-    taken: list[EventEnvelope] = []
-    stream = connection.events()
-    try:
-        while True:
-            taken.append(await asyncio.wait_for(anext(stream), 0.05))
-    except TimeoutError:
-        return taken
-
-
-async def taken(connection: SessionConnection) -> list[Event]:
-    """The events that reached ``connection`` until nothing more comes for a moment."""
-    return [envelope.payload for envelope in await envelopes(connection)]
-
-
-async def joined(session: WorkspaceHost, name: str) -> SessionConnection:
-    """A new connection to ``session`` that has said Hello as ``name`` and attached to the open
-    session, and read what that brought."""
-    connection = connect(session)
-    await say(connection, name, HELLO)
-    await say(connection, f"{name}-attach", attach_to(session))
-    await taken(connection)
-    return connection
-
-
 async def viewing(session: WorkspaceHost, name: str) -> SessionConnection:
     """A connection to ``session`` that has attached to ``earlier``, and read what that
     brought."""
-    connection = await joined(session, name)
+    connection = await joined(session, name, read=True)
     await say(connection, "attach", Attach(workspace=WORKSPACE, session=EARLIER))
-    await taken(connection)
+    await received(connection)
     return connection
 
 

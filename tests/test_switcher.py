@@ -33,6 +33,7 @@ from orbit.protocol import (
     WorkspaceEntry,
 )
 from tests.agent_fakes import FakeHalt, FakeStore, Ticks
+from tests.connection_helpers import emptied
 
 EARLIER = datetime(2026, 10, 15, 9, 0, tzinfo=UTC)
 REVIEWS = LaneSnapshot(planner=PlannerSnapshot(paused=True))
@@ -108,13 +109,6 @@ def switcher_for(
     return SessionSwitcher(parts, held.owned, events, picking), events, tasks
 
 
-def drained(events: "asyncio.Queue[Event]") -> list[Event]:
-    taken: list[Event] = []
-    while not events.empty():
-        taken.append(events.get_nowait())
-    return taken
-
-
 def saved(**fields: object) -> SessionRecord:
     record = SessionRecord(id="auth", name="auth", created=EARLIER, last_active=EARLIER)
     return record.model_copy(update=fields)
@@ -127,14 +121,14 @@ async def test_switching_is_refused_while_tasks_run() -> None:
     with pytest.raises(Refused) as refused:
         await switcher.handle(NewSession(name="other"))
     assert (refused.value.code, str(refused.value)) == (BUSY, TASKS_RUNNING)
-    assert drained(events) == []
+    assert emptied(events) == []
 
 
 async def test_activating_the_open_session_does_nothing() -> None:
     held = Held(Settings())
     switcher, events, _ = switcher_for(FakeStore(), held)
     await switcher.handle(ActivateSession(session="session-1"))
-    assert drained(events) == []
+    assert emptied(events) == []
     assert held.switches == []
 
 
@@ -167,7 +161,7 @@ async def test_a_switch_publishes_only_a_catalog_then_a_snapshot() -> None:
     held = Held(Settings())
     switcher, events, _ = switcher_for(FakeStore(), held)
     await switcher.handle(NewSession(name="other"))
-    kinds = [type(e) for e in drained(events)]
+    kinds = [type(e) for e in emptied(events)]
     assert kinds == [Catalog, Snapshot]
     assert held.snapshots == [None]
 
@@ -196,7 +190,7 @@ async def test_an_accepted_rename_publishes_a_catalog() -> None:
     held = Held(Settings())
     switcher, events, _ = switcher_for(FakeStore(), held)
     await switcher.handle(RenameSession(session_id="session-1", name="auth"))
-    assert [type(e) for e in drained(events)] == [Catalog]
+    assert [type(e) for e in emptied(events)] == [Catalog]
     assert [s.name for s in held.catalogs[0]] == ["auth"]
 
 
@@ -206,7 +200,7 @@ async def test_an_accepted_delete_publishes_a_catalog_without_the_session() -> N
     held = Held(Settings())
     switcher, events, _ = switcher_for(store, held)
     await switcher.handle(DeleteSession(session_id="auth"))
-    assert [type(e) for e in drained(events)] == [Catalog]
+    assert [type(e) for e in emptied(events)] == [Catalog]
     assert [s.id for s in held.catalogs[0]] == ["session-1"]
 
 
@@ -215,7 +209,7 @@ async def test_a_refused_rename_publishes_no_catalog() -> None:
     switcher, events, _ = switcher_for(FakeStore(), held)
     with pytest.raises(Refused):
         await switcher.handle(RenameSession(session_id="session-1", name=" "))
-    assert drained(events) == []
+    assert emptied(events) == []
     assert held.catalogs == []
 
 

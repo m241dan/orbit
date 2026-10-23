@@ -11,7 +11,7 @@ from orbit.agent.application.outbox import SEQ_BLOCK
 from orbit.agent.application.seq_mark import MarkReservations
 from orbit.protocol import AddWorkspace, WorkspaceCloning
 from tests.agent_fakes import HELLO, FakeStore
-from tests.plane_fakes import say, taken
+from tests.connection_helpers import say, taken
 
 
 async def greeted(plane: ControlPlane) -> list[int]:

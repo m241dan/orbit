@@ -46,7 +46,6 @@ from tests.agent_fakes import (
     Steps,
     events_until,
     fetch_usage_unseen,
-    frontend,
     greet,
     of_type,
     put_on_board,
@@ -55,6 +54,7 @@ from tests.agent_fakes import (
     snapshot_of,
     verified,
 )
+from tests.connection_helpers import published
 from tests.proposal_fakes import CONFIGURE, LINT, proposes
 
 
@@ -68,8 +68,7 @@ TASKS = (TaskSpec(prompt="Add a flag."), TaskSpec(prompt="Document it."))
 async def opening(session: WorkspaceHost, count: int) -> list[Event]:
     """The first ``count`` events once ``session`` is greeted, its Welcome first."""
     await greet(session)
-    stream = frontend(session).events()
-    return [(await asyncio.wait_for(anext(stream), 1)).payload for _ in range(count)]
+    return await published(session, count)
 
 
 async def test_welcome_is_followed_by_a_snapshot_of_the_open_session() -> None:

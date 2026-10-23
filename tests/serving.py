@@ -10,7 +10,8 @@ from orbit.agent.application.connection import SessionConnection
 from orbit.cli.backend import _Backend
 from orbit.cli.served import _workspaces
 from orbit.protocol import Event
-from tests.plane_fakes import payloads, taken
+from tests.connection_helpers import taken
+from tests.plane_fakes import payloads
 
 FLAGS = _Backend(None, None, False, False, False, False, new=False, name=None)
 

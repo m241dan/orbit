@@ -19,8 +19,9 @@ from orbit.protocol import (
     ErrorOccurred,
     WorkspaceCloning,
 )
+from tests.connection_helpers import say, taken
 from tests.git_repo import bare_repository, init_repo, started
-from tests.plane_fakes import payloads, refused, say, taken, welcomed
+from tests.plane_fakes import payloads, refused, welcomed
 from tests.process_checks import gone
 from tests.serving import serving, until
 

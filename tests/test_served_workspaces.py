@@ -28,7 +28,8 @@ from orbit.protocol import (
     WorkspaceEntry,
 )
 from tests.agent_fakes import HELLO, STEP, FakeLock, Steps, board_of
-from tests.plane_fakes import TASK, idle, joined, payloads, say, taken, working, workspace
+from tests.connection_helpers import joined, say, taken
+from tests.plane_fakes import TASK, idle, payloads, working, workspace
 
 
 async def test_the_catalog_lists_every_workspace_served_each_read_only_if_it_is() -> None:
@@ -47,7 +48,7 @@ async def test_the_catalog_lists_every_workspace_served_each_read_only_if_it_is(
 async def test_a_connection_gets_the_events_of_its_own_workspace_alone() -> None:
     first, second = workspace("a"), workspace("b")
     plane = ControlPlane([first, second])
-    in_a, in_b = await joined(plane, first), await joined(plane, second)
+    in_a, in_b = await joined(plane, host=first), await joined(plane, host=second)
     taken(in_a), taken(in_b)
 
     await say(in_b, "add", AddTask(task=TASK))
@@ -62,7 +63,7 @@ async def test_a_connection_gets_the_events_of_its_own_workspace_alone() -> None
 async def test_a_command_goes_to_the_workspace_its_connection_is_attached_to() -> None:
     first, second = workspace("a"), workspace("b")
     plane = ControlPlane([first, second])
-    in_b = await joined(plane, second)
+    in_b = await joined(plane, host=second)
 
     await say(in_b, "add", AddTask(task=TASK))
     await plane.close()
@@ -74,7 +75,7 @@ async def test_a_command_goes_to_the_workspace_its_connection_is_attached_to() -
 async def test_attaching_to_another_workspace_moves_the_connection_there_greeting_it() -> None:
     first, second = workspace("a"), workspace("b")
     plane = ControlPlane([first, second])
-    in_a = await joined(plane, first)
+    in_a = await joined(plane, host=first)
     taken(in_a)
 
     await say(in_a, "attach", Attach(workspace="b", session="b-1"))
@@ -90,13 +91,13 @@ async def test_attaching_to_another_workspace_moves_the_connection_there_greetin
 async def test_a_connection_moved_gets_its_new_workspaces_events_alone() -> None:
     first, second = workspace("a"), workspace("b")
     plane = ControlPlane([first, second])
-    moving, staying = await joined(plane, first), await joined(plane, first)
+    moving, staying = await joined(plane, host=first), await joined(plane, host=first)
     await say(moving, "attach", Attach(workspace="b", session="b-1"))
     taken(moving)
 
     await say(staying, "add-a", AddTask(task=TASK))
     seen_from_a = taken(moving)
-    in_b = await joined(plane, second)
+    in_b = await joined(plane, host=second)
     await say(in_b, "add-b", AddTask(task=TASK))
     seen_from_b = taken(moving)
     await plane.close()
@@ -109,7 +110,7 @@ async def test_a_connection_moved_gets_its_new_workspaces_events_alone() -> None
 async def test_moving_to_another_workspace_drops_the_old_sessions_viewers() -> None:
     first, second = workspace("a"), workspace("b")
     plane = ControlPlane([first, second])
-    moving, staying = await joined(plane, first), await joined(plane, first)
+    moving, staying = await joined(plane, host=first), await joined(plane, host=first)
     taken(staying)
 
     await say(moving, "attach", Attach(workspace="b", session="b-1"))
@@ -123,7 +124,7 @@ async def test_moving_to_another_workspace_drops_the_old_sessions_viewers() -> N
 async def test_a_refused_move_leaves_the_connection_attached_to_none() -> None:
     first, second = workspace("a"), workspace("b")
     plane = ControlPlane([first, second])
-    in_a = await joined(plane, first)
+    in_a = await joined(plane, host=first)
     taken(in_a)
 
     await say(in_a, "attach", Attach(workspace="b", session="b-9"))
@@ -144,7 +145,7 @@ async def test_a_refused_move_leaves_the_connection_attached_to_none() -> None:
 async def test_another_command_for_another_workspace_is_refused_naming_both() -> None:
     first, second = workspace("a"), workspace("b")
     plane = ControlPlane([first, second])
-    in_a = await joined(plane, first)
+    in_a = await joined(plane, host=first)
     taken(in_a)
 
     envelope = CommandEnvelope(command_id="add", workspace="b", payload=AddTask(task=TASK))
@@ -163,7 +164,7 @@ async def test_another_command_for_another_workspace_is_refused_naming_both() ->
 async def test_a_change_to_one_workspaces_sessions_sends_everyone_the_whole_catalog() -> None:
     first, second = workspace("a"), workspace("b")
     plane = ControlPlane([first, second])
-    in_a, in_b = await joined(plane, first), await joined(plane, second)
+    in_a, in_b = await joined(plane, host=first), await joined(plane, host=second)
     taken(in_a), taken(in_b)
 
     await say(in_a, "rename", RenameSession(session_id="a-1", name="Renamed"))
@@ -192,7 +193,7 @@ async def test_taking_over_a_workspace_sends_everyone_a_catalog_saying_so() -> N
     lock = FakeLock(free=True)
     first, second = workspace("a"), workspace("b", owner=WorkspaceOwner(pid=1), lock=lock)
     plane = ControlPlane([first, second])
-    in_a, in_b = await joined(plane, first), await joined(plane, second)
+    in_a, in_b = await joined(plane, host=first), await joined(plane, host=second)
     await asyncio.wait_for(offered(in_b), 5)
     taken(in_a), taken(in_b)
 
@@ -207,7 +208,7 @@ async def test_declining_a_workspace_sends_no_catalog() -> None:
     lock = FakeLock(free=True)
     first, second = workspace("a"), workspace("b", owner=WorkspaceOwner(pid=1), lock=lock)
     plane = ControlPlane([first, second])
-    in_a, in_b = await joined(plane, first), await joined(plane, second)
+    in_a, in_b = await joined(plane, host=first), await joined(plane, host=second)
     await asyncio.wait_for(offered(in_b), 5)
     taken(in_a)
 
@@ -221,7 +222,7 @@ async def test_declining_a_workspace_sends_no_catalog() -> None:
 async def test_every_workspaces_events_share_one_count_of_seqs() -> None:
     first, second = workspace("a"), workspace("b")
     plane = ControlPlane([first, second])
-    in_a, in_b = await joined(plane, first), await joined(plane, second)
+    in_a, in_b = await joined(plane, host=first), await joined(plane, host=second)
     await say(in_a, "add", AddTask(task=TASK))
     await say(in_b, "add", AddTask(task=TASK))
     seqs = [envelope.seq for envelope in taken(in_a) + taken(in_b)]
@@ -275,7 +276,7 @@ async def test_a_task_runs_in_each_workspace_at_once() -> None:
     started: list[str] = []
     first, second = working("a", gate, started), working("b", gate, started)
     plane = ControlPlane([first, second])
-    in_a, in_b = await joined(plane, first), await joined(plane, second)
+    in_a, in_b = await joined(plane, host=first), await joined(plane, host=second)
     for connection in (in_a, in_b):
         await say(connection, "add", AddTask(task=TASK))
         await say(connection, "run", RunTasks())

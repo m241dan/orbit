@@ -2,10 +2,8 @@
 it's running, and how many connections view it."""
 
 import asyncio
-from collections.abc import Callable
 
 from orbit.agent import WorkspaceHost
-from orbit.agent.application.connection import SessionConnection
 from orbit.protocol import (
     PLANNER,
     SUPER_REVIEW,
@@ -13,13 +11,10 @@ from orbit.protocol import (
     Activity,
     AddTask,
     Catalog,
-    Command,
-    CommandEnvelope,
     Event,
     FireTrigger,
     RunTasks,
     SendMessage,
-    Session,
     SessionState,
     SessionStateChanged,
     SessionSummary,
@@ -29,22 +24,20 @@ from orbit.protocol import (
     TurnEndReason,
 )
 from tests.agent_fakes import (
-    HELLO,
     Call,
     FakeStore,
     FakeTree,
     Steps,
     Ticks,
-    attach_to,
     checked,
     claims_done,
-    connect,
     frontend,
     gated_planner,
     greet,
     send,
     session_for,
 )
+from tests.connection_helpers import joined, received, say, until
 from tests.session_builders import saved
 
 OPEN = "session-1"
@@ -90,44 +83,10 @@ def changed(event: Event) -> bool:
     return isinstance(event, SessionStateChanged)
 
 
-async def until(session: WorkspaceHost, done: Callable[[Event], bool]) -> list[Event]:
-    """The events reaching ``session``'s frontend up to and including the first that's
-    ``done``."""
-    stream = frontend(session).events()
-    events = [(await anext(stream)).payload]
-    while not done(events[-1]):
-        events.append((await anext(stream)).payload)
-    return events
-
-
 async def greeted_and_counted(session: WorkspaceHost) -> list[Event]:
     """Greet ``session`` and return its events up to the change counting its frontend."""
     await greet(session)
     return await asyncio.wait_for(until(session, changed), 5)
-
-
-async def say(connection: SessionConnection, command_id: str, command: Command) -> None:
-    await connection.send(CommandEnvelope(command_id=command_id, payload=command))
-
-
-async def taken(connection: Session) -> list[Event]:
-    """What reached ``connection`` until nothing more comes for a moment."""
-    events: list[Event] = []
-    stream = connection.events()
-    try:
-        while True:
-            events.append((await asyncio.wait_for(anext(stream), 0.05)).payload)
-    except TimeoutError:
-        return events
-
-
-async def joined(session: WorkspaceHost, name: str) -> SessionConnection:
-    """A new connection to ``session`` that has said Hello as ``name`` and attached to the open
-    session."""
-    connection = connect(session)
-    await say(connection, name, HELLO)
-    await say(connection, f"{name}-attach", attach_to(session))
-    return connection
 
 
 def open_entry(events: list[Event]) -> tuple[SessionSummary, ...]:
@@ -191,7 +150,7 @@ async def test_a_review_keeps_the_open_session_running_its_review_until_it_ends(
     await send(session, RunTasks())
     started = await asyncio.wait_for(until(session, running_now), 5)
     await asyncio.wait_for(reviewing.wait(), 5)
-    during = await taken(frontend(session))
+    during = await received(frontend(session))
     gate.set()
     ended = await asyncio.wait_for(until(session, idle_again), 5)
     await session.close()
@@ -250,7 +209,7 @@ async def test_the_startup_check_is_reported_but_leaves_the_open_session_idle() 
     steps.gate = asyncio.Event()
     session, _, _ = session_for(verification=checked(steps), check_at_startup=True)
     await greet(session)
-    during = await taken(frontend(session))
+    during = await received(frontend(session))
     steps.gate.set()
     ended = await asyncio.wait_for(until(session, changed), 5)
     await session.close()
@@ -262,12 +221,12 @@ async def test_the_startup_check_is_reported_but_leaves_the_open_session_idle() 
 async def test_a_second_hello_and_its_closing_change_the_viewers_for_every_connection() -> None:
     session = WorkspaceHost(new_id=lambda: OPEN)
     first = await joined(session, "first")
-    await taken(first)
+    await received(first)
 
     second = await joined(session, "second")
-    joining = await taken(first)
+    joining = await received(first)
     await second.close()
-    leaving = await taken(first)
+    leaving = await received(first)
     await session.close()
 
     assert (changes(joining), changes(leaving)) == ([state(viewers=2)], [state(viewers=1)])
@@ -281,7 +240,7 @@ async def test_a_joining_connections_catalog_has_the_open_sessions_state_but_not
     await asyncio.wait_for(until(session, running_now), 5)
 
     second = await joined(session, "second")
-    [summary] = open_entry(await taken(second))
+    [summary] = open_entry(await received(second))
     gate.set()
     await session.close()
 
@@ -299,7 +258,7 @@ async def test_the_catalog_shows_other_sessions_inactive_idle_and_unviewed() -> 
     store.saved.append(saved("earlier"))
     session = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: OPEN)
     connection = await joined(session, "first")
-    sessions = open_entry(await taken(connection))
+    sessions = open_entry(await received(connection))
     await session.close()
 
     states = {s.id: (s.active, s.state, s.viewers) for s in sessions}
@@ -311,10 +270,10 @@ async def test_opening_another_session_publishes_both_sessions_states() -> None:
     store.saved.append(saved("earlier"))
     session = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: OPEN)
     connection = await joined(session, "first")
-    await taken(connection)
+    await received(connection)
 
     await say(connection, "open", ActivateSession(session="earlier"))
-    events = await taken(connection)
+    events = await received(connection)
     await session.close()
 
     assert changes(events) == [

@@ -33,7 +33,6 @@ from orbit.protocol import (
     WorkspaceUsage,
 )
 from tests.agent_fakes import (
-    HELLO,
     ROLES,
     FakeHost,
     FakeLedger,
@@ -42,7 +41,8 @@ from tests.agent_fakes import (
     claims_done,
     settled,
 )
-from tests.plane_fakes import idle, joined, payloads, say, taken
+from tests.connection_helpers import joined, say, taken
+from tests.plane_fakes import idle, payloads, welcomed
 
 NOW = datetime(2026, 10, 22, 15, 0, tzinfo=UTC)
 """The time the control plane's clock tells."""
@@ -105,14 +105,6 @@ def plane_of(*hosts: WorkspaceHost, ledger: FakeLedger | None = None) -> Control
     return ControlPlane(hosts, ledger=ledger, clock=lambda: NOW)
 
 
-async def welcomed(plane: ControlPlane) -> SessionConnection:
-    """A new connection to ``plane`` that has said Hello and attached to no workspace."""
-    connection = plane.connect()
-    await say(connection, "hello", HELLO)
-    taken(connection)
-    return connection
-
-
 async def run_task(connection: SessionConnection) -> None:
     """Have ``connection``'s workspace run a task to its end."""
     await say(connection, "add", AddTask(task=TaskSpec(prompt="Add a flag.")))
@@ -147,7 +139,7 @@ async def test_watching_tells_the_agents_running_and_the_totals_at_once() -> Non
 async def test_the_streams_events_belong_to_no_workspace_and_no_session() -> None:
     a = workspace("a")
     plane = plane_of(a)
-    connection = await joined(plane, a)
+    connection = await joined(plane, host=a)
     taken(connection)
 
     await say(connection, "watch", WATCH)
@@ -160,7 +152,11 @@ async def test_the_streams_events_belong_to_no_workspace_and_no_session() -> Non
 async def test_a_coder_starting_in_another_workspace_is_told_to_watchers_alone() -> None:
     a, b = workspace("a"), workspace("b")
     plane = plane_of(a, b)
-    watcher, other, in_b = await welcomed(plane), await joined(plane, a), await joined(plane, b)
+    watcher, other, in_b = (
+        await welcomed(plane),
+        await joined(plane, host=a),
+        await joined(plane, host=b),
+    )
     await say(watcher, "watch", WATCH)
     taken(watcher)
     taken(other)
@@ -179,7 +175,7 @@ async def test_a_coder_starting_in_another_workspace_is_told_to_watchers_alone()
 async def test_an_attached_watcher_is_told_the_agents_of_another_workspace() -> None:
     a, b = workspace("a"), workspace("b")
     plane = plane_of(a, b)
-    watcher, in_b = await joined(plane, a), await joined(plane, b)
+    watcher, in_b = await joined(plane, host=a), await joined(plane, host=b)
     await say(watcher, "watch", WATCH)
     taken(watcher)
 
@@ -192,7 +188,7 @@ async def test_an_attached_watcher_is_told_the_agents_of_another_workspace() -> 
 async def test_watchers_are_told_the_agents_already_running_as_they_start_watching() -> None:
     a = workspace("a")
     plane = plane_of(a)
-    in_a = await joined(plane, a)
+    in_a = await joined(plane, host=a)
     await a._events.put(AgentStarted(agent_id="agent-7", role="planner", task_id="plan"))
     watcher = await welcomed(plane)
 
@@ -223,7 +219,11 @@ async def test_a_finished_turn_tells_watchers_the_totals_with_it_counted() -> No
     ledger = TotalingLedger()
     a, b = workspace("a", ledger, TURN), workspace("b", ledger)
     plane = plane_of(a, b, ledger=ledger)
-    watcher, other, in_a = await welcomed(plane), await joined(plane, b), await joined(plane, a)
+    watcher, other, in_a = (
+        await welcomed(plane),
+        await joined(plane, host=b),
+        await joined(plane, host=a),
+    )
     await say(watcher, "watch", WATCH)
     taken(watcher)
     taken(other)
@@ -247,7 +247,7 @@ async def test_totals_are_not_read_while_no_one_watches() -> None:
     a = workspace("a", ledger, TURN)
     plane = plane_of(a, ledger=ledger)
 
-    await run_task(await joined(plane, a))
+    await run_task(await joined(plane, host=a))
 
     assert len(ledger.rows) == 1
     assert ledger.asked == []
@@ -304,7 +304,7 @@ async def test_watching_nothing_stops_the_stream() -> None:
     ledger = TotalingLedger()
     a = workspace("a", ledger, TURN)
     plane = plane_of(a, ledger=ledger)
-    watcher, in_a = await welcomed(plane), await joined(plane, a)
+    watcher, in_a = await welcomed(plane), await joined(plane, host=a)
     await say(watcher, "watch", WATCH)
     await say(watcher, "unwatch", Watch(streams=()))
     taken(watcher)

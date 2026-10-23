@@ -1,7 +1,6 @@
 """The startup check: the verification steps run once in the background on the base commit."""
 
 import asyncio
-from collections.abc import AsyncIterator
 
 import pytest
 
@@ -45,6 +44,7 @@ from tests.agent_fakes import (
     send,
     session_for,
 )
+from tests.connection_helpers import quiet
 
 SNAPSHOT = "/work/review-HEAD"
 
@@ -60,17 +60,6 @@ def titled(*statuses: str) -> VerificationChanged:
 async def until_checked(session: WorkspaceHost) -> list[Event]:
     """The events until the startup check's agent exits."""
     return await events_until(session, agent_exited("startup-check"))
-
-
-async def quiet(session: WorkspaceHost) -> list[Event]:
-    """The events published as the events start, and for a moment after."""
-    events: list[Event] = []
-    stream: AsyncIterator[Event] = payloads(session)
-    try:
-        while True:
-            events.append(await asyncio.wait_for(anext(stream), 0.05))
-    except TimeoutError:
-        return events
 
 
 async def test_the_steps_run_in_a_set_up_snapshot_of_the_base_and_pass() -> None:
@@ -165,7 +154,7 @@ async def test_it_is_skipped_without_verification_or_steps_or_when_not_asked() -
         WorkspaceHost(verification=checked(Steps())),
     ]
     for session in sessions:
-        events = await quiet(session)
+        events = await quiet(payloads(session))
         assert not [e for e in events if isinstance(e, AgentStarted | StartupChecked)]
         await session.close()
 

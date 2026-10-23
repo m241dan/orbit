@@ -34,16 +34,14 @@ from orbit.protocol import (
     Snapshot,
 )
 from tests.agent_fakes import HELLO, STEP, FakeStore, Steps
+from tests.connection_helpers import joined, say, taken
 from tests.plane_fakes import (
     TASK,
     FakeSource,
     idle,
     ids,
-    joined,
     payloads,
     refused,
-    say,
-    taken,
     welcomed,
     working,
     workspace,
@@ -256,7 +254,7 @@ async def test_removing_an_idle_workspace_closes_it_and_leaves_the_others() -> N
     first, second = workspace("a"), workspace("c")
     source = FakeSource()
     plane = ControlPlane([first, second], workspaces=source)
-    in_a = await joined(plane, first)
+    in_a = await joined(plane, host=first)
     connection = await welcomed(plane)
     taken(in_a)
 
@@ -277,7 +275,7 @@ async def test_a_workspace_whose_flag_cant_be_cleared_stays_served_and_is_refuse
     source = FakeSource()
     source.unflag_fails = "The store failed."
     plane = ControlPlane([host], workspaces=source)
-    in_c = await joined(plane, host)
+    in_c = await joined(plane, host=host)
     taken(in_c)
 
     await say(in_c, "remove", RemoveWorkspace(workspace="c"))
@@ -300,7 +298,7 @@ async def test_a_workspace_viewed_as_its_flag_is_cleared_is_flagged_again_and_re
     connection = await welcomed(plane)
     removing = asyncio.create_task(say(connection, "remove", RemoveWorkspace(workspace="c")))
     await asyncio.sleep(0.01)
-    viewer = asyncio.create_task(joined(plane, host))
+    viewer = asyncio.create_task(joined(plane, host=host))
     await asyncio.sleep(0.01)
 
     source.flag_gate.set()
@@ -332,7 +330,7 @@ async def test_removing_a_workspace_running_a_task_is_refused_as_busy() -> None:
     started: list[str] = []
     host = working("c", gate, started)
     plane = ControlPlane([host], workspaces=FakeSource())
-    in_c = await joined(plane, host)
+    in_c = await joined(plane, host=host)
     await say(in_c, "add", AddTask(task=TASK))
     await say(in_c, "run", RunTasks())
 
@@ -354,7 +352,7 @@ async def test_removing_a_workspace_running_a_task_is_refused_as_busy() -> None:
 async def test_removing_a_workspace_another_frontend_views_is_refused_as_busy() -> None:
     host = workspace("c")
     plane = ControlPlane([host], workspaces=FakeSource())
-    await joined(plane, host)
+    await joined(plane, host=host)
     connection = await welcomed(plane)
 
     await say(connection, "remove", RemoveWorkspace(workspace="c"))
@@ -370,7 +368,7 @@ async def test_removing_a_workspace_another_frontend_views_is_refused_as_busy() 
 async def test_removing_the_workspace_attached_to_leaves_the_connection_free_to_attach() -> None:
     first, second = workspace("a"), workspace("c")
     plane = ControlPlane([first, second], workspaces=FakeSource())
-    in_c = await joined(plane, second)
+    in_c = await joined(plane, host=second)
     taken(in_c)
 
     await say(in_c, "remove", RemoveWorkspace(workspace="c"))
@@ -503,7 +501,7 @@ async def test_a_workspace_that_fails_to_close_is_still_removed_from_the_catalog
     first, second = workspace("a"), Unclosable("c")
     source = FakeSource()
     plane = ControlPlane([first, second], workspaces=source)
-    in_a = await joined(plane, first)
+    in_a = await joined(plane, host=first)
     connection = await welcomed(plane)
     taken(in_a)
 

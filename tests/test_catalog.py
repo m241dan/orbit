@@ -33,6 +33,7 @@ from tests.agent_fakes import (
     frontend,
     greet,
 )
+from tests.connection_helpers import published
 
 SECURITY = Role(instructions="Look for security holes.")
 
@@ -47,12 +48,6 @@ def session_in(
     return WorkspaceHost(
         agents=agents, workspace=workspace, store=store, clock=Ticks(), new_id=lambda: "s1"
     )
-
-
-async def published(session: WorkspaceHost, count: int) -> list[Event]:
-    """The next ``count`` events ``session`` publishes."""
-    stream = frontend(session).events()
-    return [(await asyncio.wait_for(anext(stream), 1)).payload for _ in range(count)]
 
 
 async def after(session: WorkspaceHost, command: Command, count: int) -> list[Event]:

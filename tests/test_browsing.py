@@ -18,16 +18,8 @@ from orbit.protocol import (
     Event,
     ListDirectory,
 )
-from tests.plane_fakes import (
-    FakeSource,
-    joined,
-    payloads,
-    refused,
-    say,
-    taken,
-    welcomed,
-    workspace,
-)
+from tests.connection_helpers import joined, say, taken
+from tests.plane_fakes import FakeSource, payloads, refused, welcomed, workspace
 
 
 def browsing(home: Path, root: Path | None = None) -> Browsing:
@@ -191,7 +183,7 @@ async def test_no_path_is_refused_when_the_latest_added_cant_be_found(tmp_path: 
 async def test_only_the_connection_asking_gets_the_listing(tmp_path: Path) -> None:
     host = workspace("w")
     plane = ControlPlane([host], workspaces=FakeSource(), browsing=browsing(tmp_path))
-    asking, other = await joined(plane, host), await joined(plane, host)
+    asking, other = await joined(plane, host=host), await joined(plane, host=host)
     taken(asking), taken(other)
 
     await say(asking, "list", ListDirectory(path=str(tmp_path)))

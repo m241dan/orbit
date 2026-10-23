@@ -22,9 +22,7 @@ from orbit.protocol import (
     AddTask,
     Attach,
     Catalog,
-    Command,
     CommandAccepted,
-    CommandEnvelope,
     CommandRefused,
     DeleteSession,
     ErrorOccurred,
@@ -66,45 +64,16 @@ from tests.agent_fakes import (
     served,
     session_for,
 )
-from tests.attach_fakes import EARLIER, joined, stored, workspace
+from tests.attach_fakes import EARLIER, stored, workspace
+from tests.connection_helpers import envelopes, joined, received, say
 from tests.session_builders import OPEN, store_logging
 
 TASK = TaskSpec(prompt="Add a flag.", settings=Settings(model="opus"))
 
 
-async def say(connection: SessionConnection, command_id: str, command: Command) -> None:
-    """Send ``command`` on ``connection`` as ``command_id``."""
-    await connection.send(CommandEnvelope(command_id=command_id, payload=command))
-
-
-async def welcomed(session: WorkspaceHost, name: str) -> SessionConnection:
-    """A new connection to ``session`` that has said Hello as ``name`` and attached to the open
-    session."""
-    connection = connect(session)
-    await say(connection, name, HELLO)
-    await say(connection, f"{name}-attach", attach_to(session))
-    return connection
-
-
 async def everything(connection: SessionConnection) -> list[Event]:
     """What reached ``connection``, once its stream has ended."""
     return [envelope.payload async for envelope in connection.events()]
-
-
-async def taken(connection: SessionConnection) -> list[Event]:
-    """What reached ``connection`` until nothing more comes for a moment."""
-    return [envelope.payload for envelope in await taken_envelopes(connection)]
-
-
-async def taken_envelopes(connection: SessionConnection) -> list[EventEnvelope]:
-    """The envelopes that reached ``connection`` until nothing more comes for a moment."""
-    envelopes: list[EventEnvelope] = []
-    stream = connection.events()
-    try:
-        while True:
-            envelopes.append(await asyncio.wait_for(anext(stream), 0.05))
-    except TimeoutError:
-        return envelopes
 
 
 def welcomes(events: list[Event]) -> list[Welcome]:
@@ -133,8 +102,8 @@ def welcome(command_id: str) -> Welcome:
 
 async def test_each_connection_gets_its_own_welcome_catalog_and_snapshot() -> None:
     session = WorkspaceHost()
-    first = await welcomed(session, "first")
-    second = await welcomed(session, "second")
+    first = await joined(session, "first")
+    second = await joined(session, "second")
     await session.close()
 
     one, two = await everything(first), await everything(second)
@@ -144,13 +113,13 @@ async def test_each_connection_gets_its_own_welcome_catalog_and_snapshot() -> No
 
 async def test_a_command_on_one_connection_reaches_every_welcomed_one_with_its_outcome() -> None:
     session = WorkspaceHost()
-    first = await welcomed(session, "first")
-    second = await welcomed(session, "second")
-    await taken(first), await taken(second)
+    first = await joined(session, "first")
+    second = await joined(session, "second")
+    await received(first), await received(second)
 
     await say(first, "add", AddTask(task=TASK))
 
-    for events in (await taken(first), await taken(second)):
+    for events in (await received(first), await received(second)):
         assert [type(e) for e in events] == [TasksChanged, CommandAccepted]
         assert events[-1] == CommandAccepted(command_id="add")
     await session.close()
@@ -158,26 +127,26 @@ async def test_a_command_on_one_connection_reaches_every_welcomed_one_with_its_o
 
 async def test_a_history_page_reaches_only_the_connection_that_asked() -> None:
     session = WorkspaceHost()
-    first = await welcomed(session, "first")
-    second = await welcomed(session, "second")
-    await taken(first), await taken(second)
+    first = await joined(session, "first")
+    second = await joined(session, "second")
+    await received(first), await received(second)
 
     await say(first, "page", History(session=session.saved_session.id, before_seq=100))
 
-    assert [type(e) for e in await taken(first)] == [HistoryPage, CommandAccepted]
-    assert await taken(second) == [CommandAccepted(command_id="page")]
+    assert [type(e) for e in await received(first)] == [HistoryPage, CommandAccepted]
+    assert await received(second) == [CommandAccepted(command_id="page")]
     await session.close()
 
 
 async def test_a_new_session_gives_every_connection_its_catalog_and_snapshot() -> None:
     session = WorkspaceHost()
-    first = await welcomed(session, "first")
-    second = await welcomed(session, "second")
-    await taken(first), await taken(second)
+    first = await joined(session, "first")
+    second = await joined(session, "second")
+    await received(first), await received(second)
 
     await say(first, "new", NewSession(name="Next"))
 
-    for events in (await taken(first), await taken(second)):
+    for events in (await received(first), await received(second)):
         switch = [e for e in events if isinstance(e, Catalog | Snapshot | CommandAccepted)]
         assert [type(e) for e in switch] == [Catalog, Snapshot, CommandAccepted]
         snapshot = switch[1]
@@ -194,36 +163,36 @@ def catalog_names(events: list[Event]) -> list[list[str]]:
 
 async def test_a_rename_gives_every_connection_the_updated_catalog() -> None:
     session = WorkspaceHost()
-    first = await welcomed(session, "first")
-    second = await welcomed(session, "second")
-    await taken(first), await taken(second)
+    first = await joined(session, "first")
+    second = await joined(session, "second")
+    await received(first), await received(second)
 
     await say(first, "rename", RenameSession(session_id=session.saved_session.id, name="Kept"))
 
-    for events in (await taken(first), await taken(second)):
+    for events in (await received(first), await received(second)):
         assert catalog_names(events) == [["Kept"]]
     await session.close()
 
 
 async def test_a_command_before_hello_is_refused_on_that_connection_alone() -> None:
     session = WorkspaceHost()
-    first = await welcomed(session, "first")
-    await taken(first)
+    first = await joined(session, "first")
+    await received(first)
     second = connect(session)
 
     await say(second, "early", AddTask(task=TASK))
 
     refusal = CommandRefused(command_id="early", code=INVALID, message=HELLO_FIRST_MESSAGE)
-    assert await taken(second) == [refusal]
-    assert await taken(first) == []
+    assert await received(second) == [refusal]
+    assert await received(first) == []
     await session.close()
 
 
 async def test_a_connection_that_falls_too_far_behind_is_closed_and_the_others_carry_on() -> None:
     session = WorkspaceHost()
-    stalled = await welcomed(session, "stalled")
-    reading = await welcomed(session, "reading")
-    await taken(reading)
+    stalled = await joined(session, "stalled")
+    reading = await joined(session, "reading")
+    await received(reading)
     read: list[Event] = []
 
     async def keep_reading() -> None:
@@ -248,34 +217,34 @@ async def test_a_connection_that_falls_too_far_behind_is_closed_and_the_others_c
 
 async def test_an_unreadable_command_is_refused_to_every_welcomed_connection() -> None:
     session = WorkspaceHost()
-    first = await welcomed(session, "first")
-    second = await welcomed(session, "second")
-    await taken(first), await taken(second)
+    first = await joined(session, "first")
+    second = await joined(session, "second")
+    await received(first), await received(second)
 
     await first.refuse("c1", INVALID, "Not a command")
 
     refusal = CommandRefused(command_id="c1", code=INVALID, message="Not a command")
-    assert (await taken(first), await taken(second)) == ([refusal], [refusal])
+    assert (await received(first), await received(second)) == ([refusal], [refusal])
     await session.close()
 
 
 async def test_an_unreadable_command_before_hello_is_refused_on_that_connection_alone() -> None:
     session = WorkspaceHost()
-    first = await welcomed(session, "first")
-    await taken(first)
+    first = await joined(session, "first")
+    await received(first)
     second = connect(session)
 
     await second.refuse("c1", INVALID, "Not a command")
 
     refusal = CommandRefused(command_id="c1", code=INVALID, message="Not a command")
-    assert (await taken(second), await taken(first)) == ([refusal], [])
+    assert (await received(second), await received(first)) == ([refusal], [])
     await session.close()
 
 
 async def test_an_unreadable_command_on_a_closed_connection_is_not_refused() -> None:
     session = WorkspaceHost()
-    connection = await welcomed(session, "closed")
-    await taken(connection)
+    connection = await joined(session, "closed")
+    await received(connection)
     await connection.close()
 
     await connection.refuse("c1", INVALID, "Not a command")
@@ -286,16 +255,16 @@ async def test_an_unreadable_command_on_a_closed_connection_is_not_refused() -> 
 
 async def test_closing_one_connection_leaves_the_others_working() -> None:
     session = WorkspaceHost()
-    first = await welcomed(session, "first")
-    second = await welcomed(session, "second")
-    await taken(second)
+    first = await joined(session, "first")
+    second = await joined(session, "second")
+    await received(second)
 
     await first.close()
     await say(first, "ignored", AddTask(task=TASK))
     await say(second, "add", AddTask(task=TASK))
 
     assert await everything(first) == []
-    left, *answered = await taken(second)
+    left, *answered = await received(second)
     assert isinstance(left, SessionStateChanged) and left.viewers == 1
     assert [type(e) for e in answered] == [TasksChanged, CommandAccepted]
     await session.close()
@@ -303,8 +272,8 @@ async def test_closing_one_connection_leaves_the_others_working() -> None:
 
 async def test_closing_the_session_ends_every_connections_stream() -> None:
     session = WorkspaceHost()
-    first = await welcomed(session, "first")
-    second = await welcomed(session, "second")
+    first = await joined(session, "first")
+    second = await joined(session, "second")
 
     await session.close()
 
@@ -328,8 +297,8 @@ async def test_the_startup_check_runs_once_for_the_first_connection_only() -> No
     session, _, _ = session_for(verification=checked(steps), tree=tree, check_at_startup=True)
     await events_until(session, agent_exited("startup-check"))
 
-    later = await welcomed(session, "later")
-    await taken(later)
+    later = await joined(session, "later")
+    await received(later)
 
     assert steps.runs == ["Lint", "Unit tests"]
     assert tree.snapshots == ["HEAD"]
@@ -356,15 +325,15 @@ async def test_a_second_hello_greets_only_the_connection_saying_it() -> None:
     usage = Source(UsageReport(LIMITS))
     session = WorkspaceHost(workspace="w", startup_notes=["n"])
     served(session, usage)
-    first = await welcomed(session, "first")
-    seen = await taken(first)
+    first = await joined(session, "first")
+    seen = await received(first)
     while UsageChanged(limits=LIMITS) not in seen:
-        seen += await taken(first)
+        seen += await received(first)
 
-    second = await welcomed(session, "second")
+    second = await joined(session, "second")
 
-    assert greeting(await taken(first)) == []
-    assert greeting(await taken(second)) == [
+    assert greeting(await received(first)) == []
+    assert greeting(await received(second)) == [
         UsageChanged(limits=LIMITS),
         Notice(message="Workspace: w"),
         Notice(message="n"),
@@ -374,28 +343,28 @@ async def test_a_second_hello_greets_only_the_connection_saying_it() -> None:
 
 async def test_a_second_hellos_failed_greeting_step_reaches_only_that_connection() -> None:
     session = WorkspaceHost()
-    first = await welcomed(session, "first")
-    await taken(first)
+    first = await joined(session, "first")
+    await received(first)
 
     async def no_leftovers() -> Sequence[str]:
         raise RuntimeError("no leftovers")
 
     session._greeting = replace(session._greeting, leftovers=no_leftovers)
-    second = await welcomed(session, "second")
+    second = await joined(session, "second")
 
     message = "Orbit failed to finish greeting the frontend: no leftovers"
-    assert greeting(await taken(second)) == [ErrorOccurred(code=INTERNAL, message=message)]
-    assert greeting(await taken(first)) == []
+    assert greeting(await received(second)) == [ErrorOccurred(code=INTERNAL, message=message)]
+    assert greeting(await received(first)) == []
     await session.close()
 
 
 async def test_a_greetings_notices_are_not_logged() -> None:
     session = WorkspaceHost(store=FakeStore(), workspace="w", startup_notes=["n"])
-    first = await welcomed(session, "first")
-    second = await welcomed(session, "second")
-    await taken(first), await taken(second)
+    first = await joined(session, "first")
+    second = await joined(session, "second")
+    await received(first), await received(second)
     await publish(session, Notice(message="logged"))
-    await taken(first)
+    await received(first)
 
     transcript = await session._events.transcript(session.saved_session.id)
     await session.close()
@@ -447,10 +416,10 @@ async def test_events_published_while_catching_up_follow_the_ones_resent() -> No
     store = store_logging(*(notice(seq, OPEN) for seq in range(10, 21)))
     connection = await rejoined(store, 15, [LIVE])
 
-    envelopes = await taken_envelopes(connection)
+    sent = await envelopes(connection)
 
-    assert isinstance(envelopes[0].payload, Welcome)
-    rest = after_catalog(envelopes)
+    assert isinstance(sent[0].payload, Welcome)
+    rest = after_catalog(sent)
     assert [e.payload for e in rest[:6]] == [n.payload for n in map(notice, range(16, 21))] + [LIVE]
     seqs = [e.seq for e in rest]
     assert seqs == sorted(set(seqs))
@@ -460,7 +429,7 @@ async def test_events_published_while_finding_a_snapshot_is_needed_follow_welcom
     store = store_logging(*(notice(seq, "other") for seq in range(1, 16)))
     connection = await rejoined(store, 15, [LIVE])
 
-    events = await taken(connection)
+    events = await received(connection)
 
     assert isinstance(events[0], Welcome)
     assert LIVE in events and Snapshot in [type(e) for e in events]
@@ -483,10 +452,10 @@ async def test_a_connection_whose_held_events_overflow_is_closed_as_too_far_behi
 
 async def test_a_catalog_from_a_task_a_command_started_reaches_every_connection() -> None:
     session = WorkspaceHost()
-    first = await welcomed(session, "first")
-    catalog = next(e for e in await taken(first) if isinstance(e, Catalog))
-    asker = await welcomed(session, "asker")
-    await taken(asker)
+    first = await joined(session, "first")
+    catalog = next(e for e in await received(first) if isinstance(e, Catalog))
+    asker = await joined(session, "asker")
+    await received(asker)
     go = asyncio.Event()
     started: list[asyncio.Task[None]] = []
 
@@ -503,18 +472,18 @@ async def test_a_catalog_from_a_task_a_command_started_reaches_every_connection(
     go.set()
     await started[0]
 
-    assert [e for e in await taken(first) if isinstance(e, Catalog)] == [catalog]
+    assert [e for e in await received(first) if isinstance(e, Catalog)] == [catalog]
     await session.close()
 
 
 async def test_a_new_session_gives_the_others_a_catalog_listing_it() -> None:
     session = WorkspaceHost()
-    asker = await welcomed(session, "asker")
-    other = await welcomed(session, "other")
-    await taken(asker), await taken(other)
+    asker = await joined(session, "asker")
+    other = await joined(session, "other")
+    await received(asker), await received(other)
 
     await say(asker, "new", NewSession(name="Next"))
-    asked, seen = await taken(asker), await taken(other)
+    asked, seen = await received(asker), await received(other)
     await session.close()
 
     assert kinds(asked) == [Catalog, Snapshot]
@@ -523,11 +492,11 @@ async def test_a_new_session_gives_the_others_a_catalog_listing_it() -> None:
 
 async def test_a_delete_gives_every_connection_a_catalog_without_the_session() -> None:
     session = workspace(stored())
-    asker = await joined(session, "asker")
-    other = await joined(session, "other")
+    asker = await joined(session, "asker", read=True)
+    other = await joined(session, "other", read=True)
 
     await say(asker, "delete", DeleteSession(session_id=EARLIER))
-    asked, seen = await taken(asker), await taken(other)
+    asked, seen = await received(asker), await received(other)
     await session.close()
 
     assert catalog_names(asked) == catalog_names(seen) == [["today"]]
@@ -535,22 +504,22 @@ async def test_a_delete_gives_every_connection_a_catalog_without_the_session() -
 
 async def test_a_closed_connection_gets_no_catalog_after_a_rename() -> None:
     session = WorkspaceHost()
-    asker = await welcomed(session, "asker")
-    closed = await welcomed(session, "closed")
-    await taken(asker), await taken(closed)
+    asker = await joined(session, "asker")
+    closed = await joined(session, "closed")
+    await received(asker), await received(closed)
     await closed.close()
 
     await say(asker, "rename", RenameSession(session_id=session.saved_session.id, name="Kept"))
 
     assert await everything(closed) == []
-    assert catalog_names(await taken(asker)) == [["Kept"]]
+    assert catalog_names(await received(asker)) == [["Kept"]]
     await session.close()
 
 
 async def test_a_connection_not_yet_welcomed_gets_only_its_greetings_catalog() -> None:
     session = WorkspaceHost()
-    asker = await welcomed(session, "asker")
-    await taken(asker)
+    asker = await joined(session, "asker")
+    await received(asker)
     go = asyncio.Event()
     fetch = session.entry
 
@@ -566,17 +535,17 @@ async def test_a_connection_not_yet_welcomed_gets_only_its_greetings_catalog() -
     go.set()
     await greeting
 
-    assert catalog_names(await taken(joining)) == [["Kept"]]
+    assert catalog_names(await received(joining)) == [["Kept"]]
     await session.close()
 
 
 async def test_attaching_to_the_open_session_gives_only_the_asker_a_snapshot() -> None:
     session = workspace(stored())
-    asker = await joined(session, "asker")
-    other = await joined(session, "other")
+    asker = await joined(session, "asker", read=True)
+    other = await joined(session, "other", read=True)
 
     await say(asker, "attach", Attach(workspace=WORKSPACE, session=session.saved_session.id))
-    asked, seen = await taken(asker), await taken(other)
+    asked, seen = await received(asker), await received(other)
     await session.close()
 
     assert kinds(asked) == [Snapshot]

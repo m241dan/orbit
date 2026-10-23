@@ -31,24 +31,22 @@ from tests.attach_fakes import (
     SAVED_TASK,
     TASK,
     WHEN,
-    joined,
     outcome,
-    say,
     snapshot_in,
     states,
     stored,
-    taken,
     viewing,
     workspace,
 )
+from tests.connection_helpers import joined, received, say
 
 
 async def used(session: WorkspaceHost, name: str) -> SessionConnection:
     """A connection to ``session`` that has added a task to the open session, so it's saved,
     and read what that brought."""
-    connection = await joined(session, name)
+    connection = await joined(session, name, read=True)
     await say(connection, "add", AddTask(task=TASK))
-    await taken(connection)
+    await received(connection)
     return connection
 
 
@@ -56,9 +54,9 @@ async def test_activating_a_saved_session_answers_with_its_live_snapshot() -> No
     session = workspace(stored())
     activating = await used(session, "activating")
     await say(activating, "activate", ActivateSession(session=EARLIER))
-    events = await taken(activating)
+    events = await received(activating)
     await say(activating, "add", AddTask(task=TASK))
-    added = await taken(activating)
+    added = await received(activating)
     await session.close()
 
     snapshot = snapshot_in(events)
@@ -72,11 +70,11 @@ async def test_activating_a_saved_session_answers_with_its_live_snapshot() -> No
 async def test_another_connection_keeps_the_old_session_as_a_read_only_view() -> None:
     session = workspace(stored())
     activating = await used(session, "activating")
-    other = await joined(session, "other")
-    await taken(activating)
+    other = await joined(session, "other", read=True)
+    await received(activating)
     await say(activating, "activate", ActivateSession(session=EARLIER))
-    await taken(activating)
-    seen = await taken(other)
+    await received(activating)
+    seen = await received(other)
     await session.close()
 
     snapshot = snapshot_in(seen)
@@ -91,10 +89,10 @@ async def test_a_connection_not_yet_attached_stays_unattached_through_an_activat
     activating = await used(session, "activating")
     greeted = connect(session)
     await say(greeted, "hello", HELLO)
-    await taken(greeted)
+    await received(greeted)
     await say(activating, "activate", ActivateSession(session=EARLIER))
-    await taken(activating)
-    seen = await taken(greeted)
+    await received(activating)
+    seen = await received(greeted)
     await session.close()
 
     assert greeted.workspace is None
@@ -105,9 +103,9 @@ async def test_a_connection_viewing_the_activated_session_gets_it_live() -> None
     session = workspace(stored())
     activating = await used(session, "activating")
     viewer = await viewing(session, "viewer")
-    await taken(activating)
+    await received(activating)
     await say(activating, "activate", ActivateSession(session=EARLIER))
-    seen = await taken(viewer)
+    seen = await received(viewer)
     await session.close()
 
     snapshot = snapshot_in(seen)
@@ -119,7 +117,7 @@ async def test_activating_from_a_view_makes_the_viewed_session_live() -> None:
     await used(session, "user")
     viewer = await viewing(session, "viewer")
     await say(viewer, "activate", ActivateSession(session=EARLIER))
-    events = await taken(viewer)
+    events = await received(viewer)
     await session.close()
 
     snapshot = snapshot_in(events)
@@ -129,13 +127,13 @@ async def test_activating_from_a_view_makes_the_viewed_session_live() -> None:
 
 async def test_others_follow_an_unsaved_session_left_as_there_is_nothing_to_view() -> None:
     session = workspace(stored())
-    activating = await joined(session, "activating")
-    other = await joined(session, "other")
-    await taken(activating)
+    activating = await joined(session, "activating", read=True)
+    other = await joined(session, "other", read=True)
+    await received(activating)
     await say(activating, "activate", ActivateSession(session=EARLIER))
-    await taken(other)
+    await received(other)
     await say(other, "add", AddTask(task=TASK))
-    added = await taken(other)
+    added = await received(other)
     await session.close()
 
     assert outcome(added) == CommandAccepted(command_id="add")
@@ -144,11 +142,11 @@ async def test_others_follow_an_unsaved_session_left_as_there_is_nothing_to_view
 
 async def test_others_following_an_unsaved_session_left_get_the_activated_one() -> None:
     session = workspace(stored())
-    activating = await joined(session, "activating")
-    other = await joined(session, "other")
-    await taken(activating)
+    activating = await joined(session, "activating", read=True)
+    other = await joined(session, "other", read=True)
+    await received(activating)
     await say(activating, "activate", ActivateSession(session=EARLIER))
-    seen = await taken(other)
+    seen = await received(other)
     await session.close()
 
     snapshot = snapshot_in(seen)
@@ -162,11 +160,11 @@ async def test_others_following_an_unsaved_session_left_get_the_activated_one() 
 async def test_others_following_an_unsaved_session_left_get_a_new_one() -> None:
     ids = iter((OPEN, "fresh-id"))
     session = WorkspaceHost(store=stored(), clock=Ticks(), new_id=lambda: next(ids), name="today")
-    creating = await joined(session, "creating")
-    other = await joined(session, "other")
-    await taken(creating)
+    creating = await joined(session, "creating", read=True)
+    other = await joined(session, "other", read=True)
+    await received(creating)
     await say(creating, "new", NewSession(name="fresh"))
-    seen = await taken(other)
+    seen = await received(other)
     await session.close()
 
     snapshot = snapshot_in(seen)
@@ -177,11 +175,11 @@ async def test_a_new_session_is_activated_for_the_connection_creating_it() -> No
     ids = iter((OPEN, "fresh-id"))
     session = WorkspaceHost(store=stored(), clock=Ticks(), new_id=lambda: next(ids), name="today")
     creating = await used(session, "creating")
-    other = await joined(session, "other")
-    await taken(creating)
+    other = await joined(session, "other", read=True)
+    await received(creating)
     await say(creating, "new", NewSession(name="fresh"))
-    events = await taken(creating)
-    seen = await taken(other)
+    events = await received(creating)
+    seen = await received(other)
     await session.close()
 
     snapshot = snapshot_in(events)
@@ -195,13 +193,13 @@ async def test_activating_after_a_failed_switch_leaves_the_others_live() -> None
     store = stored()
     session = workspace(store)
     activating = await used(session, "activating")
-    other = await joined(session, "other")
-    await taken(activating)
+    other = await joined(session, "other", read=True)
+    await received(activating)
     store.lock_failure = "Couldn't lock the session: disk full"
     await say(activating, "activate", ActivateSession(session=EARLIER))
-    seen = await taken(other)
+    seen = await received(other)
     await say(other, "add", AddTask(task=TASK))
-    added = await taken(other)
+    added = await received(other)
     await session.close()
 
     assert not any(isinstance(e, Snapshot) for e in seen)
@@ -212,9 +210,9 @@ async def test_attach_then_activate_counts_one_viewer_of_the_activated_session()
     session = workspace(stored())
     activating = await used(session, "activating")
     await say(activating, "attach", Attach(workspace=WORKSPACE, session=EARLIER))
-    await taken(activating)
+    await received(activating)
     await say(activating, "activate", ActivateSession(session=EARLIER))
-    events = await taken(activating)
+    events = await received(activating)
     await session.close()
 
     assert snapshot_in(events).viewers == 1
@@ -224,7 +222,7 @@ async def test_activating_the_open_session_from_a_view_attaches_to_it_live() -> 
     session = workspace(stored())
     viewer = await viewing(session, "viewer")
     await say(viewer, "activate", ActivateSession(session=OPEN))
-    events = await taken(viewer)
+    events = await received(viewer)
     await session.close()
 
     snapshot = snapshot_in(events)
@@ -237,8 +235,8 @@ async def test_a_left_session_that_cant_be_read_back_sends_its_viewers_no_view()
     store = stored()
     session = workspace(store)
     activating = await used(session, "activating")
-    other = await joined(session, "other")
-    await taken(activating)
+    other = await joined(session, "other", read=True)
+    await received(activating)
 
     async def fail_listing() -> None:
         store.on_acquire = None
@@ -246,8 +244,8 @@ async def test_a_left_session_that_cant_be_read_back_sends_its_viewers_no_view()
 
     store.on_acquire = fail_listing
     await say(activating, "activate", ActivateSession(session=EARLIER))
-    events = await taken(activating)
-    seen = await taken(other)
+    events = await received(activating)
+    seen = await received(other)
     await session.close()
 
     assert outcome(events) == CommandAccepted(command_id="activate")
@@ -275,8 +273,8 @@ async def activated_meanwhile(session_id: str, once_switched: bool = False) -> M
     store.saved.append(SessionRecord(id="later", name="later work", created=WHEN, last_active=WHEN))
     session = workspace(store)
     first = await used(session, "first")
-    second = await joined(session, "second")
-    await taken(first)
+    second = await joined(session, "second", read=True)
+    await received(first)
     activating: list[asyncio.Task[None]] = []
 
     async def activate() -> None:
@@ -291,8 +289,8 @@ async def activated_meanwhile(session_id: str, once_switched: bool = False) -> M
     store.on_acquire = activate_another
     await say(first, "activate", ActivateSession(session=EARLIER))
     await asyncio.gather(*activating)
-    events = await taken(first)
-    seen = await taken(second)
+    events = await received(first)
+    seen = await received(second)
     await session.close()
     return Meanwhile(first, events, second, seen, store)
 
@@ -345,8 +343,8 @@ async def test_a_viewer_attaching_elsewhere_meanwhile_gets_no_view_of_the_sessio
     store = stored()
     session = workspace(store)
     activating = await used(session, "activating")
-    other = await joined(session, "other")
-    await taken(activating)
+    other = await joined(session, "other", read=True)
+    await received(activating)
 
     async def attach_elsewhere(session_id: str) -> None:
         if session_id != OPEN:
@@ -358,8 +356,8 @@ async def test_a_viewer_attaching_elsewhere_meanwhile_gets_no_view_of_the_sessio
 
     store.on_recent = attach_elsewhere
     await say(activating, "activate", ActivateSession(session=EARLIER))
-    await taken(activating)
-    seen = await taken(other)
+    await received(activating)
+    seen = await received(other)
     await session.close()
 
     assert store.on_recent is None
@@ -386,8 +384,8 @@ async def managed_meanwhile(command: RenameSession | DeleteSession) -> Managed:
     store = stored()
     session = workspace(store)
     first = await used(session, "first")
-    second = await joined(session, "second")
-    await taken(first)
+    second = await joined(session, "second", read=True)
+    await received(first)
     managing: list[asyncio.Task[None]] = []
 
     async def manage() -> None:
@@ -397,8 +395,8 @@ async def managed_meanwhile(command: RenameSession | DeleteSession) -> Managed:
     store.on_acquire = manage
     await say(first, "activate", ActivateSession(session=EARLIER))
     await asyncio.gather(*managing)
-    await taken(first)
-    seen = await taken(second)
+    await received(first)
+    seen = await received(second)
     managed = Managed(seen, store, EARLIER in store.locked, session.saved_session.name)
     await session.close()
     return managed

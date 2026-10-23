@@ -976,19 +976,6 @@ async def greeted(session: Session | Backend) -> None:
         await greet(session)
 
 
-async def views_on_joining(session: Backend) -> list[Event]:
-    """The events a new connection to ``session`` gets for its Hello and its Attach to the open
-    session, up to its Snapshot."""
-    connection = connect(session)
-    await connection.send(CommandEnvelope(command_id="join", payload=HELLO))
-    await connection.send(CommandEnvelope(command_id="join-attach", payload=attach_to(session)))
-    stream = connection.events()
-    events = [(await asyncio.wait_for(anext(stream), 5)).payload]
-    while not isinstance(events[-1], Snapshot):
-        events.append((await asyncio.wait_for(anext(stream), 5)).payload)
-    return events
-
-
 def nothing_queued(session: Backend) -> bool:
     """Whether the session has no events queued for its frontend."""
     return _queue_of(session).empty()

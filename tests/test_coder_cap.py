@@ -31,7 +31,8 @@ from tests.agent_fakes import (
     ScriptedLauncher,
     board_of,
 )
-from tests.plane_fakes import idle, joined, payloads, say, taken
+from tests.connection_helpers import joined, say, taken
+from tests.plane_fakes import idle, payloads
 
 WAITING_FIRST = Activity(kind="waiting_for_coder", position=1, busy=1)
 
@@ -131,7 +132,7 @@ async def test_workspaces_take_turns_at_a_single_coder() -> None:
     a, _ = workspace("a", gates.script("a1"), gates.script("a2"))
     b, _ = workspace("b", gates.script("b1"))
     plane = capped(1, a, b)
-    in_a, in_b = await joined(plane, a), await joined(plane, b)
+    in_a, in_b = await joined(plane, host=a), await joined(plane, host=b)
     await runs(in_a, task("First."), task("Second."))
     await gates.until_started("a1")
     taken(in_b)
@@ -156,7 +157,7 @@ async def test_a_third_workspace_waits_first_in_line_behind_two_coders() -> None
     hosts = [workspace(name, gates.script(name))[0] for name in ("a", "b", "c")]
     plane = capped(2, *hosts)
     for host in hosts:
-        await runs(await joined(plane, host), task())
+        await runs(await joined(plane, host=host), task())
         await until(running(host))
 
     await until(lambda: hosts[2].activity.waiting_for_coder == 1)
@@ -175,7 +176,7 @@ async def test_a_review_starts_while_every_coder_is_busy() -> None:
     )
     b, _ = workspace("b", gates.script("b1"))
     plane = capped(1, a, b)
-    in_a, in_b = await joined(plane, a), await joined(plane, b)
+    in_a, in_b = await joined(plane, host=a), await joined(plane, host=b)
     await runs(in_a, task())
     await gates.until_started("a1")
     await runs(in_b, task())
@@ -194,7 +195,7 @@ async def test_a_configurator_takes_a_coders_slot() -> None:
     a, _ = workspace("a", gates.script("configure"))
     b, _ = workspace("b", gates.script("b1"))
     plane = capped(1, a, b)
-    in_a, in_b = await joined(plane, a), await joined(plane, b)
+    in_a, in_b = await joined(plane, host=a), await joined(plane, host=b)
     await runs(in_a, task("Set up the checks.", CONFIGURATOR))
     await gates.until_started("configure")
     await runs(in_b, task())
@@ -213,7 +214,7 @@ async def test_a_planner_turn_and_a_review_task_take_no_coders_slot() -> None:
     b, launcher = workspace("b", reviewers=(gates.script("review"),))
     launcher.planner_turns.append(gates.script("planner"))
     plane = capped(1, a, b)
-    in_a, in_b = await joined(plane, a), await joined(plane, b)
+    in_a, in_b = await joined(plane, host=a), await joined(plane, host=b)
     await runs(in_a, task())
     await gates.until_started("a1")
     await say(in_b, "say", SendMessage(agent=PLANNER, text="Hello."))
@@ -231,7 +232,7 @@ async def test_cancelling_a_waiting_run_leaves_the_line_and_holds_it() -> None:
     a, _ = workspace("a", gates.script("a1"), gates.script("a2"))
     b, _ = workspace("b", gates.script("b1"))
     plane = capped(1, a, b)
-    in_a, in_b = await joined(plane, a), await joined(plane, b)
+    in_a, in_b = await joined(plane, host=a), await joined(plane, host=b)
     await runs(in_a, task("First."), task("Second."))
     await gates.until_started("a1")
     await runs(in_b, task())
@@ -255,7 +256,7 @@ async def test_a_task_removed_while_it_waits_takes_no_turn() -> None:
     a, _ = workspace("a", gates.script("a1"))
     b, _ = workspace("b", gates.script("b1"))
     plane = capped(1, a, b)
-    in_a, in_b = await joined(plane, a), await joined(plane, b)
+    in_a, in_b = await joined(plane, host=a), await joined(plane, host=b)
     await runs(in_a, task())
     await gates.until_started("a1")
     await runs(in_b, task())
@@ -274,7 +275,7 @@ async def test_closing_while_a_run_waits_leaves_no_slot_taken() -> None:
     a, _ = workspace("a", gates.script("a1"))
     b, _ = workspace("b", gates.script("b1"))
     plane = capped(1, a, b)
-    in_a, in_b = await joined(plane, a), await joined(plane, b)
+    in_a, in_b = await joined(plane, host=a), await joined(plane, host=b)
     await runs(in_a, task())
     await gates.until_started("a1")
     await runs(in_b, task())
@@ -299,7 +300,7 @@ async def test_every_slot_is_given_back_however_tasks_end() -> None:
     scripts = (gives_up, says_nothing, gives_up, says_nothing)
     a, b = workspace("a", *scripts)[0], workspace("b", *scripts)[0]
     plane = capped(1, a, b)
-    in_a, in_b = await joined(plane, a), await joined(plane, b)
+    in_a, in_b = await joined(plane, host=a), await joined(plane, host=b)
     for connection in (in_a, in_b):
         await runs(connection, *(task(f"Task {n}.") for n in range(4)))
     for connection in (in_a, in_b):
@@ -315,7 +316,7 @@ async def test_a_task_cancelled_as_it_runs_gives_its_slot_back() -> None:
     a, _ = workspace("a", gates.script("a1"))
     b, _ = workspace("b", gates.script("b1"))
     plane = capped(1, a, b)
-    in_a, in_b = await joined(plane, a), await joined(plane, b)
+    in_a, in_b = await joined(plane, host=a), await joined(plane, host=b)
     await runs(in_a, task())
     await gates.until_started("a1")
     await runs(in_b, task())
@@ -334,7 +335,7 @@ async def test_no_cap_never_waits() -> None:
     hosts = [workspace(name, gates.script(name))[0] for name in ("a", "b", "c")]
     plane = capped(0, *hosts)
     for host in hosts:
-        await runs(await joined(plane, host), task())
+        await runs(await joined(plane, host=host), task())
 
     await until(lambda: sorted(gates.started) == ["a", "b", "c"])
     assert plane.coders_running == 3

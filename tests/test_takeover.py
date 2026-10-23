@@ -61,9 +61,9 @@ from tests.agent_fakes import (
     sole,
     tasks_of,
     turns_of,
-    views_on_joining,
 )
 from tests.attach_fakes import EARLIER, stored
+from tests.connection_helpers import views_on_joining
 
 
 def offered(event: Event) -> bool:

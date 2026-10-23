@@ -23,8 +23,9 @@ from orbit.protocol import (
     WorkspaceEntry,
 )
 from tests.agent_fakes import notice
+from tests.connection_helpers import say, taken
 from tests.git_repo import bare_repository, commit_file, git, init_repo
-from tests.plane_fakes import payloads, refused, say, taken, welcomed
+from tests.plane_fakes import payloads, refused, welcomed
 from tests.serving import FLAGS, serving, until
 from tests.store_views import database, record
 

@@ -23,17 +23,8 @@ from orbit.protocol import (
     EventEnvelope,
     WorkspaceCloning,
 )
-from tests.plane_fakes import (
-    FakeSource,
-    ids,
-    joined,
-    payloads,
-    refused,
-    say,
-    taken,
-    welcomed,
-    workspace,
-)
+from tests.connection_helpers import joined, say, taken
+from tests.plane_fakes import FakeSource, ids, payloads, refused, welcomed, workspace
 
 URL = "https://github.com/o/proj.git"
 PROGRESS = WorkspaceCloning(url=URL, phase="Receiving objects", percent=50)
@@ -76,7 +67,7 @@ async def test_a_clones_news_reaches_connections_attached_too() -> None:
     host = workspace("a")
     source = FakeSource()
     plane = ControlPlane([host], workspaces=source)
-    viewer = await joined(plane, host)
+    viewer = await joined(plane, host=host)
     taken(viewer)
     connection = await welcomed(plane)
 
