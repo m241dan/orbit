@@ -403,6 +403,28 @@ async def test_an_attach_unanswered_when_the_link_drops_is_sent_again_as_it_was(
     assert again[1:] == [switch]
 
 
+async def test_an_attach_accepted_but_dropped_before_its_snapshot_is_sent_again() -> None:
+    switch = CommandEnvelope(command_id="switch", payload=Attach(workspace="w2", session="b"))
+    async with viewing() as (fake, session, events, first):
+        await session.send(switch)
+        await fake.command()
+        await drop_after(first, events, answer(5, switch))
+        _, again = await reconnecting(fake, session)
+
+    assert again[1:] == [switch]
+
+
+async def test_a_snapshot_of_the_old_session_leaves_an_attach_to_send_again() -> None:
+    switch = CommandEnvelope(command_id="switch", payload=Attach(workspace="w1", session="b"))
+    async with viewing() as (fake, session, events, first):
+        await session.send(switch)
+        await fake.command()
+        await drop_after(first, events, snapshot(5, active=False))
+        _, again = await reconnecting(fake, session)
+
+    assert again[1:] == [switch]
+
+
 async def test_a_refused_attach_is_answered_by_any_session_shown_before_it() -> None:
     switch = CommandEnvelope(command_id="switch", payload=Attach(workspace="w1", session="b"))
     async with viewing() as (fake, session, events, first):

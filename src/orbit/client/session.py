@@ -4,9 +4,10 @@ envelope, the token sent as ``Authorization: Bearer`` on the upgrade.
 A lost connection is retried with backoff until the session is closed, but for one closed as
 its stream ended (1000), for a message over the limit (1009) or for an event that can't be read,
 which reconnecting would only repeat; on reconnecting, the last ``Hello`` is sent again with
-``since`` the last ``seq`` received, then, once an ``Attach`` was sent, one for the workspace
-and session the last ``Snapshot`` showed, so the connection views that session again and the
-control plane resends what was missed of it. How the link stands is reported to whoever watches
+``since`` the last ``seq`` received, then, once an ``Attach`` was sent, that one again until a
+``Snapshot`` answers it or it's refused, and after that one for the workspace and session the
+last ``Snapshot`` showed, so the connection views that session again and the control plane
+resends what was missed of it. How the link stands is reported to whoever watches
 it.
 """
 
@@ -126,7 +127,8 @@ class WebSocketSession:
         self._websocket: ClientConnection | None = None  # While connected.
         self._hello: CommandEnvelope | None = None  # The last Hello sent.
         self._attach: CommandEnvelope | None = None  # The last Attach sent.
-        self._pending = False  # Whether the last Attach sent is yet to be answered.
+        self._pending = False  # Whether the last Attach sent is yet to be shown or refused.
+        self._accepted = False  # Whether the last Attach sent was accepted.
         self._viewed: Attach | None = None  # The session the last Snapshot received showed.
         self._seq: int | None = None  # The last seq received.
         self._ever_linked = False  # Whether a connection was ever made.
@@ -198,12 +200,12 @@ class WebSocketSession:
     async def _send_attach(self, attach: CommandEnvelope) -> None:
         """Send ``attach``, noted as the last ``Attach`` first, so its answer is known as one
         however soon it comes, unless it can't be sent."""
-        previous = self._attach, self._pending
-        self._attach, self._pending = attach, True
+        previous = self._attach, self._pending, self._accepted
+        self._attach, self._pending, self._accepted = attach, True, False
         try:
             await self._send_now(attach)
         except NotConnected:
-            self._attach, self._pending = previous
+            self._attach, self._pending, self._accepted = previous
             raise
 
     def _greeting(self, hello: CommandEnvelope) -> CommandEnvelope:
@@ -332,9 +334,10 @@ class WebSocketSession:
             await websocket.send(encode(self._reattach(self._attach)))
 
     def _reattach(self, attach: CommandEnvelope) -> CommandEnvelope:
-        """``attach``, the last ``Attach`` sent, as it was while it's unanswered, else for the
-        session the last ``Snapshot`` received showed, if any was, as switches and deletions
-        change what the connection views, and a refused one leaves it as it was."""
+        """``attach``, the last ``Attach`` sent, as it was until a ``Snapshot`` answers it or it's
+        refused, else for the session the last ``Snapshot`` received showed, if any was, as
+        switches and deletions change what the connection views, and a refused one leaves it as
+        it was."""
         if self._pending or self._viewed is None:
             return attach
         return attach.model_copy(update={"payload": self._viewed})
@@ -358,13 +361,16 @@ class WebSocketSession:
         """Note what ``envelope`` tells of the view: whether it answers the last ``Attach``
         sent, and the session it shows, if it holds a ``Snapshot``."""
         answer = envelope.payload
-        if isinstance(answer, CommandAccepted | CommandRefused) and self._attach is not None:
-            self._pending = self._pending and answer.command_id != self._attach.command_id
-        self._note_shown(envelope)
+        if self._attach is None or not isinstance(answer, CommandAccepted | CommandRefused):
+            self._note_shown(envelope)
+        elif answer.command_id == self._attach.command_id:
+            self._accepted = isinstance(answer, CommandAccepted)
+            self._pending = self._pending and self._accepted
 
     def _note_shown(self, envelope: EventEnvelope) -> None:
         """Note the session ``envelope`` shows, if it holds a ``Snapshot``, in the workspace it
-        names, or else that of the last ``Attach`` sent."""
+        names, or else that of the last ``Attach`` sent, as answering that ``Attach`` if it's
+        the one it named or it came after the ``Attach`` was accepted."""
         snapshot = envelope.payload
         if not isinstance(snapshot, Snapshot) or self._attach is None:
             return
@@ -372,6 +378,7 @@ class WebSocketSession:
         assert isinstance(attached, Attach)  # Only an Attach is kept as one.
         workspace = envelope.workspace or attached.workspace
         self._viewed = Attach(workspace=workspace, session=snapshot.session.id)
+        self._pending = self._pending and not (self._accepted or self._viewed == attached)
 
     def _lost(self) -> None:
         """Report that the connection is down, from now unless it already was."""
