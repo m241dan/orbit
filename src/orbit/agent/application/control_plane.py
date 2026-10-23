@@ -31,7 +31,7 @@ from orbit.agent.application.workspace_host import WorkspaceHost
 from orbit.agent.domain.catalog import catalog
 from orbit.agent.domain.clones import added_url
 from orbit.agent.domain.listings import LOCAL_BROWSING
-from orbit.agent.domain.purging import check_purgeable
+from orbit.agent.domain.purging import check_purgeable, check_unowned
 from orbit.agent.domain.refusals import STOPPING, Refused
 from orbit.agent.domain.workspaces import (
     LOCAL_ONLY,
@@ -532,8 +532,9 @@ class ControlPlane:
         and have ``workspaces`` let it go, and send the catalog to ``connection`` and every
         listening connection, even if closing the host or purging fails; refused for a workspace
         not served, as ``busy`` while it runs work or another connection views one of its
-        sessions, as ``invalid`` when purging it would lose work, or with the code
-        ``workspaces`` gives, still served, if its flag can't be cleared."""
+        sessions or, when purging, another orbit owns its repository, as ``invalid`` when
+        purging it would lose work, or with the code ``workspaces`` gives, still served, if its
+        flag can't be cleared."""
         workspace = command.workspace
         host = self._hosts[served_workspace(workspace, self._served)]
         self._check_removable(host)
@@ -549,9 +550,11 @@ class ControlPlane:
 
     @staticmethod
     async def _check_purgeable(host: WorkspaceHost, workspaces: WorkspaceSource) -> None:
-        """Refuse purging ``host``'s workspace as ``invalid`` if that would lose work, listing
-        it, or with the code ``workspaces`` gives if that can't be found out."""
+        """Refuse purging ``host``'s workspace as ``busy`` while another orbit owns its
+        repository, naming it, as ``invalid`` if that would lose work, listing it, or with the
+        code ``workspaces`` gives if that can't be found out."""
         name = host.path or host.workspace_id
+        check_unowned(name, host.owner)
         try:
             losses = await workspaces.losses(host.workspace_id)
         except WorkspaceUnavailable as exc:

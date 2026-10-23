@@ -190,6 +190,18 @@ async def test_taking_over_clears_read_only_from_the_catalog_and_snapshot() -> N
     await session.close()
 
 
+async def test_taking_over_stops_naming_the_owner() -> None:
+    lock = FakeLock(free=True)
+    session, _, _ = session_for(owner=OWNER, lock=lock)
+    await greeted(session)
+    before = session.owner
+    await events_until(session, offered)
+    await send(session, TakeOwnership(take=True))
+
+    assert before == OWNER and session.owner is None
+    await session.close()
+
+
 async def test_taking_over_announces_the_workspace_no_longer_read_only() -> None:
     lock = FakeLock(free=True)
     session, _, _ = session_for(owner=OWNER, lock=lock)

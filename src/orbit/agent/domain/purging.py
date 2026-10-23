@@ -3,8 +3,9 @@ being purged."""
 
 from collections.abc import Sequence
 
+from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.refusals import Refused
-from orbit.protocol import INVALID
+from orbit.protocol import BUSY, INVALID
 
 
 def _counted(count: int, one: str, many: str) -> str:
@@ -53,3 +54,10 @@ def check_purgeable(workspace: str, losses: Sequence[str]) -> None:
     lose anything, listing the ``losses``."""
     if losses:
         raise Refused(INVALID, purge_refusal(workspace, losses))
+
+
+def check_unowned(workspace: str, owner: WorkspaceOwner | None) -> None:
+    """Refuse purging the workspace ``workspace`` as ``busy`` while another orbit, the
+    ``owner``, owns its repository, naming it."""
+    if owner is not None:
+        raise Refused(BUSY, f"Can't purge {workspace}: {owner.described} owns its repository.")

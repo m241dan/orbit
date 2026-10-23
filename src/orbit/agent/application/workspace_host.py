@@ -314,6 +314,7 @@ class WorkspaceHost:
         self._workspace = workspace
         self._managed = managed
         self._recover = recover
+        self._owner = owner
         owner_notes = () if owner is None else (read_only_note(owner),)
         self._startup_notes = (*owner_notes, *startup_notes)
         self._closing = False
@@ -553,6 +554,11 @@ class WorkspaceHost:
     def read_only(self) -> bool:
         """Whether another orbit owns the repository, so the work asked for is queued."""
         return self._takeover.read_only
+
+    @property
+    def owner(self) -> WorkspaceOwner | None:
+        """The other orbit that owns the repository while this one is read-only, if any."""
+        return self._owner if self._takeover.read_only else None
 
     @property
     def storage_halted(self) -> bool:

@@ -2,7 +2,7 @@
 its records are deleted once its host is closed, before its lock is let go, unless that would
 lose a clone's work."""
 
-from orbit.agent import ControlPlane
+from orbit.agent import ControlPlane, WorkspaceOwner
 from orbit.protocol import BUSY, INTERNAL, INVALID, CommandAccepted, RemoveWorkspace
 from tests.connection_helpers import joined, say, taken
 from tests.plane_fakes import FakeSource, ids, payloads, refused, welcomed, workspace
@@ -97,3 +97,31 @@ async def test_a_purge_that_fails_leaves_the_workspace_removed_and_says_so() -> 
     message = "Removed /src/c, but couldn't purge it: The disk is full."
     assert ids(catalog) == [] and outcome == refused("purge", INTERNAL, message)
     assert source.steps == ["purge c", "close c"] and plane.hosts == ()
+
+
+async def test_a_workspace_another_orbit_owns_is_refused_purging_as_busy_and_stays_served() -> None:
+    source = FakeSource()
+    plane = ControlPlane([workspace("c", owner=WorkspaceOwner(pid=42))], workspaces=source)
+    connection = await welcomed(plane)
+
+    await say(connection, "purge", PURGE)
+    outcome = payloads(taken(connection))
+    served = [host.workspace_id for host in plane.hosts]
+    await plane.close()
+
+    message = "Can't purge /src/c: an orbit chat, pid 42 owns its repository."
+    assert outcome == [refused("purge", BUSY, message)]
+    assert served == ["c"] and source.flags == [] and source.steps == []
+
+
+async def test_a_workspace_another_orbit_owns_can_still_be_removed_without_purge() -> None:
+    source = FakeSource()
+    plane = ControlPlane([workspace("c", owner=WorkspaceOwner(pid=42))], workspaces=source)
+    connection = await welcomed(plane)
+
+    await say(connection, "remove", RemoveWorkspace(workspace="c"))
+    catalog, accepted = payloads(taken(connection))
+    await plane.close()
+
+    assert ids(catalog) == [] and accepted == CommandAccepted(command_id="remove")
+    assert source.steps == ["close c"] and source.purged == []

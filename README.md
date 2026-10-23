@@ -132,7 +132,8 @@ for when it's added again, `Delete its sessions too` purges its records (see Pur
 [Serving the control plane](#serving-the-control-plane)) and, for a clone the server made, names its directory,
 which goes too, and `Cancel` or `esc` removes nothing. It's refused, saying why under the list,
 while the workspace runs work or another frontend views one of its sessions, or, when purging,
-while its clone holds work its remote doesn't, listing what would be lost. `esc` on
+while another orbit owns its repository, naming it, or its clone holds work its remote doesn't,
+listing what would be lost. `esc` on
 the list quits orbit at startup, and later closes the picker. When the workspace this chat is on
 is removed, the workspace picker opens, or stays open if it's removed from there, and from then
 on it works as at startup: `esc` quits orbit, as there's no workspace left to go back to.
@@ -1081,7 +1082,9 @@ afresh, and so does a managed clone's directory. A directory orbit didn't clone 
 deleted. A clone holding work that exists nowhere else, uncommitted changes, stashes or commits on
 any branch, or on a detached HEAD, that its remote doesn't have, isn't purged: the refusal lists
 what would be lost (`1 commit on main not on its remote`), and nothing is removed until it's
-pushed or dropped. The server
+pushed or dropped. Nor is a workspace another orbit owns, such as a local `orbit chat` in its
+repository: the purge is refused as `busy`, naming the owner, though removing it without purging
+still works. The server
 holds the workspace's lock until the purge is done, so no local orbit starts on it meanwhile. A
 workspace no server serves, such as one only a local `orbit chat` used, is purged with `orbit db
 forget` (see [Where orbit keeps things](#where-orbit-keeps-things)). In the TUI, `x` in the
