@@ -19,7 +19,9 @@ from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.agent.external.workspace_registry import Registered, WorkspaceRegistry, register
 from tests.store_views import database
 
-REPO = "root git@github.com:o/r.git"
+ROOT = "a" * 40
+"""A root commit's hash."""
+REPO = f"{ROOT} git@github.com:o/r.git"
 """The fingerprint of a repository, wherever it is."""
 
 
@@ -221,7 +223,7 @@ async def test_a_moved_repository_takes_over_its_workspace_and_sessions(
     await store.workspace_view(first.workspace_id).save(saved)
     new = directory(tmp_path, "b")
     shutil.rmtree(old)
-    fingerprinted(monkeypatch, "root https://github.com/o/r")
+    fingerprinted(monkeypatch, f"{ROOT} https://github.com/o/r")
 
     moved = await registry.find_or_register(str(new))
 
@@ -234,7 +236,7 @@ async def test_a_moved_repository_takes_over_its_workspace_and_sessions(
     assert [session.id for session in sessions] == ["abc"]
     query = "SELECT name, fingerprint FROM workspaces"
     rows = await store.run("Couldn't read", lambda connection: connection.execute(query).fetchall())
-    assert rows == [("b", "root https://github.com/o/r")]
+    assert rows == [("b", f"{ROOT} https://github.com/o/r")]
     assert await registry.find_or_register(str(new)) == Registered(first.workspace_id)
 
 
@@ -274,7 +276,7 @@ async def test_a_gone_workspace_of_another_repository_isnt_taken_over(
     registry = WorkspaceRegistry(store)
     first = await registry.find_or_register(str(old))
     old.rmdir()
-    fingerprinted(monkeypatch, "other git@github.com:o/r.git")
+    fingerprinted(monkeypatch, f"{'b' * 40} git@github.com:o/r.git")
     second = await registry.find_or_register(str(directory(tmp_path, "b")))
     assert second.workspace_id != first.workspace_id and second.note is None
 

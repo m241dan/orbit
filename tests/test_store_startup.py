@@ -140,7 +140,7 @@ async def test_an_import_of_old_session_files_is_noted_within_the_workspace(
 async def test_a_moved_repository_re_attached_is_noted_first(
     monkeypatch: pytest.MonkeyPatch, state: Path, root: Path, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(workspace_registry, "workspace_fingerprint", lambda path: "root ")
+    monkeypatch.setattr(workspace_registry, "workspace_fingerprint", lambda path: f"{'a' * 40} ")
     old = tmp_path / "old"
     old.mkdir()
     old_id = await workspace_id_of(state, old)

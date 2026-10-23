@@ -2,7 +2,8 @@
 notes on a workspace re-attached to its moved repository.
 
 A fingerprint is a repository's root commits' hashes and its ``origin`` remote's URL, empty
-without one, joined by spaces."""
+without one, joined by spaces. The URL may hold spaces itself, so the roots are the leading
+fields that are commit hashes."""
 
 import re
 from collections.abc import Sequence
@@ -10,6 +11,7 @@ from urllib.parse import urlsplit
 
 _SCHEME = re.compile(r"^[a-z][a-z0-9+.-]*://", re.IGNORECASE)
 _SCP = re.compile(r"^(?:[^@/]+@)?([^:/]+):(.*)$")
+_HASH = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
 
 def normalise_origin(url: str) -> str:
@@ -40,9 +42,13 @@ def fingerprints_match(a: str, b: str) -> bool:
 
 
 def _parsed(fingerprint: str) -> tuple[frozenset[str], str]:
-    """The root commits and the ``origin`` URL, empty if none, of ``fingerprint``."""
-    *roots, origin = fingerprint.split(" ")
-    return frozenset(roots), origin
+    """The root commits and the ``origin`` URL, empty if none, of ``fingerprint``: the leading
+    commit hashes before its last field, and the rest."""
+    *fields, last = fingerprint.split(" ")
+    count = 0
+    while count < len(fields) and _HASH.fullmatch(fields[count]):
+        count += 1
+    return frozenset(fields[:count]), " ".join([*fields[count:], last])
 
 
 def reattached_note(old: str, new: str) -> str:
