@@ -26,8 +26,7 @@ class Paging:
 
 def paging_from(snapshot: Snapshot) -> Paging:
     """How far back ``snapshot``'s transcript goes; with any, earlier events may remain."""
-    transcript = snapshot.transcript
-    oldest = transcript[0].seq if transcript else None
+    oldest = snapshot.oldest_seq
     return Paging(session=snapshot.session.id, oldest=oldest, more=oldest is not None)
 
 
@@ -46,11 +45,11 @@ def loading(paging: Paging, waiting: bool) -> Paging:
 
 def page_arrived(paging: Paging, page: HistoryPage) -> Paging | None:
     """How far back the conversation goes with ``page`` shown above it; None when ``page``
-    isn't one ``paging`` waits for. An empty page ends the paging, as it moves nothing back, and
-    the last page says whether earlier events were trimmed."""
+    isn't one ``paging`` waits for. A page empty as sent ends the paging, as it moves nothing
+    back, and the last page says whether earlier events were trimmed."""
     if not paging.loading or page.session != paging.session:
         return None
-    oldest = page.events[0].seq if page.events else paging.oldest
-    more = page.more and bool(page.events)
+    oldest = page.oldest_seq if page.oldest_seq is not None else paging.oldest
+    more = page.more and page.oldest_seq is not None
     trimmed = page.trimmed and not page.more
     return Paging(session=paging.session, oldest=oldest, more=more, trimmed=trimmed)

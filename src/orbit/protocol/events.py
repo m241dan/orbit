@@ -4,9 +4,18 @@ They're a discriminated union on ``type``, so they can be serialized to JSON and
 process boundary without changes.
 """
 
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
 
-from pydantic import AwareDatetime, Field, TypeAdapter, ValidationInfo, field_validator
+from pydantic import (
+    AwareDatetime,
+    Field,
+    ModelWrapValidatorHandler,
+    PrivateAttr,
+    TypeAdapter,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from orbit.protocol.commands import ProposalAction
 from orbit.protocol.models import (
@@ -24,6 +33,7 @@ from orbit.protocol.models import (
     _Message,
     drop_unknown_types_on_wire,
     message_types,
+    oldest_seq_if_dropped,
 )
 from orbit.protocol.names import WORK_LANE, BusyLane
 
@@ -408,11 +418,30 @@ class Snapshot(_Message):
     active: bool = True
     open_session: SessionRef | None = None
     viewers: int = Field(default=0, ge=0)
+    _dropped_oldest: int | None = PrivateAttr(default=None)
 
     @field_validator("transcript", mode="before")
     @classmethod
     def _drop_unknown_events_on_wire(cls, transcript: Any, info: ValidationInfo) -> Any:
         return drop_unknown_types_on_wire(transcript, EVENT_TYPES, info)
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _remember_dropped_on_wire(
+        cls, data: Any, handler: ModelWrapValidatorHandler[Self], info: ValidationInfo
+    ) -> Self:
+        snapshot = handler(data)
+        if isinstance(data, dict):
+            snapshot._dropped_oldest = oldest_seq_if_dropped(
+                data.get("transcript"), EVENT_TYPES, info
+            )
+        return snapshot
+
+    @property
+    def oldest_seq(self) -> int | None:
+        """The ``seq`` of the oldest event the transcript held as sent, counting those dropped
+        in decoding as of types this orbit doesn't know; none when it held none."""
+        return _oldest_seq(self._dropped_oldest, self.transcript)
 
 
 class HistoryPage(_Message):
@@ -425,11 +454,36 @@ class HistoryPage(_Message):
     events: tuple["EventEnvelope", ...]
     more: bool
     trimmed: bool = False
+    _dropped_oldest: int | None = PrivateAttr(default=None)
 
     @field_validator("events", mode="before")
     @classmethod
     def _drop_unknown_events_on_wire(cls, events: Any, info: ValidationInfo) -> Any:
         return drop_unknown_types_on_wire(events, EVENT_TYPES, info)
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _remember_dropped_on_wire(
+        cls, data: Any, handler: ModelWrapValidatorHandler[Self], info: ValidationInfo
+    ) -> Self:
+        page = handler(data)
+        if isinstance(data, dict):
+            page._dropped_oldest = oldest_seq_if_dropped(data.get("events"), EVENT_TYPES, info)
+        return page
+
+    @property
+    def oldest_seq(self) -> int | None:
+        """The ``seq`` of the oldest event the page held as sent, counting those dropped in
+        decoding as of types this orbit doesn't know; none when it held none."""
+        return _oldest_seq(self._dropped_oldest, self.events)
+
+
+def _oldest_seq(dropped_oldest: int | None, envelopes: tuple["EventEnvelope", ...]) -> int | None:
+    """``dropped_oldest``, the oldest ``seq`` remembered from decoding, if any; otherwise that
+    of the first of ``envelopes``, if any."""
+    if dropped_oldest is not None:
+        return dropped_oldest
+    return envelopes[0].seq if envelopes else None
 
 
 class LogGap(_Message):

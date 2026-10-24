@@ -1,3 +1,6 @@
+import json
+from typing import Any
+
 from orbit.protocol import (
     EventEnvelope,
     History,
@@ -6,6 +9,8 @@ from orbit.protocol import (
     SessionSummary,
     Settings,
     Snapshot,
+    decode_event,
+    encode,
 )
 from orbit.tui.view.history import Paging, earlier_request, loading, page_arrived, paging_from
 
@@ -87,3 +92,45 @@ def test_a_page_with_more_before_it_isnt_the_trimmed_end() -> None:
     asked = loading(paging_from(snapshot(7, 9)), True)
     page = HistoryPage(session="s1", events=logged(3, 5), more=True, trimmed=True)
     assert page_arrived(asked, page) == Paging(session="s1", oldest=3, more=True)
+
+
+def unknown(*seqs: int) -> list[dict[str, Any]]:
+    return [{"seq": seq, "payload": {"type": "something_new"}} for seq in seqs]
+
+
+def over_the_wire[M: Snapshot | HistoryPage](
+    message: M, field: str, envelopes: list[dict[str, Any]]
+) -> M:
+    """``message`` as decoded from the wire with ``envelopes`` as its ``field``."""
+    data = json.loads(encode(EventEnvelope(seq=20, session="s1", payload=message)))
+    data["payload"][field] = envelopes
+    decoded = decode_event(json.dumps(data))
+    assert decoded is not None and isinstance(decoded.payload, type(message))
+    return decoded.payload
+
+
+def test_a_page_of_only_dropped_events_moves_the_paging_back_and_keeps_more() -> None:
+    asked = loading(paging_from(snapshot(7, 9)), True)
+    page = over_the_wire(HistoryPage(session="s1", events=(), more=True), "events", unknown(3, 5))
+    assert page.events == ()
+    assert page_arrived(asked, page) == Paging(session="s1", oldest=3, more=True)
+
+
+def test_a_snapshot_of_only_dropped_events_can_ask_for_earlier_ones() -> None:
+    received = over_the_wire(snapshot(), "transcript", unknown(4, 6))
+    assert received.transcript == ()
+    paging = paging_from(received)
+    assert paging == Paging(session="s1", oldest=4, more=True)
+    assert earlier_request(paging) == History(session="s1", before_seq=4)
+
+
+def test_a_page_empty_on_the_wire_ends_the_paging() -> None:
+    asked = loading(paging_from(snapshot(7, 9)), True)
+    page = over_the_wire(HistoryPage(session="s1", events=(), more=True), "events", [])
+    assert page_arrived(asked, page) == Paging(session="s1", oldest=7, more=False)
+
+
+def test_messages_built_in_process_page_from_their_first_event() -> None:
+    assert snapshot(7, 9).oldest_seq == 7
+    assert HistoryPage(session="s1", events=logged(3, 5), more=True).oldest_seq == 3
+    assert HistoryPage(session="s1", events=(), more=True).oldest_seq is None

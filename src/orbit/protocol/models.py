@@ -43,6 +43,25 @@ def drop_unknown_types_on_wire(envelopes: Any, known: frozenset[str], info: Vali
     return [envelope for envelope in envelopes if not names_unknown_type(envelope, known)]
 
 
+def oldest_seq_if_dropped(
+    envelopes: Any, known: frozenset[str], info: ValidationInfo
+) -> int | None:
+    """The lowest ``seq`` among ``envelopes``, counting those of types not ``known``, when
+    validated with the ``wire`` context set and some of them are of such types, to be dropped;
+    otherwise none."""
+    if not isinstance(envelopes, list | tuple) or not (info.context or {}).get("wire"):
+        return None
+    if not any(names_unknown_type(envelope, known) for envelope in envelopes):
+        return None
+    return min(_readable_seqs(envelopes), default=None)
+
+
+def _readable_seqs(envelopes: list[Any] | tuple[Any, ...]) -> list[int]:
+    """The integer ``seq`` values of those ``envelopes`` that are objects holding one."""
+    seqs = [envelope.get("seq") for envelope in envelopes if isinstance(envelope, dict)]
+    return [seq for seq in seqs if type(seq) is int]
+
+
 class _Message(WireTolerant):
     pass
 

@@ -11,8 +11,10 @@ from orbit.protocol import (
     CommandEnvelope,
     Event,
     EventEnvelope,
+    HistoryPage,
     Notice,
     ProtocolError,
+    Snapshot,
     TasksChanged,
     TaskSpec,
     TaskState,
@@ -181,7 +183,10 @@ def with_nested(kind: str, nested: dict[str, Any]) -> tuple[EventEnvelope, dict[
 def test_decode_event_drops_nested_envelopes_of_unknown_types(kind: str) -> None:
     example, data = with_nested(kind, UNKNOWN_ENVELOPE)
 
-    assert decode_event(json.dumps(data)) == example
+    decoded = decode_event(json.dumps(data))
+
+    assert decoded is not None
+    assert decoded.model_dump() == example.model_dump()
 
 
 @pytest.mark.parametrize("kind", NESTED_FIELDS)
@@ -216,3 +221,57 @@ def test_decode_event_refuses_nested_envelopes_that_arent_a_list(kind: str) -> N
 
     with pytest.raises(ProtocolError):
         decode_event(json.dumps(data))
+
+
+def decoded_payload(kind: str, envelopes: list[dict[str, Any]]) -> Snapshot | HistoryPage:
+    """The ``kind`` example's payload, decoded with ``envelopes`` as the ones it holds."""
+    data = example_of(kind).model_dump(mode="json")
+    data["payload"][NESTED_FIELDS[kind]] = envelopes
+    decoded = decode_event(json.dumps(data))
+    assert decoded is not None
+    assert isinstance(decoded.payload, Snapshot | HistoryPage)
+    return decoded.payload
+
+
+def unknown_at(seq: int) -> dict[str, Any]:
+    return {**UNKNOWN_ENVELOPE, "seq": seq}
+
+
+def known_at(seq: int) -> dict[str, Any]:
+    return {"seq": seq, "payload": {"type": "notice", "message": "hi"}}
+
+
+@pytest.mark.parametrize("kind", NESTED_FIELDS)
+def test_decoding_remembers_the_oldest_seq_among_dropped_envelopes(kind: str) -> None:
+    payload = decoded_payload(kind, [unknown_at(4), unknown_at(6)])
+
+    assert payload.oldest_seq == 4
+
+
+@pytest.mark.parametrize("kind", NESTED_FIELDS)
+def test_the_oldest_seq_counts_kept_and_dropped_envelopes(kind: str) -> None:
+    assert decoded_payload(kind, [unknown_at(4), known_at(6)]).oldest_seq == 4
+    assert decoded_payload(kind, [known_at(3), unknown_at(4)]).oldest_seq == 3
+
+
+@pytest.mark.parametrize("kind", NESTED_FIELDS)
+def test_a_dropped_envelope_without_a_readable_seq_is_not_counted(kind: str) -> None:
+    unreadable = {**UNKNOWN_ENVELOPE, "seq": "soon"}
+
+    assert decoded_payload(kind, [unreadable, unknown_at(5)]).oldest_seq == 5
+    assert decoded_payload(kind, [unreadable]).oldest_seq is None
+
+
+@pytest.mark.parametrize("kind", NESTED_FIELDS)
+def test_without_envelopes_on_the_wire_there_is_no_oldest_seq(kind: str) -> None:
+    assert decoded_payload(kind, []).oldest_seq is None
+
+
+@pytest.mark.parametrize("kind", NESTED_FIELDS)
+def test_the_remembered_seq_leaves_the_encoded_json_unchanged(kind: str) -> None:
+    data = example_of(kind).model_dump(mode="json")
+    data["payload"][NESTED_FIELDS[kind]] = [unknown_at(4)]
+    decoded = decode_event(json.dumps(data))
+
+    assert decoded is not None
+    assert json.loads(encode(decoded))["payload"] == {**data["payload"], NESTED_FIELDS[kind]: []}
