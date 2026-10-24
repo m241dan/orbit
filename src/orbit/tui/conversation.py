@@ -89,6 +89,8 @@ class ConversationFeed:
     _earlier: bool = field(default=False, init=False)
     # Whether the events shown were logged before, so none of their tabs' output is new.
     _replaying: bool = field(default=False, init=False)
+    # The notes shown, which aren't in the session's log, to show again when it replaces them.
+    _notes: list[tuple[str, EntryKind]] = field(default_factory=list, init=False)
 
     def render(self, event: ShownEvent) -> None:
         """Show ``event`` in the conversation."""
@@ -108,7 +110,7 @@ class ConversationFeed:
         shown when they happened, with tabs for the agents ``running``, whose entries go under
         their pinned roles' tabs even when ``events`` don't hold their start. The calls and
         requests of agents not ``running``, and of runs a later start under the same id
-        ended, show as having no result."""
+        ended, show as having no result. The notes shown so far follow them."""
         self.transcript.clear()
         self.tabs.reset(running)
         self._turns = Turns()
@@ -122,6 +124,8 @@ class ConversationFeed:
         self.tabs.follow(running)
         for agent in stopped_callers(logged, running):
             self.transcript.end_tool_calls(agent, requests=True)
+        for note in self._notes:
+            self.append(*note)
 
     def prepend(self, events: Iterable[Event]) -> None:
         """Show ``events``, which came before every event shown, above them, as they were
@@ -144,6 +148,12 @@ class ConversationFeed:
             self.append(*planner_reset_entry(), PLANNER)
         elif in_group(event, _SHOWN_EVENTS):
             self.render(event)
+
+    def note(self, text: str, kind: EntryKind) -> None:
+        """Add the entry of ``text``, by nobody, under All, and again whenever the conversation
+        is replaced."""
+        self._notes.append((text, kind))
+        self.append(text, kind)
 
     def append(self, text: str, kind: EntryKind, agent: str | None = None) -> Entry:
         """The entry of ``text`` by ``agent``, if any, added under its tab and All."""

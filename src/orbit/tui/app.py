@@ -286,7 +286,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         if self._link is not None:  # Before the events start, which start the link.
             self._link.watch(self._follow_link)
         self.warnings.attach(
-            lambda logger, message: self._feed.append(*warning_entry(logger, message))
+            lambda logger, message: self._feed.note(*warning_entry(logger, message))
         )
         self._consume_events()
 

@@ -3,8 +3,9 @@
 import asyncio
 import logging
 
+from orbit.protocol import SessionSummary
 from orbit.tui import OrbitApp
-from tests.tui_fakes import FakeSession, entries
+from tests.tui_fakes import SNAPSHOT, FakeSession, entries, feed_events, opened
 
 
 def warn_twice() -> None:
@@ -42,3 +43,27 @@ async def test_a_different_warning_from_another_thread_adds_its_own_note() -> No
                 ("⚠ Telemetry: Export failed.", "verify"),
             ]
     assert app.warnings.lines() == ["Dropped 1 spans.", "Dropped 2 spans.", "Export failed."]
+
+
+async def test_a_warning_captured_before_mounting_survives_the_first_snapshot() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    with app.warnings.capturing():
+        logging.getLogger("opentelemetry.sdk").error("Export failed.")
+        async with app.run_test() as pilot:
+            await feed_events(session, pilot, SNAPSHOT)
+
+            assert ("⚠ Telemetry: Export failed.", "verify") in entries(app)
+
+
+async def test_a_warning_shown_survives_a_later_snapshot_once() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    with app.warnings.capturing():
+        async with app.run_test() as pilot:
+            await feed_events(session, pilot, SNAPSHOT)
+            await asyncio.to_thread(warn_twice)
+            await pilot.pause()
+            await feed_events(session, pilot, opened(SessionSummary(id="s2", name="other")))
+
+            assert entries(app).count(("⚠ Telemetry: Dropped 1 spans.", "verify")) == 1
