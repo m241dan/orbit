@@ -907,7 +907,7 @@ is paused); it resumes with the next commit from one of your tasks. A review may
 refused when any task on the board, whatever its status, or any earlier suggestion of the session
 has the same title (compared on one line, ignoring case and spacing; a reworded repeat gets
 through). Each reviewer is also told the titles of the tasks still queued or running, so it can
-steer clear of them. With the defaults, one of your commits can lead to at
+steer clear of them (other than the reviews and configurator tasks orbit queues for itself). With the defaults, one of your commits can lead to at
 most 15 suggested tasks. Removing a suggested task drops it from its batch, which is then reviewed
 without it (or closed, if nothing in it landed); removing a queued review closes the batch it would
 have suggested into.

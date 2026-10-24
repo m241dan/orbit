@@ -440,6 +440,26 @@ async def _landed_two_while_the_first_review_waited(
     return events
 
 
+async def test_a_review_queued_while_another_waits_is_not_told_of_that_review() -> None:
+    gate = asyncio.Event()
+
+    async def waits_then_reviews(call: Call) -> TurnEndReason:
+        await gate.wait()
+        return await suggests()(call)
+
+    session, _, _ = session_for(
+        claims_done,
+        claims_done,
+        reviewers=(waits_then_reviews, suggests()),
+        tree=FakeTree(),
+        review=True,
+    )
+    events = await _landed_two_while_the_first_review_waited(session, gate)
+    reviews = [t.task.prompt for t in board(events) if t.task.role == "reviewer"]
+    assert reviews[0].startswith("Review commit c1")
+    assert "Review commit" not in reviews[1].split("\n", 1)[1]
+
+
 async def test_every_so_many_of_the_users_commits_the_whole_codebase_is_super_reviewed() -> None:
     gate = asyncio.Event()
 

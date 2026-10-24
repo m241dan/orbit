@@ -15,7 +15,14 @@ from orbit.agent.domain.reviews import (
     pending_titles,
     review_prompt,
 )
-from orbit.protocol import TaskSpec, TaskState, TaskStatus
+from orbit.protocol import (
+    CONFIGURATOR,
+    REVIEWER,
+    SUPER_REVIEWER,
+    TaskSpec,
+    TaskState,
+    TaskStatus,
+)
 
 
 def state(
@@ -116,11 +123,11 @@ def test_a_commit_from_the_users_task_resumes_review() -> None:
 def test_suggestions_are_capped_per_review() -> None:
     reviews = planner(cap=2)
     batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
-    assert reviews.refusal(batch, "One", queued=()) is None
+    assert reviews.refusal(batch, "One", tasks=()) is None
     reviews.added(batch, "2")
-    assert reviews.refusal(batch, "Two", queued=()) is None
+    assert reviews.refusal(batch, "Two", tasks=()) is None
     reviews.added(batch, "3")
-    refusal = reviews.refusal(batch, "Three", queued=())
+    refusal = reviews.refusal(batch, "Three", tasks=())
     assert refusal is not None and "2" in refusal
 
 
@@ -128,7 +135,7 @@ def test_suggestions_already_queued_are_refused() -> None:
     reviews = planner()
     batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
     queued = (state("5", status="pending", prompt="Add tests for parse\nmore"),)
-    refusal = reviews.refusal(batch, "  add TESTS for parse ", queued=queued)
+    refusal = reviews.refusal(batch, "  add TESTS for parse ", tasks=queued)
     assert refusal == "Task 5 already covers that."
 
 
@@ -300,6 +307,22 @@ def test_the_tasks_still_to_run_or_running_are_listed_by_their_first_lines() -> 
     assert pending_titles(tasks) == ("Add tests", "Rename x", "Tidy")
 
 
+def orbits(task_id: str, status: TaskStatus, role: str) -> TaskState:
+    return TaskState(id=task_id, task=TaskSpec(prompt=f"A {role} task", role=role), status=status)
+
+
+def test_the_tasks_orbit_queued_for_itself_are_not_listed() -> None:
+    tasks = (
+        orbits("1", "pending", REVIEWER),
+        orbits("2", "running", SUPER_REVIEWER),
+        orbits("3", "pending", CONFIGURATOR),
+        state("4", status="pending", prompt="Add tests"),
+        state("5", status="running", prompt="Rename x"),
+        state("6", status="verifying", prompt="Tidy"),
+    )
+    assert pending_titles(tasks) == ("Add tests", "Rename x", "Tidy")
+
+
 def test_long_diffs_are_trimmed_from_the_end() -> None:
     prompt = review_prompt(
         ReviewJob(commits=("a",), round=0, batch=None), "d" * (DIFF_LIMIT + 50), 5, ()
@@ -382,9 +405,9 @@ def test_a_super_reviews_batch_has_its_own_cap() -> None:
     batch = reviews.open_batch(reviews.super_review("abc"))
     assert reviews.round_of(batch) == 1
     for task_id in ("2", "3"):
-        assert reviews.refusal(batch, f"Task {task_id}", queued=()) is None
+        assert reviews.refusal(batch, f"Task {task_id}", tasks=()) is None
         reviews.added(batch, task_id)
-    refusal = reviews.refusal(batch, "Task 4", queued=())
+    refusal = reviews.refusal(batch, "Task 4", tasks=())
     assert refusal is not None and "2 tasks" in refusal
 
 
@@ -401,7 +424,7 @@ def test_a_batch_is_not_reviewed_while_its_review_is_still_suggesting() -> None:
     batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
     reviews.added(batch, "2")
     assert reviews.landed(state("2", origin="review", batch=batch), "c2") is None
-    assert reviews.refusal(batch, "More", queued=()) is None
+    assert reviews.refusal(batch, "More", tasks=()) is None
     reviews.added(batch, "3")
     assert reviews.landed(state("3", origin="review", batch=batch), "c3") is None
     job = reviews.review_ended(batch)
@@ -422,7 +445,7 @@ def test_a_batch_still_working_when_its_review_ends_is_reviewed_later() -> None:
 def test_suggesting_into_a_closed_batch_is_refused() -> None:
     reviews = planner()
     batch = filled(reviews)
-    refusal = reviews.refusal(batch, "Late", queued=())
+    refusal = reviews.refusal(batch, "Late", tasks=())
     assert refusal is not None and "over" in refusal
 
 
@@ -430,7 +453,7 @@ def test_suggesting_into_a_batch_whose_review_ended_is_refused() -> None:
     reviews = planner()
     batch = filled(reviews, "2")
     assert batch in reviews.open_batches
-    refusal = reviews.refusal(batch, "Late", queued=())
+    refusal = reviews.refusal(batch, "Late", tasks=())
     assert refusal is not None and "review is over" in refusal
 
 

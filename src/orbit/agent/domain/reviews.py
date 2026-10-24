@@ -14,15 +14,19 @@ from pydantic import BaseModel, ConfigDict
 
 from orbit.agent.domain.board import WAITING
 from orbit.protocol import (
+    CONFIGURATOR,
     MANUAL_ORIGIN,
     PLANNER_ORIGIN,
     REVIEW_ORIGIN,
+    REVIEW_ROLES,
     SUPER_REVIEW_ORIGIN,
     TaskState,
 )
 
 # Characters of diff quoted in a review task; a reviewer can read files for more.
 DIFF_LIMIT = 30000
+# Roles of the tasks orbit queues for itself, which no reviewer would suggest.
+_ORBITS_ROLES = REVIEW_ROLES | {CONFIGURATOR}
 # Queued tasks named in a review task, so the reviewer doesn't suggest them; the rest are counted.
 PENDING_LIMIT = 40
 
@@ -210,13 +214,13 @@ class ReviewPlanner:
             return None
         return self._due(batch_id)
 
-    def refusal(self, batch: str, title: str, queued: Sequence[TaskState]) -> str | None:
+    def refusal(self, batch: str, title: str, tasks: Sequence[TaskState]) -> str | None:
         """Why a suggestion titled ``title`` can't join ``batch``; ``None`` if it can.
 
-        A title that, once normalised, is the first line of a task in ``queued`` (the board's
-        tasks, whatever their status) or of a suggestion the planner accepted this session is
-        a repeat. Only an exact match after normalisation counts: a reworded repeat is
-        accepted.
+        A title that, once normalised, is the first line of a task in ``tasks`` (the board's
+        tasks, whatever their role and status) or of a suggestion the planner accepted this
+        session is a repeat. Only an exact match after normalisation counts: a reworded repeat
+        is accepted.
         """
         closed = self._closed(batch)
         if closed is not None:
@@ -224,12 +228,13 @@ class ReviewPlanner:
         cap = self._open[batch].cap
         if len(self._open[batch].tasks) >= cap:
             return f"This review has already suggested {cap} tasks, the most allowed."
-        return self._repeat(title, queued)
+        return self._repeat(title, tasks)
 
-    def _repeat(self, title: str, queued: Sequence[TaskState]) -> str | None:
-        """Why a suggestion titled ``title`` repeats work; ``None`` if it's new."""
+    def _repeat(self, title: str, tasks: Sequence[TaskState]) -> str | None:
+        """Why a suggestion titled ``title`` repeats one of ``tasks`` or an earlier suggestion;
+        ``None`` if it's new."""
         wanted = _normalized(title)
-        for state in queued:
+        for state in tasks:
             if _normalized(state.task.prompt) == wanted:
                 return f"Task {state.id} already covers that."
         if wanted in self._suggested:
@@ -355,8 +360,13 @@ def _normalized(text: str) -> str:
 
 
 def pending_titles(tasks: Sequence[TaskState]) -> tuple[str, ...]:
-    """The first lines of the ``tasks`` still to run or running, which a review needn't suggest."""
-    return tuple(_first_line(state.task.prompt) for state in tasks if state.status in WAITING)
+    """The first lines of the ``tasks`` still to run or running that a review could repeat:
+    not the reviews and configurator tasks orbit queues for itself."""
+    return tuple(
+        _first_line(state.task.prompt)
+        for state in tasks
+        if state.status in WAITING and state.task.role not in _ORBITS_ROLES
+    )
 
 
 def review_prompt(job: ReviewJob, diff: str, cap: int, pending: Sequence[str]) -> str:
