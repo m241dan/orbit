@@ -16,9 +16,10 @@ from orbit.protocol import (
 )
 from orbit.tui.explorer import ExplorerScreen
 from orbit.tui.sessions import SessionChange, SessionsScreen
+from orbit.tui.view.common import kept_highlight
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.sessions import Viewing
-from orbit.tui.widgets import ChoiceScreen, ListScreen, PickerScreen, StatusLine
+from orbit.tui.widgets import ChoiceScreen, ListScreen, PickerScreen, StatusLine, relist
 
 SESSIONS = (SessionSummary(id="a", name="first"), SessionSummary(id="b", name="second"))
 
@@ -79,7 +80,7 @@ class RefusingOne:
 
 def note_colour(screen: ListScreen[Any]) -> str:
     """The hex colour of the note under ``screen``'s list."""
-    return screen.query_one("#picker-note", Static).styles.color.hex
+    return screen.query_one("#picker-note", StatusLine).styles.color.hex
 
 
 async def test_a_refused_rename_shows_under_the_list_as_an_error_until_the_next() -> None:
@@ -112,6 +113,32 @@ async def test_a_refused_listing_shows_under_the_explorers_list_as_an_error_unti
         assert note_colour(screen) == Color.parse(app.get_css_variables()["error"]).hex
         await pilot.press("h")
         assert screen.note is None and browse.sent[-1] == ListDirectory(path="/")
+
+
+class Listing(App[None]):
+    def compose(self) -> ComposeResult:
+        yield OptionList("a", "b", "c")
+
+
+async def test_relist_keeps_the_highlight_on_its_row_while_that_is_still_listed() -> None:
+    app = Listing()
+    async with app.run_test():
+        options = app.query_one(OptionList)
+        options.highlighted = 1
+        relist(options, ["new", "a", "b"], ["a", "b", "c"], ["new", "a", "b"])
+        assert options.highlighted == 2
+        assert str(options.get_option_at_index(0).prompt) == "new"
+
+
+async def test_relist_falls_back_where_kept_highlight_says_once_its_row_has_gone() -> None:
+    old, new = ["a", "b", "c"], ["a", "b", None]
+    app = Listing()
+    async with app.run_test():
+        options = app.query_one(OptionList)
+        options.highlighted = 2
+        relist(options, ["a", "b", "add"], old, new)
+        assert options.highlighted == kept_highlight(old, 2, new) == 1
+        assert options.option_count == 3
 
 
 class Lines(App[None]):

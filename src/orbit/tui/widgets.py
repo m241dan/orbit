@@ -241,14 +241,35 @@ class StatusLine(Static):
         self.display = status is not None
 
 
-class ListScreen[T](ModalScreen[T]):
+def relist(
+    options: OptionList,
+    labels: "Sequence[Option | VisualType]",
+    old_keys: Sequence[str | None],
+    new_keys: Sequence[str | None],
+) -> None:
+    """List ``labels``, the rows with ``new_keys``, in ``options`` in place of the rows with
+    ``old_keys``, the highlight going where ``kept_highlight`` says."""
+    highlight = kept_highlight(old_keys, options.highlighted, new_keys)
+    options.clear_options()
+    options.add_options(labels)
+    options.highlighted = highlight
+
+
+class BoxedModal[T](ModalScreen[T]):
+    """Modal screen whose text boxes are bordered in the secondary colour, or heavy in the
+    accent colour while focused."""
+
+    DEFAULT_CSS = """
+    BoxedModal Input { border: round $secondary; }
+    BoxedModal Input:focus { border: heavy $accent; }
+    """
+
+
+class ListScreen[T](BoxedModal[T]):
     """Modal screen around an ``OptionList``, whose highlight ``j`` and ``k`` move alongside
     the list's own arrow keys; a focused input handles keys first, so takes them as typing.
     A screen that yields ``_note_line`` under its list shows there why a change was refused."""
 
-    DEFAULT_CSS = """
-    ListScreen #picker-note { color: $error; }
-    """
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("j", "move('down')", "Down", show=False),
         Binding("k", "move('up')", "Up", show=False),
@@ -269,11 +290,7 @@ class ListScreen[T](ModalScreen[T]):
     ) -> None:
         """List ``labels``, the rows with ``keys``, in place of the rows with keys ``shown``,
         the highlight going where ``kept_highlight`` says."""
-        options = self.query_one(OptionList)
-        highlight = kept_highlight(shown, options.highlighted, keys)
-        options.clear_options()
-        options.add_options(self._options(keys, labels))
-        options.highlighted = highlight
+        relist(self.query_one(OptionList), self._options(keys, labels), shown, keys)
 
     @staticmethod
     def _options(keys: Sequence[str | None], labels: Sequence[VisualType]) -> list[Option]:
@@ -286,16 +303,14 @@ class ListScreen[T](ModalScreen[T]):
         rather than its place, as the list may have changed since; none once it's gone."""
         return picked_row(event.option_id, keys)
 
-    def _note_line(self) -> Static:
+    def _note_line(self) -> StatusLine:
         """The note under the list, for why a change was refused, hidden until there's one."""
-        note = Static("", id="picker-note")
-        note.display = False
-        return note
+        return StatusLine("", id="picker-note", classes="error")
 
     @property
     def note(self) -> str | None:
         """Why a change was refused, while that's shown under the list."""
-        note = self.query_one("#picker-note", Static)
+        note = self.query_one("#picker-note", StatusLine)
         return str(note.render()) if note.display else None
 
     def _refused(self, why: str) -> None:
@@ -310,9 +325,7 @@ class ListScreen[T](ModalScreen[T]):
 
     def _show_note(self, note: str | None) -> None:
         """Show ``note`` under the list, or hide it while it's none."""
-        shown = self.query_one("#picker-note", Static)
-        shown.update(note or "")
-        shown.display = note is not None
+        self.query_one("#picker-note", StatusLine).show(note)
 
 
 class TypingListScreen[T](ListScreen[T]):
@@ -337,8 +350,6 @@ class TypingListScreen[T](ListScreen[T]):
         padding: 0 1;
     }
     TypingListScreen OptionList { height: auto; max-height: 30; border: none; }
-    TypingListScreen Input { border: round $secondary; }
-    TypingListScreen Input:focus { border: heavy $accent; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "back", show=False),

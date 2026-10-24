@@ -71,8 +71,6 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
         padding: 0 1;
     }
     ExplorerScreen OptionList { height: 1fr; border: none; }
-    ExplorerScreen Input { border: round $secondary; }
-    ExplorerScreen Input:focus { border: heavy $accent; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("l", "into", show=False),

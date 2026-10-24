@@ -11,8 +11,7 @@ from textual.visual import VisualType
 from textual.widgets import OptionList
 from textual.widgets.option_list import Option
 
-from orbit.tui.view.common import kept_highlight
-from orbit.tui.widgets import ModalFocus
+from orbit.tui.widgets import ModalFocus, relist
 
 Row = tuple[str, VisualType]
 """A list row: the key it's tracked by and its label."""
@@ -58,11 +57,9 @@ class ListPane(ModalFocus, OptionList):
         if keys == self._shown_keys:
             self._relabel_rows(rows)
             return
-        highlight = kept_highlight(self._shown_keys, self.highlighted, keys)
-        self._shown_rows, self._shown_keys = rows, keys
-        self.clear_options()
-        self.add_options([label for _, label in rows] + ([] if trailing is None else [trailing]))
-        self.highlighted = highlight
+        shown, self._shown_rows, self._shown_keys = self._shown_keys, rows, keys
+        labels = [label for _, label in rows] + ([] if trailing is None else [trailing])
+        relist(self, labels, shown, keys)
 
     def _relabel_rows(self, rows: tuple[Row, ...]) -> None:
         """Relabel the shown rows whose label differs in ``rows``, which have the same keys."""

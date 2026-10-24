@@ -8,7 +8,6 @@ from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Vertical
-from textual.screen import ModalScreen
 from textual.widgets import Input, Static
 
 from orbit.protocol import AgentExited, ChecksProposed, DecideProposal, Event, ProposalAction
@@ -20,9 +19,10 @@ from orbit.tui.view.proposals import (
     proposal_text,
     proposal_title,
 )
+from orbit.tui.widgets import BoxedModal
 
 
-class ProposalScreen(ModalScreen[DecideProposal | None]):
+class ProposalScreen(BoxedModal[DecideProposal | None]):
     """Shows ``proposal`` and dismisses with the user's decision on it.
 
     ``a`` accepts and ``x`` ends the task; ``r`` opens a box for what to change, which
@@ -40,8 +40,6 @@ class ProposalScreen(ModalScreen[DecideProposal | None]):
         border: round $accent;
         padding: 0 1;
     }
-    ProposalScreen Input { border: round $secondary; }
-    ProposalScreen Input:focus { border: heavy $accent; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("a", "decide('accept')", show=False),

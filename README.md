@@ -215,8 +215,9 @@ keeps that session, as does picking it. Picking another session switches what ru
 active session is idle and no other frontend views it: the session you pick becomes the active one,
 and its conversation shows in place of the one you left. Otherwise, while the active session runs
 work or another frontend views it, picking a session shows it read-only, and what runs stays as it
-was. Switching is refused, with an error saying what to stop, while tasks run, a review runs or the
-planner answers. Any other frontend that was viewing the session you
+was. Switching is refused while tasks run, a review runs or the planner answers: the picker opens
+again, saying what to stop under the list, and nothing goes to the conversation; so does any other
+pick that's refused or can't be sent. Any other frontend that was viewing the session you
 left keeps it, read-only.
 
 A read-only view shows the session as it was last saved, with its conversation's last events. You

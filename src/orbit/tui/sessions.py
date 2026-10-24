@@ -88,8 +88,9 @@ class SessionsScreen(TypingListScreen[tuple[SessionChoice, ...]]):
     asks for a name, which enter confirms and escape leaves. ``r`` asks for the highlighted
     session's new name the same way, and ``x`` deletes it once the user confirms; either is
     sent with ``manage``, and a refusal shows why under the list, or in the name box's hint
-    while it's shown, until the next change is sent. Escape on the list dismisses with none,
-    or quits orbit at ``startup``, where there's no session to go back to.
+    while it's shown, until the next change is sent; ``refused`` shows there why a pick was.
+    Escape on the list dismisses with none, or quits orbit at ``startup``, where there's no
+    session to go back to.
     """
 
     HINTS = SESSIONS_HINTS
@@ -113,6 +114,7 @@ class SessionsScreen(TypingListScreen[tuple[SessionChoice, ...]]):
         self.resume = startup == "resume"
         self._manage = manage
         self._renaming: SessionSummary | None = None  # The session being renamed, if any.
+        self._why: str | None = None  # Why a pick was refused, to show once mounted.
 
     @property
     def rows(self) -> tuple[SessionSummary, ...]:
@@ -138,6 +140,14 @@ class SessionsScreen(TypingListScreen[tuple[SessionChoice, ...]]):
 
     def on_mount(self) -> None:
         self.query_one(OptionList).highlighted = 0
+        self._show_note(self._why)
+
+    def refused(self, why: str) -> None:
+        """Show ``why`` a pick was refused under the list, as soon as it's composed."""
+        if self.is_mounted:
+            self._refused(why)
+        else:
+            self._why = why
 
     def show(self, sessions: Sequence[SessionSummary], attached: str | None) -> None:
         """List ``sessions``, with the one ``attached`` first, in place of those listed, keeping
@@ -478,23 +488,34 @@ class SessionsHost:
             # Moved before sending, as the view may come back before sending returns.
             was = self._move(viewing.workspace) if choice and not viewing.joined else None
             # The sessions as last shown, as they may have changed since the picker opened.
-            await self._send_choice(choice or (), screen.sessions, was)
+            refused = Awaited(why=lambda why: self._pick_refused(why, startup, workspace))
+            await self._send_choice(choice or (), screen.sessions, refused, was)
 
         self._picker.open(screen, chosen)
+
+    def _pick_refused(self, why: str, startup: StartupPick | None, workspace: str | None) -> None:
+        """Show ``why`` a pick was refused in the picker, opening it again as it was opened, at
+        ``startup`` and on the ``workspace``, unless one is shown; no view of it comes."""
+        self._offering = None
+        self.open(startup, workspace)
+        shown = self.shown
+        assert shown is not None  # Opened, or shown already.
+        shown.refused(why)
 
     async def _send_choice(
         self,
         choice: Sequence[SessionChoice],
         sessions: Sequence[SessionSummary],
+        awaited: Awaited,
         was: _Place | None = None,
     ) -> None:
-        """Send the commands of the user's ``choice`` among ``sessions``, until one fails to
-        send; if the first does, go back to where this frontend ``was``, if it moved."""
+        """Send the commands of the user's ``choice`` among ``sessions``, each awaited as
+        ``awaited`` says, until one fails to send; if the first does, go back to where this
+        frontend ``was``, if it moved."""
         # Before sending, as the view may come back before sending returns.
         self._offering = viewed_only(choice, sessions)
-        # Refusals come back as errors, shown like any other.
         for command in choice:
-            if not await self._send(command, Awaited()):
+            if not await self._send(command, awaited):
                 self._offering = None
                 if was is not None:
                     self._be(was)

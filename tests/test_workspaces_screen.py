@@ -732,7 +732,7 @@ async def test_moving_to_another_workspace_failing_to_attach_stays_viewing_where
         session_of(app).send_error = RuntimeError("the backend is gone")
         await pilot.press("enter")
         assert mark(app) == shown
-        await pilot.press("ctrl+p")
+        await pilot.press("escape", "ctrl+p")  # Past the picker shown again, saying why.
         assert sessions(app).workspace == "A"
 
 

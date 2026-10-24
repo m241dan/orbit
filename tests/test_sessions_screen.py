@@ -162,7 +162,8 @@ async def test_picking_a_session_that_fails_to_send_shows_why_and_activates_noth
 
         assert app.is_running
         assert changes(session) == [Attach(workspace="w", session="old")]
-        assert entries(app)[-1] == ("Couldn't send the command: the backend is gone", "error")
+        assert picker(app).note == "Couldn't send the command: the backend is gone"
+        assert entries(app) == []
 
 
 async def test_deleting_a_session_that_fails_to_send_shows_why_once_under_the_list() -> None:
@@ -531,6 +532,53 @@ async def test_a_refusal_once_the_picker_closed_shows_nowhere() -> None:
         assert no_picker(app)
         assert entries(app) == []
         assert app.is_running
+
+
+CANT_SWITCH = "Can't switch: tasks are running."
+
+
+async def test_a_refused_pick_shows_why_in_the_picker_and_not_in_the_conversation() -> None:
+    app, session = in_process()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("enter")
+        await feed_events(session, pilot, refused(session, CANT_SWITCH))
+
+        screen = picker(app)
+        assert changes(session) == SWITCH_TO_OLD
+        assert screen.note == CANT_SWITCH
+        assert screen.startup
+        assert entries(app) == []
+
+
+async def test_each_refusal_of_a_pick_shows_in_the_one_picker_shown_again() -> None:
+    app, session = in_process()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("enter")
+        attach, activate = session.envelopes[-2:]
+        await feed_events(
+            session, pilot, CommandRefused(command_id=attach.command_id, code=BUSY, message="a")
+        )
+        await feed_events(
+            session, pilot, CommandRefused(command_id=activate.command_id, code=BUSY, message="b")
+        )
+
+        assert picker(app).note == "b"
+        assert len([s for s in app.screen_stack if isinstance(s, SessionsScreen)]) == 1
+        assert entries(app) == []
+
+
+async def test_the_next_change_sent_clears_why_a_pick_was_refused() -> None:
+    app, session = in_process()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("enter")
+        await feed_events(session, pilot, refused(session, CANT_SWITCH))
+        await pilot.press("r", "!", "enter")
+
+        assert picker(app).note is None
+        assert changes(session)[-1] == RenameSession(session_id="old", name="auth rework!")
 
 
 async def test_a_catalog_again_refreshes_the_picker_shown_in_place() -> None:
