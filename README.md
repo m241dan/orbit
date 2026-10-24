@@ -4,7 +4,7 @@ Orbit command-line tool.
 
 ## Install
 
-Requires [uv](https://docs.astral.sh/uv/) and the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`) on your `PATH`.
+Requires [uv](https://docs.astral.sh/uv/) and the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`) on your `PATH`. Orbit runs on Python 3.14, which uv fetches if it isn't installed.
 
 Install orbit once, from a clone or straight from git, and use it on any project:
 
@@ -1922,30 +1922,27 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     notes and settings a resumed session starts with, and the note on sessions imported from an
     older orbit's files.
 - `orbit.tui`: frontend. Sends commands and renders events. Imports only `orbit.protocol`.
-  `view` turns state and events into text and doesn't import Textual, with a module per area of
-  the screen (`events`, `transcript`, `tool_calls`, `proposals`, `tasks`, `panels`, `agents`,
-  `tabs`, `detail` and `detail_views` for the detail pane, `diffs` and `diff_numbers` for an
-  edit's diff, `progress` for notes on a task's run, `rules` for the rules ending turns and
-  agents' runs, `turns` for the conversation's running turns, `working` for the working row,
-  `log` for which of a tab's transcript entries are shown and where, `sessions` for the list of
-  sessions, `workspaces` for the list of workspaces, `windows` for the window h/j/k/l reaches from each window, `triggers` for the keys
-  that fire triggers and their footer labels, `confirm` for the confirmations asked before a
-  key's action, `link` for how the link to a control plane elsewhere is shown, and `settings` and
-  `common` for what they share); the widgets (`transcript`,
-  `transcript_log` for one tab's log, `event_stream` for batching the backend's events so a
-  flood still lets the screen repaint, `conversation` for the `ConversationFeed`, which turns
-  events into the transcript's entries, `entries` for an entry and the renderables that draw
-  it, `tabs`, `tasks`, `task_editor` for the task editor modal, `reason` for the modal saying
-  why a task ended, `link` for the status line and modals showing a lost or stopped control
-  plane, `agents`, `panels`,
-  `detail` for the detail pane, `working` for the working row, `proposals`, the proposal modal
-  and the `ProposalHost` that shows the waiting proposals one at a time, each once, and closes
-  the one shown when it's withdrawn,
-  `sessions`, the modal listing the sessions and the `SessionsHost` that shows it and refreshes
-  it while it's open, `workspaces`, the modal listing the workspaces served and the
-  `WorkspacesHost` that shows it, `list_pane` for the list pane the lists share, `footer` for the key footer,
-  and `widgets` for the building blocks they share) lay it out, and `app` is the Textual app that
-  holds them.
+  `view` holds its decisions and doesn't import Textual: `frontend` is the `Frontend` the app
+  hands everything but Textual's part to (what it shows of each event, what the keys and prompts
+  send, which window is selected), over `router`, which takes each event to the panes and hosts
+  that show it, `commands`, the `CommandDesk` that sends commands and follows their outcomes, and
+  `feed`, the `ConversationFeed` that turns events into the transcript's entries; `navigation`,
+  `place`, `opening` and `catalog`, with the pickers' models (`session_picker`, `workspace_list`,
+  `workspace_picker`, `explorer` and `typing_list`), are where the frontend is and how it moves;
+  each window and modal has a model (`conversation`, `log`, `tab_strip`, `prompt`, `tasks`,
+  `agents`, `panels`, `detail_views`, `working`, `history`, `task_editor`, `proposals`,
+  `settings`, `storage`, `takeover`, `link` and `windows`); and the rest are the rules they share
+  for what each piece reads as (`events`, `transcript`, `tool_calls`, `tabs`, `detail`, `diffs`,
+  `diff_numbers`, `progress`, `rules`, `turns`, `sessions`, `workspaces`, `triggers`, `confirm`,
+  `outcomes` and `common`). The widgets and modals show those models (`transcript`,
+  `transcript_log`, `tabs`, `tasks`, `task_editor`, `reason`, `agents`, `panels`, `detail`,
+  `working`, `proposals`, `sessions`, `workspaces`, `explorer`, `link`, `storage_halt`,
+  `takeover` and `settings_pickers`), with `entries` for the renderables that draw an entry,
+  `list_pane` for the list pane the lists share, `modal` for the slot holding a host's one modal,
+  `footer` for the key footer and `widgets` for the building blocks they share; `event_stream`
+  batches the backend's events so a flood still lets the screen repaint, and `app` is the Textual
+  app that holds the widgets, does what only Textual does (focus, key bindings and screens) and
+  hands the rest to `Frontend`.
 - `orbit.cli`: the composition root, and the only place the two sides are wired together: it
   plugs the external adapters into a `WorkspaceHost`, builds a `ControlPlane` around it and
   hands that to the TUI. It runs the backend on its own thread and event loop through
