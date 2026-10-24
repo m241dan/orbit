@@ -1735,7 +1735,7 @@ with status 2 and a message naming the file and the key.
 
 `"console"` writes each span to stderr as JSON, and is for `orbit serve` alone: as the TUI uses
 the terminal, `orbit chat`, running its own control plane or joining one, stops with status 2
-before the TUI starts, suggesting `"file"` instead. `"file"` writes OTLP JSON, one
+before the TUI starts, suggesting `"file"` or `"otlp"` instead. `"file"` writes OTLP JSON, one
 `ExportTraceServiceRequest` per line, as the Collector's `otlpjsonfile` receiver reads it, to
 `telemetry/spans-*.jsonl` in the state directory, readable by you alone. It starts a new file
 before one would grow past `file_max_mb`, deleting the oldest so `file_keep` remain.

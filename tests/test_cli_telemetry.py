@@ -104,8 +104,8 @@ def test_the_console_exporter_stops_chat_before_the_tui_starts(
 
     assert result.exit_code == 2
     assert result.stderr == (
-        "The console exporter writes to the terminal, which the TUI uses; use it with orbit "
-        'serve, or set exporter = "file".\n'
+        "The console exporter writes over the TUI; use it with orbit serve, or set exporter = "
+        '"file" or "otlp".\n'
     )
     assert (hosts, LocalApp.launched, started_telemetry) == ([], [], [])
 

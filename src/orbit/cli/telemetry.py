@@ -35,8 +35,8 @@ def _refuse_console(config_dir: Path) -> None:
     if _telemetry_settings(config_dir).exporter != "console":
         return
     typer.echo(
-        "The console exporter writes to the terminal, which the TUI uses; use it with orbit "
-        'serve, or set exporter = "file".',
+        "The console exporter writes over the TUI; use it with orbit serve, or set exporter = "
+        '"file" or "otlp".',
         err=True,
     )
     raise typer.Exit(2)
