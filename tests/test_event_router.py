@@ -14,9 +14,11 @@ from orbit.protocol import (
     OwnershipOffered,
     OwnershipTaken,
     SessionStateChanged,
+    StepState,
     Usage,
     UsageTotal,
     UsageTotals,
+    VerificationChanged,
 )
 from orbit.tui.event_router import AppHooks, EventRouter, Handlers, Panes
 from tests.tui_fakes import SNAPSHOT
@@ -28,6 +30,11 @@ TRACKED = ["agents.track", "tabs.track", "transcript.track", "proposals.withdraw
 def routed(event: Event) -> list[str]:
     """The names of the methods ``event`` calls on the router's widgets, hosts and hooks, in
     the order it calls them."""
+    return [str(name) for name, _, _ in calls_of(event).mock_calls]
+
+
+def calls_of(event: Event) -> Mock:
+    """What ``event`` calls on the router's widgets, hosts and hooks, recorded."""
     calls = Mock()
     panes = Panes(
         calls.transcript,
@@ -51,7 +58,7 @@ def routed(event: Event) -> list[str]:
     )
     hooks = AppHooks(calls.label_triggers, calls.leave_closed_detail, calls.unfocus_task_list)
     EventRouter(panes, handlers, hooks).render(event)
-    return [str(name) for name, _, _ in calls.mock_calls]
+    return calls
 
 
 def test_a_snapshot_shows_its_tasks_before_its_transcript_and_its_usage_after() -> None:
@@ -146,3 +153,10 @@ def test_the_streams_agents_and_listings_reach_the_navigation_and_its_totals_not
     assert routed(agents) == [*TRACKED, "navigation.follow_agents"]
     assert routed(listing) == [*TRACKED, "navigation.follow_listing"]
     assert routed(totals) == TRACKED
+
+
+def test_verification_steps_reach_their_panel_with_what_they_check() -> None:
+    steps = (StepState(name="Lint", status="running"),)
+    calls = calls_of(VerificationChanged(steps=steps, title="Startup check"))
+
+    calls.verification.show.assert_called_once_with(steps, "Startup check")

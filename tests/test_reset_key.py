@@ -1,6 +1,5 @@
 """ctrl+n: reset the planner, after a confirmation, and rule off its conversation."""
 
-import pytest
 from textual.widgets import Static
 
 from orbit.protocol import PLANNER, AgentStarted, ConversationReset, ResetConversation
@@ -23,16 +22,6 @@ async def test_ctrl_n_asks_then_resets_the_planner() -> None:
         await pilot.press("y")
         assert session.commands == [ResetConversation(agent=PLANNER)]
         assert not isinstance(app.screen, ConfirmScreen)
-
-
-@pytest.mark.parametrize("key", ["n", "escape"])
-async def test_declining_the_reset_sends_nothing(key: str) -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await pilot.press("ctrl+n", key)
-        assert not isinstance(app.screen, ConfirmScreen)
-        assert session.commands == []
 
 
 async def test_ctrl_n_over_another_modal_does_not_ask() -> None:

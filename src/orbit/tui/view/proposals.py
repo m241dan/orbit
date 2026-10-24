@@ -33,6 +33,15 @@ def proposal_text(event: ChecksProposed) -> str:
     return "\n".join(lines)
 
 
+def revision(proposal: ChecksProposed, feedback: str) -> DecideProposal | None:
+    """The decision asking for the changes ``feedback`` says to ``proposal``; none while it's
+    blank."""
+    text = feedback.strip()
+    if not text:
+        return None
+    return DecideProposal(task_id=proposal.task_id, action="revise", feedback=text)
+
+
 def decision_entry(agent: str, decision: DecideProposal | ProposalDecided) -> tuple[str, EntryKind]:
     """The user's ``decision`` on ``agent``'s proposal, as a transcript entry."""
     note = DECISION_NOTES[decision.action]

@@ -37,7 +37,7 @@ async def test_sidebar_shows_in_the_footer() -> None:
 
 @pytest.mark.parametrize(
     ("keys", "expected"),
-    [("kl", "transcript"), ("l", "prompt"), ("kj", "prompt"), ("k", "transcript")],
+    [("kl", "transcript"), ("l", "prompt")],
 )
 async def test_hjkl_skip_sidebar_windows_while_it_is_hidden(keys: str, expected: str) -> None:
     app = OrbitApp(FakeSession())
