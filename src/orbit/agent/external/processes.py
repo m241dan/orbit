@@ -99,6 +99,28 @@ async def run_process(
     return process.returncode, output
 
 
+def start_failure(
+    command: Sequence[str], cwd: Path | str | None, error: OSError, *, missing_hint: str = ""
+) -> str:
+    """The message for ``command`` failing to start in ``cwd`` (this process's own directory
+    when ``None``) with ``error``: whether the directory or the program is missing, else what
+    ``error`` says. ``missing_hint`` follows it when the program is missing."""
+    program = command[0]
+    # A missing directory raises FileNotFoundError too, so it's told apart by looking.
+    if cwd is not None and not Path(cwd).is_dir():
+        return f"Could not start {program!r}: there's no directory {cwd} to run it in."
+    if isinstance(error, FileNotFoundError):
+        message = f"Could not start {program!r}: no such program."
+        return f"{message} {missing_hint}" if missing_hint else message
+    return _unstartable(program, cwd, error)
+
+
+def _unstartable(program: str, cwd: Path | str | None, error: OSError) -> str:
+    """The message for ``program`` failing to start in ``cwd``, which is there, with ``error``."""
+    where = "" if cwd is None else f" in {cwd}"
+    return f"Could not start {program!r}{where}: {error.strerror or error}."
+
+
 def process_alive(pid: int) -> bool:
     """Whether the process ``pid`` is running as this user."""
     try:

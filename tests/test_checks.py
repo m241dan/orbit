@@ -39,7 +39,17 @@ async def test_missing_command_fails_the_step() -> None:
     step = VerificationStep(name="check", command=("orbit-no-such-command",))
     passed, output = await run_step(step, ".")
     assert not passed
-    assert output == "Could not run 'orbit-no-such-command': command not found."
+    assert output == "Could not start 'orbit-no-such-command': no such program."
+
+
+async def test_missing_root_fails_the_step_naming_the_root(tmp_path: Path) -> None:
+    missing = tmp_path / "gone"
+    passed, output = await run_step(python_step("pass"), str(missing))
+    assert not passed
+    assert (
+        output
+        == f"Could not start {sys.executable!r}: there's no directory {missing} to run it in."
+    )
 
 
 async def test_non_executable_command_fails_the_step(tmp_path: Path) -> None:
@@ -49,7 +59,7 @@ async def test_non_executable_command_fails_the_step(tmp_path: Path) -> None:
     step = VerificationStep(name="check", command=(str(script),))
     passed, output = await run_step(step, ".")
     assert not passed
-    assert output == f"Could not run {str(script)!r}: Permission denied."
+    assert output == f"Could not start {str(script)!r} in .: Permission denied."
 
 
 async def test_cancelling_a_step_kills_its_process() -> None:

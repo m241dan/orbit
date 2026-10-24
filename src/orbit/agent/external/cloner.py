@@ -13,7 +13,7 @@ from pathlib import Path
 from orbit.agent.application.ports import CloneFailed
 from orbit.agent.domain.clones import clone_failure, clone_names, clone_progress
 from orbit.agent.external.git import GitUnavailable, git
-from orbit.agent.external.processes import spawned
+from orbit.agent.external.processes import spawned, start_failure
 from orbit.protocol import WorkspaceCloning, clone_failure_message, clone_name
 
 # How much of what git says, besides its progress, is kept for the message if it fails.
@@ -67,13 +67,13 @@ class Cloner:
 async def _cloned(url: str, directory: Path, progress: Callable[[WorkspaceCloning], None]) -> None:
     """Clone the repository at ``url`` into ``directory``, which is empty, telling ``progress``
     of git's progress. Raises :class:`CloneFailed` if git fails or can't be started."""
+    command = ("git", "clone", "--progress", "--", url, str(directory))
     try:
         env = {
             **os.environ,
             "GIT_TERMINAL_PROMPT": "0",
             "GIT_SSH_COMMAND": await ssh_command(directory),
         }
-        command = ("git", "clone", "--progress", "--", url, str(directory))
         async with spawned(
             command,
             env=env,
@@ -84,8 +84,10 @@ async def _cloned(url: str, directory: Path, progress: Callable[[WorkspaceClonin
             assert process.stderr is not None
             said = await _GitOutput(url, progress).read(process.stderr)
             status = await process.wait()
-    except (OSError, GitUnavailable) as exc:
-        raise CloneFailed(clone_failure_message(url, f"git failed to start: {exc}")) from None
+    except OSError as error:
+        raise CloneFailed(clone_failure_message(url, start_failure(command, None, error))) from None
+    except GitUnavailable as error:
+        raise CloneFailed(clone_failure_message(url, str(error))) from None
     if status != 0:
         raise CloneFailed(clone_failure(url, said))
 

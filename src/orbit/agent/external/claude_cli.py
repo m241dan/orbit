@@ -19,7 +19,7 @@ from typing import Any
 from orbit.agent.application.ports import AgentLaunch, ResumeFailed
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.roles import tool_rules
-from orbit.agent.external.processes import spawned
+from orbit.agent.external.processes import spawned, start_failure
 from orbit.protocol import (
     AGENT_FAILED,
     AssistantMessage,
@@ -316,9 +316,10 @@ class _Turn:
                     limit=LINE_LIMIT,
                 )
             )
-        except FileNotFoundError:
+        except OSError as error:
+            hint = "Is the Claude CLI installed and on PATH?"
             raise RuntimeError(
-                f"Could not start {self._args[0]!r}; is the Claude CLI installed and on PATH?"
+                start_failure(self._args, self._cwd, error, missing_hint=hint)
             ) from None
 
     async def _converse(

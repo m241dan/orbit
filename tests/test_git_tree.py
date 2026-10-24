@@ -755,7 +755,7 @@ async def test_head_is_the_trees_latest_commit(repo: Path) -> None:
 async def test_head_before_the_coder_tree_exists_raises_a_tree_failure(repo: Path) -> None:
     # git can't run in a directory that isn't there; callers expect a TreeFailed, not an OSError.
     tree = GitCoderTree(str(repo))
-    with pytest.raises(TreeFailed, match="git rev-parse"):
+    with pytest.raises(TreeFailed, match=r"there.s no directory .*coder to run it in"):
         await tree.head()
 
 
@@ -1308,5 +1308,5 @@ async def test_the_repositorys_git_directory_is_found_once(
 
 async def test_a_setup_that_cant_start_raises_a_tree_failure(repo: Path) -> None:
     tree = GitCoderTree(str(repo), Setup(command=("orbit-no-such-command", "--sync")))
-    with pytest.raises(TreeFailed, match="orbit-no-such-command --sync failed to start"):
+    with pytest.raises(TreeFailed, match=r"^Could not start 'orbit-no-such-command': no such pro"):
         await tree.prepare(keep=False)

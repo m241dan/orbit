@@ -101,12 +101,26 @@ async def test_a_clone_when_git_cant_start_fails_and_leaves_no_directory(
     monkeypatch.setenv("PATH", str(tmp_path / "no-bin"))
     clones = tmp_path / "clones"
 
-    with pytest.raises(
-        CloneFailed, match="Couldn't clone /srv/proj: git failed to start: "
-    ) as failed:
+    with pytest.raises(CloneFailed) as failed:
         await Cloner(clones).clone("/srv/proj", Progress())
 
-    assert str(failed.value).startswith(clone_failure_message("/srv/proj", ""))
+    message = clone_failure_message("/srv/proj", "Could not start 'git': no such program.")
+    assert str(failed.value) == message
+    assert list(clones.iterdir()) == []
+
+
+async def test_a_clone_with_its_ssh_command_set_when_git_cant_start_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PATH", str(tmp_path / "no-bin"))
+    monkeypatch.setenv("GIT_SSH_COMMAND", "ssh")
+    clones = tmp_path / "clones"
+
+    with pytest.raises(CloneFailed) as failed:
+        await Cloner(clones).clone("/srv/proj", Progress())
+
+    message = clone_failure_message("/srv/proj", "Could not start 'git': no such program.")
+    assert str(failed.value) == message
     assert list(clones.iterdir()) == []
 
 

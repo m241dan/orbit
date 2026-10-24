@@ -492,8 +492,33 @@ async def test_runner_rejects_non_json_output(tmp_path: Path) -> None:
 
 async def test_runner_reports_missing_cli(tmp_path: Path) -> None:
     runner = ClaudeCliRunner(command=(str(tmp_path / "no-such-claude"),))
-    with pytest.raises(RuntimeError, match=r"Could not start .*no-such-claude"):
+    with pytest.raises(RuntimeError) as raised:
         await run(runner, "hi")
+    assert str(raised.value) == (
+        f"Could not start {str(tmp_path / 'no-such-claude')!r}: no such program. "
+        "Is the Claude CLI installed and on PATH?"
+    )
+
+
+async def test_runner_reports_a_missing_directory_not_a_missing_cli(tmp_path: Path) -> None:
+    runner, _ = make_runner(tmp_path)
+    missing = tmp_path / "gone"
+    launch = AgentLaunch(AGENT, URL, "hi", Settings(), str(missing), "Plan.", ("x",))
+    with pytest.raises(RuntimeError) as raised:
+        [e async for e in runner.converse("t", launch)]
+    assert str(raised.value) == (
+        f"Could not start {sys.executable!r}: there's no directory {missing} to run it in."
+    )
+
+
+async def test_runner_reports_a_cli_it_may_not_run(tmp_path: Path) -> None:
+    script = tmp_path / "claude"
+    script.write_text("#!/bin/sh\n")
+    script.chmod(0o644)
+    runner = ClaudeCliRunner(command=(str(script),))
+    with pytest.raises(RuntimeError) as raised:
+        await run(runner, "hi")
+    assert str(raised.value) == f"Could not start {str(script)!r} in .: Permission denied."
 
 
 async def test_cancel_kills_the_cli_process(tmp_path: Path) -> None:

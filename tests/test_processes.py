@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from orbit.agent.external import processes
-from orbit.agent.external.processes import process_alive, run_process, spawned
+from orbit.agent.external.processes import process_alive, run_process, spawned, start_failure
 from tests.process_checks import gone
 
 
@@ -221,3 +221,57 @@ def test_another_users_process_is_not_taken_as_alive(monkeypatch: pytest.MonkeyP
 
 def test_a_process_id_too_large_for_one_is_not_alive() -> None:
     assert not process_alive(2**64)
+
+
+def test_a_start_failure_names_a_missing_program(tmp_path: Path) -> None:
+    error = FileNotFoundError(2, "No such file or directory")
+    assert start_failure(("orbit-x", "-v"), tmp_path, error) == (
+        "Could not start 'orbit-x': no such program."
+    )
+
+
+def test_a_start_failure_for_a_missing_program_ends_with_the_hint(tmp_path: Path) -> None:
+    error = FileNotFoundError(2, "No such file or directory")
+    assert start_failure(("orbit-x",), tmp_path, error, missing_hint="Install it.") == (
+        "Could not start 'orbit-x': no such program. Install it."
+    )
+
+
+def test_a_start_failure_names_a_missing_directory_not_the_program(tmp_path: Path) -> None:
+    missing = tmp_path / "gone"
+    error = FileNotFoundError(2, "No such file or directory")
+    assert start_failure(("orbit-x",), missing, error, missing_hint="Install it.") == (
+        f"Could not start 'orbit-x': there's no directory {missing} to run it in."
+    )
+
+
+def test_a_start_failure_names_a_file_given_as_the_directory(tmp_path: Path) -> None:
+    file = tmp_path / "file"
+    file.write_text("")
+    error = NotADirectoryError(20, "Not a directory")
+    assert start_failure(("orbit-x",), file, error) == (
+        f"Could not start 'orbit-x': there's no directory {file} to run it in."
+    )
+
+
+def test_a_start_failure_names_a_permission_error(tmp_path: Path) -> None:
+    error = PermissionError(13, "Permission denied")
+    assert start_failure(("orbit-x",), tmp_path, error, missing_hint="Install it.") == (
+        f"Could not start 'orbit-x' in {tmp_path}: Permission denied."
+    )
+
+
+def test_a_start_failure_without_a_strerror_gives_the_error_itself(tmp_path: Path) -> None:
+    assert start_failure(("orbit-x",), tmp_path, OSError("exec format")) == (
+        f"Could not start 'orbit-x' in {tmp_path}: exec format."
+    )
+
+
+def test_a_start_failure_in_this_processs_directory_names_no_directory() -> None:
+    error = PermissionError(13, "Permission denied")
+    assert (
+        start_failure(("orbit-x",), None, error) == "Could not start 'orbit-x': Permission denied."
+    )
+    assert start_failure(("orbit-x",), None, FileNotFoundError(2, "No such file")) == (
+        "Could not start 'orbit-x': no such program."
+    )

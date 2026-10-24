@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from orbit.agent.application.ports import TreeFailed
-from orbit.agent.external.processes import spawned
+from orbit.agent.external.processes import spawned, start_failure
 
 
 class GitUnavailable(TreeFailed):
@@ -79,4 +79,4 @@ def git_sync(cwd: Path | str, *args: str, stderr: bool = True) -> GitResult:
 
 def _unavailable(cwd: Path | str, args: tuple[str, ...], error: OSError) -> GitUnavailable:
     """The error for ``git args`` failing to start in ``cwd`` with ``error``."""
-    return GitUnavailable(f"git {args[0]} failed to start in {cwd}: {error}")
+    return GitUnavailable(start_failure(("git", *args), cwd, error))

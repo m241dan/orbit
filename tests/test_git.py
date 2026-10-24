@@ -58,9 +58,10 @@ def test_git_sync_gives_the_same_as_git(repo: Path) -> None:
 
 async def test_a_missing_directory_makes_git_unavailable(tmp_path: Path) -> None:
     missing = tmp_path / "missing"
-    with pytest.raises(GitUnavailable, match=f"git status failed to start in {missing}"):
+    message = f"^Could not start 'git': there's no directory {missing} to run it in.$"
+    with pytest.raises(GitUnavailable, match=message):
         await git(missing, "status")
-    with pytest.raises(GitUnavailable, match=f"git status failed to start in {missing}"):
+    with pytest.raises(GitUnavailable, match=message):
         git_sync(missing, "status")
 
 
@@ -68,9 +69,10 @@ async def test_a_missing_git_makes_git_unavailable(
     monkeypatch: pytest.MonkeyPatch, repo: Path
 ) -> None:
     monkeypatch.setenv("PATH", str(repo))
-    with pytest.raises(GitUnavailable, match="git status failed to start"):
+    message = r"^Could not start 'git': no such program\.$"
+    with pytest.raises(GitUnavailable, match=message):
         await git(repo, "status")
-    with pytest.raises(GitUnavailable, match="git status failed to start"):
+    with pytest.raises(GitUnavailable, match=message):
         git_sync(repo, "status")
 
 

@@ -26,7 +26,7 @@ from orbit.agent.domain.coder_tree import (
     unmerged_note,
 )
 from orbit.agent.external.git import GitResult, git
-from orbit.agent.external.processes import run_process
+from orbit.agent.external.processes import run_process, start_failure
 from orbit.agent.external.repository import ORBIT_DIR, find_git_common_dir
 from orbit.agent.external.shielding import shielded
 from orbit.agent.external.whole_files import write_whole
@@ -47,7 +47,7 @@ async def _run_setup(command: Sequence[str], cwd: Path) -> tuple[bool, str]:
     try:
         returncode, output = await run_process(command, cwd)
     except OSError as error:
-        raise TreeFailed(f"{' '.join(command[:2])} failed to start in {cwd}: {error}") from error
+        raise TreeFailed(start_failure(command, cwd, error)) from error
     return returncode == 0, output.decode(errors="replace").strip()
 
 
