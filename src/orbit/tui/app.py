@@ -1,7 +1,7 @@
 """Textual frontend. Talks to the backend only through a protocol Session."""
 
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import Awaitable, Callable
 from contextlib import aclosing
 from dataclasses import replace
 from typing import ClassVar
@@ -12,40 +12,7 @@ from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Tabs
 
-from orbit import __version__
-from orbit.protocol import (
-    CONFIGURE_CHECKS,
-    INTERNAL,
-    PLANNER,
-    PLANNER_LANE,
-    PROTOCOL_VERSION,
-    SUPER_REVIEW,
-    UNKNOWN,
-    WORK_LANE,
-    AcceptTask,
-    AddTask,
-    CancelAgent,
-    CancelTurn,
-    ChecksProposed,
-    Command,
-    Connected,
-    DecideProposal,
-    EditTask,
-    ErrorOccurred,
-    Event,
-    FireTrigger,
-    Hello,
-    Link,
-    LinkState,
-    RemoveTask,
-    ResetConversation,
-    RunTasks,
-    SendMessage,
-    Session,
-    Settings,
-    TaskSpec,
-    UpdateSettings,
-)
+from orbit.protocol import Command, Connected, Link, LinkState, Session, Settings, TaskSpec
 from orbit.tui.agents import AgentsPane
 from orbit.tui.detail import DetailPane
 from orbit.tui.event_stream import event_batches
@@ -63,36 +30,11 @@ from orbit.tui.task_editor import TaskEditorScreen
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.transcript_log import TranscriptLog
-from orbit.tui.view.commands import CommandDesk
-from orbit.tui.view.common import EntryKind
-from orbit.tui.view.confirm import (
-    CONFIGURE_MESSAGE,
-    CONFIGURE_TITLE,
-    CONFIGURE_YES,
-    RESET_MESSAGE,
-    RESET_TITLE,
-    RESET_YES,
-)
-from orbit.tui.view.events import (
-    coalesce,
-)
-from orbit.tui.view.feed import ConversationFeed
-from orbit.tui.view.history import HistoryPager
-from orbit.tui.view.navigation import Navigation, Views
+from orbit.tui.view.frontend import Frontend, Parts, Saved
 from orbit.tui.view.opening import Opening
 from orbit.tui.view.outcomes import Awaited
-from orbit.tui.view.proposals import decision_entry
-from orbit.tui.view.router import AppHooks, EventRouter, Handlers, Panes
-from orbit.tui.view.tasks import edit_refusal
-from orbit.tui.view.transcript import PLANNER_BUSY, warning_entry
-from orbit.tui.view.windows import SIDEBAR_WINDOWS, neighbors
 from orbit.tui.warning_capture import WarningCapture
-from orbit.tui.widgets import (
-    ChatPrompt,
-    StatusLine,
-    confirm,
-    mark_selected,
-)
+from orbit.tui.widgets import ChatPrompt, StatusLine, confirm, mark_selected
 from orbit.tui.workspaces import WorkspacesHost
 
 _PLAIN_OPENING = Opening()
@@ -164,17 +106,12 @@ class OrbitApp(App[None], inherit_bindings=False):
         super().__init__()
         self._session = session
         self._link = link
-        # Id of the window h/j/k/l last moved to.
-        self._selected = "prompt"
-        self._proposals = ProposalHost(self.push_screen, self._decide)
-        views = Views(
-            SessionsHost(self.push_screen, self._send, lambda: self._router.show_viewing()),
-            WorkspacesHost(self.push_screen, self._send),
+        self._opening = opening
+        self._proposals = ProposalHost(self.push_screen)
+        self._sessions = SessionsHost(
+            self.push_screen, self._send, lambda: self._frontend.router.show_viewing()
         )
-        # The latest catalog, which both pickers read, where the app is and how it opens.
-        self._navigation = Navigation(views, self._send, opening, link is not None)
-        # The feed shows answers once mounted, before any event arrives.
-        self._desk = CommandDesk(session.send, self._render_event, lambda e: self._feed.render(e))
+        self._workspaces = WorkspacesHost(self.push_screen, self._send)
         self._takeover = TakeoverHost(self.push_screen, self._send).offer
         # The lines by the prompt, built here so their hosts can show statuses on them.
         self._halt_status = StatusLine(id="storage-halt", classes="error")
@@ -216,111 +153,120 @@ class OrbitApp(App[None], inherit_bindings=False):
     @property
     def storage_halt(self) -> str | None:
         """Why the session is halted because storage failed; none while it isn't."""
-        return self._halt.explanation
+        return self._frontend.storage_halt
 
     def on_mount(self) -> None:
         # Looked up once: a query walks the DOM, and events arrive many times a second.
         self._transcript = self.query_one(Transcript)
-        self._tabs = self.query_one(ConversationTabs).strip
         self._prompt = self.query_one(ChatPrompt)
         self._task_list = self.query_one(TaskList)
-        self._verification = self.query_one(VerificationPanel)
-        self._usage = self.query_one(UsagePanel)
         self._agents = self.query_one(AgentsPane)
         self._side = self.query_one("#side")
-        # Read through, so a clock set later still times the conversation.
-        self._feed = ConversationFeed(
-            self._transcript.conversation,
-            self._tabs,
-            self._task_list,
-            self._verification,
-            lambda: self.clock(),
+        self._frontend = Frontend(
+            self._parts(), self._session.send, self._opening, self._link is not None
         )
-        self._pager = HistoryPager(self._transcript, self._feed, self._send)
-        self._router = EventRouter(
-            Panes(
-                self._transcript,
-                self._tabs,
-                self._prompt.marks,
-                self._viewing,
-                self._task_list,
-                self._verification,
-                self._usage,
-                self._agents,
-            ),
-            Handlers(
-                self._feed,
-                self._pager,
-                self._desk,
-                self._proposals.queue,
-                self._pickers.model,
-                self._navigation,
-                self._halt,
-                self._takeover,
-            ),
-            AppHooks(self._label_triggers, self._leave_closed_detail, self._unfocus_task_list),
-        )
-        self.query_one(f"#{self._selected}").add_class("selected")
+        self._frontend.start()
         self._pickers.install(self)
         if self._link is not None:  # Before the events start, which start the link.
             self._link.watch(self._follow_link)
-        self.warnings.attach(
-            lambda logger, message: self._feed.note(*warning_entry(logger, message))
-        )
+        self.warnings.attach(self._frontend.note_warning)
         self._consume_events()
+
+    def _parts(self) -> Parts:
+        """The widgets and hosts the frontend shows in, their models where they have them."""
+        transcript, prompt = self._transcript, self._prompt
+        return Parts(
+            app=self,
+            conversation=transcript.conversation,
+            paging=transcript,
+            tabs=self.query_one(ConversationTabs).strip,
+            prompt=prompt,
+            marks=prompt.marks,
+            viewing=self._viewing,
+            tasks=self._task_list.board,
+            steps=self.query_one(VerificationPanel).verification,
+            usage=self.query_one(UsagePanel),
+            agents=self._agents.agents,
+            place=self._sessions,
+            workspaces=self._workspaces,
+            proposals=self._proposals,
+            pickers=self._pickers.model,
+            halt=self._halt,
+            takeover=self._takeover,
+            # Read through, so a clock set later still times the conversation.
+            clock=lambda: self.clock(),
+        )
+
+    # What the frontend asks of the app itself.
+
+    @property
+    def nothing_focused(self) -> bool:
+        return self.focused is None
+
+    @property
+    def detail_open(self) -> bool:
+        return self._transcript.detail.opened
+
+    @property
+    def sidebar_shown(self) -> bool:
+        return self._side.display
+
+    def warn(self, message: str) -> None:
+        self.notify(message, severity="warning")
+
+    def confirm(
+        self, title: str, message: str, yes: str, then: Callable[[], Awaitable[object]]
+    ) -> None:
+        confirm(self.push_screen, title, message, yes, then)
+
+    def edit_task(self, task: TaskSpec | None, settings: Settings, saved: Saved) -> None:
+        self.push_screen(TaskEditorScreen(task, settings, self._pickers.model), saved)
+
+    def label_triggers(self, labels: dict[str, str | None]) -> None:
+        """Label each trigger's key in the footer with its label in ``labels``, hiding those
+        with none."""
+        bindings = self._bindings.key_to_bindings
+        missing: set[str] = set()
+        for key, label in labels.items():
+            binding = bindings[key][0]
+            if label is None:
+                missing.add(binding.action)
+            else:
+                bindings[key] = [replace(binding, description=label)]
+        self._missing_triggers = frozenset(missing)
+        self.refresh_bindings()
+
+    def mark_selected(self, window: str, selected: bool) -> None:
+        mark_selected(self.query_one(f"#{window}"), selected)
+
+    def enter(self, window: str) -> None:
+        if window == "task-list":
+            self._task_list.enter_list_mode()
+        elif window == "agents":
+            self._agents.enter_list_mode()
+        elif window == "transcript":
+            self._transcript.enter_list_mode()
+        elif window == "detail":
+            self._transcript.detail.enter_scroll_mode()
+
+    def unfocus(self) -> None:
+        self.set_focus(None)
+
+    def unfocus_task_list(self) -> None:
+        """Take the focus from the task list, if it has it."""
+        if self.focused is self._task_list:
+            self.set_focus(None)
+
+    # The keys and widgets' messages, as the frontend takes them.
 
     @on(ChatPrompt.Submitted, "#prompt")
     async def _submit(self, message: ChatPrompt.Submitted) -> None:
-        text = message.text.strip()
-        if not text:
-            return
-        if self._router.busy(PLANNER_LANE):
-            # Keep the draft for when the planner is free; the user sends it again then.
-            self.notify(PLANNER_BUSY, severity="warning")
-            return
-        self._prompt.action_normal_mode()
-        # Busy from now, not from TurnStarted, so a second prompt can't race the turn.
-        self._router.set_busy(PLANNER_LANE, True)
-        # A newer prompt supersedes an earlier one: only its outcome frees the planner.
-        outcome = Awaited(accepted=lambda: self._sent(text), refused=self._unsend, supersedes=True)
-        await self._show_and_send(
-            (text, "prompt"), PLANNER, SendMessage(agent=PLANNER, text=text), outcome
-        )
-
-    async def _show_and_send(
-        self, shown: tuple[str, EntryKind], agent: str, command: Command, awaited: Awaited
-    ) -> None:
-        """Show the entry ``shown`` by ``agent`` in the conversation and send ``command`` as
-        ``awaited``; refused or not sent, the entry is dropped before ``awaited`` hears it."""
-        entry = self._feed.append(*shown, agent)
-
-        def dropped() -> None:
-            self._transcript.drop_entry(entry)
-            awaited.refused()
-
-        await self._send(command, replace(awaited, refused=dropped))
-
-    def _sent(self, text: str) -> None:
-        """Clear the prompt once the planner accepted ``text``, unless the user has edited the
-        draft since."""
-        if self._prompt.text.strip() == text:
-            self._prompt.clear()
-
-    def _unsend(self) -> None:
-        """Undo sending a prompt to the planner, refused or not sent: the planner is freed, the
-        prompt's text still in the prompt."""
-        self._router.set_busy(PLANNER_LANE, False)
+        await self._frontend.submit(message.text)
 
     # Window navigation only applies at the top level, when no window is active.
 
     def action_move(self, direction: str) -> None:
-        target = self._neighbors().get(direction)
-        if target is not None and self.focused is None:
-            self._select(target)
-
-    def _neighbors(self) -> dict[str, str]:
-        """The windows h/j/k/l reach from the selected one."""
-        return neighbors(self._selected, self._transcript.detail.opened, self._side.display)
+        self._frontend.move(direction)
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         conditions: dict[str, Callable[[], bool]] = {
@@ -352,7 +298,7 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def action_toggle_thinking(self) -> None:
         """Hide agents' messages while they're still thinking out loud, or show them again."""
-        self._transcript.toggle_thinking()
+        self._frontend.toggle_thinking()
 
     def action_toggle_sidebar(self) -> None:
         """Hide the sidebar so the conversation takes the full width, or show it again; hiding
@@ -361,181 +307,95 @@ class OrbitApp(App[None], inherit_bindings=False):
         side.display = not side.display
         if side.display:  # Hidden, the task list had no width to cut its reasons to.
             self.call_after_refresh(self._task_list.fit)
-        elif self._selected in SIDEBAR_WINDOWS:
-            self.set_focus(None)
-            self._select("transcript")
+        self._frontend.sidebar_toggled(side.display)
 
     def action_cycle_tab(self, step: int) -> None:
-        self._tabs.cycle(step)
+        self._frontend.cycle_tab(step)
 
     def action_activate(self) -> None:
-        if self._selected == "task-list":
-            self._task_list.enter_list_mode()
-        elif self._selected == "agents":
-            self._agents.enter_list_mode()
-        elif self._selected == "transcript":
-            self._transcript.enter_list_mode()
-        elif self._selected == "detail":
-            self._transcript.detail.enter_scroll_mode()
-        elif self._selected == "prompt":  # Its viewing mark, while the session is a view.
-            self._navigation.place.offer()
+        self._frontend.activate()
 
     def action_release_cursor(self) -> None:
-        """With the conversation selected, let go of its held cursor; with its detail pane
-        selected, close the pane; with the task list selected, let go of it."""
-        if self._selected == "transcript":
-            self._transcript.release_cursor()
-        elif self._selected == "task-list":
-            self._task_list.let_go()
-        elif self._selected == "detail":
-            self._transcript.close_detail()
-            self._select("transcript")
+        self._frontend.release_cursor()
 
     @on(DetailPane.Focused)
     def _detail_focused(self) -> None:
-        self._select("detail")
+        self._frontend.detail_focused()
 
     def action_insert_mode(self) -> None:
         """Shortcut from any window: select the prompt and start typing."""
-        if self.focused is None:
-            self._select("prompt")
-            self._prompt.enter_insert_mode()
+        self._frontend.insert_mode()
 
     @on(TaskList.Edit)
     def _edit_task(self, message: TaskList.Edit) -> None:
-        current = message.task
-        refusal = None if current is None else edit_refusal(current)
-        if refusal is not None:
-            self.notify(refusal, severity="warning")
-            return
-
-        # The list changes when the backend reports the new task list.
-        async def saved(result: TaskSpec | None) -> None:
-            if result is None:
-                return
-            if current is None:
-                await self._send(AddTask(task=result))
-            else:
-                await self._send(EditTask(task_id=current.id, task=result))
-
-        editor = TaskEditorScreen(
-            None if current is None else current.task,
-            self._router.settings or Settings(),
-            self._pickers.model,
-        )
-        self.push_screen(editor, saved)
+        self._frontend.edit_task(message.task)
 
     async def action_run_tasks(self) -> None:
-        """Ask the backend to run the task list, unless something is already running."""
-        if not self._router.busy(WORK_LANE):
-            await self._send(RunTasks())
-
-    def _select(self, window_id: str) -> None:
-        mark_selected(self.query_one(f"#{self._selected}"), False)
-        mark_selected(self.query_one(f"#{window_id}"), True)
-        self._selected = window_id
+        await self._frontend.run_tasks()
 
     @on(Tabs.TabActivated, "#conversation-tabs")
     def _show_tab(self, event: Tabs.TabActivated) -> None:
-        tabs = self._tabs
-        agent = tabs.agent_of(event.tab.id or "")
-        tabs.mark_read(agent)
-        self._transcript.show_only(agent, event.tab.label_text)
-        self._leave_closed_detail()
-
-    def _leave_closed_detail(self) -> None:
-        """Select the conversation in place of its detail pane, which has just closed."""
-        if self._selected == "detail":
-            self._select("transcript")
+        self._frontend.tab_shown(event.tab.id or "", event.tab.label_text)
 
     @on(ConversationTabs.Relabelled)
     def _retitle_tab(self, message: ConversationTabs.Relabelled) -> None:
         # Another tab may have been shown since the relabel was posted.
-        if message.key == self._transcript.only:
-            self._transcript.relabel(message.label)
+        self._frontend.retitle(message.key, message.label)
 
     @on(AgentsPane.Cancel)
     async def _cancel_agent(self, message: AgentsPane.Cancel) -> None:
-        await self._send(CancelAgent(agent_id=message.agent_id))
+        await self._frontend.cancel_agent(message.agent_id)
 
     def action_toggle_planner(self) -> None:
         """Show the planner tab, or go back to the tab shown before it."""
-        self._tabs.toggle_planner()
+        self._frontend.toggle_planner()
 
     @on(TaskList.Accept)
     async def _accept_task(self, message: TaskList.Accept) -> None:
-        await self._send(AcceptTask(task_id=message.task_id))
+        await self._frontend.accept_task(message.task_id)
 
     @on(TaskList.Remove)
     async def _remove_task(self, message: TaskList.Remove) -> None:
-        await self._send(RemoveTask(task_id=message.task_id))
+        await self._frontend.remove_task(message.task_id)
 
     @on(TranscriptLog.ReachedTop)
     async def _page_back(self, _: TranscriptLog.ReachedTop) -> None:
-        """Show the page of the session's history before the conversation shown, if any."""
-        await self._pager.earlier()
+        await self._frontend.page_back()
 
     @on(TaskList.ShowReason)
     def _show_reason(self, message: TaskList.ShowReason) -> None:
         self.push_screen(ReasonScreen(message.state, message.number))
 
     async def action_super_review(self) -> None:
-        # Reviews have their own lane, so this works while tasks run.
-        await self._send(FireTrigger(trigger=SUPER_REVIEW))
+        await self._frontend.super_review()
 
     def action_configure_checks(self) -> None:
-        """Ask first, so a stray ctrl+e doesn't queue a configurator."""
-
-        # The backend queues it first and runs it, or says one is already on its way.
-        self._confirm_then_send(
-            CONFIGURE_TITLE, CONFIGURE_MESSAGE, CONFIGURE_YES, FireTrigger(trigger=CONFIGURE_CHECKS)
-        )
+        self._frontend.configure_checks()
 
     def action_reset_planner(self) -> None:
-        """Ask first, so a stray ctrl+n doesn't end the planner's conversation."""
-
-        # The backend refuses while the planner answers, or notes there's nothing to reset.
-        self._confirm_then_send(
-            RESET_TITLE, RESET_MESSAGE, RESET_YES, ResetConversation(agent=PLANNER)
-        )
-
-    def _confirm_then_send(self, title: str, message: str, yes: str, command: Command) -> None:
-        """Ask ``title`` and ``message``, sending ``command`` if the user answers ``yes``."""
-        confirm(self.push_screen, title, message, yes, lambda: self._send(command))
+        self._frontend.reset_planner()
 
     def action_list_sessions(self) -> None:
         """Show the session picker, the session viewed first."""
-        self._navigation.place.open()
+        self._frontend.list_sessions()
 
     def action_list_workspaces(self) -> None:
         """Show the workspace picker."""
-        self._navigation.workspaces.open()
+        self._frontend.list_workspaces()
 
     async def action_cancel_turn(self) -> None:
-        # The planner has its own lane, stopped with ctrl+x; ctrl+s stops the task run.
-        await self._send(CancelTurn(lane=WORK_LANE))
+        await self._frontend.cancel_turn()
 
     async def action_stop_planner(self) -> None:
-        await self._send(CancelTurn(lane=PLANNER_LANE))
+        await self._frontend.stop_planner()
 
     def action_pick_model(self) -> None:
         # While a picker is open, its modal screen blocks the app's key bindings, so a second
         # picker can't be pushed on top.
-        if self._router.settings is not None:
-            self._pickers.model.choose_model(self._shown_settings, self._request_settings)
+        self._frontend.pick_model()
 
     def action_pick_tool_access(self) -> None:
-        if self._router.settings is not None:
-            self._pickers.model.choose_tools(self._shown_settings, self._request_settings)
-
-    def _shown_settings(self) -> Settings:
-        settings = self._router.settings
-        assert settings is not None  # Only picked once settings were shown.
-        return settings
-
-    async def _request_settings(self, settings: Settings) -> None:
-        # The display updates when the backend confirms with SettingsChanged.
-        await self._send(UpdateSettings(settings=settings))
+        self._frontend.pick_tool_access()
 
     async def _send(
         self,
@@ -543,77 +403,23 @@ class OrbitApp(App[None], inherit_bindings=False):
         awaited: Awaited | None = None,
         failure: str = "Couldn't send the command",
     ) -> bool:
-        """Whether ``command`` was sent to the open session, as :meth:`CommandDesk.send` sends
-        it."""
-        return await self._desk.send(command, awaited, failure)
+        """Whether ``command`` was sent to the open session, as the frontend sends it."""
+        return await self._frontend.send(command, awaited, failure)
 
     @work(exclusive=True, group="events")
     async def _consume_events(self) -> None:
+        frontend = self._frontend
         # Closing the batches here, not on garbage collection, stops their reader however this ends.
         async with aclosing(event_batches(self._session.events())) as batches:
-            if not await self._hello():
+            if not await frontend.hello():
                 return
-            while batch := await self._next_batch(batches):
+            while batch := await frontend.next_batch(batches):
                 # One repaint for the whole batch.
                 with self.batch_update():
-                    for event in coalesce(batch):
-                        self._render_event(event)
-                await self._navigation.listed(batch)
-
-    async def _hello(self) -> bool:
-        """Whether the Hello opening the session was sent; a failure to send it is shown."""
-        return await self._send(
-            Hello(client=f"orbit-tui {__version__}", protocol_version=PROTOCOL_VERSION),
-            failure="The backend failed to start the session",
-        )
-
-    async def _next_batch(self, batches: AsyncIterator[list[Event]]) -> list[Event]:
-        """The next of ``batches``; none once they end, or once reading them fails, which is
-        shown."""
-        try:
-            return await anext(batches, [])
-        except Exception as exc:
-            self._render_event(
-                ErrorOccurred(code=INTERNAL, message=f"The backend's event stream failed: {exc}")
-            )
-            return []
-
-    def _render_event(self, event: Event) -> None:
-        self._router.render(event)
+                    frontend.show_batch(batch)
+                await frontend.listed(batch)
 
     def _follow_link(self, state: LinkState) -> None:
         self._link_host.monitor.follow(state, self.clock())
         if isinstance(state, Connected):
-            self._navigation.reconnected()
-
-    def _label_triggers(self, labels: dict[str, str | None]) -> None:
-        """Label each trigger's key in the footer with its label in ``labels``, hiding those
-        with none."""
-        bindings = self._bindings.key_to_bindings
-        missing: set[str] = set()
-        for key, label in labels.items():
-            binding = bindings[key][0]
-            if label is None:
-                missing.add(binding.action)
-            else:
-                bindings[key] = [replace(binding, description=label)]
-        self._missing_triggers = frozenset(missing)
-        self.refresh_bindings()
-
-    def _unfocus_task_list(self) -> None:
-        """Take the focus from the task list, if it has it."""
-        if self.focused is self._task_list:
-            self.set_focus(None)
-
-    async def _decide(self, proposal: ChecksProposed, decision: DecideProposal) -> None:
-        """Note the user's ``decision`` on ``proposal`` in the conversation and send it; refused
-        or not sent, the note is dropped and ``proposal`` shown again, unless it was refused as
-        no longer waiting."""
-        shown = decision_entry(proposal.agent_id, decision)
-
-        def undecide(code: str) -> None:
-            if code != UNKNOWN:
-                self._proposals.queue.reopen(proposal)
-
-        outcome = Awaited(code=undecide)
-        await self._show_and_send(shown, proposal.agent_id, decision, outcome)
+            self._frontend.navigation.reconnected()

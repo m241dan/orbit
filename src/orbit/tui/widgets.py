@@ -186,6 +186,10 @@ class ChatPrompt(ModalTextArea):
     def show_subtitle(self, subtitle: str) -> None:
         self.border_subtitle = subtitle
 
+    def normal_mode(self) -> None:
+        """Stop typing in the prompt."""
+        self.action_normal_mode()
+
     def action_submit(self) -> None:
         self.post_message(self.Submitted(self, self.text))
 

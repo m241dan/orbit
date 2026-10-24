@@ -5,7 +5,7 @@ from textual.app import App
 
 from orbit.protocol import AgentExited, ChecksProposed, DecideProposal, ProposedStep
 from orbit.tui.proposals import ProposalHost, ProposalScreen
-from orbit.tui.view.proposals import Decided
+from orbit.tui.view.proposals import Decided, ProposalQueue
 
 PROPOSAL = ChecksProposed(
     agent_id="agent-3", task_id="1", steps=(ProposedStep(name="Lint", command=("ruff",)),)
@@ -14,14 +14,15 @@ OTHER = PROPOSAL.model_copy(update={"agent_id": "agent-4", "task_id": "2"})
 
 
 class Host(App[None]):
-    """An app holding a ProposalHost, recording the decisions it passes on, and the callback
-    of each screen it pushes."""
+    """An app holding a ProposalHost showing a queue's proposals, recording the decisions they
+    pass on, and the callback of each screen it pushes."""
 
     def __init__(self) -> None:
         super().__init__()
         self.decisions: list[tuple[ChecksProposed, DecideProposal]] = []
         self.callbacks: list[Decided] = []
-        self.host = ProposalHost(self._push, self._decided)
+        self.host = ProposalHost(self._push)
+        self.queue = ProposalQueue(self.host, self._decided)
 
     def _push(self, screen: ProposalScreen, decided: Decided) -> None:
         self.callbacks.append(decided)
@@ -37,7 +38,7 @@ class Host(App[None]):
 async def test_a_proposal_shows_as_a_screen_whose_decision_is_passed_on() -> None:
     app = Host()
     async with app.run_test() as pilot:
-        app.host.queue.show(PROPOSAL)
+        app.queue.show(PROPOSAL)
         await pilot.pause()
         [screen] = app.proposal_screens()
         assert screen.proposal == PROPOSAL
@@ -52,9 +53,9 @@ async def test_a_proposal_shows_as_a_screen_whose_decision_is_passed_on() -> Non
 async def test_its_agent_exiting_closes_its_screen() -> None:
     app = Host()
     async with app.run_test() as pilot:
-        app.host.queue.show(PROPOSAL)
+        app.queue.show(PROPOSAL)
         await pilot.pause()
-        app.host.queue.withdraw(AgentExited(agent_id="agent-3", reason="finished"))
+        app.queue.withdraw(AgentExited(agent_id="agent-3", reason="finished"))
         assert app.host.shown is None
         await pilot.pause()
         assert app.proposal_screens() == []
@@ -64,9 +65,9 @@ async def test_its_agent_exiting_closes_its_screen() -> None:
 async def test_a_superseded_screens_late_decision_sends_nothing() -> None:
     app = Host()
     async with app.run_test() as pilot:
-        app.host.queue.show(PROPOSAL)
+        app.queue.show(PROPOSAL)
         await pilot.pause()
-        app.host.queue.follow((OTHER,))
+        app.queue.follow((OTHER,))
         await pilot.pause()
         [second] = app.proposal_screens()
         await app.callbacks[0](DecideProposal(task_id="1", action="accept"))

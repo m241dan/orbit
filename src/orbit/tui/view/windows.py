@@ -1,5 +1,7 @@
 """Which window h/j/k/l reaches from each window."""
 
+from typing import Protocol
+
 NEIGHBORS: dict[str, dict[str, str]] = {
     "transcript": {"j": "prompt", "l": "task-list"},
     "detail": {"k": "transcript", "j": "prompt", "l": "task-list"},
@@ -28,3 +30,36 @@ def neighbors(selected: str, detail_open: bool, sidebar_shown: bool) -> dict[str
     if sidebar_shown:
         return moves
     return {key: window for key, window in moves.items() if window not in SIDEBAR_WINDOWS}
+
+
+class WindowsView(Protocol):
+    """Where :class:`Windows` mark the window selected."""
+
+    def mark_selected(self, window: str, selected: bool) -> None:
+        """Mark ``window`` as ``selected``, or no longer."""
+
+
+class Windows:
+    """The window h/j/k/l last moved to, marked in ``view``: the prompt, to begin with."""
+
+    def __init__(self, view: WindowsView) -> None:
+        self._view = view
+        self.selected = "prompt"
+
+    def start(self) -> None:
+        """Mark the window selected."""
+        self._view.mark_selected(self.selected, True)
+
+    def move(self, direction: str, detail_open: bool, sidebar_shown: bool) -> None:
+        """Select the window ``direction`` reaches, if any, as :func:`neighbors` says given
+        whether the detail pane is open (``detail_open``) and the sidebar shown
+        (``sidebar_shown``)."""
+        target = neighbors(self.selected, detail_open, sidebar_shown).get(direction)
+        if target is not None:
+            self.select(target)
+
+    def select(self, window: str) -> None:
+        """Select ``window`` in place of the window selected."""
+        self._view.mark_selected(self.selected, False)
+        self._view.mark_selected(window, True)
+        self.selected = window

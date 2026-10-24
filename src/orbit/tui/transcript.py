@@ -91,10 +91,6 @@ class Transcript(Vertical):
         """Copy the whole of the open detail pane's call to the clipboard, if it shows one."""
         self.conversation.copy_detail()
 
-    def close_detail(self) -> None:
-        """Stop inspecting the shown log's entries, closing the detail pane."""
-        self.conversation.close_detail()
-
     @property
     def only(self) -> str | None:
         """The key of the tab whose entries alone are shown; None for All."""
@@ -128,10 +124,6 @@ class Transcript(Vertical):
         """The entries under the tab keyed ``key``; None is All."""
         return self.conversation.entries(key)
 
-    def drop_entry(self, entry: Entry) -> None:
-        """Drop ``entry`` from every log holding it."""
-        self.conversation.drop_entry(entry)
-
     def show_loading(self, loading: bool) -> None:
         """Show, above the entries, that earlier ones are ``loading``, or stop."""
         self.query_one("#loading-earlier").set_class(loading, "-loading")
@@ -161,10 +153,6 @@ class Transcript(Vertical):
         row."""
         self.conversation.tick()
 
-    def toggle_thinking(self) -> None:
-        """Hide agents' dim messages in every tab, or show them again."""
-        self.conversation.toggle_thinking()
-
     def enter_list_mode(self) -> None:
         """Activate the shown log: j/k move between its entries, enter collapses or expands
         one, and escape leaves."""
@@ -178,14 +166,6 @@ class Transcript(Vertical):
     def show_only(self, key: str | None, label: str = "") -> None:
         """Show only the tab keyed ``key``'s entries, titled by its tab ``label``, or all."""
         self.conversation.show_only(key, label)
-
-    def relabel(self, label: str) -> None:
-        """Title the shown tab by its new ``label``, leaving what's shown as it is."""
-        self.conversation.relabel(label)
-
-    def show_session(self, name: str | None) -> None:
-        """End the title with the open session's ``name``, or with none."""
-        self.conversation.show_session(name)
 
     @property
     def content_height(self) -> int:

@@ -15,9 +15,7 @@ from orbit.tui.view.proposals import (
     FEEDBACK_HINT,
     FEEDBACK_PLACEHOLDER,
     PROPOSAL_KEYS_HINT,
-    Decide,
     Decided,
-    ProposalQueue,
     proposal_text,
     proposal_title,
     revision,
@@ -91,12 +89,10 @@ class ProposalScreen(BoxedModal[DecideProposal | None]):
 
 
 class ProposalHost:
-    """Shows proposals with ``push``, one at a time, as its :class:`ProposalQueue` says;
-    ``decide`` takes the user's decision on a proposal."""
+    """Shows proposals with ``push``, one at a time, as a :class:`ProposalQueue` says."""
 
-    def __init__(self, push: Push[ProposalScreen, DecideProposal], decide: Decide) -> None:
+    def __init__(self, push: Push[ProposalScreen, DecideProposal]) -> None:
         self._slot = ModalSlot[ProposalScreen, DecideProposal](push)
-        self.queue = ProposalQueue(self, decide)
 
     @property
     def shown(self) -> ChecksProposed | None:

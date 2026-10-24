@@ -9,7 +9,7 @@ from textual.binding import Binding, BindingType
 from textual.message import Message
 from textual.widgets.option_list import Option
 
-from orbit.protocol import TaskState, Usage
+from orbit.protocol import TaskState
 from orbit.tui.list_pane import ListPane
 from orbit.tui.view.tasks import TaskBoard
 from orbit.tui.widgets import Ticker
@@ -23,7 +23,7 @@ class TaskList(ListPane):
     why a task ended and escape returns to window navigation. Its border shows what the
     session's turns cost, and the task about to run says when it waits for a coder. While
     following, it scrolls to keep the active task in view; activating it or scrolling it with
-    the mouse wheel holds it where it is, until ``let_go``.
+    the mouse wheel holds it where it is, until the board lets go of it.
     """
 
     class Accept(Message):
@@ -85,11 +85,6 @@ class TaskList(ListPane):
         return self.board.numbers
 
     @property
-    def numbers_by_id(self) -> dict[str, str]:
-        """The tasks' numbers by their ids."""
-        return self.board.numbers_by_id
-
-    @property
     def following(self) -> bool:
         """Whether the list follows the active task."""
         return self.board.following
@@ -120,10 +115,6 @@ class TaskList(ListPane):
     def on_mouse_scroll_up(self) -> None:
         self.board.hold()
 
-    def let_go(self) -> None:
-        """Follow the active task again, scrolling to it at once; nothing if not held."""
-        self.board.let_go()
-
     def action_select(self) -> None:
         # Resolved now, on enter or a click, rather than from a queued OptionSelected, so a list
         # replaced before that message is handled can't change which task is edited.
@@ -146,27 +137,10 @@ class TaskList(ListPane):
         """
         self.board.show(tasks)
 
-    def show_waiting(self, waiting: tuple[str, str] | None) -> None:
-        """Have the task ``waiting`` names say it waits for a coder as it says, or none do."""
-        self.board.show_waiting(waiting)
-
     @property
     def ticking(self) -> bool:
         """Whether the spinners of running tasks are turning."""
         return self._ticker.ticking
-
-    def count(self, usage: Usage) -> None:
-        """Add what a turn cost to the session's total."""
-        self.board.count(usage)
-
-    def reset_usage(self, usage: Usage) -> None:
-        """Start the session's total afresh at ``usage``; a session that has spent nothing
-        shows no total."""
-        self.board.reset_usage(usage)
-
-    def find(self, task_id: str) -> TaskState | None:
-        """The task with id ``task_id``, if it's on the list."""
-        return self.board.find(task_id)
 
     def tick(self) -> None:
         """Turn the spinners: redraw just the rows of running tasks."""

@@ -61,6 +61,7 @@ from orbit.tui.transcript import Transcript
 from orbit.tui.transcript_log import TranscriptLog
 from orbit.tui.view.common import spinner_frame
 from orbit.tui.view.events import coalesce
+from orbit.tui.view.frontend import Frontend
 from orbit.tui.widgets import ChatPrompt, PickerScreen, SidePanel
 from tests.tui_fakes import (
     PINNED,
@@ -1750,13 +1751,6 @@ async def test_notes_on_no_listed_pinned_task_stay_under_all() -> None:
         ]
 
 
-class FailingRenderApp(OrbitApp):
-    """Fails to render any event."""
-
-    def _render_event(self, event: Event) -> None:
-        raise RuntimeError("render failed")
-
-
 async def test_a_failed_render_cancels_the_event_reader(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1767,11 +1761,15 @@ async def test_a_failed_render_cancels_the_event_reader(
         held.append(event_batches(events))
         return held[-1]
 
+    def fails(frontend: Frontend, event: Event) -> None:
+        raise RuntimeError("render failed")
+
     monkeypatch.setattr("orbit.tui.app.event_batches", holding)
+    monkeypatch.setattr(Frontend, "render", fails)
     session = FakeSession()
     await session.queue.put(Notice(message="1"))
     with pytest.raises(WorkerFailed, match="render failed"):
-        async with FailingRenderApp(session).run_test() as pilot:
+        async with OrbitApp(session).run_test() as pilot:
             await pilot.pause()
     await session.queue.put(Notice(message="2"))
     await asyncio.sleep(0)
@@ -1781,7 +1779,8 @@ async def test_a_failed_render_cancels_the_event_reader(
 
 
 class BatchRecordingApp(OrbitApp):
-    """Records the events rendered inside each outermost batch update."""
+    """Records the events rendered inside each outermost batch update, once :meth:`record`
+    has it record what the frontend renders."""
 
     def __init__(self, session: FakeSession) -> None:
         super().__init__(session)
@@ -1799,9 +1798,15 @@ class BatchRecordingApp(OrbitApp):
         finally:
             self._depth -= 1
 
-    def _render_event(self, event: Event) -> None:
-        self.batches[-1].append(event)
-        super()._render_event(event)
+    def record(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Note each event the frontend renders in the batch it's rendered in."""
+        render = Frontend.render
+
+        def recording(frontend: Frontend, event: Event) -> None:
+            self.batches[-1].append(event)
+            render(frontend, event)
+
+        monkeypatch.setattr(Frontend, "render", recording)
 
 
 BURST: list[Event] = [
@@ -1830,11 +1835,14 @@ def visible_state(app: OrbitApp) -> object:
     )
 
 
-async def test_a_burst_renders_in_one_batch_without_superseded_snapshots() -> None:
+async def test_a_burst_renders_in_one_batch_without_superseded_snapshots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     session = FakeSession()
     for event in BURST:
         session.queue.put_nowait(event)
     app = BatchRecordingApp(session)
+    app.record(monkeypatch)
     async with app.run_test(size=(120, 30)) as pilot:
         await pilot.pause()
         assert [batch for batch in app.batches if batch] == [coalesce(BURST)]

@@ -7,7 +7,7 @@ from textual.binding import Binding, BindingType
 from textual.message import Message
 from textual.widgets.option_list import Option
 
-from orbit.protocol import Event, ReviewStatus
+from orbit.protocol import Event
 from orbit.tui.list_pane import ListPane
 from orbit.tui.view.agents import NO_AGENTS_LABEL, AgentRow, AgentsList
 
@@ -59,10 +59,6 @@ class AgentsPane(ListPane):
     def number_tasks(self, numbers: Mapping[str, str]) -> None:
         """Show agents' tasks by their ``numbers`` in the task list, as the list takes them."""
         self.agents.number_tasks(numbers)
-
-    def show_review(self, status: ReviewStatus | None) -> None:
-        """Show whether review is paused, as the list takes ``status``."""
-        self.agents.show_review(status)
 
     def list_agents(self, rows: Sequence[tuple[str, str]]) -> None:
         self.show_rows(rows, None if rows else Option(NO_AGENTS_LABEL, disabled=True))
