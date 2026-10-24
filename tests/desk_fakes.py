@@ -8,7 +8,7 @@ from orbit.protocol import (
     CommandRefused,
     Event,
 )
-from orbit.tui.commands import CommandDesk, Shown
+from orbit.tui.view.commands import CommandDesk, Shown
 
 
 class Backend:

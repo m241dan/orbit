@@ -47,10 +47,7 @@ from orbit.protocol import (
     UpdateSettings,
 )
 from orbit.tui.agents import AgentsPane
-from orbit.tui.commands import CommandDesk
-from orbit.tui.conversation import ConversationFeed
 from orbit.tui.detail import DetailPane
-from orbit.tui.event_router import AppHooks, EventRouter, Handlers, Panes
 from orbit.tui.event_stream import event_batches
 from orbit.tui.footer import KeyFooter
 from orbit.tui.link import LinkHost
@@ -66,6 +63,7 @@ from orbit.tui.task_editor import TaskEditorScreen
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.transcript_log import TranscriptLog
+from orbit.tui.view.commands import CommandDesk
 from orbit.tui.view.common import EntryKind
 from orbit.tui.view.confirm import (
     CONFIGURE_MESSAGE,
@@ -78,11 +76,13 @@ from orbit.tui.view.confirm import (
 from orbit.tui.view.events import (
     coalesce,
 )
+from orbit.tui.view.feed import ConversationFeed
 from orbit.tui.view.history import HistoryPager
 from orbit.tui.view.navigation import Navigation, Views
 from orbit.tui.view.opening import Opening
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.proposals import decision_entry
+from orbit.tui.view.router import AppHooks, EventRouter, Handlers, Panes
 from orbit.tui.view.tasks import edit_refusal
 from orbit.tui.view.transcript import PLANNER_BUSY, warning_entry
 from orbit.tui.view.windows import SIDEBAR_WINDOWS, neighbors

@@ -15,10 +15,10 @@ from orbit.protocol import (
     TaskState,
     Usage,
 )
-from orbit.tui.conversation import ConversationFeed
 from orbit.tui.view.conversation import Conversation
 from orbit.tui.view.detail_views import Detail
 from orbit.tui.view.events import FEED_EVENTS, in_group
+from orbit.tui.view.feed import ConversationFeed
 from orbit.tui.view.log import EntryLog, EntryRow
 from orbit.tui.view.tabs import running_roles, tab_key, track_roles
 from orbit.tui.view.working import WorkingLines

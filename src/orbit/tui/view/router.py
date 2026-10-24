@@ -1,8 +1,8 @@
 """Routes each backend event to the widgets and hosts that show it."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import assert_never
+from typing import Protocol, assert_never
 
 from orbit.protocol import (
     PLANNER,
@@ -26,22 +26,16 @@ from orbit.protocol import (
     Settings,
     SettingsChanged,
     Snapshot,
+    StepState,
     TasksChanged,
     TaskState,
+    Usage,
     UsageChanged,
     UsageTotals,
     VerificationChanged,
     WorkspaceCloning,
 )
-from orbit.tui.agents import AgentsPane
-from orbit.tui.commands import CommandDesk
-from orbit.tui.conversation import ConversationFeed
-from orbit.tui.panels import UsagePanel, VerificationPanel
-from orbit.tui.proposals import ProposalHost
-from orbit.tui.settings_pickers import SettingsPickers
-from orbit.tui.tabs import ConversationTabs
-from orbit.tui.tasks import TaskList
-from orbit.tui.transcript import Transcript
+from orbit.tui.view.commands import CommandDesk
 from orbit.tui.view.events import (
     ANSWER_EVENTS,
     FEED_EVENTS,
@@ -54,13 +48,101 @@ from orbit.tui.view.events import (
     StateEvent,
     in_group,
 )
+from orbit.tui.view.feed import ConversationFeed
 from orbit.tui.view.history import HistoryPager
 from orbit.tui.view.navigation import Navigation
 from orbit.tui.view.rules import planner_reset_entry
 from orbit.tui.view.storage import StorageHalt
 from orbit.tui.view.takeover import TakeoverOffer
 from orbit.tui.view.triggers import trigger_key_labels
-from orbit.tui.widgets import ChatPrompt, StatusLine
+
+
+class TranscriptPane(Protocol):
+    """The conversation window, as the router shows events in it."""
+
+    def track(self, event: Event, roles: Mapping[str, str]) -> None: ...
+
+    def show_session(self, name: str | None) -> None: ...
+
+
+class TabsPane(Protocol):
+    """The conversation's tabs, as the router shows events in them."""
+
+    @property
+    def roles(self) -> Mapping[str, str]: ...
+
+    def track(self, event: Event) -> None: ...
+
+    def set_planner_busy(self, busy: bool) -> None: ...
+
+
+class PromptPane(Protocol):
+    """The prompt, as the router marks it."""
+
+    def show_busy(self, busy: bool) -> None: ...
+
+    def show_read_only(self, read_only: bool) -> None: ...
+
+    def show_settings(self, settings: Settings) -> None: ...
+
+
+class StatusPane(Protocol):
+    """A line showing a status, hidden while there's none."""
+
+    def show(self, note: str | None) -> None: ...
+
+
+class TaskListPane(Protocol):
+    """The task list, as the router shows the tasks in it."""
+
+    @property
+    def numbers_by_id(self) -> Mapping[str, str]: ...
+
+    def show(self, tasks: Sequence[TaskState]) -> None: ...
+
+    def show_waiting(self, waiting: tuple[str, str] | None) -> None: ...
+
+    def let_go(self) -> None: ...
+
+    def reset_usage(self, usage: Usage) -> None: ...
+
+
+class StepsPane(Protocol):
+    """The verification steps, as the router shows them."""
+
+    def show(self, steps: Sequence[StepState], title: str = "") -> None: ...
+
+
+class UsagePane(Protocol):
+    """The usage limits, as the router shows them."""
+
+    def show(self, event: UsageChanged) -> None: ...
+
+
+class AgentsPane(Protocol):
+    """The agents running, as the router shows them."""
+
+    def track(self, event: Event) -> None: ...
+
+    def number_tasks(self, numbers: Mapping[str, str]) -> None: ...
+
+    def show_review(self, status: ReviewStatus | None) -> None: ...
+
+
+class Proposals(Protocol):
+    """The proposals waiting on the user, as the router follows them."""
+
+    def show(self, event: ChecksProposed) -> None: ...
+
+    def follow(self, proposals: tuple[ChecksProposed, ...]) -> None: ...
+
+    def withdraw(self, event: Event) -> None: ...
+
+
+class Pickers(Protocol):
+    """The settings pickers, as the router offers model choices in them."""
+
+    def show_choices(self, choices: tuple[str, ...]) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -69,13 +151,13 @@ class Panes:
     ``prompt`` and the ``viewing`` mark by it, and the sidebar's ``task_list``,
     ``verification`` steps, ``usage`` and ``agents``."""
 
-    transcript: Transcript
-    tabs: ConversationTabs
-    prompt: ChatPrompt
-    viewing: StatusLine
-    task_list: TaskList
-    verification: VerificationPanel
-    usage: UsagePanel
+    transcript: TranscriptPane
+    tabs: TabsPane
+    prompt: PromptPane
+    viewing: StatusPane
+    task_list: TaskListPane
+    verification: StepsPane
+    usage: UsagePane
     agents: AgentsPane
 
 
@@ -86,8 +168,8 @@ class Handlers:
     feed: ConversationFeed
     pager: HistoryPager
     desk: CommandDesk
-    proposals: ProposalHost
-    pickers: SettingsPickers
+    proposals: Proposals
+    pickers: Pickers
     navigation: Navigation
     halt: StorageHalt
     takeover: TakeoverOffer

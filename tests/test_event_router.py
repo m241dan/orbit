@@ -20,7 +20,7 @@ from orbit.protocol import (
     UsageTotals,
     VerificationChanged,
 )
-from orbit.tui.event_router import AppHooks, EventRouter, Handlers, Panes
+from orbit.tui.view.router import AppHooks, EventRouter, Handlers, Panes
 from tests.tui_fakes import SNAPSHOT
 
 # What every event reaches first, and what an event outside the conversation reaches last.

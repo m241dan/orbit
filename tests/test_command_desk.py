@@ -21,7 +21,7 @@ from orbit.protocol import (
     SendMessage,
     Welcome,
 )
-from orbit.tui.commands import CommandDesk, Shown
+from orbit.tui.view.commands import CommandDesk, Shown
 from orbit.tui.view.outcomes import Awaited
 
 
