@@ -3,12 +3,8 @@
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
-from orbit.protocol import Command, TakeOwnership
-from orbit.tui.view.outcomes import Awaited
-
-Send = Callable[[Command, Awaited], Awaitable[object]]
-"""Sends a command to the backend, awaiting its outcome as told; whatever it returns is
-ignored."""
+from orbit.protocol import TakeOwnership
+from orbit.tui.view.outcomes import Awaited, Send
 
 Answered = Callable[[bool | None], Awaitable[None]]
 """Takes whether the user chose to take the repository over, if the modal was answered."""

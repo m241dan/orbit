@@ -2,7 +2,8 @@
 
 from orbit.tui.modal import ModalSlot, Push
 from orbit.tui.view.confirm import TAKE_OVER_MESSAGE, TAKE_OVER_NO, TAKE_OVER_TITLE, TAKE_OVER_YES
-from orbit.tui.view.takeover import Answered, Send, TakeoverOffer
+from orbit.tui.view.outcomes import Send
+from orbit.tui.view.takeover import Answered, TakeoverOffer
 from orbit.tui.widgets import ConfirmScreen
 
 

@@ -1,10 +1,9 @@
 """How a session halted because storage failed is shown."""
 
-from collections.abc import Awaitable, Callable
 from typing import Protocol
 
-from orbit.protocol import Command, ResumeStorage
-from orbit.tui.view.outcomes import Awaited
+from orbit.protocol import ResumeStorage
+from orbit.tui.view.outcomes import Awaited, Send
 
 HALT_TITLE = "Session stopped: storage failed"
 HALT_HINT = "enter try again · esc close"
@@ -19,11 +18,6 @@ def halt_status(explanation: str) -> str:
     first = explanation.partition("\n")[0]
     failed = next((write for write in _WRITES if write in first), "storage")
     return f"Session stopped: {failed} failed; see the transcript"
-
-
-Send = Callable[[Command, Awaited], Awaitable[object]]
-"""Sends a command to the backend, awaiting its outcome as told; whatever it returns is
-ignored."""
 
 
 class HaltView(Protocol):

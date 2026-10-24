@@ -6,7 +6,8 @@ from typing import ClassVar
 from textual.binding import Binding, BindingType
 
 from orbit.tui.modal import ModalSlot, Push
-from orbit.tui.view.storage import HALT_HINT, HALT_TITLE, Send, StorageHalt
+from orbit.tui.view.outcomes import Send
+from orbit.tui.view.storage import HALT_HINT, HALT_TITLE, StorageHalt
 from orbit.tui.widgets import TextScreen
 
 Retry = Callable[[], Awaitable[object]]

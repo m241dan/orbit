@@ -1,8 +1,10 @@
 """Following what the backend makes of the commands sent: what to do once each is accepted or
 refused, by command id, or for only the latest of a kind where a newer one supersedes it."""
 
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
+
+from orbit.protocol import Command
 
 
 def _nothing() -> None:
@@ -55,3 +57,8 @@ def settled(outcomes: Outcomes, command_id: str) -> tuple[Outcomes, Awaited | No
         return outcomes, None
     rest = {key: other for key, other in outcomes.awaited.items() if key != command_id}
     return Outcomes(rest), entry[1]
+
+
+Send = Callable[[Command, Awaited], Awaitable[object]]
+"""Sends a command to the backend, awaiting its outcome as told; whatever it returns is
+ignored."""

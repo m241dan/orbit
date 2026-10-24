@@ -54,7 +54,6 @@ from orbit.tui.detail import DetailPane
 from orbit.tui.event_router import AppHooks, EventRouter, Handlers, Panes
 from orbit.tui.event_stream import event_batches
 from orbit.tui.footer import KeyFooter
-from orbit.tui.history import HistoryPager
 from orbit.tui.link import LinkHost
 from orbit.tui.opening import Hosts, Opening, OpeningHost
 from orbit.tui.panels import UsagePanel, VerificationPanel
@@ -81,6 +80,7 @@ from orbit.tui.view.confirm import (
 from orbit.tui.view.events import (
     coalesce,
 )
+from orbit.tui.view.history import HistoryPager
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.proposals import decision_entry
 from orbit.tui.view.sessions import chosen_workspace

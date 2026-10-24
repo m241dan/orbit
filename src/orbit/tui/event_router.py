@@ -37,7 +37,6 @@ from orbit.tui.agents import AgentsPane
 from orbit.tui.catalog import CatalogState
 from orbit.tui.commands import CommandDesk
 from orbit.tui.conversation import ConversationFeed
-from orbit.tui.history import HistoryPager
 from orbit.tui.opening import OpeningHost
 from orbit.tui.panels import UsagePanel, VerificationPanel
 from orbit.tui.proposals import ProposalHost
@@ -58,6 +57,7 @@ from orbit.tui.view.events import (
     StateEvent,
     in_group,
 )
+from orbit.tui.view.history import HistoryPager
 from orbit.tui.view.rules import planner_reset_entry
 from orbit.tui.view.storage import StorageHalt
 from orbit.tui.view.takeover import TakeoverOffer
