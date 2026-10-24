@@ -20,15 +20,14 @@ from orbit.protocol import Settings
 from orbit.tui.modal import Push
 from orbit.tui.view.common import (
     SPINNER_FPS,
-    ListHints,
     kept_highlight,
     option_id,
     picked_row,
-    picker_hint,
 )
 from orbit.tui.view.confirm import confirm_hint
 from orbit.tui.view.settings import settings_summary
 from orbit.tui.view.transcript import prompt_title
+from orbit.tui.view.typing_list import TypingList
 
 if TYPE_CHECKING:
     _WidgetMixin = Widget
@@ -295,15 +294,19 @@ class ListScreen[T](BoxedModal[T]):
         else:
             options.action_cursor_up()
 
-    def _relist(
-        self,
-        shown: Sequence[str | None],
-        keys: Sequence[str | None],
-        labels: Sequence[VisualType],
+    @property
+    def highlighted(self) -> int | None:
+        """The row highlighted, if any."""
+        return self.query_one(OptionList).highlighted
+
+    def show_rows(
+        self, keys: Sequence[str | None], labels: Sequence[VisualType], highlight: int | None
     ) -> None:
-        """List ``labels``, the rows with ``keys``, in place of the rows with keys ``shown``,
-        the highlight going where ``kept_highlight`` says."""
-        relist(self.query_one(OptionList), self._options(keys, labels), shown, keys)
+        """List ``labels``, the rows with ``keys``, highlighting row ``highlight``, if any."""
+        options = self.query_one(OptionList)
+        options.clear_options()
+        options.add_options(self._options(keys, labels))
+        options.highlighted = highlight
 
     @staticmethod
     def _options(keys: Sequence[str | None], labels: Sequence[VisualType]) -> list[Option]:
@@ -331,13 +334,10 @@ class ListScreen[T](BoxedModal[T]):
 
 
 class TypingListScreen[T](ListScreen[T]):
-    """List modal in a bordered box, with a text box under the list that's hidden until the
-    user types in it, a note under the list saying why a change was refused, hidden until one
-    is, and the keys ``HINTS`` names shown under the box: the text box's while it's shown, or
-    else the list's, where escape quits at ``startup``.
-
-    Escape leaves the text box, or else dismisses with ``nothing``, or quits orbit at
-    ``startup``, where there's nothing to go back to.
+    """Shows a :class:`TypingList` picker, its :attr:`picker`, in a bordered box: its list, the
+    note under the list saying why a change was refused, and the text box under that, hidden
+    until the user types in it, with the keys the picker names shown under the box. Escape goes
+    to the picker, which leaves the text box, closes, or quits orbit at startup.
     """
 
     AUTO_FOCUS = "OptionList"
@@ -356,60 +356,43 @@ class TypingListScreen[T](ListScreen[T]):
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "back", show=False),
     ]
-    HINTS: ClassVar[ListHints]
+    picker: TypingList[T]
 
-    def __init__(self, nothing: T, startup: bool) -> None:
-        super().__init__()
-        self.startup = startup
-        self._nothing = nothing
-        self._box_hint: str | None = None  # The text box's keys, while it's shown.
+    @property
+    def startup(self) -> bool:
+        """Whether escape quits orbit, as at startup."""
+        return self.picker.startup
 
     @property
     def hint(self) -> str:
         """The keys shown under the box."""
-        return picker_hint(self.HINTS, startup=self.startup, box=self._box_hint)
+        return self.picker.hint
 
     def action_back(self) -> None:
-        if self.query_one(Input).display:
-            self._typing(None)
-        elif self.startup:
-            self.app.exit()
-        else:
-            self.dismiss(self._nothing)
+        self.picker.back()
 
-    def _typing(self, box_hint: str | None, text: str = "") -> None:
-        """Show the text box, starting from ``text``, with ``box_hint`` its keys, and type in
-        it; or, with no keys, go back to the list. Either way, the box's own note is cleared."""
+    def show_hint(self, hint: str) -> None:
+        self.query_one(Vertical).border_subtitle = hint
+
+    def show_note(self, note: str | None) -> None:
+        self._show_note(note)
+
+    def show_box(self, shown: bool, text: str) -> None:
         box = self.query_one(Input)
-        box.display = box_hint is not None
+        box.display = shown
         box.border_subtitle = ""
-        self._box_hint = box_hint
-        self._show_hint()
-        if box_hint is None:
-            box.clear()
-            self.query_one(OptionList).focus()
-        else:
+        if shown:
             box.value = text
             box.focus()
-
-    def _refused(self, why: str) -> None:
-        """Show ``why`` a change was refused, as ``_show_refusal`` does; nothing once this
-        screen is gone."""
-        if self.is_attached:
-            self._show_refusal(why)
-
-    def _show_refusal(self, why: str) -> None:
-        """Show ``why`` a change was refused: in the text box's hint while it's shown, or else
-        under the list."""
-        box = self.query_one(Input)
-        if box.display:
-            box.border_subtitle = why
         else:
-            self._show_note(why)
+            box.clear()
+            self.query_one(OptionList).focus()
 
-    def _show_hint(self) -> None:
-        """Show the keys under the box."""
-        self.query_one(Vertical).border_subtitle = self.hint
+    def show_box_note(self, note: str) -> None:
+        self.query_one(Input).border_subtitle = note
+
+    def quit(self) -> None:
+        self.app.exit()
 
 
 class PickerScreen(ListScreen[int | None]):

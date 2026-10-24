@@ -4,19 +4,13 @@ adding and opening workspaces, completing paths, and what it makes of each answe
 from collections.abc import Sequence
 
 from orbit.protocol import (
-    INVALID,
     AddWorkspace,
-    Command,
-    CommandAccepted,
-    CommandEnvelope,
-    CommandRefused,
     DirectoryEntry,
     DirectoryListing,
-    Event,
     ListDirectory,
 )
-from orbit.tui.commands import CommandDesk, Shown
 from orbit.tui.view.explorer import Explorer
+from tests.desk_fakes import Backend
 
 REPO_A = DirectoryEntry(name="a", is_repository=True, hidden=False)
 SERVED_C = DirectoryEntry(name="c", is_repository=True, workspace="B", hidden=False)
@@ -79,34 +73,6 @@ class View:
 
     def dismiss(self, result: str | AddWorkspace | None) -> None:
         self.dismissed.append(result)
-
-
-class Backend:
-    """A backend the explorer sends its commands to through a real :class:`CommandDesk`, whose
-    answers a test gives; what the desk shows elsewhere is ``shown``."""
-
-    def __init__(self) -> None:
-        self.sent: list[CommandEnvelope] = []
-        self.shown: list[Shown | Event] = []
-        self.desk = CommandDesk(self._send, self.shown.append, self.shown.append)
-
-    async def _send(self, envelope: CommandEnvelope) -> None:
-        self.sent.append(envelope)
-
-    @property
-    def commands(self) -> list[Command]:
-        return [envelope.payload for envelope in self.sent]
-
-    def accept(self, index: int = -1) -> None:
-        """Accept the command sent at ``index``, the last by default."""
-        self.desk.answer(CommandAccepted(command_id=self.sent[index].command_id))
-
-    def refuse(self, message: str, index: int = -1) -> None:
-        """Refuse the command sent at ``index``, the last by default, as ``invalid``."""
-        refusal = CommandRefused(
-            command_id=self.sent[index].command_id, code=INVALID, message=message
-        )
-        self.desk.answer(refusal)
 
 
 async def opened(*listings: DirectoryListing) -> tuple[Explorer, View, Backend]:

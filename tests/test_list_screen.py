@@ -15,9 +15,10 @@ from orbit.protocol import (
     SessionSummary,
 )
 from orbit.tui.explorer import ExplorerScreen
-from orbit.tui.sessions import SessionChange, SessionsScreen
+from orbit.tui.sessions import SessionsScreen
 from orbit.tui.view.common import kept_highlight
 from orbit.tui.view.outcomes import Awaited
+from orbit.tui.view.session_picker import SessionChange
 from orbit.tui.view.sessions import Viewing
 from orbit.tui.widgets import (
     ChoiceScreen,

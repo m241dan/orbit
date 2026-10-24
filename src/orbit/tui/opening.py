@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from orbit.protocol import Command, Event
-from orbit.tui.sessions import StartupPick
 from orbit.tui.view.opening import lists_catalog
+from orbit.tui.view.session_picker import StartupPick
 
 
 @dataclass(frozen=True)

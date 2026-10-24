@@ -18,12 +18,11 @@ from orbit.protocol import (
 from orbit.tui.catalog import CatalogState
 from orbit.tui.sessions import (
     Placing,
-    SessionChange,
-    SessionChoice,
     SessionsHost,
     SessionsScreen,
 )
 from orbit.tui.view.outcomes import Awaited
+from orbit.tui.view.session_picker import SessionChange, SessionChoice
 from orbit.tui.view.sessions import chosen_workspace
 from orbit.tui.widgets import ChoiceScreen, ConfirmScreen
 from tests.tui_fakes import opened

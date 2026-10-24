@@ -12,7 +12,6 @@ from textual.containers import Vertical
 from textual.widgets import Input, OptionList
 
 from orbit.protocol import (
-    CONTROL_PLANE_STREAM,
     AddWorkspace,
     AgentRef,
     AgentsChanged,
@@ -28,34 +27,15 @@ from orbit.tui.catalog import CatalogState
 from orbit.tui.explorer import ExplorerScreen
 from orbit.tui.modal import ModalSlot, Push
 from orbit.tui.view.outcomes import Awaited
+from orbit.tui.view.workspace_picker import Answered, Change, Explored, Question, WorkspacePicker
 from orbit.tui.view.workspaces import (
-    ADD_PATH,
-    CANCEL_INDEX,
-    PATH_HINT,
     PATH_PLACEHOLDER,
-    REMOVE_MESSAGE,
-    WORKSPACES_HINTS,
     WORKSPACES_TITLE,
-    WorkspaceRow,
-    add_command,
-    added_workspace,
-    preselected,
-    removal,
-    remove_choices,
-    remove_title,
-    row_key,
-    row_label,
     with_clone,
     without_clone,
-    workspace_rows,
 )
 from orbit.tui.widgets import ChoiceScreen, TypingListScreen
 
-Change = Callable[
-    [AddWorkspace | RemoveWorkspace | Watch | ListDirectory, Awaited], Awaitable[object]
-]
-"""Sends adding or removing a workspace, the streams to watch, or listing a directory, to the
-backend, awaiting its outcome as told; whatever it returns is ignored."""
 Chosen = Callable[[str, bool], Awaitable[None]]
 """Takes the id of the workspace picked, and whether it was picked at startup."""
 
@@ -70,27 +50,19 @@ class Served:
 
 
 class WorkspacesScreen(TypingListScreen[str | None]):
-    """Lists ``workspaces``, offering first to add the ``repository`` the frontend runs in while
-    none is at it, then the clones :attr:`cloning`, then to add a path or URL; dismisses with the id
-    of the workspace picked.
+    """Shows the :class:`WorkspacePicker` of ``workspaces``, dismissing with the id of the
+    workspace picked.
 
-    ``j``/``k`` (and the arrows) move, preselected on the workspace at ``repository``, and
-    enter picks the highlighted workspace. Enter on adding the repository sends
-    ``AddWorkspace`` with ``change``, and on ``Add a path or URL…`` opens the explorer over the
-    server's directories, which may open a workspace, picking it, or add one; either way the
-    workspace added by its path is picked once accepted and listed. A refusal, or the clone of
-    a URL typed in the path box failing, shows why. ``x`` asks whether to remove the highlighted
-    workspace keeping its sessions or deleting them too, then sends ``RemoveWorkspace``,
-    showing why if it's refused.
-    Escape leaves the path box, or dismisses with none, or quits orbit at ``startup``, where
-    there's nothing to go back to. Once shown it watches the control-plane stream, so each
-    workspace's row can show the :attr:`agents` running in it.
+    ``j``/``k`` (and the arrows) move, enter picks the highlighted row, and enter in the path
+    box adds the path or URL typed; ``x`` removes the highlighted workspace, asking how first.
+    Escape leaves the path box, or dismisses with none, or quits orbit at startup. The explorer
+    it opens is shown the directories listed.
     """
 
-    HINTS = WORKSPACES_HINTS
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("x", "remove", show=False),
     ]
+    picker: WorkspacePicker
 
     def __init__(
         self,
@@ -99,165 +71,82 @@ class WorkspacesScreen(TypingListScreen[str | None]):
         change: Change,
         startup: bool = False,
     ) -> None:
-        super().__init__(None, startup)
-        self.workspaces = tuple(workspaces)
-        self.cloning: tuple[WorkspaceCloning, ...] = ()  # The clones under way, as shown.
-        self.agents: tuple[AgentRef, ...] = ()  # The agents running, as shown.
-        self.repository = repository
+        super().__init__()
+        self.picker = WorkspacePicker(self, workspaces, repository, startup)
         self._change = change
-        self._adding: str | None = None  # The path added, until its workspace is listed.
-        self._cloning: str | None = None  # The URL added, until its clone fails or another is.
         self._explorer: ExplorerScreen | None = None  # The explorer opened from here, if open.
-
-    @property
-    def rows(self) -> tuple[WorkspaceRow, ...]:
-        """The rows listed, in order."""
-        return workspace_rows(self.workspaces, self.repository, self.cloning)
 
     def compose(self) -> ComposeResult:
         with Vertical() as box:
             box.border_title = WORKSPACES_TITLE
             box.border_subtitle = self.hint
-            yield OptionList(*self._options(self._keys, self._labels))
+            yield OptionList(*self._options(self.picker.keys, self.picker.labels))
             yield self._note_line()
             path = Input(placeholder=PATH_PLACEHOLDER, id="workspace-path")
             path.display = False
             yield path
 
     async def on_mount(self) -> None:
-        self.query_one(OptionList).highlighted = preselected(self.rows, self.repository)
-        await self._change(Watch(streams=(CONTROL_PLANE_STREAM,)), Awaited())
-
-    @property
-    def _labels(self) -> tuple[str, ...]:
-        """What the rows show, in order."""
-        return tuple(row_label(row, self.agents) for row in self.rows)
+        self.query_one(OptionList).highlighted = self.picker.preselected
+        await self.picker.start()
 
     def show(
         self, workspaces: Sequence[WorkspaceEntry], cloning: Sequence[WorkspaceCloning] = ()
     ) -> None:
-        """List ``workspaces`` and the clones ``cloning`` in place of those listed, keeping the
-        highlight on the row it was on, or where it was if that one's gone; picks the workspace
-        being added once listed."""
-        shown = self._keys
-        self.workspaces = tuple(workspaces)
-        self.cloning = tuple(cloning)
-        if not self._pick_added() and self.is_mounted:
-            self._relist(shown, self._keys, self._labels)
+        """List ``workspaces`` and the clones ``cloning``, as the picker takes them."""
+        self.picker.show(workspaces, cloning)
 
     def show_agents(self, agents: Sequence[AgentRef]) -> None:
-        """Show ``agents`` running in place of those shown, keeping the highlight."""
-        self.agents = tuple(agents)
-        if self.is_mounted:
-            self._relist(self._keys, self._keys, self._labels)
+        """Show ``agents`` running, as the picker takes them."""
+        self.picker.show_agents(agents)
 
-    @property
-    def _keys(self) -> tuple[str | None, ...]:
-        """The rows' keys, None for ``Add a path or URL…``."""
-        return tuple(map(row_key, self.rows))
+    def clone_failed(self, url: str, message: str) -> None:
+        """Show why the clone of ``url`` failed, as the picker takes it."""
+        self.picker.clone_failed(url, message)
 
-    def _pick_added(self) -> bool:
-        """Whether the workspace being added is listed, and picked, unless another screen is
-        over this one."""
-        adding = self._adding
-        if adding is None or not self.is_active:
-            return False
-        entry = added_workspace(self.workspaces, adding)
-        if entry is None:
-            return False
-        self._adding = None
-        self.dismiss(entry.id)
-        return True
-
-    @on(OptionList.OptionSelected)
-    async def _choose(self, event: OptionList.OptionSelected) -> None:
-        index = self._picked_row(event, self._keys)
-        if index is None:
-            return
-        row = self.rows[index]
-        if isinstance(row, WorkspaceEntry):
-            self.dismiss(row.id)
-        elif isinstance(row, AddWorkspace):
-            await self._add(row)
-        elif row == ADD_PATH:
-            self._explore()
-
-    def _explore(self) -> None:
-        """Open the explorer, picking the workspace it opens or adds."""
-        explorer = ExplorerScreen(self._change)
-        self._explorer = explorer
-
-        async def explored(pick: str | AddWorkspace | None) -> None:
-            self._explorer = None
-            if isinstance(pick, AddWorkspace):
-                self._added(pick)
-            elif pick is not None:
-                self.dismiss(pick)
-
-        self.app.push_screen(explorer, explored)
+    def must_pick(self) -> None:
+        """Have escape quit orbit, as at startup."""
+        self.picker.must_pick()
 
     def show_listing(self, listing: DirectoryListing) -> None:
         """Show ``listing`` in the explorer, if it's open."""
         if self._explorer is not None:
             self._explorer.show_listing(listing)
 
+    def explore(self, explored: Explored) -> None:
+        explorer = ExplorerScreen(self._change)
+        self._explorer = explorer
+
+        async def closed(pick: str | AddWorkspace | None) -> None:
+            self._explorer = None
+            await explored(pick)
+
+        self.app.push_screen(explorer, closed)
+
+    async def change(
+        self, command: AddWorkspace | RemoveWorkspace | Watch | ListDirectory, awaited: Awaited
+    ) -> object:
+        return await self._change(command, awaited)
+
+    def ask(self, question: Question, answered: Answered) -> None:
+        screen = ChoiceScreen(
+            question.title, question.message, question.choices, escape_index=question.escape
+        )
+        self.app.push_screen(screen, answered)
+
+    @on(OptionList.OptionSelected)
+    async def _choose(self, event: OptionList.OptionSelected) -> None:
+        index = self._picked_row(event, self.picker.keys)
+        if index is not None:
+            await self.picker.choose(index)
+
     @on(Input.Submitted, "#workspace-path")
     async def _typed(self, event: Input.Submitted) -> None:
         event.stop()
-        text = event.value.strip()
-        if text:
-            await self._add(add_command(text))
-
-    async def _add(self, adding: AddWorkspace) -> None:
-        """Send ``adding``, picking the workspace added by its path once it's accepted and
-        listed."""
-        self._show_note(None)
-        awaited = Awaited(accepted=lambda: self._added(adding), why=self._refused)
-        await self._change(adding, awaited)
-
-    def _added(self, adding: AddWorkspace) -> None:
-        """Go back to the list now ``adding`` is accepted, unless this screen is gone: pick the
-        workspace added by its path once it's listed, or await the clone of its URL, which its
-        row shows."""
-        if not self.is_attached:
-            return
-        self._typing(None)
-        if adding.url is not None:
-            self._cloning = adding.url
-            return
-        self._adding = adding.path
-        self._pick_added()
-
-    def clone_failed(self, url: str, message: str) -> None:
-        """Show ``message``, why the clone of ``url`` failed, in the path box's hint, with the
-        URL back in the box to change, if it's the clone this picker asked for."""
-        if url != self._cloning:
-            return
-        self._cloning = None
-        self._typing(PATH_HINT, url)
-        self.query_one(Input).border_subtitle = message
+        await self.picker.typed(event.value)
 
     def action_remove(self) -> None:
-        """Remove the highlighted workspace, keeping its sessions or deleting them too as the
-        user chooses, unless they cancel; other rows remove nothing."""
-        row = self.rows[self.query_one(OptionList).highlighted or 0]
-        if not isinstance(row, WorkspaceEntry):
-            return
-
-        async def chosen(index: int | None) -> None:
-            removing = None if index is None else removal(row, index)
-            if removing is not None:
-                self._show_note(None)
-                await self._change(removing, Awaited(why=self._refused))
-
-        choices = remove_choices(row)
-        screen = ChoiceScreen(remove_title(row), REMOVE_MESSAGE, choices, escape_index=CANCEL_INDEX)
-        self.app.push_screen(screen, chosen)
-
-    def must_pick(self) -> None:
-        """Have escape quit orbit, as at startup, now there's nothing to go back to."""
-        self.startup = True
-        self._show_hint()
+        self.picker.remove()
 
 
 class WorkspacesHost:
@@ -335,7 +224,7 @@ class WorkspacesHost:
         if self.shown is not None:
             return
         screen = WorkspacesScreen(self.workspaces, self._repository, self._change, startup)
-        screen.cloning = self.cloning
+        screen.picker.cloning = self.cloning
 
         async def picked(workspace: str | None) -> None:
             await self._change(Watch(streams=()), Awaited())

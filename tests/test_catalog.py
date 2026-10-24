@@ -9,8 +9,9 @@ from orbit.protocol import (
     WorkspaceEntry,
 )
 from orbit.tui.catalog import CatalogState
-from orbit.tui.sessions import SessionChange, SessionChoice, SessionsHost
+from orbit.tui.sessions import SessionsHost
 from orbit.tui.view.outcomes import Awaited
+from orbit.tui.view.session_picker import SessionChange, SessionChoice
 from orbit.tui.workspaces import Served, WorkspacesHost
 
 NOW = SessionSummary(id="now", name="today", current=True, active=True, viewers=1)

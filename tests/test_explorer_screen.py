@@ -39,18 +39,11 @@ SRV = DirectoryListing(
     path="/srv", parent="/", entries=(REPO_A, SERVED_C, DOT, PLAIN, LINK), total=5
 )
 SRV_A = DirectoryListing(path="/srv/a", parent="/srv", entries=(PLAIN,), total=1)
-OPT_X = DirectoryListing(path="/opt/x", parent="/opt", entries=(), total=0)
 SRV_ROWS = ["⎇ a", "⎇ c (served)", "docs", "link → /opt/x"]
 ORBIT = DirectoryEntry(name="orbit", is_repository=True, hidden=False)
 ORCHARD = DirectoryEntry(name="orchard", is_repository=False, hidden=False)
 SRC = DirectoryListing(path="/src", parent="/", entries=(ORBIT, ORCHARD, DOT), total=3)
 PROJECTS = DirectoryEntry(name="projects", is_repository=False, hidden=False)
-WORK = DirectoryListing(path="/work", parent="/", entries=(PROJECTS,), total=1)
-ROOT = DirectoryListing(
-    path="/", entries=(DirectoryEntry(name="srv", is_repository=False, hidden=False),), total=1
-)
-REAL = DirectoryListing(path="/opt/real", parent="/opt", entries=(PROJECTS,), total=1)
-REPO = WorkspaceEntry(id="R", label="repo", path="/srv/repo", sessions=())
 
 
 def connected() -> OrbitApp:

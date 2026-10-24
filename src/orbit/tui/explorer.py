@@ -89,22 +89,12 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
         self.explorer.show_listing(listing)
 
     @property
-    def highlighted(self) -> int | None:
-        return self.query_one(OptionList).highlighted
-
-    @property
     def field(self) -> str:
         return self.query_one(ExplorerField).value
 
     def show_heading(self, title: str, more: str | None) -> None:
         self.query_one(Vertical).border_title = title
         self.query_one("#explorer-more", NoteLine).show(more)
-
-    def show_rows(self, keys: Sequence[str], labels: Sequence[str], highlight: int | None) -> None:
-        options = self.query_one(OptionList)
-        options.clear_options()
-        options.add_options(self._options(keys, labels))
-        options.highlighted = highlight
 
     def show_note(self, note: str | None) -> None:
         self._show_note(note)

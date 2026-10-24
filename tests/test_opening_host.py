@@ -11,8 +11,8 @@ from orbit.protocol import (
     WorkspaceEntry,
 )
 from orbit.tui.opening import Hosts, Opening, OpeningHost
-from orbit.tui.sessions import StartupPick
 from orbit.tui.view.opening import lists_catalog
+from orbit.tui.view.session_picker import StartupPick
 
 ATTACH = Attach(workspace="w", session="now")
 OPEN_WITH = RunTasks()

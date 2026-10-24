@@ -2,9 +2,8 @@
 
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar
 
-from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
@@ -15,9 +14,6 @@ from textual.widgets import Input, OptionList
 from orbit.protocol import (
     ActivateSession,
     Attach,
-    DeleteSession,
-    NewSession,
-    RenameSession,
     SessionRef,
     SessionSummary,
     Snapshot,
@@ -26,36 +22,30 @@ from orbit.protocol import (
 from orbit.tui.catalog import CatalogState
 from orbit.tui.modal import ModalSlot, Push
 from orbit.tui.view.outcomes import Awaited
+from orbit.tui.view.session_picker import (
+    Manage,
+    SessionChange,
+    SessionChoice,
+    SessionPicker,
+    StartupPick,
+)
 from orbit.tui.view.sessions import (
     ACTIVATE_CHOICE,
     ACTIVATION_TITLE,
-    DELETE_TITLE,
-    DELETE_YES,
     JUST_LOOK_CHOICE,
     NAME_PLACEHOLDER,
-    NEW_SESSION_LABEL,
-    SESSIONS_HINTS,
     SESSIONS_TITLE,
-    PickerRow,
     Viewing,
     activation_choices,
     activation_message,
     active_id,
     active_name,
-    can_delete,
-    can_open,
-    delete_message,
     held_back,
     idle_now_message,
-    name_hint,
     opening_attach,
-    picked_commands,
-    picker_rows,
     picker_viewing,
     running_words,
-    session_label,
     session_turned_idle,
-    starting_commands,
     unjoined_view,
     viewed_only,
     viewing_mark,
@@ -63,41 +53,21 @@ from orbit.tui.view.sessions import (
 from orbit.tui.view.tasks import coder_wait_row
 from orbit.tui.widgets import ChoiceScreen, TypingListScreen, confirm
 
-SessionChoice = Attach | ActivateSession | NewSession
-"""What the user chose: a saved session to view, and perhaps activate, or a new one to start."""
-
-StartupPick = Literal["resume", "pick"]
-"""How the picker opens at startup: offering to resume the session viewed, or only to pick one."""
-
-SessionChange = RenameSession | DeleteSession
-"""A change to a saved session, made while the list stays open."""
-
-Manage = Callable[[SessionChange, Awaited], Awaitable[object]]
-"""Sends a change to a saved session to the backend, awaiting its outcome as told; the backend
-lists the sessions again after one it accepts. Whatever it returns is ignored."""
-
 
 class SessionsScreen(TypingListScreen[tuple[SessionChoice, ...]]):
-    """Lists ``sessions`` of the workspace ``viewing`` names before ``New session``: the one it
-    has attached first (as ``Resume`` if ``startup`` is ``resume`` or it hasn't joined the
-    workspace, and not at all if ``startup`` is ``pick``), then the others; dismisses with the
-    commands the user's choice sends, attaching to the workspace if it hasn't joined it.
+    """Shows the :class:`SessionPicker` of ``sessions`` of the workspace ``viewing`` names,
+    dismissing with the commands the user's choice sends.
 
-    ``j``/``k`` (and the arrows) move and enter picks the highlighted session, unless it can't
-    be opened; the attached session dismisses with none, keeping it. Enter on ``New session``
-    asks for a name, which enter confirms and escape leaves. ``r`` asks for the highlighted
-    session's new name the same way, and ``x`` deletes it once the user confirms; either is
-    sent with ``manage``, and a refusal shows why under the list, or in the name box's hint
-    while it's shown, until the next change is sent; ``refused`` shows there why a pick was.
-    Escape on the list dismisses with none, or quits orbit at ``startup``, where there's no
-    session to go back to.
+    ``j``/``k`` (and the arrows) move and enter picks the highlighted row; enter in the name box
+    names the new session, or renames; ``r`` renames the highlighted session and ``x`` deletes
+    it, asking first. Escape on the list dismisses with none, or quits orbit at startup.
     """
 
-    HINTS = SESSIONS_HINTS
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("r", "rename", show=False),
         Binding("x", "delete", show=False),
     ]
+    picker: SessionPicker
 
     def __init__(
         self,
@@ -106,32 +76,41 @@ class SessionsScreen(TypingListScreen[tuple[SessionChoice, ...]]):
         manage: Manage,
         startup: StartupPick | None = None,
     ) -> None:
-        super().__init__((), startup is not None)
-        self.workspace = viewing.workspace
-        self.joined = viewing.joined
-        self.sessions = tuple(sessions)
-        self.attached = viewing.attached
-        self.resume = startup == "resume"
+        super().__init__()
+        self.picker = SessionPicker(self, sessions, viewing, startup)
         self._manage = manage
-        self._renaming: SessionSummary | None = None  # The session being renamed, if any.
         self._why: str | None = None  # Why a pick was refused, to show once mounted.
+
+    @property
+    def workspace(self) -> str:
+        """The id of the workspace whose sessions are listed."""
+        return self.picker.workspace
+
+    @property
+    def joined(self) -> bool:
+        """Whether the frontend is on the workspace listed."""
+        return self.picker.joined
+
+    @property
+    def sessions(self) -> tuple[SessionSummary, ...]:
+        """The sessions listed, as last shown."""
+        return self.picker.sessions
+
+    @property
+    def resume(self) -> bool:
+        """Whether the session attached is offered to resume."""
+        return self.picker.resume
 
     @property
     def rows(self) -> tuple[SessionSummary, ...]:
         """The sessions listed, in order, before ``New session``."""
-        return tuple(row.summary for row in self._picker_rows)
-
-    @property
-    def _picker_rows(self) -> tuple[PickerRow, ...]:
-        """The rows listed, in order, before ``New session``."""
-        viewing = Viewing(self.workspace, self.attached, self.joined)
-        return picker_rows(self.sessions, viewing, startup=self.startup, resume=self.resume)
+        return self.picker.rows
 
     def compose(self) -> ComposeResult:
         with Vertical() as box:
             box.border_title = SESSIONS_TITLE
             box.border_subtitle = self.hint
-            yield OptionList(*self._options(self._keys, self._labels()))
+            yield OptionList(*self._options(self.picker.keys, self.picker.labels))
             yield self._note_line()
             # Typing goes on from the end of a name being changed, rather than replacing it.
             name = Input(placeholder=NAME_PLACEHOLDER, id="session-name", select_on_focus=False)
@@ -144,101 +123,42 @@ class SessionsScreen(TypingListScreen[tuple[SessionChoice, ...]]):
 
     def refused(self, why: str) -> None:
         """Show ``why`` a pick was refused under the list, as soon as it's composed."""
-        if self.is_mounted:
-            self._refused(why)
-        else:
-            self._why = why
+        self.picker.refused(why)
 
     def show(self, sessions: Sequence[SessionSummary], attached: str | None) -> None:
-        """List ``sessions``, with the one ``attached`` first, in place of those listed, keeping
-        the highlight on the session it was on, or where it was if that one's gone."""
-        if not self.is_mounted:  # Listed again before it's on screen: compose lists them.
-            self.sessions, self.attached = tuple(sessions), attached
-            return
-        shown = self._keys
-        self.sessions, self.attached = tuple(sessions), attached
-        self._relist(shown, self._keys, self._labels())
+        """List ``sessions``, with the one ``attached`` first, in place of those listed."""
+        self.picker.show(sessions, attached)
 
-    @property
-    def _keys(self) -> tuple[str | None, ...]:
-        """The rows' session ids, then None for ``New session``."""
-        return (*(row.id for row in self.rows), None)
+    def show_note(self, note: str | None) -> None:
+        if self.is_mounted:
+            self._show_note(note)
+        else:
+            self._why = note
 
-    def _labels(self) -> list[Text | str]:
-        """The rows' labels, then ``New session``'s."""
-        rows = [
-            session_label(row.summary, attached=row.attached, resume=row.resume)
-            for row in self._picker_rows
-        ]
-        return [*rows, NEW_SESSION_LABEL]
+    def confirm(
+        self, title: str, message: str, yes: str, then: Callable[[], Awaitable[object]]
+    ) -> None:
+        confirm(self.app.push_screen, title, message, yes, then)
 
-    @property
-    def _highlighted(self) -> SessionSummary | None:
-        """The session highlighted; none on ``New session``."""
-        rows = self.rows
-        index = self.query_one(OptionList).highlighted or 0
-        return rows[index] if index < len(rows) else None
+    async def manage(self, change: SessionChange, awaited: Awaited) -> object:
+        return await self._manage(change, awaited)
 
     @on(OptionList.OptionSelected)
     def _choose(self, event: OptionList.OptionSelected) -> None:
-        rows, index = self.rows, self._picked_row(event, self._keys)
-        if index is None:
-            return
-        if index == len(rows):
-            self._naming(True)
-            return
-        summary = rows[index]
-        if can_open(summary):
-            attached = self.attached if self.joined else None
-            self.dismiss(picked_commands(summary, self.sessions, attached, self.workspace))
+        index = self._picked_row(event, self.picker.keys)
+        if index is not None:
+            self.picker.choose(index)
 
     @on(Input.Submitted, "#session-name")
     async def _named(self, event: Input.Submitted) -> None:
         event.stop()
-        name = event.value.strip()
-        if self._renaming is None:
-            viewing = Viewing(self.workspace, self.attached, self.joined)
-            self.dismiss(starting_commands(name or None, viewing))
-            return
-        renaming = self._renaming
-        self._naming(False)
-        if name:  # An empty name keeps the old one.
-            await self._change(RenameSession(session_id=renaming.id, name=name))
+        await self.picker.named(event.value)
 
     def action_rename(self) -> None:
-        """Ask for the highlighted session's new name, starting from its name."""
-        summary = self._highlighted
-        if summary is not None:
-            self._naming(True, summary)
+        self.picker.rename()
 
     async def action_delete(self) -> None:
-        """Delete the highlighted session once the user confirms; one that can't be deleted is
-        sent without asking, for the backend to refuse, which shows why here."""
-        summary = self._highlighted
-        if summary is None:
-            return
-        deleting = DeleteSession(session_id=summary.id)
-        if not can_delete(summary):
-            await self._change(deleting)
-            return
-        message = delete_message(summary)
-        confirm(
-            self.app.push_screen, DELETE_TITLE, message, DELETE_YES, lambda: self._change(deleting)
-        )
-
-    async def _change(self, change: SessionChange) -> None:
-        """Send ``change``, showing why it's refused here, in place of any refusal shown."""
-        self._show_note(None)
-        await self._manage(change, Awaited(why=self._refused))
-
-    def _naming(self, on: bool, renaming: SessionSummary | None = None) -> None:
-        """Show the box for the name of a new session, or the new name of the session
-        ``renaming``, and type in it; or go back to the list."""
-        self._renaming = renaming
-        if not on:
-            self._typing(None)
-            return
-        self._typing(name_hint(renaming=renaming is not None), renaming.name if renaming else "")
+        await self.picker.delete()
 
 
 Send = Callable[[SessionChoice | SessionChange, Awaited], Awaitable[bool]]
