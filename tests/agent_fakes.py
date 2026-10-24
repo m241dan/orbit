@@ -1035,6 +1035,11 @@ def halt_of(session: WorkspaceHost) -> StorageHalt:
     return session._halt
 
 
+async def resume_storage(session: WorkspaceHost) -> None:
+    """Resume the session's storage as ``ResumeStorage`` does, with no connection attached."""
+    await session._resume_storage()
+
+
 def retry_of(session: WorkspaceHost) -> Retry:
     """What the session's storage halt retries as it resumes."""
     return session._halt._retry

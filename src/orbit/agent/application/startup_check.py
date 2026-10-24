@@ -76,6 +76,11 @@ class StartupCheck:
         self._started = True
         self._background.start(self._run())
 
+    @property
+    def started(self) -> bool:
+        """Whether it was started, running or not."""
+        return self._started
+
     def release_panel(self) -> None:
         """A task's verification takes the panel over from now on."""
         self._shown = False

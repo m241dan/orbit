@@ -707,15 +707,16 @@ class WorkspaceHost:
 
     async def _resume_storage(self) -> None:
         """Lift the halt, if the writes that failed now work, start the run whose wait to start
-        again ended while halted, and the reviews waiting. A startup check the halt cancelled
-        stays cancelled, as one the user cancelled does: it runs once as orbit starts, the
-        conversation has said it was cancelled, and the first task's verification runs the same
-        steps. Closing meanwhile, nothing is started."""
+        again ended while halted, the reviews waiting and the startup check the halt kept from
+        starting. A startup check the halt cancelled stays cancelled, as one the user cancelled
+        does: it runs once as orbit starts, the conversation has said it was cancelled, and the
+        first task's verification runs the same steps. Closing meanwhile, nothing is started."""
         await self._halt.resume()
         if not self._halt.halted and not self._closing:
             await self._turns.lifted()
             if self._lane is not None:
                 self._lane.kick()
+            self._start_startup_check()
 
     def _agent_on(self, task_id: str) -> str:
         """The agent working on task ``task_id``; only asked while one is."""
@@ -875,14 +876,21 @@ class WorkspaceHost:
     def start_background(self) -> None:
         """Start loading the super review count, the startup check, if there is one and the
         session isn't halted, and the tries of the repository's lock, unless they were started
-        for an earlier connection attaching here."""
+        for an earlier connection attaching here. A startup check a halt kept from starting
+        starts once the halt lifts."""
         if self._started:
             return
         self._started = True
         self._count_loader.start(self._load_review_count())
         self._takeover.start()
-        if self._startup is not None and not self._halt.halted:
-            self._startup.start()
+        self._start_startup_check()
+
+    def _start_startup_check(self) -> None:
+        """Start the startup check, if there is one, once the background was started, unless
+        it was started already or the session is halted."""
+        startup = self._startup
+        if self._started and startup is not None and not startup.started and not self._halt.halted:
+            startup.start()
 
     def _no_steps(self) -> bool:
         """Whether verification is on with no steps to verify tasks."""

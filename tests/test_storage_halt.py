@@ -67,6 +67,7 @@ from tests.agent_fakes import (
     GatedLog,
     Script,
     Steps,
+    agent_exited,
     chats,
     checked,
     claims_done,
@@ -85,6 +86,7 @@ from tests.agent_fakes import (
     planner_turn,
     publish,
     refused,
+    resume_storage,
     review_count_of,
     send,
     session_for,
@@ -789,6 +791,82 @@ async def test_the_startup_check_does_not_start_on_a_halted_session() -> None:
 
     assert startup is not None and not startup.running and startup.panel is None
     assert steps.runs == []
+
+
+async def halted_check(steps: Steps) -> WorkspaceHost:
+    """A session that checks ``steps`` at startup, halted, its halting done, before anything
+    started."""
+    session, _, _ = session_for(
+        verification=checked(steps), tree=FakeTree(), check_at_startup=True, store=FakeStore()
+    )
+    halt_of(session).fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))
+    await settled()
+    return session
+
+
+async def still_full() -> tuple[FailedWrite, StoreFailed]:
+    return FailedWrite.EVENT_LOG, StoreFailed("still full")
+
+
+async def test_the_startup_check_the_halt_kept_from_starting_runs_once_resumed() -> None:
+    steps = Steps(True, True)
+    session = await halted_check(steps)
+    session.start_background()
+
+    await resume_storage(session)
+    await events_until(session, agent_exited("startup-check"))
+    startup = startup_of(session)
+    assert startup is not None and startup.panel is not None
+    assert steps.runs == ["Lint", "Unit tests"]
+    await resume_storage(session)
+    await settled()
+    assert steps.runs == ["Lint", "Unit tests"]
+    await session.close()
+
+
+async def test_a_resume_that_leaves_the_session_halted_starts_no_startup_check() -> None:
+    steps = Steps(True)
+    session = await halted_check(steps)
+    session.start_background()
+    install_retry(session, still_full)
+
+    with pytest.raises(Refused):
+        await resume_storage(session)
+    await settled()
+    startup = startup_of(session)
+    assert startup is not None and not startup.running and startup.panel is None
+    assert steps.runs == []
+    await session.close()
+
+
+async def test_resuming_does_not_start_the_startup_check_again_while_it_runs() -> None:
+    steps = Steps(True, True)
+    steps.gate = asyncio.Event()
+    session, _, _ = session_for(
+        verification=checked(steps), tree=FakeTree(), check_at_startup=True, store=FakeStore()
+    )
+    session.start_background()
+    while steps.runs == []:
+        await asyncio.sleep(0.01)
+
+    await resume_storage(session)
+    steps.gate.set()
+    await events_until(session, agent_exited("startup-check"))
+    await settled()
+    assert steps.runs == ["Lint", "Unit tests"]
+    await session.close()
+
+
+async def test_a_resume_before_the_background_starts_does_not_start_the_startup_check() -> None:
+    steps = Steps(True)
+    session = await halted_check(steps)
+
+    await resume_storage(session)
+    await settled()
+    startup = startup_of(session)
+    assert startup is not None and not startup.running and startup.panel is None
+    assert steps.runs == []
+    await session.close()
 
 
 async def test_resuming_logs_a_gap_for_events_that_reached_no_fallback() -> None:
