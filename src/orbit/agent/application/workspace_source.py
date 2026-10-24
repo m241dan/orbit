@@ -46,6 +46,11 @@ class WorkspaceSource(Cloner, Protocol):
         serves it, or doesn't. Raises :class:`WorkspaceUnavailable` if that fails."""
         ...
 
+    async def restore_served(self, workspace_id: str) -> None:
+        """Flag the workspace ``workspace_id`` served again, as it was before it was unflagged,
+        keeping when it was added. Raises :class:`WorkspaceUnavailable` if that fails."""
+        ...
+
     async def latest_added(self) -> str | None:
         """The path of the workspace served that was flagged served last, if any. Raises
         :class:`WorkspaceUnavailable` if that can't be found out."""

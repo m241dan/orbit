@@ -312,7 +312,7 @@ async def test_a_workspace_whose_flag_cant_be_cleared_stays_served_and_is_refuse
     assert source.closed == []
 
 
-async def test_a_workspace_viewed_as_its_flag_is_cleared_is_flagged_again_and_refused() -> None:
+async def test_a_workspace_viewed_as_its_flag_is_cleared_is_restored_and_refused() -> None:
     host = workspace("c")
     source = FakeSource()
     source.flag_gate = asyncio.Event()
@@ -331,7 +331,7 @@ async def test_a_workspace_viewed_as_its_flag_is_cleared_is_flagged_again_and_re
 
     message = "Can't remove /src/c: another frontend views its session c-1."
     assert outcome == [refused("remove", BUSY, message)]
-    assert served == ["c"] and source.flags == [("c", False), ("c", True)]
+    assert served == ["c"] and source.flags == [("c", False)] and source.restored == ["c"]
     assert source.closed == []
 
 
@@ -574,6 +574,9 @@ class Unflaggable(SlowSource):
         if served == self.failing:
             raise WorkspaceUnavailable("The store failed.", INTERNAL)
         self.flags.append((workspace_id, served))
+
+    async def restore_served(self, workspace_id: str) -> None:
+        await self.set_served(workspace_id, True)
 
     async def close(self, workspace_id: str) -> None:
         self.closed.append(workspace_id)

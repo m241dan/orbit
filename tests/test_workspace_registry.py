@@ -113,6 +113,24 @@ async def test_flagging_served_stamps_the_time_and_unflagging_keeps_it(
     assert kept == (stamped,)
 
 
+async def test_restoring_the_served_flag_keeps_the_stamp(
+    store: SqliteStore, tmp_path: Path
+) -> None:
+    registry = WorkspaceRegistry(store)
+    first, second = directory(tmp_path, "first"), directory(tmp_path, "second")
+    first_id = (await registry.find_or_register(str(first))).workspace_id
+    second_id = (await registry.find_or_register(str(second))).workspace_id
+    await registry.set_served(first_id, True)
+    await registry.set_served(second_id, True)
+    await registry.set_served(first_id, False)
+    await registry.restore_served(first_id)
+    assert await registry.latest_added() == str(second.resolve())
+    assert await registry.served() == [
+        (first_id, str(first.resolve())),
+        (second_id, str(second.resolve())),
+    ]
+
+
 async def test_a_workspace_marked_managed_stays_so_when_found_again(
     store: SqliteStore, tmp_path: Path
 ) -> None:

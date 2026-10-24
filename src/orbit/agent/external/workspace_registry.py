@@ -113,6 +113,10 @@ def _set_served(connection: sqlite3.Connection, workspace_id: str, served: bool)
     )
 
 
+def _restore_served(connection: sqlite3.Connection, workspace_id: str) -> None:
+    connection.execute("UPDATE workspaces SET served = 1 WHERE id = ?", (workspace_id,))
+
+
 def _set_managed(connection: sqlite3.Connection, workspace_id: str) -> None:
     connection.execute("UPDATE workspaces SET managed = 1 WHERE id = ?", (workspace_id,))
 
@@ -205,6 +209,12 @@ class WorkspaceRegistry:
         await self._store.run(
             message, lambda connection: _set_served(connection, workspace_id, served)
         )
+
+    async def restore_served(self, workspace_id: str) -> None:
+        """Have a server serve the workspace ``workspace_id`` again, keeping when it was
+        added."""
+        message = f"Couldn't mark the workspace {workspace_id} served again in"
+        await self._store.run(message, lambda connection: _restore_served(connection, workspace_id))
 
     async def set_managed(self, workspace_id: str) -> None:
         """Mark the workspace ``workspace_id`` as managed: orbit cloned its repository into its

@@ -291,6 +291,12 @@ class ServedWorkspaces:
         with _unavailable(StoreError):
             await WorkspaceRegistry(self._store).set_served(workspace_id, served)
 
+    async def restore_served(self, workspace_id: str) -> None:
+        """Flag the workspace ``workspace_id`` served again in the store, keeping when it was
+        added. Raises :class:`WorkspaceUnavailable` as ``INTERNAL`` if the store fails."""
+        with _unavailable(StoreError):
+            await WorkspaceRegistry(self._store).restore_served(workspace_id)
+
     async def latest_added(self) -> str | None:
         """The path of the workspace served that was flagged served last, if any. Raises
         :class:`WorkspaceUnavailable` as ``INTERNAL`` if the store fails."""

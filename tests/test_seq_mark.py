@@ -108,6 +108,9 @@ class GatedSource:
     async def set_served(self, workspace_id: str, served: bool) -> None:
         pass
 
+    async def restore_served(self, workspace_id: str) -> None:
+        pass
+
     async def latest_added(self) -> str | None:
         return None
 

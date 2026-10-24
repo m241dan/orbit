@@ -88,8 +88,9 @@ class FakeSource:
     """Workspaces for a control plane to serve: each path is a directory, but for those
     ``kinds`` says otherwise, standing for itself, but for those ``tops`` names the top level
     of; noting the workspaces ``opened``, by path, those opened ``managed``, ``closed``, by id,
-    and the ``flags`` set, each waiting for ``flag_gate``, if given, and failing as
-    ``unflag_fails`` says, if it does, when it's cleared. Each URL ``cloning`` is cloned to
+    the ``flags`` set and the workspaces ``restored`` served, by id, each waiting for
+    ``flag_gate``, if given, and failing as ``unflag_fails`` says, if it does, when it's
+    cleared. Each URL ``cloning`` is cloned to
     ``/clones/<its last part>``, reporting one step of progress, then waiting for
     ``clone_gate``, if given, and failing as ``clone_fails`` says, if it does; the clones
     ``removed`` are noted, by path. Purging a workspace would lose what ``lost`` says, by id,
@@ -117,6 +118,7 @@ class FakeSource:
         self.unavailable: str | None = None
         self.unavailable_code = INVALID
         self.flags: list[tuple[str, bool]] = []
+        self.restored: list[str] = []
         self.flag_gate: asyncio.Event | None = None
         self.unflag_fails: str | None = None
         self.lost: dict[str, list[str]] = {}
@@ -168,6 +170,11 @@ class FakeSource:
         if not served and self.unflag_fails is not None:
             raise WorkspaceUnavailable(self.unflag_fails, INTERNAL)
         self.flags.append((workspace_id, served))
+
+    async def restore_served(self, workspace_id: str) -> None:
+        if self.flag_gate is not None:
+            await self.flag_gate.wait()
+        self.restored.append(workspace_id)
 
     async def latest_added(self) -> str | None:
         if self.latest_fails is not None:

@@ -75,10 +75,14 @@ class _ServedPurging:
 
 
 async def _flag_anyway(host: WorkspaceHost, workspaces: WorkspaceSource, *, served: bool) -> None:
-    """Have ``workspaces`` flag ``host``'s workspace ``served``, or not, as it cleans up after
-    another failure, which it mustn't replace: its own failure is only logged."""
+    """Have ``workspaces`` flag ``host``'s workspace not served, or, if ``served``, served again
+    as it was, keeping when it was added, as it cleans up after another failure, which it
+    mustn't replace: its own failure is only logged."""
     try:
-        await workspaces.set_served(host.workspace_id, served)
+        if served:
+            await workspaces.restore_served(host.workspace_id)
+        else:
+            await workspaces.set_served(host.workspace_id, False)
     except WorkspaceUnavailable as exc:
         flag = "served" if served else "not served"
         unexpected(f"Orbit failed to flag {host.display_name} {flag}: {exc}", exc)
@@ -270,9 +274,9 @@ class ServedSet:
         check_removable(host.display_name, host.activity, viewed)
 
     async def _unflag(self, host: WorkspaceHost) -> None:
-        """Have the source stop flagging ``host``'s workspace served, flagging it again and
-        refusing as :meth:`_check_removable` does if it got busy meanwhile, even if flagging it
-        again fails; refused with the code the source gives if that fails."""
+        """Have the source stop flagging ``host``'s workspace served, restoring the flag and
+        refusing as :meth:`_check_removable` does if it got busy meanwhile, even if restoring it
+        fails; refused with the code the source gives if that fails."""
         try:
             await self._workspaces.set_served(host.workspace_id, False)
         except WorkspaceUnavailable as exc:

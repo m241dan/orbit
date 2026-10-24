@@ -129,6 +129,23 @@ async def test_the_latest_added_is_the_workspace_opened_last_even_when_reopened(
     assert await source.latest_added() == str(first)
 
 
+async def test_restoring_a_workspace_served_keeps_the_latest_added(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path
+) -> None:
+    first, second = directory(tmp_path, "a"), directory(tmp_path, "b")
+    source = workspaces(stack, store)
+    host = await source.open(str(first))
+    await host.close()
+    await (await source.open(str(second))).close()
+
+    await source.set_served(host.workspace_id, False)
+    await source.restore_served(host.workspace_id)
+    served = await WorkspaceRegistry(store).served()
+
+    assert await source.latest_added() == str(second)
+    assert sorted(path for _, path in served) == [str(first), str(second)]
+
+
 async def test_a_store_failing_to_find_the_latest_added_is_unavailable(
     stack: ExitStack, store: SqliteStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
