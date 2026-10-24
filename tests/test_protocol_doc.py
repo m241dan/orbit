@@ -1,13 +1,17 @@
 """The protocol document: its code tables list every refusal and error code the protocol has,
-and its Transport section states the transport's close codes, statuses, reason and header."""
+its Transport section states the transport's close codes, statuses, reason and header, and it
+names every command and every event of the connection and control-plane groups."""
 
 import re
 from pathlib import Path
+from typing import get_args
 
 from orbit.protocol import (
     AGENT_FAILED,
     BUSY,
     CHECKS_EXHAUSTED,
+    CONNECTION_EVENTS,
+    CONTROL_PLANE_EVENTS,
     ERROR_CODES,
     FORBIDDEN,
     GIT_FAILED,
@@ -30,6 +34,7 @@ from orbit.protocol import (
     UNAVAILABLE,
     UNKNOWN,
     WRONG_SESSION,
+    Command,
     bearer_header,
 )
 
@@ -42,6 +47,13 @@ TRANSPORT_PHRASES = (
     *(f"`{name}: {value}`" for name, value in bearer_header("<token>").items()),
 )
 """What the Transport section must say for each of the transport's constants."""
+NAMED_MESSAGES = tuple(
+    dict.fromkeys(
+        member.__name__
+        for member in (*get_args(get_args(Command)[0]), *CONNECTION_EVENTS, *CONTROL_PLANE_EVENTS)
+    )
+)
+"""The messages the doc must name: every command, and the connection and control-plane events."""
 
 
 def code_tables(markdown: str) -> list[set[str]]:
@@ -179,3 +191,32 @@ def test_a_transport_phrase_only_outside_the_section_is_a_problem() -> None:
 def test_protocol_doc_transport_states_the_transport_constants() -> None:
     problems = transport_problems(PROTOCOL_DOC.read_text())
     assert not problems, f"docs/protocol.md's Transport section is wrong: {'; '.join(problems)}"
+
+
+def unnamed_messages(markdown: str, names: tuple[str, ...] = NAMED_MESSAGES) -> list[str]:
+    """The ``names`` ``markdown`` never mentions in backticks, alone or as ``AddTask(task)``."""
+    return [name for name in names if not re.search(rf"`{name}[`(]", markdown)]
+
+
+def test_a_doc_naming_every_message_in_backticks_has_none_unnamed() -> None:
+    doc = " ".join(f"`{name}`" for name in NAMED_MESSAGES)
+    assert unnamed_messages(doc) == []
+
+
+def test_a_message_named_with_its_fields_in_backticks_is_named() -> None:
+    assert unnamed_messages("`AddTask(task)`", ("AddTask",)) == []
+
+
+def test_a_message_named_without_backticks_is_unnamed() -> None:
+    assert unnamed_messages("CancelTurn and `CancelTurnLater`", ("CancelTurn",)) == ["CancelTurn"]
+
+
+def test_named_messages_hold_the_commands_and_both_event_groups() -> None:
+    assert {"Hello", "CancelTurn", "ResetConversation", "ListDirectory"} <= set(NAMED_MESSAGES)
+    assert {"Welcome", "WorkspaceCloning", "UsageTotals", "HistoryPage"} <= set(NAMED_MESSAGES)
+    assert len(NAMED_MESSAGES) == len(set(NAMED_MESSAGES))
+
+
+def test_protocol_doc_names_every_command_and_grouped_event() -> None:
+    missing = unnamed_messages(PROTOCOL_DOC.read_text())
+    assert not missing, f"docs/protocol.md never mentions {', '.join(missing)} in backticks"

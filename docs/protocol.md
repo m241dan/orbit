@@ -159,7 +159,9 @@ attached to no workspace, as before its first `Attach`. A connection viewing
 the open session keeps viewing it, whichever that is, until another session is activated in its
 place. From then on the connection gets the events
 of the session it views, its workspace's events that belong to no session, the control plane's
-own (the `Catalog`s and `UsageChanged`), and the answers to its own commands; another session's
+own (the types in `CONTROL_PLANE_EVENTS`: its `Welcome`, the `Catalog`s, `UsageChanged`,
+`WorkspaceCloning`, and, while it watches the control-plane stream, `AgentsChanged` and
+`UsageTotals`, and its own `DirectoryListing`s), and the answers to its own commands; another session's
 events don't reach it, nor do another workspace's. `Attach` with the open session's id views
 the open session again, live.
 
@@ -467,6 +469,48 @@ skips the echo of a command it sent itself; it shows every other `MessageSent` a
 `ProposalDecided`, live or in a transcript, as it shows its own: the message as a prompt under
 the agent's tab, the decision as orbit's note to the agent that proposed.
 
+## Tasks, settings and stopping work
+
+The task list is the session's, and every change to it publishes the whole list again in a
+`TasksChanged`, before the command's `CommandAccepted`. A command naming a task there's none of
+is refused with `unknown`: `No task with id 't9'.`
+
+- `AddTask(task)` appends `task`, a `TaskSpec` with its `prompt`, `settings` and `role`, to the
+  list as a pending task, with the next id.
+- `EditTask(task_id, task)` replaces task `task_id`'s `TaskSpec` with `task` and makes it pending
+  again, its attempts and the reason it last ended cleared; an edited task in a review batch has
+  to finish again before the batch does. It's refused with `busy` while the task runs or is
+  verified (`Task 't3' can't be edited while it runs.`), and with `invalid` for a review orbit
+  queued itself, whose batch is spent: `Reviews can't be edited; remove it instead.`
+- `AcceptTask(task_id)` makes the draft task `task_id`, one the planner proposed, a pending
+  task, to be run. It's refused with `invalid` for a task that isn't a draft: `Task 't3' isn't
+  a draft.`
+- `RemoveTask(task_id)` takes task `task_id` off the list, and out of its review batch, if any;
+  the tasks fixing it fix what it fixed instead, or become tasks of their own. It's refused with
+  `busy` while the task runs: `Task 't3' can't be removed while it runs.`
+
+`UpdateSettings(settings)` replaces the session's settings, which apply from the next turn: it
+publishes `SettingsChanged` and saves the session.
+
+`CancelTurn(lane)` stops the work in `lane`, `work` unless given: in the work lane, the task
+run, or its wait to start again, which holds the lane until the user asks for work again; in the
+`planner` lane, the planner's turn. Stopping a lane with nothing running is accepted and does
+nothing more. It's refused with `unknown` for a lane there's none of, naming those there are.
+
+`CancelAgent(agent_id)` stops agent `agent_id`'s work: the startup check, or a reviewer's
+review, on its own; the planner's turn, as `CancelTurn` does for the `planner` lane; and any
+other agent's, the task run it's in, as `CancelTurn` does for the `work` lane. It's refused with
+`unknown` for an agent that isn't running: `No running agent 'agent-9'.`
+
+`ResetConversation(agent)` ends the conversation of the conversational agent `agent`, the
+planner, so its next message starts a fresh one, and re-reads its role from the project's
+config, keeping the role it has, with a `Notice` saying why, when the config is invalid. It
+publishes `ConversationReset(agent)` and saves the session; with no conversation yet, a `Notice`
+says there's nothing to reset. It's refused with `unknown` for any other agent, with
+`not_configured` without agents and a planner role (`Planning needs agents and a planner
+role.`), and with `busy` while the planner answers: `The planner is answering; press ctrl+x to
+stop it first.`
+
 ## Paging through history
 
 The Snapshot's transcript holds a session's last 500 events; `History` reads further back.
@@ -586,7 +630,8 @@ file (`ws://127.0.0.1:7433/` by default). Each WebSocket is a connection of its 
 its own handshake and stream: it starts with `Hello` like any other, and what it's sent follows
 the rules above, so every connection gets every event of the session it views and of none,
 outcomes of other connections' commands included, but for the events answering one connection
-(`Welcome`, `Catalog`, `Snapshot`, `HistoryPage`, `DirectoryListing`), which reach only it.
+(`CONNECTION_EVENTS`: `Welcome`, `Catalog`, `Snapshot`, `HistoryPage`, `AgentsChanged`,
+`UsageTotals` and `DirectoryListing`), which reach only it, or the connections watching a stream.
 
 - **TLS**: with `tls = "off"` (the default) the server speaks plaintext `ws://` and listens on
   loopback alone. With `tls = "tls"` (`--tls tls`) it terminates TLS itself with the server
