@@ -18,14 +18,28 @@ async def clone_loss(path: Path) -> list[str]:
     if not await asyncio.to_thread(path.is_dir):
         return []
     try:
-        changed = await _lines(path, "status", "--porcelain")
+        changed = await _changed(path)
         stashes = await _lines(path, "stash", "list")
         branches = await _lines(path, *_BRANCHES)
         unpushed = [(branch, await _unpushed(path, branch)) for branch in branches]
         detached = await _detached(path)
     except TreeFailed as exc:
         return unchecked_clone(str(exc))
-    return clone_losses(len(changed), len(stashes), unpushed, detached)
+    return clone_losses(changed, len(stashes), unpushed, detached)
+
+
+async def _changed(path: Path) -> int:
+    """How many files have uncommitted changes across the worktrees of the clone at ``path``: its
+    own checkout and any others, such as the coder's, that are still there."""
+    listed = await _lines(path, "worktree", "list", "--porcelain")
+    trees = [
+        Path(line.removeprefix("worktree ")) for line in listed if line.startswith("worktree ")
+    ]
+    changed = 0
+    for tree in trees:
+        if await asyncio.to_thread(tree.is_dir):
+            changed += len(await _lines(tree, "status", "--porcelain"))
+    return changed
 
 
 async def _unpushed(path: Path, branch: str) -> int:

@@ -113,6 +113,22 @@ def test_a_clone_holding_work_is_refused_listing_it(state: Path, tmp_path: Path)
     assert clone.is_dir()
 
 
+def test_a_clone_whose_coder_tree_holds_work_is_refused(state: Path, tmp_path: Path) -> None:
+    clone = cloned(tmp_path)
+    used(state, clone, managed=True)
+    coder = clone / ".git" / "orbit" / "coder"
+    git(clone, "worktree", "add", "-q", "--detach", str(coder))
+    (coder / "b.txt").write_text("new\n")
+
+    result = runner.invoke(app, ["db", "forget", str(clone)])
+
+    assert result.exit_code == 2
+    assert result.stderr == (
+        f"Can't purge {clone}: deleting its clone would lose uncommitted changes to 1 file.\n"
+    )
+    assert (coder / "b.txt").is_file()
+
+
 def test_a_directory_in_a_registered_repository_purges_that_workspace(
     state: Path, tmp_path: Path
 ) -> None:

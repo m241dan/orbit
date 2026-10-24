@@ -1,5 +1,6 @@
 """What deleting a clone would lose, as git sees it."""
 
+import shutil
 from pathlib import Path
 
 from orbit.agent.external.clone_loss import clone_loss
@@ -69,3 +70,42 @@ async def test_a_clone_git_cant_read_may_lose_anything(tmp_path: Path) -> None:
     [line] = await clone_loss(plain)
     assert line.startswith("whatever it holds, which can't be checked: ")
     assert "not a git repository" in line
+
+
+def with_coder_tree(clone: Path) -> Path:
+    """The coder's tree in ``clone``, a worktree at its pushed commit, as orbit adds one."""
+    coder = clone / ".git" / "orbit" / "coder"
+    git(clone, "worktree", "add", "-q", "--detach", str(coder))
+    return coder
+
+
+async def test_a_clean_coder_tree_would_lose_nothing(tmp_path: Path) -> None:
+    clone = cloned(tmp_path)
+    with_coder_tree(clone)
+    assert await clone_loss(clone) == []
+
+
+async def test_changes_to_tracked_files_in_the_coder_tree_would_be_lost(tmp_path: Path) -> None:
+    clone = cloned(tmp_path)
+    (with_coder_tree(clone) / "a.txt").write_text("two\n")
+    assert await clone_loss(clone) == ["uncommitted changes to 1 file"]
+
+
+async def test_new_files_in_the_coder_tree_add_to_the_clone_s_changes(tmp_path: Path) -> None:
+    clone = cloned(tmp_path)
+    (with_coder_tree(clone) / "b.txt").write_text("new\n")
+    (clone / "a.txt").write_text("two\n")
+    assert await clone_loss(clone) == ["uncommitted changes to 2 files"]
+
+
+async def test_a_coder_tree_that_is_gone_would_lose_nothing(tmp_path: Path) -> None:
+    clone = cloned(tmp_path)
+    shutil.rmtree(with_coder_tree(clone))
+    assert await clone_loss(clone) == []
+
+
+async def test_a_coder_tree_git_cant_read_may_lose_anything(tmp_path: Path) -> None:
+    clone = cloned(tmp_path)
+    (with_coder_tree(clone) / ".git").write_text("not a gitdir\n")
+    [line] = await clone_loss(clone)
+    assert line.startswith("whatever it holds, which can't be checked: ")
