@@ -2,12 +2,8 @@
 :class:`orbit.protocol.Session`, over the workspace hosts it routes their commands to."""
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
-from contextlib import AsyncExitStack, asynccontextmanager
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import replace
-from functools import partial
-from pathlib import PurePath
-from typing import Protocol
 
 from orbit.agent.application.browsing import Browsing
 from orbit.agent.application.clones import Clones
@@ -21,30 +17,20 @@ from orbit.agent.application.connection import (
     SessionConnection,
 )
 from orbit.agent.application.control_stream import ControlStream
-from orbit.agent.application.failures import command_failure, unexpected
+from orbit.agent.application.failures import command_failure
 from orbit.agent.application.handshake import HandshakeParts
 from orbit.agent.application.keeper import Clock, local_now
 from orbit.agent.application.outbox import Seqs
-from orbit.agent.application.ports import Cloner, SeqMark, UsageLedger, UsageSource
-from orbit.agent.application.purge import purge
+from orbit.agent.application.ports import SeqMark, UsageLedger, UsageSource
 from orbit.agent.application.seq_mark import MarkReservations
+from orbit.agent.application.served_set import ServedParts, ServedSet
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.workspace_host import WorkspaceHost
+from orbit.agent.application.workspace_source import WorkspaceSource, WorkspaceUnavailable
 from orbit.agent.domain.catalog import catalog
-from orbit.agent.domain.clones import added_url, local_clone_source
 from orbit.agent.domain.listings import LOCAL_BROWSING
-from orbit.agent.domain.purging import Purged, owned_refusal
-from orbit.agent.domain.refusals import STOPPING, Refused
-from orbit.agent.domain.workspaces import (
-    LOCAL_ONLY,
-    PathKind,
-    RegisteredWorkspace,
-    addressed_workspace,
-    check_addable,
-    check_directory,
-    check_removable,
-    served_workspace,
-)
+from orbit.agent.domain.refusals import Refused
+from orbit.agent.domain.workspaces import LOCAL_ONLY, addressed_workspace, served_workspace
 from orbit.protocol import (
     INVALID,
     AddWorkspace,
@@ -65,111 +51,6 @@ from orbit.protocol import (
 )
 
 
-class WorkspaceUnavailable(Exception):
-    """A workspace can't be served, for the reason ``message`` gives, refused with ``code``:
-    ``INVALID`` when it's the workspace as given, such as an invalid configuration, or
-    ``INTERNAL`` when orbit failed, such as the store, perhaps partway through opening it."""
-
-    def __init__(self, message: str, code: str = INVALID) -> None:
-        super().__init__(message)
-        self.code = code
-
-
-class WorkspaceSource(Cloner, Protocol):
-    """Where the workspaces a control plane serves come from as frontends add them, by their
-    paths or as clones of repositories it makes, and where they go as they're removed."""
-
-    async def kind(self, path: str) -> PathKind:
-        """What there is at ``path``."""
-        ...
-
-    async def top_level(self, path: str) -> str:
-        """The path of the workspace the directory at ``path`` stands for: its repository's top
-        level, if it's in one, else itself, resolved."""
-        ...
-
-    async def open(self, root: str, *, managed: bool = False) -> WorkspaceHost:
-        """The host of the workspace at ``root``, registered or found by its path, flagged
-        served and, if ``managed``, as a clone orbit made, with its lock taken if no other orbit
-        holds it, making it read-only otherwise. Raises :class:`WorkspaceUnavailable` if it
-        can't be served."""
-        ...
-
-    async def set_served(self, workspace_id: str, served: bool) -> None:
-        """Flag the workspace ``workspace_id`` as ``served``, or not, so a server starting later
-        serves it, or doesn't. Raises :class:`WorkspaceUnavailable` if that fails."""
-        ...
-
-    async def latest_added(self) -> str | None:
-        """The path of the workspace served that was flagged served last, if any. Raises
-        :class:`WorkspaceUnavailable` if that can't be found out."""
-        ...
-
-    async def close(self, workspace_id: str) -> None:
-        """Let go of the lock on the workspace ``workspace_id``, whose host is closed and which
-        is no longer flagged served, keeping its records."""
-        ...
-
-    async def losses(self, workspace_id: str) -> list[str]:
-        """What purging the workspace ``workspace_id`` would lose, a short line each: what the
-        directory of a clone orbit made holds that its remote doesn't; none for another
-        workspace. Raises :class:`WorkspaceUnavailable` if that can't be found out."""
-        ...
-
-    async def purge(self, workspace_id: str) -> Purged:
-        """Delete the records of the workspace ``workspace_id``, whose host is closed and which
-        is no longer flagged served but still locked, and, if it's a clone orbit made, its
-        directory, having checked nothing would be lost, as :func:`erase` orders it; returns
-        what it deleted. Raises :class:`WorkspaceUnavailable` if they can't be, as ``invalid``
-        if it isn't registered."""
-        ...
-
-
-class _ServedPurging:
-    """Purging the workspace a control plane serves with ``host``, which ``workspaces`` holds
-    the lock of, having had it ``stop``, which stops serving it, before deleting it, as
-    :func:`purge` does; refused as ``busy`` while another orbit owns its repository, and, with
-    the code ``workspaces`` gives, if what it would lose can't be found out or deleting it
-    fails."""
-
-    def __init__(
-        self, host: WorkspaceHost, workspaces: WorkspaceSource, stop: Callable[[], Awaitable[None]]
-    ) -> None:
-        self._host = host
-        self._workspaces = workspaces
-        self._stop = stop
-        self._name = host.path or host.workspace_id
-
-    async def find(self, key: str) -> RegisteredWorkspace:
-        """The workspace served with the host, whose id is ``key``."""
-        return RegisteredWorkspace(key, self._name, served=True, managed=self._host.managed)
-
-    @asynccontextmanager
-    async def held(self, workspace: RegisteredWorkspace) -> AsyncIterator[str | None]:
-        """Run the block, the lock being held already, giving why it can't be purged if another
-        orbit owns its repository."""
-        owner = self._host.owner
-        yield None if owner is None else owned_refusal(self._name, owner)
-
-    async def losses(self, workspace: RegisteredWorkspace) -> list[str]:
-        """What purging ``workspace`` would lose, as ``workspaces`` says."""
-        try:
-            return await self._workspaces.losses(workspace.id)
-        except WorkspaceUnavailable as exc:
-            raise Refused(exc.code, f"Can't purge {self._name}: {exc}") from None
-
-    async def stop(self, workspace: RegisteredWorkspace) -> None:
-        """Stop serving ``workspace``."""
-        await self._stop()
-
-    async def delete(self, workspace: RegisteredWorkspace) -> Purged:
-        """Have ``workspaces`` delete what orbit keeps of ``workspace``."""
-        try:
-            return await self._workspaces.purge(workspace.id)
-        except WorkspaceUnavailable as exc:
-            raise Refused(exc.code, f"Removed {self._name}, but couldn't purge it: {exc}") from None
-
-
 def _last_seq(hosts: Iterable[WorkspaceHost], mark: SeqMark | None) -> int:
     """The highest ``seq`` any of ``hosts`` stamped, or ``mark``, if given, counts."""
     marked = 0 if mark is None else mark.max_seq()
@@ -178,16 +59,6 @@ def _last_seq(hosts: Iterable[WorkspaceHost], mark: SeqMark | None) -> int:
 
 async def _untold(entry: WorkspaceEntry) -> None:
     """Tell no one of ``entry``."""
-
-
-async def _flag_anyway(host: WorkspaceHost, workspaces: WorkspaceSource, *, served: bool) -> None:
-    """Have ``workspaces`` flag ``host``'s workspace ``served``, or not, as it cleans up after
-    another failure, which it mustn't replace: its own failure is only logged."""
-    try:
-        await workspaces.set_served(host.workspace_id, served)
-    except WorkspaceUnavailable as exc:
-        flag = "served" if served else "not served"
-        unexpected(f"Orbit failed to flag {host.path or host.workspace_id} {flag}: {exc}", exc)
 
 
 class _ControlEvents:
@@ -310,6 +181,24 @@ class ControlPlane:
             self._serve(host)
         self._started = False
         self._closing = False
+        self._served_set = None if workspaces is None else ServedSet(self._served_parts(workspaces))
+
+    def _served_parts(self, workspaces: WorkspaceSource) -> ServedParts:
+        """What the served set adds workspaces from ``workspaces`` and removes them with."""
+        return ServedParts(
+            hosts=self._hosts,
+            workspaces=workspaces,
+            changing=self._changing,
+            closing=lambda: self._closing,
+            coders=self._coders,
+            clones=self._clones,
+            browsing=self._browsing,
+            serve=self._serve,
+            begin=self._begin,
+            detach=self._detach,
+            changed=self._changed,
+            totals_changed=self._stream.totals_changed,
+        )
 
     def _serve(self, host: WorkspaceHost) -> None:
         """Have ``host`` stamp its events with the ``seq`` shared, deliver them to the
@@ -443,25 +332,11 @@ class ControlPlane:
     async def _change(
         self, command: AddWorkspace | RemoveWorkspace, connection: SessionConnection
     ) -> None:
-        """Add or remove the workspace ``command`` names, as ``connection`` asks, once no other
-        change is under way, or start cloning the repository it names; refused without a
-        source of workspaces, once closing, or for a local repository outside the browsable
-        root."""
-        workspaces = self._workspaces
-        if workspaces is None:
+        """Add or remove the workspace ``command`` names, as ``connection`` asks, as the served
+        set does; refused without a source of workspaces."""
+        if self._served_set is None:
             raise Refused(INVALID, LOCAL_ONLY)
-        if isinstance(command, RemoveWorkspace):
-            async with self._locked():
-                await self._remove(command, connection, workspaces)
-            return
-        url = added_url(command.path, command.url)
-        if url is not None:
-            await self._confine_source(url)
-            self._clone(url, workspaces)
-            return
-        assert command.path is not None  # added_url refuses an AddWorkspace with neither.
-        async with self._locked():
-            await self._add(command.path, connection, workspaces)
+        await self._served_set.change(command, connection)
 
     async def _list(self, command: ListDirectory, connection: SessionConnection) -> None:
         """Send ``connection`` alone the listing of the directory ``command`` names; refused
@@ -482,92 +357,6 @@ class ControlPlane:
             return await self._workspaces.latest_added()
         except WorkspaceUnavailable as exc:
             raise Refused(exc.code, f"Can't find where to start listing: {exc}") from None
-
-    async def _confine(self, path: str, managed: bool) -> None:
-        """Refuse adding the workspace at ``path`` as ``invalid`` when it's outside the
-        browsable root, if there is one, with its symlinks followed, unless it's ``managed``, a
-        clone orbit made in its clone directory."""
-        if not managed and self._browsing is not None:
-            await self._browsing.confined(path)
-
-    async def _confine_source(self, url: str) -> None:
-        """Refuse cloning ``url`` as ``invalid`` when it's a path on the server's host, or a
-        ``file://`` URL to one, outside the browsable root, if there is one, with its symlinks
-        followed."""
-        path = local_clone_source(url)
-        if path is not None and self._browsing is not None:
-            await self._browsing.confined(path)
-
-    @asynccontextmanager
-    async def _locked(self) -> AsyncIterator[None]:
-        """Run the block once no other change is under way; refused once closing."""
-        async with self._changing:
-            self._check_open()
-            yield
-
-    def _check_open(self) -> None:
-        """Refuse a change as ``invalid`` once closing."""
-        if self._closing:
-            raise Refused(INVALID, STOPPING)
-
-    def _clone(self, url: str, workspaces: WorkspaceSource) -> None:
-        """Have ``workspaces`` clone the repository at ``url`` in the background, then serve
-        the clone, managed; refused once closing, or as ``busy`` while ``url`` is being cloned
-        already."""
-        self._check_open()
-
-        async def serve(path: str) -> str:
-            async with self._locked():
-                return await self._add(path, None, workspaces, managed=True)
-
-        self._clones.start(url, workspaces, serve)
-
-    async def _add(
-        self,
-        path: str,
-        connection: SessionConnection | None,
-        workspaces: WorkspaceSource,
-        managed: bool = False,
-    ) -> str:
-        """The id of the workspace at ``path``, served from ``workspaces``, as a clone orbit
-        made if ``managed``, unless it's served already: start its host, opening its most recently
-        active session and its background work, and send the catalog to ``connection``, if one
-        asked, and every listening connection, or let it go again if that fails or is
-        cancelled, raising what failed even if clearing its flag fails; refused unless ``path``
-        is the absolute path to a directory, within the browsable root unless it's ``managed``,
-        or with the code it gives if it can't be served."""
-        check_addable(path, absolute=PurePath(path).is_absolute())
-        await self._confine(path, managed)
-        check_directory(path, await workspaces.kind(path))
-        root = await workspaces.top_level(path)
-        served = self._served_at(root)
-        if served is not None:
-            return served
-        try:
-            host = await workspaces.open(root, managed=managed)
-        except WorkspaceUnavailable as exc:
-            raise Refused(exc.code, f"Can't add {root}: {exc}") from None
-        try:
-            await self._start(host, connection)
-        except BaseException:
-            try:
-                await _flag_anyway(host, workspaces, served=False)
-            finally:
-                await self._let_go(host, workspaces)
-            raise
-        return host.workspace_id
-
-    def _served_at(self, root: str) -> str | None:
-        """The id of the workspace served at ``root``, if any."""
-        return next((host.workspace_id for host in self._hosts.values() if host.path == root), None)
-
-    async def _start(self, host: WorkspaceHost, connection: SessionConnection | None) -> None:
-        """Serve ``host``, as :meth:`_begin` does, and send the catalog to ``connection``, if
-        given, and every listening connection. Its events are stamped and delivered as it opens
-        its most recently active session, but no ``Attach`` reaches it till it's open."""
-        self._serve(host)
-        await self._begin(host)
-        await self._changed(connection)
 
     async def start(self) -> None:
         """Start serving the hosts this was built with, as :meth:`_begin` does, one by one, with
@@ -591,89 +380,6 @@ class ControlPlane:
             await host.open_latest()
         finally:
             host.catalog_changed = self._publish_catalog
-
-    async def _remove(
-        self, command: RemoveWorkspace, connection: SessionConnection, workspaces: WorkspaceSource
-    ) -> None:
-        """Stop serving the workspace ``command`` names: have ``workspaces`` stop flagging it
-        served, then close its host, having ``connection``, if it's attached there, attached to
-        none, if ``command`` says to purge it, delete its records, as :func:`purge` does, while
-        its lock is still held, and have ``workspaces`` let it go, and send the catalog to
-        ``connection`` and every listening connection, even if closing the host or purging
-        fails, then, once a purge has run, even if it failed, the usage totals read afresh to
-        the control-plane stream's watchers; refused for a workspace not served, as ``busy``
-        while it runs work or another connection views one of its sessions or, when purging,
-        another orbit owns its repository, as ``invalid`` when purging it would lose work, or
-        with the code ``workspaces`` gives, still served, if its flag can't be cleared."""
-        host = self._hosts[served_workspace(command.workspace, self._served)]
-        self._check_removable(host)
-        try:
-            async with AsyncExitStack() as stack:
-                stop = partial(self._stop, host, connection, workspaces, stack)
-                if command.purge:
-                    await purge(_ServedPurging(host, workspaces, stop), host.workspace_id)
-                else:
-                    await stop()
-        finally:
-            if command.purge:  # Some of its records may be gone even if purging failed.
-                self._stream.totals_changed()
-
-    async def _stop(
-        self,
-        host: WorkspaceHost,
-        connection: SessionConnection,
-        workspaces: WorkspaceSource,
-        stack: AsyncExitStack,
-    ) -> None:
-        """Stop serving ``host``'s workspace: have ``workspaces`` stop flagging it served, as
-        :meth:`_unflag` does, have ``connection``, if it's attached there, attached to none, and
-        close ``host``, its place in line for a coder, if any, going at once; once ``stack``
-        closes, even if closing ``host`` fails, have ``workspaces`` let it go and send the
-        catalog, as :meth:`_changed` does."""
-        await self._unflag(host, workspaces)
-        stack.push_async_callback(self._changed, connection)
-        stack.push_async_callback(workspaces.close, host.workspace_id)
-        if connection.workspace == host.workspace_id:
-            self._detach(connection)
-        await self._close_host(host)
-
-    @staticmethod
-    def _check_removable(host: WorkspaceHost) -> None:
-        """Refuse removing ``host``'s workspace as ``busy`` while it runs work or another
-        connection views one of its sessions."""
-        viewed = host.connections.others_view()
-        check_removable(host.path or host.workspace_id, host.activity, viewed)
-
-    async def _unflag(self, host: WorkspaceHost, workspaces: WorkspaceSource) -> None:
-        """Have ``workspaces`` stop flagging ``host``'s workspace served, flagging it again and
-        refusing as :meth:`_check_removable` does if it got busy meanwhile, even if flagging it
-        again fails; refused with the code
-        ``workspaces`` gives if that fails."""
-        name = host.path or host.workspace_id
-        try:
-            await workspaces.set_served(host.workspace_id, False)
-        except WorkspaceUnavailable as exc:
-            raise Refused(exc.code, f"Can't remove {name}, which is still served: {exc}") from None
-        try:
-            self._check_removable(host)
-        except Refused:
-            await _flag_anyway(host, workspaces, served=True)
-            raise
-
-    async def _let_go(self, host: WorkspaceHost, workspaces: WorkspaceSource) -> None:
-        """Stop serving ``host``'s workspace: close it, as :meth:`_close_host` does, then have
-        ``workspaces`` let it go, even if closing ``host`` fails."""
-        try:
-            await self._close_host(host)
-        finally:
-            await workspaces.close(host.workspace_id)
-
-    async def _close_host(self, host: WorkspaceHost) -> None:
-        """Close ``host``, no longer served; its place in line for a coder, if any, goes at
-        once."""
-        self._hosts.pop(host.workspace_id, None)
-        self._coders.drop(host.workspace_id)
-        await host.close()
 
     async def _changed(self, connection: SessionConnection | None) -> None:
         """Send every listening connection the catalog, as the workspaces served changed, and

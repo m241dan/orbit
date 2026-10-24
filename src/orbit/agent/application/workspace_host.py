@@ -525,6 +525,12 @@ class WorkspaceHost:
         return self._workspace
 
     @property
+    def display_name(self) -> str:
+        """What the workspace this host serves is called when it's told of: its path, or its id
+        if it's given none."""
+        return self._workspace or self._workspace_id
+
+    @property
     def managed(self) -> bool:
         """Whether the workspace this host serves is a clone orbit made."""
         return self._managed

@@ -7,10 +7,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from orbit.agent.application.control_plane import WorkspaceUnavailable
 from orbit.agent.application.ports import Cloner
 from orbit.agent.application.recovery import RecoveryFailed
 from orbit.agent.application.workspace_host import WorkspaceHost
+from orbit.agent.application.workspace_source import WorkspaceUnavailable
 from orbit.agent.domain.config import OrbitConfig
 from orbit.agent.domain.config_errors import INVALID_CONFIG, ConfigError
 from orbit.agent.domain.ownership import WorkspaceOwner
