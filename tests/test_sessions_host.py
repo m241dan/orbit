@@ -15,13 +15,10 @@ from orbit.protocol import (
     Snapshot,
     WorkspaceEntry,
 )
-from orbit.tui.catalog import CatalogState
-from orbit.tui.sessions import (
-    Placing,
-    SessionsHost,
-    SessionsScreen,
-)
+from orbit.tui.sessions import SessionsHost, SessionsScreen
+from orbit.tui.view.catalog import CatalogState
 from orbit.tui.view.outcomes import Awaited
+from orbit.tui.view.place import Place
 from orbit.tui.view.session_picker import SessionChange, SessionChoice
 from orbit.tui.view.sessions import chosen_workspace
 from orbit.tui.widgets import ChoiceScreen, ConfirmScreen
@@ -38,9 +35,9 @@ def catalog(*sessions: SessionSummary) -> Catalog:
 
 
 class Host(App[None]):
-    """An app holding a SessionsHost over the catalog it follows, recording the commands it
-    sends, those in ``failing`` failing to send, and the marks it shows as the session viewed
-    moves."""
+    """An app holding a :class:`Place` over the catalog it follows, shown by a SessionsHost,
+    recording the commands it sends, those in ``failing`` failing to send, and the marks it
+    shows as the session viewed moves."""
 
     def __init__(self, repository: str | None = None) -> None:
         super().__init__()
@@ -48,14 +45,14 @@ class Host(App[None]):
         self.failing: set[str] = set()
         self.marks: list[str | None] = []
         self.catalog = CatalogState()
-        self.host = SessionsHost(
-            self.push_screen,
+        self.screens = SessionsHost(
+            self.push_screen, self._sent, lambda: self.marks.append(self.host.mark)
+        )
+        self.host = Place(
+            self.screens,
             self._sent,
             self.catalog,
-            Placing(
-                lambda workspaces: chosen_workspace(workspaces, repository),
-                lambda: self.marks.append(self.host.mark),
-            ),
+            lambda workspaces: chosen_workspace(workspaces, repository),
         )
 
     def follow(self, listed: Catalog) -> None:
@@ -223,7 +220,7 @@ async def test_a_catalog_while_shown_replaces_the_rows_in_place() -> None:
         app.follow(catalog(NOW, OLD))
         await pilot.pause()
         [screen] = app.sessions_screens()
-        assert app.host.shown is screen
+        assert app.screens.shown is screen
         assert screen.sessions == (NOW, OLD)
         assert screen.query_one(OptionList).option_count == 3
 
@@ -294,7 +291,7 @@ async def test_dismissing_and_reopening_before_the_callback_keeps_one_picker() -
         app.host.open()
         await pilot.pause()
         [screen] = app.sessions_screens()
-        assert app.host.shown is screen
+        assert app.screens.shown is screen
 
 
 async def test_closing_with_a_choice_sends_it_and_forgets_the_screen() -> None:
@@ -304,7 +301,7 @@ async def test_closing_with_a_choice_sends_it_and_forgets_the_screen() -> None:
         await pilot.pause()
         app.screen.dismiss((NewSession(name="fresh"),))
         await pilot.pause()
-        assert app.host.shown is None
+        assert app.screens.shown is None
         assert app.sent == [NewSession(name="fresh")]
 
 
@@ -315,7 +312,7 @@ async def test_closing_with_no_commands_sends_nothing() -> None:
         await pilot.pause()
         app.screen.dismiss(())
         await pilot.pause()
-        assert app.host.shown is None
+        assert app.screens.shown is None
         assert app.sent == []
 
 
@@ -374,10 +371,10 @@ async def test_offering_twice_shows_one_offer() -> None:
         app.host.offer()
         await pilot.pause()
         [screen] = app.activation_screens()
-        assert app.host.offered is screen
+        assert app.screens.offered is screen
         screen.dismiss(1)  # Just look.
         await pilot.pause()
-        assert app.host.offered is None
+        assert app.screens.offered is None
         assert app.sent == []
 
 
@@ -402,7 +399,7 @@ async def test_a_live_snapshot_dismisses_the_offer_shown() -> None:
         app.host.offer()
         await pilot.pause()
         app.host.view(opened(OLD))
-        assert app.host.offered is None
+        assert app.screens.offered is None
         await pilot.pause()
         assert app.activation_screens() == []
         assert app.sent == []
@@ -420,7 +417,7 @@ async def test_an_offer_withdrawn_under_another_modal_is_closed_and_sends_nothin
         app.host.view(opened(OLD))
         await pilot.pause()
         assert app.activation_screens() == []
-        assert app.host.offered is None
+        assert app.screens.offered is None
         assert app.screen is other
         assert app.sent == []
 
@@ -428,7 +425,7 @@ async def test_an_offer_withdrawn_under_another_modal_is_closed_and_sends_nothin
 def test_the_mark_names_the_tasks_the_active_session_runs_without_numbers() -> None:
     app = Host()
     # Opens on the first workspace listed.
-    host = SessionsHost(app.push_screen, app._sent, app.catalog)
+    host = Place(SessionsHost(app.push_screen, app._sent), app._sent, app.catalog)
     app.catalog.follow(catalog(NOW, OLD))
     host.follow()
     host.view(view(OLD))

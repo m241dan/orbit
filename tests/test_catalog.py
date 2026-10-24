@@ -8,11 +8,13 @@ from orbit.protocol import (
     SessionSummary,
     WorkspaceEntry,
 )
-from orbit.tui.catalog import CatalogState
 from orbit.tui.sessions import SessionsHost
+from orbit.tui.view.catalog import CatalogState
 from orbit.tui.view.outcomes import Awaited
+from orbit.tui.view.place import Place
 from orbit.tui.view.session_picker import SessionChange, SessionChoice
-from orbit.tui.workspaces import Served, WorkspacesHost
+from orbit.tui.view.workspace_list import Served, WorkspaceList
+from orbit.tui.workspaces import WorkspacesHost
 
 NOW = SessionSummary(id="now", name="today", current=True, active=True, viewers=1)
 OLD = SessionSummary(id="old", name="auth rework")
@@ -76,8 +78,10 @@ async def _chosen(workspace: str, startup: bool) -> None:
 def test_both_hosts_report_the_state_the_one_holder_notes() -> None:
     app = App[None]()
     state = CatalogState()
-    sessions = SessionsHost(app.push_screen, _send, state)
-    workspaces = WorkspacesHost(app.push_screen, _change, _chosen, Served(state))
+    sessions = Place(SessionsHost(app.push_screen, _send), _send, state)
+    workspaces = WorkspaceList(
+        WorkspacesHost(app.push_screen, _change), _change, _chosen, Served(state)
+    )
     state.follow(TWO)
     sessions.follow()
     workspaces.follow()

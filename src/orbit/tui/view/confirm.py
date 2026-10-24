@@ -1,5 +1,7 @@
 """The confirmations asked before a key's action."""
 
+from dataclasses import dataclass
+
 CONFIGURE_TITLE = "Set up checks?"
 CONFIGURE_MESSAGE = "A configurator task will go to the front of the task list and run now."
 CONFIGURE_YES = "set up"
@@ -24,3 +26,14 @@ def confirm_hint(yes: str, no: str = "cancel") -> str:
     """The keys a confirmation shows, with ``yes`` naming what y does and ``no`` what n and
     escape do."""
     return f"y {yes} · n/esc {no}"
+
+
+@dataclass(frozen=True)
+class Question:
+    """``title``, asked with ``message``, offering ``choices``, of which escape picks the one at
+    ``escape``."""
+
+    title: str
+    message: str
+    choices: tuple[str, ...]
+    escape: int

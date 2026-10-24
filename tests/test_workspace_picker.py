@@ -15,9 +15,10 @@ from orbit.protocol import (
     WorkspaceCloning,
     WorkspaceEntry,
 )
+from orbit.tui.view.confirm import Question
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.typing_list import Label
-from orbit.tui.view.workspace_picker import Answered, Explored, Question, WorkspacePicker
+from orbit.tui.view.workspace_picker import Answered, Explored, WorkspacePicker
 from tests.desk_fakes import Backend
 
 TODAY_A = SessionSummary(id="a1", name="today", active=True)

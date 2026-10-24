@@ -2,7 +2,6 @@
 it lists, picking, adding and removing workspaces, and the clones under way."""
 
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
 from typing import Protocol
 
 from orbit.protocol import (
@@ -15,6 +14,7 @@ from orbit.protocol import (
     WorkspaceCloning,
     WorkspaceEntry,
 )
+from orbit.tui.view.confirm import Question
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.typing_list import TypingList, TypingListView
 from orbit.tui.view.workspaces import (
@@ -45,17 +45,6 @@ Explored = Callable[[str | AddWorkspace | None], Awaitable[None]]
 accepted, or none."""
 Answered = Callable[[int | None], Awaitable[None]]
 """Takes the index of the choice picked, or none."""
-
-
-@dataclass(frozen=True)
-class Question:
-    """``title``, asked with ``message``, offering ``choices``, of which escape picks the one at
-    ``escape``."""
-
-    title: str
-    message: str
-    choices: tuple[str, ...]
-    escape: int
 
 
 class WorkspacePickerView(TypingListView[str | None], Protocol):

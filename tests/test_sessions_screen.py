@@ -436,7 +436,9 @@ async def test_a_pick_takes_the_session_picked_though_the_list_changed_before_it
         await feed_events(session, pilot, CATALOG)
         screen = picker(app)
         screen.query_one(OptionList).action_select()
-        screen.show((CURRENT, LOCKED, OLD, BROKEN), "now")  # Puts the locked one where OLD was.
+        screen.picker.show(
+            (CURRENT, LOCKED, OLD, BROKEN), "now"
+        )  # Puts the locked one where OLD was.
         await pilot.pause()
         assert changes(session) == SWITCH_TO_OLD
 
@@ -448,7 +450,7 @@ async def test_a_pick_whose_session_left_the_list_before_it_is_taken_does_nothin
         screen = picker(app)
         screen.query_one(OptionList).action_select()
         other = SessionSummary(id="other", name="other")
-        screen.show((CURRENT, other), "now")  # Puts another session where OLD was.
+        screen.picker.show((CURRENT, other), "now")  # Puts another session where OLD was.
         await pilot.pause()
         assert app.screen is screen
         assert changes(session) == []

@@ -47,7 +47,6 @@ from orbit.protocol import (
     UpdateSettings,
 )
 from orbit.tui.agents import AgentsPane
-from orbit.tui.catalog import CatalogState
 from orbit.tui.commands import CommandDesk
 from orbit.tui.conversation import ConversationFeed
 from orbit.tui.detail import DetailPane
@@ -55,11 +54,10 @@ from orbit.tui.event_router import AppHooks, EventRouter, Handlers, Panes
 from orbit.tui.event_stream import event_batches
 from orbit.tui.footer import KeyFooter
 from orbit.tui.link import LinkHost
-from orbit.tui.opening import Hosts, Opening, OpeningHost
 from orbit.tui.panels import UsagePanel, VerificationPanel
 from orbit.tui.proposals import ProposalHost
 from orbit.tui.reason import ReasonScreen
-from orbit.tui.sessions import Placing, SessionsHost
+from orbit.tui.sessions import SessionsHost
 from orbit.tui.settings_pickers import SettingsPickers
 from orbit.tui.storage_halt import StorageHaltHost
 from orbit.tui.tabs import ConversationTabs
@@ -81,9 +79,10 @@ from orbit.tui.view.events import (
     coalesce,
 )
 from orbit.tui.view.history import HistoryPager
+from orbit.tui.view.navigation import Navigation, Views
+from orbit.tui.view.opening import Opening
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.proposals import decision_entry
-from orbit.tui.view.sessions import chosen_workspace
 from orbit.tui.view.tasks import edit_refusal
 from orbit.tui.view.transcript import PLANNER_BUSY, warning_entry
 from orbit.tui.view.windows import SIDEBAR_WINDOWS, neighbors
@@ -94,7 +93,7 @@ from orbit.tui.widgets import (
     confirm,
     mark_selected,
 )
-from orbit.tui.workspaces import Served, WorkspacesHost
+from orbit.tui.workspaces import WorkspacesHost
 
 _PLAIN_OPENING = Opening()
 
@@ -168,28 +167,12 @@ class OrbitApp(App[None], inherit_bindings=False):
         # Id of the window h/j/k/l last moved to.
         self._selected = "prompt"
         self._proposals = ProposalHost(self.push_screen, self._decide)
-        repository = opening.repository
-        # The latest catalog, as session states change it, which both pickers read.
-        self._catalog = CatalogState()
-        self._sessions = SessionsHost(
-            self.push_screen,
-            self._send,
-            self._catalog,
-            Placing(
-                # Over a link the user picks the workspace.
-                lambda workspaces: None if link else chosen_workspace(workspaces, repository),
-                lambda: self._router.show_viewing(),
-            ),
+        views = Views(
+            SessionsHost(self.push_screen, self._send, lambda: self._router.show_viewing()),
+            WorkspacesHost(self.push_screen, self._send),
         )
-        self._workspaces = WorkspacesHost(
-            self.push_screen,
-            self._send,
-            lambda workspace, startup: self._opening.open_workspace(workspace, startup),
-            Served(self._catalog, repository),
-        )
-        self._opening = OpeningHost(
-            opening, link is not None, self._send, Hosts(self._sessions, self._workspaces)
-        )
+        # The latest catalog, which both pickers read, where the app is and how it opens.
+        self._navigation = Navigation(views, self._send, opening, link is not None)
         # The feed shows answers once mounted, before any event arrives.
         self._desk = CommandDesk(session.send, self._render_event, lambda e: self._feed.render(e))
         self._takeover = TakeoverHost(self.push_screen, self._send).offer
@@ -267,10 +250,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 self._desk,
                 self._proposals,
                 self._pickers,
-                self._catalog,
-                self._sessions,
-                self._workspaces,
-                self._opening,
+                self._navigation,
                 self._halt,
                 self._takeover,
             ),
@@ -398,7 +378,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         elif self._selected == "detail":
             self._transcript.detail.enter_scroll_mode()
         elif self._selected == "prompt":  # Its viewing mark, while the session is a view.
-            self._sessions.offer()
+            self._navigation.place.offer()
 
     def action_release_cursor(self) -> None:
         """With the conversation selected, let go of its held cursor; with its detail pane
@@ -525,11 +505,11 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def action_list_sessions(self) -> None:
         """Show the session picker, the session viewed first."""
-        self._sessions.open()
+        self._navigation.place.open()
 
     def action_list_workspaces(self) -> None:
         """Show the workspace picker."""
-        self._workspaces.open()
+        self._navigation.workspaces.open()
 
     async def action_cancel_turn(self) -> None:
         # The planner has its own lane, stopped with ctrl+x; ctrl+s stops the task run.
@@ -578,7 +558,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 with self.batch_update():
                     for event in coalesce(batch):
                         self._render_event(event)
-                await self._opening.listed(batch)
+                await self._navigation.listed(batch)
 
     async def _hello(self) -> bool:
         """Whether the Hello opening the session was sent; a failure to send it is shown."""
@@ -604,7 +584,7 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _follow_link(self, state: LinkState) -> None:
         self._link_host.monitor.follow(state, self.clock())
         if isinstance(state, Connected):
-            self._workspaces.reconnected()
+            self._navigation.reconnected()
 
     def _label_triggers(self, labels: dict[str, str | None]) -> None:
         """Label each trigger's key in the footer with its label in ``labels``, hiding those

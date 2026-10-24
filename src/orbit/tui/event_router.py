@@ -34,13 +34,10 @@ from orbit.protocol import (
     WorkspaceCloning,
 )
 from orbit.tui.agents import AgentsPane
-from orbit.tui.catalog import CatalogState
 from orbit.tui.commands import CommandDesk
 from orbit.tui.conversation import ConversationFeed
-from orbit.tui.opening import OpeningHost
 from orbit.tui.panels import UsagePanel, VerificationPanel
 from orbit.tui.proposals import ProposalHost
-from orbit.tui.sessions import SessionsHost
 from orbit.tui.settings_pickers import SettingsPickers
 from orbit.tui.tabs import ConversationTabs
 from orbit.tui.tasks import TaskList
@@ -58,12 +55,12 @@ from orbit.tui.view.events import (
     in_group,
 )
 from orbit.tui.view.history import HistoryPager
+from orbit.tui.view.navigation import Navigation
 from orbit.tui.view.rules import planner_reset_entry
 from orbit.tui.view.storage import StorageHalt
 from orbit.tui.view.takeover import TakeoverOffer
 from orbit.tui.view.triggers import trigger_key_labels
 from orbit.tui.widgets import ChatPrompt, StatusLine
-from orbit.tui.workspaces import WorkspacesHost
 
 
 @dataclass(frozen=True)
@@ -91,10 +88,7 @@ class Handlers:
     desk: CommandDesk
     proposals: ProposalHost
     pickers: SettingsPickers
-    catalog: CatalogState
-    sessions: SessionsHost
-    workspaces: WorkspacesHost
-    opening: OpeningHost
+    navigation: Navigation
     halt: StorageHalt
     takeover: TakeoverOffer
 
@@ -148,7 +142,7 @@ class EventRouter:
             assert_never(event)
         self._follow_halt(event)
         if isinstance(event, ErrorOccurred):
-            self._handlers.workspaces.follow_error(event)
+            self._handlers.navigation.follow_error(event)
 
     def set_busy(self, lane: BusyLane, busy: bool) -> None:
         """Note whether ``lane`` is ``busy``, showing it for the planner's lane."""
@@ -160,9 +154,9 @@ class EventRouter:
     def show_viewing(self) -> None:
         """Mark the prompt while the session viewed isn't the active one, or hide the mark, and
         have the task about to run say when the session viewed waits for a coder."""
-        sessions = self._handlers.sessions
-        self._panes.viewing.show(sessions.mark)
-        self._panes.task_list.show_waiting(sessions.coder_wait)
+        place = self._handlers.navigation.place
+        self._panes.viewing.show(place.mark)
+        self._panes.task_list.show_waiting(place.coder_wait)
 
     def _render_ownership(self, event: OwnershipEvent) -> None:
         """Ask whether to take over the repository offered, or close the offer once it's
@@ -205,23 +199,12 @@ class EventRouter:
         longer lists the workspace the app is on opens the workspace picker. In process, the
         first catalog opens the session picker, if the app picks one."""
         self._hooks.label_triggers(trigger_key_labels(catalog.triggers))
-        self._handlers.catalog.follow(catalog)
-        self._handlers.workspaces.follow()
-        self._follow_sessions()
-        attached = self._handlers.sessions.attached_session
+        navigation = self._handlers.navigation
+        navigation.follow_catalog(catalog)
+        attached = navigation.place.attached_session
         if attached is not None:
             self._panes.transcript.show_session(attached.name)
         self.show_viewing()
-        self._handlers.opening.catalog_shown()
-
-    def _follow_sessions(self) -> None:
-        """List the latest catalog's sessions of the workspace the app is on, letting the user
-        pick another once the catalog no longer lists it."""
-        sessions = self._handlers.sessions
-        was_on = sessions.workspace
-        sessions.follow()
-        if was_on is not None and sessions.workspace is None:
-            self._handlers.workspaces.lost()
 
     def _open_session(self, session: SessionSummary) -> None:
         """Title the conversation with ``session``'s name, take the task list out of list
@@ -253,7 +236,7 @@ class EventRouter:
         panes.transcript.track(snapshot, panes.tabs.roles)
         handlers.pager.follow(snapshot)
         self._open_session(snapshot.session)
-        handlers.sessions.view(snapshot)
+        handlers.navigation.view(snapshot)
         self.show_viewing()
         panes.prompt.show_read_only(snapshot.read_only)
         handlers.takeover.follow(snapshot.ownership_offered)
@@ -280,9 +263,9 @@ class EventRouter:
         """Show the agents running across workspaces in the workspace picker, and the server's
         directories in its explorer; nothing shows what turns cost across them."""
         if isinstance(event, AgentsChanged):
-            self._handlers.workspaces.follow_agents(event)
+            self._handlers.navigation.follow_agents(event)
         elif isinstance(event, DirectoryListing):
-            self._handlers.workspaces.follow_listing(event)
+            self._handlers.navigation.follow_listing(event)
 
     def _follow_agents(self, event: Event) -> None:
         panes = self._panes
@@ -310,11 +293,9 @@ class EventRouter:
         elif isinstance(event, UsageChanged):
             self._panes.usage.show(event)
         elif isinstance(event, WorkspaceCloning):
-            self._handlers.workspaces.follow_cloning(event)
+            self._handlers.navigation.follow_cloning(event)
         else:
-            self._handlers.catalog.follow_state(event)
-            self._handlers.sessions.follow_state()
-            self._handlers.workspaces.follow()
+            self._handlers.navigation.follow_state(event)
             self.show_viewing()
 
     def _show_settings(self, settings: Settings, choices: tuple[str, ...]) -> None:

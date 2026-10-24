@@ -456,7 +456,7 @@ async def test_a_join_at_startup_failing_to_attach_joins_nothing_and_sends_no_op
         session_of(app).send_error = RuntimeError("the backend is gone")
         await pilot.press("enter")
         assert changes(session_of(app)) == [Attach(workspace="A", session="a1")]
-        assert (app._sessions.workspace, app._sessions.attached) == (None, None)
+        assert (app._navigation.place.workspace, app._navigation.place.attached) == (None, None)
 
 
 async def test_a_new_session_in_another_workspace_attaches_there_first() -> None:
@@ -660,7 +660,7 @@ async def test_a_pick_takes_the_workspace_picked_though_the_list_changed_before_
         await feed_events(session_of(app), pilot, SERVED)
         screen = workspaces(app)
         screen.query_one(OptionList).action_select()
-        screen.show((A, B))  # Puts B where A was.
+        screen.picker.show((A, B))  # Puts B where A was.
         await pilot.pause()
         assert sessions(app).workspace == "A"
 
@@ -671,7 +671,7 @@ async def test_a_pick_whose_workspace_left_the_list_before_it_is_taken_does_noth
         await feed_events(session_of(app), pilot, SERVED)
         screen = workspaces(app)
         screen.query_one(OptionList).action_select()
-        screen.show((B,))  # Puts adding a path where A was.
+        screen.picker.show((B,))  # Puts adding a path where A was.
         await pilot.pause()
         assert app.screen is screen
         assert changes(session_of(app)) == []

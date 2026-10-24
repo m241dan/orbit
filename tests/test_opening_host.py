@@ -10,8 +10,7 @@ from orbit.protocol import (
     SessionSummary,
     WorkspaceEntry,
 )
-from orbit.tui.opening import Hosts, Opening, OpeningHost
-from orbit.tui.view.opening import lists_catalog
+from orbit.tui.view.opening import Hosts, Opening, OpeningHost, lists_catalog
 from orbit.tui.view.session_picker import StartupPick
 
 ATTACH = Attach(workspace="w", session="now")
