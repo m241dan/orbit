@@ -11,6 +11,7 @@ import orbit.tui
 TESTS = Path(__file__).parent
 PYPROJECT = TESTS.parent / "pyproject.toml"
 VIEW_CONTRACT = "TUI view is independent of Textual"
+TRACING_CONTRACT = "Tracing imports no orbit package"
 
 
 def _contract(name: str) -> dict[str, Any]:
@@ -99,9 +100,11 @@ def test_imports_from_test_modules_are_found_however_they_are_written() -> None:
 
 
 def test_tracing_imports_no_orbit_package() -> None:
-    forbidden: list[str] = _contract("Tracing imports no orbit package")["forbidden_modules"]
-    for package in ("orbit.agent", "orbit.tui", "orbit.protocol", "orbit.cli", "orbit.client"):
-        assert _forbids(forbidden, package), package
+    forbidden: list[str] = _contract(TRACING_CONTRACT)["forbidden_modules"]
+    modules = pkgutil.iter_modules(orbit.__path__, prefix="orbit.")
+    others = sorted(module.name for module in modules if module.name != "orbit.tracing")
+    missing = [module for module in others if not _forbids(forbidden, module)]
+    assert not missing, f"{TRACING_CONTRACT!r} doesn't forbid {', '.join(missing)}"
 
 
 def test_neither_the_domain_nor_the_protocol_may_import_tracing() -> None:

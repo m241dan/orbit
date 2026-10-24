@@ -150,6 +150,8 @@ forbidden_modules = [
     "orbit.cli",
     "orbit.client",
     "orbit.profiling",
+    "orbit.telemetry",
+    "orbit.__main__",
     "pydantic",
 ]
 
