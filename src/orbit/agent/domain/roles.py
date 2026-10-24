@@ -58,9 +58,6 @@ disables it unless the built-in tool set is replaced to name it."""
 WRITE_TOOLS = ("Edit", "Write", "NotebookEdit")
 """The tools a restricted agent is denied, which write files."""
 
-REVIEW_ROLES = frozenset({REVIEWER, SUPER_REVIEWER})
-"""The roles that review work rather than do it."""
-
 CODER_ROLES = frozenset({CODER, CONFIGURATOR})
 """The roles whose tasks take one of the coders' slots a control plane shares across its
 workspaces."""

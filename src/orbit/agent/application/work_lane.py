@@ -32,11 +32,12 @@ from orbit.agent.domain.endings import (
     WORK_GONE,
     gave_up,
 )
-from orbit.agent.domain.roles import CODER_ROLES, REVIEW_ROLES
+from orbit.agent.domain.roles import CODER_ROLES
 from orbit.agent.domain.usage_limits import FIX_ERROR_NOTE, limit_hit
 from orbit.agent.domain.verification import FallbackFixes, failure_reason, fix_prompt
 from orbit.protocol import (
     CHECKS_EXHAUSTED,
+    REVIEW_ROLES,
     ErrorOccurred,
     Notice,
     TaskSpec,

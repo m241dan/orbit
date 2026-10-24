@@ -56,6 +56,7 @@ from orbit.protocol.commands import (
     command_adapter,
 )
 from orbit.protocol.deprecated import DEPRECATED_MESSAGES
+from orbit.protocol.edits import EditRefusal, edit_refusal
 from orbit.protocol.envelope import (
     CONNECTION_EVENTS,
     CONTROL_PLANE_EVENTS,
@@ -172,6 +173,7 @@ from orbit.protocol.names import (
     PLANNER_ORIGIN,
     PROTOCOL_VERSION,
     REVIEW_ORIGIN,
+    REVIEW_ROLES,
     REVIEWER,
     STARTUP_TASK,
     STREAMS,
@@ -237,6 +239,7 @@ __all__ = [
     "REFUSAL_CODES",
     "REVIEWER",
     "REVIEW_ORIGIN",
+    "REVIEW_ROLES",
     "SAVE_FAILED",
     "SESSIONLESS_EVENTS",
     "SHUTTING_DOWN",
@@ -284,6 +287,7 @@ __all__ = [
     "DeleteSession",
     "DirectoryEntry",
     "DirectoryListing",
+    "EditRefusal",
     "EditTask",
     "Ended",
     "ErrorOccurred",
@@ -377,6 +381,7 @@ __all__ = [
     "command_adapter",
     "decode_command",
     "decode_event",
+    "edit_refusal",
     "encode",
     "event_adapter",
     "failed_clone",

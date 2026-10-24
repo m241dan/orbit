@@ -5,6 +5,7 @@ from textual import events
 from orbit.agent import WorkspaceHost
 from orbit.protocol import (
     NOT_CONFIGURED,
+    REVIEW_ORIGIN,
     SUPER_REVIEW,
     AcceptTask,
     ActivateSession,
@@ -350,7 +351,8 @@ async def test_enter_on_a_running_task_says_it_cant_be_edited(
 
 
 async def test_enter_on_a_review_says_it_cant_be_edited(monkeypatch: pytest.MonkeyPatch) -> None:
-    state = TaskState(id="1", task=TaskSpec(prompt="check it", role="reviewer"))
+    task = TaskSpec(prompt="check it", role="reviewer")
+    state = TaskState(id="1", task=task, origin=REVIEW_ORIGIN)
     notes = await press_enter_on_the_task(monkeypatch, state)
     assert notes == [("Reviews can't be edited; remove it instead.", "warning")]
 

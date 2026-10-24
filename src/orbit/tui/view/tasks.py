@@ -6,7 +6,8 @@ from collections.abc import Sequence
 from rich.cells import cell_len
 from rich.text import Text
 
-from orbit.protocol import ACTIVE_STATUSES, REVIEWER, SUPER_REVIEWER, Activity, TaskState, Usage
+from orbit.protocol import ACTIVE_STATUSES, Activity, TaskState, Usage
+from orbit.protocol import edit_refusal as shared_edit_refusal
 from orbit.tui.view.common import STATUS_ICONS, counted, model_label, token_text
 from orbit.tui.view.detail_views import ERROR
 
@@ -190,16 +191,9 @@ def active_task(tasks: Sequence[TaskState]) -> int | None:
 
 
 def edit_refusal(state: TaskState) -> str | None:
-    """Why ``state`` can't be edited, in the backend's words; None if it can.
-
-    A running or verifying task can't change under its agent, and every review on the list
-    is one orbit queued, whose batch is spent.
-    """
-    if state.status in ACTIVE_STATUSES:
-        return f"Task {state.id!r} can't be edited while it runs."
-    if state.task.role in (REVIEWER, SUPER_REVIEWER):
-        return "Reviews can't be edited; remove it instead."
-    return None
+    """Why ``state`` can't be edited, as the backend would refuse it; None if it can."""
+    refusal = shared_edit_refusal(state)
+    return None if refusal is None else refusal.message
 
 
 def task_list_title(*, held: bool) -> str:

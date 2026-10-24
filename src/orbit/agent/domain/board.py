@@ -18,6 +18,7 @@ from orbit.protocol import (
     TaskState,
     TaskStatus,
     Usage,
+    edit_refusal,
 )
 
 # Statuses of a task that's yet to finish: still to run, or running.
@@ -100,10 +101,12 @@ class TaskBoard:
 
     def edit(self, task_id: str, task: TaskSpec) -> None:
         """Replace a task and make it pending again, without a reason for how it last ended.
-        Raises ``Refused`` if it can't be."""
+        Raises ``Refused`` if it can't be: while it runs, or for a review orbit queued, whose
+        batch is spent."""
         current = self.get(task_id)
-        if current.status in ACTIVE_STATUSES:
-            raise Refused(BUSY, f"Task {task_id!r} can't be edited while it runs.")
+        refusal = edit_refusal(current)
+        if refusal is not None:
+            raise Refused(refusal.code, refusal.message)
         fresh = {"task": task, "status": "pending", "attempt": 0, "max_attempts": 0} | _NO_REASON
         self._tasks[self.position(task_id)] = current.model_copy(update=fresh)
 

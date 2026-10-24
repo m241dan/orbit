@@ -1,11 +1,13 @@
 from rich.text import Text
 
 from orbit.protocol import (
+    REVIEW_ORIGIN,
     TaskSpec,
     TaskState,
     TaskStatus,
     Usage,
 )
+from orbit.protocol import edit_refusal as shared_edit_refusal
 from orbit.tui.view.rules import usage_text
 from orbit.tui.view.tasks import (
     NEW_TASK_LABEL,
@@ -187,9 +189,10 @@ def test_edit_refusal_says_a_running_or_verifying_task_cant_be_edited() -> None:
         assert edit_refusal(state) == "Task '3' can't be edited while it runs."
 
 
-def test_edit_refusal_says_reviews_cant_be_edited() -> None:
+def test_edit_refusal_says_a_review_orbit_queued_cant_be_edited() -> None:
     for role in ("reviewer", "super-reviewer"):
-        state = TaskState(id="1", task=TaskSpec(prompt="check", role=role))
+        task = TaskSpec(prompt="check", role=role)
+        state = TaskState(id="1", task=task, origin=REVIEW_ORIGIN)
         assert edit_refusal(state) == "Reviews can't be edited; remove it instead."
 
 
@@ -197,6 +200,25 @@ def test_edit_refusal_allows_a_pending_coder_task_and_a_draft() -> None:
     for status in ("pending", "draft"):
         state = TaskState(id="1", task=TaskSpec(prompt="go"), status=status)
         assert edit_refusal(state) is None
+
+
+def test_edit_refusal_allows_a_review_the_user_added_and_a_task_a_review_suggested() -> None:
+    review = TaskState(id="1", task=TaskSpec(prompt="check", role="reviewer"))
+    suggestion = TaskState(id="2", task=TaskSpec(prompt="tidy"), origin=REVIEW_ORIGIN)
+    assert edit_refusal(review) is None
+    assert edit_refusal(suggestion) is None
+
+
+def test_edit_refusal_answers_as_the_backend_does() -> None:
+    states = (
+        TaskState(id="3", task=TaskSpec(prompt="go"), status="verifying"),
+        TaskState(id="1", task=TaskSpec(prompt="check", role="super-reviewer"), origin="review"),
+        TaskState(id="1", task=TaskSpec(prompt="check", role="reviewer")),
+        TaskState(id="2", task=TaskSpec(prompt="tidy"), origin="review"),
+    )
+    for state in states:
+        shared = shared_edit_refusal(state)
+        assert edit_refusal(state) == (None if shared is None else shared.message)
 
 
 def test_new_task_row_is_labelled() -> None:

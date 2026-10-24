@@ -47,7 +47,7 @@ from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import Setup
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.replay import LogBounds
-from orbit.agent.domain.roles import REVIEW_ROLES, Role, built_in_roles
+from orbit.agent.domain.roles import Role, built_in_roles
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.agent.domain.usage import UsageFetch
@@ -57,6 +57,7 @@ from orbit.protocol import (
     BUILT_IN_ROLE_NAMES,
     PLANNER,
     PROTOCOL_VERSION,
+    REVIEW_ROLES,
     AddTask,
     AgentExited,
     AgentReply,

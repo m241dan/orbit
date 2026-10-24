@@ -77,6 +77,18 @@ def test_edit_rejects_unknown_and_running_tasks() -> None:
     assert board.get(first).task == ONE
 
 
+def test_edit_refuses_a_review_orbit_queued_but_not_one_the_user_added() -> None:
+    board = TaskBoard()
+    review = TaskSpec(prompt="Review commit abc", role="reviewer")
+    queued, added = board.add_review(review), board.add(review)
+    board.set_status(queued, "completed")
+    with pytest.raises(Refused, match="Reviews can't be edited") as refused:
+        board.edit(queued, TWO)
+    assert refused.value.code == INVALID
+    board.edit(added, TWO)
+    assert [t.task for t in board.tasks] == [review, TWO]
+
+
 def test_next_runnable_skips_done_running_and_already_tried_tasks() -> None:
     board = TaskBoard()
     ids = [board.add(TaskSpec(prompt=str(i))) for i in range(6)]

@@ -20,13 +20,13 @@ from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.catalog import CONVERSATIONAL_ROLES, LANES, TRIGGER_NAMES
 from orbit.agent.domain.refusals import Refused, unknown
-from orbit.agent.domain.roles import REVIEW_ROLES
 from orbit.protocol import (
     CONFIGURE_CHECKS,
     INTERNAL,
     INVALID,
     NOT_CONFIGURED,
     PLANNER,
+    REVIEW_ROLES,
     SUPER_REVIEW,
     UNKNOWN,
     WORK_LANE,
@@ -230,11 +230,9 @@ class WorkCommands:
                 assert_never(command)
 
     async def _edit(self, task_id: str, task: TaskSpec) -> None:
-        """Edit a task, unless it's a review orbit queued: its batch is spent, so it couldn't
-        run again. An edited task in a review batch has to finish again before the batch does."""
+        """Edit a task, if the board allows it. An edited task in a review batch has to finish
+        again before the batch does."""
         lane = self._parts.lane
-        if lane is not None and lane.queued_by_orbit(task_id):
-            raise Refused(INVALID, "Reviews can't be edited; remove it instead.")
 
         def edit(board: TaskBoard) -> TaskState:
             board.edit(task_id, task)

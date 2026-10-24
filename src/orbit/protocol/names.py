@@ -25,6 +25,9 @@ CONFIGURATOR = "configurator"
 BUILT_IN_ROLE_NAMES = (PLANNER, CODER, REVIEWER, SUPER_REVIEWER, CONFIGURATOR)
 """The built-in roles' names, in the order the TUI's strip shows their tabs."""
 
+REVIEW_ROLES = frozenset({REVIEWER, SUPER_REVIEWER})
+"""The roles that review work rather than do it."""
+
 
 BusyLane = str
 """Where work runs, by name: task runs in ``work``; the planner's turns in ``planner``."""

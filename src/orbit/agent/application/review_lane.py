@@ -26,11 +26,12 @@ from orbit.agent.domain.reviews import (
     pending_titles,
     review_prompt,
 )
-from orbit.agent.domain.roles import REVIEW_ROLES, role_task, suggested_task
+from orbit.agent.domain.roles import role_task, suggested_task
 from orbit.protocol import (
     CODER,
     GIT_FAILED,
     REVIEW_ORIGIN,
+    REVIEW_ROLES,
     REVIEWER,
     SUPER_REVIEW_ORIGIN,
     SUPER_REVIEWER,
@@ -192,10 +193,6 @@ class ReviewLane:
 
         new_id = await self._tasks.change(add)
         return Reply(f"Queued as task {new_id}.")
-
-    def queued_by_orbit(self, task_id: str) -> bool:
-        """Whether task ``task_id`` is a review this lane queued, rather than one the user added."""
-        return task_id in self._batches
 
     def cancel(self, task_id: str) -> None:
         """Stop review task ``task_id`` if it's the one running; the lane carries on."""
