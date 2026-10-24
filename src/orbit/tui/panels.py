@@ -33,16 +33,6 @@ class VerificationPanel(SidePanel):
         """Whether the running step's spinner and clock are turning."""
         return self._ticker.ticking
 
-    @property
-    def steps(self) -> tuple[StepState, ...]:
-        """The steps shown."""
-        return self.verification.steps
-
-    @property
-    def title(self) -> str:
-        """What the steps shown check, when it isn't the current task."""
-        return self.verification.title
-
     def show(self, steps: Sequence[StepState], title: str = "") -> None:
         """Show ``steps`` under ``title``, as the verification takes them."""
         self.verification.show(steps, title)
