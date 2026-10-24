@@ -4,7 +4,7 @@ import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import aclosing
 from dataclasses import replace
-from typing import ClassVar, assert_never
+from typing import ClassVar
 
 from textual import on, work
 from textual.app import App, ComposeResult
@@ -19,60 +19,41 @@ from orbit.protocol import (
     PLANNER,
     PLANNER_LANE,
     PROTOCOL_VERSION,
-    STORAGE_FAILED,
     SUPER_REVIEW,
     UNKNOWN,
     WORK_LANE,
     AcceptTask,
     AddTask,
-    AgentsChanged,
-    BusyChanged,
-    BusyLane,
     CancelAgent,
     CancelTurn,
-    Catalog,
     ChecksProposed,
     Command,
-    CommandRefused,
     Connected,
     DecideProposal,
-    DirectoryListing,
     EditTask,
     ErrorOccurred,
     Event,
     FireTrigger,
     Hello,
-    HistoryPage,
     Link,
     LinkState,
-    OwnershipOffered,
-    OwnershipTaken,
     RemoveTask,
     ResetConversation,
     ResumeStorage,
-    ReviewStatus,
     RunTasks,
     SendMessage,
     Session,
-    SessionSummary,
     Settings,
-    SettingsChanged,
-    Snapshot,
     TakeOwnership,
-    TasksChanged,
     TaskSpec,
-    TaskState,
     UpdateSettings,
-    UsageChanged,
-    UsageTotals,
-    VerificationChanged,
-    WorkspaceCloning,
 )
 from orbit.tui.agents import AgentsPane
 from orbit.tui.catalog import CatalogState
 from orbit.tui.commands import CommandDesk
 from orbit.tui.conversation import ConversationFeed
 from orbit.tui.detail import DetailPane
+from orbit.tui.event_router import AppHooks, EventRouter, Handlers, Panes
 from orbit.tui.event_stream import event_batches
 from orbit.tui.footer import KeyFooter
 from orbit.tui.history import HistoryPager
@@ -100,25 +81,13 @@ from orbit.tui.view.confirm import (
     RESET_YES,
 )
 from orbit.tui.view.events import (
-    ANSWER_EVENTS,
-    FEED_EVENTS,
-    OWNERSHIP_EVENTS,
-    SESSION_EVENTS,
-    STATE_EVENTS,
-    OwnershipEvent,
-    ProgressEvent,
-    SessionEvent,
-    StateEvent,
     coalesce,
-    in_group,
 )
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.proposals import decision_entry
-from orbit.tui.view.rules import planner_reset_entry
 from orbit.tui.view.sessions import chosen_workspace
 from orbit.tui.view.tasks import edit_refusal
 from orbit.tui.view.transcript import PLANNER_BUSY, warning_entry
-from orbit.tui.view.triggers import trigger_key_labels
 from orbit.tui.view.windows import SIDEBAR_WINDOWS, neighbors
 from orbit.tui.warning_capture import WarningCapture
 from orbit.tui.widgets import (
@@ -200,10 +169,6 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._link = link
         # Id of the window h/j/k/l last moved to.
         self._selected = "prompt"
-        # Which lanes have work in progress, as last reported (or just requested).
-        self._busy: dict[BusyLane, bool] = {WORK_LANE: False, PLANNER_LANE: False}
-        # Last settings reported by the backend; None until the first report.
-        self._settings: Settings | None = None
         self._proposals = ProposalHost(self.push_screen, self._decide)
         repository = opening.repository
         # The latest catalog, as session states change it, which both pickers read.
@@ -215,7 +180,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             Placing(
                 # Over a link the user picks the workspace.
                 lambda workspaces: None if link else chosen_workspace(workspaces, repository),
-                lambda: self._show_viewing(),
+                lambda: self._router.show_viewing(),
             ),
         )
         self._workspaces = WorkspacesHost(
@@ -290,6 +255,32 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._transcript, self._tabs, self._task_list, self._verification, lambda: self.clock()
         )
         self._pager = HistoryPager(self._transcript, self._feed, self._send)
+        self._router = EventRouter(
+            Panes(
+                self._transcript,
+                self._tabs,
+                self._prompt,
+                self._viewing,
+                self._task_list,
+                self._verification,
+                self._usage,
+                self._agents,
+            ),
+            Handlers(
+                self._feed,
+                self._pager,
+                self._desk,
+                self._proposals,
+                self._pickers,
+                self._catalog,
+                self._sessions,
+                self._workspaces,
+                self._opening,
+                self._halt,
+                self._takeover,
+            ),
+            AppHooks(self._label_triggers, self._leave_closed_detail, self._unfocus_task_list),
+        )
         self.query_one(f"#{self._selected}").add_class("selected")
         self._pickers.install(self)
         if self._link is not None:  # Before the events start, which start the link.
@@ -304,13 +295,13 @@ class OrbitApp(App[None], inherit_bindings=False):
         text = message.text.strip()
         if not text:
             return
-        if self._busy[PLANNER_LANE]:
+        if self._router.busy(PLANNER_LANE):
             # Keep the draft for when the planner is free; the user sends it again then.
             self.notify(PLANNER_BUSY, severity="warning")
             return
         self._prompt.action_normal_mode()
         # Busy from now, not from TurnStarted, so a second prompt can't race the turn.
-        self._set_busy(PLANNER_LANE, True)
+        self._router.set_busy(PLANNER_LANE, True)
         # A newer prompt supersedes an earlier one: only its outcome frees the planner.
         outcome = Awaited(accepted=lambda: self._sent(text), refused=self._unsend, supersedes=True)
         await self._show_and_send(
@@ -339,7 +330,7 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _unsend(self) -> None:
         """Undo sending a prompt to the planner, refused or not sent: the planner is freed, the
         prompt's text still in the prompt."""
-        self._set_busy(PLANNER_LANE, False)
+        self._router.set_busy(PLANNER_LANE, False)
 
     # Window navigation only applies at the top level, when no window is active.
 
@@ -453,13 +444,15 @@ class OrbitApp(App[None], inherit_bindings=False):
                 await self._send(EditTask(task_id=current.id, task=result))
 
         editor = TaskEditorScreen(
-            None if current is None else current.task, self._settings or Settings(), self._pickers
+            None if current is None else current.task,
+            self._router.settings or Settings(),
+            self._pickers,
         )
         self.push_screen(editor, saved)
 
     async def action_run_tasks(self) -> None:
         """Ask the backend to run the task list, unless something is already running."""
-        if not self._busy[WORK_LANE]:
+        if not self._router.busy(WORK_LANE):
             await self._send(RunTasks())
 
     def _select(self, window_id: str) -> None:
@@ -553,16 +546,17 @@ class OrbitApp(App[None], inherit_bindings=False):
     def action_pick_model(self) -> None:
         # While a picker is open, its modal screen blocks the app's key bindings, so a second
         # picker can't be pushed on top.
-        if self._settings is not None:
+        if self._router.settings is not None:
             self._pickers.choose_model(self._shown_settings, self._request_settings)
 
     def action_pick_tool_access(self) -> None:
-        if self._settings is not None:
+        if self._router.settings is not None:
             self._pickers.choose_tools(self._shown_settings, self._request_settings)
 
     def _shown_settings(self) -> Settings:
-        assert self._settings is not None  # Only picked once settings were shown.
-        return self._settings
+        settings = self._router.settings
+        assert settings is not None  # Only picked once settings were shown.
+        return settings
 
     async def _request_settings(self, settings: Settings) -> None:
         # The display updates when the backend confirms with SettingsChanged.
@@ -610,39 +604,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             return []
 
     def _render_event(self, event: Event) -> None:
-        self._follow_agents(event)
-        if in_group(event, STATE_EVENTS):
-            self._render_state(event)
-        elif in_group(event, FEED_EVENTS):
-            self._feed.render(event)
-        elif in_group(event, SESSION_EVENTS):
-            self._render_session(event)
-        elif in_group(event, ANSWER_EVENTS):
-            self._desk.answer(event)
-        else:
-            assert_never(event)
-        self._follow_halt(event)
-        if isinstance(event, ErrorOccurred):
-            self._workspaces.follow_error(event)
-
-    def _render_ownership(self, event: OwnershipEvent) -> None:
-        """Ask whether to take over the repository offered, or close the offer once it's
-        settled, clearing the read-only mark if this orbit owns it."""
-        if isinstance(event, OwnershipOffered):
-            self._takeover.offered()
-            return
-        self._takeover.settled()
-        if isinstance(event, OwnershipTaken):
-            self._prompt.show_read_only(False)
-
-    def _follow_halt(self, event: Event) -> None:
-        """Show the halt a storage error or a command refused for it reports."""
-        match event:
-            case (
-                ErrorOccurred(code=code, message=message)
-                | CommandRefused(code=code, message=message)
-            ) if code == STORAGE_FAILED:
-                self._halt.halted(message)
+        self._router.render(event)
 
     async def _resume_storage(self) -> None:
         # Trying again lifts the halt once accepted; only the latest try counts.
@@ -652,44 +614,6 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._link_host.follow(state, self.clock())
         if isinstance(state, Connected):
             self._workspaces.reconnected()
-
-    def _render_session(self, event: SessionEvent) -> None:
-        """Rule off the planner's conversation where it was reset, show a snapshot of the session
-        viewed or a page of its history, follow a catalog, or follow the session's hold on the
-        repository."""
-        if isinstance(event, Snapshot):
-            self._render_snapshot(event)
-        elif isinstance(event, Catalog):
-            self._render_catalog(event)
-        elif isinstance(event, HistoryPage):
-            self._pager.show(event)
-        elif in_group(event, OWNERSHIP_EVENTS):
-            self._render_ownership(event)
-        else:
-            self._feed.append(*planner_reset_entry(), PLANNER)
-
-    def _render_catalog(self, catalog: Catalog) -> None:
-        """Label the trigger keys from ``catalog`` and list its workspaces and sessions, titling
-        the conversation with the name of the session viewed, renamed perhaps; one that no
-        longer lists the workspace the app is on opens the workspace picker. In process, the
-        first catalog opens the session picker, if the app picks one."""
-        self._label_triggers(trigger_key_labels(catalog.triggers))
-        self._catalog.follow(catalog)
-        self._workspaces.follow()
-        self._follow_sessions()
-        attached = self._sessions.attached_session
-        if attached is not None:
-            self._transcript.show_session(attached.name)
-        self._show_viewing()
-        self._opening.catalog_shown()
-
-    def _follow_sessions(self) -> None:
-        """List the latest catalog's sessions of the workspace the app is on, letting the user
-        pick another once the catalog no longer lists it."""
-        was_on = self._sessions.workspace
-        self._sessions.follow()
-        if was_on is not None and self._sessions.workspace is None:
-            self._workspaces.lost()
 
     def _label_triggers(self, labels: dict[str, str | None]) -> None:
         """Label each trigger's key in the footer with its label in ``labels``, hiding those
@@ -705,101 +629,10 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._missing_triggers = frozenset(missing)
         self.refresh_bindings()
 
-    def _open_session(self, session: SessionSummary) -> None:
-        """Title the conversation with ``session``'s name, take the task list out of list
-        mode, let it follow again and start its total from what ``session`` spent."""
-        self._transcript.show_session(session.name)
+    def _unfocus_task_list(self) -> None:
+        """Take the focus from the task list, if it has it."""
         if self.focused is self._task_list:
             self.set_focus(None)
-        self._task_list.let_go()
-        self._task_list.reset_usage(session.usage)
-
-    def _render_snapshot(self, snapshot: Snapshot) -> None:
-        """Replace the state shown with ``snapshot``'s, the conversation with its transcript's,
-        and open the session it holds, asking about the repository while it says it's offered;
-        the agents pane follows it as it follows every event, and the working row once its
-        roles are known."""
-        self._show_settings(snapshot.settings, snapshot.model_choices)
-        for lane, busy in snapshot.busy.items():
-            self._set_busy(lane, busy)
-        self._show_tasks(snapshot.tasks)
-        self._verification.show(snapshot.steps, snapshot.steps_title)
-        self._agents.show_review(snapshot.review)
-        self._proposals.follow(snapshot.proposals)
-        # Its tasks shown first, as the transcript's notes on them read them, and its usage
-        # set after, as the transcript's turns count theirs.
-        self._feed.replace((envelope.payload for envelope in snapshot.transcript), snapshot.agents)
-        self._leave_closed_detail()
-        self._transcript.track(snapshot, self._tabs.roles)
-        self._pager.follow(snapshot)
-        self._open_session(snapshot.session)
-        self._sessions.view(snapshot)
-        self._show_viewing()
-        self._prompt.show_read_only(snapshot.read_only)
-        self._takeover.follow(snapshot.ownership_offered)
-        if snapshot.storage_halt is None:
-            self._halt.lifted()
-        else:
-            self._halt.halted(snapshot.storage_halt)
-
-    def _show_viewing(self) -> None:
-        """Mark the prompt while the session viewed isn't the active one, or hide the mark, and
-        have the task about to run say when the session viewed waits for a coder."""
-        self._viewing.show(self._sessions.mark)
-        self._task_list.show_waiting(self._sessions.coder_wait)
-
-    def _render_state(self, event: StateEvent) -> None:
-        """Show a snapshot of backend state, or a decision it waits for."""
-        match event:
-            case SettingsChanged(settings=settings, model_choices=choices):
-                self._show_settings(settings, choices)
-            case BusyChanged(busy=busy, lane=lane):
-                self._set_busy(lane, busy)
-            case TasksChanged(tasks=tasks):
-                self._show_tasks(tasks)
-            case AgentsChanged() | UsageTotals() | DirectoryListing():
-                self._follow_stream(event)
-            case _:
-                self._show_progress(event)
-
-    def _follow_stream(self, event: AgentsChanged | UsageTotals | DirectoryListing) -> None:
-        """Show the agents running across workspaces in the workspace picker, and the server's
-        directories in its explorer; nothing shows what turns cost across them."""
-        if isinstance(event, AgentsChanged):
-            self._workspaces.follow_agents(event)
-        elif isinstance(event, DirectoryListing):
-            self._workspaces.follow_listing(event)
-
-    def _follow_agents(self, event: Event) -> None:
-        self._agents.track(event)
-        self._tabs.track(event)
-        # A snapshot's roles are known only once it replaces the conversation.
-        if not isinstance(event, Snapshot):
-            self._transcript.track(event, self._tabs.roles)
-        self._proposals.withdraw(event)
-
-    def _show_tasks(self, tasks: tuple[TaskState, ...]) -> None:
-        self._task_list.show(tasks)
-        self._agents.number_tasks(self._task_list.numbers_by_id)
-
-    def _show_progress(self, event: ProgressEvent) -> None:
-        """Show the verification steps' progress, whether review is paused, proposed steps, usage
-        limits, a clone's progress or a session's state, which the pickers show."""
-        if isinstance(event, VerificationChanged):
-            self._verification.show(event.steps, event.title)
-        elif isinstance(event, ReviewStatus):
-            self._agents.show_review(event)
-        elif isinstance(event, ChecksProposed):
-            self._proposals.show(event)
-        elif isinstance(event, UsageChanged):
-            self._usage.show(event)
-        elif isinstance(event, WorkspaceCloning):
-            self._workspaces.follow_cloning(event)
-        else:
-            self._catalog.follow_state(event)
-            self._sessions.follow_state()
-            self._workspaces.follow()
-            self._show_viewing()
 
     async def _decide(self, proposal: ChecksProposed, decision: DecideProposal) -> None:
         """Note the user's ``decision`` on ``proposal`` in the conversation and send it; refused
@@ -813,14 +646,3 @@ class OrbitApp(App[None], inherit_bindings=False):
 
         outcome = Awaited(code=undecide)
         await self._show_and_send(shown, proposal.agent_id, decision, outcome)
-
-    def _show_settings(self, settings: Settings, choices: tuple[str, ...]) -> None:
-        self._pickers.show_choices(choices)
-        self._settings = settings
-        self._prompt.show_settings(settings)
-
-    def _set_busy(self, lane: BusyLane, busy: bool) -> None:
-        self._busy[lane] = busy
-        if lane == PLANNER_LANE:
-            self._prompt.show_busy(busy)
-            self._tabs.set_planner_busy(busy)

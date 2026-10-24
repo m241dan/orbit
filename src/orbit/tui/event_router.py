@@ -1,0 +1,323 @@
+"""Routes each backend event to the widgets and hosts that show it."""
+
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import assert_never
+
+from orbit.protocol import (
+    PLANNER,
+    PLANNER_LANE,
+    STORAGE_FAILED,
+    WORK_LANE,
+    AgentsChanged,
+    BusyChanged,
+    BusyLane,
+    Catalog,
+    ChecksProposed,
+    CommandRefused,
+    DirectoryListing,
+    ErrorOccurred,
+    Event,
+    HistoryPage,
+    OwnershipOffered,
+    OwnershipTaken,
+    ReviewStatus,
+    SessionSummary,
+    Settings,
+    SettingsChanged,
+    Snapshot,
+    TasksChanged,
+    TaskState,
+    UsageChanged,
+    UsageTotals,
+    VerificationChanged,
+    WorkspaceCloning,
+)
+from orbit.tui.agents import AgentsPane
+from orbit.tui.catalog import CatalogState
+from orbit.tui.commands import CommandDesk
+from orbit.tui.conversation import ConversationFeed
+from orbit.tui.history import HistoryPager
+from orbit.tui.opening import OpeningHost
+from orbit.tui.panels import UsagePanel, VerificationPanel
+from orbit.tui.proposals import ProposalHost
+from orbit.tui.sessions import SessionsHost
+from orbit.tui.settings_pickers import SettingsPickers
+from orbit.tui.storage_halt import StorageHaltHost
+from orbit.tui.tabs import ConversationTabs
+from orbit.tui.takeover import TakeoverHost
+from orbit.tui.tasks import TaskList
+from orbit.tui.transcript import Transcript
+from orbit.tui.view.events import (
+    ANSWER_EVENTS,
+    FEED_EVENTS,
+    OWNERSHIP_EVENTS,
+    SESSION_EVENTS,
+    STATE_EVENTS,
+    OwnershipEvent,
+    ProgressEvent,
+    SessionEvent,
+    StateEvent,
+    in_group,
+)
+from orbit.tui.view.rules import planner_reset_entry
+from orbit.tui.view.triggers import trigger_key_labels
+from orbit.tui.widgets import ChatPrompt, StatusLine
+from orbit.tui.workspaces import WorkspacesHost
+
+
+@dataclass(frozen=True)
+class Panes:
+    """The app's widgets that show events: the conversation's ``transcript`` and ``tabs``, the
+    ``prompt`` and the ``viewing`` mark by it, and the sidebar's ``task_list``,
+    ``verification`` steps, ``usage`` and ``agents``."""
+
+    transcript: Transcript
+    tabs: ConversationTabs
+    prompt: ChatPrompt
+    viewing: StatusLine
+    task_list: TaskList
+    verification: VerificationPanel
+    usage: UsagePanel
+    agents: AgentsPane
+
+
+@dataclass(frozen=True)
+class Handlers:
+    """The app's hosts and helpers that follow events."""
+
+    feed: ConversationFeed
+    pager: HistoryPager
+    desk: CommandDesk
+    proposals: ProposalHost
+    pickers: SettingsPickers
+    catalog: CatalogState
+    sessions: SessionsHost
+    workspaces: WorkspacesHost
+    opening: OpeningHost
+    halt: StorageHaltHost
+    takeover: TakeoverHost
+
+
+@dataclass(frozen=True)
+class AppHooks:
+    """What the router asks of the app itself: to ``label_triggers``' keys, to
+    ``leave_closed_detail`` once the conversation's detail pane closed, and to
+    ``unfocus_task_list`` if it has the focus."""
+
+    label_triggers: Callable[[dict[str, str | None]], None]
+    leave_closed_detail: Callable[[], None]
+    unfocus_task_list: Callable[[], None]
+
+
+class EventRouter:
+    """Shows each event in the ``panes`` and the ``handlers`` it concerns, asking the app for
+    what only it does through ``hooks``; it keeps which lanes are busy and the settings, as
+    last reported."""
+
+    def __init__(self, panes: Panes, handlers: Handlers, hooks: AppHooks) -> None:
+        self._panes = panes
+        self._handlers = handlers
+        self._hooks = hooks
+        # Which lanes have work in progress, as last reported (or just requested).
+        self._busy: dict[BusyLane, bool] = {WORK_LANE: False, PLANNER_LANE: False}
+        # Last settings reported by the backend; None until the first report.
+        self._settings: Settings | None = None
+
+    def busy(self, lane: BusyLane) -> bool:
+        """Whether ``lane`` has work in progress, as last reported or set."""
+        return self._busy[lane]
+
+    @property
+    def settings(self) -> Settings | None:
+        """The settings last reported; none until the first report."""
+        return self._settings
+
+    def render(self, event: Event) -> None:
+        """Show ``event`` wherever it concerns."""
+        self._follow_agents(event)
+        if in_group(event, STATE_EVENTS):
+            self._render_state(event)
+        elif in_group(event, FEED_EVENTS):
+            self._handlers.feed.render(event)
+        elif in_group(event, SESSION_EVENTS):
+            self._render_session(event)
+        elif in_group(event, ANSWER_EVENTS):
+            self._handlers.desk.answer(event)
+        else:
+            assert_never(event)
+        self._follow_halt(event)
+        if isinstance(event, ErrorOccurred):
+            self._handlers.workspaces.follow_error(event)
+
+    def set_busy(self, lane: BusyLane, busy: bool) -> None:
+        """Note whether ``lane`` is ``busy``, showing it for the planner's lane."""
+        self._busy[lane] = busy
+        if lane == PLANNER_LANE:
+            self._panes.prompt.show_busy(busy)
+            self._panes.tabs.set_planner_busy(busy)
+
+    def show_viewing(self) -> None:
+        """Mark the prompt while the session viewed isn't the active one, or hide the mark, and
+        have the task about to run say when the session viewed waits for a coder."""
+        sessions = self._handlers.sessions
+        self._panes.viewing.show(sessions.mark)
+        self._panes.task_list.show_waiting(sessions.coder_wait)
+
+    def _render_ownership(self, event: OwnershipEvent) -> None:
+        """Ask whether to take over the repository offered, or close the offer once it's
+        settled, clearing the read-only mark if this orbit owns it."""
+        takeover = self._handlers.takeover
+        if isinstance(event, OwnershipOffered):
+            takeover.offered()
+            return
+        takeover.settled()
+        if isinstance(event, OwnershipTaken):
+            self._panes.prompt.show_read_only(False)
+
+    def _follow_halt(self, event: Event) -> None:
+        """Show the halt a storage error or a command refused for it reports."""
+        match event:
+            case (
+                ErrorOccurred(code=code, message=message)
+                | CommandRefused(code=code, message=message)
+            ) if code == STORAGE_FAILED:
+                self._handlers.halt.halted(message)
+
+    def _render_session(self, event: SessionEvent) -> None:
+        """Rule off the planner's conversation where it was reset, show a snapshot of the session
+        viewed or a page of its history, follow a catalog, or follow the session's hold on the
+        repository."""
+        if isinstance(event, Snapshot):
+            self._render_snapshot(event)
+        elif isinstance(event, Catalog):
+            self._render_catalog(event)
+        elif isinstance(event, HistoryPage):
+            self._handlers.pager.show(event)
+        elif in_group(event, OWNERSHIP_EVENTS):
+            self._render_ownership(event)
+        else:
+            self._handlers.feed.append(*planner_reset_entry(), PLANNER)
+
+    def _render_catalog(self, catalog: Catalog) -> None:
+        """Label the trigger keys from ``catalog`` and list its workspaces and sessions, titling
+        the conversation with the name of the session viewed, renamed perhaps; one that no
+        longer lists the workspace the app is on opens the workspace picker. In process, the
+        first catalog opens the session picker, if the app picks one."""
+        self._hooks.label_triggers(trigger_key_labels(catalog.triggers))
+        self._handlers.catalog.follow(catalog)
+        self._handlers.workspaces.follow()
+        self._follow_sessions()
+        attached = self._handlers.sessions.attached_session
+        if attached is not None:
+            self._panes.transcript.show_session(attached.name)
+        self.show_viewing()
+        self._handlers.opening.catalog_shown()
+
+    def _follow_sessions(self) -> None:
+        """List the latest catalog's sessions of the workspace the app is on, letting the user
+        pick another once the catalog no longer lists it."""
+        sessions = self._handlers.sessions
+        was_on = sessions.workspace
+        sessions.follow()
+        if was_on is not None and sessions.workspace is None:
+            self._handlers.workspaces.lost()
+
+    def _open_session(self, session: SessionSummary) -> None:
+        """Title the conversation with ``session``'s name, take the task list out of list
+        mode, let it follow again and start its total from what ``session`` spent."""
+        self._panes.transcript.show_session(session.name)
+        self._hooks.unfocus_task_list()
+        self._panes.task_list.let_go()
+        self._panes.task_list.reset_usage(session.usage)
+
+    def _render_snapshot(self, snapshot: Snapshot) -> None:
+        """Replace the state shown with ``snapshot``'s, the conversation with its transcript's,
+        and open the session it holds, asking about the repository while it says it's offered;
+        the agents pane follows it as it follows every event, and the working row once its
+        roles are known."""
+        panes, handlers = self._panes, self._handlers
+        self._show_settings(snapshot.settings, snapshot.model_choices)
+        for lane, busy in snapshot.busy.items():
+            self.set_busy(lane, busy)
+        self._show_tasks(snapshot.tasks)
+        panes.verification.show(snapshot.steps, snapshot.steps_title)
+        panes.agents.show_review(snapshot.review)
+        handlers.proposals.follow(snapshot.proposals)
+        # Its tasks shown first, as the transcript's notes on them read them, and its usage
+        # set after, as the transcript's turns count theirs.
+        handlers.feed.replace(
+            (envelope.payload for envelope in snapshot.transcript), snapshot.agents
+        )
+        self._hooks.leave_closed_detail()
+        panes.transcript.track(snapshot, panes.tabs.roles)
+        handlers.pager.follow(snapshot)
+        self._open_session(snapshot.session)
+        handlers.sessions.view(snapshot)
+        self.show_viewing()
+        panes.prompt.show_read_only(snapshot.read_only)
+        handlers.takeover.follow(snapshot.ownership_offered)
+        if snapshot.storage_halt is None:
+            handlers.halt.lifted()
+        else:
+            handlers.halt.halted(snapshot.storage_halt)
+
+    def _render_state(self, event: StateEvent) -> None:
+        """Show a snapshot of backend state, or a decision it waits for."""
+        match event:
+            case SettingsChanged(settings=settings, model_choices=choices):
+                self._show_settings(settings, choices)
+            case BusyChanged(busy=busy, lane=lane):
+                self.set_busy(lane, busy)
+            case TasksChanged(tasks=tasks):
+                self._show_tasks(tasks)
+            case AgentsChanged() | UsageTotals() | DirectoryListing():
+                self._follow_stream(event)
+            case _:
+                self._show_progress(event)
+
+    def _follow_stream(self, event: AgentsChanged | UsageTotals | DirectoryListing) -> None:
+        """Show the agents running across workspaces in the workspace picker, and the server's
+        directories in its explorer; nothing shows what turns cost across them."""
+        if isinstance(event, AgentsChanged):
+            self._handlers.workspaces.follow_agents(event)
+        elif isinstance(event, DirectoryListing):
+            self._handlers.workspaces.follow_listing(event)
+
+    def _follow_agents(self, event: Event) -> None:
+        panes = self._panes
+        panes.agents.track(event)
+        panes.tabs.track(event)
+        # A snapshot's roles are known only once it replaces the conversation.
+        if not isinstance(event, Snapshot):
+            panes.transcript.track(event, panes.tabs.roles)
+        self._handlers.proposals.withdraw(event)
+
+    def _show_tasks(self, tasks: tuple[TaskState, ...]) -> None:
+        task_list = self._panes.task_list
+        task_list.show(tasks)
+        self._panes.agents.number_tasks(task_list.numbers_by_id)
+
+    def _show_progress(self, event: ProgressEvent) -> None:
+        """Show the verification steps' progress, whether review is paused, proposed steps, usage
+        limits, a clone's progress or a session's state, which the pickers show."""
+        if isinstance(event, VerificationChanged):
+            self._panes.verification.show(event.steps, event.title)
+        elif isinstance(event, ReviewStatus):
+            self._panes.agents.show_review(event)
+        elif isinstance(event, ChecksProposed):
+            self._handlers.proposals.show(event)
+        elif isinstance(event, UsageChanged):
+            self._panes.usage.show(event)
+        elif isinstance(event, WorkspaceCloning):
+            self._handlers.workspaces.follow_cloning(event)
+        else:
+            self._handlers.catalog.follow_state(event)
+            self._handlers.sessions.follow_state()
+            self._handlers.workspaces.follow()
+            self.show_viewing()
+
+    def _show_settings(self, settings: Settings, choices: tuple[str, ...]) -> None:
+        self._handlers.pickers.show_choices(choices)
+        self._settings = settings
+        self._panes.prompt.show_settings(settings)
