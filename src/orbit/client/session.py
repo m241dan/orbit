@@ -109,9 +109,9 @@ class WebSocketSession:
     ``wss://`` URL is verified with ``ssl_context``, or the system's trusted CAs without one.
 
     Raises :class:`PlaintextRefused` for a ``ws://`` URL to a host beyond loopback, before
-    connecting. It connects once it's first used. While the connection is down, :meth:`send` raises
-    :class:`NotConnected`, but for a ``Hello`` or a ``Watch``, which is kept to be sent on
-    connecting.
+    connecting. It connects once it's first used. While the connection is down, or yet to be
+    greeted, :meth:`send` raises :class:`NotConnected`, but for a ``Hello`` or a ``Watch``, which
+    is kept to be sent on connecting.
     """
 
     def __init__(
@@ -127,7 +127,8 @@ class WebSocketSession:
         self._token_file = token_file
         self._backoff = backoff
         self._events: asyncio.Queue[EventEnvelope | Exception | None] = asyncio.Queue()
-        self._websocket: ClientConnection | None = None  # While connected.
+        self._open: ClientConnection | None = None  # While connected, greeting included.
+        self._websocket: ClientConnection | None = None  # While connected, once greeted.
         self._hello: CommandEnvelope | None = None  # The last Hello sent.
         self._attach: CommandEnvelope | None = None  # The last Attach sent.
         self._watch: CommandEnvelope | None = None  # The last Watch sent.
@@ -174,8 +175,8 @@ class WebSocketSession:
     async def close(self) -> None:
         """Close the WebSocket and stop reconnecting; the events end."""
         self._closed = True
-        if self._websocket is not None:
-            await self._websocket.close()
+        if self._open is not None:
+            await self._open.close()
         try:
             if self._running is not None:
                 self._running.cancel()
@@ -307,18 +308,21 @@ class WebSocketSession:
     async def _linked(self, websocket: ClientConnection) -> bool:
         """Greet the control plane on ``websocket`` with the last ``Hello``, if any, and take
         its events until the connection closes, noting if it said it was shutting down; whether
-        it received anything. Raises :class:`_Ended` if it closed, from either side, in a way
-        that would recur, unless the session closed it."""
+        it received anything. Commands are sent on it, and it's reported connected, only once
+        it's greeted, so none goes before the ``Hello`` or the ``Attach`` sent again. Raises
+        :class:`_Ended` if it closed, from either side, in a way that would recur, unless the
+        session closed it."""
         async with websocket:
-            self._websocket = websocket
+            self._open = websocket
             self._ever_linked = True
             try:
-                self._report(Connected(self.url))
                 with suppress(ConnectionClosed):
                     await self._greet(websocket)
+                self._websocket = websocket
+                self._report(Connected(self.url))
                 received = await self._read(websocket)
             finally:
-                self._websocket = None
+                self._open = self._websocket = None
         self._closed_as(_closing(websocket))
         return received
 

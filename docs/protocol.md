@@ -191,7 +191,9 @@ viewers. The delete's `CommandAccepted` follows.
 A reconnecting `orbit.client.WebSocketSession` sends its `Hello` again and, if it had attached,
 its last `Attach`: as it was while it's unanswered, so a switch the link dropped isn't lost;
 otherwise for the workspace and session the last `Snapshot` it got showed, if it got one since,
-so it views that session again, the one it viewed before a refused `Attach` included.
+so it views that session again, the one it viewed before a refused `Attach` included. Until
+those are sent, it refuses other commands as not connected and doesn't report itself connected,
+so none reaches the control plane before them.
 
 ## Workspaces
 

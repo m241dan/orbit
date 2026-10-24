@@ -2,18 +2,21 @@
 
 import asyncio
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import pytest
-from websockets.asyncio.client import connect
+from websockets.asyncio.client import ClientConnection, connect
 from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.datastructures import Headers
 from websockets.http11 import Request, Response
 
 from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.client import Backoff, TokenUnreadable, WebSocketSession, messages, read_token
+from orbit.client import session as session_module
+from orbit.client.upgrade import open_connection
 from orbit.protocol import (
     DEFAULT_MAX_MESSAGE_MB,
     NOT_CONNECTED,
@@ -615,6 +618,75 @@ async def test_a_command_on_a_connection_closed_unnoticed_raises_not_connected()
                 await session.send(RUN)
             await session.send(HELLO)  # Kept for the next connection.
         await session.close()
+
+
+class Gate:
+    """Holds each frame a client sends on its next connection until opened."""
+
+    def __init__(self) -> None:
+        self.entered = asyncio.Event()  # Set once a frame is held.
+        self.opened = asyncio.Event()
+
+    def hold(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Have each connection the client opens from now hold its frames until opened."""
+        real = open_connection
+
+        async def opening(*args: Any, **kwargs: Any) -> ClientConnection | None:
+            connection = await real(*args, **kwargs)
+            assert connection is not None
+            monkeypatch.setattr(connection, "send", self._held(connection.send))
+            return connection
+
+        monkeypatch.setattr(session_module, "open_connection", opening)
+
+    def _held(self, send: Callable[[str], Awaitable[None]]) -> Callable[[str], Awaitable[None]]:
+        async def held(message: str) -> None:
+            self.entered.set()
+            await self.opened.wait()
+            await send(message)
+
+        return held
+
+
+async def test_a_command_sent_while_greeting_raises_not_connected_and_follows_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async with viewing() as (fake, session, events, first):
+        states = States()
+        session.watch(states)
+        await session.send(WATCH)
+        await fake.command()
+        gate = Gate()
+        gate.hold(monkeypatch)
+        await drop_after(first, events)
+        await asyncio.wait_for(gate.entered.wait(), 5)
+        with pytest.raises(NotConnected):
+            await asyncio.wait_for(session.send(RUN), 5)
+        assert not any(isinstance(state, Connected) for state in states.seen)
+        gate.opened.set()
+        await states.until(Connected)
+        await session.send(RUN)
+        greeting = [await fake.command() for _ in range(4)]
+
+    assert isinstance(greeting[0].payload, Hello) and greeting[1:] == [ATTACH, WATCH, RUN]
+
+
+async def test_closing_while_greeting_closes_the_connection_and_ends_the_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gate = Gate()
+    gate.hold(monkeypatch)
+    async with plane() as (fake, url):
+        session, states = client(url)
+        events = session.events()
+        await session.send(HELLO)
+        connection = await fake.connection()
+        await asyncio.wait_for(gate.entered.wait(), 5)
+        await asyncio.wait_for(session.close(), 5)
+        await asyncio.wait_for(connection.wait_closed(), 5)
+        assert [state async for state in events] == []
+        assert states.seen == []
+        assert fake.commands.empty()
 
 
 async def test_failing_to_connect_is_retried_and_reported_once() -> None:
