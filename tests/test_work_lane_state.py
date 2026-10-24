@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 import pytest
 
 from orbit.agent import Agents
+from orbit.agent.application.coder_slots import CoderSeat, CoderSlots
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import SessionGate
 from orbit.agent.application.ports import Merge
@@ -29,6 +30,8 @@ from orbit.protocol import (
     TurnEndReason,
 )
 from tests.agent_fakes import ROLES, Call, FakeHost, FakeTree, Script, ScriptedLauncher, claims_done
+
+OTHERS_SLOT = ("other", "s")  # Another workspace's session, which holds the only coder's slot.
 
 
 async def no_work() -> None:
@@ -312,3 +315,119 @@ async def test_work_whose_base_kept_moving_ends_without_landing() -> None:
     [merged] = [e for e in published.events if isinstance(e, TaskMerged)]
     assert merged.result == "rebased" and "kept moving" in merged.detail
     assert review.heard == [("ended", task_id, "completed")]
+
+
+class Unwatchable(Tasks):
+    """A board whose next publish can't be waited for: a bug in whatever waits."""
+
+    async def moved(self) -> None:
+        raise RuntimeError("no watching")
+
+
+class NotingStart:
+    """Publishing that notes the tasks still pending as the board is first published with a
+    task running."""
+
+    def __init__(self) -> None:
+        self.pending: set[asyncio.Task[object]] | None = None
+
+    async def __call__(self, event: Event) -> None:
+        if self.pending is None and running(event):
+            self.pending = {t for t in asyncio.all_tasks() if not t.done()}
+
+
+def running(event: Event) -> bool:
+    """Whether ``event`` publishes a board with a task running."""
+    return isinstance(event, TasksChanged) and any(t.status == "running" for t in event.tasks)
+
+
+async def waiting_lane_for(
+    publish: Callable[[Event], Awaitable[None]], tasks: Tasks, *scripts: Script
+) -> tuple[WorkLane, CoderSlots]:
+    """A work lane on ``tasks``, whose agents play ``scripts``, publishing with ``publish``,
+    seated at a single coder's slot that another workspace holds: its runs wait in line."""
+    slots = CoderSlots(1)
+    await slots.acquire(*OTHERS_SLOT)
+    coders = CoderSeat(lambda: slots, "ws", lambda: "s1")
+    lane = WorkLane(desk_for(publish, *scripts), tasks, None, Beside(coders=coders))
+    return lane, slots
+
+
+async def in_line(lane: WorkLane, run: asyncio.Task[object]) -> asyncio.Task[object]:
+    """The task watching the board for ``lane``'s ``run``, once it waits in line for a slot."""
+    while lane.waiting_for_coder != 1:
+        await asyncio.sleep(0)
+    (watch,) = asyncio.all_tasks() - {asyncio.current_task(), run}
+    return watch
+
+
+async def test_the_watch_has_ended_before_a_seated_task_starts() -> None:
+    noting = NotingStart()
+    tasks = Tasks(TaskBoard(), noting)
+    tasks.board.add(TaskSpec(prompt="a"))
+    lane, slots = await waiting_lane_for(noting, tasks, claims_done)
+    run = asyncio.create_task(lane.run())
+    watch = await in_line(lane, run)
+
+    slots.release()
+    assert await run == "finished"
+    assert noting.pending is not None
+    assert watch not in noting.pending
+    assert slots.taken == 0
+
+
+async def test_the_watch_has_ended_once_the_run_leaves_the_line() -> None:
+    tasks = Tasks(TaskBoard(), quiet)
+    task_id = tasks.board.add(TaskSpec(prompt="a"))
+    lane, slots = await waiting_lane_for(quiet, tasks, claims_done)
+    run = asyncio.create_task(lane.run())
+    watch = await in_line(lane, run)
+
+    await tasks.change(lambda board: board.remove(task_id))
+    assert await run == "finished"
+    assert watch.done()
+    assert slots.waiting == 0
+    assert asyncio.all_tasks() == {asyncio.current_task()}
+
+
+async def test_stopping_a_run_as_it_waits_leaves_no_watch_behind() -> None:
+    tasks = Tasks(TaskBoard(), quiet)
+    tasks.board.add(TaskSpec(prompt="a"))
+    lane, slots = await waiting_lane_for(quiet, tasks, claims_done)
+    run = asyncio.create_task(lane.run())
+    watch = await in_line(lane, run)
+
+    assert lane.stopped_by_user()
+    assert await run == "cancelled"
+    assert watch.done()
+    assert slots.waiting == 0
+    assert asyncio.all_tasks() == {asyncio.current_task()}
+
+
+async def test_cancelling_a_run_as_it_waits_leaves_no_watch_behind() -> None:
+    tasks = Tasks(TaskBoard(), quiet)
+    tasks.board.add(TaskSpec(prompt="a"))
+    lane, slots = await waiting_lane_for(quiet, tasks, claims_done)
+    run = asyncio.create_task(lane.run())
+    watch = await in_line(lane, run)
+
+    run.cancel()
+    await asyncio.gather(run, return_exceptions=True)
+    assert run.cancelled()
+    assert watch.done()
+    assert slots.waiting == 0
+    assert asyncio.all_tasks() == {asyncio.current_task()}
+
+
+async def test_a_watch_that_fails_fails_the_run_and_gives_the_slot_back() -> None:
+    tasks = Unwatchable(TaskBoard(), quiet)
+    tasks.board.add(TaskSpec(prompt="a"))
+    lane, slots = await waiting_lane_for(quiet, tasks, claims_done)
+    run = asyncio.create_task(lane.run())
+    await in_line(lane, run)
+
+    slots.release()
+    with pytest.raises(RuntimeError, match="no watching"):
+        await run
+    assert slots.taken == 0
+    assert asyncio.all_tasks() == {asyncio.current_task()}

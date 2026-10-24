@@ -17,7 +17,7 @@ from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.coder_slots import CoderSeat
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.landing import Lander
-from orbit.agent.application.lanes import OPEN_GATE, SessionGate
+from orbit.agent.application.lanes import OPEN_GATE, SessionGate, stop
 from orbit.agent.application.outcomes import Outcome, UserStop, ended, run_task_to_end
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.startup_check import StartupCheck
@@ -202,7 +202,8 @@ class WorkLane:
         """Take a coder's slot for task ``task_id``, waiting in line for one, if its role takes
         one and no slot is held already, or else give back any held; returns whether it may
         run, false if the run's place in line was dropped: the user stopped the run, or the
-        board's next task, among those not ``tried``, no longer takes a slot."""
+        board's next task, among those not ``tried``, no longer takes a slot. The watch on the
+        board that drops the place has ended, however this ends; its failure, a bug, escapes."""
         coders = self._coders
         if coders is None or not self._takes_slot(task_id):
             self._unseat()
@@ -213,7 +214,7 @@ class WorkLane:
         try:
             self._seated = await self._tracing.seat(coders)
         finally:
-            watch.cancel()
+            await stop(watch)
         return self._seated
 
     async def _leave_line_unneeded(self, coders: CoderSeat, tried: set[str]) -> None:
