@@ -172,6 +172,49 @@ async def test_suggestions_over_the_cap_or_already_queued_are_refused() -> None:
     assert len([t for t in board(events) if t.batch]) == 2
 
 
+async def test_a_review_is_told_which_tasks_are_queued_already() -> None:
+    session, _, _ = session_for(
+        claims_done,
+        claims_done,
+        claims_done,
+        reviewers=(suggests(), suggests(), suggests()),
+        tree=FakeTree(),
+        review=True,
+    )
+    await start(session, "Make it faster.", "Add tests\n\nFor parse.", "Rename x")
+    events = await asyncio.wait_for(settle(session), 10)
+    reviews = [t.task.prompt for t in board(events) if t.task.role == "reviewer"]
+    assert "Tasks already queued (don't suggest these):\n- Add tests\n- Rename x\n\n" in reviews[0]
+    assert "- Add tests" not in reviews[2] and "- Rename x" not in reviews[2]
+
+
+async def test_a_suggestion_an_earlier_review_made_is_refused_after_its_task_is_removed() -> None:
+    replies: list[Reply] = []
+    sessions: list[WorkspaceHost] = []
+
+    async def suggests_then_it_is_removed(call: Call) -> TurnEndReason:
+        await call("get_task")
+        await call("suggest_task", title="Add tests", prompt="Please.")
+        await send(sessions[0], RemoveTask(task_id="4"))
+        await call("complete_task", summary="Reviewed")
+        return "completed"
+
+    session, _, _ = session_for(
+        claims_done,
+        claims_done,
+        claims_done,
+        reviewers=(suggests_then_it_is_removed, suggests("add TESTS", "Rename x", replies=replies)),
+        tree=FakeTree(),
+        review=True,
+    )
+    sessions.append(session)
+    await start(session, "one", "two")
+    events = await asyncio.wait_for(settle(session), 10)
+    assert [r.is_error for r in replies] == [True, False]
+    assert replies[0].text == "An earlier review already suggested that."
+    assert [t.task.prompt.split("\n")[0] for t in board(events) if t.batch] == ["Rename x"]
+
+
 async def test_a_suggestion_without_a_title_is_refused_and_not_counted() -> None:
     replies: list[Reply] = []
     session, _, _ = session_for(

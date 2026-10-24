@@ -4,6 +4,7 @@ the reviews its crash interrupted ended."""
 import asyncio
 
 from orbit.agent import WorkspaceHost
+from orbit.agent.application.ports import Reply
 from orbit.agent.domain.reviews import BatchSnapshot, LaneSnapshot, PlannerSnapshot, ReviewJob
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
@@ -32,7 +33,9 @@ from tests.agent_fakes import (
     of_type,
     send,
     session_for,
+    settle,
     start,
+    suggests,
 )
 from tests.session_builders import last_of, messages, opened, saved, store_with, switching
 
@@ -68,6 +71,29 @@ def reviews_of(store: FakeStore) -> LaneSnapshot:
     reviews = store.last.reviews
     assert reviews is not None
     return reviews
+
+
+async def test_a_saved_sessions_reviews_remember_what_they_suggested() -> None:
+    crashing, kept = await suggesting()
+    assert reviews_of(kept).planner.suggested == frozenset({"add tests"})
+    record = from_disk(kept.last)
+    assert record.reviews is not None
+    assert record.reviews.planner.suggested == frozenset({"add tests"})
+    await crashing.close()
+
+
+async def test_an_opened_session_refuses_what_an_earlier_review_suggested() -> None:
+    remembered = PlannerSnapshot(next_batch=2, suggested=frozenset({"add tests"}))
+    snapshot = LaneSnapshot(planner=remembered)
+    store = store_with(saved("auth", task("1", "coder", "pending"), reviews=snapshot))
+    session, launcher = switching(store, claims_done)
+    await opened(session, ActivateSession(session="auth"))
+    replies: list[Reply] = []
+    launcher.reviewers.append(suggests("Add tests", replies=replies))
+    await send(session, RunTasks())
+    await asyncio.wait_for(settle(session), 10)
+    assert [r.text for r in replies] == ["An earlier review already suggested that."]
+    await session.close()
 
 
 async def test_an_opened_session_has_the_reviews_it_was_saved_with() -> None:

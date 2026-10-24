@@ -4,6 +4,7 @@ from dataclasses import fields
 
 from orbit.agent.domain.reviews import (
     DIFF_LIMIT,
+    PENDING_LIMIT,
     BatchSnapshot,
     LaneSnapshot,
     PlannerSnapshot,
@@ -11,6 +12,7 @@ from orbit.agent.domain.reviews import (
     ReviewLimits,
     ReviewPlanner,
     _Batch,
+    pending_titles,
     review_prompt,
 )
 from orbit.protocol import TaskSpec, TaskState, TaskStatus
@@ -127,9 +129,75 @@ def test_suggestions_already_queued_are_refused() -> None:
     batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
     queued = (state("5", status="pending", prompt="Add tests for parse\nmore"),)
     refusal = reviews.refusal(batch, "  add TESTS for parse ", queued=queued)
-    assert refusal is not None and "already" in refusal
+    assert refusal == "Task 5 already covers that."
+
+
+def test_a_suggestion_a_finished_task_covers_is_refused_with_its_id() -> None:
+    reviews = planner()
+    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
     finished = (state("5", status="completed", prompt="Add tests for parse"),)
-    assert reviews.refusal(batch, "Add tests for parse", queued=finished) is None
+    assert reviews.refusal(batch, "Add tests for parse", finished) == "Task 5 already covers that."
+
+
+def test_a_suggestion_a_task_of_any_status_covers_is_refused() -> None:
+    reviews = planner()
+    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
+    statuses: tuple[TaskStatus, ...] = (
+        "draft",
+        "running",
+        "verifying",
+        "unverified",
+        "gave_up",
+        "error",
+        "cancelled",
+    )
+    for status in statuses:
+        covered = (state("5", status=status, prompt="Add tests"),)
+        assert reviews.refusal(batch, "Add tests", covered) == "Task 5 already covers that."
+
+
+def test_a_reworded_suggestion_is_accepted() -> None:
+    reviews = planner()
+    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
+    reviews.added(batch, "2", "Add tests for parse")
+    covered = (state("5", status="completed", prompt="Add tests for parse"),)
+    assert reviews.refusal(batch, "Add parse tests", covered) is None
+
+
+def test_a_suggestion_an_earlier_review_made_is_refused_once_its_task_is_gone() -> None:
+    reviews = planner()
+    first = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
+    reviews.added(first, "2", "Add tests for parse\nmore")
+    assert reviews.removed(state("2", status="pending", origin="review", batch=first)) is None
+    second = reviews.open_batch(ReviewJob(commits=("b",), round=0, batch=None))
+    refusal = reviews.refusal(second, "  add TESTS for parse ", ())
+    assert refusal == "An earlier review already suggested that."
+
+
+def test_a_suggestion_still_on_the_board_is_refused_by_its_task() -> None:
+    reviews = planner()
+    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
+    reviews.added(batch, "2", "Add tests")
+    queued = (state("2", status="pending", origin="review", batch=batch, prompt="Add tests"),)
+    assert reviews.refusal(batch, "Add tests", queued) == "Task 2 already covers that."
+
+
+def test_a_fix_joining_a_batch_is_not_remembered_as_a_suggestion() -> None:
+    reviews = planner()
+    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
+    reviews.added(batch, "3")
+    assert reviews.snapshot().suggested == frozenset()
+
+
+def test_a_closed_batch_and_the_cap_are_refused_before_a_repeat() -> None:
+    reviews = planner(cap=1)
+    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
+    reviews.added(batch, "2", "Add tests")
+    refusal = reviews.refusal(batch, "Add tests", ())
+    assert refusal is not None and "1 tasks" in refusal
+    assert reviews.review_ended(batch) is None
+    refusal = reviews.refusal(batch, "Add tests", ())
+    assert refusal is not None and "review is over" in refusal
 
 
 def test_tasks_outside_any_batch_from_reviews_are_not_reviewed() -> None:
@@ -179,13 +247,13 @@ def test_landing_after_its_batch_closed_is_not_reviewed_again() -> None:
 
 
 def test_a_commit_review_prompt_is_its_title_its_limit_and_the_diff() -> None:
-    prompt = review_prompt(ReviewJob(commits=("abc1234def",), round=0, batch=None), "+new", 5)
+    prompt = review_prompt(ReviewJob(commits=("abc1234def",), round=0, batch=None), "+new", 5, ())
     assert prompt == "Review commit abc1234\n\nYou may make at most 5 suggestions.\n\n+new"
 
 
 def test_a_batch_review_prompt_names_its_commits_and_what_did_not_land() -> None:
     job = ReviewJob(commits=("a" * 10, "b" * 10), round=1, batch="batch-1", missing=("7",))
-    prompt = review_prompt(job, "diffs", 3)
+    prompt = review_prompt(job, "diffs", 3, ())
     assert prompt == (
         "Review the 2 commits made for review batch-1\n\n"
         "Task 7 of that review ended without a commit.\n\n"
@@ -194,9 +262,47 @@ def test_a_batch_review_prompt_names_its_commits_and_what_did_not_land() -> None
     )
 
 
+def test_a_review_prompt_lists_the_tasks_queued_before_the_diff() -> None:
+    job = ReviewJob(commits=("abc1234def",), round=0, batch=None)
+    prompt = review_prompt(job, "+new", 5, ("Add tests", "Rename x"))
+    assert prompt == (
+        "Review commit abc1234\n\n"
+        "You may make at most 5 suggestions.\n\n"
+        "Tasks already queued (don't suggest these):\n- Add tests\n- Rename x\n\n"
+        "+new"
+    )
+
+
+def test_a_review_prompt_names_only_so_many_queued_tasks_and_counts_the_rest() -> None:
+    job = ReviewJob(commits=("abc1234def",), round=0, batch=None, whole=True)
+    pending = tuple(f"Task {n}" for n in range(PENDING_LIMIT + 3))
+    prompt = review_prompt(job, "", 10, pending)
+    listed = prompt.split("Tasks already queued (don't suggest these):\n", 1)[1]
+    assert listed == "\n".join([*(f"- {line}" for line in pending[:PENDING_LIMIT]), "… and 3 more"])
+    assert f"- Task {PENDING_LIMIT}" not in prompt
+
+
+def test_a_review_prompt_lists_exactly_the_limit_without_a_count() -> None:
+    job = ReviewJob(commits=("a",), round=0, batch=None)
+    prompt = review_prompt(job, "", 5, tuple(f"Task {n}" for n in range(PENDING_LIMIT)))
+    assert f"- Task {PENDING_LIMIT - 1}\n\n" in prompt and "more" not in prompt
+
+
+def test_the_tasks_still_to_run_or_running_are_listed_by_their_first_lines() -> None:
+    tasks = (
+        state("1", status="completed", prompt="Done already"),
+        state("2", status="pending", prompt="  Add tests \n\nPlease."),
+        state("3", status="running", prompt="Rename x"),
+        state("4", status="verifying", prompt="Tidy"),
+        state("5", status="draft", prompt="A draft"),
+        state("6", status="gave_up", prompt="Gave up"),
+    )
+    assert pending_titles(tasks) == ("Add tests", "Rename x", "Tidy")
+
+
 def test_long_diffs_are_trimmed_from_the_end() -> None:
     prompt = review_prompt(
-        ReviewJob(commits=("a",), round=0, batch=None), "d" * (DIFF_LIMIT + 50), 5
+        ReviewJob(commits=("a",), round=0, batch=None), "d" * (DIFF_LIMIT + 50), 5, ()
     )
     assert prompt.endswith("d" * DIFF_LIMIT + "\n… (diff trimmed)")
 
@@ -246,7 +352,7 @@ def test_a_super_reviews_batch_has_its_own_cap() -> None:
 
 def test_a_super_review_prompt_is_its_title_and_its_limit() -> None:
     job = ReviewJob(commits=("abc1234def",), round=0, batch=None, whole=True)
-    prompt = review_prompt(job, "", 10)
+    prompt = review_prompt(job, "", 10, ())
     assert (
         prompt == "Super review of the codebase at abc1234\n\nYou may make at most 10 suggestions."
     )
@@ -324,7 +430,7 @@ def test_a_removed_task_that_ended_without_a_commit_is_not_reported_missing() ->
     assert reviews.removed(state("2", status="gave_up", origin="review", batch=batch)) is None
     job = reviews.landed(state("3", origin="review", batch=batch), "c3")
     assert job == ReviewJob(commits=("c3",), round=1, batch=batch, reviewed=("3",))
-    assert "ended without a commit" not in review_prompt(job, "", 5)
+    assert "ended without a commit" not in review_prompt(job, "", 5, ())
 
 
 def test_removing_a_batchs_only_task_closes_it_with_nothing_to_review() -> None:
@@ -383,13 +489,15 @@ def test_reopening_a_task_outside_any_open_batch_changes_nothing() -> None:
 
 def busy() -> ReviewPlanner:
     """A planner part way through a session: paused, one batch closed, one waiting for a task
-    and one still filling."""
+    and one still filling, having remembered one suggestion."""
     reviews = planner(rounds=1, cap=2)
     done = filled(reviews, "2")
     reviews.landed(state("2", origin="review", batch=done), "c2")
     waiting = filled(reviews, "3", "4")
     reviews.ended(state("3", status="gave_up", origin="review", batch=waiting))
     reviews.open_batch(ReviewJob(commits=("c5",), round=0, batch=None))
+    reviews.added("batch-3", "7", "Tidy imports")
+    reviews.removed(state("7", status="pending", origin="review", batch="batch-3"))
     return reviews
 
 
@@ -414,7 +522,19 @@ def test_a_snapshot_holds_the_planners_session_state() -> None:
 
 def test_a_snapshot_survives_json_and_restores_the_same_state() -> None:
     reviews = busy()
+    assert reviews.snapshot().suggested == frozenset({"tidy imports"})
     assert restored(reviews.snapshot()).snapshot() == reviews.snapshot()
+
+
+def test_a_restored_planner_remembers_the_suggestions_made_before() -> None:
+    again = restored(busy().snapshot())
+    refusal = again.refusal("batch-3", "TIDY imports", ())
+    assert refusal == "An earlier review already suggested that."
+
+
+def test_a_snapshot_saved_before_suggestions_were_remembered_still_loads() -> None:
+    saved = {"paused": False, "next_batch": 2, "batches": {}}
+    assert PlannerSnapshot.model_validate(saved).suggested == frozenset()
 
 
 def test_a_batch_and_its_snapshot_have_the_same_fields() -> None:
@@ -464,6 +584,8 @@ def test_restoring_replaces_what_the_planner_had() -> None:
     reviews.restore(PlannerSnapshot())
     assert reviews.snapshot() == PlannerSnapshot()
     assert not reviews.open_batches
+    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
+    assert reviews.refusal(batch, "Tidy imports", ()) is None
 
 
 def test_the_super_review_count_is_kept_apart_from_snapshots() -> None:

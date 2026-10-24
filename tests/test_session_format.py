@@ -23,14 +23,15 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit these for a format change: they're what orbits at versions 1 to 5 wrote, and
-# they still need to read. A new version gets its own fixture (session-v6.json) and a
+# Never edit these for a format change: they're what orbits at versions 1 to 6 wrote, and
+# they still need to read. A new version gets its own fixture (session-v7.json) and a
 # migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
 SESSION_V2 = FIXTURES / "session-v2.json"
 SESSION_V3 = FIXTURES / "session-v3.json"
 SESSION_V4 = FIXTURES / "session-v4.json"
 SESSION_V5 = FIXTURES / "session-v5.json"
+SESSION_V6 = FIXTURES / "session-v6.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -100,9 +101,13 @@ def tasks() -> tuple[TaskState, ...]:
     )
 
 
-def reviews(landed: tuple[str, ...] = (), reviewed: tuple[str, ...] = ()) -> LaneSnapshot:
+def reviews(
+    landed: tuple[str, ...] = (),
+    reviewed: tuple[str, ...] = (),
+    suggested: frozenset[str] = frozenset(),
+) -> LaneSnapshot:
     """The review lane's state, its batch's ``landed`` tasks and its job's ``reviewed`` ones
-    as version 5 keeps them."""
+    as version 5 keeps them, and the titles its planner ``suggested`` as version 6 does."""
     batch = BatchSnapshot(
         round=2,
         cap=4,
@@ -117,7 +122,9 @@ def reviews(landed: tuple[str, ...] = (), reviewed: tuple[str, ...] = ()) -> Lan
         commits=("c1", "c2"), round=1, batch="b1", missing=("6",), whole=True, reviewed=reviewed
     )
     return LaneSnapshot(
-        planner=PlannerSnapshot(paused=True, next_batch=3, batches={"b2": batch}),
+        planner=PlannerSnapshot(
+            paused=True, next_batch=3, batches={"b2": batch}, suggested=suggested
+        ),
         jobs={"3": job},
         batches={"3": "b2"},
     )
@@ -138,7 +145,7 @@ def expected(
     lane: LaneSnapshot | None = None,
 ) -> SessionRecord:
     return SessionRecord(
-        version=5,
+        version=6,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
@@ -172,14 +179,24 @@ def reviewing() -> SessionRecord:
     return expected(states=ended(), lane=reviews(landed=("5",), reviewed=("1", "2")))
 
 
-def test_a_version_5_session_file_reads_as_its_record() -> None:
+def test_a_version_5_session_file_migrates_to_a_planner_without_suggested_titles() -> None:
     assert parse_record(SESSION_V5.read_text(encoding="utf-8")) == reviewing()
 
 
-def test_a_session_record_is_written_in_the_version_5_format() -> None:
-    written = json.loads(record_json(reviewing()))
-    golden = json.loads(SESSION_V5.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V5.name)
+def suggesting() -> SessionRecord:
+    """The golden record as version 6 keeps it, its planner naming the titles it suggested."""
+    lane = reviews(landed=("5",), reviewed=("1", "2"), suggested=frozenset({"fix the parser"}))
+    return expected(states=ended(), lane=lane)
+
+
+def test_a_version_6_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V6.read_text(encoding="utf-8")) == suggesting()
+
+
+def test_a_session_record_is_written_in_the_version_6_format() -> None:
+    written = json.loads(record_json(suggesting()))
+    golden = json.loads(SESSION_V6.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V6.name)
 
 
 def test_a_version_1_review_count_reads_as_its_count() -> None:

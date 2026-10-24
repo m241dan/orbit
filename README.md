@@ -898,8 +898,11 @@ Suggestions from one review form a **batch**. When every task in a batch has fin
 commits are reviewed together, which may suggest more. To keep this from going on forever, each
 batch is a round further from your own work, and once the batches reach `review_rounds` (default 3)
 review pauses, with a note in the conversation (given again when you open a session whose review
-is paused); it resumes with the next commit from one of your tasks. A review may suggest at most `review_suggestions` tasks (default 5), and a suggestion that
-an unfinished task already covers is refused. With the defaults, one of your commits can lead to at
+is paused); it resumes with the next commit from one of your tasks. A review may suggest at most `review_suggestions` tasks (default 5), and a suggestion is
+refused when any task on the board, whatever its status, or any earlier suggestion of the session
+has the same title (compared on one line, ignoring case and spacing; a reworded repeat gets
+through). Each reviewer is also told the titles of the tasks still queued or running, so it can
+steer clear of them. With the defaults, one of your commits can lead to at
 most 15 suggested tasks. Removing a suggested task drops it from its batch, which is then reviewed
 without it (or closed, if nothing in it landed); removing a queued review closes the batch it would
 have suggested into.

@@ -17,6 +17,8 @@ from orbit.protocol import MANUAL_ORIGIN, PLANNER_ORIGIN, TaskState
 
 # Characters of diff quoted in a review task; a reviewer can read files for more.
 DIFF_LIMIT = 30000
+# Queued tasks named in a review task, so the reviewer doesn't suggest them; the rest are counted.
+PENDING_LIMIT = 40
 
 
 @dataclass(frozen=True)
@@ -109,14 +111,16 @@ class _Batch:
 
 class PlannerSnapshot(BaseModel):
     """A :class:`ReviewPlanner`'s state for one session: whether review is ``paused``, the
-    number of the ``next_batch`` and the ``batches`` still open. The count towards a super
-    review isn't in it: that's kept per repository."""
+    number of the ``next_batch``, the ``batches`` still open and the normalised titles of
+    every suggestion it accepted, ``suggested``. The count towards a super review isn't in
+    it: that's kept per repository."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     paused: bool = False
     next_batch: int = 1
     batches: dict[str, BatchSnapshot] = {}
+    suggested: frozenset[str] = frozenset()
 
 
 class LaneSnapshot(BaseModel):
@@ -139,11 +143,17 @@ class ReviewPlanner:
         self.since_super = 0  # Commits since the last super review.
         self._next_batch = 1
         self._open: dict[str, _Batch] = {}
+        self._suggested: set[str] = set()  # Normalised titles of the suggestions accepted.
 
     def snapshot(self) -> PlannerSnapshot:
         """The planner's state for this session, to :meth:`restore` later."""
         batches = {batch_id: batch.frozen() for batch_id, batch in self._open.items()}
-        return PlannerSnapshot(paused=self.paused, next_batch=self._next_batch, batches=batches)
+        return PlannerSnapshot(
+            paused=self.paused,
+            next_batch=self._next_batch,
+            batches=batches,
+            suggested=frozenset(self._suggested),
+        )
 
     def restore(self, snapshot: PlannerSnapshot) -> None:
         """Replace the planner's state with ``snapshot``'s; the super review count is kept."""
@@ -152,6 +162,7 @@ class ReviewPlanner:
         self._open = {
             batch_id: _Batch.thawed(batch) for batch_id, batch in snapshot.batches.items()
         }
+        self._suggested = set(snapshot.suggested)
 
     @property
     def open_batches(self) -> tuple[str, ...]:
@@ -176,9 +187,12 @@ class ReviewPlanner:
         self._open[batch] = _Batch(round=job.round + 1, cap=self.cap(job))
         return batch
 
-    def added(self, batch: str, task_id: str) -> None:
-        """Task ``task_id`` joined ``batch``: a suggestion, or a fix of one."""
+    def added(self, batch: str, task_id: str, title: str | None = None) -> None:
+        """Task ``task_id`` joined ``batch``: a suggestion titled ``title``, which no later
+        review of the session may suggest again, or (with no title) a fix of one."""
         self._open[batch].tasks.append(task_id)
+        if title is not None:
+            self._suggested.add(_normalized(title))
 
     def review_ended(self, batch_id: str) -> ReviewJob | None:
         """The review behind ``batch_id`` is over; returns the review of the batch, if that's
@@ -191,17 +205,29 @@ class ReviewPlanner:
         return self._due(batch_id)
 
     def refusal(self, batch: str, title: str, queued: Sequence[TaskState]) -> str | None:
-        """Why a suggestion titled ``title`` can't join ``batch``; ``None`` if it can."""
+        """Why a suggestion titled ``title`` can't join ``batch``; ``None`` if it can.
+
+        A title that, once normalised, is the first line of a task in ``queued`` (the board's
+        tasks, whatever their status) or of a suggestion the planner accepted this session is
+        a repeat. Only an exact match after normalisation counts: a reworded repeat is
+        accepted.
+        """
         closed = self._closed(batch)
         if closed is not None:
             return closed
         cap = self._open[batch].cap
         if len(self._open[batch].tasks) >= cap:
             return f"This review has already suggested {cap} tasks, the most allowed."
+        return self._repeat(title, queued)
+
+    def _repeat(self, title: str, queued: Sequence[TaskState]) -> str | None:
+        """Why a suggestion titled ``title`` repeats work; ``None`` if it's new."""
         wanted = _normalized(title)
         for state in queued:
-            if state.status in WAITING and _normalized(state.task.prompt) == wanted:
+            if _normalized(state.task.prompt) == wanted:
                 return f"Task {state.id} already covers that."
+        if wanted in self._suggested:
+            return "An earlier review already suggested that."
         return None
 
     def _closed(self, batch: str) -> str | None:
@@ -295,24 +321,51 @@ def _forget_finish(batch: _Batch, task_id: str) -> None:
         batch.missing.remove(task_id)
 
 
+def _first_line(text: str) -> str:
+    """The first line of ``text``, stripped: a task's title."""
+    return text.strip().split("\n", 1)[0].strip()
+
+
 def _normalized(text: str) -> str:
-    return " ".join(text.strip().split("\n", 1)[0].lower().split())
+    return " ".join(_first_line(text).lower().split())
 
 
-def review_prompt(job: ReviewJob, diff: str, cap: int) -> str:
-    """The task for the reviewer of ``job``, whose commits' messages and diffs are ``diff``.
+def pending_titles(tasks: Sequence[TaskState]) -> tuple[str, ...]:
+    """The first lines of the ``tasks`` still to run or running, which a review needn't suggest."""
+    return tuple(_first_line(state.task.prompt) for state in tasks if state.status in WAITING)
+
+
+def review_prompt(job: ReviewJob, diff: str, cap: int, pending: Sequence[str]) -> str:
+    """The task for the reviewer of ``job``, whose commits' messages and diffs are ``diff``,
+    allowed ``cap`` suggestions and told the tasks titled ``pending`` are queued already.
 
     Its first line titles it. It holds only the facts: how to review is the role's instructions.
     """
-    limit = f"You may make at most {cap} suggestions."
-    if job.whole:
-        return f"Super review of the codebase at {job.commits[0][:7]}\n\n{limit}"
-    if job.batch is None:
-        title = f"Review commit {job.commits[0][:7]}"
-    else:
-        title = f"Review the {len(job.commits)} commits made for review {job.batch}"
-    parts = [title]
+    parts = [_review_title(job)]
     parts += [f"Task {task} of that review ended without a commit." for task in job.missing]
+    parts.append(f"You may make at most {cap} suggestions.")
+    if pending:
+        parts.append(_pending_list(pending))
+    if job.whole:
+        return "\n\n".join(parts)
     if len(diff) > DIFF_LIMIT:
         diff = diff[:DIFF_LIMIT] + "\n… (diff trimmed)"
-    return "\n\n".join([*parts, limit, diff])
+    return "\n\n".join([*parts, diff])
+
+
+def _review_title(job: ReviewJob) -> str:
+    """The first line of ``job``'s review task."""
+    if job.whole:
+        return f"Super review of the codebase at {job.commits[0][:7]}"
+    if job.batch is None:
+        return f"Review commit {job.commits[0][:7]}"
+    return f"Review the {len(job.commits)} commits made for review {job.batch}"
+
+
+def _pending_list(pending: Sequence[str]) -> str:
+    """The tasks titled ``pending`` for a reviewer not to suggest: the first
+    :data:`PENDING_LIMIT` named, the rest counted."""
+    lines = [f"- {title}" for title in pending[:PENDING_LIMIT]]
+    if len(pending) > PENDING_LIMIT:
+        lines.append(f"… and {len(pending) - PENDING_LIMIT} more")
+    return "\n".join(["Tasks already queued (don't suggest these):", *lines])

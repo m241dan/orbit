@@ -23,6 +23,7 @@ from orbit.agent.domain.reviews import (
     LaneSnapshot,
     ReviewJob,
     ReviewPlanner,
+    pending_titles,
     review_prompt,
 )
 from orbit.agent.domain.roles import REVIEW_ROLES, role_task, suggested_task
@@ -183,7 +184,7 @@ class ReviewLane:
 
         def add(board: TaskBoard) -> str:
             new_id = board.add_suggestion(task, batch, self.planner.round_of(batch), origin)
-            self.planner.added(batch, new_id)
+            self.planner.added(batch, new_id, title)
             return new_id
 
         new_id = await self._tasks.change(add)
@@ -246,7 +247,8 @@ class ReviewLane:
         """The change to the board that queues ``job``'s review task, told ``diff``."""
         batch = self.planner.open_batch(job)
         role = SUPER_REVIEWER if job.whole else REVIEWER
-        prompt = review_prompt(job, diff, self.planner.cap(job))
+        pending = pending_titles(self._board.tasks)
+        prompt = review_prompt(job, diff, self.planner.cap(job), pending)
         task = role_task(role, self._desk.agents.roles[role], prompt)
 
         def add(board: TaskBoard) -> None:
