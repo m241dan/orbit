@@ -336,6 +336,22 @@ class Shell:
         await self.frontend.submit(self.prompt.text)
         await self.settle()
 
+    async def click_tab(self, label: str) -> None:
+        """Click the tab labelled ``label``, as the user does."""
+        self.strip.activate(self.strip.id_of(label))
+        await self.settle()
+
+    async def cycle(self, step: int, times: int = 1) -> None:
+        """Press tab, or shift+tab with a negative ``step``, ``times`` times."""
+        for _ in range(times):
+            self.frontend.cycle_tab(step)
+            await self.settle()
+
+    async def toggle_planner(self) -> None:
+        """Press ctrl+t."""
+        self.frontend.toggle_planner()
+        await self.settle()
+
     def entries(self) -> list[tuple[str, EntryKind]]:
         """Every entry, with its kind, as the All tab has them."""
         return [(entry.text, entry.kind) for entry in self.window.conversation.entries(None)]
