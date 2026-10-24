@@ -36,7 +36,7 @@ from orbit.cli import backend, served
 from orbit.cli.backend import _Backend, _backend, _Directories
 from orbit.cli.served import _added, _workspaces
 from orbit.protocol import INTERNAL, INVALID, StartupChecked
-from tests.agent_fakes import agent_exited, events_until
+from tests.agent_fakes import agent_exited, events_until, logged_with_traceback
 
 FLAGS = _Backend(None, None, False, False, False, False, new=False, name=None)
 CLONES = Path("/nonexistent/clones")
@@ -603,6 +603,71 @@ def test_serving_stops_if_the_workspaces_added_cant_be_flagged(
 
     assert exited.value.exit_code == 2
     assert capsys.readouterr().err == "The store failed.\n" and free(root)
+
+
+def flagging_the_second_fails(
+    monkeypatch: pytest.MonkeyPatch, *, unflagging: bool
+) -> list[tuple[str, bool]]:
+    """The flags set as flagging the second workspace added fails, and unflagging fails too
+    if ``unflagging``."""
+    set_served = WorkspaceRegistry.set_served
+    calls: list[tuple[str, bool]] = []
+
+    async def second_fails(self: WorkspaceRegistry, workspace_id: str, served: bool) -> None:
+        calls.append((workspace_id, served))
+        if served and len(calls) == 2:
+            raise StoreError("The store failed.")
+        if not served and unflagging:
+            raise StoreError("The store failed again.")
+        await set_served(self, workspace_id, served)
+
+    monkeypatch.setattr(WorkspaceRegistry, "set_served", second_fails)
+    return calls
+
+
+def test_serving_stops_if_a_later_workspace_added_cant_be_flagged_unflagging_the_others(
+    stack: ExitStack,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    first, second = directory(tmp_path, "first"), directory(tmp_path, "second")
+    state = tmp_path / "state"
+    calls = flagging_the_second_fails(monkeypatch, unflagging=False)
+
+    with pytest.raises(typer.Exit) as exited:
+        stack.enter_context(
+            served._serving(FLAGS, [first, second], state, tmp_path / "config", CLONES)
+        )
+
+    assert exited.value.exit_code == 2
+    assert [served for _, served in calls] == [True, True, False]
+    assert calls[0][0] == calls[2][0]
+    assert capsys.readouterr().err == "The store failed.\n"
+    assert flagged(state) == [] and free(first) and free(second)
+
+
+def test_a_failure_unflagging_the_others_is_logged_and_the_flags_failure_reported(
+    stack: ExitStack,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    first, second = directory(tmp_path, "first"), directory(tmp_path, "second")
+    state = tmp_path / "state"
+    flagging_the_second_fails(monkeypatch, unflagging=True)
+
+    with pytest.raises(typer.Exit) as exited:
+        stack.enter_context(
+            served._serving(FLAGS, [first, second], state, tmp_path / "config", CLONES)
+        )
+
+    assert exited.value.exit_code == 2
+    assert capsys.readouterr().err == "The store failed.\n"
+    message = f"Orbit failed to flag {first} not served: The store failed again."
+    assert logged_with_traceback(caplog.records, message)
+    assert flagged(state) == [str(first)]
 
 
 type Refusal = Callable[[Path, pytest.MonkeyPatch], _Backend]

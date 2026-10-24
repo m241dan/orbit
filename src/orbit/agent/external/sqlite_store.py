@@ -36,6 +36,7 @@ from orbit.agent.domain.sessions import SessionRecord, Unreadable, parse_record,
 from orbit.agent.domain.usage_totals import UsageRow, UsageTotalsData
 from orbit.agent.external import sqlite_log, sqlite_usage
 from orbit.agent.external.session_locks import SessionLocks, check_session_id
+from orbit.agent.external.shielding import shielded
 from orbit.agent.external.sqlite_backup import copy_to, is_database_file
 from orbit.agent.external.sqlite_errors import error_kind
 from orbit.agent.external.sqlite_schema import (
@@ -150,7 +151,7 @@ class SqliteStore:
         if not self._closed:
             self._closed = True
             self._executor.submit(self._disconnect)
-        await asyncio.shield(asyncio.to_thread(self._executor.shutdown))
+        await shielded(asyncio.ensure_future(asyncio.to_thread(self._executor.shutdown)))
 
     async def run[T](self, message: str, function: Callable[[sqlite3.Connection], T]) -> T:
         """What ``function`` returns given the connection, run on the database's thread.

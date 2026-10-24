@@ -3,10 +3,12 @@ registered in the store; and the workspaces a server serves as frontends add and
 by their paths or as clones it makes, each opened so and flagged served, and purged if asked."""
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from orbit.agent.application.failures import unexpected
 from orbit.agent.application.ports import Cloner
 from orbit.agent.application.recovery import RecoveryFailed
 from orbit.agent.application.workspace_host import WorkspaceHost
@@ -188,13 +190,30 @@ class ServedWorkspaces:
 
     def flag_served(self) -> None:
         """Flag every workspace served as served, so a server starting later serves them again.
-        Raises :class:`WorkspaceUnavailable` if the store fails."""
+        Raises :class:`WorkspaceUnavailable` if the store fails, having flagged those it flagged
+        not served again."""
         asyncio.run(self._flag_served())
 
     async def _flag_served(self) -> None:
         """Flag every workspace served as served, as :meth:`flag_served` does."""
-        for workspace_id in tuple(self._locks):
-            await self.set_served(workspace_id, True)
+        flagged: list[str] = []
+        try:
+            for workspace_id in tuple(self._locks):
+                await self.set_served(workspace_id, True)
+                flagged.append(workspace_id)
+        except WorkspaceUnavailable:
+            for workspace_id in flagged:
+                await self._unflag_anyway(workspace_id)
+            raise
+
+    async def _unflag_anyway(self, workspace_id: str) -> None:
+        """Flag the workspace ``workspace_id`` not served again, as it cleans up after another
+        failure, which it mustn't replace: its own failure is only logged."""
+        try:
+            await self.set_served(workspace_id, False)
+        except WorkspaceUnavailable as exc:
+            root = self._roots[workspace_id]
+            unexpected(f"Orbit failed to flag {root} not served: {exc}", exc)
 
     def serves(self, workspace_id: str) -> bool:
         """Whether the workspace ``workspace_id`` is served."""
@@ -273,18 +292,14 @@ class ServedWorkspaces:
     async def set_served(self, workspace_id: str, served: bool) -> None:
         """Flag the workspace ``workspace_id`` as ``served``, or not, in the store. Raises
         :class:`WorkspaceUnavailable` as ``INTERNAL`` if the store fails."""
-        try:
+        with _unavailable(StoreError):
             await WorkspaceRegistry(self._store).set_served(workspace_id, served)
-        except StoreError as exc:
-            raise WorkspaceUnavailable(str(exc), INTERNAL) from None
 
     async def latest_added(self) -> str | None:
         """The path of the workspace served that was flagged served last, if any. Raises
         :class:`WorkspaceUnavailable` as ``INTERNAL`` if the store fails."""
-        try:
+        with _unavailable(StoreError):
             return await WorkspaceRegistry(self._store).latest_added()
-        except StoreError as exc:
-            raise WorkspaceUnavailable(str(exc), INTERNAL) from None
 
     async def close(self, workspace_id: str) -> None:
         """Stop serving the workspace ``workspace_id`` and let go of its lock, leaving its flag
@@ -295,10 +310,8 @@ class ServedWorkspaces:
     async def losses(self, workspace_id: str) -> list[str]:
         """What purging the workspace ``workspace_id`` would lose, as :func:`purge_losses`
         says. Raises :class:`WorkspaceUnavailable` as ``INTERNAL`` if the store fails."""
-        try:
+        with _unavailable(StoreError):
             workspace = await WorkspaceRegistry(self._store).workspace(workspace_id)
-        except StoreError as exc:
-            raise WorkspaceUnavailable(str(exc), INTERNAL) from None
         return [] if workspace is None else await purge_losses(workspace)
 
     async def purge(self, workspace_id: str) -> Purged:
@@ -306,11 +319,10 @@ class ServedWorkspaces:
         does; returns what it deleted. Raises :class:`WorkspaceUnavailable` as ``INVALID`` if
         it's refused, or as ``INTERNAL`` if the store fails or a file can't be deleted."""
         try:
-            return await purge_workspace(self._store, workspace_id)
+            with _unavailable(StoreError, OSError):
+                return await purge_workspace(self._store, workspace_id)
         except PurgeRefused as exc:
             raise WorkspaceUnavailable(str(exc)) from None
-        except (StoreError, OSError) as exc:
-            raise WorkspaceUnavailable(str(exc), INTERNAL) from None
 
     def let_go(self) -> None:
         """Let go of the locks of the workspaces still served."""
@@ -318,6 +330,16 @@ class ServedWorkspaces:
             lock.close()
         self._locks.clear()
         self._roots.clear()
+
+
+@contextmanager
+def _unavailable(*errors: type[Exception]) -> Iterator[None]:
+    """Run the block, raising :class:`WorkspaceUnavailable` as ``INTERNAL``, with its message,
+    for any of the ``errors`` it raises."""
+    try:
+        yield
+    except errors as exc:
+        raise WorkspaceUnavailable(str(exc), INTERNAL) from None
 
 
 def _unshown(progress: WorkspaceCloning) -> None:
@@ -399,7 +421,7 @@ async def _view(store: SqliteStore, root: Path, *, owned: bool, opening: Opening
     recovering its fallback files if this orbit ``owned`` it, marked managed and flagged as
     served as ``opening`` says. Raises :class:`WorkspaceUnavailable` as ``INTERNAL`` if that
     fails, as it may have changed the store or the workspace's files by then."""
-    try:
+    with _unavailable(StoreError, RepositoryUnreadable, ImportBlocked, RecoveryFailed):
         opened = await open_workspace_store(store, root, owned=owned)
         workspace_id = opened.store.workspace_id
         registry = WorkspaceRegistry(store)
@@ -408,8 +430,6 @@ async def _view(store: SqliteStore, root: Path, *, owned: bool, opening: Opening
         if opening.flag:
             await _flagged(registry, workspace_id)
         registered = await registry.workspace(workspace_id)
-    except (StoreError, RepositoryUnreadable, ImportBlocked, RecoveryFailed) as exc:
-        raise WorkspaceUnavailable(str(exc), INTERNAL) from None
     return replace(opened, managed=registered is not None and registered.managed)
 
 

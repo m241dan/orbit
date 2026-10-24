@@ -372,6 +372,26 @@ async def test_closing_while_a_call_is_in_flight_finishes_it_and_leaves_no_threa
     assert await (await open_store(workspace)).load("abc") == record()
 
 
+async def test_a_cancelled_close_waits_for_the_thread_to_end_before_it_is_cancelled(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    with database(state) as connection:
+        connection.execute("BEGIN IMMEDIATE")  # Holds the save mid-flight.
+        saving = asyncio.create_task(store.save(record()))
+        await asyncio.sleep(0.05)
+        closing_store = asyncio.create_task(store.close())
+        await asyncio.sleep(0.05)
+        closing_store.cancel()
+        await asyncio.sleep(0.05)
+        assert not closing_store.done()
+        connection.execute("ROLLBACK")
+        with pytest.raises(asyncio.CancelledError):
+            await closing_store
+        assert store_threads() == []
+        await saving
+
+
 async def test_a_cancelled_call_leaves_the_store_usable(
     open_store: Opener, state: Path, workspace: Path
 ) -> None:
