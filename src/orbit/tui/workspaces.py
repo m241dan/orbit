@@ -152,8 +152,8 @@ class WorkspacesScreen(TypingListScreen[str | None]):
             self._relist(self._keys, self._keys, self._labels)
 
     @property
-    def _keys(self) -> tuple[str, ...]:
-        """The rows' keys."""
+    def _keys(self) -> tuple[str | None, ...]:
+        """The rows' keys, None for ``Add a path or URL…``."""
         return tuple(map(row_key, self.rows))
 
     def _pick_added(self) -> bool:

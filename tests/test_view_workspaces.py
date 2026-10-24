@@ -313,7 +313,7 @@ def test_hints() -> None:
 def test_row_keys_tell_rows_apart_by_workspace_or_path() -> None:
     assert row_key(A) == row_key(A.model_copy(update={"sessions": ()})) == "a"
     assert row_key(AddWorkspace(path="/src/a")) == "add /src/a"
-    assert row_key(ADD_PATH) == "add_path"
+    assert row_key(ADD_PATH) is None
 
 
 def test_relisting_with_no_row_highlighted_highlights_none() -> None:
@@ -321,7 +321,7 @@ def test_relisting_with_no_row_highlighted_highlights_none() -> None:
     assert kept_highlight(keys, None, keys) is None
 
 
-def test_relisting_without_the_highlighted_workspace_keeps_it_on_the_nearest_row() -> None:
+def test_relisting_without_the_last_workspace_highlighted_keeps_it_off_adding_a_path() -> None:
     shown = tuple(map(row_key, workspace_rows((A, B), None)))
     keys = tuple(map(row_key, workspace_rows((A,), None)))
-    assert kept_highlight(shown, 1, keys) == 1 and keys[1] == row_key(ADD_PATH)
+    assert kept_highlight(shown, 1, keys) == 0

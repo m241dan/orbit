@@ -630,10 +630,20 @@ async def test_a_removal_listed_while_shown_keeps_the_highlight_on_its_row() -> 
 async def test_a_gone_row_highlighted_moves_to_where_it_was() -> None:
     app = connected(None)
     async with app.run_test() as pilot:
+        await feed_events(session_of(app), pilot, catalog(B, A, C))
+        await pilot.press("j")
+        await feed_events(session_of(app), pilot, catalog(B, C))
+        assert highlighted(workspaces(app)) == 1
+
+
+async def test_removing_the_last_workspace_highlighted_moves_to_the_one_above() -> None:
+    app = connected(None)
+    async with app.run_test() as pilot:
         await feed_events(session_of(app), pilot, SERVED)
         await pilot.press("j")
         await feed_events(session_of(app), pilot, catalog(B))
-        assert highlighted(workspaces(app)) == 1
+        assert rows(workspaces(app)) == [B_ROW, "Add a path or URL…"]
+        assert highlighted(workspaces(app)) == 0
 
 
 async def test_a_state_change_shows_in_the_workspaces_row() -> None:

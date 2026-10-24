@@ -85,14 +85,15 @@ def preselected(rows: Sequence[WorkspaceRow], repository: str | None) -> int:
     return 0 if entry is None else rows.index(entry)
 
 
-def row_key(row: WorkspaceRow) -> str:
+def row_key(row: WorkspaceRow) -> str | None:
     """What tells ``row`` apart from the picker's other rows, as its workspace's sessions
-    change."""
+    change; None for the trailing row adding a path or URL, which the highlight isn't kept
+    on when the row it was on goes."""
     if isinstance(row, AddWorkspace):
         return f"add {row.path}"
     if isinstance(row, WorkspaceCloning):
         return f"cloning {row.url}"
-    return row.id if isinstance(row, WorkspaceEntry) else row
+    return row.id if isinstance(row, WorkspaceEntry) else None
 
 
 def row_label(row: WorkspaceRow, agents: Sequence[AgentRef] = ()) -> str:

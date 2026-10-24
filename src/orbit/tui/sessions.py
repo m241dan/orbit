@@ -472,12 +472,15 @@ class SessionsHost:
             self._catalog.workspaces, self.workspace, self.attached, self.sessions, workspace
         )
 
+        screen = SessionsScreen(sessions, viewing, self._send, startup)
+
         async def chosen(choice: tuple[SessionChoice, ...] | None) -> None:
             # Moved before sending, as the view may come back before sending returns.
             was = self._move(viewing.workspace) if choice and not viewing.joined else None
-            await self._send_choice(choice or (), sessions, was)
+            # The sessions as last shown, as they may have changed since the picker opened.
+            await self._send_choice(choice or (), screen.sessions, was)
 
-        self._picker.open(SessionsScreen(sessions, viewing, self._send, startup), chosen)
+        self._picker.open(screen, chosen)
 
     async def _send_choice(
         self,

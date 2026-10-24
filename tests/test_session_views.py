@@ -116,6 +116,38 @@ async def test_picking_a_session_viewed_read_only_offers_to_make_it_active() -> 
         assert not isinstance(app.screen, ChoiceScreen)
 
 
+async def test_picking_a_session_made_active_while_the_picker_is_open_offers_nothing() -> None:
+    app, session = joined()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG, VIEWED)
+        await pilot.press("enter")
+        made_active = OLD.model_copy(update={"active": True})
+        await feed_events(
+            session, pilot, catalog(CURRENT.model_copy(update={"active": False}), made_active)
+        )
+        await pilot.press("k", "enter")  # From today, now listed after auth rework.
+        await feed_events(session, pilot, view(OLD))
+
+        assert changes(session) == [Attach(workspace="w", session="old")]
+        assert not isinstance(app.screen, ChoiceScreen)
+
+
+async def test_picking_a_session_no_longer_active_since_the_picker_opened_offers_it() -> None:
+    app, session = joined()
+    async with app.run_test() as pilot:
+        was_active = OLD.model_copy(update={"active": True})
+        await feed_events(
+            session, pilot, catalog(CURRENT.model_copy(update={"active": False}), was_active)
+        )
+        await pilot.press("enter")
+        await feed_events(session, pilot, CATALOG, VIEWED)
+        await pilot.press("enter")  # The highlight stays on auth rework, now listed second.
+        await feed_events(session, pilot, view(OLD))
+
+        assert changes(session) == [Attach(workspace="w", session="old")]
+        assert choices(prompt(app)) == ["Make this the active session", "Just look"]
+
+
 async def test_just_look_closes_the_prompt_and_keeps_the_view() -> None:
     app, session = joined()
     async with app.run_test() as pilot:
