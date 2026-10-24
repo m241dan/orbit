@@ -221,7 +221,7 @@ class OrbitApp(App[None], inherit_bindings=False):
     def on_mount(self) -> None:
         # Looked up once: a query walks the DOM, and events arrive many times a second.
         self._transcript = self.query_one(Transcript)
-        self._tabs = self.query_one(ConversationTabs)
+        self._tabs = self.query_one(ConversationTabs).strip
         self._prompt = self.query_one(ChatPrompt)
         self._task_list = self.query_one(TaskList)
         self._verification = self.query_one(VerificationPanel)
@@ -366,11 +366,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._select("transcript")
 
     def action_cycle_tab(self, step: int) -> None:
-        tabs = self._tabs
-        if step > 0:
-            tabs.action_next_tab()
-        else:
-            tabs.action_previous_tab()
+        self._tabs.cycle(step)
 
     def action_activate(self) -> None:
         if self._selected == "task-list":
