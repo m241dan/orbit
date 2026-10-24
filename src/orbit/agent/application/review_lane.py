@@ -207,7 +207,12 @@ class ReviewLane:
             return
         self._background.start(self._run_reviews())
 
+    async def stop(self) -> None:
+        """Stop the reviews running, and wait for them to; they run again once kicked."""
+        await self._background.stop()
+
     async def close(self) -> None:
+        """Stop the reviews running for good: a kick from now on runs none."""
         await self._background.close()
 
     async def _queue(self, job: ReviewJob | None) -> None:

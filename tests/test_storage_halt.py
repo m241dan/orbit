@@ -75,6 +75,7 @@ from tests.agent_fakes import (
     greet,
     halt_of,
     idle,
+    install_retry,
     lane_of,
     outcome_of,
     payloads,
@@ -650,6 +651,31 @@ async def test_a_resume_that_fails_to_lift_the_halt_starts_no_review() -> None:
     assert not lane_of(session).running
     assert launcher.launches == []
     await session.close()
+
+
+async def test_a_close_during_a_resumes_retry_starts_no_review() -> None:
+    store, fallback = FakeStore(), FakeFallback()
+    store.append_failure = "disk full"
+    session, _, launcher = session_for(
+        reviewers=(suggests(),), tree=FakeTree(), review=True, store=store, fallback=fallback
+    )
+    await publish(session, Notice(message="n0"))
+    await halt_error(session)
+    tasks_of(session).board.add(TaskSpec(prompt="Review it.", role=REVIEWER))
+    store.append_failure = None
+    retry = BlockedRetry(asyncio.Event(), asyncio.Event())
+    install_retry(session, retry)
+
+    resuming = asyncio.create_task(send(session, ResumeStorage()))
+    await retry.started.wait()
+    await session.close()
+    retry.release.set()
+    await resuming
+    await settled()
+
+    assert not halt_of(session).halted
+    assert not lane_of(session).running
+    assert launcher.launches == []
 
 
 async def test_resuming_does_not_run_the_startup_check_the_halt_cancelled() -> None:

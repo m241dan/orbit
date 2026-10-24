@@ -106,7 +106,12 @@ class StartupCheck:
     def cancel(self) -> None:
         self._background.cancel()
 
+    async def stop(self) -> None:
+        """Stop the check, if it runs, and wait for it to."""
+        await self._background.stop()
+
     async def close(self) -> None:
+        """Stop the check, if it runs, for good: it doesn't start from now on."""
         await self._background.close()
 
     async def _run(self) -> None:

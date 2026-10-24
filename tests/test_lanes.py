@@ -198,6 +198,20 @@ async def test_close_when_never_started_does_nothing() -> None:
     assert not lane.running and events.empty()
 
 
+async def test_start_after_close_closes_the_work_and_starts_no_task() -> None:
+    lane, events = background()
+    work = Work()
+    await lane.close()
+
+    coroutine = work("late")
+    lane.start(coroutine)
+    await asyncio.sleep(0)
+
+    assert inspect.getcoroutinestate(coroutine) == inspect.CORO_CLOSED
+    assert work.runs == [] and not lane.running and events.empty()
+    assert asyncio.all_tasks() == {asyncio.current_task()}
+
+
 async def test_close_cancelled_while_the_work_stops_is_cancelled() -> None:
     lane, _ = background()
     started, stop = asyncio.Event(), asyncio.Event()

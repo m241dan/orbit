@@ -79,12 +79,13 @@ def _detached[T](work: Coroutine[Any, Any, T]) -> "asyncio.Task[T]":
 class Background:
     """Runs one piece of work at a time in the background for lane ``name``. A failure that
     escapes the work is reported once with ``publish``, as it happens, and never raised;
-    :attr:`ended` is called once the work has stopped."""
+    :attr:`ended` is called once the work has stopped. Once closed, it starts nothing."""
 
     def __init__(self, name: str, publish: Publish) -> None:
         self._name = name
         self._publish = publish
         self._task: asyncio.Task[None] | None = None
+        self._closed = False
         self.ended: Callable[[], None] = _unwatched
 
     @property
@@ -92,8 +93,9 @@ class Background:
         return self._task is not None and not self._task.done()
 
     def start(self, work: Coroutine[Any, Any, object]) -> None:
-        """Run ``work`` in the background, unless earlier work still runs: then drop it."""
-        if self.running:
+        """Run ``work`` in the background, unless earlier work still runs or this is closed:
+        then drop it."""
+        if self._closed or self.running:
             work.close()
             return
         self._task = _detached(self._guarded(work))
@@ -105,11 +107,16 @@ class Background:
         if self._task is not None:
             self._task.cancel()
 
-    async def close(self) -> None:
+    async def stop(self) -> None:
         """Cancel the work, if any, and wait for it to stop; cancelled meanwhile, this is
-        cancelled once it has."""
+        cancelled once it has. Work can start again afterwards."""
         if self._task is not None:
             await stop(self._task)
+
+    async def close(self) -> None:
+        """Stop the work, as :meth:`stop` does, for good: nothing starts from now on."""
+        self._closed = True
+        await self.stop()
 
     async def _guarded(self, work: Coroutine[Any, Any, object]) -> None:
         try:

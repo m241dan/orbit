@@ -447,8 +447,8 @@ class WorkspaceHost:
         return Handover(parts)
 
     def _kick_reviews(self) -> None:
-        """Start the reviews waiting, if there's a review lane."""
-        if self._lane is not None:
+        """Start the reviews waiting, if there's a review lane, unless closing."""
+        if self._lane is not None and not self._closing:
             self._lane.kick()
 
     def _host_greeting(self) -> HostGreeting:
@@ -714,9 +714,9 @@ class WorkspaceHost:
         again ended while halted, and the reviews waiting. A startup check the halt cancelled
         stays cancelled, as one the user cancelled does: it runs once as orbit starts, the
         conversation has said it was cancelled, and the first task's verification runs the same
-        steps."""
+        steps. Closing meanwhile, nothing is started."""
         await self._halt.resume()
-        if not self._halt.halted:
+        if not self._halt.halted and not self._closing:
             await self._turns.lifted()
             if self._lane is not None:
                 self._lane.kick()
@@ -805,7 +805,7 @@ class WorkspaceHost:
             self._takeover.close,
             self._count_loader.close,
         ]
-        stops += self._work_stops(self._stop_turns)
+        stops += self._work_stops(self._stop_turns, final=True)
         stops += [self._seat.close_retired, self._seat.close]
         if self._desk is not None:
             stops.append(self._desk.stop)
@@ -833,16 +833,19 @@ class WorkspaceHost:
         turns, as the session halts, and wait for them to end; nothing that could wake the work
         lane runs once its turn is cancelled, but a run the usage limit stopped still waits to
         start again."""
-        for stop in self._work_stops(self._halt_turns):
+        for stop in self._work_stops(self._halt_turns, final=False):
             await stop()
 
     def _work_stops(
-        self, stop_turns: Callable[[], Awaitable[None]]
+        self, stop_turns: Callable[[], Awaitable[None]], *, final: bool
     ) -> list[Callable[[], Awaitable[None]]]:
         """What :meth:`_stop_work` awaits, in order: the review lane, the startup check, then
-        ``stop_turns``, which stops the work lane's and the planner's turns."""
+        ``stop_turns``, which stops the work lane's and the planner's turns. The lane and the
+        check are closed for good if ``final``, else stopped, to start again later."""
         parts = (self._lane, self._startup)
-        stops: list[Callable[[], Awaitable[None]]] = [p.close for p in parts if p is not None]
+        stops: list[Callable[[], Awaitable[None]]] = [
+            p.close if final else p.stop for p in parts if p is not None
+        ]
         return [*stops, stop_turns]
 
     def check_state(self) -> None:
