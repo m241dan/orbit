@@ -44,7 +44,6 @@ from orbit.tui.proposals import ProposalHost
 from orbit.tui.sessions import SessionsHost
 from orbit.tui.settings_pickers import SettingsPickers
 from orbit.tui.tabs import ConversationTabs
-from orbit.tui.takeover import TakeoverHost
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.view.events import (
@@ -61,6 +60,7 @@ from orbit.tui.view.events import (
 )
 from orbit.tui.view.rules import planner_reset_entry
 from orbit.tui.view.storage import StorageHalt
+from orbit.tui.view.takeover import TakeoverOffer
 from orbit.tui.view.triggers import trigger_key_labels
 from orbit.tui.widgets import ChatPrompt, StatusLine
 from orbit.tui.workspaces import WorkspacesHost
@@ -96,7 +96,7 @@ class Handlers:
     workspaces: WorkspacesHost
     opening: OpeningHost
     halt: StorageHalt
-    takeover: TakeoverHost
+    takeover: TakeoverOffer
 
 
 @dataclass(frozen=True)

@@ -241,3 +241,10 @@ async def test_keys_left_when_one_goes_are_laid_out_in_the_footers_row_in_order(
 
 async def test_keys_that_change_order_are_laid_out_in_the_footers_row_in_order() -> None:
     await assert_in_one_row_after("paging", "backwards", ["Previous", "Next", "Quit", "Danger"])
+
+
+async def test_a_footer_no_longer_attached_recomposes_nothing() -> None:
+    # As a closing app may ask of it.
+    footer = KeyFooter()
+    await footer.recompose()
+    assert list(footer.children) == []

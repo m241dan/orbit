@@ -8,6 +8,9 @@ from orbit.protocol import (
     CommandRefused,
     ErrorOccurred,
     Event,
+    OwnershipDeclined,
+    OwnershipOffered,
+    OwnershipTaken,
     SessionStateChanged,
 )
 from orbit.tui.event_router import AppHooks, EventRouter, Handlers, Panes
@@ -127,3 +130,12 @@ def test_a_refusal_or_an_error_for_another_reason_halts_nothing() -> None:
 
     assert routed(refusal) == [*TRACKED, "desk.answer"]
     assert routed(error) == [*TRACKED, "feed.render", "workspaces.follow_error"]
+
+
+def test_an_offer_asks_about_the_repository() -> None:
+    assert routed(OwnershipOffered()) == [*TRACKED, "takeover.offered"]
+
+
+def test_an_offer_settled_closes_it_and_owning_the_repository_clears_the_read_only_mark() -> None:
+    assert routed(OwnershipDeclined()) == [*TRACKED, "takeover.settled"]
+    assert routed(OwnershipTaken()) == [*TRACKED, "takeover.settled", "prompt.show_read_only"]

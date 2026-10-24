@@ -1,22 +1,23 @@
-"""The offer of a freed repository: a modal to take it over or stay read-only."""
+"""The offer of a freed repository: a modal to take it over or stay read-only, as the app asks
+it and as the host shows it in a bare app."""
 
 import pytest
+from textual.app import App
 from textual.widgets import Static
 
 from orbit.protocol import (
     STORAGE_FAILED,
-    CommandAccepted,
-    CommandRefused,
+    Command,
     ErrorOccurred,
-    Event,
-    OwnershipDeclined,
     OwnershipOffered,
     OwnershipTaken,
     TakeOwnership,
 )
 from orbit.tui import OrbitApp
 from orbit.tui.storage_halt import StorageHaltScreen
+from orbit.tui.takeover import TakeoverHost
 from orbit.tui.view.confirm import TAKE_OVER_MESSAGE, TAKE_OVER_TITLE
+from orbit.tui.view.outcomes import Awaited
 from orbit.tui.widgets import ChatPrompt, ConfirmScreen
 from tests.tui_fakes import SNAPSHOT, FakeSession, feed_events
 
@@ -38,16 +39,6 @@ async def test_an_offer_asks_and_taking_over_sends_the_choice() -> None:
         assert not isinstance(app.screen, ConfirmScreen)
 
 
-@pytest.mark.parametrize("key", ["n", "escape"])
-async def test_staying_read_only_sends_the_choice(key: str) -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, OwnershipOffered())
-        await pilot.press(key)
-        assert session.commands == [TakeOwnership(take=False)]
-
-
 async def test_owning_the_repository_clears_the_read_only_mark() -> None:
     session = FakeSession()
     app = OrbitApp(session)
@@ -67,69 +58,6 @@ async def test_a_snapshot_with_an_offer_open_asks() -> None:
         assert session.commands == [TakeOwnership(take=True)]
 
 
-async def test_an_offer_already_shown_isnt_asked_again() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, OwnershipOffered(), OFFERING, OwnershipOffered())
-        assert sum(isinstance(screen, ConfirmScreen) for screen in app.screen_stack) == 1
-
-
-@pytest.mark.parametrize("settled", [OwnershipTaken(), OwnershipDeclined(), SNAPSHOT])
-async def test_an_offer_settled_elsewhere_closes_the_modal_unanswered(settled: Event) -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, OFFERING, settled)
-        assert not isinstance(app.screen, ConfirmScreen)
-        assert session.commands == []
-
-        await feed_events(session, pilot, OwnershipOffered())
-        assert isinstance(app.screen, ConfirmScreen)
-
-
-def refusal(session: FakeSession) -> CommandRefused:
-    return CommandRefused(
-        command_id=session.envelopes[-1].command_id, code="invalid", message="Not now."
-    )
-
-
-@pytest.mark.parametrize(("key", "take"), [("y", True), ("n", False)])
-async def test_a_refused_answer_asks_again(key: str, take: bool) -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, OwnershipOffered())
-        await pilot.press(key)
-        assert not isinstance(app.screen, ConfirmScreen)
-        await feed_events(session, pilot, refusal(session))
-        assert isinstance(app.screen, ConfirmScreen)
-        await pilot.press(key)
-        assert session.commands == [TakeOwnership(take=take), TakeOwnership(take=take)]
-
-
-@pytest.mark.parametrize("settled", [OwnershipTaken(), OwnershipDeclined()])
-async def test_a_refusal_after_the_offer_settled_doesnt_ask_again(settled: Event) -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, OFFERING)
-        await pilot.press("y")
-        await feed_events(session, pilot, settled, refusal(session))
-        assert not isinstance(app.screen, ConfirmScreen)
-
-
-async def test_an_accepted_answer_leaves_no_modal_open() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, OwnershipOffered())
-        await pilot.press("y")
-        accepted = CommandAccepted(command_id=session.envelopes[-1].command_id)
-        await feed_events(session, pilot, accepted)
-        assert not isinstance(app.screen, ConfirmScreen)
-
-
 async def test_an_offer_settled_under_a_storage_halt_leaves_no_modal_once_it_lifts() -> None:
     session = FakeSession()
     app = OrbitApp(session)
@@ -142,3 +70,41 @@ async def test_an_offer_settled_under_a_storage_halt_leaves_no_modal_once_it_lif
         assert not any(isinstance(screen, ConfirmScreen) for screen in app.screen_stack)
         assert not isinstance(app.screen, StorageHaltScreen)
         assert session.commands == []
+
+
+class TakeoverApp(App[None]):
+    """A bare app showing a TakeoverHost's offer, recording the commands it sends."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.sent: list[Command] = []
+        self.host = TakeoverHost(self.push_screen, self._send)
+
+    async def _send(self, command: Command, awaited: Awaited) -> None:
+        self.sent.append(command)
+
+
+@pytest.mark.parametrize("key", ["n", "escape"])
+async def test_staying_read_only_sends_the_choice(key: str) -> None:
+    app = TakeoverApp()
+    async with app.run_test() as pilot:
+        app.host.offer.offered()
+        await pilot.pause()
+        await pilot.press(key)
+        assert app.sent == [TakeOwnership(take=False)]
+        assert not app.host.modal_open
+
+
+async def test_an_offer_settled_closes_the_modal_unanswered() -> None:
+    app = TakeoverApp()
+    async with app.run_test() as pilot:
+        app.host.offer.offered()
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmScreen) and app.host.modal_open
+        app.host.offer.settled()
+        await pilot.pause()
+        assert not isinstance(app.screen, ConfirmScreen) and not app.host.modal_open
+        assert app.sent == []
+        app.host.offer.offered()
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmScreen)

@@ -43,7 +43,6 @@ from orbit.protocol import (
     SendMessage,
     Session,
     Settings,
-    TakeOwnership,
     TaskSpec,
     UpdateSettings,
 )
@@ -193,10 +192,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         )
         # The feed shows answers once mounted, before any event arrives.
         self._desk = CommandDesk(session.send, self._render_event, lambda e: self._feed.render(e))
-        self._takeover = TakeoverHost(
-            self.push_screen,
-            lambda take, awaited: self._send(TakeOwnership(take=take), awaited),
-        )
+        self._takeover = TakeoverHost(self.push_screen, self._send).offer
         # The lines by the prompt, built here so their hosts can show statuses on them.
         self._halt_status = StatusLine(id="storage-halt", classes="error")
         self._link_status = StatusLine(id="link-status")
