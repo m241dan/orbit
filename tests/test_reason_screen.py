@@ -1,6 +1,8 @@
-"""f on the task list opens a modal saying in full why the highlighted task ended."""
+"""f on the task list opens a modal saying in full why the highlighted task ended: the app
+opening it, and the screen alone scrolling, copying and closing."""
 
 import pytest
+from textual.app import App
 from textual.containers import VerticalScroll
 from textual.pilot import Pilot
 
@@ -30,14 +32,14 @@ def task(
     )
 
 
-def notes(app: OrbitApp, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+def notes(app: App[None], monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """The toasts ``app`` shows from now on."""
     shown: list[str] = []
     monkeypatch.setattr(app, "notify", lambda message, **_: shown.append(message))
     return shown
 
 
-def reason_screen(app: OrbitApp) -> ReasonScreen:
+def reason_screen(app: App[None]) -> ReasonScreen:
     screen = app.screen
     assert isinstance(screen, ReasonScreen)
     return screen
@@ -106,23 +108,41 @@ async def test_f_does_nothing_on_a_task_without_a_reason_or_the_new_task_row() -
         assert not isinstance(app.screen, ReasonScreen)
 
 
-async def test_y_copies_the_reason_and_detail(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_it_keeps_the_task_as_opened_when_the_board_changes() -> None:
     session = FakeSession()
     app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await opened(session, pilot, task())
+        await feed_events(session, pilot, TasksChanged(tasks=()))
+        assert shown(app)[2] == "Unit tests failed"
+
+
+class ReasonApp(App[None]):
+    """A bare app showing why ``state``, task 1, ended."""
+
+    AUTO_FOCUS = None  # As OrbitApp's, which the screen inherits.
+
+    def __init__(self, state: TaskState) -> None:
+        super().__init__()
+        self.state = state
+
+    def on_mount(self) -> None:
+        self.push_screen(ReasonScreen(self.state, "1"))
+
+
+async def test_y_copies_the_reason_and_detail(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = ReasonApp(task(detail="out"))
     toasts = notes(app, monkeypatch)
     copied: list[str] = []
     monkeypatch.setattr(app, "copy_to_clipboard", copied.append)
     async with app.run_test() as pilot:
-        await opened(session, pilot, task(detail="out"))
         await pilot.press("y")
         assert copied == ["Unit tests failed\n\nout"] and toasts == ["Copied 3 lines"]
 
 
 async def test_j_k_and_the_arrows_scroll_a_long_detail() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app = ReasonApp(task(detail=LONG))
     async with app.run_test(size=(80, 30)) as pilot:
-        await opened(session, pilot, task(detail=LONG))
         box = reason_screen(app).query_one(VerticalScroll)
         await pilot.press("j", "j", "down")
         assert box.scroll_y == 3
@@ -131,18 +151,7 @@ async def test_j_k_and_the_arrows_scroll_a_long_detail() -> None:
 
 
 async def test_escape_closes_it() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app = ReasonApp(task())
     async with app.run_test() as pilot:
-        await opened(session, pilot, task())
         await pilot.press("escape")
         assert not isinstance(app.screen, ReasonScreen)
-
-
-async def test_it_keeps_the_task_as_opened_when_the_board_changes() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await opened(session, pilot, task())
-        await feed_events(session, pilot, TasksChanged(tasks=()))
-        assert shown(app)[2] == "Unit tests failed"

@@ -1,3 +1,8 @@
+"""The modal where the user decides on proposed checks: the app opening it, noting the
+decision and closing it, and the screen alone taking its keys and feedback."""
+
+from textual.app import App
+from textual.containers import Vertical
 from textual.widgets import Input, Static
 
 from orbit.protocol import (
@@ -13,7 +18,7 @@ from orbit.protocol import (
 from orbit.tui import OrbitApp
 from orbit.tui.proposals import ProposalScreen
 from orbit.tui.transcript import Transcript
-from orbit.tui.view.proposals import proposal_text
+from orbit.tui.view.proposals import FEEDBACK_HINT, PROPOSAL_KEYS_HINT, proposal_text
 from tests.tui_fakes import FakeSession, feed_events
 
 PROPOSAL = ChecksProposed(
@@ -106,73 +111,6 @@ async def test_another_frontends_decision_shows_under_the_agents_tab() -> None:
         assert app.query_one(Transcript).entries("configurator")[-1].text == entries(app)[-1]
 
 
-async def test_x_ends_the_task() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, STARTED, PROPOSAL)
-        await pilot.press("x")
-        await pilot.pause()
-        assert session.commands == [DecideProposal(task_id="7", action="end")]
-        assert entries(app)[-1] == "orbit → agent-3: task ended"
-
-
-async def test_r_takes_feedback_and_enter_sends_it() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, STARTED, PROPOSAL)
-        await pilot.press("r")
-        feedback = app.screen.query_one(Input)
-        assert feedback.display and feedback.has_focus
-        # Keys type into the feedback rather than deciding.
-        await pilot.press(*"add mypy", "enter")
-        await pilot.pause()
-        assert session.commands == [
-            DecideProposal(task_id="7", action="revise", feedback="add mypy")
-        ]
-        assert entries(app)[-1] == "orbit → agent-3: changes asked for: add mypy"
-
-
-async def test_blank_feedback_is_not_sent() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, STARTED, PROPOSAL)
-        await pilot.press("r", "space", "enter")
-        await pilot.pause()
-        assert session.commands == []
-        assert isinstance(app.screen, ProposalScreen)
-
-
-async def test_esc_from_the_feedback_goes_back_to_the_proposal() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, STARTED, PROPOSAL)
-        await pilot.press("r", *"hm", "escape")
-        await pilot.pause()
-        screen = app.screen
-        assert isinstance(screen, ProposalScreen)
-        assert not screen.query_one(Input).display
-        assert session.commands == []
-        # Back at the proposal, its keys work again.
-        await pilot.press("a")
-        await pilot.pause()
-        assert session.commands == [DecideProposal(task_id="7", action="accept")]
-
-
-async def test_esc_on_the_proposal_does_not_cancel_or_close_it() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, STARTED, PROPOSAL)
-        await pilot.press("escape")
-        await pilot.pause()
-        assert isinstance(app.screen, ProposalScreen)
-        assert session.commands == []
-
-
 async def test_the_proposal_closes_when_its_agent_exits_or_is_cancelled() -> None:
     session = FakeSession()
     app = OrbitApp(session)
@@ -197,3 +135,77 @@ async def test_a_proposal_shown_while_typing_takes_over_the_keys() -> None:
         await pilot.press("x")
         await pilot.pause()
         assert session.commands == [DecideProposal(task_id="7", action="end")]
+
+
+class ScreenApp(App[None]):
+    """A bare app showing the proposal, recording what its screen is dismissed with."""
+
+    AUTO_FOCUS = None  # As OrbitApp's, which the screen inherits.
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.decisions: list[DecideProposal | None] = []
+
+    def on_mount(self) -> None:
+        self.push_screen(ProposalScreen(PROPOSAL), self.decisions.append)
+
+    @property
+    def proposal(self) -> ProposalScreen:
+        screen = self.screen
+        assert isinstance(screen, ProposalScreen)
+        return screen
+
+
+async def test_x_ends_the_task() -> None:
+    app = ScreenApp()
+    async with app.run_test() as pilot:
+        await pilot.press("x")
+        await pilot.pause()
+        assert app.decisions == [DecideProposal(task_id="7", action="end")]
+        assert not isinstance(app.screen, ProposalScreen)
+
+
+async def test_r_takes_feedback_and_enter_sends_it() -> None:
+    app = ScreenApp()
+    async with app.run_test() as pilot:
+        await pilot.press("r")
+        feedback = app.proposal.query_one(Input)
+        assert feedback.display and feedback.has_focus
+        assert app.proposal.query_one(Vertical).border_subtitle == FEEDBACK_HINT
+        # Keys type into the feedback rather than deciding.
+        await pilot.press(*"add mypy", "enter")
+        await pilot.pause()
+        assert app.decisions == [DecideProposal(task_id="7", action="revise", feedback="add mypy")]
+
+
+async def test_blank_feedback_is_not_sent() -> None:
+    app = ScreenApp()
+    async with app.run_test() as pilot:
+        await pilot.press("r", "space", "enter")
+        await pilot.pause()
+        assert app.decisions == []
+        assert isinstance(app.screen, ProposalScreen)
+
+
+async def test_esc_from_the_feedback_goes_back_to_the_proposal() -> None:
+    app = ScreenApp()
+    async with app.run_test() as pilot:
+        await pilot.press("r", *"hm", "escape")
+        await pilot.pause()
+        screen = app.proposal
+        assert not screen.query_one(Input).display
+        assert screen.query_one(Vertical).border_subtitle == PROPOSAL_KEYS_HINT
+        assert app.decisions == []
+        # Back at the proposal, its keys work again.
+        await pilot.press("a")
+        await pilot.pause()
+        assert app.decisions == [DecideProposal(task_id="7", action="accept")]
+
+
+async def test_esc_on_the_proposal_does_not_cancel_or_close_it() -> None:
+    app = ScreenApp()
+    async with app.run_test() as pilot:
+        await pilot.press("escape")
+        await pilot.pause()
+        assert isinstance(app.screen, ProposalScreen)
+        assert app.decisions == []

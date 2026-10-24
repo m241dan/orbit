@@ -18,6 +18,7 @@ from orbit.tui.view.proposals import (
     PROPOSAL_KEYS_HINT,
     proposal_text,
     proposal_title,
+    revision,
 )
 from orbit.tui.widgets import BoxedModal
 
@@ -73,10 +74,9 @@ class ProposalScreen(BoxedModal[DecideProposal | None]):
     @on(Input.Submitted, "#proposal-feedback")
     def _send(self, event: Input.Submitted) -> None:
         event.stop()
-        feedback = event.value.strip()
-        if feedback:
-            task_id = self.proposal.task_id
-            self.dismiss(DecideProposal(task_id=task_id, action="revise", feedback=feedback))
+        decision = revision(self.proposal, event.value)
+        if decision is not None:
+            self.dismiss(decision)
 
     def _typing(self, on: bool) -> None:
         feedback = self.query_one(Input)
