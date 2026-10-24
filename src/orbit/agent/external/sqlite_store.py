@@ -211,7 +211,8 @@ class SqliteStore:
     async def recent(self, workspace: str, session_id: str, limit: int) -> list[EventEnvelope]:
         """The last ``limit`` events logged of the session ``session_id`` in the workspace
         ``workspace``, oldest first, but for those of types this orbit doesn't know. Raises
-        :class:`ReadFailed` when they can't be read."""
+        :class:`ReadFailed` when they can't be read, as when one of them isn't a valid
+        envelope."""
         check_session_id(session_id)
         message = f"Couldn't read the events of the session {session_id} from"
         return await self._or_raise(
@@ -224,7 +225,7 @@ class SqliteStore:
         """The last ``limit`` events logged of the session ``session_id`` in the workspace
         ``workspace`` before ``before_seq``, oldest first, but for those of types this orbit
         doesn't know, and whether earlier ones remain. Raises :class:`ReadFailed` when they
-        can't be read."""
+        can't be read, as when one of them isn't a valid envelope."""
         check_session_id(session_id)
         message = f"Couldn't read the events of the session {session_id} from"
         return await self._or_raise(
@@ -234,7 +235,8 @@ class SqliteStore:
     async def after(self, workspace: str, session_id: str, after_seq: int) -> list[EventEnvelope]:
         """The events logged of the session ``session_id`` in the workspace ``workspace`` after
         ``after_seq``, oldest first, but for those of types this orbit doesn't know. Raises
-        :class:`ReadFailed` when they can't be read."""
+        :class:`ReadFailed` when they can't be read, as when one of them isn't a valid
+        envelope."""
         check_session_id(session_id)
         message = f"Couldn't read the events of the session {session_id} from"
         return await self._or_raise(
@@ -330,9 +332,13 @@ class SqliteStore:
         the database.
 
         Raises :class:`StoreError`, naming both files, when ``target`` is the database or one of
-        its files, or when the copy fails, leaving ``target`` as it was.
+        its files, or when the copy fails, as once the store is closed, leaving ``target`` as it
+        was.
         """
-        await self._call(self._backup, target)
+        try:
+            await self._call(self._backup, target)
+        except sqlite3.Error as error:
+            raise StoreError(self._backup_failed(target, error)) from error
 
     async def _read_or[*A, T](
         self, fallback: Callable[[sqlite3.Error], T], function: Callable[[*A], T], *args: *A
@@ -351,15 +357,18 @@ class SqliteStore:
         """What ``function(*args)`` returns, run on the database's thread.
 
         Raises, saying ``message`` and the database, when the database fails: a
-        :class:`StorageFailed` when it's a ``write``, or else a :class:`ReadFailed`.
+        :class:`StorageFailed` when it's a ``write``, or else a :class:`ReadFailed`, as also
+        when a read finds an event that isn't a valid envelope.
         """
         try:
             return await self._call(function, *args)
         except sqlite3.Error as error:
             text = self._message(message, error)
             raise (self._failed(text, error) if write else ReadFailed(text)) from error
+        except sqlite_log.UndecodableEvent as error:
+            raise ReadFailed(self._message(message, error)) from error
 
-    def _message(self, message: str, error: sqlite3.Error) -> str:
+    def _message(self, message: str, error: Exception) -> str:
         """``message``, followed by the database and ``error``."""
         return f"{message} {self._database}: {error}"
 
@@ -423,8 +432,11 @@ class SqliteStore:
         try:
             copy_to(self._db, target)
         except (OSError, sqlite3.Error) as error:
-            message = f"Couldn't back up the database {self._database} to {target}: {error}"
-            raise StoreError(message) from error
+            raise StoreError(self._backup_failed(target, error)) from error
+
+    def _backup_failed(self, target: Path, error: Exception) -> str:
+        """Why the database couldn't be backed up to ``target`` when ``error`` was raised."""
+        return f"Couldn't back up the database {self._database} to {target}: {error}"
 
     def _disconnect(self) -> None:
         if self._connection is not None:

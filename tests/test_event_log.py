@@ -220,6 +220,36 @@ async def test_recent_events_of_types_this_orbit_doesnt_know_are_left_out(
     assert await store.recent("abc", 10) == [notice(2)]
 
 
+type Read = Callable[[OwnView], Awaitable[object]]
+
+
+@pytest.mark.parametrize(
+    "read",
+    [
+        lambda store: store.recent("abc", 10),
+        lambda store: store.before("abc", 3, 10),
+        lambda store: store.after("abc", 0),
+    ],
+)
+@pytest.mark.parametrize(
+    "json", ["{oops", '{"seq": 2, "session": "abc", "payload": {"type": "notice"}}']
+)
+async def test_events_with_a_row_that_isnt_a_valid_envelope_cant_be_read(
+    open_store: Opener, state: Path, workspace: Path, read: Read, json: str
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [notice(1), notice(2), notice(3)])
+    with database(state) as connection:
+        connection.execute("UPDATE events SET json = ? WHERE seq = 2", (json,))
+
+    match = (
+        r"Couldn't read the events of the session abc from .*orbit\.db: event 2 isn't a valid"
+        r" envelope: "
+    )
+    with pytest.raises(ReadFailed, match=match):
+        await read(store)
+
+
 async def test_recent_events_that_cant_be_read_raise_naming_the_database(
     open_store: Opener, workspace: Path
 ) -> None:

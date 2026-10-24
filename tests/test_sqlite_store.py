@@ -437,6 +437,18 @@ async def test_a_backup_replaces_an_existing_file_and_makes_it_the_owners_alone(
         assert connection.execute("SELECT id FROM sessions").fetchall() == [("abc",)]
 
 
+async def test_a_backup_from_a_closed_store_is_refused_naming_both_files(
+    open_store: Opener, state: Path, workspace: Path, tmp_path: Path
+) -> None:
+    await (await open_store(workspace)).save(record())
+    store = await SqliteStore.open_for_backup(state)
+    await store.close()
+    match = r"Couldn't back up the database .*orbit\.db to .*copy\.db: the store is closed"
+    with pytest.raises(StoreError, match=match):
+        await store.backup(tmp_path / "copy.db")
+    assert not (tmp_path / "copy.db").exists()
+
+
 async def test_opening_for_a_backup_registers_no_workspace(
     open_store: Opener, state: Path, workspace: Path, tmp_path: Path
 ) -> None:

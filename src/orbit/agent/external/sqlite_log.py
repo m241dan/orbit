@@ -13,9 +13,19 @@ from collections.abc import Sequence
 
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.external.sqlite_schema import transaction
-from orbit.protocol import EventEnvelope, decode_event, encode
+from orbit.protocol import EventEnvelope, ProtocolError, decode_event, encode
 
 type EventRow = tuple[str, str, int, str, str, int]
+type JsonRow = tuple[int, str]
+
+
+class UndecodableEvent(Exception):
+    """A logged event whose JSON isn't a valid envelope, as a corrupt row or one a later
+    protocol changed isn't: the message names its ``seq`` and says why."""
+
+    def __init__(self, seq: int, error: ProtocolError) -> None:
+        super().__init__(f"event {seq} isn't a valid envelope: {error}")
+        self.seq = seq
 
 
 def max_seq(connection: sqlite3.Connection) -> int:
@@ -35,11 +45,26 @@ def _event_row(workspace: str, session_id: str, envelope: EventEnvelope) -> Even
     return (workspace, session_id, envelope.seq, envelope.payload.type, text, len(text.encode()))
 
 
-def _decoded(texts: Sequence[str]) -> list[EventEnvelope]:
-    """The events whose JSON ``texts`` holds, latest first, decoded oldest first, but for those
-    of types this orbit doesn't know."""
-    decoded = [decode_event(text) for text in reversed(texts)]
+def _json_rows(cursor: sqlite3.Cursor) -> list[JsonRow]:
+    """The ``seq`` and JSON of each row ``cursor`` selected, in its order."""
+    return [(int(seq), str(text)) for seq, text in cursor]
+
+
+def _decoded(rows: Sequence[JsonRow]) -> list[EventEnvelope]:
+    """The events whose ``seq`` and JSON ``rows`` hold, latest first, decoded oldest first, but
+    for those of types this orbit doesn't know; raises :class:`UndecodableEvent` for a row
+    whose JSON isn't a valid envelope."""
+    decoded = [_decode(seq, text) for seq, text in reversed(rows)]
     return [envelope for envelope in decoded if envelope is not None]
+
+
+def _decode(seq: int, text: str) -> EventEnvelope | None:
+    """The envelope the event ``seq``'s JSON ``text`` holds, or ``None`` for one of a type this
+    orbit doesn't know; raises :class:`UndecodableEvent` if it holds neither."""
+    try:
+        return decode_event(text)
+    except ProtocolError as error:
+        raise UndecodableEvent(seq, error) from error
 
 
 def append(
@@ -88,11 +113,11 @@ def recent(
     """The session ``session_id``'s last ``limit`` events in the workspace ``workspace``, oldest
     first, but for those of types this orbit doesn't know."""
     rows = connection.execute(
-        """SELECT json FROM events WHERE workspace_id = ? AND session_id = ?
+        """SELECT seq, json FROM events WHERE workspace_id = ? AND session_id = ?
         ORDER BY seq DESC LIMIT ?""",
         (workspace, session_id, limit),
     )
-    return _decoded([str(text) for (text,) in rows])
+    return _decoded(_json_rows(rows))
 
 
 def before(
@@ -102,12 +127,12 @@ def before(
     ``before_seq``, oldest first, but for those of types this orbit doesn't know, and whether
     earlier ones remain."""
     rows = connection.execute(
-        """SELECT json FROM events WHERE workspace_id = ? AND session_id = ? AND seq < ?
+        """SELECT seq, json FROM events WHERE workspace_id = ? AND session_id = ? AND seq < ?
         ORDER BY seq DESC LIMIT ?""",
         (workspace, session_id, before_seq, limit + 1),
     )
-    texts = [str(text) for (text,) in rows]
-    return _decoded(texts[:limit]), len(texts) > limit
+    json_rows = _json_rows(rows)
+    return _decoded(json_rows[:limit]), len(json_rows) > limit
 
 
 def after(
@@ -116,11 +141,11 @@ def after(
     """The session ``session_id``'s events in the workspace ``workspace`` after ``after_seq``,
     oldest first, but for those of types this orbit doesn't know."""
     rows = connection.execute(
-        """SELECT json FROM events WHERE workspace_id = ? AND session_id = ? AND seq > ?
+        """SELECT seq, json FROM events WHERE workspace_id = ? AND session_id = ? AND seq > ?
         ORDER BY seq DESC""",
         (workspace, session_id, after_seq),
     )
-    return _decoded([str(text) for (text,) in rows])
+    return _decoded(_json_rows(rows))
 
 
 def trim(

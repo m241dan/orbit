@@ -71,6 +71,37 @@ def test_before_and_after_read_around_a_seq(connection: sqlite3.Connection) -> N
     assert sqlite_log.after(connection, WORKSPACE, "a", 3) == [notice(4), notice(5)]
 
 
+INVALID_NOTICE = '{"seq": 2, "session": "a", "payload": {"type": "notice"}}'
+
+
+def test_a_row_that_isnt_json_fails_each_read_naming_its_seq(
+    connection: sqlite3.Connection,
+) -> None:
+    sqlite_log.append(connection, WORKSPACE, "a", [notice(1), notice(2), notice(3)])
+    connection.execute("UPDATE events SET json = '{oops' WHERE seq = 2")
+    match = r"^event 2 isn't a valid envelope: Not JSON: "
+    with pytest.raises(sqlite_log.UndecodableEvent, match=match):
+        sqlite_log.recent(connection, WORKSPACE, "a", 10)
+    with pytest.raises(sqlite_log.UndecodableEvent, match=match):
+        sqlite_log.before(connection, WORKSPACE, "a", 3, 10)
+    with pytest.raises(sqlite_log.UndecodableEvent, match=match):
+        sqlite_log.after(connection, WORKSPACE, "a", 1)
+
+
+def test_a_known_event_with_an_invalid_payload_fails_the_read_but_an_unknown_type_is_skipped(
+    connection: sqlite3.Connection,
+) -> None:
+    sqlite_log.append(connection, WORKSPACE, "a", [notice(1), notice(2), notice(3)])
+    connection.execute(
+        "UPDATE events SET json = replace(json, '\"notice\"', '\"later\"') WHERE seq = 1"
+    )
+    assert sqlite_log.recent(connection, WORKSPACE, "a", 10) == [notice(2), notice(3)]
+    connection.execute("UPDATE events SET json = ? WHERE seq = 2", (INVALID_NOTICE,))
+    with pytest.raises(sqlite_log.UndecodableEvent, match=r"^event 2 isn't a valid envelope: "):
+        sqlite_log.recent(connection, WORKSPACE, "a", 10)
+    assert sqlite_log.after(connection, WORKSPACE, "a", 2) == [notice(3)]
+
+
 def test_trim_keeps_the_newest_event_alone_when_it_is_over_the_target(
     connection: sqlite3.Connection,
 ) -> None:
