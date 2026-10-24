@@ -41,6 +41,19 @@ REFUSALS: dict[Phase, str] = {
     "gave_up": "This task is finished. " + STOP,
     "ended": "This task is finished. " + STOP,
 }
+NO_STEPS = "No verification steps are configured."
+NO_SUGGESTIONS = "Orbit isn't taking suggestions."
+NO_CHECK_PROPOSALS = "Orbit isn't taking check proposals."
+
+
+def unknown_step(names: Sequence[str]) -> str:
+    """The refusal of a check run naming no step, listing the step ``names`` there are."""
+    return f"No step by that name; the steps are: {step_list(names)}."
+
+
+def invalid_proposal(reason: str) -> str:
+    """The refusal of a proposal of checks that's invalid for ``reason``."""
+    return f"Invalid proposal: {reason}"
 
 
 @dataclass(frozen=True)

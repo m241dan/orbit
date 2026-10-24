@@ -19,7 +19,10 @@ from orbit.protocol import (
     PLANNER_ORIGIN,
     REVIEW_ORIGIN,
     REVIEW_ROLES,
+    REVIEWER,
     SUPER_REVIEW_ORIGIN,
+    SUPER_REVIEWER,
+    TaskOrigin,
     TaskState,
 )
 
@@ -47,6 +50,16 @@ class ReviewJob:
     missing: tuple[str, ...] = ()
     whole: bool = False
     reviewed: tuple[str, ...] = ()
+
+    @property
+    def origin(self) -> TaskOrigin:
+        """The origin of the tasks the review suggests."""
+        return SUPER_REVIEW_ORIGIN if self.whole else REVIEW_ORIGIN
+
+    @property
+    def role(self) -> str:
+        """The role of the review's task."""
+        return SUPER_REVIEWER if self.whole else REVIEWER
 
 
 @dataclass(frozen=True)
@@ -366,6 +379,14 @@ def pending_titles(tasks: Sequence[TaskState]) -> tuple[str, ...]:
         _first_line(state.task.prompt)
         for state in tasks
         if state.status in WAITING and state.task.role not in _ORBITS_ROLES
+    )
+
+
+def pause_notice(rounds: int) -> str:
+    """The notice that review paused after ``rounds`` rounds of review-suggested work."""
+    return (
+        f"Review paused after {rounds} round(s) of review-suggested work;"
+        " it resumes when one of your tasks lands."
     )
 
 

@@ -23,6 +23,7 @@ from orbit.agent.domain.reviews import (
     LaneSnapshot,
     ReviewJob,
     ReviewPlanner,
+    pause_notice,
     pending_titles,
     review_prompt,
 )
@@ -30,15 +31,10 @@ from orbit.agent.domain.roles import role_task, suggested_task
 from orbit.protocol import (
     CODER,
     GIT_FAILED,
-    REVIEW_ORIGIN,
     REVIEW_ROLES,
-    REVIEWER,
-    SUPER_REVIEW_ORIGIN,
-    SUPER_REVIEWER,
     ErrorOccurred,
     Notice,
     ReviewStatus,
-    TaskOrigin,
     TaskState,
 )
 
@@ -184,7 +180,7 @@ class ReviewLane:
         if refusal is not None:
             return Reply(refusal, is_error=True)
         task = suggested_task(self._desk.agents.roles[CODER], title, prompt)
-        origin: TaskOrigin = SUPER_REVIEW_ORIGIN if self._jobs[task_id].whole else REVIEW_ORIGIN
+        origin = self._jobs[task_id].origin
 
         def add(board: TaskBoard) -> str:
             new_id = board.add_suggestion(task, batch, self.planner.round_of(batch), origin)
@@ -251,7 +247,7 @@ class ReviewLane:
     def _adder(self, job: ReviewJob, diff: str) -> Callable[[TaskBoard], None]:
         """The change to the board that queues ``job``'s review task, told ``diff``."""
         batch = self.planner.open_batch(job)
-        role = SUPER_REVIEWER if job.whole else REVIEWER
+        role = job.role
         pending = pending_titles(self._board.tasks)
         prompt = review_prompt(job, diff, self.planner.cap(job), pending)
         task = role_task(role, self._desk.agents.roles[role], prompt)
@@ -276,12 +272,7 @@ class ReviewLane:
     async def note_pause(self) -> None:
         """Note that review is paused, unless that was noted since it paused."""
         if self.planner.paused and not self._paused_noted:
-            rounds = self.planner.limits.rounds
-            message = (
-                f"Review paused after {rounds} round(s) of review-suggested work;"
-                " it resumes when one of your tasks lands."
-            )
-            await self._publish(Notice(message=message))
+            await self._publish(Notice(message=pause_notice(self.planner.limits.rounds)))
         self._paused_noted = self.planner.paused
 
     async def _run_reviews(self) -> None:

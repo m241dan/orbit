@@ -23,7 +23,15 @@ from orbit.agent.application.proposal_trial import ProposalTrial
 from orbit.agent.application.task_trace import CHECK_RUNS, FIX_ATTEMPTS, GAVE_UP_EVENT
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Failure, Verifier, first_failure
-from orbit.agent.domain.agent_task import FINISHED, AgentTask
+from orbit.agent.domain.agent_task import (
+    FINISHED,
+    NO_CHECK_PROPOSALS,
+    NO_STEPS,
+    NO_SUGGESTIONS,
+    AgentTask,
+    invalid_proposal,
+    unknown_step,
+)
 from orbit.agent.domain.agents import Agent, bootstrap_prompt
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import ChecksProposal, parse_proposal
@@ -45,7 +53,6 @@ from orbit.agent.domain.roles import (
 from orbit.agent.domain.verification import (
     VerificationStep,
     check_reply,
-    step_list,
 )
 from orbit.protocol import (
     AGENT_FAILED,
@@ -379,12 +386,11 @@ class AgentRun:
 
     async def _run_check(self, arguments: dict[str, Any]) -> Reply:
         if self._verifier is None:
-            return Reply("No verification steps are configured.", is_error=True)
+            return Reply(NO_STEPS, is_error=True)
         steps = {step.name: step for step in self._verifier.verification.steps}
         step = steps.get(str(arguments.get("step", "")))
         if step is None:
-            names = step_list(tuple(steps))
-            return Reply(f"No step by that name; the steps are: {names}.", is_error=True)
+            return Reply(unknown_step(tuple(steps)), is_error=True)
         refusal = self._work.request_check()
         if refusal is not None:
             return Reply(refusal, is_error=True)
@@ -417,7 +423,7 @@ class AgentRun:
 
     async def _suggest_task(self, arguments: dict[str, Any]) -> Reply:
         if self._desk.suggest is None:
-            return Reply("Orbit isn't taking suggestions.", is_error=True)
+            return Reply(NO_SUGGESTIONS, is_error=True)
         suggestion = task_suggestion(arguments)
         if isinstance(suggestion, str):
             return Reply(suggestion, is_error=True)
@@ -426,11 +432,11 @@ class AgentRun:
 
     async def _propose_checks(self, arguments: dict[str, Any]) -> Reply:
         if self._verifier is None or self._desk.agents.proposal_review is None:
-            return Reply("Orbit isn't taking check proposals.", is_error=True)
+            return Reply(NO_CHECK_PROPOSALS, is_error=True)
         try:
             checks = parse_proposal(arguments)
         except ConfigError as exc:
-            return Reply(f"Invalid proposal: {exc}", is_error=True)
+            return Reply(invalid_proposal(str(exc)), is_error=True)
         refusal = self._work.propose()
         if refusal is not None:
             return Reply(refusal, is_error=True)

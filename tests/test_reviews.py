@@ -12,12 +12,15 @@ from orbit.agent.domain.reviews import (
     ReviewLimits,
     ReviewPlanner,
     _Batch,
+    pause_notice,
     pending_titles,
     review_prompt,
 )
 from orbit.protocol import (
     CONFIGURATOR,
+    REVIEW_ORIGIN,
     REVIEWER,
+    SUPER_REVIEW_ORIGIN,
     SUPER_REVIEWER,
     TaskSpec,
     TaskState,
@@ -658,3 +661,20 @@ def test_the_super_review_count_is_kept_apart_from_snapshots() -> None:
     assert reviews.since_super == 2
     assert reviews.count(state("2"), ())
     assert reviews.since_super == 0
+
+
+def test_a_commit_review_suggests_review_tasks_and_is_run_by_a_reviewer() -> None:
+    job = ReviewJob(commits=("abc",), round=0, batch=None)
+    assert (job.origin, job.role) == (REVIEW_ORIGIN, REVIEWER)
+
+
+def test_a_super_review_suggests_super_review_tasks_and_is_run_by_a_super_reviewer() -> None:
+    job = ReviewJob(commits=("abc",), round=0, batch=None, whole=True)
+    assert (job.origin, job.role) == (SUPER_REVIEW_ORIGIN, SUPER_REVIEWER)
+
+
+def test_the_pause_notice_names_the_rounds_limit() -> None:
+    assert pause_notice(3) == (
+        "Review paused after 3 round(s) of review-suggested work;"
+        " it resumes when one of your tasks lands."
+    )

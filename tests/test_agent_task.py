@@ -1,6 +1,14 @@
 import pytest
 
-from orbit.agent.domain.agent_task import AgentTask, Limits
+from orbit.agent.domain.agent_task import (
+    NO_CHECK_PROPOSALS,
+    NO_STEPS,
+    NO_SUGGESTIONS,
+    AgentTask,
+    Limits,
+    invalid_proposal,
+    unknown_step,
+)
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import TaskSpec
 
@@ -211,3 +219,19 @@ def test_every_accepted_claim_keeps_its_summary() -> None:
     agent_task.failed(STEP, "1 failed")
     agent_task.claim_done("fixed the test")
     assert agent_task.summaries == ["added it", "fixed the test"]
+
+
+def test_the_refusals_for_what_orbit_isnt_offering() -> None:
+    assert NO_STEPS == "No verification steps are configured."
+    assert NO_SUGGESTIONS == "Orbit isn't taking suggestions."
+    assert NO_CHECK_PROPOSALS == "Orbit isn't taking check proposals."
+
+
+def test_an_unknown_step_is_refused_with_the_steps_there_are() -> None:
+    assert unknown_step(("Ruff lint", "Unit tests")) == (
+        "No step by that name; the steps are: `Ruff lint`, `Unit tests`."
+    )
+
+
+def test_an_invalid_proposal_is_refused_with_why() -> None:
+    assert invalid_proposal("no steps") == "Invalid proposal: no steps"
