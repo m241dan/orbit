@@ -8,16 +8,16 @@ session halts.
 """
 
 import asyncio
-from collections.abc import Collection
+from collections.abc import Collection, Coroutine
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Literal
+from typing import Any, Literal
 
 from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.coder_slots import CoderSeat
 from orbit.agent.application.desk import AgentDesk
-from orbit.agent.application.landing import Lander
-from orbit.agent.application.lanes import OPEN_GATE, SessionGate, stop
+from orbit.agent.application.landing import Lander, Landing
+from orbit.agent.application.lanes import OPEN_GATE, SessionGate, stop, waited_out
 from orbit.agent.application.outcomes import Outcome, UserStop, ended, run_task_to_end
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.startup_check import StartupCheck
@@ -70,9 +70,10 @@ class WorkLane:
     Reviews are left to ``beside``'s review lane, when there's one. :meth:`run` is meant to run as
     a task of its own: cancelling it cancels the task running, and the cancel goes on once that
     task has ended. The user's stop, :meth:`stopped_by_user`, cancels only the agent's run, and
-    the run ends by itself. A coder's or configurator's task takes a slot at ``beside``'s
-    coders, waiting in line for one, before it starts, and gives it back once it has ended,
-    however it does; the user's stop leaves the line. Each task is traced, from before it
+    the run ends by itself: work the agent finished before the stop is still settled, and
+    lands. A coder's or configurator's task takes a slot at ``beside``'s coders, waiting in
+    line for one, before it starts, and gives it back once it has ended, however it does; the
+    user's stop leaves the line. Each task is traced, from before it
     waits for a slot until its status is final, with ``beside``'s tracing.
     """
 
@@ -281,7 +282,7 @@ class WorkLane:
         """Run task ``task_id`` through a new agent, then tell the review lane how it ended;
         returns how it did. The lane stopping tells the review lane only of work that landed,
         which must always be reviewed."""
-        run = partial(self._run_alone, task_id)
+        run = partial(self._run_started, task_id)
         stop = UserStop(STOPPED_BY_YOU, self._cancelled)
         state = self._board.get(task_id)  # Taken now: the task may be removed once it finishes.
         outcome: Outcome | None = None
@@ -291,10 +292,10 @@ class WorkLane:
         finally:
             await self._report_to_review(state, outcome)
 
-    async def _run_alone(self, task_id: str) -> Outcome:
-        """How started task ``task_id``'s run through an agent ended, run as a task of its own
-        that the user's stop cancels, leaving the run going; anything unexpected escapes."""
-        agent = asyncio.create_task(self._run_started(task_id))
+    async def _run_alone(self, run: Coroutine[Any, Any, Outcome]) -> Outcome:
+        """How the agent's ``run`` ended, run as a task of its own that the user's stop cancels,
+        leaving the lane's run going; anything unexpected escapes."""
+        agent = asyncio.create_task(run)
         if self._stopped:  # The user stopped the run as the task started.
             agent.cancel()
         self._agent = agent
@@ -356,16 +357,20 @@ class WorkLane:
         verifier = self._verifier
         before = await verifier.state_before(task, root) if verifier is not None else None
         with self._tracing.run():
-            outcome = await AgentRun(task_id, self._tasks, verifier, self._desk).run(before, root)
+            agent = AgentRun(task_id, self._tasks, verifier, self._desk)
+            outcome = await self._run_alone(agent.run(before, root))
             return await self._settle(task_id, outcome, root)
 
     async def _settle(self, task_id: str, outcome: Outcome, root: str) -> Outcome:
         """What task ``task_id``'s run ending in ``outcome`` at ``root`` comes to: the checks
-        accepted from it are used, its completed work lands, and a fallback queues a fix."""
+        accepted from it are used, its completed work lands, and a fallback queues a fix. The
+        user's stop doesn't reach this, as it cancels only the agent's run."""
         verifier = self._verifier
         if outcome.checks is not None:
             assert verifier is not None  # Checks are only proposed to a verifier.
-            await self._configure(verifier, outcome.checks, root)
+            # Waited out: a save in a thread goes on when cancelled, so the checks it saves
+            # are used too.
+            await waited_out(self._configure(verifier, outcome.checks, root))
         if outcome.status == "completed":
             outcome = await self._land(task_id, outcome, root)
         if outcome.failure is not None and outcome.status == "unverified":
@@ -396,14 +401,22 @@ class WorkLane:
         else:
             message = commit_message(state.task, outcome.summaries, fix=state.fixes is not None)
         verifier = self._verifier if self._desk.agents.roles[state.task.role].verify else None
-        lander = Lander(self._desk.agents.tree, verifier, self._publish)
-        landing = await lander.land(task_id, message, root, self._starts[task_id])
+        landing = await self._merge(
+            task_id, Lander(self._desk.agents.tree, verifier, self._publish), message, root
+        )
         if landing.failure is not None:
             reason, detail = failure_reason(*landing.failure, rebased=True)
             return Outcome("unverified", landing.failure, reason=reason, detail=detail)
-        if landing.merged is not None:
-            self._landed[task_id] = landing.merged
         return outcome
+
+    async def _merge(self, task_id: str, lander: Lander, message: str, root: str) -> Landing:
+        """What landing task ``task_id``'s work with ``lander``, committed with ``message`` at
+        ``root``, came to; work that merged is noted as landed, however the landing ends."""
+        try:
+            return await lander.land(task_id, message, root, self._starts[task_id])
+        finally:
+            if lander.merged is not None:
+                self._landed[task_id] = lander.merged
 
     async def _prepare(self, task_id: str) -> str:
         """Where task ``task_id`` is worked on: the coder's tree, readied for it."""

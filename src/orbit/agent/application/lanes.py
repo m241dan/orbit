@@ -4,6 +4,7 @@ says whether work may start. A lane's work outlives whatever started it, so it s
 span current: it doesn't record on its starter's, such as the task that landed what it reviews."""
 
 import asyncio
+import contextlib
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
@@ -63,6 +64,20 @@ async def stop(task: "asyncio.Task[Any]") -> None:
         # The task's own cancel ends here; one meant for the caller goes on.
         if cancelling():
             raise
+
+
+async def waited_out[T](work: Coroutine[Any, Any, T]) -> T:
+    """``work``'s result, run as a task of its own that cancelling this doesn't cancel. When
+    cancelled, this waits for ``work`` to finish, however often it's cancelled meanwhile, then
+    is cancelled itself."""
+    task = asyncio.ensure_future(work)
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        while not task.done():
+            with contextlib.suppress(asyncio.CancelledError):
+                await asyncio.wait([task])
+        raise
 
 
 def _unwatched() -> None:

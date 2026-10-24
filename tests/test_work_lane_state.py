@@ -16,6 +16,7 @@ from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
 from orbit.agent.application.tasks import Changed, Tasks
 from orbit.agent.application.work_lane import Beside, WorkLane
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.endings import STOPPED_BY_YOU
 from orbit.agent.domain.reviews import ReviewLimits, ReviewPlanner
 from orbit.protocol import (
     ACTIVE_STATUSES,
@@ -315,6 +316,92 @@ async def test_work_whose_base_kept_moving_ends_without_landing() -> None:
     [merged] = [e for e in published.events if isinstance(e, TaskMerged)]
     assert merged.result == "rebased" and "kept moving" in merged.detail
     assert review.heard == [("ended", task_id, "completed")]
+
+
+class HeldHead(FakeTree):
+    """A tree whose head, once its work merged, is read only after :attr:`released` is set;
+    :attr:`merged` is set as the merge returns."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.merged = asyncio.Event()
+        self.released = asyncio.Event()
+
+    async def integrate(self) -> Merge:
+        merge = await super().integrate()
+        self.merged.set()
+        return merge
+
+    async def head(self) -> str:
+        if self.merged.is_set():
+            await self.released.wait()
+        return await super().head()
+
+
+async def test_a_stop_between_the_merge_and_its_report_leaves_the_task_landed() -> None:
+    published = Recording()
+    tasks = Tasks(TaskBoard(), published)
+    task_id = tasks.board.add(TaskSpec(prompt="a"))
+    tree = HeldHead()
+    lane, review = lane_for(published, tasks, claims_done, tree=tree)
+    run = asyncio.create_task(lane.run())
+    await asyncio.wait_for(tree.merged.wait(), 5)
+
+    assert lane.stopped_by_user()
+    tree.released.set()
+    assert await run == "cancelled"
+
+    assert tasks.board.get(task_id).status == "completed"
+    assert TaskMerged(task_id=task_id, result="merged", commit="c1") in published.events
+    assert review.heard == [("landed", task_id, "c1")]
+    assert tasks.board.next_runnable() is None
+
+
+async def test_a_lane_cancelled_between_the_merge_and_its_report_still_reports_the_landing() -> (
+    None
+):
+    published = Recording()
+    tasks = Tasks(TaskBoard(), published)
+    task_id = tasks.board.add(TaskSpec(prompt="a"))
+    tree = HeldHead()
+    lane, review = lane_for(published, tasks, claims_done, tree=tree)
+    run = asyncio.create_task(lane.run())
+    await asyncio.wait_for(tree.merged.wait(), 5)
+
+    run.cancel()
+    await asyncio.sleep(0)
+    tree.released.set()
+    await asyncio.gather(run, return_exceptions=True)
+
+    assert run.cancelled()
+    assert TaskMerged(task_id=task_id, result="merged", commit="c1") in published.events
+    assert review.heard == [("landed", task_id, "c1")]
+    assert lane._landed == {}
+
+
+async def test_a_stop_during_the_agents_run_cancels_the_task_and_lands_nothing() -> None:
+    working = asyncio.Event()
+
+    async def works_on(call: Call) -> TurnEndReason:
+        await call("get_task")
+        working.set()
+        await asyncio.Event().wait()  # Until the run is cancelled.
+        return "completed"
+
+    tasks = Tasks(TaskBoard(), quiet)
+    task_id = tasks.board.add(TaskSpec(prompt="a"))
+    tree = FakeTree()
+    lane, review = lane_for(quiet, tasks, works_on, tree=tree)
+    run = asyncio.create_task(lane.run())
+    await asyncio.wait_for(working.wait(), 5)
+
+    assert lane.stopped_by_user()
+    assert await asyncio.wait_for(run, 5) == "cancelled"
+
+    state = tasks.board.get(task_id)
+    assert (state.status, state.reason) == ("cancelled", STOPPED_BY_YOU)
+    assert tree.commits == []
+    assert review.heard == [("ended", task_id, "cancelled")]
 
 
 class Unwatchable(Tasks):

@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+from orbit.agent.application.lanes import waited_out
 from orbit.agent.application.ports import CoderTree, Merge, Publish
 from orbit.agent.application.task_trace import MERGE_CONFLICT_EVENT, MERGE_RESULT
 from orbit.agent.application.verifier import Failure, Verifier
@@ -30,12 +31,14 @@ class Landing:
 
 class Lander:
     """Commits and merges tasks' work from ``tree``, verifying it again after a rebase; the
-    merge's result is recorded on the current span."""
+    merge's result is recorded on the current span. :attr:`merged` is the commit the work
+    landed on the base, if it merged, even when the landing was cancelled after the merge."""
 
     def __init__(self, tree: CoderTree, verifier: Verifier | None, publish: Publish) -> None:
         self._tree = tree
         self._verifier = verifier
         self._publish = publish
+        self.merged: str | None = None
 
     async def land(self, task_id: str, message: str, root: str, start: str) -> Landing:
         """Commit task ``task_id``'s work with ``message`` and merge it; ``start`` is the tree's
@@ -45,15 +48,25 @@ class Lander:
         if not isinstance(merge, Merge):
             return Landing(failure=merge)
         _record_merge(merge)
+        # Waited out: work that merged is on the base, so it's always noted and told of.
+        return await waited_out(self._report(task_id, merge, start))
+
+    async def _report(self, task_id: str, merge: Merge, start: str) -> Landing:
+        """What task ``task_id``'s ``merge`` landed, from the tree's head before the task,
+        ``start``, noted as :attr:`merged` and published."""
         # Read after any rebase, which rewrites the commits.
         head = await self._tree.head()
-        commit = head if head != start else None
+        landing = Landing(commit=head if head != start else None, result=merge.result)
+        self.merged = landing.merged
         await self._publish(
             TaskMerged(
-                task_id=task_id, result=merge.result, detail=merge.detail, commit=commit or ""
+                task_id=task_id,
+                result=merge.result,
+                detail=merge.detail,
+                commit=landing.commit or "",
             )
         )
-        return Landing(commit=commit, result=merge.result)
+        return landing
 
     async def _integrate(self, task_id: str, root: str) -> Merge | Failure:
         """Merge the tree's work, rechecking it after each of at most MAX_REBASES rebases;

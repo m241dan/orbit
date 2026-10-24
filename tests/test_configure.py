@@ -1,6 +1,7 @@
 """Accepted checks: orbit saves them to the project config, lands them, and uses them live."""
 
 import asyncio
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +48,7 @@ from tests.agent_fakes import (
     send,
     session_for,
     verified,
+    work_lane_of,
 )
 from tests.git_repo import git, init_repo
 from tests.proposal_fakes import CONFIGURE, LINT, SETUP, TESTS, Review, proposes
@@ -159,6 +161,38 @@ async def test_checks_that_cant_be_saved_end_the_task_in_error_and_change_nothin
     assert len(tree.commits) == 1  # Only the next task's work landed.
     shown = [e.steps for e in events if isinstance(e, VerificationChanged)]
     assert {tuple(step.name for step in steps) for steps in shown} == {(STEP.name,)}
+
+
+class HeldWriter(Writer):
+    """A writer that, once it's entered, writes only after :attr:`released` is set."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = threading.Event()
+        self.released = threading.Event()
+
+    def __call__(self, root: str, checks: ChecksProposal) -> None:
+        self.entered.set()
+        self.released.wait(5)
+        super().__call__(root, checks)
+
+
+async def test_a_stop_while_the_checks_are_saved_still_saves_and_uses_them() -> None:
+    tree, writer = FakeTree(), HeldWriter()
+    session = accepting(steps=Steps(True, True, True), tree=tree, write_config=writer)
+    running = asyncio.create_task(everything(session, CONFIGURE))
+    assert await asyncio.to_thread(writer.entered.wait, 5)
+
+    lane = work_lane_of(session)
+    assert lane is not None and lane.stopped_by_user()
+    writer.released.set()
+    events = await asyncio.wait_for(running, 5)
+
+    assert writer.writes == [(FakeTree.path, CHECKS)]
+    assert tree.setups == [CHECKS.setup]
+    assert VerificationChanged(steps=(StepState(name="Lint"), StepState(name="Tests"))) in events
+    [task] = board(events)
+    assert task.status == "completed"
 
 
 async def test_accepted_checks_end_the_no_steps_state() -> None:
