@@ -4,10 +4,8 @@ import time
 from collections.abc import Callable, Sequence
 from typing import ClassVar
 
-from textual import on
 from textual.binding import Binding, BindingType
 from textual.message import Message
-from textual.widgets import OptionList
 from textual.widgets.option_list import Option
 
 from orbit.protocol import TaskState, Usage
@@ -134,12 +132,11 @@ class TaskList(ListPane):
         self.border_title = task_list_title(held=False)
         self._follow()
 
-    @on(OptionList.OptionSelected)
-    def _edit(self, event: OptionList.OptionSelected) -> None:
-        # Resolved here, so a list replaced before the app takes the message can't change it.
-        event.stop()
-        index = event.option_index
-        self.post_message(self.Edit(self.tasks[index] if index < len(self.tasks) else None))
+    def action_select(self) -> None:
+        # Resolved now, on enter or a click, rather than from a queued OptionSelected, so a list
+        # replaced before that message is handled can't change which task is edited.
+        if self.highlighted is not None:
+            self.post_message(self.Edit(self._highlighted_task()))
 
     def action_accept(self) -> None:
         state = self._highlighted_task()

@@ -354,6 +354,39 @@ async def test_enter_edits_the_chosen_task_though_the_list_is_reordered_before_i
         assert session.commands == [EditTask(task_id="2", task=TaskSpec(prompt="two!"))]
 
 
+async def test_enter_edits_the_chosen_task_though_the_list_is_reordered_right_after() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings())
+        await feed_events(session, pilot, board("one", "two"))
+        await open_task_list(pilot)
+        tasks = app.query_one(TaskList)
+        await pilot.press("j")
+        # The backend reorders the list after enter, before any queued message is handled.
+        tasks.action_select()
+        tasks.show(tuple(reversed(tasks.tasks)))
+        await pilot.pause()
+        assert editor_fields(app)[0] == "two"
+        await pilot.press("i", "!", "escape", "ctrl+s")
+        assert session.commands == [EditTask(task_id="2", task=TaskSpec(prompt="two!"))]
+
+
+async def test_clicking_a_task_row_edits_that_task() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings())
+        await feed_events(session, pilot, board("one", "two"))
+        await open_task_list(pilot)
+        tasks = app.query_one(TaskList)
+        top = tasks.row_lines()[1][0]
+        await pilot.click(tasks, offset=(3, top + 1))
+        assert editor_fields(app)[0] == "two"
+        await pilot.press("i", "!", "escape", "ctrl+s")
+        assert session.commands == [EditTask(task_id="2", task=TaskSpec(prompt="two!"))]
+
+
 async def test_editing_a_task_keeps_its_role() -> None:
     session = FakeSession()
     app = OrbitApp(session)
