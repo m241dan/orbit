@@ -36,7 +36,7 @@ def _append(path: Path, lines: str) -> None:
         try:
             _write_all(descriptor, data)
         except OSError:
-            with suppress(OSError):  # A torn line is skipped on reading anyway.
+            with suppress(OSError):  # Skipped on reading: the next write starts after it.
                 os.ftruncate(descriptor, size)
             raise
     finally:

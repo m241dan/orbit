@@ -282,6 +282,19 @@ async def test_a_parked_file_with_a_torn_line_before_good_ones_reads_every_good_
     assert await files.read(file) == [notice(1), notice(3)]
 
 
+@pytest.mark.parametrize("torn", ['{"seq": 2, "sess', b"\xe2\x82"])
+async def test_an_append_after_a_torn_last_line_reads_back_every_whole_envelope(
+    files: FallbackFiles, torn: str | bytes
+) -> None:
+    await files.write("s1", [notice(1)])
+    [file] = await files.parked()
+    with open(file.path, "ab") as appended:
+        appended.write(torn.encode() if isinstance(torn, str) else torn)
+    await files.write("s1", [notice(3), notice(4)])
+
+    assert await files.read(file) == [notice(1), notice(3), notice(4)]
+
+
 async def test_an_append_after_a_line_without_a_newline_starts_a_line_of_its_own(
     files: FallbackFiles,
 ) -> None:
