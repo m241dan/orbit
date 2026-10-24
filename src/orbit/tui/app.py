@@ -606,7 +606,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._router.render(event)
 
     def _follow_link(self, state: LinkState) -> None:
-        self._link_host.follow(state, self.clock())
+        self._link_host.monitor.follow(state, self.clock())
         if isinstance(state, Connected):
             self._workspaces.reconnected()
 

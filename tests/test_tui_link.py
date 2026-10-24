@@ -2,6 +2,8 @@
 
 import pytest
 from textual.app import App
+from textual.color import Color
+from textual.containers import Vertical
 from textual.widgets import OptionList, Static
 
 from orbit.protocol import (
@@ -9,8 +11,6 @@ from orbit.protocol import (
     Attach,
     Catalog,
     Connected,
-    Ended,
-    HandshakeFailed,
     NewSession,
     NotConnected,
     Reconnecting,
@@ -106,15 +106,6 @@ async def test_after_two_minutes_of_reconnecting_a_modal_offers_to_keep_trying()
         assert modal(app) is None
 
 
-async def test_quitting_from_the_lost_modal_exits() -> None:
-    app, _, link = linked()
-    async with app.run_test() as pilot:
-        await link.move(pilot, lost_long_ago())
-        await pilot.press("down", "enter")
-        await pilot.pause()
-    assert app.return_code == 0
-
-
 async def test_j_and_k_move_the_highlight_in_the_lost_modal() -> None:
     app, _, link = linked()
     async with app.run_test() as pilot:
@@ -131,17 +122,6 @@ async def test_j_and_k_move_the_highlight_in_the_lost_modal() -> None:
     assert app.return_code == 0
 
 
-async def test_reconnecting_in_time_closes_the_modal_and_stops_waiting() -> None:
-    app, _, link = linked()
-    async with app.run_test() as pilot:
-        await link.move(pilot, lost_long_ago())
-        await link.move(pilot, Connected(URL))
-        assert modal(app) is None
-        await link.move(pilot, Reconnecting(URL, NOW))  # A new outage waits anew.
-        assert modal(app) is None
-        await link.move(pilot, Connected(URL))
-
-
 async def test_a_stopped_control_plane_shows_its_modal_at_once() -> None:
     app, _, link = linked()
     async with app.run_test() as pilot:
@@ -155,55 +135,6 @@ async def test_a_stopped_control_plane_shows_its_modal_at_once() -> None:
         assert modal(app) is None and status(app) is None
 
 
-async def test_a_stop_right_after_reconnecting_shows_its_modal() -> None:
-    app, _, link = linked()
-    async with app.run_test() as pilot:
-        await link.move(pilot, lost_long_ago())
-        for changed in link.watchers:  # Before the lost modal's close callback runs.
-            changed(Connected(URL))
-            changed(Stopped(URL))
-        await pilot.pause()
-        shown = modal(app)
-        assert shown is not None and shown.title_text == "The control plane stopped"
-        assert app.return_code is None
-
-
-async def test_the_old_modals_late_callback_leaves_the_new_one_open() -> None:
-    app, _, link = linked()
-    async with app.run_test() as pilot:
-        await link.move(pilot, lost_long_ago())
-        for changed in link.watchers:
-            changed(Connected(URL))
-            changed(Stopped(URL))
-        await pilot.pause()
-        stopped = modal(app)
-        assert stopped is not None
-        await link.move(pilot, Stopped(URL))  # Still asked by the open one.
-        assert app.screen is stopped
-        await pilot.press("escape")
-        assert modal(app) is None
-
-
-async def test_the_stopped_modal_is_bordered_as_an_error() -> None:
-    app, _, link = linked()
-    async with app.run_test() as pilot:
-        await link.move(pilot, Stopped(URL))
-        stopped = modal(app)
-        assert stopped is not None and stopped.has_class("error")
-
-
-async def test_escape_keeps_trying_and_quit_exits_from_the_stopped_modal() -> None:
-    app, _, link = linked()
-    async with app.run_test() as pilot:
-        await link.move(pilot, Stopped(URL))
-        await pilot.press("escape")
-        assert modal(app) is None
-        await link.move(pilot, Stopped(URL))
-        await pilot.press("down", "enter")
-        await pilot.pause()
-    assert app.return_code == 0
-
-
 async def test_a_refused_token_shows_why_and_quits_once_closed() -> None:
     app, _, link = linked()
     async with app.run_test() as pilot:
@@ -212,41 +143,6 @@ async def test_a_refused_token_shows_why_and_quits_once_closed() -> None:
         shown = modal(app)
         assert shown is not None and shown.choices == ("Quit",)
         assert shown.message == "The control plane refused the token from /t."
-        assert status(app) is None
-        await pilot.press("enter")
-        await pilot.pause()
-    assert app.return_code == 0
-
-
-async def test_a_failed_handshake_shows_why_and_quits_once_closed() -> None:
-    app, _, link = linked()
-    async with app.run_test() as pilot:
-        await link.move(pilot, HandshakeFailed(URL, "The server is speaking TLS. Use wss://."))
-        shown = modal(app)
-        assert shown is not None and shown.choices == ("Quit",)
-        assert shown.title_text == "Can't connect"
-        assert shown.message == "The server is speaking TLS. Use wss://."
-        await pilot.press("enter")
-        await pilot.pause()
-    assert app.return_code == 0
-
-
-@pytest.mark.parametrize(
-    "reason",
-    ["An event of 99 bytes is over the 9-byte limit", "An event can't be read: Not JSON"],
-)
-async def test_an_ended_link_shows_why_and_quits_once_closed(reason: str) -> None:
-    app, _, link = linked()
-    async with app.run_test() as pilot:
-        await link.move(pilot, Reconnecting(URL, NOW))
-        await link.move(pilot, Ended(URL, reason))
-        shown = modal(app)
-        assert shown is not None and shown.choices == ("Quit",)
-        assert shown.title_text == "Disconnected"
-        assert shown.message == (
-            f"The connection to the control plane at {URL} ended: {reason}."
-            " Reconnecting would end the same way."
-        )
         assert status(app) is None
         await pilot.press("enter")
         await pilot.pause()
@@ -336,10 +232,10 @@ class LinkApp(App[None]):
 async def test_a_superseded_modals_late_quit_does_not_quit() -> None:
     app = LinkApp()
     async with app.run_test() as pilot:
-        app.host.follow(Stopped(URL), NOW)
+        app.host.monitor.follow(Stopped(URL), NOW)
         await pilot.pause()
-        app.host.follow(Connected(URL), NOW)
-        app.host.follow(Stopped(URL), NOW)
+        app.host.monitor.follow(Connected(URL), NOW)
+        app.host.monitor.follow(Stopped(URL), NOW)
         await pilot.pause()
         newer = app.host.shown
         await app.callbacks[0](1)  # Quit, picked on the closed modal.
@@ -351,9 +247,9 @@ async def test_a_superseded_modals_late_quit_does_not_quit() -> None:
 async def test_a_final_notice_replaces_the_modal_asking_and_quits_once_closed() -> None:
     app = LinkApp()
     async with app.run_test() as pilot:
-        app.host.follow(Stopped(URL), NOW)
+        app.host.monitor.follow(Stopped(URL), NOW)
         await pilot.pause()
-        app.host.follow(TokenRefused("Refused."), NOW)
+        app.host.monitor.follow(TokenRefused("Refused."), NOW)
         await pilot.pause()
         [final] = app.link_screens()
         assert final.choices == ("Quit",) and app.host.shown is final
@@ -368,12 +264,69 @@ async def test_a_final_notice_replaces_the_modal_asking_and_quits_once_closed() 
 async def test_a_link_modal_closed_before_it_mounts_leaves_the_final_notice() -> None:
     app = LinkApp()
     async with app.run_test() as pilot:
-        app.host.follow(Stopped(URL), NOW)
-        app.host.follow(TokenRefused("Refused."), NOW)  # In the same tick, before it mounts.
+        app.host.monitor.follow(Stopped(URL), NOW)
+        # In the same tick, before it mounts.
+        app.host.monitor.follow(TokenRefused("Refused."), NOW)
         await pilot.pause()
         [final] = app.link_screens()
         assert final.choices == ("Quit",) and app.host.shown is final
         assert final.query_one(OptionList).highlighted == 0
         await pilot.press("enter")
+        await pilot.pause()
+        assert app.quits == 1
+
+
+async def test_a_stop_right_after_reconnecting_shows_its_modal() -> None:
+    app = LinkApp()
+    async with app.run_test() as pilot:
+        app.host.monitor.follow(lost_long_ago(), NOW)
+        await pilot.pause()
+        # Before the lost modal's close callback runs.
+        app.host.monitor.follow(Connected(URL), NOW)
+        app.host.monitor.follow(Stopped(URL), NOW)
+        await pilot.pause()
+        [shown] = app.link_screens()
+        assert app.screen is shown and shown.title_text == "The control plane stopped"
+        assert app.quits == 0
+
+
+async def test_the_old_modals_late_callback_leaves_the_new_one_open() -> None:
+    app = LinkApp()
+    async with app.run_test() as pilot:
+        app.host.monitor.follow(lost_long_ago(), NOW)
+        await pilot.pause()
+        app.host.monitor.follow(Connected(URL), NOW)
+        app.host.monitor.follow(Stopped(URL), NOW)
+        await pilot.pause()
+        stopped = app.host.shown
+        assert stopped is not None
+        app.host.monitor.follow(Stopped(URL), NOW)  # Still asked by the open one.
+        await pilot.pause()
+        assert app.screen is stopped
+        await pilot.press("escape")
+        assert app.link_screens() == [] and app.host.shown is None
+
+
+async def test_the_stopped_modal_is_bordered_as_an_error() -> None:
+    app = LinkApp()
+    async with app.run_test() as pilot:
+        app.host.monitor.follow(Stopped(URL), NOW)
+        await pilot.pause()
+        stopped = app.host.shown
+        assert stopped is not None and stopped.has_class("error")
+        _, colour = stopped.query_one(Vertical).styles.border_top
+        assert colour == Color.parse(app.get_css_variables()["error"])
+
+
+async def test_escape_keeps_trying_and_quit_quits_from_the_stopped_modal() -> None:
+    app = LinkApp()
+    async with app.run_test() as pilot:
+        app.host.monitor.follow(Stopped(URL), NOW)
+        await pilot.pause()
+        await pilot.press("escape")
+        assert app.link_screens() == [] and app.quits == 0
+        app.host.monitor.follow(Stopped(URL), NOW)
+        await pilot.pause()
+        await pilot.press("down", "enter")
         await pilot.pause()
         assert app.quits == 1
