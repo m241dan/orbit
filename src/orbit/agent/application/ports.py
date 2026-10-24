@@ -41,6 +41,10 @@ ConfigWriter = Callable[[str, ChecksProposal], None]
 """Makes accepted checks the verification steps and setup in the project config in a directory;
 raises :class:`ConfigWriteFailed` when it can't."""
 
+FileNames = Callable[[str], Collection[str]]
+"""The names of the files in a directory; none when it can't be read, such as when it doesn't
+exist."""
+
 PlannerRoleReader = Callable[[], Role | ConfigError]
 """Reads the planner's role from the project's config again: the role, or why the config is
 invalid."""

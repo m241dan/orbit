@@ -19,6 +19,7 @@ from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.landing import Lander, Landing
 from orbit.agent.application.lanes import OPEN_GATE, SessionGate, stop, waited_out
 from orbit.agent.application.outcomes import Outcome, UserStop, ended, run_task_to_end
+from orbit.agent.application.record_moves import move_records
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.task_trace import TaskTracing
@@ -353,6 +354,7 @@ class WorkLane:
         work, as :meth:`_run_agent` does."""
         if not await self._holds_fixed_work(task_id):
             return ended("gave_up", gave_up(WORK_GONE))
+        await self._move_records(task_id, root)
         task = self._board.get(task_id).task
         verifier = self._verifier
         before = await verifier.state_before(task, root) if verifier is not None else None
@@ -427,6 +429,13 @@ class WorkLane:
         root = await tree.prepare(keep=self._board.get(task_id).fixes is not None)
         self._starts[task_id] = await tree.head()
         return root
+
+    async def _move_records(self, task_id: str, root: str) -> None:
+        """Move each record task ``task_id`` names whose number another record at ``root``
+        took, when the files there can be listed."""
+        names = self._desk.agents.file_names
+        if names is not None:
+            await move_records(self._tasks, task_id, root, names, self._publish)
 
     async def _holds_fixed_work(self, task_id: str) -> bool:
         """Whether the coder's tree, if there is one, still holds the work task ``task_id``

@@ -34,6 +34,7 @@ from orbit.agent import (
     WorkspaceOwner,
     WorkspaceRegistry,
     WorkspaceStore,
+    file_names,
     run_step,
     workspace_state,
 )
@@ -741,6 +742,7 @@ def test_chat_runs_tasks_through_agents_connected_over_mcp(launched: list[Worksp
     assert agents.limits == Limits(max_attempts=5)
     first, second = agents.new_token(), agents.new_token()
     assert first != second and len(first) >= 32
+    assert agents.file_names is file_names
 
 
 def test_chat_works_in_the_coder_tree_inside_a_git_repository(

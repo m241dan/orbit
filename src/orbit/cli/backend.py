@@ -35,6 +35,7 @@ from orbit.agent import (
     WorkspaceLock,
     WorkspaceOwner,
     WorkspaceUnavailable,
+    file_names,
     in_git_work_tree,
     open_workspace,
     read_config,
@@ -290,6 +291,7 @@ def _agents(config: OrbitConfig, root: Path, *, worktree: bool, review: bool) ->
         review_limits=config.review_limits,
         write_config=write_checks,
         planner_role=lambda: _planner_role(where),
+        file_names=file_names,
         root=where,
     )
 

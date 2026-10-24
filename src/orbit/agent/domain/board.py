@@ -1,10 +1,11 @@
 """The task list: plain state the session publishes as snapshots."""
 
 import itertools
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import Any
 
 from orbit.agent.domain.endings import INTERRUPTED
+from orbit.agent.domain.records import renumbered
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import (
     ACTIVE_STATUSES,
@@ -109,6 +110,15 @@ class TaskBoard:
             raise Refused(refusal.code, refusal.message)
         fresh = {"task": task, "status": "pending", "attempt": 0, "max_attempts": 0} | _NO_REASON
         self._tasks[self.position(task_id)] = current.model_copy(update=fresh)
+
+    def move_records(self, moves: Mapping[str, str]) -> None:
+        """Name each record ``moves`` maps by its new path in every task that hasn't completed,
+        leaving its status as it is; a completed task's prompt is history."""
+        for index, state in enumerate(self._tasks):
+            prompt = renumbered(state.task.prompt, moves)
+            if state.status != "completed" and prompt != state.task.prompt:
+                task = state.task.model_copy(update={"prompt": prompt})
+                self._tasks[index] = state.model_copy(update={"task": task})
 
     def get(self, task_id: str) -> TaskState:
         return self._tasks[self.position(task_id)]

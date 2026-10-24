@@ -48,6 +48,7 @@ from orbit.agent.external.control_plane import ControlPlaneServer, ListenFailed
 from orbit.agent.external.directories import resolve_config_dir, resolve_state_dir
 from orbit.agent.external.directory_lister import DirectoryLister
 from orbit.agent.external.fallback_files import FallbackFiles
+from orbit.agent.external.file_names import file_names
 from orbit.agent.external.git_tree import GitCoderTree
 from orbit.agent.external.mcp_host import McpHost
 from orbit.agent.external.repository import (
@@ -154,6 +155,7 @@ __all__ = [
     "WorkspaceSource",
     "WorkspaceStore",
     "WorkspaceUnavailable",
+    "file_names",
     "forget_workspace",
     "git_top_level",
     "has_git_identity",

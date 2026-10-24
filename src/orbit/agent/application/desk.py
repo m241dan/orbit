@@ -20,6 +20,7 @@ from orbit.agent.application.ports import (
     AgentLauncher,
     CoderTree,
     ConfigWriter,
+    FileNames,
     PlannerRoleReader,
     ProposalReview,
     Publish,
@@ -106,7 +107,9 @@ class Agents:
     proposed checks; without it, proposals are refused. ``write_config`` saves the checks the
     user accepts into the project's config; without it, they're used but not saved.
     ``planner_role`` reads the planner's role from the project's config again when the planner
-    is reset; without it, the planner keeps its role. ``root`` is the workspace's directory,
+    is reset; without it, the planner keeps its role. ``file_names`` lists the files in a
+    directory, for moving a record a task names whose number another record took; without it,
+    records keep the numbers tasks give them. ``root`` is the workspace's directory,
     where agents work without a tree, the planner always. ``pause`` times a run that Claude's
     usage limit stopped, until it starts again.
     """
@@ -123,6 +126,7 @@ class Agents:
     proposal_review: ProposalReview | None = None
     write_config: ConfigWriter | None = None
     planner_role: PlannerRoleReader | None = None
+    file_names: FileNames | None = None
     root: str = field(kw_only=True)
     pause: LimitPause = field(default_factory=LimitPause)
 

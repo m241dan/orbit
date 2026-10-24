@@ -63,6 +63,20 @@ def test_edit_replaces_the_task_and_resets_it_to_pending() -> None:
     assert board.tasks == (TaskState(id=first, task=TWO),)
 
 
+def test_moving_records_renames_them_in_every_task_but_completed_ones() -> None:
+    board = TaskBoard()
+    old, new = "docs/00024-feature-metrics.md", "docs/00025-feature-metrics.md"
+    done, draft, running, other = (board.add(TaskSpec(prompt=f"Plan: {old}")) for _ in range(4))
+    board.set_status(done, "completed")
+    board.set_status(draft, "draft")
+    board.set_status(running, "running")
+    board.edit(other, TWO)
+    board.move_records({old: new})
+    assert prompts(board) == [f"Plan: {old}", f"Plan: {new}", f"Plan: {new}", "two"]
+    assert [t.status for t in board.tasks] == ["completed", "draft", "running", "pending"]
+    assert board.get(other).task == TWO
+
+
 def test_edit_rejects_unknown_and_running_tasks() -> None:
     board = TaskBoard()
     first = board.add(ONE)

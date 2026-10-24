@@ -856,7 +856,9 @@ kept to one line). Every plan's first task writes the plan's record: a numbered 
 document in `docs/` (or wherever the project keeps such records), named like
 `docs/00001-feature-dark-mode.md`, with the decisions you confirmed and the tasks that carry them
 out. Every other task's prompt opens with `Plan: <path>` pointing at it, so coders and reviewers
-read the same record. Its first prompt, and the first after the verification steps change, tells it
+read the same record. A task's record keeps its number unless another record has taken it by the
+time the task runs, such as one planned in another session: orbit then gives the record the next
+free number, in that task and in every task that names it and hasn't completed, and says so. Its first prompt, and the first after the verification steps change, tells it
 the steps each task must pass. Proposals appear in the task list as 📝 drafts, with the `coder`
 role's default settings, and never run on their own: on the task list, `a` accepts the highlighted
 draft (or edit it with `enter` and save, which accepts it too), and `x` removes it. Accepted tasks
