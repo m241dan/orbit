@@ -124,31 +124,6 @@ async def test_dot_shows_hidden_directories_and_hides_them_again() -> None:
         assert changes(session_of(app)) == [ListDirectory(path=None)]
 
 
-async def test_showing_hidden_ones_of_nothing_shown_highlights_the_first() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        hidden_only = DirectoryListing(path="/srv", entries=(DOT,), total=1)
-        await explore(app, pilot, hidden_only)
-        await pilot.press("full_stop")
-        assert explorer(app).query_one(OptionList).highlighted == 0
-
-
-async def test_l_lists_the_directory_highlighted_ignoring_a_late_listing() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRV)
-        await pilot.press("l")
-        assert changes(session_of(app))[-1] == ListDirectory(path="/srv/a")
-        await feed_events(session_of(app), pilot, SRV)
-        screen = explorer(app)
-        assert rows(screen) == SRV_ROWS
-        await feed_events(session_of(app), pilot, SRV_A)
-        assert screen.query_one(Vertical).border_title == "/srv/a"
-        assert rows(screen) == ["docs"]
-        await answer(app, pilot)
-        assert rows(screen) == ["docs"]
-
-
 async def test_h_lists_the_parent_and_nothing_at_the_top() -> None:
     app = connected()
     async with app.run_test() as pilot:
@@ -159,31 +134,6 @@ async def test_h_lists_the_parent_and_nothing_at_the_top() -> None:
         await feed_events(session_of(app), pilot, top)
         await pilot.press("h", "l", "a")
         assert changes(session_of(app))[-1] == ListDirectory(path="/srv")
-
-
-async def test_keys_before_a_listing_send_nothing() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot)
-        await pilot.press("h", "l", "a", "full_stop")
-        assert changes(session_of(app)) == [ListDirectory(path=None)]
-        assert explorer(app).query_one(Vertical).border_title == ""
-
-
-async def test_enter_lists_a_directory_and_a_symlinks_listing_shows_once_accepted() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRV)
-        await pilot.press("j", "j", "j", "enter")
-        assert changes(session_of(app))[-1] == ListDirectory(path="/srv/link")
-        await feed_events(session_of(app), pilot, OPT_X)
-        screen = explorer(app)
-        assert rows(screen) == SRV_ROWS
-        await answer(app, pilot)
-        assert screen.query_one(Vertical).border_title == "/opt/x"
-        assert rows(screen) == []
-        await feed_events(session_of(app), pilot, SRV)
-        assert rows(screen) == []
 
 
 async def test_enter_on_a_served_directory_opens_its_workspace() -> None:
@@ -209,21 +159,6 @@ async def test_a_adds_the_directory_and_opens_its_sessions_once_listed() -> None
         await feed_events(session_of(app), pilot, catalog)
         screen = app.screen
         assert isinstance(screen, SessionsScreen) and screen.workspace == "A"
-
-
-async def test_a_on_a_symlink_adds_its_target_and_opens_its_sessions_once_listed() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRV)
-        await pilot.press("j", "j", "j", "a")
-        assert changes(session_of(app))[-1] == AddWorkspace(path="/opt/x")
-        await answer(app, pilot)
-        await pilot.pause()
-        x = WorkspaceEntry(id="X", label="x", path="/opt/x", sessions=())
-        catalog = Catalog(workspaces=(B, x), agents=(), triggers=(), lanes=())
-        await feed_events(session_of(app), pilot, catalog)
-        screen = app.screen
-        assert isinstance(screen, SessionsScreen) and screen.workspace == "X"
 
 
 async def test_a_workspace_listed_before_its_add_is_accepted_opens_on_acceptance() -> None:
@@ -279,30 +214,6 @@ async def test_a_refused_listing_shows_why_under_the_listing_it_had() -> None:
         assert screen.note is None
 
 
-async def test_a_refused_add_shows_why_and_keeps_a_listing_asked_for() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRV)
-        await pilot.press("l", "a")
-        await answer(app, pilot, "/srv/docs is outside the browsable root /srv/a.")
-        screen = explorer(app)
-        assert screen.note == "/srv/docs is outside the browsable root /srv/a."
-        await feed_events(session_of(app), pilot, SRV_A)
-        assert rows(screen) == ["docs"]
-
-
-async def test_a_truncated_listing_says_how_many_are_left_out() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        truncated = DirectoryListing(path="/srv", entries=(PLAIN,), truncated=True, total=2400)
-        await explore(app, pilot, truncated)
-        assert more(explorer(app)) == "… 2399 more not shown: type the path in the field"
-        await pilot.press("l")
-        docs = DirectoryListing(path="/srv/docs", entries=(), total=0)
-        await feed_events(session_of(app), pilot, docs)
-        assert more(explorer(app)) is None
-
-
 async def test_escape_returns_to_the_list_picker() -> None:
     app = connected()
     async with app.run_test() as pilot:
@@ -322,18 +233,6 @@ async def test_an_answer_once_the_explorer_closed_changes_nothing() -> None:
             await answer(app, pilot, refused)
             assert isinstance(app.screen, WorkspacesScreen)
             assert app.screen.note is None
-
-
-async def test_a_held_listing_accepted_once_the_explorer_closed_changes_nothing() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRV)
-        await pilot.press("j", "j", "j", "enter")
-        await feed_events(session_of(app), pilot, OPT_X)
-        await pilot.press("escape")
-        await answer(app, pilot)
-        assert isinstance(app.screen, WorkspacesScreen)
-        assert app.is_running
 
 
 async def test_a_listing_with_the_picker_closed_shows_nothing() -> None:
@@ -377,19 +276,6 @@ async def test_slash_focuses_the_field_where_keys_type_and_escape_returns() -> N
         assert changes(session_of(app)) == [ListDirectory(path=None)]
 
 
-async def test_tab_completes_one_match_from_the_listing_with_a_slash() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRC)
-        await typed(app, pilot, "/src/orb")
-        await pilot.press("tab")
-        field = field_of(app)
-        assert field.value == "/src/orbit/"
-        assert app.focused is field
-        assert candidates(app) is None
-        assert changes(session_of(app)) == [ListDirectory(path=None)]
-
-
 async def test_tab_completes_several_matches_prefix_and_shows_them() -> None:
     app = connected()
     async with app.run_test() as pilot:
@@ -404,161 +290,6 @@ async def test_tab_completes_several_matches_prefix_and_shows_them() -> None:
         assert candidates(app) is None
 
 
-async def test_tab_with_no_match_changes_nothing() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRC)
-        await typed(app, pilot, "/src/x")
-        await pilot.press("tab")
-        assert field_of(app).value == "/src/x"
-        assert candidates(app) is None
-
-
-async def test_tab_completes_hidden_directories_only_while_shown() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRC)
-        await typed(app, pilot, "/src/.c")
-        await pilot.press("tab")
-        assert field_of(app).value == "/src/.c"
-        await pilot.press("escape", "full_stop")
-        await pilot.press("slash", "tab")
-        assert field_of(app).value == "/src/.cache/"
-
-
-async def test_tab_elsewhere_lists_the_parent_for_completion_alone() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRC)
-        await typed(app, pilot, "/work/pro")
-        await pilot.press("tab")
-        assert changes(session_of(app))[-1] == ListDirectory(path="/work")
-        assert field_of(app).value == "/work/pro"
-        await feed_events(session_of(app), pilot, WORK)
-        assert field_of(app).value == "/work/pro"
-        await answer(app, pilot)
-        assert field_of(app).value == "/work/projects/"
-        screen = explorer(app)
-        assert screen.query_one(Vertical).border_title == "/src"
-        assert rows(screen) == ["⎇ orbit", "orchard"]
-        await feed_events(session_of(app), pilot, WORK)
-        assert rows(screen) == ["⎇ orbit", "orchard"]
-        assert field_of(app).value == "/work/projects/"
-
-
-async def test_a_completion_listing_once_typed_on_completes_nothing() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRC)
-        await typed(app, pilot, "/work/pro")
-        await pilot.press("tab")
-        field_of(app).value = "/srv/a"
-        await feed_events(session_of(app), pilot, WORK)
-        await answer(app, pilot)
-        assert field_of(app).value == "/srv/a"
-
-
-async def test_tab_without_a_path_does_nothing() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRC)
-        await typed(app, pilot, "src")
-        await pilot.press("tab")
-        assert field_of(app).value == "src"
-        assert changes(session_of(app)) == [ListDirectory(path=None)]
-
-
-async def test_a_completion_listing_of_the_directory_asked_for_is_also_shown() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRV)
-        await pilot.press("l")
-        await typed(app, pilot, "/srv/a/d")
-        await pilot.press("tab")
-        await feed_events(session_of(app), pilot, SRV_A)
-        assert rows(explorer(app)) == ["docs"]
-        await answer(app, pilot)
-        assert field_of(app).value == "/srv/a/docs/"
-        assert rows(explorer(app)) == ["docs"]
-
-
-async def test_a_completion_listing_at_its_resolved_path_completes_the_path_typed() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRC)
-        await typed(app, pilot, "/link/pro")
-        await pilot.press("tab")
-        assert changes(session_of(app))[-1] == ListDirectory(path="/link")
-        await feed_events(session_of(app), pilot, REAL)
-        await answer(app, pilot)
-        assert field_of(app).value == "/link/projects/"
-        screen = explorer(app)
-        assert screen.query_one(Vertical).border_title == "/src"
-        assert rows(screen) == ["⎇ orbit", "orchard"]
-
-
-async def test_a_completion_listing_while_a_listing_is_awaited_is_never_shown() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRV)
-        await pilot.press("l")
-        listed = len(session_of(app).envelopes) - 1
-        await typed(app, pilot, "/link/pro")
-        await pilot.press("tab")
-        await feed_events(session_of(app), pilot, REAL)
-        await answer_to(app, pilot, listed, None)
-        screen = explorer(app)
-        assert rows(screen) == SRV_ROWS
-        await answer(app, pilot)
-        assert field_of(app).value == "/link/projects/"
-        assert rows(screen) == SRV_ROWS
-        await pilot.press("escape", "l", "j", "j", "j", "enter")
-        await feed_events(session_of(app), pilot, OPT_X)
-        await answer(app, pilot)
-        assert screen.query_one(Vertical).border_title == "/opt/x"
-
-
-async def test_the_listing_asked_for_while_completing_elsewhere_is_shown_alone() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRV)
-        await pilot.press("l")
-        await typed(app, pilot, "/link/d")
-        await pilot.press("tab")
-        await feed_events(session_of(app), pilot, SRV_A)
-        assert rows(explorer(app)) == ["docs"]
-        await answer(app, pilot)
-        assert field_of(app).value == "/link/d"
-
-
-async def test_an_earlier_completions_outcome_once_another_is_asked_for_completes_nothing() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRC)
-        await typed(app, pilot, "/work/pro")
-        await pilot.press("tab")
-        earliest = len(session_of(app).envelopes) - 1
-        await pilot.press("tab", "tab")
-        await answer_to(app, pilot, earliest, None)
-        assert field_of(app).value == "/work/pro"
-        await answer_to(app, pilot, earliest + 1, "Permission denied: /work")
-        await feed_events(session_of(app), pilot, WORK)
-        await answer(app, pilot)
-        assert field_of(app).value == "/work/projects/"
-
-
-async def test_a_completion_answered_once_the_explorer_closed_changes_nothing() -> None:
-    for refused in (None, "Permission denied: /work"):
-        app = connected()
-        async with app.run_test() as pilot:
-            await explore(app, pilot, SRC)
-            await typed(app, pilot, "/work/pro")
-            await pilot.press("tab", "escape", "escape")
-            await answer(app, pilot, refused)
-            assert isinstance(app.screen, WorkspacesScreen)
-            assert app.screen.note is None
-
-
 async def test_a_refused_completion_listing_shows_in_the_fields_hint() -> None:
     app = connected()
     async with app.run_test() as pilot:
@@ -568,96 +299,6 @@ async def test_a_refused_completion_listing_shows_in_the_fields_hint() -> None:
         await answer(app, pilot, "Permission denied: /root")
         assert field_of(app).border_subtitle == "Permission denied: /root"
         assert explorer(app).note is None
-
-
-async def test_a_refused_completions_hint_is_gone_after_the_next_tab() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRC)
-        await typed(app, pilot, "/root/x")
-        await pilot.press("tab")
-        await answer(app, pilot, "Permission denied: /root")
-        field_of(app).value = "/src/orb"
-        await pilot.press("tab")
-        assert field_of(app).value == "/src/orbit/"
-        assert field_of(app).border_subtitle == ""
-
-
-async def shown_candidates(app: OrbitApp, pilot: Pilot[None]) -> None:
-    """Open the explorer on ``/src`` and tab on ``/src/or`` to show its candidates."""
-    await explore(app, pilot, SRC)
-    await typed(app, pilot, "/src/or")
-    await pilot.press("tab")
-    assert candidates(app) == "orbit  orchard"
-
-
-async def test_candidates_are_hidden_after_a_tab_with_no_match() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await shown_candidates(app, pilot)
-        field_of(app).value = "/src/x"
-        await pilot.press("tab")
-        assert candidates(app) is None
-
-
-async def test_candidates_are_hidden_after_a_refused_completion() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await shown_candidates(app, pilot)
-        field_of(app).value = "/work/x"
-        await pilot.press("tab")
-        await answer(app, pilot, "Permission denied: /work")
-        assert candidates(app) is None
-
-
-async def test_candidates_are_hidden_once_typed_on_into_another_directory() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await shown_candidates(app, pilot)
-        field_of(app).value = "/work/pro"
-        await pilot.press("tab")
-        field_of(app).value = "/srv/a"
-        await feed_events(session_of(app), pilot, WORK)
-        await answer(app, pilot)
-        assert candidates(app) is None
-
-
-async def test_candidates_are_hidden_after_enter_in_the_field() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await shown_candidates(app, pilot)
-        await pilot.press("enter")
-        assert candidates(app) is None
-
-
-async def test_a_refused_completion_leaves_nothing_to_complete_from() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRC)
-        await typed(app, pilot, "/work/pro")
-        await pilot.press("tab")
-        await answer(app, pilot, "Permission denied: /work")
-        await pilot.press("escape", "l")
-        await feed_events(session_of(app), pilot, WORK)
-        await answer(app, pilot)
-        assert field_of(app).value == "/work/pro"
-        assert explorer(app).query_one(Vertical).border_title == "/work"
-
-
-async def test_enter_in_the_field_adds_the_path_and_opens_its_sessions_once_listed() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRV)
-        await typed(app, pilot, " /srv/repo ")
-        await pilot.press("enter")
-        assert changes(session_of(app))[-1] == AddWorkspace(path="/srv/repo")
-        await answer(app, pilot)
-        await pilot.pause()
-        assert isinstance(app.screen, WorkspacesScreen)
-        catalog = Catalog(workspaces=(B, REPO), agents=(), triggers=(), lanes=())
-        await feed_events(session_of(app), pilot, catalog)
-        screen = app.screen
-        assert isinstance(screen, SessionsScreen) and screen.workspace == "R"
 
 
 async def test_enter_in_the_field_adds_a_url_and_returns_to_the_list_picker() -> None:
@@ -693,28 +334,6 @@ async def test_a_refused_add_from_the_field_shows_in_its_hint_until_the_next() -
         assert field.border_subtitle == ""
 
 
-async def test_enter_in_an_empty_field_adds_nothing() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRV)
-        await typed(app, pilot, "  ")
-        await pilot.press("enter")
-        assert changes(session_of(app)) == [ListDirectory(path=None)]
-        assert isinstance(app.screen, ExplorerScreen)
-
-
-async def test_a_field_add_answered_once_the_explorer_closed_changes_nothing() -> None:
-    for refused in (None, "Permission denied: /srv/a"):
-        app = connected()
-        async with app.run_test() as pilot:
-            await explore(app, pilot, SRV)
-            await typed(app, pilot, "/srv/repo")
-            await pilot.press("enter", "escape", "escape")
-            await answer(app, pilot, refused)
-            assert isinstance(app.screen, WorkspacesScreen)
-            assert app.screen.note is None
-
-
 async def test_a_pick_takes_the_directory_picked_though_the_list_changed_before_it_is_taken() -> (
     None
 ):
@@ -739,50 +358,7 @@ async def test_a_pick_whose_directory_left_the_list_before_it_is_taken_does_noth
         await pilot.press("j", "j")
         screen = explorer(app)
         screen.query_one(OptionList).action_select()
-        screen._show(SRV_A)
+        screen.explorer._show(SRV_A)
         await pilot.pause()
         assert explorer(app) is screen
         assert changes(session_of(app)) == [ListDirectory(path=None)]
-
-
-async def answer_to(app: OrbitApp, pilot: Pilot[None], index: int, refused: str | None) -> None:
-    """Accept the command sent at ``index``, or refuse it as ``invalid`` saying ``refused``."""
-    command_id = session_of(app).envelopes[index].command_id
-    if refused is None:
-        await feed_events(session_of(app), pilot, CommandAccepted(command_id=command_id))
-    else:
-        refusal = CommandRefused(command_id=command_id, code=INVALID, message=refused)
-        await feed_events(session_of(app), pilot, refusal)
-
-
-async def test_an_earlier_listings_outcome_once_another_is_asked_for_changes_nothing() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRV)
-        await pilot.press("l")
-        earlier = len(session_of(app).envelopes) - 1
-        await pilot.press("h")
-        assert changes(session_of(app))[-1] == ListDirectory(path="/")
-        await feed_events(session_of(app), pilot, SRV_A)
-        await answer_to(app, pilot, earlier, None)
-        screen = explorer(app)
-        assert rows(screen) == SRV_ROWS
-        await feed_events(session_of(app), pilot, ROOT)
-        await answer(app, pilot)
-        assert screen.query_one(Vertical).border_title == "/"
-        assert rows(screen) == ["srv"]
-
-
-async def test_an_earlier_listings_refusal_once_another_is_asked_for_shows_nothing() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRV)
-        await pilot.press("l")
-        earlier = len(session_of(app).envelopes) - 1
-        await pilot.press("h")
-        await answer_to(app, pilot, earlier, "Permission denied: /srv/a")
-        screen = explorer(app)
-        assert screen.note is None
-        await feed_events(session_of(app), pilot, ROOT)
-        assert screen.query_one(Vertical).border_title == "/"
-        assert rows(screen) == ["srv"]

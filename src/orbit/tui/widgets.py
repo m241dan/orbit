@@ -280,7 +280,8 @@ class BoxedModal[T](ModalScreen[T]):
 class ListScreen[T](BoxedModal[T]):
     """Modal screen around an ``OptionList``, whose highlight ``j`` and ``k`` move alongside
     the list's own arrow keys; a focused input handles keys first, so takes them as typing.
-    A screen that yields ``_note_line`` under its list shows there why a change was refused."""
+    A screen that yields ``_note_line`` under its list shows notes there, such as why a change
+    was refused."""
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("j", "move('down')", "Down", show=False),
@@ -323,16 +324,6 @@ class ListScreen[T](BoxedModal[T]):
     def note(self) -> str | None:
         """Why a change was refused, while that's shown under the list."""
         return self.query_one("#picker-note", StatusLine).shown
-
-    def _refused(self, why: str) -> None:
-        """Show ``why`` a change was refused, as ``_show_refusal`` does; nothing once this
-        screen is gone."""
-        if self.is_attached:
-            self._show_refusal(why)
-
-    def _show_refusal(self, why: str) -> None:
-        """Show ``why`` a change was refused under the list."""
-        self._show_note(why)
 
     def _show_note(self, note: str | None) -> None:
         """Show ``note`` under the list, or hide it while it's none."""
@@ -400,6 +391,12 @@ class TypingListScreen[T](ListScreen[T]):
         else:
             box.value = text
             box.focus()
+
+    def _refused(self, why: str) -> None:
+        """Show ``why`` a change was refused, as ``_show_refusal`` does; nothing once this
+        screen is gone."""
+        if self.is_attached:
+            self._show_refusal(why)
 
     def _show_refusal(self, why: str) -> None:
         """Show ``why`` a change was refused: in the text box's hint while it's shown, or else

@@ -1,6 +1,6 @@
 """The explorer over the server host's directories, opened from the workspace picker."""
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 from typing import ClassVar
 
 from textual import on
@@ -9,28 +9,17 @@ from textual.binding import Binding, BindingType
 from textual.containers import Vertical
 from textual.widgets import Input, OptionList, Static
 
-from orbit.protocol import AddWorkspace, DirectoryEntry, DirectoryListing, ListDirectory
+from orbit.protocol import AddWorkspace, DirectoryListing
 from orbit.tui.view.explorer import (
     EXPLORER_HINT,
     FIELD_HINT,
-    added_path,
-    answers,
+    Browse,
+    Explorer,
     candidates_line,
-    completed,
-    completion_parent,
-    entry_label,
-    entry_path,
     explorer_title,
-    more_note,
-    shown_entries,
 )
-from orbit.tui.view.outcomes import Awaited
-from orbit.tui.view.workspaces import PATH_PLACEHOLDER, add_command
+from orbit.tui.view.workspaces import PATH_PLACEHOLDER
 from orbit.tui.widgets import ListScreen, NoteLine, PromptInput
-
-Browse = Callable[[ListDirectory | AddWorkspace, Awaited], Awaitable[object]]
-"""Sends listing a directory or adding a workspace to the backend, awaiting its outcome as
-told; whatever it returns is ignored."""
 
 
 class ExplorerField(PromptInput):
@@ -44,20 +33,13 @@ class ExplorerField(PromptInput):
 
 
 class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
-    """Lists the directories on the server's host, starting where the server starts, under the
-    path or URL field; dismisses with the id of a workspace to open, or the ``AddWorkspace``
-    accepted.
+    """Shows the :class:`Explorer` over the server's directories, dismissing with what it closes
+    with: the id of a workspace to open, or the ``AddWorkspace`` accepted.
 
     ``j``/``k`` move; ``l`` or enter lists the highlighted directory, ``h`` the one above; enter
-    on a workspace served opens it; ``a`` adds the highlighted directory, or a symlink's target,
-    with ``browse``, dismissing once it's accepted; ``.`` shows or hides hidden directories;
-    ``/`` types in the field; escape dismisses with none. Only the listing last asked for is
-    shown, and a refusal shows why under it.
-
-    In the field, enter adds the path or URL typed, the same way, showing a refusal in the
-    field's hint; tab completes the path's last component from the directories of its parent,
-    from the listing shown when it's that directory's, else from a listing asked for alone,
-    which isn't shown; escape returns to the listing.
+    on a workspace served opens it; ``a`` adds the highlighted directory; ``.`` shows or hides
+    hidden directories; ``/`` types in the field; escape dismisses with none. In the field,
+    enter adds the path or URL typed, tab completes it and escape returns to the listing.
     """
 
     AUTO_FOCUS = "OptionList"
@@ -83,16 +65,7 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
 
     def __init__(self, browse: Browse) -> None:
         super().__init__()
-        self._browse = browse
-        self.listing: DirectoryListing | None = None  # The listing shown, if any.
-        self.hidden = False  # Whether hidden directories are shown.
-        self._asked: str | None = None  # The path last asked for, None for the start.
-        self._waiting = False  # Whether the listing last asked for is yet to be shown.
-        self._held: DirectoryListing | None = None  # A listing for another path, meanwhile.
-        self._completing: str | None = None  # The parent typed, listed to complete from.
-        self._completion: DirectoryListing | None = None  # The listing come for it, meanwhile.
-        self._requests = 0  # How many listings have been asked for to complete from.
-        self._accepted: AddWorkspace | None = None  # An add accepted under another screen.
+        self.explorer = Explorer(self, browse)
 
     def compose(self) -> ComposeResult:
         with Vertical() as box:
@@ -109,153 +82,66 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
             yield self._note_line()
 
     async def on_mount(self) -> None:
-        await self._list(None)
-
-    @property
-    def entries(self) -> tuple[DirectoryEntry, ...]:
-        """The directories shown, in order."""
-        entries = () if self.listing is None else self.listing.entries
-        return shown_entries(entries, self.hidden)
-
-    async def _list(self, path: str | None) -> None:
-        """Ask for the listing of the directory at ``path``, or the starting one for none."""
-        self._asked = path
-        self._waiting = True
-        self._held = None
-        self._show_note(None)
-        awaited = Awaited(accepted=self._listed, why=self._unlisted, supersedes=True)
-        await self._browse(ListDirectory(path=path), awaited)
+        await self.explorer.start()
 
     def show_listing(self, listing: DirectoryListing) -> None:
-        """Show ``listing`` if it answers the listing last asked for, by its path; else hold it
-        for the listing asked for to complete from, if one is, as that one may have its symlinks
-        followed, or else for the listing last asked for, as a symlink followed gives, until
-        that one's accepted."""
-        answered = self._waiting and answers(self._asked, listing)
-        held = self._held_to_complete(listing, answered)
-        if answered:
-            self._show(listing)
-        elif self._waiting and not held:
-            self._held = listing
+        """Show ``listing``, as the explorer takes it."""
+        self.explorer.show_listing(listing)
 
-    def _held_to_complete(self, listing: DirectoryListing, answered: bool) -> bool:
-        """Whether ``listing`` is held to complete from, as it is while a listing's asked for
-        to complete from unless it's ``answered`` the one last asked for, for another path."""
-        if self._completing is None:
-            return False
-        if answered and listing.path != self._completing:
-            return False
-        self._completion = listing
-        return True
+    @property
+    def highlighted(self) -> int | None:
+        return self.query_one(OptionList).highlighted
 
-    def _listed(self) -> None:
-        """Show the listing held now the one last asked for is accepted, if it's not shown,
-        unless this screen is gone."""
-        if not self.is_attached:
-            return
-        held = self._held
-        if self._waiting and held is not None:
-            self._show(held)
-        self._waiting = False
+    @property
+    def field(self) -> str:
+        return self.query_one(ExplorerField).value
 
-    def _show(self, listing: DirectoryListing) -> None:
-        """Show ``listing`` in place of the one shown, highlighting its first directory."""
-        self.listing = listing
-        self._waiting = False
-        self._held = None
-        self.query_one(Vertical).border_title = explorer_title(listing)
-        self.query_one("#explorer-more", NoteLine).show(more_note(listing))
-        self.query_one(OptionList).highlighted = None  # A new listing starts at its top.
-        self._relist_entries(())
+    def show_heading(self, title: str, more: str | None) -> None:
+        self.query_one(Vertical).border_title = title
+        self.query_one("#explorer-more", NoteLine).show(more)
 
-    def _relist_entries(self, shown: Sequence[str]) -> None:
-        """List the directories shown in place of those at the paths ``shown``, keeping the
-        highlight on its directory, or where it was if that one's gone, or else on the first."""
-        entries = self.entries
-        self._relist(shown, self._paths, [entry_label(entry) for entry in entries])
+    def show_rows(self, keys: Sequence[str], labels: Sequence[str], highlight: int | None) -> None:
         options = self.query_one(OptionList)
-        if options.highlighted is None and entries:
-            options.highlighted = 0
+        options.clear_options()
+        options.add_options(self._options(keys, labels))
+        options.highlighted = highlight
 
-    def _unlisted(self, why: str) -> None:
-        """Show ``why`` the listing last asked for was refused, keeping the one shown."""
-        self._waiting = False
-        self._held = None
-        self._refused(why)
+    def show_note(self, note: str | None) -> None:
+        self._show_note(note)
 
-    @property
-    def _highlighted(self) -> DirectoryEntry | None:
-        """The directory highlighted, if any."""
-        index = self.query_one(OptionList).highlighted
-        return None if index is None else self.entries[index]
+    def set_field(self, text: str) -> None:
+        field = self.query_one(ExplorerField)
+        field.value = text
+        field.cursor_position = len(text)
 
-    @property
-    def _paths(self) -> list[str]:
-        """The paths of the directories shown, in order."""
-        return [self._path_of(entry) for entry in self.entries]
+    def show_field_note(self, note: str) -> None:
+        self.query_one(ExplorerField).border_subtitle = note
 
-    def _path_of(self, entry: DirectoryEntry) -> str:
-        """The path of ``entry``, in the listing shown."""
-        assert self.listing is not None  # Entries are only shown with their listing.
-        return entry_path(self.listing, entry)
+    def show_candidates(self, candidates: Sequence[str]) -> None:
+        shown = self.query_one("#explorer-candidates", Static)
+        shown.update(candidates_line(candidates))
+        shown.display = bool(candidates)
 
     @on(OptionList.OptionSelected)
     async def _chosen(self, event: OptionList.OptionSelected) -> None:
-        index = self._picked_row(event, self._paths)
-        if index is None:
-            return
-        entry = self.entries[index]
-        if entry.workspace is not None:
-            self.dismiss(entry.workspace)
-        else:
-            await self._list(self._path_of(entry))
+        index = self._picked_row(event, self.explorer.paths)
+        if index is not None:
+            await self.explorer.choose(index)
 
     async def action_into(self) -> None:
-        """List the directory highlighted, if any."""
-        entry = self._highlighted
-        if entry is not None:
-            await self._list(self._path_of(entry))
+        await self.explorer.into()
 
     async def action_up(self) -> None:
-        """List the directory above the one shown, if there's one."""
-        if self.listing is not None and self.listing.parent is not None:
-            await self._list(self.listing.parent)
+        await self.explorer.up()
 
     async def action_add(self) -> None:
-        """Add the directory highlighted, if any, at its target if it's a symlink, dismissing
-        with it once accepted."""
-        entry = self._highlighted
-        if entry is None:
-            return
-        assert self.listing is not None  # Entries are only shown with their listing.
-        adding = AddWorkspace(path=added_path(self.listing, entry))
-        self._show_note(None)
-        await self._browse(adding, Awaited(accepted=lambda: self._added(adding), why=self._refused))
-
-    def _added(self, adding: AddWorkspace) -> None:
-        """Dismiss with ``adding`` now it's accepted, or once this screen is on top again if
-        another is over it, unless this screen is gone."""
-        if self.is_attached:
-            self._accepted = adding
-            self._dismiss_accepted()
+        await self.explorer.add()
 
     def on_screen_resume(self) -> None:
-        self._dismiss_accepted()
-
-    def _dismiss_accepted(self) -> None:
-        """Dismiss with the add accepted, if any, unless another screen is over this one."""
-        # Textual's dismiss pops the top screen whichever screen it's called on.
-        adding = self._accepted
-        if adding is None or not self.is_active:
-            return
-        self._accepted = None
-        self.dismiss(adding)
+        self.explorer.resumed()
 
     def action_hidden(self) -> None:
-        """Show hidden directories, or hide them, keeping the highlight on its directory."""
-        shown = self._paths
-        self.hidden = not self.hidden
-        self._relist_entries(shown)
+        self.explorer.toggle_hidden()
 
     def action_back(self) -> None:
         self.dismiss(None)
@@ -269,87 +155,9 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
         self.query_one(OptionList).focus()
 
     async def action_complete(self) -> None:
-        """Complete the last component of the path typed, from the listing shown when it's its
-        parent's, else from that parent's listing once it comes; nothing for no path."""
-        parent = completion_parent(self.query_one(ExplorerField).value)
-        if parent is None:
-            return
-        self.query_one(ExplorerField).border_subtitle = ""
-        if self.listing is not None and self.listing.path == parent:
-            self._complete(self.listing, parent)
-            return
-        self._requests += 1
-        request = self._requests
-        self._completing = parent
-        self._completion = None
-        awaited = Awaited(
-            accepted=lambda: self._completed(request),
-            why=lambda why: self._uncompleted(request, why),
-        )
-        await self._browse(ListDirectory(path=parent), awaited)
-
-    def _completed(self, request: int) -> None:
-        """Complete the path typed from the listing come for the ``request``, the number of the
-        listing asked for to complete from, once it's accepted, unless another's asked for."""
-        parent, listing = self._completing, self._completion
-        if request != self._requests or parent is None:
-            return
-        self._completing = None
-        self._completion = None
-        if listing is not None:
-            self._complete(listing, parent)
-
-    def _uncompleted(self, request: int, why: str) -> None:
-        """Show ``why`` the ``request``, the number of the listing asked for to complete from,
-        was refused, leaving nothing to complete from unless another's asked for."""
-        if request == self._requests:
-            self._completing = None
-            self._completion = None
-        self._refused_typed(why)
-        self._show_candidates(())
-
-    def _complete(self, listing: DirectoryListing, parent: str) -> None:
-        """Complete the path typed from the directories ``listing`` shows, as those of the
-        directory typed as ``parent``, unless it's been typed on into another directory since;
-        show the candidates when there are several, and none otherwise."""
-        field = self.query_one(ExplorerField)
-        if completion_parent(field.value) != parent:
-            self._show_candidates(())
-            return
-        names = [entry.name for entry in shown_entries(listing.entries, self.hidden)]
-        completion = completed(field.value, names)
-        if completion is None:
-            self._show_candidates(())
-            return
-        field.value = completion.text
-        field.cursor_position = len(completion.text)
-        self._show_candidates(completion.candidates)
-
-    def _show_candidates(self, candidates: Sequence[str]) -> None:
-        """Show the ``candidates`` under the field, hiding the line for none; nothing once this
-        screen is gone."""
-        if not self.is_attached:
-            return
-        shown = self.query_one("#explorer-candidates", Static)
-        shown.update(candidates_line(candidates))
-        shown.display = bool(candidates)
+        await self.explorer.complete()
 
     @on(Input.Submitted, "#explorer-path")
     async def _typed(self, event: Input.Submitted) -> None:
-        """Add the path or URL typed, if any, dismissing with it once accepted."""
         event.stop()
-        self._show_candidates(())
-        text = event.value.strip()
-        if not text:
-            return
-        adding = add_command(text)
-        field = self.query_one(ExplorerField)
-        field.border_subtitle = ""
-        awaited = Awaited(accepted=lambda: self._added(adding), why=self._refused_typed)
-        await self._browse(adding, awaited)
-
-    def _refused_typed(self, why: str) -> None:
-        """Show ``why`` what was typed was refused in the field's hint; nothing once this screen
-        is gone."""
-        if self.is_attached:
-            self.query_one(ExplorerField).border_subtitle = why
+        await self.explorer.submit(event.value)
