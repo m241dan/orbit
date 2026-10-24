@@ -45,6 +45,9 @@ ORCHARD = DirectoryEntry(name="orchard", is_repository=False, hidden=False)
 SRC = DirectoryListing(path="/src", parent="/", entries=(ORBIT, ORCHARD, DOT), total=3)
 PROJECTS = DirectoryEntry(name="projects", is_repository=False, hidden=False)
 WORK = DirectoryListing(path="/work", parent="/", entries=(PROJECTS,), total=1)
+ROOT = DirectoryListing(
+    path="/", entries=(DirectoryEntry(name="srv", is_repository=False, hidden=False),), total=1
+)
 REPO = WorkspaceEntry(id="R", label="repo", path="/srv/repo", sessions=())
 
 
@@ -532,3 +535,46 @@ async def test_a_pick_whose_directory_left_the_list_before_it_is_taken_does_noth
         await pilot.pause()
         assert explorer(app) is screen
         assert changes(session_of(app)) == [ListDirectory(path=None)]
+
+
+async def answer_to(app: OrbitApp, pilot: Pilot[None], index: int, refused: str | None) -> None:
+    """Accept the command sent at ``index``, or refuse it as ``invalid`` saying ``refused``."""
+    command_id = session_of(app).envelopes[index].command_id
+    if refused is None:
+        await feed_events(session_of(app), pilot, CommandAccepted(command_id=command_id))
+    else:
+        refusal = CommandRefused(command_id=command_id, code=INVALID, message=refused)
+        await feed_events(session_of(app), pilot, refusal)
+
+
+async def test_an_earlier_listings_outcome_once_another_is_asked_for_changes_nothing() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRV)
+        await pilot.press("l")
+        earlier = len(session_of(app).envelopes) - 1
+        await pilot.press("h")
+        assert changes(session_of(app))[-1] == ListDirectory(path="/")
+        await feed_events(session_of(app), pilot, SRV_A)
+        await answer_to(app, pilot, earlier, None)
+        screen = explorer(app)
+        assert rows(screen) == SRV_ROWS
+        await feed_events(session_of(app), pilot, ROOT)
+        await answer(app, pilot)
+        assert screen.query_one(Vertical).border_title == "/"
+        assert rows(screen) == ["srv"]
+
+
+async def test_an_earlier_listings_refusal_once_another_is_asked_for_shows_nothing() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRV)
+        await pilot.press("l")
+        earlier = len(session_of(app).envelopes) - 1
+        await pilot.press("h")
+        await answer_to(app, pilot, earlier, "Permission denied: /srv/a")
+        screen = explorer(app)
+        assert screen.note is None
+        await feed_events(session_of(app), pilot, ROOT)
+        assert screen.query_one(Vertical).border_title == "/"
+        assert rows(screen) == ["srv"]
