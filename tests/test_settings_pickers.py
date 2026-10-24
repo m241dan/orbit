@@ -1,4 +1,5 @@
-"""The SettingsPickers choosing a model and tool access for whoever opens them."""
+"""The SettingsPickers showing their model as picker screens; what the pickers decide is checked
+in test_pickers."""
 
 from textual.app import App
 from textual.widgets import OptionList
@@ -39,8 +40,8 @@ def shown(app: PickersApp) -> tuple[str, list[str], int | None]:
 async def test_choosing_a_model_offers_the_choices_and_passes_on_the_model_picked() -> None:
     app = PickersApp(Settings(model="opus", tool_access="off"))
     async with app.run_test() as pilot:
-        app.pickers.show_choices(("opus", "sonnet"))
-        app.pickers.choose_model(app.current, app.pick)
+        app.pickers.model.show_choices(("opus", "sonnet"))
+        app.pickers.model.choose_model(app.current, app.pick)
         await pilot.pause()
         assert shown(app) == ("Model", ["default", "opus", "sonnet"], 1)
         assert app.screen is app.get_screen("pick-model")
@@ -51,7 +52,7 @@ async def test_choosing_a_model_offers_the_choices_and_passes_on_the_model_picke
 async def test_choosing_tools_passes_on_the_tool_access_picked() -> None:
     app = PickersApp(Settings(model="opus", tool_access="off"))
     async with app.run_test() as pilot:
-        app.pickers.choose_tools(app.current, app.pick)
+        app.pickers.model.choose_tools(app.current, app.pick)
         await pilot.pause()
         assert shown(app)[0::2] == ("Tool access", 0)
         assert app.screen is app.get_screen("pick-tool-access")
@@ -59,28 +60,10 @@ async def test_choosing_tools_passes_on_the_tool_access_picked() -> None:
         assert app.picked == [Settings(model="opus", tool_access="full")]
 
 
-async def test_a_pick_applies_to_the_settings_current_when_picked() -> None:
-    app = PickersApp(Settings(model="opus", tool_access="off"))
-    async with app.run_test() as pilot:
-        app.pickers.show_choices(("opus", "sonnet"))
-        app.pickers.choose_model(app.current, app.pick)
-        await pilot.pause()
-        app.settings = Settings(model="opus", tool_access="full")
-        await pilot.press("down", "enter")
-        app.pickers.choose_tools(app.current, app.pick)
-        await pilot.pause()
-        app.settings = Settings(model="haiku", tool_access="full")
-        await pilot.press("home", "enter")
-        assert app.picked == [
-            Settings(model="sonnet", tool_access="full"),
-            Settings(model="haiku", tool_access="off"),
-        ]
-
-
 async def test_escape_picks_nothing() -> None:
     app = PickersApp(Settings())
     async with app.run_test() as pilot:
-        app.pickers.choose_model(app.current, app.pick)
+        app.pickers.model.choose_model(app.current, app.pick)
         await pilot.pause()
         await pilot.press("escape")
         assert app.picked == []
@@ -89,23 +72,11 @@ async def test_escape_picks_nothing() -> None:
 async def test_new_model_choices_relabel_the_model_picker_and_apply_to_picks() -> None:
     app = PickersApp(Settings())
     async with app.run_test() as pilot:
-        app.pickers.show_choices(("opus",))
-        app.pickers.choose_model(app.current, app.pick)
+        app.pickers.model.show_choices(("opus",))
+        app.pickers.model.choose_model(app.current, app.pick)
         await pilot.pause()
-        app.pickers.show_choices(("haiku", "fable"))
+        app.pickers.model.show_choices(("haiku", "fable"))
         await pilot.pause()
         assert shown(app)[1] == ["default", "haiku", "fable"]
         await pilot.press("end", "enter")
         assert app.picked == [Settings(model="fable")]
-
-
-async def test_the_same_model_choices_keep_the_model_picker_as_it_is() -> None:
-    app = PickersApp(Settings(model="opus"))
-    async with app.run_test() as pilot:
-        app.pickers.show_choices(("opus",))
-        app.pickers.choose_model(app.current, app.pick)
-        await pilot.pause()
-        app.pickers.show_choices(("opus",))
-        await pilot.pause()
-        # Relabelling would clear the highlight.
-        assert shown(app) == ("Model", ["default", "opus"], 1)

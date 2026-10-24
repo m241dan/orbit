@@ -241,7 +241,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             Panes(
                 self._transcript,
                 self._tabs,
-                self._prompt,
+                self._prompt.marks,
                 self._viewing,
                 self._task_list,
                 self._verification,
@@ -252,8 +252,8 @@ class OrbitApp(App[None], inherit_bindings=False):
                 self._feed,
                 self._pager,
                 self._desk,
-                self._proposals,
-                self._pickers,
+                self._proposals.queue,
+                self._pickers.model,
                 self._navigation,
                 self._halt,
                 self._takeover,
@@ -421,7 +421,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         editor = TaskEditorScreen(
             None if current is None else current.task,
             self._router.settings or Settings(),
-            self._pickers,
+            self._pickers.model,
         )
         self.push_screen(editor, saved)
 
@@ -522,11 +522,11 @@ class OrbitApp(App[None], inherit_bindings=False):
         # While a picker is open, its modal screen blocks the app's key bindings, so a second
         # picker can't be pushed on top.
         if self._router.settings is not None:
-            self._pickers.choose_model(self._shown_settings, self._request_settings)
+            self._pickers.model.choose_model(self._shown_settings, self._request_settings)
 
     def action_pick_tool_access(self) -> None:
         if self._router.settings is not None:
-            self._pickers.choose_tools(self._shown_settings, self._request_settings)
+            self._pickers.model.choose_tools(self._shown_settings, self._request_settings)
 
     def _shown_settings(self) -> Settings:
         settings = self._router.settings
@@ -613,7 +613,7 @@ class OrbitApp(App[None], inherit_bindings=False):
 
         def undecide(code: str) -> None:
             if code != UNKNOWN:
-                self._proposals.reopen(proposal)
+                self._proposals.queue.reopen(proposal)
 
         outcome = Awaited(code=undecide)
         await self._show_and_send(shown, proposal.agent_id, decision, outcome)

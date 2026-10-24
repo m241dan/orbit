@@ -1,7 +1,7 @@
 """The session's settings and the pickers that change them."""
 
-from collections.abc import Sequence
-from typing import get_args
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Protocol, get_args
 
 from orbit.protocol import Settings, ToolAccess
 from orbit.tui.view.common import model_label
@@ -80,3 +80,59 @@ def settings_summary(settings: Settings) -> str:
     """
     model, tools = settings_fields(settings)
     return f"planner's model: {model} · new tasks' tools: {tools}"
+
+
+Picked = Callable[[Settings], Awaitable[None] | None]
+"""Takes the settings picked."""
+Chosen = Callable[[int], Awaitable[None] | None]
+"""Takes the index of the option picked."""
+
+
+class PickersView(Protocol):
+    """Where :class:`Pickers` show: a model picker and a tool access picker."""
+
+    def label_models(self, labels: Sequence[str]) -> None:
+        """Label the model picker's options ``labels``."""
+
+    def pick_model(self, current: int | None, chosen: Chosen) -> None:
+        """Open the model picker on option ``current``, calling ``chosen`` with the option
+        picked; closed, it calls nothing."""
+
+    def pick_tool_access(self, current: int | None, chosen: Chosen) -> None:
+        """Open the tool access picker on option ``current``, calling ``chosen`` with the
+        option picked; closed, it calls nothing."""
+
+
+class Pickers:
+    """The model and tool access pickers, shown in ``view``, and the model choices the model
+    picker offers, its labels following them.
+
+    The settings may change while a picker is open, so a pick changes only its own setting of
+    the settings as they are when picked.
+    """
+
+    def __init__(self, view: PickersView) -> None:
+        self._view = view
+        self.model_choices: tuple[str, ...] = ()
+
+    def show_choices(self, choices: tuple[str, ...]) -> None:
+        """Offer the models ``choices``, relabelling the model picker if they changed."""
+        if choices != self.model_choices:
+            self._view.label_models(model_options(choices)[1])
+        self.model_choices = choices
+
+    def choose_model(self, settings: Callable[[], Settings], then: Picked) -> None:
+        """Open the model picker on the model of ``settings``, the settings now, and call
+        ``then`` with them, as they are when picked, with the model picked."""
+        _, current = model_choices(self.model_choices, settings())
+        self._view.pick_model(
+            current, lambda index: then(picked_model(self.model_choices, settings(), index))
+        )
+
+    def choose_tools(self, settings: Callable[[], Settings], then: Picked) -> None:
+        """Open the tool access picker on the tool access of ``settings``, the settings now, and
+        call ``then`` with them, as they are when picked, with the tool access picked."""
+        _, current = tool_access_choices(settings())
+        self._view.pick_tool_access(
+            current, lambda index: then(picked_tool_access(settings(), index))
+        )

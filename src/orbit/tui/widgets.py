@@ -16,7 +16,6 @@ from textual.widget import Widget
 from textual.widgets import Input, OptionList, Static, TextArea
 from textual.widgets.option_list import Option
 
-from orbit.protocol import Settings
 from orbit.tui.modal import Push
 from orbit.tui.view.common import (
     SPINNER_FPS,
@@ -25,8 +24,7 @@ from orbit.tui.view.common import (
     picked_row,
 )
 from orbit.tui.view.confirm import confirm_hint
-from orbit.tui.view.settings import settings_summary
-from orbit.tui.view.transcript import prompt_title
+from orbit.tui.view.prompt import PromptMarks
 from orbit.tui.view.typing_list import TypingList
 
 if TYPE_CHECKING:
@@ -177,23 +175,16 @@ class ChatPrompt(ModalTextArea):
 
     def __init__(self, *, placeholder: str = "", id: str | None = None) -> None:
         super().__init__(soft_wrap=True, show_line_numbers=False, placeholder=placeholder, id=id)
-        self._busy = False
-        self._read_only = False
+        self.marks = PromptMarks(self)
 
     def on_mount(self) -> None:
-        self.show_busy(False)
+        self.marks.show_busy(False)
 
-    def show_busy(self, busy: bool) -> None:
-        self._busy = busy
-        self.border_title = prompt_title(busy, self._read_only)
+    def show_title(self, title: str) -> None:
+        self.border_title = title
 
-    def show_read_only(self, read_only: bool) -> None:
-        """Mark the prompt while the orbit is ``read_only``."""
-        self._read_only = read_only
-        self.border_title = prompt_title(self._busy, read_only)
-
-    def show_settings(self, settings: Settings) -> None:
-        self.border_subtitle = settings_summary(settings)
+    def show_subtitle(self, subtitle: str) -> None:
+        self.border_subtitle = subtitle
 
     def action_submit(self) -> None:
         self.post_message(self.Submitted(self, self.text))

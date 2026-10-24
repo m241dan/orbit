@@ -10,9 +10,8 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, Static
 
 from orbit.protocol import Settings, TaskSpec
-from orbit.tui.settings_pickers import SettingsPickers
 from orbit.tui.view.settings import MODEL_TITLE, TOOL_ACCESS_TITLE
-from orbit.tui.view.task_editor import TaskEditor
+from orbit.tui.view.task_editor import SettingsChooser, TaskEditor
 from orbit.tui.view.tasks import (
     TASK_EDITOR_HINT,
     TASK_PROMPT_TITLE,
@@ -76,7 +75,7 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
         self,
         task: TaskSpec | None,
         settings: Settings,
-        pickers: SettingsPickers,
+        pickers: SettingsChooser,
     ) -> None:
         super().__init__()
         self.editor = TaskEditor(self, task, settings, pickers)

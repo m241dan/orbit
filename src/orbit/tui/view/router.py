@@ -139,7 +139,7 @@ class Proposals(Protocol):
     def withdraw(self, event: Event) -> None: ...
 
 
-class Pickers(Protocol):
+class ModelChoices(Protocol):
     """The settings pickers, as the router offers model choices in them."""
 
     def show_choices(self, choices: tuple[str, ...]) -> None: ...
@@ -169,7 +169,7 @@ class Handlers:
     pager: HistoryPager
     desk: CommandDesk
     proposals: Proposals
-    pickers: Pickers
+    pickers: ModelChoices
     navigation: Navigation
     halt: StorageHalt
     takeover: TakeoverOffer

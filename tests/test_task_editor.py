@@ -36,7 +36,7 @@ class EditorApp(App[None]):
         self.saved: list[TaskSpec | None] = []
 
     def on_mount(self) -> None:
-        editor = TaskEditorScreen(self.editing, Settings(), SettingsPickers())
+        editor = TaskEditorScreen(self.editing, Settings(), SettingsPickers().model)
         self.push_screen(editor, self.saved.append)
 
 
