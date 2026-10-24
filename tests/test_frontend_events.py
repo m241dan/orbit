@@ -1,24 +1,39 @@
 """What the frontend shows of the backend's events, without Textual: the Hello it opens with,
 what shows in the conversation, and what shows nothing there."""
 
+import pytest
+
 from orbit.protocol import (
     INTERNAL,
     PLANNER,
     PROTOCOL_VERSION,
     AgentReply,
     AgentStarted,
+    AssistantMessage,
     BusyChanged,
     ErrorOccurred,
+    Event,
     Hello,
     Notice,
     SendMessage,
     SessionStateChanged,
+    StepState,
+    TaskMerged,
+    TasksChanged,
+    TaskSpec,
+    TaskStarted,
+    TaskState,
     ToolCallFinished,
     ToolCallStarted,
     TurnFinished,
     UsageChanged,
+    VerificationChanged,
+    VerificationFinished,
+    VerificationSkipped,
+    VerificationStarted,
     Welcome,
 )
+from orbit.tui.view.events import coalesce
 from tests.frontend_fakes import Shell
 
 
@@ -89,3 +104,57 @@ async def test_a_prompt_stops_the_typing_and_the_planner_going_free_doesnt_start
     assert not shell.prompt.typing
     shell.frontend.insert_mode()
     assert shell.prompt.typing
+
+
+def task(task_id: str, role: str = "coder") -> TaskState:
+    return TaskState(id=task_id, task=TaskSpec(prompt=f"do {task_id}", role=role))
+
+
+BURST: list[Event] = [
+    TasksChanged(tasks=(task("1"),)),
+    TasksChanged(tasks=(task("1"), task("2", "reviewer"))),
+    VerificationChanged(steps=(StepState(name="Lint"),)),
+    TaskStarted(task_id="2"),
+    AgentStarted(agent_id="agent-1", role="reviewer", task_id="1"),
+    AssistantMessage(turn_id="t", text="looking", agent_id="agent-1"),
+    TasksChanged(tasks=(task("2", "reviewer"),)),
+    TasksChanged(tasks=(task("2", "reviewer"), task("3"))),
+    TaskStarted(task_id="2"),
+    VerificationStarted(task_id="2", step=0),
+    VerificationFinished(task_id="2", step=0, passed=False),
+    VerificationFinished(task_id="2", step=0, passed=True),
+    VerificationSkipped(task_id="2", reason="no_changes"),
+    TaskMerged(task_id="2", result="merged"),
+]
+"""Events that come in a burst, two of whose task lists a later one supersedes."""
+
+
+def visible_state(shell: Shell) -> object:
+    return (
+        shell.entries(),
+        shell.tab_strip,
+        shell.tasks.tasks,
+        shell.tasks.numbers,
+        shell.agents.rows,
+        shell.steps.steps,
+    )
+
+
+async def test_a_burst_shows_its_events_but_those_superseded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shell = Shell()
+    rendered: list[Event] = []
+    monkeypatch.setattr(shell.frontend, "render", rendered.append)
+    shell.frontend.show_batch(BURST)
+    assert rendered == coalesce(BURST)
+    assert len(rendered) == len(BURST) - 2
+
+
+async def test_a_burst_ends_where_showing_each_event_alone_would() -> None:
+    one_by_one = Shell()
+    for event in BURST:
+        await one_by_one.feed(event)
+    burst = Shell()
+    await burst.feed(*BURST)
+    assert visible_state(burst) == visible_state(one_by_one)

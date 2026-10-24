@@ -80,11 +80,6 @@ class TaskList(ListPane):
         return self.board.tasks
 
     @property
-    def numbers(self) -> list[str]:
-        """The tasks' numbers, in order."""
-        return self.board.numbers
-
-    @property
     def following(self) -> bool:
         """Whether the list follows the active task."""
         return self.board.following

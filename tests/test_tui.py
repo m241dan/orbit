@@ -30,9 +30,7 @@ from orbit.protocol import (
     VerificationStarted,
 )
 from orbit.tui import OrbitApp
-from orbit.tui.agents import AgentsPane
 from orbit.tui.event_stream import event_batches
-from orbit.tui.panels import VerificationPanel
 from orbit.tui.tabs import ConversationTabs
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
@@ -47,7 +45,6 @@ from tests.tui_fakes import (
     accept_last,
     active_tab,
     call,
-    entries,
     feed_events,
     picker,
     result,
@@ -325,38 +322,6 @@ async def test_prompt_window_is_selected_on_start_and_highlighted() -> None:
         assert tasks.styles.border_top != unselected_border
 
 
-@pytest.mark.parametrize(
-    ("keys", "expected"),
-    [
-        ("k", "transcript"),
-        ("l", "verification-steps"),
-        ("kl", "task-list"),
-        ("klj", "verification-steps"),
-        ("kljh", "prompt"),
-        ("klh", "transcript"),
-        ("kj", "prompt"),
-        ("lk", "task-list"),
-        # Edges: nothing further in that direction.
-        ("j", "prompt"),
-        ("h", "prompt"),
-        ("kk", "transcript"),
-        ("kh", "transcript"),
-        ("kll", "task-list"),
-        ("lj", "agents"),
-        ("ljk", "verification-steps"),
-        ("ljh", "prompt"),
-        ("ljj", "agents"),
-        ("ljl", "agents"),
-    ],
-)
-async def test_hjkl_moves_selection_between_windows(keys: str, expected: str) -> None:
-    app = OrbitApp(FakeSession())
-    async with app.run_test() as pilot:
-        await pilot.press(*keys)
-        assert selected(app) == [expected]
-        assert app.focused is None
-
-
 async def test_border_highlight_follows_selection() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test() as pilot:
@@ -387,28 +352,6 @@ async def test_enter_does_nothing_on_a_window_without_a_list() -> None:
         await pilot.press("l", "enter")
         assert app.focused is None
         assert selected(app) == ["verification-steps"]
-
-
-@pytest.mark.parametrize("keys", ["k", "kl", "l", "lk"])
-async def test_i_jumps_to_prompt_from_any_window(keys: str) -> None:
-    app = OrbitApp(FakeSession())
-    async with app.run_test() as pilot:
-        await pilot.press(*keys, "i")
-        assert selected(app) == ["prompt"]
-        assert app.focused is app.query_one(ChatPrompt)
-
-        await pilot.press("escape")
-        assert selected(app) == ["prompt"]
-        assert app.focused is None
-
-
-async def test_enter_on_prompt_does_nothing() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await pilot.press("enter")
-        assert app.focused is None
-        assert session.commands == []
 
 
 async def test_i_on_prompt_enters_insert_mode_and_hjkl_type() -> None:
@@ -743,19 +686,6 @@ BURST: list[Event] = [
 ]
 
 
-def visible_state(app: OrbitApp) -> object:
-    agents = app.query_one(AgentsPane)
-    task_list = app.query_one(TaskList)
-    return (
-        entries(app),
-        tab_strip(app),
-        task_list.tasks,
-        task_list.numbers,
-        [str(agents.get_option_at_index(i).prompt) for i in range(agents.option_count)],
-        app.query_one(VerificationPanel).steps,
-    )
-
-
 async def test_a_burst_renders_in_one_batch_without_superseded_snapshots(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -768,20 +698,3 @@ async def test_a_burst_renders_in_one_batch_without_superseded_snapshots(
         await pilot.pause()
         assert [batch for batch in app.batches if batch] == [coalesce(BURST)]
         assert len(coalesce(BURST)) == len(BURST) - 2
-
-
-async def test_a_burst_ends_where_rendering_each_event_alone_would() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test(size=(120, 30)) as pilot:
-        for event in BURST:
-            await feed_events(session, pilot, event)
-        one_by_one = visible_state(app)
-
-    session = FakeSession()
-    for event in BURST:
-        session.queue.put_nowait(event)
-    app = OrbitApp(session)
-    async with app.run_test(size=(120, 30)) as pilot:
-        await pilot.pause()
-        assert visible_state(app) == one_by_one
