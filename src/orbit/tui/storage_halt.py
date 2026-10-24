@@ -6,7 +6,7 @@ from typing import ClassVar
 from textual.binding import Binding, BindingType
 
 from orbit.tui.modal import ModalSlot, Push
-from orbit.tui.view.storage import HALT_HINT, HALT_TITLE, halt_status
+from orbit.tui.view.storage import HALT_HINT, HALT_TITLE, Send, StorageHalt
 from orbit.tui.widgets import TextScreen
 
 Retry = Callable[[], Awaitable[object]]
@@ -33,36 +33,32 @@ ShowStatus = Callable[[str | None], None]
 
 
 class StorageHaltHost:
-    """Follows whether the session is halted: while it is, the status line is shown with
-    ``show_status`` and the halt's modal, one at a time, with ``push``; ``retry`` tries again."""
+    """Shows the :class:`StorageHalt` it holds as ``halt``, which tries again with ``send``:
+    its status line with ``show_status`` and its modal, one at a time, with ``push``."""
 
     def __init__(
-        self, push: Push[StorageHaltScreen, None], retry: Retry, show_status: ShowStatus
+        self, push: Push[StorageHaltScreen, None], send: Send, show_status: ShowStatus
     ) -> None:
         self._slot = ModalSlot[StorageHaltScreen, None](push)
-        self._retry = retry
         self._show_status = show_status
-        self.explanation: str | None = None  # Why the session is halted; none while it isn't.
+        self.halt = StorageHalt(self, send)
 
     @property
-    def shown(self) -> StorageHaltScreen | None:
-        """The modal open, if any."""
-        return self._slot.showing
+    def modal_open(self) -> bool:
+        return self._slot.showing is not None
 
-    def halted(self, explanation: str) -> None:
-        """Show that the session is halted for ``explanation``, opening the modal or showing it
-        there if it's open."""
-        self.explanation = explanation
-        self._show_status(halt_status(explanation))
-        if self.shown is not None:
-            self.shown.show(explanation)
-            return
-        self._slot.open(StorageHaltScreen(explanation, self._retry), _nothing)
+    def show_status(self, status: str | None) -> None:
+        self._show_status(status)
 
-    def lifted(self) -> None:
-        """Show that the session isn't halted, closing the modal if it's open."""
-        self.explanation = None
-        self._show_status(None)
+    def open_modal(self, explanation: str) -> None:
+        self._slot.open(StorageHaltScreen(explanation, self.halt.retry), _nothing)
+
+    def show_in_modal(self, explanation: str) -> None:
+        screen = self._slot.showing
+        assert screen is not None  # The halt only shows in its modal while it's open.
+        screen.show(explanation)
+
+    def close_modal(self) -> None:
         self._slot.close(None)
 
 

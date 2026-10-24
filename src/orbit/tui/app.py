@@ -39,7 +39,6 @@ from orbit.protocol import (
     LinkState,
     RemoveTask,
     ResetConversation,
-    ResumeStorage,
     RunTasks,
     SendMessage,
     Session,
@@ -202,7 +201,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._halt_status = StatusLine(id="storage-halt", classes="error")
         self._link_status = StatusLine(id="link-status")
         self._viewing = StatusLine(id="viewing")
-        self._halt = StorageHaltHost(self.push_screen, self._resume_storage, self._halt_status.show)
+        self._halt = StorageHaltHost(self.push_screen, self._send, self._halt_status.show).halt
         self._link_host = LinkHost(
             self.push_screen, self.exit, self._link_status.show, self.set_timer
         )
@@ -605,10 +604,6 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _render_event(self, event: Event) -> None:
         self._router.render(event)
-
-    async def _resume_storage(self) -> None:
-        # Trying again lifts the halt once accepted; only the latest try counts.
-        await self._send(ResumeStorage(), Awaited(accepted=self._halt.lifted, supersedes=True))
 
     def _follow_link(self, state: LinkState) -> None:
         self._link_host.follow(state, self.clock())
