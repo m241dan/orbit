@@ -12,10 +12,11 @@ from orbit.protocol import Notice
 
 async def move_records(
     tasks: Tasks, task_id: str, root: str, names: FileNames, publish: Publish
-) -> None:
+) -> dict[str, str]:
     """Move each record task ``task_id`` names that isn't written at ``root`` yet but whose
     number another record there has, listing the files with ``names``: it's renamed in every
-    task that hasn't completed, and the user told with ``publish``."""
+    task that hasn't completed, and the user told with ``publish``. Returns the moves, each
+    old path mapped to its new one."""
     prompt = tasks.board.get(task_id).task.prompt
     listings = {
         # A large directory, or a slow filesystem, would stall the event loop.
@@ -24,7 +25,8 @@ async def move_records(
     }
     moves = moved_records(prompt, listings)
     if not moves:
-        return
+        return moves
     await tasks.change(lambda board: board.move_records(moves))
     for old, new in moves.items():
         await publish(Notice(message=moved_note(old, new)))
+    return moves

@@ -3,7 +3,8 @@
 The planner is one agent for the whole session. Each prompt is a turn of its conversation,
 resumed from the last, so it remembers what was said; it proposes tasks with ``propose_task``,
 and they wait on the board as drafts until the user accepts them. Its first prompt, and the first
-after the verification steps change, tells it the steps each task must pass. A restored session
+after the verification steps change, tells it the steps each task must pass; the next prompt
+also carries what orbit told it since, such as a record that moved. A restored session
 carries on its saved conversation, or starts a fresh one if that can't be resumed.
 """
 
@@ -56,6 +57,7 @@ class PlannerChat:
         self._step_names = step_names
         self._agent: Agent | None = None
         self._told: tuple[str, ...] | None = None  # The steps the planner last heard about.
+        self._notes: list[str] = []  # What it's been told, until a turn surely delivers it.
         self._saved: str | None = None  # The saved conversation, until a turn resumes it.
         self._tools: dict[str, Tool] = {
             PROPOSE_TASK: self._propose_task,
@@ -85,6 +87,10 @@ class PlannerChat:
         """Carry on the saved conversation ``conversation_id`` from the first turn on, which
         starts a fresh one instead if it can't be resumed."""
         self._saved = conversation_id
+
+    def tell(self, note: str) -> None:
+        """Have the planner hear ``note`` ahead of its next prompt."""
+        self._notes.append(note)
 
     async def answer(self, text: str, settings: Settings) -> TurnEndReason:
         """Run a turn of the planner's on ``text``, publishing its events; returns how it ended.
@@ -188,21 +194,23 @@ class PlannerChat:
         assert self._agent is not None
         role = self._desk.agents.roles[PLANNER]
         own = Settings(model=settings.model or role.model, tool_access=role.tool_access)
-        steps = self._step_names()
+        steps, notes = self._step_names(), tuple(self._notes)
         launch = await self._desk.launch(
-            self._agent, self._with_steps(prompt, steps), own, self._desk.agents.root
+            self._agent, self._with_notes(prompt, steps, notes), own, self._desk.agents.root
         )
         async for event in self._desk.agents.launcher.converse(turn_id, launch):
-            # Only a completed turn surely delivered the note; otherwise the next prompt repeats it.
+            # Only a completed turn surely delivered the notes; otherwise the next prompt repeats
+            # them. Notes told during the turn wait for the next.
             if isinstance(event, TurnFinished) and event.reason == "completed":
                 self._told = steps
+                del self._notes[: len(notes)]
             yield event
 
-    def _with_steps(self, prompt: str, steps: tuple[str, ...]) -> str:
-        """``prompt``, after a note of ``steps`` if the planner hasn't heard them."""
-        if steps == self._told:
-            return prompt
-        return f"{steps_note(steps)}\n\n{prompt}"
+    def _with_notes(self, prompt: str, steps: tuple[str, ...], notes: tuple[str, ...]) -> str:
+        """``prompt``, after a note of ``steps`` if the planner hasn't heard them, and then
+        ``notes``."""
+        heard = () if steps == self._told else (steps_note(steps),)
+        return "\n\n".join((*heard, *notes, prompt))
 
     async def handle(self, tool: str, arguments: dict[str, Any]) -> Reply:
         role = self._desk.agents.roles[PLANNER]

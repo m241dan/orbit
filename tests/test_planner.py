@@ -296,6 +296,35 @@ async def test_the_planner_hears_the_steps_again_after_a_cancelled_turn() -> Non
     assert again == f"{steps_note(('Ruff lint',))}\n\nAgain."
 
 
+async def test_the_planner_hears_what_it_was_told_once_after_the_steps() -> None:
+    chat, launcher, _ = steps_chat(chats, chats)
+    chat.tell("Record moved.")
+    first = await turn(chat, launcher, "Plan.")
+    assert first == f"{steps_note(('Ruff lint',))}\n\nRecord moved.\n\nPlan."
+    assert await turn(chat, launcher, "More.") == "More."
+
+
+async def test_the_planner_hears_again_what_a_turn_that_ended_in_error_was_told() -> None:
+    chat, launcher, _ = steps_chat(chats, errs, chats)
+    await turn(chat, launcher, "Plan.")
+    chat.tell("Record moved.")
+    await turn(chat, launcher, "Go.")
+    assert await turn(chat, launcher, "Again.") == "Record moved.\n\nAgain."
+
+
+async def test_what_the_planner_is_told_during_a_turn_waits_for_the_next() -> None:
+    told: list[PlannerChat] = []
+
+    async def tells_meanwhile(call: Call) -> TurnEndReason:
+        told[0].tell("Record moved.")
+        return "completed"
+
+    chat, launcher, _ = steps_chat(tells_meanwhile, chats)
+    told.append(chat)
+    await turn(chat, launcher, "Plan.")
+    assert await turn(chat, launcher, "More.") == "Record moved.\n\nMore."
+
+
 async def test_the_planners_agent_id_is_known_once_its_first_turn_opens_it() -> None:
     chat, launcher, _ = steps_chat(chats)
     assert chat.agent_id is None

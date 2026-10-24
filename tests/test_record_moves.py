@@ -4,12 +4,17 @@ orbit moves the record to the next free number in it and in the tasks still to c
 from collections.abc import Collection
 from typing import Any
 
-from orbit.protocol import AddTask, Event, Notice, RunTasks, TaskSpec, TurnEndReason
+from orbit.agent.domain.records import planner_note
+from orbit.protocol import PLANNER, AddTask, Event, Notice, RunTasks, TaskSpec, TurnEndReason
 from tests.agent_fakes import (
+    ROLES,
     Call,
     FakeTree,
+    ScriptedLauncher,
     board,
+    chats,
     gives_up,
+    plan,
     send,
     session_for,
     until_idle,
@@ -47,12 +52,26 @@ class Briefs:
 async def run(files: Files, *tasks: TaskSpec, **options: Any) -> tuple[Briefs, list[Event]]:
     """Run ``tasks`` with ``files`` listing the directories; the first task's agent's brief
     and every event until the work lane goes idle."""
+    agent, events, _ = await run_then_plan(files, *tasks, **options)
+    return agent, events
+
+
+async def run_then_plan(
+    files: Files, *tasks: TaskSpec, **options: Any
+) -> tuple[Briefs, list[Event], ScriptedLauncher]:
+    """Run ``tasks`` as :func:`run` does, with the session's launcher, which plays a planner
+    that chats."""
     agent = Briefs()
-    session, _, _ = session_for(agent, gives_up, file_names=files, **options)
+    session, _, launcher = session_for(agent, gives_up, file_names=files, **options)
+    launcher.planner_turns = [chats, chats]
     for task in tasks:
         await send(session, AddTask(task=task))
     await send(session, RunTasks())
-    return agent, await until_idle(session)
+    events = await until_idle(session)
+    if PLANNER in options.get("roles", ROLES):
+        await plan(session, "Revise the plan.")
+        await plan(session, "And again.")
+    return agent, events, launcher
 
 
 async def test_a_record_whose_number_was_taken_moves_in_its_task_and_those_to_come() -> None:
@@ -85,3 +104,17 @@ async def test_a_task_naming_no_record_lists_nothing() -> None:
     files = Files({})
     await run(files, TaskSpec(prompt="Add a flag."), tree=FakeTree())
     assert files.asked == []
+
+
+async def test_the_planner_hears_of_a_moved_record_on_its_next_turn_only() -> None:
+    files = Files({"/work/coder/docs": TAKEN})
+    _, _, launcher = await run_then_plan(files, WRITE, tree=FakeTree())
+    first, second = (launch.prompt for launch in launcher.launches[-2:])
+    assert first.endswith(f"{planner_note(OLD, NEW)}\n\nRevise the plan.")
+    assert second == "And again."
+
+
+async def test_a_record_moves_in_a_session_without_a_planner() -> None:
+    roles = {name: role for name, role in ROLES.items() if name != PLANNER}
+    agent, _ = await run(Files({"/work/coder/docs": TAKEN}), WRITE, tree=FakeTree(), roles=roles)
+    assert NEW in agent.briefs[0]

@@ -464,7 +464,9 @@ class WorkspaceHost:
         if self._desk is None:
             return None
         tracing = TaskTracing(self.telemetry, self._workspace_id, lambda: self._keeper.id)
-        beside = Beside(self._lane, self._startup, self._gate, self._coders, tracing)
+        beside = Beside(
+            self._lane, self._startup, self._gate, self._coders, tracing, self._seat.tell
+        )
         return WorkLane(self._desk, self._tasks, self._verifier, beside)
 
     def _startup_check(

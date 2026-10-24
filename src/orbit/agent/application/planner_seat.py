@@ -88,6 +88,11 @@ class PlannerSeat:
             return None
         return PlannerChat(self._desk, self._tasks, self._hooks.step_names)
 
+    def tell(self, note: str) -> None:
+        """Have the planner, if there is one, hear ``note`` ahead of its next prompt."""
+        if self._planner is not None:
+            self._planner.tell(note)
+
     async def submit(self, text: str, settings: Settings) -> None:
         """Start a turn of the planner's conversation on ``text`` with ``settings``, in its
         own lane; refused without a planner, while it answers, or once saving the session halted

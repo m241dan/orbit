@@ -8,7 +8,7 @@ session halts.
 """
 
 import asyncio
-from collections.abc import Collection, Coroutine
+from collections.abc import Callable, Collection, Coroutine
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any, Literal
@@ -33,6 +33,7 @@ from orbit.agent.domain.endings import (
     WORK_GONE,
     gave_up,
 )
+from orbit.agent.domain.records import planner_note
 from orbit.agent.domain.roles import CODER_ROLES
 from orbit.agent.domain.usage_limits import FIX_ERROR_NOTE, limit_hit
 from orbit.agent.domain.verification import FallbackFixes, failure_reason, fix_prompt
@@ -51,18 +52,25 @@ RunEnd = Literal["finished", "cancelled", "limited", "fix_failed"]
 limit, or a fix ended in error."""
 
 
+def _unheard(note: str) -> None:
+    """Tell no one ``note``."""
+
+
 @dataclass(frozen=True)
 class Beside:
     """What runs beside the work lane: the review lane, if any, and the startup check, if any,
     whose panel each task takes over; the session's ``gate``, which stops a run halted before
     its next task; its seat at the ``coders``' slots, if any, which a coder's or
-    configurator's task takes one of before it starts; and the ``tracing`` of its tasks."""
+    configurator's task takes one of before it starts; the ``tracing`` of its tasks; and
+    ``tell_planner``, which has the session's planner hear a note, such as of a record that
+    moved, ahead of its next prompt."""
 
     review: ReviewLane | None = None
     startup: StartupCheck | None = None
     gate: SessionGate = OPEN_GATE
     coders: CoderSeat | None = None
     tracing: TaskTracing = field(default_factory=TaskTracing)
+    tell_planner: Callable[[str], None] = _unheard
 
 
 class WorkLane:
@@ -95,6 +103,7 @@ class WorkLane:
         self._gate = beside.gate
         self._coders = beside.coders
         self._tracing = beside.tracing
+        self._tell_planner = beside.tell_planner
         self._seated = False  # The run holds a coder's slot, for the task about to run or running.
         # Task id -> the commit it merged into the base, until reported.
         self._landed: dict[str, str] = {}
@@ -432,10 +441,13 @@ class WorkLane:
 
     async def _move_records(self, task_id: str, root: str) -> None:
         """Move each record task ``task_id`` names whose number another record at ``root``
-        took, when the files there can be listed."""
+        took, when the files there can be listed, and tell the planner where each went."""
         names = self._desk.agents.file_names
-        if names is not None:
-            await move_records(self._tasks, task_id, root, names, self._publish)
+        if names is None:
+            return
+        moves = await move_records(self._tasks, task_id, root, names, self._publish)
+        for old, new in moves.items():
+            self._tell_planner(planner_note(old, new))
 
     async def _holds_fixed_work(self, task_id: str) -> bool:
         """Whether the coder's tree, if there is one, still holds the work task ``task_id``

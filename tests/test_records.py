@@ -1,4 +1,9 @@
-from orbit.agent.domain.records import moved_records, record_directories, renumbered
+from orbit.agent.domain.records import (
+    moved_records,
+    planner_note,
+    record_directories,
+    renumbered,
+)
 
 CREATE = "Create `docs/00024-feature-metrics.md` with exactly the text below."
 DOCS = ("00023-bugfix-pause.md", "00024-bugfix-review-loop.md", "protocol.md")
@@ -65,3 +70,17 @@ def test_renumbered_leaves_a_longer_path_that_ends_the_same() -> None:
     moves = {"docs/00024-feature-metrics.md": "docs/00025-feature-metrics.md"}
     text = "old/docs/00024-feature-metrics.md and mydocs/00024-feature-metrics.md"
     assert renumbered(text, moves) == text
+
+
+def test_a_record_already_written_under_another_number_is_named_by_that_one() -> None:
+    listing = (*DOCS, "00025-feature-metrics.md")
+    assert moved_records(CREATE, {"docs": listing}) == {
+        "docs/00024-feature-metrics.md": "docs/00025-feature-metrics.md"
+    }
+
+
+def test_the_planner_is_told_to_name_a_moved_record_by_its_new_path() -> None:
+    assert planner_note("docs/00024-a.md", "docs/00025-a.md") == (
+        "Another record took the number of `docs/00024-a.md`, so orbit renamed it "
+        "`docs/00025-a.md` in the tasks still to come. Name it `docs/00025-a.md` from now on."
+    )
