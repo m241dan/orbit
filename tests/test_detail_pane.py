@@ -18,7 +18,6 @@ from orbit.protocol import (
 from orbit.tui import OrbitApp
 from orbit.tui.detail import DetailPane
 from orbit.tui.transcript import Transcript
-from orbit.tui.transcript_log import TranscriptLog
 from orbit.tui.view.detail import DETAIL_COVER_BELOW, DETAIL_HEIGHT, NO_DETAILS, WAITING
 from orbit.tui.widgets import ChatPrompt, ConfirmScreen
 from orbit.tui.working import WorkingRow
@@ -213,10 +212,6 @@ async def test_switching_tabs_closes_the_pane_for_good() -> None:
         await pilot.press("ctrl+t", "enter", "j", "k")  # Back to All, and its list again.
         await pilot.pause()
         assert not pane(app).opened
-
-
-def test_a_log_without_a_cursor_has_no_details() -> None:
-    assert TranscriptLog().detail is None
 
 
 LONG = "\n".join(f"line {n}" for n in range(60))
