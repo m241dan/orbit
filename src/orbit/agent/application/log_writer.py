@@ -6,21 +6,10 @@ from dataclasses import dataclass
 
 from orbit.agent.application.failures import ReportedOnce, outcome, unexpected
 from orbit.agent.application.ports import EventLog, Fallback, Publish, StoreFailed
-from orbit.agent.domain.replay import LogBounds
+from orbit.agent.domain.replay import LogBounds, in_order, latest, pending_bounds
 from orbit.agent.domain.storage import trim_target
 from orbit.agent.domain.storage_halt import SeqSpan, lost_spans
 from orbit.protocol import SAVE_FAILED, EventEnvelope
-
-
-def _in_order(envelopes: Sequence[EventEnvelope]) -> list[EventEnvelope]:
-    """``envelopes`` by ``seq``, oldest first, each ``seq`` once."""
-    by_seq = {envelope.seq: envelope for envelope in envelopes}
-    return [by_seq[seq] for seq in sorted(by_seq)]
-
-
-def _latest(envelopes: Sequence[EventEnvelope], limit: int) -> list[EventEnvelope]:
-    """The last ``limit`` of ``envelopes``, which are in order."""
-    return list(envelopes[max(0, len(envelopes) - limit) :])
 
 
 def _by_session(queued: Sequence[tuple[str, EventEnvelope]]) -> dict[str, list[EventEnvelope]]:
@@ -59,34 +48,6 @@ class Overflow:
 
 
 _NO_OVERFLOW = Overflow()
-
-
-def _with_pending(
-    bounds: LogBounds,
-    session_id: str,
-    since: int,
-    pending: Sequence[tuple[str, EventEnvelope]],
-) -> LogBounds:
-    """``bounds`` of the log of the session ``session_id``, for a frontend that saw the events up
-    to ``since``, moved to take in the envelopes ``pending``, each with its session's id, as
-    though they were logged."""
-    own = [envelope.seq for session, envelope in pending if session == session_id]
-    others = [envelope.seq for session, envelope in pending if session != session_id]
-    return LogBounds(
-        first_seq=min([*_listed(bounds.first_seq), *own], default=None),
-        others_seq=max([bounds.others_seq, *others]),
-        own_seq=max([*_listed(bounds.own_seq), *_up_to(own, since)], default=None),
-    )
-
-
-def _listed(seq: int | None) -> list[int]:
-    """``seq`` alone, or nothing when it's ``None``."""
-    return [] if seq is None else [seq]
-
-
-def _up_to(seqs: Sequence[int], since: int) -> list[int]:
-    """Those of ``seqs`` at or before ``since``."""
-    return [seq for seq in seqs if seq <= since]
 
 
 class LogWriter:
@@ -173,7 +134,7 @@ class LogWriter:
         # was still to be written before it, and one added meanwhile is still to be written.
         before = self._unwritten(session_id)
         logged = await self._log.recent(session_id, limit)
-        return _latest(_in_order([*logged, *before, *self._unwritten(session_id)]), limit)
+        return latest(in_order([*logged, *before, *self._unwritten(session_id)]), limit)
 
     async def before(
         self, session_id: str, before_seq: int, limit: int
@@ -184,9 +145,9 @@ class LogWriter:
         # Read on both sides of the log's read, as recent does.
         pending = self._unwritten(session_id)
         logged, more = await self._log.before(session_id, before_seq, limit)
-        found = _in_order([*logged, *pending, *self._unwritten(session_id)])
+        found = in_order([*logged, *pending, *self._unwritten(session_id)])
         earlier = [envelope for envelope in found if envelope.seq < before_seq]
-        return _latest(earlier, limit), more or len(earlier) > limit
+        return latest(earlier, limit), more or len(earlier) > limit
 
     async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope]:
         """The events of the session ``session_id`` after ``after_seq``, oldest first, logged or
@@ -194,7 +155,7 @@ class LogWriter:
         # Read on both sides of the log's read, as recent does.
         pending = self._unwritten(session_id)
         logged = await self._log.after(session_id, after_seq)
-        found = _in_order([*logged, *pending, *self._unwritten(session_id)])
+        found = in_order([*logged, *pending, *self._unwritten(session_id)])
         return [envelope for envelope in found if envelope.seq > after_seq]
 
     async def bounds(self, session_id: str, since: int) -> LogBounds:
@@ -204,7 +165,7 @@ class LogWriter:
         # Read on both sides of the log's read, as recent does.
         pending = self._pending()
         logged = await self._log.bounds(session_id, since)
-        return _with_pending(logged, session_id, since, [*pending, *self._pending()])
+        return pending_bounds(logged, session_id, since, [*pending, *self._pending()])
 
     async def trimmed(self, session_id: str) -> bool:
         """Whether events of the session ``session_id`` were trimmed from the log. Raises
@@ -233,7 +194,7 @@ class LogWriter:
         if session_id not in self._places:
             async with self._diverting:
                 self._places[session_id] = await self._to_fallback(session_id, [])
-        return _in_order([envelope for _, envelope in self._diverted]), self._places[session_id]
+        return in_order([envelope for _, envelope in self._diverted]), self._places[session_id]
 
     async def resume(self) -> list[SeqSpan] | StoreFailed:
         """Append to the log again, once stopped: the envelopes the fallback took, then those
@@ -283,7 +244,7 @@ class LogWriter:
         """Append ``queued`` to the log by ``seq``, one append per session; returns the error
         of the first that fails."""
         for session_id, envelopes in _by_session(queued).items():
-            error = await outcome(self._log.append(session_id, _in_order(envelopes)))
+            error = await outcome(self._log.append(session_id, in_order(envelopes)))
             if isinstance(error, StoreFailed):
                 return error
         return None

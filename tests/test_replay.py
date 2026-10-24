@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from orbit.agent import ControlPlane, WorkspaceHost
-from orbit.agent.domain.replay import LogBounds, can_replay
+from orbit.agent.domain.replay import LogBounds, can_replay, in_order, latest, pending_bounds
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
     PROTOCOL_VERSION,
@@ -70,6 +70,54 @@ def test_a_frontend_catches_up_on_the_open_sessions_events_alone(
 )
 def test_a_frontend_cant_catch_up_otherwise(since: int, bounds: LogBounds) -> None:
     assert not can_replay(since, 20, bounds)
+
+
+# Taking in what's still to be written
+
+BOUNDS = LogBounds(first_seq=10, others_seq=12, own_seq=14)
+
+
+def test_nothing_pending_leaves_the_bounds_as_given() -> None:
+    assert pending_bounds(BOUNDS, OPEN, 15, []) == BOUNDS
+
+
+def test_the_sessions_own_pending_lower_its_first_seq_and_raise_its_own_up_to_since() -> None:
+    pending = [(OPEN, notice(seq, OPEN)) for seq in (8, 15, 17)]
+
+    assert pending_bounds(BOUNDS, OPEN, 15, pending) == LogBounds(
+        first_seq=8, others_seq=12, own_seq=15
+    )
+
+
+def test_its_own_pending_after_since_leave_its_own_seq_as_logged() -> None:
+    pending = [(OPEN, notice(seq, OPEN)) for seq in (16, 17)]
+    assert pending_bounds(BOUNDS, OPEN, 15, pending) == BOUNDS
+
+
+def test_another_sessions_pending_raise_others_seq() -> None:
+    pending = [("other", notice(seq, "other")) for seq in (11, 16)]
+
+    assert pending_bounds(BOUNDS, OPEN, 15, pending) == LogBounds(
+        first_seq=10, others_seq=16, own_seq=14
+    )
+
+
+def test_a_session_with_nothing_logged_gets_its_first_seq_from_its_pending() -> None:
+    empty = LogBounds(first_seq=None, others_seq=0, own_seq=None)
+    pending = [(OPEN, notice(seq, OPEN)) for seq in (3, 4)]
+
+    assert pending_bounds(empty, OPEN, 15, pending) == LogBounds(
+        first_seq=3, others_seq=0, own_seq=4
+    )
+
+
+def test_envelopes_in_order_are_by_seq_each_once() -> None:
+    assert in_order([notice(3, OPEN), notice(1, OPEN), notice(3, OPEN)]) == notices(1, 4)[::2]
+
+
+def test_the_latest_are_the_last_up_to_the_limit() -> None:
+    assert latest(notices(1, 6), 2) == notices(4, 6)
+    assert latest(notices(1, 3), 5) == notices(1, 3)
 
 
 # What the session sends
