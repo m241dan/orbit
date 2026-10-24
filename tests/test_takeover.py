@@ -52,6 +52,7 @@ from tests.agent_fakes import (
     commands_of,
     events_until,
     greeted,
+    halt_of,
     idle,
     lane_of,
     no_steps,
@@ -573,7 +574,7 @@ async def test_the_queued_work_does_not_start_once_recovering_on_taking_over_hal
     lock, sessions = FakeLock(), list[WorkspaceHost]()
 
     async def halts() -> Sequence[str]:
-        sessions[0]._halt.fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))
+        halt_of(sessions[0]).fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))
         return ()
 
     session, _, launcher = session_for(

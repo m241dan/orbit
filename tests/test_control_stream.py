@@ -41,6 +41,7 @@ from tests.agent_fakes import (
     ScriptedLauncher,
     board_of,
     claims_done,
+    publish,
     settled,
 )
 from tests.connection_helpers import joined, say, taken
@@ -193,7 +194,7 @@ async def test_watchers_are_told_the_agents_already_running_as_they_start_watchi
     a = workspace("a")
     plane = plane_of(a)
     in_a = await joined(plane, host=a)
-    await a._events.put(AgentStarted(agent_id="agent-7", role="planner", task_id="plan"))
+    await publish(a, AgentStarted(agent_id="agent-7", role="planner", task_id="plan"))
     watcher = await welcomed(plane)
 
     await say(watcher, "watch", WATCH)
@@ -213,7 +214,7 @@ async def test_an_exit_of_an_agent_never_started_tells_nothing() -> None:
     await say(watcher, "watch", WATCH)
     taken(watcher)
 
-    await a._events.put(AgentExited(agent_id="agent-9", reason="finished"))
+    await publish(a, AgentExited(agent_id="agent-9", reason="finished"))
 
     assert told(watcher, AgentsChanged) == []
     await plane.close()

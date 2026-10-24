@@ -429,7 +429,7 @@ async def test_a_review_ending_while_halted_starts_no_work_on_its_fixes() -> Non
         await call("get_task")
         await call("suggest_task", title="Add tests", prompt="Please add tests.")
         await call("complete_task", summary="Reviewed")
-        sessions[0]._halt.fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))
+        halt_of(sessions[0]).fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))
         return "completed"
 
     session, _, launcher = session_for(
