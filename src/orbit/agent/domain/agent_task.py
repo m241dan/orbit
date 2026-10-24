@@ -46,6 +46,14 @@ NO_SUGGESTIONS = "Orbit isn't taking suggestions."
 NO_CHECK_PROPOSALS = "Orbit isn't taking check proposals."
 
 
+def visible_steps(
+    steps: Sequence[VerificationStep], *, verify: bool
+) -> tuple[VerificationStep, ...]:
+    """The configured ``steps`` an agent is told of and may run: all of them if its work is
+    verified (``verify``), else none, since no step will verify it."""
+    return tuple(steps) if verify else ()
+
+
 def unknown_step(names: Sequence[str]) -> str:
     """The refusal of a check run naming no step, listing the step ``names`` there are."""
     return f"No step by that name; the steps are: {step_list(names)}."

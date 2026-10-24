@@ -8,6 +8,7 @@ from orbit.agent.domain.agent_task import (
     Limits,
     invalid_proposal,
     unknown_step,
+    visible_steps,
 )
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import TaskSpec
@@ -231,6 +232,15 @@ def test_an_unknown_step_is_refused_with_the_steps_there_are() -> None:
     assert unknown_step(("Ruff lint", "Unit tests")) == (
         "No step by that name; the steps are: `Ruff lint`, `Unit tests`."
     )
+
+
+def test_a_verified_agent_sees_every_step() -> None:
+    lint = VerificationStep(name="Ruff lint", command=("ruff",))
+    assert visible_steps([lint, STEP], verify=True) == (lint, STEP)
+
+
+def test_an_unverified_agent_sees_no_steps() -> None:
+    assert visible_steps([STEP], verify=False) == ()
 
 
 def test_an_invalid_proposal_is_refused_with_why() -> None:

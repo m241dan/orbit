@@ -31,6 +31,7 @@ from orbit.agent.domain.agent_task import (
     AgentTask,
     invalid_proposal,
     unknown_step,
+    visible_steps,
 )
 from orbit.agent.domain.agents import Agent, bootstrap_prompt
 from orbit.agent.domain.board import TaskBoard
@@ -369,10 +370,14 @@ class AgentRun:
 
     # Tools
 
+    def _visible_steps(self) -> tuple[VerificationStep, ...]:
+        """The steps this agent is told of and may run."""
+        if self._verifier is None:
+            return ()
+        return visible_steps(self._verifier.verification.steps, verify=self.role.verify)
+
     async def _get_task(self, arguments: dict[str, Any]) -> Reply:
-        steps: list[str] = []
-        if self._verifier is not None and self.role.verify:
-            steps = [step.name for step in self._verifier.verification.steps]
+        steps = [step.name for step in self._visible_steps()]
         return Reply(self._work.get_task(steps, self.role.runs_checks))
 
     async def _complete_task(self, arguments: dict[str, Any]) -> Reply:
@@ -385,9 +390,9 @@ class AgentRun:
         return await asyncio.shield(answer)
 
     async def _run_check(self, arguments: dict[str, Any]) -> Reply:
-        if self._verifier is None:
+        steps = {step.name: step for step in self._visible_steps()}
+        if not steps:
             return Reply(NO_STEPS, is_error=True)
-        steps = {step.name: step for step in self._verifier.verification.steps}
         step = steps.get(str(arguments.get("step", "")))
         if step is None:
             return Reply(unknown_step(tuple(steps)), is_error=True)

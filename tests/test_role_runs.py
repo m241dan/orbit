@@ -2,6 +2,7 @@
 
 import asyncio
 
+from orbit.agent.domain.agent_task import NO_STEPS
 from orbit.protocol import (
     NOT_CONFIGURED,
     TIMED_OUT,
@@ -51,6 +52,27 @@ async def test_an_unverified_agent_is_told_no_checks() -> None:
     session, _, _ = session_for(verification=verified(Steps()), reviewers=(reviews,))
     await asyncio.wait_for(run(session, TaskSpec(prompt="Review", role="reviewer")), 5)
     assert "Unit tests" not in briefs[0] and "run_check" not in briefs[0]
+
+
+async def test_an_unverified_agent_that_may_run_checks_is_told_and_given_none() -> None:
+    replies: list[str] = []
+
+    async def checks(call: Call) -> TurnEndReason:
+        replies.append((await call("get_task")).text)
+        refused = await call("run_check", step="Unit tests")
+        assert refused.is_error
+        replies.append(refused.text)
+        await call("complete_task", summary="done")
+        return "completed"
+
+    role = ROLES["coder"].model_copy(update={"verify": False})
+    steps = Steps()
+    session, _, _ = session_for(
+        checks, verification=verified(steps), roles={**ROLES, "coder": role}
+    )
+    await asyncio.wait_for(run(session), 5)
+    assert "Unit tests" not in replies[0] and "run_check" not in replies[0]
+    assert replies[1] == NO_STEPS and steps.runs == []
 
 
 async def test_tools_outside_the_role_are_refused_and_unverified_roles_finish_on_their_claim() -> (
