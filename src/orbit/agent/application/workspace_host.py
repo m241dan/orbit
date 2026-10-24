@@ -77,6 +77,7 @@ from orbit.agent.domain.catalog import workspace_entry
 from orbit.agent.domain.ownership import WorkspaceOwner, queued_dropped_note, read_only_note
 from orbit.agent.domain.refusals import STOPPING, Refused
 from orbit.agent.domain.reviews import ReviewPlanner
+from orbit.agent.domain.roles import role_task
 from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
@@ -496,10 +497,10 @@ class WorkspaceHost:
     async def _add_startup_fix(self, step: VerificationStep, output: str) -> None:
         """Add a draft task to fix ``step``, which failed at startup with ``output``, to the
         session open once no switch is under way."""
-        settings = Settings()
+        prompt = startup_fix_prompt(step, output)
+        task = TaskSpec(prompt=prompt, settings=Settings())
         if self._desk is not None:
-            settings = self._desk.agents.roles[CODER].settings
-        task = TaskSpec(prompt=startup_fix_prompt(step, output), settings=settings)
+            task = role_task(CODER, self._desk.agents.roles[CODER], prompt)
         await self._switcher.between_switches(
             lambda: self._tasks.change(lambda board: board.add_draft(task))
         )

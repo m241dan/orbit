@@ -9,6 +9,7 @@ from orbit.agent.application import workspace_host as session_module
 from orbit.agent.application.ports import TreeFailed
 from orbit.agent.application.startup_check import CANCELLED_NOTE, CheckSite, StartupCheck
 from orbit.protocol import (
+    CODER,
     GIT_FAILED,
     INTERNAL,
     PLANNER,
@@ -20,6 +21,7 @@ from orbit.protocol import (
     Event,
     Notice,
     SendMessage,
+    Settings,
     StartupChecked,
     StepState,
     TaskStarted,
@@ -29,6 +31,7 @@ from orbit.protocol import (
 from tests.agent_fakes import (
     ACCEPTED,
     LINT,
+    ROLES,
     STEP,
     Call,
     FakeTree,
@@ -92,7 +95,13 @@ async def test_the_steps_run_in_a_set_up_snapshot_of_the_base_and_pass() -> None
 async def test_a_failing_step_adds_a_draft_task_to_fix_it() -> None:
     steps = Steps(False)
     tree = FakeTree()
-    session, _, _ = session_for(verification=checked(steps), tree=tree, check_at_startup=True)
+    coder = ROLES[CODER].model_copy(update={"model": "sonnet"})
+    session, _, _ = session_for(
+        verification=checked(steps),
+        tree=tree,
+        check_at_startup=True,
+        roles={**ROLES, CODER: coder},
+    )
 
     events = await until_checked(session)
 
@@ -103,7 +112,8 @@ async def test_a_failing_step_adds_a_draft_task_to_fix_it() -> None:
     assert draft.status == "draft"
     assert draft.task.prompt.splitlines()[0] == "Fix failing check: Lint"
     assert "ruff check" in draft.task.prompt and "1 test failed" in draft.task.prompt
-    assert draft.task.settings.tool_access == "full"  # The coder role's.
+    assert draft.task.settings == coder.settings
+    assert draft.task.role == CODER
     assert AgentExited(agent_id="startup-check", reason="finished") in events
     await session.close()
 
@@ -133,7 +143,8 @@ async def test_without_agents_it_runs_in_the_workspace_given() -> None:
     assert steps.roots == ["/src/project", "/src/project"]
     assert StartupChecked(passed=False, step="Unit tests", output="1 test failed") in events
     # Without agents, the draft has the default settings.
-    assert board(events)[0].task.settings.tool_access == "restricted"
+    assert board(events)[0].task.settings == Settings()
+    assert board(events)[0].task.role == CODER
     await session.close()
 
 
