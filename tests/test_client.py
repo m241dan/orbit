@@ -4,6 +4,7 @@ import asyncio
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -323,22 +324,33 @@ async def test_a_lost_connection_waits_the_backoff_before_reconnecting() -> None
         await session.close()
 
 
+@dataclass(frozen=True)
+class CountingBackoff(Backoff):
+    """A backoff that records how many failures in a row each wait it gives is for."""
+
+    asked: list[int] = field(default_factory=list)
+
+    def delay(self, failures: int, chance: float) -> float:
+        self.asked.append(failures)
+        return super().delay(failures, chance)
+
+
 async def test_a_connection_that_received_something_resets_the_backoff() -> None:
     async with plane() as (fake, url):
         fake.hang_up = True
-        session, _ = client(url, backoff=Backoff(first=0.05, most=5, jitter=0))
+        backoff = CountingBackoff(first=0.001, most=5, jitter=0)
+        session, _ = client(url, backoff=backoff)
         events = session.events()
-        for _ in range(5):  # Waits of 0.05, 0.1, 0.2, 0.4 and 0.8 s; the next would be 1.6.
+        for _ in range(5):  # Each hung up at once, so the waits grow.
             await fake.connection()
         fake.hang_up = False
         working = await fake.connection()
         await working.send(event(1))
         await next_event(events)
-        lost = time.monotonic()
         await working.close(1011, "Oops")
         await fake.connection()
-        assert time.monotonic() - lost < 1
         await session.close()
+    assert backoff.asked == [0, 1, 2, 3, 4, 0]
 
 
 async def test_closing_while_waiting_the_backoff_stops_at_once() -> None:

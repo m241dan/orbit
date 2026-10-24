@@ -10,6 +10,7 @@ import sys
 import threading
 from collections import Counter
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -297,8 +298,8 @@ async def test_a_lock_being_taken_when_closed_is_free_once_both_finish(tmp_path:
 
 class CloseRecorder:
     """Stands in for ``os.close``, recording the inode of each descriptor it closes (``None``
-    for one that's not open) and holding the first close in the thread ``pause_in`` until told
-    to go on."""
+    for one that's not open) and holding the first close in a thread whose name starts with
+    ``pause_in``, if given, until told to go on."""
 
     def __init__(self, pause_in: str = "") -> None:
         self.closed: list[int | None] = []
@@ -312,10 +313,26 @@ class CloseRecorder:
             self.closed.append(os.fstat(fd).st_ino)
         except OSError:
             self.closed.append(None)
-        if threading.current_thread().name == self._pause_in and not self.paused.is_set():
+        thread = threading.current_thread().name
+        if self._pause_in and thread.startswith(self._pause_in) and not self.paused.is_set():
             self.paused.set()
             self.go.wait(timeout=5)
         self._close(fd)
+
+
+def release_in_thread(locks: SessionLocks) -> threading.Thread:
+    """A started thread releasing ``abc`` from ``locks`` in a loop of its own, whose worker
+    threads, where the release lets go of the lock, are named ``releaser_N``; the loop's own
+    thread, which closes descriptors of its own as it starts, isn't."""
+
+    async def release() -> None:
+        pool = ThreadPoolExecutor(thread_name_prefix="releaser")
+        asyncio.get_running_loop().set_default_executor(pool)
+        await locks.release("abc")
+
+    releaser = threading.Thread(target=asyncio.run, args=(release(),), name="release-loop")
+    releaser.start()
+    return releaser
 
 
 def close_in_thread(locks: SessionLocks, errors: list[BaseException]) -> threading.Thread:
@@ -365,7 +382,8 @@ async def test_closing_while_a_lock_is_let_go_closes_each_lock_once(
         patch.setattr(os, "close", recorder)
         patch.setattr(session_locks, "locked_dir", hook)
         closer = close_in_thread(locks, errors)
-        await asyncio.to_thread(recorder.paused.wait, 5)  # close() is mid-way through its locks.
+        # close() is mid-way through its locks.
+        assert await asyncio.to_thread(recorder.paused.wait, 5)
         releasing = asyncio.create_task(locks.release("abc"))
         await asyncio.to_thread(hook.entered.wait, 5)  # The release waits on close().
         recorder.go.set()
@@ -411,11 +429,9 @@ async def test_closing_while_a_release_lets_go_of_its_lock_waits_for_it(
     errors: list[BaseException] = []
     with monkeypatch.context() as patch:
         patch.setattr(os, "close", recorder)
-        releaser = threading.Thread(
-            target=asyncio.run, args=(locks.release("abc"),), name="releaser"
-        )
-        releaser.start()
-        await asyncio.to_thread(recorder.paused.wait, 5)  # The release is closing its lock.
+        releaser = release_in_thread(locks)
+        # The release is closing its lock.
+        assert await asyncio.to_thread(recorder.paused.wait, 5)
         closer = close_in_thread(locks, errors)
         recorder.go.set()
         await asyncio.to_thread(closer.join)
