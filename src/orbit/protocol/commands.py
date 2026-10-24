@@ -237,9 +237,9 @@ class RemoveWorkspace(_Message):
     envelope's ``workspace`` is ``null``. Refused with ``unknown`` for a workspace not served,
     ``busy`` while it runs work or another connection views one of its sessions, and
     ``invalid`` by a local orbit. With ``purge``, its records are deleted too: its sessions,
-    events, logs, review count, session locks, fallback files and registry entry, and, for a
-    clone orbit made, its directory; refused with ``invalid``, listing what would be lost and
-    removing nothing, while that clone holds work its remote doesn't."""
+    events, logs, review count, record moves, session locks, fallback files and registry entry,
+    and, for a clone orbit made, its directory; refused with ``invalid``, listing what would be
+    lost and removing nothing, while that clone holds work its remote doesn't."""
 
     type: Literal["remove_workspace"] = "remove_workspace"
     workspace: str

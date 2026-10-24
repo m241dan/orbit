@@ -3,11 +3,14 @@ moving one whose number another record took by the time its task runs."""
 
 import re
 from collections.abc import Collection, Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from types import MappingProxyType
 
 # A relative path whose file name is a five-digit number, a dash and a name, ending in .md.
 _RECORD = re.compile(r"(?<![\w./-])((?:[\w.-]+/)*)(\d{5})-([\w.-]*?)\.md(?![\w-])")
 _NUMBERED = re.compile(r"(\d{5})-")
 _WIDTH = 5
+_NO_MOVES: Mapping[str, str] = MappingProxyType({})
 
 
 def record_directories(text: str) -> tuple[str, ...]:
@@ -22,29 +25,61 @@ def named_records(texts: Iterable[str]) -> tuple[str, ...]:
 
 
 def moved_records(
-    text: str, listings: Mapping[str, Collection[str]], named: Sequence[str] = ()
+    text: str,
+    listings: Mapping[str, Collection[str]],
+    named: Sequence[str] = (),
+    logged: Mapping[str, str] = _NO_MOVES,
 ) -> dict[str, str]:
     """The records ``text`` names that aren't written yet but whose number another record in
     their directory has, each mapped to its path there under another number, as when a task
     names a record by the number it had before it moved: the one it's written under; or else
-    the last of ``named``, the records other tasks name, that names it under a number no other
-    record has; or else the next free one, one above the highest. ``listings`` holds the file
-    names in each directory, by directory."""
+    where the moves ``logged`` (each old path mapped to its new one) take it, followed to the
+    last, under a number no other record has; or else the last of ``named``, the records other
+    tasks name, that names it under such a number; or else the next free one, one above the
+    highest. ``listings`` holds the file names in each directory, by directory."""
     moves: dict[str, str] = {}
     highest = {name: _highest(files) for name, files in listings.items()}
     for match in _RECORD.finditer(text):
         files = listings.get(_directory(match), ())
         if match[0] not in moves and _clashes(match, files):
-            moves[match[0]] = _new_path(match, files, named, highest)
+            moves[match[0]] = _new_path(match, files, _Known(named, logged), highest)
     return moves
 
 
+@dataclass(frozen=True)
+class _Known:
+    """Where records went that the files don't show: the records other tasks have ``named``,
+    and the moves ``logged``."""
+
+    named: Sequence[str]
+    logged: Mapping[str, str]
+
+
 def _new_path(
-    record: re.Match[str], files: Collection[str], named: Sequence[str], highest: dict[str, int]
+    record: re.Match[str], files: Collection[str], known: _Known, highest: dict[str, int]
 ) -> str:
     """Where ``record`` goes, as :func:`moved_records` says."""
-    known = _written(record, files) or _planned(record, named, files)
-    return known or _next_path(record, highest)
+    found = (
+        _written(record, files)
+        or _followed(record, known.logged, files)
+        or _planned(record, known.named, files)
+    )
+    return found or _next_path(record, highest)
+
+
+def _followed(
+    record: re.Match[str], logged: Mapping[str, str], files: Collection[str]
+) -> str | None:
+    """Where the moves ``logged`` take ``record``, followed until they end or would come back
+    around, if that's elsewhere under a number none of ``files`` has."""
+    path, seen = record[0], {record[0]}
+    while path in logged and logged[path] not in seen:
+        path = logged[path]
+        seen.add(path)
+    other = _RECORD.fullmatch(path)
+    if other is None or path == record[0] or _taken(other[2], files):
+        return None
+    return path
 
 
 def _directory(record: re.Match[str]) -> str:

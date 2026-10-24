@@ -39,6 +39,7 @@ from orbit.agent.application.ports import (
     UsageLedger,
 )
 from orbit.agent.application.proposals import FrontendReview
+from orbit.agent.application.record_moves import MoveHooks, RecordMoves
 from orbit.agent.application.review_count import ReviewCount
 from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
 from orbit.agent.application.session_state import SessionStates, StateParts
@@ -308,6 +309,7 @@ class WorkspaceHost:
         self._coders = CoderSeat(lambda: self.coder_slots, workspace_id, lambda: self._keeper.id)
         hooks = SeatHooks(self._save, self._keeper.use, self._step_names, self._halt.check)
         self._seat = PlannerSeat(self._desk, self._tasks, self._events, hooks)
+        self._record_moves = self._moves_kept_in(store)
         self._startup = self._startup_check(
             verification, check_at_startup and not self._takeover.read_only
         )
@@ -325,11 +327,12 @@ class WorkspaceHost:
 
     def _storage_resume(self) -> StorageResume:
         """What resumes the session once storage works again: it retries the session record,
-        the review count and the usage, then appends to the event log again."""
+        the review count, the usage and the record moves, then appends to the event log
+        again."""
         parts = ResumeParts(
             self._keeper,
             self._switcher.contents,
-            (self._review_count, self._usage),
+            (self._review_count, self._usage, self._record_moves),
             self._events,
             self._turns,
             self._restart_background,
@@ -460,12 +463,19 @@ class WorkspaceHost:
         )
         return WorkTurns(parts)
 
+    def _moves_kept_in(self, store: SessionStore | None) -> RecordMoves:
+        """What moves the records tasks name whose numbers others took, keeping each move in
+        ``store``; records keep their numbers without agents that can list files."""
+        names = self._desk.agents.file_names if self._desk else None
+        hooks = MoveHooks(names, self._events.put, self._seat.tell)
+        return RecordMoves(self._tasks, store, self._halt, hooks)
+
     def _work_lane(self) -> WorkLane | None:
         if self._desk is None:
             return None
         tracing = TaskTracing(self.telemetry, self._workspace_id, lambda: self._keeper.id)
         beside = Beside(
-            self._lane, self._startup, self._gate, self._coders, tracing, self._seat.tell
+            self._lane, self._startup, self._gate, self._coders, tracing, self._record_moves
         )
         return WorkLane(self._desk, self._tasks, self._verifier, beside)
 

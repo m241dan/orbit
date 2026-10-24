@@ -235,6 +235,28 @@ async def test_an_opened_session_carries_on_its_planners_conversation() -> None:
     await session.close()
 
 
+async def test_an_opened_session_s_planner_hears_the_notes_it_was_saved_with() -> None:
+    session, launcher = switching(store_with(saved("auth", planner_notes=("Record moved.",))))
+    await opened(session, ActivateSession(session="auth"))
+    launcher.planner_turns = [chats]
+    await send(session, SendMessage(agent=PLANNER, text="Where were we?"))
+    await events_until(session, idle("planner"))
+    assert launcher.launches[-1].prompt.endswith("Record moved.\n\nWhere were we?")
+    await session.close()
+
+
+async def test_a_session_without_a_planner_keeps_the_notes_it_was_saved_with() -> None:
+    roles = {name: role for name, role in ROLES.items() if name != PLANNER}
+    store = store_with(saved("auth", planner_notes=("Record moved.",)))
+    session, _, _ = session_for(store=store, roles=roles)
+    await opened(session, ActivateSession(session="auth"))
+    await send(session, AddTask(task=TASK))
+    await events_until(session, of_type(TasksChanged))
+    await session.close()
+    assert store.last.id == "auth"
+    assert store.last.planner_notes == ("Record moved.",)
+
+
 async def test_an_opened_session_has_its_saved_settings() -> None:
     settings = Settings(model="opus", tool_access="full")
     session, _ = switching(store_with(saved("auth", settings=settings)))

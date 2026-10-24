@@ -16,7 +16,7 @@ import asyncio
 import logging
 import shutil
 import sqlite3
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -304,6 +304,14 @@ class SqliteStore:
         message = "Couldn't save the review count to"
         await self._or_raise(message, self._save_review_count, workspace, count, write=True)
 
+    async def record_moves(self, workspace: str) -> dict[str, str]:
+        message = "Couldn't read the record moves from"
+        return await self._or_raise(message, self._record_moves, workspace)
+
+    async def save_record_moves(self, workspace: str, moves: Mapping[str, str]) -> None:
+        message = "Couldn't save the record moves to"
+        await self._or_raise(message, self._save_record_moves, workspace, moves, write=True)
+
     async def record(self, row: UsageRow) -> None:
         message = f"Couldn't record the usage of a turn in the session {row.session_id} in"
         await self._or_raise(message, self._log(sqlite_usage.record), row, write=True)
@@ -546,6 +554,19 @@ class SqliteStore:
             (workspace, count),
         )
 
+    def _record_moves(self, workspace: str) -> dict[str, str]:
+        rows = self._db.execute(
+            "SELECT old_path, new_path FROM record_moves WHERE workspace_id = ?", (workspace,)
+        ).fetchall()
+        return {str(old): str(new) for old, new in rows}
+
+    def _save_record_moves(self, workspace: str, moves: Mapping[str, str]) -> None:
+        self._db.executemany(
+            """INSERT INTO record_moves (workspace_id, old_path, new_path) VALUES (?, ?, ?)
+            ON CONFLICT (workspace_id, old_path) DO UPDATE SET new_path = excluded.new_path""",
+            [(workspace, old, new) for old, new in moves.items()],
+        )
+
     def _listed(
         self, workspace: str, locks: SessionLocks, rows: list[tuple[str, str]]
     ) -> list[StoredSession]:
@@ -646,6 +667,12 @@ class WorkspaceStore:
 
     async def save_review_count(self, count: int) -> None:
         await self._store.save_review_count(self._id, count)
+
+    async def record_moves(self) -> dict[str, str]:
+        return await self._store.record_moves(self._id)
+
+    async def save_record_moves(self, moves: Mapping[str, str]) -> None:
+        await self._store.save_record_moves(self._id, moves)
 
     async def insert_new(
         self,

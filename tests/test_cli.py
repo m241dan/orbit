@@ -43,6 +43,7 @@ from orbit.agent.domain.ownership import read_only_note
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, default_name
 from orbit.agent.domain.usage import UsageUnavailable
+from orbit.agent.external.sqlite_schema import MIGRATIONS
 from orbit.cli import app
 from orbit.cli.backend import _Backend, _backend, _Directories, _in_process
 from orbit.cli.errors import _configured, _exit_on
@@ -532,7 +533,7 @@ def test_a_database_newer_than_orbit_stops_chat(
     result = runner.invoke(app, ["chat", "-C", str(tmp_path)])
 
     assert result.exit_code == 2
-    assert "has schema version 99, newer than this orbit's 8" in result.output
+    assert f"has schema version 99, newer than this orbit's {len(MIGRATIONS)}" in result.output
     assert launched == []
     assert store_threads() == []
 

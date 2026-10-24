@@ -134,3 +134,38 @@ def test_a_record_written_under_another_number_wins_over_what_tasks_name() -> No
     assert moved_records(STALE, {"docs": listing}, named) == {
         "docs/00024-feature-metrics.md": "docs/00025-feature-metrics.md"
     }
+
+
+LOGGED = {"docs/00024-feature-metrics.md": "docs/00031-feature-metrics.md"}
+
+
+def test_a_record_not_yet_written_follows_the_move_kept_for_it() -> None:
+    assert moved_records(STALE, {"docs": DOCS}, logged=LOGGED) == LOGGED
+
+
+def test_a_record_follows_each_move_kept_after_the_first() -> None:
+    logged = LOGGED | {"docs/00031-feature-metrics.md": "docs/00032-feature-metrics.md"}
+    assert moved_records(STALE, {"docs": DOCS}, logged=logged) == {
+        "docs/00024-feature-metrics.md": "docs/00032-feature-metrics.md"
+    }
+
+
+def test_moves_kept_in_a_loop_stop_before_coming_back_around() -> None:
+    logged = LOGGED | {"docs/00031-feature-metrics.md": "docs/00024-feature-metrics.md"}
+    assert moved_records(STALE, {"docs": DOCS}, logged=logged) == LOGGED
+
+
+def test_a_move_kept_to_a_number_another_record_has_is_passed_over() -> None:
+    logged = {"docs/00024-feature-metrics.md": "docs/00023-feature-metrics.md"}
+    assert moved_records(STALE, {"docs": DOCS}, logged=logged) == {
+        "docs/00024-feature-metrics.md": "docs/00025-feature-metrics.md"
+    }
+
+
+def test_a_move_kept_wins_over_what_tasks_name_and_a_written_record_over_both() -> None:
+    named = ("docs/00030-feature-metrics.md",)
+    assert moved_records(STALE, {"docs": DOCS}, named, LOGGED) == LOGGED
+    listing = (*DOCS, "00025-feature-metrics.md")
+    assert moved_records(STALE, {"docs": listing}, named, LOGGED) == {
+        "docs/00024-feature-metrics.md": "docs/00025-feature-metrics.md"
+    }

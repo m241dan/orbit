@@ -17,6 +17,8 @@ from tests.store_views import Opener, database, store_threads
 
 # Failures at open
 
+NEWER = rf"orbit\.db has schema version 99, newer than .* {len(MIGRATIONS)};"
+
 
 async def test_a_newer_database_is_refused_naming_both_versions(
     open_store: Opener, state: Path, workspace: Path
@@ -24,7 +26,7 @@ async def test_a_newer_database_is_refused_naming_both_versions(
     await (await open_store(workspace)).close()
     with database(state) as connection:
         connection.execute("INSERT INTO schema_version (version) VALUES (99)")
-    with pytest.raises(StoreError, match=r"orbit\.db has schema version 99, newer than .* 8;"):
+    with pytest.raises(StoreError, match=NEWER):
         await open_store(workspace)
     assert store_threads() == []
 
@@ -51,14 +53,7 @@ async def test_a_migration_applied_meanwhile_by_another_orbit_isnt_run_again(
     await open_store(workspace)
     with database(state) as connection:
         assert connection.execute("SELECT version FROM schema_version").fetchall() == [
-            (1,),
-            (2,),
-            (3,),
-            (4,),
-            (5,),
-            (6,),
-            (7,),
-            (8,),
+            (version,) for version in range(1, len(MIGRATIONS) + 1)
         ]
 
 
@@ -69,7 +64,7 @@ async def test_a_newer_version_written_meanwhile_is_refused(
         other.execute("INSERT INTO schema_version (version) VALUES (99)")
 
     racing(monkeypatch, state, newer)
-    with pytest.raises(StoreError, match=r"orbit\.db has schema version 99, newer than .* 8;"):
+    with pytest.raises(StoreError, match=NEWER):
         await open_store(workspace)
     with database(state) as connection:
         tables = connection.execute("SELECT name FROM sqlite_master WHERE name = 'workspaces'")
@@ -85,14 +80,7 @@ async def test_stores_opened_at_once_on_a_new_state_directory_both_open(
     await asyncio.gather(open_store(first), open_store(second))
     with database(state) as connection:
         assert connection.execute("SELECT version FROM schema_version").fetchall() == [
-            (1,),
-            (2,),
-            (3,),
-            (4,),
-            (5,),
-            (6,),
-            (7,),
-            (8,),
+            (version,) for version in range(1, len(MIGRATIONS) + 1)
         ]
         assert connection.execute("SELECT count(*) FROM workspaces").fetchone() == (2,)
 
@@ -131,10 +119,13 @@ async def test_a_failed_migration_is_rolled_back_and_refused(
     await (await open_store(workspace)).close()
     broken = (*MIGRATIONS, ("CREATE TABLE extra (x)", "NOT SQL"))
     monkeypatch.setattr(sqlite_schema, "MIGRATIONS", broken)
-    with pytest.raises(StoreError, match=r"upgrade the database .*orbit\.db to schema version 9"):
+    upgrade = rf"upgrade the database .*orbit\.db to schema version {len(MIGRATIONS) + 1}"
+    with pytest.raises(StoreError, match=upgrade):
         await open_store(workspace)
     with database(state) as connection:
-        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (8,)
+        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (
+            len(MIGRATIONS),
+        )
         tables = connection.execute("SELECT name FROM sqlite_master WHERE name = 'extra'")
         assert tables.fetchall() == []
 
@@ -207,7 +198,9 @@ async def test_a_version_4_database_upgrades_with_no_workspace_served(
     store = await SqliteStore.open(state)
     await store.close()
     with database(state) as connection:
-        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (8,)
+        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (
+            len(MIGRATIONS),
+        )
         assert connection.execute("SELECT path, served FROM workspaces").fetchall() == [
             (str(workspace), 0)
         ]
@@ -224,7 +217,9 @@ async def test_a_version_5_database_upgrades_to_6_with_no_workspace_managed(
     store = await SqliteStore.open(state)
     await store.close()
     with database(state) as connection:
-        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (8,)
+        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (
+            len(MIGRATIONS),
+        )
         assert connection.execute("SELECT path, managed FROM workspaces").fetchall() == [
             (str(workspace), 0)
         ]
@@ -241,7 +236,9 @@ async def test_a_version_6_database_upgrades_to_7_with_no_usage_recorded(
     store = await SqliteStore.open(state)
     await store.close()
     with database(state) as connection:
-        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (8,)
+        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (
+            len(MIGRATIONS),
+        )
         assert connection.execute("SELECT count(*) FROM usage").fetchone() == (0,)
         assert connection.execute("SELECT path FROM workspaces").fetchall() == [(str(workspace),)]
 
@@ -264,7 +261,9 @@ async def test_a_version_7_database_upgrades_to_8_stamping_the_served_workspaces
     await store.close()
     after = datetime.now(UTC)
     with database(state) as connection:
-        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (8,)
+        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (
+            len(MIGRATIONS),
+        )
         rows = dict(connection.execute("SELECT path, added_at FROM workspaces").fetchall())
     assert rows[str(other)] is None
     # The migration's time is to the millisecond.
@@ -273,6 +272,21 @@ async def test_a_version_7_database_upgrades_to_8_stamping_the_served_workspaces
         <= datetime.fromisoformat(rows[str(served)])
         <= after
     )
+
+
+async def test_a_version_8_database_upgrades_to_9_with_no_record_moved(
+    monkeypatch: pytest.MonkeyPatch, state: Path, workspace: Path
+) -> None:
+    with monkeypatch.context() as patched:
+        patched.setattr(sqlite_schema, "MIGRATIONS", MIGRATIONS[:8])
+        connection = sqlite_schema.open_database(state / "orbit.db")
+        register(connection, workspace.resolve(), None)
+        connection.close()
+    store = await SqliteStore.open(state)
+    await store.close()
+    with database(state) as connection:
+        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (9,)
+        assert connection.execute("SELECT count(*) FROM record_moves").fetchone() == (0,)
 
 
 # Transactions

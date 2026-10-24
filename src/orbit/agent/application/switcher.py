@@ -188,6 +188,7 @@ class SessionSwitcher:
             tasks=self._parts.tasks.board.tasks,
             reviews=lane.snapshot() if lane else self._kept_reviews,
             spent=self.spent,
+            planner_notes=self._parts.seat.notes,
         )
 
     async def save(self) -> None:
@@ -259,7 +260,7 @@ class SessionSwitcher:
         tasks = interrupted(record.tasks)[0]
         self.spent = record.spent
         self._settings.resume(record.settings)
-        self._hold(tasks, record.planner_conversation, record.reviews)
+        self._hold(tasks, record.planner_conversation, record.reviews, record.planner_notes)
 
     def _clear(self) -> None:
         """Hold what a new session does, keeping the settings and having spent nothing; refused
@@ -279,14 +280,15 @@ class SessionSwitcher:
         tasks: tuple[TaskState, ...],
         conversation: str | None,
         reviews: LaneSnapshot | None,
+        notes: tuple[str, ...] = (),
     ) -> None:
-        """Hold a session's ``tasks``, planner ``conversation`` and ``reviews``, with no fix
-        counts."""
+        """Hold a session's ``tasks``, planner ``conversation``, ``reviews`` and the ``notes``
+        its planner is still to hear, with no fix counts."""
         parts = self._parts
         self._replace_board(tasks)
         if parts.work is not None:
             parts.work.reset()
-        parts.seat.replace(conversation)
+        parts.seat.replace(conversation, notes)
         if parts.lane is not None:
             parts.lane.load(reviews or NO_REVIEWS)
         self._kept_reviews = reviews

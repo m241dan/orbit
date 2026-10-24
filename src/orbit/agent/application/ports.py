@@ -2,7 +2,7 @@
 :mod:`orbit.agent.external` (or tests) implement them; the CLI picks which.
 """
 
-from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import datetime
@@ -525,6 +525,18 @@ class SessionStore(EventLog, Protocol):
     async def save_review_count(self, count: int) -> None:
         """Save ``count`` as the commits since the last super review; raises
         :class:`StoreFailed`, a :class:`StorageFailed` when the database failed, when it can't."""
+        ...
+
+    async def record_moves(self) -> dict[str, str]:
+        """Where orbit moved each requirements record whose number another record took: each
+        path tasks named it by mapped to the path it moved to. Raises :class:`ReadFailed` when
+        they can't be read."""
+        ...
+
+    async def save_record_moves(self, moves: Mapping[str, str]) -> None:
+        """Keep ``moves``, each record's old path mapped to its new one, replacing a move kept
+        from the same old path; raises :class:`StoreFailed`, a :class:`StorageFailed` when the
+        database failed, when they can't be saved."""
         ...
 
 

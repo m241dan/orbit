@@ -98,6 +98,16 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         """UPDATE workspaces SET added_at = strftime('%Y-%m-%dT%H:%M:%f000+00:00', 'now')
         WHERE served""",
     ),
+    (
+        # Where orbit moved each requirements record whose number another record took, by the
+        # path tasks named it by, so a task that still names that path follows it.
+        """CREATE TABLE record_moves (
+            workspace_id TEXT NOT NULL REFERENCES workspaces (id),
+            old_path TEXT NOT NULL,
+            new_path TEXT NOT NULL,
+            PRIMARY KEY (workspace_id, old_path)
+        )""",
+    ),
 )
 
 

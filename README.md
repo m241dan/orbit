@@ -689,7 +689,7 @@ your checkout out of its way, it doesn't sandbox it.
 |---|---|---|
 | The repository | your checkout | your code, which agents change only through commits orbit lands |
 | `.git/orbit` | the repository's git directory | the coder's worktree, review snapshots, what earlier runs left there and `workspace.lock`, which says which orbit owns the repository (`.orbit/workspace.lock` outside git; see [Owning the repository](#owning-the-repository)) |
-| The store | the state directory | `orbit.db`, the saved sessions, their event logs and the super review count of every repository, `locks/`, and `fallback/` for events a failed write left unsaved (see [Storage failures](#storage-failures)) |
+| The store | the state directory | `orbit.db`, the saved sessions, their event logs, the super review count and the record moves of every repository, `locks/`, and `fallback/` for events a failed write left unsaved (see [Storage failures](#storage-failures)) |
 | Config files | `.orbit/config.toml` in the repository | the verification steps, setup, roles and limits, committed with your code |
 | User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]`, `[server]`, `[remotes]` and `[telemetry]` |
 | The token | `token` in the config directory | what frontends show `orbit serve` to connect (see [Serving the control plane](#serving-the-control-plane)) |
@@ -768,7 +768,7 @@ miss writes still in its `-wal` file, or catch one half done. To restore, stop e
 state directory, replace `orbit.db` with the backup, and start orbit again.
 
 `orbit db forget PATH` deletes everything orbit keeps of the workspace at `PATH`, or the repository
-`PATH` is in, as `orbit chat` finds it (or with the id `PATH`): its saved sessions and their events, its review count, its turns' usage, its session
+`PATH` is in, as `orbit chat` finds it (or with the id `PATH`): its saved sessions and their events, its review count, its record moves, its turns' usage, its session
 locks in `locks/`, its fallback files, in the state directory and the repository, and its entry, so orbit starts afresh
 there next time; for a clone `orbit serve` made, it deletes the clone's directory too, and never a
 directory orbit didn't clone into. Files go before the records, so a file it can't delete leaves
@@ -783,7 +783,7 @@ does.
 ### Storage failures
 
 When a write to the store fails, whether the event log, the session record (taking its lock on
-the first save included) or the super review count, orbit halts the session instead of carrying on with work it can't record: the running
+the first save included), the super review count or the record moves, orbit halts the session instead of carrying on with work it can't record: the running
 agents, the planner's turn, the reviews and the startup check are cancelled, and every command
 but quitting and "Try again" is refused with `storage_failed` and the same explanation. Nothing more is written
 to `orbit.db` until storage is resumed.
@@ -817,7 +817,7 @@ says that neither place could be written.
 Once the cause is fixed, "Try again" retries the writes that failed: the session record as it is
 now, taking its lock first if that failed, a saved session's rename whose save failed (dropped,
 with an error, if that session was deleted or another orbit has it open since), the super review
-count and the event log. When they work, the events in the fallback file and those still waiting
+count, the record moves and the event log. When they work, the events in the fallback file and those still waiting
 are appended to the log in `seq` order in one go, skipping any it already holds, the fallback file
 is deleted and the halt is lifted: commands are accepted again, the reviews waiting on the board
 start, a run the usage limit had stopped starts again if its wait ended meanwhile, and work can
@@ -858,9 +858,11 @@ document in `docs/` (or wherever the project keeps such records), named like
 out. Every other task's prompt opens with `Plan: <path>` pointing at it, so coders and reviewers
 read the same record. A task's record keeps its number unless another record has taken it by the
 time the task runs, such as one planned in another session: orbit then gives the record the next
-free number, in that task and in every task that names it and hasn't completed, and says so; the
-planner hears the new path ahead of its next prompt, and a task that still names the old one is
-pointed at the record where it's written, or else where the other tasks name it. Its first prompt, and the first after the verification steps change, tells it
+free number, in that task and in every task that names it and hasn't completed, and says so. The
+planner hears the new path ahead of its next prompt, even after a switch or a restart, as the
+session saves what it's still to hear. Orbit keeps each move in the store, so a task in any
+session that still names the old path is pointed at the record where it's written, or else where
+the move took it, or where the other tasks on the board name it. Its first prompt, and the first after the verification steps change, tells it
 the steps each task must pass. Proposals appear in the task list as 📝 drafts, with the `coder`
 role's default settings, and never run on their own: on the task list, `a` accepts the highlighted
 draft (or edit it with `enter` and save, which accepts it too), and `x` removes it. Accepted tasks
@@ -1096,7 +1098,7 @@ it; a frontend that never watches is sent neither.
 
 **Purging.** A frontend removing a workspace can have its records deleted too, with
 `RemoveWorkspace`'s `purge`: under the same refusals as removing, its sessions, their events, its
-review count, session locks, fallback files and registry entry go, so adding it again starts
+review count, record moves, session locks, fallback files and registry entry go, so adding it again starts
 afresh, and so does a managed clone's directory. A directory orbit didn't clone into is never
 deleted. A clone holding work that exists nowhere else, uncommitted changes, stashes or commits on
 any branch, or on a detached HEAD, that its remote doesn't have, isn't purged: the refusal lists
@@ -1827,7 +1829,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     fingerprints the git working tree; `usage_api` fetches the Claude subscription's usage
     limits (`UsageApi`) with the token in `~/.claude/.credentials.json`; `sqlite_store` is the
     `SessionStore` port's adapter (`SqliteStore`): saved sessions and each repository's super
-    review count in `orbit.db` in the state directory, with `session_locks`' lock files while
+    review count and record moves in `orbit.db` in the state directory, with `session_locks`' lock files while
     an orbit has a session open, `sqlite_schema` creating, migrating and opening the database,
     `sqlite_log` holding the events' log's statements, `sqlite_backup` copying it to a backup and `sqlite_errors` telling its errors apart;
     `directories` picks the state and config directories (`resolve_state_dir`,
@@ -1886,7 +1888,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     read-only session's workspace lock, through the `RepositoryLock` port, until the
     repository is free, and holds the offer of it until the user answers;
     `ReviewCount` (in `review_count`) keeps the repository's super review count apart from
-    any one session; `SessionSettings` (in `settings`) holds the open session's settings, at
+    any one session; `RecordMoves` (in `record_moves`) moves a record a task names whose
+    number another record took, keeping each move in the store and telling the planner; `SessionSettings` (in `settings`) holds the open session's settings, at
     first those given at startup (a session opened brings its saved ones, but for the pinned
     ones, which keep the given), and the models they may choose from; `outcome` and
     `ReportedOnce` (in `failures`) turn a failing call to the store into its error and report a

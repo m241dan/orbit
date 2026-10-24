@@ -325,6 +325,17 @@ async def test_what_the_planner_is_told_during_a_turn_waits_for_the_next() -> No
     assert await turn(chat, launcher, "More.") == "Record moved.\n\nMore."
 
 
+async def test_the_notes_the_planner_is_still_to_hear_are_known_until_a_turn_delivers_them() -> (
+    None
+):
+    chat, launcher, _ = steps_chat(chats)
+    chat.tell("Record moved.")
+    chat.tell("Another moved.")
+    assert chat.notes == ("Record moved.", "Another moved.")
+    await turn(chat, launcher, "Plan.")
+    assert not chat.notes
+
+
 async def test_the_planners_agent_id_is_known_once_its_first_turn_opens_it() -> None:
     chat, launcher, _ = steps_chat(chats)
     assert chat.agent_id is None

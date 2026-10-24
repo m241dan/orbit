@@ -88,6 +88,11 @@ class PlannerChat:
         starts a fresh one instead if it can't be resumed."""
         self._saved = conversation_id
 
+    @property
+    def notes(self) -> tuple[str, ...]:
+        """What the planner has been told and is still to hear, to save."""
+        return tuple(self._notes)
+
     def tell(self, note: str) -> None:
         """Have the planner hear ``note`` ahead of its next prompt."""
         self._notes.append(note)

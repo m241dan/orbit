@@ -9,6 +9,7 @@ from orbit.protocol import PLANNER, AddTask, Event, Notice, RunTasks, TaskSpec, 
 from tests.agent_fakes import (
     ROLES,
     Call,
+    FakeStore,
     FakeTree,
     ScriptedLauncher,
     board,
@@ -127,3 +128,20 @@ async def test_a_task_naming_a_moved_record_not_yet_written_follows_the_move() -
     agent, events = await run(files, LATER, moved, tree=FakeTree())
     assert f"Plan: {NEW_ELSEWHERE}" in agent.briefs[0]
     assert Notice(message=moved_note(OLD, NEW_ELSEWHERE)) in events
+
+
+async def test_a_move_is_saved_with_the_note_for_the_planner_until_a_turn_delivers_it() -> None:
+    store = FakeStore()
+    files = Files({"/work/coder/docs": TAKEN})
+    agent = Briefs()
+    session, _, launcher = session_for(
+        agent, gives_up, file_names=files, tree=FakeTree(), store=store
+    )
+    launcher.planner_turns = [chats]
+    await send(session, AddTask(task=WRITE))
+    await send(session, RunTasks())
+    await until_idle(session)
+    assert planner_note(OLD, NEW) in [note for r in store.saved for note in r.planner_notes]
+    assert store.moves == {OLD: NEW}
+    await plan(session, "Revise the plan.")
+    assert store.last.planner_notes == ()

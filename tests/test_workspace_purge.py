@@ -29,8 +29,8 @@ from tests.store_views import database, record
 
 async def used(store: SqliteStore, path: Path, *, managed: bool = False) -> str:
     """The id of the workspace at ``path``, registered with a session, ``abc``, holding its
-    lock, an event, a review count and a fallback file in the state directory and the
-    repository; marked managed if ``managed``."""
+    lock, an event, a review count, a record move and a fallback file in the state directory
+    and the repository; marked managed if ``managed``."""
     path.mkdir(parents=True, exist_ok=True)
     registry = WorkspaceRegistry(store)
     workspace_id = (await registry.find_or_register(str(path))).workspace_id
@@ -39,6 +39,7 @@ async def used(store: SqliteStore, path: Path, *, managed: bool = False) -> str:
     await store.save(workspace_id, record())
     await store.append(workspace_id, "abc", [notice(1, "abc", "hi")])
     await store.save_review_count(workspace_id, 3)
+    await store.save_record_moves(workspace_id, {"docs/00001-a.md": "docs/00002-a.md"})
     assert await store.acquire(workspace_id, "abc")
     files = FallbackFiles(store.state_dir, workspace_id, orbit_dir(str(path)))
     for place in files.places("abc"):
@@ -50,7 +51,7 @@ async def used(store: SqliteStore, path: Path, *, managed: bool = False) -> str:
 def rows(state: Path, workspace_id: str) -> dict[str, int]:
     """How many rows each table keyed by workspace has for ``workspace_id``."""
     tables = {"events": "workspace_id", "logs": "workspace_id", "sessions": "workspace_id"}
-    tables |= {"reviews": "workspace_id", "workspaces": "id"}
+    tables |= {"reviews": "workspace_id", "record_moves": "workspace_id", "workspaces": "id"}
     with database(state) as connection:
         return {
             table: connection.execute(

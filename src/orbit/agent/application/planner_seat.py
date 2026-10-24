@@ -66,6 +66,7 @@ class PlannerSeat:
         self._planner = self._chat()
         self._retired: list[PlannerChat] = []  # Planners of sessions left or reset, still to close.
         self._kept: str | None = None  # The conversation opened, kept to save without a planner.
+        self._kept_notes: tuple[str, ...] = ()  # Its notes, kept the same way.
         self._turns = TurnSlot(PLANNER_LANE, "The planner is already answering.", events.put_nowait)
 
     @property
@@ -82,6 +83,11 @@ class PlannerSeat:
     def conversation_id(self) -> str | None:
         """The planner's conversation, to save; without a planner, the one opened."""
         return self._planner.conversation_id if self._planner else self._kept
+
+    @property
+    def notes(self) -> tuple[str, ...]:
+        """What the planner is still to hear, to save; without a planner, the notes opened."""
+        return self._planner.notes if self._planner else self._kept_notes
 
     def _chat(self) -> PlannerChat | None:
         if self._desk is None or PLANNER not in self._desk.agents.roles:
@@ -117,15 +123,19 @@ class PlannerSeat:
         """Cancel the planner's turn, if it runs."""
         self._turns.cancel()
 
-    def replace(self, conversation: str | None) -> None:
-        """Have a new planner, carrying on ``conversation`` if there is one; the old one is
-        closed by :meth:`close_retired`, once the switch is done."""
+    def replace(self, conversation: str | None, notes: tuple[str, ...] = ()) -> None:
+        """Have a new planner, carrying on ``conversation`` if there is one and still to hear
+        ``notes``; the old one is closed by :meth:`close_retired`, once the switch is done."""
         if self._planner is not None:
             self._retired.append(self._planner)
         self._planner = self._chat()
-        self._kept = conversation
-        if self._planner is not None and conversation is not None:
+        self._kept, self._kept_notes = conversation, notes
+        if self._planner is None:
+            return
+        if conversation is not None:
             self._planner.restore(conversation)
+        for note in notes:
+            self._planner.tell(note)
 
     async def close_retired(self) -> None:
         """Close the planners retired by leaving a session or by a reset."""

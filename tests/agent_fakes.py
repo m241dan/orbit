@@ -356,6 +356,9 @@ class FakeStore:
     as the port says; ``reserve_failure``, while set, is the error reserving raises.
     ``after_failure`` and ``bounds_failure``, while set, are the errors reading the events after
     a ``seq`` and the bounds raise, as :class:`ReadFailed`.
+
+    The record moves kept are ``moves``; ``moves_failure``, while set, is the error saving them
+    raises, and ``moves_load_failure`` the error reading them raises, as :class:`ReadFailed`.
     """
 
     def __init__(self, count: int = 0) -> None:
@@ -396,6 +399,9 @@ class FakeStore:
         self.reserve_failure: str | None = None
         self.after_failure: str | None = None
         self.bounds_failure: str | None = None
+        self.moves: dict[str, str] = {}
+        self.moves_failure: str | None = None
+        self.moves_load_failure: str | None = None
 
     @property
     def last(self) -> SessionRecord:
@@ -545,6 +551,16 @@ class FakeStore:
             await asyncio.sleep(0)  # Saving takes a while, as writing a file does.
         self.count = count
         self.counts.append(count)
+
+    async def record_moves(self) -> dict[str, str]:
+        await self._read(self.moves_load_failure)
+        return dict(self.moves)
+
+    async def save_record_moves(self, moves: Mapping[str, str]) -> None:
+        if self.moves_failure is not None:
+            raise StoreFailed(self.moves_failure)
+        await asyncio.sleep(0)  # Saving takes a while, as writing a file does.
+        self.moves |= moves
 
 
 STEP = VerificationStep(name="Unit tests", command=("pytest",))

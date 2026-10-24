@@ -81,6 +81,23 @@ async def test_each_workspace_has_its_own_sessions_and_review_count(
     assert await store.acquire("same") and await other.acquire("same")
 
 
+async def test_record_moves_survive_closing_and_a_later_move_replaces_an_earlier(
+    open_store: Opener, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    assert await store.record_moves() == {}
+    await store.save_record_moves(
+        {"docs/00001-a.md": "docs/00002-a.md", "00003-b.md": "00004-b.md"}
+    )
+    await store.save_record_moves({"docs/00001-a.md": "docs/00005-a.md"})
+    await store.close()
+    reopened = await open_store(workspace)
+    assert await reopened.record_moves() == {
+        "docs/00001-a.md": "docs/00005-a.md",
+        "00003-b.md": "00004-b.md",
+    }
+
+
 async def test_a_workspace_is_registered_once_by_path_and_its_fingerprint_kept_current(
     open_store: Opener, state: Path, workspace: Path
 ) -> None:
@@ -134,6 +151,8 @@ async def test_two_views_of_one_store_see_only_their_own_sessions_and_review_cou
     assert [entry.id for entry in await theirs.sessions()] == ["b"]
     assert isinstance(await theirs.load("a"), Unreadable)
     assert (await mine.review_count(), await theirs.review_count()) == (3, 0)
+    await mine.save_record_moves({"docs/00001-a.md": "docs/00002-a.md"})
+    assert await theirs.record_moves() == {}
     assert (mine.workspace_id, theirs.workspace_id) == ("mine", "theirs")
 
 
@@ -296,6 +315,8 @@ type Outcome = type[StoreFailed] | Callable[[Path], object]
         (lambda store: store.forget("abc"), StorageFailed),
         (lambda store: store.review_count(), ReadFailed),
         (lambda store: store.save_review_count(1), StorageFailed),
+        (lambda store: store.record_moves(), ReadFailed),
+        (lambda store: store.save_record_moves({"00001-a.md": "00002-a.md"}), StorageFailed),
     ],
 )
 async def test_each_call_on_a_closed_store_has_its_own_failure(

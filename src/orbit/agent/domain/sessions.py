@@ -28,7 +28,7 @@ from orbit.protocol import (
     Usage,
 )
 
-FORMAT_VERSION = 6
+FORMAT_VERSION = 7
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
@@ -61,7 +61,7 @@ def _without_rounds(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def _unchanged(record: dict[str, Any]) -> dict[str, Any]:
-    """Version 3, 4 or 5 ``record`` as it is: the next version only added fields that have
+    """Version 3, 4, 5 or 6 ``record`` as it is: the next version only added fields that have
     defaults."""
     return record
 
@@ -70,15 +70,17 @@ def _unchanged(record: dict[str, Any]) -> dict[str, Any]:
 # The upgrade sets the version for it. Version 3 dropped the planner's rounds through a migration
 # rather than by having the snapshot ignore them, so that the format stays pinned by its fixtures
 # and the snapshot model keeps forbidding fields it doesn't know. Version 4 added the reasons tasks
-# ended for, version 5 the tasks each review reviews, and version 6 the titles the review planner
-# has suggested; their versions stop an older orbit, which forbids fields it doesn't know, at a
-# clear "written by a newer orbit" rather than a field it can't read.
+# ended for, version 5 the tasks each review reviews, version 6 the titles the review planner
+# has suggested, and version 7 the notes the planner is still to hear; their versions stop an
+# older orbit, which forbids fields it doesn't know, at a clear "written by a newer orbit" rather
+# than a field it can't read.
 _MIGRATIONS: dict[int, Migration] = {
     1: _spent_by_tasks,
     2: _without_rounds,
     3: _unchanged,
     4: _unchanged,
     5: _unchanged,
+    6: _unchanged,
 }
 
 EMPTY_NAME = "A session needs a name."
@@ -88,9 +90,9 @@ OPEN_UNRENAMABLE = "Can't rename the session as a saved one: it was opened meanw
 
 class SessionRecord(BaseModel):
     """A saved session ``id``, ``name``d by the user, with the ``settings`` its planner and new
-    tasks use, the planner's Claude conversation, its ``tasks`` and, when reviews are on, its
-    ``reviews``' state, and what its agents have ``spent`` in all, the planner and tasks since
-    removed included."""
+    tasks use, the planner's Claude conversation and the ``planner_notes`` it's still to hear,
+    its ``tasks`` and, when reviews are on, its ``reviews``' state, and what its agents have
+    ``spent`` in all, the planner and tasks since removed included."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -101,6 +103,7 @@ class SessionRecord(BaseModel):
     last_active: AwareDatetime
     settings: Settings = Settings()
     planner_conversation: str | None = None
+    planner_notes: tuple[str, ...] = ()
     tasks: tuple[TaskState, ...] = ()
     reviews: LaneSnapshot | None = None
     spent: Usage = Usage()

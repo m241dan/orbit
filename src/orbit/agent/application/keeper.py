@@ -169,14 +169,15 @@ _NEW_SESSIONS = NewSessions()
 @dataclass(frozen=True)
 class Contents:
     """What a saved session holds of the work: the ``settings`` its planner and new tasks use,
-    the planner's Claude conversation, its ``tasks``, its ``reviews``' state, if any, and what
-    its agents have ``spent`` in all."""
+    the planner's Claude conversation, its ``tasks``, its ``reviews``' state, if any, what its
+    agents have ``spent`` in all, and the ``planner_notes`` its planner is still to hear."""
 
     settings: Settings
     planner_conversation: str | None
     tasks: tuple[TaskState, ...]
     reviews: LaneSnapshot | None
     spent: Usage
+    planner_notes: tuple[str, ...] = ()
 
 
 class SessionKeeper:
@@ -322,6 +323,7 @@ class SessionKeeper:
             last_active=self._clock(),
             settings=contents.settings,
             planner_conversation=contents.planner_conversation,
+            planner_notes=contents.planner_notes,
             tasks=contents.tasks,
             reviews=contents.reviews,
             spent=contents.spent,

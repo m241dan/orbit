@@ -1834,7 +1834,7 @@
       "type": "object"
     },
     "RemoveWorkspace": {
-      "description": "Stop serving the workspace ``workspace``, by its id: its lock is let go, its sessions are\nkept for when it's added again, and a ``Catalog`` without it follows; the connection sending\nit, if attached there, is attached to no workspace again. A control-plane command: its\nenvelope's ``workspace`` is ``null``. Refused with ``unknown`` for a workspace not served,\n``busy`` while it runs work or another connection views one of its sessions, and\n``invalid`` by a local orbit. With ``purge``, its records are deleted too: its sessions,\nevents, logs, review count, session locks, fallback files and registry entry, and, for a\nclone orbit made, its directory; refused with ``invalid``, listing what would be lost and\nremoving nothing, while that clone holds work its remote doesn't.",
+      "description": "Stop serving the workspace ``workspace``, by its id: its lock is let go, its sessions are\nkept for when it's added again, and a ``Catalog`` without it follows; the connection sending\nit, if attached there, is attached to no workspace again. A control-plane command: its\nenvelope's ``workspace`` is ``null``. Refused with ``unknown`` for a workspace not served,\n``busy`` while it runs work or another connection views one of its sessions, and\n``invalid`` by a local orbit. With ``purge``, its records are deleted too: its sessions,\nevents, logs, review count, record moves, session locks, fallback files and registry entry,\nand, for a clone orbit made, its directory; refused with ``invalid``, listing what would be\nlost and removing nothing, while that clone holds work its remote doesn't.",
       "properties": {
         "purge": {
           "default": false,

@@ -83,7 +83,7 @@ def test_the_default_name_drops_the_days_leading_zero_but_pads_the_time() -> Non
 
 
 def test_a_new_record_carries_the_current_format_version() -> None:
-    assert record().version == FORMAT_VERSION == 6
+    assert record().version == FORMAT_VERSION == 7
 
 
 def test_a_record_round_trips_through_json() -> None:
@@ -157,13 +157,13 @@ def rename_title(record: dict[str, Any]) -> dict[str, Any]:
 def test_an_older_record_is_migrated_and_stamped_with_the_new_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(sessions, "FORMAT_VERSION", 7)
-    monkeypatch.setitem(sessions._MIGRATIONS, 6, rename_title)
+    monkeypatch.setattr(sessions, "FORMAT_VERSION", 8)
+    monkeypatch.setitem(sessions._MIGRATIONS, 7, rename_title)
     data = {key: value for key, value in fields().items() if key != "name"}
-    old = data | {"version": 6, "title": "Old name"}
+    old = data | {"version": 7, "title": "Old name"}
     result = parse_record(json.dumps(old))
     assert isinstance(result, SessionRecord)
-    assert (result.version, result.name) == (7, "Old name")
+    assert (result.version, result.name) == (8, "Old name")
 
 
 def version_1(tasks: tuple[TaskState, ...]) -> dict[str, Any]:
@@ -238,7 +238,7 @@ def test_a_version_3_records_tasks_read_without_reasons() -> None:
     data = fields() | {"version": 3, "tasks": [{"id": "1", "task": {"prompt": "x"}}]}
     result = parse_record(json.dumps(data))
     assert isinstance(result, SessionRecord)
-    assert result.version == 6
+    assert result.version == FORMAT_VERSION
     assert [(t.reason, t.reason_detail) for t in result.tasks] == [("", "")]
 
 
@@ -256,7 +256,7 @@ def test_a_version_4_records_reviews_read_without_the_tasks_they_review() -> Non
     data = fields() | {"version": 4, "reviews": reviews}
     result = parse_record(json.dumps(data))
     assert isinstance(result, SessionRecord) and result.reviews is not None
-    assert result.version == 6
+    assert result.version == FORMAT_VERSION
     assert result.reviews.planner.batches["b1"].landed == ()
     assert result.reviews.jobs["3"].reviewed == ()
 
@@ -266,7 +266,7 @@ def test_a_version_5_records_planner_reads_without_the_titles_it_suggested() -> 
     data = fields() | {"version": 5, "reviews": reviews}
     result = parse_record(json.dumps(data))
     assert isinstance(result, SessionRecord) and result.reviews is not None
-    assert result.version == 6
+    assert result.version == FORMAT_VERSION
     assert result.reviews.planner.suggested == frozenset()
 
 
