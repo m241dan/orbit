@@ -91,7 +91,9 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
         self._asked: str | None = None  # The path last asked for, None for the start.
         self._waiting = False  # Whether the listing last asked for is yet to be shown.
         self._held: DirectoryListing | None = None  # A listing for another path, meanwhile.
-        self._completing: str | None = None  # The directory listed to complete from, if any.
+        self._completing: str | None = None  # The parent typed, listed to complete from.
+        self._completion: DirectoryListing | None = None  # The listing come for it, meanwhile.
+        self._requests = 0  # How many listings have been asked for to complete from.
 
     def compose(self) -> ComposeResult:
         with Vertical() as box:
@@ -128,20 +130,26 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
         await self._browse(ListDirectory(path=path), awaited)
 
     def show_listing(self, listing: DirectoryListing) -> None:
-        """Complete the field from ``listing`` if it's the one asked for to complete from; show
-        it if it answers the listing last asked for, by its path; hold one for another path, as
-        a symlink followed gives, until that listing is accepted."""
-        if listing.path == self._completing:
-            self._completing = None
-            self._complete(listing)
-            if listing.path != self._asked:
-                return
-        if not self._waiting:
-            return
-        if answers(self._asked, listing):
+        """Show ``listing`` if it answers the listing last asked for, by its path; else hold it
+        for the listing asked for to complete from, if one is, as that one may have its symlinks
+        followed, or else for the listing last asked for, as a symlink followed gives, until
+        that one's accepted."""
+        answered = self._waiting and answers(self._asked, listing)
+        held = self._held_to_complete(listing, answered)
+        if answered:
             self._show(listing)
-        else:
+        elif self._waiting and not held:
             self._held = listing
+
+    def _held_to_complete(self, listing: DirectoryListing, answered: bool) -> bool:
+        """Whether ``listing`` is held to complete from, as it is while a listing's asked for
+        to complete from unless it's ``answered`` the one last asked for, for another path."""
+        if self._completing is None:
+            return False
+        if answered and listing.path != self._completing:
+            return False
+        self._completion = listing
+        return True
 
     def _listed(self) -> None:
         """Show the listing held now the one last asked for is accepted, if it's not shown."""
@@ -256,16 +264,43 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
         if parent is None:
             return
         if self.listing is not None and self.listing.path == parent:
-            self._complete(self.listing)
+            self._complete(self.listing, parent)
             return
+        self._requests += 1
+        request = self._requests
         self._completing = parent
-        await self._browse(ListDirectory(path=parent), Awaited(why=self._refused_typed))
+        self._completion = None
+        awaited = Awaited(
+            accepted=lambda: self._completed(request),
+            why=lambda why: self._uncompleted(request, why),
+        )
+        await self._browse(ListDirectory(path=parent), awaited)
 
-    def _complete(self, listing: DirectoryListing) -> None:
-        """Complete the path typed from the directories ``listing`` shows, unless it's been
-        typed on into another directory since; show the candidates when there are several."""
+    def _completed(self, request: int) -> None:
+        """Complete the path typed from the listing come for the ``request``, the number of the
+        listing asked for to complete from, once it's accepted, unless another's asked for."""
+        parent, listing = self._completing, self._completion
+        if request != self._requests or parent is None:
+            return
+        self._completing = None
+        self._completion = None
+        if listing is not None:
+            self._complete(listing, parent)
+
+    def _uncompleted(self, request: int, why: str) -> None:
+        """Show ``why`` the ``request``, the number of the listing asked for to complete from,
+        was refused, leaving nothing to complete from unless another's asked for."""
+        if request == self._requests:
+            self._completing = None
+            self._completion = None
+        self._refused_typed(why)
+
+    def _complete(self, listing: DirectoryListing, parent: str) -> None:
+        """Complete the path typed from the directories ``listing`` shows, as those of the
+        directory typed as ``parent``, unless it's been typed on into another directory since;
+        show the candidates when there are several."""
         field = self.query_one(ExplorerField)
-        if completion_parent(field.value) != listing.path:
+        if completion_parent(field.value) != parent:
             return
         names = [entry.name for entry in shown_entries(listing.entries, self.hidden)]
         completion = completed(field.value, names)

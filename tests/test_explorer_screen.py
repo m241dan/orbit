@@ -48,6 +48,7 @@ WORK = DirectoryListing(path="/work", parent="/", entries=(PROJECTS,), total=1)
 ROOT = DirectoryListing(
     path="/", entries=(DirectoryEntry(name="srv", is_repository=False, hidden=False),), total=1
 )
+REAL = DirectoryListing(path="/opt/real", parent="/opt", entries=(PROJECTS,), total=1)
 REPO = WorkspaceEntry(id="R", label="repo", path="/srv/repo", sessions=())
 
 
@@ -397,11 +398,12 @@ async def test_tab_elsewhere_lists_the_parent_for_completion_alone() -> None:
         assert changes(session_of(app))[-1] == ListDirectory(path="/work")
         assert field_of(app).value == "/work/pro"
         await feed_events(session_of(app), pilot, WORK)
+        assert field_of(app).value == "/work/pro"
+        await answer(app, pilot)
         assert field_of(app).value == "/work/projects/"
         screen = explorer(app)
         assert screen.query_one(Vertical).border_title == "/src"
         assert rows(screen) == ["⎇ orbit", "orchard"]
-        await answer(app, pilot)
         await feed_events(session_of(app), pilot, WORK)
         assert rows(screen) == ["⎇ orbit", "orchard"]
         assert field_of(app).value == "/work/projects/"
@@ -415,6 +417,7 @@ async def test_a_completion_listing_once_typed_on_completes_nothing() -> None:
         await pilot.press("tab")
         field_of(app).value = "/srv/a"
         await feed_events(session_of(app), pilot, WORK)
+        await answer(app, pilot)
         assert field_of(app).value == "/srv/a"
 
 
@@ -436,8 +439,85 @@ async def test_a_completion_listing_of_the_directory_asked_for_is_also_shown() -
         await typed(app, pilot, "/srv/a/d")
         await pilot.press("tab")
         await feed_events(session_of(app), pilot, SRV_A)
+        assert rows(explorer(app)) == ["docs"]
+        await answer(app, pilot)
         assert field_of(app).value == "/srv/a/docs/"
         assert rows(explorer(app)) == ["docs"]
+
+
+async def test_a_completion_listing_at_its_resolved_path_completes_the_path_typed() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRC)
+        await typed(app, pilot, "/link/pro")
+        await pilot.press("tab")
+        assert changes(session_of(app))[-1] == ListDirectory(path="/link")
+        await feed_events(session_of(app), pilot, REAL)
+        await answer(app, pilot)
+        assert field_of(app).value == "/link/projects/"
+        screen = explorer(app)
+        assert screen.query_one(Vertical).border_title == "/src"
+        assert rows(screen) == ["⎇ orbit", "orchard"]
+
+
+async def test_a_completion_listing_while_a_listing_is_awaited_is_never_shown() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRV)
+        await pilot.press("l")
+        listed = len(session_of(app).envelopes) - 1
+        await typed(app, pilot, "/link/pro")
+        await pilot.press("tab")
+        await feed_events(session_of(app), pilot, REAL)
+        await answer_to(app, pilot, listed, None)
+        screen = explorer(app)
+        assert rows(screen) == SRV_ROWS
+        await answer(app, pilot)
+        assert field_of(app).value == "/link/projects/"
+        assert rows(screen) == SRV_ROWS
+        await pilot.press("escape", "l", "j", "j", "j", "enter")
+        await feed_events(session_of(app), pilot, OPT_X)
+        await answer(app, pilot)
+        assert screen.query_one(Vertical).border_title == "/opt/x"
+
+
+async def test_the_listing_asked_for_while_completing_elsewhere_is_shown_alone() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRV)
+        await pilot.press("l")
+        await typed(app, pilot, "/link/d")
+        await pilot.press("tab")
+        await feed_events(session_of(app), pilot, SRV_A)
+        assert rows(explorer(app)) == ["docs"]
+        await answer(app, pilot)
+        assert field_of(app).value == "/link/d"
+
+
+async def test_an_earlier_completions_outcome_once_another_is_asked_for_completes_nothing() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRC)
+        await typed(app, pilot, "/work/pro")
+        await pilot.press("tab")
+        earliest = len(session_of(app).envelopes) - 1
+        await pilot.press("tab", "tab")
+        await answer_to(app, pilot, earliest, None)
+        assert field_of(app).value == "/work/pro"
+        await answer_to(app, pilot, earliest + 1, "Permission denied: /work")
+        await feed_events(session_of(app), pilot, WORK)
+        await answer(app, pilot)
+        assert field_of(app).value == "/work/projects/"
+
+
+async def test_a_completion_answered_once_the_explorer_closed_changes_nothing() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRC)
+        await typed(app, pilot, "/work/pro")
+        await pilot.press("tab", "escape", "escape")
+        await answer(app, pilot)
+        assert isinstance(app.screen, WorkspacesScreen)
 
 
 async def test_a_refused_completion_listing_shows_in_the_fields_hint() -> None:
@@ -449,6 +529,20 @@ async def test_a_refused_completion_listing_shows_in_the_fields_hint() -> None:
         await answer(app, pilot, "Permission denied: /root")
         assert field_of(app).border_subtitle == "Permission denied: /root"
         assert explorer(app).note is None
+
+
+async def test_a_refused_completion_leaves_nothing_to_complete_from() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRC)
+        await typed(app, pilot, "/work/pro")
+        await pilot.press("tab")
+        await answer(app, pilot, "Permission denied: /work")
+        await pilot.press("escape", "l")
+        await feed_events(session_of(app), pilot, WORK)
+        await answer(app, pilot)
+        assert field_of(app).value == "/work/pro"
+        assert explorer(app).query_one(Vertical).border_title == "/work"
 
 
 async def test_enter_in_the_field_adds_the_path_and_opens_its_sessions_once_listed() -> None:
