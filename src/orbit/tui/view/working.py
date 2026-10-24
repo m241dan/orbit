@@ -1,7 +1,8 @@
 """The working row below the conversation: who runs right now, and what they're doing."""
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
+from typing import Protocol
 
 from rich.cells import cell_len
 
@@ -168,3 +169,54 @@ def working_lines(view: WorkingView, now: float, width: int) -> tuple[str, ...]:
     if hidden > 0:
         lines.append(f"+{hidden} more")
     return tuple(lines)
+
+
+class WorkingRowView(Protocol):
+    """The working row, as its lines are shown in it."""
+
+    @property
+    def width(self) -> int:
+        """How many columns the row has."""
+        ...
+
+    def show_lines(self, lines: Sequence[str]) -> None:
+        """Show ``lines``, one per row, hiding the row for none."""
+        ...
+
+
+class WorkingLines:
+    """What's running right now under the shown tab, one line per agent, shown in ``view``
+    and timed by ``clock``."""
+
+    def __init__(self, view: WorkingRowView, clock: Callable[[], float]) -> None:
+        self._view = view
+        self._clock = clock
+        self.agents: Working = ()
+        self.lines: tuple[str, ...] = ()  # The lines shown.
+        self._roles: Mapping[str, str] = {}
+        self._shown: str | None = None
+
+    @property
+    def running(self) -> bool:
+        """Whether any agent runs."""
+        return bool(self.agents)
+
+    def track(self, event: Event, roles: Mapping[str, str]) -> None:
+        """Follow who runs after ``event``, with ``roles`` placing agents in tabs."""
+        self.agents = track_working(self.agents, event, self._clock())
+        self._roles = roles
+        self.tick()
+
+    def show_tab(self, key: str | None) -> None:
+        """Show what runs under the tab keyed ``key``; None is All."""
+        self._shown = key
+        self.tick()
+
+    def tick(self) -> None:
+        """Show the lines again, if they changed."""
+        view = WorkingView(self.agents, self._roles, self._shown)
+        lines = working_lines(view, self._clock(), self._view.width)
+        if lines == self.lines:
+            return
+        self.lines = lines
+        self._view.show_lines(lines)
