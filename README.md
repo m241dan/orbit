@@ -860,7 +860,7 @@ read the same record. A task's record keeps its number unless another record has
 time the task runs, such as one planned in another session: orbit then gives the record the next
 free number, in that task and in every task that names it and hasn't completed, and says so; the
 planner hears the new path ahead of its next prompt, and a task that still names the old one is
-pointed at the record where it's written. Its first prompt, and the first after the verification steps change, tells it
+pointed at the record where it's written, or else where the other tasks name it. Its first prompt, and the first after the verification steps change, tells it
 the steps each task must pass. Proposals appear in the task list as 📝 drafts, with the `coder`
 role's default settings, and never run on their own: on the task list, `a` accepts the highlighted
 draft (or edit it with `enter` and save, which accepts it too), and `x` removes it. Accepted tasks

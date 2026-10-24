@@ -1,5 +1,6 @@
 from orbit.agent.domain.records import (
     moved_records,
+    named_records,
     planner_note,
     record_directories,
     renumbered,
@@ -84,3 +85,52 @@ def test_the_planner_is_told_to_name_a_moved_record_by_its_new_path() -> None:
         "Another record took the number of `docs/00024-a.md`, so orbit renamed it "
         "`docs/00025-a.md` in the tasks still to come. Name it `docs/00025-a.md` from now on."
     )
+
+
+STALE = "Plan: docs/00024-feature-metrics.md"
+
+
+def test_the_records_tasks_name_in_the_order_named() -> None:
+    texts = ["Plan: docs/00025-feature-a.md and 00001-b.md", "None here", "docs/00026-feature-c.md"]
+    assert named_records(texts) == (
+        "docs/00025-feature-a.md",
+        "00001-b.md",
+        "docs/00026-feature-c.md",
+    )
+
+
+def test_a_record_not_yet_written_is_named_as_another_task_names_it_since_it_moved() -> None:
+    named = ("docs/00024-feature-metrics.md", "docs/00030-feature-metrics.md")
+    assert moved_records(STALE, {"docs": DOCS}, named) == {
+        "docs/00024-feature-metrics.md": "docs/00030-feature-metrics.md"
+    }
+
+
+def test_the_last_task_naming_the_record_elsewhere_wins() -> None:
+    named = ("docs/00026-feature-metrics.md", "docs/00027-feature-metrics.md")
+    assert (
+        moved_records(STALE, {"docs": DOCS}, named)["docs/00024-feature-metrics.md"]
+        == "docs/00027-feature-metrics.md"
+    )
+
+
+def test_a_name_whose_number_another_record_has_too_is_passed_over() -> None:
+    named = ("docs/00023-feature-metrics.md", "docs/00024-feature-metrics.md")
+    assert moved_records(STALE, {"docs": DOCS}, named) == {
+        "docs/00024-feature-metrics.md": "docs/00025-feature-metrics.md"
+    }
+
+
+def test_another_record_or_directory_named_by_tasks_is_passed_over() -> None:
+    named = ("docs/00030-feature-other.md", "notes/00030-feature-metrics.md")
+    assert moved_records(STALE, {"docs": DOCS}, named) == {
+        "docs/00024-feature-metrics.md": "docs/00025-feature-metrics.md"
+    }
+
+
+def test_a_record_written_under_another_number_wins_over_what_tasks_name() -> None:
+    listing = (*DOCS, "00025-feature-metrics.md")
+    named = ("docs/00030-feature-metrics.md",)
+    assert moved_records(STALE, {"docs": listing}, named) == {
+        "docs/00024-feature-metrics.md": "docs/00025-feature-metrics.md"
+    }

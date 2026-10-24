@@ -4,7 +4,7 @@ orbit moves the record to the next free number in it and in the tasks still to c
 from collections.abc import Collection
 from typing import Any
 
-from orbit.agent.domain.records import planner_note
+from orbit.agent.domain.records import moved_note, planner_note
 from orbit.protocol import PLANNER, AddTask, Event, Notice, RunTasks, TaskSpec, TurnEndReason
 from tests.agent_fakes import (
     ROLES,
@@ -21,6 +21,7 @@ from tests.agent_fakes import (
 )
 
 OLD, NEW = "docs/00024-feature-metrics.md", "docs/00025-feature-metrics.md"
+NEW_ELSEWHERE = "docs/00030-feature-metrics.md"  # Where a move in an earlier run took it.
 WRITE = TaskSpec(prompt=f"Write the metrics record\n\nCreate `{OLD}` with exactly this text.")
 LATER = TaskSpec(prompt=f"Export metrics\n\nPlan: {OLD}")
 TAKEN = ("00023-bugfix-pause.md", "00024-bugfix-review-loop.md", "protocol.md")
@@ -118,3 +119,11 @@ async def test_a_record_moves_in_a_session_without_a_planner() -> None:
     roles = {name: role for name, role in ROLES.items() if name != PLANNER}
     agent, _ = await run(Files({"/work/coder/docs": TAKEN}), WRITE, tree=FakeTree(), roles=roles)
     assert NEW in agent.briefs[0]
+
+
+async def test_a_task_naming_a_moved_record_not_yet_written_follows_the_move() -> None:
+    files = Files({"/work/coder/docs": TAKEN})
+    moved = TaskSpec(prompt=f"Write the metrics record\n\nCreate `{NEW_ELSEWHERE}`.")
+    agent, events = await run(files, LATER, moved, tree=FakeTree())
+    assert f"Plan: {NEW_ELSEWHERE}" in agent.briefs[0]
+    assert Notice(message=moved_note(OLD, NEW_ELSEWHERE)) in events

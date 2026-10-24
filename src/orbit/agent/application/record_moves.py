@@ -6,7 +6,12 @@ from pathlib import PurePath
 
 from orbit.agent.application.ports import FileNames, Publish
 from orbit.agent.application.tasks import Tasks
-from orbit.agent.domain.records import moved_note, moved_records, record_directories
+from orbit.agent.domain.records import (
+    moved_note,
+    moved_records,
+    named_records,
+    record_directories,
+)
 from orbit.protocol import Notice
 
 
@@ -15,15 +20,17 @@ async def move_records(
 ) -> dict[str, str]:
     """Move each record task ``task_id`` names that isn't written at ``root`` yet but whose
     number another record there has, listing the files with ``names``: it's renamed in every
-    task that hasn't completed, and the user told with ``publish``. Returns the moves, each
-    old path mapped to its new one."""
+    task that hasn't completed, as the other tasks on the board name it if one has moved it
+    already, and the user told with ``publish``. Returns the moves, each old path mapped to
+    its new one."""
     prompt = tasks.board.get(task_id).task.prompt
     listings = {
         # A large directory, or a slow filesystem, would stall the event loop.
         directory: await asyncio.to_thread(names, str(PurePath(root, directory)))
         for directory in record_directories(prompt)
     }
-    moves = moved_records(prompt, listings)
+    others = named_records(t.task.prompt for t in tasks.board.tasks if t.id != task_id)
+    moves = moved_records(prompt, listings, others)
     if not moves:
         return moves
     await tasks.change(lambda board: board.move_records(moves))
