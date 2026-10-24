@@ -222,7 +222,25 @@ class PromptBox(ModalTextArea):
         super().__init__(text, soft_wrap=True, show_line_numbers=False, **kwargs)
 
 
-class StatusLine(Static):
+class NoteLine(Static):
+    """Line showing a note, hidden while there's none."""
+
+    DEFAULT_CSS = """
+    NoteLine { display: none; }
+    """
+
+    def show(self, note: str | None) -> None:
+        """Show ``note``, or hide the line when there's none."""
+        self.update(note or "")
+        self.display = note is not None
+
+    @property
+    def shown(self) -> str | None:
+        """The note shown, or None while the line is hidden."""
+        return str(self.render()) if self.display else None
+
+
+class StatusLine(NoteLine):
     """Line by the prompt showing a status, hidden while there's none, coloured as a warning,
     or as an error with the ``error`` class."""
 
@@ -230,15 +248,9 @@ class StatusLine(Static):
     StatusLine {
         color: $warning;
         padding: 0 1;
-        display: none;
     }
     StatusLine.error { color: $error; }
     """
-
-    def show(self, status: str | None) -> None:
-        """Show ``status``, or hide the line when there's none."""
-        self.update(status or "")
-        self.display = status is not None
 
 
 def relist(
@@ -310,8 +322,7 @@ class ListScreen[T](BoxedModal[T]):
     @property
     def note(self) -> str | None:
         """Why a change was refused, while that's shown under the list."""
-        note = self.query_one("#picker-note", StatusLine)
-        return str(note.render()) if note.display else None
+        return self.query_one("#picker-note", StatusLine).shown
 
     def _refused(self, why: str) -> None:
         """Show ``why`` a change was refused, as ``_show_refusal`` does; nothing once this

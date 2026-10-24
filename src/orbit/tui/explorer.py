@@ -26,7 +26,7 @@ from orbit.tui.view.explorer import (
 )
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.workspaces import PATH_PLACEHOLDER, add_command
-from orbit.tui.widgets import ListScreen, PromptInput
+from orbit.tui.widgets import ListScreen, NoteLine, PromptInput
 
 Browse = Callable[[ListDirectory | AddWorkspace, Awaited], Awaitable[object]]
 """Sends listing a directory or adding a workspace to the backend, awaiting its outcome as
@@ -105,9 +105,7 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
             candidates.display = False
             yield candidates
             yield OptionList()
-            more = Static("", id="explorer-more")
-            more.display = False
-            yield more
+            yield NoteLine("", id="explorer-more")
             yield self._note_line()
 
     async def on_mount(self) -> None:
@@ -166,10 +164,7 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
         self._waiting = False
         self._held = None
         self.query_one(Vertical).border_title = explorer_title(listing)
-        more = more_note(listing)
-        shown = self.query_one("#explorer-more", Static)
-        shown.update(more or "")
-        shown.display = more is not None
+        self.query_one("#explorer-more", NoteLine).show(more_note(listing))
         self.query_one(OptionList).highlighted = None  # A new listing starts at its top.
         self._relist_entries(())
 

@@ -19,7 +19,14 @@ from orbit.tui.sessions import SessionChange, SessionsScreen
 from orbit.tui.view.common import kept_highlight
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.sessions import Viewing
-from orbit.tui.widgets import ChoiceScreen, ListScreen, PickerScreen, StatusLine, relist
+from orbit.tui.widgets import (
+    ChoiceScreen,
+    ListScreen,
+    NoteLine,
+    PickerScreen,
+    StatusLine,
+    relist,
+)
 
 SESSIONS = (SessionSummary(id="a", name="first"), SessionSummary(id="b", name="second"))
 
@@ -139,6 +146,37 @@ async def test_relist_falls_back_where_kept_highlight_says_once_its_row_has_gone
         relist(options, ["a", "b", "add"], old, new)
         assert options.highlighted == kept_highlight(old, 2, new) == 1
         assert options.option_count == 3
+
+
+async def test_relist_with_nothing_left_highlights_nothing() -> None:
+    app = Listing()
+    async with app.run_test():
+        options = app.query_one(OptionList)
+        options.highlighted = 1
+        relist(options, [], ["a", "b", "c"], [])
+        assert options.highlighted is None
+        assert options.option_count == 0
+
+
+class Notes(App[None]):
+    def compose(self) -> ComposeResult:
+        yield NoteLine("", id="note")
+
+
+async def test_a_note_line_is_hidden_until_it_shows_a_note() -> None:
+    app = Notes()
+    async with app.run_test():
+        assert app.query_one("#note", NoteLine).shown is None
+
+
+async def test_a_note_line_shows_its_note_and_none_hides_it() -> None:
+    app = Notes()
+    async with app.run_test():
+        line = app.query_one("#note", NoteLine)
+        line.show("12 more")
+        assert line.shown == "12 more"
+        line.show(None)
+        assert line.shown is None
 
 
 class Lines(App[None]):

@@ -21,7 +21,7 @@ from orbit.protocol import (
 from orbit.tui import Opening, OrbitApp
 from orbit.tui.explorer import ExplorerScreen
 from orbit.tui.sessions import SessionsScreen
-from orbit.tui.widgets import ConfirmScreen
+from orbit.tui.widgets import ConfirmScreen, NoteLine
 from orbit.tui.workspaces import WorkspacesScreen
 from tests.tui_fakes import FakeLink, FakeSession, changes, feed_events
 
@@ -77,8 +77,7 @@ def rows(screen: ExplorerScreen) -> list[str]:
 
 
 def more(screen: ExplorerScreen) -> str | None:
-    shown = screen.query_one("#explorer-more", Static)
-    return str(shown.render()) if shown.display else None
+    return screen.query_one("#explorer-more", NoteLine).shown
 
 
 async def explore(app: OrbitApp, pilot: Pilot[None], *listings: DirectoryListing) -> None:
