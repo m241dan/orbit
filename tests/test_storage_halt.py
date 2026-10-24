@@ -19,7 +19,6 @@ from orbit.agent.application.storage_halt import (
     HaltHooks,
     StorageHalt,
     fault_of,
-    retried,
     written,
 )
 from orbit.agent.domain.refusals import Refused
@@ -548,38 +547,13 @@ async def test_once_closed_a_failure_only_marks_the_session_halted() -> None:
     assert halt.halted and published == []
 
 
-@dataclass
-class Retried:
-    """A write that, retried, fails with ``error`` if there is one, noting it ran in ``ran``."""
+async def test_a_failed_append_to_the_log_halts_the_session_as_the_event_log() -> None:
+    halt = StorageHalt(lambda event: asyncio.sleep(0))
+    halt.log_failed(StoreFailed("full"))
 
-    write: FailedWrite
-    ran: list[FailedWrite]
-    error: StoreFailed | None = None
-
-    async def retry(self) -> StoreFailed | None:
-        self.ran.append(self.write)
-        return self.error
-
-
-async def test_retrying_writes_stops_at_the_first_that_fails_and_names_it() -> None:
-    ran: list[FailedWrite] = []
-    full = StoreFailed("full")
-    writes = (
-        Retried(FailedWrite.SESSION_RECORD, ran),
-        Retried(FailedWrite.REVIEW_COUNT, ran, full),
-        Retried(FailedWrite.USAGE, ran, StoreFailed("later")),
-    )
-
-    assert await retried(writes) == (FailedWrite.REVIEW_COUNT, full)
-    assert ran == [FailedWrite.SESSION_RECORD, FailedWrite.REVIEW_COUNT]
-
-
-async def test_retrying_writes_that_all_work_retries_each_in_order() -> None:
-    ran: list[FailedWrite] = []
-    writes = (Retried(FailedWrite.USAGE, ran), Retried(FailedWrite.SESSION_RECORD, ran))
-
-    assert await retried(writes) is None
-    assert ran == [FailedWrite.USAGE, FailedWrite.SESSION_RECORD]
+    assert halt.halted
+    assert halt.message == halting_message(FailedWrite.EVENT_LOG)
+    await halt.close()
 
 
 async def test_a_write_is_skipped_while_the_session_is_halted() -> None:

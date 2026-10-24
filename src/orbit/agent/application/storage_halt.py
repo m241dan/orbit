@@ -72,16 +72,6 @@ async def written(halt: Halting, write: FailedWrite, attempt: Attempt) -> None:
         halt.fail(write, error)
 
 
-async def retried(writes: Sequence[RetriedWrite]) -> Failure | None:
-    """Retry ``writes`` in order, stopping at the first that fails; returns that write and its
-    error, if one did."""
-    for each in writes:
-        error = await each.retry()
-        if error is not None:
-            return each.write, error
-    return None
-
-
 async def _nothing_diverted() -> tuple[Sequence[EventEnvelope], str | None]:
     return (), None
 
@@ -162,6 +152,10 @@ class StorageHalt:
         if not self._closed:
             self._halting = True
             self._background.start(self._halt(self._fault))
+
+    def log_failed(self, error: StoreFailed) -> None:
+        """Halt the session, as appending to its event log failed with ``error``."""
+        self.fail(FailedWrite.EVENT_LOG, error)
 
     def check(self) -> None:
         """Refuse a command, raising :class:`Refused`, while the session is halted."""

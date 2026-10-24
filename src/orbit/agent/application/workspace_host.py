@@ -36,7 +36,6 @@ from orbit.agent.application.ports import (
     ProposalReview,
     RepositoryLock,
     SessionStore,
-    StoreFailed,
     UsageLedger,
 )
 from orbit.agent.application.proposals import FrontendReview
@@ -45,7 +44,8 @@ from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
 from orbit.agent.application.session_state import SessionStates, StateParts
 from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.startup_check import CheckSite, StartupCheck
-from orbit.agent.application.storage_halt import Failure, HaltHooks, StorageHalt, retried
+from orbit.agent.application.storage_halt import HaltHooks, StorageHalt
+from orbit.agent.application.storage_resume import ResumeParts, StorageResume
 from orbit.agent.application.switcher import (
     SessionCommand,
     SessionSwitcher,
@@ -78,7 +78,6 @@ from orbit.agent.domain.refusals import STOPPING, Refused
 from orbit.agent.domain.reviews import ReviewPlanner
 from orbit.agent.domain.roles import role_task
 from orbit.agent.domain.storage import StorageSettings
-from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     CODER,
@@ -90,7 +89,6 @@ from orbit.protocol import (
     DeleteSession,
     Event,
     History,
-    LogGap,
     NewSession,
     Notice,
     RenameSession,
@@ -272,13 +270,15 @@ class WorkspaceHost:
         self._settings = SessionSettings(settings or Settings(), pinned, model_choices)
         self._storage = storage
         halt_hooks = HaltHooks(
-            lambda: self._events.stop_log(self._keeper.id), self._stop_work, self._retry_storage
+            lambda: self._events.stop_log(self._keeper.id),
+            self._stop_work,
+            lambda: self._resume.retry(),
         )
         self._halt = StorageHalt(lambda event: self._events.put(event), halt_hooks)
         self._gate = SessionGate(
             lambda: self._halt.halted, lambda: self._takeover.read_only, self._halt.check
         )
-        overflow = Overflow(fallback, self._log_failed)
+        overflow = Overflow(fallback, self._halt.log_failed)
         self._connections = Connections(lambda: self._states.check(), lambda: self._keeper.id)
         self._workspace_id = workspace_id
         self._events = Outbox(lambda: self._keeper.id, store, storage, overflow)
@@ -314,6 +314,7 @@ class WorkspaceHost:
         self._work = self._work_lane()
         self._turns = self._work_turns()
         self._switcher = self._session_switcher(pick_session)
+        self._resume = self._storage_resume()
         self._commands = self._work_commands()
         self._handover = self._make_handover()
         self._greeting = self._host_greeting()
@@ -322,28 +323,19 @@ class WorkspaceHost:
         self._views = self._session_views()
         self._watch_background()
 
-    async def _retry_storage(self) -> Failure | None:
-        """Retry the writes to the store a halt stopped: the session record as it is now, with a
-        saved session's rename whose save failed, the review count and the usage, then appending
-        to the event log, which logs a ``LogGap`` for each span of events lost; returns the write
-        that failed and its error, if one did."""
-        record = self._keeper.retried(self._switcher.contents)
-        saves = await retried((record, self._review_count, self._usage))
-        return saves or await self._resume_log()
-
-    async def _resume_log(self) -> Failure | None:
-        """Append to the event log again, publishing a ``LogGap`` for each span of events that
-        reached neither it nor a fallback file; returns the error, if appending failed."""
-        resumed = await self._events.resume_log()
-        if isinstance(resumed, StoreFailed):
-            return FailedWrite.EVENT_LOG, resumed
-        for first, last in resumed:
-            await self._events.put(LogGap(first_seq=first, last_seq=last))
-        return None
-
-    def _log_failed(self, error: StoreFailed) -> None:
-        """Halt the session, as appending to its event log failed with ``error``."""
-        self._halt.fail(FailedWrite.EVENT_LOG, error)
+    def _storage_resume(self) -> StorageResume:
+        """What resumes the session once storage works again: it retries the session record,
+        the review count and the usage, then appends to the event log again."""
+        parts = ResumeParts(
+            self._keeper,
+            self._switcher.contents,
+            (self._review_count, self._usage),
+            self._events,
+            self._turns,
+            self._restart_background,
+            lambda: self._closing,
+        )
+        return StorageResume(self._halt, parts)
 
     def _session_states(self) -> SessionStates:
         """What publishes the open session's state as it changes."""
@@ -657,7 +649,7 @@ class WorkspaceHost:
         if self._closing:
             raise Refused(INVALID, STOPPING)
         if isinstance(command, ResumeStorage):
-            await self._resume_storage()
+            await self._resume.resume()
             return
         self._halt.check()
         if isinstance(command, Attach):
@@ -707,18 +699,14 @@ class WorkspaceHost:
         if await self._switcher.change_saved(command):
             await self._views.deleted(command.session_id)
 
-    async def _resume_storage(self) -> None:
-        """Lift the halt, if the writes that failed now work, start the run whose wait to start
-        again ended while halted, the reviews waiting and the startup check the halt kept from
-        starting. A startup check the halt cancelled stays cancelled, as one the user cancelled
-        does: it runs once as orbit starts, the conversation has said it was cancelled, and the
-        first task's verification runs the same steps. Closing meanwhile, nothing is started."""
-        await self._halt.resume()
-        if not self._halt.halted and not self._closing:
-            await self._turns.lifted()
-            if self._lane is not None:
-                self._lane.kick()
-            self._start_startup_check()
+    def _restart_background(self) -> None:
+        """Start the reviews waiting and the startup check the halt kept from starting, as the
+        halt lifts. A startup check the halt cancelled stays cancelled, as one the user
+        cancelled does: it runs once as orbit starts, the conversation has said it was
+        cancelled, and the first task's verification runs the same steps."""
+        if self._lane is not None:
+            self._lane.kick()
+        self._start_startup_check()
 
     def _agent_on(self, task_id: str) -> str:
         """The agent working on task ``task_id``; only asked while one is."""
