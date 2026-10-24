@@ -112,7 +112,9 @@ class ProposalHost:
 
     def show(self, event: ChecksProposed) -> None:
         """Ask the user about ``event``'s proposal, or once the one shown is done with, unless
-        it's the one shown or waiting already."""
+        it's the one shown or waiting already. Its agent no longer counts as exited, as agent
+        ids restart with orbit."""
+        self._exited.discard(event.agent_id)
         if self.shown is not None:
             self._wait(event)
             return  # A snapshot showed it before its event arrived, or another is shown.

@@ -516,6 +516,35 @@ async def test_a_decision_whose_agent_exits_before_its_refusal_leaves_the_propos
         assert proposal_screens(app) == []
 
 
+async def test_a_refused_decision_reopens_a_new_proposal_from_a_reused_agent_id() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        exited = AgentExited(agent_id="agent-3", reason="finished")
+        await feed_events(session, pilot, exited, PROPOSAL)
+        await pilot.press("a")
+        await pilot.pause()
+        [sent] = session.envelopes
+        refused = CommandRefused(command_id=sent.command_id, code="busy", message="Not now.")
+        await feed_events(session, pilot, refused)
+        assert [screen.proposal for screen in proposal_screens(app)] == [PROPOSAL]
+
+
+async def test_a_refused_decision_reopens_a_snapshot_proposal_from_a_reused_agent_id() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        exited = AgentExited(agent_id="agent-3", reason="finished")
+        waiting = SNAPSHOT.model_copy(update={"proposals": (PROPOSAL,)})
+        await feed_events(session, pilot, exited, waiting)
+        await pilot.press("a")
+        await pilot.pause()
+        [sent] = session.envelopes
+        refused = CommandRefused(command_id=sent.command_id, code="busy", message="Not now.")
+        await feed_events(session, pilot, refused)
+        assert [screen.proposal for screen in proposal_screens(app)] == [PROPOSAL]
+
+
 async def test_a_decision_that_failed_to_send_drops_its_entry_and_shows_the_proposal_again() -> (
     None
 ):
