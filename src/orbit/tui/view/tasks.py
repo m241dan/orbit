@@ -1,7 +1,8 @@
 """The task list."""
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from typing import Protocol
 
 from rich.cells import cell_len
 from rich.text import Text
@@ -13,6 +14,7 @@ from orbit.tui.view.common import (
     STATUS_ICONS,
     coder_wait_note,
     counted,
+    spinner_frame,
     token_text,
 )
 from orbit.tui.view.detail_views import ERROR
@@ -231,3 +233,209 @@ def follow_top(
         return min(bottom - view_height, top)
     context = rows[index - 1][0] if index else top
     return context if bottom - context <= view_height else top
+
+
+class TaskBoardView(Protocol):
+    """What the task list shows and what the user has done in it: the widget, which keeps the
+    highlight and the scroll position as the user changes them, and is measured as it's laid
+    out."""
+
+    @property
+    def highlighted(self) -> int | None:
+        """The row highlighted, if any; the new-task row comes after the tasks'."""
+        ...
+
+    @property
+    def row_width(self) -> int:
+        """The cells a row's line has."""
+        ...
+
+    @property
+    def scroll_top(self) -> int:
+        """The first line in view."""
+        ...
+
+    @property
+    def view_height(self) -> int:
+        """How many lines are in view."""
+        ...
+
+    def row_lines(self) -> Sequence[tuple[int, int]]:
+        """Each row's first line and height, once the list is measured; none before."""
+        ...
+
+    def show_title(self, title: str) -> None:
+        """Show ``title`` over the list."""
+        ...
+
+    def show_usage(self, usage: str) -> None:
+        """Show ``usage`` under the list, empty for none."""
+        ...
+
+    def show_labels(self, rows: Sequence[tuple[str, Text]], trailing: Text) -> None:
+        """Show ``rows``, each a task's id and its label, then the row ``trailing``."""
+        ...
+
+    def highlight(self, index: int) -> None:
+        """Highlight row ``index``."""
+        ...
+
+    def scroll_to_line(self, top: int) -> None:
+        """Scroll at once so line ``top`` is the first in view."""
+        ...
+
+    def keep_ticking(self, running: bool) -> None:
+        """Have :meth:`TaskBoard.redraw` called as fast as spinners turn while ``running``,
+        and not otherwise."""
+        ...
+
+    def edit_task(self, task: TaskState | None) -> None:
+        """Ask for ``task`` to be edited, or a new task for none."""
+        ...
+
+    def accept_task(self, task_id: str) -> None:
+        """Ask for draft task ``task_id`` to be accepted."""
+        ...
+
+    def remove_task(self, task_id: str) -> None:
+        """Ask for task ``task_id`` to be removed."""
+        ...
+
+    def show_why(self, state: TaskState, number: str) -> None:
+        """Show why ``state``, task ``number`` on the list, ended."""
+        ...
+
+
+class TaskBoard:
+    """The backend's task list as ``view`` shows it, a trailing row to add a task after its
+    tasks, telling the time for its spinners with ``clock``.
+
+    It numbers the tasks and labels their rows at the view's width, the task about to run
+    saying when it waits for a coder, and redraws as the tasks change and while any runs. It
+    totals what the session's turns cost. While following, it scrolls to keep the active task
+    (``active_task``) in view; held, it stays where it is, until let go.
+    """
+
+    def __init__(self, view: TaskBoardView, clock: Callable[[], float]) -> None:
+        self._view = view
+        self._clock = clock
+        self.tasks: tuple[TaskState, ...] = ()
+        self.numbers: list[str] = []
+        self.numbers_by_id: dict[str, str] = {}
+        self.session_usage = Usage()
+        self.waiting: tuple[str, str] | None = None  # The task waiting for a coder, and its note.
+        self.following = True
+
+    def start(self) -> None:
+        """Show the list's title and its rows, following."""
+        self._view.show_title(task_list_title(held=False))
+        self.redraw()
+
+    def show(self, tasks: Sequence[TaskState]) -> None:
+        """Show ``tasks``, turning their spinners while any runs and following the active one;
+        nothing for the tasks already shown."""
+        tasks = tuple(tasks)
+        if tasks == self.tasks:
+            return
+        self.tasks, self.numbers = tasks, task_numbers(tasks)
+        self.numbers_by_id = dict(zip((t.id for t in tasks), self.numbers, strict=True))
+        self.redraw()
+        self._view.keep_ticking(ticking(tasks))
+        self.follow()
+
+    def show_waiting(self, waiting: tuple[str, str] | None) -> None:
+        """Have the task ``waiting`` names say it waits for a coder as it says, or none do."""
+        if waiting == self.waiting:
+            return
+        self.waiting = waiting
+        self.redraw()
+
+    def redraw(self) -> None:
+        """Label the tasks' rows afresh, as the spinners are now and at the view's width."""
+        frame, width = spinner_frame(self._clock()), self._view.row_width
+        waiting_id, note = self.waiting or (None, None)
+        rows = [
+            (
+                t.id,
+                task_label(t, n, frame, width=width, waiting=note if t.id == waiting_id else None),
+            )
+            for t, n in zip(self.tasks, self.numbers, strict=True)
+        ]
+        self._view.show_labels(rows, new_task_row())
+
+    def follow(self) -> None:
+        """Scroll just enough to bring the active task into view, if following and the list
+        is measured; the highlight stays where it is."""
+        index = active_task(self.tasks)
+        if not self.following or index is None:
+            return
+        rows = self._view.row_lines()
+        if index >= len(rows):  # Not measured yet, before the list has a size.
+            return
+        top = follow_top(rows, index, self._view.scroll_top, self._view.view_height)
+        if top is not None:
+            self._view.scroll_to_line(top)
+
+    def hold(self) -> None:
+        """Stop following, so the list stays where the user put it."""
+        self.following = False
+        self._view.show_title(task_list_title(held=True))
+
+    def let_go(self) -> None:
+        """Follow the active task again, scrolling to it at once; nothing if not held."""
+        if self.following:
+            return
+        self.following = True
+        self._view.show_title(task_list_title(held=False))
+        self.follow()
+
+    def activated(self, focused: bool) -> None:
+        """Highlight the active task, if there is one, now the list is activated, if it took
+        the focus (``focused``), as a disabled list doesn't."""
+        index = active_task(self.tasks)
+        if focused and index is not None:
+            self._view.highlight(index)
+
+    @property
+    def highlighted_task(self) -> TaskState | None:
+        """The task the highlight is on; none on the new-task row or with nothing highlighted."""
+        index = self._view.highlighted
+        return self.tasks[index] if index is not None and index < len(self.tasks) else None
+
+    def select(self) -> None:
+        """Ask to edit the task highlighted, or a new task on the new-task row; nothing with
+        nothing highlighted."""
+        if self._view.highlighted is not None:
+            self._view.edit_task(self.highlighted_task)
+
+    def accept(self) -> None:
+        """Ask to accept the task highlighted, if it's a draft."""
+        state = self.highlighted_task
+        if state is not None and acceptable(state):
+            self._view.accept_task(state.id)
+
+    def remove(self) -> None:
+        """Ask to remove the task highlighted, if any."""
+        state = self.highlighted_task
+        if state is not None:
+            self._view.remove_task(state.id)
+
+    def explain(self) -> None:
+        """Show why the task highlighted ended, if it has a reason."""
+        state = self.highlighted_task
+        if state is not None and state.reason:
+            self._view.show_why(state, self.numbers_by_id[state.id])
+
+    def count(self, usage: Usage) -> None:
+        """Add what a turn cost, ``usage``, to the session's total."""
+        self.reset_usage(self.session_usage + usage)
+
+    def reset_usage(self, usage: Usage) -> None:
+        """Start the session's total afresh at ``usage``; a session that has spent nothing
+        shows no total."""
+        self.session_usage = usage
+        self._view.show_usage(session_usage_subtitle(usage))
+
+    def find(self, task_id: str) -> TaskState | None:
+        """The task with id ``task_id``, if it's on the list."""
+        return next((t for t in self.tasks if t.id == task_id), None)

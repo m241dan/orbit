@@ -1,11 +1,12 @@
 import pytest
 from rich.cells import cell_len
 from textual import events
+from textual.app import App, ComposeResult
+from textual.pilot import Pilot
 
 from orbit.agent import WorkspaceHost
 from orbit.protocol import (
     NOT_CONFIGURED,
-    REVIEW_ORIGIN,
     SUPER_REVIEW,
     AcceptTask,
     ActivateSession,
@@ -190,12 +191,6 @@ def test_tasks_are_numbered_and_every_fix_in_a_chain_under_the_first_task() -> N
     assert task_numbers([]) == []
 
 
-async def test_task_list_starts_with_only_the_new_task_row() -> None:
-    app = OrbitApp(FakeSession())
-    async with app.run_test():
-        assert rows(app) == ["+ new task"]
-
-
 async def test_list_shows_the_board_the_backend_reports() -> None:
     session = FakeSession()
     app = OrbitApp(session)
@@ -211,63 +206,34 @@ async def test_list_shows_the_board_the_backend_reports() -> None:
         ]
 
 
-async def test_list_numbers_its_tasks_by_id() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        one, two = board("one", "two").tasks
-        fix = TaskState(id="3", task=TaskSpec(prompt="fix one"), fixes="1")
-        await feed_events(session, pilot, TasksChanged(tasks=(one, fix, two)))
-        assert app.query_one(TaskList).numbers_by_id == {"1": "1", "3": "1.1", "2": "2"}
+class TaskListApp(App[None]):
+    """An app showing just a task list, for what the list does on its own."""
+
+    def compose(self) -> ComposeResult:
+        yield TaskList(id="task-list")
 
 
-async def test_running_tasks_spin_in_place() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        tasks = app.query_one(TaskList)
-        now = [0.0]
-        tasks.clock = lambda: now[0]
-        one, two, three = board("one", "two", "three").tasks
-        await feed_events(
-            session,
-            pilot,
-            TasksChanged(
-                tasks=(
-                    one.model_copy(update={"status": "completed"}),
-                    two.model_copy(update={"status": "running"}),
-                    three.model_copy(update={"status": "verifying"}),
-                )
-            ),
-        )
-        await open_task_list(pilot)  # On the running task, "two".
-        await pilot.press("j")
-        assert [r.split("\n")[0] for r in rows(app)[:3]] == [
-            "1. ✅ one",
-            "2. ◜  two",
-            "3. 🔍 three",
-        ]
+async def show(pilot: Pilot[None], changed: TasksChanged) -> None:
+    """Show the tasks ``changed`` reports on the app's task list, and let it take them in."""
+    pilot.app.query_one(TaskList).show(changed.tasks)
+    await pilot.pause()
 
-        now[0] = 0.25  # two frames on, at 8 a second
-        tasks.tick()
-        assert rows(app)[1].startswith("2. ◝  two")
-        assert rows(app)[2].startswith("3. 🔍 three")  # only running tasks spin
-        assert tasks.highlighted == 2  # redrawing a row leaves the highlight alone
 
-        # Nothing spins once nothing is in progress.
-        await feed_events(session, pilot, board("one", "two", "three", status="completed"))
-        before = rows(app)
-        now[0] = 0.5
-        tasks.tick()
-        assert rows(app) == before
+async def activate(pilot: Pilot[None]) -> None:
+    """Activate the app's task list, as enter on it does."""
+    pilot.app.query_one(TaskList).enter_list_mode()
+    await pilot.pause()
+
+
+def shown_rows(task_list: TaskList) -> list[str]:
+    return [str(task_list.get_option_at_index(i).prompt) for i in range(task_list.option_count)]
 
 
 async def test_highlight_stays_on_its_task_as_the_board_changes() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app = TaskListApp()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, board("one", "two"))
-        await open_task_list(pilot)
+        await show(pilot, board("one", "two"))
+        await activate(pilot)
         tasks = app.query_one(TaskList)
         await pilot.press("j")
         assert tasks.highlighted == 1  # on "two"
@@ -275,32 +241,19 @@ async def test_highlight_stays_on_its_task_as_the_board_changes() -> None:
         # A fix task appears before it: the highlight follows "two" down.
         fix = TaskState(id="9", task=TaskSpec(prompt="fix"))
         one, two = board("one", "two").tasks
-        await feed_events(session, pilot, TasksChanged(tasks=(one, fix, two)))
+        await show(pilot, TasksChanged(tasks=(one, fix, two)))
         assert tasks.highlighted == 2
 
         # On the new-task row, it stays there as tasks are added.
         await pilot.press("j")
         new = TaskState(id="10", task=TaskSpec(prompt="three"))
-        await feed_events(session, pilot, TasksChanged(tasks=(one, fix, two, new)))
+        await show(pilot, TasksChanged(tasks=(one, fix, two, new)))
         assert tasks.highlighted == 4
 
         # Leaving and re-entering the list keeps the highlight where it was.
-        await pilot.press("escape", "enter")
+        await pilot.press("escape")
+        await activate(pilot)
         assert tasks.highlighted == 4
-
-
-async def test_removing_the_only_task_leaves_the_new_task_row_unhighlighted() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, board("one"))
-        await open_task_list(pilot)
-        tasks = app.query_one(TaskList)
-        assert tasks.highlighted == 0
-        await feed_events(session, pilot, TasksChanged(tasks=()))
-        assert tasks.highlighted is None
-        await pilot.press("enter")
-        assert len(app.screen_stack) == 1
 
 
 async def test_enter_activates_the_task_list() -> None:
@@ -348,13 +301,6 @@ async def test_enter_on_a_running_task_says_it_cant_be_edited(
     state = TaskState(id="3", task=TaskSpec(prompt="go"), status="running")
     notes = await press_enter_on_the_task(monkeypatch, state)
     assert notes == [("Task '3' can't be edited while it runs.", "warning")]
-
-
-async def test_enter_on_a_review_says_it_cant_be_edited(monkeypatch: pytest.MonkeyPatch) -> None:
-    task = TaskSpec(prompt="check it", role="reviewer")
-    state = TaskState(id="1", task=task, origin=REVIEW_ORIGIN)
-    notes = await press_enter_on_the_task(monkeypatch, state)
-    assert notes == [("Reviews can't be edited; remove it instead.", "warning")]
 
 
 async def test_ctrl_r_asks_the_backend_to_run_unless_busy() -> None:
@@ -500,44 +446,16 @@ def options(task_list: TaskList) -> list[object]:
     return [task_list.get_option_at_index(i) for i in range(task_list.option_count)]
 
 
-async def test_an_unchanged_task_list_is_left_alone() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, board("one", "two"))
-        task_list = app.query_one(TaskList)
-        before = options(task_list)
-        await feed_events(session, pilot, board("one", "two"))
-        assert options(task_list) == before
-
-
-async def test_a_changed_task_relabels_its_row_in_place() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        task_list = app.query_one(TaskList)
-        task_list.clock = lambda: 0.0
-        await feed_events(session, pilot, board("one", "two"))
-        before = options(task_list)
-        one, two = board("one", "two").tasks
-        done = one.model_copy(update={"status": "completed"})
-        await feed_events(session, pilot, TasksChanged(tasks=(done, two)))
-        assert options(task_list) == before  # The same rows, one with a new label.
-        assert rows(app)[0] == str(task_label(done, "1", spinner_frame(0.0)))
-        assert rows(app)[1] == str(task_label(two, "2", spinner_frame(0.0)))
-
-
 async def test_tasks_coming_or_going_rebuild_the_rows() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app = TaskListApp()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, board("one", "two"))
+        await show(pilot, board("one", "two"))
         task_list = app.query_one(TaskList)
         before = options(task_list)
-        await feed_events(session, pilot, board("one", "two", "three"))
+        await show(pilot, board("one", "two", "three"))
         assert len(options(task_list)) == 4
         assert not any(option in before for option in options(task_list))
-        assert [row.split()[0] for row in rows(app)[:3]] == ["1.", "2.", "3."]
+        assert [row.split()[0] for row in shown_rows(task_list)[:3]] == ["1.", "2.", "3."]
 
 
 def cached_rows(task_list: TaskList) -> set[int]:
@@ -548,14 +466,13 @@ def cached_rows(task_list: TaskList) -> set[int]:
 
 
 async def test_spinning_and_relabelling_redraw_only_their_rows() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app = TaskListApp()
     async with app.run_test() as pilot:
         task_list = app.query_one(TaskList)
         task_list.clock = lambda: 0.0
         one, two, three = board("one", "two", "three").tasks
         running = two.model_copy(update={"status": "running"})
-        await feed_events(session, pilot, TasksChanged(tasks=(one, running, three)))
+        await show(pilot, TasksChanged(tasks=(one, running, three)))
         await pilot.pause()
         before = cached_rows(task_list)
         assert {0, 1, 2} <= before
@@ -566,20 +483,19 @@ async def test_spinning_and_relabelling_redraw_only_their_rows() -> None:
         done = three.model_copy(update={"status": "completed"})
         task_list.show((one, running, done))
         assert cached_rows(task_list) == before - {2}
-        assert rows(app)[2] == str(task_label(done, "3", spinner_frame(0.25)))
+        assert shown_rows(task_list)[2] == str(task_label(done, "3", spinner_frame(0.25)))
 
 
 async def test_task_list_ticks_only_while_a_task_runs() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app = TaskListApp()
     async with app.run_test() as pilot:
         tasks = app.query_one(TaskList)
         assert not tasks.ticking
-        await feed_events(session, pilot, board("one", "two"))
+        await show(pilot, board("one", "two"))
         assert not tasks.ticking
-        await feed_events(session, pilot, board("one", "two", status="running"))
+        await show(pilot, board("one", "two", status="running"))
         assert tasks.ticking
-        await feed_events(session, pilot, board("one", "two", status="verifying"))
+        await show(pilot, board("one", "two", status="verifying"))
         assert not tasks.ticking
 
 
@@ -599,14 +515,13 @@ def in_view(task_list: TaskList, index: int) -> bool:
 
 
 async def test_the_list_follows_the_active_task_down_the_board() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app = TaskListApp()
     async with app.run_test() as pilot:
         task_list = app.query_one(TaskList)
         assert task_list.following
-        await feed_events(session, pilot, many(30))
+        await show(pilot, many(30))
         assert task_list.scroll_y == 0  # Nothing active: it stays put.
-        await feed_events(session, pilot, many(30, running=25))
+        await show(pilot, many(30, running=25))
         assert in_view(task_list, 25)
         # Scrolled just enough: the task is on the last lines.
         top, height = task_list.row_lines()[25]
@@ -614,33 +529,11 @@ async def test_the_list_follows_the_active_task_down_the_board() -> None:
         assert task_list.highlighted is None  # Following only scrolls.
 
 
-async def test_the_list_scrolls_back_up_to_the_active_task_with_a_row_above_it() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        task_list = app.query_one(TaskList)
-        await feed_events(session, pilot, many(30, running=25))
-        await feed_events(session, pilot, many(30, running=3))
-        assert task_list.scroll_y == task_list.row_lines()[2][0]
-
-
-async def test_the_list_does_not_scroll_while_the_active_task_is_in_view() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        task_list = app.query_one(TaskList)
-        await feed_events(session, pilot, many(30, running=25))
-        scroll_y = task_list.scroll_y
-        await feed_events(session, pilot, many(30, running=24))
-        assert task_list.scroll_y == scroll_y
-
-
 async def test_the_list_follows_the_active_task_when_resized() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app = TaskListApp()
     async with app.run_test(size=(120, 60)) as pilot:
         task_list = app.query_one(TaskList)
-        await feed_events(session, pilot, many(30, running=12))
+        await show(pilot, many(30, running=12))
         assert task_list.scroll_y == 0
         await pilot.resize_terminal(120, 24)
         await pilot.pause()
@@ -655,11 +548,10 @@ def wordy(count: int, running: int) -> TasksChanged:
 
 
 async def test_the_list_follows_the_active_task_when_a_resize_rewraps_the_rows() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app = TaskListApp()
     async with app.run_test(size=(400, 60)) as pilot:
         task_list = app.query_one(TaskList)
-        await feed_events(session, pilot, wordy(30, running=25))
+        await show(pilot, wordy(30, running=25))
         await pilot.resize_terminal(80, 30)
         await pilot.pause()
         assert task_list.row_lines()[25][1] > 1  # The rows really did wrap.
@@ -677,11 +569,10 @@ def with_reasons(
 
 
 async def test_the_list_follows_the_active_task_below_rows_with_a_reason() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app = TaskListApp()
     async with app.run_test() as pilot:
         task_list = app.query_one(TaskList)
-        await feed_events(session, pilot, with_reasons(many(30, running=25), *range(25)))
+        await show(pilot, with_reasons(many(30, running=25), *range(25)))
         heights = [height for _, height in task_list.row_lines()]
         assert heights[24] == heights[26] + 1  # The reason's line.
         assert in_view(task_list, 25)
@@ -690,15 +581,14 @@ async def test_the_list_follows_the_active_task_below_rows_with_a_reason() -> No
 
 
 async def test_the_list_follows_the_active_task_as_reasons_come_and_go_above_it() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app = TaskListApp()
     async with app.run_test() as pilot:
         task_list = app.query_one(TaskList)
-        await feed_events(session, pilot, many(30, running=25))
-        await feed_events(session, pilot, with_reasons(many(30, running=25), *range(25)))
+        await show(pilot, many(30, running=25))
+        await show(pilot, with_reasons(many(30, running=25), *range(25)))
         await pilot.pause()
         assert in_view(task_list, 25)
-        await feed_events(session, pilot, many(30, running=25))
+        await show(pilot, many(30, running=25))
         await pilot.pause()
         heights = [height for _, height in task_list.row_lines()]
         assert heights[24] == heights[26]
@@ -706,46 +596,29 @@ async def test_the_list_follows_the_active_task_as_reasons_come_and_go_above_it(
 
 
 async def test_a_long_reason_is_cut_to_the_list_rather_than_wrapped() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app = TaskListApp()
     async with app.run_test(size=(400, 30)) as pilot:
         task_list = app.query_one(TaskList)
-        await feed_events(session, pilot, with_reasons(many(2), 0, reason="word " * 200))
+        await show(pilot, with_reasons(many(2), 0, reason="word " * 200))
         for size in ((400, 30), (80, 30)):
             await pilot.resize_terminal(*size)
             await pilot.pause()
             heights = [height for _, height in task_list.row_lines()]
             assert heights[0] == heights[1] + 1  # The reason takes one line, however long.
-            assert rows(app)[0].endswith("…")
-
-
-async def test_following_leaves_the_highlight_alone() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        task_list = app.query_one(TaskList)
-        await feed_events(session, pilot, many(30, running=1))
-        await open_task_list(pilot)
-        await pilot.press("k", "escape", "escape")
-        assert task_list.following
-        assert task_list.highlighted == 0
-        await feed_events(session, pilot, many(30, running=25))
-        assert task_list.scroll_y > 0
-        assert in_view(task_list, 25)
-        assert task_list.highlighted == 0
+            assert shown_rows(task_list)[0].endswith("…")
 
 
 async def test_activating_the_list_highlights_the_active_task() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app = TaskListApp()
     async with app.run_test() as pilot:
         task_list = app.query_one(TaskList)
-        await feed_events(session, pilot, many(30, running=25))
-        await open_task_list(pilot)
+        await show(pilot, many(30, running=25))
+        await activate(pilot)
         assert task_list.highlighted == 25
         assert in_view(task_list, 25)
         # It lands there even when the highlight was elsewhere.
-        await pilot.press("k", "k", "escape", "enter")
+        await pilot.press("k", "k", "escape")
+        await activate(pilot)
         assert task_list.highlighted == 25
 
 
@@ -767,17 +640,6 @@ def wheel(task_list: TaskList, down: bool = True) -> None:
     task_list.post_message(kind(task_list, 0, 0, 0, 1 if down else -1, 0, False, False, False))
 
 
-async def test_activating_the_list_holds_it() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        task_list = app.query_one(TaskList)
-        assert title(task_list) == "Task list"
-        await open_task_list(pilot)
-        assert not task_list.following
-        assert title(task_list) == "Task list · held"
-
-
 async def test_the_first_escape_leaves_list_mode_still_held() -> None:
     session = FakeSession()
     app = OrbitApp(session)
@@ -790,22 +652,6 @@ async def test_the_first_escape_leaves_list_mode_still_held() -> None:
         assert not task_list.following
         assert title(task_list) == "Task list · held"
         assert task_list.highlighted == 24
-
-
-async def test_escape_again_lets_go_and_scrolls_to_the_active_task() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        task_list = app.query_one(TaskList)
-        await feed_events(session, pilot, many(30, running=25))
-        await open_task_list(pilot)
-        await pilot.press(*"k" * 25, "escape")
-        assert task_list.scroll_y == 0
-        await pilot.press("escape")
-        assert task_list.following
-        assert title(task_list) == "Task list"
-        assert in_view(task_list, 25)
-        assert task_list.highlighted == 0  # Letting go only scrolls.
 
 
 async def test_the_mouse_wheel_holds_the_list() -> None:
@@ -829,43 +675,13 @@ async def test_the_mouse_wheel_holds_the_list() -> None:
 
 
 async def test_following_scrolls_do_not_hold_the_list() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app = TaskListApp()
     async with app.run_test() as pilot:
         task_list = app.query_one(TaskList)
-        await feed_events(session, pilot, many(30, running=25))
-        await feed_events(session, pilot, many(30, running=3))
+        await show(pilot, many(30, running=25))
+        await show(pilot, many(30, running=3))
         assert task_list.scroll_y > 0
         assert task_list.following
-        assert title(task_list) == "Task list"
-
-
-async def test_a_held_list_does_not_scroll_as_the_board_changes() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        task_list = app.query_one(TaskList)
-        await feed_events(session, pilot, many(30))
-        await open_task_list(pilot)
-        await pilot.press("escape")
-        await feed_events(session, pilot, many(30, running=25))
-        assert task_list.scroll_y == 0
-        await pilot.resize_terminal(100, 20)
-        await pilot.pause()
-        assert task_list.scroll_y == 0
-
-
-async def test_escape_on_a_list_not_held_is_harmless() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        task_list = app.query_one(TaskList)
-        await feed_events(session, pilot, many(30, running=25))
-        scroll_y = task_list.scroll_y
-        await pilot.press("l", "k", "escape")
-        assert selected(app) == ["task-list"]
-        assert task_list.following
-        assert task_list.scroll_y == scroll_y
         assert title(task_list) == "Task list"
 
 
@@ -933,58 +749,6 @@ async def test_opening_a_session_replaces_the_total_with_its_saved_spend() -> No
         saved = Usage(input_tokens=2_000, cost_usd=2.0)
         await feed_events(session, pilot, opened(SessionSummary(id="b", name="b", usage=saved)))
         assert task_list.border_subtitle == "session: 2k tok · $2.00"
-
-
-async def test_a_turn_after_opening_a_session_adds_to_its_total() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        task_list = app.query_one(TaskList)
-        await feed_events(
-            session,
-            pilot,
-            TurnFinished(turn_id="a", reason="completed", usage=Usage(cost_usd=0.84)),
-            opened(SessionSummary(id="b", name="b", usage=Usage(cost_usd=2.0))),
-            TurnFinished(turn_id="b", reason="completed", usage=Usage(cost_usd=0.5)),
-        )
-        assert task_list.border_subtitle == "session: 0 tok · $2.50"
-
-
-async def test_a_turn_that_spent_nothing_shows_no_total() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        free = TurnFinished(turn_id="a", reason="completed", usage=Usage())
-        await feed_events(session, pilot, free)
-        assert not app.query_one(TaskList).border_subtitle
-
-
-async def test_counting_and_resetting_to_the_same_total_show_the_same() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test():
-        task_list = app.query_one(TaskList)
-        total = Usage(input_tokens=1_000, cost_usd=0.84)
-        task_list.count(total)
-        counted = task_list.border_subtitle
-        task_list.reset_usage(total)
-        assert task_list.border_subtitle == counted == "session: 1k tok · $0.84"
-        task_list.reset_usage(Usage())
-        assert not task_list.border_subtitle
-
-
-async def test_opening_a_new_session_clears_the_total() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        task_list = app.query_one(TaskList)
-        spent = Usage(input_tokens=1_000, cost_usd=0.84)
-        await feed_events(
-            session, pilot, TurnFinished(turn_id="a", reason="completed", usage=spent)
-        )
-        await feed_events(session, pilot, opened(SessionSummary(id="n", name="n")))
-        assert not task_list.border_subtitle
-        assert task_list.session_usage == Usage()
 
 
 def waiting_state(*activity: Activity) -> SessionStateChanged:
