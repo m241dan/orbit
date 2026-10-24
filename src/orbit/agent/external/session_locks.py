@@ -18,6 +18,7 @@ from pathlib import Path
 
 from orbit.agent.application.ports import StorageFailed, StoreFailed
 from orbit.agent.external.file_locks import take_flock
+from orbit.agent.external.shielding import shielded
 from orbit.agent.external.sqlite_errors import error_kind
 
 
@@ -99,11 +100,10 @@ class SessionLocks:
         """
         taking = asyncio.ensure_future(asyncio.to_thread(self._acquire, session_id))
         try:
-            return await asyncio.shield(taking) is not _Taken.REFUSED
+            return await shielded(taking) is not _Taken.REFUSED
         except asyncio.CancelledError:
-            # The thread carries on; once it's done, let go of any lock it created (but not one
+            # The thread carried on; now it's done, let go of any lock it created (but not one
             # we already held). A lock that can't be let go of mustn't lose the cancellation.
-            await asyncio.wait([taking])
             if taking.exception() is None and taking.result() is _Taken.CREATED:
                 with suppress(StoreFailed):
                     await self.release(session_id)

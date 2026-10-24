@@ -25,6 +25,7 @@ from orbit.agent.external.repository import (
     orbit_dir,
 )
 from orbit.agent.external.session_import import ImportBlocked
+from orbit.agent.external.shielding import shielded
 from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.agent.external.store_startup import OpenedStore, open_workspace_store
@@ -93,12 +94,11 @@ async def open_workspace(
     # Git, the configuration file and the lock would stall the event loop.
     preparing = asyncio.ensure_future(asyncio.to_thread(_prepared, root, make_host, opening))
     try:
-        served, make = await asyncio.shield(preparing)
+        served, make = await shielded(preparing)
     except asyncio.CancelledError:
-        preparing.add_done_callback(_let_go_prepared)
-        # The thread runs on regardless; waiting for it means the lock it takes is let go by the
-        # time the cancellation is, as that callback runs before this wait ends.
-        await asyncio.wait([preparing])
+        # The thread ran on regardless and has finished: let go of the lock it took before the
+        # cancellation ends.
+        _let_go_prepared(preparing)
         raise
     try:
         opened = await _view(store, root, owned=served.owner is None, opening=opening)

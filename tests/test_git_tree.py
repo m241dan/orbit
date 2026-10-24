@@ -1014,6 +1014,33 @@ async def test_a_snapshot_cancelled_while_making_its_directory_leaves_nothing(
     assert snapshot_dirs(repo) == [] and tree._snapshots == set()
 
 
+async def test_a_snapshot_cancelled_twice_while_making_its_directory_leaves_nothing(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    real = git_tree._make_snapshot_dir
+    making, release, made = threading.Event(), threading.Event(), threading.Event()
+
+    def blocking(parent: Path, commit: str) -> Path:
+        making.set()
+        release.wait()
+        path = real(parent, commit)
+        made.set()
+        return path
+
+    monkeypatch.setattr(git_tree, "_make_snapshot_dir", blocking)
+    tree = GitCoderTree(str(repo))
+    task = asyncio.create_task(tree.snapshot("HEAD"))
+    await asyncio.to_thread(making.wait)
+    for _ in range(2):  # Again while it waits for the thread: it still removes the directory.
+        task.cancel()
+        await asyncio.sleep(0)
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await asyncio.to_thread(made.wait)
+    assert snapshot_dirs(repo) == [] and tree._snapshots == set()
+
+
 @pytest.mark.parametrize("worktree", [True, False])
 async def test_a_leftover_from_the_old_naming_doesnt_block_a_snapshot(
     repo: Path, worktree: bool

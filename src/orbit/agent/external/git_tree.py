@@ -28,6 +28,7 @@ from orbit.agent.domain.coder_tree import (
 from orbit.agent.external.git import GitResult, git
 from orbit.agent.external.processes import run_process
 from orbit.agent.external.repository import ORBIT_DIR, find_git_common_dir
+from orbit.agent.external.shielding import shielded
 from orbit.agent.external.whole_files import write_whole
 
 BRANCH = "orbit/coder"
@@ -202,9 +203,8 @@ class GitCoderTree:
         the thread goes on to make is removed before the cancellation is raised."""
         making = asyncio.ensure_future(asyncio.to_thread(_make_snapshot_dir, parent, sha))
         try:
-            return await asyncio.shield(making)
+            return await shielded(making)
         except asyncio.CancelledError:
-            await asyncio.wait([making])
             with contextlib.suppress(TreeFailed):  # It failed to make one: nothing to remove.
                 await asyncio.to_thread(shutil.rmtree, making.result(), ignore_errors=True)
             raise
@@ -343,12 +343,7 @@ class GitCoderTree:
     async def _abort_rebase_shielded(self, path: Path) -> None:
         """Abort the rebase in progress in ``path``, if there is one, finishing even when
         cancelled, and ignoring failures so the error that stopped it is the one raised."""
-        aborting = asyncio.ensure_future(self._try_abort_rebase(path))
-        try:
-            await asyncio.shield(aborting)
-        except asyncio.CancelledError:
-            await asyncio.wait([aborting])
-            raise
+        await shielded(asyncio.ensure_future(self._try_abort_rebase(path)))
 
     async def _try_abort_rebase(self, path: Path) -> None:
         """Abort the rebase in progress in ``path``, if there is one, ignoring failures."""

@@ -195,6 +195,34 @@ async def test_a_cancelled_acquire_leaves_no_lock_behind(tmp_path: Path) -> None
     assert await locks_in(tmp_path).acquire("abc")
 
 
+async def test_an_acquire_cancelled_twice_still_leaves_no_lock_behind(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    real = SessionLocks._acquire
+    taken = threading.Event()
+
+    def taking(self: SessionLocks, session_id: str) -> object:
+        try:
+            return real(self, session_id)
+        finally:
+            taken.set()
+
+    monkeypatch.setattr(SessionLocks, "_acquire", taking)
+    sessions(tmp_path).mkdir(parents=True)
+    locks = locks_in(tmp_path)
+    with directory_held(sessions(tmp_path)):
+        acquiring = asyncio.create_task(locks.acquire("abc"))
+        await asyncio.sleep(0.05)
+        for _ in range(2):  # Again while it waits for the thread: it still lets go.
+            acquiring.cancel()
+            await asyncio.sleep(0)
+    with pytest.raises(asyncio.CancelledError):
+        await acquiring
+    await asyncio.to_thread(taken.wait)
+    assert list(sessions(tmp_path).iterdir()) == []
+    assert not locks.held_elsewhere("abc") and not locks_in(tmp_path).held_elsewhere("abc")
+
+
 async def test_a_cancelled_acquire_whose_lock_fails_stays_cancelled(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
