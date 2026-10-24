@@ -21,6 +21,7 @@ from orbit.protocol import (
 from orbit.tui import Opening, OrbitApp
 from orbit.tui.explorer import ExplorerScreen
 from orbit.tui.sessions import SessionsScreen
+from orbit.tui.widgets import ConfirmScreen
 from orbit.tui.workspaces import WorkspacesScreen
 from tests.tui_fakes import FakeLink, FakeSession, changes, feed_events
 
@@ -235,6 +236,31 @@ async def test_a_workspace_listed_before_its_add_is_accepted_opens_on_acceptance
         await feed_events(session_of(app), pilot, catalog)
         await answer(app, pilot)
         await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, SessionsScreen) and screen.workspace == "A"
+
+
+async def test_an_add_accepted_under_another_modal_waits_for_it_to_close() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRV)
+        await pilot.press("a")
+        answers: list[bool | None] = []
+
+        async def answered(confirmed: bool | None) -> None:
+            answers.append(confirmed)
+
+        app.push_screen(ConfirmScreen("Take over?", "Another TUI is attached."), answered)
+        await pilot.pause()
+        await answer(app, pilot)
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmScreen) and answers == []
+        await pilot.press("n")
+        await pilot.pause()
+        assert answers == [False]
+        assert isinstance(app.screen, WorkspacesScreen)
+        catalog = Catalog(workspaces=(B, A), agents=(), triggers=(), lanes=())
+        await feed_events(session_of(app), pilot, catalog)
         screen = app.screen
         assert isinstance(screen, SessionsScreen) and screen.workspace == "A"
 

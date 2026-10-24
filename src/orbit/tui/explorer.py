@@ -94,6 +94,7 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
         self._completing: str | None = None  # The parent typed, listed to complete from.
         self._completion: DirectoryListing | None = None  # The listing come for it, meanwhile.
         self._requests = 0  # How many listings have been asked for to complete from.
+        self._accepted: AddWorkspace | None = None  # An add accepted under another screen.
 
     def compose(self) -> ComposeResult:
         with Vertical() as box:
@@ -236,9 +237,23 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
         await self._browse(adding, Awaited(accepted=lambda: self._added(adding), why=self._refused))
 
     def _added(self, adding: AddWorkspace) -> None:
-        """Dismiss with ``adding`` now it's accepted, unless this screen is gone."""
+        """Dismiss with ``adding`` now it's accepted, or once this screen is on top again if
+        another is over it, unless this screen is gone."""
         if self.is_attached:
-            self.dismiss(adding)
+            self._accepted = adding
+            self._dismiss_accepted()
+
+    def on_screen_resume(self) -> None:
+        self._dismiss_accepted()
+
+    def _dismiss_accepted(self) -> None:
+        """Dismiss with the add accepted, if any, unless another screen is over this one."""
+        # Textual's dismiss pops the top screen whichever screen it's called on.
+        adding = self._accepted
+        if adding is None or not self.is_active:
+            return
+        self._accepted = None
+        self.dismiss(adding)
 
     def action_hidden(self) -> None:
         """Show hidden directories, or hide them, keeping the highlight on its directory."""
