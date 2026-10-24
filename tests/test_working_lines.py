@@ -1,7 +1,7 @@
 """The working row's lines, without the row showing them: who runs under the shown tab, what
 they're running and for how long."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 
 from orbit.protocol import (
     PLANNER_LANE,
@@ -17,22 +17,11 @@ from orbit.protocol import (
 from orbit.tui.view.tabs import track_roles
 from orbit.tui.view.working import WorkingLines
 from tests.session_apps import OLD
+from tests.transcript_fakes import Row
 from tests.tui_fakes import opened as snapshot_of
 from tests.tui_fakes import started
 
 NOW = 222.0  # Shows the spinner's first frame.
-
-
-class Row:
-    """The working row as the lines show in it, ``width`` columns wide: what it shows each
-    time, in turn."""
-
-    def __init__(self, width: int = 80) -> None:
-        self.width = width
-        self.shows: list[tuple[str, ...]] = []
-
-    def show_lines(self, lines: Sequence[str]) -> None:
-        self.shows.append(tuple(lines))
 
 
 class Lines:

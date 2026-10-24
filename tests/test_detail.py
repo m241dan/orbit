@@ -1,43 +1,13 @@
 """The detail pane's content, without the pane showing it: which call it shows, while it's
 open, and when it starts again at the top."""
 
-import io
-
-from rich.console import Console, RenderableType
-
 from orbit.protocol import ToolCallFinished, ToolCallStarted
 from orbit.tui.view.detail import NO_DETAILS, WAITING
 from orbit.tui.view.detail_views import Detail
 from orbit.tui.view.tool_calls import ToolCall, tool_call_finished, tool_call_started
+from tests.transcript_fakes import Pane
 
 RULE = "─" * 40
-
-
-def plain(renderable: RenderableType) -> list[str]:
-    """``renderable``'s lines as drawn 40 columns wide."""
-    out = io.StringIO()
-    Console(width=40, file=out, color_system=None).print(renderable)
-    return out.getvalue().splitlines()
-
-
-class Pane:
-    """The detail pane as the details show in it: its title and body, whether it's open, and
-    how many times it was scrolled back to the top."""
-
-    def __init__(self) -> None:
-        self.title = ""
-        self.body: list[str] = []
-        self.open = False
-        self.tops = 0
-
-    def scroll_to_top(self) -> None:
-        self.tops += 1
-
-    def show_detail(self, title: str, body: RenderableType) -> None:
-        self.title, self.body, self.open = title, plain(body), True
-
-    def hide(self) -> None:
-        self.open = False
 
 
 def read(call_id: str, path: str = "a.py") -> ToolCall:

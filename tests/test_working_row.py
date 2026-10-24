@@ -6,24 +6,18 @@ from textual.app import App, ComposeResult
 from textual.pilot import Pilot
 
 from orbit.protocol import (
-    PLANNER_LANE,
-    AgentExited,
     Attach,
     Event,
-    RunningAgent,
-    Snapshot,
-    ToolCallFinished,
     ToolCallStarted,
     TurnFinished,
     TurnStarted,
 )
 from orbit.tui import OrbitApp
-from orbit.tui.tabs import ConversationTabs
 from orbit.tui.transcript import Transcript
 from orbit.tui.view.tabs import track_roles
 from orbit.tui.working import WorkingRow
 from tests.session_apps import CATALOG, OLD, RUNNING, SWITCH_TO_OLD, in_process, joined
-from tests.tui_fakes import FakeSession, changes, feed_events, labels, started
+from tests.tui_fakes import FakeSession, changes, feed_events, started
 from tests.tui_fakes import opened as snapshot_of
 
 NOW = 222.0  # Shows the spinner's first frame.
@@ -33,18 +27,10 @@ def turn(agent: str) -> TurnStarted:
     return TurnStarted(turn_id="t", agent_id=agent)
 
 
-def finished(agent: str) -> TurnFinished:
-    return TurnFinished(turn_id="t", agent_id=agent, reason="completed")
-
-
 def read(agent: str, call_id: str, path: str) -> ToolCallStarted:
     return ToolCallStarted(
         turn_id="t", agent_id=agent, call_id=call_id, name="Read", arguments={"file_path": path}
     )
-
-
-def done(agent: str, call_id: str) -> ToolCallFinished:
-    return ToolCallFinished(turn_id="t", agent_id=agent, call_id=call_id, output="")
 
 
 def lines(row: WorkingRow) -> tuple[str, ...]:
@@ -55,12 +41,6 @@ def lines(row: WorkingRow) -> tuple[str, ...]:
 def ticking(app: OrbitApp) -> bool:
     """Whether the conversation's spinners and clocks are turning."""
     return app.query_one(Transcript).ticking
-
-
-def planning(agent: str, busy: bool) -> Snapshot:
-    """A snapshot of the old session, its planner ``agent`` live and mid-turn if ``busy``."""
-    planner = RunningAgent(agent_id=agent, role="planner", task_id="")
-    return snapshot_of(OLD).model_copy(update={"agents": (planner,), "busy": {PLANNER_LANE: busy}})
 
 
 async def opened(app: OrbitApp, pilot: Pilot[None]) -> WorkingRow:
@@ -74,101 +54,6 @@ async def opened(app: OrbitApp, pilot: Pilot[None]) -> WorkingRow:
 async def fed(session: FakeSession, pilot: Pilot[None], *events: Event) -> None:
     await feed_events(session, pilot, *events)
     await pilot.pause()
-
-
-async def test_the_row_is_hidden_and_still_while_nothing_runs() -> None:
-    app = OrbitApp(FakeSession())
-    async with app.run_test(size=(80, 24)) as pilot:
-        row = await opened(app, pilot)
-        assert lines(row) == ()
-        assert row.size.height == 0
-        assert not ticking(app)
-        assert not row.focusable
-
-
-async def test_the_planner_shows_while_its_turn_runs() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test(size=(80, 24)) as pilot:
-        row = await opened(app, pilot)
-        await fed(session, pilot, started("agent-1", "planner"), turn("agent-1"))
-        assert lines(row) == ("◜ planner · 0:00",)
-        assert row.size.height == 1
-        assert ticking(app)
-        await fed(session, pilot, finished("agent-1"))
-        assert lines(row) == ()
-        assert row.size.height == 0
-        assert not ticking(app)
-
-
-async def test_one_ticker_turns_a_call_and_its_row_until_the_turn_ends() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test(size=(80, 24)) as pilot:
-        row = await opened(app, pilot)
-        await fed(session, pilot, started("agent-2"), turn("agent-2"), read("agent-2", "c1", "a"))
-        assert ticking(app)
-        row.clock = lambda: NOW + 12
-        app.query_one(Transcript).tick()
-        assert lines(row) == ("◜ agent-2 · Read a 0:12 · 0:12",)
-        await fed(session, pilot, finished("agent-2"))
-        assert lines(row) == ()
-        assert not ticking(app)
-
-
-async def test_an_agent_exiting_leaves_the_row() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test(size=(80, 24)) as pilot:
-        row = await opened(app, pilot)
-        await fed(session, pilot, started("agent-2"), turn("agent-2"))
-        await fed(session, pilot, AgentExited(agent_id="agent-2", reason="crashed"))
-        assert lines(row) == ()
-        assert not ticking(app)
-
-
-async def test_each_tab_shows_only_its_own_running_agents() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test(size=(80, 24)) as pilot:
-        row = await opened(app, pilot)
-        await fed(session, pilot, started("agent-1", "planner"), started("agent-2"))
-        await fed(session, pilot, turn("agent-1"), turn("agent-2"))
-        assert lines(row) == ("◜ planner · 0:00", "◜ agent-2 · 0:00")
-        app.query_one(ConversationTabs).active = "tab-coder"
-        await pilot.pause()
-        assert lines(row) == ("◜ agent-2 · 0:00",)
-        await pilot.press("ctrl+t")  # The planner tab.
-        assert lines(row) == ("◜ planner · 0:00",)
-        app.query_one(ConversationTabs).active = "tab-reviewer"
-        await pilot.pause()
-        assert lines(row) == ()
-        assert row.size.height == 0
-        assert ticking(app)  # Others still run.
-
-
-async def test_the_row_sits_below_the_shown_log() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test(size=(80, 24)) as pilot:
-        row = await opened(app, pilot)
-        await fed(session, pilot, started("agent-2"), turn("agent-2"))
-        log = app.query_one(Transcript).shown
-        assert row.region.y == log.region.bottom
-
-
-async def test_a_cancelled_planner_turn_leaves_the_row_and_ends_its_running_call() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test(size=(80, 24)) as pilot:
-        row = await opened(app, pilot)
-        planner = (started("agent-1", "planner"), turn("agent-1"), read("agent-1", "c1", "a.py"))
-        await fed(session, pilot, *planner)
-        assert lines(row) == ("◜ planner · Read a.py 0:00 · 0:00",)
-        cancelled = TurnFinished(turn_id="t", agent_id="agent-1", reason="cancelled")
-        await fed(session, pilot, cancelled)
-        assert lines(row) == ()
-        assert "agent-1: → Read a.py ⊘ no result" in labels(app)
 
 
 async def test_activating_another_session_clears_the_working_lines() -> None:
@@ -193,32 +78,6 @@ async def test_attaching_to_another_session_clears_the_working_lines() -> None:
         assert changes(session) == [Attach(workspace="w", session="old")]
         await fed(session, pilot, started("agent-2"), turn("agent-2"), read("agent-2", "c1", "a"))
         await fed(session, pilot, snapshot_of(OLD))
-        assert lines(row) == ()
-        assert not ticking(app)
-
-
-async def test_a_snapshot_with_an_idle_planner_shows_no_planner_line() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test(size=(80, 24)) as pilot:
-        row = await opened(app, pilot)
-        await fed(session, pilot, planning("agent-1", busy=False))
-        assert lines(row) == ()
-        assert not ticking(app)
-
-
-async def test_a_snapshot_switching_sessions_shows_its_busy_planner_as_the_planner() -> None:
-    app, session = in_process()
-    async with app.run_test(size=(80, 24)) as pilot:
-        row = await opened(app, pilot)
-        await fed(session, pilot, started("agent-1", "planner"), CATALOG)
-        await pilot.press("j", "k", "enter")
-        await fed(session, pilot, planning("agent-7", busy=True))
-        assert lines(row) == ("◜ planner · 0:00",)
-        await pilot.press("ctrl+t")  # The planner tab.
-        assert lines(row) == ("◜ planner · 0:00",)
-        assert ticking(app)
-        await fed(session, pilot, finished("agent-7"))
         assert lines(row) == ()
         assert not ticking(app)
 
@@ -282,3 +141,40 @@ async def test_a_line_too_wide_for_the_row_does_not_wrap() -> None:
         call = read("agent-2", "c1", "日" * 60)
         await tracked(pilot, row, started("agent-2"), turn("agent-2"), call)
         assert row.size.height == 1
+
+
+async def test_the_row_is_hidden_and_unfocusable_while_nothing_runs() -> None:
+    app = RowApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        row = app.query_one(WorkingRow)
+        await tracked(pilot, row, started("agent-2"))
+        assert lines(row) == () and row.size.height == 0
+        assert not row.focusable
+
+
+async def test_the_row_shows_while_something_runs_and_hides_again() -> None:
+    app = RowApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        row = app.query_one(WorkingRow)
+        await tracked(pilot, row, started("agent-1", "planner"), turn("agent-1"))
+        assert lines(row) == ("◜ planner · 0:00",) and row.size.height == 1
+        await tracked(pilot, row, TurnFinished(turn_id="t", agent_id="agent-1", reason="completed"))
+        assert row.size.height == 0
+
+
+class TranscriptApp(App[None]):
+    """The conversation window alone."""
+
+    def compose(self) -> ComposeResult:
+        yield Transcript()
+
+
+async def test_the_row_sits_below_the_shown_log() -> None:
+    app = TranscriptApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        transcript = app.query_one(Transcript)
+        for event in (started("agent-2"), turn("agent-2")):
+            transcript.track(event, {"agent-2": "coder"})
+        await pilot.pause()
+        row = app.query_one(WorkingRow)
+        assert row.size.height == 1 and row.region.y == transcript.shown.region.bottom

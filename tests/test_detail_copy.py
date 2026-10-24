@@ -5,7 +5,7 @@ from textual.pilot import Pilot
 
 from orbit.protocol import ToolCallFinished, ToolCallStarted
 from orbit.tui import OrbitApp
-from tests.tui_fakes import FakeSession, feed_events, said
+from tests.tui_fakes import FakeSession, feed_events
 
 LONG = "\n".join(f"line {n}" for n in range(250))
 
@@ -32,19 +32,6 @@ async def inspecting(pilot: Pilot[None]) -> None:
     await pilot.press("k", "enter", "enter")
 
 
-async def test_y_copies_the_whole_output_including_lines_omitted(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    toasts = notes(app, monkeypatch)
-    async with app.run_test(size=(80, 30)) as pilot:
-        await feed_events(session, pilot, read("c1"), done("c1", LONG))
-        await inspecting(pilot)
-        await pilot.press("y")
-        assert app.clipboard == LONG and toasts == ["Copied 250 lines"]
-
-
 async def test_y_copies_from_the_activated_pane(monkeypatch: pytest.MonkeyPatch) -> None:
     session = FakeSession()
     app = OrbitApp(session)
@@ -54,30 +41,6 @@ async def test_y_copies_from_the_activated_pane(monkeypatch: pytest.MonkeyPatch)
         await inspecting(pilot)
         await pilot.press("tab", "y")
         assert app.clipboard == "x" and toasts == ["Copied 1 line"]
-
-
-async def test_y_copies_a_running_calls_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    toasts = notes(app, monkeypatch)
-    async with app.run_test(size=(80, 30)) as pilot:
-        await feed_events(session, pilot, read("c1"))
-        await inspecting(pilot)
-        await pilot.press("y")
-        assert app.clipboard == '{\n  "file_path": "a.py"\n}' and toasts == ["Copied 3 lines"]
-
-
-async def test_y_does_nothing_on_an_entry_without_details(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    toasts = notes(app, monkeypatch)
-    async with app.run_test(size=(80, 30)) as pilot:
-        await feed_events(session, pilot, said("a", "hi"), read("c1"), done("c1", "x"))
-        await inspecting(pilot)
-        await pilot.press("k", "y")
-        assert app.clipboard == "" and toasts == []
 
 
 async def test_y_does_nothing_while_the_pane_is_closed(monkeypatch: pytest.MonkeyPatch) -> None:

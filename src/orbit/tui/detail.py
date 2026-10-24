@@ -13,7 +13,6 @@ from textual.widgets import Static
 
 from orbit.tui.view.detail import DETAIL_HEIGHT
 from orbit.tui.view.detail_views import Detail
-from orbit.tui.view.tool_calls import ToolCall
 from orbit.tui.widgets import ModalFocus
 
 
@@ -62,14 +61,6 @@ class DetailPane(ModalFocus, VerticalScroll):
     @property
     def opened(self) -> bool:
         return self.detail.opened
-
-    def show(self, call: ToolCall | None) -> None:
-        """Open, showing ``call``'s details, as the detail shows them."""
-        self.detail.show(call)
-
-    def close(self) -> None:
-        """Close, leaving the pane if it's active."""
-        self.detail.close()
 
     def scroll_to_top(self) -> None:
         self.scroll_home(animate=False)

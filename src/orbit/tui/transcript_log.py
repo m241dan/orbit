@@ -1,7 +1,7 @@
 """One tab's entries in the conversation window, as a list pane."""
 
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Sequence
 from typing import ClassVar, get_args
 
 from rich.console import RenderableType
@@ -12,13 +12,11 @@ from textual import on
 from textual.message import Message
 from textual.widgets import OptionList
 
-from orbit.protocol import AgentReply, ToolCallFinished
 from orbit.tui.detail import DetailPane
 from orbit.tui.entries import GutteredEntry, markdown_body
 from orbit.tui.list_pane import ListPane
 from orbit.tui.view.common import EntryKind
 from orbit.tui.view.log import Entry, EntryLog, EntryRow
-from orbit.tui.view.tool_calls import ToolCall
 
 
 class TranscriptLog(ListPane):
@@ -31,7 +29,7 @@ class TranscriptLog(ListPane):
 
     class Inspect(Message):
         """What the detail pane should show may have changed: whether the log is
-        :attr:`inspecting`, or its :attr:`detail`."""
+        :attr:`inspecting`, or the call of its cursor's entry."""
 
     class ReachedTop(Message):
         """The cursor was moved up past the first entry."""
@@ -104,18 +102,9 @@ class TranscriptLog(ListPane):
         return self.entry_log.inspected
 
     @property
-    def detail(self) -> ToolCall | None:
-        """The tool call or request of the cursor's entry, if it's one."""
-        return self.entry_log.detail
-
-    @property
     def inspecting(self) -> bool:
         """Whether the detail pane shows the cursor's entry."""
         return self.entry_log.inspecting
-
-    @inspecting.setter
-    def inspecting(self, inspecting: bool) -> None:
-        self.entry_log.inspecting = inspecting
 
     def action_normal_mode(self) -> None:
         """Stop inspecting if the log is, else leave list mode."""
@@ -140,59 +129,10 @@ class TranscriptLog(ListPane):
         self.entry_log.start_at_latest()
         super().enter_list_mode()
 
-    def append(self, entry: Entry) -> None:
-        """Add ``entry``, as the entry log adds it."""
-        self.entry_log.append(entry)
-
-    def clear(self) -> None:
-        """Drop every entry."""
-        self.entry_log.clear()
-
-    def begin_earlier(self) -> None:
-        """Set the entries aside, so those added until :meth:`end_earlier` come before them."""
-        self.entry_log.begin_earlier()
-
-    def end_earlier(self) -> None:
-        """Put the entries set aside back after those added since."""
-        self.entry_log.end_earlier()
-
-    def drop(self, entry: Entry) -> None:
-        """Drop ``entry``, as the entry log drops it."""
-        self.entry_log.drop(entry)
-
-    def replace_rule(self, agent: str, text: str, kind: EntryKind) -> None:
-        """Make ``agent``'s latest rule read ``text`` as a ``kind`` entry."""
-        self.entry_log.replace_rule(agent, text, kind)
-
     @property
     def running(self) -> bool:
         """Whether any tool call shown here is still running."""
         return self.entry_log.running
-
-    def append_call(self, call: ToolCall, agent: str | None, speaker: str | None) -> None:
-        """Add ``agent``'s running ``call``, spoken by ``speaker``, as a one-line entry."""
-        self.entry_log.append_call(call, agent, speaker)
-
-    def finish_call(self, event: ToolCallFinished | AgentReply) -> bool:
-        """Show the running call or request ``event`` finishes as finished; False when no
-        running call here is the one."""
-        return self.entry_log.finish_call(event)
-
-    def end_calls(self, agent: str | None, requests: bool) -> None:
-        """Show ``agent``'s tool calls still running as having no result."""
-        self.entry_log.end_calls(agent, requests)
-
-    def end_running_calls(self) -> None:
-        """Show every call and request still running as having no result."""
-        self.entry_log.end_running_calls()
-
-    def tick(self) -> None:
-        """Turn the spinners."""
-        self.entry_log.tick()
-
-    def release_cursor(self) -> None:
-        """Let go of the held cursor, so the view follows the latest entry again."""
-        self.entry_log.release_cursor()
 
     def show_place(self) -> None:
         """Scroll to the held cursor's entry, or to the latest entry if there's none."""
@@ -201,22 +141,9 @@ class TranscriptLog(ListPane):
         else:
             self.scroll_to_highlight()
 
-    def promote(self, agent: str | None, turn: str, places: Iterable[int]) -> None:
-        """Draw at full brightness the messages ``agent`` thought out loud in ``turn`` at
-        ``places`` among them."""
-        self.entry_log.promote(agent, turn, places)
-
-    def hide_thinking(self, hidden: bool) -> None:
-        """Leave out agents' dim messages if ``hidden``, or show them again."""
-        self.entry_log.hide_thinking(hidden)
-
     def collapsed(self, row: int) -> bool:
         """Whether the entry at option ``row`` is collapsed."""
         return self.entry_log.collapsed(row)
-
-    def toggle(self, row: int) -> None:
-        """Collapse the entry at option ``row`` if it's expanded, and the other way round."""
-        self.entry_log.toggle(row)
 
     def watch_highlighted(self, highlighted: int | None) -> None:
         """Move the marker from the entry it was on to the cursor's, if there is one."""
