@@ -221,7 +221,8 @@ store, importing its old sessions or recovering its fallback files, which may ha
 `AddWorkspace(url)` serves a clone of the repository at `url`, which the server makes: an
 `https://`, `ssh://` or `file://` URL, a scp-style `user@host:path`, or an absolute path on the
 server's host (cloned, not served in place). An `AddWorkspace` is given `path` or `url`, never
-both; both, neither, or a `url` of any other kind, such as `ftp://x`, is refused with `invalid`.
+both; both, neither, or a `url` of any other kind, such as `ftp://x`, is refused with `invalid`,
+as is an absolute path or `file://` URL outside the server's `browse_root`, if it has one.
 It's accepted at once, and git clones the repository in the background, so other commands carry
 on meanwhile; a second `AddWorkspace` with the same `url` while it's being cloned is refused with
 `busy`. The clone goes to the server's clone directory (`clone_dir` in `[server]`, by default
@@ -325,7 +326,9 @@ serve to browse for others.`
 adding to one tree: a `ListDirectory`, or an `AddWorkspace` with a `path`, whose path, with its
 symlinks followed, is outside it is refused with `invalid`: `/srv/other is outside the browsable
 root /srv/repos.` Symlinks are followed for the check, so a link inside the root leading out of
-it is refused too. Clones are made in the server's clone directory wherever that is. Without
+it is refused too. So is an `AddWorkspace` whose `url` is an absolute path or a `file://` URL
+to one outside it, before anything's cloned; remote URLs aren't confined. Clones are made in the
+server's clone directory wherever that is. Without
 `browse_root`, the server's account browses whatever it can read.
 
 ## The control-plane stream

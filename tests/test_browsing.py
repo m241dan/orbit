@@ -13,6 +13,7 @@ from orbit.protocol import (
     UNKNOWN,
     AddWorkspace,
     CommandAccepted,
+    CommandRefused,
     DirectoryEntry,
     DirectoryListing,
     Event,
@@ -343,3 +344,42 @@ async def test_a_clone_is_added_wherever_the_clone_directory_is(tmp_path: Path) 
     await plane.close()
 
     assert source.managed == ["/clones/proj.git"]
+
+
+async def test_outside_the_browsable_root_no_local_repository_is_cloned(tmp_path: Path) -> None:
+    x, y = fenced(tmp_path)
+    source = FakeSource()
+    plane = ControlPlane(workspaces=source, browsing=browsing(tmp_path, x))
+    connection = await welcomed(plane)
+
+    await say(connection, "path", AddWorkspace(url=str(y / "repo")))
+    await say(connection, "file", AddWorkspace(url=f"file://{y / 'repo'}"))
+    await say(connection, "linked", AddWorkspace(url=f"file://{x / 'out' / 'repo'}"))
+    outcomes = payloads(taken(connection))
+    await plane.close()
+
+    out, linked = f"{y / 'repo'}", f"{x / 'out' / 'repo'}"
+    assert outcomes == [
+        refused("path", INVALID, f"{out} is outside the browsable root {x}."),
+        refused("file", INVALID, f"{out} is outside the browsable root {x}."),
+        refused("linked", INVALID, f"{linked} is outside the browsable root {x}."),
+    ]
+    assert source.cloning == []
+
+
+async def test_inside_the_browsable_root_a_local_repository_is_cloned(tmp_path: Path) -> None:
+    x, _ = fenced(tmp_path)
+    source = FakeSource()
+    plane = ControlPlane(workspaces=source, browsing=browsing(tmp_path, x))
+    connection = await welcomed(plane)
+
+    await say(connection, "path", AddWorkspace(url=str(x / "a")))
+    await say(connection, "file", AddWorkspace(url=f"file://{x / 'a'}.git"))
+    seen = payloads(taken(connection))
+    while len(source.opened) < 2:
+        await asyncio.sleep(0.01)
+    await plane.close()
+
+    outcomes = [event for event in seen if isinstance(event, CommandAccepted | CommandRefused)]
+    assert outcomes == [CommandAccepted(command_id="path"), CommandAccepted(command_id="file")]
+    assert source.cloning == [str(x / "a"), f"file://{x / 'a'}.git"]

@@ -4,6 +4,7 @@ goes to, git's progress as it clones, and what's said when a clone fails."""
 import itertools
 import re
 from collections.abc import Iterator, Sequence
+from urllib.parse import unquote, urlsplit
 
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import (
@@ -43,6 +44,17 @@ def added_url(path: str | None, url: str | None) -> str | None:
             " absolute path.",
         )
     return url
+
+
+def local_clone_source(url: str) -> str | None:
+    """The path on the server's host that cloning ``url`` copies: ``url`` itself if it's an
+    absolute path, or a ``file://`` URL's path, percent-decoded, its host ignored as git ignores
+    it; none for a remote URL."""
+    if url.startswith("/"):
+        return url
+    if url.startswith("file://"):
+        return unquote(urlsplit(url).path)
+    return None
 
 
 def clone_names(name: str) -> Iterator[str]:

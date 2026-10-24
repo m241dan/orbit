@@ -1248,7 +1248,9 @@ them, to find a repository to add (the protocol's `ListDirectory`, see
 workspace served at each, if any; the listing comes from the server, so it's the server's
 filesystem a frontend on another machine browses. With `browse_root` set, an absolute directory,
 frontends may browse and add workspaces by path within it alone, symlinks followed, so a link
-inside it can't lead out; clones still go to `clone_dir`. Unset, the server's account may browse
+inside it can't lead out, and clone a repository on the server's host (an absolute path or a
+`file://` URL) from within it alone too; remote URLs aren't fenced, and clones still go to
+`clone_dir`. Unset, the server's account may browse
 whatever it can read. Browsing starts in the directory holding the workspace added last (by
 `AddWorkspace`, `--add` or a clone), if it's still there and inside `browse_root`; else at
 `browse_root`, if set, else the server account's home directory. A local `orbit chat` refuses browsing.

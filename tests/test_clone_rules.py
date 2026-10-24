@@ -10,6 +10,7 @@ from orbit.agent.domain.clones import (
     clone_names,
     clone_progress,
     clone_served,
+    local_clone_source,
 )
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import INVALID, WorkspaceCloning, clone_name, failed_clone
@@ -138,3 +139,23 @@ def test_the_hint_names_ssh_keys_and_credential_helpers() -> None:
         "The server's account needs access to this repository: an SSH key or a git credential"
         " helper."
     )
+
+
+@pytest.mark.parametrize(
+    ("url", "path"),
+    [
+        ("/srv/repos/proj.git", "/srv/repos/proj.git"),
+        ("file:///srv/repos/proj.git", "/srv/repos/proj.git"),
+        ("file://localhost/srv/repos/proj.git", "/srv/repos/proj.git"),
+        ("file:///srv/my%20repos/proj.git", "/srv/my repos/proj.git"),
+    ],
+)
+def test_an_absolute_path_or_file_url_clones_a_local_path(url: str, path: str) -> None:
+    assert local_clone_source(url) == path
+
+
+@pytest.mark.parametrize(
+    "url", ["https://github.com/o/proj.git", "ssh://git@github.com/o/proj", "git@github.com:o/p"]
+)
+def test_a_remote_url_clones_no_local_path(url: str) -> None:
+    assert local_clone_source(url) is None

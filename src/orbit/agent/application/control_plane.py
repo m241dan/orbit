@@ -31,7 +31,7 @@ from orbit.agent.application.seq_mark import MarkReservations
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.workspace_host import WorkspaceHost
 from orbit.agent.domain.catalog import catalog
-from orbit.agent.domain.clones import added_url
+from orbit.agent.domain.clones import added_url, local_clone_source
 from orbit.agent.domain.listings import LOCAL_BROWSING
 from orbit.agent.domain.purging import Purged, owned_refusal
 from orbit.agent.domain.refusals import STOPPING, Refused
@@ -451,7 +451,8 @@ class ControlPlane:
     ) -> None:
         """Add or remove the workspace ``command`` names, as ``connection`` asks, once no other
         change is under way, or start cloning the repository it names; refused without a
-        source of workspaces, or once closing."""
+        source of workspaces, once closing, or for a local repository outside the browsable
+        root."""
         workspaces = self._workspaces
         if workspaces is None:
             raise Refused(INVALID, LOCAL_ONLY)
@@ -461,6 +462,7 @@ class ControlPlane:
             return
         url = added_url(command.path, command.url)
         if url is not None:
+            await self._confine_source(url)
             self._clone(url, workspaces)
             return
         assert command.path is not None  # added_url refuses an AddWorkspace with neither.
@@ -492,6 +494,14 @@ class ControlPlane:
         browsable root, if there is one, with its symlinks followed, unless it's ``managed``, a
         clone orbit made in its clone directory."""
         if not managed and self._browsing is not None:
+            await self._browsing.confined(path)
+
+    async def _confine_source(self, url: str) -> None:
+        """Refuse cloning ``url`` as ``invalid`` when it's a path on the server's host, or a
+        ``file://`` URL to one, outside the browsable root, if there is one, with its symlinks
+        followed."""
+        path = local_clone_source(url)
+        if path is not None and self._browsing is not None:
             await self._browsing.confined(path)
 
     @asynccontextmanager
