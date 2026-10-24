@@ -227,6 +227,22 @@ async def test_closing_after_an_unexpected_append_error_returns() -> None:
     assert fallback.files == {"a": [notice(1), notice(2)]}
 
 
+async def test_a_forget_pending_at_an_unexpected_append_error_runs_once_resumed() -> None:
+    log = BuggyFor("b")
+    log.logged = [notice(1)]
+    log.forget_failure = "read-only"
+    writer = LogWriter(log, Published(), overflow=Overflow(FakeFallback()))
+    writer.add("b", notice(2, "b"))
+    writer.forget("a")
+    await asyncio.sleep(0.01)
+
+    assert log.logged == [notice(1)] and log.forgotten == []
+    log.buggy, log.forget_failure = False, None
+    assert await writer.resume() == []
+    await writer.close()
+    assert log.logged == [notice(2, "b")] and log.forgotten == ["a"]
+
+
 async def test_stopping_sends_what_queued_and_what_follows_to_the_fallback() -> None:
     log, fallback = GatedLog(), FakeFallback()
     writer = LogWriter(log, Published(), overflow=Overflow(fallback))

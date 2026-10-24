@@ -287,10 +287,14 @@ class LogWriter:
         """Stop the appending on ``exc``, which escaped a write, as a failed append does: what
         wasn't appended goes to the fallback, and the failure is told to ``failed``."""
         writing, self._writing = self._writing, []
-        self._stopped = True
         message = f"The event log writer stopped on an unexpected error: {exc!r}"
-        self._failed(StoreFailed(unexpected(message, exc)))
+        self._halt(StoreFailed(unexpected(message, exc)))
         await self._divert(writing)
+
+    def _halt(self, error: StoreFailed) -> None:
+        """Stop the appending and the reserving, telling ``failed`` of ``error``."""
+        self._stopped = True
+        self._failed(error)
 
     @property
     def _unreserved(self) -> bool:
@@ -302,15 +306,29 @@ class LogWriter:
         added before that are written by then, and reserve the ``seq`` asked to be."""
         self._writing, self._queued = self._queued, []
         forgetting, self._forgetting = self._forgetting, []
-        if self._stopped:
-            await self._divert(self._writing)
-        else:
-            async with self._appending:
-                await self._append(self._writing)
+        try:
+            await self._write_taken()
+        except BaseException:
+            self._forget_later(forgetting)
+            raise
         self._writing = []
         for session_id in forgetting:
             await self._forget(session_id)
         await self._reserve()
+
+    async def _write_taken(self) -> None:
+        """Write what's taken from the queue: append it, or, once stopped, divert it."""
+        if self._stopped:
+            await self._divert(self._writing)
+            return
+        async with self._appending:
+            await self._append(self._writing)
+
+    def _forget_later(self, forgetting: list[str]) -> None:
+        """Have the sessions ``forgetting``, taken to forget, forgotten in the next write,
+        ahead of those to forget since."""
+        self._forgetting[:0] = forgetting
+        self._ready.set()
 
     async def _reserve(self) -> None:
         """Have the log reserve the ``seq`` asked to be, if it can be; a failed reservation stops
@@ -320,8 +338,7 @@ class LogWriter:
         seq = self._reserving
         error = await outcome(self._log.reserve(seq))
         if isinstance(error, StoreFailed):
-            self._stopped = True
-            self._failed(error)
+            self._halt(error)
             return
         self._reserved = max(self._reserved, seq)
 
@@ -365,8 +382,7 @@ class LogWriter:
         appending and is told to ``failed``."""
         error = await outcome(self._log.append(session_id, envelopes))
         if isinstance(error, StoreFailed):
-            self._stopped = True
-            self._failed(error)
+            self._halt(error)
             return False
         self._writing = _without(self._writing, session_id)  # Logged, so not to divert.
         if self._log_bytes and not self._stopped:
