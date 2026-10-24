@@ -13,7 +13,13 @@ from dataclasses import dataclass, field
 from pydantic import BaseModel, ConfigDict
 
 from orbit.agent.domain.board import WAITING
-from orbit.protocol import MANUAL_ORIGIN, PLANNER_ORIGIN, TaskState
+from orbit.protocol import (
+    MANUAL_ORIGIN,
+    PLANNER_ORIGIN,
+    REVIEW_ORIGIN,
+    SUPER_REVIEW_ORIGIN,
+    TaskState,
+)
 
 # Characters of diff quoted in a review task; a reviewer can read files for more.
 DIFF_LIMIT = 30000
@@ -238,14 +244,27 @@ class ReviewPlanner:
             return "This review's suggestions are closed: its review is over."
         return None
 
-    def count(self) -> bool:
-        """A commit landed; returns whether a super review is due now. One that falls due
-        while review is paused waits until it resumes."""
+    def count(self, state: TaskState, tasks: Sequence[TaskState]) -> bool:
+        """Task ``state`` landed a commit, with ``tasks`` on the board; returns whether a super
+        review is due now. Only the user's and the planner's commits count: a suggested task's
+        doesn't. One that falls due waits, as it does while review is paused, while a suggested
+        task or a review (any task with origin review or super_review) is pending or running,
+        and comes with the first of the user's commits to find none."""
+        if not _users_work(state):
+            return False
         self.since_super += 1
-        if self.since_super < self.limits.super_every or self.paused:
+        if self.since_super < self.limits.super_every or self._holds_super_review(tasks):
             return False
         self.since_super = 0
         return True
+
+    def _holds_super_review(self, tasks: Sequence[TaskState]) -> bool:
+        """Whether a super review that's due waits: review is paused, or a task that reviews
+        suggested, or a review itself, is in ``tasks`` still to run or running."""
+        return self.paused or any(
+            task.origin in (REVIEW_ORIGIN, SUPER_REVIEW_ORIGIN) and task.status in WAITING
+            for task in tasks
+        )
 
     def super_review(self, commit: str) -> ReviewJob:
         """A super review of the codebase at ``commit``; the count starts again."""
@@ -324,6 +343,11 @@ def _forget_finish(batch: _Batch, task_id: str) -> None:
 def _first_line(text: str) -> str:
     """The first line of ``text``, stripped: a task's title."""
     return text.strip().split("\n", 1)[0].strip()
+
+
+def _users_work(state: TaskState) -> bool:
+    """Whether ``state`` is one of the user's own tasks, or the planner's, outside any batch."""
+    return state.batch is None and state.origin in (MANUAL_ORIGIN, PLANNER_ORIGIN)
 
 
 def _normalized(text: str) -> str:

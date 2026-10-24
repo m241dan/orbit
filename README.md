@@ -907,14 +907,16 @@ most 15 suggested tasks. Removing a suggested task drops it from its batch, whic
 without it (or closed, if nothing in it landed); removing a queued review closes the batch it would
 have suggested into.
 
-Every `super_review_every` commits (default 10, counting every commit orbit lands), a
-`super-reviewer` (Opus by default) reviews the **whole codebase** at the latest commit, looking for
-duplication, structure that no longer fits and gaps in tests, and may suggest up to
-`super_review_suggestions` tasks (default 10). Those form a batch at round 1 and carry on like any
-other review's. Each review ends with a one-line verdict that also counts the findings its cap
-left out, so `5 suggestions, 2 more left out` tells you a second pass would find more. `ctrl+g` asks for one straight away and restarts the count. The count belongs to
-the repository rather than to a session, so it carries on across sessions and restarts. A super
-review that falls due while review is paused waits until it resumes.
+Every `super_review_every` commits (default 10, counting your own and the planner's commits, not
+those of suggested tasks), a `super-reviewer` (Opus by default) reviews the **whole codebase** at the
+latest commit, looking for duplication, structure that no longer fits and gaps in tests, and may
+suggest up to `super_review_suggestions` tasks (default 10). Those form a batch at round 1 and carry
+on like any other review's. Each review ends with a one-line verdict that also counts the findings
+its cap left out, so `5 suggestions, 2 more left out` tells you a second pass would find more.
+`ctrl+g` asks for one straight away and restarts the count. The count belongs to the repository
+rather than to a session, so it carries on across sessions and restarts. A super review that falls
+due waits while review is paused, and while suggested tasks (or reviews) are pending or running; it
+comes with your next commit once none is.
 
 The reviews orbit queued can't be edited: remove one instead. Reviews need the worktree;
 `--no-review` turns them off.

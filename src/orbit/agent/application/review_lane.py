@@ -127,8 +127,11 @@ class ReviewLane:
     async def landed(self, state: TaskState, commit: str) -> None:
         """The task that ended as ``state`` landed ``commit``. The task isn't looked up: it may
         have been removed since it finished, and its work is reviewed all the same."""
-        await self._queue(self.planner.landed(state, commit))
-        if self.planner.count():
+        job = self.planner.landed(state, commit)
+        # Counted before the commit's own review is queued, which would hold a due super review.
+        due = self.planner.count(state, self._board.tasks)
+        await self._queue(job)
+        if due:
             await self._queue(self.planner.super_review(commit))
         await self._hooks.changed()  # The count changed even if no review is due.
 

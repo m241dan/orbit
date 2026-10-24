@@ -29,7 +29,8 @@ class OrbitConfig(_Config):
     ``max_checks``: verification steps an agent may run itself before claiming done.
     ``fallback_fixes``: fresh-agent fix tasks one task's chain may queue for each failing step.
     ``review_rounds``: rounds of review-suggested work after which review pauses.
-    ``super_review_every``: commits between super reviews.
+    ``super_review_every``: commits between super reviews, counting your own and the planner's;
+    a super review that's due waits while suggested tasks are pending.
     ``review_suggestions`` / ``super_review_suggestions``: tasks one review may suggest.
     ``verification``: how tasks are verified.
     ``setup``: how the coder's worktree is set up; ``None`` sets nothing up.

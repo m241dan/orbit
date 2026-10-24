@@ -425,26 +425,50 @@ async def test_reviews_queued_while_one_runs_wait_their_turn() -> None:
     assert [la.agent.role for la in launcher.launches].count("reviewer") == 2
 
 
-async def test_every_so_many_commits_the_whole_codebase_is_super_reviewed() -> None:
+async def _landed_two_while_the_first_review_waited(
+    session: WorkspaceHost, gate: asyncio.Event
+) -> list[Event]:
+    """Run tasks "one" and "two", the second landing while the first's review waits on
+    ``gate``, then let the reviews finish; returns the events."""
+    await start(session, "one", "two")
+    events: list[Event] = []
+    collecting = asyncio.ensure_future(settle(session, events))
+    while [t.task.role for t in latest_board(events)].count("reviewer") < 2:
+        await asyncio.sleep(0.01)
+    gate.set()
+    await asyncio.wait_for(collecting, 10)
+    return events
+
+
+async def test_every_so_many_of_the_users_commits_the_whole_codebase_is_super_reviewed() -> None:
+    gate = asyncio.Event()
+
+    async def waits_then_reviews(call: Call) -> TurnEndReason:
+        await gate.wait()
+        return await suggests()(call)
+
     tree = FakeTree()
     session, _, _ = session_for(
-        claims_done,
-        claims_done,
-        reviewers=(suggests(), suggests(), suggests("Split the parser")),
+        *([claims_done] * 4),
+        reviewers=(waits_then_reviews, suggests(), suggests(), suggests("Split the parser")),
         tree=tree,
         review=True,
         review_limits=ReviewLimits(super_every=2),
     )
-    await start(session, "one", "two")
-    events = await asyncio.wait_for(settle(session), 10)
+    events = await _landed_two_while_the_first_review_waited(session, gate)
+    assert "super-reviewer" not in _roles_seen(events)  # Due at c2, but a review was pending.
+
+    await send(session, AddTask(task=TaskSpec(prompt="three")))
+    await send(session, RunTasks())
+    events = await asyncio.wait_for(settle(session, events), 10)
     tasks = board(events)
     supers = [t for t in tasks if t.task.role == "super-reviewer"]
     assert len(supers) == 1
-    assert supers[0].task.prompt.startswith("Super review of the codebase at c2")
+    assert supers[0].task.prompt.startswith("Super review of the codebase at c3")
     assert supers[0].task.settings.model == "opus"  # The super reviewer's default.
     [suggestion] = [t for t in tasks if t.batch]
     assert (suggestion.origin, suggestion.round) == ("super_review", 1)
-    assert "c2" in tree.snapshots
+    assert "c3" in tree.snapshots
 
 
 async def test_a_super_review_can_be_asked_for_before_any_task_ran() -> None:

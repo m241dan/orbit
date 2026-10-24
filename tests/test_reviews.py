@@ -307,11 +307,50 @@ def test_long_diffs_are_trimmed_from_the_end() -> None:
     assert prompt.endswith("d" * DIFF_LIMIT + "\n… (diff trimmed)")
 
 
-def test_a_super_review_is_due_every_so_many_commits() -> None:
-    reviews = ReviewPlanner(
-        ReviewLimits(rounds=3, suggestions=5, super_every=3, super_suggestions=10)
+def counting(super_every: int) -> ReviewPlanner:
+    return ReviewPlanner(
+        ReviewLimits(rounds=3, suggestions=5, super_every=super_every, super_suggestions=10)
     )
-    assert [reviews.count() for _ in range(7)] == [False, False, True, False, False, True, False]
+
+
+def test_a_super_review_is_due_every_so_many_of_the_users_commits() -> None:
+    reviews = counting(3)
+    due = [reviews.count(state(str(n)), ()) for n in range(7)]
+    assert due == [False, False, True, False, False, True, False]
+
+
+def test_a_commit_from_a_planner_task_counts_toward_a_super_review() -> None:
+    reviews = counting(2)
+    assert not reviews.count(state("1", origin="planner"), ())
+    assert reviews.count(state("2", origin="planner"), ())
+
+
+def test_a_commit_from_a_suggested_task_does_not_count_toward_a_super_review() -> None:
+    reviews = counting(1)
+    batch = filled(reviews, "2", "3")
+    assert not reviews.count(state("2", origin="review", batch=batch), ())
+    assert not reviews.count(state("3", origin="super_review", batch=batch), ())
+    assert reviews.since_super == 0
+
+
+def test_a_super_review_due_while_a_suggested_task_waits_fires_on_the_next_landing() -> None:
+    reviews = counting(2)
+    reviews.count(state("1"), ())
+    pending = (state("1"), state("3", status="pending", origin="review", batch="batch-1"))
+    assert not reviews.count(state("2"), pending)
+    running = (state("3", status="running", origin="super_review", batch="batch-1"),)
+    assert not reviews.count(state("4"), running)
+    assert reviews.since_super == 3
+    assert not reviews.count(state("5", origin="review"), ())
+    assert reviews.count(state("6"), (state("3", origin="review", batch="batch-1"),))
+    assert reviews.since_super == 0
+
+
+def test_a_review_orbit_queued_holds_a_due_super_review_like_a_suggestion() -> None:
+    reviews = counting(1)
+    review = state("2", status="pending", origin="review", prompt="Review of commit c1")
+    assert not reviews.count(state("1"), (review,))
+    assert reviews.count(state("3"), ())
 
 
 def test_a_super_review_due_while_paused_waits_until_review_resumes() -> None:
@@ -321,20 +360,19 @@ def test_a_super_review_due_while_paused_waits_until_review_resumes() -> None:
     batch = filled(reviews, "2")
     reviews.landed(state("2", origin="review", batch=batch), "c2")
     assert reviews.paused
-    assert not reviews.count()
+    reviews.since_super = 1
+    assert not reviews.count(state("8"), ())
     reviews.landed(state("9"), "c9")
-    assert reviews.count()
+    assert reviews.count(state("9"), ())
 
 
 def test_asking_for_a_super_review_restarts_the_count() -> None:
-    reviews = ReviewPlanner(
-        ReviewLimits(rounds=3, suggestions=5, super_every=2, super_suggestions=10)
-    )
-    assert not reviews.count()
+    reviews = counting(2)
+    assert not reviews.count(state("1"), ())
     job = reviews.super_review("abc")
     assert job == ReviewJob(commits=("abc",), round=0, batch=None, whole=True)
-    assert not reviews.count()
-    assert reviews.count()
+    assert not reviews.count(state("2"), ())
+    assert reviews.count(state("3"), ())
 
 
 def test_a_super_reviews_batch_has_its_own_cap() -> None:
@@ -590,10 +628,10 @@ def test_restoring_replaces_what_the_planner_had() -> None:
 
 def test_the_super_review_count_is_kept_apart_from_snapshots() -> None:
     reviews = ReviewPlanner(ReviewLimits(super_every=3))
-    reviews.count()
+    reviews.count(state("1"), ())
     snapshot = reviews.snapshot()
     reviews.since_super = 2
     reviews.restore(snapshot)
     assert reviews.since_super == 2
-    assert reviews.count()
+    assert reviews.count(state("2"), ())
     assert reviews.since_super == 0
