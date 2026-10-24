@@ -25,15 +25,4 @@ def clone_name(url: str) -> str:
 def clone_failure_message(url: str, detail: str) -> str:
     """What's said when the clone of ``url`` fails, as ``detail`` says why:
     ``Couldn't clone <url>: <detail>``."""
-    return f"{_failure_prefix(url)}{detail}"
-
-
-def failed_clone(message: str, url: str) -> bool:
-    """Whether ``message`` says the clone of ``url`` failed, as
-    :func:`clone_failure_message` says it."""
-    return message.startswith(_failure_prefix(url))
-
-
-def _failure_prefix(url: str) -> str:
-    """What every message saying the clone of ``url`` failed starts with."""
-    return f"Couldn't clone {url}: "
+    return f"Couldn't clone {url}: {detail}"

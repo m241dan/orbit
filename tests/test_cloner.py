@@ -10,7 +10,7 @@ import pytest
 from orbit.agent import CloneFailed, Cloner
 from orbit.agent.domain.clones import AUTH_HINT
 from orbit.agent.external.cloner import ssh_command
-from orbit.protocol import WorkspaceCloning, clone_name, failed_clone
+from orbit.protocol import WorkspaceCloning, clone_failure_message, clone_name
 from tests.git_repo import bare_repository, started
 from tests.process_checks import gone
 
@@ -64,7 +64,7 @@ async def test_a_name_taken_is_numbered(tmp_path: Path) -> None:
     assert (Path(first).name, Path(second).name) == ("proj", "proj-2")
 
 
-async def test_a_failed_clone_gives_gits_message_and_leaves_no_directory(
+async def test_a_clone_that_fails_gives_gits_message_and_leaves_no_directory(
     tmp_path: Path,
 ) -> None:
     url = (tmp_path / "nothing.git").as_uri()
@@ -73,7 +73,7 @@ async def test_a_failed_clone_gives_gits_message_and_leaves_no_directory(
     with pytest.raises(CloneFailed) as failed:
         await Cloner(clones).clone(url, Progress())
 
-    assert failed_clone(str(failed.value), url)
+    assert str(failed.value).startswith(clone_failure_message(url, ""))
     assert "does not appear to be a git repository" in str(failed.value)
     assert list(clones.iterdir()) == []
 
@@ -106,7 +106,7 @@ async def test_a_clone_when_git_cant_start_fails_and_leaves_no_directory(
     ) as failed:
         await Cloner(clones).clone("/srv/proj", Progress())
 
-    assert failed_clone(str(failed.value), "/srv/proj")
+    assert str(failed.value).startswith(clone_failure_message("/srv/proj", ""))
     assert list(clones.iterdir()) == []
 
 
@@ -118,7 +118,7 @@ async def test_a_clone_directory_that_cant_be_made_fails(tmp_path: Path) -> None
         CloneFailed, match=f"Couldn't clone /srv/proj: couldn't make a directory in {clones}: "
     ) as failed:
         await Cloner(clones).clone("/srv/proj", Progress())
-    assert failed_clone(str(failed.value), "/srv/proj")
+    assert str(failed.value).startswith(clone_failure_message("/srv/proj", ""))
 
 
 async def test_ssh_never_prompts(tmp_path: Path, isolated_git: Path) -> None:

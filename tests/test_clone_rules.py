@@ -13,7 +13,7 @@ from orbit.agent.domain.clones import (
     local_clone_source,
 )
 from orbit.agent.domain.refusals import Refused
-from orbit.protocol import INVALID, WorkspaceCloning, clone_name, failed_clone
+from orbit.protocol import INVALID, WorkspaceCloning, clone_failure_message, clone_name
 
 URL = "https://github.com/o/proj.git"
 
@@ -114,7 +114,7 @@ def test_a_failure_gives_gits_last_lines() -> None:
 
 @pytest.mark.parametrize("said", [[], ["fatal: not found"], ["Permission denied (publickey)."]])
 def test_a_failure_is_told_as_the_shared_rule_tells_one(said: list[str]) -> None:
-    assert failed_clone(clone_failure(URL, said), URL)
+    assert clone_failure(URL, said).startswith(clone_failure_message(URL, ""))
 
 
 def test_a_failure_git_said_nothing_of_says_so() -> None:

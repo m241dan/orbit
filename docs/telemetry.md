@@ -26,7 +26,7 @@ span for each run; a fix task queued after verification fails has its own.
 | `orbit.task.title` | string | The task's prompt's first line, cut to 71 characters. |
 | `orbit.role` | string | The role that takes the task, such as `coder` or `reviewer`. |
 | `orbit.runtime` | string | What runs the agent: `claude`. |
-| `gen_ai.request.model` | string | The model the task asks for, or else its role's; absent when neither names one. |
+| `gen_ai.request.model` | string | The model the task's own settings name, as its launch uses; absent when the task names none, since its role's model isn't a fallback. |
 | `orbit.trigger` | string | Who queued the task: `manual`, `planner`, `review` or `super_review`. |
 | `orbit.task.fixes` | string | For a fix task, the id of the task it fixes; absent otherwise. |
 | `orbit.task.fix_attempts` | int | How many times the agent was told its work failed verification and asked to fix it. |

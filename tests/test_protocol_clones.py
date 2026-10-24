@@ -3,7 +3,7 @@ a clone is given and how a clone's failure is told."""
 
 import pytest
 
-from orbit.protocol import clone_failure_message, clone_name, failed_clone, looks_like_url
+from orbit.protocol import clone_failure_message, clone_name, looks_like_url
 
 URL = "https://github.com/o/proj.git"
 
@@ -67,15 +67,5 @@ def test_a_failure_message_names_the_url_before_the_detail() -> None:
 @pytest.mark.parametrize(
     "detail", ["not found", "git failed to start: no git", "line 1\nline 2", ""]
 )
-def test_a_failure_message_is_of_the_clone_of_its_url(detail: str) -> None:
-    assert failed_clone(clone_failure_message(URL, detail), URL)
-
-
-def test_a_failure_message_isnt_of_another_urls_clone() -> None:
-    message = clone_failure_message("git@host:o/other.git", "denied")
-    assert not failed_clone(message, URL)
-    assert not failed_clone(clone_failure_message(f"{URL}x", "denied"), URL)
-
-
-def test_another_message_isnt_a_clones_failure() -> None:
-    assert not failed_clone(f"Can't clone {URL}: it's being cloned already.", URL)
+def test_a_failure_message_keeps_its_detail_as_given(detail: str) -> None:
+    assert clone_failure_message(URL, detail) == f"Couldn't clone {URL}: {detail}"
