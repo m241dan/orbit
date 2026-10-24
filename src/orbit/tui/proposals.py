@@ -126,7 +126,9 @@ class ProposalHost:
 
     def follow(self, proposals: tuple[ChecksProposed, ...]) -> None:
         """Close the proposal shown unless it's among ``proposals``, still waiting, and wait on
-        the rest of them; with none shown, show the first."""
+        the rest of them; with none shown, show the first. The agents that exited are
+        forgotten, as ``proposals`` are authoritative and agent ids restart with orbit."""
+        self._exited = set()
         screen = self.shown
         if screen is not None and screen.proposal not in proposals:
             self._slot.close(None)

@@ -165,7 +165,7 @@ async def test_picking_a_session_that_fails_to_send_shows_why_and_activates_noth
         assert entries(app)[-1] == ("Couldn't send the command: the backend is gone", "error")
 
 
-async def test_deleting_a_session_that_fails_to_send_shows_why() -> None:
+async def test_deleting_a_session_that_fails_to_send_shows_why_once_under_the_list() -> None:
     app, session = in_process()
     async with app.run_test() as pilot:
         await feed_events(session, pilot, CATALOG)
@@ -175,7 +175,8 @@ async def test_deleting_a_session_that_fails_to_send_shows_why() -> None:
 
         assert app.is_running
         assert changes(session) == [DeleteSession(session_id="old")]
-        assert entries(app)[-1] == ("Couldn't send the command: the backend is gone", "error")
+        assert picker(app).note == "Couldn't send the command: the backend is gone"
+        assert entries(app) == []
 
 
 async def test_locked_and_unreadable_sessions_cannot_be_opened() -> None:

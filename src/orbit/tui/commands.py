@@ -78,16 +78,16 @@ class CommandDesk:
 
     def _unsent(self, command_id: str, exc: Exception, failure: str) -> None:
         """Report that the command ``command_id`` wasn't sent for ``exc``: refused while not
-        connected, else failed, after ``failure``; either does what awaits its refusal."""
+        connected, else failed, after ``failure``; either does what awaits its refusal, and
+        shows why once, where what awaits it takes that or else in the transcript."""
         if isinstance(exc, NotConnected):
             self._report(CommandRefused(command_id=command_id, code=INVALID, message=str(exc)))
             return
         self._echoes.discard(command_id)
         message = f"{failure}: {exc}"
-        self._settle(
-            command_id, CommandRefused(command_id=command_id, code=INTERNAL, message=message)
-        )
-        self._report(ErrorOccurred(code=INTERNAL, message=message))
+        refusal = CommandRefused(command_id=command_id, code=INTERNAL, message=message)
+        if not self._settle(command_id, refusal):
+            self._report(ErrorOccurred(code=INTERNAL, message=message))
 
     def _echo(self, event: MessageSent | ProposalDecided) -> None:
         """Show a message or decision a frontend sent, unless it's one this one sent and showed

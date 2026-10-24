@@ -261,3 +261,14 @@ async def test_reopening_while_another_is_shown_shows_it_next() -> None:
     assert [screen.proposal for screen, _ in pushed] == [OTHER, PROPOSAL, third]
     await pushed[2][1](None)
     assert len(pushed) == 3
+
+
+async def test_a_snapshot_forgets_the_agents_that_exited() -> None:
+    host, pushed = recording_host()
+    host.withdraw(AgentExited(agent_id="agent-3", reason="finished"))
+    host.reopen(PROPOSAL)
+    assert pushed == []
+    host.follow(())
+    host.reopen(PROPOSAL)
+    [(screen, _)] = pushed
+    assert screen.proposal == PROPOSAL

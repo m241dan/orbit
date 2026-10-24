@@ -168,6 +168,7 @@ async def test_a_failure_to_send_tells_what_awaits_it_why() -> None:
     reasons: list[str] = []
     assert not await desk.desk.send(RunTasks(), Awaited(why=reasons.append))
     assert reasons == ["Couldn't send the command: boom"]
+    assert desk.reported == []  # What takes why shows it, so the failure shows once.
 
 
 async def test_a_refusal_tells_what_awaits_it_its_code() -> None:
