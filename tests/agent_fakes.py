@@ -3,6 +3,7 @@ CLI, and a step runner and workspace for verification."""
 
 import asyncio
 import logging
+import sys
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -50,7 +51,7 @@ from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.roles import Role, built_in_roles
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.storage_halt import FailedWrite
-from orbit.agent.domain.usage import UsageFetch
+from orbit.agent.domain.usage import UsageFetch, UsageUnavailable
 from orbit.agent.domain.usage_totals import UsageRow, UsageTotalsData, usage_totals
 from orbit.protocol import (
     AGENT_FAILED,
@@ -538,6 +539,11 @@ class FakeStore:
 
 
 STEP = VerificationStep(name="Unit tests", command=("pytest",))
+
+
+def python_step(code: str, name: str = "check") -> VerificationStep:
+    """A step named ``name`` that runs Python ``code``."""
+    return VerificationStep(name=name, command=(sys.executable, "-c", code))
 
 
 class FakeWorkspace:
@@ -1155,6 +1161,18 @@ async def claims_done(call: Call, summary: str = "done") -> TurnEndReason:
     await call("get_task")
     await call("complete_task", summary=summary)
     return "completed"
+
+
+async def gives_up(call: Call, reason: str = "blocked") -> TurnEndReason:
+    """Fetches the task and gives up on it for ``reason``."""
+    await call("get_task")
+    await call("give_up", reason=reason)
+    return "completed"
+
+
+async def no_usage() -> UsageFetch:
+    """No usage: it's unavailable."""
+    return UsageUnavailable("offline")
 
 
 async def keeps_claiming(call: Call) -> TurnEndReason:

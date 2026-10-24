@@ -23,16 +23,10 @@ from orbit.protocol import (
     TaskSpec,
     TurnEndReason,
 )
-from tests.agent_fakes import ROLES, Call, FakeHost, FakeTree, Script, ScriptedLauncher
+from tests.agent_fakes import ROLES, Call, FakeHost, FakeTree, Script, ScriptedLauncher, gives_up
 
 WAITING = ("pending", "running")
 """The statuses of a task that hasn't ended."""
-
-
-async def gives_up(call: Call) -> TurnEndReason:
-    await call("get_task")
-    await call("give_up", reason="blocked")
-    return "completed"
 
 
 async def reviews(call: Call) -> TurnEndReason:

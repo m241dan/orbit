@@ -71,15 +71,6 @@ def project(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Path]:
 
 
 @pytest.fixture
-def token_file(config_dir: Path) -> Path:
-    """The token file in the config directory."""
-    path = config_dir / "token"
-    path.parent.mkdir()
-    path.write_text("the-token\n")
-    return path
-
-
-@pytest.fixture
 def plane(monkeypatch: pytest.MonkeyPatch) -> Plane:
     fake = Plane()
     monkeypatch.setattr("orbit.cli.chat.accepts", fake.accepts)

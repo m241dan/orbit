@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from functools import partial
 from typing import Any
 
 import pytest
@@ -63,7 +64,9 @@ from tests.agent_fakes import (
     ScriptedLauncher,
     Steps,
     board,
+    chats,
     ended_unverified,
+    gives_up,
     keeps_claiming,
     logged_with_traceback,
     payloads,
@@ -217,11 +220,8 @@ async def test_an_agent_that_exits_without_claiming_done_is_verified() -> None:
 
 
 async def test_an_agent_that_never_asks_for_its_task_errors() -> None:
-    async def wanders_off(call: Call) -> TurnEndReason:
-        return "completed"
-
     steps = Steps()
-    session, _, _ = session_for(wanders_off, verification=verified(steps))
+    session, _, _ = session_for(chats, verification=verified(steps))
     events = await asyncio.wait_for(run(session), 5)
 
     assert steps.runs == []
@@ -267,13 +267,13 @@ async def test_a_crashing_agent_is_reported_and_its_work_still_verified() -> Non
 
 
 async def test_giving_up_ends_the_task() -> None:
-    async def gives_up(call: Call) -> TurnEndReason:
+    async def gives_up_hearing_back(call: Call) -> TurnEndReason:
         await call("get_task")
         reply = await call("give_up", reason="the spec contradicts itself")
         assert "given up" in reply.text
         return "completed"
 
-    session, _, _ = session_for(gives_up, verification=verified(Steps()))
+    session, _, _ = session_for(gives_up_hearing_back, verification=verified(Steps()))
     events = await asyncio.wait_for(run(session), 5)
 
     assert (
@@ -285,12 +285,7 @@ async def test_giving_up_ends_the_task() -> None:
 async def test_giving_up_gives_the_first_line_of_the_reason_and_keeps_it_whole() -> None:
     reason = "The spec contradicts itself.\n\nIt asks for both a flag and no flags."
 
-    async def gives_up(call: Call) -> TurnEndReason:
-        await call("get_task")
-        await call("give_up", reason=reason)
-        return "completed"
-
-    session, _, _ = session_for(gives_up, verification=verified(Steps()))
+    session, _, _ = session_for(partial(gives_up, reason=reason), verification=verified(Steps()))
     events = await asyncio.wait_for(run(session), 5)
 
     [task] = board(events)

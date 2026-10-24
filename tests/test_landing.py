@@ -11,7 +11,6 @@ from orbit.agent.application.ports import Merge
 from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.domain.agent_task import Limits
-from orbit.agent.domain.usage import UsageFetch, UsageUnavailable
 from orbit.agent.domain.verification import failure_report
 from orbit.protocol import (
     GIT_FAILED,
@@ -33,7 +32,9 @@ from tests.agent_fakes import (
     board,
     claims_done,
     ended_unverified,
+    gives_up,
     keeps_claiming,
+    no_usage,
     payloads,
     run,
     session_for,
@@ -42,12 +43,6 @@ from tests.agent_fakes import (
 )
 
 adds_the_flag = partial(claims_done, summary="Add the --fast flag")
-
-
-async def gives_up(call: Call) -> TurnEndReason:
-    await call("get_task")
-    await call("give_up", reason="blocked")
-    return "completed"
 
 
 async def test_finished_work_is_done_in_the_tree_then_committed_and_merged() -> None:
@@ -203,10 +198,6 @@ def recorded(start: Callable[[Any], None], name: str, started: list[str]) -> Cal
 async def listen(stream: AsyncIterator[Event], seen: list[Event]) -> None:
     async for event in stream:
         seen.append(event)
-
-
-async def no_usage() -> UsageFetch:
-    return UsageUnavailable("no usage here")
 
 
 async def test_a_listener_cancelled_while_leftovers_are_found_still_starts_the_background(

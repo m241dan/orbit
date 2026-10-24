@@ -1,5 +1,3 @@
-import sys
-
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Verification, Verifier, first_failure
 from orbit.agent.domain.board import TaskBoard
@@ -30,10 +28,7 @@ from orbit.protocol import (
     TaskSpec,
     VerificationChanged,
 )
-
-
-def python_step(code: str, name: str = "check") -> VerificationStep:
-    return VerificationStep(name=name, command=(sys.executable, "-c", code))
+from tests.agent_fakes import python_step
 
 
 def task(tool_access: str = "restricted") -> TaskSpec:

@@ -47,6 +47,7 @@ from tests.agent_fakes import (
     board_of,
     claims_done,
     events_until,
+    gives_up,
     keeps_claiming,
     lane_of,
     of_type,
@@ -899,11 +900,6 @@ async def test_a_review_the_user_queued_can_be_edited_with_the_review_lane() -> 
 
 async def test_a_task_edited_back_to_pending_is_reviewed_with_its_batch() -> None:
     sessions: list[WorkspaceHost] = []
-
-    async def gives_up(call: Call) -> TurnEndReason:
-        await call("get_task")
-        await call("give_up", reason="blocked")
-        return "completed"
 
     async def reopens_task_3(call: Call) -> TurnEndReason:
         await call("get_task")

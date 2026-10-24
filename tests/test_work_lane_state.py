@@ -27,32 +27,22 @@ from orbit.protocol import (
     TaskMerged,
     TasksChanged,
     TaskSpec,
-    TaskState,
     TurnEndReason,
 )
-from tests.agent_fakes import ROLES, Call, FakeHost, FakeTree, Script, ScriptedLauncher, claims_done
+from tests.agent_fakes import (
+    ROLES,
+    Call,
+    FakeHost,
+    FakeTree,
+    Script,
+    ScriptedLauncher,
+    chats,
+    claims_done,
+    gives_up,
+)
+from tests.lane_fakes import Hearing, no_work
 
 OTHERS_SLOT = ("other", "s")  # Another workspace's session, which holds the only coder's slot.
-
-
-async def no_work() -> None:
-    """Wakes no work lane."""
-
-
-class Hearing(ReviewLane):
-    """A review lane that notes how it hears each task ended, as which state, and reviews
-    none."""
-
-    def __init__(self, desk: AgentDesk, tasks: Tasks) -> None:
-        hooks = ReviewHooks(no_work, no_work, SessionGate(lambda: False))
-        super().__init__(desk, tasks, ReviewPlanner(ReviewLimits()), hooks)
-        self.heard: list[tuple[str, ...]] = []
-
-    async def landed(self, state: TaskState, commit: str) -> None:
-        self.heard.append(("landed", state.id, commit))
-
-    async def ended(self, state: TaskState) -> None:
-        self.heard.append(("ended", state.id, state.status))
 
 
 class Held:
@@ -76,16 +66,6 @@ def completed(event: Event) -> bool:
 
 async def quiet(event: Event) -> None:
     """Publishes nothing."""
-
-
-async def gives_up(call: Call) -> TurnEndReason:
-    await call("get_task")
-    await call("give_up", reason="blocked")
-    return "completed"
-
-
-async def wanders_off(call: Call) -> TurnEndReason:
-    return "completed"  # Without calling get_task, which ends the task in error.
 
 
 def desk_for(
@@ -144,6 +124,14 @@ def removing_once_finished(board: TaskBoard, task_id: str) -> Changed:
     return save
 
 
+async def run_reused(lane: WorkLane, tasks: Tasks, task_id: str) -> None:
+    """Run ``lane`` once ``tasks``' board is emptied, as for a new session, and given a task
+    that reuses id ``task_id``."""
+    tasks.board.restore([])
+    assert tasks.board.add(TaskSpec(prompt="b")) == task_id
+    assert await asyncio.wait_for(lane.run(), 5) == "finished"
+
+
 async def test_a_lane_cancelled_right_after_a_task_lands_still_reports_the_landing() -> None:
     held = Held()
     tasks = Tasks(TaskBoard(), held)
@@ -169,9 +157,7 @@ async def test_a_reused_id_after_a_cancelled_landing_reports_it_ended_not_the_ol
     run.cancel()
     await asyncio.gather(run, return_exceptions=True)
 
-    tasks.board.restore([])
-    assert tasks.board.add(TaskSpec(prompt="b")) == task_id
-    assert await asyncio.wait_for(lane.run(), 5) == "finished"
+    await run_reused(lane, tasks, task_id)
 
     assert review.heard == [("landed", task_id, "c1"), ("ended", task_id, "gave_up")]
 
@@ -179,40 +165,34 @@ async def test_a_reused_id_after_a_cancelled_landing_reports_it_ended_not_the_ol
 async def test_after_a_reset_a_reused_id_that_lands_nothing_reports_it_ended() -> None:
     tasks = Tasks(TaskBoard(), quiet)
     task_id = tasks.board.add(TaskSpec(prompt="a"))
-    lane, review = lane_for(quiet, tasks, gives_up)
-    lane._landed[task_id] = "stale"  # A landing the session left never reported.
-    lane._starts[task_id] = "stale"
-
-    lane.reset()
-    assert lane._landed == {} and lane._starts == {}
+    lane, review = lane_for(quiet, tasks, claims_done, gives_up)
     assert await asyncio.wait_for(lane.run(), 5) == "finished"
 
-    assert review.heard == [("ended", task_id, "gave_up")]
+    lane.reset()
+    await run_reused(lane, tasks, task_id)
+
+    assert review.heard == [("landed", task_id, "c1"), ("ended", task_id, "gave_up")]
 
 
-async def test_a_task_that_errors_leaves_no_start_behind() -> None:
+async def test_a_task_that_errors_reports_it_ended() -> None:
     tasks = Tasks(TaskBoard(), quiet)
     task_id = tasks.board.add(TaskSpec(prompt="a"))
-    lane, review = lane_for(quiet, tasks, wanders_off)
+    lane, review = lane_for(quiet, tasks, chats)
 
     assert await asyncio.wait_for(lane.run(), 5) == "finished"
 
     assert tasks.board.get(task_id).status == "error"
-    assert lane._starts == {}
     assert review.heard == [("ended", task_id, "error")]
 
 
 async def test_a_reused_id_after_an_error_lands_from_its_own_start() -> None:
     tasks = Tasks(TaskBoard(), quiet)
     task_id = tasks.board.add(TaskSpec(prompt="a"))
-    lane, review = lane_for(quiet, tasks, wanders_off, claims_done)
+    lane, review = lane_for(quiet, tasks, chats, claims_done)
     assert await asyncio.wait_for(lane.run(), 5) == "finished"
 
-    tasks.board.restore([])
-    assert tasks.board.add(TaskSpec(prompt="b")) == task_id
-    assert await asyncio.wait_for(lane.run(), 5) == "finished"
+    await run_reused(lane, tasks, task_id)
 
-    assert lane._starts == {}
     assert review.heard == [("ended", task_id, "error"), ("landed", task_id, "c1")]
 
 
@@ -265,15 +245,15 @@ async def test_work_that_did_not_merge_ends_completed_without_landing(result: Me
     tasks = Tasks(TaskBoard(), published)
     task_id = tasks.board.add(TaskSpec(prompt="a"))
     tree = FakeTree(Merge(result, "why it didn't merge"))
-    lane, review = lane_for(published, tasks, claims_done, tree=tree)
+    lane, review = lane_for(published, tasks, claims_done, gives_up, tree=tree)
 
     assert await asyncio.wait_for(lane.run(), 5) == "finished"
 
     assert tasks.board.get(task_id).status == "completed"
     merged = TaskMerged(task_id=task_id, result=result, detail="why it didn't merge", commit="c1")
     assert merged in published.events
-    assert review.heard == [("ended", task_id, "completed")]
-    assert lane._landed == {}
+    await run_reused(lane, tasks, task_id)  # Which lands nothing, so must not hear of "c1".
+    assert review.heard == [("ended", task_id, "completed"), ("ended", task_id, "gave_up")]
 
 
 @pytest.mark.parametrize("result", UNMERGED)
@@ -364,7 +344,7 @@ async def test_a_lane_cancelled_between_the_merge_and_its_report_still_reports_t
     tasks = Tasks(TaskBoard(), published)
     task_id = tasks.board.add(TaskSpec(prompt="a"))
     tree = HeldHead()
-    lane, review = lane_for(published, tasks, claims_done, tree=tree)
+    lane, review = lane_for(published, tasks, claims_done, gives_up, tree=tree)
     run = asyncio.create_task(lane.run())
     await asyncio.wait_for(tree.merged.wait(), 5)
 
@@ -375,8 +355,8 @@ async def test_a_lane_cancelled_between_the_merge_and_its_report_still_reports_t
 
     assert run.cancelled()
     assert TaskMerged(task_id=task_id, result="merged", commit="c1") in published.events
-    assert review.heard == [("landed", task_id, "c1")]
-    assert lane._landed == {}
+    await run_reused(lane, tasks, task_id)  # Which lands nothing, so must not hear of "c1".
+    assert review.heard == [("landed", task_id, "c1"), ("ended", task_id, "gave_up")]
 
 
 async def test_a_stop_during_the_agents_run_cancels_the_task_and_lands_nothing() -> None:

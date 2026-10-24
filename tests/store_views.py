@@ -14,7 +14,7 @@ import pytest
 from orbit.agent.domain.sessions import SessionRecord, record_json
 from orbit.agent.external.sqlite_store import THREAD_PREFIX, SqliteStore, WorkspaceStore
 from orbit.agent.external.workspace_registry import WorkspaceRegistry
-from orbit.protocol import EventEnvelope
+from orbit.protocol import EventEnvelope, Notice, encode
 from tests.agent_fakes import notice
 
 
@@ -50,6 +50,34 @@ async def workspace_id_of(state: Path, workspace: Path | str) -> str:
     view = await open_view(state, workspace)
     await view.close()
     return view.workspace_id
+
+
+async def logged(state: Path, workspace: Path | str) -> list[EventEnvelope]:
+    """The session ``s1``'s events in the store in ``state`` for ``workspace``."""
+    store = await open_view(state, workspace)
+    try:
+        return await store.recent("s1", 100)
+    finally:
+        await store.close()
+
+
+def parked_notice(seq: int) -> EventEnvelope:
+    """The notice numbered ``seq`` of the session ``s1``, as parked in a fallback file."""
+    return EventEnvelope(seq=seq, session="s1", payload=Notice(message=f"parked {seq}"))
+
+
+def park(path: Path, *seqs: int) -> Path:
+    """A fallback file at ``path`` holding notices numbered ``seqs``."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(f"{encode(parked_notice(seq))}\n" for seq in seqs))
+    return path
+
+
+async def park_in_state(state: Path, workspace: Path | str, *seqs: int) -> Path:
+    """The session ``s1``'s fallback file in ``state``, for ``workspace``, holding notices
+    numbered ``seqs``."""
+    workspace_id = await workspace_id_of(state, workspace)
+    return park(state / "fallback" / f"{workspace_id}-s1.jsonl", *seqs)
 
 
 type Opener = Callable[[Path], Awaitable[OwnView]]

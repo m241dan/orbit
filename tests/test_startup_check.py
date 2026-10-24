@@ -25,7 +25,6 @@ from orbit.protocol import (
     StartupChecked,
     StepState,
     TaskStarted,
-    TurnEndReason,
     VerificationChanged,
 )
 from tests.agent_fakes import (
@@ -33,11 +32,11 @@ from tests.agent_fakes import (
     LINT,
     ROLES,
     STEP,
-    Call,
     FakeTree,
     Steps,
     agent_exited,
     board,
+    chats,
     checked,
     claims_done,
     events_until,
@@ -315,10 +314,6 @@ async def test_tasks_run_while_it_does_and_take_the_panel_over() -> None:
     await session.close()
 
 
-async def says_nothing(call: Call) -> TurnEndReason:
-    return "completed"
-
-
 async def test_a_crash_is_reported_and_closing_still_stops_the_host(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -327,7 +322,7 @@ async def test_a_crash_is_reported_and_closing_still_stops_the_host(
 
     monkeypatch.setattr(session_module, "startup_fix_prompt", broken)
     session, host, launcher = session_for(verification=checked(Steps(False)), check_at_startup=True)
-    launcher.planner_turns.append(says_nothing)
+    launcher.planner_turns.append(chats)
     await send(session, SendMessage(agent=PLANNER, text="Hello."))  # Starts the host.
     events: list[Event] = []
     async for event in payloads(session):

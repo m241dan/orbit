@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -153,3 +154,9 @@ def other_key(directory: Path) -> Path:
     """A private key no certificate is made for, written to ``other-key.pem`` in
     ``directory``."""
     return _pem(directory / "other-key.pem", _key_pem(ec.generate_private_key(ec.SECP256R1())))
+
+
+@pytest.fixture
+def ca(tmp_path: Path) -> Ca:
+    """A certificate authority in ``tmp_path``."""
+    return make_ca(tmp_path)

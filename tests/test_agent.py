@@ -20,7 +20,6 @@ from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.work_turns import WorkTurns
-from orbit.agent.domain.usage import UsageFetch, UsageUnavailable
 from orbit.agent.domain.verification import MAX_FALLBACK_FIXES
 from orbit.protocol import (
     AGENT_FAILED,
@@ -60,6 +59,7 @@ from tests.agent_fakes import (
     events_until,
     greeting_only,
     idle,
+    no_usage,
     nothing_queued,
     payloads,
     planner_turn,
@@ -269,10 +269,6 @@ async def test_planner_turns_are_not_verified() -> None:
     assert not any(isinstance(e, VerificationChanged | VerificationFinished) for e in events[1:])
     await asyncio.sleep(0.01)
     assert only_state_queued(session)
-
-
-async def no_usage() -> UsageFetch:
-    return UsageUnavailable("offline")
 
 
 def record_stops(monkeypatch: pytest.MonkeyPatch, failing: str = "") -> list[str]:

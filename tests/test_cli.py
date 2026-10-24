@@ -48,14 +48,12 @@ from orbit.cli.errors import _configured, _exit_on
 from orbit.protocol import (
     AddTask,
     Catalog,
-    EventEnvelope,
     Notice,
     Settings,
     Snapshot,
     TasksChanged,
     TaskSpec,
     decode_event,
-    encode,
 )
 from tests.agent_fakes import greeted, queued, send, sole, startup_of, store_of
 from tests.cli_fakes import LocalApp
@@ -65,7 +63,10 @@ from tests.store_views import (
     WHEN,
     held,
     legacy_sessions,
+    logged,
     open_view,
+    park_in_state,
+    parked_notice,
     store_threads,
 )
 
@@ -468,36 +469,6 @@ def test_chat_imports_an_older_orbits_session_files(
     ]
 
 
-def parked_notice(seq: int) -> EventEnvelope:
-    return EventEnvelope(seq=seq, session="s1", payload=Notice(message=f"parked {seq}"))
-
-
-async def workspace_id_of(state: Path, workspace: Path) -> str:
-    store = await open_view(state, workspace)
-    try:
-        return store.workspace_id
-    finally:
-        await store.close()
-
-
-async def logged_in(state: Path, workspace: Path) -> list[EventEnvelope]:
-    """The session ``s1``'s events in the store in ``state`` for ``workspace``."""
-    store = await open_view(state, workspace)
-    try:
-        return await store.recent("s1", 100)
-    finally:
-        await store.close()
-
-
-def park(state: Path, workspace: Path, *seqs: int) -> Path:
-    """A fallback file of the session ``s1`` in ``state`` holding notices numbered ``seqs``."""
-    workspace_id = asyncio.run(workspace_id_of(state, workspace.resolve()))
-    path = state / "fallback" / f"{workspace_id}-s1.jsonl"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("".join(f"{encode(parked_notice(seq))}\n" for seq in seqs))
-    return path
-
-
 @dataclass(frozen=True)
 class Order:
     """Where the Snapshot and each notice came in what a chat's session published first."""
@@ -525,10 +496,10 @@ def orders(launched: list[WorkspaceHost]) -> list[Order]:
 def test_chat_recovers_parked_events_and_notes_it_after_the_snapshot(
     orders: list[Order], state: Path, tmp_path: Path
 ) -> None:
-    path = park(state, tmp_path, 2, 1)
+    path = asyncio.run(park_in_state(state, tmp_path.resolve(), 2, 1))
     assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
 
-    assert asyncio.run(logged_in(state, tmp_path.resolve())) == [parked_notice(1), parked_notice(2)]
+    assert asyncio.run(logged(state, tmp_path.resolve())) == [parked_notice(1), parked_notice(2)]
     assert not path.exists()
     [order] = orders
     shown = path.relative_to(tmp_path)  # The state directory is in the workspace here.
@@ -539,7 +510,7 @@ def test_chat_recovers_parked_events_and_notes_it_after_the_snapshot(
 def test_a_parked_file_that_cant_be_read_stops_chat_naming_it(
     launched: list[WorkspaceHost], state: Path, tmp_path: Path
 ) -> None:
-    path = park(state, tmp_path, 1)
+    path = asyncio.run(park_in_state(state, tmp_path.resolve(), 1))
     path.write_text("not an envelope\n")
     result = runner.invoke(app, ["chat", "-C", str(tmp_path)])
 
@@ -1219,7 +1190,7 @@ def test_a_chat_on_a_repository_another_orbit_owns_is_read_only_naming_it(
 def test_a_chat_on_a_repository_another_orbit_owns_leaves_its_parked_events(
     standings: list[Standing], state: Path, tmp_path: Path
 ) -> None:
-    path = park(state, tmp_path, 1)
+    path = asyncio.run(park_in_state(state, tmp_path.resolve(), 1))
     owner = WorkspaceLock(tmp_path / ".orbit")
     owner.take()
     try:
@@ -1228,7 +1199,7 @@ def test_a_chat_on_a_repository_another_orbit_owns_leaves_its_parked_events(
         owner.close()
 
     assert path.exists()
-    assert asyncio.run(logged_in(state, tmp_path.resolve())) == []
+    assert asyncio.run(logged(state, tmp_path.resolve())) == []
     [standing] = standings
     assert not any(note.startswith("Recovered") for note in standing.notices)
 

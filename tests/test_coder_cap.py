@@ -31,6 +31,8 @@ from tests.agent_fakes import (
     Script,
     ScriptedLauncher,
     board_of,
+    chats,
+    gives_up,
 )
 from tests.connection_helpers import joined, say, taken
 from tests.plane_fakes import idle, payloads
@@ -274,18 +276,8 @@ async def test_closing_while_a_run_waits_leaves_no_slot_taken() -> None:
     assert plane.coders_running == 0
 
 
-async def gives_up(call: Call) -> TurnEndReason:
-    await call("get_task")
-    await call("give_up", reason="Can't.")
-    return "completed"
-
-
-async def says_nothing(call: Call) -> TurnEndReason:
-    return "completed"
-
-
 async def test_every_slot_is_given_back_however_tasks_end() -> None:
-    scripts = (gives_up, says_nothing, gives_up, says_nothing)
+    scripts = (gives_up, chats, gives_up, chats)
     a, b = workspace("a", *scripts)[0], workspace("b", *scripts)[0]
     plane = capped(1, a, b)
     in_a, in_b = await joined(plane, host=a), await joined(plane, host=b)

@@ -4,10 +4,7 @@ from pathlib import Path
 
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.checks import run_step
-
-
-def python_step(code: str, name: str = "check") -> VerificationStep:
-    return VerificationStep(name=name, command=(sys.executable, "-c", code))
+from tests.agent_fakes import python_step
 
 
 async def test_step_passes_on_zero_exit_and_captures_both_streams() -> None:

@@ -39,11 +39,6 @@ from tests.tls_certs import DAY, Ca, ServerFiles, make_ca, make_client, make_ser
 
 
 @pytest.fixture
-def ca(tmp_path: Path) -> Ca:
-    return make_ca(tmp_path)
-
-
-@pytest.fixture
 def token_file(tmp_path: Path) -> Path:
     path = tmp_path / "token"
     path.write_text(f"{TOKEN}\n")

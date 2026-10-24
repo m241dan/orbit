@@ -4,6 +4,7 @@ wait for a coder and its run as children, exported through the OpenTelemetry SDK
 import asyncio
 import logging
 from collections.abc import Mapping
+from functools import partial
 from typing import Any
 
 import pytest
@@ -39,6 +40,7 @@ from tests.agent_fakes import (
     chats,
     claims_done,
     events_until,
+    gives_up,
     greeted,
     idle,
     keeps_claiming,
@@ -97,10 +99,7 @@ def traced_session(traced: Traced, *scripts: Script, **options: Any) -> Workspac
     return session
 
 
-async def gives_up(call: Call) -> TurnEndReason:
-    await call("get_task")
-    await call("give_up", reason="The task contradicts the code.")
-    return "completed"
+gives_up_contradicting = partial(gives_up, reason="The task contradicts the code.")
 
 
 async def claims_twice(call: Call) -> TurnEndReason:
@@ -205,7 +204,7 @@ async def test_a_step_that_passes_after_a_fix_counts_one_fix_attempt() -> None:
 
 async def test_a_task_that_gives_up_says_why_and_has_its_event() -> None:
     traced = Traced()
-    session = traced_session(traced, gives_up)
+    session = traced_session(traced, gives_up_contradicting)
     await asyncio.wait_for(run(session), 5)
 
     task = traced.task()
@@ -221,7 +220,7 @@ async def test_a_review_of_landed_work_records_nothing_on_the_tasks_span(
     traced = Traced()
     session, _, _ = session_for(
         claims_done,
-        reviewers=(gives_up,),
+        reviewers=(gives_up_contradicting,),
         tree=FakeTree(),
         review=True,
         telemetry=traced.telemetry,

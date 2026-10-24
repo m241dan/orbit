@@ -1,6 +1,7 @@
 """Settings for every test."""
 
 import os
+from contextlib import ExitStack
 from pathlib import Path
 
 import pytest
@@ -14,7 +15,7 @@ from orbit.agent.external.usage_api import UsageApi
 os.environ.setdefault("TEXTUAL_ANIMATIONS", "none")
 
 # Fixtures more than one test module uses.
-pytest_plugins = ["tests.cli_fakes", "tests.git_repo", "tests.store_views"]
+pytest_plugins = ["tests.cli_fakes", "tests.git_repo", "tests.store_views", "tests.tls_certs"]
 
 
 def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:
@@ -69,6 +70,21 @@ def state(tmp_path: Path) -> Path:
 def config_dir(tmp_path: Path) -> Path:
     """The config directory every test has, unless it sets its own."""
     return tmp_path / "config"
+
+
+@pytest.fixture
+def token_file(config_dir: Path) -> Path:
+    """The token file in the config directory."""
+    path = config_dir / "token"
+    path.parent.mkdir()
+    path.write_text("the-token\n")
+    return path
+
+
+@pytest.fixture
+def stack() -> ExitStack:
+    """An exit stack for what a test serves."""
+    return ExitStack()
 
 
 @pytest.fixture

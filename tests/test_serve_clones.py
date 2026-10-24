@@ -7,8 +7,6 @@ import sqlite3
 from contextlib import ExitStack
 from pathlib import Path
 
-import pytest
-
 from orbit.agent import SqliteStore, WorkspaceRegistry
 from orbit.agent.application.connection import SessionConnection
 from orbit.protocol import (
@@ -27,11 +25,6 @@ from tests.git_repo import bare_repository, commit_file, git, init_repo, started
 from tests.plane_fakes import payloads, refused, welcomed
 from tests.process_checks import gone
 from tests.serving import serving, until
-
-
-@pytest.fixture
-def stack() -> ExitStack:
-    return ExitStack()
 
 
 async def served(connection: SessionConnection) -> list[Event]:

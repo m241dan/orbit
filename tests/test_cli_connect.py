@@ -18,15 +18,6 @@ runner = CliRunner()
 pytestmark = pytest.mark.usefixtures("fakes")
 
 
-@pytest.fixture
-def token_file(config_dir: Path) -> Path:
-    """The token file in the config directory."""
-    path = config_dir / "token"
-    path.parent.mkdir()
-    path.write_text("the-token\n")
-    return path
-
-
 def test_connect_runs_the_tui_over_the_control_plane_with_the_config_dirs_token(
     token_file: Path,
 ) -> None:

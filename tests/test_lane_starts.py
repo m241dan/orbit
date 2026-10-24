@@ -22,10 +22,10 @@ from orbit.protocol import (
     TasksChanged,
     TaskSpec,
     TaskStarted,
-    TaskState,
     VerificationChanged,
 )
 from tests.agent_fakes import ROLES, FakeHost, FakeTree, ScriptedLauncher, Steps, verified
+from tests.lane_fakes import Hearing, no_work
 
 
 class Gate:
@@ -59,10 +59,6 @@ def desk_for(publish: Gate) -> AgentDesk:
     return AgentDesk(agents, publish)
 
 
-async def no_work() -> None:
-    """Wakes no work lane."""
-
-
 def hooks(read_only: bool = False, halted: Callable[[], bool] = lambda: False) -> ReviewHooks:
     """Hooks waking no work lane and acting on no change, ``read_only`` or not, halted as
     ``halted`` says."""
@@ -75,21 +71,6 @@ def ended_and_free(tasks: Tasks, task_id: str, reason: str) -> None:
     assert (state.status, state.reason, state.reason_detail) == ("cancelled", reason, "")
     assert tasks.board.next_runnable() == task_id
     tasks.board.remove(task_id)
-
-
-class Hearing(ReviewLane):
-    """A review lane that notes each task it hears ended, landed or not, and reviews none."""
-
-    def __init__(self, desk: AgentDesk, tasks: Tasks) -> None:
-        super().__init__(desk, tasks, ReviewPlanner(ReviewLimits()), hooks())
-        self.tasks = tasks
-        self.heard: list[str] = []
-
-    async def landed(self, state: TaskState, commit: str) -> None:
-        self.heard.append(state.id)
-
-    async def ended(self, state: TaskState) -> None:
-        self.heard.append(state.id)
 
 
 async def cancel_work(
@@ -204,7 +185,7 @@ async def test_a_task_the_user_stops_is_still_reported_to_the_review_lane() -> N
     review = hearing(gate)
     tasks, task_id = await cancel_work(gate, stopped=True, review=review)
     ended_and_free(tasks, task_id, STOPPED_BY_YOU)
-    assert review.heard == [task_id]
+    assert review.heard == [("ended", task_id, "cancelled")]
 
 
 async def test_a_work_lane_the_user_stops_as_it_closes_still_just_closes() -> None:

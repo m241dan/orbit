@@ -17,12 +17,15 @@ from orbit.agent.domain.sessions import SessionRecord
 from orbit.agent.external import store_startup, workspace_registry
 from orbit.agent.external.session_import import Imported
 from orbit.agent.external.sqlite_store import SqliteStore, WorkspaceStore
-from orbit.protocol import EventEnvelope, Notice, encode
 from tests.store_views import (
     WHEN,
     held,
     legacy_sessions,
+    logged,
     open_view,
+    park,
+    park_in_state,
+    parked_notice,
     store_threads,
     workspace_id_of,
 )
@@ -46,23 +49,6 @@ def state(tmp_path: Path) -> Path:
     return tmp_path / "state"
 
 
-def parked_notice(seq: int) -> EventEnvelope:
-    return EventEnvelope(seq=seq, session="s1", payload=Notice(message=f"parked {seq}"))
-
-
-def park(path: Path, *seqs: int) -> Path:
-    """A fallback file at ``path`` holding notices numbered ``seqs``."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("".join(f"{encode(parked_notice(seq))}\n" for seq in seqs))
-    return path
-
-
-async def park_in_state(state: Path, root: Path, *seqs: int) -> Path:
-    """The session ``s1``'s fallback file in ``state``, holding notices numbered ``seqs``."""
-    workspace_id = await workspace_id_of(state, root)
-    return park(state / "fallback" / f"{workspace_id}-s1.jsonl", *seqs)
-
-
 async def park_in_repository(state: Path, root: Path, *seqs: int, session: str = "s1") -> Path:
     """The session ``session``'s fallback file in ``root``'s orbit directory, holding notices
     numbered ``seqs``."""
@@ -76,15 +62,6 @@ async def opened_notes(state: Path, root: Path) -> list[str]:
     store = await SqliteStore.open(state)
     try:
         return (await open_workspace_store(store, root, owned=True)).notes
-    finally:
-        await store.close()
-
-
-async def logged(state: Path, root: Path) -> list[EventEnvelope]:
-    """The session ``s1``'s events in the store in ``state`` for ``root``."""
-    store = await open_view(state, root)
-    try:
-        return await store.recent("s1", 100)
     finally:
         await store.close()
 

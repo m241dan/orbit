@@ -43,11 +43,6 @@ HELLO = CommandEnvelope(
 
 
 @pytest.fixture
-def ca(tmp_path: Path) -> Ca:
-    return make_ca(tmp_path)
-
-
-@pytest.fixture
 def settings(ca: Ca, tmp_path: Path) -> ServerSettings:
     files = make_server(ca, tmp_path)
     return ServerSettings(

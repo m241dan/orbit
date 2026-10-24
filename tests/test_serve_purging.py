@@ -40,11 +40,6 @@ from tests.serving import FLAGS, serving, until
 from tests.store_views import database, record
 
 
-@pytest.fixture
-def stack() -> ExitStack:
-    return ExitStack()
-
-
 def served_entries(events: list[Event]) -> tuple[WorkspaceEntry, ...]:
     """The workspaces the last catalog in ``events`` lists."""
     catalog = [event for event in events if isinstance(event, Catalog)][-1]

@@ -43,11 +43,6 @@ CLONES = Path("/nonexistent/clones")
 """A clone directory for serving that clones nothing."""
 
 
-@pytest.fixture
-def stack() -> ExitStack:
-    return ExitStack()
-
-
 def workspaces(stack: ExitStack, store: SqliteStore, flags: _Backend = FLAGS) -> ServedWorkspaces:
     return _workspaces(stack, flags, store, StorageSettings(), store.state_dir / "workspaces")
 
