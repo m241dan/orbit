@@ -3,6 +3,7 @@ what comes back."""
 
 import asyncio
 from collections.abc import AsyncIterator, Callable
+from contextlib import suppress
 
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
@@ -15,9 +16,18 @@ from orbit.protocol import (
     Snapshot,
 )
 from tests.agent_fakes import HELLO, Backend, attach_to, connect, frontend, host_of, of_type
+from tests.loop_quiet import quiet_within
 
 QUIET = 0.05
-"""How long a stream stays silent before it counts as drained, in seconds."""
+"""How long a stream stays silent before it counts as drained, in seconds, unless the event loop
+is quiet sooner."""
+
+
+async def stop[T](task: "asyncio.Future[T]") -> None:
+    """Cancel ``task`` and wait for it to end."""
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
 
 
 async def say(
@@ -50,12 +60,18 @@ async def joined(
 
 
 async def quiet[T](stream: AsyncIterator[T]) -> list[T]:
-    """What ``stream`` yields until nothing more comes for a moment."""
+    """What ``stream`` yields until nothing more comes for a moment: until the event loop is
+    quiet, or nothing has come for :data:`QUIET` seconds."""
     items: list[T] = []
-    try:
-        while True:
-            items.append(await asyncio.wait_for(anext(stream), QUIET))
-    except TimeoutError:
+    while True:
+        getting = asyncio.ensure_future(anext(stream))
+        waiting = asyncio.ensure_future(quiet_within(QUIET))
+        await asyncio.wait({getting, waiting}, return_when=asyncio.FIRST_COMPLETED)
+        if getting.done():
+            await stop(waiting)
+            items.append(getting.result())
+            continue
+        await stop(getting)
         return items
 
 

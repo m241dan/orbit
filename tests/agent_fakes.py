@@ -101,6 +101,7 @@ from orbit.protocol import (
     Welcome,
 )
 from orbit.tracing import NoTelemetry, Telemetry
+from tests.loop_quiet import quiet_within
 
 Backend = WorkspaceHost | ControlPlane
 """A workspace host, driven through the control plane around it, or a control plane."""
@@ -1343,11 +1344,17 @@ async def settle(
 
 
 async def _quiet(events: list[Event], done: Callable[[list[Event]], bool]) -> None:
-    seen, quiet = -1, 0
-    while quiet < 3:
-        await asyncio.sleep(0.05)
-        quiet = quiet + 1 if len(events) == seen and done(events) else 0
+    """Wait until ``done`` holds for ``events`` and none has come since the event loop went
+    quiet, or for 0.15 s."""
+    while True:
         seen = len(events)
+        went_quiet = await quiet_within(0.15)
+        if len(events) != seen:
+            continue
+        if done(events):
+            return
+        if went_quiet:  # Nothing comes by itself: look again a little later, as before.
+            await asyncio.sleep(0.05)
 
 
 def _finished(events: list[Event]) -> bool:
