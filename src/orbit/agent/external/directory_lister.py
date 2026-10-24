@@ -27,15 +27,24 @@ class DirectoryLister:
 def _directories(path: str) -> list[FoundDirectory]:
     """The directories in the directory at ``path``, symlinks to directories included."""
     with os.scandir(path) as entries:
-        return [_found(entry) for entry in entries if entry.is_dir()]
+        return [directory for entry in entries if (directory := _found(entry)) is not None]
 
 
-def _found(entry: os.DirEntry[str]) -> FoundDirectory:
+def _found(entry: os.DirEntry[str]) -> FoundDirectory | None:
     """The directory ``entry``, with its path once its symlinks are followed, whether it holds
-    ``.git``, and, for a symlink, its target."""
+    ``.git``, and, for a symlink, its target, or None if it isn't a directory or its type or
+    link can't be read."""
+    # A bad link, such as a loop or one into a directory we can't search, can't be confirmed
+    # as a directory, and mustn't fail the listing of the rest.
+    try:
+        if not entry.is_dir():
+            return None
+        target = os.readlink(entry.path) if entry.is_symlink() else None
+    except OSError:
+        return None
     return FoundDirectory(
         name=entry.name,
         path=os.path.realpath(entry.path),
         is_repository=os.path.lexists(os.path.join(entry.path, ".git")),
-        target=os.readlink(entry.path) if entry.is_symlink() else None,
+        target=target,
     )

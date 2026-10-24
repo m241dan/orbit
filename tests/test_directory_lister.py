@@ -1,6 +1,7 @@
 """Reading the server host's directories: directories alone, symlinks to them included, marked
 as repositories, and the errors reading them raises."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -56,3 +57,38 @@ async def test_a_path_is_resolved_following_its_symlinks_even_past_what_exists(
     (tmp_path / "l").symlink_to("a")
     resolved = await DirectoryLister().resolved(str(tmp_path / "l" / "gone"))
     assert resolved == str(tmp_path.resolve() / "a" / "gone")
+
+
+async def test_a_symlink_loop_is_skipped(tmp_path: Path) -> None:
+    (tmp_path / "a").mkdir()
+    (tmp_path / "loop").symlink_to("loop")
+    found = await DirectoryLister().directories(str(tmp_path))
+    assert found == [FoundDirectory("a", str(tmp_path / "a"), False)]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root searches any directory")
+async def test_a_symlink_into_an_unsearchable_directory_is_skipped(tmp_path: Path) -> None:
+    listed, locked = tmp_path / "listed", tmp_path / "locked"
+    (listed / "a").mkdir(parents=True)
+    (locked / "inner").mkdir(parents=True)
+    (listed / "l").symlink_to(locked / "inner")
+    locked.chmod(0)
+    try:
+        found = await DirectoryLister().directories(str(listed))
+    finally:
+        locked.chmod(0o700)
+    assert found == [FoundDirectory("a", str(listed / "a"), False)]
+
+
+async def test_a_symlink_that_cant_be_read_is_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "a").mkdir()
+    (tmp_path / "l").symlink_to("a")
+
+    def vanished(path: str) -> str:
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr(os, "readlink", vanished)
+    found = await DirectoryLister().directories(str(tmp_path))
+    assert found == [FoundDirectory("a", str(tmp_path / "a"), False)]
