@@ -11,15 +11,13 @@ from textual.widgets import Input, Static
 
 from orbit.protocol import Settings, TaskSpec
 from orbit.tui.settings_pickers import SettingsPickers
-from orbit.tui.view.settings import MODEL_TITLE, TOOL_ACCESS_TITLE, settings_fields
+from orbit.tui.view.settings import MODEL_TITLE, TOOL_ACCESS_TITLE
+from orbit.tui.view.task_editor import TaskEditor
 from orbit.tui.view.tasks import (
     TASK_EDITOR_HINT,
     TASK_PROMPT_TITLE,
     TASK_TITLE_PLACEHOLDER,
     TASK_TITLE_TITLE,
-    join_prompt,
-    split_prompt,
-    task_editor_title,
 )
 from orbit.tui.widgets import PromptBox, PromptInput, mark_selected
 
@@ -40,19 +38,15 @@ class FieldBox(Static):
         self.border_title = title
 
 
-FIELDS = ("task-title", "task-prompt", "task-model", "task-tools")
-TEXT_FIELDS = FIELDS[:2]
-
-
 class TaskEditorScreen(ModalScreen[TaskSpec | None]):
-    """Edit one task's title, prompt, model and tool access. Dismisses with the task, or None.
+    """Shows the :class:`TaskEditor` of one task's title, prompt, model and tool access.
+    Dismisses with the task, or None.
 
-    The title is the prompt's first line and the prompt box its body, joined on save by
-    ``join_prompt``. Works like the main screen: j/k select a field, J/K scroll the prompt box
-    from any field, i types in the title or prompt (escape stops; enter stops in the title and
-    adds a line in the prompt), enter on model or tools opens its picker, ctrl+s saves and
-    escape discards. The pickers are the app's ``pickers``, built once so they open instantly
-    and offering the app's current model choices.
+    Works like the main screen: j/k select a field, J/K scroll the prompt box from any field,
+    i types in the title or prompt (escape stops; enter stops in the title and adds a line in
+    the prompt), enter on model or tools opens its picker, ctrl+s saves and escape discards.
+    The pickers are the app's ``pickers``, built once so they open instantly and offering the
+    app's current model choices.
     """
 
     AUTO_FOCUS = None
@@ -85,19 +79,19 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
         pickers: SettingsPickers,
     ) -> None:
         super().__init__()
-        self.title_text = task_editor_title(new=task is None)
-        self._prompt = "" if task is None else task.prompt
-        self._settings = settings if task is None else task.settings
-        self._role = TaskSpec.model_fields["role"].default if task is None else task.role
-        self._pickers = pickers
-        self._field = 0
+        self.editor = TaskEditor(self, task, settings, pickers)
+
+    @property
+    def title_text(self) -> str:
+        """The editor's title, for a new task or one being edited."""
+        return self.editor.heading
 
     def compose(self) -> ComposeResult:
-        title, body = split_prompt(self._prompt)
-        model, tools = settings_fields(self._settings)
+        title, body = self.editor.text
+        model, tools = self.editor.settings_shown
         # Fields are reached with j/k, not by tabbing or clicking; the wheel still scrolls.
         with VerticalScroll(can_focus=False) as box:
-            box.border_title = self.title_text
+            box.border_title = self.editor.heading
             box.border_subtitle = TASK_EDITOR_HINT
             yield PromptInput(value=title, placeholder=TASK_TITLE_PLACEHOLDER, id="task-title")
             yield PromptBox(body, id="task-prompt")
@@ -107,61 +101,52 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
     def on_mount(self) -> None:
         self.query_one(PromptInput).border_title = TASK_TITLE_TITLE
         self.query_one(PromptBox).border_title = TASK_PROMPT_TITLE
-        self.query_one(f"#{FIELDS[0]}").add_class("selected")
+        self.query_one(f"#{self.editor.selected}").add_class("selected")
 
     def action_move(self, step: int) -> None:
-        self._select(min(max(self._field + step, 0), len(FIELDS) - 1))
+        self.editor.move(step)
 
     def action_scroll_prompt(self, step: int) -> None:
         """Scroll the prompt box ``step`` lines, leaving its cursor and the selection alone."""
         self.query_one(PromptBox).scroll_relative(y=step, animate=False)
 
     def action_insert_mode(self) -> None:
-        """Type in the selected text field, or in the title when another is selected."""
-        if FIELDS[self._field] not in TEXT_FIELDS:
-            self._select(0)
-        if FIELDS[self._field] == "task-title":
-            self.query_one(PromptInput).enter_insert_mode()
-        else:
-            self.query_one(PromptBox).enter_insert_mode()
+        self.editor.insert()
 
     def action_choose(self) -> None:
-        if FIELDS[self._field] == "task-model":
-            self._choose_model()
-        elif FIELDS[self._field] == "task-tools":
-            self._choose_tools()
-
-    def _choose_model(self) -> None:
-        self._pickers.choose_model(lambda: self._settings, self._update)
-
-    def _choose_tools(self) -> None:
-        self._pickers.choose_tools(lambda: self._settings, self._update)
+        self.editor.choose()
 
     def action_save(self) -> None:
-        """Save the task, if it has a title; its body may be empty."""
-        title = self.query_one(PromptInput).value
-        if title.strip():
-            prompt = join_prompt(title, self.query_one(PromptBox).text)
-            self.dismiss(TaskSpec(prompt=prompt, settings=self._settings, role=self._role))
+        self.editor.save()
 
     def action_cancel(self) -> None:
-        self.dismiss(None)
+        self.editor.cancel()
 
     @on(Input.Submitted, "#task-title")
     def _stop_typing(self, event: Input.Submitted) -> None:
         event.stop()
         self.query_one(PromptInput).action_normal_mode()
 
-    def _select(self, field: int) -> None:
-        """Select field ``field``, scrolling it into view when the editor doesn't all fit."""
-        mark_selected(self.query_one(f"#{FIELDS[self._field]}"), False)
-        selected = self.query_one(f"#{FIELDS[field]}")
+    @property
+    def typed_title(self) -> str:
+        return self.query_one(PromptInput).value
+
+    @property
+    def typed_body(self) -> str:
+        return self.query_one(PromptBox).text
+
+    def select_field(self, previous: str, field: str) -> None:
+        mark_selected(self.query_one(f"#{previous}"), False)
+        selected = self.query_one(f"#{field}")
         mark_selected(selected, True)
         selected.scroll_visible()
-        self._field = field
 
-    def _update(self, settings: Settings) -> None:
-        self._settings = settings
-        model, tools = settings_fields(settings)
+    def type_title(self) -> None:
+        self.query_one(PromptInput).enter_insert_mode()
+
+    def type_body(self) -> None:
+        self.query_one(PromptBox).enter_insert_mode()
+
+    def show_settings(self, model: str, tools: str) -> None:
         self.query_one("#task-model", FieldBox).update(model)
         self.query_one("#task-tools", FieldBox).update(tools)
