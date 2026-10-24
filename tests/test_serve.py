@@ -17,13 +17,15 @@ import urllib.request
 from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from types import TracebackType
 from typing import Any, cast
 
 import pytest
 import typer
 from typer.testing import CliRunner
+from websockets.asyncio.client import ClientConnection
+from websockets.asyncio.client import connect as open_websocket
 from websockets.exceptions import ConnectionClosed, InvalidStatus
-from websockets.sync.client import ClientConnection, connect
 
 from orbit.agent import (
     INVALID_CONFIG,
@@ -85,6 +87,63 @@ def project(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Path]:
     yield path
 
 
+class Client:
+    """A websocket connection to ``orbit serve``, used from one thread: websockets' asyncio
+    client on an event loop of its own, closed on leaving it as a context manager."""
+
+    # websockets' sync client reads on a thread of its own while the caller writes, but OpenSSL
+    # can't share a connection between threads: now and then a TLS write was lost, and the test
+    # waited out its timeout.
+
+    def __init__(self, loop: asyncio.AbstractEventLoop, connection: ClientConnection) -> None:
+        self._loop = loop
+        self._connection = connection
+
+    def send(self, message: str) -> None:
+        self._loop.run_until_complete(self._connection.send(message))
+
+    def recv(self, timeout: float) -> str | bytes:
+        """The next message; raises :class:`TimeoutError` if none comes within ``timeout``
+        seconds, and :class:`ConnectionClosed` once the connection is closed."""
+        return self._loop.run_until_complete(asyncio.wait_for(self._connection.recv(), timeout))
+
+    @property
+    def close_code(self) -> int | None:
+        return self._connection.close_code
+
+    @property
+    def close_reason(self) -> str | None:
+        return self._connection.close_reason
+
+    def __enter__(self) -> "Client":
+        return self
+
+    def __exit__(
+        self,
+        kind: type[BaseException] | None,
+        error: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        try:
+            self._loop.run_until_complete(self._connection.close())
+        finally:
+            self._loop.close()
+
+
+def connect(
+    url: str, additional_headers: dict[str, str] | None = None, ssl: ssl.SSLContext | None = None
+) -> Client:
+    """A connection to ``url``, sending ``additional_headers`` and trusting what ``ssl`` does;
+    raises as websockets does if the server refuses it."""
+    loop = asyncio.new_event_loop()
+    try:
+        opening = open_websocket(url, additional_headers=additional_headers, ssl=ssl)
+        return Client(loop, loop.run_until_complete(opening))
+    except BaseException:
+        loop.close()
+        raise
+
+
 @dataclass
 class Frontend:
     """A frontend run on a thread of its own against the ``orbit serve`` whose run file is in
@@ -95,8 +154,8 @@ class Frontend:
 
     state: Path
     config_dir: Path
-    work: Callable[[ClientConnection], list[Event]] = lambda websocket: []
-    greet: Callable[[ClientConnection], list[Event]] = lambda websocket: attached(websocket)
+    work: Callable[[Client], list[Event]] = lambda websocket: []
+    greet: Callable[[Client], list[Event]] = lambda websocket: attached(websocket)
     listening: Callable[[Path], dict[str, object]] = lambda state: _run_file(state)
     run_file: dict[str, object] = field(default_factory=dict)
     events: list[Event] = field(default_factory=list)
@@ -145,11 +204,11 @@ def _run_file(state: Path) -> dict[str, object]:
     raise AssertionError("orbit serve never started")
 
 
-def say(websocket: ClientConnection, command_id: str, command: Command) -> None:
+def say(websocket: Client, command_id: str, command: Command) -> None:
     websocket.send(encode(CommandEnvelope(command_id=command_id, payload=command)))
 
 
-def until(websocket: ClientConnection, kind: type[Event]) -> list[Event]:
+def until(websocket: Client, kind: type[Event]) -> list[Event]:
     events: list[Event] = []
     while not events or not isinstance(events[-1], kind):
         envelope = decode_event(str(websocket.recv(timeout=10)))
@@ -158,13 +217,13 @@ def until(websocket: ClientConnection, kind: type[Event]) -> list[Event]:
     return events
 
 
-def welcomed(websocket: ClientConnection) -> list[Event]:
+def welcomed(websocket: Client) -> list[Event]:
     """Say Hello on ``websocket``; what it received, up to the Catalog."""
     say(websocket, "hello", Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION))
     return until(websocket, Catalog)
 
 
-def attached(websocket: ClientConnection) -> list[Event]:
+def attached(websocket: Client) -> list[Event]:
     """Say Hello on ``websocket``, then attach to the active session of the first workspace its
     catalog lists; what it received, up to the Attach's acceptance."""
     greeting = welcomed(websocket)
@@ -176,14 +235,14 @@ def attached(websocket: ClientConnection) -> list[Event]:
     return greeting + until(websocket, CommandAccepted)
 
 
-def closed(websocket: ClientConnection) -> tuple[int | None, str | None]:
+def closed(websocket: Client) -> tuple[int | None, str | None]:
     with pytest.raises(ConnectionClosed):
         while True:
             websocket.recv(timeout=10)
     return websocket.close_code, websocket.close_reason
 
 
-def adds_a_task(websocket: ClientConnection) -> list[Event]:
+def adds_a_task(websocket: Client) -> list[Event]:
     say(websocket, "add", AddTask(task=TASK))
     return until(websocket, CommandAccepted)
 
@@ -201,7 +260,7 @@ def served(frontend: Frontend, *args: str, added: tuple[str, ...] = (".",)) -> s
 
 @pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
 def test_a_frontend_failing_on_its_thread_still_stops_serve(state: Path, config_dir: Path) -> None:
-    def breaks(websocket: ClientConnection) -> list[Event]:
+    def breaks(websocket: Client) -> list[Event]:
         raise RuntimeError("the frontend broke")
 
     frontend = Frontend(state, config_dir, breaks)
@@ -294,7 +353,7 @@ def test_serve_names_its_url_in_the_workspace_lock_while_it_owns_the_repository(
 ) -> None:
     owners: list[WorkspaceOwner] = []
 
-    def reads_the_lock(websocket: ClientConnection) -> list[Event]:
+    def reads_the_lock(websocket: Client) -> list[Event]:
         owners.append(WorkspaceLock(project / ".orbit").owner())
         return []
 
@@ -342,7 +401,7 @@ def test_a_read_only_workspace_taken_over_names_the_servers_url_in_its_lock(
     owner.take()
     owners: list[WorkspaceOwner] = []
 
-    def takes_over(websocket: ClientConnection) -> list[Event]:
+    def takes_over(websocket: Client) -> list[Event]:
         owner.close()
         events = until(websocket, OwnershipOffered)
         say(websocket, "take", TakeOwnership(take=True))
@@ -370,7 +429,7 @@ def test_a_read_only_workspace_recovers_the_parked_events_only_once_taken_over(
     owner.take()
     left: list[bool] = []
 
-    def takes_over(websocket: ClientConnection) -> list[Event]:
+    def takes_over(websocket: Client) -> list[Event]:
         left.append(parked.exists())
         owner.close()
         events = until(websocket, OwnershipOffered)
@@ -406,11 +465,11 @@ def _ready(url: object) -> dict[str, object]:
 
 def _checking_readiness(
     frontend: Frontend, readiness: list[dict[str, object]]
-) -> Callable[[ClientConnection], list[Event]]:
+) -> Callable[[Client], list[Event]]:
     """What notes in ``readiness`` what ``/readyz`` answers on the server ``frontend`` is
     connected to."""
 
-    def checks(websocket: ClientConnection) -> list[Event]:
+    def checks(websocket: Client) -> list[Event]:
         readiness.append(_ready(frontend.run_file["url"]))
         return []
 
@@ -712,7 +771,7 @@ def test_adding_a_path_that_cant_be_served_leaves_it_in_place(project: Path) -> 
     assert (project / ".orbit" / "config.toml").read_text() == "not = [toml\n"
 
 
-def _changes(websocket: ClientConnection, command_id: str, command: Command) -> list[Event]:
+def _changes(websocket: Client, command_id: str, command: Command) -> list[Event]:
     """Send ``command`` on ``websocket``; what it received, up to the command's outcome."""
     say(websocket, command_id, command)
     events: list[Event] = []
@@ -739,7 +798,7 @@ def test_a_frontend_adds_and_removes_a_workspace_which_keeps_its_sessions(
     [other] = _workspace_dirs(tmp_path, "other")
     seen: dict[str, object] = {}
 
-    def adds_and_removes(websocket: ClientConnection) -> list[Event]:
+    def adds_and_removes(websocket: Client) -> list[Event]:
         [added] = _catalogs(_changes(websocket, "add", AddWorkspace(path=str(other))))
         seen["held"] = WorkspaceLock(other / ".orbit").owner()
         seen["again"] = _changes(websocket, "again", AddWorkspace(path=str(other)))
@@ -771,7 +830,7 @@ def test_a_frontend_adds_and_removes_a_workspace_which_keeps_its_sessions(
 
 
 def test_a_frontend_adding_a_relative_path_is_refused(state: Path, config_dir: Path) -> None:
-    def adds(websocket: ClientConnection) -> list[Event]:
+    def adds(websocket: Client) -> list[Event]:
         return _changes(websocket, "add", AddWorkspace(path="relative"))
 
     frontend = Frontend(state, config_dir, adds)
@@ -781,7 +840,7 @@ def test_a_frontend_adding_a_relative_path_is_refused(state: Path, config_dir: P
     assert refusal.code == "invalid"
 
 
-def _second_connection(frontend: Frontend) -> ClientConnection:
+def _second_connection(frontend: Frontend) -> Client:
     """Another connection to the server ``frontend`` talks to, with its token."""
     token = frontend.config_dir / "token"
     headers = {"Authorization": f"Bearer {token.read_text().strip()}"}
@@ -803,7 +862,7 @@ def test_a_frontend_is_served_while_another_adds_a_workspace_whose_git_is_slow(
 
     monkeypatch.setattr(backend, "in_git_work_tree", slow)
 
-    def adds_while_another_says_hello(websocket: ClientConnection) -> list[Event]:
+    def adds_while_another_says_hello(websocket: Client) -> list[Event]:
         say(websocket, "add", AddWorkspace(path=str(other)))
         assert entered.wait(10)
         with _second_connection(frontend) as second:
@@ -847,7 +906,7 @@ def test_a_chat_discovers_the_orbit_serve_running(
 ) -> None:
     found: list[chat.Discovered | None] = []
 
-    def discovers(websocket: ClientConnection) -> list[Event]:
+    def discovers(websocket: Client) -> list[Event]:
         found.append(chat.discover_control_plane(state, chat._ClientFiles(), config_dir))
         return []
 
@@ -889,11 +948,11 @@ def test_serve_over_tls_welcomes_a_frontend_trusting_its_ca_beyond_loopback(
 
 def _discovering(
     state: Path, config_dir: Path, found: list[chat.Discovered | None]
-) -> Callable[[ClientConnection], list[Event]]:
+) -> Callable[[Client], list[Event]]:
     """What has a chat discover the control plane running, noting what it found in
     ``found``."""
 
-    def discovers(websocket: ClientConnection) -> list[Event]:
+    def discovers(websocket: Client) -> list[Event]:
         found.append(chat.discover_control_plane(state, chat._ClientFiles(), config_dir))
         return []
 
@@ -963,7 +1022,7 @@ def test_serve_over_mtls_names_the_client_certificate_and_revokes_it_without_res
     statuses: list[int] = []
     frontend = Frontend(state, config_dir, trust=_trusting(ca, client))
 
-    def revokes(websocket: ClientConnection) -> list[Event]:
+    def revokes(websocket: Client) -> list[Event]:
         _mtls_config(config_dir, ca, files, revoked=fingerprint)
         with pytest.raises(InvalidStatus) as refused:
             connect(str(frontend.run_file["url"]), ssl=frontend.trust)
@@ -1270,7 +1329,7 @@ def test_a_rotated_token_admits_new_frontends_at_once_and_keeps_open_ones(
     statuses: list[int] = []
     frontend = Frontend(state, config_dir)
 
-    def rotates(websocket: ClientConnection) -> list[Event]:
+    def rotates(websocket: Client) -> list[Event]:
         old = (config_dir / "token").read_text().strip()
         TokenFile(config_dir).rotate()
         new = (config_dir / "token").read_text().strip()
