@@ -3,6 +3,9 @@ lock says; any other orbit on it is read-only."""
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+OWNED_NOTE = "This orbit now owns the repository; queued work is running."
+"""The notice once a read-only orbit takes the repository over."""
+
 
 class WorkspaceOwner(BaseModel):
     """The orbit owning a repository, as its lock says: its process ``pid`` and, for an

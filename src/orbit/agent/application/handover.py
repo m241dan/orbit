@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from orbit.agent.application.outbox import EventSink
+from orbit.agent.domain.ownership import OWNED_NOTE
 from orbit.protocol import (
     INTERNAL,
     ErrorOccurred,
@@ -14,9 +15,6 @@ from orbit.protocol import (
     OwnershipTaken,
     TakeOwnership,
 )
-
-OWNED_NOTE = "This orbit now owns the repository; queued work is running."
-"""The notice once a read-only orbit takes the repository over."""
 
 
 class Offer(Protocol):

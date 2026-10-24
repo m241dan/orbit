@@ -15,7 +15,6 @@ from orbit.agent.application.closing import close_all
 from orbit.agent.application.coder_slots import CoderSeat, CoderSlots
 from orbit.agent.application.connection import Connections, Place, SessionConnection
 from orbit.agent.application.desk import AgentDesk, Agents
-from orbit.agent.application.handover import OWNED_NOTE as OWNED_NOTE
 from orbit.agent.application.handover import Handover, HandoverParts
 from orbit.agent.application.handshake import HostGreeting
 from orbit.agent.application.history import SessionHistory

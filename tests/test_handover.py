@@ -5,8 +5,9 @@ from collections.abc import Sequence
 
 import pytest
 
-from orbit.agent.application.handover import OWNED_NOTE, Handover, HandoverParts
+from orbit.agent.application.handover import Handover, HandoverParts
 from orbit.agent.application.recovery import RecoveryFailed
+from orbit.agent.domain.ownership import OWNED_NOTE
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import (
     INTERNAL,

@@ -8,8 +8,7 @@ from orbit.agent.application.ports import StoreFailed
 from orbit.agent.application.recovery import RecoveryFailed
 from orbit.agent.application.takeover import NO_OFFER, RetryTimes, Takeover
 from orbit.agent.application.work_turns import TASKS_RUNNING_MESSAGE
-from orbit.agent.application.workspace_host import OWNED_NOTE
-from orbit.agent.domain.ownership import queued_dropped_note
+from orbit.agent.domain.ownership import OWNED_NOTE, queued_dropped_note
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import (
     BUSY,
