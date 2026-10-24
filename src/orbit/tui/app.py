@@ -230,7 +230,11 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._side = self.query_one("#side")
         # Read through, so a clock set later still times the conversation.
         self._feed = ConversationFeed(
-            self._transcript, self._tabs, self._task_list, self._verification, lambda: self.clock()
+            self._transcript.conversation,
+            self._tabs,
+            self._task_list,
+            self._verification,
+            lambda: self.clock(),
         )
         self._pager = HistoryPager(self._transcript, self._feed, self._send)
         self._router = EventRouter(

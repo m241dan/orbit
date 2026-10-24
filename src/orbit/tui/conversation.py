@@ -1,8 +1,8 @@
 """Turns backend events into the conversation's entries."""
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import assert_never, get_args
+from typing import Protocol, assert_never, get_args
 
 from orbit.protocol import (
     PLANNER,
@@ -18,15 +18,14 @@ from orbit.protocol import (
     MessageSent,
     ProposalDecided,
     RunningAgent,
+    StepState,
+    TaskState,
     ToolCallFinished,
     ToolCallStarted,
     TurnFinished,
     TurnStarted,
+    Usage,
 )
-from orbit.tui.panels import VerificationPanel
-from orbit.tui.tabs import ConversationTabs
-from orbit.tui.tasks import TaskList
-from orbit.tui.transcript import Transcript
 from orbit.tui.view.common import EntryKind
 from orbit.tui.view.events import (
     ACTIVITY_EVENTS,
@@ -73,15 +72,116 @@ _SHOWN_EVENTS: tuple[type[ShownEvent], ...] = get_args(ShownEvent)
 """The classes in each grouping, for ``isinstance``."""
 
 
+class Entries(Protocol):
+    """The conversation's entries, kept under All and their tabs, as the feed adds them."""
+
+    def clear(self) -> None:
+        """Drop every entry."""
+        ...
+
+    def add_entry(self, entry: Entry, key: str | None = None) -> None:
+        """Add ``entry`` under All and, if ``key`` names a tab, under that tab."""
+        ...
+
+    def prepend(self, add: Callable[[], None]) -> None:
+        """Have the entries ``add`` adds come before every entry."""
+        ...
+
+    def replace_rule(self, text: str, kind: EntryKind, key: str | None, agent: str) -> None:
+        """Make ``agent``'s latest rule read ``text`` as a ``kind`` entry."""
+        ...
+
+    def add_tool_call(
+        self, event: ToolCallStarted | AgentRequest, key: str | None, speaker: str | None
+    ) -> None:
+        """Add the call or request ``event`` starts, spoken by ``speaker``, as a running
+        entry."""
+        ...
+
+    def finish_tool_call(self, event: ToolCallFinished | AgentReply) -> bool:
+        """Show the call or request ``event`` finishes as finished; False when none is the
+        one."""
+        ...
+
+    def end_tool_calls(self, agent: str | None, requests: bool = False) -> None:
+        """Show ``agent``'s tool calls still running as having no result, and its requests to
+        orbit with no reply too if ``requests``."""
+        ...
+
+    def promote(self, agent: str | None, turn: str, places: Iterable[int]) -> None:
+        """Draw at full brightness the messages ``agent`` thought out loud in ``turn`` at
+        ``places`` among them."""
+        ...
+
+
+class Tabs(Protocol):
+    """The conversation's tabs, as the feed places entries under them."""
+
+    @property
+    def roles(self) -> Mapping[str, str]:
+        """Agents that ran in a pinned role, to the role."""
+        ...
+
+    def key_of(self, agent: str | None) -> str | None:
+        """The key of the tab ``agent``'s entries belong to."""
+        ...
+
+    def reset(self, running: Sequence[RunningAgent]) -> None:
+        """Close every agent's own tab and forget the agents' roles, but those ``running``."""
+        ...
+
+    def replay(self, event: Event) -> None:
+        """Add and remove agents' tabs for ``event``, one replayed from the session's log."""
+        ...
+
+    def follow(self, running: Sequence[RunningAgent]) -> None:
+        """Make the tabs agree with the agents ``running``."""
+        ...
+
+    def learn_roles(self, event: Event) -> None:
+        """Note the pinned role an agent started in by ``event``, an earlier one."""
+        ...
+
+    def mark_unread(self, key: str | None) -> None:
+        """Mark the tab keyed ``key`` unread, unless it's being shown."""
+        ...
+
+
+class Tasks(Protocol):
+    """The task list, as the feed notes tasks' progress and counts what turns cost."""
+
+    @property
+    def numbers_by_id(self) -> Mapping[str, str]:
+        """The number each task is listed under, by its id."""
+        ...
+
+    def find(self, task_id: str) -> TaskState | None:
+        """The task with ``task_id``, if it's listed."""
+        ...
+
+    def count(self, usage: Usage) -> None:
+        """Count what a turn cost, ``usage``."""
+        ...
+
+
+class Steps(Protocol):
+    """The verification steps, as the feed names them in tasks' progress."""
+
+    @property
+    def steps(self) -> tuple[StepState, ...]:
+        """The steps, in order."""
+        ...
+
+
 @dataclass(eq=False)
 class ConversationFeed:
     """Shows events as entries in ``transcript``, under ``tabs``' tabs, timing turns and agents'
     runs by ``clock``."""
 
-    transcript: Transcript
-    tabs: ConversationTabs
-    task_list: TaskList
-    verification: VerificationPanel
+    transcript: Entries
+    tabs: Tabs
+    task_list: Tasks
+    verification: Steps
     clock: Callable[[], float]
     # The running turns and agents, timed by ``clock``.
     _turns: Turns = field(default_factory=Turns, init=False)
