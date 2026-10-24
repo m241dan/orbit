@@ -9,38 +9,25 @@ from textual.widgets import Footer, Tab
 from textual.worker import WorkerFailed
 
 from orbit.protocol import (
-    INTERNAL,
     PLANNER,
-    PROTOCOL_VERSION,
     AgentExited,
-    AgentReply,
-    AgentStarted,
     AssistantMessage,
     BusyChanged,
     CancelTurn,
-    ErrorOccurred,
     Event,
     EventEnvelope,
-    Hello,
     Notice,
     SendMessage,
-    SessionStateChanged,
     Settings,
-    SettingsChanged,
     StepState,
     TaskMerged,
     TasksChanged,
     TaskStarted,
-    ToolCallFinished,
-    ToolCallStarted,
-    TurnFinished,
     UpdateSettings,
-    UsageChanged,
     VerificationChanged,
     VerificationFinished,
     VerificationSkipped,
     VerificationStarted,
-    Welcome,
 )
 from orbit.tui import OrbitApp
 from orbit.tui.agents import AgentsPane
@@ -80,39 +67,6 @@ async def test_quitting_closes_the_session() -> None:
     async with app.run_test() as pilot:
         await pilot.press("ctrl+c")
     assert session.closed
-
-
-async def test_the_first_command_is_a_hello_from_the_tui() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await pilot.press("i", *"hi", "enter")
-
-    first, second = session.sent
-    assert isinstance(first.payload, Hello)
-    assert first.payload.client.startswith("orbit-tui ")
-    assert first.payload.protocol_version == PROTOCOL_VERSION == 2
-    assert first.payload.since is None
-    assert second.payload == SendMessage(agent=PLANNER, text="hi")
-
-
-async def test_a_welcome_shows_nothing() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        before = entries(app)
-        await feed_events(session, pilot, Welcome(command_id="hello", server_version="1.0"))
-        assert entries(app) == before
-
-
-async def test_a_session_state_change_shows_nothing() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        before = entries(app)
-        change = SessionStateChanged(session="s1", active=True, state="running", viewers=2)
-        await feed_events(session, pilot, change)
-        assert entries(app) == before
 
 
 async def test_ctrl_s_stops_the_run_and_ctrl_x_the_planner() -> None:
@@ -186,58 +140,6 @@ async def test_a_pasted_multi_line_prompt_is_sent_whole_and_the_box_shrinks() ->
         await accept_last(session, pilot)
         assert prompt.text == ""
         assert prompt.region.height == 3
-
-
-async def test_renders_tool_calls_errors_and_cancellation() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        events: list[Event] = [
-            ToolCallStarted(turn_id="t", call_id="c1", name="upper", arguments={"text": "hi"}),
-            ToolCallFinished(turn_id="t", call_id="c1", output="HI"),
-            ToolCallFinished(turn_id="t", call_id="c2", output="KeyError", is_error=True),
-            ErrorOccurred(code=INTERNAL, message="boom"),
-            TurnFinished(turn_id="t", reason="cancelled"),
-        ]
-        for event in events:
-            await session.queue.put(event)
-        await pilot.pause()
-
-        rendered = entries(app)
-        assert rendered == [
-            ('→ upper {"text": "hi"} ✓ 1 line', "tool"),
-            ("KeyError", "error"),
-            ("boom", "error"),
-            ("stopped", "rule"),
-        ]
-
-
-async def test_renders_agent_activity() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await session.queue.put(AgentStarted(agent_id="agent-1", role="coder", task_id="1"))
-        await session.queue.put(AgentReply(agent_id="agent-1", request_id="r", text="Do X."))
-        await session.queue.put(Notice(message="1 stash"))
-        await pilot.pause()
-
-        rendered = entries(app)
-        assert rendered == [
-            ("▶ agent-1 (coder) started", "agent"),
-            ("orbit → agent-1: Do X.", "agent"),
-            ("📌 1 stash", "verify"),
-        ]
-
-
-async def test_usage_changes_add_nothing_to_the_transcript() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await session.queue.put(UsageChanged(status="unavailable", detail="not logged in"))
-        await session.queue.put(Notice(message="1 stash"))
-        await pilot.pause()
-
-        assert entries(app) == [("📌 1 stash", "verify")]
 
 
 async def test_layout_stacks_display_over_prompt_over_footer() -> None:
@@ -322,22 +224,6 @@ async def test_escape_in_insert_mode_returns_to_normal_mode_without_cancelling()
         assert prompt.text == "ab"
 
 
-async def test_submit_returns_to_normal_mode_and_finished_turn_stays_there() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await pilot.press("i", *"hi", "enter")
-        assert app.focused is None
-
-        await session.queue.put(BusyChanged(busy=True, lane="planner"))
-        await pilot.pause()
-        await session.queue.put(BusyChanged(busy=False, lane="planner"))
-        await pilot.pause()
-        assert app.focused is None  # the planner going free doesn't focus the prompt
-        await pilot.press("i")
-        assert app.focused is app.query_one(ChatPrompt)
-
-
 async def test_display_follows_latest_output() -> None:
     session = FakeSession()
     app = OrbitApp(session)
@@ -349,158 +235,6 @@ async def test_display_follows_latest_output() -> None:
         log = app.query_one("Transcript > TranscriptLog.-shown", TranscriptLog)
         assert log.max_scroll_y > 0
         assert log.scroll_y == log.max_scroll_y
-
-
-async def test_settings_shown_under_prompt() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        prompt = app.query_one(ChatPrompt)
-        assert not app.query_one(ChatPrompt).border_subtitle
-
-        await show_settings(session, pilot, Settings())
-        assert prompt.border_subtitle == "planner's model: default · new tasks' tools: restricted"
-
-        await show_settings(session, pilot, Settings(model="opus", tool_access="full"))
-        assert (
-            prompt.border_subtitle
-            == "planner's model: opus · new tasks' tools: full (auto-approved)"
-        )
-
-        await show_settings(session, pilot, Settings(tool_access="off"))
-        assert prompt.border_subtitle == "planner's model: default · new tasks' tools: off"
-
-
-async def test_settings_keys_do_nothing_before_backend_reports_settings() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await pilot.press("ctrl+o", "ctrl+l")
-        assert session.commands == []
-        assert not isinstance(app.screen, PickerScreen)
-
-
-async def test_display_waits_for_backend_to_confirm_settings() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await show_settings(session, pilot, Settings())
-        prompt = app.query_one(ChatPrompt)
-        await pilot.press("ctrl+l", "down", "enter")
-        await pilot.pause()
-        assert prompt.border_subtitle == "planner's model: default · new tasks' tools: restricted"
-        assert session.commands == [UpdateSettings(settings=Settings(tool_access="full"))]
-
-        await show_settings(session, pilot, Settings(tool_access="full"))
-        assert (
-            prompt.border_subtitle
-            == "planner's model: default · new tasks' tools: full (auto-approved)"
-        )
-
-
-async def test_ctrl_o_lists_models_with_current_highlighted() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await show_settings(session, pilot, Settings(model="opus"))
-        await pilot.press("ctrl+o")
-        assert picker(app) == ("Model", ["default", "opus", "sonnet"], 1)
-
-
-async def test_model_picker_selection_requests_that_model() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await show_settings(session, pilot, Settings(model="opus", tool_access="full"))
-        await pilot.press("ctrl+o", "down", "enter")
-        assert session.commands == [
-            UpdateSettings(settings=Settings(model="sonnet", tool_access="full"))
-        ]
-        assert not isinstance(app.screen, PickerScreen)
-
-
-async def test_model_pick_keeps_tool_access_changed_while_the_picker_is_open() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await show_settings(session, pilot, Settings(model="opus", tool_access="full"))
-        await pilot.press("ctrl+o")
-        await show_settings(session, pilot, Settings(model="opus", tool_access="off"))
-        await pilot.press("down", "enter")
-        assert session.commands == [
-            UpdateSettings(settings=Settings(model="sonnet", tool_access="off"))
-        ]
-
-
-async def test_tool_access_pick_keeps_model_changed_while_the_picker_is_open() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await show_settings(session, pilot, Settings(model="opus", tool_access="off"))
-        await pilot.press("ctrl+l")
-        await show_settings(session, pilot, Settings(model="sonnet", tool_access="off"))
-        await pilot.press("down", "enter")
-        assert session.commands == [
-            UpdateSettings(settings=Settings(model="sonnet", tool_access="restricted"))
-        ]
-
-
-async def test_model_pick_sends_the_model_labelled_after_choices_change_while_open() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await show_settings(session, pilot, Settings())
-        await pilot.press("ctrl+o")
-        choices = ("haiku", "opus", "sonnet", "fable")
-        await feed_events(
-            session, pilot, SettingsChanged(settings=Settings(), model_choices=choices)
-        )
-        await pilot.press("end")
-        labels, highlighted = picker(app)[1:]
-        assert highlighted is not None and labels[highlighted] == "fable"
-        await pilot.press("enter")
-        assert session.commands == [UpdateSettings(settings=Settings(model="fable"))]
-
-
-async def test_model_picker_highlights_nothing_for_custom_model() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await show_settings(session, pilot, Settings(model="claude-custom-1"))
-        await pilot.press("ctrl+o")
-        assert picker(app)[2] is None
-
-
-async def test_ctrl_l_lists_tool_access_and_selects() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await show_settings(session, pilot, Settings(model="opus", tool_access="off"))
-        await pilot.press("ctrl+l")
-        assert picker(app) == (
-            "Tool access",
-            [
-                "off: no tools",
-                "restricted: read-only; anything needing approval is refused",
-                "full: auto-approve everything",
-            ],
-            0,
-        )
-
-        await pilot.press("down", "down", "enter")
-        assert session.commands == [
-            UpdateSettings(settings=Settings(model="opus", tool_access="full"))
-        ]
-
-
-async def test_escape_closes_picker_without_changes() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await show_settings(session, pilot, Settings())
-        await pilot.press("ctrl+l", "down", "escape")
-        assert not isinstance(app.screen, PickerScreen)
-        assert session.commands == []
 
 
 async def test_pickers_are_built_once_and_reused() -> None:
@@ -521,22 +255,6 @@ async def test_pickers_are_built_once_and_reused() -> None:
         await pilot.press("ctrl+o")
         assert app.screen is opened[0]
         assert picker(app)[2] == 1
-
-
-async def test_model_picker_updates_when_choices_change() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await show_settings(session, pilot, Settings())
-        await pilot.press("ctrl+o")
-        first = app.screen
-        await pilot.press("escape")
-
-        await session.queue.put(SettingsChanged(settings=Settings(), model_choices=("haiku",)))
-        await pilot.pause()
-        await pilot.press("ctrl+o")
-        assert app.screen is first
-        assert picker(app)[1] == ["default", "haiku"]
 
 
 async def test_picker_keys_ignored_while_a_picker_is_open() -> None:

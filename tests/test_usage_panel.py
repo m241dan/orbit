@@ -100,3 +100,10 @@ async def test_panel_redraws_its_reset_times_as_the_clock_moves() -> None:
         now[0] = datetime(2026, 10, 15, 9, 0, tzinfo=UTC)
         panel.tick()
         assert panel_rows(app)[0] == "Session  50%  resets Fri 3:40pm"
+
+
+def test_the_panel_tells_the_time_by_the_local_clock() -> None:
+    before = datetime.now().astimezone()
+    now = UsagePanel(id="usage").now()
+    assert now.utcoffset() == before.utcoffset()
+    assert before <= now <= datetime.now().astimezone()
