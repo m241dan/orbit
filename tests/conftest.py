@@ -1,5 +1,6 @@
 """Settings for every test."""
 
+import gc
 import os
 from contextlib import ExitStack
 from pathlib import Path
@@ -29,6 +30,21 @@ def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:
     if os.environ.get("PYTEST_XDIST_AUTO_NUM_WORKERS"):
         return None
     return 2 * (os.process_cpu_count() or 1)
+
+
+YOUNG_COLLECTION_THRESHOLD = 50_000
+"""How many objects a test allocates, less those freed, between collections of the youngest
+generation; Python's default of 2,000 collected every few keys a pilot pressed."""
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_collection_finish(session: pytest.Session) -> None:
+    """Have the garbage collector skip what collection built and collect less often."""
+    # The modules and tests last the whole run, yet each full collection walked them all again:
+    # about a sixth of a worker's time went to the collector. Frozen, they're never collected.
+    gc.collect()
+    gc.freeze()
+    gc.set_threshold(YOUNG_COLLECTION_THRESHOLD, *gc.get_threshold()[1:])
 
 
 OFFLINE = "offline in tests"
