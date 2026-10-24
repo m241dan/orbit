@@ -69,7 +69,9 @@ def test_commands_of_other_kinds_are_awaited_side_by_side() -> None:
     assert settled(outcomes, "c2")[1] is not None
 
 
-def test_by_default_an_outcome_does_nothing() -> None:
+def test_by_default_an_outcome_does_nothing_and_nothing_takes_why() -> None:
     awaited = Awaited()
     awaited.accepted()
     awaited.refused()
+    awaited.code("invalid")
+    assert awaited.why is None

@@ -9,7 +9,7 @@ from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Vertical
-from textual.widgets import Input, OptionList, Static
+from textual.widgets import Input, OptionList
 
 from orbit.protocol import (
     CONTROL_PLANE_STREAM,
@@ -88,9 +88,6 @@ class WorkspacesScreen(TypingListScreen[str | None]):
     workspace's row can show the :attr:`agents` running in it.
     """
 
-    DEFAULT_CSS = """
-    WorkspacesScreen #workspace-note { color: $error; }
-    """
     HINTS = WORKSPACES_HINTS
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("x", "remove", show=False),
@@ -123,9 +120,7 @@ class WorkspacesScreen(TypingListScreen[str | None]):
             box.border_title = WORKSPACES_TITLE
             box.border_subtitle = self.hint
             yield OptionList(*self._labels)
-            note = Static("", id="workspace-note")
-            note.display = False
-            yield note
+            yield self._note_line()
             path = Input(placeholder=PATH_PLACEHOLDER, id="workspace-path")
             path.display = False
             yield path
@@ -138,12 +133,6 @@ class WorkspacesScreen(TypingListScreen[str | None]):
     def _labels(self) -> tuple[str, ...]:
         """What the rows show, in order."""
         return tuple(row_label(row, self.agents) for row in self.rows)
-
-    @property
-    def note(self) -> str | None:
-        """Why removing or adding a workspace was refused, while that's shown."""
-        note = self.query_one("#workspace-note", Static)
-        return str(note.render()) if note.display else None
 
     def show(
         self, workspaces: Sequence[WorkspaceEntry], cloning: Sequence[WorkspaceCloning] = ()
@@ -255,17 +244,6 @@ class WorkspacesScreen(TypingListScreen[str | None]):
         self._typing(PATH_HINT, url)
         self.query_one(Input).border_subtitle = message
 
-    def _refused(self, why: str) -> None:
-        """Show ``why`` adding or removing a workspace was refused: in the path box's hint while
-        it's shown, or else under the list; nothing once this screen is gone."""
-        if not self.is_attached:
-            return
-        path = self.query_one(Input)
-        if path.display:
-            path.border_subtitle = why
-        else:
-            self._show_note(why)
-
     def action_remove(self) -> None:
         """Remove the highlighted workspace, keeping its sessions or deleting them too as the
         user chooses, unless they cancel; other rows remove nothing."""
@@ -287,12 +265,6 @@ class WorkspacesScreen(TypingListScreen[str | None]):
         """Have escape quit orbit, as at startup, now there's nothing to go back to."""
         self.startup = True
         self._show_hint()
-
-    def _show_note(self, note: str | None) -> None:
-        """Show ``note`` under the list, or hide it while it's none."""
-        shown = self.query_one("#workspace-note", Static)
-        shown.update(note or "")
-        shown.display = note is not None
 
 
 class WorkspacesHost:

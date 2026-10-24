@@ -8,6 +8,7 @@ from orbit.agent import WorkspaceHost
 from orbit.protocol import (
     BUSY,
     Attach,
+    CommandRefused,
     DeleteSession,
     ErrorOccurred,
     NewSession,
@@ -36,7 +37,7 @@ from tests.session_apps import (
     started,
 )
 from tests.session_builders import saved, store_with
-from tests.tui_fakes import FakeSession, changes, entries, feed_events, opened
+from tests.tui_fakes import FakeSession, accept_last, changes, entries, feed_events, opened
 
 OLD_ROW = "  auth rework · Oct 16 18:02"
 SAVED_ROWS = [OLD_ROW, "  elsewhere · open in another orbit", "  bad.json · unreadable: not JSON"]
@@ -446,6 +447,89 @@ async def test_deleting_a_session_open_somewhere_is_left_to_the_backend_to_refus
             DeleteSession(session_id="busy"),
         ]
         assert isinstance(app.screen, SessionsScreen)
+
+
+def refused(session: FakeSession, message: str) -> CommandRefused:
+    """The backend refusing the last change ``session`` got, saying ``message``."""
+    return CommandRefused(command_id=session.envelopes[-1].command_id, code=BUSY, message=message)
+
+
+CANT_DELETE = "Can't delete today: it's the active session."
+
+
+async def test_a_refused_delete_shows_why_under_the_list_and_not_in_the_conversation() -> None:
+    app, session = started()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("ctrl+p", "x")
+        await feed_events(session, pilot, refused(session, CANT_DELETE))
+
+        screen = picker(app)
+        assert app.screen is screen
+        assert screen.note == CANT_DELETE
+        assert entries(app) == []
+
+
+async def test_a_refused_rename_shows_why_under_the_list() -> None:
+    app, session = in_process()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("r", "ctrl+u", *"jk", "enter")
+        await feed_events(session, pilot, refused(session, "Can't rename: it's open elsewhere."))
+
+        screen = picker(app)
+        assert screen.note == "Can't rename: it's open elsewhere."
+        assert not screen.query_one(Input).display
+        assert entries(app) == []
+
+
+async def test_a_rename_refused_while_naming_again_shows_why_in_the_name_boxs_hint() -> None:
+    app, session = in_process()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("r", "ctrl+u", *"jk", "enter", "r")
+        await feed_events(session, pilot, refused(session, "Can't rename: it's open elsewhere."))
+
+        screen = picker(app)
+        assert screen.query_one(Input).border_subtitle == "Can't rename: it's open elsewhere."
+        assert screen.note is None
+
+
+async def test_an_accepted_change_shows_nothing() -> None:
+    app, session = in_process()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("x", "y")
+        await accept_last(session, pilot)
+
+        screen = picker(app)
+        assert screen.note is None
+        assert not screen.query_one(Input).border_subtitle
+        assert entries(app) == []
+
+
+async def test_the_next_change_sent_clears_the_refusal_shown() -> None:
+    app, session = started()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("ctrl+p", "x")
+        await feed_events(session, pilot, refused(session, CANT_DELETE))
+        await pilot.press("j", "r", "!", "enter")
+
+        assert picker(app).note is None
+        assert changes(session)[-1] == RenameSession(session_id="old", name="auth rework!")
+
+
+async def test_a_refusal_once_the_picker_closed_shows_nowhere() -> None:
+    app, session = started()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("ctrl+p", "x", "escape")
+        await feed_events(session, pilot, refused(session, CANT_DELETE))
+
+        assert no_picker(app)
+        assert entries(app) == []
+        assert app.is_running
 
 
 async def test_a_catalog_again_refreshes_the_picker_shown_in_place() -> None:

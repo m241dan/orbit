@@ -264,8 +264,9 @@ starting from the old one; `enter` saves it (an empty name keeps the old one) an
 Names needn't be unique. `x` deletes the highlighted session after a `y`/`n` confirm (`esc` is no):
 it leaves the store, with any stale lock, while Claude's own conversation files stay. The open session
 can't be deleted, and a session open in another orbit can be neither renamed nor deleted; an
-unreadable one can be deleted but not renamed. The list refreshes after either. On `New session`,
-`r` and `x` do nothing.
+unreadable one can be deleted but not renamed. A refusal says why under the list, or in the name
+box's hint while it's shown, until the next rename or delete; nothing goes to the conversation.
+The list refreshes after either. On `New session`, `r` and `x` do nothing.
 
 The Conversation window's title ends with the open session's name, cut to 30 characters
 (`Conversation — auth rework`). It follows a rename of the open session and a switch to another.

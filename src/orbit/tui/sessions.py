@@ -26,6 +26,7 @@ from orbit.protocol import (
 from orbit.tui.catalog import CatalogState
 from orbit.tui.modal import ModalSlot, Push
 from orbit.tui.view.common import kept_highlight
+from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.sessions import (
     ACTIVATE_CHOICE,
     ACTIVATION_TITLE,
@@ -72,9 +73,9 @@ StartupPick = Literal["resume", "pick"]
 SessionChange = RenameSession | DeleteSession
 """A change to a saved session, made while the list stays open."""
 
-Manage = Callable[[SessionChange], Awaitable[object]]
-"""Sends a change to a saved session to the backend, which lists the sessions again after;
-whatever it returns is ignored."""
+Manage = Callable[[SessionChange, Awaited], Awaitable[object]]
+"""Sends a change to a saved session to the backend, awaiting its outcome as told; the backend
+lists the sessions again after one it accepts. Whatever it returns is ignored."""
 
 
 class SessionsScreen(TypingListScreen[tuple[SessionChoice, ...]]):
@@ -85,8 +86,11 @@ class SessionsScreen(TypingListScreen[tuple[SessionChoice, ...]]):
 
     ``j``/``k`` (and the arrows) move and enter picks the highlighted session, unless it can't
     be opened; the attached session dismisses with none, keeping it. Enter on ``New session``
-    asks for a name, which enter confirms and escape leaves. Escape on the list dismisses with
-    none, or quits orbit at ``startup``, where there's no session to go back to.
+    asks for a name, which enter confirms and escape leaves. ``r`` asks for the highlighted
+    session's new name the same way, and ``x`` deletes it once the user confirms; either is
+    sent with ``manage``, and a refusal shows why under the list, or in the name box's hint
+    while it's shown, until the next change is sent. Escape on the list dismisses with none,
+    or quits orbit at ``startup``, where there's no session to go back to.
     """
 
     HINTS = SESSIONS_HINTS
@@ -127,6 +131,7 @@ class SessionsScreen(TypingListScreen[tuple[SessionChoice, ...]]):
             box.border_title = SESSIONS_TITLE
             box.border_subtitle = self.hint
             yield OptionList(*self._labels())
+            yield self._note_line()
             # Typing goes on from the end of a name being changed, rather than replacing it.
             name = Input(placeholder=NAME_PLACEHOLDER, id="session-name", select_on_focus=False)
             name.display = False
@@ -190,7 +195,7 @@ class SessionsScreen(TypingListScreen[tuple[SessionChoice, ...]]):
         renaming = self._renaming
         self._naming(False)
         if name:  # An empty name keeps the old one.
-            await self._manage(RenameSession(session_id=renaming.id, name=name))
+            await self._change(RenameSession(session_id=renaming.id, name=name))
 
     def action_rename(self) -> None:
         """Ask for the highlighted session's new name, starting from its name."""
@@ -200,18 +205,23 @@ class SessionsScreen(TypingListScreen[tuple[SessionChoice, ...]]):
 
     async def action_delete(self) -> None:
         """Delete the highlighted session once the user confirms; one that can't be deleted is
-        left to the backend to refuse."""
+        sent without asking, for the backend to refuse, which shows why here."""
         summary = self._highlighted
         if summary is None:
             return
         deleting = DeleteSession(session_id=summary.id)
         if not can_delete(summary):
-            await self._manage(deleting)
+            await self._change(deleting)
             return
         message = delete_message(summary)
         confirm(
-            self.app.push_screen, DELETE_TITLE, message, DELETE_YES, lambda: self._manage(deleting)
+            self.app.push_screen, DELETE_TITLE, message, DELETE_YES, lambda: self._change(deleting)
         )
+
+    async def _change(self, change: SessionChange) -> None:
+        """Send ``change``, showing why it's refused here, in place of any refusal shown."""
+        self._show_note(None)
+        await self._manage(change, Awaited(why=self._refused))
 
     def _naming(self, on: bool, renaming: SessionSummary | None = None) -> None:
         """Show the box for the name of a new session, or the new name of the session
@@ -223,8 +233,9 @@ class SessionsScreen(TypingListScreen[tuple[SessionChoice, ...]]):
         self._typing(name_hint(renaming=renaming is not None), renaming.name if renaming else "")
 
 
-Send = Callable[[SessionChoice | SessionChange], Awaitable[bool]]
-"""Sends a session command to the backend, returning whether it was sent."""
+Send = Callable[[SessionChoice | SessionChange, Awaited], Awaitable[bool]]
+"""Sends a session command to the backend, awaiting its outcome as told, returning whether it
+was sent."""
 OpensOn = Callable[[Sequence[WorkspaceEntry]], WorkspaceEntry | None]
 """The workspace a frontend opens on by itself, among those a catalog lists; none while the
 user is to pick one."""
@@ -379,7 +390,7 @@ class SessionsHost:
         """Whether attaching to the active session of the workspace this frontend is on was
         sent; not if there's none."""
         attach = self.opening
-        return attach is not None and await self._send(attach)
+        return attach is not None and await self._send(attach, Awaited())
 
     def _move(self, workspace: str) -> _Place:
         """Be on the workspace ``workspace``, viewing its active session, and return where this
@@ -443,7 +454,7 @@ class SessionsHost:
 
         async def answered(index: int | None) -> None:
             if index is not None and choices[index] == ACTIVATE_CHOICE:
-                await self._send(ActivateSession(session=viewed))
+                await self._send(ActivateSession(session=viewed), Awaited())
 
         just_look = choices.index(JUST_LOOK_CHOICE)
         screen = ChoiceScreen(ACTIVATION_TITLE, message, choices, escape_index=just_look)
@@ -482,7 +493,7 @@ class SessionsHost:
         self._offering = viewed_only(choice, sessions)
         # Refusals come back as errors, shown like any other.
         for command in choice:
-            if not await self._send(command):
+            if not await self._send(command, Awaited()):
                 self._offering = None
                 if was is not None:
                     self._be(was)

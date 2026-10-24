@@ -251,8 +251,9 @@ class ListScreen[T](ModalScreen[T]):
 
 class TypingListScreen[T](ListScreen[T]):
     """List modal in a bordered box, with a text box under the list that's hidden until the
-    user types in it, and the keys ``HINTS`` names shown under the box: the text box's while
-    it's shown, or else the list's, where escape quits at ``startup``.
+    user types in it, a note under the list saying why a change was refused, hidden until one
+    is, and the keys ``HINTS`` names shown under the box: the text box's while it's shown, or
+    else the list's, where escape quits at ``startup``.
 
     Escape leaves the text box, or else dismisses with ``nothing``, or quits orbit at
     ``startup``, where there's nothing to go back to.
@@ -272,6 +273,7 @@ class TypingListScreen[T](ListScreen[T]):
     TypingListScreen OptionList { height: auto; max-height: 30; border: none; }
     TypingListScreen Input { border: round $secondary; }
     TypingListScreen Input:focus { border: heavy $accent; }
+    TypingListScreen #picker-note { color: $error; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "back", show=False),
@@ -315,6 +317,35 @@ class TypingListScreen[T](ListScreen[T]):
     def _show_hint(self) -> None:
         """Show the keys under the box."""
         self.query_one(Vertical).border_subtitle = self.hint
+
+    def _note_line(self) -> Static:
+        """The note under the list, for why a change was refused, hidden until there's one."""
+        note = Static("", id="picker-note")
+        note.display = False
+        return note
+
+    @property
+    def note(self) -> str | None:
+        """Why a change was refused, while that's shown under the list."""
+        note = self.query_one("#picker-note", Static)
+        return str(note.render()) if note.display else None
+
+    def _refused(self, why: str) -> None:
+        """Show ``why`` a change was refused: in the text box's hint while it's shown, or else
+        under the list; nothing once this screen is gone."""
+        if not self.is_attached:
+            return
+        box = self.query_one(Input)
+        if box.display:
+            box.border_subtitle = why
+        else:
+            self._show_note(why)
+
+    def _show_note(self, note: str | None) -> None:
+        """Show ``note`` under the list, or hide it while it's none."""
+        shown = self.query_one("#picker-note", Static)
+        shown.update(note or "")
+        shown.display = note is not None
 
 
 class PickerScreen(ListScreen[int | None]):

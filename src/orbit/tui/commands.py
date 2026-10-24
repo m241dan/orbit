@@ -98,26 +98,30 @@ class CommandDesk:
             self._show(event)
 
     def _outcome(self, event: CommandAccepted | CommandRefused | Welcome) -> None:
-        """Show why a command was refused, doing what awaits its outcome; an accepted one, or
-        the Welcome answering Hello, shows nothing."""
+        """Do what awaits a command's outcome, and show why it was refused unless what awaits
+        it takes that; an accepted one, or the Welcome answering Hello, shows nothing."""
         self._echoes.discard(event.command_id)
         if isinstance(event, Welcome):
             return
         if isinstance(event, CommandAccepted):
             self._settle(event.command_id)
             return
-        self._settle(event.command_id, event)
-        self._show(event)
+        if not self._settle(event.command_id, event):
+            self._show(event)
 
-    def _settle(self, command_id: str, refusal: CommandRefused | None = None) -> None:
+    def _settle(self, command_id: str, refusal: CommandRefused | None = None) -> bool:
         """Do what awaits ``command_id`` being accepted, or refused as ``refusal`` says, if
-        anything does."""
+        anything does; whether something took why it was refused, to show where the user
+        looks."""
         self._outcomes, awaited = settled(self._outcomes, command_id)
         if awaited is None:
-            return
+            return False
         if refusal is None:
             awaited.accepted()
-        else:
-            awaited.refused()
-            awaited.why(refusal.message)
-            awaited.code(refusal.code)
+            return False
+        awaited.refused()
+        awaited.code(refusal.code)
+        if awaited.why is None:
+            return False
+        awaited.why(refusal.message)
+        return True

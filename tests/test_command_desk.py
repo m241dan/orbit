@@ -145,12 +145,13 @@ async def test_a_failure_to_send_reports_the_default_failure_text() -> None:
     ]
 
 
-async def test_a_refusal_tells_what_awaits_it_why() -> None:
+async def test_a_refusal_tells_what_awaits_it_why_and_is_not_shown() -> None:
     desk = Desk()
     reasons: list[str] = []
     await desk.desk.send(RunTasks(), Awaited(why=reasons.append))
     desk.desk.answer(CommandRefused(command_id=desk.last_id, code=INVALID, message="no"))
     assert reasons == ["no"]
+    assert desk.shown == []  # What takes why shows it, where the user looks.
 
 
 async def test_an_acceptance_tells_no_reason() -> None:

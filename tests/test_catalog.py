@@ -10,6 +10,7 @@ from orbit.protocol import (
 )
 from orbit.tui.catalog import CatalogState
 from orbit.tui.sessions import SessionChange, SessionChoice, SessionsHost
+from orbit.tui.view.outcomes import Awaited
 from orbit.tui.workspaces import Served, WorkspacesHost
 
 NOW = SessionSummary(id="now", name="today", current=True, active=True, viewers=1)
@@ -59,7 +60,7 @@ def test_a_later_catalog_replaces_the_states_noted() -> None:
     assert state.workspaces == TWO.workspaces
 
 
-async def _send(command: SessionChoice | SessionChange) -> bool:
+async def _send(command: SessionChoice | SessionChange, awaited: Awaited) -> bool:
     return True
 
 

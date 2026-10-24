@@ -9,14 +9,15 @@ from textual.widgets import Input, OptionList, Static
 
 from orbit.protocol import SessionSummary
 from orbit.tui.sessions import SessionChange, SessionsScreen
+from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.sessions import Viewing
 from orbit.tui.widgets import ChoiceScreen, ListScreen, PickerScreen, StatusLine
 
 SESSIONS = (SessionSummary(id="a", name="first"), SessionSummary(id="b", name="second"))
 
 
-async def ignore(change: SessionChange) -> None:
-    del change
+async def ignore(change: SessionChange, awaited: Awaited) -> None:
+    del change, awaited
 
 
 def screens() -> list[ListScreen[Any]]:

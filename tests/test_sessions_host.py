@@ -23,6 +23,7 @@ from orbit.tui.sessions import (
     SessionsHost,
     SessionsScreen,
 )
+from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.sessions import chosen_workspace
 from orbit.tui.widgets import ChoiceScreen, ConfirmScreen
 from tests.tui_fakes import opened
@@ -66,7 +67,7 @@ class Host(App[None]):
         self.catalog.follow_state(changed)
         self.host.follow_state()
 
-    async def _sent(self, command: SessionChoice | SessionChange) -> bool:
+    async def _sent(self, command: SessionChoice | SessionChange, awaited: Awaited) -> bool:
         self.sent.append(command)
         return command.type not in self.failing
 

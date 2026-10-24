@@ -9,19 +9,20 @@ def _nothing() -> None:
     """Does nothing, for an outcome nothing awaits."""
 
 
-def _ignored(_why: str) -> None:
-    """Does nothing with why a command was refused, or its code, when nothing awaits it."""
+def _ignored(_code: str) -> None:
+    """Does nothing with a refusal's code, when nothing awaits it."""
 
 
 @dataclass(frozen=True)
 class Awaited:
     """What to do once a command is ``accepted``, and once it's ``refused`` or isn't sent,
-    after which ``why`` takes the message saying why and ``code`` the refusal's code; when it
-    ``supersedes``, it's awaited in place of any earlier command of its kind that does too."""
+    after which ``why``, if given, takes the message saying why, in place of the conversation
+    showing it, and ``code`` the refusal's code; when it ``supersedes``, it's awaited in place
+    of any earlier command of its kind that does too."""
 
     accepted: Callable[[], None] = _nothing
     refused: Callable[[], None] = _nothing
-    why: Callable[[str], None] = _ignored
+    why: Callable[[str], None] | None = None
     code: Callable[[str], None] = _ignored
     supersedes: bool = False
 
