@@ -118,7 +118,7 @@ class WorkspacesScreen(TypingListScreen[str | None]):
         with Vertical() as box:
             box.border_title = WORKSPACES_TITLE
             box.border_subtitle = self.hint
-            yield OptionList(*self._labels)
+            yield OptionList(*self._options(self._keys, self._labels))
             yield self._note_line()
             path = Input(placeholder=PATH_PLACEHOLDER, id="workspace-path")
             path.display = False
@@ -171,7 +171,10 @@ class WorkspacesScreen(TypingListScreen[str | None]):
 
     @on(OptionList.OptionSelected)
     async def _choose(self, event: OptionList.OptionSelected) -> None:
-        row = self.rows[event.option_index]
+        index = self._picked_row(event, self._keys)
+        if index is None:
+            return
+        row = self.rows[index]
         if isinstance(row, WorkspaceEntry):
             self.dismiss(row.id)
         elif isinstance(row, AddWorkspace):

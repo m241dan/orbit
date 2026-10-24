@@ -1,6 +1,6 @@
 """What the other view modules share: entry kinds, the spinner, status icons, model labels,
-token counts, counted nouns, the lines of text, where a list's highlight goes, the keys a
-picker shows and the active session."""
+token counts, counted nouns, the lines of text, where a list's highlight goes, the ids of a
+list's options, the keys a picker shows and the active session."""
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -128,6 +128,22 @@ def _nearest_keyed(index: int, keys: Sequence[str | None]) -> int | None:
     """The keyed row of rows with ``keys`` nearest row ``index``, or None when there's none."""
     keyed = sum(1 for key in keys if key is not None)
     return min(index, keyed - 1) if keyed else None
+
+
+ACTION_OPTION = "action"
+"""The id of a list's trailing action row's option."""
+
+
+def option_id(key: str | None) -> str:
+    """The id of the option for the row with ``key``, a trailing action row's key being None."""
+    return ACTION_OPTION if key is None else f"row {key}"
+
+
+def picked_row(picked: str | None, keys: Sequence[str | None]) -> int | None:
+    """Which of the rows with ``keys`` has the option with the id ``picked``; none once that
+    row has gone."""
+    ids = [option_id(key) for key in keys]
+    return ids.index(picked) if picked in ids else None
 
 
 @dataclass(frozen=True)

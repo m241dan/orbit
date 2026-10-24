@@ -163,11 +163,10 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
         self._relist_entries(())
 
     def _relist_entries(self, shown: Sequence[str]) -> None:
-        """List the directories shown in place of those named ``shown``, keeping the highlight
-        on its directory, or where it was if that one's gone, or else on the first."""
+        """List the directories shown in place of those at the paths ``shown``, keeping the
+        highlight on its directory, or where it was if that one's gone, or else on the first."""
         entries = self.entries
-        names = [entry.name for entry in entries]
-        self._relist(shown, names, [entry_label(entry) for entry in entries])
+        self._relist(shown, self._paths, [entry_label(entry) for entry in entries])
         options = self.query_one(OptionList)
         if options.highlighted is None and entries:
             options.highlighted = 0
@@ -184,6 +183,11 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
         index = self.query_one(OptionList).highlighted
         return None if index is None else self.entries[index]
 
+    @property
+    def _paths(self) -> list[str]:
+        """The paths of the directories shown, in order."""
+        return [self._path_of(entry) for entry in self.entries]
+
     def _path_of(self, entry: DirectoryEntry) -> str:
         """The path of ``entry``, in the listing shown."""
         assert self.listing is not None  # Entries are only shown with their listing.
@@ -191,7 +195,10 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
 
     @on(OptionList.OptionSelected)
     async def _chosen(self, event: OptionList.OptionSelected) -> None:
-        entry = self.entries[event.option_index]
+        index = self._picked_row(event, self._paths)
+        if index is None:
+            return
+        entry = self.entries[index]
         if entry.workspace is not None:
             self.dismiss(entry.workspace)
         else:
@@ -224,7 +231,7 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
 
     def action_hidden(self) -> None:
         """Show hidden directories, or hide them, keeping the highlight on its directory."""
-        shown = [entry.name for entry in self.entries]
+        shown = self._paths
         self.hidden = not self.hidden
         self._relist_entries(shown)
 

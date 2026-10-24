@@ -963,3 +963,28 @@ async def test_another_workspace_listed_after_adding_one_served_is_not_picked() 
         await accept_last(app, pilot)
         await feed_events(session, pilot, catalog(B, A, C))
         assert rows(workspaces(app))[-2] == "repoC · /src/repoC · new, idle"
+
+
+async def test_a_pick_takes_the_workspace_picked_though_the_list_changed_before_it_is_taken() -> (
+    None
+):
+    app = connected()
+    async with app.run_test() as pilot:
+        await feed_events(session_of(app), pilot, SERVED)
+        screen = workspaces(app)
+        screen.query_one(OptionList).action_select()
+        screen.show((A, B))  # Puts B where A was.
+        await pilot.pause()
+        assert sessions(app).workspace == "A"
+
+
+async def test_a_pick_whose_workspace_left_the_list_before_it_is_taken_does_nothing() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await feed_events(session_of(app), pilot, SERVED)
+        screen = workspaces(app)
+        screen.query_one(OptionList).action_select()
+        screen.show((B,))  # Puts adding a path where A was.
+        await pilot.pause()
+        assert app.screen is screen
+        assert changes(session_of(app)) == []

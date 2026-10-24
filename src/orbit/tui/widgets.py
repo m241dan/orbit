@@ -14,10 +14,18 @@ from textual.timer import Timer
 from textual.visual import VisualType
 from textual.widget import Widget
 from textual.widgets import Input, OptionList, Static, TextArea
+from textual.widgets.option_list import Option
 
 from orbit.protocol import Settings
 from orbit.tui.modal import Push
-from orbit.tui.view.common import SPINNER_FPS, ListHints, kept_highlight, picker_hint
+from orbit.tui.view.common import (
+    SPINNER_FPS,
+    ListHints,
+    kept_highlight,
+    option_id,
+    picked_row,
+    picker_hint,
+)
 from orbit.tui.view.confirm import confirm_hint
 from orbit.tui.view.settings import settings_summary
 from orbit.tui.view.transcript import prompt_title
@@ -264,8 +272,19 @@ class ListScreen[T](ModalScreen[T]):
         options = self.query_one(OptionList)
         highlight = kept_highlight(shown, options.highlighted, keys)
         options.clear_options()
-        options.add_options(labels)
+        options.add_options(self._options(keys, labels))
         options.highlighted = highlight
+
+    @staticmethod
+    def _options(keys: Sequence[str | None], labels: Sequence[VisualType]) -> list[Option]:
+        """The options showing ``labels``, each with the id of its row's key in ``keys``."""
+        return [Option(label, id=option_id(key)) for key, label in zip(keys, labels, strict=True)]
+
+    @staticmethod
+    def _picked_row(event: OptionList.OptionSelected, keys: Sequence[str | None]) -> int | None:
+        """Which of the rows with ``keys`` the user picked with ``event``, by its option's id
+        rather than its place, as the list may have changed since; none once it's gone."""
+        return picked_row(event.option_id, keys)
 
     def _note_line(self) -> Static:
         """The note under the list, for why a change was refused, hidden until there's one."""

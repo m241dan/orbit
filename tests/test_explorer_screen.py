@@ -502,3 +502,33 @@ async def test_a_field_add_answered_once_the_explorer_closed_changes_nothing() -
             await answer(app, pilot, refused)
             assert isinstance(app.screen, WorkspacesScreen)
             assert app.screen.note is None
+
+
+async def test_a_pick_takes_the_directory_picked_though_the_list_changed_before_it_is_taken() -> (
+    None
+):
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRV)
+        await pilot.press("j", "j")
+        screen = explorer(app)
+        screen.query_one(OptionList).action_select()
+        screen.action_hidden()  # Puts .cache where docs was.
+        await pilot.pause()
+        assert changes(session_of(app)) == [
+            ListDirectory(path=None),
+            ListDirectory(path="/srv/docs"),
+        ]
+
+
+async def test_a_pick_whose_directory_left_the_list_before_it_is_taken_does_nothing() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRV)
+        await pilot.press("j", "j")
+        screen = explorer(app)
+        screen.query_one(OptionList).action_select()
+        screen._show(SRV_A)
+        await pilot.pause()
+        assert explorer(app) is screen
+        assert changes(session_of(app)) == [ListDirectory(path=None)]

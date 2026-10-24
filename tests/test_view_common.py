@@ -12,6 +12,8 @@ from orbit.tui.view.common import (
     active_session,
     counted,
     kept_highlight,
+    option_id,
+    picked_row,
     picker_hint,
     text_lines,
     token_text,
@@ -142,3 +144,18 @@ def test_with_no_active_session_none_is_active() -> None:
 def test_the_one_active_session_is_the_active_one() -> None:
     active = SessionSummary(id="b", name="b", active=True)
     assert active_session((SessionSummary(id="a", name="a"), active)) == active
+
+
+def test_each_row_has_its_own_option_id_and_the_action_row_a_fixed_one() -> None:
+    assert [option_id(key) for key in ("a", "action", None)] == ["row a", "row action", "action"]
+
+
+def test_a_picked_option_names_its_row_wherever_it_has_moved() -> None:
+    assert picked_row(option_id("b"), ("c", "b", None)) == 1
+    assert picked_row(option_id(None), ("c", "b", None)) == 2
+
+
+def test_a_picked_option_whose_row_has_gone_names_none() -> None:
+    assert picked_row(option_id("b"), ("a", None)) is None
+    assert picked_row(option_id(None), ("a",)) is None
+    assert picked_row(None, ("a", None)) is None

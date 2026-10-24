@@ -129,7 +129,7 @@ class SessionsScreen(TypingListScreen[tuple[SessionChoice, ...]]):
         with Vertical() as box:
             box.border_title = SESSIONS_TITLE
             box.border_subtitle = self.hint
-            yield OptionList(*self._labels())
+            yield OptionList(*self._options(self._keys, self._labels()))
             yield self._note_line()
             # Typing goes on from the end of a name being changed, rather than replacing it.
             name = Input(placeholder=NAME_PLACEHOLDER, id="session-name", select_on_focus=False)
@@ -171,11 +171,13 @@ class SessionsScreen(TypingListScreen[tuple[SessionChoice, ...]]):
 
     @on(OptionList.OptionSelected)
     def _choose(self, event: OptionList.OptionSelected) -> None:
-        rows = self.rows
-        if event.option_index == len(rows):
+        rows, index = self.rows, self._picked_row(event, self._keys)
+        if index is None:
+            return
+        if index == len(rows):
             self._naming(True)
             return
-        summary = rows[event.option_index]
+        summary = rows[index]
         if can_open(summary):
             attached = self.attached if self.joined else None
             self.dismiss(picked_commands(summary, self.sessions, attached, self.workspace))

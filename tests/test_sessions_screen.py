@@ -665,3 +665,40 @@ async def test_a_catalog_without_the_session_viewed_keeps_the_conversation_title
         await feed_events(session, pilot, opened(OLD))
         await feed_events(session, pilot, catalog(CURRENT))
         assert conversation_title(app) == "Conversation — auth rework"
+
+
+async def test_a_pick_takes_the_session_picked_though_the_list_changed_before_it_is_taken() -> None:
+    app, session = in_process()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG)
+        screen = picker(app)
+        screen.query_one(OptionList).action_select()
+        screen.show((CURRENT, LOCKED, OLD, BROKEN), "now")  # Puts the locked one where OLD was.
+        await pilot.pause()
+        assert changes(session) == SWITCH_TO_OLD
+
+
+async def test_new_session_picked_names_it_though_the_list_shrank_before_it_is_taken() -> None:
+    app, session = in_process()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG)
+        screen = picker(app)
+        await pilot.press("j", "j", "j")
+        screen.query_one(OptionList).action_select()
+        screen.show((CURRENT, OLD), "now")
+        await pilot.pause()
+        assert screen.query_one(Input).display
+        assert changes(session) == []
+
+
+async def test_a_pick_whose_session_left_the_list_before_it_is_taken_does_nothing() -> None:
+    app, session = in_process()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG)
+        screen = picker(app)
+        screen.query_one(OptionList).action_select()
+        other = SessionSummary(id="other", name="other")
+        screen.show((CURRENT, other), "now")  # Puts another session where OLD was.
+        await pilot.pause()
+        assert app.screen is screen
+        assert changes(session) == []
