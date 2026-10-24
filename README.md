@@ -145,8 +145,8 @@ directories below, repositories first, marked `⎇`, a workspace served marked `
 symlink `→ <target>`. It starts in the directory holding the workspace added last, else the
 server's `browse_root`, else its account's home. `j`/`k` move; `l` or `enter` lists the
 highlighted directory, and `h` the one above; `enter` on a workspace served opens its session
-picker, as picking it in the list does; `a` adds the highlighted directory, then opens the
-added workspace's session picker; `.` shows or hides hidden directories (hidden at first);
+picker, as picking it in the list does; `a` adds the highlighted directory, or a symlink's
+target, then opens the added workspace's session picker; `.` shows or hides hidden directories (hidden at first);
 `/` types in the field; `esc` goes back to the list. A listing that's refused, such as
 `Permission denied: <path>`, or an add that's refused, shows why under the listing, which stays
 as it was. A directory holding more than 2,000 directories lists 2,000, with a last line saying

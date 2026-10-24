@@ -13,6 +13,7 @@ from orbit.protocol import AddWorkspace, DirectoryEntry, DirectoryListing, ListD
 from orbit.tui.view.explorer import (
     EXPLORER_HINT,
     FIELD_HINT,
+    added_path,
     answers,
     candidates_line,
     completed,
@@ -48,10 +49,10 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
     accepted.
 
     ``j``/``k`` move; ``l`` or enter lists the highlighted directory, ``h`` the one above; enter
-    on a workspace served opens it; ``a`` adds the highlighted directory with ``browse``,
-    dismissing once it's accepted; ``.`` shows or hides hidden directories; ``/`` types in the
-    field; escape dismisses with none. Only the listing last asked for is shown, and a refusal
-    shows why under it.
+    on a workspace served opens it; ``a`` adds the highlighted directory, or a symlink's target,
+    with ``browse``, dismissing once it's accepted; ``.`` shows or hides hidden directories;
+    ``/`` types in the field; escape dismisses with none. Only the listing last asked for is
+    shown, and a refusal shows why under it.
 
     In the field, enter adds the path or URL typed, the same way, showing a refusal in the
     field's hint; tab completes the path's last component from the directories of its parent,
@@ -216,11 +217,13 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
             await self._list(self.listing.parent)
 
     async def action_add(self) -> None:
-        """Add the directory highlighted, if any, dismissing with it once accepted."""
+        """Add the directory highlighted, if any, at its target if it's a symlink, dismissing
+        with it once accepted."""
         entry = self._highlighted
         if entry is None:
             return
-        adding = AddWorkspace(path=self._path_of(entry))
+        assert self.listing is not None  # Entries are only shown with their listing.
+        adding = AddWorkspace(path=added_path(self.listing, entry))
         self._show_note(None)
         await self._browse(adding, Awaited(accepted=lambda: self._added(adding), why=self._refused))
 

@@ -3,6 +3,7 @@
 from orbit.protocol import DirectoryEntry, DirectoryListing
 from orbit.tui.view.explorer import (
     Completion,
+    added_path,
     answers,
     candidates_line,
     completed,
@@ -50,6 +51,19 @@ def test_hidden_entries_are_left_out_unless_shown() -> None:
 def test_an_entrys_path_is_inside_the_listings() -> None:
     assert entry_path(listing("/srv"), REPO) == "/srv/orbit"
     assert entry_path(listing("/"), REPO) == "/orbit"
+
+
+def test_a_directory_is_added_at_its_path_in_the_listing() -> None:
+    assert added_path(listing("/srv"), REPO) == "/srv/orbit"
+
+
+def test_a_symlink_is_added_at_its_absolute_target() -> None:
+    link = DirectoryEntry(name="link", is_repository=False, hidden=False, target="/opt/x/")
+    assert added_path(listing("/srv"), link) == "/opt/x"
+
+
+def test_a_symlink_is_added_at_its_relative_target_from_the_listing() -> None:
+    assert added_path(listing("/srv/sub"), LINK) == "/srv/elsewhere"
 
 
 def test_a_truncated_listing_says_how_many_more_there_are() -> None:

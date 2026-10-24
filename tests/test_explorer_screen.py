@@ -210,6 +210,21 @@ async def test_a_adds_the_directory_and_opens_its_sessions_once_listed() -> None
         assert isinstance(screen, SessionsScreen) and screen.workspace == "A"
 
 
+async def test_a_on_a_symlink_adds_its_target_and_opens_its_sessions_once_listed() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRV)
+        await pilot.press("j", "j", "j", "a")
+        assert changes(session_of(app))[-1] == AddWorkspace(path="/opt/x")
+        await answer(app, pilot)
+        await pilot.pause()
+        x = WorkspaceEntry(id="X", label="x", path="/opt/x", sessions=())
+        catalog = Catalog(workspaces=(B, x), agents=(), triggers=(), lanes=())
+        await feed_events(session_of(app), pilot, catalog)
+        screen = app.screen
+        assert isinstance(screen, SessionsScreen) and screen.workspace == "X"
+
+
 async def test_a_workspace_listed_before_its_add_is_accepted_opens_on_acceptance() -> None:
     app = connected()
     async with app.run_test() as pilot:

@@ -34,6 +34,16 @@ def entry_path(listing: DirectoryListing, entry: DirectoryEntry) -> str:
     return posixpath.join(listing.path, entry.name)
 
 
+def added_path(listing: DirectoryListing, entry: DirectoryEntry) -> str:
+    """The path adding ``entry`` in the directory ``listing`` lists sends: a symlink's target,
+    from the listing's path when it's relative, with ``..`` and ``.`` collapsed, so it's the
+    path the server serves the workspace at; else the entry's path. A target that's itself a
+    symlink can't be resolved here, as the server will."""
+    if entry.target is None:
+        return entry_path(listing, entry)
+    return posixpath.normpath(posixpath.join(listing.path, entry.target))
+
+
 def more_note(listing: DirectoryListing) -> str | None:
     """What says how many directories ``listing`` leaves out, when it's truncated."""
     if not listing.truncated:
