@@ -95,7 +95,7 @@ class Transcript(Vertical):
     def action_copy_detail(self) -> None:
         """Copy the whole of the open detail pane's call to the clipboard, if it shows one,
         and say how many lines were copied."""
-        text = detail_copy(self.detail.call)
+        text = detail_copy(self.detail.detail.call)
         if text is None:
             return
         self.app.copy_to_clipboard(text)
