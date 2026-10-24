@@ -394,17 +394,18 @@ async def test_a_session_that_fails_to_build_raises_on_send_and_events() -> None
 
 
 async def test_close_during_the_build_returns_once_it_completes_and_closes_it() -> None:
-    gate = threading.Event()
+    building, gate = threading.Event(), threading.Event()
     built: list[FakeSession] = []
 
     def make() -> SharedSession:
+        building.set()
         gate.wait()
         built.append(FakeSession())
         return built[-1]
 
     session = ThreadedSession(make)
     starting = asyncio.create_task(asyncio.to_thread(session.start))
-    await asyncio.sleep(0.05)
+    assert await asyncio.to_thread(building.wait, 5)
     closing = asyncio.create_task(session.close())
     await asyncio.sleep(0.05)
 
@@ -418,15 +419,16 @@ async def test_close_during_the_build_returns_once_it_completes_and_closes_it() 
 
 
 async def test_close_during_a_build_that_fails_returns() -> None:
-    gate = threading.Event()
+    building, gate = threading.Event(), threading.Event()
 
     def make() -> SharedSession:
+        building.set()
         gate.wait()
         raise OSError("no backend")
 
     session = ThreadedSession(make)
     starting = asyncio.create_task(asyncio.to_thread(session.start))
-    await asyncio.sleep(0.05)
+    assert await asyncio.to_thread(building.wait, 5)
     closing = asyncio.create_task(session.close())
     await asyncio.sleep(0.05)
     gate.set()
