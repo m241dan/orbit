@@ -34,7 +34,7 @@ class FakeClient:
 class FakeApp:
     """The TUI built over a control plane, run once."""
 
-    built: ClassVar[list["FakeApp"]] = []
+    built: ClassVar[list[FakeApp]] = []
 
     session: object
     link: object = None

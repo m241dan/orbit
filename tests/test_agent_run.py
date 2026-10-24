@@ -605,7 +605,7 @@ async def started(
     publish: Publish = ignore,
     timeout_minutes: float | None = None,
     verification: Verification | None = None,
-) -> tuple[AgentRun, "asyncio.Task[Outcome]"]:
+) -> tuple[AgentRun, asyncio.Task[Outcome]]:
     """A run of a task in ``role``, timing out after ``timeout_minutes``, whose agent has
     fetched its task and is working on it; the run publishes to ``publish`` and verifies with
     ``verification``, or a step that passes."""
@@ -707,7 +707,7 @@ class HangingStep:
 
 async def checking(
     step: HangingStep, timeout_minutes: float | None = None
-) -> tuple["asyncio.Task[Outcome]", "asyncio.Future[Reply]"]:
+) -> tuple[asyncio.Task[Outcome], asyncio.Future[Reply]]:
     """A coder's run, timing out after ``timeout_minutes``, and its agent's call to run a
     check whose ``step`` is now running."""
     verification = Verification((STEP,), step)
@@ -950,7 +950,7 @@ async def test_stopping_while_the_host_starts_cancels_the_start_and_stops_the_ho
     assert (host.starts, host.stops) == (0, 1)
 
 
-def run_on(host: FakeHost, events: list[Event]) -> tuple[AgentDesk, "asyncio.Task[Outcome]"]:
+def run_on(host: FakeHost, events: list[Event]) -> tuple[AgentDesk, asyncio.Task[Outcome]]:
     """A desk on ``host`` publishing to ``events``, and a coder's run on it."""
 
     async def publish(event: Event) -> None:

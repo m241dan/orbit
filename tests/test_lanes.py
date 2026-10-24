@@ -32,7 +32,7 @@ class SlowToStop:
 
 
 async def cancelled_while_stopping(
-    stopping: "asyncio.Task[None]", child: "asyncio.Task[Any]", gate: asyncio.Event
+    stopping: asyncio.Task[None], child: asyncio.Task[Any], gate: asyncio.Event
 ) -> None:
     """Cancel ``stopping`` while ``child`` stops, then let the child end through ``gate``."""
     await asyncio.sleep(0)
@@ -89,7 +89,7 @@ async def test_stop_of_a_finished_task_does_nothing() -> None:
     assert not child.cancelled()
 
 
-def background() -> tuple[Background, "asyncio.Queue[Event]"]:
+def background() -> tuple[Background, asyncio.Queue[Event]]:
     events: asyncio.Queue[Event] = asyncio.Queue()
     return Background("test", events.put), events
 
@@ -275,7 +275,7 @@ BUSY = BusyChanged(busy=True, lane="planner")
 IDLE = BusyChanged(busy=False, lane="planner")
 
 
-async def ended(turn: "asyncio.Task[object] | None") -> None:
+async def ended(turn: asyncio.Task[object] | None) -> None:
     """Wait until ``turn`` is done and its done-callbacks have run."""
     assert turn is not None
     with suppress(BaseException):

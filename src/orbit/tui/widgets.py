@@ -166,13 +166,13 @@ class ChatPrompt(ModalTextArea):
     class Submitted(Message):
         """The user sent ``text``."""
 
-        def __init__(self, prompt: "ChatPrompt", text: str) -> None:
+        def __init__(self, prompt: ChatPrompt, text: str) -> None:
             super().__init__()
             self.prompt = prompt
             self.text = text
 
         @property
-        def control(self) -> "ChatPrompt":
+        def control(self) -> ChatPrompt:
             return self.prompt
 
     def __init__(self, *, placeholder: str = "", id: str | None = None) -> None:
@@ -254,7 +254,7 @@ class StatusLine(NoteLine):
 
 def relist(
     options: OptionList,
-    labels: "Sequence[Option | VisualType]",
+    labels: Sequence[Option | VisualType],
     old_keys: Sequence[str | None],
     new_keys: Sequence[str | None],
 ) -> None:

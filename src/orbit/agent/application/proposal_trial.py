@@ -33,7 +33,7 @@ class ProposalTrial:
     ``ask`` has the user decide on them, and ``exited`` finishes when the agent's process ends."""
 
     def __init__(
-        self, work: AgentTask, run_steps: RunSteps, ask: Ask, exited: "asyncio.Future[Any]"
+        self, work: AgentTask, run_steps: RunSteps, ask: Ask, exited: asyncio.Future[Any]
     ) -> None:
         self._work = work
         self._run_steps = run_steps

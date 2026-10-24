@@ -115,7 +115,7 @@ class Client:
     def close_reason(self) -> str | None:
         return self._connection.close_reason
 
-    def __enter__(self) -> "Client":
+    def __enter__(self) -> Client:
         return self
 
     def __exit__(
@@ -319,6 +319,25 @@ def test_serve_stops_if_it_cant_write_its_run_file_naming_it(state: Path) -> Non
     assert f"Can't write the run file {RunFile(state).path}" in result.stderr
     assert "Traceback" not in result.output
     assert not [t for t in threading.enumerate() if t.name.startswith("orbit-sqlite")]
+
+
+def test_serve_that_cant_replace_a_run_file_naming_its_process_leaves_that_alone(
+    state: Path,
+) -> None:
+    stale = RunFile(state)
+    stale.write("ws://127.0.0.1:1/", os.getpid())
+    ServeLock(state).path.touch()  # So the lock is taken without making a file.
+    run = stale.path.parent
+    run.chmod(0o500)  # Nothing can be written there, or removed.
+    try:
+        result = runner.invoke(app, ["serve", *QUIET, "--port", "0"])
+    finally:
+        run.chmod(0o700)
+
+    assert result.exit_code == 2
+    assert f"Can't write the run file {stale.path}" in result.stderr
+    assert "Traceback" not in result.output
+    assert stale.read() is not None
 
 
 def test_serve_stops_if_it_cant_take_its_lock_naming_it(state: Path) -> None:

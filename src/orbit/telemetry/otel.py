@@ -66,7 +66,7 @@ class OtelTelemetry:
     those not yet exported."""
 
     def __init__(
-        self, provider: TracerProvider, counts: "SpanCounts", flush_seconds: float = FLUSH_SECONDS
+        self, provider: TracerProvider, counts: SpanCounts, flush_seconds: float = FLUSH_SECONDS
     ) -> None:
         self._provider = provider
         self._tracer = provider.get_tracer("orbit")

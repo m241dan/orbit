@@ -23,7 +23,7 @@ QUIET = 0.05
 is quiet sooner."""
 
 
-async def stop[T](task: "asyncio.Future[T]") -> None:
+async def stop[T](task: asyncio.Future[T]) -> None:
     """Cancel ``task`` and wait for it to end."""
     task.cancel()
     with suppress(asyncio.CancelledError):
@@ -101,7 +101,7 @@ async def published(session: Session | Backend, count: int) -> list[Event]:
     return [(await asyncio.wait_for(anext(stream), 1)).payload for _ in range(count)]
 
 
-def emptied[T](queue: "asyncio.Queue[T]") -> list[T]:
+def emptied[T](queue: asyncio.Queue[T]) -> list[T]:
     """Take what ``queue`` holds, without waiting for more."""
     return [queue.get_nowait() for _ in range(queue.qsize())]
 

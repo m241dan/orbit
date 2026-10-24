@@ -17,7 +17,7 @@ class Changes:
         self.count += 1
 
 
-async def waiting(slots: CoderSlots, workspace: str, session: str = "s") -> "asyncio.Task[bool]":
+async def waiting(slots: CoderSlots, workspace: str, session: str = "s") -> asyncio.Task[bool]:
     """A task taking a slot for ``workspace``'s ``session``, waiting in line by now."""
     task = asyncio.create_task(slots.acquire(workspace, session))
     await asyncio.sleep(0)

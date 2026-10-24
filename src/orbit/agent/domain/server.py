@@ -137,7 +137,7 @@ class ServerSettings(TlsSettings):
         certificate stands in for it."""
         return not self.mutual
 
-    def with_flags(self, given: Mapping[str, object]) -> "ServerSettings":
+    def with_flags(self, given: Mapping[str, object]) -> ServerSettings:
         """These settings with the command-line flags ``given``, by setting name, over them,
         ignoring those that are ``None`` and taking paths as strings.
 

@@ -562,7 +562,7 @@ class SessionKeeper:
         self.used, self._saved, self._locked = False, None, None
         return left
 
-    def retried(self, contents: Callable[[], Contents]) -> "RecordRetry":
+    def retried(self, contents: Callable[[], Contents]) -> RecordRetry:
         """The session record's write, which resuming retries as :meth:`retry` does, holding
         what ``contents`` says."""
         return RecordRetry(self, contents)

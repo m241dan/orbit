@@ -78,21 +78,21 @@ class _Proposal:
     """Checks the agent proposed, and the call waiting for orbit's answer."""
 
     checks: ChecksProposal
-    answer: "asyncio.Future[Reply]"
+    answer: asyncio.Future[Reply]
 
 
-def _answer(claim: "asyncio.Future[Reply] | None", reply: Reply) -> None:
+def _answer(claim: asyncio.Future[Reply] | None, reply: Reply) -> None:
     """Answer ``claim`` with ``reply``, unless there's no claim or it was answered already."""
     if claim is not None and not claim.done():
         claim.set_result(reply)
 
 
-def _cancel(claim: "asyncio.Future[Reply] | None") -> None:
+def _cancel(claim: asyncio.Future[Reply] | None) -> None:
     """Answer ``claim``, if it's still waiting, with the reply that the task was cancelled."""
     _answer(claim, Reply("The task was cancelled.", is_error=True))
 
 
-def _fail(claim: "asyncio.Future[Reply] | None", exc: BaseException) -> None:
+def _fail(claim: asyncio.Future[Reply] | None, exc: BaseException) -> None:
     """Answer ``claim``, if it's still waiting, with why orbit stopped checking: it was
     cancelled, or ``exc`` went wrong."""
     if isinstance(exc, asyncio.CancelledError):
@@ -191,7 +191,7 @@ class AgentRun:
         finally:
             await stop(stream)
 
-    async def _launch(self) -> "asyncio.Task[None]":
+    async def _launch(self) -> asyncio.Task[None]:
         await self._desk.url()  # Started before the agent is announced.
         role = self._work.task.role
         await self._publish(AgentStarted(agent_id=self.agent.id, role=role, task_id=self._task_id))
@@ -255,7 +255,7 @@ class AgentRun:
         still changed."""
         await self._tasks.changed_elsewhere()
 
-    async def _await_exit(self, stream: "asyncio.Task[None]") -> None:
+    async def _await_exit(self, stream: asyncio.Task[None]) -> None:
         """Give a finished agent ``exit_grace`` seconds to exit on its own."""
         with suppress(TimeoutError):
             await asyncio.wait_for(asyncio.shield(stream), self._desk.agents.exit_grace)
@@ -312,7 +312,7 @@ class AgentRun:
         assert self._verifier is not None  # Only a verification failure records a state.
         return await self._verifier.fingerprint(self._root) == self._failed_state
 
-    async def _verify(self, before: object, claim: "asyncio.Future[Reply] | None") -> None:
+    async def _verify(self, before: object, claim: asyncio.Future[Reply] | None) -> None:
         """Check the work, then answer ``claim`` (if the agent made one) with the verdict."""
         try:
             failure = await self._check(before)

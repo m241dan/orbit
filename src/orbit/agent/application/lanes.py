@@ -41,7 +41,7 @@ OPEN_GATE = SessionGate()
 """A gate that never keeps work from starting."""
 
 
-def crash_of(task: "asyncio.Task[object]") -> BaseException | None:
+def crash_of(task: asyncio.Task[object]) -> BaseException | None:
     """The exception a done ``task`` ended with; none if it finished or was cancelled."""
     if task.cancelled():
         return None
@@ -54,7 +54,7 @@ def crash_report(lane: str, exc: BaseException) -> ErrorOccurred:
     return ErrorOccurred(code=INTERNAL, message=message)
 
 
-async def stop(task: "asyncio.Task[Any]") -> None:
+async def stop(task: asyncio.Task[Any]) -> None:
     """Cancel ``task`` and wait for it to end; cancelled meanwhile, this is cancelled once it
     has."""
     task.cancel()
@@ -84,7 +84,7 @@ def _unwatched() -> None:
     """Note an end no one watches."""
 
 
-def _detached[T](work: Coroutine[Any, Any, T]) -> "asyncio.Task[T]":
+def _detached[T](work: Coroutine[Any, Any, T]) -> asyncio.Task[T]:
     """``work`` as a task of its own that sees no span current: a task copies the context it's
     created in, and this one outlives whatever started it."""
     with no_span():
@@ -157,7 +157,7 @@ class TurnSlot:
         return self._turn is not None and not self._turn.done()
 
     @property
-    def turn(self) -> "asyncio.Task[object] | None":
+    def turn(self) -> asyncio.Task[object] | None:
         """The current or last turn; none before the first."""
         return self._turn
 
@@ -187,7 +187,7 @@ class TurnSlot:
         if turn is not None and not turn.done():
             await stop(turn)
 
-    def _ended(self, turn: "asyncio.Task[object]") -> None:
+    def _ended(self, turn: asyncio.Task[object]) -> None:
         crash = crash_of(turn)
         if crash is not None:  # A bug; nothing awaits the turn, so it's reported here.
             self._post(crash_report(self._lane, crash))

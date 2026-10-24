@@ -92,7 +92,7 @@ def reporting_handshakes(say: Callable[[str], None], client_ca: str) -> type[ssl
         def do_handshake(self) -> None:
             try:
                 super().do_handshake()
-            except (ssl.SSLWantReadError, ssl.SSLWantWriteError):
+            except ssl.SSLWantReadError, ssl.SSLWantWriteError:
                 raise  # Not failed: waiting for more of the handshake.
             except ssl.SSLError as error:
                 message = refused_client(error, client_ca)

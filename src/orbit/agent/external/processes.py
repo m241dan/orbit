@@ -125,6 +125,6 @@ def process_alive(pid: int) -> bool:
     """Whether the process ``pid`` is running as this user."""
     try:
         os.kill(pid, 0)
-    except (OSError, OverflowError):  # Gone, another user's, or no process id at all.
+    except OSError, OverflowError:  # Gone, another user's, or no process id at all.
         return False
     return True

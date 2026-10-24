@@ -35,7 +35,7 @@ class RunFile:
         """The server the file names; ``None`` if there's no file or it can't be read."""
         try:
             text = self.path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        except OSError, UnicodeDecodeError:
             return None
         return parse_running(text)
 

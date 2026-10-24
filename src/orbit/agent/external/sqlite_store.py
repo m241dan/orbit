@@ -138,7 +138,7 @@ class SqliteStore:
         """The state directory the database is in."""
         return self._state_dir
 
-    def workspace_view(self, workspace_id: str) -> "WorkspaceStore":
+    def workspace_view(self, workspace_id: str) -> WorkspaceStore:
         """The saved sessions, events' log, review count and session locks of the workspace
         ``workspace_id``, in this store."""
         return WorkspaceStore(self, workspace_id)

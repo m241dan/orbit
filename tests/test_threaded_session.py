@@ -75,7 +75,7 @@ class FakeSession:
             self.stream_closed_on = threading.current_thread().name
             self.stream_closed.set()
 
-    def connect(self) -> "FakeSession":
+    def connect(self) -> FakeSession:
         self._record("connect")
         return self
 
@@ -102,7 +102,7 @@ class EchoSession:
         while True:
             yield await self._queue.get()
 
-    def connect(self) -> "EchoSession":
+    def connect(self) -> EchoSession:
         return self
 
     async def close(self) -> None:

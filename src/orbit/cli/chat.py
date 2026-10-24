@@ -158,7 +158,7 @@ class _ClientFiles:
     cert: Path | None = None
     key: Path | None = None
 
-    def over(self, configured: "_ClientFiles") -> "_ClientFiles":
+    def over(self, configured: _ClientFiles) -> _ClientFiles:
         """These files over the ``configured`` ones: the token or client certificate given, if
         any, in place of the configured one, and the CA given, if any."""
         return replace(self if self.identified else configured, ca=self.ca or configured.ca)

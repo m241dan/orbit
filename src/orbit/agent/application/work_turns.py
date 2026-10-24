@@ -216,7 +216,7 @@ class WorkTurns:
         self._waiting = True
         self._wait.start(self._start_again(stopped, at))
 
-    async def _start_again(self, stopped: "asyncio.Task[object]", at: datetime) -> None:
+    async def _start_again(self, stopped: asyncio.Task[object], at: datetime) -> None:
         """Once the ``stopped`` turn has ended, wait until ``at``, then start the run again, or
         once the halt lifts if the session is halted then."""
         try:

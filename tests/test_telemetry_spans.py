@@ -31,7 +31,7 @@ def _telemetry(exporter: SpanExporter, flush_seconds: float = 5.0) -> OtelTeleme
     return otel_telemetry(exporter, RESOURCE, flush_seconds)
 
 
-def _exported(build: "Build") -> dict[str, ReadableSpan]:
+def _exported(build: Build) -> dict[str, ReadableSpan]:
     """The spans ``build`` exported, by name, once its telemetry is closed."""
     build.telemetry.close()
     return {span.name: span for span in build.exporter.get_finished_spans()}

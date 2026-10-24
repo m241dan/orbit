@@ -81,7 +81,7 @@ def _check_key(path: Path) -> None:
         raise TlsError(tls_messages.KEY_READABLE.format(path=path))
     try:
         load_pem_private_key(data, password=None)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         raise TlsError(_unreadable(path, "not an unencrypted PEM private key")) from None
 
 

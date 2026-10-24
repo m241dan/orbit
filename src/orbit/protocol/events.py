@@ -411,7 +411,7 @@ class Snapshot(_Message):
     review: ReviewStatus | None
     proposals: tuple[ChecksProposed, ...]
     agents: tuple[RunningAgent, ...]
-    transcript: tuple["EventEnvelope", ...] = ()
+    transcript: tuple[EventEnvelope, ...] = ()
     storage_halt: str | None = None
     read_only: bool = False
     ownership_offered: bool = False
@@ -451,7 +451,7 @@ class HistoryPage(_Message):
 
     type: Literal["history_page"] = "history_page"
     session: str
-    events: tuple["EventEnvelope", ...]
+    events: tuple[EventEnvelope, ...]
     more: bool
     trimmed: bool = False
     _dropped_oldest: int | None = PrivateAttr(default=None)
@@ -478,7 +478,7 @@ class HistoryPage(_Message):
         return _oldest_seq(self._dropped_oldest, self.events)
 
 
-def _oldest_seq(dropped_oldest: int | None, envelopes: tuple["EventEnvelope", ...]) -> int | None:
+def _oldest_seq(dropped_oldest: int | None, envelopes: tuple[EventEnvelope, ...]) -> int | None:
     """``dropped_oldest``, the oldest ``seq`` remembered from decoding, if any; otherwise that
     of the first of ``envelopes``, if any."""
     if dropped_oldest is not None:

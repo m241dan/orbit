@@ -183,7 +183,7 @@ def pretty_json(text: str) -> str | None:
     """``text`` indented, if it's a JSON object or array, else None."""
     try:
         value = json.loads(text)
-    except (ValueError, RecursionError):
+    except ValueError, RecursionError:
         return None
     return _dumped(value) if isinstance(value, dict | list) else None
 

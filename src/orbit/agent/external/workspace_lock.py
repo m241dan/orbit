@@ -55,7 +55,7 @@ class WorkspaceLock:
         """The owner the lock file names; one naming nobody if it can't be read."""
         try:
             return parse_owner(self.path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError):
+        except OSError, UnicodeDecodeError:
             return WorkspaceOwner()
 
     def close(self) -> None:

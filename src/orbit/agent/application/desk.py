@@ -174,7 +174,7 @@ class AgentDesk:
         # Shielded: one caller giving up doesn't cancel the start the others wait on.
         return await asyncio.shield(self._starting)
 
-    def _started(self, starting: "asyncio.Task[str]") -> None:
+    def _started(self, starting: asyncio.Task[str]) -> None:
         """Forget ``starting`` if it failed, so the next call starts the host again."""
         failed = starting.cancelled() or starting.exception() is not None
         if failed and self._starting is starting:

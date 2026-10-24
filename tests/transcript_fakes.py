@@ -141,7 +141,7 @@ class Log(EntryList):
     whether it was removed; what it says of the detail pane reaches the window later, as a
     message does."""
 
-    def __init__(self, window: "Window", thinking_hidden: bool) -> None:
+    def __init__(self, window: Window, thinking_hidden: bool) -> None:
         super().__init__(thinking_hidden, window.clock)
         self._window = window
         self.displayed = False

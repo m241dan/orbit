@@ -72,7 +72,7 @@ async def serving(
         yield url
 
 
-def frontend(url: str, token: str | None = TOKEN) -> "connect":
+def frontend(url: str, token: str | None = TOKEN) -> connect:
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     return connect(url, additional_headers=headers, max_size=None)
 

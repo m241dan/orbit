@@ -122,7 +122,7 @@ class Usage(_Message):
         """The tokens read: the input, with what was cached and what was read from the cache."""
         return self.input_tokens + self.cache_creation_input_tokens + self.cache_read_input_tokens
 
-    def __add__(self, other: "Usage") -> "Usage":
+    def __add__(self, other: Usage) -> Usage:
         mine, theirs = self.model_dump(), other.model_dump()
         return Usage(**{name: mine[name] + theirs[name] for name in mine})
 

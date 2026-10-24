@@ -110,7 +110,7 @@ def translate(turn_id: str, message: dict[str, Any]) -> list[Event]:
     one missing what it should hold raises RuntimeError."""
     try:
         return _events(turn_id, message)
-    except (KeyError, TypeError):
+    except KeyError, TypeError:
         raise RuntimeError(f"Unexpected output from claude: {json.dumps(message)[:200]}") from None
 
 
@@ -250,7 +250,7 @@ class ClaudeCliRunner:
         finally:
             self._remember(agent_id, turn)
 
-    def _remember(self, agent_id: str, turn: "_Turn") -> None:
+    def _remember(self, agent_id: str, turn: _Turn) -> None:
         """Note the Claude session ``turn`` ran in as agent ``agent_id``'s, if it reported one."""
         if turn.session_id:
             self._conversations[agent_id] = turn.session_id
@@ -267,7 +267,7 @@ class ClaudeCliRunner:
         else:
             self._conversations[agent_id] = conversation_id
 
-    def _turn(self, launch: AgentLaunch, resume: str | None) -> "_Turn":
+    def _turn(self, launch: AgentLaunch, resume: str | None) -> _Turn:
         """A turn of ``launch``'s agent, resuming the Claude session ``resume`` if given."""
         args = [*self._command, *STREAM_ARGS]
         if launch.settings.model:

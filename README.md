@@ -1553,7 +1553,7 @@ and connect with `orbit chat --remote work`. In all, the server keeps `ca.pem`, 
 ### Hosting in a container
 
 The recommended way to host the control plane is in a container, built from this repository's
-own files: `deploy/Dockerfile` makes an image of `orbit serve` (Python 3.13, git, Node.js LTS and
+own files: `deploy/Dockerfile` makes an image of `orbit serve` (Python 3.14, git, Node.js LTS and
 the Claude Code CLI pinned by the `CLAUDE_CODE_VERSION` build argument, and orbit installed from
 the checkout with `uv sync --frozen --no-dev`), and `deploy/compose.yaml` runs it over TLS. The
 image holds no credential: Claude's login, the token, the certificates and their keys live in

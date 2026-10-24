@@ -75,7 +75,7 @@ class PlannerSeat:
         return self._turns.running
 
     @property
-    def turn(self) -> "asyncio.Task[object] | None":
+    def turn(self) -> asyncio.Task[object] | None:
         """The planner's current or last turn; none before the first."""
         return self._turns.turn
 

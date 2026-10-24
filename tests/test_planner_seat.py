@@ -46,7 +46,7 @@ class Seated:
     """A seat, the events it publishes, and what it asked of its session."""
 
     seat: PlannerSeat
-    events: "asyncio.Queue[Event]"
+    events: asyncio.Queue[Event]
     launcher: ScriptedLauncher
     calls: list[str] = field(default_factory=list)
 

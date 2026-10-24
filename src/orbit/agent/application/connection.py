@@ -63,7 +63,7 @@ class Connections:
         self._open_session = open_session
         self._ended = False
 
-    def add(self, connection: "SessionConnection") -> None:
+    def add(self, connection: SessionConnection) -> None:
         """Route events to ``connection``, or end its stream at once if the connections have
         ended."""
         if self._ended:
@@ -71,10 +71,10 @@ class Connections:
             return
         self._open.add(connection)
 
-    def discard(self, connection: "SessionConnection") -> None:
+    def discard(self, connection: SessionConnection) -> None:
         self._open.discard(connection)
 
-    def viewing(self, connection: "SessionConnection") -> SessionRef | None:
+    def viewing(self, connection: SessionConnection) -> SessionRef | None:
         """The session ``connection`` views, if it isn't the open one."""
         attached = connection.attached
         return None if attached is None or attached.id == self._open_session() else attached
@@ -92,7 +92,7 @@ class Connections:
         viewers = (c for c in self._open if c.greeted and c is not asker)
         return sum(1 for c in viewers if self._viewed_by(c) == session_id)
 
-    def others_attached(self, session_id: str) -> list["SessionConnection"]:
+    def others_attached(self, session_id: str) -> list[SessionConnection]:
         """The greeted connections attached to the session ``session_id``, but for the one whose
         command is being answered."""
         asker = _asker()
@@ -105,11 +105,11 @@ class Connections:
         asker = _asker()
         return sorted({self._viewed_by(c) for c in self._open if c is not asker})
 
-    def watching(self, stream: str) -> list["SessionConnection"]:
+    def watching(self, stream: str) -> list[SessionConnection]:
         """The connections here watching the optional stream ``stream``."""
         return [c for c in self._open if stream in c.streams]
 
-    def attached(self, session_id: str) -> list["SessionConnection"]:
+    def attached(self, session_id: str) -> list[SessionConnection]:
         """The connections attached to the session ``session_id``."""
         return [c for c in self._open if c.attached_id == session_id]
 
@@ -130,7 +130,7 @@ class Connections:
             elif left is not None and self.viewing(connection) is None:
                 connection.attach(left)
 
-    def _viewed_by(self, connection: "SessionConnection") -> str:
+    def _viewed_by(self, connection: SessionConnection) -> str:
         """The id of the session ``connection`` views."""
         viewing = self.viewing(connection)
         return self._open_session() if viewing is None else viewing.id
@@ -164,7 +164,7 @@ class Connections:
             elif connection.handshake.welcomed and connection.workspace is None:
                 connection.receive(envelope)
 
-    def _sees(self, connection: "SessionConnection", session: str | None) -> bool:
+    def _sees(self, connection: SessionConnection, session: str | None) -> bool:
         """Whether the events of ``session``, or those of none, reach ``connection``."""
         return session is None or self._viewed_by(connection) == session
 
@@ -176,13 +176,13 @@ class Connections:
             connection.end()
 
 
-_answering: ContextVar["tuple[SessionConnection, object] | None"] = ContextVar(
+_answering: ContextVar[tuple[SessionConnection, object] | None] = ContextVar(
     "answering", default=None
 )
 """The connection whose command is being answered, if any, with the task answering it."""
 
 
-def _asker() -> "SessionConnection | None":
+def _asker() -> SessionConnection | None:
     """The connection whose command the current task is answering, if any: not one whose
     command was being answered when a task started in the background, which inherits the
     context but answers no one."""
@@ -192,7 +192,7 @@ def _asker() -> "SessionConnection | None":
     return answering[0]
 
 
-def _joiner() -> "SessionConnection | None":
+def _joiner() -> SessionConnection | None:
     """The connection whose command the current task is answering, if it's attached or
     attaching."""
     asker = _asker()

@@ -62,7 +62,7 @@ def _read_token(path: Path) -> str | None:
     when it isn't ASCII, which an HTTP header can't carry."""
     try:
         content = json.loads(path.read_text())
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return None
     oauth = content.get("claudeAiOauth") if isinstance(content, dict) else None
     token = oauth.get("accessToken") if isinstance(oauth, dict) else None

@@ -1036,7 +1036,7 @@ def nothing_queued(session: Backend) -> bool:
     return _queue_of(session).empty()
 
 
-def _queue_of(session: Backend) -> "asyncio.Queue[EventEnvelope]":
+def _queue_of(session: Backend) -> asyncio.Queue[EventEnvelope]:
     """The events queued for the frontend of ``session``."""
     return _sole_frontend(session).connection._queue
 
@@ -1143,7 +1143,7 @@ def startup_of(session: WorkspaceHost) -> StartupCheck | None:
     return session._startup
 
 
-def planner_turn(session: WorkspaceHost) -> "asyncio.Task[object] | None":
+def planner_turn(session: WorkspaceHost) -> asyncio.Task[object] | None:
     """The planner's current turn, if it has one."""
     return session._seat.turn
 

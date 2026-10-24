@@ -304,8 +304,13 @@ class ReviewLane:
         try:  # Even a bug ends the review, or its batch would stay open.
             await run_task_to_end(self._tasks, task_id, run, stop, self._publish)
         finally:
-            if not cancelling():  # The lane stopping leaves its batches as they are.
-                await self._after(self._batches.get(task_id))
+            await self._ended(task_id)
+
+    async def _ended(self, task_id: str) -> None:
+        """The review of ``task_id`` ended: go on as :meth:`_after` says, unless the lane is
+        stopping, which leaves its batches as they are."""
+        if not cancelling():
+            await self._after(self._batches.get(task_id))
 
     async def _reviewed(self, task_id: str) -> Outcome:
         """How started review ``task_id`` ended, after which it's no longer the current one;

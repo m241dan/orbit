@@ -597,6 +597,25 @@ async def test_a_review_cancelled_as_the_session_closes_is_just_cancelled() -> N
     assert (review.status, review.reason, review.reason_detail) == ("cancelled", CANCELLED, "")
 
 
+async def test_a_review_cancelled_as_the_session_closes_leaves_its_batch_open() -> None:
+    reviewing = asyncio.Event()
+
+    async def endless(call: Call) -> TurnEndReason:
+        await call("get_task")
+        reviewing.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    session, _, _ = session_for(claims_done, reviewers=(endless,), tree=FakeTree(), review=True)
+    await start(session)
+    collecting = asyncio.ensure_future(settle(session, until=lambda _: reviewing.is_set()))
+    await asyncio.wait_for(reviewing.wait(), 10)
+    events = await asyncio.wait_for(collecting, 10)
+    await session.close()
+    statuses = [e for e in events + queued(session) if isinstance(e, ReviewStatus)]
+    assert statuses[-1] == ReviewStatus(paused=False, open_batches=1)
+
+
 async def test_a_review_ending_as_the_session_closes_starts_no_work(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

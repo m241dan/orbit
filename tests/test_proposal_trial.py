@@ -64,13 +64,13 @@ def proposing() -> AgentTask:
     return work
 
 
-def alive() -> "asyncio.Future[None]":
+def alive() -> asyncio.Future[None]:
     """An agent's process that hasn't ended."""
     return asyncio.get_running_loop().create_future()
 
 
 async def decide(
-    steps: Steps, user: User, exited: "asyncio.Future[None] | None" = None
+    steps: Steps, user: User, exited: asyncio.Future[None] | None = None
 ) -> tuple[Verdict, AgentTask]:
     work = proposing()
     return await ProposalTrial(work, steps, user, exited or alive()).decide(CHECKS), work

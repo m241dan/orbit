@@ -43,7 +43,7 @@ class ListView:
     """What a picker shows, as it shows it: the highlight is set as a test moves it. Closing it
     hands what it closes with to ``close``."""
 
-    def __init__(self, modals: "Modals") -> None:
+    def __init__(self, modals: Modals) -> None:
         self._modals = modals
         self.is_attached = True
         self.is_mounted = False
@@ -89,7 +89,7 @@ class SessionPickerView(ListView):
     """A session picker's fake screen, whose changes go to the backend; a note shown before
     it's on screen shows once it is, as the screen's does."""
 
-    def __init__(self, modals: "Modals") -> None:
+    def __init__(self, modals: Modals) -> None:
         super().__init__(modals)
         self._pending_note: str | None = None
 
@@ -138,7 +138,7 @@ class WorkspacePickerView(ListView):
 class ExplorerView:
     """The explorer's fake screen: what it shows, and what the user has done in it."""
 
-    def __init__(self, modals: "Modals") -> None:
+    def __init__(self, modals: Modals) -> None:
         self._modals = modals
         self.is_attached = True
         self.is_active = True

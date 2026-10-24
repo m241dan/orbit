@@ -218,7 +218,7 @@ def _standing(workspace: ServedWorkspace) -> str:
     return f"{workspace.root} read-only, as {owner.described} owns it"
 
 
-def _serve_until_stopped(parts: "_ServeParts", profile: Path | None, user_config: Path) -> None:
+def _serve_until_stopped(parts: _ServeParts, profile: Path | None, user_config: Path) -> None:
     """Serve as ``parts`` say, profiled into ``profile`` if given, until stopped.
 
     Exits with status 2 if the server can't listen, naming the user config in
@@ -385,10 +385,10 @@ async def _until_stopped(
     """
     stopping = asyncio.Event()
     _on_signals(stopping)
-    written = False
+    written: RunFile | None = None
     try:
         _write_run_file(parts.run_file, url, parts.local)
-        written = True
+        written = parts.run_file
         # A workspace whose lock is taken from here on names the URL as it's added.
         parts.served.url = url
         for lock in parts.served.locks:
@@ -396,11 +396,19 @@ async def _until_stopped(
         typer.echo(parts.banner(url))
         await stopping.wait()
     finally:
-        try:
-            await server.stop(plane.close)
-        finally:
-            if written:  # One that couldn't be written may not be removable either.
-                parts.run_file.remove()
+        await _stop_serving(plane, server, written)
+
+
+async def _stop_serving(
+    plane: ControlPlane, server: ControlPlaneServer, written: RunFile | None
+) -> None:
+    """Stop ``server``, closing ``plane``, then remove the run file ``written``, if any: one
+    that couldn't be written may not be removable either."""
+    try:
+        await server.stop(plane.close)
+    finally:
+        if written is not None:
+            written.remove()
 
 
 def _write_run_file(run_file: RunFile, url: str, local: LocalTls | None) -> None:

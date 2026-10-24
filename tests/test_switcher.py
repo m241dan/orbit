@@ -86,7 +86,7 @@ async def nothing() -> None:
 
 def switcher_for(
     store: FakeStore, held: Held, *, picking: bool = False, pinned: tuple[str, ...] = ()
-) -> tuple[SessionSwitcher, "asyncio.Queue[Event]", Tasks]:
+) -> tuple[SessionSwitcher, asyncio.Queue[Event], Tasks]:
     """A switcher of a session without agents saved in ``store``, its settings ``held``."""
     events: asyncio.Queue[Event] = asyncio.Queue()
     ids = (f"session-{n}" for n in count(1))

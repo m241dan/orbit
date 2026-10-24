@@ -163,7 +163,7 @@ def test_a_removed_mount_is_caught() -> None:
 
 def test_an_unset_variable_is_reported() -> None:
     with pytest.raises(AssertionError, match="ORBIT_STATE_DIR"):
-        environment("FROM python:3.13-slim\n", "ORBIT_STATE_DIR")
+        environment("FROM python:3.14-slim\n", "ORBIT_STATE_DIR")
 
 
 def test_the_container_runs_as_the_hosts_user() -> None:

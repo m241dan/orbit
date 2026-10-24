@@ -247,7 +247,7 @@ class _Conversation:
             code = POLICY_VIOLATION if isinstance(error, ConnectionDropped) else MESSAGE_TOO_BIG
             await self.close(code, str(error))
             return
-        except (WebSocketDisconnect, WebSocketDisconnected):
+        except WebSocketDisconnect, WebSocketDisconnected:
             await self._gone()
             return
         await self.close(*self._farewell())

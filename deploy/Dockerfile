@@ -4,7 +4,7 @@
 # The image holds no credential: Claude's login, the token and the certificates live in volumes.
 FROM node:24-bookworm-slim AS node
 
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 # Claude Code's CLI, pinned so builds are reproducible; raise it with --build-arg.
 ARG CLAUDE_CODE_VERSION=2.1.304

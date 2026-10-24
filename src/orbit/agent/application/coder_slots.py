@@ -18,7 +18,7 @@ class _Place:
 
     workspace: str
     session: str
-    granted: "asyncio.Future[bool]"
+    granted: asyncio.Future[bool]
 
     def at(self, workspace: str, session: str | None) -> bool:
         """Whether this is the ``workspace``'s ``session``'s place, or any of its sessions' if

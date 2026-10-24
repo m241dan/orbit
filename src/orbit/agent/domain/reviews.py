@@ -118,7 +118,7 @@ class _Batch:
         )
 
     @classmethod
-    def thawed(cls, snapshot: BatchSnapshot) -> "_Batch":
+    def thawed(cls, snapshot: BatchSnapshot) -> _Batch:
         """The batch ``snapshot`` saved."""
         return cls(
             round=snapshot.round,

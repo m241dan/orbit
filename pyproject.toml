@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "Daniel R Koris", email = "korisd@gmail.com" }
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 dependencies = [
     "cryptography>=50.0.2",
     "httpx>=0.28.1",
@@ -56,7 +56,7 @@ dev = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py313"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
@@ -75,6 +75,9 @@ asyncio_mode = "auto"
 [tool.coverage.run]
 source = ["orbit"]
 branch = true
+# Python's own monitoring, which costs nothing in code coverage doesn't measure; the classic
+# tracer slowed every call, Textual's included, and so the whole run by about half.
+core = "sysmon"
 # Entry-point shim: `python -m orbit` just calls the Typer app tested in test_cli.
 omit = ["*/orbit/__main__.py"]
 
