@@ -127,7 +127,6 @@ class StorageHalt:
         self._resuming = False  # A resume is under way.
         self._lifting: list[Failure] | None = None  # The failures while the halt is lifted.
         self._background = Background("storage halt", publish)
-        self._closed = False
 
     @property
     def halted(self) -> bool:
@@ -153,9 +152,8 @@ class StorageHalt:
                 self._lifting.append((write, error))
             return
         self._fault = fault_of(write, error)
-        if not self._closed:
-            self._halting = True
-            self._background.start(self._halt(self._fault))
+        # Once closed, the halt doesn't start, so it isn't under way.
+        self._halting = self._background.start(self._halt(self._fault))
 
     def log_failed(self, error: StoreFailed) -> None:
         """Halt the session, as appending to its event log failed with ``error``."""
@@ -207,7 +205,6 @@ class StorageHalt:
     async def close(self) -> None:
         """Stop halting, if it's under way; a failure from now on only marks the session
         halted."""
-        self._closed = True
         await self._background.close()
 
     async def _halt(self, fault: StorageFault) -> None:

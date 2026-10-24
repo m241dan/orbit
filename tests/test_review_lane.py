@@ -7,6 +7,7 @@ import pytest
 
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.ports import Reply, TreeFailed
+from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.work_turns import WorkTurns
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.endings import BUG, CANCELLED, REVIEW_STOPPED_BY_YOU, STOPPED_BY_YOU
@@ -622,6 +623,41 @@ async def test_a_review_ending_as_the_session_closes_starts_no_work(
     await asyncio.wait_for(reviewing.wait(), 10)
     await session.close()
     assert [la.agent.role for la in launcher.launches] == ["coder", "reviewer"]
+    assert {t for t in asyncio.all_tasks() if not t.done()} == {asyncio.current_task()}
+
+
+class _HeldTree(FakeTree):
+    """A coder tree whose head, once work is committed, is read only after ``release``."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.heading, self.release = asyncio.Event(), asyncio.Event()
+
+    async def head(self) -> str:
+        if self.commits:
+            self.heading.set()
+            await self.release.wait()
+        return await super().head()
+
+
+async def test_a_task_landing_as_the_session_closes_starts_no_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tree = _HeldTree()
+    close_lane = ReviewLane.close
+
+    async def close_then_release(lane: ReviewLane) -> None:
+        await close_lane(lane)
+        tree.release.set()
+
+    monkeypatch.setattr(ReviewLane, "close", close_then_release)
+    session, _, launcher = session_for(claims_done, reviewers=(suggests(),), tree=tree, review=True)
+    await start(session)
+    await asyncio.wait_for(tree.heading.wait(), 10)
+    await session.close()
+    assert [la.agent.role for la in launcher.launches] == ["coder"]
+    assert any(t.task.role == "reviewer" for t in board(queued(session)))
+    assert not lane_of(session).running
     assert {t for t in asyncio.all_tasks() if not t.done()} == {asyncio.current_task()}
 
 

@@ -150,10 +150,10 @@ async def test_ended_is_called_once_the_work_has_stopped() -> None:
 async def test_start_while_running_drops_the_new_work() -> None:
     lane, _ = background()
     work = Work()
-    lane.start(work("first"))
+    assert lane.start(work("first"))
     await work.started.wait()
 
-    lane.start(work("second"))
+    assert not lane.start(work("second"))
     work.gate.set()
     await lane.close()
 
@@ -204,7 +204,7 @@ async def test_start_after_close_closes_the_work_and_starts_no_task() -> None:
     await lane.close()
 
     coroutine = work("late")
-    lane.start(coroutine)
+    assert not lane.start(coroutine)
     await asyncio.sleep(0)
 
     assert inspect.getcoroutinestate(coroutine) == inspect.CORO_CLOSED

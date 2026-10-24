@@ -107,16 +107,17 @@ class Background:
     def running(self) -> bool:
         return self._task is not None and not self._task.done()
 
-    def start(self, work: Coroutine[Any, Any, object]) -> None:
+    def start(self, work: Coroutine[Any, Any, object]) -> bool:
         """Run ``work`` in the background, unless earlier work still runs or this is closed:
-        then drop it."""
+        then drop it. Returns whether ``work`` was started."""
         if self._closed or self.running:
             work.close()
-            return
+            return False
         self._task = _detached(self._guarded(work))
         # Work cancelled before it starts is closed, not left never awaited.
         self._task.add_done_callback(lambda _: work.close())
         self._task.add_done_callback(lambda _: self.ended())
+        return True
 
     def cancel(self) -> None:
         if self._task is not None:
