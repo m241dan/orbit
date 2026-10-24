@@ -5,8 +5,12 @@ from unittest.mock import Mock
 from orbit.protocol import (
     STORAGE_FAILED,
     Catalog,
+    CommandRefused,
     ErrorOccurred,
     Event,
+    OwnershipDeclined,
+    OwnershipOffered,
+    OwnershipTaken,
     SessionStateChanged,
 )
 from orbit.tui.event_router import AppHooks, EventRouter, Handlers, Panes
@@ -112,3 +116,26 @@ def test_a_storage_error_shows_in_the_feed_then_halts_then_reaches_the_workspace
     error = ErrorOccurred(code=STORAGE_FAILED, message="The disk is full.")
 
     assert routed(error) == [*TRACKED, "feed.render", "halt.halted", "workspaces.follow_error"]
+
+
+def test_a_command_refused_for_storage_is_answered_then_halts() -> None:
+    refusal = CommandRefused(command_id="c", code=STORAGE_FAILED, message="The disk is full.")
+
+    assert routed(refusal) == [*TRACKED, "desk.answer", "halt.halted"]
+
+
+def test_a_refusal_or_an_error_for_another_reason_halts_nothing() -> None:
+    refusal = CommandRefused(command_id="c", code="busy", message="Busy")
+    error = ErrorOccurred(code="agent_failed", message="x")
+
+    assert routed(refusal) == [*TRACKED, "desk.answer"]
+    assert routed(error) == [*TRACKED, "feed.render", "workspaces.follow_error"]
+
+
+def test_an_offer_asks_about_the_repository() -> None:
+    assert routed(OwnershipOffered()) == [*TRACKED, "takeover.offered"]
+
+
+def test_an_offer_settled_closes_it_and_owning_the_repository_clears_the_read_only_mark() -> None:
+    assert routed(OwnershipDeclined()) == [*TRACKED, "takeover.settled"]
+    assert routed(OwnershipTaken()) == [*TRACKED, "takeover.settled", "prompt.show_read_only"]

@@ -367,7 +367,7 @@ async def test_an_earlier_completions_outcome_once_another_is_asked_for_complete
     await explorer.complete()
     backend.accept(earliest)
     assert view.field == "/work/pro"
-    backend.refuse("Permission denied: /work", earliest + 1)
+    backend.refuse("Permission denied: /work", index=earliest + 1)
     explorer.show_listing(WORK)
     backend.accept()
     assert view.field == "/work/projects/"
@@ -514,7 +514,7 @@ async def test_an_earlier_listings_refusal_once_another_is_asked_for_shows_nothi
     await explorer.into()
     earlier = len(backend.sent) - 1
     await explorer.up()
-    backend.refuse(DENIED, earlier)
+    backend.refuse(DENIED, index=earlier)
     assert view.note is None
     explorer.show_listing(ROOT)
     assert (view.title, view.rows) == ("/", ["srv"])

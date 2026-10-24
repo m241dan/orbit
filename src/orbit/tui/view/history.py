@@ -1,8 +1,11 @@
 """Paging back through the open session's history, a page above the conversation at a time."""
 
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
+from typing import Protocol
 
-from orbit.protocol import History, HistoryPage, Snapshot
+from orbit.protocol import Event, History, HistoryPage, Snapshot
+from orbit.tui.view.outcomes import Awaited, Send
 
 LOADING_EARLIER = "Loading earlier messages…"
 """Shown at the top of the conversation while a page of earlier events loads."""
@@ -53,3 +56,72 @@ def page_arrived(paging: Paging, page: HistoryPage) -> Paging | None:
     more = page.more and page.oldest_seq is not None
     trimmed = page.trimmed and not page.more
     return Paging(session=paging.session, oldest=oldest, more=more, trimmed=trimmed)
+
+
+class PagingView(Protocol):
+    """Where the paging shows, above the conversation's entries."""
+
+    def show_loading(self, loading: bool) -> None:
+        """Show that earlier entries are ``loading``, or stop."""
+        ...
+
+    def show_trimmed(self, trimmed: bool) -> None:
+        """Show that earlier entries were ``trimmed`` from the log, or stop."""
+        ...
+
+
+class Feed(Protocol):
+    """What shows the conversation's events."""
+
+    def prepend(self, events: Iterable[Event]) -> None:
+        """Show ``events``, which came before every event shown, above them."""
+        ...
+
+
+class HistoryPager:
+    """Asks with ``send`` for the page of events before the oldest the conversation shows,
+    one page at a time, showing in ``view`` that it loads until it arrives or is refused,
+    and has ``feed`` show the page above the conversation once it arrives; ``view`` shows
+    too when the last page reaches events trimmed from the log."""
+
+    def __init__(self, view: PagingView, feed: Feed, send: Send) -> None:
+        self._view = view
+        self._feed = feed
+        self._send = send
+        self._paging = Paging()
+
+    def follow(self, snapshot: Snapshot) -> None:
+        """Page back from ``snapshot``'s transcript, which replaced the conversation,
+        forgetting any page still loading."""
+        self._paging = paging_from(snapshot)
+        self._view.show_loading(False)
+        self._view.show_trimmed(False)
+
+    async def earlier(self) -> None:
+        """Ask for the page before the oldest event shown, unless one loads or none remain."""
+        request = earlier_request(self._paging)
+        if request is None:
+            return
+        self._show_loading(True)
+        # A request sent after a snapshot reset the paging supersedes any still loading.
+        await self._send(request, Awaited(refused=self._refused, supersedes=True))
+
+    def _refused(self) -> None:
+        """Stop waiting for the page asked for, which was refused or not sent, so it can be
+        asked for again."""
+        self._show_loading(False)
+
+    def show(self, page: HistoryPage) -> None:
+        """Show ``page`` above the conversation, if it's the page asked for."""
+        paging = page_arrived(self._paging, page)
+        if paging is None:
+            return
+        self._paging = paging
+        self._view.show_loading(False)
+        self._view.show_trimmed(paging.trimmed)
+        self._feed.prepend(envelope.payload for envelope in page.events)
+
+    def _show_loading(self, waiting: bool) -> None:
+        """Note that a page is loading if ``waiting``, or no longer, and show it."""
+        self._paging = loading(self._paging, waiting)
+        self._view.show_loading(waiting)

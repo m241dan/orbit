@@ -2,31 +2,9 @@
 stands."""
 
 from collections.abc import Callable
-from typing import assert_never
 
-from textual.timer import Timer
-
-from orbit.protocol import (
-    Connected,
-    Ended,
-    HandshakeFailed,
-    LinkState,
-    Reconnecting,
-    Stopped,
-    TokenRefused,
-)
 from orbit.tui.modal import ModalSlot, Push
-from orbit.tui.view.link import (
-    CHOICES,
-    QUIT,
-    STOPPED_TITLE,
-    final_notice,
-    lost_delay,
-    lost_message,
-    lost_title,
-    reconnecting_status,
-    stopped_message,
-)
+from orbit.tui.view.link import After, Closed, LinkMonitor
 from orbit.tui.widgets import ChoiceScreen
 
 
@@ -36,18 +14,13 @@ def _link_screen(title: str, message: str, choices: tuple[str, ...]) -> ChoiceSc
     return ChoiceScreen(title, message, choices, escape_index=0).add_class("error")
 
 
-_SOONEST = 0.01  # Textual's timers can't wait no time at all.
-
 ShowStatus = Callable[[str | None], None]
-After = Callable[[float, Callable[[], None]], Timer]
 
 
 class LinkHost:
-    """Follows the link to the control plane: while it's down, the status line is shown with
-    ``show_status`` and, after two minutes, a modal pushed with ``push`` asks whether to keep
-    trying, as one does at once when the control plane stops, and a link that won't be retried
-    is shown with only the choice to quit; ``quit`` ends the app, and
-    ``after`` calls back after a delay."""
+    """Shows the :class:`LinkMonitor` it holds as ``monitor``, which ends the app with
+    ``quit`` and waits with ``after``: its status line with ``show_status`` and its modals,
+    one at a time, with ``push``, bordered as an error."""
 
     def __init__(
         self,
@@ -56,11 +29,9 @@ class LinkHost:
         show_status: ShowStatus,
         after: After,
     ) -> None:
-        self._quit = quit
         self._show_status = show_status
-        self._after = after
-        self._timer: Timer | None = None  # Until the user is asked whether to keep trying.
         self._slot = ModalSlot[ChoiceScreen, int](push)
+        self.monitor = LinkMonitor(self, quit, after)
 
     @property
     def shown(self) -> ChoiceScreen | None:
@@ -68,58 +39,17 @@ class LinkHost:
         open."""
         return self._slot.showing
 
-    def follow(self, state: LinkState, now: float) -> None:
-        """Show ``state``, the link's, as of ``now``, a ``time.monotonic()`` reading."""
-        match state:
-            case Connected():
-                self._connected()
-            case Reconnecting(url=url, since=since):
-                self._reconnecting(url, lost_delay(since, now))
-            case Stopped(url=url):
-                self._ask(STOPPED_TITLE, stopped_message(url))
-            case TokenRefused() | HandshakeFailed() | Ended():
-                self._final(*final_notice(state))
-            case _:
-                assert_never(state)
+    @property
+    def modal_open(self) -> bool:
+        return self.shown is not None
 
-    def _connected(self) -> None:
-        """Hide the status line and stop waiting to ask, closing the modal if it's open."""
-        self._show_status(None)
-        self._stop_timer()
-        self._slot.close(0)
+    def show_status(self, status: str | None) -> None:
+        self._show_status(status)
 
-    def _reconnecting(self, url: str, delay: float) -> None:
-        """Show that the link to ``url`` is being retried, asking whether to keep trying in
-        ``delay`` seconds unless that's already due."""
-        self._show_status(reconnecting_status(url))
-        if self._timer is None:
-            ask = lambda: self._ask(lost_title(url), lost_message(url))  # noqa: E731
-            self._timer = self._after(max(delay, _SOONEST), ask)
+    def open_modal(
+        self, title: str, message: str, choices: tuple[str, ...], closed: Closed
+    ) -> None:
+        self._slot.open(_link_screen(title, message, choices), closed)
 
-    def _final(self, title: str, message: str) -> None:
-        """Show ``title`` with ``message``, saying why the link won't be retried, quitting once
-        it's closed, in place of any modal open."""
-        self._show_status(None)
-        self._stop_timer()
-        self._slot.close(None)
-        self._slot.open(_link_screen(title, message, (QUIT,)), self._quit_now)
-
-    def _ask(self, title: str, message: str) -> None:
-        """Ask ``title`` with ``message`` whether to keep trying, unless that's being asked."""
-        if self.shown is not None:
-            return
-        self._slot.open(_link_screen(title, message, CHOICES), self._answered)
-
-    async def _answered(self, index: int | None) -> None:
-        """Quit if the choice at ``index`` is to."""
-        if index is not None and CHOICES[index] == QUIT:
-            self._quit()
-
-    async def _quit_now(self, _: int | None) -> None:
-        """Quit, whatever was picked."""
-        self._quit()
-
-    def _stop_timer(self) -> None:
-        if self._timer is not None:
-            self._timer.stop()
-            self._timer = None
+    def close_modal(self, result: int | None) -> None:
+        self._slot.close(result)

@@ -39,12 +39,10 @@ from orbit.protocol import (
     LinkState,
     RemoveTask,
     ResetConversation,
-    ResumeStorage,
     RunTasks,
     SendMessage,
     Session,
     Settings,
-    TakeOwnership,
     TaskSpec,
     UpdateSettings,
 )
@@ -56,7 +54,6 @@ from orbit.tui.detail import DetailPane
 from orbit.tui.event_router import AppHooks, EventRouter, Handlers, Panes
 from orbit.tui.event_stream import event_batches
 from orbit.tui.footer import KeyFooter
-from orbit.tui.history import HistoryPager
 from orbit.tui.link import LinkHost
 from orbit.tui.opening import Hosts, Opening, OpeningHost
 from orbit.tui.panels import UsagePanel, VerificationPanel
@@ -83,6 +80,7 @@ from orbit.tui.view.confirm import (
 from orbit.tui.view.events import (
     coalesce,
 )
+from orbit.tui.view.history import HistoryPager
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.proposals import decision_entry
 from orbit.tui.view.sessions import chosen_workspace
@@ -194,15 +192,12 @@ class OrbitApp(App[None], inherit_bindings=False):
         )
         # The feed shows answers once mounted, before any event arrives.
         self._desk = CommandDesk(session.send, self._render_event, lambda e: self._feed.render(e))
-        self._takeover = TakeoverHost(
-            self.push_screen,
-            lambda take, awaited: self._send(TakeOwnership(take=take), awaited),
-        )
+        self._takeover = TakeoverHost(self.push_screen, self._send).offer
         # The lines by the prompt, built here so their hosts can show statuses on them.
         self._halt_status = StatusLine(id="storage-halt", classes="error")
         self._link_status = StatusLine(id="link-status")
         self._viewing = StatusLine(id="viewing")
-        self._halt = StorageHaltHost(self.push_screen, self._resume_storage, self._halt_status.show)
+        self._halt = StorageHaltHost(self.push_screen, self._send, self._halt_status.show).halt
         self._link_host = LinkHost(
             self.push_screen, self.exit, self._link_status.show, self.set_timer
         )
@@ -606,12 +601,8 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _render_event(self, event: Event) -> None:
         self._router.render(event)
 
-    async def _resume_storage(self) -> None:
-        # Trying again lifts the halt once accepted; only the latest try counts.
-        await self._send(ResumeStorage(), Awaited(accepted=self._halt.lifted, supersedes=True))
-
     def _follow_link(self, state: LinkState) -> None:
-        self._link_host.follow(state, self.clock())
+        self._link_host.monitor.follow(state, self.clock())
         if isinstance(state, Connected):
             self._workspaces.reconnected()
 

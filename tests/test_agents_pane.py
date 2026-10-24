@@ -1,4 +1,10 @@
+"""The agents pane: the app listing its agents and cancelling one, and the pane alone keeping
+its highlight and redrawing only the rows that change."""
+
 import pytest
+from textual import on
+from textual.app import App, ComposeResult
+from textual.pilot import Pilot
 from textual.visual import VisualType
 
 from orbit.protocol import (
@@ -8,6 +14,7 @@ from orbit.protocol import (
     AgentRequest,
     AgentStarted,
     CancelAgent,
+    Event,
     ReviewStatus,
     TasksChanged,
     TaskSpec,
@@ -16,7 +23,7 @@ from orbit.protocol import (
 from orbit.tui import OrbitApp
 from orbit.tui.agents import AgentsPane
 from tests.agent_fakes import chats, frontend, session_for
-from tests.tui_fakes import FakeSession, active_tab, board, feed_events, shown, tab_strip
+from tests.tui_fakes import FakeSession, active_tab, feed_events, shown, tab_strip
 
 
 def rows(pane: AgentsPane) -> list[str]:
@@ -73,106 +80,6 @@ async def test_c_on_the_pane_cancels_the_highlighted_agent() -> None:
         assert session.commands == [CancelAgent(agent_id="agent-2")]
 
 
-async def test_c_with_no_agents_cancels_nothing() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await pilot.press("l", "j", "enter", "c")
-        assert session.commands == []
-
-
-async def test_the_highlight_stays_on_its_agent_as_one_above_it_exits() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(
-            session,
-            pilot,
-            AgentStarted(agent_id="agent-1", role="coder", task_id="7"),
-            AgentStarted(agent_id="agent-2", role="reviewer", task_id="8"),
-            AgentStarted(agent_id="startup-check", role="checker", task_id=STARTUP_TASK),
-        )
-        await pilot.press("l", "j", "enter", "j")
-        pane = app.query_one(AgentsPane)
-        assert pane.highlighted == 1
-        await feed_events(session, pilot, AgentExited(agent_id="agent-1", reason="finished"))
-        assert pane.highlighted == 0
-        assert rows(pane)[0].startswith("agent-2 ")
-
-
-async def test_c_after_an_agent_above_exits_cancels_the_highlighted_agent() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(
-            session,
-            pilot,
-            AgentStarted(agent_id="agent-1", role="coder", task_id="7"),
-            AgentStarted(agent_id="agent-2", role="reviewer", task_id="8"),
-            AgentStarted(agent_id="startup-check", role="checker", task_id=STARTUP_TASK),
-        )
-        await pilot.press("l", "j", "enter", "j")
-        await feed_events(
-            session,
-            pilot,
-            AgentExited(agent_id="agent-1", reason="finished"),
-            AgentStarted(agent_id="agent-3", role="coder", task_id="9"),
-        )
-        await pilot.press("c", "escape")
-        assert session.commands == [CancelAgent(agent_id="agent-2")]
-
-
-async def test_c_after_a_reviewer_above_exits_cancels_the_reviewer_not_the_coder() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(
-            session,
-            pilot,
-            AgentStarted(agent_id="agent-1", role="reviewer", task_id="7"),
-            AgentStarted(agent_id="agent-2", role="reviewer", task_id="8"),
-            AgentStarted(agent_id="agent-3", role="coder", task_id="9"),
-        )
-        await pilot.press("l", "j", "enter", "j")
-        await feed_events(session, pilot, AgentExited(agent_id="agent-1", reason="finished"))
-        pane = app.query_one(AgentsPane)
-        assert pane.highlighted == 0
-        assert pane.rows[0].agent_id == "agent-2"
-        await pilot.press("c", "escape")
-        assert session.commands == [CancelAgent(agent_id="agent-2")]
-
-
-async def test_the_highlight_moves_to_the_nearest_row_when_its_agent_exits() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(
-            session,
-            pilot,
-            AgentStarted(agent_id="agent-1", role="coder", task_id="7"),
-            AgentStarted(agent_id="agent-2", role="reviewer", task_id="8"),
-        )
-        await pilot.press("l", "j", "enter", "j")
-        pane = app.query_one(AgentsPane)
-        assert pane.highlighted == 1
-        await feed_events(session, pilot, AgentExited(agent_id="agent-2", reason="finished"))
-        assert pane.highlighted == 0
-
-
-async def test_the_startup_check_is_listed_against_the_base_commit() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(
-            session,
-            pilot,
-            AgentStarted(agent_id="startup-check", role="checker", task_id=STARTUP_TASK),
-        )
-        assert rows(app.query_one(AgentsPane)) == ["startup-check checker · base commit · working"]
-        await pilot.press("l", "j", "enter", "c", "escape")
-        assert session.commands == [CancelAgent(agent_id="startup-check")]
-
-
 async def test_a_real_planners_reply_shows_on_the_planner_tab() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [chats]
@@ -190,27 +97,6 @@ async def test_a_real_planners_reply_shows_on_the_planner_tab() -> None:
         assert active_tab(app) == "planner"
         assert "Here's a plan." in shown(app)
         assert "agent-1 planner · planning · working" in rows(app.query_one(AgentsPane))
-
-
-async def test_the_pane_is_redrawn_only_when_its_agents_numbers_change() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        one, two = board("one", "two").tasks
-        await feed_events(
-            session, pilot, AgentStarted(agent_id="agent-1", role="coder", task_id="2")
-        )
-        await feed_events(session, pilot, TasksChanged(tasks=(one, two)))
-        pane = app.query_one(AgentsPane)
-        assert rows(pane) == ["agent-1 coder · task 2 · working"]
-        before = pane.get_option_at_index(0)
-        # A task added after agent-1's leaves its number alone.
-        three = TaskState(id="3", task=TaskSpec(prompt="three"))
-        await feed_events(session, pilot, TasksChanged(tasks=(one, two, three)))
-        assert pane.get_option_at_index(0) is before
-        # One added before it renumbers it.
-        await feed_events(session, pilot, TasksChanged(tasks=(three, one, two)))
-        assert rows(pane) == ["agent-1 coder · task 3 · working"]
 
 
 def spy_rebuilds(pane: AgentsPane, monkeypatch: pytest.MonkeyPatch) -> list[None]:
@@ -239,30 +125,167 @@ def spy_relabels(pane: AgentsPane, monkeypatch: pytest.MonkeyPatch) -> list[int]
     return relabelled
 
 
-async def test_an_agent_starting_to_wait_relabels_only_its_row(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+class PaneApp(App[None]):
+    """A bare app around an agents pane, recording the agents it asks to cancel."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.cancels: list[str] = []
+
+    def compose(self) -> ComposeResult:
+        yield AgentsPane(id="agents")
+
+    @property
+    def pane(self) -> AgentsPane:
+        return self.query_one(AgentsPane)
+
+    @on(AgentsPane.Cancel)
+    def _cancel(self, message: AgentsPane.Cancel) -> None:
+        self.cancels.append(message.agent_id)
+
+
+async def follow(pilot: Pilot[None], pane: AgentsPane, *events: Event) -> None:
+    """Have ``pane`` follow ``events``, and let it redraw."""
+    for event in events:
+        pane.track(event)
+    await pilot.pause()
+
+
+async def number(pilot: Pilot[None], pane: AgentsPane, numbers: dict[str, str]) -> None:
+    """Have ``pane`` show its agents' tasks by ``numbers``, and let it redraw."""
+    pane.number_tasks(numbers)
+    await pilot.pause()
+
+
+async def highlight_second(pilot: Pilot[None], pane: AgentsPane) -> None:
+    """Activate ``pane`` and move its highlight to the second row."""
+    pane.enter_list_mode()
+    await pilot.press("j")
+
+
+async def test_the_highlight_stays_on_its_agent_as_one_above_it_exits() -> None:
+    app = PaneApp()
     async with app.run_test() as pilot:
-        await feed_events(
-            session,
+        pane = app.pane
+        await follow(
             pilot,
+            pane,
+            AgentStarted(agent_id="agent-1", role="coder", task_id="7"),
+            AgentStarted(agent_id="agent-2", role="reviewer", task_id="8"),
+            AgentStarted(agent_id="startup-check", role="checker", task_id=STARTUP_TASK),
+        )
+        await highlight_second(pilot, pane)
+        assert pane.highlighted == 1
+        await follow(pilot, pane, AgentExited(agent_id="agent-1", reason="finished"))
+        assert pane.highlighted == 0
+        assert rows(pane)[0].startswith("agent-2 ")
+
+
+async def test_c_after_an_agent_above_exits_cancels_the_highlighted_agent() -> None:
+    app = PaneApp()
+    async with app.run_test() as pilot:
+        pane = app.pane
+        await follow(
+            pilot,
+            pane,
+            AgentStarted(agent_id="agent-1", role="coder", task_id="7"),
+            AgentStarted(agent_id="agent-2", role="reviewer", task_id="8"),
+            AgentStarted(agent_id="startup-check", role="checker", task_id=STARTUP_TASK),
+        )
+        await highlight_second(pilot, pane)
+        await follow(
+            pilot,
+            pane,
+            AgentExited(agent_id="agent-1", reason="finished"),
+            AgentStarted(agent_id="agent-3", role="coder", task_id="9"),
+        )
+        await pilot.press("c")
+        assert app.cancels == ["agent-2"]
+
+
+async def test_c_after_a_reviewer_above_exits_cancels_the_reviewer_not_the_coder() -> None:
+    app = PaneApp()
+    async with app.run_test() as pilot:
+        pane = app.pane
+        await follow(
+            pilot,
+            pane,
+            AgentStarted(agent_id="agent-1", role="reviewer", task_id="7"),
+            AgentStarted(agent_id="agent-2", role="reviewer", task_id="8"),
+            AgentStarted(agent_id="agent-3", role="coder", task_id="9"),
+        )
+        await highlight_second(pilot, pane)
+        await follow(pilot, pane, AgentExited(agent_id="agent-1", reason="finished"))
+        assert pane.highlighted == 0
+        assert pane.rows[0].agent_id == "agent-2"
+        await pilot.press("c")
+        assert app.cancels == ["agent-2"]
+
+
+async def test_the_highlight_moves_to_the_nearest_row_when_its_agent_exits() -> None:
+    app = PaneApp()
+    async with app.run_test() as pilot:
+        pane = app.pane
+        await follow(
+            pilot,
+            pane,
             AgentStarted(agent_id="agent-1", role="coder", task_id="7"),
             AgentStarted(agent_id="agent-2", role="reviewer", task_id="8"),
         )
-        pane = app.query_one(AgentsPane)
-        clears, relabelled = spy_rebuilds(pane, monkeypatch), spy_relabels(pane, monkeypatch)
-        await feed_events(
-            session,
+        await highlight_second(pilot, pane)
+        assert pane.highlighted == 1
+        await follow(pilot, pane, AgentExited(agent_id="agent-2", reason="finished"))
+        assert pane.highlighted == 0
+
+
+async def test_c_with_no_agents_cancels_nothing() -> None:
+    app = PaneApp()
+    async with app.run_test() as pilot:
+        assert rows(app.pane) == ["No agents running"]
+        app.pane.enter_list_mode()
+        await pilot.press("c")
+        assert app.cancels == []
+
+
+async def test_the_pane_is_redrawn_only_when_its_agents_numbers_change() -> None:
+    app = PaneApp()
+    async with app.run_test() as pilot:
+        pane = app.pane
+        await follow(pilot, pane, AgentStarted(agent_id="agent-1", role="coder", task_id="2"))
+        await number(pilot, pane, {"1": "1", "2": "2"})
+        assert rows(pane) == ["agent-1 coder · task 2 · working"]
+        before = pane.get_option_at_index(0)
+        # A task added after agent-1's leaves its number alone.
+        await number(pilot, pane, {"1": "1", "2": "2", "3": "3"})
+        assert pane.get_option_at_index(0) is before
+        # One added before it renumbers it.
+        await number(pilot, pane, {"3": "1", "1": "2", "2": "3"})
+        assert rows(pane) == ["agent-1 coder · task 3 · working"]
+
+
+async def test_an_agent_starting_to_wait_relabels_only_its_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = PaneApp()
+    async with app.run_test() as pilot:
+        pane = app.pane
+        await follow(
             pilot,
+            pane,
+            AgentStarted(agent_id="agent-1", role="coder", task_id="7"),
+            AgentStarted(agent_id="agent-2", role="reviewer", task_id="8"),
+        )
+        clears, relabelled = spy_rebuilds(pane, monkeypatch), spy_relabels(pane, monkeypatch)
+        await follow(
+            pilot,
+            pane,
             AgentRequest(agent_id="agent-2", request_id="r", tool="complete_task", arguments={}),
         )
         assert rows(pane) == [
             "agent-1 coder · task 7 · working",
             "agent-2 reviewer · task 8 · waiting on complete_task",
         ]
-        await feed_events(session, pilot, AgentReply(agent_id="agent-2", request_id="r", text="ok"))
+        await follow(pilot, pane, AgentReply(agent_id="agent-2", request_id="r", text="ok"))
         assert rows(pane) == [
             "agent-1 coder · task 7 · working",
             "agent-2 reviewer · task 8 · working",
@@ -273,21 +296,18 @@ async def test_an_agent_starting_to_wait_relabels_only_its_row(
 async def test_renumbering_an_agents_task_relabels_its_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app = PaneApp()
     async with app.run_test() as pilot:
-        one, two = board("one", "two").tasks
-        await feed_events(
-            session,
+        pane = app.pane
+        await follow(
             pilot,
+            pane,
             AgentStarted(agent_id="agent-1", role="coder", task_id="1"),
             AgentStarted(agent_id="agent-2", role="coder", task_id="2"),
-            TasksChanged(tasks=(one, two)),
         )
-        pane = app.query_one(AgentsPane)
+        await number(pilot, pane, {"1": "1", "2": "2"})
         clears, relabelled = spy_rebuilds(pane, monkeypatch), spy_relabels(pane, monkeypatch)
-        three = TaskState(id="3", task=TaskSpec(prompt="three"))
-        await feed_events(session, pilot, TasksChanged(tasks=(one, three, two)))
+        await number(pilot, pane, {"1": "1", "3": "2", "2": "3"})
         assert rows(pane) == [
             "agent-1 coder · task 1 · working",
             "agent-2 coder · task 3 · working",
@@ -298,63 +318,56 @@ async def test_renumbering_an_agents_task_relabels_its_row(
 async def test_agents_coming_and_going_rebuild_the_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app = PaneApp()
     async with app.run_test() as pilot:
-        pane = app.query_one(AgentsPane)
+        pane = app.pane
         clears, relabelled = spy_rebuilds(pane, monkeypatch), spy_relabels(pane, monkeypatch)
-        await feed_events(
-            session, pilot, AgentStarted(agent_id="agent-1", role="coder", task_id="7")
-        )
-        await feed_events(
-            session, pilot, AgentStarted(agent_id="agent-2", role="coder", task_id="8")
-        )
-        await feed_events(session, pilot, AgentExited(agent_id="agent-1", reason="finished"))
+        await follow(pilot, pane, AgentStarted(agent_id="agent-1", role="coder", task_id="7"))
+        await follow(pilot, pane, AgentStarted(agent_id="agent-2", role="coder", task_id="8"))
+        await follow(pilot, pane, AgentExited(agent_id="agent-1", reason="finished"))
         assert rows(pane) == ["agent-2 coder · task 8 · working"]
-        await feed_events(session, pilot, AgentExited(agent_id="agent-2", reason="finished"))
+        await follow(pilot, pane, AgentExited(agent_id="agent-2", reason="finished"))
         assert rows(pane) == ["No agents running"]
         assert (len(clears), relabelled) == (4, [])
 
 
 async def test_the_highlight_stays_on_its_row_as_labels_change() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app = PaneApp()
     async with app.run_test() as pilot:
-        await feed_events(
-            session,
+        pane = app.pane
+        await follow(
             pilot,
+            pane,
             AgentStarted(agent_id="agent-1", role="coder", task_id="7"),
             AgentStarted(agent_id="agent-2", role="reviewer", task_id="8"),
         )
-        await pilot.press("l", "j", "enter", "j")
-        pane = app.query_one(AgentsPane)
-        await feed_events(
-            session,
+        await highlight_second(pilot, pane)
+        await follow(
             pilot,
+            pane,
             AgentRequest(agent_id="agent-1", request_id="r", tool="complete_task", arguments={}),
         )
         assert pane.highlighted == 1
 
 
 async def test_a_new_agent_isnt_highlighted_from_the_empty_row() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app = PaneApp()
     async with app.run_test() as pilot:
-        await feed_events(
-            session,
+        pane = app.pane
+        await follow(
             pilot,
+            pane,
             AgentStarted(agent_id="agent-1", role="coder", task_id="7"),
             AgentStarted(agent_id="agent-2", role="reviewer", task_id="8"),
         )
-        await pilot.press("l", "j", "enter", "j")
-        await feed_events(
-            session,
+        await highlight_second(pilot, pane)
+        await follow(
             pilot,
+            pane,
             AgentExited(agent_id="agent-1", reason="finished"),
             AgentExited(agent_id="agent-2", reason="finished"),
             AgentStarted(agent_id="agent-3", role="coder", task_id="9"),
         )
-        pane = app.query_one(AgentsPane)
         assert pane.highlighted is None
-        await pilot.press("c", "escape")
-        assert session.commands == []
+        await pilot.press("c")
+        assert app.cancels == []

@@ -279,7 +279,7 @@ async def test_a_refused_delete_shows_why_under_the_list_and_nowhere_else() -> N
 
 async def test_a_delete_that_fails_to_send_shows_why_once_under_the_list() -> None:
     picked, view, backend = picker()
-    backend.failure = RuntimeError("the backend is gone")
+    backend.send_error = RuntimeError("the backend is gone")
     await picked.delete()
     await view.confirmed[0][3]()
     assert backend.commands == [DeleteSession(session_id="old")]

@@ -1,6 +1,8 @@
 """The agents pane."""
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
+from typing import Protocol
 
 from orbit.protocol import (
     PLAN_TASK,
@@ -106,3 +108,71 @@ def review_line(status: ReviewStatus | None) -> str:
     if status.paused:
         return "review: paused"
     return "review: active" + (f" · {status.open_batches} open" if status.open_batches else "")
+
+
+class AgentsView(Protocol):
+    """What shows the agents running, a row each, and the review line, and what the user
+    highlights there, as the widget keeps it."""
+
+    @property
+    def highlighted(self) -> int | None:
+        """The row highlighted, if any."""
+        ...
+
+    def list_agents(self, rows: Sequence[tuple[str, str]]) -> None:
+        """List ``rows``, each an agent's id and its line, or the empty row for none."""
+        ...
+
+    def show_review_line(self, line: str) -> None:
+        """Show ``line``, saying whether review is paused."""
+        ...
+
+    def ask_to_cancel(self, agent_id: str) -> None:
+        """Ask to cancel agent ``agent_id``'s work."""
+        ...
+
+
+class AgentsList:
+    """The agents running, shown in ``view`` a row each by what each is doing, its task by its
+    number in the task list, and whether review is paused; cancelling asks to cancel the
+    highlighted agent's work."""
+
+    def __init__(self, view: AgentsView) -> None:
+        self._view = view
+        self.rows: tuple[AgentRow, ...] = ()
+        self._numbers: Mapping[str, str] = {}
+
+    def show(self) -> None:
+        """Show the rows, the empty row when no agents are running."""
+        numbers = self._numbers
+        self._view.list_agents(
+            [(row.agent_id, agent_line(row, numbers.get(row.task_id))) for row in self.rows]
+        )
+
+    def track(self, event: Event) -> None:
+        """Follow the agents through ``event``, showing them again if they changed."""
+        rows = track_agents(self.rows, event)
+        if rows != self.rows:
+            self.rows = rows
+            self.show()
+
+    def number_tasks(self, numbers: Mapping[str, str]) -> None:
+        """Task ids' numbers in the task list, to show agents' tasks by; shows the agents again
+        only if one of their numbers changed."""
+        changed = self._shown_numbers(numbers) != self._shown_numbers(self._numbers)
+        self._numbers = numbers
+        if changed:
+            self.show()
+
+    def _shown_numbers(self, numbers: Mapping[str, str]) -> list[str | None]:
+        return [numbers.get(row.task_id) for row in self.rows]
+
+    def show_review(self, status: ReviewStatus | None) -> None:
+        """Show whether review is paused, as ``status`` says."""
+        self._view.show_review_line(review_line(status))
+
+    def cancel(self) -> None:
+        """Ask to cancel the highlighted agent's work, if an agent is highlighted."""
+        highlighted = self._view.highlighted
+        if highlighted is not None and highlighted < len(self.rows):
+            self._view.ask_to_cancel(self.rows[highlighted].agent_id)

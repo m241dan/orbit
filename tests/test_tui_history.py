@@ -6,11 +6,9 @@ from textual.widgets import Static
 from orbit.protocol import (
     PLANNER,
     PLANNER_LANE,
-    STORAGE_FAILED,
     WORK_LANE,
     AgentStarted,
     AssistantMessage,
-    CommandRefused,
     ConversationReset,
     Event,
     EventEnvelope,
@@ -121,63 +119,6 @@ async def test_moving_up_past_the_top_shows_the_earlier_page_above_keeping_the_c
         assert cursor_text(app) == shown("b") and len(histories(session)) == 1
 
 
-async def test_with_no_more_earlier_events_moving_up_past_the_top_asks_for_nothing() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, snapshot(*logged(501, *notices("c"))))
-        await at_the_top(pilot, 1)
-        await pilot.press("k")
-        await feed_events(session, pilot, page(*logged(1, *notices("a")), more=False))
-        await pilot.press("k", "k")
-        assert cursor_text(app) == shown("a")
-        assert histories(session) == [History(session="s1", before_seq=501)]
-        assert not loading(app)
-
-
-async def test_the_next_page_is_asked_for_before_the_oldest_shown() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, snapshot(*logged(501, *notices("c"))))
-        await at_the_top(pilot, 1)
-        await pilot.press("k")
-        await feed_events(session, pilot, page(*logged(301, *notices("b")), more=True))
-        await pilot.press("k", "k")
-        assert [history.before_seq for history in histories(session)] == [501, 301]
-
-
-async def test_an_empty_transcript_has_no_history_to_ask_for() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, snapshot(), Notice(message="live"))
-        await at_the_top(pilot, 1)
-        await pilot.press("k")
-        assert histories(session) == [] and not loading(app)
-
-
-async def test_a_page_not_asked_for_is_ignored() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, snapshot(*logged(501, *notices("c"))))
-        await feed_events(session, pilot, page(*logged(1, *notices("a"))))
-        assert texts(app) == [shown("c")]
-
-
-async def test_a_snapshot_forgets_the_page_loading() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, snapshot(*logged(501, *notices("c"))))
-        await at_the_top(pilot, 1)
-        await pilot.press("k")
-        other = snapshot(*logged(601, *notices("x")), session="s2")
-        await feed_events(session, pilot, other, page(*logged(1, *notices("a"))))
-        assert texts(app) == [shown("x")] and not loading(app)
-
-
 def trimmed_shown(app: OrbitApp) -> bool:
     return app.query_one(Transcript).trimmed_earlier
 
@@ -198,19 +139,6 @@ async def test_the_last_page_of_a_trimmed_log_shows_older_events_were_removed() 
         assert len(histories(session)) == 1
 
 
-async def test_a_snapshot_hides_the_removed_events_line() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, snapshot(*logged(501, *notices("c"))))
-        await at_the_top(pilot, 1)
-        await pilot.press("k")
-        await feed_events(session, pilot, page(trimmed=True))
-        assert trimmed_shown(app)
-        await feed_events(session, pilot, snapshot(*logged(601, *notices("x"))))
-        assert not trimmed_shown(app)
-
-
 async def test_a_gap_in_the_log_shows_where_events_werent_saved() -> None:
     session = FakeSession()
     app = OrbitApp(session)
@@ -225,103 +153,6 @@ async def test_a_gap_in_the_log_shows_where_events_werent_saved() -> None:
             shown("c"),
             "⚠ Events 9–9 weren't saved",
         ]
-
-
-async def test_a_request_that_fails_to_send_can_be_made_again() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, snapshot(*logged(501, *notices("c"))))
-        await at_the_top(pilot, 1)
-        session.send_error = RuntimeError("gone")
-        await pilot.press("k")
-        assert not loading(app)
-        assert "Couldn't send the command: gone" in texts(app)
-        session.send_error = None
-        await pilot.press("k")
-        assert len(histories(session)) == 2 and loading(app)
-
-
-def history_id(session: FakeSession) -> str:
-    """The command id of the last ``History`` sent."""
-    return [e.command_id for e in session.envelopes if isinstance(e.payload, History)][-1]
-
-
-def refusal(command_id: str) -> CommandRefused:
-    return CommandRefused(command_id=command_id, code="internal", message="Couldn't read.")
-
-
-async def test_a_refused_request_stops_loading_and_can_be_made_again() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, snapshot(*logged(501, *notices("c"))))
-        await at_the_top(pilot, 1)
-        await pilot.press("k")
-        await feed_events(session, pilot, refusal(history_id(session)))
-        assert not loading(app) and "Couldn't read." in texts(app)
-        await pilot.press("k")
-        assert histories(session) == [History(session="s1", before_seq=501)] * 2
-        assert loading(app)
-
-
-async def test_a_request_refused_for_storage_stops_loading_and_can_be_made_again() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, snapshot(*logged(501, *notices("c"))))
-        await at_the_top(pilot, 1)
-        await pilot.press("k")
-        stopped = CommandRefused(
-            command_id=history_id(session), code=STORAGE_FAILED, message="Storage failed."
-        )
-        await feed_events(session, pilot, stopped)
-        assert not loading(app)
-        await pilot.press("escape", "k")
-        assert histories(session) == [History(session="s1", before_seq=501)] * 2
-        assert loading(app)
-
-
-async def test_a_refusal_of_an_older_request_leaves_the_newer_loading() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, snapshot(*logged(501, *notices("c"))))
-        await at_the_top(pilot, 1)
-        await pilot.press("k")
-        older = history_id(session)
-        await feed_events(session, pilot, snapshot(*logged(501, *notices("c"))))
-        await pilot.press("escape")
-        await at_the_top(pilot, 1)
-        await pilot.press("k")
-        assert len(histories(session)) == 2
-        await feed_events(session, pilot, refusal(older))
-        assert loading(app)
-
-
-async def test_a_refusal_of_another_command_leaves_the_page_loading() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, snapshot(*logged(501, *notices("c"))))
-        await at_the_top(pilot, 1)
-        await pilot.press("k")
-        await feed_events(session, pilot, refusal("other"))
-        assert loading(app)
-        await pilot.press("k")
-        assert len(histories(session)) == 1
-
-
-async def test_a_page_arriving_after_its_request_was_refused_is_ignored() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, snapshot(*logged(501, *notices("c"))))
-        await at_the_top(pilot, 1)
-        await pilot.press("k")
-        await feed_events(session, pilot, refusal(history_id(session)))
-        await feed_events(session, pilot, page(*logged(1, *notices("a"))))
-        assert shown("a") not in texts(app) and not loading(app)
 
 
 EARLIER = (

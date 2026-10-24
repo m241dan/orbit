@@ -37,15 +37,12 @@ from orbit.tui.agents import AgentsPane
 from orbit.tui.catalog import CatalogState
 from orbit.tui.commands import CommandDesk
 from orbit.tui.conversation import ConversationFeed
-from orbit.tui.history import HistoryPager
 from orbit.tui.opening import OpeningHost
 from orbit.tui.panels import UsagePanel, VerificationPanel
 from orbit.tui.proposals import ProposalHost
 from orbit.tui.sessions import SessionsHost
 from orbit.tui.settings_pickers import SettingsPickers
-from orbit.tui.storage_halt import StorageHaltHost
 from orbit.tui.tabs import ConversationTabs
-from orbit.tui.takeover import TakeoverHost
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.view.events import (
@@ -60,7 +57,10 @@ from orbit.tui.view.events import (
     StateEvent,
     in_group,
 )
+from orbit.tui.view.history import HistoryPager
 from orbit.tui.view.rules import planner_reset_entry
+from orbit.tui.view.storage import StorageHalt
+from orbit.tui.view.takeover import TakeoverOffer
 from orbit.tui.view.triggers import trigger_key_labels
 from orbit.tui.widgets import ChatPrompt, StatusLine
 from orbit.tui.workspaces import WorkspacesHost
@@ -95,8 +95,8 @@ class Handlers:
     sessions: SessionsHost
     workspaces: WorkspacesHost
     opening: OpeningHost
-    halt: StorageHaltHost
-    takeover: TakeoverHost
+    halt: StorageHalt
+    takeover: TakeoverOffer
 
 
 @dataclass(frozen=True)
