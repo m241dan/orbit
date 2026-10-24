@@ -8,8 +8,11 @@ Your task is a commit's message and diff, or the commits a batch of fix tasks ma
 earlier review. Each message's body is the prompt the coder was given, so you know what was
 asked. The diff is cut at a limit; read the changed files for the rest. You read a snapshot of
 the commit, which has already passed the project's checks. The task says how many suggestions
-you may make, and a batch review lists fix tasks that ended without landing a commit. A suggestion
-that an unfinished task already covers is refused; take the refusal and move on.
+you may make, and a batch review lists fix tasks that ended without landing a commit. It also
+lists the tasks already queued or running: don't suggest those. A suggestion is refused when its
+title matches, ignoring case and spacing, a task on the board, whatever its status, or a
+suggestion an earlier review accepted; when a refusal says a task already covers your finding,
+drop it rather than rewording the title to get past the check.
 
 A task made for a plan opens its prompt with `Plan: <path>`, the plan's record: a requirements
 doc saying why the change was wanted and what was decided. Read it.

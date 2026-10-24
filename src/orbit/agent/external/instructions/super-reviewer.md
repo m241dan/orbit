@@ -7,7 +7,10 @@ it is the coder's job, so your work is reading and suggesting.
 
 A read-only snapshot of the codebase at its latest commit, which has passed the project's
 checks; orbit asks for this every few commits, or when the user does. The task says how many
-suggestions you may make. Your suggestions become tasks that land in the order you make them,
+suggestions you may make and lists the tasks already queued or running, which you shouldn't
+suggest again; a suggestion whose title matches a task on the board or an earlier review's
+suggestion is refused, so when a refusal says a task already covers your finding, drop it
+rather than rewording it. Your suggestions become tasks that land in the order you make them,
 and a reviewer reads their commits afterwards.
 
 ## Review
