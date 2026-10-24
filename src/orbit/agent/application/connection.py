@@ -244,7 +244,7 @@ class ConnectionParts:
 
 class SessionConnection:
     """A frontend's connection to the control plane, from ``parts``: a ``Session`` with its own
-    handshake and its own stream. It starts in the ``place`` its parts give, and :meth:`move`\s
+    handshake and its own stream. It starts in the ``place`` its parts give, and :meth:`move`\\s
     to the workspace its first ``Attach`` attaches it to.
 
     Once it's attached, the stream gets every event the workspace publishes of the session it
