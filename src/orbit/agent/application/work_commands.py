@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import assert_never
 
 from orbit.agent.application.desk import AgentDesk
-from orbit.agent.application.failures import unexpected
+from orbit.agent.application.failures import command_failure
 from orbit.agent.application.lanes import OPEN_GATE, SessionGate
 from orbit.agent.application.outbox import EventSink
 from orbit.agent.application.planner_seat import PlannerSeat
@@ -22,7 +22,6 @@ from orbit.agent.domain.catalog import CONVERSATIONAL_ROLES, LANES, TRIGGER_NAME
 from orbit.agent.domain.refusals import Refused, unknown
 from orbit.protocol import (
     CONFIGURE_CHECKS,
-    INTERNAL,
     INVALID,
     NOT_CONFIGURED,
     PLANNER,
@@ -152,12 +151,9 @@ class WorkCommands:
         try:
             await self._dispatch(command, command_id)
             return
-        except Refused as refusal:
-            error = ErrorOccurred(code=refusal.code, message=refusal.message)
         except Exception as exc:
-            message = unexpected(f"Orbit failed to handle {type(command).__name__}: {exc}", exc)
-            error = ErrorOccurred(code=INTERNAL, message=message)
-        await self._parts.events.put(error)
+            code, message = command_failure(command, exc)
+        await self._parts.events.put(ErrorOccurred(code=code, message=message))
 
     def _check(self, command: QueuedWork) -> None:
         """Refuse ``command`` as running it would, for what doesn't change with ownership."""

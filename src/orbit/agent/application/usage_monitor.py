@@ -7,6 +7,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from datetime import UTC, datetime
 
+from orbit.agent.application.failures import unexpected
 from orbit.agent.application.lanes import Background
 from orbit.agent.application.ports import Publish, UsageSource
 from orbit.agent.domain.usage import (
@@ -95,6 +96,7 @@ class UsageMonitor:
         try:
             outcome = await self._source()
         except Exception as exc:  # A bug in the source mustn't stop the monitor.
+            unexpected(f"Orbit failed to fetch the usage: {exc}", exc)
             outcome = UsageUnavailable(str(exc) or "error")
         finally:
             self._fetching = False

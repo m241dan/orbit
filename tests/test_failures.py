@@ -4,9 +4,10 @@ import logging
 
 import pytest
 
-from orbit.agent.application.failures import ReportedOnce, outcome, unexpected
+from orbit.agent.application.failures import ReportedOnce, command_failure, outcome, unexpected
 from orbit.agent.application.ports import ReadFailed, StoreFailed
-from orbit.protocol import INTERNAL, SAVE_FAILED, ErrorOccurred, Event
+from orbit.agent.domain.refusals import Refused
+from orbit.protocol import BUSY, INTERNAL, SAVE_FAILED, ErrorOccurred, Event, RunTasks
 from tests.agent_fakes import FakeStore
 
 
@@ -109,3 +110,21 @@ def test_an_unexpected_error_is_logged_with_its_traceback(
     assert record.getMessage() == "Orbit failed to handle X: 100% a bug"
     assert record.exc_info is not None and record.exc_info[1] is exc
     assert "Traceback" in caplog.text
+
+
+def test_a_refused_command_fails_with_the_refusals_code_and_message() -> None:
+    refusal = Refused(BUSY, "A turn is running.")
+
+    assert command_failure(RunTasks(), refusal) == (BUSY, "A turn is running.")
+
+
+def test_a_command_that_raises_fails_as_internal_naming_it(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    exc = raised()
+    with caplog.at_level(logging.ERROR):
+        failure = command_failure(RunTasks(), exc)
+
+    message = "Orbit failed to handle RunTasks: a bug"
+    assert failure == (INTERNAL, message)
+    assert caplog.records[0].exc_info is not None and caplog.records[0].exc_info[1] is exc

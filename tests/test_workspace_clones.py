@@ -3,6 +3,7 @@ the background, telling every connection of git's progress and any failure, then
 clone, managed, as one added by its path."""
 
 import asyncio
+import logging
 
 import pytest
 
@@ -25,6 +26,7 @@ from orbit.protocol import (
     EventEnvelope,
     WorkspaceCloning,
 )
+from tests.agent_fakes import logged_with_traceback
 from tests.connection_helpers import joined, say, taken
 from tests.plane_fakes import FakeSource, ids, payloads, refused, welcomed, workspace
 
@@ -169,6 +171,29 @@ async def test_a_clone_whose_serving_fails_is_told_as_internal() -> None:
     assert error == ErrorOccurred(code=INTERNAL, message=message, url=URL)
     assert source.flags == [("proj.git", False)]
     assert source.removed == ["/clones/proj.git"]
+
+
+async def test_a_clone_whose_serving_fails_is_logged_with_its_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class Broken(WorkspaceHost):
+        async def open_latest(self) -> None:
+            raise RuntimeError("The store is gone.")
+
+    class BrokenSource(FakeSource):
+        def make(self, name: str) -> WorkspaceHost:
+            return Broken(workspace=f"/clones/{name}", workspace_id=name)
+
+    plane = ControlPlane(workspaces=BrokenSource())
+    connection = await welcomed(plane)
+
+    with caplog.at_level(logging.ERROR):
+        await say(connection, "add", AddWorkspace(url=URL))
+        await received_until(connection, ErrorOccurred)
+    await plane.close()
+
+    message = f"Couldn't clone {URL}: Orbit failed to serve the clone: The store is gone."
+    assert logged_with_traceback(caplog.records, message)
 
 
 async def test_a_url_being_cloned_already_is_refused_as_busy() -> None:

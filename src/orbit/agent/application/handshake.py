@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 
 from orbit import __version__
+from orbit.agent.application.failures import unexpected
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import (
     INCOMPATIBLE,
@@ -237,7 +238,7 @@ class Handshake:
         try:
             await step()
         except Exception as exc:  # Attach has its outcome; this mustn't be a second.
-            message = f"Orbit failed to finish greeting the frontend: {exc}"
+            message = unexpected(f"Orbit failed to finish greeting the frontend: {exc}", exc)
             await self._greet(ErrorOccurred(code=INTERNAL, message=message))
 
     async def _publish_usage(self) -> None:

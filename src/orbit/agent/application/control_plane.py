@@ -21,7 +21,7 @@ from orbit.agent.application.connection import (
     SessionConnection,
 )
 from orbit.agent.application.control_stream import ControlStream
-from orbit.agent.application.failures import unexpected
+from orbit.agent.application.failures import command_failure, unexpected
 from orbit.agent.application.handshake import HandshakeParts
 from orbit.agent.application.keeper import Clock, local_now
 from orbit.agent.application.outbox import Seqs
@@ -46,7 +46,6 @@ from orbit.agent.domain.workspaces import (
     served_workspace,
 )
 from orbit.protocol import (
-    INTERNAL,
     INVALID,
     AddWorkspace,
     Attach,
@@ -418,14 +417,9 @@ class ControlPlane:
                 return
             connection.handshake.admit()
             await self._route(envelope, connection)
-        except Refused as refusal:
-            await publish(
-                CommandRefused(command_id=command_id, code=refusal.code, message=str(refusal))
-            )
-            return
         except Exception as exc:  # A bug in one handler mustn't leave its command unanswered.
-            message = unexpected(f"Orbit failed to handle {type(command).__name__}: {exc}", exc)
-            await publish(CommandRefused(command_id=command_id, code=INTERNAL, message=message))
+            code, message = command_failure(command, exc)
+            await publish(CommandRefused(command_id=command_id, code=code, message=message))
             return
         await publish(CommandAccepted(command_id=command_id))
 

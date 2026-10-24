@@ -250,8 +250,8 @@ class SessionKeeper:
         renaming, self._renaming = self._renaming, None
         try:
             renamed = await self._rename(renaming)
-        except Refused as refused:
-            await self._publish(ErrorOccurred(code=refused.code, message=refused.message))
+        except Refused as refusal:
+            await self._publish(ErrorOccurred(code=refusal.code, message=refusal.message))
             return None
         if renamed is False:
             self._renaming = renaming

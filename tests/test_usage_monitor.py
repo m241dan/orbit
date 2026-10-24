@@ -1,6 +1,7 @@
 """The usage monitor: fetches the usage limits on a schedule and publishes them."""
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
@@ -12,7 +13,15 @@ from orbit.agent.application import usage_monitor
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.domain.usage import UsageFetch, UsageRateLimited, UsageReport, UsageUnavailable
 from orbit.protocol import Event, TurnFinished, UsageChanged, UsageLimit
-from tests.agent_fakes import LIMITS, Source, host_of, payloads, publish, served
+from tests.agent_fakes import (
+    LIMITS,
+    Source,
+    host_of,
+    logged_with_traceback,
+    payloads,
+    publish,
+    served,
+)
 
 NOW = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
 LATER = (UsageLimit(label="Session", percent=60.0),)
@@ -84,6 +93,19 @@ async def test_a_source_that_raises_is_unavailable_and_the_loop_carries_on() -> 
         UsageChanged(limits=LIMITS),
     ]
     await watched.monitor.close()
+
+
+@pytest.mark.usefixtures("no_delay")
+async def test_a_source_that_raises_is_logged_with_its_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    watched = Monitored(Source(RuntimeError("boom"), UsageReport(LIMITS)))
+    with caplog.at_level(logging.ERROR):
+        watched.monitor.start()
+        await watched.next()
+    await watched.monitor.close()
+
+    assert logged_with_traceback(caplog.records, "Orbit failed to fetch the usage: boom")
 
 
 async def test_a_nudge_fetches_again_once_a_refresh_is_due() -> None:

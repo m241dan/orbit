@@ -2,6 +2,9 @@
 the control plane, then the first Attach, answered with the session."""
 
 import asyncio
+import logging
+
+import pytest
 
 from orbit import __version__
 from orbit.agent import Verification, WorkspaceHost
@@ -48,6 +51,7 @@ from tests.agent_fakes import (
     events_until,
     frontend,
     greet,
+    logged_with_traceback,
     nothing_queued,
     of_type,
     queued,
@@ -277,3 +281,18 @@ async def test_an_attach_whose_leftovers_fail_is_accepted_once_and_reports_an_er
     ]
     assert ErrorOccurred(code=INTERNAL, message=message) in events
     assert accepted[-1] == CommandAccepted(command_id="add")
+
+
+async def test_a_greeting_step_that_fails_is_logged_with_its_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    tree = FakeTree()
+    tree.failures["leftovers"] = RuntimeError("git stash list failed")
+    session, _, _ = session_for(tree=tree)
+    with caplog.at_level(logging.ERROR):
+        await greet(session)
+        await events_until(session, of_type(ErrorOccurred))
+    await session.close()
+
+    message = "Orbit failed to finish greeting the frontend: git stash list failed"
+    assert logged_with_traceback(caplog.records, message)
