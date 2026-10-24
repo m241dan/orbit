@@ -429,9 +429,10 @@ async def _view(store: SqliteStore, root: Path, *, owned: bool, opening: Opening
         registry = WorkspaceRegistry(store)
         if opening.managed:
             await registry.set_managed(workspace_id)
+        registered = await registry.workspace(workspace_id)
+        # Flagged last, so a later failure can't leave served a workspace whose add failed.
         if opening.flag:
             await _flagged(registry, workspace_id, root)
-        registered = await registry.workspace(workspace_id)
     return replace(opened, managed=registered is not None and registered.managed)
 
 

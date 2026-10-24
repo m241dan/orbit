@@ -847,6 +847,47 @@ async def test_an_add_cancelled_as_it_flags_served_whose_unflagging_fails_is_sti
     assert free(root) and source.locks == ()
 
 
+async def test_an_add_whose_registry_read_fails_leaves_the_workspace_unflagged_and_free(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = directory(tmp_path)
+
+    async def fails(self: WorkspaceRegistry, workspace_id: str) -> None:
+        raise StoreError("The store failed.")
+
+    monkeypatch.setattr(WorkspaceRegistry, "workspace", fails)
+    source = workspaces(stack, store)
+
+    with pytest.raises(WorkspaceUnavailable) as refused:
+        await source.open(str(root))
+
+    assert refused.value.code == INTERNAL
+    assert free(root) and source.locks == ()
+    assert await WorkspaceRegistry(store).served() == []
+
+
+async def test_an_add_cancelled_as_it_reads_the_registry_leaves_the_workspace_unflagged_and_free(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = directory(tmp_path)
+    reading = asyncio.Event()
+
+    async def waits(self: WorkspaceRegistry, workspace_id: str) -> None:
+        reading.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(WorkspaceRegistry, "workspace", waits)
+    source = workspaces(stack, store)
+    opening = asyncio.create_task(source.open(str(root)))
+    await reading.wait()
+    opening.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await opening
+    assert free(root) and source.locks == ()
+    assert await WorkspaceRegistry(store).served() == []
+
+
 async def opened_as_the_server_starts(
     source: ServedWorkspaces, root: Path, gate: threading.Event, url: str
 ) -> WorkspaceHost:
