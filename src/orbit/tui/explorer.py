@@ -1,6 +1,6 @@
 """The explorer over the server host's directories, opened from the workspace picker."""
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import ClassVar
 
 from textual import on
@@ -10,7 +10,6 @@ from textual.containers import Vertical
 from textual.widgets import Input, OptionList, Static
 
 from orbit.protocol import AddWorkspace, DirectoryEntry, DirectoryListing, ListDirectory
-from orbit.tui.view.common import kept_highlight
 from orbit.tui.view.explorer import (
     EXPLORER_HINT,
     FIELD_HINT,
@@ -73,7 +72,6 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
     ExplorerScreen OptionList { height: 1fr; border: none; }
     ExplorerScreen Input { border: round $secondary; }
     ExplorerScreen Input:focus { border: heavy $accent; }
-    ExplorerScreen #explorer-note { color: $error; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("l", "into", show=False),
@@ -108,9 +106,7 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
             more = Static("", id="explorer-more")
             more.display = False
             yield more
-            note = Static("", id="explorer-note")
-            note.display = False
-            yield note
+            yield self._note_line()
 
     async def on_mount(self) -> None:
         await self._list(None)
@@ -120,12 +116,6 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
         """The directories shown, in order."""
         entries = () if self.listing is None else self.listing.entries
         return shown_entries(entries, self.hidden)
-
-    @property
-    def note(self) -> str | None:
-        """Why listing or adding was refused, while that's shown."""
-        note = self.query_one("#explorer-note", Static)
-        return str(note.render()) if note.display else None
 
     async def _list(self, path: str | None) -> None:
         """Ask for the listing of the directory at ``path``, or the starting one for none."""
@@ -169,26 +159,24 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
         shown = self.query_one("#explorer-more", Static)
         shown.update(more or "")
         shown.display = more is not None
-        self._relist(0)
+        self.query_one(OptionList).highlighted = None  # A new listing starts at its top.
+        self._relist_entries(())
 
-    def _relist(self, highlighted: int | None) -> None:
-        """List the directories shown, highlighting the row at ``highlighted``."""
+    def _relist_entries(self, shown: Sequence[str]) -> None:
+        """List the directories shown in place of those named ``shown``, keeping the highlight
+        on its directory, or where it was if that one's gone, or else on the first."""
+        entries = self.entries
+        names = [entry.name for entry in entries]
+        self._relist(shown, names, [entry_label(entry) for entry in entries])
         options = self.query_one(OptionList)
-        options.clear_options()
-        options.add_options([entry_label(entry) for entry in self.entries])
-        options.highlighted = highlighted if self.entries else None
+        if options.highlighted is None and entries:
+            options.highlighted = 0
 
     def _unlisted(self, why: str) -> None:
         """Show ``why`` the listing last asked for was refused, keeping the one shown."""
         self._waiting = False
         self._held = None
         self._refused(why)
-
-    def _refused(self, why: str) -> None:
-        """Show ``why`` listing or adding was refused under the listing, which stays; nothing
-        once this screen is gone."""
-        if self.is_attached:
-            self._show_note(why)
 
     @property
     def _highlighted(self) -> DirectoryEntry | None:
@@ -237,10 +225,8 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
     def action_hidden(self) -> None:
         """Show hidden directories, or hide them, keeping the highlight on its directory."""
         shown = [entry.name for entry in self.entries]
-        highlighted = self.query_one(OptionList).highlighted
         self.hidden = not self.hidden
-        kept = kept_highlight(shown, highlighted, [entry.name for entry in self.entries])
-        self._relist(kept or 0)
+        self._relist_entries(shown)
 
     def action_back(self) -> None:
         self.dismiss(None)
@@ -299,9 +285,3 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
         is gone."""
         if self.is_attached:
             self.query_one(ExplorerField).border_subtitle = why
-
-    def _show_note(self, note: str | None) -> None:
-        """Show ``note`` under the listing, or hide it while it's none."""
-        shown = self.query_one("#explorer-note", Static)
-        shown.update(note or "")
-        shown.display = note is not None

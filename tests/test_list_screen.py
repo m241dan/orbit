@@ -7,7 +7,14 @@ from textual.color import Color
 from textual.containers import Vertical
 from textual.widgets import Input, OptionList, Static
 
-from orbit.protocol import SessionSummary
+from orbit.protocol import (
+    AddWorkspace,
+    DirectoryEntry,
+    DirectoryListing,
+    ListDirectory,
+    SessionSummary,
+)
+from orbit.tui.explorer import ExplorerScreen
 from orbit.tui.sessions import SessionChange, SessionsScreen
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.sessions import Viewing
@@ -52,6 +59,59 @@ async def test_j_and_k_type_in_the_session_name_box() -> None:
         await pilot.press("j", "j", "enter", "j", "k")  # Onto New session, then name it.
         assert screen.query_one(Input).value == "jk"
         assert screen.query_one(OptionList).highlighted == 2
+
+
+class RefusingOne:
+    """Sends commands to nowhere, refusing the one numbered ``refused``, from 1, as ``no`` and
+    leaving the rest unanswered."""
+
+    def __init__(self, refused: int) -> None:
+        self.refused = refused
+        self.sent: list[object] = []
+
+    async def __call__(
+        self, command: SessionChange | ListDirectory | AddWorkspace, awaited: Awaited
+    ) -> None:
+        self.sent.append(command)
+        if len(self.sent) == self.refused and awaited.why is not None:
+            awaited.why("no")
+
+
+def note_colour(screen: ListScreen[Any]) -> str:
+    """The hex colour of the note under ``screen``'s list."""
+    return screen.query_one("#picker-note", Static).styles.color.hex
+
+
+async def test_a_refused_rename_shows_under_the_list_as_an_error_until_the_next() -> None:
+    manage = RefusingOne(1)
+    screen = SessionsScreen(SESSIONS, Viewing(workspace="w", attached=None), manage)
+    app: App[None] = App()
+    async with app.run_test() as pilot:
+        app.push_screen(screen)
+        await pilot.pause()
+        await pilot.press("r", "x", "enter")
+        assert screen.note == "no"
+        assert note_colour(screen) == Color.parse(app.get_css_variables()["error"]).hex
+        await pilot.press("r", "y", "enter")
+        assert screen.note is None and len(manage.sent) == 2
+
+
+async def test_a_refused_listing_shows_under_the_explorers_list_as_an_error_until_the_next() -> (
+    None
+):
+    browse = RefusingOne(2)
+    screen = ExplorerScreen(browse)
+    app: App[None] = App()
+    async with app.run_test() as pilot:
+        app.push_screen(screen)
+        await pilot.pause()
+        docs = DirectoryEntry(name="docs", is_repository=False, hidden=False)
+        screen.show_listing(DirectoryListing(path="/srv", parent="/", entries=(docs,), total=1))
+        await pilot.press("l")
+        assert screen.note == "no"
+        assert note_colour(screen) == Color.parse(app.get_css_variables()["error"]).hex
+        await pilot.press("h")
+        assert screen.note is None and browse.sent[-1] == ListDirectory(path="/")
 
 
 class Lines(App[None]):

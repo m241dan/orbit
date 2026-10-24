@@ -27,7 +27,6 @@ from orbit.protocol import (
 from orbit.tui.catalog import CatalogState
 from orbit.tui.explorer import ExplorerScreen
 from orbit.tui.modal import ModalSlot, Push
-from orbit.tui.view.common import kept_highlight
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.workspaces import (
     ADD_PATH,
@@ -144,22 +143,13 @@ class WorkspacesScreen(TypingListScreen[str | None]):
         self.workspaces = tuple(workspaces)
         self.cloning = tuple(cloning)
         if not self._pick_added() and self.is_mounted:
-            self._relist(shown)
+            self._relist(shown, self._keys, self._labels)
 
     def show_agents(self, agents: Sequence[AgentRef]) -> None:
         """Show ``agents`` running in place of those shown, keeping the highlight."""
         self.agents = tuple(agents)
         if self.is_mounted:
-            self._relist(self._keys)
-
-    def _relist(self, shown: Sequence[str]) -> None:
-        """List the rows again in place of rows with keys ``shown``, keeping the highlight on
-        the row it was on, or where it was if that one's gone."""
-        options = self.query_one(OptionList)
-        highlighted = options.highlighted
-        options.clear_options()
-        options.add_options(self._labels)
-        options.highlighted = kept_highlight(shown, highlighted, self._keys)
+            self._relist(self._keys, self._keys, self._labels)
 
     @property
     def _keys(self) -> tuple[str, ...]:

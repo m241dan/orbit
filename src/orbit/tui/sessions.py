@@ -25,7 +25,6 @@ from orbit.protocol import (
 )
 from orbit.tui.catalog import CatalogState
 from orbit.tui.modal import ModalSlot, Push
-from orbit.tui.view.common import kept_highlight
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.sessions import (
     ACTIVATE_CHOICE,
@@ -146,12 +145,9 @@ class SessionsScreen(TypingListScreen[tuple[SessionChoice, ...]]):
         if not self.is_mounted:  # Listed again before it's on screen: compose lists them.
             self.sessions, self.attached = tuple(sessions), attached
             return
-        options = self.query_one(OptionList)
-        shown, highlighted = self._keys, options.highlighted
+        shown = self._keys
         self.sessions, self.attached = tuple(sessions), attached
-        options.clear_options()
-        options.add_options(self._labels())
-        options.highlighted = kept_highlight(shown, highlighted, self._keys)
+        self._relist(shown, self._keys, self._labels())
 
     @property
     def _keys(self) -> tuple[str | None, ...]:

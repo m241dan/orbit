@@ -11,12 +11,13 @@ from textual.containers import Vertical, VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.timer import Timer
+from textual.visual import VisualType
 from textual.widget import Widget
 from textual.widgets import Input, OptionList, Static, TextArea
 
 from orbit.protocol import Settings
 from orbit.tui.modal import Push
-from orbit.tui.view.common import SPINNER_FPS, ListHints, picker_hint
+from orbit.tui.view.common import SPINNER_FPS, ListHints, kept_highlight, picker_hint
 from orbit.tui.view.confirm import confirm_hint
 from orbit.tui.view.settings import settings_summary
 from orbit.tui.view.transcript import prompt_title
@@ -234,8 +235,12 @@ class StatusLine(Static):
 
 class ListScreen[T](ModalScreen[T]):
     """Modal screen around an ``OptionList``, whose highlight ``j`` and ``k`` move alongside
-    the list's own arrow keys; a focused input handles keys first, so takes them as typing."""
+    the list's own arrow keys; a focused input handles keys first, so takes them as typing.
+    A screen that yields ``_note_line`` under its list shows there why a change was refused."""
 
+    DEFAULT_CSS = """
+    ListScreen #picker-note { color: $error; }
+    """
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("j", "move('down')", "Down", show=False),
         Binding("k", "move('up')", "Up", show=False),
@@ -247,6 +252,48 @@ class ListScreen[T](ModalScreen[T]):
             options.action_cursor_down()
         else:
             options.action_cursor_up()
+
+    def _relist(
+        self,
+        shown: Sequence[str | None],
+        keys: Sequence[str | None],
+        labels: Sequence[VisualType],
+    ) -> None:
+        """List ``labels``, the rows with ``keys``, in place of the rows with keys ``shown``,
+        the highlight going where ``kept_highlight`` says."""
+        options = self.query_one(OptionList)
+        highlight = kept_highlight(shown, options.highlighted, keys)
+        options.clear_options()
+        options.add_options(labels)
+        options.highlighted = highlight
+
+    def _note_line(self) -> Static:
+        """The note under the list, for why a change was refused, hidden until there's one."""
+        note = Static("", id="picker-note")
+        note.display = False
+        return note
+
+    @property
+    def note(self) -> str | None:
+        """Why a change was refused, while that's shown under the list."""
+        note = self.query_one("#picker-note", Static)
+        return str(note.render()) if note.display else None
+
+    def _refused(self, why: str) -> None:
+        """Show ``why`` a change was refused, as ``_show_refusal`` does; nothing once this
+        screen is gone."""
+        if self.is_attached:
+            self._show_refusal(why)
+
+    def _show_refusal(self, why: str) -> None:
+        """Show ``why`` a change was refused under the list."""
+        self._show_note(why)
+
+    def _show_note(self, note: str | None) -> None:
+        """Show ``note`` under the list, or hide it while it's none."""
+        shown = self.query_one("#picker-note", Static)
+        shown.update(note or "")
+        shown.display = note is not None
 
 
 class TypingListScreen[T](ListScreen[T]):
@@ -273,7 +320,6 @@ class TypingListScreen[T](ListScreen[T]):
     TypingListScreen OptionList { height: auto; max-height: 30; border: none; }
     TypingListScreen Input { border: round $secondary; }
     TypingListScreen Input:focus { border: heavy $accent; }
-    TypingListScreen #picker-note { color: $error; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "back", show=False),
@@ -314,38 +360,18 @@ class TypingListScreen[T](ListScreen[T]):
             box.value = text
             box.focus()
 
-    def _show_hint(self) -> None:
-        """Show the keys under the box."""
-        self.query_one(Vertical).border_subtitle = self.hint
-
-    def _note_line(self) -> Static:
-        """The note under the list, for why a change was refused, hidden until there's one."""
-        note = Static("", id="picker-note")
-        note.display = False
-        return note
-
-    @property
-    def note(self) -> str | None:
-        """Why a change was refused, while that's shown under the list."""
-        note = self.query_one("#picker-note", Static)
-        return str(note.render()) if note.display else None
-
-    def _refused(self, why: str) -> None:
+    def _show_refusal(self, why: str) -> None:
         """Show ``why`` a change was refused: in the text box's hint while it's shown, or else
-        under the list; nothing once this screen is gone."""
-        if not self.is_attached:
-            return
+        under the list."""
         box = self.query_one(Input)
         if box.display:
             box.border_subtitle = why
         else:
             self._show_note(why)
 
-    def _show_note(self, note: str | None) -> None:
-        """Show ``note`` under the list, or hide it while it's none."""
-        shown = self.query_one("#picker-note", Static)
-        shown.update(note or "")
-        shown.display = note is not None
+    def _show_hint(self) -> None:
+        """Show the keys under the box."""
+        self.query_one(Vertical).border_subtitle = self.hint
 
 
 class PickerScreen(ListScreen[int | None]):
