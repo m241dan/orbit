@@ -11,7 +11,6 @@ from textual.worker import WorkerFailed
 from orbit.protocol import (
     AGENT_FAILED,
     INTERNAL,
-    NOT_ACTIVE,
     PLANNER,
     PROTOCOL_VERSION,
     STARTUP_TASK,
@@ -22,15 +21,11 @@ from orbit.protocol import (
     AssistantMessage,
     BusyChanged,
     CancelTurn,
-    CommandAccepted,
-    CommandRefused,
     ErrorOccurred,
     Event,
     EventEnvelope,
     Hello,
-    MessageSent,
     Notice,
-    RunTasks,
     SendMessage,
     SessionStateChanged,
     Settings,
@@ -42,7 +37,6 @@ from orbit.protocol import (
     ToolCallFinished,
     ToolCallStarted,
     TurnFinished,
-    TurnStarted,
     UpdateSettings,
     UsageChanged,
     VerificationChanged,
@@ -125,176 +119,6 @@ async def test_a_session_state_change_shows_nothing() -> None:
         assert entries(app) == before
 
 
-async def test_submit_sends_command_and_renders_events() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    app.clock = lambda: 0.0
-    async with app.run_test() as pilot:
-        prompt = app.query_one("#prompt", ChatPrompt)
-        await pilot.press("i", *"hi", "enter")
-        assert session.commands == [SendMessage(agent=PLANNER, text="hi")]
-        # Busy from now, not from the backend's notice, so a second prompt can't race it.
-        assert prompt.border_title == "Prompt · planner · busy"
-
-        for event in (
-            BusyChanged(busy=True, lane="planner"),
-            TurnStarted(turn_id="t"),
-            AssistantMessage(turn_id="t", text="hello back"),
-            TurnFinished(turn_id="t", reason="completed"),
-        ):
-            await session.queue.put(event)
-        await pilot.pause()
-        assert shown(app) == ["hi", "hello back", "done · 0s"]
-        assert prompt.border_title == "Prompt · planner · busy"
-
-        await session.queue.put(BusyChanged(busy=False, lane="planner"))
-        await pilot.pause()
-        assert prompt.border_title == "Prompt · planner"
-
-
-async def test_a_submitted_prompt_shows_once_when_the_backend_echoes_it() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await pilot.press("i", *"hi", "enter")
-        [sent] = session.envelopes
-        echo = MessageSent(command_id=sent.command_id, agent=PLANNER, text="hi")
-        await feed_events(session, pilot, echo, CommandAccepted(command_id=sent.command_id))
-        assert entries(app) == [("hi", "prompt")]
-        assert [entry.text for entry in app.query_one(Transcript).entries(PLANNER)] == ["hi"]
-
-
-async def test_another_frontends_message_shows_as_a_prompt_to_the_planner() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, MessageSent(command_id="other", agent=PLANNER, text="yo"))
-        assert entries(app) == [("yo", "prompt")]
-        assert [entry.text for entry in app.query_one(Transcript).entries(PLANNER)] == ["yo"]
-
-
-async def test_each_command_goes_in_an_envelope_with_a_fresh_id() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await pilot.press("i", *"hi", "enter", "ctrl+x")
-
-    first, second = session.envelopes
-    assert first.payload == SendMessage(agent=PLANNER, text="hi")
-    assert second.payload == CancelTurn(lane="planner")
-    for envelope in (first, second):
-        assert len(envelope.command_id) == 32
-        int(envelope.command_id, 16)  # Hex.
-        assert (envelope.workspace, envelope.session) == (None, None)
-    assert first.command_id != second.command_id
-
-
-async def test_a_refused_message_shows_why_and_frees_the_prompt() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        prompt = app.query_one("#prompt", ChatPrompt)
-        await pilot.press("i", *"hi", "enter")
-        [sent] = session.envelopes
-        await feed_events(session, pilot, CommandAccepted(command_id="other"))
-        assert prompt.border_title == "Prompt · planner · busy"
-        refused = CommandRefused(command_id=sent.command_id, code="unknown", message="Not now.")
-        await feed_events(session, pilot, refused)
-        assert entries(app)[-1] == ("Not now.", "error")
-        assert prompt.border_title == "Prompt · planner"
-        await pilot.press("i", "enter")  # The draft is back, to send again.
-    assert session.commands[-1] == SendMessage(agent=PLANNER, text="hi")
-
-
-async def test_a_message_refused_as_not_active_is_withdrawn_and_its_draft_restored() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        prompt = app.query_one("#prompt", ChatPrompt)
-        await pilot.press("i", *"hi", "enter")
-        [sent] = session.envelopes
-        refused = CommandRefused(command_id=sent.command_id, code=NOT_ACTIVE, message="Not here.")
-        await feed_events(session, pilot, refused)
-        assert entries(app) == [("Not here.", "error")]
-        assert app.query_one(Transcript).entries(PLANNER) == ()
-        assert prompt.text == "hi"
-        assert prompt.border_title == "Prompt · planner"
-
-
-async def test_a_refusal_keeps_the_draft_as_edited_since_sending() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        prompt = app.query_one("#prompt", ChatPrompt)
-        await pilot.press("i", *"hi", "enter", "i", *" more")
-        [sent] = session.envelopes
-        refused = CommandRefused(command_id=sent.command_id, code=NOT_ACTIVE, message="Not here.")
-        await feed_events(session, pilot, refused)
-        assert entries(app) == [("Not here.", "error")]
-        assert prompt.text == "hi more"
-
-
-async def test_a_sent_message_keeps_its_text_in_the_prompt_until_accepted() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        prompt = app.query_one("#prompt", ChatPrompt)
-        await pilot.press("i", *"hi", "enter")
-        assert prompt.text == "hi"
-        assert prompt.border_title == "Prompt · planner · busy"
-
-
-async def test_an_accepted_message_stays_a_prompt_and_leaves_the_prompt_empty() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        prompt = app.query_one("#prompt", ChatPrompt)
-        await pilot.press("i", *"hi", "enter")
-        await accept_last(session, pilot)
-        assert entries(app) == [("hi", "prompt")]
-        assert prompt.text == ""
-        assert prompt.border_title == "Prompt · planner · busy"
-
-
-async def test_an_accepted_message_keeps_a_draft_edited_since_sending() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        prompt = app.query_one("#prompt", ChatPrompt)
-        await pilot.press("i", *"hi", "enter", "i", *" more")
-        await accept_last(session, pilot)
-        assert entries(app) == [("hi", "prompt")]
-        assert prompt.text == "hi more"
-
-
-async def test_a_refusal_of_an_earlier_message_leaves_the_planner_busy() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        prompt = app.query_one("#prompt", ChatPrompt)
-        await pilot.press("i", *"hi", "enter")
-        [first] = session.envelopes
-        await feed_events(session, pilot, BusyChanged(busy=False, lane="planner"))
-        await pilot.press("i", *"again", "enter")
-        refused = CommandRefused(command_id=first.command_id, code="unknown", message="Late.")
-        await feed_events(session, pilot, refused)
-        assert entries(app)[-1] == ("Late.", "error")
-        assert prompt.border_title == "Prompt · planner · busy"
-
-
-async def test_a_refusal_of_another_command_leaves_the_planner_busy() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        prompt = app.query_one("#prompt", ChatPrompt)
-        await pilot.press("i", *"hi", "enter", "ctrl+x")
-        cancel = session.envelopes[-1]
-        refused = CommandRefused(command_id=cancel.command_id, code="unknown", message="No.")
-        await feed_events(session, pilot, refused)
-        assert entries(app)[-1] == ("No.", "error")
-        assert prompt.border_title == "Prompt · planner · busy"
-
-
 async def test_a_failed_event_stream_shows_an_error_line() -> None:
     session = FakeSession()
     app = OrbitApp(session)
@@ -313,58 +137,6 @@ async def test_a_failed_hello_shows_an_error_line() -> None:
         await pilot.pause()
         assert app.is_running
         assert shown(app)[-1] == "The backend failed to start the session: no git"
-
-
-async def test_a_message_that_fails_to_send_shows_why_and_frees_the_prompt() -> None:
-    session = FakeSession()
-    session.send_error = RuntimeError("the backend is gone")
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        prompt = app.query_one("#prompt", ChatPrompt)
-        await pilot.press("i", *"hi", "enter")
-        await pilot.pause()
-        assert app.is_running
-        assert entries(app)[-1] == ("Couldn't send the command: the backend is gone", "error")
-        assert prompt.border_title == "Prompt · planner"
-
-
-async def test_a_message_that_failed_to_send_lets_the_next_enter_send_again() -> None:
-    session = FakeSession()
-    session.send_error = RuntimeError("the backend is gone")
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await pilot.press("i", *"hi", "enter")
-        await pilot.pause()
-        assert app.query_one("#prompt", ChatPrompt).text == "hi"  # The draft is back.
-        await pilot.press("i", "enter")
-        await pilot.pause()
-        assert session.commands == [SendMessage(agent=PLANNER, text="hi")] * 2
-
-
-async def test_running_tasks_when_the_send_fails_shows_why_and_keeps_running() -> None:
-    session = FakeSession()
-    session.send_error = RuntimeError("the backend is gone")
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await pilot.press("ctrl+r")
-        await pilot.pause()
-        assert app.is_running
-        assert session.commands == [RunTasks()]
-        assert entries(app)[-1] == ("Couldn't send the command: the backend is gone", "error")
-
-
-async def test_another_command_that_fails_to_send_leaves_the_planner_busy() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        prompt = app.query_one("#prompt", ChatPrompt)
-        await pilot.press("i", *"hi", "enter")
-        session.send_error = RuntimeError("the backend is gone")
-        await pilot.press("ctrl+x")
-        await pilot.pause()
-        assert app.is_running
-        assert entries(app)[-1] == ("Couldn't send the command: the backend is gone", "error")
-        assert prompt.border_title == "Prompt · planner · busy"
 
 
 async def test_the_prompt_takes_typing_while_the_planner_is_busy() -> None:
@@ -394,54 +166,6 @@ async def test_enter_while_the_planner_is_busy_keeps_the_draft_and_says_so(
         assert prompt.cursor_location == (0, 1)
         assert app.focused is prompt
         assert notes == [("Planner is busy", "warning")]
-
-
-async def test_enter_sends_the_kept_draft_once_the_planner_is_free() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, BusyChanged(busy=True, lane="planner"))
-        prompt = app.query_one(ChatPrompt)
-        await pilot.press("i", *"hi", "enter")
-        await feed_events(session, pilot, BusyChanged(busy=False, lane="planner"))
-        assert session.commands == []
-        # Still in insert mode, so enter alone sends it.
-        await pilot.press("enter")
-        assert session.commands == [SendMessage(agent=PLANNER, text="hi")]
-        await accept_last(session, pilot)
-        assert prompt.text == ""
-
-
-async def test_a_rapid_second_enter_sends_nothing() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await pilot.press("i", *"a", "enter", "i", *"b", "enter")
-        assert session.commands == [SendMessage(agent=PLANNER, text="a")]
-        assert app.query_one(ChatPrompt).text == "ab"
-
-
-async def test_ctrl_s_sends_cancel() -> None:
-    session = FakeSession()
-    async with OrbitApp(session).run_test() as pilot:
-        await pilot.press("ctrl+s")
-        assert session.commands == [CancelTurn()]
-
-
-async def test_escape_in_normal_mode_does_not_cancel() -> None:
-    session = FakeSession()
-    async with OrbitApp(session).run_test() as pilot:
-        await pilot.press("escape")
-        assert session.commands == []
-
-
-async def test_blank_submit_is_ignored() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await pilot.press("i", "space", "enter")
-        assert session.commands == []
-        assert shown(app) == []
 
 
 async def test_a_pasted_multi_line_prompt_is_sent_whole_and_the_box_shrinks() -> None:

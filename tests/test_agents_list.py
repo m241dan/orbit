@@ -1,8 +1,6 @@
 """The agents running, without the pane showing them: their rows, when they're shown again,
 the review line, and which agent cancelling cancels."""
 
-from collections.abc import Sequence
-
 from orbit.protocol import (
     STARTUP_TASK,
     AgentExited,
@@ -13,37 +11,15 @@ from orbit.protocol import (
     ReviewStatus,
 )
 from orbit.tui.view.agents import AgentsList
+from tests.view_fakes import AgentsView
 
 CODER = AgentStarted(agent_id="agent-1", role="coder", task_id="7")
 REVIEWER = AgentStarted(agent_id="agent-2", role="reviewer", task_id="8")
 
 
-class View:
-    """What the agents list shows, as it shows it: the lines of each listing, in turn, the keys
-    of the last and the review line; and the row highlighted, which a test sets as the user
-    moves. ``cancels`` has the agents asked to be cancelled."""
-
-    def __init__(self) -> None:
-        self.highlighted: int | None = None
-        self.listings: list[list[str]] = []
-        self.keys: list[str] = []
-        self.review = ""
-        self.cancels: list[str] = []
-
-    def list_agents(self, rows: Sequence[tuple[str, str]]) -> None:
-        self.keys = [key for key, _ in rows]
-        self.listings.append([line for _, line in rows])
-
-    def show_review_line(self, line: str) -> None:
-        self.review = line
-
-    def ask_to_cancel(self, agent_id: str) -> None:
-        self.cancels.append(agent_id)
-
-
-def listed(*events: AgentStarted) -> tuple[AgentsList, View]:
+def listed(*events: AgentStarted) -> tuple[AgentsList, AgentsView]:
     """An agents list shown in a view, following ``events``."""
-    view = View()
+    view = AgentsView()
     agents = AgentsList(view)
     agents.show()
     for event in events:
@@ -57,7 +33,7 @@ def test_with_no_agents_the_list_shows_the_empty_row() -> None:
 
 
 def test_the_list_shows_running_agents_by_their_tasks_numbers_and_the_review_status() -> None:
-    view = View()
+    view = AgentsView()
     agents = AgentsList(view)
     agents.number_tasks({"7": "1", "8": "2"})
     agents.track(CODER)

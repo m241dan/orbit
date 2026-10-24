@@ -4,6 +4,7 @@ status line, the modal, one at a time, and trying again."""
 from orbit.protocol import STORAGE_FAILED, CommandAccepted, ResumeStorage
 from orbit.tui.view.storage import StorageHalt
 from tests.desk_fakes import Backend
+from tests.view_fakes import HaltView
 
 EXPLANATION = (
     "Orbit stopped this session: saving the event log to /s/orbit.db failed.\n"
@@ -14,38 +15,9 @@ EVENT_LOG_STATUS = "Session stopped: event log failed; see the transcript"
 STILL_STATUS = "Session stopped: session record failed; see the transcript"
 
 
-class View:
-    """What the halt shows, as it shows it: the status line, and the text each modal opened
-    shows, in the order they opened; a test closes the one open as the user would, by setting
-    ``modal_open``. ``closes`` counts the modals closed from the halt."""
-
-    def __init__(self) -> None:
-        self.status: str | None = None
-        self.modals: list[str] = []
-        self.modal_open = False
-        self.closes = 0
-
-    def show_status(self, status: str | None) -> None:
-        self.status = status
-
-    def open_modal(self, explanation: str) -> None:
-        assert not self.modal_open
-        self.modals.append(explanation)
-        self.modal_open = True
-
-    def show_in_modal(self, explanation: str) -> None:
-        assert self.modal_open
-        self.modals[-1] = explanation
-
-    def close_modal(self) -> None:
-        if self.modal_open:
-            self.closes += 1
-            self.modal_open = False
-
-
-def halt() -> tuple[StorageHalt, View, Backend]:
+def halt() -> tuple[StorageHalt, HaltView, Backend]:
     """A halt following no halt yet, shown in a view, trying again through a backend."""
-    view, backend = View(), Backend()
+    view, backend = HaltView(), Backend()
     return StorageHalt(view, backend.desk.send), view, backend
 
 

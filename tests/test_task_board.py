@@ -2,87 +2,12 @@
 following the active task, holding and letting go, the tasks the user picks, the session's
 total and the wait for a coder."""
 
-from collections.abc import Sequence
-
 from rich.cells import cell_len
-from rich.text import Text
 
 from orbit.protocol import TaskSpec, TaskState, TaskStatus, Usage
-from orbit.tui.view.common import kept_highlight, spinner_frame
+from orbit.tui.view.common import spinner_frame
 from orbit.tui.view.tasks import TaskBoard, task_label
-
-
-class View:
-    """What the task list shows, as it shows it, and what the user has done in it: the row
-    highlighted, which stays on its task's row as the rows change as a list pane keeps it, and
-    the lines in view, a line for each line of a row's label."""
-
-    def __init__(self, height: int = 10) -> None:
-        self.highlighted: int | None = None
-        self.row_width = 60
-        self.scroll_top = 0
-        self.view_height = height
-        self.measured = True
-        self.title = ""
-        self.usage = ""
-        self.keys: list[str | None] = []
-        self.labels: list[Text] = []
-        self.redraws = 0
-        self.scrolls: list[int] = []
-        self.ticking = False
-        self.edits: list[TaskState | None] = []
-        self.accepted: list[str] = []
-        self.removed: list[str] = []
-        self.whys: list[tuple[TaskState, str]] = []
-
-    @property
-    def rows(self) -> list[str]:
-        return [str(label) for label in self.labels]
-
-    def row_lines(self) -> list[tuple[int, int]]:
-        lines: list[tuple[int, int]] = []
-        top = 0
-        for label in self.labels if self.measured else ():
-            height = len(str(label).split("\n"))
-            lines.append((top, height))
-            top += height
-        return lines
-
-    def show_title(self, title: str) -> None:
-        self.title = title
-
-    def show_usage(self, usage: str) -> None:
-        self.usage = usage
-
-    def show_labels(self, rows: Sequence[tuple[str, Text]], trailing: Text) -> None:
-        keys: list[str | None] = [key for key, _ in rows]
-        keys.append(None)
-        if keys != self.keys:
-            self.highlighted = kept_highlight(self.keys, self.highlighted, keys)
-        self.keys, self.labels = keys, [*(label for _, label in rows), trailing]
-        self.redraws += 1
-
-    def highlight(self, index: int) -> None:
-        self.highlighted = index
-
-    def scroll_to_line(self, top: int) -> None:
-        self.scroll_top = top
-        self.scrolls.append(top)
-
-    def keep_ticking(self, running: bool) -> None:
-        self.ticking = running
-
-    def edit_task(self, task: TaskState | None) -> None:
-        self.edits.append(task)
-
-    def accept_task(self, task_id: str) -> None:
-        self.accepted.append(task_id)
-
-    def remove_task(self, task_id: str) -> None:
-        self.removed.append(task_id)
-
-    def show_why(self, state: TaskState, number: str) -> None:
-        self.whys.append((state, number))
+from tests.view_fakes import TaskView
 
 
 def board(*prompts: str, status: TaskStatus = "pending") -> tuple[TaskState, ...]:
@@ -93,15 +18,15 @@ def board(*prompts: str, status: TaskStatus = "pending") -> tuple[TaskState, ...
     )
 
 
-def started(height: int = 10, now: float = 0.0) -> tuple[TaskBoard, View]:
+def started(height: int = 10, now: float = 0.0) -> tuple[TaskBoard, TaskView]:
     """A board started in a view ``height`` lines high, its clock stopped at ``now``."""
-    view = View(height)
+    view = TaskView(height)
     tasks = TaskBoard(view, lambda: now)
     tasks.start()
     return tasks, view
 
 
-def activate(tasks: TaskBoard, view: View) -> None:
+def activate(tasks: TaskBoard, view: TaskView) -> None:
     """Activate the list as list mode does: held, the first row highlighted if none is, then
     the active task, if there is one."""
     tasks.hold()
@@ -129,18 +54,18 @@ def with_reasons(
     return tuple(changed)
 
 
-def in_view(view: View, index: int) -> bool:
+def in_view(view: TaskView, index: int) -> bool:
     top, height = view.row_lines()[index]
     return view.scroll_top <= top and top + height <= view.scroll_top + view.view_height
 
 
-def at_bottom(view: View, index: int) -> bool:
+def at_bottom(view: TaskView, index: int) -> bool:
     """Whether row ``index`` is on the last lines in view."""
     top, height = view.row_lines()[index]
     return top + height == view.scroll_top + view.view_height
 
 
-def heights(view: View) -> list[int]:
+def heights(view: TaskView) -> list[int]:
     return [height for _, height in view.row_lines()]
 
 
@@ -178,7 +103,7 @@ def test_the_board_numbers_its_tasks_by_id() -> None:
 
 def test_running_tasks_spin_in_place_and_nothing_spins_once_nothing_runs() -> None:
     now = [0.0]
-    view = View()
+    view = TaskView()
     tasks = TaskBoard(view, lambda: now[0])
     tasks.start()
     one, two, three = board("one", "two", "three")
@@ -321,7 +246,7 @@ def test_tasks_coming_or_going_change_the_rows_keys() -> None:
 
 def test_only_a_running_task_relabels_as_the_spinners_turn() -> None:
     now = [0.0]
-    view = View()
+    view = TaskView()
     tasks = TaskBoard(view, lambda: now[0])
     one, two, three = board("one", "two", "three")
     running = two.model_copy(update={"status": "running"})
@@ -449,7 +374,7 @@ def test_a_list_that_took_no_focus_highlights_nothing() -> None:
 
 
 def test_a_board_not_measured_yet_has_nothing_to_follow() -> None:
-    view = View()
+    view = TaskView()
     view.measured = False
     tasks = TaskBoard(view, lambda: 0.0)
     tasks.show(board("one", status="verifying"))

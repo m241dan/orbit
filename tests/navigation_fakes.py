@@ -25,7 +25,7 @@ from orbit.protocol import (
 )
 from orbit.tui.view.confirm import Question
 from orbit.tui.view.explorer import Explorer
-from orbit.tui.view.navigation import Navigation, Views
+from orbit.tui.view.navigation import Navigation, Send, Views
 from orbit.tui.view.opening import Opening
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.place import Answered, Chosen
@@ -112,7 +112,7 @@ class SessionPickerView(ListView):
         self._modals.confirms.append((title, message, yes, then))
 
     async def manage(self, change: SessionChange, awaited: Awaited) -> object:
-        return await self._modals.backend.desk.send(change, awaited)
+        return await self._modals.send(change, awaited)
 
 
 class WorkspacePickerView(ListView):
@@ -132,7 +132,7 @@ class WorkspacePickerView(ListView):
     async def change(
         self, command: AddWorkspace | RemoveWorkspace | Watch | ListDirectory, awaited: Awaited
     ) -> object:
-        return await self._modals.backend.desk.send(command, awaited)
+        return await self._modals.send(command, awaited)
 
 
 class ExplorerView:
@@ -173,12 +173,12 @@ class ExplorerView:
 
 class Modals:
     """The modals a navigation opens, one of each kind at a time, holding the real models in
-    fake screens; what a modal closes with is handed on, and what a screen does once mounted
-    is done, only once :meth:`settle` runs, as Textual does both later. ``moves`` counts the
-    frontend's moves."""
+    fake screens, whose commands go out with ``send``; what a modal closes with is handed on,
+    and what a screen does once mounted is done, only once :meth:`settle` runs, as Textual does
+    both later. ``moves`` counts the frontend's moves."""
 
-    def __init__(self, backend: Backend) -> None:
-        self.backend = backend
+    def __init__(self, send: Send) -> None:
+        self.send = send
         self.sessions: SessionPicker | None = None
         self.sessions_view: SessionPickerView | None = None
         self.workspaces: WorkspacePicker | None = None
@@ -278,7 +278,7 @@ class Modals:
 
     def open_explorer(self, explored: Explored) -> None:
         view = ExplorerView(self)
-        self.explorer = Explorer(view, self.backend.desk.send)
+        self.explorer = Explorer(view, self.send)
         self.explorer_view, self._explored = view, explored
         self._pending.append(self.explorer.start)
 
@@ -293,7 +293,7 @@ class Modals:
             self.explorer.show_listing(listing)
 
 
-class _WorkspaceViews:
+class WorkspaceViews:
     """The workspace list's view: the workspace picker of :class:`Modals`."""
 
     def __init__(self, modals: Modals) -> None:
@@ -322,8 +322,8 @@ def navigating(
     """A navigation opening as ``opening`` says, over a link if ``linked``, with its modals and
     the backend it sends to."""
     backend = Backend()
-    modals = Modals(backend)
-    views = Views(modals, _WorkspaceViews(modals))
+    modals = Modals(backend.desk.send)
+    views = Views(modals, WorkspaceViews(modals))
     navigation = Navigation(views, backend.desk.send, opening or Opening(), linked)
     return navigation, modals, backend
 

@@ -4,40 +4,14 @@ what an answer sends, and asking again when it's refused."""
 import pytest
 
 from orbit.protocol import TakeOwnership
-from orbit.tui.view.takeover import Answered, TakeoverOffer
+from orbit.tui.view.takeover import TakeoverOffer
 from tests.desk_fakes import Backend
+from tests.view_fakes import OfferView
 
 
-class View:
-    """What the offer shows: the modals opened, by what takes each one's answer; a test answers
-    the one open as the user would, with :meth:`answer`. ``closes`` counts the modals closed
-    from the offer."""
-
-    def __init__(self) -> None:
-        self.modals: list[Answered] = []
-        self.modal_open = False
-        self.closes = 0
-
-    def open_modal(self, answered: Answered) -> None:
-        assert not self.modal_open
-        self.modals.append(answered)
-        self.modal_open = True
-
-    def close_modal(self) -> None:
-        if self.modal_open:
-            self.closes += 1
-            self.modal_open = False
-
-    async def answer(self, take: bool | None) -> None:
-        """Answer the modal open, taking the repository over or not, or closing it with none."""
-        assert self.modal_open
-        self.modal_open = False
-        await self.modals[-1](take)
-
-
-def offer() -> tuple[TakeoverOffer, View, Backend]:
+def offer() -> tuple[TakeoverOffer, OfferView, Backend]:
     """An offer not yet made, shown in a view, answered through a backend."""
-    view, backend = View(), Backend()
+    view, backend = OfferView(), Backend()
     return TakeoverOffer(view, backend.desk.send), view, backend
 
 

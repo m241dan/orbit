@@ -1,36 +1,17 @@
 """The model and tool access pickers, without Textual: what each opens on, the model choices
 they offer, and the settings a pick passes on."""
 
-from collections.abc import Sequence
-
 from orbit.protocol import Settings
-from orbit.tui.view.settings import Chosen, Pickers
+from orbit.tui.view.settings import Pickers
+from tests.view_fakes import PickerScreens
 
 
-class Screens:
-    """Where the pickers show: the labels the model picker was given, in turn, and each picker
-    opened, with the option it opened on and what takes the pick."""
+class Screens(PickerScreens):
+    """Picker screens showing their model."""
 
     def __init__(self) -> None:
-        self.labels: list[list[str]] = []
-        self.opened: list[tuple[str, int | None, Chosen]] = []
+        super().__init__()
         self.pickers = Pickers(self)
-
-    def label_models(self, labels: Sequence[str]) -> None:
-        self.labels.append(list(labels))
-
-    def pick_model(self, current: int | None, chosen: Chosen) -> None:
-        self.opened.append(("model", current, chosen))
-
-    def pick_tool_access(self, current: int | None, chosen: Chosen) -> None:
-        self.opened.append(("tools", current, chosen))
-
-    async def pick(self, index: int) -> None:
-        """Pick option ``index`` in the picker opened last."""
-        _, _, chosen = self.opened[-1]
-        result = chosen(index)
-        if result is not None:
-            await result
 
 
 async def test_choosing_a_model_opens_on_the_model_and_passes_on_the_one_picked() -> None:

@@ -1,42 +1,17 @@
 """The verification steps, without the panel showing them: their lines, how long a running one
 has run, when they're redrawn and laid out again, and when they tick."""
 
-from math import ceil
-
 from orbit.protocol import StepState, StepStatus
 from orbit.tui.view.common import spinner_frame
 from orbit.tui.view.panels import VerificationSteps, step_lines
-
-
-class View:
-    """What the steps show, as they show them: each text drawn, whether it was laid out again,
-    and whether they tick. Text wraps at ``width`` characters, unknown while it's None."""
-
-    def __init__(self, width: int | None = 40) -> None:
-        self.width = width
-        self.texts: list[str] = []
-        self.layouts: list[bool] = []
-        self.ticking = False
-
-    def wrapped_height(self, text: str) -> int | None:
-        if self.width is None:
-            return None
-        width = self.width
-        return sum(max(1, ceil(len(line) / width)) for line in text.split("\n"))
-
-    def show_text(self, text: str, layout: bool) -> None:
-        self.texts.append(text)
-        self.layouts.append(layout)
-
-    def keep_ticking(self, running: bool) -> None:
-        self.ticking = running
+from tests.view_fakes import StepsView
 
 
 class Steps:
     """Verification steps in a view, timed by a clock a test sets in ``now``."""
 
     def __init__(self, width: int | None = 40, now: float = 0.0) -> None:
-        self.view = View(width)
+        self.view = StepsView(width)
         self.now = now
         self.steps = VerificationSteps(self.view, lambda: self.now)
 

@@ -8,7 +8,8 @@ from orbit.protocol import (
     DecideProposal,
     ProposedStep,
 )
-from orbit.tui.view.proposals import Decided, ProposalQueue
+from orbit.tui.view.proposals import ProposalQueue
+from tests.view_fakes import ProposalModal
 
 PROPOSAL = ChecksProposed(
     agent_id="agent-3", task_id="1", steps=(ProposedStep(name="Lint", command=("ruff",)),)
@@ -18,37 +19,16 @@ THIRD = PROPOSAL.model_copy(update={"agent_id": "agent-5", "task_id": "3"})
 ACCEPT = DecideProposal(task_id="1", action="accept")
 
 
-class Modal:
-    """Where a :class:`ProposalQueue` shows proposals, as the app's modal slot does: what it
-    opened, in turn, what it closed, the proposal shown, and the decisions passed on. Only
-    the proposal shown can be decided: a closed one's screen answers nothing."""
+class Modal(ProposalModal):
+    """A proposal modal showing a queue's proposals, recording the decisions passed on."""
 
     def __init__(self) -> None:
-        self.opened: list[ChecksProposed] = []
-        self.closed: list[ChecksProposed] = []
-        self.shown: ChecksProposed | None = None
+        super().__init__()
         self.decisions: list[tuple[ChecksProposed, DecideProposal]] = []
-        self._decided: Decided | None = None
         self.queue = ProposalQueue(self, self._decide)
 
     async def _decide(self, proposal: ChecksProposed, decision: DecideProposal) -> None:
         self.decisions.append((proposal, decision))
-
-    def open(self, proposal: ChecksProposed, decided: Decided) -> None:
-        self.opened.append(proposal)
-        self.shown, self._decided = proposal, decided
-
-    def close(self) -> None:
-        if self.shown is not None:
-            self.closed.append(self.shown)
-        self.shown = self._decided = None
-
-    async def decide(self, decision: DecideProposal | None) -> None:
-        """Have the user decide on the proposal shown, or close it undecided."""
-        decided = self._decided
-        assert decided is not None
-        self.shown = self._decided = None
-        await decided(decision)
 
 
 def exited(agent: str) -> AgentExited:
