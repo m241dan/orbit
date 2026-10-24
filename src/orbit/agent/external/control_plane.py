@@ -293,7 +293,7 @@ class ControlPlaneServer:
         except OSError as exc:
             raise ListenFailed(host, port, exc.strerror or str(exc)) from None
         try:
-            url = ws_url(host, sock.getsockname()[1], self._secure)
+            url = ws_url(host, sock.getsockname()[1], self._settings.secure)
             server = EmbeddedServer(self._config())
         except BaseException:
             sock.close()
@@ -313,16 +313,6 @@ class ControlPlaneServer:
             read_only=self._plane.read_only,
         )
 
-    @property
-    def _secure(self) -> bool:
-        """Whether the server serves over TLS."""
-        return self._settings.tls != "off"
-
-    @property
-    def _mutual(self) -> bool:
-        """Whether the server serves mutual TLS, requiring client certificates."""
-        return self._settings.tls == "mtls"
-
     def app(self) -> Starlette:
         """The app serving frontends and health checks, behind a gate turning away every request
         but a health check that showed no client certificate if it's mutual."""
@@ -332,7 +322,7 @@ class ControlPlaneServer:
             Route("/readyz", self._readyz, methods=["GET"]),
         ]
         gate = [Middleware(_CertificateGate, refusal=self._no_certificate)]
-        return Starlette(routes=routes, middleware=gate if self._mutual else [])
+        return Starlette(routes=routes, middleware=gate if self._settings.mutual else [])
 
     def _config(self) -> uvicorn.Config:
         """How uvicorn serves the app: logging left to the program, messages kept under the
@@ -341,11 +331,11 @@ class ControlPlaneServer:
         requiring one, so health checks need none, and passing it to the app with each request."""
         return uvicorn.Config(
             self.app(),
-            ssl_certfile=self._settings.cert if self._secure else None,
-            ssl_keyfile=self._settings.key if self._secure else None,
-            ssl_ca_certs=self._settings.client_ca if self._mutual else None,
-            ssl_cert_reqs=ssl.CERT_OPTIONAL if self._mutual else ssl.CERT_NONE,
-            ssl_context_factory=self._ssl_context if self._mutual else None,
+            ssl_certfile=self._settings.cert if self._settings.secure else None,
+            ssl_keyfile=self._settings.key if self._settings.secure else None,
+            ssl_ca_certs=self._settings.client_ca if self._settings.mutual else None,
+            ssl_cert_reqs=ssl.CERT_OPTIONAL if self._settings.mutual else ssl.CERT_NONE,
+            ssl_context_factory=self._ssl_context if self._settings.mutual else None,
             log_config=None,
             lifespan="off",
             http=self._http_protocol(),
@@ -357,7 +347,7 @@ class ControlPlaneServer:
     def _http_protocol(self) -> type[asyncio.Protocol] | str:
         """The protocol uvicorn serves HTTP with: one passing each request's client certificate
         to the app if it's mutual, and otherwise uvicorn's own."""
-        return CertifiedHttpProtocol if self._mutual else "auto"
+        return CertifiedHttpProtocol if self._settings.mutual else "auto"
 
     def _ssl_context(
         self, config: uvicorn.Config, default: Callable[[], ssl.SSLContext]
@@ -403,11 +393,11 @@ class ControlPlaneServer:
         """What turns ``websocket`` away: under mutual TLS, a certificate missing or revoked,
         and otherwise a token missing or wrong; then a server that's stopping. None if it's
         let in."""
-        if self._mutual:
-            refusal = self._uncertified(client_certificate(websocket.scope))
-        else:
+        if self._settings.uses_token:
             unauthorized = PlainTextResponse(UNAUTHORIZED_BODY, UNAUTHORIZED)
             refusal = None if self._authorized(websocket) else unauthorized
+        else:
+            refusal = self._uncertified(client_certificate(websocket.scope))
         if refusal is None and self._stopping:
             return PlainTextResponse(SHUTTING_DOWN, UNAVAILABLE)
         return refusal

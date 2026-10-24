@@ -261,3 +261,14 @@ def test_a_flag_not_given_keeps_the_setting() -> None:
 def test_an_invalid_flag_is_refused_by_name(given: dict[str, object], flag: str) -> None:
     with pytest.raises(ConfigError, match=f"^{re.escape(flag)}: "):
         ServerSettings().with_flags(given)
+
+
+@pytest.mark.parametrize(
+    ("mode", "secure", "mutual", "uses_token"),
+    [("off", False, False, True), ("tls", True, False, True), ("mtls", True, True, False)],
+)
+def test_the_tls_mode_says_whether_it_is_secure_mutual_and_uses_the_token(
+    mode: str, secure: bool, mutual: bool, uses_token: bool
+) -> None:
+    settings = ServerSettings.model_validate({"tls": mode})
+    assert (settings.secure, settings.mutual, settings.uses_token) == (secure, mutual, uses_token)

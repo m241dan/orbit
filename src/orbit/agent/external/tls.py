@@ -37,11 +37,11 @@ def tls_warnings(settings: ServerSettings, now: datetime | None = None) -> tuple
 
     Raises :class:`TlsError` if it can't serve as they say.
     """
-    if settings.tls == "off":
+    if not settings.secure:
         _check_plaintext(settings.host)
         return ()
     cert, key = _files(settings)
-    if settings.tls == "mtls":
+    if settings.mutual:
         assert settings.client_ca is not None  # As _files checked.
         _certificate(Path(settings.client_ca))
     _check_key(key)
@@ -151,7 +151,7 @@ def local_tls(settings: ServerSettings, base: Path) -> LocalTls:
         names = ", ".join(local_candidates(settings.host))
         message = tls_messages.LOCAL_NO_HOSTNAME.format(cert=cert, names=names)
         raise LocalDiscoveryUnavailable(message)
-    return LocalTls(mutual=settings.tls == "mtls", ca=str(base / ca), hostname=hostname)
+    return LocalTls(mutual=settings.mutual, ca=str(base / ca), hostname=hostname)
 
 
 def _certificate_names(certificate: x509.Certificate) -> tuple[str, ...]:

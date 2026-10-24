@@ -121,6 +121,22 @@ class ServerSettings(TlsSettings):
     def max_message_bytes(self) -> int:
         return self.max_message_mb * 1024 * 1024
 
+    @property
+    def secure(self) -> bool:
+        """Whether the server serves over TLS."""
+        return self.tls != "off"
+
+    @property
+    def mutual(self) -> bool:
+        """Whether the server serves mutual TLS, requiring client certificates."""
+        return self.tls == "mtls"
+
+    @property
+    def uses_token(self) -> bool:
+        """Whether frontends show the bearer token: unless under mutual TLS, where the client
+        certificate stands in for it."""
+        return not self.mutual
+
     def with_flags(self, given: Mapping[str, object]) -> "ServerSettings":
         """These settings with the command-line flags ``given``, by setting name, over them,
         ignoring those that are ``None`` and taking paths as strings.

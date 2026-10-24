@@ -197,7 +197,7 @@ def _banner(
     ``workspaces`` it serves, each as its owner, or read-only while another orbit owns it, or
     saying it serves none yet, and what frontends show it: where ``token_file`` is, or under
     mutual TLS the client CA in ``settings``."""
-    if settings.tls == "mtls":
+    if settings.mutual:
         shown = f"a client certificate {settings.client_ca} signed"
     else:
         shown = f"the token in {token_file.path}"
@@ -260,7 +260,7 @@ def _local_tls(settings: ServerSettings, root: Path) -> LocalTls | None:
     """How a frontend on this machine reaches the server ``settings`` serve with TLS, relative
     paths taken from ``root``, the directory it started in; ``None`` for plaintext, or, with a
     warning saying why, when it can't find it on its own."""
-    if settings.tls == "off":
+    if not settings.secure:
         return None
     try:
         return local_tls(settings, root)
@@ -276,7 +276,7 @@ def _frontend_token(token_file: TokenFile, settings: ServerSettings) -> Callable
 
     Exits with status 2 if the token file is needed and can't be used.
     """
-    if settings.tls == "mtls":
+    if not settings.uses_token:
         return _no_token
     _token(token_file)
     return _current_token(token_file)
