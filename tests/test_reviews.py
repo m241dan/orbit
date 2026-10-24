@@ -256,7 +256,7 @@ def test_a_batch_review_prompt_names_its_commits_and_what_did_not_land() -> None
     prompt = review_prompt(job, "diffs", 3, ())
     assert prompt == (
         "Review the 2 commits made for review batch-1\n\n"
-        "Task 7 of that review ended without a commit.\n\n"
+        "Task 7 of that review ended without landing a commit.\n\n"
         "You may make at most 3 suggestions.\n\n"
         "diffs"
     )
@@ -468,7 +468,7 @@ def test_a_removed_task_that_ended_without_a_commit_is_not_reported_missing() ->
     assert reviews.removed(state("2", status="gave_up", origin="review", batch=batch)) is None
     job = reviews.landed(state("3", origin="review", batch=batch), "c3")
     assert job == ReviewJob(commits=("c3",), round=1, batch=batch, reviewed=("3",))
-    assert "ended without a commit" not in review_prompt(job, "", 5, ())
+    assert "ended without landing a commit" not in review_prompt(job, "", 5, ())
 
 
 def test_removing_a_batchs_only_task_closes_it_with_nothing_to_review() -> None:

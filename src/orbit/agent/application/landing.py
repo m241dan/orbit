@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from orbit.agent.application.ports import CoderTree, Merge, Publish
 from orbit.agent.application.task_trace import MERGE_CONFLICT_EVENT, MERGE_RESULT
 from orbit.agent.application.verifier import Failure, Verifier
-from orbit.protocol import TaskMerged
+from orbit.protocol import MergeResult, TaskMerged
 from orbit.tracing import current_span
 
 # Times the work is rebased onto a base that keeps moving before orbit stops trying.
@@ -14,11 +14,18 @@ MAX_REBASES = 3
 
 @dataclass(frozen=True)
 class Landing:
-    """What landing a task's work came to: the commit it made, if any, or why the work
-    failed verification after being rebased onto a moved base."""
+    """What landing a task's work came to: the commit it made, if any, and the ``result`` of
+    merging it, or why the work failed verification after being rebased onto a moved base.
+    Only a ``merged`` commit is on the base."""
 
     commit: str | None = None
+    result: MergeResult | None = None
     failure: Failure | None = None
+
+    @property
+    def merged(self) -> str | None:
+        """The commit the work landed on the base, if it merged."""
+        return self.commit if self.result == "merged" else None
 
 
 class Lander:
@@ -46,7 +53,7 @@ class Lander:
                 task_id=task_id, result=merge.result, detail=merge.detail, commit=commit or ""
             )
         )
-        return Landing(commit=commit)
+        return Landing(commit=commit, result=merge.result)
 
     async def _integrate(self, task_id: str, root: str) -> Merge | Failure:
         """Merge the tree's work, rechecking it after each of at most MAX_REBASES rebases;

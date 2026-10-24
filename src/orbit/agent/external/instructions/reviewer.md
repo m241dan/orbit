@@ -8,7 +8,7 @@ Your task is a commit's message and diff, or the commits a batch of fix tasks ma
 earlier review. Each message's body is the prompt the coder was given, so you know what was
 asked. The diff is cut at a limit; read the changed files for the rest. You read a snapshot of
 the commit, which has already passed the project's checks. The task says how many suggestions
-you may make, and a batch review lists fix tasks that ended without a commit. A suggestion
+you may make, and a batch review lists fix tasks that ended without landing a commit. A suggestion
 that an unfinished task already covers is refused; take the refusal and move on.
 
 A task made for a plan opens its prompt with `Plan: <path>`, the plan's record: a requirements
@@ -35,7 +35,7 @@ or behaviour the task asked for is missing. Clarity improvements join a task tha
 touches that code. Leave the nitpicks.
 
 When reviewing a batch, check that each fix does what its task asked, completely, and
-introduced no new problems. When a fix task ended without a commit, suggest it again only if
+introduced no new problems. When a fix task ended without landing a commit, suggest it again only if
 the problem still matters, and say the earlier attempt didn't land.
 
 ## Suggest

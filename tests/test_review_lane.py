@@ -915,7 +915,7 @@ async def test_a_task_edited_back_to_pending_is_reviewed_with_its_batch() -> Non
     ]
     prompt = board(events)[4].task.prompt
     assert prompt.startswith("Review the 2 commits made for review batch-1")
-    assert "ended without a commit" not in prompt
+    assert "ended without landing a commit" not in prompt
     assert [e for e in events if isinstance(e, ReviewStatus)][-1].open_batches == 0
 
 

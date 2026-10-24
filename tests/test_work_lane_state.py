@@ -5,9 +5,12 @@ import asyncio
 import itertools
 from collections.abc import Awaitable, Callable
 
+import pytest
+
 from orbit.agent import Agents
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import SessionGate
+from orbit.agent.application.ports import Merge
 from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
 from orbit.agent.application.tasks import Changed, Tasks
 from orbit.agent.application.work_lane import Beside, WorkLane
@@ -18,6 +21,8 @@ from orbit.protocol import (
     CODER,
     REVIEWER,
     Event,
+    MergeResult,
+    TaskMerged,
     TasksChanged,
     TaskSpec,
     TaskState,
@@ -79,8 +84,11 @@ async def wanders_off(call: Call) -> TurnEndReason:
     return "completed"  # Without calling get_task, which ends the task in error.
 
 
-def desk_for(publish: Callable[[Event], Awaitable[None]], *scripts: Script) -> AgentDesk:
-    """A desk in a tree whose agents play ``scripts``, publishing with ``publish``."""
+def desk_for(
+    publish: Callable[[Event], Awaitable[None]], *scripts: Script, tree: FakeTree | None = None
+) -> AgentDesk:
+    """A desk in ``tree``, or one that merges, whose agents play ``scripts``, publishing with
+    ``publish``."""
     host = FakeHost()
     tokens = itertools.count(1)
     agents = Agents(
@@ -88,26 +96,32 @@ def desk_for(publish: Callable[[Event], Awaitable[None]], *scripts: Script) -> A
         ScriptedLauncher(host, *scripts),
         lambda: f"token-{next(tokens)}",
         ROLES,
-        tree=FakeTree(),
+        tree=tree or FakeTree(),
         root=".",
     )
     return AgentDesk(agents, publish)
 
 
 def lane_for(
-    publish: Callable[[Event], Awaitable[None]], tasks: Tasks, *scripts: Script
+    publish: Callable[[Event], Awaitable[None]],
+    tasks: Tasks,
+    *scripts: Script,
+    tree: FakeTree | None = None,
 ) -> tuple[WorkLane, Hearing]:
-    """A work lane on ``tasks`` in a tree whose agents play ``scripts``, publishing with
-    ``publish``, beside a review lane that hears."""
-    desk = desk_for(publish, *scripts)
+    """A work lane on ``tasks`` in ``tree``, or one that merges, whose agents play ``scripts``,
+    publishing with ``publish``, beside a review lane that hears."""
+    desk = desk_for(publish, *scripts, tree=tree)
     review = Hearing(desk, tasks)
     return WorkLane(desk, tasks, None, Beside(review)), review
 
 
-def queueing_lane_for(tasks: Tasks, *scripts: Script) -> tuple[WorkLane, ReviewLane]:
-    """A work lane on ``tasks`` in a tree whose agents play ``scripts``, publishing nothing,
-    beside a review lane that queues the reviews due but, read-only, runs none."""
-    desk = desk_for(quiet, *scripts)
+def queueing_lane_for(
+    tasks: Tasks, *scripts: Script, tree: FakeTree | None = None
+) -> tuple[WorkLane, ReviewLane]:
+    """A work lane on ``tasks`` in ``tree``, or one that merges, whose agents play ``scripts``,
+    publishing nothing, beside a review lane that queues the reviews due but, read-only, runs
+    none."""
+    desk = desk_for(quiet, *scripts, tree=tree)
     hooks = ReviewHooks(no_work, no_work, SessionGate(read_only=lambda: True))
     review = ReviewLane(desk, tasks, ReviewPlanner(ReviewLimits()), hooks)
     return WorkLane(desk, tasks, None, Beside(review)), review
@@ -226,3 +240,75 @@ async def test_a_task_removed_once_it_ended_without_landing_does_not_stop_the_la
 
     assert board.find(task_id) is None
     assert review.heard == [("ended", task_id, "gave_up"), ("landed", next_id, "c1")]
+
+
+class Recording:
+    """Publishing that keeps every event."""
+
+    def __init__(self) -> None:
+        self.events: list[Event] = []
+
+    async def __call__(self, event: Event) -> None:
+        self.events.append(event)
+
+
+UNMERGED: tuple[MergeResult, ...] = ("conflict", "blocked", "detached")
+
+
+@pytest.mark.parametrize("result", UNMERGED)
+async def test_work_that_did_not_merge_ends_completed_without_landing(result: MergeResult) -> None:
+    published = Recording()
+    tasks = Tasks(TaskBoard(), published)
+    task_id = tasks.board.add(TaskSpec(prompt="a"))
+    tree = FakeTree(Merge(result, "why it didn't merge"))
+    lane, review = lane_for(published, tasks, claims_done, tree=tree)
+
+    assert await asyncio.wait_for(lane.run(), 5) == "finished"
+
+    assert tasks.board.get(task_id).status == "completed"
+    merged = TaskMerged(task_id=task_id, result=result, detail="why it didn't merge", commit="c1")
+    assert merged in published.events
+    assert review.heard == [("ended", task_id, "completed")]
+    assert lane._landed == {}
+
+
+@pytest.mark.parametrize("result", UNMERGED)
+async def test_work_that_did_not_merge_does_not_count_toward_a_super_review(
+    result: MergeResult,
+) -> None:
+    tasks = Tasks(TaskBoard(), quiet)
+    tasks.board.add(TaskSpec(prompt="a"))
+    tree = FakeTree(Merge(result, "why it didn't merge"))
+    lane, review = queueing_lane_for(tasks, claims_done, tree=tree)
+
+    assert await asyncio.wait_for(lane.run(), 5) == "finished"
+
+    assert review.planner.since_super == 0
+    assert review.snapshot().jobs == {}
+
+
+async def test_work_that_merged_lands_its_commit_and_counts() -> None:
+    tasks = Tasks(TaskBoard(), quiet)
+    task_id = tasks.board.add(TaskSpec(prompt="a"))
+    lane, review = queueing_lane_for(tasks, claims_done, tree=FakeTree(Merge("merged")))
+
+    assert await asyncio.wait_for(lane.run(), 5) == "finished"
+
+    assert review.planner.since_super == 1
+    assert [job.commits for job in review.snapshot().jobs.values()] == [("c1",)]
+    assert tasks.board.get(task_id).status == "completed"
+
+
+async def test_work_whose_base_kept_moving_ends_without_landing() -> None:
+    published = Recording()
+    tasks = Tasks(TaskBoard(), published)
+    task_id = tasks.board.add(TaskSpec(prompt="a"))
+    tree = FakeTree(*[Merge("rebased")] * 4)
+    lane, review = lane_for(published, tasks, claims_done, tree=tree)
+
+    assert await asyncio.wait_for(lane.run(), 5) == "finished"
+
+    assert tasks.board.get(task_id).status == "completed"
+    [merged] = [e for e in published.events if isinstance(e, TaskMerged)]
+    assert merged.result == "rebased" and "kept moving" in merged.detail
+    assert review.heard == [("ended", task_id, "completed")]

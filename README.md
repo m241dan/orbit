@@ -667,6 +667,10 @@ that fails, a fresh agent fixes it. When it can't be merged, it stays committed 
 - `blocked`: uncommitted changes in your checkout are in the way. Commit or stash them.
 - `detached`: you started orbit on a detached HEAD, so there's no branch to merge into.
 
+A commit is reviewed, and counts toward a super review, only once it has merged into the base: work
+that stays on `orbit/coder`, whether it couldn't be merged or its base kept moving, is reported to
+review as ended without landing a commit.
+
 Work is never thrown away. When a new task starts, changes a failed task left in the worktree are
 stashed (`git stash list` shows them as `orbit: unverified work …`); a fallback fix carries on from
 the work it fixes instead. At startup orbit mentions unmerged commits on `orbit/coder` and stashes
@@ -886,7 +890,8 @@ rule under the planner tab and All. The reset is refused while the planner answe
 
 ### Reviews
 
-Every commit from one of your tasks is reviewed in the background while the next task runs. Orbit
+Every commit from one of your tasks that merged into the base is reviewed in the background while
+the next task runs (one that couldn't be merged isn't, and doesn't count toward a super review). Orbit
 queues a `reviewer` task (it shows in the task list) carrying the commit's diff, and runs it in a
 read-only snapshot of that commit. The reviewer judges the change against its task's prompt and,
 when the prompt opens with `Plan: <path>`, against that plan's record, then looks for bugs, gaps

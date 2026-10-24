@@ -93,7 +93,8 @@ class WorkLane:
         self._coders = beside.coders
         self._tracing = beside.tracing
         self._seated = False  # The run holds a coder's slot, for the task about to run or running.
-        self._landed: dict[str, str] = {}  # Task id -> the commit it landed, until reported.
+        # Task id -> the commit it merged into the base, until reported.
+        self._landed: dict[str, str] = {}
         self._starts: dict[str, str] = {}  # Task id -> the tree's head when it started.
         # Fixes queued per step along each chain, kept across runs so a restart can't reset
         # the cap.
@@ -322,7 +323,7 @@ class WorkLane:
         await self._publish(TaskStarted(task_id=task_id))
 
     async def _report_to_review(self, state: TaskState, outcome: Outcome | None) -> None:
-        """Tell the review lane the commit the task that was ``state`` landed, if any, or else,
+        """Tell the review lane the commit the task that was ``state`` merged, if any, or else,
         if it finished in ``outcome`` rather than being cut short, that it ended. The task is
         told of as it ended, without looking it up: a task is published as finished before the
         save that follows, and one removed in that window is reviewed all the same."""
@@ -384,7 +385,8 @@ class WorkLane:
     async def _land(self, task_id: str, outcome: Outcome, root: str) -> Outcome:
         """Commit and merge a completed task's work, when there's a tree to do it from: the
         checks the user accepted from it, or else the work itself. A rebase is rechecked only
-        if the task's role is verified."""
+        if the task's role is verified. The work has landed, for review, only once it merged:
+        the task stays completed either way, with the merge's detail."""
         if self._desk.agents.tree is None:
             return outcome
         state = self._board.get(task_id)
@@ -398,8 +400,8 @@ class WorkLane:
         if landing.failure is not None:
             reason, detail = failure_reason(*landing.failure, rebased=True)
             return Outcome("unverified", landing.failure, reason=reason, detail=detail)
-        if landing.commit is not None:
-            self._landed[task_id] = landing.commit
+        if landing.merged is not None:
+            self._landed[task_id] = landing.merged
         return outcome
 
     async def _prepare(self, task_id: str) -> str:

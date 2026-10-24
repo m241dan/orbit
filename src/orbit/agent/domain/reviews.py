@@ -32,9 +32,9 @@ class ReviewJob:
     """A review to run: of ``commits``, which are work at ``round``.
 
     ``batch`` is the batch whose work it is (``None`` for a commit of the user's task),
-    ``missing`` the batch's tasks that ended without a commit, and ``reviewed`` the tasks that
-    landed the commits, in task order. A ``whole`` review is a super review: of the whole
-    codebase at its one commit, reviewing no particular task.
+    ``missing`` the batch's tasks that ended without landing a commit, and ``reviewed`` the
+    tasks that landed the commits, in task order. A ``whole`` review is a super review: of the
+    whole codebase at its one commit, reviewing no particular task.
     """
 
     commits: tuple[str, ...]
@@ -366,7 +366,7 @@ def review_prompt(job: ReviewJob, diff: str, cap: int, pending: Sequence[str]) -
     Its first line titles it. It holds only the facts: how to review is the role's instructions.
     """
     parts = [_review_title(job)]
-    parts += [f"Task {task} of that review ended without a commit." for task in job.missing]
+    parts += [f"Task {task} of that review ended without landing a commit." for task in job.missing]
     parts.append(f"You may make at most {cap} suggestions.")
     if pending:
         parts.append(_pending_list(pending))
