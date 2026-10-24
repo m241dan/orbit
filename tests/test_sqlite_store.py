@@ -242,8 +242,11 @@ async def test_a_delete_whose_lock_file_cannot_be_removed_deletes_and_says_so(
     await store.acquire("other")
     [locks] = (state / "locks").iterdir()
     (locks / "abc.lock").mkdir()
-    with pytest.raises(LockLeft, match=r"Couldn't delete the session .*abc\.lock"):
+    with pytest.raises(LockLeft) as raised:
         await store.delete("abc")
+    message = str(raised.value)
+    assert message.startswith("Deleted the session abc, but couldn't remove its lock file ")
+    assert str(locks / "abc.lock") in message
     assert await store.sessions() == []
 
 

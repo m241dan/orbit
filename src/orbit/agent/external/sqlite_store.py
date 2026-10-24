@@ -182,10 +182,14 @@ class SqliteStore:
         check_session_id(session_id)
         message = f"Couldn't delete the session {session_id} from"
         await self._or_raise(message, self._delete, workspace, session_id, write=True)
+        locks = self._locks_of(workspace)
         try:
-            await self._locks_of(workspace).remove(session_id)
+            await locks.remove(session_id)
         except StoreFailed as error:
-            raise LockLeft(str(error)) from error
+            lock = locks.path(session_id)
+            detail = error.__cause__ or error
+            message = f"Deleted the session {session_id}, but couldn't remove its lock file {lock}"
+            raise LockLeft(f"{message}: {detail}") from error
 
     def max_seq(self) -> int:
         """The highest ``seq`` ever logged or reserved, across workspaces, when the store opened
