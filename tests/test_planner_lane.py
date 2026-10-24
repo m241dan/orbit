@@ -249,16 +249,20 @@ def finishes(events: list[Event]) -> list[TurnEndReason]:
 
 
 async def test_a_planner_turn_that_runs_out_of_time_frees_the_planners_lane() -> None:
-    planner = ROLES[PLANNER].model_copy(update={"timeout_minutes": 0.0001})
-    session, _, launcher = session_for(roles={**ROLES, PLANNER: planner})
+    roles = {**ROLES}
+    session, _, launcher = session_for(roles=roles)
     launcher.planner_turns = [chats, hangs, chats]
     await send(session, SendMessage(agent=PLANNER, text="Plan."))
     await events_until(session, lambda e: e == PLANNER_IDLE)
+    # Only the turn that hangs has so little time, as each turn reads the role as it starts, so
+    # the others can't run out of it on a loaded machine.
+    roles[PLANNER] = ROLES[PLANNER].model_copy(update={"timeout_minutes": 0.0001})
     await send(session, SendMessage(agent=PLANNER, text="More."))
     events = await events_until(session, lambda e: e == PLANNER_IDLE)
     assert [e.code for e in events if isinstance(e, ErrorOccurred)] == [TIMED_OUT]
     assert finishes(events) == ["error"]
 
+    roles[PLANNER] = ROLES[PLANNER]
     await send(session, SendMessage(agent=PLANNER, text="Again."))
     events = await events_until(session, lambda e: e == PLANNER_IDLE)
     assert finishes(events) == ["completed"] and errors(events) == []
