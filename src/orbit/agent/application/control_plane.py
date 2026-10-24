@@ -274,8 +274,9 @@ class ControlPlane:
     async def _catalog(self, changed: WorkspaceEntry | None = None) -> Catalog:
         """What exists: every workspace served, the one ``changed`` names with that entry, if
         given, and the others with their sessions as they are now, and their agents' roles."""
-        entries = [await self._entry(host, changed) for host in self._hosts.values()]
-        roles = (role for host in self._hosts.values() for role in host.roles)
+        hosts = tuple(self._hosts.values())  # Workspaces may be added or removed meanwhile.
+        entries = [await self._entry(host, changed) for host in hosts]
+        roles = (role for host in hosts for role in host.roles)
         return catalog(entries, roles)
 
     @staticmethod

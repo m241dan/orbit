@@ -36,6 +36,8 @@ from orbit.protocol import (
     RemoveWorkspace,
     RunTasks,
     Snapshot,
+    Welcome,
+    WorkspaceEntry,
 )
 from tests.agent_fakes import HELLO, STEP, FakeStore, Steps, install_greeting
 from tests.connection_helpers import joined, say, taken
@@ -78,6 +80,22 @@ class Unclosable(WorkspaceHost):
     async def close(self) -> None:
         await super().close()
         raise OSError("The store won't close.")
+
+
+class Listing(WorkspaceHost):
+    """The host of the workspace ``name`` whose entry in the catalog, once ``gate`` is given,
+    sets ``listing`` and waits for ``gate``."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(workspace=f"/src/{name}", workspace_id=name, new_id=lambda: f"{name}-1")
+        self.gate: asyncio.Event | None = None
+        self.listing = asyncio.Event()
+
+    async def entry(self) -> WorkspaceEntry:
+        if self.gate is not None:
+            self.listing.set()
+            await self.gate.wait()
+        return await super().entry()
 
 
 class SlowSource(FakeSource):
@@ -519,6 +537,26 @@ async def test_a_workspace_that_fails_to_close_is_still_removed_from_the_catalog
     assert outcome == refused("remove", INTERNAL, message)
     assert [ids(event) for event in seen_in_a] == [["a"]]
     assert source.closed == ["c"]
+
+
+async def test_a_hello_listing_as_a_workspace_is_added_gets_the_catalog_as_it_began() -> None:
+    first = Listing("a")
+    plane = ControlPlane([first], workspaces=FakeSource())
+    adder = await welcomed(plane)
+    first.gate = gate = asyncio.Event()
+    greeted = plane.connect()
+    hello = asyncio.create_task(say(greeted, "hello", HELLO))
+    await first.listing.wait()
+
+    adding = asyncio.create_task(say(adder, "add", AddWorkspace(path="/src/c")))
+    while len(plane.hosts) < 2:
+        await asyncio.sleep(0.01)
+    gate.set()
+    await asyncio.gather(hello, adding)
+    welcome, catalog = payloads(taken(greeted))
+    await plane.close()
+
+    assert isinstance(welcome, Welcome) and ids(catalog) == ["a"]
 
 
 class Unflaggable(SlowSource):
