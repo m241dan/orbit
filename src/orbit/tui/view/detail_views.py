@@ -1,5 +1,5 @@
 """What the detail pane shows for each tool: its arguments in the form that suits it, a rule,
-then its output, capped before it's drawn."""
+then its output, capped before it's drawn; and which call it shows, while it's open."""
 
 import json
 import re
@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
 from functools import partial
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Protocol
 
 from rich.console import Group, RenderableType
 from rich.rule import Rule
@@ -15,7 +15,14 @@ from rich.syntax import Syntax
 from rich.text import Text
 
 from orbit.tui.view.common import text_lines
-from orbit.tui.view.detail import DIM, EMPTY_DIFF, NO_DETAILS, WAITING, capped_with
+from orbit.tui.view.detail import (
+    DIM,
+    EMPTY_DIFF,
+    NO_DETAILS,
+    WAITING,
+    capped_with,
+    detail_title,
+)
 from orbit.tui.view.diff_numbers import NUMBERED_LINE, diff_numbers, numbered_diff
 from orbit.tui.view.diffs import FileDiff, file_diff
 from orbit.tui.view.tool_calls import ToolCall
@@ -215,3 +222,49 @@ TOOL_VIEWS: Mapping[str, View] = MappingProxyType(
     }
 )
 """How the detail pane shows the calls of the tools that have a view of their own."""
+
+
+class DetailPaneView(Protocol):
+    """The detail pane, as a call's details are shown in it."""
+
+    def scroll_to_top(self) -> None:
+        """Scroll back to the top of the details."""
+        ...
+
+    def show_detail(self, title: str, body: RenderableType) -> None:
+        """Open, titled ``title``, showing ``body``."""
+        ...
+
+    def hide(self) -> None:
+        """Close, leaving the pane if it's active."""
+        ...
+
+
+class Detail:
+    """The full content of the tool call or request under the conversation's cursor, shown in
+    ``view`` while it's open."""
+
+    def __init__(self, view: DetailPaneView) -> None:
+        self._view = view
+        self.call: ToolCall | None = None  # The call whose details are shown, if any.
+        self.opened = False
+
+    def show(self, call: ToolCall | None) -> None:
+        """Open, showing ``call``'s details, or a note that there are none; another call than
+        the one shown starts at the top, while the same one updated keeps its place."""
+        if not self.opened or self._another(call):
+            self._view.scroll_to_top()
+        self.call = call
+        self._view.show_detail(detail_title(call), detail_body(call))
+        self.opened = True
+
+    def _another(self, call: ToolCall | None) -> bool:
+        """Whether ``call`` is another call than the one shown, or none where one is."""
+        if call is None or self.call is None:
+            return call is not self.call
+        return call.call_id != self.call.call_id
+
+    def close(self) -> None:
+        """Close the pane."""
+        self._view.hide()
+        self.opened = False

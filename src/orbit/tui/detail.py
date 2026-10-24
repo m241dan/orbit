@@ -3,6 +3,7 @@ cursor."""
 
 from typing import Any, ClassVar
 
+from rich.console import RenderableType
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import VerticalScroll
@@ -10,16 +11,17 @@ from textual.message import Message
 from textual.reactive import reactive
 from textual.widgets import Static
 
-from orbit.tui.view.detail import DETAIL_HEIGHT, detail_title
-from orbit.tui.view.detail_views import detail_body
+from orbit.tui.view.detail import DETAIL_HEIGHT
+from orbit.tui.view.detail_views import Detail
 from orbit.tui.view.tool_calls import ToolCall
 from orbit.tui.widgets import ModalFocus
 
 
 class DetailPane(ModalFocus, VerticalScroll):
-    """The full content of the tool call or request under the conversation's cursor, below
-    the logs and the working row, taking ``share`` percent of the conversation, or all of it
-    while ``covering``; hidden until opened. Activated, j/k scroll it and escape leaves."""
+    """Shows the :class:`Detail` of the tool call or request under the conversation's cursor,
+    below the logs and the working row, taking ``share`` percent of the conversation, or all
+    of it while ``covering``; hidden until opened. Activated, j/k scroll it and escape
+    leaves."""
 
     class Focused(Message):
         """The pane was activated."""
@@ -43,7 +45,7 @@ class DetailPane(ModalFocus, VerticalScroll):
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self.call: ToolCall | None = None  # The call whose details are shown, if any.
+        self.detail = Detail(self)
 
     def compose(self) -> ComposeResult:
         yield Static()
@@ -59,26 +61,25 @@ class DetailPane(ModalFocus, VerticalScroll):
 
     @property
     def opened(self) -> bool:
-        return self.has_class("-open")
+        return self.detail.opened
 
     def show(self, call: ToolCall | None) -> None:
-        """Open, showing ``call``'s details, or a note that there are none; another call than
-        the one shown starts at the top, while the same one updated keeps its place."""
-        if not self.opened or self._another(call):
-            self.scroll_home(animate=False)
-        self.call = call
-        self.border_title = detail_title(call)
-        self.query_one(Static).update(detail_body(call))
-        self.add_class("-open")
-
-    def _another(self, call: ToolCall | None) -> bool:
-        """Whether ``call`` is another call than the one shown, or none where one is."""
-        if call is None or self.call is None:
-            return call is not self.call
-        return call.call_id != self.call.call_id
+        """Open, showing ``call``'s details, as the detail shows them."""
+        self.detail.show(call)
 
     def close(self) -> None:
         """Close, leaving the pane if it's active."""
+        self.detail.close()
+
+    def scroll_to_top(self) -> None:
+        self.scroll_home(animate=False)
+
+    def show_detail(self, title: str, body: RenderableType) -> None:
+        self.border_title = title
+        self.query_one(Static).update(body)
+        self.add_class("-open")
+
+    def hide(self) -> None:
         if self.has_focus:
             self.screen.set_focus(None)
         self.remove_class("-open")

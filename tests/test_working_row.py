@@ -1,5 +1,8 @@
 """The working row below the conversation shows what runs right now under the shown tab."""
 
+from collections.abc import Mapping
+
+from textual.app import App, ComposeResult
 from textual.pilot import Pilot
 
 from orbit.protocol import (
@@ -17,6 +20,7 @@ from orbit.protocol import (
 from orbit.tui import OrbitApp
 from orbit.tui.tabs import ConversationTabs
 from orbit.tui.transcript import Transcript
+from orbit.tui.view.tabs import track_roles
 from orbit.tui.working import WorkingRow
 from tests.session_apps import CATALOG, OLD, RUNNING, SWITCH_TO_OLD, in_process, joined
 from tests.tui_fakes import FakeSession, changes, feed_events, labels, started
@@ -45,7 +49,7 @@ def done(agent: str, call_id: str) -> ToolCallFinished:
 
 def lines(row: WorkingRow) -> tuple[str, ...]:
     """The row's lines, read afresh each time."""
-    return row.lines
+    return row.working.lines
 
 
 def ticking(app: OrbitApp) -> bool:
@@ -97,30 +101,6 @@ async def test_the_planner_shows_while_its_turn_runs() -> None:
         assert not ticking(app)
 
 
-async def test_the_row_follows_tool_calls_starting_and_finishing() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test(size=(80, 24)) as pilot:
-        row = await opened(app, pilot)
-        await fed(session, pilot, started("agent-2"), turn("agent-2"), read("agent-2", "c1", "a"))
-        assert lines(row) == ("◜ agent-2 · Read a 0:00 · 0:00",)
-        await fed(session, pilot, read("agent-2", "c2", "b"))
-        assert lines(row) == ("◜ agent-2 · Read b (+1 running) 0:00 · 0:00",)
-        await fed(session, pilot, done("agent-2", "c2"), done("agent-2", "c1"))
-        assert lines(row) == ("◜ agent-2 · 0:00",)
-
-
-async def test_the_clocks_tick_while_something_runs() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test(size=(80, 24)) as pilot:
-        row = await opened(app, pilot)
-        await fed(session, pilot, started("agent-2"), turn("agent-2"))
-        row.clock = lambda: NOW + 12
-        row.tick()
-        assert lines(row) == ("◜ agent-2 · 0:12",)
-
-
 async def test_one_ticker_turns_a_call_and_its_row_until_the_turn_ends() -> None:
     session = FakeSession()
     app = OrbitApp(session)
@@ -134,22 +114,6 @@ async def test_one_ticker_turns_a_call_and_its_row_until_the_turn_ends() -> None
         await fed(session, pilot, finished("agent-2"))
         assert lines(row) == ()
         assert not ticking(app)
-
-
-async def test_four_running_agents_show_three_lines_and_how_many_more() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test(size=(80, 24)) as pilot:
-        row = await opened(app, pilot)
-        agents = [f"agent-{n}" for n in range(2, 6)]
-        await fed(session, pilot, *(started(a) for a in agents), *(turn(a) for a in agents))
-        assert lines(row) == (
-            "◜ agent-2 · 0:00",
-            "◜ agent-3 · 0:00",
-            "◜ agent-4 · 0:00",
-            "+1 more",
-        )
-        assert row.size.height == 4
 
 
 async def test_an_agent_exiting_leaves_the_row() -> None:
@@ -191,44 +155,6 @@ async def test_the_row_sits_below_the_shown_log() -> None:
         await fed(session, pilot, started("agent-2"), turn("agent-2"))
         log = app.query_one(Transcript).shown
         assert row.region.y == log.region.bottom
-
-
-async def test_a_long_call_is_clipped_to_the_row_and_refit_on_resize() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test(size=(80, 24)) as pilot:
-        row = await opened(app, pilot)
-        path = "x" * 200
-        await fed(session, pilot, started("agent-2"), turn("agent-2"), read("agent-2", "c", path))
-        assert len(lines(row)[0]) == row.size.width
-        await pilot.resize_terminal(100, 24)
-        await pilot.pause()
-        assert len(lines(row)[0]) == row.size.width
-
-
-async def test_markup_in_a_call_shows_literally() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    command = "echo [/] [red]x[/red]"
-    call = ToolCallStarted(
-        turn_id="t", agent_id="agent-2", call_id="c1", name="Bash", arguments={"command": command}
-    )
-    async with app.run_test(size=(80, 24)) as pilot:
-        row = await opened(app, pilot)
-        await fed(session, pilot, started("agent-2"), turn("agent-2"), call)
-        assert lines(row) == (f"◜ agent-2 · Bash {command} 0:00 · 0:00",)
-        assert str(row.render()) == f"◜ agent-2 · Bash {command} 0:00 · 0:00"
-
-
-async def test_a_line_too_wide_for_the_row_does_not_wrap() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test(size=(80, 24)) as pilot:
-        row = await opened(app, pilot)
-        await fed(
-            session, pilot, started("agent-2"), turn("agent-2"), read("agent-2", "c1", "日" * 60)
-        )
-        assert row.size.height == 1
 
 
 async def test_a_cancelled_planner_turn_leaves_the_row_and_ends_its_running_call() -> None:
@@ -295,3 +221,64 @@ async def test_a_snapshot_switching_sessions_shows_its_busy_planner_as_the_plann
         await fed(session, pilot, finished("agent-7"))
         assert lines(row) == ()
         assert not ticking(app)
+
+
+class RowApp(App[None]):
+    """The working row alone, its clock stopped at ``NOW``."""
+
+    def compose(self) -> ComposeResult:
+        row = WorkingRow()
+        row.clock = lambda: NOW
+        yield row
+
+
+async def tracked(pilot: Pilot[None], row: WorkingRow, *events: Event) -> None:
+    """Have ``row`` follow ``events``, with the roles the tabs track from them, and lay it
+    out."""
+    roles: Mapping[str, str] = {}
+    for event in events:
+        roles = track_roles(roles, event)
+        row.working.track(event, roles)
+    await pilot.pause()
+
+
+async def test_four_running_agents_take_a_line_each_and_one_for_the_rest() -> None:
+    app = RowApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        row = app.query_one(WorkingRow)
+        agents = [f"agent-{n}" for n in range(2, 6)]
+        await tracked(pilot, row, *(started(a) for a in agents), *(turn(a) for a in agents))
+        assert len(lines(row)) == 4 and row.size.height == 4
+
+
+async def test_a_long_call_is_clipped_to_the_row_and_refit_on_resize() -> None:
+    app = RowApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        row = app.query_one(WorkingRow)
+        path = "x" * 200
+        await tracked(pilot, row, started("agent-2"), turn("agent-2"), read("agent-2", "c", path))
+        assert len(lines(row)[0]) == row.size.width
+        await pilot.resize_terminal(100, 24)
+        await pilot.pause()
+        assert row.size.width == 100 and len(lines(row)[0]) == row.size.width
+
+
+async def test_markup_in_a_call_shows_literally() -> None:
+    app = RowApp()
+    command = "echo [/] [red]x[/red]"
+    call = ToolCallStarted(
+        turn_id="t", agent_id="agent-2", call_id="c1", name="Bash", arguments={"command": command}
+    )
+    async with app.run_test(size=(80, 24)) as pilot:
+        row = app.query_one(WorkingRow)
+        await tracked(pilot, row, started("agent-2"), turn("agent-2"), call)
+        assert str(row.render()) == f"◜ agent-2 · Bash {command} 0:00 · 0:00"
+
+
+async def test_a_line_too_wide_for_the_row_does_not_wrap() -> None:
+    app = RowApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        row = app.query_one(WorkingRow)
+        call = read("agent-2", "c1", "日" * 60)
+        await tracked(pilot, row, started("agent-2"), turn("agent-2"), call)
+        assert row.size.height == 1

@@ -95,7 +95,7 @@ class Transcript(Vertical):
     def action_copy_detail(self) -> None:
         """Copy the whole of the open detail pane's call to the clipboard, if it shows one,
         and say how many lines were copied."""
-        text = detail_copy(self.detail.call)
+        text = detail_copy(self.detail.detail.call)
         if text is None:
             return
         self.app.copy_to_clipboard(text)
@@ -141,7 +141,7 @@ class Transcript(Vertical):
 
     def track(self, event: Event, roles: Mapping[str, str]) -> None:
         """Follow who runs after ``event``, with ``roles`` placing agents in tabs."""
-        self.working.track(event, roles)
+        self.working.working.track(event, roles)
         self._keep_ticking()
 
     def entries(self, key: str | None) -> tuple[Entry, ...]:
@@ -245,12 +245,12 @@ class Transcript(Vertical):
         row."""
         for log in self._logs.values():
             log.tick()
-        self.working.tick()
+        self.working.working.tick()
 
     @property
     def _anything_runs(self) -> bool:
         """Whether any agent or tool call runs."""
-        return self.working.running or any(log.running for log in self._logs.values())
+        return self.working.working.running or any(log.running for log in self._logs.values())
 
     def _keep_ticking(self) -> None:
         """Tick while any agent or tool call runs, and only then."""
@@ -290,7 +290,7 @@ class Transcript(Vertical):
         self.only = key
         self._label = None if key is None else label
         self._retitle()
-        self.working.show_tab(key)
+        self.working.working.show_tab(key)
         log = self._log(key)
         if log is not before:
             before.show(False)
