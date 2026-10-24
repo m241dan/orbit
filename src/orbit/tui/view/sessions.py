@@ -18,11 +18,12 @@ from orbit.protocol import (
     WorkspaceEntry,
 )
 from orbit.tui.view.common import (
+    CODER_WAIT,
     SPINNER_FRAMES,
     STATUS_ICONS,
     ListHints,
     active_session,
-    ordinal,
+    coder_place,
 )
 from orbit.tui.view.tasks import coder_wait, usage_label
 from orbit.tui.view.workspaces import workspace_at
@@ -362,10 +363,8 @@ def state_words(activity: Sequence[Activity]) -> str:
 def waiting_words(position: int | None) -> str:
     """A wait for a coder at ``position`` in line, in words: ``waiting for a coder: 2nd in
     line``, ``next in line`` at 1, and just ``waiting for a coder`` without a position."""
-    if position is None:
-        return "waiting for a coder"
-    place = "next" if position == 1 else ordinal(position)
-    return f"waiting for a coder: {place} in line"
+    place = coder_place(position)
+    return CODER_WAIT if place is None else f"{CODER_WAIT}: {place} in line"
 
 
 def _activity_word(activity: Activity) -> str:

@@ -11,9 +11,16 @@ from textual.widgets import Input, Static
 
 from orbit.protocol import Settings, TaskSpec
 from orbit.tui.settings_pickers import SettingsPickers
-from orbit.tui.view.common import model_label
-from orbit.tui.view.settings import MODEL_TITLE, TOOL_ACCESS_TITLE
-from orbit.tui.view.tasks import TASK_EDITOR_HINT, join_prompt, split_prompt, task_editor_title
+from orbit.tui.view.settings import MODEL_TITLE, TOOL_ACCESS_TITLE, settings_fields
+from orbit.tui.view.tasks import (
+    TASK_EDITOR_HINT,
+    TASK_PROMPT_TITLE,
+    TASK_TITLE_PLACEHOLDER,
+    TASK_TITLE_TITLE,
+    join_prompt,
+    split_prompt,
+    task_editor_title,
+)
 from orbit.tui.widgets import PromptBox, PromptInput, mark_selected
 
 
@@ -87,18 +94,19 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
 
     def compose(self) -> ComposeResult:
         title, body = split_prompt(self._prompt)
+        model, tools = settings_fields(self._settings)
         # Fields are reached with j/k, not by tabbing or clicking; the wheel still scrolls.
         with VerticalScroll(can_focus=False) as box:
             box.border_title = self.title_text
             box.border_subtitle = TASK_EDITOR_HINT
-            yield PromptInput(value=title, placeholder="Press i to type", id="task-title")
+            yield PromptInput(value=title, placeholder=TASK_TITLE_PLACEHOLDER, id="task-title")
             yield PromptBox(body, id="task-prompt")
-            yield FieldBox(MODEL_TITLE, model_label(self._settings), id="task-model")
-            yield FieldBox(TOOL_ACCESS_TITLE, self._settings.tool_access, id="task-tools")
+            yield FieldBox(MODEL_TITLE, model, id="task-model")
+            yield FieldBox(TOOL_ACCESS_TITLE, tools, id="task-tools")
 
     def on_mount(self) -> None:
-        self.query_one(PromptInput).border_title = "Title"
-        self.query_one(PromptBox).border_title = "Prompt"
+        self.query_one(PromptInput).border_title = TASK_TITLE_TITLE
+        self.query_one(PromptBox).border_title = TASK_PROMPT_TITLE
         self.query_one(f"#{FIELDS[0]}").add_class("selected")
 
     def action_move(self, step: int) -> None:
@@ -154,5 +162,6 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
 
     def _update(self, settings: Settings) -> None:
         self._settings = settings
-        self.query_one("#task-model", FieldBox).update(model_label(self._settings))
-        self.query_one("#task-tools", FieldBox).update(self._settings.tool_access)
+        model, tools = settings_fields(settings)
+        self.query_one("#task-model", FieldBox).update(model)
+        self.query_one("#task-tools", FieldBox).update(tools)

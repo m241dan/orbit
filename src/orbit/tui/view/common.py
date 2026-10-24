@@ -1,6 +1,7 @@
 """What the other view modules share: entry kinds, the spinner, status icons, model labels,
-token counts, counted nouns, the lines of text, where a list's highlight goes, the ids of a
-list's options, the keys a picker shows and the active session."""
+the wording of a wait for a coder, token counts, counted nouns, the lines of text, where a
+list's highlight goes, the ids of a list's options, the keys a picker shows and the active
+session."""
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -77,6 +78,23 @@ def ordinal(number: int) -> str:
     teen = number % 100 in (11, 12, 13)
     suffix = "th" if teen else suffixes.get(number % 10, "th")
     return f"{number}{suffix}"
+
+
+CODER_WAIT = "waiting for a coder"
+"""A wait for a coder, in words, where nothing more is known about it."""
+
+
+def coder_place(position: int | None) -> str | None:
+    """Where a run at ``position`` in line for a coder is: ``next`` at 1, else the ordinal
+    (``2nd``); none without a position."""
+    if position is None:
+        return None
+    return "next" if position == 1 else ordinal(position)
+
+
+def coder_wait_note(detail: str) -> str:
+    """A short note that a run waits for a coder, with ``detail``: ``waiting: 2nd``."""
+    return f"waiting: {detail}"
 
 
 def model_label(settings: Settings) -> str:

@@ -1,5 +1,8 @@
+import pytest
+
 from orbit.protocol import (
     Settings,
+    ToolAccess,
 )
 from orbit.tui.view.settings import (
     MODEL_TITLE,
@@ -8,6 +11,7 @@ from orbit.tui.view.settings import (
     model_options,
     picked_model,
     picked_tool_access,
+    settings_fields,
     settings_summary,
     tool_access_choices,
     tool_access_labels,
@@ -91,3 +95,17 @@ def test_picked_model_changes_only_the_model() -> None:
 def test_picked_tool_access_changes_only_the_tool_access() -> None:
     settings = Settings(model="opus", tool_access="off")
     assert picked_tool_access(settings, 2) == Settings(model="opus", tool_access="full")
+
+
+@pytest.mark.parametrize(
+    ("access", "tools"),
+    [("off", "off"), ("restricted", "restricted"), ("full", "full (auto-approved)")],
+)
+def test_settings_fields_show_the_model_and_the_tool_access_label(
+    access: ToolAccess, tools: str
+) -> None:
+    assert settings_fields(Settings(model="opus", tool_access=access)) == ("opus", tools)
+
+
+def test_settings_fields_call_no_model_the_default() -> None:
+    assert settings_fields(Settings())[0] == "default"

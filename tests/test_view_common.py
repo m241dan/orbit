@@ -10,6 +10,7 @@ from orbit.tui.view.common import (
     STATUS_ICONS,
     ListHints,
     active_session,
+    coder_place,
     counted,
     kept_highlight,
     option_id,
@@ -159,3 +160,10 @@ def test_a_picked_option_whose_row_has_gone_names_none() -> None:
     assert picked_row(option_id("b"), ("a", None)) is None
     assert picked_row(option_id(None), ("a",)) is None
     assert picked_row(None, ("a", None)) is None
+
+
+@pytest.mark.parametrize(("position", "place"), [(1, "next"), (2, "2nd"), (3, "3rd"), (None, None)])
+def test_coder_place_says_next_at_the_front_of_the_line_else_the_ordinal(
+    position: int | None, place: str | None
+) -> None:
+    assert coder_place(position) == place

@@ -82,7 +82,7 @@ async def test_editor_builds_a_task_with_vim_keys() -> None:
         assert picker(app)[0] == "Tool access"
         assert picker(app)[2] == 1  # restricted
         await pilot.press("j", "enter")
-        assert editor_fields(app) == ("fix it", "", "opus", "full")
+        assert editor_fields(app) == ("fix it", "", "opus", "full (auto-approved)")
 
         # i jumps back to the title field from the model or tools field.
         await pilot.press("i", "!", "enter")
@@ -123,6 +123,20 @@ async def test_editor_escape_discards_and_blank_title_is_not_saved() -> None:
         assert isinstance(app.screen, TaskEditorScreen)
         assert editor_fields(app)[:2] == (" ", "body")
         assert session.commands == []
+
+
+async def test_editor_shows_a_tasks_model_and_tools_as_its_row_does() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings())
+        task = TaskSpec(prompt="Add a widget", settings=Settings(model="opus", tool_access="full"))
+        await feed_events(session, pilot, TasksChanged(tasks=(TaskState(id="1", task=task),)))
+        await open_task_list(pilot)
+        row_details = rows(app)[0].split("\n")[1].strip()
+        await pilot.press("enter")
+        assert row_details == "opus · full (auto-approved)"
+        assert " · ".join(editor_fields(app)[2:]) == row_details
 
 
 async def test_editor_shows_a_prompts_title_and_body_and_edits_the_body() -> None:

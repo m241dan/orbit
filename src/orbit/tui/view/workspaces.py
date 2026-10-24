@@ -21,7 +21,13 @@ from orbit.protocol import (
     looks_like_url,
     with_state,
 )
-from orbit.tui.view.common import ListHints, active_session, counted, ordinal
+from orbit.tui.view.common import (
+    ListHints,
+    active_session,
+    coder_place,
+    coder_wait_note,
+    counted,
+)
 from orbit.tui.view.tasks import coder_wait
 
 WORKSPACES_TITLE = "Workspaces"
@@ -149,10 +155,10 @@ def wait_note(activity: Sequence[Activity]) -> str | None:
     ``waiting: next`` at 1, and just ``waiting`` without a position; none while it doesn't
     wait."""
     wait = coder_wait(activity)
-    if wait is None or wait.position is None:
-        return None if wait is None else "waiting"
-    place = "next" if wait.position == 1 else ordinal(wait.position)
-    return f"waiting: {place}"
+    if wait is None:
+        return None
+    place = coder_place(wait.position)
+    return "waiting" if place is None else coder_wait_note(place)
 
 
 def clone_label(cloning: WorkspaceCloning) -> str:

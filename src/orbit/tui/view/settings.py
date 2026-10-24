@@ -61,11 +61,22 @@ def tool_access_labels() -> list[str]:
     return [TOOL_ACCESS_DESCRIPTIONS[a] for a in TOOL_ACCESS_OPTIONS]
 
 
+def tool_access_label(access: ToolAccess) -> str:
+    """How ``access`` is shown beside a model: ``full (auto-approved)``."""
+    return TOOL_ACCESS_LABELS[access]
+
+
+def settings_fields(settings: Settings) -> tuple[str, str]:
+    """How ``settings`` show their model and their tool access, as a task and its editor show
+    them: ``("default", "restricted")``."""
+    return model_label(settings), tool_access_label(settings.tool_access)
+
+
 def settings_summary(settings: Settings) -> str:
     """The settings as the prompt shows them.
 
     The model is the planner's, and the default for new tasks; the tool access is
     only the default for new tasks.
     """
-    tools = TOOL_ACCESS_LABELS[settings.tool_access]
-    return f"planner's model: {model_label(settings)} · new tasks' tools: {tools}"
+    model, tools = settings_fields(settings)
+    return f"planner's model: {model} · new tasks' tools: {tools}"

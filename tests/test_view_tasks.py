@@ -12,6 +12,9 @@ from orbit.tui.view.rules import usage_text
 from orbit.tui.view.tasks import (
     NEW_TASK_LABEL,
     TASK_EDITOR_HINT,
+    TASK_PROMPT_TITLE,
+    TASK_TITLE_PLACEHOLDER,
+    TASK_TITLE_TITLE,
     acceptable,
     active_task,
     edit_refusal,
@@ -254,3 +257,8 @@ def test_the_spinners_stop_with_no_task_running() -> None:
 
 def test_the_new_task_row_is_dim_and_italic() -> None:
     assert new_task_row() == Text(NEW_TASK_LABEL, style="dim italic")
+
+
+def test_the_task_editor_titles_its_text_fields_and_says_how_to_type() -> None:
+    assert (TASK_TITLE_TITLE, TASK_PROMPT_TITLE) == ("Title", "Prompt")
+    assert TASK_TITLE_PLACEHOLDER == "Press i to type"

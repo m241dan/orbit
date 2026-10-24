@@ -8,10 +8,20 @@ from rich.text import Text
 
 from orbit.protocol import ACTIVE_STATUSES, Activity, TaskState, Usage
 from orbit.protocol import edit_refusal as shared_edit_refusal
-from orbit.tui.view.common import STATUS_ICONS, counted, model_label, token_text
+from orbit.tui.view.common import (
+    CODER_WAIT,
+    STATUS_ICONS,
+    coder_wait_note,
+    counted,
+    token_text,
+)
 from orbit.tui.view.detail_views import ERROR
+from orbit.tui.view.settings import settings_fields
 
 TASK_EDITOR_HINT = "j/k move · J/K scroll · i type · enter choose · ctrl+s save · esc cancel"
+TASK_TITLE_TITLE = "Title"
+TASK_PROMPT_TITLE = "Prompt"
+TASK_TITLE_PLACEHOLDER = "Press i to type"
 REASON_HINT = "j/k scroll · y copy · esc close"
 NEW_TASK_LABEL = "+ new task"
 
@@ -71,8 +81,7 @@ def task_label(
 def _details(state: TaskState, waiting: str | None) -> str:
     """What a row says under its title: the settings, the fix it's on, what it spent, and that
     it's ``waiting`` for a coder, if pending and given."""
-    settings = state.task.settings
-    details = f"{model_label(settings)} · {settings.tool_access}"
+    details = " · ".join(settings_fields(state.task.settings))
     if state.attempt:
         details += f" · fix {state.attempt}/{state.max_attempts}"
     if state.usage != Usage():
@@ -154,9 +163,8 @@ def coder_wait_row(activity: Sequence[Activity]) -> tuple[str, str] | None:
 def _wait_note(busy: int | None) -> str:
     """What the row of the task waiting for a coder says while ``busy`` coders hold the slots:
     ``⏳ waiting: 3 coders busy``, or ``⏳ waiting for a coder`` while that isn't known."""
-    if busy is None:
-        return "⏳ waiting for a coder"
-    return f"⏳ waiting: {counted(busy, 'coder')} busy"
+    note = CODER_WAIT if busy is None else coder_wait_note(f"{counted(busy, 'coder')} busy")
+    return f"⏳ {note}"
 
 
 def usage_label(usage: Usage) -> str:
