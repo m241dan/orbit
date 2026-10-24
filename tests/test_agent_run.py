@@ -50,6 +50,7 @@ from orbit.protocol import (
     TurnEndReason,
     VerificationSkipped,
 )
+from orbit.tracing import NoSpan, Span, current_span, use_span
 from tests.agent_fakes import (
     ROLES,
     STEP,
@@ -877,6 +878,27 @@ async def test_concurrent_callers_start_the_host_once_and_share_its_url() -> Non
     await desk.stop()
     await desk.stop()
     assert host.stops == 1
+
+
+class SpanSeeingHost(FakeHost):
+    """A host noting the span current as it starts, as uvicorn's serve task would run with."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.span: Span | None = None
+
+    async def start(self, handler: CallHandler) -> str:
+        self.span = current_span()
+        return await super().start(handler)
+
+
+async def test_the_host_started_inside_a_span_runs_with_no_span_current() -> None:
+    host = SpanSeeingHost()
+    desk = desk_on(host)
+    none = current_span()
+    with use_span(NoSpan("task")):
+        assert await desk.url() == URL
+    assert host.span is none
 
 
 async def test_a_host_that_failed_to_start_is_started_again_next_time() -> None:

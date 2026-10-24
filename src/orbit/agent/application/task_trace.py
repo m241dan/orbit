@@ -17,13 +17,12 @@ from orbit.agent.domain.commits import task_title
 from orbit.protocol import TaskState
 from orbit.tracing import (
     AttributeValue,
-    NoSpan,
     NoTelemetry,
     Span,
     Telemetry,
     current_span,
+    no_span,
     span_block,
-    use_span,
 )
 
 TASK_SPAN = "orbit.task"
@@ -42,8 +41,6 @@ MERGE_RESULT = "orbit.merge.result"
 VERIFY_STEP_EVENT = "orbit.verify.step"
 GAVE_UP_EVENT = "orbit.task.gave_up"
 MERGE_CONFLICT_EVENT = "orbit.merge.conflict"
-
-_ROOT = NoSpan("root")  # Current while a task's span starts, so it starts its own trace.
 
 
 class TaskFailed(Exception):
@@ -69,7 +66,7 @@ class TaskTracing:
         and starting its own trace; on leaving it, it's given the task's usage, status and
         reason as the board has them, and ended."""
         attributes = self._identity(board.get(task_id), model)
-        with use_span(_ROOT):
+        with no_span():  # So the span starts its own trace.
             span = self.telemetry.start(TASK_SPAN, attributes)
         with span_block(span):
             escaped = True

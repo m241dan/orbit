@@ -42,6 +42,7 @@ from orbit.protocol import (
     RunningAgent,
     Settings,
 )
+from orbit.tracing import no_span
 
 # The refusal of a call from an agent that isn't running.
 UNKNOWN_AGENT = Reply("Unknown or expired agent token.", is_error=True)
@@ -162,7 +163,9 @@ class AgentDesk:
     async def url(self) -> str:
         """Where agents reach orbit; starts the host the first time, or after a failed start."""
         if self._starting is None:
-            self._starting = asyncio.ensure_future(self.agents.host.start(self.handle))
+            # Detached: the host serves every later agent, not the task whose launch started it.
+            with no_span():
+                self._starting = asyncio.ensure_future(self.agents.host.start(self.handle))
             self._starting.add_done_callback(self._started)
         # Shielded: one caller giving up doesn't cancel the start the others wait on.
         return await asyncio.shield(self._starting)
