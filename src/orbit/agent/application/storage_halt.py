@@ -45,6 +45,43 @@ class Halting(Protocol):
         ...
 
 
+Attempt = Callable[[], Awaitable[StoreFailed | None]]
+"""Makes a write to the store; returns the error when it fails."""
+
+
+class RetriedWrite(Protocol):
+    """A write to the store a halt stopped, which resuming retries."""
+
+    @property
+    def write(self) -> FailedWrite:
+        """Which write to the store this is."""
+        ...
+
+    async def retry(self) -> StoreFailed | None:
+        """Make the write though the session is halted; returns the error when it fails."""
+        ...
+
+
+async def written(halt: Halting, write: FailedWrite, attempt: Attempt) -> None:
+    """Make the write ``attempt`` makes, unless ``halt`` says the session is halted, halting it
+    as ``write`` failing when it fails."""
+    if halt.halted:
+        return
+    error = await attempt()
+    if error is not None:
+        halt.fail(write, error)
+
+
+async def retried(writes: Sequence[RetriedWrite]) -> Failure | None:
+    """Retry ``writes`` in order, stopping at the first that fails; returns that write and its
+    error, if one did."""
+    for each in writes:
+        error = await each.retry()
+        if error is not None:
+            return each.write, error
+    return None
+
+
 async def _nothing_diverted() -> tuple[Sequence[EventEnvelope], str | None]:
     return (), None
 

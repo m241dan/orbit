@@ -7,7 +7,7 @@ from orbit.agent.application.failures import outcome
 from orbit.agent.application.keeper import Clock
 from orbit.agent.application.lanes import Background
 from orbit.agent.application.ports import AgentLaunch, Publish, StoreFailed, UsageLedger
-from orbit.agent.application.storage_halt import Halting
+from orbit.agent.application.storage_halt import Halting, written
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.agent.domain.usage_totals import UsageRow, counted
 from orbit.protocol import Usage
@@ -23,6 +23,8 @@ class UsageRecorder:
     ``publish``. A row that can't be written halts the session through ``halt`` and is kept, with
     those after it, to be written when the halt is retried; nothing is written while it's
     halted. :attr:`recorded` is called after each row is written."""
+
+    write = FailedWrite.USAGE
 
     def __init__(
         self, ledger: UsageLedger | None, halt: Halting, publish: Publish, clock: Clock
@@ -51,28 +53,26 @@ class UsageRecorder:
     async def _write_pending(self, ledger: UsageLedger) -> None:
         """Write the rows not yet written, unless the session is halted, halting it if one
         fails."""
-        if self._halt.halted:
-            return
-        error = await self._write(ledger)
-        if error is not None:
-            self._halt.fail(FailedWrite.USAGE, error)
+        async with self._writing:
+            await written(self._halt, self.write, lambda: self._write(ledger))
 
     async def retry(self) -> StoreFailed | None:
         """Write the rows not yet written, though the session is halted, as resuming does;
         returns the error when one fails."""
         if self._ledger is None:
             return None
-        return await self._write(self._ledger)
+        async with self._writing:
+            return await self._write(self._ledger)
 
     async def _write(self, ledger: UsageLedger) -> StoreFailed | None:
-        """Write the rows not yet written, oldest first, until one fails; returns its error."""
-        async with self._writing:
-            while self._pending:
-                error = await outcome(ledger.record(self._pending[0]))
-                if isinstance(error, StoreFailed):
-                    return error
-                self._pending.pop(0)
-                self.recorded()
+        """Write the rows not yet written, oldest first, until one fails, holding the lock to
+        write them; returns its error."""
+        while self._pending:
+            error = await outcome(ledger.record(self._pending[0]))
+            if isinstance(error, StoreFailed):
+                return error
+            self._pending.pop(0)
+            self.recorded()
         return None
 
     async def close(self) -> None:

@@ -18,7 +18,7 @@ from orbit.agent.application.ports import (
     StoredSession,
     StoreFailed,
 )
-from orbit.agent.application.storage_halt import Halting
+from orbit.agent.application.storage_halt import Halting, written
 from orbit.agent.domain.refusals import STOPPING, Refused
 from orbit.agent.domain.reviews import LaneSnapshot
 from orbit.agent.domain.sessions import (
@@ -235,16 +235,19 @@ class SessionKeeper:
         """Save the session, holding what ``contents`` says it does as it's saved, if it's used
         and changed since it was last saved. A failing save, or a store failing as the session's
         lock is taken on its first save, halts the session."""
-        error = await self._save(contents, retrying=False)
-        if error is not None:
-            self._halt.fail(FailedWrite.SESSION_RECORD, error)
+        if self._store is None:
+            return
+        store = self._store
+        async with self._saving:
+            held = self._held(contents)
+            await written(self._halt, FailedWrite.SESSION_RECORD, lambda: self._save(store, held))
 
     async def retry(self, contents: Callable[[], Contents]) -> StoreFailed | None:
         """Save the session as :meth:`save` does, though it's halted, as resuming does, and then
         redo the rename of a saved session whose save failed; returns the error when a save
         fails, or when a store problem keeps the rename from being redone, keeping it to retry.
         A rename whose session can't be claimed any more is dropped, reported."""
-        error = await self._save(contents, retrying=True)
+        error = await self._resave(contents)
         if error is not None or self._renaming is None:
             return error
         renaming, self._renaming = self._renaming, None
@@ -260,27 +263,35 @@ class SessionKeeper:
             )
         return renamed if isinstance(renamed, StoreFailed) else None
 
-    async def _save(self, contents: Callable[[], Contents], retrying: bool) -> StoreFailed | None:
-        """Save the session as :meth:`save` does, halted or not if ``retrying``; returns the
-        error when the save fails."""
+    async def _resave(self, contents: Callable[[], Contents]) -> StoreFailed | None:
+        """Save the session as :meth:`save` does, though it's halted; returns the error when the
+        save fails."""
         if self._store is None:
             return None
         async with self._saving:
-            contents_now = contents()
-            if not self._due(contents_now, retrying):
-                return None
-            locked = await self._lock(self._store)
-            if locked is True:
-                return await self._write(self._store, contents_now)
+            return await self._save(self._store, self._held(contents))
+
+    def _held(self, contents: Callable[[], Contents]) -> Contents:
+        """What ``contents`` says the session holds now, marking it used once it has a task."""
+        held = contents()
+        self.used = self.used or bool(held.tasks)
+        return held
+
+    async def _save(self, store: SessionStore, contents: Contents) -> StoreFailed | None:
+        """Save ``contents`` in ``store``, holding the lock to save, if they're due, taking the
+        session's lock on its first save; returns the error when the save, or taking the lock,
+        fails."""
+        if not self._due(contents):
+            return None
+        locked = await self._lock(store)
+        if locked is True:
+            return await self._write(store, contents)
         return locked if isinstance(locked, StoreFailed) else None
 
-    def _due(self, contents: Contents, retrying: bool) -> bool:
-        """Whether ``contents`` are to be saved: the session is open, not halted unless
-        ``retrying``, used (as it is once it has a task) and holds something it didn't when it
-        was last saved, its name included."""
-        self.used = self.used or bool(contents.tasks)
-        open_now = not self._closed and (retrying or not self._halt.halted)
-        return open_now and self.used and (self.name, contents) != self._saved
+    def _due(self, contents: Contents) -> bool:
+        """Whether ``contents`` are to be saved: the session is open, used (as it is once it has
+        a task) and holds something it didn't when it was last saved, its name included."""
+        return not self._closed and self.used and (self.name, contents) != self._saved
 
     async def _lock(self, store: SessionStore) -> StoreFailed | bool:
         """Lock the session in ``store`` on its first save; returns whether it's locked, or the
@@ -539,6 +550,11 @@ class SessionKeeper:
         self.used, self._saved, self._locked = False, None, None
         return left
 
+    def retried(self, contents: Callable[[], Contents]) -> "RecordRetry":
+        """The session record's write, which resuming retries as :meth:`retry` does, holding
+        what ``contents`` says."""
+        return RecordRetry(self, contents)
+
     async def close(self) -> None:
         """Stop saving, and let go of the session's lock if it was taken, else forget its logged
         events unless it's halted; reports it if the lock can't be let go of."""
@@ -563,3 +579,21 @@ class SessionKeeper:
             await self._publish(ErrorOccurred(code=SAVE_FAILED, message=str(result)))
             return None
         return result
+
+
+@dataclass(frozen=True)
+class RecordRetry:
+    """The session record's write, retried by ``keeper`` holding what ``contents`` says."""
+
+    keeper: SessionKeeper
+    contents: Callable[[], Contents]
+
+    @property
+    def write(self) -> FailedWrite:
+        """The session record's write."""
+        return FailedWrite.SESSION_RECORD
+
+    async def retry(self) -> StoreFailed | None:
+        """Save the session record, and redo a failed rename, though halted; returns the error
+        when that fails."""
+        return await self.keeper.retry(self.contents)

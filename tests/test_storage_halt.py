@@ -19,6 +19,8 @@ from orbit.agent.application.storage_halt import (
     HaltHooks,
     StorageHalt,
     fault_of,
+    retried,
+    written,
 )
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.sessions import SessionRecord
@@ -542,6 +544,81 @@ async def test_once_closed_a_failure_only_marks_the_session_halted() -> None:
     await asyncio.sleep(0.01)
 
     assert halt.halted and published == []
+
+
+@dataclass
+class Retried:
+    """A write that, retried, fails with ``error`` if there is one, noting it ran in ``ran``."""
+
+    write: FailedWrite
+    ran: list[FailedWrite]
+    error: StoreFailed | None = None
+
+    async def retry(self) -> StoreFailed | None:
+        self.ran.append(self.write)
+        return self.error
+
+
+async def test_retrying_writes_stops_at_the_first_that_fails_and_names_it() -> None:
+    ran: list[FailedWrite] = []
+    full = StoreFailed("full")
+    writes = (
+        Retried(FailedWrite.SESSION_RECORD, ran),
+        Retried(FailedWrite.REVIEW_COUNT, ran, full),
+        Retried(FailedWrite.USAGE, ran, StoreFailed("later")),
+    )
+
+    assert await retried(writes) == (FailedWrite.REVIEW_COUNT, full)
+    assert ran == [FailedWrite.SESSION_RECORD, FailedWrite.REVIEW_COUNT]
+
+
+async def test_retrying_writes_that_all_work_retries_each_in_order() -> None:
+    ran: list[FailedWrite] = []
+    writes = (Retried(FailedWrite.USAGE, ran), Retried(FailedWrite.SESSION_RECORD, ran))
+
+    assert await retried(writes) is None
+    assert ran == [FailedWrite.USAGE, FailedWrite.SESSION_RECORD]
+
+
+async def test_a_write_is_skipped_while_the_session_is_halted() -> None:
+    halt = StorageHalt(lambda event: asyncio.sleep(0))
+    halt.fail(FailedWrite.EVENT_LOG, StoreFailed("first"))
+    attempts: list[str] = []
+
+    async def attempt() -> StoreFailed | None:
+        attempts.append("tried")
+        return None
+
+    await written(halt, FailedWrite.USAGE, attempt)
+
+    assert attempts == []
+    await halt.close()
+
+
+async def test_a_failing_write_halts_the_session_as_that_write() -> None:
+    halt = StorageHalt(lambda event: asyncio.sleep(0))
+
+    async def attempt() -> StoreFailed | None:
+        return StoreFailed("full")
+
+    await written(halt, FailedWrite.REVIEW_COUNT, attempt)
+
+    assert halt.message == halting_message(FailedWrite.REVIEW_COUNT)
+    await halt.close()
+
+
+async def test_a_write_that_works_leaves_the_session_running() -> None:
+    halt = StorageHalt(lambda event: asyncio.sleep(0))
+    attempts: list[str] = []
+
+    async def attempt() -> StoreFailed | None:
+        attempts.append("tried")
+        return None
+
+    await written(halt, FailedWrite.USAGE, attempt)
+
+    assert attempts == ["tried"] and not halt.halted
+    await halt.close()
 
 
 async def test_an_outbox_without_a_log_diverts_and_loses_nothing() -> None:

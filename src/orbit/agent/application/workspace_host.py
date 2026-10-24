@@ -46,7 +46,7 @@ from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
 from orbit.agent.application.session_state import SessionStates, StateParts
 from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.startup_check import CheckSite, StartupCheck
-from orbit.agent.application.storage_halt import Failure, HaltHooks, StorageHalt
+from orbit.agent.application.storage_halt import Failure, HaltHooks, StorageHalt, retried
 from orbit.agent.application.switcher import (
     SessionCommand,
     SessionSwitcher,
@@ -323,23 +323,13 @@ class WorkspaceHost:
         self._watch_background()
 
     async def _retry_storage(self) -> Failure | None:
-        """Retry the writes to the store a halt stopped: the session record as it is now and
-        the review count, then appending to the event log, which logs a ``LogGap`` for each
-        span of events lost; returns the write that failed and its error, if one did."""
-        return await self._retry_saves() or await self._resume_log()
-
-    async def _retry_saves(self) -> Failure | None:
-        """Save the session record as it is now, and a saved session's rename whose save failed,
-        then the review count, though halted; returns the one that failed and its error, if one
-        did."""
-        record = await self._keeper.retry(self._switcher.contents)
-        if record is not None:
-            return FailedWrite.SESSION_RECORD, record
-        count = await self._review_count.retry()
-        if count is not None:
-            return FailedWrite.REVIEW_COUNT, count
-        usage = await self._usage.retry()
-        return None if usage is None else (FailedWrite.USAGE, usage)
+        """Retry the writes to the store a halt stopped: the session record as it is now, with a
+        saved session's rename whose save failed, the review count and the usage, then appending
+        to the event log, which logs a ``LogGap`` for each span of events lost; returns the write
+        that failed and its error, if one did."""
+        record = self._keeper.retried(self._switcher.contents)
+        saves = await retried((record, self._review_count, self._usage))
+        return saves or await self._resume_log()
 
     async def _resume_log(self) -> Failure | None:
         """Append to the event log again, publishing a ``LogGap`` for each span of events that

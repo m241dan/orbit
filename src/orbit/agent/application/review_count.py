@@ -5,7 +5,7 @@ import asyncio
 
 from orbit.agent.application.failures import ReportedOnce, outcome
 from orbit.agent.application.ports import Publish, SessionStore, StoreFailed
-from orbit.agent.application.storage_halt import Halting
+from orbit.agent.application.storage_halt import Halting, written
 from orbit.agent.domain.reviews import ReviewPlanner
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import INTERNAL
@@ -16,6 +16,8 @@ class ReviewCount:
     is reported with ``publish``, and a failing save halts the session through ``halt``.
     Nothing is saved while it's halted, nor until a load has worked, so a count never read
     can't replace the one saved."""
+
+    write = FailedWrite.REVIEW_COUNT
 
     def __init__(self, store: SessionStore | None, halt: Halting, publish: Publish) -> None:
         self._store = store
@@ -73,13 +75,10 @@ class ReviewCount:
         changed."""
         if self._store is None:
             return
+        store = self._store
         self._wanted = count
         async with self._saving:
-            if self._halt.halted:
-                return
-            error = await self._write(self._store, count)
-            if error is not None:
-                self._halt.fail(FailedWrite.REVIEW_COUNT, error)
+            await written(self._halt, self.write, lambda: self._write(store, count))
 
     async def retry(self) -> StoreFailed | None:
         """Save the count last asked to be saved, if it changed, though the session is halted,
