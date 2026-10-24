@@ -77,6 +77,10 @@ def refused(event: Event) -> bool:
     return isinstance(event, CommandRefused)
 
 
+def store_gone(event: Event) -> bool:
+    return event == ErrorOccurred(code=INTERNAL, message="store gone")
+
+
 async def snapshot_on_joining(session: WorkspaceHost) -> Snapshot:
     """The Snapshot a new connection to ``session`` gets for its Hello and its Attach."""
     snapshot = (await views_on_joining(session))[-1]
@@ -676,7 +680,7 @@ async def test_work_sent_after_a_takeover_that_failed_runs_at_once() -> None:
 
     switcher_of(session).publish_catalog = failing  # type: ignore[method-assign]
     await send(session, TakeOwnership(take=True))
-    await events_until(session, refused)
+    await events_until(session, store_gone)
     await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
     await send(session, RunTasks())
     await events_until(session, idle())
@@ -701,7 +705,7 @@ async def test_work_queued_before_a_takeover_that_failed_still_runs() -> None:
     await events_until(session, offered)
 
     await send(session, TakeOwnership(take=True))
-    await events_until(session, refused)
+    await events_until(session, store_gone)
     await events_until(session, idle())
 
     assert session.queued_work == () and len(launcher.launches) == 1
@@ -719,7 +723,7 @@ async def test_work_sent_after_a_takeover_that_failed_with_work_queued_runs_at_o
     lock.free = True
     await events_until(session, offered)
     await send(session, TakeOwnership(take=True))
-    await events_until(session, refused)
+    await events_until(session, store_gone)
     await events_until(session, idle())
 
     await send(session, AddTask(task=TaskSpec(prompt="Add a switch.")))

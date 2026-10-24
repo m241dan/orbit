@@ -1,5 +1,6 @@
 """Handing the repository over: what answering the offer of it does, and in what order."""
 
+import asyncio
 from collections.abc import Sequence
 
 import pytest
@@ -28,8 +29,9 @@ class Effects:
         self.log: list[object] = []
         self.answerable = True
         self.notes: Sequence[str] = ()
-        self.recovery_failure: RecoveryFailed | None = None
-        self.catalog_failure: Exception | None = None
+        self.recovery_failure: Exception | None = None
+        self.catalog_failure: BaseException | None = None
+        self.recount_failure: Exception | None = None
         self.own_failure: Exception | None = None
 
     def answer(self, take: bool) -> None:
@@ -70,6 +72,8 @@ class Effects:
 
     async def recount(self) -> None:
         self.log.append("recount")
+        if self.recount_failure is not None:
+            raise self.recount_failure
 
     def kick(self) -> None:
         self.log.append("kick")
@@ -146,14 +150,57 @@ async def test_a_failed_recovery_is_reported_as_internal_and_the_takeover_goes_o
     ]
 
 
-async def test_a_failed_announcement_still_runs_the_queue_ends_the_takeover_and_raises() -> None:
+async def test_a_failed_catalog_publish_is_reported_and_the_queue_still_runs() -> None:
     effects = Effects()
     effects.catalog_failure = RuntimeError("store gone")
 
-    with pytest.raises(RuntimeError, match="store gone"):
+    await handover_on(effects).answer(TakeOwnership(take=True), COMMAND_ID)
+
+    assert effects.log[effects.log.index("catalog") + 1 :] == [
+        ErrorOccurred(code=INTERNAL, message="store gone"),
+        ("own", COMMAND_ID),
+        "kick",
+        "taken",
+    ]
+
+
+async def test_a_failed_recount_is_reported_and_the_queue_still_runs() -> None:
+    effects = Effects()
+    effects.recount_failure = OSError("count unreadable")
+
+    await handover_on(effects).answer(TakeOwnership(take=True), COMMAND_ID)
+
+    assert effects.log[effects.log.index("recount") + 1 :] == [
+        ErrorOccurred(code=INTERNAL, message="count unreadable"),
+        ("own", COMMAND_ID),
+        "kick",
+        "taken",
+    ]
+
+
+async def test_an_unexpected_recovery_failure_is_reported_and_the_takeover_goes_on() -> None:
+    effects = Effects()
+    effects.recovery_failure = ValueError("bad record")
+
+    await handover_on(effects).answer(TakeOwnership(take=True), COMMAND_ID)
+
+    assert effects.log[effects.log.index("recover") + 1 :] == [
+        ErrorOccurred(code=INTERNAL, message="bad record"),
+        "recount",
+        ("own", COMMAND_ID),
+        "kick",
+        "taken",
+    ]
+
+
+async def test_a_cancelled_announcement_ends_the_takeover_and_propagates() -> None:
+    effects = Effects()
+    effects.catalog_failure = asyncio.CancelledError()
+
+    with pytest.raises(asyncio.CancelledError):
         await handover_on(effects).answer(TakeOwnership(take=True), COMMAND_ID)
 
-    assert effects.log[effects.log.index("catalog") + 1 :] == [("own", COMMAND_ID), "kick", "taken"]
+    assert effects.log[-1] == "taken"
 
 
 async def test_reviews_are_kicked_even_when_running_the_queue_fails() -> None:

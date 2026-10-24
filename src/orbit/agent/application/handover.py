@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from orbit.agent.application.outbox import EventSink
-from orbit.agent.application.recovery import RecoveryFailed
 from orbit.protocol import (
     INTERNAL,
     ErrorOccurred,
@@ -62,10 +61,11 @@ class Handover:
     ``OwnershipTaken``, a notice and a ``Catalog`` with this workspace no longer read-only. It
     then runs ``recover``, which imports the fallback files the owner left into the log, as the
     owner's startup does, and publishes a notice for each of the notes it returns; one that
-    fails is reported as an ``ErrorOccurred`` coded ``internal``, its files left for the next
-    owner's start. It then reads the super review count the owner left again, runs the work
-    queued, in order, and kicks the reviews waiting, even if announcing the ownership or running
-    the queued work fails.
+    fails, however it does, is reported as an ``ErrorOccurred`` coded ``internal``, its files
+    left for the next owner's start, and the takeover goes on. It then reads the super review
+    count the owner left again; announcing failing otherwise is reported the same way, the rest
+    of the announcement skipped. It then runs the work queued, in order, and kicks the reviews
+    waiting, even if announcing the ownership or running the queued work fails.
     """
 
     def __init__(self, parts: HandoverParts) -> None:
@@ -81,7 +81,7 @@ class Handover:
         # Work sent from here on joins the queue, so it runs after the work queued before.
         self._parts.queue.taking()
         try:
-            await self._announce()
+            await self._announce_reporting()
         finally:
             # Owned even if announcing it failed, and no offer comes again to run the queue.
             try:
@@ -97,6 +97,18 @@ class Handover:
         finally:  # After the queued work, so its tasks get agents first, even if it fails.
             self._parts.kick()
 
+    async def _announce_reporting(self) -> None:
+        """Announce the ownership, reporting a failure as an ``ErrorOccurred`` coded
+        ``internal``, as nothing waits on its answer and the queued work runs regardless."""
+        try:
+            await self._announce()
+        except Exception as exc:
+            await self._report(exc)
+
+    async def _report(self, exc: Exception) -> None:
+        """Publish ``exc`` as an ``ErrorOccurred`` coded ``internal``."""
+        await self._parts.events.put(ErrorOccurred(code=INTERNAL, message=str(exc)))
+
     async def _announce(self) -> None:
         """Say this orbit owns the repository now, send the catalog saying so, recover the
         fallback files the owner left and read the super review count it left."""
@@ -109,11 +121,11 @@ class Handover:
 
     async def _recover_parked(self) -> None:
         """Recover the fallback files the owner left, publishing a notice for each recovered or
-        an error if that failed."""
+        an error if that failed, however it did."""
         try:
             notes = await self._parts.recover()
-        except RecoveryFailed as exc:
-            await self._parts.events.put(ErrorOccurred(code=INTERNAL, message=str(exc)))
+        except Exception as exc:
+            await self._report(exc)
             return
         for note in notes:
             await self._parts.events.put(Notice(message=note))

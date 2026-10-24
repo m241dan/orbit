@@ -618,12 +618,14 @@ class WorkspaceHost:
 
     async def open_latest(self) -> None:
         """Open the most recently active saved session no other orbit has open in place of the
-        new one, if there's one that can be opened, as the user would; the new one stays open
-        if it can't be."""
+        new one, if there's one that can be opened, as the user would: one refused, as another
+        orbit opened it meanwhile, is passed over for the next. The new one stays open if none
+        can be."""
         for summary in await self._keeper.summaries():
-            if not summary.locked and summary.unreadable is None:
-                with suppress(Refused):
-                    await self._switcher.handle(ActivateSession(session=summary.id))
+            if summary.locked or summary.unreadable is not None:
+                continue
+            with suppress(Refused):
+                await self._switcher.handle(ActivateSession(session=summary.id))
                 return
 
     def check_addressed(self, connection: SessionConnection, session: str | None) -> None:

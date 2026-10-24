@@ -40,3 +40,16 @@ async def test_a_session_that_cant_be_opened_leaves_the_new_one_open() -> None:
     await session.open_latest()
     assert session.saved_session.id == "session-1"
     await session.close()
+
+
+async def test_a_session_locked_meanwhile_is_skipped_for_the_next_that_opens() -> None:
+    store = store_with(saved("old"), saved("recent", last_active=LATER))
+
+    async def lock_recent() -> None:
+        store.elsewhere.add("recent")  # Another orbit opens it once it's listed.
+
+    store.on_list = lock_recent
+    session, _ = switching(store)
+    await session.open_latest()
+    assert session.saved_session.id == "old"
+    await session.close()
