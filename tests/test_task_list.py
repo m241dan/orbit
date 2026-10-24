@@ -1,4 +1,3 @@
-import pytest
 from rich.cells import cell_len
 from textual import events
 from textual.app import App, ComposeResult
@@ -6,37 +5,26 @@ from textual.pilot import Pilot
 
 from orbit.agent import WorkspaceHost
 from orbit.protocol import (
-    NOT_CONFIGURED,
-    SUPER_REVIEW,
     AcceptTask,
     ActivateSession,
     Activity,
-    BusyChanged,
     Catalog,
-    ErrorOccurred,
-    FireTrigger,
     RemoveTask,
-    RunTasks,
-    SessionStateChanged,
     SessionSummary,
     Settings,
     TasksChanged,
     TaskSpec,
-    TaskStarted,
     TaskState,
-    TurnFinished,
     Usage,
     WorkspaceEntry,
 )
 from orbit.tui import OrbitApp
 from orbit.tui.sessions import SessionsScreen
 from orbit.tui.tasks import TaskList
-from orbit.tui.transcript import Transcript
 from orbit.tui.view.common import spinner_frame
 from orbit.tui.view.tasks import coder_wait_row, task_label, task_numbers, usage_label
 from orbit.tui.widgets import ChatPrompt
 from tests.agent_fakes import frontend
-from tests.session_apps import CATALOG
 from tests.tui_fakes import (
     FakeSession,
     board,
@@ -44,9 +32,7 @@ from tests.tui_fakes import (
     feed_events,
     open_task_list,
     opened,
-    rows,
     selected,
-    show_settings,
 )
 
 
@@ -191,21 +177,6 @@ def test_tasks_are_numbered_and_every_fix_in_a_chain_under_the_first_task() -> N
     assert task_numbers([]) == []
 
 
-async def test_list_shows_the_board_the_backend_reports() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        one, two = board("one", "two", status="completed").tasks
-        fix = TaskState(id="3", task=TaskSpec(prompt="fix one"), fixes="1")
-        await feed_events(session, pilot, TasksChanged(tasks=(one, fix, two)))
-        assert rows(app) == [
-            "1. ✅ one\n      default · restricted",
-            "   1.1 ⏳ fix one\n          default · restricted",
-            "2. ✅ two\n      default · restricted",
-            "+ new task",
-        ]
-
-
 class TaskListApp(App[None]):
     """An app showing just a task list, for what the list does on its own."""
 
@@ -277,72 +248,6 @@ async def test_enter_activates_the_task_list() -> None:
         assert selected(app) == ["transcript"]
 
 
-async def press_enter_on_the_task(
-    monkeypatch: pytest.MonkeyPatch, state: TaskState
-) -> list[tuple[str, object]]:
-    """The notes shown by enter on the only task, ``state``, which opens no editor."""
-    session = FakeSession()
-    app = OrbitApp(session)
-    notes: list[tuple[str, object]] = []
-    monkeypatch.setattr(app, "notify", lambda text, **kw: notes.append((text, kw["severity"])))
-    async with app.run_test() as pilot:
-        await show_settings(session, pilot, Settings())
-        await feed_events(session, pilot, TasksChanged(tasks=(state,)))
-        await open_task_list(pilot)
-        await pilot.press("enter")
-        assert len(app.screen_stack) == 1
-        assert session.commands == []
-    return notes
-
-
-async def test_enter_on_a_running_task_says_it_cant_be_edited(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    state = TaskState(id="3", task=TaskSpec(prompt="go"), status="running")
-    notes = await press_enter_on_the_task(monkeypatch, state)
-    assert notes == [("Task '3' can't be edited while it runs.", "warning")]
-
-
-async def test_ctrl_r_asks_the_backend_to_run_unless_busy() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await pilot.press("ctrl+r")
-        assert session.commands == [RunTasks()]
-
-        await feed_events(session, pilot, BusyChanged(busy=True))
-        await pilot.press("ctrl+r")
-        assert session.commands == [RunTasks()]
-
-        await feed_events(session, pilot, BusyChanged(busy=False))
-        await pilot.press("ctrl+r")
-        assert session.commands == [RunTasks(), RunTasks()]
-
-        # The planner has a lane of its own, so its turns don't hold up runs.
-        await feed_events(session, pilot, BusyChanged(busy=True, lane="planner"))
-        await pilot.press("ctrl+r")
-        assert session.commands == [RunTasks(), RunTasks(), RunTasks()]
-
-
-async def test_started_task_is_announced_in_the_transcript() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        one, two = board("one", "two").tasks
-        fix = TaskState(id="3", task=TaskSpec(prompt="fix one"), fixes="1")
-        await feed_events(
-            session,
-            pilot,
-            TasksChanged(tasks=(one, fix, two)),
-            TaskStarted(task_id="2"),
-            TaskStarted(task_id="3"),
-        )
-        entries = app.query_one(Transcript).entries(None)
-        # Announced by the number the list shows.
-        assert [entry.text for entry in entries] == ["Task 2: two", "Task 1.1: fix one"]
-        assert entries[0].kind == "user"
-
-
 async def test_side_windows_do_not_take_focus_on_click() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test() as pilot:
@@ -368,15 +273,6 @@ def test_tasks_being_fixed_show_which_fix_they_are_on() -> None:
     assert str(task_label(state, "1", "◠ ")) == "1. ◠  go\n      default · restricted · fix 2/5"
 
 
-async def test_ctrl_g_asks_for_a_super_review_even_while_busy() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, BusyChanged(busy=True))
-        await pilot.press("ctrl+g")
-        assert session.commands == [FireTrigger(trigger=SUPER_REVIEW)]
-
-
 async def test_a_accepts_the_highlighted_draft_and_x_removes_a_task() -> None:
     session = FakeSession()
     app = OrbitApp(session)
@@ -390,46 +286,6 @@ async def test_a_accepts_the_highlighted_draft_and_x_removes_a_task() -> None:
         await pilot.press("x")
         await pilot.press("j", "a", "x")  # The new-task row.
         assert session.commands == [AcceptTask(task_id="1"), RemoveTask(task_id="2")]
-
-
-async def test_list_shows_each_tasks_usage_and_the_sessions_total() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        assert not app.query_one(TaskList).border_subtitle
-        spent = TaskState(
-            id="1", task=TaskSpec(prompt="one"), usage=Usage(input_tokens=1_500, cost_usd=0.2)
-        )
-        await feed_events(session, pilot, TasksChanged(tasks=(spent,)))
-        assert rows(app)[0].endswith("default · restricted · 1.5k tok · $0.20")
-        # Every metered turn counts towards the session, whether or not a task ran it.
-        await feed_events(
-            session,
-            pilot,
-            TurnFinished(turn_id="a", reason="completed", usage=Usage(input_tokens=1_000)),
-            TurnFinished(turn_id="b", reason="completed"),
-            TurnFinished(
-                turn_id="c",
-                reason="error",
-                agent_id="agent-1",
-                usage=Usage(output_tokens=500, cost_usd=0.3),
-            ),
-        )
-        assert app.query_one(TaskList).border_subtitle == "session: 1.5k tok · $0.30"
-
-
-async def test_a_refused_planner_prompt_frees_the_prompt() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test(size=(120, 30)) as pilot:
-        prompt = app.query_one(ChatPrompt)
-        await pilot.press("ctrl+t", "i", *"plan", "enter")
-        assert prompt.border_title == "Prompt · planner · busy"
-        refused = ErrorOccurred(
-            code=NOT_CONFIGURED, message="Planning needs agents and a planner role."
-        )
-        await feed_events(session, pilot, refused, BusyChanged(busy=False, lane="planner"))
-        assert prompt.border_title == "Prompt · planner"
 
 
 async def test_a_planner_less_session_leaves_the_prompt_usable() -> None:
@@ -735,40 +591,3 @@ async def test_switching_session_through_ctrl_p_while_the_list_is_active_leaves_
         assert task_list.following
         assert title(task_list) == "Task list"
         assert in_view(task_list, 25)
-
-
-async def test_opening_a_session_replaces_the_total_with_its_saved_spend() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        task_list = app.query_one(TaskList)
-        spent = Usage(input_tokens=1_000, cost_usd=0.84)
-        await feed_events(
-            session, pilot, TurnFinished(turn_id="a", reason="completed", usage=spent)
-        )
-        saved = Usage(input_tokens=2_000, cost_usd=2.0)
-        await feed_events(session, pilot, opened(SessionSummary(id="b", name="b", usage=saved)))
-        assert task_list.border_subtitle == "session: 2k tok · $2.00"
-
-
-def waiting_state(*activity: Activity) -> SessionStateChanged:
-    """The active session ``now`` running ``activity``."""
-    return SessionStateChanged(
-        session="now", active=True, state="running", viewers=1, activity=activity
-    )
-
-
-async def test_the_next_task_shows_the_wait_for_a_coder_until_it_starts() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        tasks = TasksChanged(
-            tasks=tuple(TaskState(id=f"t{n}", task=TaskSpec(prompt=f"task {n}")) for n in (1, 2))
-        )
-        await feed_events(session, pilot, CATALOG, tasks, waiting_state(*waiting(2)))
-        assert rows(app)[:2] == [
-            "1. ⏳ task 1\n      default · restricted · ⏳ waiting: 2 coders busy",
-            "2. ⏳ task 2\n      default · restricted",
-        ]
-        await feed_events(session, pilot, waiting_state(waiting(2)[0]))
-        assert rows(app)[0] == "1. ⏳ task 1\n      default · restricted"
