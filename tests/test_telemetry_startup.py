@@ -221,6 +221,22 @@ def test_a_file_export_that_cant_be_written_fails(tmp_path: Path) -> None:
     exporter.shutdown()
 
 
+def test_a_file_export_that_cant_be_written_logs_a_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    blocked = tmp_path / "telemetry"
+    blocked.write_text("a file, not a directory")
+    exporter = OtlpJsonFileExporter(blocked, Rotation(1_000_000, 5))
+
+    with caplog.at_level(logging.WARNING):
+        result = exporter.export([_ended("orbit.task")])
+
+    assert result is SpanExportResult.FAILURE
+    [record] = caplog.records
+    assert (record.name, record.levelno) == ("orbit.telemetry.file_exporter", logging.WARNING)
+    assert record.getMessage().startswith(f"Telemetry couldn't write spans to {blocked}: ")
+
+
 def test_the_console_exporter_writes_spans_to_stderr(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

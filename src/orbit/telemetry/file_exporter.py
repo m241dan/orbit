@@ -3,6 +3,7 @@
 
 import base64
 import json
+import logging
 import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -14,6 +15,8 @@ from google.protobuf.json_format import MessageToDict
 from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
+
+logger = logging.getLogger(__name__)
 
 _IDS = ("traceId", "spanId", "parentSpanId")
 """The fields of spans and links OTLP JSON writes in hex, where protobuf's JSON has base64."""
@@ -45,11 +48,13 @@ class OtlpJsonFileExporter(SpanExporter):
         self._current: Path | None = None
 
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
-        """Write ``spans`` as one line; a failure to write is a failed export."""
+        """Write ``spans`` as one line; a failure to write is a failed export, logged as a
+        warning, as the SDK doesn't log it."""
         line = (json.dumps(otlp_json(spans), separators=(",", ":")) + "\n").encode()
         try:
             self._append(line)
-        except OSError:
+        except OSError as exc:
+            logger.warning("Telemetry couldn't write spans to %s: %s", self._directory, exc)
             return SpanExportResult.FAILURE
         return SpanExportResult.SUCCESS
 
