@@ -16,6 +16,7 @@ from orbit.agent.application.keeper import (
     Contents,
     Left,
     NewSessions,
+    Opened,
     SessionKeeper,
     local_now,
     new_session_id,
@@ -40,7 +41,7 @@ from orbit.protocol import (
     Settings,
     Usage,
 )
-from tests.agent_fakes import START, FakeHalt, FakeStore, Ticks
+from tests.agent_fakes import HALTED, START, FakeHalt, FakeStore, Ticks
 from tests.keeper_fakes import EMPTY, TASK, WITH_TASK, Published, save
 
 SPENT = Usage(input_tokens=500, cost_usd=1.4, turns=3)
@@ -950,9 +951,13 @@ async def test_a_delete_racing_an_open_of_its_session_is_refused_and_keeps_it() 
 
 
 async def test_a_pending_rename_of_a_session_opened_since_is_dropped_and_reported() -> None:
-    keeper, published, store = failed_rename()
+    store = store_with_other()
+    store.failure = "disk full"
+    published, halt = Published(), FakeHalt()
+    keeper = SessionKeeper(store, published, halt, NewSessions(Ticks(), lambda: "session-1"))
     await keeper.rename_saved("other", "Renamed")
     store.failure = None
+    halt.failures.clear()  # Lifted as if resumed, though the rename is still pending.
     await keeper.open("other", loads)
 
     assert await keeper.retry(lambda: EMPTY) is None
@@ -960,3 +965,105 @@ async def test_a_pending_rename_of_a_session_opened_since_is_dropped_and_reporte
     assert store.last.name == "other" and store.locked == {"other"}
     assert await keeper.retry(lambda: EMPTY) is None
     assert store.last.name == "other"
+
+
+def halting_unlocked(store: FakeStore) -> tuple[SessionKeeper, FakeHalt, list[str]]:
+    """A keeper over ``store``, its halt and the sessions whose logged events it has removed;
+    its session ``session-1`` is used but not yet saved."""
+    halt, forgotten = FakeHalt(), list[str]()
+    ids = iter(f"session-{n}" for n in range(1, 100))
+    new_sessions = NewSessions(Ticks(), lambda: next(ids), forgotten.append)
+    return SessionKeeper(store, Published(), halt, new_sessions), halt, forgotten
+
+
+async def refused_once_halted[T](
+    store: FakeStore, keeper: SessionKeeper, then: Awaitable[T]
+) -> Refused:
+    """Why ``then`` is refused, started while the keeper's first save is taking its lock in
+    ``store``, which fails, halting the session."""
+    store.lock_failure = "Couldn't lock the session: disk full"
+    with pytest.raises(Refused) as refused:
+        await raced(store, save(keeper, WITH_TASK), then)
+    store.lock_failure = None
+    return refused.value
+
+
+def untouched(store: FakeStore, keeper: SessionKeeper, forgotten: list[str]) -> bool:
+    """Whether the keeper still holds its session, unforgotten, and ``store`` holds only the
+    saved session ``other``, unlocked."""
+    return (
+        keeper.id == "session-1"
+        and forgotten == []
+        and [r.name for r in store.saved] == ["other"]
+        and store.locked == set()
+        and store.deleted == []
+    )
+
+
+def unexpected(*_: object) -> None:
+    raise AssertionError("switched while halted")
+
+
+async def test_an_open_waiting_on_a_save_that_halts_is_refused_and_switches_nothing() -> None:
+    store = store_with_other()
+    keeper, halt, forgotten = halting_unlocked(store)
+    refused = await refused_once_halted(store, keeper, keeper.open("other", unexpected))
+    assert (refused.code, refused.message) == (STORAGE_FAILED, HALTED)
+    assert untouched(store, keeper, forgotten) and len(halt.failures) == 1
+
+
+async def test_a_renewal_waiting_on_a_save_that_halts_is_refused_and_switches_nothing() -> None:
+    store = store_with_other()
+    keeper, _, forgotten = halting_unlocked(store)
+    refused = await refused_once_halted(store, keeper, keeper.renew("Next", unexpected))
+    assert (refused.code, refused.message) == (STORAGE_FAILED, HALTED)
+    assert untouched(store, keeper, forgotten)
+
+
+async def test_a_rename_waiting_on_a_save_that_halts_is_refused_and_saves_nothing() -> None:
+    store = store_with_other()
+    keeper, _, forgotten = halting_unlocked(store)
+    refused = await refused_once_halted(store, keeper, keeper.rename_saved("other", "Renamed"))
+    assert (refused.code, refused.message) == (STORAGE_FAILED, HALTED)
+    assert untouched(store, keeper, forgotten) and store.released == []
+    assert await keeper.retry(lambda: EMPTY) is None
+    assert "Renamed" not in [r.name for r in store.saved]
+
+
+async def test_a_delete_waiting_on_a_save_that_halts_is_refused_and_deletes_nothing() -> None:
+    store = store_with_other()
+    keeper, _, forgotten = halting_unlocked(store)
+    refused = await refused_once_halted(store, keeper, keeper.delete_saved("other"))
+    assert (refused.code, refused.message) == (STORAGE_FAILED, HALTED)
+    assert untouched(store, keeper, forgotten)
+
+
+async def test_a_rename_waiting_on_a_rename_that_halts_is_refused_keeping_the_first_to_retry() -> (
+    None
+):
+    store = store_with_other()
+    store.failure = "disk full"
+    keeper, halt = halting_keeper(store)
+    with pytest.raises(Refused) as refused:
+        await raced(
+            store, keeper.rename_saved("other", "First"), keeper.rename_saved("other", "Second")
+        )
+    assert refused.value.code == STORAGE_FAILED and len(halt.failures) == 1
+    store.failure = None
+
+    assert await keeper.retry(lambda: EMPTY) is None
+    assert [r.name for r in store.saved] == ["other", "First"]
+
+
+async def test_a_session_halted_as_an_open_catches_up_keeps_the_logged_events_it_left() -> None:
+    store = store_with_other()
+    halt, forgotten = FakeHalt(), list[str]()
+
+    async def catch_up() -> None:
+        halt.fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))
+
+    new_sessions = NewSessions(Ticks(), lambda: "one", forgotten.append, catch_up)
+    keeper = SessionKeeper(store, Published(), halt, new_sessions)
+    opened = await keeper.open("other", loads)
+    assert isinstance(opened, Opened) and opened.left == Left(None)
+    assert keeper.id == "other" and forgotten == []

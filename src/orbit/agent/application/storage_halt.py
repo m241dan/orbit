@@ -44,6 +44,10 @@ class Halting(Protocol):
         """Halt the session because ``write`` failed with ``error``."""
         ...
 
+    def check(self) -> None:
+        """Refuse a command, raising :class:`Refused`, while the session is halted."""
+        ...
+
 
 Attempt = Callable[[], Awaitable[StoreFailed | None]]
 """Makes a write to the store; returns the error when it fails."""

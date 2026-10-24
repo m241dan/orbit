@@ -252,7 +252,7 @@ class SessionKeeper:
             return error
         renaming, self._renaming = self._renaming, None
         try:
-            renamed = await self._rename(renaming)
+            renamed = await self._rename(renaming, resuming=True)
         except Refused as refusal:
             await self._publish(ErrorOccurred(code=refusal.code, message=refusal.message))
             return None
@@ -363,17 +363,21 @@ class SessionKeeper:
         lock while it's rewritten; returns whether it was renamed. Refused (raising
         :class:`Refused`) if it can't be renamed; a failing save halts the session, and other
         store problems are reported."""
-        renamed = await self._rename(_Renaming(session_id, name))
+        renamed = await self._rename(_Renaming(session_id, name), resuming=False)
         if isinstance(renamed, StoreFailed):
             self._halt.fail(FailedWrite.SESSION_RECORD, renamed)
             return False
         return renamed
 
-    async def _rename(self, renaming: _Renaming) -> StoreFailed | bool:
+    async def _rename(self, renaming: _Renaming, resuming: bool) -> StoreFailed | bool:
         """Carry out ``renaming`` as :meth:`rename_saved` does; returns whether it was renamed,
         not if a store problem kept it from being claimed, or the error when its save fails,
-        keeping it to :meth:`retry`. Refused if it's the session open here by then."""
+        keeping it to :meth:`retry`. Refused if it's the session open here by then, or if it's
+        halted by then, unless ``resuming``."""
         async with self._saving:
+            # A save may have halted the session while this one waited.
+            if not resuming:
+                self._halt.check()
             # A switch may have opened it while this one waited.
             if renaming.session_id == self.id:
                 raise Refused(INVALID, OPEN_UNRENAMABLE)
@@ -395,8 +399,10 @@ class SessionKeeper:
     async def delete_saved(self, session_id: str) -> bool:
         """Delete the saved session ``session_id``, lock and all, unless it's the one open here
         or another orbit has it open: then raises :class:`Refused`; returns whether it was
-        deleted. Store problems are reported."""
+        deleted, refused too while the session is halted. Store problems are reported."""
         async with self._saving:
+            # A save may have halted the session while this one waited.
+            self._halt.check()
             # A switch may have opened it while this one waited.
             if session_id == self.id:
                 raise Refused(INVALID, OPEN_UNDELETABLE)
@@ -426,7 +432,7 @@ class SessionKeeper:
         if it's the one open already, or none if a store problem, reported, kept it from
         opening. A refusal, its own or ``load``'s, raises :class:`Refused`, with the session's
         lock let go of, as it is if catching up fails or is cancelled; refused, with no lock
-        taken, once closed."""
+        taken, once closed or while halted."""
         async with self._saving:
             self._check_open()
             # Another switch may have opened it while this one waited.
@@ -503,7 +509,8 @@ class SessionKeeper:
     async def renew(self, name: str | None, commit: Commit) -> Left:
         """Make a new session ``name``d so (by the time, without a name) the one open here, if
         ``commit`` switches to it; returns the session left. A refused ``commit`` raises
-        :class:`Refused`, leaving the session open as it was, as is a renewal once closed."""
+        :class:`Refused`, leaving the session open as it was, as is a renewal once closed or
+        while halted."""
         async with self._saving:
             self._check_open()
             commit()
@@ -513,9 +520,11 @@ class SessionKeeper:
 
     def _check_open(self) -> None:
         """Refuse what would make a session the one open here once this is closed, as nothing
-        would let go of its lock."""
+        would let go of its lock, or while it's halted, as a save may have halted it while this
+        waited, and the work it holds isn't saved."""
         if self._closed:
             raise Refused(INVALID, STOPPING)
+        self._halt.check()
 
     async def leave(self, left: Left, discard: bool) -> None:
         """Let go of the lock of the session ``left``, if it's held, or delete that session if
@@ -542,9 +551,10 @@ class SessionKeeper:
 
     def _become(self, session_id: str, name: str, created: datetime) -> Left:
         """Be the session ``session_id``, unused and unsaved so far; returns the one left, whose
-        logged events are forgotten if it was never saved."""
+        logged events are forgotten if it was never saved, unless it's halted, so they're kept
+        to resume."""
         left = Left(self.id if self._locked else None)
-        if left.id is None:
+        if left.id is None and not self._halt.halted:
             self._forget(self.id)
         self.id, self.name, self.created = session_id, name, created
         self.used, self._saved, self._locked = False, None, None

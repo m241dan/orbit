@@ -47,6 +47,7 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import Setup
 from orbit.agent.domain.ownership import WorkspaceOwner
+from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.roles import Role, built_in_roles
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
@@ -59,6 +60,7 @@ from orbit.protocol import (
     PLANNER,
     PROTOCOL_VERSION,
     REVIEW_ROLES,
+    STORAGE_FAILED,
     AddTask,
     AgentExited,
     AgentReply,
@@ -248,6 +250,9 @@ class Steps:
 
 
 START = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
+
+HALTED = "The session is halted."
+"""Why :class:`FakeHalt` refuses a command while halted."""
 """When a :class:`Ticks` clock starts."""
 
 
@@ -264,7 +269,7 @@ class Ticks:
 
 class FakeHalt:
     """Records the store's failures it's told of, each as the write and the error's text; halted
-    from the first."""
+    from the first, refusing commands with :data:`HALTED`."""
 
     def __init__(self) -> None:
         self.failures: list[tuple[FailedWrite, str]] = []
@@ -275,6 +280,10 @@ class FakeHalt:
 
     def fail(self, write: FailedWrite, error: StoreFailed) -> None:
         self.failures.append((write, str(error)))
+
+    def check(self) -> None:
+        if self.failures:
+            raise Refused(STORAGE_FAILED, HALTED)
 
 
 class FakeLedger:
