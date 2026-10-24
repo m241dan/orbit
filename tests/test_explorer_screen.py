@@ -325,6 +325,18 @@ async def test_an_answer_once_the_explorer_closed_changes_nothing() -> None:
             assert app.screen.note is None
 
 
+async def test_a_held_listing_accepted_once_the_explorer_closed_changes_nothing() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRV)
+        await pilot.press("j", "j", "j", "enter")
+        await feed_events(session_of(app), pilot, OPT_X)
+        await pilot.press("escape")
+        await answer(app, pilot)
+        assert isinstance(app.screen, WorkspacesScreen)
+        assert app.is_running
+
+
 async def test_a_listing_with_the_picker_closed_shows_nothing() -> None:
     app = connected()
     async with app.run_test() as pilot:

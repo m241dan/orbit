@@ -151,7 +151,10 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
         return True
 
     def _listed(self) -> None:
-        """Show the listing held now the one last asked for is accepted, if it's not shown."""
+        """Show the listing held now the one last asked for is accepted, if it's not shown,
+        unless this screen is gone."""
+        if not self.is_attached:
+            return
         held = self._held
         if self._waiting and held is not None:
             self._show(held)
