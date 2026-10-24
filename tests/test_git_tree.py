@@ -406,6 +406,75 @@ async def test_a_detached_checkout_has_no_base_to_merge_into(repo: Path) -> None
     assert merge.result == "detached"
 
 
+async def test_a_git_failure_reading_the_checked_out_branch_fails_the_merge_and_moves_nothing(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.prepare(keep=False))
+    (path / "b.txt").write_text("two\n")
+    await tree.commit("Add b")
+    ran = failing_git(monkeypatch, "symbolic-ref")
+    with pytest.raises(TreeFailed, match="git symbolic-ref failed: fatal: bad object deadbeef"):
+        await tree.integrate()
+    assert not [args for args in ran if args[0] in ("merge", "update-ref")]
+    assert log(repo, "main")[0] == "start"
+    assert git(repo, "status", "--porcelain") == ""
+
+
+async def test_a_git_failure_reading_the_checked_out_branch_fails_prepare(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    failing_git(monkeypatch, "symbolic-ref")
+    tree = GitCoderTree(str(repo))
+    with pytest.raises(TreeFailed, match="git symbolic-ref failed: fatal: bad object deadbeef"):
+        await tree.prepare(keep=False)
+
+
+async def test_symbolic_ref_exiting_1_still_means_a_detached_checkout(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    failing_git(monkeypatch, "symbolic-ref", status=1)
+    tree = GitCoderTree(str(repo))
+    await tree.prepare(keep=False)
+    merge = await tree.integrate()
+    assert merge.result == "detached"
+    assert merge.detail == (
+        "There's no branch to merge into (detached HEAD); the work is on orbit/coder."
+    )
+
+
+async def test_a_git_failure_checking_for_the_coder_branch_fails_prepare_before_adding_a_tree(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    ran = failing_git(monkeypatch, "rev-parse", "--verify")
+    tree = GitCoderTree(str(repo))
+    with pytest.raises(TreeFailed, match="git rev-parse failed: fatal: bad object deadbeef"):
+        await tree.prepare(keep=False)
+    assert not [args for args in ran if args[:2] == ("worktree", "add")]
+
+
+async def test_a_git_failure_checking_for_the_coder_branch_fails_leftovers(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    tree = GitCoderTree(str(repo))
+    await tree.prepare(keep=False)
+    failing_git(monkeypatch, "rev-parse", "--verify")
+    with pytest.raises(TreeFailed, match="git rev-parse failed: fatal: bad object deadbeef"):
+        await tree.leftovers()
+
+
+async def test_rev_parse_verify_exiting_1_still_means_a_missing_coder_branch(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.prepare(keep=False))
+    (path / "b.txt").write_text("two\n")
+    await tree.commit("Add b")
+    assert await tree.leftovers()
+    failing_git(monkeypatch, "rev-parse", "--verify", status=1)
+    assert await tree.leftovers() == []
+
+
 async def test_prepare_catches_up_with_a_base_that_moved_ahead(repo: Path) -> None:
     tree = GitCoderTree(str(repo))
     path = Path(await tree.prepare(keep=False))
@@ -435,18 +504,26 @@ async def test_prepare_leaves_unmerged_work_that_conflicts_with_the_base(repo: P
     assert git(path, "status", "--porcelain") == ""
 
 
-def failing_merge_base(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
-    """Make ``git merge-base`` fail as on a corrupt repository; returns the git commands run."""
+def failing_git(
+    monkeypatch: pytest.MonkeyPatch, *command: str, status: int = 128
+) -> list[tuple[str, ...]]:
+    """Make the git commands starting with ``command`` exit with ``status``, as on a corrupt
+    repository; returns the git commands run."""
     ran: list[tuple[str, ...]] = []
 
     async def fake(cwd: Path | str, *args: str) -> GitResult:
         ran.append(args)
-        if args[0] == "merge-base":
-            return GitResult(128, b"", b"fatal: bad object deadbeef\n")
+        if args[: len(command)] == command:
+            return GitResult(status, b"", b"fatal: bad object deadbeef\n")
         return await run_git(cwd, *args)
 
     monkeypatch.setattr(git_tree, "git", fake)
     return ran
+
+
+def failing_merge_base(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
+    """Make ``git merge-base`` fail as on a corrupt repository; returns the git commands run."""
+    return failing_git(monkeypatch, "merge-base")
 
 
 async def test_integrate_raises_when_git_cant_tell_an_ancestor_and_doesnt_rebase(

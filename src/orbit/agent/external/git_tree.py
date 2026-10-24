@@ -25,7 +25,7 @@ from orbit.agent.domain.coder_tree import (
     stashed_note,
     unmerged_note,
 )
-from orbit.agent.external.git import git
+from orbit.agent.external.git import GitResult, git
 from orbit.agent.external.processes import run_process
 from orbit.agent.external.repository import ORBIT_DIR, find_git_common_dir
 from orbit.agent.external.whole_files import write_whole
@@ -392,10 +392,17 @@ class GitCoderTree:
 
         Raises ``TreeFailed`` with git's message when it exits otherwise, unable to tell.
         """
+        return (await self._answer(cwd, *args)).ok
+
+    async def _answer(self, cwd: Path, *args: str) -> GitResult:
+        """The result of ``git args`` in ``cwd``, a command that exits 0 or 1 to answer a question.
+
+        Raises ``TreeFailed`` with git's message when it exits otherwise, unable to tell.
+        """
         result = await git(cwd, *args)
         if result.status not in (0, 1):
             raise TreeFailed(f"git {args[0]} failed: {result.message}")
-        return result.ok
+        return result
 
     # Paths
 
@@ -431,15 +438,18 @@ class GitCoderTree:
         return self._base if self._started else await self._checked_out()
 
     async def _checked_out(self) -> str | None:
-        """The branch the main checkout is on; ``None`` on a detached HEAD."""
-        result = await git(self._root, "symbolic-ref", "--short", "-q", "HEAD")
+        """The branch the main checkout is on; ``None`` on a detached HEAD.
+
+        Raises ``TreeFailed`` with git's message when git can't tell.
+        """
+        result = await self._answer(self._root, "symbolic-ref", "--short", "-q", "HEAD")
         return result.text if result.ok else None
 
     async def _tip(self, branch: str) -> str:
         return await self._git(self._root, "rev-parse", f"refs/heads/{branch}")
 
     async def _exists(self, branch: str) -> bool:
-        return (await git(self._root, "rev-parse", "--verify", "-q", f"refs/heads/{branch}")).ok
+        return await self._ask(self._root, "rev-parse", "--verify", "-q", f"refs/heads/{branch}")
 
     async def _is_ancestor(self, older: str, newer: str, cwd: Path | None = None) -> bool:
         return await self._ask(cwd or self._root, "merge-base", "--is-ancestor", older, newer)
