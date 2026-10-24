@@ -511,13 +511,15 @@ async def test_an_earlier_completions_outcome_once_another_is_asked_for_complete
 
 
 async def test_a_completion_answered_once_the_explorer_closed_changes_nothing() -> None:
-    app = connected()
-    async with app.run_test() as pilot:
-        await explore(app, pilot, SRC)
-        await typed(app, pilot, "/work/pro")
-        await pilot.press("tab", "escape", "escape")
-        await answer(app, pilot)
-        assert isinstance(app.screen, WorkspacesScreen)
+    for refused in (None, "Permission denied: /work"):
+        app = connected()
+        async with app.run_test() as pilot:
+            await explore(app, pilot, SRC)
+            await typed(app, pilot, "/work/pro")
+            await pilot.press("tab", "escape", "escape")
+            await answer(app, pilot, refused)
+            assert isinstance(app.screen, WorkspacesScreen)
+            assert app.screen.note is None
 
 
 async def test_a_refused_completion_listing_shows_in_the_fields_hint() -> None:
@@ -529,6 +531,66 @@ async def test_a_refused_completion_listing_shows_in_the_fields_hint() -> None:
         await answer(app, pilot, "Permission denied: /root")
         assert field_of(app).border_subtitle == "Permission denied: /root"
         assert explorer(app).note is None
+
+
+async def test_a_refused_completions_hint_is_gone_after_the_next_tab() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRC)
+        await typed(app, pilot, "/root/x")
+        await pilot.press("tab")
+        await answer(app, pilot, "Permission denied: /root")
+        field_of(app).value = "/src/orb"
+        await pilot.press("tab")
+        assert field_of(app).value == "/src/orbit/"
+        assert field_of(app).border_subtitle == ""
+
+
+async def shown_candidates(app: OrbitApp, pilot: Pilot[None]) -> None:
+    """Open the explorer on ``/src`` and tab on ``/src/or`` to show its candidates."""
+    await explore(app, pilot, SRC)
+    await typed(app, pilot, "/src/or")
+    await pilot.press("tab")
+    assert candidates(app) == "orbit  orchard"
+
+
+async def test_candidates_are_hidden_after_a_tab_with_no_match() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await shown_candidates(app, pilot)
+        field_of(app).value = "/src/x"
+        await pilot.press("tab")
+        assert candidates(app) is None
+
+
+async def test_candidates_are_hidden_after_a_refused_completion() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await shown_candidates(app, pilot)
+        field_of(app).value = "/work/x"
+        await pilot.press("tab")
+        await answer(app, pilot, "Permission denied: /work")
+        assert candidates(app) is None
+
+
+async def test_candidates_are_hidden_once_typed_on_into_another_directory() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await shown_candidates(app, pilot)
+        field_of(app).value = "/work/pro"
+        await pilot.press("tab")
+        field_of(app).value = "/srv/a"
+        await feed_events(session_of(app), pilot, WORK)
+        await answer(app, pilot)
+        assert candidates(app) is None
+
+
+async def test_candidates_are_hidden_after_enter_in_the_field() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await shown_candidates(app, pilot)
+        await pilot.press("enter")
+        assert candidates(app) is None
 
 
 async def test_a_refused_completion_leaves_nothing_to_complete_from() -> None:

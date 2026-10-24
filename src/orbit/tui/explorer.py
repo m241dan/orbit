@@ -263,6 +263,7 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
         parent = completion_parent(self.query_one(ExplorerField).value)
         if parent is None:
             return
+        self.query_one(ExplorerField).border_subtitle = ""
         if self.listing is not None and self.listing.path == parent:
             self._complete(self.listing, parent)
             return
@@ -294,28 +295,39 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
             self._completing = None
             self._completion = None
         self._refused_typed(why)
+        self._show_candidates(())
 
     def _complete(self, listing: DirectoryListing, parent: str) -> None:
         """Complete the path typed from the directories ``listing`` shows, as those of the
         directory typed as ``parent``, unless it's been typed on into another directory since;
-        show the candidates when there are several."""
+        show the candidates when there are several, and none otherwise."""
         field = self.query_one(ExplorerField)
         if completion_parent(field.value) != parent:
+            self._show_candidates(())
             return
         names = [entry.name for entry in shown_entries(listing.entries, self.hidden)]
         completion = completed(field.value, names)
         if completion is None:
+            self._show_candidates(())
             return
         field.value = completion.text
         field.cursor_position = len(completion.text)
+        self._show_candidates(completion.candidates)
+
+    def _show_candidates(self, candidates: Sequence[str]) -> None:
+        """Show the ``candidates`` under the field, hiding the line for none; nothing once this
+        screen is gone."""
+        if not self.is_attached:
+            return
         shown = self.query_one("#explorer-candidates", Static)
-        shown.update(candidates_line(completion.candidates))
-        shown.display = bool(completion.candidates)
+        shown.update(candidates_line(candidates))
+        shown.display = bool(candidates)
 
     @on(Input.Submitted, "#explorer-path")
     async def _typed(self, event: Input.Submitted) -> None:
         """Add the path or URL typed, if any, dismissing with it once accepted."""
         event.stop()
+        self._show_candidates(())
         text = event.value.strip()
         if not text:
             return
