@@ -203,17 +203,13 @@ class ServedWorkspaces:
                 flagged.append(workspace_id)
         except WorkspaceUnavailable:
             for workspace_id in flagged:
-                await self._unflag_anyway(workspace_id)
+                await self._unflag_anyway(workspace_id, self._roots[workspace_id])
             raise
 
-    async def _unflag_anyway(self, workspace_id: str) -> None:
-        """Flag the workspace ``workspace_id`` not served again, as it cleans up after another
-        failure, which it mustn't replace: its own failure is only logged."""
-        try:
-            await self.set_served(workspace_id, False)
-        except WorkspaceUnavailable as exc:
-            root = self._roots[workspace_id]
-            unexpected(f"Orbit failed to flag {root} not served: {exc}", exc)
+    async def _unflag_anyway(self, workspace_id: str, root: Path) -> None:
+        """Flag the workspace ``workspace_id``, at ``root``, not served again, as
+        :func:`_unflag_anyway` does."""
+        await _unflag_anyway(WorkspaceRegistry(self._store), workspace_id, root)
 
     def serves(self, workspace_id: str) -> bool:
         """Whether the workspace ``workspace_id`` is served."""
@@ -284,7 +280,7 @@ class ServedWorkspaces:
         except OSError as exc:
             opened.served.let_go()
             if flagged:
-                await self.set_served(opened.workspace_id, False)
+                await self._unflag_anyway(opened.workspace_id, opened.served.root)
             raise WorkspaceUnavailable(
                 f"Couldn't write the workspace lock {lock.path}: {exc}", INTERNAL
             ) from None
@@ -428,18 +424,28 @@ async def _view(store: SqliteStore, root: Path, *, owned: bool, opening: Opening
         if opening.managed:
             await registry.set_managed(workspace_id)
         if opening.flag:
-            await _flagged(registry, workspace_id)
+            await _flagged(registry, workspace_id, root)
         registered = await registry.workspace(workspace_id)
     return replace(opened, managed=registered is not None and registered.managed)
 
 
-async def _flagged(registry: WorkspaceRegistry, workspace_id: str) -> None:
-    """Flag the workspace ``workspace_id`` served in ``registry``; cancelled meanwhile, flag it
-    not served again, so a server starting later doesn't serve a workspace whose add was
-    cancelled."""
+async def _flagged(registry: WorkspaceRegistry, workspace_id: str, root: Path) -> None:
+    """Flag the workspace ``workspace_id``, at ``root``, served in ``registry``; cancelled
+    meanwhile, flag it not served again, so a server starting later doesn't serve a workspace
+    whose add was cancelled."""
     try:
         await registry.set_served(workspace_id, True)
     except asyncio.CancelledError:
         # The store's one thread runs writes in order, so this lands after the flag, if it does.
-        await registry.set_served(workspace_id, False)
+        await _unflag_anyway(registry, workspace_id, root)
         raise
+
+
+async def _unflag_anyway(registry: WorkspaceRegistry, workspace_id: str, root: Path) -> None:
+    """Flag the workspace ``workspace_id``, at ``root``, not served again in ``registry``, as
+    it cleans up after another failure, which it mustn't replace: its own failure is only
+    logged."""
+    try:
+        await registry.set_served(workspace_id, False)
+    except StoreError as exc:
+        unexpected(f"Orbit failed to flag {root} not served: {exc}", exc)

@@ -806,6 +806,35 @@ async def test_an_add_cancelled_as_it_flags_the_workspace_served_leaves_it_unfla
     assert await WorkspaceRegistry(store).served() == []
 
 
+async def test_an_add_cancelled_as_it_flags_served_whose_unflagging_fails_is_still_cancelled(
+    stack: ExitStack,
+    store: SqliteStore,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    root = directory(tmp_path)
+    flagging = asyncio.Event()
+
+    async def waits_or_fails(self: WorkspaceRegistry, workspace_id: str, served: bool) -> None:
+        if not served:
+            raise StoreError("The store failed.")
+        flagging.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(WorkspaceRegistry, "set_served", waits_or_fails)
+    source = workspaces(stack, store)
+    opening = asyncio.create_task(source.open(str(root)))
+    await flagging.wait()
+    opening.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await opening
+    message = f"Orbit failed to flag {root} not served: The store failed."
+    assert logged_with_traceback(caplog.records, message)
+    assert free(root) and source.locks == ()
+
+
 async def opened_as_the_server_starts(
     source: ServedWorkspaces, root: Path, gate: threading.Event, url: str
 ) -> WorkspaceHost:
@@ -852,6 +881,40 @@ async def test_a_lock_that_cant_name_the_url_known_once_taken_is_unavailable_and
     assert refused.value.code == INTERNAL
     assert free(root) and source.locks == ()
     assert await WorkspaceRegistry(store).served() == []
+
+
+async def test_a_lock_that_cant_name_the_url_whose_unflagging_fails_is_unavailable_saying_why(
+    stack: ExitStack,
+    store: SqliteStore,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    root = directory(tmp_path)
+    gate = threading.Event()
+    gated(monkeypatch, gate)
+    set_served = WorkspaceRegistry.set_served
+
+    def unwritable(lock: WorkspaceLock, url: str) -> None:
+        raise OSError("disk full")
+
+    async def unflagging_fails(self: WorkspaceRegistry, workspace_id: str, served: bool) -> None:
+        if not served:
+            raise StoreError("The store failed.")
+        await set_served(self, workspace_id, served)
+
+    monkeypatch.setattr(WorkspaceLock, "announce", unwritable)
+    monkeypatch.setattr(WorkspaceRegistry, "set_served", unflagging_fails)
+    source = workspaces(stack, store)
+
+    with pytest.raises(
+        WorkspaceUnavailable, match=r"^Couldn't write the workspace lock .*: disk full$"
+    ) as refused:
+        await opened_as_the_server_starts(source, root, gate, "ws://127.0.0.1:7433/")
+    assert refused.value.code == INTERNAL
+    message = f"Orbit failed to flag {root} not served: The store failed."
+    assert logged_with_traceback(caplog.records, message)
+    assert free(root) and source.locks == ()
 
 
 def test_a_lock_served_from_the_start_that_cant_name_the_url_leaves_the_flag_alone(
