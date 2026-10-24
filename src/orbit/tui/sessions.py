@@ -65,11 +65,6 @@ class SessionsScreen(TypingListScreen[tuple[SessionChoice, ...]]):
         return self.picker.workspace
 
     @property
-    def joined(self) -> bool:
-        """Whether the frontend is on the workspace listed."""
-        return self.picker.joined
-
-    @property
     def sessions(self) -> tuple[SessionSummary, ...]:
         """The sessions listed, as last shown."""
         return self.picker.sessions

@@ -4,14 +4,19 @@ from unittest.mock import Mock
 
 from orbit.protocol import (
     STORAGE_FAILED,
+    AgentsChanged,
     Catalog,
     CommandRefused,
+    DirectoryListing,
     ErrorOccurred,
     Event,
     OwnershipDeclined,
     OwnershipOffered,
     OwnershipTaken,
     SessionStateChanged,
+    Usage,
+    UsageTotal,
+    UsageTotals,
 )
 from orbit.tui.event_router import AppHooks, EventRouter, Handlers, Panes
 from tests.tui_fakes import SNAPSHOT
@@ -131,3 +136,13 @@ def test_an_offer_asks_about_the_repository() -> None:
 def test_an_offer_settled_closes_it_and_owning_the_repository_clears_the_read_only_mark() -> None:
     assert routed(OwnershipDeclined()) == [*TRACKED, "takeover.settled"]
     assert routed(OwnershipTaken()) == [*TRACKED, "takeover.settled", "prompt.show_read_only"]
+
+
+def test_the_streams_agents_and_listings_reach_the_navigation_and_its_totals_nothing() -> None:
+    agents = AgentsChanged(agents=())
+    listing = DirectoryListing(path="/srv", entries=(), total=0)
+    totals = UsageTotals(workspaces=(), total=UsageTotal(today=Usage(), lifetime=Usage()))
+
+    assert routed(agents) == [*TRACKED, "navigation.follow_agents"]
+    assert routed(listing) == [*TRACKED, "navigation.follow_listing"]
+    assert routed(totals) == TRACKED
