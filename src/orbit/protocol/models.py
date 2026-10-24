@@ -1,6 +1,6 @@
 """The state models commands and events share, and the base every message is built on."""
 
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationInfo, model_validator
 
@@ -20,6 +20,27 @@ class WireTolerant(BaseModel):
         if not isinstance(data, dict) or not (info.context or {}).get("wire"):
             return data
         return {name: value for name, value in data.items() if name in cls.model_fields}
+
+
+def message_types(union: Any) -> frozenset[str]:
+    """The ``type`` names of the messages in the discriminated ``union``."""
+    return frozenset(member.model_fields["type"].default for member in get_args(get_args(union)[0]))
+
+
+def names_unknown_type(data: Any, known: frozenset[str]) -> bool:
+    """Whether the envelope ``data``'s payload names a ``type`` that isn't one of the ``known``
+    ones."""
+    payload = data.get("payload") if isinstance(data, dict) else None
+    kind = payload.get("type") if isinstance(payload, dict) else None
+    return isinstance(kind, str) and kind not in known
+
+
+def drop_unknown_types_on_wire(envelopes: Any, known: frozenset[str], info: ValidationInfo) -> Any:
+    """``envelopes`` without those of types not ``known``, when validated with the ``wire``
+    context set; otherwise ``envelopes`` unchanged, so validation refuses them."""
+    if not isinstance(envelopes, list | tuple) or not (info.context or {}).get("wire"):
+        return envelopes
+    return [envelope for envelope in envelopes if not names_unknown_type(envelope, known)]
 
 
 class _Message(WireTolerant):

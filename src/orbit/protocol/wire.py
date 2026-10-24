@@ -4,25 +4,18 @@ Decoding is tolerant: it drops fields it doesn't know and skips event types it d
 so a peer's additive changes don't break it.
 """
 
-from typing import Any, get_args
+from typing import Any
 
 from pydantic import ValidationError
 from pydantic_core import from_json
 
 from orbit.protocol.commands import Command
 from orbit.protocol.envelope import CommandEnvelope, EventEnvelope
-from orbit.protocol.events import Event
+from orbit.protocol.events import EVENT_TYPES
+from orbit.protocol.models import message_types, names_unknown_type
 
 _WIRE = {"wire": True}
-
-
-def _types(union: Any) -> frozenset[str]:
-    """The ``type`` names of the messages in the discriminated ``union``."""
-    return frozenset(member.model_fields["type"].default for member in get_args(get_args(union)[0]))
-
-
-_COMMAND_TYPES = _types(Command)
-_EVENT_TYPES = _types(Event)
+_COMMAND_TYPES = message_types(Command)
 
 
 class ProtocolError(Exception):
@@ -48,7 +41,7 @@ def decode_command(text: str) -> CommandEnvelope:
     command_id = data.get("command_id")
     if not isinstance(command_id, str) or not command_id:
         command_id = None
-    if _is_unknown(data, _COMMAND_TYPES):
+    if names_unknown_type(data, _COMMAND_TYPES):
         raise ProtocolError("Unknown command type", command_id, unknown=True)
     try:
         return CommandEnvelope.model_validate(data, context=_WIRE)
@@ -60,7 +53,7 @@ def decode_event(text: str) -> EventEnvelope | None:
     """The event envelope ``text`` holds, or ``None`` for an event type this orbit doesn't
     know, to be skipped; raises ``ProtocolError`` if it holds neither."""
     data = _load(text)
-    if _is_unknown(data, _EVENT_TYPES):
+    if names_unknown_type(data, EVENT_TYPES):
         return None
     try:
         return EventEnvelope.model_validate(data, context=_WIRE)
@@ -77,10 +70,3 @@ def _load(text: str) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ProtocolError("Not a JSON object")
     return data
-
-
-def _is_unknown(data: dict[str, Any], known: frozenset[str]) -> bool:
-    """Whether ``data``'s payload names a ``type`` that isn't one of the ``known`` ones."""
-    payload = data.get("payload")
-    kind = payload.get("type") if isinstance(payload, dict) else None
-    return isinstance(kind, str) and kind not in known

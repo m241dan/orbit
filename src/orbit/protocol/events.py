@@ -6,7 +6,7 @@ process boundary without changes.
 
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from pydantic import AwareDatetime, Field, TypeAdapter
+from pydantic import AwareDatetime, Field, TypeAdapter, ValidationInfo, field_validator
 
 from orbit.protocol.commands import ProposalAction
 from orbit.protocol.models import (
@@ -22,6 +22,8 @@ from orbit.protocol.models import (
     Usage,
     UsageLimit,
     _Message,
+    drop_unknown_types_on_wire,
+    message_types,
 )
 from orbit.protocol.names import WORK_LANE, BusyLane
 
@@ -407,6 +409,11 @@ class Snapshot(_Message):
     open_session: SessionRef | None = None
     viewers: int = Field(default=0, ge=0)
 
+    @field_validator("transcript", mode="before")
+    @classmethod
+    def _drop_unknown_events_on_wire(cls, transcript: Any, info: ValidationInfo) -> Any:
+        return drop_unknown_types_on_wire(transcript, EVENT_TYPES, info)
+
 
 class HistoryPage(_Message):
     """The events of the session ``session`` that ``History`` asked for, oldest first, in the
@@ -418,6 +425,11 @@ class HistoryPage(_Message):
     events: tuple["EventEnvelope", ...]
     more: bool
     trimmed: bool = False
+
+    @field_validator("events", mode="before")
+    @classmethod
+    def _drop_unknown_events_on_wire(cls, events: Any, info: ValidationInfo) -> Any:
+        return drop_unknown_types_on_wire(events, EVENT_TYPES, info)
 
 
 class LogGap(_Message):
@@ -656,3 +668,6 @@ Event = Annotated[
 
 
 event_adapter: TypeAdapter[Event] = TypeAdapter(Event)
+
+EVENT_TYPES = message_types(Event)
+"""The ``type`` names of every event, so decoding can skip those it doesn't know."""

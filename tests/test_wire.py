@@ -1,5 +1,6 @@
 """The JSON wire encoding: every message round-trips, decoding tolerates what it doesn't know."""
 
+import json
 from typing import Any, get_args
 
 import pytest
@@ -152,3 +153,66 @@ def test_a_command_without_a_readable_command_id_has_none(text: str) -> None:
         decode_command(text)
 
     assert caught.value.command_id is None
+
+
+UNKNOWN_ENVELOPE: dict[str, Any] = {"seq": 9, "payload": {"type": "something_new", "x": 1}}
+MALFORMED_ENVELOPE: dict[str, Any] = {"seq": 9, "payload": {"type": "notice"}}
+NESTED_FIELDS = {"snapshot": "transcript", "history_page": "events"}
+
+
+def example_of(kind: str) -> EventEnvelope:
+    """The example event envelope whose payload is of type ``kind``."""
+    return next(
+        example
+        for example in EXAMPLES
+        if isinstance(example, EventEnvelope) and example.payload.type == kind
+    )
+
+
+def with_nested(kind: str, nested: dict[str, Any]) -> tuple[EventEnvelope, dict[str, Any]]:
+    """The ``kind`` example and its JSON data with ``nested`` added to the envelopes it holds."""
+    example = example_of(kind)
+    data = example.model_dump(mode="json")
+    data["payload"][NESTED_FIELDS[kind]].insert(0, nested)
+    return example, data
+
+
+@pytest.mark.parametrize("kind", NESTED_FIELDS)
+def test_decode_event_drops_nested_envelopes_of_unknown_types(kind: str) -> None:
+    example, data = with_nested(kind, UNKNOWN_ENVELOPE)
+
+    assert decode_event(json.dumps(data)) == example
+
+
+@pytest.mark.parametrize("kind", NESTED_FIELDS)
+def test_decode_event_refuses_a_malformed_nested_event_of_a_known_type(kind: str) -> None:
+    _, data = with_nested(kind, MALFORMED_ENVELOPE)
+
+    with pytest.raises(ProtocolError):
+        decode_event(json.dumps(data))
+
+
+@pytest.mark.parametrize("kind", NESTED_FIELDS)
+def test_nested_unknown_types_still_fail_without_the_wire_context(kind: str) -> None:
+    _, data = with_nested(kind, UNKNOWN_ENVELOPE)
+
+    with pytest.raises(ValidationError, match="something_new"):
+        EventEnvelope.model_validate(data)
+
+
+@pytest.mark.parametrize("kind", NESTED_FIELDS)
+def test_decode_event_refuses_a_nested_envelope_that_isnt_an_object(kind: str) -> None:
+    _, data = with_nested(kind, {})
+    data["payload"][NESTED_FIELDS[kind]][0] = "notice"
+
+    with pytest.raises(ProtocolError):
+        decode_event(json.dumps(data))
+
+
+@pytest.mark.parametrize("kind", NESTED_FIELDS)
+def test_decode_event_refuses_nested_envelopes_that_arent_a_list(kind: str) -> None:
+    _, data = with_nested(kind, {})
+    data["payload"][NESTED_FIELDS[kind]] = "events"
+
+    with pytest.raises(ProtocolError):
+        decode_event(json.dumps(data))
