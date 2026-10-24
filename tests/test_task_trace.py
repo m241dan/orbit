@@ -304,13 +304,26 @@ async def test_no_attribute_holds_the_tasks_prompt() -> None:
     assert not any("secret body" in value for value in values)
 
 
-async def test_the_model_is_the_roles_when_the_task_names_none() -> None:
+async def test_a_task_naming_no_model_is_traced_with_none_as_it_is_launched() -> None:
     traced = Traced()
     roles = {**ROLES, CODER: ROLES[CODER].model_copy(update={"model": "sonnet"})}
-    session = traced_session(traced, claims_done, roles=roles)
+    session, _, launcher = session_for(claims_done, telemetry=traced.telemetry, roles=roles)
     await asyncio.wait_for(run(session, TaskSpec(prompt="a")), 5)
 
-    assert attributes(traced.task())["gen_ai.request.model"] == "sonnet"
+    [launch] = launcher.launches
+    assert launch.settings.model is None
+    assert "gen_ai.request.model" not in attributes(traced.task())
+
+
+async def test_a_task_naming_a_model_is_traced_with_it() -> None:
+    traced = Traced()
+    roles = {**ROLES, CODER: ROLES[CODER].model_copy(update={"model": "sonnet"})}
+    session, _, launcher = session_for(claims_done, telemetry=traced.telemetry, roles=roles)
+    await asyncio.wait_for(run(session, TaskSpec(prompt="a", settings=Settings(model="opus"))), 5)
+
+    [launch] = launcher.launches
+    assert launch.settings.model == "opus"
+    assert attributes(traced.task())["gen_ai.request.model"] == "opus"
 
 
 async def test_a_task_of_no_known_role_and_no_model_names_no_model() -> None:

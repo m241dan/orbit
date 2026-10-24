@@ -179,11 +179,10 @@ class WorkLane:
             self._unseat()  # A slot kept for a task that never ran.
 
     def _model(self, task_id: str) -> str | None:
-        """The model task ``task_id`` runs on: its own, or else its role's; none if neither
-        names one."""
-        task = self._board.get(task_id).task
-        role = self._desk.agents.roles.get(task.role)
-        return task.settings.model or (role.model if role is not None else None)
+        """The model task ``task_id`` is launched with, the one its own settings name; none if
+        they name none, as its role's model is a default for tasks orbit queues, not a
+        fallback at launch."""
+        return self._board.get(task_id).task.settings.model
 
     async def _take(self, task_id: str, tried: set[str]) -> RunEnd | None:
         """Seat task ``task_id`` and run it, as :meth:`_run_seated` does; the run ends cancelled
