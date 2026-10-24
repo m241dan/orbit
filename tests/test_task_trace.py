@@ -17,6 +17,7 @@ from orbit.agent.application.ports import Merge
 from orbit.agent.application.task_trace import TaskTracing
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.roles import role_task
 from orbit.protocol import (
     CODER,
     AddTask,
@@ -324,6 +325,19 @@ async def test_a_task_naming_a_model_is_traced_with_it() -> None:
     [launch] = launcher.launches
     assert launch.settings.model == "opus"
     assert attributes(traced.task())["gen_ai.request.model"] == "opus"
+
+
+async def test_a_task_orbit_queues_in_a_role_naming_a_model_is_traced_with_it() -> None:
+    traced = Traced()
+    coder = ROLES[CODER].model_copy(update={"model": "sonnet"})
+    session, _, launcher = session_for(
+        claims_done, telemetry=traced.telemetry, roles={**ROLES, CODER: coder}
+    )
+    await asyncio.wait_for(run(session, role_task(CODER, coder, "a")), 5)
+
+    [launch] = launcher.launches
+    assert launch.settings.model == "sonnet"
+    assert attributes(traced.task())["gen_ai.request.model"] == "sonnet"
 
 
 async def test_a_task_of_no_known_role_and_no_model_names_no_model() -> None:
