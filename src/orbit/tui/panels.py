@@ -9,28 +9,20 @@ from textual.app import ComposeResult
 from textual.widgets import Static
 
 from orbit.protocol import StepState, UsageChanged
-from orbit.tui.view.common import spinner_frame
-from orbit.tui.view.panels import NO_STEPS_TEXT, step_lines, usage_lines
+from orbit.tui.view.panels import NO_STEPS_TEXT, VerificationSteps, usage_lines
 from orbit.tui.widgets import SidePanel, Ticker
 
 
 class VerificationPanel(SidePanel):
-    """The verification steps and how each fared after the current task, as reported.
-
-    A running step spins and shows how long it has been running, so a slow step
-    doesn't look stalled.
-    """
+    """Shows the :class:`VerificationSteps` it holds as ``verification``, timed by ``clock``:
+    the verification steps and how each fared after the current task, as reported, a running
+    one spinning."""
 
     def __init__(self, *, id: str) -> None:
         super().__init__("Verification steps", id=id)
-        self.steps: tuple[StepState, ...] = ()
-        self.title = ""  # What the steps check, when it isn't the current task.
         self.clock: Callable[[], float] = time.monotonic
-        # The running step and when it started, by ``clock``.
-        self._running_step: int | None = None
-        self._since = 0.0
-        self._text = NO_STEPS_TEXT  # What the panel shows now.
-        self._height: int | None = None  # Its rows when last drawn, if its width was known.
+        # Read through, so a clock set later still times the steps.
+        self.verification = VerificationSteps(self, lambda: self.clock())
         self._ticker = Ticker(self, self.tick)
 
     def compose(self) -> ComposeResult:
@@ -41,34 +33,35 @@ class VerificationPanel(SidePanel):
         """Whether the running step's spinner and clock are turning."""
         return self._ticker.ticking
 
+    @property
+    def steps(self) -> tuple[StepState, ...]:
+        """The steps shown."""
+        return self.verification.steps
+
+    @property
+    def title(self) -> str:
+        """What the steps shown check, when it isn't the current task."""
+        return self.verification.title
+
     def show(self, steps: Sequence[StepState], title: str = "") -> None:
-        self.steps, self.title = tuple(steps), title
-        running = next((i for i, s in enumerate(self.steps) if s.status == "running"), None)
-        if running is not None and running != self._running_step:
-            self._since = self.clock()
-        self._running_step = running
-        self.tick()
-        self._ticker.keep(running is not None)
+        """Show ``steps`` under ``title``, as the verification takes them."""
+        self.verification.show(steps, title)
 
     def tick(self) -> None:
-        """Redraw the steps, if they or the spinner's frame changed since the last time."""
-        now = self.clock()
-        lines = step_lines(self.steps, spinner_frame(now), int(now - self._since), self.title)
-        text = "\n".join(lines) or NO_STEPS_TEXT
-        if text != self._text:
-            # Spinner frames keep every line's length, so only a change in the wrapped
-            # height needs a layout.
-            height = self._wrapped_height(text)
-            layout = height is None or height != self._height
-            self._text, self._height = text, height
-            self.query_one(Static).update(Text(text), layout=layout)
+        """Redraw the steps, as the verification does."""
+        self.verification.tick()
 
-    def _wrapped_height(self, text: str) -> int | None:
-        """The rows ``text`` takes wrapped to the panel's width, or None before it has one."""
+    def wrapped_height(self, text: str) -> int | None:
         width = self.query_one(Static).content_region.width
         if not width:
             return None
         return len(Text(text).wrap(self.app.console, width))
+
+    def show_text(self, text: str, layout: bool) -> None:
+        self.query_one(Static).update(Text(text), layout=layout)
+
+    def keep_ticking(self, running: bool) -> None:
+        self._ticker.keep(running)
 
 
 def _local_now() -> datetime:

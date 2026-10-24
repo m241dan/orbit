@@ -12,6 +12,8 @@ from orbit.protocol import (
     OwnershipOffered,
     OwnershipTaken,
     SessionStateChanged,
+    StepState,
+    VerificationChanged,
 )
 from orbit.tui.event_router import AppHooks, EventRouter, Handlers, Panes
 from tests.tui_fakes import SNAPSHOT
@@ -23,6 +25,11 @@ TRACKED = ["agents.track", "tabs.track", "transcript.track", "proposals.withdraw
 def routed(event: Event) -> list[str]:
     """The names of the methods ``event`` calls on the router's widgets, hosts and hooks, in
     the order it calls them."""
+    return [str(name) for name, _, _ in calls_of(event).mock_calls]
+
+
+def calls_of(event: Event) -> Mock:
+    """What ``event`` calls on the router's widgets, hosts and hooks, recorded."""
     calls = Mock()
     panes = Panes(
         calls.transcript,
@@ -49,7 +56,7 @@ def routed(event: Event) -> list[str]:
     )
     hooks = AppHooks(calls.label_triggers, calls.leave_closed_detail, calls.unfocus_task_list)
     EventRouter(panes, handlers, hooks).render(event)
-    return [str(name) for name, _, _ in calls.mock_calls]
+    return calls
 
 
 def test_a_snapshot_shows_its_tasks_before_its_transcript_and_its_usage_after() -> None:
@@ -139,3 +146,10 @@ def test_an_offer_asks_about_the_repository() -> None:
 def test_an_offer_settled_closes_it_and_owning_the_repository_clears_the_read_only_mark() -> None:
     assert routed(OwnershipDeclined()) == [*TRACKED, "takeover.settled"]
     assert routed(OwnershipTaken()) == [*TRACKED, "takeover.settled", "prompt.show_read_only"]
+
+
+def test_verification_steps_reach_their_panel_with_what_they_check() -> None:
+    steps = (StepState(name="Lint", status="running"),)
+    calls = calls_of(VerificationChanged(steps=steps, title="Startup check"))
+
+    calls.verification.show.assert_called_once_with(steps, "Startup check")
