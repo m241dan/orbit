@@ -328,7 +328,8 @@ serve to browse for others.`
 adding to one tree: a `ListDirectory`, or an `AddWorkspace` with a `path`, whose path, with its
 symlinks followed, is outside it is refused with `invalid`: `/srv/other is outside the browsable
 root /srv/repos.` Symlinks are followed for the check, so a link inside the root leading out of
-it is refused too. So is an `AddWorkspace` whose `url` is an absolute path or a `file://` URL
+it is refused too, as is an `AddWorkspace` with a `path` inside it whose repository's top
+level is outside it. So is an `AddWorkspace` whose `url` is an absolute path or a `file://` URL
 to one outside it, before anything's cloned; remote URLs aren't confined. Clones are made in the
 server's clone directory wherever that is. Without
 `browse_root`, the server's account browses whatever it can read.

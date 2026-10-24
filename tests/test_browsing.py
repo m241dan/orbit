@@ -332,6 +332,39 @@ async def test_outside_the_browsable_root_nothing_is_added(tmp_path: Path) -> No
     assert source.opened == [str(x / "a")]
 
 
+async def test_a_repository_whose_top_level_is_outside_the_browsable_root_isnt_added(
+    tmp_path: Path,
+) -> None:
+    x, _ = fenced(tmp_path)
+    source = FakeSource(tops={str(x / "a"): str(tmp_path)})
+    plane = ControlPlane(workspaces=source, browsing=browsing(tmp_path, x))
+    connection = await welcomed(plane)
+
+    await say(connection, "add", AddWorkspace(path=str(x / "a")))
+    outcomes = payloads(taken(connection))
+    await plane.close()
+
+    assert outcomes == [refused("add", INVALID, f"{tmp_path} is outside the browsable root {x}.")]
+    assert source.opened == []
+
+
+async def test_a_repository_whose_top_level_is_inside_the_browsable_root_is_added(
+    tmp_path: Path,
+) -> None:
+    x, _ = fenced(tmp_path)
+    (x / "a" / "sub").mkdir()
+    source = FakeSource(tops={str(x / "a" / "sub"): str(x / "a")})
+    plane = ControlPlane(workspaces=source, browsing=browsing(tmp_path, x))
+    connection = await welcomed(plane)
+
+    await say(connection, "add", AddWorkspace(path=str(x / "a" / "sub")))
+    outcomes = payloads(taken(connection))
+    await plane.close()
+
+    assert outcomes[-1] == CommandAccepted(command_id="add")
+    assert source.opened == [str(x / "a")]
+
+
 async def test_a_clone_is_added_wherever_the_clone_directory_is(tmp_path: Path) -> None:
     x, _ = fenced(tmp_path)
     source = FakeSource()

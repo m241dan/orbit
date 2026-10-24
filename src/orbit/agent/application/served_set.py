@@ -191,13 +191,14 @@ class ServedSet:
         active session and its background work, and send the catalog to ``connection``, if one
         asked, and every listening connection, or let it go again if that fails or is
         cancelled, raising what failed even if clearing its flag fails; refused unless ``path``
-        is the absolute path to a directory, within the browsable root unless it's ``managed``,
-        or with the code it gives if it can't be served."""
+        is the absolute path to a directory, within the browsable root, as its work tree's top
+        level must be, unless it's ``managed``, or with the code it gives if it can't be served."""
         workspaces = self._workspaces
         check_addable(path, absolute=PurePath(path).is_absolute())
         await self._confine(path, managed)
         check_directory(path, await workspaces.kind(path))
         root = await workspaces.top_level(path)
+        await self._confine(root, managed)  # Its work tree may reach above the browsable root.
         served = self._served_at(root)
         if served is not None:
             return served
