@@ -1,6 +1,6 @@
 """The agents pane: the agents running now, what each is doing, and whether review is paused."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import ClassVar
 
 from textual.binding import Binding, BindingType
@@ -9,12 +9,13 @@ from textual.widgets.option_list import Option
 
 from orbit.protocol import Event, ReviewStatus
 from orbit.tui.list_pane import ListPane
-from orbit.tui.view.agents import NO_AGENTS_LABEL, AgentRow, agent_line, review_line, track_agents
+from orbit.tui.view.agents import NO_AGENTS_LABEL, AgentRow, AgentsList
 
 
 class AgentsPane(ListPane):
-    """Running agents, one per row. Activated like the task list: j/k move, ``c`` cancels the
-    highlighted agent's work and escape returns to window navigation."""
+    """Shows the :class:`AgentsList` it holds as ``agents``, one row per running agent.
+    Activated like the task list: j/k move, ``c`` cancels the highlighted agent's work and
+    escape returns to window navigation."""
 
     DEFAULT_CSS = """
     AgentsPane {
@@ -37,41 +38,37 @@ class AgentsPane(ListPane):
 
     def __init__(self, *, id: str) -> None:
         super().__init__(id=id)
-        self.rows: tuple[AgentRow, ...] = ()
-        self._numbers: Mapping[str, str] = {}
+        self.agents = AgentsList(self)
+
+    @property
+    def rows(self) -> tuple[AgentRow, ...]:
+        """The agents running, a row each."""
+        return self.agents.rows
 
     def on_mount(self) -> None:
         self.border_title = "Agents"
-        self._redraw()
+        self.agents.show()
 
     def action_cancel_agent(self) -> None:
-        if self.highlighted is not None and self.highlighted < len(self.rows):
-            self.post_message(self.Cancel(self.rows[self.highlighted].agent_id))
+        self.agents.cancel()
 
     def track(self, event: Event) -> None:
-        """Follow the agents through ``event``."""
-        rows = track_agents(self.rows, event)
-        if rows != self.rows:
-            self.rows = rows
-            self._redraw()
+        """Follow the agents through ``event``, as the list takes it."""
+        self.agents.track(event)
 
     def number_tasks(self, numbers: Mapping[str, str]) -> None:
-        """Task ids' numbers in the task list, to show agents' tasks by; redraws the pane
-        only if one of its agents' numbers changed."""
-        changed = self._shown_numbers(numbers) != self._shown_numbers(self._numbers)
-        self._numbers = numbers
-        if changed:
-            self._redraw()
-
-    def _shown_numbers(self, numbers: Mapping[str, str]) -> list[str | None]:
-        return [numbers.get(row.task_id) for row in self.rows]
+        """Show agents' tasks by their ``numbers`` in the task list, as the list takes them."""
+        self.agents.number_tasks(numbers)
 
     def show_review(self, status: ReviewStatus | None) -> None:
-        self.border_subtitle = review_line(status)
+        """Show whether review is paused, as the list takes ``status``."""
+        self.agents.show_review(status)
 
-    def _redraw(self) -> None:
-        """Show the rows, the empty row when no agents are running."""
-        rows = [
-            (row.agent_id, agent_line(row, self._numbers.get(row.task_id))) for row in self.rows
-        ]
+    def list_agents(self, rows: Sequence[tuple[str, str]]) -> None:
         self.show_rows(rows, None if rows else Option(NO_AGENTS_LABEL, disabled=True))
+
+    def show_review_line(self, line: str) -> None:
+        self.border_subtitle = line
+
+    def ask_to_cancel(self, agent_id: str) -> None:
+        self.post_message(self.Cancel(agent_id))
