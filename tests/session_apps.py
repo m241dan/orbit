@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 from orbit.protocol import (
     ActivateSession,
+    AgentEntry,
     Attach,
     Catalog,
     SessionStateChanged,
@@ -42,6 +43,12 @@ def catalog(*sessions: SessionSummary) -> Catalog:
 
 
 CATALOG = catalog(CURRENT, OLD, LOCKED, BROKEN)
+
+
+def with_agents(*agents: AgentEntry) -> Catalog:
+    """:data:`CATALOG`, its workspace configuring the roles of ``agents``, which it lists."""
+    workspaces = tuple(w.model_copy(update={"agents": agents}) for w in CATALOG.workspaces)
+    return CATALOG.model_copy(update={"agents": agents, "workspaces": workspaces})
 
 
 def in_process() -> tuple[OrbitApp, FakeSession]:

@@ -11,6 +11,7 @@ from orbit.protocol import (
     AssistantMessage,
     BusyChanged,
     CancelTurn,
+    Catalog,
     ConversationReset,
     MessageSent,
     ResetConversation,
@@ -18,9 +19,11 @@ from orbit.protocol import (
     Settings,
     SettingsChanged,
     UpdateSettings,
+    WorkspaceEntry,
 )
+from orbit.tui.view.seats import PLANNER_SEAT
 from tests.frontend_fakes import Shell
-from tests.session_apps import CATALOG
+from tests.session_apps import CURRENT, with_agents
 from tests.tui_fakes import SNAPSHOT
 
 ARCHITECT = "architect"
@@ -31,10 +34,10 @@ PLANNER_ENTRY = AgentEntry(name=PLANNER, label="Planner", conversational=True, l
 CODER_ENTRY = AgentEntry(name="coder", label="Coder", conversational=False)
 ARCHITECT_ENTRY = AgentEntry(name=ARCHITECT, label="Architect", conversational=True, lane=DESIGN)
 
-TALKING = CATALOG.model_copy(update={"agents": (PLANNER_ENTRY, CODER_ENTRY, ARCHITECT_ENTRY)})
+TALKING = with_agents(PLANNER_ENTRY, CODER_ENTRY, ARCHITECT_ENTRY)
 """A catalog listing the planner, the coder and the architect."""
 
-BUILT_IN = CATALOG.model_copy(update={"agents": (PLANNER_ENTRY, CODER_ENTRY)})
+BUILT_IN = with_agents(PLANNER_ENTRY, CODER_ENTRY)
 """A catalog listing the built-in roles' planner and coder alone."""
 
 CRITIC = "critic"
@@ -43,7 +46,7 @@ CRITIC_ENTRY = AgentEntry(name=CRITIC, label="Critic", conversational=True, lane
 BUSY_CRITIC = f"● {CRITIC}"
 """The critic's tab while its lane is busy."""
 
-SHARING = TALKING.model_copy(update={"agents": (*TALKING.agents, CRITIC_ENTRY)})
+SHARING = with_agents(*TALKING.agents, CRITIC_ENTRY)
 """A catalog listing the planner, the coder, and the architect and the critic in one lane."""
 
 STRIP = ["All", "planner", "coder", "reviewer", "super-reviewer", "configurator"]
@@ -379,3 +382,43 @@ async def test_a_role_no_longer_listed_loses_its_tab_and_the_prompt_the_role() -
     assert shell.marks.placeholder == TALK_TO_PLANNER
     await shell.submit("plan")
     assert shell.wire.changes == [SendMessage(agent=PLANNER, text="plan")]
+
+
+AUDITOR = AgentEntry(name="auditor", label="auditor", conversational=False, lane="security")
+"""A role in lane security in workspace A, which B runs in lane audit."""
+
+
+def two_workspaces() -> Catalog:
+    """A catalog serving B, which this frontend opens on as it's listed first, configuring the
+    auditor in lane audit, then A, which also configures the architect, the auditor in lane
+    security; its own agents merge them, A's lanes first."""
+    in_a = (PLANNER_ENTRY, ARCHITECT_ENTRY, AUDITOR)
+    in_b = (PLANNER_ENTRY, AUDITOR.model_copy(update={"lane": "audit"}))
+    a = WorkspaceEntry(id="A", label="a", sessions=(CURRENT,), agents=in_a)
+    b = WorkspaceEntry(id="B", label="b", sessions=(CURRENT,), agents=in_b)
+    return Catalog(workspaces=(b, a), agents=in_a, triggers=(), lanes=())
+
+
+async def test_a_frontend_pins_and_groups_the_roles_of_the_workspace_it_is_on() -> None:
+    shell = Shell()
+    await shell.feed(two_workspaces())
+    assert shell.frontend.navigation.place.workspace == "B"
+    assert shell.tab_strip == STRIP
+    assert shell.tasks.lanes == {PLANNER: "planner", "auditor": "audit"}
+
+
+async def test_moving_to_another_workspace_pins_and_groups_its_roles() -> None:
+    shell = Shell()
+    await shell.feed(two_workspaces())
+    assert await shell.frontend.navigation.place.join("A")
+    shell.frontend.router.show_viewing()
+    assert shell.tab_strip == [*STRIP, ARCHITECT]
+    assert shell.tasks.lanes == {PLANNER: "planner", ARCHITECT: DESIGN, "auditor": "security"}
+
+
+async def test_before_a_workspace_is_open_only_the_planner_is_seated() -> None:
+    shell = Shell(linked=True)
+    await shell.feed(two_workspaces())
+    assert shell.frontend.navigation.place.workspace is None
+    assert shell.frontend.router.seats.listed == (PLANNER_SEAT,)
+    assert shell.tab_strip == STRIP

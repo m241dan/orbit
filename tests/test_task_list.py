@@ -34,7 +34,7 @@ from orbit.tui.view.tasks import (
 )
 from orbit.tui.widgets import ChatPrompt
 from tests.agent_fakes import frontend
-from tests.session_apps import CATALOG
+from tests.session_apps import with_agents
 from tests.tui_fakes import (
     FakeSession,
     board,
@@ -636,14 +636,10 @@ async def test_switching_session_through_ctrl_p_while_the_list_is_active_leaves_
         assert in_view(task_list, 25)
 
 
-LANED = CATALOG.model_copy(
-    update={
-        "agents": (
-            AgentEntry(name=CODER, label="Coder", conversational=False),
-            AgentEntry(name=REVIEWER, label="Reviewer", conversational=False, lane="review"),
-            AgentEntry(name="security", label="security", conversational=False, lane="security"),
-        )
-    }
+LANED = with_agents(
+    AgentEntry(name=CODER, label="Coder", conversational=False),
+    AgentEntry(name=REVIEWER, label="Reviewer", conversational=False, lane="review"),
+    AgentEntry(name="security", label="security", conversational=False, lane="security"),
 )
 """A catalog listing the coder, in lane work, the reviewer, in review, and a security role, in
 its own lane."""
@@ -678,7 +674,7 @@ async def test_a_review_tasks_row_shows_its_lane_and_a_coder_tasks_none() -> Non
 
 async def test_a_task_rows_usage_is_unknown_when_its_roles_runtime_doesnt_report_it() -> None:
     unmetered = AgentEntry(name=REVIEWER, label="Reviewer", conversational=False, usage_known=False)
-    catalog = CATALOG.model_copy(update={"agents": (LANED.agents[0], unmetered)})
+    catalog = with_agents(LANED.agents[0], unmetered)
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:

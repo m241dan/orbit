@@ -30,12 +30,14 @@ TRACKED = ["agents.track", "tabs.track", "transcript.track", "proposals.withdraw
 def routed(event: Event) -> list[str]:
     """The names of the methods ``event`` calls on the router's widgets, hosts and hooks, in
     the order it calls them."""
-    return [str(name) for name, _, _ in calls_of(event).mock_calls]
+    calls = calls_of(event).mock_calls
+    return [str(name) for name, _, _ in calls if name != "navigation.catalog.agents"]
 
 
 def calls_of(event: Event) -> Mock:
     """What ``event`` calls on the router's widgets, hosts and hooks, recorded."""
     calls = Mock()
+    calls.navigation.catalog.agents.return_value = ()
     panes = Panes(
         calls.transcript,
         calls.tabs,
@@ -104,11 +106,6 @@ def test_a_catalog_labels_triggers_pins_conversations_tags_lanes_then_follows_wo
     assert routed(catalog) == [
         *TRACKED,
         "label_triggers",
-        "prompt.show_target",
-        "prompt.show_busy",
-        "tabs.pin",
-        "task_list.show_lanes",
-        "task_list.show_usage_unknown",
         "navigation.follow_catalog",
         "transcript.show_session",
         "viewing.show",

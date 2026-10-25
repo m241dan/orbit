@@ -382,8 +382,10 @@ its requests to orbit and orbit's replies (`agent-1 → orbit complete_task … 
 colour. The tabs above it narrow it: **All** shows everything,
 then come a pinned tab for each built-in role, labelled by its name: **planner**, **coder**,
 **reviewer**, **super-reviewer** and **configurator**, and one for each other conversational role
-the project configures (see `conversation` under
-[Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)), such as **architect**. The pinned
+the workspace you're on configures (see `conversation` under
+[Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)), such as **architect**, pinned
+again as you move to another workspace; the task list tags each task with the lane its role runs
+in there. The pinned
 tabs are there from the start and keep the whole session's history; every agent in a role shares its tab (two reviewers running at
 once both show under **reviewer**), each message headed and every other entry prefixed with its
 agent's id, so you can tell them apart. Whether the speaker changed is judged within the tab: under

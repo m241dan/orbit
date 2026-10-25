@@ -6,7 +6,6 @@ from textual.widgets._footer import FooterKey
 from orbit.protocol import (
     PLANNER,
     AgentEntry,
-    Catalog,
     Command,
     SendMessage,
     Settings,
@@ -15,16 +14,12 @@ from orbit.protocol import (
 )
 from orbit.tui import OrbitApp
 from orbit.tui.widgets import ChatPrompt, PickerScreen
+from tests.session_apps import with_agents
 from tests.tui_fakes import FakeSession, active_tab, feed_events, picker, show_settings
 
-TALKING = Catalog(
-    workspaces=(),
-    agents=(
-        AgentEntry(name=PLANNER, label="Planner", conversational=True, lane="planner"),
-        AgentEntry(name="architect", label="Architect", conversational=True, lane="design"),
-    ),
-    triggers=(),
-    lanes=(),
+TALKING = with_agents(
+    AgentEntry(name=PLANNER, label="Planner", conversational=True, lane="planner"),
+    AgentEntry(name="architect", label="Architect", conversational=True, lane="design"),
 )
 """A catalog listing the architect, a project's own conversational role, beside the planner."""
 

@@ -9,6 +9,7 @@ from orbit.protocol import (
     PLANNER_LANE,
     STORAGE_FAILED,
     WORK_LANE,
+    AgentEntry,
     AgentsChanged,
     BusyChanged,
     BusyLane,
@@ -205,7 +206,8 @@ class AppHooks:
 class EventRouter:
     """Shows each event in the ``panes`` and the ``handlers`` it concerns, asking the app for
     what only it does through ``hooks``; it keeps which lanes are busy, as last reported, and
-    the conversational roles' ``seats``, with their settings."""
+    the conversational roles' ``seats``, with their settings, those of the workspace this
+    frontend is on."""
 
     def __init__(self, panes: Panes, handlers: Handlers, hooks: AppHooks) -> None:
         self._panes = panes
@@ -214,6 +216,7 @@ class EventRouter:
         # Which lanes have work in progress, as last reported (or just requested).
         self._busy: dict[BusyLane, bool] = {WORK_LANE: False, PLANNER_LANE: False}
         self.seats = Seats(panes.prompt, self.busy)
+        self._agents: tuple[AgentEntry, ...] = ()  # The roles shown, those of no workspace.
 
     def busy(self, lane: BusyLane) -> bool:
         """Whether ``lane`` has work in progress, as last reported or set; a lane not reported
@@ -247,11 +250,28 @@ class EventRouter:
     def show_viewing(self) -> None:
         """Mark the prompt while the session viewed isn't the active one, or hide the mark, say
         by it while the session viewed's run is paused, and have the task about to run say when
-        the session viewed waits for a coder."""
+        the session viewed waits for a coder, and follow the roles of the workspace this
+        frontend is on, if it moved or they changed."""
         place = self._handlers.navigation.place
         self._panes.viewing.show(place.mark)
         self._panes.paused.show(place.paused)
         self._panes.task_list.show_waiting(place.coder_wait)
+        self._follow_roles()
+
+    def _follow_roles(self) -> None:
+        """Pin a tab for each conversational role of the workspace this frontend is on, which
+        the prompt talks to while its tab is shown, and tag the tasks with their roles' lanes and
+        whether their usage is unknown, once those roles differ from the ones shown; before a
+        workspace is open there's only the planner."""
+        navigation = self._handlers.navigation
+        agents = navigation.catalog.agents(navigation.place.workspace)
+        if agents == self._agents:
+            return
+        self._agents = agents
+        self.seats.follow_catalog(agents)
+        self._panes.tabs.pin(self.seats.lanes)
+        self._panes.task_list.show_lanes(role_lanes(agents))
+        self._panes.task_list.show_usage_unknown(usage_unknown_roles(agents))
 
     def _render_answer(self, event: AnswerEvent) -> None:
         """Follow what the backend made of a command, noting the role a message it accepted went
@@ -296,17 +316,12 @@ class EventRouter:
             self._handlers.feed.append(*reset_entry(event.agent), event.agent)
 
     def _render_catalog(self, catalog: Catalog) -> None:
-        """Label the trigger keys from ``catalog``, pin a tab for each conversational role it
-        lists, which the prompt talks to while its tab is shown, tag the tasks with their roles'
-        lanes and whether their usage is unknown, and list its workspaces and sessions, titling
-        the conversation with the name of the session viewed, renamed perhaps; one that no
-        longer lists the workspace the app is on opens the workspace picker. In process, the
-        first catalog opens the session picker, if the app picks one."""
+        """Label the trigger keys from ``catalog``, list its workspaces and sessions, titling
+        the conversation with the name of the session viewed, renamed perhaps, and follow the
+        roles of the workspace the app is on; one that no longer lists the workspace the app is
+        on opens the workspace picker. In process, the first catalog opens the session picker,
+        if the app picks one."""
         self._hooks.label_triggers(trigger_key_labels(catalog.triggers))
-        self.seats.follow_catalog(catalog.agents)
-        self._panes.tabs.pin(self.seats.lanes)
-        self._panes.task_list.show_lanes(role_lanes(catalog.agents))
-        self._panes.task_list.show_usage_unknown(usage_unknown_roles(catalog.agents))
         navigation = self._handlers.navigation
         navigation.follow_catalog(catalog)
         attached = navigation.place.attached_session
