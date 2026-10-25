@@ -1757,7 +1757,9 @@ orbit and OpenTelemetry alike (an unreachable collector, say, or a span file tha
 written), to stderr. `orbit chat` keeps them
 off the screen while the TUI runs, showing each kind (the same logger and message) once per run as
 a transcript note (`⚠ Telemetry: …` for telemetry's), and prints every one to stderr, in order,
-after it closes, followed by the dropped spans' warning.
+after it closes, followed by the dropped spans' warning. Orbit's unexpected errors, which the
+conversation already shows, aren't noted again, but are printed after it closes with their
+tracebacks.
 
 Each task the work lane runs is one span, `orbit.task`, starting its own trace: who the task is
 (workspace, session, id, title, role, model and who queued it), what its turns cost in tokens and

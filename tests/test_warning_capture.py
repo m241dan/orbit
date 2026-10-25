@@ -6,6 +6,7 @@ import threading
 
 import pytest
 
+from orbit.agent.application.failures import unexpected
 from orbit.tui.warning_capture import WarningCapture
 
 
@@ -115,6 +116,68 @@ def test_a_warning_after_the_attached_loop_closed_is_still_captured() -> None:
 
     assert shown == []
     assert capture.lines() == ["unseen"]
+
+
+async def test_an_unexpected_error_is_kept_with_its_traceback_but_not_shown() -> None:
+    capture = WarningCapture()
+    shown: list[tuple[str, str]] = []
+    capture.attach(lambda name, message: shown.append((name, message)))
+
+    with capture.capturing():
+        unexpected("Orbit failed to handle X: a bug", raised())
+        await asyncio.sleep(0)
+
+    assert shown == []
+    [line] = capture.lines()
+    assert line.startswith("Orbit failed to handle X: a bug\nTraceback")
+    assert line.endswith("ValueError: a bug")
+
+
+async def test_an_unexpected_error_captured_before_attaching_isnt_shown_on_attaching() -> None:
+    capture = WarningCapture()
+    shown: list[tuple[str, str]] = []
+
+    with capture.capturing():
+        unexpected("Orbit failed to handle X: a bug", raised())
+        capture.attach(lambda name, message: shown.append((name, message)))
+        await asyncio.sleep(0)
+
+    assert shown == []
+
+
+async def test_a_warning_after_an_unexpected_error_is_still_shown_once() -> None:
+    capture = WarningCapture()
+    shown: list[tuple[str, str]] = []
+    capture.attach(lambda name, message: shown.append((name, message)))
+
+    with capture.capturing():
+        unexpected("Orbit failed to handle X: a bug", raised())
+        logging.getLogger("orbit.a").warning("one")
+        logging.getLogger("orbit.a").warning("one")
+        await asyncio.sleep(0)
+
+    assert shown == [("orbit.a", "one")]
+    assert len(capture.lines()) == 3
+
+
+async def test_another_error_logged_with_its_traceback_is_still_shown() -> None:
+    capture = WarningCapture()
+    shown: list[tuple[str, str]] = []
+    capture.attach(lambda name, message: shown.append((name, message)))
+
+    with capture.capturing():
+        logging.getLogger("opentelemetry.sdk").error("Export failed.", exc_info=raised())
+        await asyncio.sleep(0)
+
+    assert shown == [("opentelemetry.sdk", "Export failed.")]
+
+
+def raised() -> ValueError:
+    """An error with a traceback, as one caught is."""
+    try:
+        raise ValueError("a bug")
+    except ValueError as exc:
+        return exc
 
 
 def thread() -> str:

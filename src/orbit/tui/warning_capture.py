@@ -19,8 +19,9 @@ class WarningCapture(logging.Handler):
     message template, once per run through what :meth:`attach` is given.
 
     A kind once shown isn't shown again that run (the telemetry plan's decision 12): libraries
-    rarely log recovery. Records may come from any thread; they're shown on the loop that
-    attached.
+    rarely log recovery. Records marked ``reported``, the backend's unexpected errors, are kept
+    but never shown, as the backend already told the user of them through an event. Records may
+    come from any thread; they're shown on the loop that attached.
     """
 
     def __init__(self) -> None:
@@ -57,15 +58,15 @@ class WarningCapture(logging.Handler):
             self._attached = None
 
     def emit(self, record: logging.LogRecord) -> None:
-        """Keep ``record``, and show it if it's the first of its kind."""
+        """Keep ``record``, and show it if it's the first of its kind and not reported."""
         with self._guard:
             self._keep(record)
 
     def _keep(self, record: logging.LogRecord) -> None:
-        """Keep ``record``, and show it if it's the first of its kind."""
+        """Keep ``record``, and show it if it's the first of its kind and not reported."""
         self.records.append(record)
         kind = (record.name, str(record.msg))
-        if kind in self._kinds:
+        if getattr(record, "reported", False) or kind in self._kinds:
             return
         self._kinds.add(kind)
         warning = (record.name, record.getMessage())

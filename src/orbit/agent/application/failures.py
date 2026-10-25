@@ -13,8 +13,9 @@ logger = logging.getLogger(__name__)
 
 def unexpected(message: str, exc: BaseException) -> str:
     """``message``, telling the user of ``exc``, which nothing expected; ``exc`` is logged with
-    its traceback, as the message alone loses its cause."""
-    logger.error("%s", message, exc_info=exc)
+    its traceback, as the message alone loses its cause, in a record marked ``reported``, as the
+    caller tells the user the message itself."""
+    logger.error("%s", message, exc_info=exc, extra={"reported": True})
     return message
 
 
