@@ -55,7 +55,7 @@ from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.purging import Purged, PurgeRefused
 from orbit.agent.domain.remotes import RemoteSettings
 from orbit.agent.domain.roles import Role, runtime_roles
-from orbit.agent.domain.runtimes import CLAUDE, known_runtimes, knows_runtime, not_on_path
+from orbit.agent.domain.runtimes import CLAUDE, KIRO, known_runtimes, knows_runtime, not_on_path
 from orbit.agent.domain.server import LocalTls, RunningServer, ServerSettings, TlsMode
 from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.domain.verification import VerificationStep
@@ -96,6 +96,7 @@ from orbit.agent.external.directory_lister import DirectoryLister
 from orbit.agent.external.fallback_files import FallbackFiles
 from orbit.agent.external.file_names import file_names
 from orbit.agent.external.git_tree import GitCoderTree
+from orbit.agent.external.kiro_cli import KiroCliRunner
 from orbit.agent.external.mcp_host import McpHost
 from orbit.agent.external.repository import (
     RepositoryUnreadable,
@@ -141,6 +142,7 @@ __all__ = [
     "CERTIFICATE_DAYS",
     "CLAUDE",
     "INVALID_CONFIG",
+    "KIRO",
     "LIMIT_KEYS",
     "NO_STEPS_NOTE",
     "REMOTE_FILE",
@@ -170,6 +172,7 @@ __all__ = [
     "InstructionLines",
     "Instructions",
     "KeyType",
+    "KiroCliRunner",
     "Layer",
     "Limits",
     "ListenFailed",

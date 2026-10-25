@@ -540,7 +540,9 @@ def test_a_layered_config_is_the_config_with_the_layer_each_role_field_came_from
 
 # A role's runtime
 
-UNKNOWN_RUNTIME = 'roles.coder.runtime = "kiro": this version of orbit knows the runtimes claude.'
+UNKNOWN_RUNTIME = (
+    'roles.coder.runtime = "nope": this version of orbit knows the runtimes claude, kiro.'
+)
 
 
 def test_every_role_runs_on_claude_unless_it_says_otherwise() -> None:
@@ -555,17 +557,17 @@ def test_a_role_on_claude_loads() -> None:
 
 def test_a_role_on_a_runtime_this_version_doesnt_know_is_refused_naming_it() -> None:
     with pytest.raises(ConfigError) as raised:
-        load_config(tomllib.loads('[roles.coder]\nruntime = "kiro"'), BUILT_IN_ROLES)
+        load_config(tomllib.loads('[roles.coder]\nruntime = "nope"'), BUILT_IN_ROLES)
     assert str(raised.value) == UNKNOWN_RUNTIME
 
 
 def test_each_role_on_a_runtime_this_version_doesnt_know_is_named_on_a_line_of_its_own() -> None:
-    roles = {"coder": {"runtime": "kiro"}, "x": {"instructions": "Do x.", "runtime": "harness"}}
+    roles = {"coder": {"runtime": "nope"}, "x": {"instructions": "Do x.", "runtime": "harness"}}
     with pytest.raises(ConfigError) as raised:
         load_config({"roles": roles}, BUILT_IN_ROLES)
     assert str(raised.value).splitlines() == [
         UNKNOWN_RUNTIME,
-        'roles.x.runtime = "harness": this version of orbit knows the runtimes claude.',
+        'roles.x.runtime = "harness": this version of orbit knows the runtimes claude, kiro.',
     ]
 
 

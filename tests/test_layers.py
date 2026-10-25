@@ -116,9 +116,9 @@ def test_the_user_configs_roles_table_sets_the_runtime_for_every_role_and_for_on
 @pytest.mark.parametrize(
     ("roles", "key"),
     [
-        ({"runtime": "kiro"}, "roles.runtime"),
-        ({"coder": {"runtime": "kiro"}}, "roles.coder.runtime"),
-        ({"helper": {**HELPER, "runtime": "kiro"}}, "roles.helper.runtime"),
+        ({"runtime": "nope"}, "roles.runtime"),
+        ({"coder": {"runtime": "nope"}}, "roles.coder.runtime"),
+        ({"helper": {**HELPER, "runtime": "nope"}}, "roles.helper.runtime"),
     ],
 )
 def test_a_runtime_this_version_doesnt_know_is_refused_naming_the_key(
@@ -126,12 +126,14 @@ def test_a_runtime_this_version_doesnt_know_is_refused_naming_the_key(
 ) -> None:
     with pytest.raises(ConfigError) as raised:
         user({"roles": roles})
-    assert str(raised.value) == f'{key} = "kiro": this version of orbit knows the runtimes claude.'
+    assert str(raised.value) == (
+        f'{key} = "nope": this version of orbit knows the runtimes claude, kiro.'
+    )
 
 
 def test_each_unknown_runtime_in_the_user_config_is_named_on_a_line_of_its_own() -> None:
     with pytest.raises(ConfigError) as raised:
-        user({"roles": {"runtime": "kiro", "coder": {"runtime": "harness"}}})
+        user({"roles": {"runtime": "nope", "coder": {"runtime": "harness"}}})
     lines = str(raised.value).splitlines()
     assert [line.split(" = ", 1)[0] for line in lines] == ["roles.runtime", "roles.coder.runtime"]
 
@@ -244,9 +246,9 @@ def test_the_projects_runtime_for_a_role_wins_over_the_users_for_every_role() ->
 
 def test_a_project_role_on_a_runtime_this_version_doesnt_know_is_refused() -> None:
     with pytest.raises(ConfigError) as raised:
-        resolve_roles(PACKAGE_ROLES, NO_USER_ROLES, project({"coder": {"runtime": "kiro"}}))
+        resolve_roles(PACKAGE_ROLES, NO_USER_ROLES, project({"coder": {"runtime": "nope"}}))
     assert str(raised.value) == (
-        'roles.coder.runtime = "kiro": this version of orbit knows the runtimes claude.'
+        'roles.coder.runtime = "nope": this version of orbit knows the runtimes claude, kiro.'
     )
 
 

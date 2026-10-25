@@ -1,17 +1,20 @@
 """The runtimes the CLI knows, and the launchers it builds for those a workspace's enabled roles
 run on, once their executables are found on PATH."""
 
+import os
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from orbit.agent import ClaudeCliRunner, Role, WorkspaceUnavailable
-from orbit.agent.domain.runtimes import CLAUDE, RUNTIME_NAMES
+from orbit.agent import ClaudeCliRunner, KiroCliRunner, Role, WorkspaceUnavailable
+from orbit.agent.domain.runtimes import CLAUDE, KIRO, RUNTIME_NAMES
 from orbit.cli.runtimes import RUNTIMES, build_runtimes
 from orbit.protocol import CODER, PLANNER
 from orbit.telemetry import AgentCollector
 from tests.agent_fakes import ROLES
 from tests.cli_fakes import FAKE_RUNTIME, FakeRuntimeLauncher
+from tests.stand_ins import stand_in
 
 NOT_ON_PATH = (
     "Roles planner, coder, reviewer, super-reviewer, configurator use the runtime claude, but"
@@ -43,6 +46,44 @@ def test_claude_is_claude_codes_cli_on_path() -> None:
     claude = RUNTIMES[CLAUDE]
     assert (claude.executable, claude.install) == ("claude", "Install Claude Code")
     assert isinstance(claude.launcher(AgentCollector()), ClaudeCliRunner)
+
+
+def test_kiro_is_kiros_cli_on_path() -> None:
+    kiro = RUNTIMES[KIRO]
+    assert (kiro.executable, kiro.install) == ("kiro-cli", "Install the Kiro CLI and log in")
+
+
+def test_kiro_is_built_once_its_cli_is_found_sweeping_away_leftover_configs(
+    monkeypatch: pytest.MonkeyPatch, stand_in_bin: Path, tmp_path: Path
+) -> None:
+    kiro_bin = tmp_path / "kiro-bin"
+    stand_in(kiro_bin, "kiro-cli")
+    monkeypatch.setenv("PATH", f"{kiro_bin}{os.pathsep}{stand_in_bin}")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    agents = tmp_path / ".kiro" / "agents"
+    agents.mkdir(parents=True)
+    leftover, fresh = agents / "orbit-agent-1.json", agents / "orbit-agent-2.json"
+    leftover.write_text("{}")
+    fresh.write_text("{}")
+    stale = (datetime.now(UTC) - timedelta(days=2)).timestamp()
+    os.utime(leftover, (stale, stale))
+
+    launchers = build_runtimes(on(KIRO, CODER))
+    assert list(launchers) == [CLAUDE, KIRO]
+    assert isinstance(launchers[KIRO], KiroCliRunner)
+    assert sorted(agents.iterdir()) == [fresh]
+
+
+def test_kiros_missing_cli_names_its_roles_and_how_to_install_it(
+    monkeypatch: pytest.MonkeyPatch, stand_in_bin: Path
+) -> None:
+    monkeypatch.setenv("PATH", str(stand_in_bin))
+    with pytest.raises(WorkspaceUnavailable) as raised:
+        build_runtimes(on(KIRO, CODER, PLANNER))
+    assert str(raised.value) == (
+        "Roles planner, coder use the runtime kiro, but kiro-cli isn't on PATH. Install the Kiro"
+        " CLI and log in, or set those roles' runtime to one you have."
+    )
 
 
 def test_the_runtime_the_enabled_roles_use_is_built() -> None:

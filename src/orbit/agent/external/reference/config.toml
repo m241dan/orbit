@@ -57,7 +57,7 @@
 # enabled = true
 # Its effort: "low", "medium", "high", "xhigh" or "max"; unset, the user config's, else the CLI's.
 # effort: unset
-# The runtime its agents run on; only "claude" so far. Left out, the user config's, else "claude".
+# The runtime its agents run on: "claude" or "kiro". Left out, the user config's, else "claude".
 # runtime = "claude"
 
 # [roles.coder]
@@ -85,7 +85,7 @@
 # enabled = true
 # Its effort: "low", "medium", "high", "xhigh" or "max"; unset, the user config's, else the CLI's.
 # effort: unset
-# The runtime its agents run on; only "claude" so far. Left out, the user config's, else "claude".
+# The runtime its agents run on: "claude" or "kiro". Left out, the user config's, else "claude".
 # runtime = "claude"
 
 # [roles.reviewer]
@@ -113,7 +113,7 @@
 # enabled = true
 # Its effort: "low", "medium", "high", "xhigh" or "max"; unset, the user config's, else the CLI's.
 # effort: unset
-# The runtime its agents run on; only "claude" so far. Left out, the user config's, else "claude".
+# The runtime its agents run on: "claude" or "kiro". Left out, the user config's, else "claude".
 # runtime = "claude"
 
 # [roles.super-reviewer]
@@ -141,7 +141,7 @@
 # enabled = true
 # Its effort: "low", "medium", "high", "xhigh" or "max"; unset, the user config's, else the CLI's.
 # effort: unset
-# The runtime its agents run on; only "claude" so far. Left out, the user config's, else "claude".
+# The runtime its agents run on: "claude" or "kiro". Left out, the user config's, else "claude".
 # runtime = "claude"
 
 # [roles.configurator]
@@ -169,7 +169,7 @@
 # enabled = true
 # Its effort: "low", "medium", "high", "xhigh" or "max"; unset, the user config's, else the CLI's.
 # effort: unset
-# The runtime its agents run on; only "claude" so far. Left out, the user config's, else "claude".
+# The runtime its agents run on: "claude" or "kiro". Left out, the user config's, else "claude".
 # runtime = "claude"
 
 # A role of your own, which must set its instructions. For example:

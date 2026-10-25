@@ -688,7 +688,9 @@ def test_a_workspace_flagged_before_that_git_has_no_identity_for_is_skipped_with
 def test_serve_refuses_a_runtime_it_doesnt_know_naming_those_it_does() -> None:
     result = runner.invoke(app, ["serve", *QUIET, "--runtime", "nope", "--port", "0"])
     assert result.exit_code == 2
-    assert result.stderr == "--runtime nope: this version of orbit knows the runtimes claude.\n"
+    assert result.stderr == (
+        "--runtime nope: this version of orbit knows the runtimes claude, kiro.\n"
+    )
 
 
 def test_adding_a_workspace_whose_runtime_isnt_on_path_exits_naming_the_roles(

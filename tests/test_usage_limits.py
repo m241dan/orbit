@@ -3,13 +3,17 @@ starts again."""
 
 from datetime import UTC, datetime, timedelta
 
-from orbit.agent.domain.runtimes import CLAUDE, Failure, FailureKind
+import pytest
+
+from orbit.agent.domain.runtimes import CLAUDE, KIRO, Failure, FailureKind
 from orbit.agent.domain.usage_limits import (
+    KIRO_LIMIT_RETRY,
     LimitWaits,
     Outage,
     RuntimeStop,
     api_unavailable,
     claude_failure,
+    kiro_failure,
     limit_hit,
     limit_resume_time,
     outage_after,
@@ -114,6 +118,17 @@ def test_another_runtimes_usage_doesnt_time_a_limit_so_it_retries() -> None:
     assert limit_resume_time(stop("usage_limit", FAKE), claudes, NOW, WAITS) == NOW + WAITS.retry
 
 
+def test_a_limit_whose_runtime_declares_its_retry_retries_after_that() -> None:
+    hourly = RuntimeStop(KIRO, Failure("usage_limit", retry=timedelta(hours=1)))
+    assert limit_resume_time(hourly, None, NOW, WAITS) == NOW + timedelta(hours=1)
+
+
+def test_a_declared_retry_still_gives_way_to_a_stated_reset() -> None:
+    stated = NOW + timedelta(hours=3)
+    limit = Failure("usage_limit", resets_at=stated, retry=timedelta(hours=1))
+    assert limit_resume_time(RuntimeStop(KIRO, limit), None, NOW, WAITS) == stated
+
+
 def test_an_outage_whose_failure_states_its_reset_starts_the_run_again_then() -> None:
     stated = NOW + timedelta(hours=1)
     outage = Outage(CLAUDE, "API Error: 529", level=3)
@@ -210,3 +225,68 @@ def test_the_outage_notes_name_another_runtime_by_its_name() -> None:
     assert outage_resuming_note(CLAUDE) == (
         "Starting the run again now Claude's API may be answering."
     )
+
+
+KIRO_OUTAGE = (
+    "Internal error (code -32603): Encountered an error in the response stream: An unknown error"
+    " occurred: dispatch failure"
+)
+"""What Kiro says when it can't reach its service, as captured."""
+
+KIRO_BAD_MODEL = (
+    "Internal error (code -32603): Encountered an error in the response stream: The model"
+    " 'no-such-model' is not available. Please use '/model' to select a different model and try"
+    " again. (request_id: REQUEST)"
+)
+"""What Kiro says of a model it doesn't have, as captured."""
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        KIRO_OUTAGE,
+        "An unknown error occurred: DISPATCH FAILURE",
+        "Service error: HTTP 503 Service Unavailable",
+        "unexpected status code: 500",
+        "Status: 502 Bad Gateway",
+        "error code 529",
+        "The model is overloaded, try again later",
+        "ServiceOverloadedException: monthly credit limit",
+    ],
+)
+def test_kiros_connection_failures_server_errors_and_overloads_are_outages(message: str) -> None:
+    assert kiro_failure(message) == Failure("api_unavailable")
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Monthly credit limit reached",
+        "You have exceeded your QUOTA",
+        "Out of Credits",
+        "Rate LIMIT exceeded (HTTP 429)",
+    ],
+)
+def test_kiros_limits_quotas_and_credits_are_usage_limits_retried_hourly(message: str) -> None:
+    assert kiro_failure(message) == Failure("usage_limit", retry=KIRO_LIMIT_RETRY)
+    assert timedelta(hours=1) == KIRO_LIMIT_RETRY
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        KIRO_BAD_MODEL,
+        "Kiro couldn't connect to orbit's MCP server at http://127.0.0.1:500/mcp",
+        "HTTP 404 Not Found",
+        "status 5000",
+        "",
+    ],
+)
+def test_kiros_other_errors_are_no_failure(message: str) -> None:
+    assert kiro_failure(message) is None
+
+
+def test_the_notes_name_kiro_by_its_name() -> None:
+    at = datetime(2026, 10, 23, 14, 20, tzinfo=UTC)
+    assert paused_note(at, KIRO).startswith("Kiro's usage limit is reached, so the run stopped.")
+    assert outage_resuming_note(KIRO) == "Starting the run again now Kiro's API may be answering."

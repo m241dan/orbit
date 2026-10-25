@@ -195,7 +195,7 @@ class Role(_Config):
     runtime: str = Field(
         default=CLAUDE,
         description=(
-            'The runtime its agents run on; only "claude" so far.'
+            'The runtime its agents run on: "claude" or "kiro".'
             ' Left out, the user config\'s, else "claude".'
         ),
     )

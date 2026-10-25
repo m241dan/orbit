@@ -194,9 +194,25 @@ def test_an_outage_fails_the_turn_without_reporting_reasoning_unavailable() -> N
     assert translation.session_id == SESSION_ID
     assert not translation.reasoning_unavailable
     assert translation.stop_reason is None
+    assert translation.error_stage == "prompt"
 
 
 # Lines the fixtures don't show
+
+
+def test_the_stage_a_run_failed_at_is_noted_and_none_before_it_fails() -> None:
+    translation = KiroTranslation("t")
+    translation.feed(line("runStarted"))
+    assert translation.error_stage is None
+    translation.feed(line("runError", stage="init", message="No such session"))
+    assert translation.error_stage == "init"
+    assert translation.session_id is None
+
+
+def test_a_run_error_without_a_stage_notes_none() -> None:
+    translation = KiroTranslation("t")
+    translation.feed(line("runError", message="Broken"))
+    assert translation.error_stage is None
 
 
 @pytest.mark.parametrize(

@@ -15,7 +15,7 @@ import pytest
 from orbit.agent import ClaudeCliRunner, ControlPlane, WorkspaceHost
 from orbit.agent.application.ports import AgentLaunch, UsageSource
 from orbit.agent.domain.agents import Agent
-from orbit.agent.domain.runtimes import CLAUDE
+from orbit.agent.domain.runtimes import RUNTIME_NAMES
 from orbit.agent.domain.server import ServerSettings
 from orbit.agent.external.runtimes import RUNTIME_CAPABILITIES
 from orbit.cli.runtimes import RUNTIMES, Runtime
@@ -60,7 +60,7 @@ def know_runtime(
     directory = tmp_path / "fake-bin"
     stand_in(directory, FAKE_EXECUTABLE)
     monkeypatch.setenv("PATH", f"{directory}{os.pathsep}{os.environ.get('PATH', '')}")
-    monkeypatch.setattr("orbit.agent.domain.runtimes.RUNTIME_NAMES", (CLAUDE, name))
+    monkeypatch.setattr("orbit.agent.domain.runtimes.RUNTIME_NAMES", (*RUNTIME_NAMES, name))
     runtime = Runtime(FAKE_EXECUTABLE, "Install the fake", lambda collector: launcher())
     monkeypatch.setitem(RUNTIMES, name, runtime)
     monkeypatch.setitem(RUNTIME_CAPABILITIES, name, launcher.capabilities)

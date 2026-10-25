@@ -107,15 +107,15 @@ async def test_a_prompt_starts_a_turn_of_the_planner() -> None:
     assert any(isinstance(e, TurnFinished) and e.reason == "completed" for e in events)
 
 
-async def test_agents_are_launched_for_the_hosts_workspace() -> None:
+async def test_agents_are_launched_for_the_hosts_workspace_in_its_open_session() -> None:
     agents, launcher = agents_for()
     launcher.planner_turns = [chats]
-    session = WorkspaceHost(agents=agents, workspace_id="workspace-1")
+    session = WorkspaceHost(agents=agents, workspace_id="workspace-1", new_id=lambda: "session-7")
     await send(session, SendMessage(agent=PLANNER, text="hello"))
     await collect_run(session)
 
     [launch] = launcher.launches
-    assert launch.workspace_id == "workspace-1"
+    assert (launch.workspace_id, launch.session_id) == ("workspace-1", "session-7")
 
 
 def only_state_queued(session: WorkspaceHost) -> bool:

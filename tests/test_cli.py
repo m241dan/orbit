@@ -656,7 +656,7 @@ def test_aliases_for_a_runtime_this_version_doesnt_know_stop_chat_naming_the_fil
     result = runner.invoke(app, ["chat"])
 
     assert result.exit_code == 2
-    assert f"{path}: runtimes.nope: this version of orbit knows the runtimes claude." in (
+    assert f"{path}: runtimes.nope: this version of orbit knows the runtimes claude, kiro." in (
         result.stderr
     )
     assert launched == []
@@ -964,7 +964,9 @@ def test_chat_refuses_a_runtime_it_doesnt_know_naming_those_it_does(
     result = runner.invoke(app, ["chat", "--runtime", "nope"])
 
     assert result.exit_code == 2
-    assert result.stderr == "--runtime nope: this version of orbit knows the runtimes claude.\n"
+    assert result.stderr == (
+        "--runtime nope: this version of orbit knows the runtimes claude, kiro.\n"
+    )
     assert launched == []
 
 
@@ -1014,6 +1016,25 @@ def test_chat_stops_naming_the_roles_whose_runtime_isnt_on_path(
         "Roles planner, coder, reviewer, super-reviewer, configurator use the runtime claude, but"
         " claude isn't on PATH. Install Claude Code, or set those roles' runtime to one you"
         " have.\n"
+    )
+    assert launched == []
+
+
+def test_chat_stops_naming_the_roles_on_kiro_when_kiro_cli_isnt_on_path(
+    launched: list[WorkspaceHost],
+    monkeypatch: pytest.MonkeyPatch,
+    stand_in_bin: Path,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("PATH", str(stand_in_bin))
+    (tmp_path / ".orbit").mkdir()
+    (tmp_path / ".orbit" / "config.toml").write_text('[roles.coder]\nruntime = "kiro"\n')
+    result = runner.invoke(app, ["chat", "-C", str(tmp_path)])
+
+    assert result.exit_code == 2
+    assert result.stderr == (
+        "Roles coder use the runtime kiro, but kiro-cli isn't on PATH. Install the Kiro CLI and"
+        " log in, or set those roles' runtime to one you have.\n"
     )
     assert launched == []
 

@@ -140,9 +140,9 @@ def test_roles_on_runtimes_this_version_knows_have_no_runtime_problems() -> None
 
 
 def test_each_role_on_a_runtime_this_version_doesnt_know_is_a_runtime_problem() -> None:
-    roles = {**BUILT_IN_ROLES, "coder": Role(instructions="Code.", runtime="kiro")}
+    roles = {**BUILT_IN_ROLES, "coder": Role(instructions="Code.", runtime="nope")}
     assert runtime_problems(roles) == [
-        'roles.coder.runtime = "kiro": this version of orbit knows the runtimes claude.'
+        'roles.coder.runtime = "nope": this version of orbit knows the runtimes claude, kiro.'
     ]
 
 

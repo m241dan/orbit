@@ -22,7 +22,7 @@ from urllib.parse import quote
 from orbit.agent.application.ports import AgentLaunch, ResumeFailed
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.roles import tool_rules
-from orbit.agent.domain.runtimes import Capabilities, Failure
+from orbit.agent.domain.runtimes import Capabilities, Failure, starting_with
 from orbit.agent.domain.usage_limits import claude_failure
 from orbit.agent.external.processes import spawned, start_failure
 from orbit.protocol import (
@@ -295,10 +295,10 @@ def _crash(status: int, stderr: str) -> _Crashed:
 class ClaudeCliRunner:
     """Runs agents as Claude CLI sessions connected to orbit, run as ``command``, which send
     their telemetry to the OTLP collector at ``endpoint`` over ``protocol``, if given. Its full
-    model ids start with ``model_id_prefix``."""
+    model ids are those ``full_model_ids`` takes, starting with ``MODEL_ID_PREFIX``."""
 
     capabilities = CAPABILITIES
-    model_id_prefix = MODEL_ID_PREFIX
+    full_model_ids = starting_with(MODEL_ID_PREFIX)
 
     def __init__(
         self,

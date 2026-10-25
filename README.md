@@ -4,7 +4,7 @@ Orbit command-line tool.
 
 ## Install
 
-Requires [uv](https://docs.astral.sh/uv/) and the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`) on your `PATH`. Orbit runs on Python 3.14, which uv fetches if it isn't installed.
+Requires [uv](https://docs.astral.sh/uv/) and the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`) on your `PATH`. Orbit runs on Python 3.14, which uv fetches if it isn't installed. Roles you put on Kiro need the Kiro CLI (`kiro-cli`) instead (see [Running agents on Kiro](#running-agents-on-kiro)).
 
 Install orbit once, from a clone or straight from git, and use it on any project:
 
@@ -39,7 +39,7 @@ uv run orbit chat -C ~/code/other              # work on another project
 uv run orbit chat --new                        # start a new session rather than picking one
 uv run orbit chat --name "auth rework"         # start a new session with that name
 uv run orbit chat --model opus --tools full    # planner's model, new tasks' access (over saved)
-uv run orbit chat --runtime claude             # run roles not naming their own runtime on claude
+uv run orbit chat --runtime kiro               # run roles not naming their own runtime on kiro
 uv run orbit chat --no-verify                  # don't verify tasks (ctrl+e is refused)
 uv run orbit chat --no-review                  # don't review landed work
 uv run orbit chat --no-worktree                # tasks edit the current checkout; nothing is committed
@@ -563,8 +563,9 @@ tells it (for Claude, its session or weekly limit: `You've hit your session limi
 when the error says the limit resets, if it says and that's still ahead; else, for a runtime that
 reports usage, a minute after the reset time the usage monitor last fetched for that runtime's
 limits used up (Claude's usage, for Claude's limit, never another runtime's); or, without one (as
-with `--no-usage`, before the usage caught up, or on a runtime that reports none), 15 minutes
-later, when a limit still reached stops it again at once. The conversation says when
+with `--no-usage`, before the usage caught up, or on a runtime that reports none), after the
+retry its runtime declares, 15 minutes on Claude and an hour on Kiro, whose limits reset monthly,
+when a limit still reached stops it again at once. The conversation says when
 (`Claude's usage limit is reached, so the run stopped. It starts again by itself at Wed 21 Oct
 18:01 UTC; ctrl+r starts it now and ctrl+s cancels that.`) and again as it starts. The task that
 hit the limit runs again first, afresh, as any rerun does. While the run waits, `ctrl+r` starts it
@@ -598,8 +599,9 @@ pause, starting with the task it stopped at, even if a later task's role runs on
 Every other lane, such as `review`, skips the tasks whose role runs on the paused runtime and runs
 its next task on a runtime that isn't paused, then the tasks it skipped once the pause ends or
 `ctrl+s` cancels it. With every role on Claude, the work lane and every lane's tasks wait out
-Claude's pause. [docs/00031-feature-runtime-port.md](docs/00031-feature-runtime-port.md) records
-the requirements.
+Claude's pause. What Kiro's limits and outages look like is under
+[Running agents on Kiro](#running-agents-on-kiro).
+[docs/00031-feature-runtime-port.md](docs/00031-feature-runtime-port.md) records the requirements.
 
 While a run waits to start again, after a usage limit or an outage, a line by the prompt says so,
 with the runtime it's paused on and the time it starts again in local time: `run paused: claude's
@@ -1163,13 +1165,15 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   Like its model and tool access, it's the default for tasks orbit queues in the role, and what
   the task editor fills in when you pick the role, and is saved with them and the session. An agent runs with its task's effort, or for a conversational
   role its session's, and otherwise with its role's, passed to the CLI as `--effort`; with none,
-  no flag is passed and the CLI's default applies. `CLAUDE_CODE_EFFORT_LEVEL` is removed from
+  no flag is passed and the CLI's default applies. A model on Kiro may ignore it, which the
+  conversation notes (see [Running agents on Kiro](#running-agents-on-kiro)). `CLAUDE_CODE_EFFORT_LEVEL` is removed from
   every agent's environment, so one set where orbit runs never overrides orbit's setting or the
   CLI's default.
-- `runtime`: the runtime its agents run on. This version of orbit knows one, `claude` (Claude
-  Code, the `claude` CLI), which every role runs on unless it says otherwise; any other value is
-  refused, naming the role: `roles.coder.runtime = "kiro": this version of orbit knows the
-  runtimes claude.`. Your `config.toml` can set it for every role or for one (see
+- `runtime`: the runtime its agents run on. This version of orbit knows two: `claude` (Claude
+  Code, the `claude` CLI), which every role runs on unless it says otherwise, and `kiro` (Kiro,
+  the `kiro-cli` CLI; see [Running agents on Kiro](#running-agents-on-kiro)); any other value is
+  refused, naming the role: `roles.coder.runtime = "nope": this version of orbit knows the
+  runtimes claude, kiro.`. Your `config.toml` can set it for every role or for one (see
   [Your machine's model, effort and runtime](#your-machines-model-effort-and-runtime)), and
   `--runtime NAME` on `orbit chat` or `orbit serve` sets it for a run. Orbit starts agents only on
   the runtimes its enabled roles run on, once it finds each one's executable on your `PATH`; one
@@ -1179,7 +1183,8 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   to one you have.`), and makes a workspace `orbit serve` can't open. The Catalog lists each
   role's `runtime`, and telemetry's `orbit.runtime` is it. Each runtime says what it can do:
   carry a conversation on (resume), report what its agents' turns cost (usage), and which
-  levels of `tool_access` and `effort` it takes; Claude Code can do all of it, at every level.
+  levels of `tool_access` and `effort` it takes; Claude Code and Kiro can do all of it, at every
+  level.
   Each runtime also takes its own models (see [Models and their aliases](#models-and-their-aliases)).
   An enabled role asking for more than its runtime can do is refused as the configuration
   loads, before anything runs, naming the role, the runtime, what it asks for and what the
@@ -1295,7 +1300,7 @@ doesn't name its own, in the project's `.orbit/config.toml` or in a `[roles.<nam
 it wins over orbit's `claude` and your `[roles]` `runtime`, but a role's own runtime wins over it,
 so a project that puts one role on a runtime keeps it there. A name this version of orbit doesn't
 know stops it with status 2, naming those it does (`--runtime nope: this version of orbit knows
-the runtimes claude.`). `orbit chat` joining an `orbit serve` refuses it, as the server's runs
+the runtimes claude, kiro.`). `orbit chat` joining an `orbit serve` refuses it, as the server's runs
 take their runtime from `orbit serve`'s.
 
 Only `model`, `effort` and `runtime` of orbit's own roles belong to your machine: any other field
@@ -1303,8 +1308,8 @@ of one, such as `[roles.coder] verify = false`, is refused, naming the file, the
 belongs in the project's `.orbit/config.toml`, so your machine can't turn off a project's
 verification; so is any other field in `[roles]` itself. `effort` takes the levels a role's does,
 and any other value is refused, listing them; `runtime` takes the runtimes this version of orbit
-knows, and any other is refused, naming the key (`roles.runtime = "kiro": this version of orbit
-knows the runtimes claude.`). A `[roles.<name>]` table names its role as a project's does, with
+knows, and any other is refused, naming the key (`roles.runtime = "nope": this version of orbit
+knows the runtimes claude, kiro.`). A `[roles.<name>]` table names its role as a project's does, with
 a plain name of letters, digits, `-` and `_`, and one that doesn't is refused, naming the file and
 the key. `orbit chat` reads
 your `config.toml`'s roles as it opens its workspace, and `orbit serve`, with the config directory
@@ -1317,9 +1322,10 @@ open.
 
 A model is an alias or a full id, and which names are which is up to the role's runtime. Each
 runtime has a table of aliases, each resolving to the id its agents are given: orbit ships
-Claude's in `runtimes.toml`, beside the built-in roles' `roles.toml`, passing `fable`, `opus`,
+them in `runtimes.toml`, beside the built-in roles' `roles.toml`: Claude's pass `fable`, `opus`,
 `sonnet` and `haiku` through as they are, for Claude Code to resolve to the latest model of each
-family. Your `config.toml` adds aliases, or changes what one resolves to, in a
+family, and Kiro's are `auto`, `sonnet` (`claude-sonnet-4.5`) and `haiku` (`claude-haiku-4.5`).
+Your `config.toml` adds aliases, or changes what one resolves to, in a
 `[runtimes.<name>.models]` table for a runtime this version of orbit knows:
 
 ```toml
@@ -1329,13 +1335,15 @@ opus = "claude-opus-5-5"   # opus pinned to one model
 ```
 
 Any other name is a full id if its runtime says it looks like one: on Claude, one starting with
-`claude-`, such as `claude-sonnet-5-5`, is given to Claude Code as it is. A role's `model`, the
+`claude-`, such as `claude-sonnet-5-5`, is given to Claude Code as it is; on Kiro, one of
+lowercase letters, digits, dots and dashes with at least one dash, such as `glm-5`. A role's
+`model`, the
 project's or the one your `[roles]` or `[roles.<name>]` sets, must be an alias or a full id its
 runtime takes, or the configuration is refused as it loads, naming the role, the model and the
 aliases: `roles.reviewer.model = "sonet": the runtime claude takes the aliases fable, opus,
 sonnet, haiku or a full id starting with "claude-".`. A `[runtimes.<name>]` table for a runtime
 this version of orbit doesn't know is refused, naming it (`runtimes.nope: this version of orbit
-knows the runtimes claude.`), as is one setting anything but `models`. `[runtimes]` is yours
+knows the runtimes claude, kiro.`), as is one setting anything but `models`. `[runtimes]` is yours
 alone: a project's `.orbit/config.toml` setting it is refused (`runtimes: Extra inputs are not
 permitted`).
 
@@ -1501,6 +1509,83 @@ Tool access levels:
   `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`.
 - `full`: every tool call is auto-approved (`--permission-mode bypassPermissions`). Claude can
   edit files and run commands without asking.
+
+### Running agents on Kiro
+
+A role can run on [Kiro](https://kiro.dev) rather than Claude Code. Install the Kiro CLI, which
+puts `kiro-cli` on your `PATH`, and log in once with `kiro-cli login`; agents use that login. Then
+put roles on Kiro, in `.orbit/config.toml` or your `config.toml` (see
+[Your machine's model, effort and runtime](#your-machines-model-effort-and-runtime)), or every role
+that doesn't name its own runtime for a run with `--runtime kiro`:
+
+```toml
+[roles.coder]
+runtime = "kiro"
+model = "sonnet"  # Kiro's claude-sonnet-4.5; left out, Kiro picks with auto
+```
+
+Orbit looks for `kiro-cli` only when an enabled role runs on Kiro, and `orbit chat` stops with
+status 2 when it's missing (`Roles coder use the runtime kiro, but kiro-cli isn't on PATH. Install
+the Kiro CLI and log in, or set those roles' runtime to one you have.`). Each Kiro agent runs
+`kiro-cli chat --output-format stream-json --agent orbit-<agent id> --agent-engine v2
+--require-mcp-startup` in its workspace, with `--model` and `--effort` when it has them,
+`--resume-id <session id>` on a conversation's later turns, so conversational roles such as the
+planner carry their conversations on, and the message telling it to fetch its task. Kiro's agent
+engine is pinned to V2, the one orbit was built and tested against, so a new default engine can't
+change how agents run unnoticed. `--require-mcp-startup` has Kiro exit before the run starts,
+spending no credits, when it can't reach orbit's MCP server: the agent crashes with `Kiro couldn't
+connect to orbit's MCP server at <url>`, which never pauses the run. A run `kiro-cli` exits from
+without saying how it ended is a crash too, with what it printed on stderr. Kiro's agents don't
+get orbit's OTLP headers, which may hold your collector's key.
+
+**Agent configs.** Kiro takes an agent's prompt, MCP servers and tools from its agent config, so
+orbit writes one for each agent, `~/.kiro/agents/orbit-<agent id>.json`, readable by you alone as
+it holds the agent's token, just before the agent starts, and removes it when the agent ends,
+cancelled or crashed included; one a crash of orbit itself left behind is removed a day later, the
+next time orbit starts its Kiro runtime. The config's prompt is orbit's rules and then the role's
+instructions, as Claude's agents get them; its only MCP server is orbit's, by URL with the
+agent's token (`includeMcpJson` is off, so no `mcp.json` of yours or the workspace's adds
+others); and its tools are those the role's `tool_access` allows, all trusted up front:
+
+- `off`: orbit's tools alone (`@orbit`).
+- `restricted`: orbit's tools and Kiro's read-only built-ins, `read`, `glob` and `grep`, which read
+  and search files but neither write them nor run commands.
+- `full`: orbit's tools and every built-in (`@builtin`), which edit files and run commands without
+  asking.
+
+**Credits.** Kiro charges in credits, not tokens or dollars: a Kiro turn's cost is the credits it
+reports, counted apart from dollars and never converted, so a task row shows `0.62 credits` and a
+total holding both `$0.84 · 0.62 credits` (see [Tasks](#tasks)).
+
+**Models.** Orbit gives Kiro the aliases `auto` (Kiro picks a model as it goes), `sonnet`
+(`claude-sonnet-4.5`) and `haiku` (`claude-haiku-4.5`); Kiro has no Opus or Fable, so `opus` and
+`fable` aren't aliases on Kiro rather than quietly meaning another model. A role on Kiro with no
+model passes none, and Kiro uses `auto`. Any of Kiro's models can be named by its full id, a name of
+lowercase letters, digits, dots and dashes with at least one dash, such as `glm-5` or
+`qwen3-coder-next` (`kiro-cli chat --list-models` lists those your login has). A bare word, such
+as `opus`, is taken for a mistyped alias and refused as the configuration loads:
+`roles.coder.model = "opus": the runtime kiro takes the aliases auto, sonnet, haiku or a full id
+of lowercase letters, digits, dots and dashes, with at least one dash.`. That includes the built-in
+`super-reviewer`'s `opus`, so a super-reviewer on Kiro needs a model of Kiro's
+(`[roles.super-reviewer] model = "sonnet"`). Your `config.toml`'s `[runtimes.kiro.models]` adds
+aliases (see [Models and their aliases](#models-and-their-aliases)).
+
+**Effort.** Kiro takes every effort level, but whether it's used is up to the model, and Kiro says
+when its model takes none, as `auto` doesn't. An agent given an effort on such a model runs
+without it, and the conversation says so once for each role in a session (`kiro's model auto
+ignores effort; coder runs without it.`), and again after orbit restarts or you switch sessions.
+
+**Usage limits and errors.** An agent's error is Kiro's API not answering when it names a
+connection failure (`dispatch failure`, as Kiro says when it can't reach its service), an HTTP
+server error (`HTTP 503`, `status code: 500`) or an overload, which pauses the run as an outage
+does; otherwise it's Kiro's usage limit when it mentions a limit, a quota or credits (`Monthly
+credit limit reached`), which pauses the run too. Kiro's limits reset monthly and its errors give
+no reset time, so a run its limit stopped tries again every hour (see **Usage limits** under
+[Tasks](#tasks)). Any other error fails the task with Kiro's own message. Kiro's wordings for its
+limits and outages are mostly guessed, so if one of them fails a task rather than pausing the run,
+or an error that's neither pauses it, please report its message.
+[docs/00032-feature-kiro-runtime.md](docs/00032-feature-kiro-runtime.md) records the
+requirements.
 
 ### Usage limits
 

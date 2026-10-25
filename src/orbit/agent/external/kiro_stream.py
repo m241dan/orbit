@@ -3,7 +3,8 @@
 ``kiro-cli chat --output-format stream-json`` prints a run's ACP events as JSON lines. Kiro
 streams the agent's answers, and its thoughts, in chunks, which are joined into whole messages,
 and charges for a run in credits. Besides its events, a run's stream tells its runner the session
-to resume, whether Kiro found reasoning unavailable, and Kiro's reason for stopping.
+to resume, whether Kiro found reasoning unavailable, Kiro's reason for stopping, and the stage a
+failed run failed at.
 """
 
 import json
@@ -49,14 +50,16 @@ class _Chunk:
 
 class KiroTranslation(Iterator[Event]):
     """Turn ``turn_id``'s events from the lines of a Kiro run's stream, and what else the
-    stream tells: the session to resume, whether reasoning was reported unavailable, and Kiro's
-    reason for stopping. A runner reading lines as they come feeds them one at a time instead."""
+    stream tells: the session to resume, whether reasoning was reported unavailable, Kiro's
+    reason for stopping, and the stage a failed run failed at, such as ``init`` for one that
+    never started. A runner reading lines as they come feeds them one at a time instead."""
 
     def __init__(self, turn_id: str, lines: Iterable[str] = ()) -> None:
         self.turn_id = turn_id
         self.session_id: str | None = None
         self.reasoning_unavailable = False
         self.stop_reason: str | None = None
+        self.error_stage: str | None = None
         self._held: _Chunk | None = None  # The message being joined, until another event.
         self._credits = 0.0
         self._duration_ms = 0
@@ -150,7 +153,9 @@ class KiroTranslation(Iterator[Event]):
         return [TurnFinished(turn_id=self.turn_id, reason=reason, usage=self._usage())]
 
     def _failed(self, data: dict[str, Any]) -> list[Event]:
-        """The error a ``runError`` event's ``data`` reports, then the turn's end in error."""
+        """The error a ``runError`` event's ``data`` reports, then the turn's end in error, noting
+        the stage it failed at."""
+        self.error_stage = data.get("stage")
         return [
             ErrorOccurred(turn_id=self.turn_id, code=AGENT_FAILED, message=data["message"]),
             TurnFinished(turn_id=self.turn_id, reason="error", usage=self._usage()),

@@ -53,13 +53,22 @@ from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.roles import Role, built_in_roles
-from orbit.agent.domain.runtimes import CLAUDE, Capabilities, Failure, ModelAliases, RuntimeRules
+from orbit.agent.domain.runtimes import (
+    CLAUDE,
+    KIRO,
+    Capabilities,
+    Failure,
+    ModelAliases,
+    RuntimeRules,
+    starting_with,
+)
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.agent.domain.usage import UsageFetch, UsageUnavailable
 from orbit.agent.domain.usage_limits import claude_failure
 from orbit.agent.domain.usage_totals import UsageRow, UsageTotalsData, usage_totals
 from orbit.agent.external.built_in_roles import read_built_in_roles
+from orbit.agent.external.kiro_cli import KiroCliRunner
 from orbit.protocol import (
     AGENT_FAILED,
     BUILT_IN_ROLE_NAMES,
@@ -200,9 +209,18 @@ KNOWN_CAPABILITIES = {CLAUDE: EVERYTHING, LIMITED_RUNTIME: LIMITED}
 """What Claude Code and :data:`LIMITED_RUNTIME` can do, by runtime."""
 
 CLAUDE_MODELS = ModelAliases(
-    CLAUDE, {"fable": "fable", "opus": "opus", "sonnet": "sonnet", "haiku": "haiku"}, "claude-"
+    CLAUDE,
+    {"fable": "fable", "opus": "opus", "sonnet": "sonnet", "haiku": "haiku"},
+    starting_with("claude-"),
 )
 """The models Claude Code takes, as orbit ships its aliases."""
+
+KIRO_MODELS = ModelAliases(
+    KIRO,
+    {"auto": "auto", "sonnet": "claude-sonnet-4.5", "haiku": "claude-haiku-4.5"},
+    KiroCliRunner.full_model_ids,
+)
+"""The models Kiro takes, as orbit ships its aliases."""
 
 KNOWN_RULES = RuntimeRules(KNOWN_CAPABILITIES, {CLAUDE: CLAUDE_MODELS})
 """What Claude Code and :data:`LIMITED_RUNTIME` can do, and the models Claude Code takes, by

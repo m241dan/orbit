@@ -6,22 +6,30 @@ from pathlib import Path
 
 from orbit.agent.domain.runtimes import (
     CLAUDE,
+    KIRO,
     Capabilities,
+    FullIdRule,
     RuntimeRules,
     load_model_tables,
     model_aliases,
 )
 from orbit.agent.external.built_in_roles import ROLE_DIRECTORY
 from orbit.agent.external.claude_cli import ClaudeCliRunner
+from orbit.agent.external.kiro_cli import KiroCliRunner
 from orbit.agent.external.toml_files import read_toml
 from orbit.agent.external.user_config import read_user_models
 
-RUNTIME_CAPABILITIES: dict[str, Capabilities] = {CLAUDE: ClaudeCliRunner.capabilities}
+RUNTIME_CAPABILITIES: dict[str, Capabilities] = {
+    CLAUDE: ClaudeCliRunner.capabilities,
+    KIRO: KiroCliRunner.capabilities,
+}
 """What each runtime this version of orbit knows can do, by name, in order."""
 
-MODEL_ID_PREFIXES: dict[str, str] = {CLAUDE: ClaudeCliRunner.model_id_prefix}
-"""What each runtime this version of orbit knows takes as a full model id, by name, in order:
-the ids starting with it."""
+FULL_MODEL_IDS: dict[str, FullIdRule] = {
+    CLAUDE: ClaudeCliRunner.full_model_ids,
+    KIRO: KiroCliRunner.full_model_ids,
+}
+"""How each runtime this version of orbit knows tells a full model id, by name, in order."""
 
 RUNTIMES_FILE = ROLE_DIRECTORY / "runtimes.toml"
 """The aliases of the models each runtime takes, shipped with orbit beside the built-in
@@ -46,5 +54,5 @@ def read_runtime_rules(config_dir: Path) -> RuntimeRules:
     user config can't be read or is invalid, as the user config is when it gives aliases to a
     runtime this version of orbit doesn't know.
     """
-    models = model_aliases(read_package_models(), read_user_models(config_dir), MODEL_ID_PREFIXES)
+    models = model_aliases(read_package_models(), read_user_models(config_dir), FULL_MODEL_IDS)
     return RuntimeRules(dict(RUNTIME_CAPABILITIES), models)

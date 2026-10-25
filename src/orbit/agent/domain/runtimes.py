@@ -7,9 +7,10 @@ resolving to an id the runtime takes, and full ids, which the runtime says how t
 tables aren't kept here: whoever reads them passes in their contents.
 """
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
@@ -20,7 +21,10 @@ from orbit.protocol import Effort, ToolAccess
 CLAUDE = "claude"
 """Claude Code, the runtime a role runs on unless it says otherwise."""
 
-RUNTIME_NAMES = (CLAUDE,)
+KIRO = "kiro"
+"""Kiro, through its CLI, ``kiro-cli``."""
+
+RUNTIME_NAMES = (CLAUDE, KIRO)
 """The runtimes this version of orbit knows, by name, in order."""
 
 
@@ -83,21 +87,42 @@ class Capabilities:
 
 @dataclass(frozen=True)
 class Failure:
-    """An agent's error as its runtime tells it: the ``kind`` of failure, and when the limit
-    it hit resets, ``resets_at``, if the error says."""
+    """An agent's error as its runtime tells it: the ``kind`` of failure, when the limit it hit
+    resets, ``resets_at``, if the error says, and how long a run it stopped waits before trying
+    again when nothing says when it resets, ``retry``, if its runtime says, as one whose limits
+    reset less often than Claude's does."""
 
     kind: FailureKind
     resets_at: datetime | None = None
+    retry: timedelta | None = None
+
+
+@dataclass(frozen=True)
+class FullIdRule:
+    """How a runtime tells a full model id: a name the regular expression ``pattern`` matches
+    whole, as ``described`` says in words."""
+
+    pattern: str
+    described: str
+
+    def matches(self, model: str) -> bool:
+        """Whether ``model`` is a full id by this rule."""
+        return re.fullmatch(self.pattern, model, re.DOTALL) is not None
+
+
+def starting_with(prefix: str) -> FullIdRule:
+    """The rule of a runtime whose full ids are the names starting with ``prefix``."""
+    return FullIdRule(f"{re.escape(prefix)}.*", f'starting with "{prefix}"')
 
 
 @dataclass(frozen=True)
 class ModelAliases:
     """The models the runtime ``runtime`` takes: its ``aliases``, each with the id it resolves
-    to, in order, and its full ids, those starting with ``full_id_prefix``."""
+    to, in order, and its full ids, the names its ``full_id`` rule takes."""
 
     runtime: str
     aliases: Mapping[str, str]
-    full_id_prefix: str
+    full_id: FullIdRule
 
 
 class UnknownModel(ValueError):
@@ -112,7 +137,7 @@ class UnknownModel(ValueError):
 def known_models(models: ModelAliases) -> str:
     """What says which models ``models``' runtime takes: its aliases, in order, and its full
     ids."""
-    full = f'a full id starting with "{models.full_id_prefix}"'
+    full = f"a full id {models.full_id.described}"
     if not models.aliases:
         return f"the runtime {models.runtime} takes {full}"
     listed = ", ".join(models.aliases)
@@ -128,7 +153,7 @@ def unknown_model(key: str, model: str, models: ModelAliases) -> str:
 def resolves(models: ModelAliases, model: str) -> bool:
     """Whether a runtime's ``models`` resolve ``model``: it's one of their aliases, or a full
     id."""
-    return model in models.aliases or model.startswith(models.full_id_prefix)
+    return model in models.aliases or models.full_id.matches(model)
 
 
 def resolve_model(models: ModelAliases, model: str) -> str:
@@ -195,12 +220,12 @@ def load_model_tables(data: dict[str, Any]) -> dict[str, dict[str, str]]:
 def model_aliases(
     package: Mapping[str, Mapping[str, str]],
     user: Mapping[str, Mapping[str, str]],
-    prefixes: Mapping[str, str],
+    full_ids: Mapping[str, FullIdRule],
 ) -> dict[str, ModelAliases]:
-    """The models each runtime in ``prefixes`` takes, by name, in order: the ``package``'s
-    aliases for it, with the ``user``'s added or in their place, and its full ids, those starting
-    with its prefix there."""
+    """The models each runtime in ``full_ids`` takes, by name, in order: the ``package``'s
+    aliases for it, with the ``user``'s added or in their place, and its full ids, those its rule
+    there takes."""
     return {
-        name: ModelAliases(name, {**package.get(name, {}), **user.get(name, {})}, prefix)
-        for name, prefix in prefixes.items()
+        name: ModelAliases(name, {**package.get(name, {}), **user.get(name, {})}, rule)
+        for name, rule in full_ids.items()
     }

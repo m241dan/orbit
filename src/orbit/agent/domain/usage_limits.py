@@ -1,12 +1,13 @@
 """Runtimes' usage limits and API outages as they stop a run: telling that an agent hit one of
-Claude's, and when the run starts again, each pause belonging to the runtime whose agent hit it."""
+Claude's or Kiro's, and when the run starts again, each pause belonging to the runtime whose agent
+hit it."""
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
 from orbit.agent.domain.endings import first_line
-from orbit.agent.domain.runtimes import CLAUDE, Failure
+from orbit.agent.domain.runtimes import CLAUDE, KIRO, Failure
 from orbit.protocol import PLANNER, PauseReason, UsageChanged
 
 _LIMIT_HIT = re.compile(r"\bhit your\b.*\blimit\b|\busage limit reached\b", re.IGNORECASE)
@@ -17,11 +18,25 @@ _API_UNAVAILABLE = re.compile(
     re.IGNORECASE,
 )
 
+# Kiro's words for its service not answering: a connection failure, as the AWS SDK it's built on
+# words one, a server error by its HTTP status, or an overload.
+_KIRO_UNAVAILABLE = re.compile(
+    r"\bdispatch failure\b|\b(?:HTTP|status(?: code)?|code)[ :]{1,3}5\d\d\b|overload",
+    re.IGNORECASE,
+)
+
+# Kiro's words for a usage limit, which no captured run shows: any mention of one.
+_KIRO_LIMIT = re.compile(r"limit|quota|credit", re.IGNORECASE)
+
+KIRO_LIMIT_RETRY = timedelta(hours=1)
+"""How long a run Kiro's usage limit stopped waits before trying again: its limits reset monthly,
+and it says no reset time."""
+
 _OUTAGE_DELAYS = tuple(timedelta(minutes=minutes) for minutes in (2, 5, 10, 20, 30))
 """How long a run an outage stopped waits, by the backoff's level; the last for every level
 past them."""
 
-_RUNTIME_NAMES = {CLAUDE: "Claude"}
+_RUNTIME_NAMES = {CLAUDE: "Claude", KIRO: "Kiro"}
 """How the notes name each runtime that has a name of its own; any other goes by its name."""
 
 RESUMING_NOTE = "Starting the run again after the usage limit."
@@ -77,7 +92,7 @@ class RuntimeStop:
 @dataclass(frozen=True)
 class LimitWaits:
     """How long a run a usage limit stopped waits: ``grace`` past the reset time, when there's
-    one, else ``retry``."""
+    one, else ``retry``, unless the limit's runtime declares a retry of its own."""
 
     retry: timedelta = timedelta(minutes=15)
     grace: timedelta = timedelta(minutes=1)
@@ -104,11 +119,14 @@ def limit_resume_time(
 ) -> datetime:
     """When a run the usage limit ``stop`` tells stopped ``now`` starts again: when the failure
     says the limit resets, if that's still ahead, else as :func:`resume_time` says from
-    ``usage``, if it's the usage of the stop's runtime, else after the ``retry``."""
+    ``usage``, if it's the usage of the stop's runtime, else after the retry: the one the
+    failure's runtime declares, if it declares one, else the ``waits``'."""
     stated = _stated_reset(stop, now)
     if stated is not None:
         return stated
-    return resume_time(usage if usage and usage.runtime == stop.runtime else None, now, waits)
+    retry = stop.failure.retry
+    own = waits if retry is None else replace(waits, retry=retry)
+    return resume_time(usage if usage and usage.runtime == stop.runtime else None, now, own)
 
 
 def _stated_reset(stop: RuntimeStop, now: datetime) -> datetime | None:
@@ -163,6 +181,19 @@ def claude_failure(message: str) -> Failure | None:
         return Failure("usage_limit")
     if api_unavailable(message):
         return Failure("api_unavailable")
+    return None
+
+
+def kiro_failure(message: str) -> Failure | None:
+    """The failure an agent's error ``message`` tells, as Kiro words it: an
+    ``api_unavailable`` when it names a connection failure (``dispatch failure``), an HTTP
+    server error (``HTTP 503``, ``status code: 500``) or an overload; else a ``usage_limit``,
+    retried hourly, when it mentions a limit, a quota or credits; none for any other error. It
+    says no reset time."""
+    if _KIRO_UNAVAILABLE.search(message):
+        return Failure("api_unavailable")
+    if _KIRO_LIMIT.search(message):
+        return Failure("usage_limit", retry=KIRO_LIMIT_RETRY)
     return None
 
 

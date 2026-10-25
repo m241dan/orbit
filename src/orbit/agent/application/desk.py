@@ -192,7 +192,8 @@ class CallTarget(Protocol):
 
 class AgentDesk:
     """Answers agents' calls by passing them to their runs, publishing each call and reply.
-    It launches agents for the workspace ``workspace_id``.
+    It launches agents for the workspace ``workspace_id``, in the session :attr:`session` says
+    is open.
 
     Each call is traced with ``telemetry`` under the span of its agent's process, while that's
     traced (see :meth:`traced`), and otherwise under the span current."""
@@ -206,6 +207,7 @@ class AgentDesk:
     ) -> None:
         self.agents = agents
         self._workspace_id = workspace_id
+        self.session: Callable[[], str] = lambda: ""  # The id of the session open.
         self.registry = AgentRegistry(agents.new_token)
         self._publish = publish
         self._tracing = AgentTracing(telemetry)
@@ -261,7 +263,7 @@ class AgentDesk:
     async def launch(self, agent: Agent, prompt: str, settings: Settings, cwd: str) -> AgentLaunch:
         """How to start ``agent`` in its role: told ``prompt``, with ``settings`` (or its role's
         effort, if they set none), their model resolved to the id its runtime is given, in
-        ``cwd``.
+        ``cwd``, in the session open.
 
         Raises :class:`~orbit.agent.domain.runtimes.UnknownModel` if their model doesn't
         resolve, as one saved before its alias was taken out of the user config doesn't.
@@ -271,7 +273,15 @@ class AgentDesk:
         url = await self.url()
         own = role.launch_settings(settings).model_copy(update={"model": model})
         launch = AgentLaunch(
-            agent, url, prompt, own, cwd, role.instructions, role.tools, self._workspace_id
+            agent,
+            url,
+            prompt,
+            own,
+            cwd,
+            role.instructions,
+            role.tools,
+            self._workspace_id,
+            self.session(),
         )
         self._launches[agent.id] = launch
         return launch

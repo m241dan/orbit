@@ -145,11 +145,20 @@ def _reviewed(agents: Agents | None, review: ProposalReview) -> Agents | None:
 
 
 def _desk(
-    agents: Agents | None, publish: Publish, telemetry: Telemetry, workspace_id: str
+    agents: Agents | None,
+    publish: Publish,
+    telemetry: Telemetry,
+    workspace_id: str,
+    session: Callable[[], str],
 ) -> AgentDesk | None:
-    """The desk launching ``agents`` for the workspace ``workspace_id``, publishing with
-    ``publish`` and tracing with ``telemetry``; none without agents."""
-    return AgentDesk(agents, publish, telemetry, workspace_id) if agents else None
+    """The desk launching ``agents`` for the workspace ``workspace_id``, in the session
+    ``session`` says is open, publishing with ``publish`` and tracing with ``telemetry``; none
+    without agents."""
+    if agents is None:
+        return None
+    desk = AgentDesk(agents, publish, telemetry, workspace_id)
+    desk.session = session
+    return desk
 
 
 def _workspace_label(workspace: str | None) -> str | None:
@@ -328,7 +337,9 @@ class WorkspaceHost:
         self._proposals = FrontendReview(self._events.put, self._agent_on)
         agents = _reviewed(agents, self._proposals)
         self._verifier = _verifier(verification, self._tasks, self._events, agents, telemetry)
-        self._desk = _desk(agents, self._publish_agents, telemetry, workspace_id)
+        self._desk = _desk(
+            agents, self._publish_agents, telemetry, workspace_id, lambda: self._keeper.id
+        )
         self._workspace = workspace
         self._managed = managed
         self._recover = recover

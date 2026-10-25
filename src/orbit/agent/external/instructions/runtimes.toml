@@ -7,3 +7,10 @@ fable = "fable"
 opus = "opus"
 sonnet = "sonnet"
 haiku = "haiku"
+
+[runtimes.kiro.models]
+# Kiro picks a model for each task itself on auto, the model it uses when a role names none; it
+# has no Opus or Fable.
+auto = "auto"
+sonnet = "claude-sonnet-4.5"
+haiku = "claude-haiku-4.5"

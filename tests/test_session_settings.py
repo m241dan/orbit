@@ -1,17 +1,19 @@
 """Tests for the settings of the session open, by conversational role."""
 
 from orbit.agent.application.settings import SessionSettings
-from orbit.agent.domain.runtimes import CLAUDE, ModelAliases
+from orbit.agent.domain.runtimes import CLAUDE, ModelAliases, starting_with
 from orbit.protocol import PLANNER, Settings, SettingsChanged
 
 GIVEN = Settings(model="opus", tool_access="restricted")
 SAVED = Settings(model="sonnet", tool_access="full")
 ARCHITECTS = Settings(model="haiku", tool_access="off", effort="max")
 
-PLANNERS_MODELS = ModelAliases(CLAUDE, {"opus": "opus", "fast": "claude-haiku-5-5"}, "claude-")
+PLANNERS_MODELS = ModelAliases(
+    CLAUDE, {"opus": "opus", "fast": "claude-haiku-5-5"}, starting_with("claude-")
+)
 """The models the planner's runtime takes."""
 
-ARCHITECTS_MODELS = ModelAliases("kiro", {"auto": "kiro-auto"}, "kiro-")
+ARCHITECTS_MODELS = ModelAliases("kiro", {"auto": "kiro-auto"}, starting_with("kiro-"))
 """The models the architect's runtime takes, another runtime's."""
 
 

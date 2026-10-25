@@ -20,7 +20,7 @@ from orbit.agent.domain.config_update import (
     update_text,
 )
 from orbit.agent.domain.layers import Layer
-from orbit.agent.domain.runtimes import CLAUDE, RUNTIME_NAMES
+from orbit.agent.domain.runtimes import CLAUDE, KIRO, RUNTIME_NAMES, resolve_model
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.agent.external.claude_cli import ClaudeCliRunner
@@ -31,19 +31,23 @@ from orbit.agent.external.config_file import (
     read_config_sources,
     write_checks,
 )
+from orbit.agent.external.kiro_cli import KiroCliRunner
 from orbit.agent.external.role_instructions import resolve_instructions
 from orbit.agent.external.runtimes import (
-    MODEL_ID_PREFIXES,
+    FULL_MODEL_IDS,
     RUNTIME_CAPABILITIES,
     read_package_models,
     read_runtime_rules,
 )
 from orbit.protocol import BUILT_IN_ROLE_NAMES, PLANNER
-from tests.agent_fakes import CLAUDE_MODELS, LIMITED_RUNTIME
+from tests.agent_fakes import CLAUDE_MODELS, KIRO_MODELS, LIMITED_RUNTIME
 
 BUILT_IN_ROLES = read_built_in_roles()
 
-DEFAULTS = OrbitConfig(roles=BUILT_IN_ROLES, models={CLAUDE: CLAUDE_MODELS})
+MODELS = {CLAUDE: CLAUDE_MODELS, KIRO: KIRO_MODELS}
+"""The models each runtime takes without a user config."""
+
+DEFAULTS = OrbitConfig(roles=BUILT_IN_ROLES, models=MODELS)
 """The configuration in effect without a project file or a user config."""
 
 CLAUDES_ALIASES = (
@@ -105,8 +109,8 @@ def test_a_runs_runtime_is_every_roles_but_those_naming_their_own(
     write_user_config(config_dir, '[roles]\nruntime = "claude"\n')
     write(tmp_path, '[roles.coder]\nruntime = "claude"\n')
     with pytest.raises(ConfigError) as raised:
-        read_config(str(tmp_path), config_dir, runtime="kiro")
-    named = re.findall(r"roles\.([a-z-]+)\.runtime = \"kiro\"", str(raised.value))
+        read_config(str(tmp_path), config_dir, runtime="nope")
+    named = re.findall(r"roles\.([a-z-]+)\.runtime = \"nope\"", str(raised.value))
     assert named == [name for name in BUILT_IN_ROLE_NAMES if name != "coder"]
 
 
@@ -117,22 +121,31 @@ def test_without_a_runs_runtime_the_roles_keep_theirs(tmp_path: Path, config_dir
 def test_roles_are_held_to_what_each_runtime_this_version_knows_says_it_can_do() -> None:
     assert tuple(RUNTIME_CAPABILITIES) == RUNTIME_NAMES
     assert RUNTIME_CAPABILITIES[CLAUDE] is ClaudeCliRunner.capabilities
+    assert RUNTIME_CAPABILITIES[KIRO] is KiroCliRunner.capabilities
 
 
 def test_the_package_passes_claudes_aliases_through_to_claude_code() -> None:
     aliases = {"fable": "fable", "opus": "opus", "sonnet": "sonnet", "haiku": "haiku"}
-    assert read_package_models() == {CLAUDE: aliases}
+    assert read_package_models()[CLAUDE] == aliases
     assert list(read_package_models()[CLAUDE]) == ["fable", "opus", "sonnet", "haiku"]
 
 
-def test_each_runtime_this_version_knows_says_what_its_full_model_ids_start_with() -> None:
-    assert tuple(MODEL_ID_PREFIXES) == RUNTIME_NAMES
-    assert MODEL_ID_PREFIXES[CLAUDE] == ClaudeCliRunner.model_id_prefix == "claude-"
+def test_the_package_gives_kiro_auto_and_its_sonnet_and_haiku_but_no_opus_or_fable() -> None:
+    aliases = {"auto": "auto", "sonnet": "claude-sonnet-4.5", "haiku": "claude-haiku-4.5"}
+    assert read_package_models()[KIRO] == aliases
+    assert list(read_package_models()) == [CLAUDE, KIRO]
+
+
+def test_each_runtime_this_version_knows_says_how_to_tell_its_full_model_ids() -> None:
+    assert tuple(FULL_MODEL_IDS) == RUNTIME_NAMES
+    assert FULL_MODEL_IDS[CLAUDE] == ClaudeCliRunner.full_model_ids
+    assert ClaudeCliRunner.full_model_ids.described == 'starting with "claude-"'
+    assert FULL_MODEL_IDS[KIRO] == KiroCliRunner.full_model_ids
 
 
 def test_without_a_user_config_each_runtime_takes_the_packages_aliases(config_dir: Path) -> None:
     rules = read_runtime_rules(config_dir)
-    assert rules.models == {CLAUDE: CLAUDE_MODELS}
+    assert rules.models == MODELS
     assert rules.capabilities == RUNTIME_CAPABILITIES
 
 
@@ -158,7 +171,7 @@ def test_user_aliases_for_a_runtime_this_version_doesnt_know_are_refused_naming_
     with pytest.raises(ConfigError) as raised:
         read_config(str(tmp_path), config_dir)
     assert str(raised.value) == (
-        f"{path}: runtimes.nope: this version of orbit knows the runtimes claude."
+        f"{path}: runtimes.nope: this version of orbit knows the runtimes claude, kiro."
     )
 
 
@@ -179,6 +192,30 @@ def test_a_roles_model_its_runtime_doesnt_take_is_refused_naming_the_file(
     with pytest.raises(ConfigError) as raised:
         read_config(str(tmp_path), config_dir)
     assert str(raised.value) == f'{path}: roles.reviewer.model = "sonet": {CLAUDES_ALIASES}.'
+
+
+def test_a_role_runs_on_kiro_with_no_model_of_its_own(tmp_path: Path, config_dir: Path) -> None:
+    write(tmp_path, '[roles.coder]\nruntime = "kiro"\n')
+    coder = read_config(str(tmp_path), config_dir).roles["coder"]
+    assert (coder.runtime, coder.model) == (KIRO, None)
+
+
+def test_a_role_on_kiro_may_take_a_full_id(tmp_path: Path, config_dir: Path) -> None:
+    write(tmp_path, '[roles.coder]\nruntime = "kiro"\nmodel = "glm-5"\n')
+    config = read_config(str(tmp_path), config_dir)
+    assert config.roles["coder"].model == "glm-5"
+    assert resolve_model(config.models[KIRO], "glm-5") == "glm-5"
+
+
+def test_opus_on_kiro_is_refused_listing_kiros_aliases(tmp_path: Path, config_dir: Path) -> None:
+    path = write(tmp_path, '[roles.coder]\nruntime = "kiro"\nmodel = "opus"\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value) == (
+        f'{path}: roles.coder.model = "opus": the runtime kiro takes the aliases auto, sonnet,'
+        " haiku or a full id of lowercase letters, digits, dots and dashes, with at least one"
+        " dash."
+    )
 
 
 @pytest.mark.usefixtures("limited_runtime")

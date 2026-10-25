@@ -4,13 +4,16 @@ runtime an enabled role runs on, once its executable is found on PATH."""
 import shutil
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import typer
 
 from orbit.agent import (
     CLAUDE,
+    KIRO,
     AgentLauncher,
     ClaudeCliRunner,
+    KiroCliRunner,
     Role,
     WorkspaceUnavailable,
     known_runtimes,
@@ -38,7 +41,18 @@ def _claude(collector: AgentCollector) -> AgentLauncher:
     return ClaudeCliRunner(endpoint=collector.endpoint, protocol=collector.protocol)
 
 
-RUNTIMES: dict[str, Runtime] = {CLAUDE: Runtime("claude", "Install Claude Code", _claude)}
+def _kiro(collector: AgentCollector) -> AgentLauncher:
+    """Kiro's launcher, having swept away the agent configs crashed runs left behind; Kiro's
+    agents send no telemetry of their own to ``collector``."""
+    runner = KiroCliRunner()
+    runner.sweep(datetime.now(UTC))
+    return runner
+
+
+RUNTIMES: dict[str, Runtime] = {
+    CLAUDE: Runtime("claude", "Install Claude Code", _claude),
+    KIRO: Runtime("kiro-cli", "Install the Kiro CLI and log in", _kiro),
+}
 """The runtimes this version of orbit knows, by name."""
 
 
