@@ -5,7 +5,7 @@ from orbit.protocol import PLANNER, AgentExited, AgentStarted, AssistantMessage,
 from orbit.tui.view.tab_strip import ALL_TAB_ID, OPENING, PLANNER_TAB_ID, TabStrip
 from tests.frontend_fakes import opened_before
 
-STRIP = ["All", "planner", "coder", "reviewer", "super-reviewer", "configurator"]
+STRIP = ["All", "planner", "experimenter", "coder", "reviewer", "super-reviewer", "configurator"]
 
 
 class Strip:
@@ -87,7 +87,7 @@ def test_closing_the_active_tab_shows_all() -> None:
 def test_an_agent_in_a_pinned_role_marks_its_roles_tab_while_it_runs() -> None:
     strip = Strip()
     strip.tabs.track(started("agent-3", "coder"))
-    assert strip.shown[2] == "● coder"
+    assert strip.shown[3] == "● coder"
     assert strip.tabs.key_of("agent-3") == "coder"
     assert strip.tabs.key_of("agent-9") == "agent-9"
     strip.tabs.track(exited("agent-3"))
@@ -113,10 +113,10 @@ def test_an_entry_without_an_agent_marks_its_tab_unread_unless_shown() -> None:
     strip.tabs.mark_unread(None)
     assert strip.shown == STRIP
     strip.tabs.mark_unread("coder")
-    assert strip.shown[2] == "coder *"
+    assert strip.shown[3] == "coder *"
     strip.activate(strip.id_of("reviewer"))
     strip.tabs.mark_unread("reviewer")
-    assert strip.shown[3] == "reviewer"
+    assert strip.shown[4] == "reviewer"
 
 
 def test_replayed_events_open_and_close_tabs_but_mark_none_unread() -> None:
@@ -124,7 +124,7 @@ def test_replayed_events_open_and_close_tabs_but_mark_none_unread() -> None:
     strip.tabs.replay(started("agent-3", "tester"))
     strip.tabs.replay(started("agent-4", "coder"))
     strip.tabs.replay(said("agent-3"))
-    assert strip.shown == ["All", "planner", "● coder", *STRIP[3:], "tester"]
+    assert strip.shown == ["All", "planner", "experimenter", "● coder", *STRIP[4:], "tester"]
     assert strip.tabs.key_of("agent-4") == "coder"
     strip.tabs.replay(exited("agent-3"))
     assert strip.shown[-1] == "configurator"
@@ -156,7 +156,7 @@ def test_following_the_agents_running_opens_their_tabs_and_counts_the_pinned() -
         RunningAgent(agent_id="agent-4", role="coder", task_id="2"),
     ]
     strip.tabs.follow(running)
-    assert strip.shown == ["All", "planner", "● coder", *STRIP[3:], "tester"]
+    assert strip.shown == ["All", "planner", "experimenter", "● coder", *STRIP[4:], "tester"]
     assert strip.tabs.key_of("agent-4") == "coder"
 
 

@@ -985,6 +985,7 @@ def test_chat_runs_each_role_that_doesnt_name_its_own_runtime_on_the_one_given(
     [session] = launched
     assert runtimes_of(session) == {
         PLANNER: "fake",
+        "experimenter": "claude",
         "coder": "claude",
         "reviewer": "fake",
         "super-reviewer": "claude",
@@ -1013,9 +1014,9 @@ def test_chat_stops_naming_the_roles_whose_runtime_isnt_on_path(
 
     assert result.exit_code == 2
     assert result.stderr == (
-        "Roles planner, coder, reviewer, super-reviewer, configurator use the runtime claude, but"
-        " claude isn't on PATH. Install Claude Code, or set those roles' runtime to one you"
-        " have.\n"
+        "Roles planner, experimenter, coder, reviewer, super-reviewer, configurator use the runtime"
+        " claude, but claude isn't on PATH. Install Claude Code, or set those roles' runtime to one"
+        " you have.\n"
     )
     assert launched == []
 

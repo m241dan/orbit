@@ -92,7 +92,8 @@ async def test_reading_an_unknown_report_is_refused() -> None:
 
 async def test_a_role_without_the_report_tools_is_refused_them() -> None:
     heard: list[Reply] = []
-    session, _, launcher = session_for(store=FakeStore())
+    planner = ROLES[PLANNER].model_copy(update={"tools": ("propose_task", "report_progress")})
+    session, _, launcher = session_for(store=FakeStore(), roles={**ROLES, PLANNER: planner})
     launcher.planner_turns = [calls(heard, SAVE)]
     await send(session, SendMessage(agent=PLANNER, text="Plan."))
     await events_until(session, finished("agent-1"))

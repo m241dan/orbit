@@ -139,7 +139,13 @@ async def test_a_task_in_a_lane_of_its_own_starts_at_once_beside_a_coder_task() 
     await held.until_started("security")
 
     snapshot = await snapshot_of(session)
-    assert snapshot.busy == {"work": True, "planner": False, "review": False, "security": True}
+    assert snapshot.busy == {
+        "work": True,
+        "planner": False,
+        "experimenter": False,
+        "review": False,
+        "security": True,
+    }
     assert [(la.agent.role, la.cwd) for la in launcher.launches] == [
         ("coder", "/work/coder"),
         ("security", "/work/review-base"),
@@ -349,7 +355,12 @@ BUILD_ROLES = {
 async def test_the_merging_lane_is_named_by_its_roles() -> None:
     held = Held()
     session, _, _ = session_for(held.script("coder"), roles=BUILD_ROLES)
-    assert (await snapshot_of(session)).busy == {"build": False, "planner": False, "review": False}
+    assert (await snapshot_of(session)).busy == {
+        "build": False,
+        "planner": False,
+        "experimenter": False,
+        "review": False,
+    }
     await send(session, AddTask(task=TaskSpec(prompt="Code it.")))
     await send(session, RunTasks())
     events = await events_until(session, of_type(BusyChanged))
@@ -358,7 +369,7 @@ async def test_the_merging_lane_is_named_by_its_roles() -> None:
 
     await send(session, CancelTurn(lane="work"))
     events = await events_until(session, of_type(CommandRefused))
-    message = "No lane 'work'; the lanes are build, planner and review."
+    message = "No lane 'work'; the lanes are build, planner, experimenter and review."
     assert events[-1] == refused(UNKNOWN, message)
     await send(session, CancelTurn(lane="build"))
     await events_until(session, idle("build"))
@@ -381,7 +392,11 @@ async def test_reviews_are_off_while_the_reviewer_shares_the_merging_lane() -> N
     roles = with_review_roles({"lane": "work"}, {"lane": "work"})
     session, _, _ = session_for(roles=roles, tree=FakeTree(), review=True)
     assert session._lane is None
-    assert (await snapshot_of(session)).busy == {"work": False, "planner": False}
+    assert (await snapshot_of(session)).busy == {
+        "work": False,
+        "planner": False,
+        "experimenter": False,
+    }
     await session.close()
 
 

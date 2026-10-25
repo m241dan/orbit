@@ -17,6 +17,7 @@ from orbit.agent.domain.roles import Role
 from orbit.agent.domain.sessions import SavedConversation
 from orbit.protocol import (
     BUSY,
+    EXPERIMENTER,
     INVALID,
     NOT_CONFIGURED,
     PLANNER,
@@ -184,7 +185,10 @@ async def test_the_architects_settings_change_alone_and_its_turns_use_them() -> 
     changed = await events_until(session, of_type(SettingsChanged))
     assert changed[-1] == SettingsChanged(role=ARCHITECT, settings=architects)
     assert session.settings == Settings()
-    assert store.last.role_settings == {PLANNER: Settings(), ARCHITECT: architects}
+    assert store.last.role_settings == {
+        PLANNER: Settings(),
+        ARCHITECT: architects,
+    }
     await talk(session, ARCHITECT, DESIGN)
     launched = launcher.launches[-1].settings
     assert (launched.model, launched.effort) == ("haiku", "max")
@@ -197,7 +201,11 @@ async def test_the_snapshot_carries_each_conversational_roles_settings() -> None
     await send(session, UpdateSettings(role=ARCHITECT, settings=architects))
     await events_until(session, of_type(SettingsChanged))
     snapshot = await snapshot_of(session)
-    assert snapshot.role_settings == {PLANNER: Settings(), ARCHITECT: architects}
+    assert snapshot.role_settings == {
+        PLANNER: Settings(),
+        EXPERIMENTER: Settings(),
+        ARCHITECT: architects,
+    }
     await session.close()
 
 
@@ -205,7 +213,7 @@ async def test_settings_for_a_role_that_isnt_conversational_are_refused() -> Non
     session, _ = talking()
     refusal = await refusal_of(session, UpdateSettings(role="coder", settings=Settings()))
     message = "Role 'coder' has no settings of its own; the roles with them are"
-    assert refusal == refused(UNKNOWN, f"{message} planner and architect.")
+    assert refusal == refused(UNKNOWN, f"{message} planner, experimenter and architect.")
     await session.close()
 
 
@@ -213,7 +221,7 @@ async def test_messaging_a_role_that_isnt_conversational_lists_those_that_are() 
     session, _ = talking()
     refusal = await refusal_of(session, SendMessage(agent="coder", text="Hi."))
     message = "Agent 'coder' can't be messaged; the agents you can message are"
-    assert refusal == refused(UNKNOWN, f"{message} planner and architect.")
+    assert refusal == refused(UNKNOWN, f"{message} planner, experimenter and architect.")
     await session.close()
 
 
@@ -223,7 +231,12 @@ async def test_a_disabled_conversational_role_is_refused_as_not_configured() -> 
     disabled = refused(NOT_CONFIGURED, "architect is disabled in this project's configuration.")
     assert await refusal_of(session, SendMessage(agent=ARCHITECT, text="Hi.")) == disabled
     assert await refusal_of(session, ResetConversation(agent=ARCHITECT)) == disabled
-    assert (await snapshot_of(session)).busy == {"work": False, "planner": False, "review": False}
+    assert (await snapshot_of(session)).busy == {
+        "work": False,
+        "planner": False,
+        "experimenter": False,
+        "review": False,
+    }
     await session.close()
 
 
@@ -318,10 +331,10 @@ async def test_a_message_to_a_disabled_role_leaves_its_lane_busy_while_another_a
 
 async def test_a_lane_a_disabled_planner_shares_with_an_enabled_role_stays_listed() -> None:
     session, _ = talking(roles=IN_THE_MUTED_PLANNERS_LANE)
-    busy = {"work": False, "planner": False, "review": False}
+    busy = {"work": False, "planner": False, "experimenter": False, "review": False}
     assert (await snapshot_of(session)).busy == busy
-    assert session.lanes == ("work", "planner", "review")
-    assert (await catalog_of(session)).lanes == ("work", "planner", "review")
+    assert session.lanes == ("work", "experimenter", "planner", "review")
+    assert (await catalog_of(session)).lanes == ("work", "experimenter", "planner", "review")
 
 
 async def test_cancelling_a_lane_a_disabled_planner_shares_stops_the_roles_turn() -> None:
@@ -338,14 +351,15 @@ async def test_cancelling_a_lane_a_disabled_planner_shares_stops_the_roles_turn(
 
 async def test_the_architects_lane_shows_in_the_snapshot_and_the_catalog() -> None:
     session, _ = talking()
-    busy = {"work": False, "planner": False, DESIGN: False, "review": False}
+    busy = {"work": False, "planner": False, "experimenter": False, DESIGN: False, "review": False}
     assert (await snapshot_of(session)).busy == busy
     listed = await catalog_of(session)
     assert [(a.name, a.conversational) for a in listed.agents if a.conversational] == [
         (PLANNER, True),
+        (EXPERIMENTER, True),
         (ARCHITECT, True),
     ]
-    assert listed.lanes == ("work", "planner", DESIGN, "review")
+    assert listed.lanes == ("work", "planner", "experimenter", DESIGN, "review")
 
 
 async def test_the_conversations_of_roles_without_a_seat_are_saved_back() -> None:
@@ -433,7 +447,10 @@ async def test_roles_sharing_a_lane_take_turns_in_it_each_keeping_its_own_turn_a
     hooks = SeatHooks(nothing, lambda: None, tuple)
     tasks = Tasks(TaskBoard(), events.put)
     seats = ConversationSeats(AgentDesk(agents, events.put), tasks, events, hooks)
-    assert (seats.names, seats.lanes) == ((PLANNER, ARCHITECT, CRITIC), ("planner", DESIGN))
+    assert (seats.names, seats.lanes) == (
+        (PLANNER, EXPERIMENTER, ARCHITECT, CRITIC),
+        ("planner", "experimenter", DESIGN),
+    )
     launcher.planner_turns = [hangs, chats]
     designing, critiquing = seats.seat(ARCHITECT, "", ""), seats.seat(CRITIC, "", "")
     await designing.submit("Design.", Settings())
@@ -442,13 +459,16 @@ async def test_roles_sharing_a_lane_take_turns_in_it_each_keeping_its_own_turn_a
         await critiquing.submit("Critique.", Settings())
     assert (refusal.value.code, str(refusal.value)) == (BUSY, ARCHITECT_ANSWERING)
     assert (designing.running, critiquing.running, critiquing.turn) == (True, False, None)
-    assert (seats.busy(), seats.answering) == ({"planner": False, DESIGN: True}, (ARCHITECT,))
+    assert (seats.busy(), seats.answering) == (
+        {"planner": False, "experimenter": False, DESIGN: True},
+        (ARCHITECT,),
+    )
     await critiquing.reset()  # Its conversation isn't the one answering, so it isn't busy.
     critiquing.cancel()
     assert designing.turn is not None and not designing.turn.cancelling()
     seats.cancel(DESIGN)
     await eventually(lambda: not seats.answering)
-    assert seats.busy() == {"planner": False, DESIGN: False}
+    assert seats.busy() == {"planner": False, "experimenter": False, DESIGN: False}
     await critiquing.submit("Critique.", Settings())
     await eventually(lambda: not seats.answering)
     assert launcher.launches[-1].instructions == "You critique."

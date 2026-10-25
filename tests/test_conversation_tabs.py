@@ -29,7 +29,7 @@ from orbit.protocol import (
 )
 from tests.frontend_fakes import Shell
 
-PINNED = ["planner", "coder", "reviewer", "super-reviewer", "configurator"]
+PINNED = ["planner", "experimenter", "coder", "reviewer", "super-reviewer", "configurator"]
 STRIP = ["All", *PINNED]
 LINT_STEP = VerificationChanged(steps=(StepState(name="Lint"),))
 NOTES_AFTER_HEADER = [
@@ -151,7 +151,7 @@ async def test_a_relabel_of_a_tab_no_longer_shown_leaves_the_title_alone() -> No
 async def test_coder_output_lands_in_the_coder_tab_which_keeps_it_for_later_coders() -> None:
     shell = Shell()
     await shell.feed(started("agent-1"), said("agent-1", "coding"))
-    assert shell.tab_strip == ["All", "planner", "● coder *", *PINNED[2:]]
+    assert shell.tab_strip == ["All", "planner", "experimenter", "● coder *", *PINNED[3:]]
     await shell.click_tab("● coder *")
     assert shell.window.conversation.only == "coder"
     assert shell.window.title == "Conversation · ● coder"
@@ -182,6 +182,7 @@ async def test_concurrent_reviewers_share_the_reviewer_tab() -> None:
     assert shell.tab_strip == [
         "All",
         "planner",
+        "experimenter",
         "coder",
         "● reviewer *",
         "● super-reviewer",
@@ -194,7 +195,7 @@ async def test_concurrent_reviewers_share_the_reviewer_tab() -> None:
         "agent-1: boom",
         "agent-2 stopped",
     ]
-    await shell.cycle(-1, 3)
+    await shell.cycle(-1, 4)
     assert shell.active_tab == "All"
     # An error with no agent shows unprefixed, under All only.
     assert shell.shown()[-1] == "lost"
@@ -210,21 +211,21 @@ async def test_the_startup_checks_tab_goes_when_it_exits() -> None:
 
 async def test_background_output_marks_a_tab_until_it_is_shown() -> None:
     shell = Shell()
-    rest = PINNED[3:]
+    rest = PINNED[4:]
     await shell.feed(started("agent-1"), started("agent-2", "reviewer"))
     await shell.feed(said("agent-1", "coding"), said("agent-2", "hmm"))
-    assert shell.tab_strip == ["All", "planner", "● coder *", "● reviewer *", *rest]
+    assert shell.tab_strip == ["All", "planner", "experimenter", "● coder *", "● reviewer *", *rest]
     await shell.feed(AssistantMessage(turn_id="t", text="chat"))
-    assert shell.tab_strip == ["All", "planner", "● coder *", "● reviewer *", *rest]
-    await shell.cycle(1, 2)
-    assert shell.tab_strip == ["All", "planner", "● coder", "● reviewer *", *rest]
+    assert shell.tab_strip == ["All", "planner", "experimenter", "● coder *", "● reviewer *", *rest]
+    await shell.cycle(1, 3)
+    assert shell.tab_strip == ["All", "planner", "experimenter", "● coder", "● reviewer *", *rest]
     assert shell.window.title == "Conversation · ● coder"
     # Output for the tab being shown doesn't mark it.
     await shell.feed(said("agent-1", "more"))
-    assert shell.tab_strip == ["All", "planner", "● coder", "● reviewer *", *rest]
+    assert shell.tab_strip == ["All", "planner", "experimenter", "● coder", "● reviewer *", *rest]
     await shell.cycle(-1)
     await shell.feed(said("agent-1", "again"))
-    assert shell.tab_strip == ["All", "planner", "● coder *", "● reviewer *", *rest]
+    assert shell.tab_strip == ["All", "planner", "experimenter", "● coder *", "● reviewer *", *rest]
 
 
 async def test_tab_and_shift_tab_cycle_the_tabs_and_wrap() -> None:
@@ -241,7 +242,7 @@ async def test_tab_and_shift_tab_cycle_the_tabs_and_wrap() -> None:
     assert shell.active_tab == "checker"
     await shell.cycle(-1)
     assert shell.active_tab == "configurator"
-    await shell.cycle(-1, 5)
+    await shell.cycle(-1, 6)
     assert shell.active_tab == "All"
 
 
@@ -249,7 +250,7 @@ async def test_tab_with_no_agents_cycles_all_and_the_pinned_tabs() -> None:
     shell = Shell()
     await shell.cycle(1)
     assert shell.active_tab == "planner"
-    await shell.cycle(1, 5)
+    await shell.cycle(1, 6)
     assert shell.active_tab == "All"
     await shell.cycle(-1, 2)
     assert shell.active_tab == "super-reviewer"
@@ -271,16 +272,16 @@ async def test_planner_output_shows_under_planner_and_all_but_not_other_tabs() -
         said("agent-2", "coding"),
     )
     # The planner gets no tab of its own; its tab is marked while it answers the prompt.
-    assert shell.tab_strip == ["All", "● planner", "● coder *", *PINNED[2:]]
+    assert shell.tab_strip == ["All", "● planner", "experimenter", "● coder *", *PINNED[3:]]
     assert shell.window.title == "Conversation · ● planner"
     planner = ["plan", "▶ agent-1 (planner) started", "drafting", "orbit → agent-1: Added."]
     assert shell.shown() == planner
-    await shell.cycle(1)
+    await shell.cycle(1, 2)
     assert shell.shown() == ["▶ agent-2 (coder) started", "coding"]
     # Output while another tab is shown marks the planner tab.
     await shell.feed(said("agent-1", "more"))
-    assert shell.tab_strip == ["All", "● planner *", "● coder", *PINNED[2:]]
-    await shell.cycle(-1, 2)
+    assert shell.tab_strip == ["All", "● planner *", "experimenter", "● coder", *PINNED[3:]]
+    await shell.cycle(-1, 3)
     assert shell.active_tab == "All"
     assert shell.shown() == [*planner, "▶ agent-2 (coder) started", "coding", "more"]
     # The planner exiting leaves its tab, and only its busy lane clears its marker.
@@ -296,15 +297,15 @@ async def test_planner_turn_rules_and_errors_show_under_planner_and_all() -> Non
     shell = Shell()
     await shell.feed(started("agent-1", "planner"), started("agent-2"))
     # Show the coder's tab, so the planner's entries mark the planner tab.
-    await shell.cycle(1, 2)
+    await shell.cycle(1, 3)
     assert shell.active_tab == "● coder"
     await shell.feed(
         TurnFinished(turn_id="t", agent_id="agent-1", reason="cancelled"),
         ErrorOccurred(agent_id="agent-1", code=AGENT_FAILED, message="boom"),
     )
-    assert shell.tab_strip == ["All", "planner *", "● coder", *PINNED[2:]]
+    assert shell.tab_strip == ["All", "planner *", "experimenter", "● coder", *PINNED[3:]]
     assert shell.shown() == ["▶ agent-2 (coder) started"]
-    await shell.cycle(-1, 2)
+    await shell.cycle(-1, 3)
     assert shell.active_tab == "All"
     # The planner's rule isn't headed by its id.
     entries = ["stopped", "agent-1: boom"]
@@ -363,14 +364,14 @@ async def test_ctrl_t_jumps_to_the_planner_tab_and_back() -> None:
     assert shell.window.title == "Conversation · planner"
     await shell.cycle_conversations()
     assert shell.active_tab == "All"
-    await shell.cycle(1, 3)
+    await shell.cycle(1, 4)
     assert shell.active_tab == "reviewer"
     await shell.cycle_conversations()
     assert shell.active_tab == "planner"
     await shell.cycle_conversations()
     assert shell.active_tab == "reviewer"
     # Back to All when the tab it came from has gone.
-    await shell.cycle(-1, 4)
+    await shell.cycle(-1, 5)
     assert shell.active_tab == "checker"
     await shell.cycle_conversations()
     await shell.feed(exited("agent-2"))
@@ -382,9 +383,9 @@ async def test_ctrl_t_jumps_to_the_planner_tab_and_back() -> None:
 async def test_a_roles_tab_is_marked_while_any_of_its_agents_runs() -> None:
     shell = Shell()
     await shell.feed(started("agent-1"), started("agent-2"))
-    assert shell.tab_strip == ["All", "planner", "● coder", *PINNED[2:]]
+    assert shell.tab_strip == ["All", "planner", "experimenter", "● coder", *PINNED[3:]]
     await shell.feed(exited("agent-1"))
-    assert shell.tab_strip == ["All", "planner", "● coder", *PINNED[2:]]
+    assert shell.tab_strip == ["All", "planner", "experimenter", "● coder", *PINNED[3:]]
     await shell.feed(exited("agent-2"))
     assert shell.tab_strip == STRIP
 
@@ -413,10 +414,10 @@ async def test_a_coder_tasks_notes_show_under_coder_and_all_and_mark_coder_unrea
     assert shell.active_tab == "planner"
     await shell.feed(*task_notes("1"))
     # Notes landing in a tab not being shown mark it, like agent output does.
-    assert shell.tab_strip == ["All", "planner", "coder *", *PINNED[2:]]
+    assert shell.tab_strip == ["All", "planner", "experimenter", "coder *", *PINNED[3:]]
     assert shell.shown() == []
     notes = ["Task 1: do 1", *NOTES_AFTER_HEADER]
-    await shell.cycle(1)
+    await shell.cycle(1, 2)
     assert shell.active_tab == "coder"
     assert shell.tab_strip == STRIP
     assert shell.shown() == notes
@@ -424,7 +425,7 @@ async def test_a_coder_tasks_notes_show_under_coder_and_all_and_mark_coder_unrea
     await shell.feed(TaskMerged(task_id="1", result="conflict", detail="x"))
     assert shell.tab_strip == STRIP
     assert shell.shown() == [*notes, "⚠ Not merged (conflict): x"]
-    await shell.cycle(-1, 2)
+    await shell.cycle(-1, 3)
     assert shell.active_tab == "All"
     assert shell.shown() == [*notes, "⚠ Not merged (conflict): x"]
 
@@ -433,8 +434,8 @@ async def test_a_reviewer_tasks_notes_show_under_reviewer_not_coder() -> None:
     shell = Shell()
     await shell.feed(TasksChanged(tasks=(task("1"), task("2", "reviewer"))), LINT_STEP)
     await shell.feed(*task_notes("2"))
-    assert shell.tab_strip == ["All", "planner", "coder", "reviewer *", *PINNED[3:]]
-    await shell.cycle(1, 2)
+    assert shell.tab_strip == ["All", "planner", "experimenter", "coder", "reviewer *", *PINNED[4:]]
+    await shell.cycle(1, 3)
     assert shell.active_tab == "coder"
     assert shell.shown() == []
     await shell.cycle(1)

@@ -20,9 +20,10 @@ CODER = "coder"
 REVIEWER = "reviewer"
 SUPER_REVIEWER = "super-reviewer"
 CONFIGURATOR = "configurator"
+EXPERIMENTER = "experimenter"
 """The built-in roles' names."""
 
-BUILT_IN_ROLE_NAMES = (PLANNER, CODER, REVIEWER, SUPER_REVIEWER, CONFIGURATOR)
+BUILT_IN_ROLE_NAMES = (PLANNER, EXPERIMENTER, CODER, REVIEWER, SUPER_REVIEWER, CONFIGURATOR)
 """The built-in roles' names, in the order the TUI's strip shows their tabs."""
 
 REVIEW_ROLES = frozenset({REVIEWER, SUPER_REVIEWER})

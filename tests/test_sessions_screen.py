@@ -406,7 +406,7 @@ async def test_a_session_opened_names_the_conversation_through_tabs_and_hidden_t
     async with app.run_test(size=(120, 30)) as pilot:
         await feed_events(session, pilot, opened(OLD))
         assert conversation_title(app) == "Conversation — auth rework"
-        await pilot.press("tab", "tab", "t")  # coder
+        await pilot.press("tab", "tab", "tab", "t")  # coder
         assert conversation_title(app) == "Conversation · coder · thinking hidden — auth rework"
 
 

@@ -50,7 +50,7 @@ BUSY_CRITIC = f"● {CRITIC}"
 SHARING = with_agents(*TALKING.agents, CRITIC_ENTRY)
 """A catalog listing the planner, the coder, and the architect and the critic in one lane."""
 
-STRIP = ["All", "planner", "coder", "reviewer", "super-reviewer", "configurator"]
+STRIP = ["All", "planner", "experimenter", "coder", "reviewer", "super-reviewer", "configurator"]
 
 TALK_TO_PLANNER = "Press i to talk to Planner, esc to stop typing"
 TALK_TO_ARCHITECT = "Press i to talk to Architect, esc to stop typing"
@@ -239,7 +239,7 @@ async def test_a_prompt_refused_as_busy_leaves_its_lane_busy_until_the_backend_f
 
 async def test_ctrl_t_cycles_the_conversational_roles_tabs_then_goes_back() -> None:
     shell = await talking()
-    await shell.cycle(1, 3)
+    await shell.cycle(1, 4)
     assert shell.active_tab == "reviewer"
     await shell.cycle_conversations()
     assert shell.active_tab == "planner"

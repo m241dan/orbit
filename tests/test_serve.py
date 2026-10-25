@@ -700,8 +700,8 @@ def test_adding_a_workspace_whose_runtime_isnt_on_path_exits_naming_the_roles(
     result = runner.invoke(app, ["serve", *QUIET, "--add", ".", "--port", "0"])
     assert result.exit_code == 2
     assert result.stderr.startswith(
-        "Roles planner, coder, reviewer, super-reviewer, configurator use the runtime claude, but"
-        " claude isn't on PATH."
+        "Roles planner, experimenter, coder, reviewer, super-reviewer, configurator use the runtime"
+        " claude, but claude isn't on PATH."
     )
 
 

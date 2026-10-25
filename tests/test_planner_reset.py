@@ -128,7 +128,7 @@ async def test_a_reset_rereads_the_planners_role() -> None:
     session, _, launcher = session_for(planner_role=lambda: NEW_ROLE)
     await planned_twice(launcher, session)
     fresh = launcher.launches[-1]
-    assert (fresh.instructions, fresh.tools) == ("Plan small.", ("propose_task",))
+    assert (fresh.instructions, fresh.tools) == ("Plan small.", ("propose_task", "consult"))
     agents = session.agents
     assert agents is not None and agents.roles["coder"] == ROLES["coder"]
     await session.close()
@@ -146,7 +146,7 @@ async def test_an_invalid_config_keeps_the_planners_role_but_still_resets() -> N
     assert ErrorOccurred(code=INVALID, message=message) in events
     await plan(session, "Plan again.")
     fresh = launcher.launches[-1]
-    assert (fresh.agent.id, fresh.tools) == ("agent-2", ROLES["planner"].tools)
+    assert (fresh.agent.id, fresh.tools) == ("agent-2", ROLES["planner"].granted_tools)
     await session.close()
 
 
@@ -204,7 +204,10 @@ async def test_only_the_planners_conversation_can_be_reset() -> None:
     for agent in ("coder", "nobody"):
         await send(session, ResetConversation(agent=agent))
         events = await events_until(session, of_type(CommandRefused))
-        message = f"Agent {agent!r} has no conversation to reset; the agents with one are planner."
+        message = (
+            f"Agent {agent!r} has no conversation to reset;"
+            " the agents with one are planner and experimenter."
+        )
         assert events[-1] == refused(UNKNOWN, message)
         assert not any(isinstance(e, ConversationReset | AgentExited) for e in events)
     await asyncio.sleep(0.01)  # Saving takes a while.

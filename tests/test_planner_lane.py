@@ -142,7 +142,10 @@ async def test_only_the_planner_can_be_messaged() -> None:
     for agent in ("coder", "nobody"):
         await send(session, SendMessage(agent=agent, text="hi"))
         events = await events_until(session, lambda e: isinstance(e, CommandRefused))
-        message = f"Agent {agent!r} can't be messaged; the agents you can message are planner."
+        message = (
+            f"Agent {agent!r} can't be messaged;"
+            " the agents you can message are planner and experimenter."
+        )
         assert events[-1] == refused(UNKNOWN, message)
         assert errors(events) == []
         assert BusyChanged(busy=True, lane="planner") not in events
@@ -179,7 +182,9 @@ async def test_cancelling_an_unknown_lane_stops_neither_lane() -> None:
     await events_until(session, lambda e: isinstance(e, TurnStarted) and e.turn_id != e.agent_id)
     await send(session, CancelTurn(lane="x"))
     events = await events_until(session, lambda e: isinstance(e, CommandRefused))
-    assert events[-1] == refused(UNKNOWN, "No lane 'x'; the lanes are work, planner and review.")
+    assert events[-1] == refused(
+        UNKNOWN, "No lane 'x'; the lanes are work, planner, experimenter and review."
+    )
     assert errors(events) == []
 
     planner_gate.set()

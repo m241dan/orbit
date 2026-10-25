@@ -142,7 +142,7 @@ async def accept_last(session: FakeSession, pilot: Pilot[None]) -> None:
     await feed_events(session, pilot, CommandAccepted(command_id=session.envelopes[-1].command_id))
 
 
-PINNED = ["planner", "coder", "reviewer", "super-reviewer", "configurator"]
+PINNED = ["planner", "experimenter", "coder", "reviewer", "super-reviewer", "configurator"]
 STRIP = ["All", *PINNED]
 
 

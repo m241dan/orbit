@@ -17,8 +17,9 @@ from tests.cli_fakes import FAKE_RUNTIME, FakeRuntimeLauncher
 from tests.stand_ins import stand_in
 
 NOT_ON_PATH = (
-    "Roles planner, coder, reviewer, super-reviewer, configurator use the runtime claude, but"
-    " claude isn't on PATH. Install Claude Code, or set those roles' runtime to one you have."
+    "Roles planner, experimenter, coder, reviewer, super-reviewer, configurator use the runtime"
+    " claude, but claude isn't on PATH. Install Claude Code, or set those roles' runtime to one"
+    " you have."
 )
 
 
@@ -105,7 +106,7 @@ def test_only_the_enabled_roles_using_a_missing_runtime_are_named(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("PATH", str(tmp_path))
-    roles = disabled(ROLES, "reviewer", "super-reviewer", "configurator")
+    roles = disabled(ROLES, "experimenter", "reviewer", "super-reviewer", "configurator")
     with pytest.raises(WorkspaceUnavailable, match=r"^Roles planner, coder use the runtime"):
         build_runtimes(roles)
 

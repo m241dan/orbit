@@ -240,7 +240,7 @@ async def refusal(roles: dict[str, Role], *messages: str, role: str = EXPERIMENT
 
 
 async def test_a_role_without_consults_calling_consult_is_refused() -> None:
-    roles = {**CONSULTING, PLANNER: ROLES[PLANNER]}
+    roles = {**CONSULTING, PLANNER: ROLES[PLANNER].model_copy(update={"consults": ()})}
     refused = await refusal(roles, "Check X")
     assert refused == Reply("Your role (planner) can't use consult.", is_error=True)
 

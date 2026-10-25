@@ -361,6 +361,7 @@ def test_built_in_roles_cover_coding_reviewing_and_planning() -> None:
         "reviewer",
         "super-reviewer",
         "planner",
+        "experimenter",
         "configurator",
     }
     coder = BUILT_IN_ROLES["coder"]
@@ -379,7 +380,14 @@ def test_built_in_roles_cover_coding_reviewing_and_planning() -> None:
     assert "suggest_task" in BUILT_IN_ROLES["super-reviewer"].tools
     assert "suggest_task" not in coder.tools
     planner = BUILT_IN_ROLES["planner"]
-    assert set(planner.tools) == {"propose_task", "report_progress"}
+    assert set(planner.tools) == {
+        "propose_task",
+        "report_progress",
+        "save_report",
+        "list_reports",
+        "read_report",
+    }
+    assert planner.consults == ("experimenter",)
     assert BUILT_IN_ROLES["super-reviewer"].model == "opus"
     assert all(role.instructions == INSTRUCTIONS[name] for name, role in BUILT_IN_ROLES.items())
     assert all(set(role.tools) <= set(ORBIT_TOOLS) for role in BUILT_IN_ROLES.values())
@@ -513,12 +521,12 @@ def test_orbit_tools_are_the_twelve_in_order() -> None:
 
 
 def test_a_role_that_consults_is_granted_consult_after_its_tools() -> None:
-    role = BUILT_IN_ROLES["planner"].model_copy(update={"consults": ("experimenter",)})
-    assert role.granted_tools == (*BUILT_IN_ROLES["planner"].tools, "consult")
+    assert BUILT_IN_ROLES["planner"].granted_tools == (*BUILT_IN_ROLES["planner"].tools, "consult")
 
 
 def test_a_role_that_consults_no_one_is_granted_its_tools_alone() -> None:
-    assert BUILT_IN_ROLES["planner"].granted_tools == BUILT_IN_ROLES["planner"].tools
+    experimenter = BUILT_IN_ROLES["experimenter"]
+    assert experimenter.granted_tools == experimenter.tools
 
 
 def test_consult_among_a_roles_tools_is_refused() -> None:
@@ -621,15 +629,15 @@ def test_a_disabled_role_adds_no_lane() -> None:
     assert "security" not in task_lanes({**BUILT_IN_ROLES, "security": security})
 
 
-def test_the_built_in_conversational_role_is_the_planner() -> None:
-    assert conversational_roles(BUILT_IN_ROLES) == ("planner",)
+def test_the_built_in_conversational_roles_are_the_planner_and_experimenter() -> None:
+    assert conversational_roles(BUILT_IN_ROLES) == ("planner", "experimenter")
 
 
 def test_the_conversational_roles_are_the_enabled_ones_in_conversation_in_order() -> None:
     architect = BUILT_IN_ROLES["planner"].model_copy(update={"lane": "design"})
     muted = architect.model_copy(update={"lane": "muted", "enabled": False})
     roles = {"architect": architect, **BUILT_IN_ROLES, "muted": muted}
-    assert conversational_roles(roles) == ("architect", "planner")
+    assert conversational_roles(roles) == ("architect", "planner", "experimenter")
 
 
 def test_the_merging_lane_is_the_lane_of_the_roles_that_merge() -> None:

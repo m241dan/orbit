@@ -122,13 +122,21 @@ def test_marking_a_tab_read_clears_only_its_marker() -> None:
 
 
 def test_the_pinned_tabs_are_the_built_in_roles_in_order() -> None:
-    assert ROLE_TABS == ("planner", "coder", "reviewer", "super-reviewer", "configurator")
+    assert ROLE_TABS == (
+        "planner",
+        "experimenter",
+        "coder",
+        "reviewer",
+        "super-reviewer",
+        "configurator",
+    )
     assert PLANNER == "planner"
     assert [tab.key for tab in PINNED_TABS] == list(ROLE_TABS)
     assert pinned_roles(PINNED_TABS) == frozenset(ROLE_TABS)
-    assert [tab.lane for tab in PINNED_TABS] == ["planner", None, None, None, None]
+    assert [tab.lane for tab in PINNED_TABS] == ["planner", None, None, None, None, None]
     assert tab_labels(PINNED_TABS) == [
         "planner",
+        "experimenter",
         "coder",
         "reviewer",
         "super-reviewer",
@@ -195,6 +203,7 @@ def test_pinned_role_output_marks_its_tab_unless_shown() -> None:
     marked = track_tabs(PINNED_TABS, said, active=None, roles=roles)
     assert tab_labels(marked) == [
         "planner",
+        "experimenter",
         "coder",
         "reviewer *",
         "super-reviewer",
@@ -218,7 +227,14 @@ def test_a_pinned_roles_tab_is_marked_running_from_its_agents_start_to_its_exit(
     assert tabs == tuple(
         replace(tab, running=1) if tab.key == "coder" else tab for tab in PINNED_TABS
     )
-    assert tab_labels(tabs) == ["planner", "● coder", "reviewer", "super-reviewer", "configurator"]
+    assert tab_labels(tabs) == [
+        "planner",
+        "experimenter",
+        "● coder",
+        "reviewer",
+        "super-reviewer",
+        "configurator",
+    ]
     assert track_tabs(tabs, exited, roles=roles) == PINNED_TABS
 
 
@@ -230,11 +246,11 @@ def test_a_roles_marker_stays_until_its_last_agent_exits() -> None:
     for started in (started_1, started_2):
         roles = track_roles(roles, started)
         tabs = track_tabs(tabs, started, roles=roles)
-    assert tab_labels(tabs)[2] == "● reviewer"
+    assert tab_labels(tabs)[3] == "● reviewer"
     tabs = track_tabs(tabs, exited_1, roles=roles)
-    assert tab_labels(tabs)[2] == "● reviewer"
+    assert tab_labels(tabs)[3] == "● reviewer"
     tabs = track_tabs(tabs, exited_2, roles=roles)
-    assert tab_labels(tabs)[2] == "reviewer"
+    assert tab_labels(tabs)[3] == "reviewer"
     assert tabs == PINNED_TABS
 
 
@@ -257,7 +273,7 @@ def test_only_the_tabs_of_the_roles_answering_in_a_lane_follow_it() -> None:
     tabs = pin_conversations(PINNED_TABS, {"architect": "design", "critic": "design"})
     busy = mark_lane_busy(tabs, "design", True)
     assert tab_labels(busy)[-2:] == ["● architect", "● critic"]
-    assert busy[:5] == PINNED_TABS
+    assert busy[:6] == PINNED_TABS
     assert mark_lane_busy(tabs, "work", True) == tabs
 
 
@@ -275,14 +291,14 @@ def test_the_planner_keeps_its_own_lane_when_the_roles_dont_list_it() -> None:
 
 def test_a_built_in_role_made_conversational_follows_its_lane() -> None:
     tabs = pin_conversations(PINNED_TABS, {"reviewer": "review"})
-    assert tabs[2] == replace(PINNED_TABS[2], lane="review")
+    assert tabs[3] == replace(PINNED_TABS[3], lane="review")
 
 
 def test_pinning_again_keeps_the_tabs_still_listed_and_drops_the_others() -> None:
     tabs = pin_conversations(PINNED_TABS, {"architect": "design", "critic": "review"})
     tabs = mark_tab_unread(mark_lane_busy(tabs, "design", True), "architect", None)
     kept = pin_conversations(tabs, {"architect": "design"})
-    assert kept == (*PINNED_TABS, replace(tabs[5], running=1, unread=True))
+    assert kept == (*PINNED_TABS, replace(tabs[6], running=1, unread=True))
 
 
 def test_a_conversational_roles_agents_share_its_tab_without_counting() -> None:
@@ -362,8 +378,15 @@ def test_following_no_running_agents_closes_own_tabs_and_idles_pinned_but_the_pl
 def test_following_running_agents_counts_each_pinned_roles_agents() -> None:
     agents = (_running("a", "reviewer"), _running("b", "reviewer"), _running("p", PLANNER))
     tabs = follow_running(PINNED_TABS, agents)
-    assert tab_labels(tabs) == ["planner", "coder", "● reviewer", "super-reviewer", "configurator"]
-    assert tabs[2].running == 2
+    assert tab_labels(tabs) == [
+        "planner",
+        "experimenter",
+        "coder",
+        "● reviewer",
+        "super-reviewer",
+        "configurator",
+    ]
+    assert tabs[3].running == 2
 
 
 def test_following_running_agents_keeps_their_open_tabs_and_opens_the_missing() -> None:

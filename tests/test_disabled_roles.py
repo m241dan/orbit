@@ -13,6 +13,7 @@ from orbit.protocol import (
     CODER,
     CONFIGURATOR,
     CONFIGURE_CHECKS,
+    EXPERIMENTER,
     INVALID,
     NOT_CONFIGURED,
     PLANNER,
@@ -120,16 +121,22 @@ async def test_with_every_role_enabled_the_catalog_lists_them_their_triggers_and
     listed = await catalog_of(session)
     assert tuple(agent.name for agent in listed.agents) == BUILT_IN_ROLE_NAMES
     assert [trigger.name for trigger in listed.triggers] == [SUPER_REVIEW, CONFIGURE_CHECKS]
-    assert listed.lanes == ("work", "planner", "review")
+    assert listed.lanes == ("work", "planner", "experimenter", "review")
 
 
 async def test_a_disabled_super_reviewer_leaves_the_catalog_with_its_trigger_and_key() -> None:
     session, _, _ = session_for(tree=FakeTree(), review=True, roles=disabling(SUPER_REVIEWER))
     listed = await catalog_of(session)
-    assert [agent.name for agent in listed.agents] == [PLANNER, CODER, REVIEWER, CONFIGURATOR]
+    assert [agent.name for agent in listed.agents] == [
+        PLANNER,
+        EXPERIMENTER,
+        CODER,
+        REVIEWER,
+        CONFIGURATOR,
+    ]
     assert [trigger.name for trigger in listed.triggers] == [CONFIGURE_CHECKS]
     assert trigger_key_labels(listed.triggers) == {"ctrl+g": None, "ctrl+e": "Set up checks"}
-    assert listed.lanes == ("work", "planner", "review")
+    assert listed.lanes == ("work", "planner", "experimenter", "review")
 
 
 async def test_a_disabled_configurator_takes_its_trigger_and_key_out_of_the_catalog() -> None:
@@ -143,8 +150,8 @@ async def test_disabled_reviewers_and_planner_take_their_lanes_out_of_the_catalo
     roles = disabling(PLANNER, REVIEWER, SUPER_REVIEWER)
     session, _, _ = session_for(tree=FakeTree(), review=True, roles=roles)
     listed = await catalog_of(session)
-    assert [agent.name for agent in listed.agents] == [CODER, CONFIGURATOR]
-    assert listed.lanes == ("work",)
+    assert [agent.name for agent in listed.agents] == [EXPERIMENTER, CODER, CONFIGURATOR]
+    assert listed.lanes == ("work", "experimenter")
 
 
 async def test_firing_a_disabled_super_reviewers_trigger_is_refused_as_unknown() -> None:
@@ -215,8 +222,13 @@ async def test_a_disabled_planners_lane_leaves_the_snapshot_and_cancel_turn_refu
     busy = (await snapshot_of(session)).busy
     events = await refusal_of(session, CancelTurn(lane="planner"))
     await session.close()
-    assert (busy, session.lanes) == ({"work": False, "review": False}, ("work", "review"))
-    assert events[-1] == refused(UNKNOWN, "No lane 'planner'; the lanes are work and review.")
+    assert (busy, session.lanes) == (
+        {"work": False, "experimenter": False, "review": False},
+        ("work", "experimenter", "review"),
+    )
+    assert events[-1] == refused(
+        UNKNOWN, "No lane 'planner'; the lanes are work, experimenter and review."
+    )
 
 
 async def test_a_planner_disabled_as_a_reset_reads_its_role_again_takes_its_lane_out() -> None:
@@ -230,9 +242,14 @@ async def test_a_planner_disabled_as_a_reset_reads_its_role_again_takes_its_lane
     busy = (await snapshot_of(session)).busy
     events = await refusal_of(session, CancelTurn(lane="planner"))
     await session.close()
-    assert enabled == ("work", "planner", "review")
-    assert (busy, session.lanes) == ({"work": False, "review": False}, ("work", "review"))
-    assert events[-1] == refused(UNKNOWN, "No lane 'planner'; the lanes are work and review.")
+    assert enabled == ("work", "planner", "experimenter", "review")
+    assert (busy, session.lanes) == (
+        {"work": False, "experimenter": False, "review": False},
+        ("work", "experimenter", "review"),
+    )
+    assert events[-1] == refused(
+        UNKNOWN, "No lane 'planner'; the lanes are work, experimenter and review."
+    )
 
 
 async def test_the_planners_settings_still_change_while_it_is_disabled_for_new_tasks() -> None:

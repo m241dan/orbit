@@ -185,7 +185,14 @@ async def test_a_running_agent_started_before_the_transcript_gets_its_roles_tab(
         update={"agents": (CODER, checker), "transcript": logged(*CODER_CALL[1:])}
     )
     await shell.feed(cut)
-    assert shell.tab_strip == ["All", "● planner", "● coder", *PINNED[2:], "checker"]
+    assert shell.tab_strip == [
+        "All",
+        "● planner",
+        "experimenter",
+        "● coder",
+        *PINNED[3:],
+        "checker",
+    ]
     assert call_statuses(shell, "coder") == ["passed"]
     assert shell.tab_entries("agent-3") == []
 
@@ -194,7 +201,7 @@ async def test_a_snapshots_transcript_marks_no_tab_unread() -> None:
     shell = Shell()
     transcript = logged(TaskStarted(task_id="1"), *PLANNER_TURN, *CODER_CALL, *REVIEWER_TURN)
     await shell.feed(SNAPSHOT.model_copy(update={"transcript": transcript}))
-    assert shell.tab_strip == ["All", "● planner", "● coder", *PINNED[2:]]
+    assert shell.tab_strip == ["All", "● planner", "experimenter", "● coder", *PINNED[3:]]
     assert "Looks good." in shell.tab_entries("reviewer")
 
 
@@ -203,7 +210,7 @@ async def test_a_live_event_after_a_snapshot_marks_its_tab_unread() -> None:
     said = AssistantMessage(turn_id="c2", agent_id="agent-3", text="Done.")
     await shell.feed(SNAPSHOT.model_copy(update={"transcript": logged(*CODER_CALL)}))
     await shell.feed(said, TaskStarted(task_id="1"))
-    assert shell.tab_strip == ["All", "● planner", "● coder *", *PINNED[2:]]
+    assert shell.tab_strip == ["All", "● planner", "experimenter", "● coder *", *PINNED[3:]]
 
 
 async def test_a_replayed_call_of_an_agent_not_running_shows_no_result() -> None:

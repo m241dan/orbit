@@ -73,11 +73,28 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
     "planner": {
         "model": None,
         "tool_access": "restricted",
-        "tools": ("propose_task", "report_progress"),
+        "tools": ("propose_task", "report_progress", "save_report", "list_reports", "read_report"),
         "verify": False,
         "timeout_minutes": None,
         "lane": "planner",
         "workspace": "checkout",
+        "conversation": True,
+        "merge": False,
+        "enabled": True,
+        "effort": None,
+        "runtime": "claude",
+        "consults": ("experimenter",),
+        "consult_limit_per_hour": 6,
+        "copy_ttl_hours": 24,
+    },
+    "experimenter": {
+        "model": "sonnet",
+        "tool_access": "full",
+        "tools": ("report_progress", "save_report", "list_reports", "read_report"),
+        "verify": False,
+        "timeout_minutes": 30,
+        "lane": "experimenter",
+        "workspace": "copy",
         "conversation": True,
         "merge": False,
         "enabled": True,
@@ -248,6 +265,33 @@ def planner_text() -> str:
 def test_the_planner_asks_every_open_choice_before_proposing() -> None:
     text = planner_text()
     for passage in PLANNER_ASKS_BEFORE_PROPOSING:
+        assert passage in text, passage
+
+
+PLANNER_CONSULTS = (
+    "When a fact can only be found by running code, such as how a library behaves, consult a"
+    " role you may consult with `consult`, saying in the same message what you're finding out"
+    " and why, and carry on with what you can meanwhile; use the reply when it arrives. Ask the"
+    " user instead only for facts about their own machine or accounts beyond the consultant's"
+    " copy. Save a report with `save_report` when a finding will matter beyond this"
+    " conversation."
+)
+
+
+def test_the_planner_consults_rather_than_asking_the_user_to_run_code() -> None:
+    text = planner_text()
+    assert PLANNER_CONSULTS in text
+    assert "ask the user to run it and paste the output" not in text
+
+
+def test_the_experimenter_answers_from_a_throwaway_copy() -> None:
+    text = " ".join(read_built_in_roles()["experimenter"].instructions.split())
+    for passage in (
+        "throwaway copy of the project that is never merged",
+        "change nothing beyond what that needs",
+        "your last message is what the asker receives",
+        "save a report with `save_report`",
+    ):
         assert passage in text, passage
 
 

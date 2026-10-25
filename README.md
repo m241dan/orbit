@@ -95,7 +95,7 @@ In the app:
 | `enter` | On the prompt, while viewing a session read-only: ask whether to make it the active session (see [Sessions](#sessions)) |
 | `t` | Hide agents' dim messages, still thinking out loud, in every tab; again, show them (works with the conversation activated too) |
 | `ctrl+b` | Hide the sidebar so the conversation takes the full width (`h`/`j`/`k`/`l` skip its windows meanwhile); again, show it as it was (not while typing) |
-| `ctrl+t` | Jump to the **planner** tab; again, to each other conversational role's tab in turn, and from the last, back to the tab you were on (with the built-in roles alone, the planner tab and back) |
+| `ctrl+t` | Jump to the **planner** tab; again, to each other conversational role's tab in turn, and from the last, back to the tab you were on (with the built-in roles alone, the planner tab, the experimenter's, and back) |
 | `ctrl+r` | Run the tasks that haven't completed yet |
 | `ctrl+g` | Ask for a super review of the whole codebase now (works while tasks run; hidden while the `super-reviewer` is disabled) |
 | `ctrl+e` | Set up (or redo) the verification steps: after you confirm (`y` to go ahead, `n`/`esc` to cancel), queue a configurator task first and run it (see [Setting up verification](#setting-up-verification); hidden while the `configurator` is disabled) |
@@ -382,8 +382,8 @@ The conversation shows everything in one timeline: each agent's own messages, he
 agent's id in a muted row whenever the speaker changes, its tool calls, prefixed with its id, and
 its requests to orbit and orbit's replies (`agent-1 → orbit complete_task … ✓ …`) in their own
 colour. The tabs above it narrow it: **All** shows everything,
-then come a pinned tab for each built-in role, labelled by its name: **planner**, **coder**,
-**reviewer**, **super-reviewer** and **configurator**, and one for each other conversational role
+then come a pinned tab for each built-in role, labelled by its name: **planner**,
+**experimenter**, **coder**, **reviewer**, **super-reviewer** and **configurator**, and one for each other conversational role
 the workspace you're on configures (see `conversation` under
 [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)), such as **architect**, pinned
 again as you move to another workspace; the task list tags each task with the lane its role runs
@@ -1035,7 +1035,7 @@ role's is its own: one whose runtime changed leaves the others carrying on their
 
 A report is a finding an agent keeps for later, in Markdown, saved per workspace in orbit's store
 with its title, the role that wrote it, the session it was saved in and when. Three orbit tools
-work with them, granted through a role's `tools` like any other (no built-in role has them yet):
+work with them, granted through a role's `tools` like any other (the planner and the experimenter have all three):
 `save_report(title, body)` saves one and answers `Saved report <id>.`, numbering reports from 1 in
 each workspace; a report without a title is refused, and so is a body over 200 KB (`That report
 is over 200 KB; summarise it and keep only the essential output.`). `list_reports()` lists each
@@ -1105,8 +1105,17 @@ defaults for tasks orbit queues in that role; a task you queue keeps its own set
 | `coder` | `get_task`, `complete_task`, `run_check`, `report_progress`, `give_up` | yes | default / `full` |
 | `reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `suggest_task` | no | default / `restricted` |
 | `super-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `suggest_task` | no | `opus` / `restricted` |
-| `planner` | `propose_task`, `report_progress` | no | default / `restricted` |
+| `planner` | `propose_task`, `report_progress`, `save_report`, `list_reports`, `read_report` | no | default / `restricted` |
+| `experimenter` | `report_progress`, `save_report`, `list_reports`, `read_report` | no | `sonnet` / `full` |
 | `configurator` | `get_task`, `propose_checks`, `report_progress`, `give_up` | no | default / `restricted` |
+
+The `experimenter` is a conversational role the planner consults (see `consults` below) and you
+can talk to on its own tab: it runs what it's asked to learn, such as how a library behaves, in a
+throwaway `copy` of the project that's never merged, with the network and packages it needs, and
+answers with what it observed; it saves a report when a finding will matter later. Its turns run
+in its own `experimenter` lane, for at most 30 minutes each. Rather than asking you to run code
+and paste the output, the planner asks the experimenter and carries on meanwhile, asking you only
+about your own machine or accounts.
 
 The built-in roles are data shipped with the package in
 [`src/orbit/agent/external/instructions/`](src/orbit/agent/external/instructions/) and read when
@@ -1178,8 +1187,8 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   answering.`), and the lane shows busy until no turn in it runs; on its tab, `enter` then says
   the one answering is busy (`Architect is busy`), or the role shown is, when the TUI doesn't
   know who answers, as when it opens a session mid-turn. It's listed as conversational
-  in the Catalog, and its lane in the Catalog's lanes and the Snapshot's `busy`. Each has a pinned tab after the built-in roles':
-  `ctrl+t`, which with the built-in roles alone toggles the planner's tab, goes to the planner's
+  in the Catalog, and its lane in the Catalog's lanes and the Snapshot's `busy`. Each other has a pinned tab after the built-in roles':
+  `ctrl+t` goes to the planner's
   tab, then each other conversational role's in turn, then back to the tab you were on. On a
   conversational role's tab, the prompt talks to that role, `ctrl+x` stops
   its turn, `ctrl+n` resets it (its role isn't read again, unlike the planner's), and `ctrl+o`,
@@ -1245,7 +1254,7 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   runs on another runtime, the session still opens, but messages to the role are refused until
   you reset its conversation (see [Planning with the planner](#planning-with-the-planner)).
 - `consults`: the other enabled conversational roles a conversational role may consult, by name;
-  none by default. It's refused on a role that isn't conversational, naming a role that isn't
+  none by default, but the built-in `planner` consults the `experimenter`. It's refused on a role that isn't conversational, naming a role that isn't
   another enabled conversational role, and in a cycle (`architect` consulting the `planner` while
   the `planner` consults `architect`), naming the roles. A role with `consults` gets the orbit
   tool `consult(role, message)`, which returns at once (`Asked the experimenter (consultation

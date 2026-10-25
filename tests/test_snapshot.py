@@ -85,7 +85,12 @@ async def test_welcome_is_followed_by_a_snapshot_of_the_open_session() -> None:
     assert [t.task for t in snapshot.tasks] == list(TASKS)
     assert snapshot.steps == (StepState(name=STEP.name),)
     assert snapshot.steps_title == ""
-    assert snapshot.busy == {WORK_LANE: False, PLANNER_LANE: False, "review": False}
+    assert snapshot.busy == {
+        WORK_LANE: False,
+        PLANNER_LANE: False,
+        "experimenter": False,
+        "review": False,
+    }
     assert snapshot.session == session.saved_session.summary(snapshot.tasks, Usage(), None)
     assert (snapshot.settings, snapshot.model_choices) == (Settings(), ())
     assert (snapshot.review, snapshot.proposals, snapshot.agents) == (None, (), ())

@@ -489,7 +489,7 @@ async def test_relabelling_the_shown_agent_tab_keeps_its_list_and_details() -> N
         await feed_events(
             session, pilot, started("agent-1"), call("agent-1", "c1"), result("agent-1", "c1", "x")
         )
-        await pilot.click(list(app.query_one(ConversationTabs).query(Tab))[2])
+        await pilot.click(list(app.query_one(ConversationTabs).query(Tab))[3])
         transcript = await inspect_latest(app, pilot)
         await pilot.press("tab")
 

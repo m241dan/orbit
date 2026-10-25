@@ -185,6 +185,7 @@ def test_update_says_what_it_added_where(tmp_path: Path) -> None:
                 "[[verification.steps]]",
                 "[setup]",
                 "[roles.planner]",
+                "[roles.experimenter]",
                 "[roles.reviewer]",
                 "[roles.super-reviewer]",
                 "[roles.configurator]",

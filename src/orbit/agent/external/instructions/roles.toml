@@ -4,10 +4,25 @@
 [roles.planner]
 instructions = "planner.md"
 tool_access = "restricted"
-tools = ["propose_task", "report_progress"]
+tools = ["propose_task", "report_progress", "save_report", "list_reports", "read_report"]
+consults = ["experimenter"]
 verify = false
 lane = "planner"
 workspace = "checkout"
+conversation = true
+merge = false
+enabled = true
+runtime = "claude"
+
+[roles.experimenter]
+instructions = "experimenter.md"
+model = "sonnet"
+timeout_minutes = 30
+tool_access = "full"
+tools = ["report_progress", "save_report", "list_reports", "read_report"]
+verify = false
+lane = "experimenter"
+workspace = "copy"
 conversation = true
 merge = false
 enabled = true

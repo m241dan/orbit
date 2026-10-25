@@ -326,7 +326,7 @@ async def test_closing_stops_the_turns_even_if_the_review_lane_fails_then_raises
     with pytest.raises(ValueError, match="review broke"):
         await close(full_session())
 
-    assert stopped == ["usage", "review", "startup", "turns", "planner", "host"]
+    assert stopped == ["usage", "review", "startup", "turns", "planner", "planner", "host"]
 
 
 async def test_closing_stops_the_background_then_the_turns_then_the_planner_then_the_host(
@@ -336,7 +336,7 @@ async def test_closing_stops_the_background_then_the_turns_then_the_planner_then
 
     await close(full_session())
 
-    assert stopped == ["usage", "review", "startup", "turns", "planner", "host"]
+    assert stopped == ["usage", "review", "startup", "turns", "planner", "planner", "host"]
 
 
 async def test_closing_stops_every_part_even_if_one_fails_then_raises_it(
@@ -347,7 +347,7 @@ async def test_closing_stops_every_part_even_if_one_fails_then_raises_it(
     with pytest.raises(ValueError, match="startup broke"):
         await close(full_session())
 
-    assert stopped == ["usage", "review", "startup", "turns", "planner", "host"]
+    assert stopped == ["usage", "review", "startup", "turns", "planner", "planner", "host"]
 
 
 async def test_closing_closes_the_host_even_if_the_usage_monitor_fails_then_raises_it(
@@ -358,4 +358,4 @@ async def test_closing_closes_the_host_even_if_the_usage_monitor_fails_then_rais
     with pytest.raises(ValueError, match="usage broke"):
         await close(full_session())
 
-    assert stopped == ["usage", "review", "startup", "turns", "planner", "host"]
+    assert stopped == ["usage", "review", "startup", "turns", "planner", "planner", "host"]

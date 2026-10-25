@@ -60,7 +60,7 @@ watch = ["uv.lock"]
 # How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
 # tool_access = "restricted"
 # The orbit tools its agents may call.
-# tools = ["propose_task", "report_progress"]
+# tools = ["propose_task", "report_progress", "save_report", "list_reports", "read_report"]
 # Whether its agents' claims of being done are verified.
 # verify = false
 # How long its agents may take, in minutes; unset, no limit.
@@ -69,6 +69,40 @@ watch = ["uv.lock"]
 # lane = "planner"
 # Where its agents work: "worktree", "snapshot", "checkout", "none" or "copy".
 # workspace = "checkout"
+# Whether you talk to it, as you do the planner, rather than it taking tasks.
+# conversation = true
+# Whether its finished work is committed and merged.
+# merge = false
+# Whether it runs at all.
+# enabled = true
+# Its effort: "low", "medium", "high", "xhigh" or "max"; unset, the user config's, else the CLI's.
+# effort: unset
+# The runtime its agents run on: "claude" or "kiro". Left out, the user config's, else "claude".
+# runtime = "claude"
+# The other conversational roles a conversational role may consult, by name.
+# consults = ["experimenter"]
+# Consultations it may start in an hour; 0, no limit.
+# consult_limit_per_hour = 6
+# How long its copy is kept after its conversation's last turn, in hours.
+# copy_ttl_hours = 24.0
+
+# [roles.experimenter]
+# What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
+# instructions: orbit's own experimenter.md
+# Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
+# model = "sonnet"
+# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
+# tool_access = "full"
+# The orbit tools its agents may call.
+# tools = ["report_progress", "save_report", "list_reports", "read_report"]
+# Whether its agents' claims of being done are verified.
+# verify = false
+# How long its agents may take, in minutes; unset, no limit.
+# timeout_minutes = 30.0
+# The lane that runs its agents, a plain name; a lane runs one task at a time.
+# lane = "experimenter"
+# Where its agents work: "worktree", "snapshot", "checkout", "none" or "copy".
+# workspace = "copy"
 # Whether you talk to it, as you do the planner, rather than it taking tasks.
 # conversation = true
 # Whether its finished work is committed and merged.

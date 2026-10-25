@@ -124,3 +124,14 @@ async def test_startup_removes_expired_and_unrecorded_copies_keeping_the_others(
     await eventually(lambda: copies.removed == ["/copies/old", "/copies/stray"])
     await session.close()
     assert copies.left == ["/copies/young"]
+
+
+async def test_messaging_the_built_in_experimenter_starts_a_turn_in_a_copy() -> None:
+    copies = FakeCopies()
+    agents, launcher = agents_for(roles=ROLES, copies=copies)
+    launcher.planner_turns = [chats]
+    session = WorkspaceHost(agents=agents, store=FakeStore(), clock=Ticks(), new_id=lambda: "s")
+    await send(session, SendMessage(agent=EXPERIMENTER, text="Run it."))
+    await events_until(session, idle(EXPERIMENTER))
+    assert directories(launcher) == ["/copies/copy-1"]
+    await session.close()

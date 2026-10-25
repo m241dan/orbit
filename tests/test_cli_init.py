@@ -160,8 +160,9 @@ def test_update_adds_what_the_file_doesnt_mention_and_says_what(project: Path) -
         f"Added to {path}, commented out:",
         f"  in the top level: {', '.join(LIMIT_KEYS)}",
         f"  in [roles.coder]: {fields}",
-        "  at the end: [[verification.steps]], [setup], [roles.planner], [roles.reviewer],"
-        " [roles.super-reviewer], [roles.configurator], [roles.security-reviewer],"
+        "  at the end: [[verification.steps]], [setup], [roles.planner],"
+        " [roles.experimenter], [roles.reviewer], [roles.super-reviewer], [roles.configurator],"
+        " [roles.security-reviewer],"
         " [triggers.review-each-commit], [mcp.github], [mcp.semgrep],"
         " [roles.security-reviewer.tools], [models.local-coder]",
     ]
