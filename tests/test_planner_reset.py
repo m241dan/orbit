@@ -50,6 +50,7 @@ from tests.agent_fakes import (
     steps_chat,
 )
 from tests.session_builders import opened, saved, store_with, switching
+from tests.waiting import eventually
 
 NEW_ROLE = ROLES["planner"].model_copy(
     update={"instructions": "Plan small.", "tools": ("propose_task",)}
@@ -150,8 +151,7 @@ async def test_a_reset_is_refused_while_the_planner_answers() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [hangs]
     await send(session, SendMessage(agent=PLANNER, text="Plan."))
-    while not launcher.launches:
-        await asyncio.sleep(0)
+    await eventually(lambda: launcher.launches, poll=0)
     assert await refusal(session) == refused(BUSY, PLANNER_BUSY_RESET)
     await send(session, CancelTurn(lane="planner"))
     events = await events_until(session, idle("planner"))

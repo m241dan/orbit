@@ -37,6 +37,7 @@ from orbit.cli.backend import _Backend, _backend, _Directories
 from orbit.cli.served import _added, _workspaces
 from orbit.protocol import INTERNAL, INVALID, StartupChecked
 from tests.agent_fakes import agent_exited, events_until, logged_with_traceback
+from tests.waiting import eventually
 
 FLAGS = _Backend(None, None, False, False, False, False, new=False, name=None)
 CLONES = Path("/nonexistent/clones")
@@ -252,14 +253,9 @@ async def test_a_slow_identity_check_leaves_the_event_loop_running(
     monkeypatch.setattr(served_workspaces, "has_git_identity", waits)
     flags = _Backend(None, None, False, True, False, False, new=False, name=None)
     opening = asyncio.create_task(workspaces(stack, store, flags).open(str(root)))
-
-    async def lets_go() -> None:
-        """Let the identity check finish once it's under way, running meanwhile."""
-        while not checking.is_set():
-            await asyncio.sleep(0.01)
-        gate.set()
-
-    await asyncio.wait_for(lets_go(), 5)
+    # Let the identity check finish once it's under way, running meanwhile.
+    await eventually(checking.is_set)
+    gate.set()
 
     with pytest.raises(WorkspaceUnavailable, match=r"^Git has no identity"):
         await opening

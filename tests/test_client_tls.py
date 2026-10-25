@@ -3,7 +3,7 @@ handshake that would fail the same way again reported with what's wrong and the 
 
 import asyncio
 import ssl
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -36,6 +36,7 @@ from orbit.protocol import (
 from tests.cli_fakes import HELLO, control_plane
 from tests.server_fakes import TOKEN
 from tests.tls_certs import DAY, Ca, ServerFiles, make_ca, make_client, make_server, other_key
+from tests.waiting import eventually
 
 
 @pytest.fixture
@@ -255,7 +256,7 @@ async def test_a_tls_connection_closed_unanswered_after_linking_is_retried(
         )
         session.watch(states.append)
         await session.send(HELLO)
-        await asyncio.wait_for(_until(lambda: Connected(url) in states), 5)
+        await eventually(lambda: Connected(url) in states)
     context = _server_context(files)
     async with await asyncio.start_server(hang_up, "127.0.0.1", port, ssl=context):
         for _ in range(3):  # Each an attempt closed before any HTTP answer.
@@ -263,16 +264,10 @@ async def test_a_tls_connection_closed_unanswered_after_linking_is_retried(
     assert isinstance(session.state, Reconnecting)
     try:
         async with tls_server(files, port):
-            await asyncio.wait_for(_until(lambda: session.state == Connected(url)), 5)
+            await eventually(lambda: session.state == Connected(url))
         assert not any(isinstance(state, HandshakeFailed) for state in states)
     finally:
         await session.close()
-
-
-async def _until(holds: Callable[[], bool]) -> None:
-    """Return once ``holds`` does."""
-    while not holds():
-        await asyncio.sleep(0.01)
 
 
 def test_the_context_shows_the_client_certificate_given(ca: Ca, tmp_path: Path) -> None:

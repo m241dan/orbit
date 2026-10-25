@@ -25,14 +25,18 @@ from tests.git_repo import bare_repository, commit_file, git, init_repo, started
 from tests.plane_fakes import payloads, refused, welcomed
 from tests.process_checks import gone
 from tests.serving import serving, until
+from tests.waiting import eventually
 
 
 async def served(connection: SessionConnection) -> list[Event]:
     """What's queued for ``connection`` up to a clone's last news, once it's served."""
     events: list[Event] = []
-    while not any(isinstance(event, WorkspaceCloning) and event.workspace for event in events):
-        await asyncio.sleep(0.01)
-        events += payloads(taken(connection))
+
+    def arrived() -> bool:
+        events.extend(payloads(taken(connection)))
+        return any(isinstance(event, WorkspaceCloning) and event.workspace for event in events)
+
+    await eventually(arrived)
     return events
 
 

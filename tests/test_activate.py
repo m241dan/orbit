@@ -39,6 +39,7 @@ from tests.attach_fakes import (
 )
 from tests.connection_helpers import joined, received, say
 from tests.server_fakes import TASK
+from tests.waiting import eventually
 
 
 async def used(session: WorkspaceHost, name: str) -> SessionConnection:
@@ -278,8 +279,8 @@ async def activated_meanwhile(session_id: str, once_switched: bool = False) -> M
     activating: list[asyncio.Task[None]] = []
 
     async def activate() -> None:
-        while once_switched and session.saved_session.id != EARLIER:
-            await asyncio.sleep(0)
+        if once_switched:
+            await eventually(lambda: session.saved_session.id == EARLIER, poll=0)
         await say(second, "activate", ActivateSession(session=session_id))
 
     async def activate_another() -> None:
@@ -351,8 +352,7 @@ async def test_a_viewer_attaching_elsewhere_meanwhile_gets_no_view_of_the_sessio
             return
         store.on_recent = None
         await say(other, "attach", Attach(workspace=WORKSPACE, session=EARLIER))
-        while other.attached is not None:
-            await asyncio.sleep(0)
+        await eventually(lambda: other.attached is None, poll=0)
 
     store.on_recent = attach_elsewhere
     await say(activating, "activate", ActivateSession(session=EARLIER))

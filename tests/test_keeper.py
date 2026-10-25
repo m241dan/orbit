@@ -43,6 +43,7 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import HALTED, START, FakeHalt, FakeStore, Ticks
 from tests.keeper_fakes import EMPTY, TASK, WITH_TASK, Published, save
+from tests.waiting import eventually
 
 SPENT = Usage(input_tokens=500, cost_usd=1.4, turns=3)
 UNLOCKABLE = "Couldn't unlock the session x.lock: read-only"
@@ -338,8 +339,7 @@ async def test_a_lock_file_that_cannot_be_written_halts_the_session_naming_the_c
         LockingStore(tmp_path), published, halt, NewSessions(Ticks(), lambda: "session-1")
     )
     await save(keeper, WITH_TASK)
-    while not published.events:
-        await asyncio.sleep(0)
+    await eventually(lambda: published.events, poll=0)
     await halt.close()
 
     [code], [explanation] = published.codes, published.errors

@@ -14,6 +14,7 @@ from orbit.protocol import BUSY as BUSY_CODE
 from orbit.protocol import INTERNAL, BusyChanged, ErrorOccurred, Event
 from orbit.tracing import NoSpan, Span, current_span, use_span
 from tests.agent_fakes import logged_with_traceback
+from tests.waiting import eventually
 
 
 class SlowToStop:
@@ -349,8 +350,7 @@ async def test_a_stale_turns_end_leaves_the_lane_busy() -> None:
     await turns.start(work("first"))
     first = turns.turn
     assert first is not None
-    while not first.done():
-        await asyncio.sleep(0)
+    await eventually(first.done, poll=0)
 
     await turns.start(work("second"))  # Before the first's callback has run.
     await ended(turns.turn)

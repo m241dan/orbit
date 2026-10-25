@@ -63,6 +63,7 @@ from tests.agent_fakes import (
     session_for,
 )
 from tests.server_fakes import TASK
+from tests.waiting import eventually
 
 OUTCOMES = (CommandAccepted, CommandRefused)
 
@@ -200,8 +201,7 @@ async def answering() -> WorkspaceHost:
     launcher.planner_turns = [hangs]
     await send_as(session, "plan", SendMessage(agent=PLANNER, text="Plan."))
     await events_until(session, lambda event: event == CommandAccepted(command_id="plan"))
-    while not launcher.launches:
-        await asyncio.sleep(0)
+    await eventually(lambda: launcher.launches, poll=0)
     return session
 
 

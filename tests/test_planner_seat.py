@@ -36,6 +36,7 @@ from orbit.protocol import (
     TurnFinished,
 )
 from tests.agent_fakes import ROLES, FakeHost, ScriptedLauncher, chats, hangs
+from tests.waiting import eventually
 
 HALTED_MESSAGE = "The session is halted."
 EXITED = AgentExited(agent_id="agent-1", reason="finished")
@@ -171,8 +172,7 @@ async def test_stopping_the_turn_waits_for_it_to_end() -> None:
     seated_ = seated()
     seated_.launcher.planner_turns = [hangs]
     await seated_.seat.submit("Plan.", Settings())
-    while not seated_.launcher.launches:
-        await asyncio.sleep(0)
+    await eventually(lambda: seated_.launcher.launches, poll=0)
     await seated_.seat.stop_turn()
     turn = seated_.seat.turn
     assert turn is not None and turn.done()

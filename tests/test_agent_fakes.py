@@ -1,9 +1,11 @@
-"""The test helpers in agent_fakes: gathering a session's events up to a given one."""
+"""The test helpers in agent_fakes: gathering a session's events up to a given one, or until
+they settle."""
 
 import pytest
 
 from orbit.protocol import PLANNER, BusyChanged, SendMessage, SettingsChanged
-from tests.agent_fakes import agent_exited, chats, events_until, idle, send, session_for
+from tests import agent_fakes
+from tests.agent_fakes import agent_exited, chats, events_until, idle, send, session_for, settle
 
 
 async def test_events_until_fails_naming_the_event_when_it_never_comes() -> None:
@@ -20,3 +22,12 @@ async def test_events_until_stops_at_the_first_done_event_leaving_out_skipped_on
 
     assert events[-1] == BusyChanged(busy=False, lane="planner")
     assert not any(isinstance(e, SettingsChanged) for e in events)
+
+
+async def test_settle_fails_with_a_timeout_when_the_events_never_settle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(agent_fakes, "SETTLING", 0.05)
+    session, _, _ = session_for()
+    with pytest.raises(TimeoutError):
+        await settle(session, until=lambda events: False)

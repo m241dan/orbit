@@ -77,6 +77,7 @@ from tests.agent_fakes import (
     session_for,
     verified,
 )
+from tests.waiting import eventually
 
 
 async def passes(call: Call) -> TurnEndReason:
@@ -369,8 +370,7 @@ async def test_a_second_claim_while_verifying_is_refused() -> None:
     async def claims_twice(call: Call) -> TurnEndReason:
         await call("get_task")
         first = asyncio.ensure_future(call("complete_task", summary="one"))
-        while not steps.runs:
-            await asyncio.sleep(0)
+        await eventually(lambda: steps.runs, poll=0)
         second = await call("complete_task", summary="two")
         assert second.is_error and "already" in second.text
         assert steps.gate is not None
@@ -410,8 +410,7 @@ async def test_cancelling_during_verification_stops_the_agent_and_the_run() -> N
     for prompt in ("one", "two"):
         await send(session, AddTask(task=TaskSpec(prompt=prompt)))
     await send(session, RunTasks())
-    while not steps.runs:
-        await asyncio.sleep(0)
+    await eventually(lambda: steps.runs, poll=0)
     await send(session, CancelTurn())
     events: list[Event] = []
     async for event in payloads(session):

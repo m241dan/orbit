@@ -98,6 +98,7 @@ from tests.agent_fakes import (
 )
 from tests.server_fakes import TASK
 from tests.store_views import fill_up, open_view
+from tests.waiting import eventually
 
 BIG = Notice(message="x" * 100_000)  # Too big for a database that can't grow.
 
@@ -327,8 +328,7 @@ async def test_a_failed_rename_halts_the_session_and_lets_go_of_its_lock() -> No
     halt = StorageHalt(record)
     keeper = SessionKeeper(store, record, halt)
     await keeper.rename_saved("other", "Renamed")
-    while not published:
-        await asyncio.sleep(0)
+    await eventually(lambda: published, poll=0)
     await halt.close()
 
     assert halt.halted and store.released == ["other"]
@@ -414,8 +414,7 @@ async def test_halting_cancels_the_startup_check() -> None:
     await halt_error(session)
     startup = startup_of(session)
     assert startup is not None
-    while startup.running:
-        await asyncio.sleep(0.01)
+    await eventually(lambda: not startup.running)
     await session.close()
 
     assert steps.results == [True]  # The step never finished.
@@ -473,8 +472,10 @@ async def test_a_review_ending_while_halted_starts_no_work_on_its_fixes() -> Non
     await send(session, AddTask(task=TASK))
     await send(session, RunTasks())
     board = tasks_of(session).board
-    while not any(t.task.role == "reviewer" and t.status == "completed" for t in board.tasks):
-        await asyncio.sleep(0.01)  # The halt waits on the append in flight meanwhile.
+    # The halt waits on the append in flight meanwhile.
+    await eventually(
+        lambda: any(t.task.role == "reviewer" and t.status == "completed" for t in board.tasks)
+    )
     await asyncio.sleep(0.05)
     store.gate.set()
     await halt_error(session)
@@ -545,6 +546,12 @@ async def test_until_the_explanation_is_made_the_halt_says_what_failed() -> None
     await halt.close()
 
 
+async def explained(halt: StorageHalt) -> None:
+    """Wait until ``halt``, halting on a failed write to the event log, has made its explanation,
+    so it no longer says only what failed."""
+    await eventually(lambda: halt.message != halting_message(FailedWrite.EVENT_LOG), poll=0)
+
+
 async def test_a_session_halts_once_however_many_writes_fail() -> None:
     published: list[Event] = []
 
@@ -554,8 +561,7 @@ async def test_a_session_halts_once_however_many_writes_fail() -> None:
     halt = StorageHalt(record)
     halt.fail(FailedWrite.EVENT_LOG, StoreFailed("first"))
     halt.fail(FailedWrite.SESSION_RECORD, StoreFailed("second"))
-    while halt.message == halting_message(FailedWrite.EVENT_LOG):
-        await asyncio.sleep(0)
+    await explained(halt)
     await halt.close()
 
     [error] = published
@@ -772,8 +778,7 @@ async def test_resuming_does_not_run_the_startup_check_the_halt_cancelled() -> N
     await halt_error(session)
     startup = startup_of(session)
     assert startup is not None
-    while startup.running:
-        await asyncio.sleep(0.01)
+    await eventually(lambda: not startup.running)
     store.append_failure = None
 
     assert (await outcome_of(session, ResumeStorage()))[-1].payload == ACCEPTED
@@ -850,8 +855,7 @@ async def test_resuming_does_not_start_the_startup_check_again_while_it_runs() -
         verification=checked(steps), tree=FakeTree(), check_at_startup=True, store=FakeStore()
     )
     session.start_background()
-    while steps.runs == []:
-        await asyncio.sleep(0.01)
+    await eventually(lambda: steps.runs)
 
     await resume_storage(session)
     steps.gate.set()
@@ -994,14 +998,12 @@ async def test_a_resumed_halt_halts_again_on_the_next_failure() -> None:
 
     halt = StorageHalt(record, HaltHooks())
     halt.fail(FailedWrite.EVENT_LOG, StoreFailed("first"))
-    while halt.message == halting_message(FailedWrite.EVENT_LOG):
-        await asyncio.sleep(0)
+    await explained(halt)
     await asyncio.sleep(0.01)
     await halt.resume()
     assert not halt.halted
     halt.fail(FailedWrite.EVENT_LOG, StoreFailed("second"))
-    while halt.message == halting_message(FailedWrite.EVENT_LOG):
-        await asyncio.sleep(0)
+    await explained(halt)
     await halt.close()
 
     errors = [event.message for event in published if isinstance(event, ErrorOccurred)]
@@ -1051,13 +1053,11 @@ async def test_a_halt_lifted_despite_failures_halts_again_on_the_first() -> None
 
     halt = StorageHalt(record, HaltHooks(retry=retry))
     halt.fail(FailedWrite.EVENT_LOG, StoreFailed("first"))
-    while halt.message == halting_message(FailedWrite.EVENT_LOG):
-        await asyncio.sleep(0)
+    await explained(halt)
     await asyncio.sleep(0.01)
     await halt.resume()
     assert halt.halted
-    while halt.message == halting_message(FailedWrite.EVENT_LOG):
-        await asyncio.sleep(0)
+    await explained(halt)
     await halt.close()
 
     errors = [event.message for event in published if isinstance(event, ErrorOccurred)]
@@ -1088,8 +1088,7 @@ async def halted_on_retry(
     retry = BlockedRetry(asyncio.Event(), asyncio.Event())
     halt = StorageHalt(record, HaltHooks(retry=retry))
     halt.fail(FailedWrite.EVENT_LOG, StoreFailed("first"))
-    while halt.message == halting_message(FailedWrite.EVENT_LOG):
-        await asyncio.sleep(0)
+    await explained(halt)
     await asyncio.sleep(0.01)
     return halt, retry
 
@@ -1126,8 +1125,7 @@ async def test_a_failure_during_a_resume_refused_a_second_time_halts_again() -> 
     retry.release.set()
     await first
     assert halt.halted
-    while halt.message == halting_message(FailedWrite.EVENT_LOG):
-        await asyncio.sleep(0)
+    await explained(halt)
     await halt.close()
 
     errors = [event.message for event in published if isinstance(event, ErrorOccurred)]
@@ -1162,8 +1160,7 @@ async def test_a_resume_while_one_is_explaining_its_failed_retry_is_refused() ->
     divert = BlockedDivert(asyncio.Event(), asyncio.Event())
     halt = StorageHalt(lambda event: asyncio.sleep(0), HaltHooks(divert=divert, retry=retry))
     halt.fail(FailedWrite.EVENT_LOG, StoreFailed("first"))
-    while halt.message == halting_message(FailedWrite.EVENT_LOG):
-        await asyncio.sleep(0)
+    await explained(halt)
     await asyncio.sleep(0.01)
     first = asyncio.create_task(halt.resume())
     await divert.started.wait()

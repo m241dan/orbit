@@ -2,7 +2,6 @@
 connection that asked alone, refused as the path calls for, confined to the browsable root, as
 ``AddWorkspace`` is too; a local orbit refuses it."""
 
-import asyncio
 from pathlib import Path
 
 from orbit.agent import Browsing, ControlPlane, DirectoryLister, WorkspaceHost
@@ -21,6 +20,7 @@ from orbit.protocol import (
 )
 from tests.connection_helpers import joined, say, taken
 from tests.plane_fakes import FakeSource, payloads, refused, welcomed, workspace
+from tests.waiting import eventually
 
 
 def browsing(home: Path, root: Path | None = None) -> Browsing:
@@ -372,8 +372,7 @@ async def test_a_clone_is_added_wherever_the_clone_directory_is(tmp_path: Path) 
     connection = await welcomed(plane)
 
     await say(connection, "clone", AddWorkspace(url="https://github.com/o/proj.git"))
-    while not source.opened:
-        await asyncio.sleep(0.01)
+    await eventually(lambda: source.opened)
     await plane.close()
 
     assert source.managed == ["/clones/proj.git"]
@@ -409,8 +408,7 @@ async def test_inside_the_browsable_root_a_local_repository_is_cloned(tmp_path: 
     await say(connection, "path", AddWorkspace(url=str(x / "a")))
     await say(connection, "file", AddWorkspace(url=f"file://{x / 'a'}.git"))
     seen = payloads(taken(connection))
-    while len(source.opened) < 2:
-        await asyncio.sleep(0.01)
+    await eventually(lambda: len(source.opened) >= 2)
     await plane.close()
 
     outcomes = [event for event in seen if isinstance(event, CommandAccepted | CommandRefused)]

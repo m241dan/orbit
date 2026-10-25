@@ -29,6 +29,7 @@ from orbit.protocol import (
 from tests.agent_fakes import logged_with_traceback
 from tests.connection_helpers import joined, say, taken
 from tests.plane_fakes import FakeSource, ids, payloads, refused, welcomed, workspace
+from tests.waiting import eventually
 
 URL = "https://github.com/o/proj.git"
 PROGRESS = WorkspaceCloning(url=URL, phase="Receiving objects", percent=50)
@@ -37,34 +38,38 @@ PROGRESS = WorkspaceCloning(url=URL, phase="Receiving objects", percent=50)
 async def received_until(connection: SessionConnection, kind: type[Event]) -> list[EventEnvelope]:
     """The envelopes queued for ``connection`` up to the first of ``kind``."""
     envelopes: list[EventEnvelope] = []
-    while not any(isinstance(envelope.payload, kind) for envelope in envelopes):
-        await asyncio.sleep(0.01)
-        envelopes += taken(connection)
+
+    def arrived() -> bool:
+        envelopes.extend(taken(connection))
+        return any(isinstance(envelope.payload, kind) for envelope in envelopes)
+
+    await eventually(arrived)
     return envelopes
 
 
 async def received_served(connection: SessionConnection) -> list[EventEnvelope]:
     """The envelopes queued for ``connection`` up to the clone's last news, once it's served."""
     envelopes: list[EventEnvelope] = []
-    while not any(
-        isinstance(envelope.payload, WorkspaceCloning) and envelope.payload.workspace
-        for envelope in envelopes
-    ):
-        await asyncio.sleep(0.01)
-        envelopes += taken(connection)
+
+    def arrived() -> bool:
+        envelopes.extend(taken(connection))
+        return any(
+            isinstance(envelope.payload, WorkspaceCloning) and envelope.payload.workspace
+            for envelope in envelopes
+        )
+
+    await eventually(arrived)
     return envelopes
 
 
 async def cloning(source: FakeSource) -> None:
     """Wait until ``source`` has started cloning."""
-    while not source.cloning:
-        await asyncio.sleep(0.01)
+    await eventually(lambda: source.cloning)
 
 
 async def removed(source: FakeSource) -> None:
     """Wait until ``source`` has removed a clone."""
-    while not source.removed:
-        await asyncio.sleep(0.01)
+    await eventually(lambda: source.removed)
 
 
 async def test_a_url_is_accepted_at_once_then_cloned_and_served_managed() -> None:
@@ -321,8 +326,7 @@ async def test_closing_while_a_clone_waits_to_be_served_removes_it() -> None:
     plane = ControlPlane(workspaces=source)
     connection = await welcomed(plane)
     adding = asyncio.create_task(say(connection, "add", AddWorkspace(path="/src/c")))
-    while not source.opened:
-        await asyncio.sleep(0.01)
+    await eventually(lambda: source.opened)
 
     await say(connection, "clone", AddWorkspace(url=URL))
     await received_until(connection, WorkspaceCloning)

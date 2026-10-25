@@ -41,6 +41,7 @@ from tests.agent_fakes import (
     gives_up,
 )
 from tests.lane_fakes import Hearing, no_work
+from tests.waiting import eventually
 
 OTHERS_SLOT = ("other", "s")  # Another workspace's session, which holds the only coder's slot.
 
@@ -422,8 +423,7 @@ async def waiting_lane_for(
 
 async def in_line(lane: WorkLane, run: asyncio.Task[object]) -> asyncio.Task[object]:
     """The task watching the board for ``lane``'s ``run``, once it waits in line for a slot."""
-    while lane.waiting_for_coder != 1:
-        await asyncio.sleep(0)
+    await eventually(lambda: lane.waiting_for_coder == 1, poll=0)
     (watch,) = asyncio.all_tasks() - {asyncio.current_task(), run}
     return watch
 

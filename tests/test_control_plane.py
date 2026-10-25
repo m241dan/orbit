@@ -58,6 +58,7 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import board_of, claims_done, control_plane, session_for
 from tests.server_fakes import LOOPBACK, TASK, TOKEN, Lines, serving_plane
+from tests.waiting import eventually
 
 
 @asynccontextmanager
@@ -267,8 +268,7 @@ async def test_the_server_says_as_frontends_connect_and_disconnect() -> None:
         async with frontend(url) as websocket:
             await hello(websocket, "orbit-tui")
             port = websocket.local_address[1]
-        while len(lines.said) < 2:
-            await asyncio.sleep(0.01)
+        await eventually(lambda: len(lines.said) >= 2)
     assert lines.said == [
         f"orbit-tui connected from 127.0.0.1:{port}.",
         f"orbit-tui disconnected from 127.0.0.1:{port}.",
@@ -281,8 +281,7 @@ async def test_the_server_says_as_an_unnamed_frontend_connects_and_disconnects()
         async with frontend(url) as websocket:
             await hello(websocket, "")
             port = websocket.local_address[1]
-        while len(lines.said) < 2:
-            await asyncio.sleep(0.01)
+        await eventually(lambda: len(lines.said) >= 2)
     assert lines.said == [
         f" connected from 127.0.0.1:{port}.",
         f" disconnected from 127.0.0.1:{port}.",
@@ -312,8 +311,7 @@ async def test_queued_work_runs_to_the_end_with_no_frontend_connected() -> None:
             await until(websocket, CommandAccepted)
             await say(websocket, "run", RunTasks())
             await until(websocket, CommandAccepted)
-        while board_of(session).tasks[0].status != "completed":
-            await asyncio.sleep(0.01)
+        await eventually(lambda: board_of(session).tasks[0].status == "completed")
 
 
 async def test_a_port_in_use_cant_be_listened_on() -> None:

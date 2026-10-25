@@ -36,6 +36,7 @@ from tests.agent_fakes import (
 )
 from tests.connection_helpers import joined, say, taken
 from tests.plane_fakes import idle, payloads
+from tests.waiting import eventually
 
 WAITING_FIRST = Activity(kind="waiting_for_coder", position=1, busy=1)
 
@@ -68,17 +69,7 @@ class Gates:
 
     async def until_started(self, *names: str) -> None:
         """Wait until the runs that started are ``names``, in order."""
-        await until(lambda: self.started == list(names))
-
-
-async def until(condition: Callable[[], bool]) -> None:
-    """Wait until ``condition`` holds; fails if it doesn't within 5 seconds."""
-
-    async def polled() -> None:
-        while not condition():
-            await asyncio.sleep(0.01)
-
-    await asyncio.wait_for(polled(), 5)
+        await eventually(lambda: self.started == list(names))
 
 
 def running(host: WorkspaceHost) -> Callable[[], bool]:
@@ -146,7 +137,7 @@ async def test_workspaces_take_turns_at_a_single_coder() -> None:
     await gates.until_started("a1")
     taken(in_b)
     await runs(in_b, task())
-    await until(lambda: b.activity.waiting_for_coder == 1)
+    await eventually(lambda: b.activity.waiting_for_coder == 1)
 
     assert WAITING_FIRST in states(in_b, "b-1")[-1].activity
     gates.let("a1")
@@ -167,14 +158,14 @@ async def test_a_third_workspace_waits_first_in_line_behind_two_coders() -> None
     plane = capped(2, *hosts)
     for host in hosts:
         await runs(await joined(plane, host=host), task())
-        await until(running(host))
+        await eventually(running(host))
 
-    await until(lambda: hosts[2].activity.waiting_for_coder == 1)
+    await eventually(lambda: hosts[2].activity.waiting_for_coder == 1)
     await gates.until_started("a", "b")  # Their agents start a moment after their slots.
     gates.let("b")
     await gates.until_started("a", "b", "c")
     gates.let("a", "c")
-    await until(lambda: plane.coders_running == 0)
+    await eventually(lambda: plane.coders_running == 0)
     await plane.close()
 
 
@@ -189,10 +180,10 @@ async def test_a_review_starts_while_every_coder_is_busy() -> None:
     await runs(in_a, task())
     await gates.until_started("a1")
     await runs(in_b, task())
-    await until(lambda: b.activity.waiting_for_coder == 1)
+    await eventually(lambda: b.activity.waiting_for_coder == 1)
     gates.let("a1")
 
-    await until(lambda: sorted(gates.started) == ["a1", "b1", "review"])
+    await eventually(lambda: sorted(gates.started) == ["a1", "b1", "review"])
     assert plane.coders_running == 1
     gates.let("b1", "review")
     await asyncio.wait_for(idle(in_b), 5)
@@ -209,7 +200,7 @@ async def test_a_configurator_takes_a_coders_slot() -> None:
     await gates.until_started("configure")
     await runs(in_b, task())
 
-    await until(lambda: b.activity.waiting_for_coder == 1)
+    await eventually(lambda: b.activity.waiting_for_coder == 1)
     gates.let("configure")
     await gates.until_started("configure", "b1")
     gates.let("b1")
@@ -229,7 +220,7 @@ async def test_a_planner_turn_and_a_review_task_take_no_coders_slot() -> None:
     await say(in_b, "say", SendMessage(agent=PLANNER, text="Hello."))
     await runs(in_b, task("Review it.", REVIEWER))
 
-    await until(lambda: sorted(gates.started) == ["a1", "planner", "review"])
+    await eventually(lambda: sorted(gates.started) == ["a1", "planner", "review"])
     assert b.activity.waiting_for_coder is None
     gates.let("a1", "planner", "review")
     await asyncio.wait_for(idle(in_b), 5)
@@ -245,7 +236,7 @@ async def test_cancelling_a_waiting_run_leaves_the_line_and_holds_it() -> None:
     await runs(in_a, task("First."), task("Second."))
     await gates.until_started("a1")
     await runs(in_b, task())
-    await until(lambda: b.activity.waiting_for_coder == 1)
+    await eventually(lambda: b.activity.waiting_for_coder == 1)
     await say(in_b, "cancel", CancelTurn())
     await asyncio.wait_for(idle(in_b), 5)
 
@@ -269,7 +260,7 @@ async def test_closing_while_a_run_waits_leaves_no_slot_taken() -> None:
     await runs(in_a, task())
     await gates.until_started("a1")
     await runs(in_b, task())
-    await until(lambda: b.activity.waiting_for_coder == 1)
+    await eventually(lambda: b.activity.waiting_for_coder == 1)
     gates.let("a1")
     await plane.close()
 
@@ -300,7 +291,7 @@ async def test_a_task_cancelled_as_it_runs_gives_its_slot_back() -> None:
     await runs(in_a, task())
     await gates.until_started("a1")
     await runs(in_b, task())
-    await until(lambda: b.activity.waiting_for_coder == 1)
+    await eventually(lambda: b.activity.waiting_for_coder == 1)
     await say(in_a, "cancel", CancelTurn())
 
     await gates.until_started("a1", "b1")
@@ -317,10 +308,10 @@ async def test_no_cap_never_waits() -> None:
     for host in hosts:
         await runs(await joined(plane, host=host), task())
 
-    await until(lambda: sorted(gates.started) == ["a", "b", "c"])
+    await eventually(lambda: sorted(gates.started) == ["a", "b", "c"])
     assert plane.coders_running == 3
     gates.let("a", "b", "c")
-    await until(lambda: plane.coders_running == 0)
+    await eventually(lambda: plane.coders_running == 0)
     await plane.close()
 
 
@@ -333,7 +324,7 @@ async def test_removing_the_only_waiting_task_leaves_the_line_at_once() -> None:
     await runs(in_a, task())
     await gates.until_started("a1")
     await runs(in_b, task())
-    await until(lambda: b.activity.waiting_for_coder == 1)
+    await eventually(lambda: b.activity.waiting_for_coder == 1)
     await say(in_b, "remove", RemoveTask(task_id="1"))
 
     await asyncio.wait_for(idle(in_b), 5)
@@ -358,9 +349,9 @@ async def test_a_coder_task_put_ahead_of_a_waiting_one_runs_on_its_turn() -> Non
     await runs(in_a, task())
     await gates.until_started("a1")
     await runs(in_b, task("Second."))
-    await until(lambda: b.activity.waiting_for_coder == 1)
+    await eventually(lambda: b.activity.waiting_for_coder == 1)
     await runs(in_c, task())
-    await until(lambda: c.activity.waiting_for_coder == 2)
+    await eventually(lambda: c.activity.waiting_for_coder == 2)
     await say(in_b, "edit", EditTask(task_id="1", task=task("First, again.")))
     gates.let("a1")
 

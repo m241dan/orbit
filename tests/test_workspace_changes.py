@@ -52,6 +52,7 @@ from tests.plane_fakes import (
     workspace,
 )
 from tests.server_fakes import TASK
+from tests.waiting import eventually
 
 
 class Slow(WorkspaceHost):
@@ -140,12 +141,7 @@ async def test_a_workspace_added_opens_its_latest_session_and_runs_its_startup_c
     plane = ControlPlane(workspaces=Checked())
     connection = await welcomed(plane)
     await say(connection, "add", AddWorkspace(path="/src/c"))
-
-    async def checked() -> None:
-        while steps.runs != [STEP.name]:
-            await asyncio.sleep(0.01)
-
-    await asyncio.wait_for(checked(), 5)
+    await eventually(lambda: steps.runs == [STEP.name])
     await plane.close()
 
 
@@ -355,12 +351,7 @@ async def test_removing_a_workspace_running_a_task_is_refused_as_busy() -> None:
     in_c = await joined(plane, host=host)
     await say(in_c, "add", AddTask(task=TASK))
     await say(in_c, "run", RunTasks())
-
-    async def runs() -> None:
-        while not started:
-            await asyncio.sleep(0.01)
-
-    await asyncio.wait_for(runs(), 5)
+    await eventually(lambda: started)
     taken(in_c)
     await say(in_c, "remove", RemoveWorkspace(workspace="c"))
     refusals = [e for e in payloads(taken(in_c)) if isinstance(e, CommandRefused)]
@@ -433,8 +424,7 @@ async def test_a_workspace_being_added_as_the_control_plane_closes_is_closed_wit
     plane = ControlPlane(workspaces=source)
     connection = await welcomed(plane)
     adding = asyncio.create_task(say(connection, "add", AddWorkspace(path="/src/c")))
-    while not source.opened:
-        await asyncio.sleep(0.01)
+    await eventually(lambda: source.opened)
 
     closing = asyncio.create_task(plane.close())
     await asyncio.sleep(0.01)
@@ -485,8 +475,7 @@ async def test_an_add_cancelled_as_its_latest_session_opens_lets_the_workspace_g
     plane = ControlPlane(workspaces=source)
     connection = await welcomed(plane)
     adding = asyncio.create_task(say(connection, "add", AddWorkspace(path="/src/c")))
-    while not source.hosts:
-        await asyncio.sleep(0.01)
+    await eventually(lambda: source.hosts)
     await asyncio.sleep(0.01)
 
     adding.cancel()
@@ -506,8 +495,7 @@ async def test_a_workspace_added_is_not_served_until_its_latest_session_is_open(
     plane = ControlPlane(workspaces=source)
     connection = await welcomed(plane)
     adding = asyncio.create_task(say(connection, "add", AddWorkspace(path="/src/c")))
-    while not source.hosts:
-        await asyncio.sleep(0.01)
+    await eventually(lambda: source.hosts)
     await asyncio.sleep(0.01)
 
     served = plane.hosts
@@ -549,8 +537,7 @@ async def test_a_hello_listing_as_a_workspace_is_added_gets_the_catalog_as_it_be
     await first.listing.wait()
 
     adding = asyncio.create_task(say(adder, "add", AddWorkspace(path="/src/c")))
-    while len(plane.hosts) < 2:
-        await asyncio.sleep(0.01)
+    await eventually(lambda: len(plane.hosts) >= 2)
     gate.set()
     await asyncio.gather(hello, adding)
     welcome, catalog = payloads(taken(greeted))
@@ -609,8 +596,7 @@ async def test_an_add_cancelled_stays_cancelled_when_unflagging_fails(
     plane = ControlPlane(workspaces=source)
     connection = await welcomed(plane)
     adding = asyncio.create_task(say(connection, "add", AddWorkspace(path="/src/c")))
-    while not source.hosts:
-        await asyncio.sleep(0.01)
+    await eventually(lambda: source.hosts)
     await asyncio.sleep(0.01)
 
     with caplog.at_level(logging.ERROR):

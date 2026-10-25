@@ -14,6 +14,7 @@ from orbit.agent.domain.agent_task import AgentTask, Limits
 from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import Event, TaskSpec
+from tests.waiting import eventually
 
 LINT = VerificationStep(name="Lint", command=("ruff", "check"))
 TESTS = VerificationStep(name="Tests", command=("pytest",))
@@ -140,8 +141,7 @@ async def test_the_agent_exiting_while_the_user_decides_ends_the_task() -> None:
 async def test_cancelling_the_trial_stops_asking_the_user() -> None:
     user = User()
     trial = asyncio.ensure_future(decide(Steps(), user))
-    while not user.shown:
-        await asyncio.sleep(0)
+    await eventually(lambda: user.shown, poll=0)
     trial.cancel()
     with pytest.raises(asyncio.CancelledError):
         await trial

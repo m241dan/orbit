@@ -1,10 +1,11 @@
 """Real throwaway git repositories for the tests that run git itself."""
 
-import asyncio
 import subprocess
 from pathlib import Path
 
 import pytest
+
+from tests.waiting import eventually
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -48,6 +49,5 @@ def bare_repository(tmp_path: Path, name: str = "proj.git") -> Path:
 
 async def started(pidfile: Path) -> int:
     """The pid the slow SSH noted, once it has."""
-    while not pidfile.exists() or not pidfile.read_text().strip():
-        await asyncio.sleep(0.01)
+    await eventually(lambda: pidfile.exists() and pidfile.read_text().strip())
     return int(pidfile.read_text())

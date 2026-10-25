@@ -59,6 +59,7 @@ from tests.agent_fakes import (
     steps_chat,
     until_idle,
 )
+from tests.waiting import eventually
 
 
 async def test_prompts_to_the_planner_go_to_it_and_proposals_become_drafts() -> None:
@@ -287,8 +288,7 @@ async def test_the_planner_hears_the_steps_again_after_a_turn_that_ended_in_erro
 async def test_the_planner_hears_the_steps_again_after_a_cancelled_turn() -> None:
     chat, launcher, _ = steps_chat(hangs, chats)
     first = asyncio.create_task(turn(chat, launcher, "Plan a flag."))
-    while not launcher.launches:
-        await asyncio.sleep(0)
+    await eventually(lambda: launcher.launches, poll=0)
     first.cancel()
     with pytest.raises(asyncio.CancelledError):
         await first
@@ -364,8 +364,7 @@ async def test_answering_a_cancelled_turn_publishes_it_cancelled_and_returns_can
     published: list[Event] = []
     chat, launcher, _ = steps_chat(hangs, published=published)
     answering = asyncio.create_task(chat.answer("Plan.", Settings()))
-    while not launcher.launches:
-        await asyncio.sleep(0)
+    await eventually(lambda: launcher.launches, poll=0)
     answering.cancel()
     assert await answering == "cancelled"
     finished = TurnFinished(turn_id=turn_id_of(published), agent_id="agent-1", reason="cancelled")
@@ -402,8 +401,7 @@ async def test_cancelling_a_turn_after_it_finished_publishes_one_finish_and_retu
     launcher.planner_replies.append("Here is a plan.")
     launcher.planner_afters.append(blocks)
     answering = asyncio.create_task(chat.answer("Plan.", Settings()))
-    while not finished_turns(published):
-        await asyncio.sleep(0)
+    await eventually(lambda: finished_turns(published), poll=0)
     answering.cancel()
     assert await answering == "completed"
     finished = TurnFinished(turn_id=turn_id_of(published), agent_id="agent-1", reason="completed")
@@ -497,8 +495,7 @@ async def test_a_cancelled_first_turn_still_falls_back_if_the_saved_one_is_gone(
     chat, launcher, _ = steps_chat(hangs, resume_lost, chats)
     chat.restore("saved-1")
     first = asyncio.create_task(turn(chat, launcher, "Plan."))
-    while not launcher.launches:
-        await asyncio.sleep(0)
+    await eventually(lambda: launcher.launches, poll=0)
     first.cancel()
     with pytest.raises(asyncio.CancelledError):
         await first

@@ -10,6 +10,7 @@ import pytest
 from orbit.agent.external import processes
 from orbit.agent.external.processes import process_alive, run_process, spawned, start_failure
 from tests.process_checks import gone
+from tests.waiting import eventually
 
 
 async def test_returns_exit_status_and_combined_output(tmp_path: Path) -> None:
@@ -65,8 +66,7 @@ async def test_cancelling_kills_the_child(tmp_path: Path) -> None:
 
 async def recorded_line(path: Path) -> str:
     """The line written to ``path``, once it's whole."""
-    while not (path.exists() and path.read_text().endswith("\n")):
-        await asyncio.sleep(0.01)
+    await eventually(lambda: path.exists() and path.read_text().endswith("\n"))
     return path.read_text()
 
 

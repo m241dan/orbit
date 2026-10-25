@@ -31,6 +31,7 @@ from tests.agent_fakes import HELLO, STEP, FakeLock, Steps, board_of
 from tests.connection_helpers import joined, say, taken
 from tests.plane_fakes import idle, payloads, working, workspace
 from tests.server_fakes import TASK
+from tests.waiting import eventually
 
 
 async def test_the_catalog_lists_every_workspace_served_each_read_only_if_it_is() -> None:
@@ -281,12 +282,7 @@ async def test_a_task_runs_in_each_workspace_at_once() -> None:
     for connection in (in_a, in_b):
         await say(connection, "add", AddTask(task=TASK))
         await say(connection, "run", RunTasks())
-
-    async def both_started() -> None:
-        while len(started) < 2:
-            await asyncio.sleep(0.01)
-
-    await asyncio.wait_for(both_started(), 5)
+    await eventually(lambda: len(started) >= 2)
     gate.set()
     for connection in (in_a, in_b):
         await asyncio.wait_for(idle(connection), 5)
@@ -305,10 +301,5 @@ async def test_a_workspace_served_at_start_runs_its_startup_check_with_no_fronte
     )
     plane = ControlPlane([host])
     await plane.start()
-
-    async def checked() -> None:
-        while steps.runs != [STEP.name]:
-            await asyncio.sleep(0.01)
-
-    await asyncio.wait_for(checked(), 5)
+    await eventually(lambda: steps.runs == [STEP.name])
     await plane.close()

@@ -22,6 +22,7 @@ from tests.agent_fakes import (
     publish,
     served,
 )
+from tests.waiting import eventually
 
 NOW = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
 LATER = (UsageLimit(label="Session", percent=60.0),)
@@ -172,8 +173,7 @@ async def test_a_nudge_during_a_fetch_does_nothing() -> None:
     source.gate = asyncio.Event()
     watched = Monitored(source)
     watched.monitor.start()
-    while source.calls == 0:
-        await asyncio.sleep(0)
+    await eventually(lambda: source.calls > 0, poll=0)
     watched.clock.time = 100
     watched.monitor.nudge()
     source.gate.set()
@@ -196,8 +196,7 @@ async def test_close_cancels_the_loop_and_can_be_repeated() -> None:
     source = Source()
     watched = Monitored(source)
     watched.monitor.start()
-    while source.calls == 0:
-        await asyncio.sleep(0)
+    await eventually(lambda: source.calls > 0, poll=0)
     await watched.monitor.close()
     await watched.monitor.close()
     assert await watched.none()
@@ -218,8 +217,7 @@ async def test_close_stops_the_loop_when_the_source_swallows_the_cancel() -> Non
     source = Swallowing()
     watched = Monitored(source)
     watched.monitor.start()
-    while source.calls == 0:
-        await asyncio.sleep(0)
+    await eventually(lambda: source.calls > 0, poll=0)
     closing = asyncio.create_task(watched.monitor.close())
     await asyncio.wait([closing], timeout=1)
     assert closing.done()

@@ -48,6 +48,7 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
+    "pytest-timeout>=2.4.0",
     "pytest-xdist>=3.8.0",
     "ruff>=0.17.0",
     "types-jsonschema>=4.26.0.20261006",
@@ -71,6 +72,9 @@ files = ["src", "tests"]
 testpaths = ["tests"]
 addopts = "-ra -n auto --dist worksteal"
 asyncio_mode = "auto"
+# A backstop, so a test that hangs fails rather than holding its worker forever; each wait in
+# the tests has a bound of its own, of seconds.
+timeout = 60
 
 [tool.coverage.run]
 source = ["orbit"]

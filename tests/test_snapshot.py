@@ -56,6 +56,7 @@ from tests.agent_fakes import (
 )
 from tests.connection_helpers import published
 from tests.proposal_fakes import CONFIGURE, LINT, proposes
+from tests.waiting import eventually
 
 
 def last_of[E](kind: type[E], events: list[Event]) -> E:
@@ -195,8 +196,7 @@ async def test_while_the_startup_check_runs_it_is_a_running_agent_with_the_panel
     steps.gate = asyncio.Event()
     session, _, _ = session_for(verification=Verification((STEP,), steps), check_at_startup=True)
     await greet(session)
-    while not steps.runs:
-        await asyncio.sleep(0)
+    await eventually(lambda: steps.runs, poll=0)
     snapshot = await snapshot_of(session)
     steps.gate.set()
     await session.close()
@@ -297,8 +297,7 @@ async def test_the_startup_check_is_an_agent_only_between_its_start_and_exit() -
 
     check = StartupCheck(Verification((STEP,), Steps(True)), CheckSite(None, "."), publish, add_fix)
     check.start()
-    while check.running:
-        await asyncio.sleep(0)
+    await eventually(lambda: not check.running, poll=0)
     await check.close()
 
     agent = RunningAgent(agent_id=STARTUP_AGENT, role=STARTUP_ROLE, task_id=STARTUP_TASK)

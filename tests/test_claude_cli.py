@@ -27,6 +27,7 @@ from orbit.protocol import (
     Usage,
 )
 from tests.process_checks import gone
+from tests.waiting import eventually
 
 FAKE_CLAUDE = Path(__file__).parent / "fake_claude.py"
 SESSION_ID = "49782958-d074-475d-9aaa-54d462f567dc"
@@ -526,8 +527,7 @@ async def test_cancel_kills_the_cli_process(tmp_path: Path) -> None:
     turn = asyncio.create_task(run(runner, "hi"))
     recorded = Path(f"{scenario}.calls")
     # The file opens before its line is written, so wait for the whole line.
-    while not (recorded.exists() and recorded.read_text().endswith("\n")):
-        await asyncio.sleep(0.01)
+    await eventually(lambda: recorded.exists() and recorded.read_text().endswith("\n"))
     turn.cancel()
     with pytest.raises(asyncio.CancelledError):
         await turn
@@ -540,8 +540,7 @@ async def test_cancel_stops_what_the_cli_started(tmp_path: Path) -> None:
     runner, scenario = make_runner(tmp_path, stdout=lines(INIT), hang=True, spawn=True)
     turn = asyncio.create_task(run(runner, "hi"))
     recorded = Path(f"{scenario}.calls")
-    while not (recorded.exists() and recorded.read_text().endswith("\n")):
-        await asyncio.sleep(0.01)
+    await eventually(lambda: recorded.exists() and recorded.read_text().endswith("\n"))
     turn.cancel()
     with pytest.raises(asyncio.CancelledError):
         await turn
@@ -554,8 +553,7 @@ async def test_cancel_stops_what_the_cli_left_holding_its_output(tmp_path: Path)
     runner, scenario = make_runner(tmp_path, stdout=lines(INIT), spawn=True)
     turn = asyncio.create_task(run(runner, "hi"))
     recorded = Path(f"{scenario}.calls")
-    while not (recorded.exists() and recorded.read_text().endswith("\n")):
-        await asyncio.sleep(0.01)
+    await eventually(lambda: recorded.exists() and recorded.read_text().endswith("\n"))
     [call] = calls(scenario)
     assert await gone(call["pid"])
     turn.cancel()

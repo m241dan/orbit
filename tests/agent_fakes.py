@@ -102,6 +102,7 @@ from orbit.protocol import (
 )
 from orbit.tracing import NoTelemetry, Telemetry
 from tests.loop_quiet import quiet_within
+from tests.waiting import eventually
 
 Backend = WorkspaceHost | ControlPlane
 """A workspace host, driven through the control plane around it, or a control plane."""
@@ -1169,8 +1170,7 @@ async def fetch_usage_unseen(session: Backend) -> None:
     monitor = control_plane(session)._usage
     assert monitor is not None
     monitor.start()
-    while monitor.latest is None:
-        await asyncio.sleep(0)
+    await eventually(lambda: monitor.latest is not None, poll=0)
     queued(session)
 
 
@@ -1322,13 +1322,18 @@ async def settled() -> None:
         await asyncio.sleep(0)
 
 
+SETTLING = 10
+"""How long :func:`settle` waits at the most, in seconds."""
+
+
 async def settle(
     session: WorkspaceHost,
     events: list[Event] | None = None,
     until: Callable[[list[Event]], bool] | None = None,
 ) -> list[Event]:
     """Events until ``until`` holds (by default, every task has finished) and nothing has
-    happened for a moment."""
+    happened for a moment; raises :class:`TimeoutError` if that takes over :data:`SETTLING`
+    seconds."""
     events = [] if events is None else events
 
     async def pump() -> None:
@@ -1345,16 +1350,17 @@ async def settle(
 
 async def _quiet(events: list[Event], done: Callable[[list[Event]], bool]) -> None:
     """Wait until ``done`` holds for ``events`` and none has come since the event loop went
-    quiet, or for 0.15 s."""
-    while True:
-        seen = len(events)
-        went_quiet = await quiet_within(0.15)
-        if len(events) != seen:
-            continue
-        if done(events):
-            return
-        if went_quiet:  # Nothing comes by itself: look again a little later, as before.
-            await asyncio.sleep(0.05)
+    quiet, or for 0.15 s, for :data:`SETTLING` seconds at the most."""
+    async with asyncio.timeout(SETTLING):
+        while True:
+            seen = len(events)
+            went_quiet = await quiet_within(0.15)
+            if len(events) != seen:
+                continue
+            if done(events):
+                return
+            if went_quiet:  # Nothing comes by itself: look again a little later, as before.
+                await asyncio.sleep(0.05)
 
 
 def _finished(events: list[Event]) -> bool:

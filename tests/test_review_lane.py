@@ -61,6 +61,7 @@ from tests.agent_fakes import (
     suggests,
     verified,
 )
+from tests.waiting import eventually
 
 
 def _errored(events: list[Event]) -> bool:
@@ -290,8 +291,7 @@ async def test_after_cancelling_suggestions_wait_to_be_run() -> None:
         review_limits=ReviewLimits(rounds=1),
     )
     await start(session)
-    while not any(la.agent.role == "reviewer" for la in launcher.launches):
-        await asyncio.sleep(0.01)
+    await eventually(lambda: any(la.agent.role == "reviewer" for la in launcher.launches))
     await send(session, CancelTurn())
     gate.set()
 
@@ -435,8 +435,7 @@ async def _landed_two_while_the_first_review_waited(
     await start(session, "one", "two")
     events: list[Event] = []
     collecting = asyncio.ensure_future(settle(session, events))
-    while [t.task.role for t in latest_board(events)].count("reviewer") < 2:
-        await asyncio.sleep(0.01)
+    await eventually(lambda: [t.task.role for t in latest_board(events)].count("reviewer") >= 2)
     gate.set()
     await asyncio.wait_for(collecting, 10)
     return events
@@ -767,10 +766,7 @@ async def test_a_review_can_suggest_after_its_first_suggestion_landed() -> None:
         await call("get_task")
         replies.append(await call("suggest_task", title="Add tests", prompt="Please."))
         suggested.set()
-        first = board_of(sessions[0]).get("4")
-        while first.status != "completed":
-            await asyncio.sleep(0.01)
-            first = board_of(sessions[0]).get("4")
+        await eventually(lambda: board_of(sessions[0]).get("4").status == "completed")
         await asyncio.sleep(0.1)  # Let the work lane tell the review lane it landed.
         replies.append(await call("suggest_task", title="Rename x", prompt="Please."))
         await call("complete_task", summary="Reviewed")
@@ -904,8 +900,7 @@ async def test_a_queued_review_that_is_removed_leaves_no_batch_open() -> None:
     await start(session, "one", "two")
     events: list[Event] = []
     collecting = asyncio.ensure_future(settle(session, events))
-    while [t.task.role for t in latest_board(events)].count("reviewer") < 2:
-        await asyncio.sleep(0.01)
+    await eventually(lambda: [t.task.role for t in latest_board(events)].count("reviewer") >= 2)
     await send(session, RemoveTask(task_id="4"))
     gate.set()
     await asyncio.wait_for(collecting, 10)

@@ -13,6 +13,7 @@ from starlette.applications import Starlette
 
 from orbit.agent.application.ports import HostFailed
 from orbit.agent.external.embedded_server import EmbeddedServer
+from tests.waiting import eventually
 
 
 def bound() -> socket.socket:
@@ -198,8 +199,7 @@ async def test_a_server_forced_to_exit_while_waiting_on_a_connection_stops_waiti
     serving = await server.start_serving(bound(), "It failed.")
     connection = Lingering(server, after=None)
     server.should_exit = True
-    while not connection.asked:
-        await asyncio.sleep(0)
+    await eventually(lambda: connection.asked, poll=0)
     await asyncio.sleep(0.02)
     assert not serving.done()
     server.force_exit = True

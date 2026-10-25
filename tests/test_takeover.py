@@ -66,6 +66,7 @@ from tests.agent_fakes import (
 )
 from tests.attach_fakes import EARLIER, stored
 from tests.connection_helpers import views_on_joining
+from tests.waiting import eventually
 
 
 def offered(event: Event) -> bool:
@@ -169,8 +170,7 @@ async def test_taking_over_counts_on_from_the_super_count_the_owner_left() -> No
     lock = FakeLock(free=True)
     session, _, _ = session_for(owner=OWNER, lock=lock, tree=FakeTree(), review=True, store=store)
     await events_until(session, offered)
-    while lane_of(session).planner.since_super != 3:
-        await asyncio.sleep(0)
+    await eventually(lambda: lane_of(session).planner.since_super == 3, poll=0)
     store.count = 5
     await send(session, TakeOwnership(take=True))
     await events_until(session, lambda event: event == ACCEPTED)
@@ -302,8 +302,7 @@ async def test_a_declined_repository_is_offered_again_once_another_orbit_has_hel
     await declined(session)
     lock.free = False
     tries = lock.tries
-    while lock.tries < tries + 2:
-        await asyncio.sleep(LOCK_RETRY)
+    await eventually(lambda: lock.tries >= tries + 2, poll=LOCK_RETRY)
 
     lock.free = True
     await events_until(session, offered)
@@ -363,8 +362,7 @@ async def offered_takeover(events: list[Event], lock: FakeLock) -> Takeover:
 
     takeover = Takeover(True, lock, publish, RetryTimes(LOCK_RETRY))
     takeover.start()
-    while not takeover.offered:
-        await asyncio.sleep(LOCK_RETRY)
+    await eventually(lambda: takeover.offered, poll=LOCK_RETRY)
     return takeover
 
 

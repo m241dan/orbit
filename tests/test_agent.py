@@ -68,6 +68,7 @@ from tests.agent_fakes import (
     send,
     session_for,
 )
+from tests.waiting import eventually
 
 PLANNER_IDLE = BusyChanged(busy=False, lane="planner")
 
@@ -206,8 +207,7 @@ async def test_a_turn_started_as_the_last_ends_is_not_reported_idle() -> None:
     # event marks: TurnFinished comes before the end, BusyChanged after the callback.
     turn = planner_turn(session)
     assert turn is not None
-    while not turn.done():
-        await asyncio.sleep(0)
+    await eventually(turn.done, poll=0)
     # The first turn is done but hasn't reported idle yet when the second starts.
     await send(session, SendMessage(agent=PLANNER, text="two"))
     events = await collect_run(session)

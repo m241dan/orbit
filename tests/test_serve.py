@@ -71,6 +71,7 @@ from tests.git_repo import bare_repository, commit_file, init_repo
 from tests.server_fakes import TASK
 from tests.store_views import database, workspace_id_of
 from tests.tls_certs import DAY, Ca, ServerFiles, make_ca, make_client, make_server, other_key
+from tests.waiting import eventually
 
 runner = CliRunner()
 QUIET = ["--no-usage", "--no-verify"]
@@ -1388,8 +1389,7 @@ async def test_the_first_signal_stops_serving_and_a_second_ctrl_c_exits_at_once(
         signal.raise_signal(signal.SIGINT)
         await asyncio.wait_for(stopping.wait(), 5)
         signal.raise_signal(signal.SIGINT)
-        while not exits:
-            await asyncio.sleep(0.01)
+        await eventually(lambda: exits)
     finally:
         loop = asyncio.get_running_loop()
         for number in (signal.SIGINT, signal.SIGTERM):
@@ -1466,8 +1466,7 @@ async def test_cancelling_serve_as_its_server_starts_stops_the_server_and_closes
     monkeypatch.setattr(serve, "ControlPlaneServer", made)
     host = WorkspaceHost(workspace="/src/a", workspace_id="a")
     serving = asyncio.create_task(serve._served(serve_parts(ControlPlane([host]), tmp_path), None))
-    while not servers:
-        await asyncio.sleep(0.01)
+    await eventually(lambda: servers)
     await asyncio.wait_for(servers[0].starting.wait(), 5)
 
     serving.cancel()

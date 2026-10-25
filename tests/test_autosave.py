@@ -53,6 +53,7 @@ from tests.agent_fakes import (
     suggests,
 )
 from tests.server_fakes import TASK
+from tests.waiting import eventually
 
 
 async def proposes(call: Call) -> TurnEndReason:
@@ -232,8 +233,7 @@ async def joined(session: WorkspaceHost) -> None:
     async for envelope in connection.events():
         if envelope.payload == Notice(message=LEFTOVER):
             break
-    while count_loader_of(session).running:
-        await asyncio.sleep(0)
+    await eventually(lambda: not count_loader_of(session).running, poll=0)
 
 
 async def test_the_super_count_is_loaded_from_the_store_on_the_first_join() -> None:

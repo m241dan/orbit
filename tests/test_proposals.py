@@ -47,6 +47,7 @@ from tests.agent_fakes import (
     verified,
 )
 from tests.proposal_fakes import CONFIGURE, LINT, SETUP, TESTS, Review, proposes
+from tests.waiting import eventually
 
 
 def status(events: list[Event]) -> str:
@@ -228,8 +229,7 @@ async def test_a_task_cancelled_while_its_proposal_runs_answers_the_agent() -> N
         proposal_review=Review(),
     )
     running = asyncio.create_task(run(session, CONFIGURE))
-    while not steps.runs:
-        await asyncio.sleep(0.01)
+    await eventually(lambda: steps.runs)
     await send(session, CancelTurn())
     events = await asyncio.wait_for(running, 5)
     assert status(events) == "cancelled"
