@@ -96,7 +96,6 @@ from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     CODER,
     INVALID,
-    PLANNER,
     REVIEW_ROLES,
     ActivateSession,
     Attach,
@@ -706,12 +705,10 @@ class WorkspaceHost:
 
     @property
     def lanes(self) -> tuple[str, ...]:
-        """The names of this workspace's lanes: the work lane, the conversational roles', but
-        the planner's while the planner is disabled, and those that start by themselves, which
-        only enabled roles have."""
-        planner = PLANNER not in disabled_roles(self._roles())
-        shut = self._seats.planner.lane
-        return tuple(lane for lane in self._lanes.names if planner or lane != shut)
+        """The names of this workspace's lanes: the work lane, the conversational roles', a
+        disabled planner's only while another role answers there, and those that start by
+        themselves, which only enabled roles have."""
+        return self._lanes.names
 
     @property
     def conversational(self) -> tuple[str, ...]:
@@ -881,9 +878,11 @@ class WorkspaceHost:
 
     def _session_lanes(self) -> Lanes:
         """The session's lanes: the one whose roles merge, which runs on the user's asking, the
-        conversational roles', and those that start by themselves, the review lane among them."""
+        conversational roles', as they stand each time they're named, and those that start by
+        themselves, the review lane among them."""
         review = (self._lane.runner,) if self._lane else ()
-        return Lanes(merging_lane(self._roles()), (*review, *self._runners), self._seats.lanes)
+        runners = (*review, *self._runners)
+        return Lanes(merging_lane(self._roles()), runners, lambda: self._seats.lanes)
 
     def _paused(self) -> bool:
         """Whether the work lane waits out a pause, when no other lane starts a task."""

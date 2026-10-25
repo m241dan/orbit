@@ -74,6 +74,13 @@ CRITIC_ROLE = ARCHITECT_ROLE.model_copy(update={"instructions": "You critique."}
 SHARING = {**TALKING, CRITIC: CRITIC_ROLE}
 """The built-in roles, the architect and a critic answering in the architect's lane."""
 
+IN_THE_MUTED_PLANNERS_LANE = {
+    **ROLES,
+    PLANNER: ROLES[PLANNER].model_copy(update={"enabled": False}),
+    ARCHITECT: ARCHITECT_ROLE.model_copy(update={"lane": "planner"}),
+}
+"""The built-in roles with the planner disabled, and the architect answering in its lane."""
+
 ARCHITECT_ANSWERING = "The architect is already answering."
 """What a message is refused with while the architect answers in its lane."""
 
@@ -275,9 +282,7 @@ async def test_a_message_while_another_role_answers_in_its_lane_is_refused_namin
 
 
 async def test_a_message_to_a_disabled_role_leaves_its_lane_busy_while_another_answers() -> None:
-    muted = ROLES[PLANNER].model_copy(update={"enabled": False})
-    planning = ARCHITECT_ROLE.model_copy(update={"lane": "planner"})
-    session, launcher = talking(roles={**ROLES, PLANNER: muted, ARCHITECT: planning})
+    session, launcher = talking(roles=IN_THE_MUTED_PLANNERS_LANE)
     launcher.planner_turns = [hangs]
     await send(session, SendMessage(agent=ARCHITECT, text="Design."))
     await eventually(lambda: launcher.launches, poll=0)
@@ -289,6 +294,26 @@ async def test_a_message_to_a_disabled_role_leaves_its_lane_busy_while_another_a
     await send(session, CancelTurn(lane="planner"))
     await events_until(session, idle("planner"))
     await session.close()
+
+
+async def test_a_lane_a_disabled_planner_shares_with_an_enabled_role_stays_listed() -> None:
+    session, _ = talking(roles=IN_THE_MUTED_PLANNERS_LANE)
+    busy = {"work": False, "planner": False, "review": False}
+    assert (await snapshot_of(session)).busy == busy
+    assert session.lanes == ("work", "planner", "review")
+    assert (await catalog_of(session)).lanes == ("work", "planner", "review")
+
+
+async def test_cancelling_a_lane_a_disabled_planner_shares_stops_the_roles_turn() -> None:
+    session, launcher = talking(roles=IN_THE_MUTED_PLANNERS_LANE)
+    launcher.planner_turns = [hangs]
+    await send(session, SendMessage(agent=ARCHITECT, text="Design."))
+    await eventually(lambda: launcher.launches, poll=0)
+    await send(session, CancelTurn(lane="planner"))
+    events = await events_until(session, idle("planner"))
+    await session.close()
+    assert any(isinstance(e, TurnFinished) and e.reason == "cancelled" for e in events)
+    assert not any(isinstance(e, CommandRefused) for e in events)
 
 
 async def test_the_architects_lane_shows_in_the_snapshot_and_the_catalog() -> None:

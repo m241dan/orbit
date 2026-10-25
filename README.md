@@ -1100,18 +1100,20 @@ merges, whether it's enabled and how hard its agents think:
   `CancelTurn` and `UpdateSettings` reach it too (see [docs/protocol.md](docs/protocol.md)).
 - `merge`: whether its finished work is committed and merged.
 - `enabled`: whether it runs at all. A disabled role is left out of the Catalog's agents, and its
-  lane out of the Catalog's lanes unless an enabled role shares it. A disabled `reviewer` queues no
-  reviews as work lands, and a disabled `super-reviewer` no super reviews, however many commits
-  land; a disabled `super-reviewer` also takes the `super-review` trigger out of the Catalog,
-  hiding `ctrl+g`, as a disabled `configurator` does `configure-checks` and `ctrl+e`, and firing
-  either is then refused as an unknown trigger. A message to a disabled `planner`, or resetting its
+  lane out of the Catalog's lanes and the Snapshot's `busy` unless an enabled role shares it. A
+  disabled `reviewer` queues no reviews as work lands, and a disabled `super-reviewer` no super
+  reviews, however many commits land; a disabled `super-reviewer` also takes the `super-review`
+  trigger out of the Catalog, hiding `ctrl+g`, as a disabled `configurator` does `configure-checks`
+  and `ctrl+e`, and firing either is then refused as an unknown trigger. A message to a disabled
+  `planner`, or resetting its
   conversation, is refused (`planner is disabled in this project's configuration.`), as are adding
   a task in a disabled role, editing one into it or accepting a draft in it, naming the role, and
   `ctrl+r` while a task in one is still to run. Nothing runs such a task, which stays on the task list until you edit or
   remove it, and a failing startup check adds no draft while the `coder` is disabled. Nor can
   agents add coder tasks then: a reviewer's `suggest_task` and a conversational role's
   `propose_task` get an error reply naming the `coder` as disabled, adding nothing to the task
-  list or the review's batch.
+  list or the review's batch. A disabled `planner`'s settings can still be picked with `ctrl+o`,
+  `ctrl+l` and `ctrl+y`, as new tasks start with them.
 - `effort`: how hard its agents think: `low`, `medium`, `high`, `xhigh` or `max`, the levels
   `claude --help` lists; any other value is refused, listing those. Left out, the CLI's default.
   Like its model and tool access, it's the default for tasks orbit queues in the role, and what

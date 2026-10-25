@@ -129,6 +129,12 @@ class PlannerSeat:
         return self._lane
 
     @property
+    def disabled(self) -> bool:
+        """Whether the seat's role is disabled, which refuses its work."""
+        role = self._role()
+        return role is not None and not role.enabled
+
+    @property
     def running(self) -> bool:
         """Whether the planner is answering."""
         return self._turn is not None and not self._turn.done()
@@ -161,9 +167,7 @@ class PlannerSeat:
     def _absent(self) -> Refused:
         """The refusal of the seat's work while it has no planner: its role is disabled, or
         there are no agents or role."""
-        role = self._role()
-        disabled = role is not None and not role.enabled
-        message = disabled_note(self._name) if disabled else NO_PLANNER_MESSAGE
+        message = disabled_note(self._name) if self.disabled else NO_PLANNER_MESSAGE
         return Refused(NOT_CONFIGURED, message)
 
     def tell(self, note: str) -> None:

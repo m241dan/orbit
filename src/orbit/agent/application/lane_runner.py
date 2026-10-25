@@ -25,6 +25,11 @@ def unpaused() -> bool:
     return False
 
 
+def planners_lane() -> tuple[BusyLane, ...]:
+    """Says the conversational roles answer in the planner's lane alone."""
+    return (PLANNER_LANE,)
+
+
 def unposted(event: Event) -> None:
     """Posts ``event`` nowhere."""
 
@@ -195,24 +200,25 @@ class Kickable(Protocol):
 
 class Lanes:
     """The session's lanes, by name: ``work``, the lane whose roles merge, which runs on the
-    user's asking, those the conversational roles answer in (``conversing``), the planner's
-    unless given, and those the ``runners`` run, which start by themselves."""
+    user's asking, those the conversational roles answer in, as ``conversing`` says each time
+    they're named, the planner's unless given, and those the ``runners`` run, which start by
+    themselves."""
 
     def __init__(
         self,
         work: BusyLane = WORK_LANE,
         runners: Iterable[LaneRunner] = (),
-        conversing: Iterable[BusyLane] = (PLANNER_LANE,),
+        conversing: Callable[[], Iterable[BusyLane]] = planners_lane,
     ) -> None:
         self.work = work
         self._runners = {runner.lane: runner for runner in runners}
-        self._conversing = tuple(conversing)
+        self._conversing = conversing
 
     @property
     def names(self) -> tuple[BusyLane, ...]:
         """Every lane's name: the work lane's, the conversational roles', then those that start
         by themselves."""
-        return (self.work, *self._conversing, *self._runners)
+        return (self.work, *self._conversing(), *self._runners)
 
     @property
     def elsewhere(self) -> frozenset[str]:

@@ -23,21 +23,26 @@ from orbit.protocol import (
     AcceptTask,
     AddTask,
     BusyChanged,
+    CancelTurn,
     Catalog,
     Command,
     CommandAccepted,
     CommandRefused,
+    ConversationReset,
     EditTask,
     Event,
     FireTrigger,
     ResetConversation,
     RunTasks,
     SendMessage,
+    Settings,
+    SettingsChanged,
     StartupChecked,
     TasksChanged,
     TaskSpec,
     TurnEndReason,
     TurnFinished,
+    UpdateSettings,
 )
 from orbit.tui.view.triggers import trigger_key_labels
 from tests.agent_fakes import (
@@ -53,6 +58,7 @@ from tests.agent_fakes import (
     agent_exited,
     board,
     board_of,
+    chats,
     checked,
     claims_done,
     events_until,
@@ -64,6 +70,7 @@ from tests.agent_fakes import (
     send,
     session_for,
     settle,
+    snapshot_of,
     start,
     suggests,
     until_idle,
@@ -201,6 +208,41 @@ async def test_a_message_to_a_disabled_planner_is_refused_freeing_its_lane() -> 
     assert events[-1] == disabled(PLANNER)
     assert BusyChanged(busy=False, lane="planner") in events
     assert launcher.launches == []
+
+
+async def test_a_disabled_planners_lane_leaves_the_snapshot_and_cancel_turn_refuses_it() -> None:
+    session, _, _ = session_for(roles=disabling(PLANNER))
+    busy = (await snapshot_of(session)).busy
+    events = await refusal_of(session, CancelTurn(lane="planner"))
+    await session.close()
+    assert (busy, session.lanes) == ({"work": False, "review": False}, ("work", "review"))
+    assert events[-1] == refused(UNKNOWN, "No lane 'planner'; the lanes are work and review.")
+
+
+async def test_a_planner_disabled_as_a_reset_reads_its_role_again_takes_its_lane_out() -> None:
+    muted = ROLES[PLANNER].model_copy(update={"enabled": False})
+    session, _, launcher = session_for(planner_role=lambda: muted)
+    launcher.planner_turns = [chats]
+    await plan(session, "Plan it.")
+    enabled = session.lanes
+    await send(session, ResetConversation(agent=PLANNER))
+    await events_until(session, lambda e: e == ConversationReset(agent=PLANNER))
+    busy = (await snapshot_of(session)).busy
+    events = await refusal_of(session, CancelTurn(lane="planner"))
+    await session.close()
+    assert enabled == ("work", "planner", "review")
+    assert (busy, session.lanes) == ({"work": False, "review": False}, ("work", "review"))
+    assert events[-1] == refused(UNKNOWN, "No lane 'planner'; the lanes are work and review.")
+
+
+async def test_the_planners_settings_still_change_while_it_is_disabled_for_new_tasks() -> None:
+    session, _, _ = session_for(roles=disabling(PLANNER))
+    picked = Settings(model="haiku", tool_access="full")
+    await send(session, UpdateSettings(role=PLANNER, settings=picked))
+    events = await events_until(session, of_type(CommandAccepted))
+    await session.close()
+    assert SettingsChanged(role=PLANNER, settings=picked) in events
+    assert (await snapshot_of(session)).settings == picked
 
 
 async def test_resetting_a_disabled_planners_conversation_is_refused() -> None:

@@ -113,8 +113,9 @@ with `invalid`. The first `Attach` is answered in this order:
 
 1. `Snapshot`: the session as it stands, with its settings (the planner's), each conversational
    role's settings by role in `role_settings` (the planner's among them; added to version 2, so
-   an older peer's Snapshot has none), busy lanes (a flag for each lane, by
-   name: the work lane, the planner's and every other lane of the enabled task roles), tasks,
+   an older peer's Snapshot has none), busy lanes (a flag for each lane the Catalog lists, by
+   name: the work lane, the conversational roles', a disabled planner's only while an enabled
+   conversational role shares it, and every other lane of the enabled task roles), tasks,
    verification steps, review status, checks proposals waiting for a decision, running
    agents and its `transcript`: the session's last 500 logged events, oldest first, in the
    envelopes they were sent in, their `seq`s included (none without a store), and, while the
@@ -530,7 +531,8 @@ role)` and saves the session. The session keeps settings for each conversational
 `Snapshot`'s `settings` hold, and every role's are in its `role_settings`. `role` was added to
 version 2 of both, defaulting to `planner`, so an older peer's settings are the planner's. It's refused with `unknown` for a role that isn't
 conversational here (`Role 'coder' has no settings of its own; the roles with them are planner.`)
-and with `not_configured` for a disabled one, as `SendMessage` to it is.
+and with `not_configured` for a disabled one, as `SendMessage` to it is, but the planner: its
+settings can still be set while it's disabled, as new tasks start with them.
 
 A `Settings`, the session's or a task's, holds the `model` (`null` for the backend's default), the
 `tool_access` (`off`, `restricted` or `full`) and the `effort` (`low`, `medium`, `high`, `xhigh`
@@ -546,7 +548,8 @@ again, which holds the lane until the user asks for work again; in a conversatio
 (`planner` for the planner), the turn of the role answering there; in any other lane of the roles' (such as `review`), whose tasks start by
 themselves, the task running there, and the lane goes on with its next. Stopping a lane with
 nothing running is accepted and does nothing more. It's refused with `unknown` for a lane there's
-none of, naming those there are.
+none of, naming those there are: it accepts the lanes the Catalog lists, so a disabled planner's
+only while an enabled conversational role shares it.
 
 `CancelAgent(agent_id)` stops agent `agent_id`'s work: the startup check, or the task of an agent
 in a lane whose tasks start by themselves, such as a reviewer's review, on its own; a conversational role's turn, such as the planner's, as `CancelTurn` does for its lane; and any

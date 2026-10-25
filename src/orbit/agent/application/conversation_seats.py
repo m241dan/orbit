@@ -24,9 +24,9 @@ class ConversationSeats:
     ``tasks`` and publishing into ``events``, each asking ``hooks`` of the session: the planner's
     first, there even without agents or a planner role, or while it's disabled, as it refuses
     their work then, and then one for each other enabled role with ``conversation = true``, in
-    the roles' order. The seats in a lane take turns: one answers there at a time. The
-    conversations of roles without a seat that a session was opened with are kept, to save
-    back."""
+    the roles' order. A disabled planner's lane is the roles' only while another role answers
+    there. The seats in a lane take turns: one answers there at a time. The conversations of
+    roles without a seat that a session was opened with are kept, to save back."""
 
     def __init__(
         self, desk: AgentDesk | None, tasks: Tasks, events: EventSink, hooks: SeatHooks
@@ -71,8 +71,9 @@ class ConversationSeats:
 
     @property
     def lanes(self) -> tuple[BusyLane, ...]:
-        """The lanes the roles answer in, the planner's first, each named once."""
-        return tuple(dict.fromkeys(seat.lane for seat in self._seats.values()))
+        """The lanes the roles answer in, the planner's first, each named once: a disabled
+        planner's only while another role answers there."""
+        return tuple(dict.fromkeys(seat.lane for seat in self._open()))
 
     def busy(self) -> dict[BusyLane, bool]:
         """Whether each of the roles' lanes is busy, by name: a role in it is answering."""
@@ -82,6 +83,10 @@ class ConversationSeats:
         """Cancel the turns of the roles in ``lane``, if they run."""
         for seat in self._in(lane):
             seat.cancel()
+
+    def _open(self) -> Iterator[PlannerSeat]:
+        """The seats whose roles aren't disabled: every one but a disabled planner's."""
+        return (seat for seat in self._seats.values() if not seat.disabled)
 
     def _in(self, lane: BusyLane) -> Iterator[PlannerSeat]:
         """The seats whose turns run in ``lane``."""
