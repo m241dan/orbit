@@ -286,9 +286,6 @@ class Steps:
 
 
 START = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
-
-HALTED = "The session is halted."
-"""Why :class:`FakeHalt` refuses a command while halted."""
 """When a :class:`Ticks` clock starts."""
 
 
@@ -301,6 +298,10 @@ class Ticks:
     def __call__(self) -> datetime:
         self.reads += 1
         return START + timedelta(minutes=self.reads - 1)
+
+
+HALTED = "The session is halted."
+"""Why :class:`FakeHalt` refuses a command while halted."""
 
 
 class FakeHalt:
