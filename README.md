@@ -1773,7 +1773,9 @@ step, a give-up and a merge conflict as events, and its wait and run as child sp
 a frontend sends is one span, `orbit.command`: its type, the workspace and session it's for, the
 client that sent it and whether it was accepted or refused, with the code; it's a child of the
 span whose trace context its envelope carries, if any, else it starts its own trace, and the
-events it publishes carry its own. Spans hold no prompts, agent messages, diffs or check output.
+events it publishes carry its own. Each planner turn is one span, `orbit.planner.turn`, a child of
+the `SendMessage` command's: the workspace, session and model, what the turn cost, the drafts it
+proposed and how it ended. Spans hold no prompts, agent messages, diffs or check output.
 [docs/telemetry.md](docs/telemetry.md) lists every span, attribute and event.
 
 The TUI traces what the user does: each action that sends commands, such as pressing ctrl+r or
@@ -1902,7 +1904,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     (in `planner`) is the planner's conversation, running each turn and publishing how it ended;
     `PlannerSeat` (in `planner_seat`) is the planner's place in the session: it holds the current
     `PlannerChat` and its turns, starts, cancels and resets them, and closes the planners a
-    switch or reset retired once that's done; `SessionKeeper` (in `keeper`) is the open session:
+    switch or reset retired once that's done; each turn is traced as an `orbit.planner.turn`
+    span by `PlannerTracing` (in `planner_trace`), current while it runs so the `PlannerChat`
+    records on it; `SessionKeeper` (in `keeper`) is the open session:
     it saves it after every change once it's used, and opens, renames and deletes saved sessions
     through the store, each under its lock; `SessionSwitcher` (in `switcher`) switches the
     session between saved ones: it lists, opens, renames and deletes them through the keeper,

@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from orbit.agent.application.coder_slots import CoderSeat
+from orbit.agent.application.span_usage import usage_attributes
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.commits import task_title
 from orbit.protocol import TaskState
@@ -130,17 +131,7 @@ def _ended(span: Span, state: TaskState | None, *, failed: bool) -> None:
     ended, recording an error unless one escaping it already ``failed`` it."""
     if state is None:
         return
-    usage = state.usage
-    span.set_attributes(
-        {
-            "gen_ai.usage.input_tokens": usage.input_tokens,
-            "gen_ai.usage.output_tokens": usage.output_tokens,
-            "gen_ai.usage.cache_creation.input_tokens": usage.cache_creation_input_tokens,
-            "gen_ai.usage.cache_read.input_tokens": usage.cache_read_input_tokens,
-            "orbit.cost.usd": usage.cost_usd,
-            "orbit.task.status": state.status,
-        }
-    )
+    span.set_attributes({**usage_attributes(state.usage), "orbit.task.status": state.status})
     if state.reason:
         span.set_attributes({"orbit.task.reason": state.reason})
     if state.status == "error" and not failed:

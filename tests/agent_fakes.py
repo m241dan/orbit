@@ -175,6 +175,9 @@ class ScriptedLauncher:
         self.planner_turns: list[Script] = []  # Played by converse(), one per turn.
         self.planner_replies: list[str] = []  # What the planner says, a turn at a time.
         self.planner_usages: list[Usage] = []  # What planner turns cost; unmetered once out.
+        # The error each planner turn ends in, one turn at a time, as the CLI reports it; none
+        # once out.
+        self.planner_errors: list[str] = []
         # What each planner turn does after its TurnFinished, a turn at a time.
         self.planner_afters: list[Callable[[], Awaitable[None]]] = []
         # The usage of each launch's turns, one launch at a time; one unmetered turn if none.
@@ -230,6 +233,12 @@ class ScriptedLauncher:
         reason = await self.planner_turns.pop(0)(call)
         self.conversations.setdefault(agent.id, f"conversation-{agent.id}")
         usage = self.planner_usages.pop(0) if self.planner_usages else None
+        if self.planner_errors:
+            message = self.planner_errors.pop(0)
+            yield ErrorOccurred(
+                turn_id=turn_id, agent_id=agent.id, code=AGENT_FAILED, message=message
+            )
+            reason = "error"
         yield TurnFinished(turn_id=turn_id, reason=reason, agent_id=agent.id, usage=usage)
         if self.planner_afters:
             await self.planner_afters.pop(0)()
@@ -900,7 +909,7 @@ def of_type(kind: type) -> Stop:
 
 
 async def events_until(
-    session: WorkspaceHost,
+    session: Session | Backend,
     done: Callable[[Event], bool],
     *,
     skip: tuple[type, ...] = (),

@@ -117,6 +117,35 @@ A command refused because handling it failed (`internal`) has the span's error s
 refusal's message, and an `exception` event; other refusals aren't errors, as they're the
 command's doing.
 
+## The planner
+
+### `orbit.planner.turn`
+
+One span for each turn of the planner's conversation, from when the turn starts in the planner's
+lane until it ends, its duration the span's own. It's a child of the `orbit.command` span of the
+`SendMessage` asking for it, and current while the turn runs. A message refused, as one sent
+while the planner answers, starts no turn and has none.
+
+| Attribute | Type | Meaning |
+| --- | --- | --- |
+| `orbit.workspace.id` | string | The workspace's id (`unregistered` for one no store registers). |
+| `orbit.session.id` | string | The id of the session open as the turn started. |
+| `gen_ai.request.model` | string | The model the planner is launched with: the session's, else the planner role's; absent when neither names one (the CLI's default). |
+| `gen_ai.usage.input_tokens` | int | Input tokens of the turn. |
+| `gen_ai.usage.output_tokens` | int | Output tokens of the turn. |
+| `gen_ai.usage.cache_creation.input_tokens` | int | Input tokens the turn wrote to the cache. |
+| `gen_ai.usage.cache_read.input_tokens` | int | Input tokens the turn read from the cache. |
+| `orbit.cost.usd` | double | What the turn cost, in US dollars. |
+| `orbit.planner.drafts` | int | How many draft tasks the planner proposed in the turn. |
+| `orbit.planner.end_reason` | string | How the turn ended: `completed`, `cancelled`, `max_steps` or `error`. |
+
+The usage is what the CLI reported for the turn, and 0 when it reported none, as for a turn
+cancelled before it finished.
+
+A turn that fails, such as by running out of the planner role's time, or that the CLI reports an
+error for has the span's error status with the error's message; a failure also records an
+`exception` event.
+
 ## Trace context
 
 Each event published, a workspace's or the control plane's own, carries, in its envelope's

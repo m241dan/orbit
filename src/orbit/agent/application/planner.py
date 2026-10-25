@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from orbit.agent.application.desk import AgentDesk, Tool, dispatch, report_progress
+from orbit.agent.application.planner_trace import turn_ended
 from orbit.agent.application.ports import Reply, ResumeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.agents import Agent
@@ -39,7 +40,9 @@ from orbit.protocol import (
     TurnEndReason,
     TurnFinished,
     TurnStarted,
+    Usage,
 )
+from orbit.tracing import current_span
 
 RESUME_FAILED_NOTE = "Couldn't resume the planner's conversation; starting fresh."
 
@@ -59,6 +62,8 @@ class PlannerChat:
         self._told: tuple[str, ...] | None = None  # The steps the planner last heard about.
         self._notes: list[str] = []  # What it's been told, until a turn surely delivers it.
         self._saved: str | None = None  # The saved conversation, until a turn resumes it.
+        self._usage = Usage()  # What the turn running, or the last, cost.
+        self._drafts = 0  # The drafts it proposed.
         self._tools: dict[str, Tool] = {
             PROPOSE_TASK: self._propose_task,
             REPORT_PROGRESS: self._report_progress,
@@ -97,6 +102,11 @@ class PlannerChat:
         """Have the planner hear ``note`` ahead of its next prompt."""
         self._notes.append(note)
 
+    def model(self, settings: Settings) -> str | None:
+        """The model a turn with ``settings`` runs on: the one they pick, else the planner
+        role's; none for the CLI's default."""
+        return settings.model or self._desk.agents.roles[PLANNER].model
+
     async def answer(self, text: str, settings: Settings) -> TurnEndReason:
         """Run a turn of the planner's on ``text``, publishing its events; returns how it ended.
 
@@ -104,7 +114,20 @@ class PlannerChat:
         and one that fails or runs out of the planner role's time then ends in error. Once its
         TurnFinished is out, a cancelled or failed turn returns that TurnFinished's reason
         without publishing another; a failure is still reported with ErrorOccurred.
+
+        The span current, the turn's, records each error the turn reports as it does, and what
+        the turn cost, the drafts it proposed and how it ended as it ends.
         """
+        self._usage, self._drafts = Usage(), 0
+        reason: TurnEndReason = "cancelled"  # What a turn cancelled again as it ends escapes as.
+        try:
+            reason = await self._answer(text, settings)
+        finally:
+            turn_ended(current_span(), reason, self._usage, self._drafts)
+        return reason
+
+    async def _answer(self, text: str, settings: Settings) -> TurnEndReason:
+        """The turn :meth:`answer` runs on ``text``; returns how it ended."""
         turn_id = uuid.uuid4().hex
         finished: TurnEndReason | None = None  # How it ended, once its TurnFinished is out.
         role = self._desk.agents.roles[PLANNER]  # Read again on a reset.
@@ -117,22 +140,35 @@ class PlannerChat:
         except TimeoutError as exc:
             minutes = role.timeout_minutes
             ending = timeout_ending(deadline.expired(), minutes, "The planner", exc)
-            return await self._fail(turn_id, finished, *ending)
+            return await self._fail(turn_id, finished, exc, ending)
         except Exception as exc:
-            return await self._fail(turn_id, finished, AGENT_FAILED, str(exc))
+            return await self._fail(turn_id, finished, exc, (AGENT_FAILED, str(exc)))
         return finished or "completed"
 
     async def _publish(self, event: Event, finished: TurnEndReason | None) -> TurnEndReason | None:
-        """Publish ``event``; returns how the turn ended, once its TurnFinished is out, given
+        """Publish ``event``, recording an error it reports on the turn's span and adding what
+        it says the turn cost; returns how the turn ended, once its TurnFinished is out, given
         ``finished`` before it."""
         await self._desk.publish(event)
-        return event.reason if isinstance(event, TurnFinished) else finished
+        if isinstance(event, ErrorOccurred):
+            current_span().error(event.message)
+        if not isinstance(event, TurnFinished):
+            return finished
+        self._usage += event.usage or Usage()
+        return event.reason
 
     async def _fail(
-        self, turn_id: str, finished: TurnEndReason | None, code: str, message: str
+        self,
+        turn_id: str,
+        finished: TurnEndReason | None,
+        failure: Exception,
+        ending: tuple[str, str],
     ) -> TurnEndReason:
-        """Report turn ``turn_id`` failing with ``code`` and ``message``, and end it in error
-        unless ``finished`` says how it already ended."""
+        """Report turn ``turn_id`` failing with ``failure``, as the code and message of
+        ``ending``, on its span too, and end it in error unless ``finished`` says how it already
+        ended."""
+        code, message = ending
+        current_span().error(message, failure)
         await self._desk.publish(
             ErrorOccurred(turn_id=turn_id, agent_id=self.agent_id, code=code, message=message)
         )
@@ -198,7 +234,7 @@ class PlannerChat:
         """Turn ``turn_id`` of the planner's conversation, on ``prompt``."""
         assert self._agent is not None
         role = self._desk.agents.roles[PLANNER]
-        own = Settings(model=settings.model or role.model, tool_access=role.tool_access)
+        own = Settings(model=self.model(settings), tool_access=role.tool_access)
         steps, notes = self._step_names(), tuple(self._notes)
         launch = await self._desk.launch(
             self._agent, self._with_notes(prompt, steps, notes), own, self._desk.agents.root
@@ -234,6 +270,7 @@ class PlannerChat:
         title, prompt = suggestion
         task = suggested_task(self._desk.agents.roles[CODER], title, prompt)
         task_id = await self._tasks.change(lambda board: board.add_draft(task))
+        self._drafts += 1
         return Reply(f"Added draft task {task_id}; the user will accept or drop it.")
 
     async def _report_progress(self, arguments: dict[str, Any]) -> Reply:

@@ -1,0 +1,63 @@
+"""Tracing the planner: the ``orbit.planner.turn`` span of each of its turns, a child of the
+``SendMessage`` command that asked for it (the remaining spans plan's decisions 1 and 8).
+
+The turn's span is the current one while the turn runs, so the planner records on it, through
+:func:`current_span`, what the turn cost, the drafts it proposed, how it ended and the errors it
+reported.
+"""
+
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+
+from orbit.agent.application.span_usage import usage_attributes
+from orbit.protocol import TurnEndReason, Usage
+from orbit.tracing import AttributeValue, NoTelemetry, Span, Telemetry, span_block, use_span
+
+TURN_SPAN = "orbit.planner.turn"
+
+
+def _no_session() -> str:
+    return ""
+
+
+@dataclass(frozen=True)
+class PlannerTracing:
+    """What traces the planner's turns: the ``telemetry`` recording them, and the ids of the
+    ``workspace`` and of the ``session`` open there now."""
+
+    telemetry: Telemetry = field(default_factory=NoTelemetry)
+    workspace: str = ""
+    session: Callable[[], str] = _no_session
+
+    @contextmanager
+    def turn(self, parent: Span, model: str | None) -> Iterator[Span]:
+        """The span of a planner turn on ``model``, if known, current for the block and ended on
+        leaving it: a child of ``parent``, the span current as the turn was asked for. An error
+        escaping the block is recorded on it."""
+        with use_span(parent):
+            span = self.telemetry.start(TURN_SPAN, self._identity(model))
+        with span_block(span):
+            yield span
+
+    def _identity(self, model: str | None) -> dict[str, AttributeValue]:
+        """The attributes a turn's span on ``model``, if known, starts with."""
+        attributes: dict[str, AttributeValue] = {
+            "orbit.workspace.id": self.workspace,
+            "orbit.session.id": self.session(),
+        }
+        if model is not None:
+            attributes["gen_ai.request.model"] = model
+        return attributes
+
+
+def turn_ended(span: Span, reason: TurnEndReason, usage: Usage, drafts: int) -> None:
+    """Record on ``span`` that its turn ended for ``reason``, having cost ``usage`` and proposed
+    ``drafts`` draft tasks."""
+    span.set_attributes(
+        {
+            **usage_attributes(usage),
+            "orbit.planner.drafts": drafts,
+            "orbit.planner.end_reason": reason,
+        }
+    )

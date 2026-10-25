@@ -31,6 +31,7 @@ from orbit.agent.application.lanes import Background, SessionGate
 from orbit.agent.application.log_writer import Overflow
 from orbit.agent.application.outbox import EventSink, Outbox, Shown
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
+from orbit.agent.application.planner_trace import PlannerTracing
 from orbit.agent.application.ports import (
     Fallback,
     ProposalReview,
@@ -308,8 +309,7 @@ class WorkspaceHost:
         self._started = False
         self._lane = self._review_lane()
         self._coders = CoderSeat(lambda: self.coder_slots, workspace_id, lambda: self._keeper.id)
-        hooks = SeatHooks(self._save, self._keeper.use, self._step_names, self._halt.check)
-        self._seat = PlannerSeat(self._desk, self._tasks, self._events, hooks)
+        self._seat = self._planner_seat()
         self._record_moves = self._moves_kept_in(store)
         self._startup = self._startup_check(
             verification, check_at_startup and not self._takeover.read_only
@@ -325,6 +325,12 @@ class WorkspaceHost:
         self._states = self._session_states()
         self._views = self._session_views()
         self._watch_background()
+
+    def _planner_seat(self) -> PlannerSeat:
+        """The planner's seat in this session, its turns traced with :attr:`telemetry`."""
+        tracing = PlannerTracing(self.telemetry, self._workspace_id, lambda: self._keeper.id)
+        hooks = SeatHooks(self._save, self._keeper.use, self._step_names, self._halt.check, tracing)
+        return PlannerSeat(self._desk, self._tasks, self._events, hooks)
 
     def _storage_resume(self) -> StorageResume:
         """What resumes the session once storage works again: it retries the session record,

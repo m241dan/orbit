@@ -10,6 +10,7 @@ from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import TurnSlot
 from orbit.agent.application.outbox import EventSink
 from orbit.agent.application.planner import PlannerChat
+from orbit.agent.application.planner_trace import PlannerTracing
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.refusals import Refused
@@ -26,11 +27,15 @@ from orbit.protocol import (
     Settings,
     TurnEndReason,
 )
+from orbit.tracing import Span, current_span
 
 NO_PLANNER_MESSAGE = "Planning needs agents and a planner role."
 PLANNER_BUSY_RESET = "The planner is answering; press ctrl+x to stop it first."
 NOTHING_TO_RESET = "The planner has no conversation to reset."
 ROLE_KEPT = "Kept the planner's role, as the config is invalid"
+
+
+_UNTRACED = PlannerTracing()
 
 
 def _admit() -> None:
@@ -40,13 +45,14 @@ def _admit() -> None:
 @dataclass(frozen=True)
 class SeatHooks:
     """What the seat asks of its session: to ``save`` it, to mark it ``use``d, the
-    ``step_names`` verifying tasks now, and to ``check`` it, refusing a turn by raising
-    :class:`Refused` while it's halted."""
+    ``step_names`` verifying tasks now, to ``check`` it, refusing a turn by raising
+    :class:`Refused` while it's halted, and the ``tracing`` its turns are traced by."""
 
     save: Callable[[], Awaitable[None]]
     use: Callable[[], None]
     step_names: Callable[[], tuple[str, ...]]
     check: Callable[[], None] = _admit
+    tracing: PlannerTracing = _UNTRACED
 
 
 class PlannerSeat:
@@ -102,8 +108,8 @@ class PlannerSeat:
 
     async def submit(self, text: str, settings: Settings) -> None:
         """Start a turn of the planner's conversation on ``text`` with ``settings``, in its
-        own lane; refused without a planner, while it answers, or once saving the session halted
-        it."""
+        own lane, traced as a child of the span current, the command's asking for it; refused
+        without a planner, while it answers, or once saving the session halted it."""
         if self._planner is None:
             # Frees the prompt of a frontend that marked the lane busy when it sent this.
             await self._events.put(BusyChanged(busy=False, lane=PLANNER_LANE))
@@ -111,12 +117,17 @@ class PlannerSeat:
         self._hooks.use()
         await self._hooks.save()
         self._hooks.check()  # The save may have halted the session.
-        await self._turns.start(self._answer(self._planner, text, settings))
+        await self._turns.start(self._answer(self._planner, text, settings, current_span()))
 
-    async def _answer(self, planner: PlannerChat, text: str, settings: Settings) -> TurnEndReason:
-        """``planner``'s turn on ``text``, saving the session after it, as its conversation
-        may have changed."""
-        reason = await planner.answer(text, settings)
+    async def _answer(
+        self, planner: PlannerChat, text: str, settings: Settings, parent: Span
+    ) -> TurnEndReason:
+        """``planner``'s turn on ``text``, in its span, a child of ``parent``, saving the
+        session after it, as its conversation may have changed."""
+        # The span starts as the turn does, not as it's asked for, so a turn refused, or
+        # cancelled before it runs, leaves no span unended.
+        with self._hooks.tracing.turn(parent, planner.model(settings)):
+            reason = await planner.answer(text, settings)
         await self._hooks.save()
         return reason
 
