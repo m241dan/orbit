@@ -85,8 +85,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("ctrl+e", "configure_checks", "Set up checks"),
         Binding("ctrl+t", "cycle_conversations", "Conversations"),
         Binding("ctrl+s", "cancel_turn", "Stop run"),
-        Binding("ctrl+x", "stop_planner", "Stop planner"),
-        Binding("ctrl+n", "reset_planner", "Reset planner"),
+        Binding("ctrl+x", "stop_planner", "Stop turn"),
+        Binding("ctrl+n", "reset_planner", "Reset conversation"),
         Binding("ctrl+o", "pick_model", "Model"),
         Binding("ctrl+l", "pick_tool_access", "Tools"),
         # While typing, the prompt's own ctrl+y (redo) comes first.

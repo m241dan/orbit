@@ -1,5 +1,5 @@
-"""ctrl+t, ctrl+y and the prompt in the app: the keys acting on the conversational role whose tab
-is shown, and how the footer labels them."""
+"""ctrl+t, ctrl+y, ctrl+x, ctrl+n and the prompt in the app: the keys acting on the
+conversational role whose tab is shown, and how the footer labels them."""
 
 from textual.widgets._footer import FooterKey
 
@@ -14,7 +14,7 @@ from orbit.protocol import (
     UpdateSettings,
 )
 from orbit.tui import OrbitApp
-from orbit.tui.widgets import ChatPrompt
+from orbit.tui.widgets import ChatPrompt, PickerScreen
 from tests.tui_fakes import FakeSession, active_tab, feed_events, picker, show_settings
 
 TALKING = Catalog(
@@ -41,6 +41,32 @@ async def test_the_footer_labels_ctrl_t_conversations_and_ctrl_y_effort() -> Non
         labels = [key.description for key in app.query(FooterKey)]
         assert "Conversations" in labels
         assert "Effort" in labels
+
+
+async def test_the_footer_labels_ctrl_x_and_ctrl_n_without_naming_the_planner() -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test(size=(300, 30)) as pilot:
+        await pilot.pause()
+        labels = [key.description for key in app.query(FooterKey)]
+        assert "Stop turn" in labels
+        assert "Reset conversation" in labels
+        assert not [label for label in labels if "planner" in label.lower()]
+
+
+async def test_while_typing_ctrl_y_redoes_in_the_prompt_rather_than_picking_effort() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings(model="opus"))
+        prompt = app.query_one(ChatPrompt)
+        await pilot.press("i", *"draft", "ctrl+z")
+        assert prompt.text == ""
+        await pilot.press("ctrl+y")
+        assert prompt.text == "draft"
+        assert not isinstance(app.screen, PickerScreen)
+        await pilot.press("escape", "ctrl+y")
+        assert picker(app)[0] == "Effort"
+        assert talked(session) == []
 
 
 async def test_ctrl_y_picks_the_planners_effort() -> None:
