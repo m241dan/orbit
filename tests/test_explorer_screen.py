@@ -44,6 +44,7 @@ ORBIT = DirectoryEntry(name="orbit", is_repository=True, hidden=False)
 ORCHARD = DirectoryEntry(name="orchard", is_repository=False, hidden=False)
 SRC = DirectoryListing(path="/src", parent="/", entries=(ORBIT, ORCHARD, DOT), total=3)
 PROJECTS = DirectoryEntry(name="projects", is_repository=False, hidden=False)
+WORK = DirectoryListing(path="/work", parent="/", entries=(PROJECTS,), total=1)
 
 
 def connected() -> OrbitApp:
@@ -292,6 +293,20 @@ async def test_a_refused_completion_listing_shows_in_the_fields_hint() -> None:
         await answer(app, pilot, "Permission denied: /root")
         assert field_of(app).border_subtitle == "Permission denied: /root"
         assert explorer(app).note is None
+
+
+async def test_a_completion_listing_accepted_once_the_explorer_closed_changes_nothing() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRC)
+        await typed(app, pilot, "/work/pro")
+        await pilot.press("tab")
+        await feed_events(session_of(app), pilot, WORK)
+        await pilot.press("escape", "escape")
+        await answer(app, pilot)
+        assert app.is_running
+        assert isinstance(app.screen, WorkspacesScreen)
+        assert app.screen.note is None
 
 
 async def test_enter_in_the_field_adds_a_url_and_returns_to_the_list_picker() -> None:

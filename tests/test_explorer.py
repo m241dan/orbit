@@ -390,6 +390,15 @@ async def test_a_completion_answered_once_the_explorer_closed_changes_nothing() 
         )
 
 
+async def test_a_completion_listing_accepted_once_the_explorer_closed_changes_nothing() -> None:
+    explorer, view, backend = await opened(SRC)
+    await completing(explorer, view, "/work/pro")
+    explorer.show_listing(WORK)
+    view.is_attached = False
+    backend.accept()
+    assert (view.field, view.candidates, backend.shown) == ("/work/pro", (), [])
+
+
 async def test_a_refused_completion_listing_shows_in_the_fields_hint() -> None:
     explorer, view, backend = await opened(SRC)
     await completing(explorer, view, "/root/x")

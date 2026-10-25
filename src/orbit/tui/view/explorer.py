@@ -359,7 +359,10 @@ class Explorer:
 
     def _completed(self, request: int) -> None:
         """Complete the path typed from the listing come for the ``request``, the number of the
-        listing asked for to complete from, once it's accepted, unless another's asked for."""
+        listing asked for to complete from, once it's accepted, unless another's asked for or the
+        explorer is closed."""
+        if not self._view.is_attached:
+            return
         parent, listing = self._completing, self._completion
         if request != self._requests or parent is None:
             return
