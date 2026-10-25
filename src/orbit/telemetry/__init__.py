@@ -8,6 +8,7 @@ from orbit.telemetry.headers import HeadersFileError, parse_headers, read_header
 from orbit.telemetry.run import FLUSH_SECONDS, TelemetryRun
 from orbit.telemetry.settings import (
     OtlpTarget,
+    Signal,
     TelemetryConfigError,
     TelemetrySettings,
     env_headers,
@@ -27,6 +28,7 @@ __all__ = [
     "Off",
     "OtlpTarget",
     "RunningTelemetry",
+    "Signal",
     "TelemetryConfigError",
     "TelemetryNotInstalled",
     "TelemetryRun",

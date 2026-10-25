@@ -5,8 +5,17 @@ import logging
 import threading
 import time
 from collections.abc import Sequence
+from typing import Any
 
 import pytest
+from opentelemetry.sdk.metrics.export import (
+    InMemoryMetricReader,
+    MetricExporter,
+    MetricExportResult,
+    MetricReader,
+    MetricsData,
+    PeriodicExportingMetricReader,
+)
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
@@ -27,8 +36,10 @@ from orbit.tracing import NoSpan, Telemetry, current_span, use_span
 RESOURCE = Resource.create({"service.name": "orbit-tests"})
 
 
-def _telemetry(exporter: SpanExporter, flush_seconds: float = 5.0) -> OtelTelemetry:
-    return otel_telemetry(exporter, RESOURCE, flush_seconds)
+def _telemetry(
+    exporter: SpanExporter, flush_seconds: float = 5.0, reader: MetricReader | None = None
+) -> OtelTelemetry:
+    return otel_telemetry(exporter, reader or InMemoryMetricReader(), RESOURCE, flush_seconds)
 
 
 def _exported(build: Build) -> dict[str, ReadableSpan]:
@@ -355,3 +366,74 @@ def test_closing_waits_no_longer_than_the_flush_time(caplog: pytest.LogCaptureFi
     assert [record.getMessage() for record in caplog.records] == [
         "Telemetry dropped 1 spans it couldn't export."
     ]
+
+
+class Collected(MetricExporter):
+    """A metric exporter keeping the metrics' names each export has."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.exports: list[list[str]] = []
+
+    def export(
+        self, metrics_data: MetricsData, timeout_millis: float = 10_000, **kwargs: Any
+    ) -> MetricExportResult:
+        scopes = [
+            scope for resource in metrics_data.resource_metrics for scope in resource.scope_metrics
+        ]
+        self.exports.append([metric.name for scope in scopes for metric in scope.metrics])
+        return MetricExportResult.SUCCESS
+
+    def force_flush(self, timeout_millis: float = 10_000) -> bool:
+        return True
+
+    def shutdown(self, timeout_millis: float = 30_000, **kwargs: Any) -> None:
+        """Nothing to shut down."""
+
+
+class StuckMetrics(Collected):
+    """A metric exporter whose exports and shutdown hang until released."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.released = threading.Event()
+
+    def export(
+        self, metrics_data: MetricsData, timeout_millis: float = 10_000, **kwargs: Any
+    ) -> MetricExportResult:
+        self.released.wait(10)
+        return MetricExportResult.SUCCESS
+
+    def shutdown(self, timeout_millis: float = 30_000, **kwargs: Any) -> None:
+        self.released.wait(10)
+
+
+def _periodic(exporter: MetricExporter) -> PeriodicExportingMetricReader:
+    """A reader exporting to ``exporter`` once a minute, and as it shuts down."""
+    return PeriodicExportingMetricReader(exporter, export_interval_millis=60_000)
+
+
+def test_closing_exports_the_metrics_not_yet_exported() -> None:
+    collected = Collected()
+    telemetry = _telemetry(InMemorySpanExporter(), reader=_periodic(collected))
+    with telemetry.span("orbit.task"):
+        pass
+
+    telemetry.close()
+
+    assert collected.exports == [["orbit.tasks"]]
+
+
+def test_closing_waits_no_longer_than_the_flush_time_for_metrics() -> None:
+    spans, metrics = Stuck(), StuckMetrics()
+    telemetry = _telemetry(spans, flush_seconds=0.2, reader=_periodic(metrics))
+    with telemetry.span("orbit.task"):
+        pass
+
+    started = time.monotonic()
+    telemetry.close()
+    took = time.monotonic() - started
+    spans.released.set()
+    metrics.released.set()
+
+    assert took < 1

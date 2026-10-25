@@ -162,7 +162,12 @@ def test_the_console_exporter_stops_chat_before_the_tui_starts(
 
 @pytest.mark.parametrize(
     ("line", "key"),
-    [('exporter = "jaeger"', "telemetry.exporter"), ("sample = 1", "telemetry.sample")],
+    [
+        ('exporter = "jaeger"', "telemetry.exporter"),
+        ("sample = 1", "telemetry.sample"),
+        ("metrics_interval_s = 0", "telemetry.metrics_interval_s"),
+        ('metrics_interval_s = "x"', "telemetry.metrics_interval_s"),
+    ],
 )
 def test_an_invalid_telemetry_setting_stops_chat_naming_the_file_and_the_key(
     hosts: list[WorkspaceHost], config_dir: Path, line: str, key: str

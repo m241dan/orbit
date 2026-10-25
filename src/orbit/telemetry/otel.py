@@ -1,13 +1,17 @@
 """The tracing port over the OpenTelemetry SDK: spans batched to an exporter, the current span
-following orbit's own, and the trace context carried in envelopes."""
+following orbit's own, the trace context carried in envelopes, and metrics recorded from the
+spans."""
 
 import logging
 import threading
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 
 from opentelemetry import trace
 from opentelemetry.context import Context
+from opentelemetry.sdk.metrics import AlwaysOffExemplarFilter, MeterProvider
+from opentelemetry.sdk.metrics.export import MetricReader
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter, SpanExportResult
@@ -16,6 +20,7 @@ from opentelemetry.trace import Link, Status, StatusCode
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from orbit.protocol import trace_carrier, with_trace_carrier
+from orbit.telemetry.metrics import MetricsFromSpans
 from orbit.telemetry.run import FLUSH_SECONDS
 from orbit.tracing import (
     Attributes,
@@ -66,14 +71,20 @@ class OtelSpan:
 
 
 class OtelTelemetry:
-    """Telemetry over ``provider``, whose spans nest under orbit's current span; ``counts``
-    tells how many it couldn't export, and :meth:`close` waits at most ``flush_seconds`` for
-    those not yet exported."""
+    """Telemetry over ``provider``, whose spans nest under orbit's current span, and ``meters``,
+    which exports the metrics recorded from them; ``counts`` tells how many spans it couldn't
+    export, and :meth:`close` waits at most ``flush_seconds`` for the spans and metrics not yet
+    exported."""
 
     def __init__(
-        self, provider: TracerProvider, counts: SpanCounts, flush_seconds: float = FLUSH_SECONDS
+        self,
+        provider: TracerProvider,
+        meters: MeterProvider,
+        counts: SpanCounts,
+        flush_seconds: float = FLUSH_SECONDS,
     ) -> None:
         self._provider = provider
+        self._meters = meters
         self._tracer = provider.get_tracer("orbit")
         self._counts = counts
         self._flush_seconds = flush_seconds
@@ -109,18 +120,31 @@ class OtelTelemetry:
         return OtelSpan(trace.get_current_span(context))
 
     def close(self) -> None:
-        """Export the spans not yet exported, waiting at most the flush time, then shut down,
-        warning of the spans that couldn't be exported."""
-        flushing = threading.Thread(target=self._flush, name="telemetry flush", daemon=True)
-        flushing.start()
-        flushing.join(self._flush_seconds)
+        """Export the spans and metrics not yet exported, side by side, waiting at most the
+        flush time for both, then shut down, warning of the spans that couldn't be exported."""
+        deadline = time.monotonic() + self._flush_seconds
+        flushes = [_flushing(self._flush_spans, "spans"), _flushing(self._flush_metrics, "metrics")]
+        for flushing in flushes:
+            flushing.join(max(deadline - time.monotonic(), 0))
         dropped = self._counts.dropped
         if dropped:
             logger.warning("Telemetry dropped %d spans it couldn't export.", dropped)
 
-    def _flush(self) -> None:
+    def _flush_spans(self) -> None:
         self._provider.force_flush(int(self._flush_seconds * 1000))
         self._provider.shutdown()
+
+    def _flush_metrics(self) -> None:
+        """Shut the meters down, which exports the metrics not yet exported first."""
+        self._meters.shutdown(self._flush_seconds * 1000)
+
+
+def _flushing(flush: Callable[[], None], what: str) -> threading.Thread:
+    """A thread started running ``flush``, which flushes ``what``; it won't keep orbit from
+    exiting."""
+    thread = threading.Thread(target=flush, name=f"telemetry {what} flush", daemon=True)
+    thread.start()
+    return thread
 
 
 def _context(parent: Span) -> Context:
@@ -188,12 +212,23 @@ class _Counted(SpanExporter):
 
 
 def otel_telemetry(
-    exporter: SpanExporter, resource: Resource, flush_seconds: float = FLUSH_SECONDS
+    exporter: SpanExporter,
+    reader: MetricReader,
+    resource: Resource,
+    flush_seconds: float = FLUSH_SECONDS,
 ) -> OtelTelemetry:
-    """Telemetry describing ``resource``, every span batched to ``exporter``, with no
-    sampling."""
+    """Telemetry describing ``resource``, every span batched to ``exporter``, with no sampling,
+    and the metrics recorded from them read by ``reader``."""
+    # Orbit keeps its own current span, not OpenTelemetry's, so exemplars would name no span.
+    meters = MeterProvider(
+        metric_readers=[reader],
+        resource=resource,
+        exemplar_filter=AlwaysOffExemplarFilter(),
+        shutdown_on_exit=False,
+    )
     provider = TracerProvider(sampler=ALWAYS_ON, resource=resource, shutdown_on_exit=False)
     counts = SpanCounts()
     provider.add_span_processor(_Ending(counts))
+    provider.add_span_processor(MetricsFromSpans(meters.get_meter("orbit")))
     provider.add_span_processor(BatchSpanProcessor(_Counted(exporter, counts)))
-    return OtelTelemetry(provider, counts, flush_seconds)
+    return OtelTelemetry(provider, meters, counts, flush_seconds)

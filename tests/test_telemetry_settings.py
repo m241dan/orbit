@@ -7,6 +7,7 @@ import pytest
 from orbit.telemetry import (
     HeadersFileError,
     OtlpTarget,
+    Signal,
     TelemetryConfigError,
     TelemetrySettings,
     env_headers,
@@ -23,6 +24,7 @@ def test_without_a_telemetry_table_telemetry_is_off() -> None:
     assert settings == TelemetrySettings()
     assert settings.exporter == "none"
     assert (settings.protocol, settings.file_max_mb, settings.file_keep) == ("http/protobuf", 50, 5)
+    assert settings.metrics_interval_s == 60
     assert settings.service_name == "orbit"
 
 
@@ -34,6 +36,7 @@ def test_the_telemetry_table_sets_every_key() -> None:
         "headers_file": "otel-headers",
         "file_max_mb": 10,
         "file_keep": 3,
+        "metrics_interval_s": 15,
         "service_name": "orbit-ci",
     }
 
@@ -47,6 +50,8 @@ def test_the_telemetry_table_sets_every_key() -> None:
         ({"protocol": "http/json"}, "telemetry.protocol"),
         ({"file_max_mb": 0}, "telemetry.file_max_mb"),
         ({"file_keep": "5"}, "telemetry.file_keep"),
+        ({"metrics_interval_s": 0}, "telemetry.metrics_interval_s"),
+        ({"metrics_interval_s": "x"}, "telemetry.metrics_interval_s"),
         ({"service_name": ""}, "telemetry.service_name"),
         ({"sampler": "always_on"}, "telemetry.sampler"),
     ],
@@ -94,49 +99,63 @@ def test_the_headers_file_has_its_tilde_expanded(
 
 
 def test_without_an_endpoint_the_exporter_chooses() -> None:
-    assert otlp_target(TelemetrySettings(), {}, {}) == OtlpTarget(None, {})
+    assert otlp_target(TelemetrySettings(), {}, {}, "traces") == OtlpTarget(None, {})
 
 
-def test_over_http_the_traces_path_is_added_to_the_endpoint() -> None:
+@pytest.mark.parametrize("signal", ["traces", "metrics"])
+def test_over_http_the_signals_path_is_added_to_the_endpoint(signal: Signal) -> None:
     settings = TelemetrySettings(endpoint="http://collector:4318/")
 
-    assert otlp_target(settings, {}, {}).endpoint == "http://collector:4318/v1/traces"
+    endpoint = otlp_target(settings, {}, {}, signal).endpoint
+
+    assert endpoint == f"http://collector:4318/v1/{signal}"
 
 
-def test_over_grpc_the_endpoint_is_used_as_it_is() -> None:
+@pytest.mark.parametrize("signal", ["traces", "metrics"])
+def test_over_grpc_the_endpoint_is_used_as_it_is(signal: Signal) -> None:
     settings = TelemetrySettings(endpoint="collector:4317", protocol="grpc")
 
-    assert otlp_target(settings, {}, {}).endpoint == "collector:4317"
+    assert otlp_target(settings, {}, {}, signal).endpoint == "collector:4317"
 
 
 def test_the_environments_endpoint_overrides_the_configured_one() -> None:
     settings = TelemetrySettings(endpoint="http://configured:4318")
     environ = {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://env:4318"}
 
-    assert otlp_target(settings, {}, environ).endpoint == "http://env:4318/v1/traces"
+    assert otlp_target(settings, {}, environ, "traces").endpoint == "http://env:4318/v1/traces"
+    assert otlp_target(settings, {}, environ, "metrics").endpoint == "http://env:4318/v1/metrics"
 
 
-def test_the_environments_traces_endpoint_is_used_as_it_is() -> None:
-    environ = {
-        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://env:4318",
-        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "http://traces:4318/spans",
-    }
+ENVIRON = {
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://env:4318",
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "http://traces:4318/spans",
+    "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": "http://metrics:4318/points",
+    "OTEL_EXPORTER_OTLP_HEADERS": "x-team=env,x-key=env",
+    "OTEL_EXPORTER_OTLP_TRACES_HEADERS": "x-key=traces",
+    "OTEL_EXPORTER_OTLP_METRICS_HEADERS": "x-key=metrics",
+}
+"""An environment setting every variable for each signal."""
 
-    endpoint = otlp_target(TelemetrySettings(endpoint="http://c:1"), {}, environ).endpoint
 
-    assert endpoint == "http://traces:4318/spans"
+@pytest.mark.parametrize(
+    ("signal", "endpoint"),
+    [("traces", "http://traces:4318/spans"), ("metrics", "http://metrics:4318/points")],
+)
+def test_the_environments_endpoint_for_the_signal_is_used_as_it_is(
+    signal: Signal, endpoint: str
+) -> None:
+    settings = TelemetrySettings(endpoint="http://c:1")
+
+    assert otlp_target(settings, {}, ENVIRON, signal).endpoint == endpoint
 
 
-def test_the_environments_headers_override_the_files_by_name() -> None:
-    environ = {
-        "OTEL_EXPORTER_OTLP_HEADERS": "x-team=env,x-key=env",
-        "OTEL_EXPORTER_OTLP_TRACES_HEADERS": "x-key=traces",
-    }
+@pytest.mark.parametrize("signal", ["traces", "metrics"])
+def test_the_environments_headers_override_the_files_by_name(signal: Signal) -> None:
     from_file = {"x-team": "file", "x-file": "file", "x-key": "file"}
 
-    headers = otlp_target(TelemetrySettings(), from_file, environ).headers
+    headers = otlp_target(TelemetrySettings(), from_file, ENVIRON, signal).headers
 
-    assert headers == {"x-team": "env", "x-file": "file", "x-key": "traces"}
+    assert headers == {"x-team": "env", "x-file": "file", "x-key": signal}
 
 
 def test_environment_headers_are_percent_decoded_ignoring_pairs_without_a_name() -> None:

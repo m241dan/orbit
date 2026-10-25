@@ -1,4 +1,5 @@
-"""The user config's ``[telemetry]``, and where spans go once the environment has its say."""
+"""The user config's ``[telemetry]``, and where spans and metrics go once the environment has
+its say."""
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -9,14 +10,15 @@ from urllib.parse import unquote
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 Exporter = Literal["none", "otlp", "console", "file"]
-"""Where spans go: nowhere, to a collector over OTLP, to stderr, or to files in the state
-directory."""
+"""Where spans and metrics go: nowhere, to a collector over OTLP, to stderr, or to files in the
+state directory."""
 
 OtlpProtocol = Literal["http/protobuf", "grpc"]
-"""How spans reach a collector over OTLP."""
+"""How spans and metrics reach a collector over OTLP."""
 
-TRACES_PATH = "/v1/traces"
-"""What OTLP over HTTP adds to a collector's base URL for spans."""
+Signal = Literal["traces", "metrics"]
+"""What OTLP sends: spans or metrics. OTLP over HTTP adds ``/v1/<signal>`` to a collector's base
+URL for each, and each has variables of its own, ``OTEL_EXPORTER_OTLP_<SIGNAL>_*``."""
 
 
 class TelemetryConfigError(ValueError):
@@ -24,11 +26,11 @@ class TelemetryConfigError(ValueError):
 
 
 class TelemetrySettings(BaseModel):
-    """The user config's ``[telemetry]``: the ``exporter`` spans go to, and for OTLP the
-    collector's base URL ``endpoint`` (the exporter's default if ``None``), the ``protocol``,
-    and the ``headers_file`` holding the headers sent; the files the file exporter writes grow
-    to ``file_max_mb`` each, ``file_keep`` of them kept; ``service_name`` names orbit to the
-    collector."""
+    """The user config's ``[telemetry]``: the ``exporter`` spans and metrics go to, and for OTLP
+    the collector's base URL ``endpoint`` (the exporter's default if ``None``), the
+    ``protocol``, and the ``headers_file`` holding the headers sent; the files the file exporter
+    writes grow to ``file_max_mb`` each, ``file_keep`` of them kept; metrics are exported every
+    ``metrics_interval_s`` seconds; ``service_name`` names orbit to the collector."""
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
@@ -38,6 +40,7 @@ class TelemetrySettings(BaseModel):
     headers_file: str | None = Field(default=None, min_length=1)
     file_max_mb: int = Field(default=50, ge=1)
     file_keep: int = Field(default=5, ge=1)
+    metrics_interval_s: int = Field(default=60, ge=1)
     service_name: str = Field(default="orbit", min_length=1)
 
     @property
@@ -85,36 +88,47 @@ def _problem(where: tuple[int | str, ...], why: str) -> str:
 
 @dataclass(frozen=True)
 class OtlpTarget:
-    """Where OTLP sends spans: the ``endpoint`` (the exporter's default if ``None``) and the
-    ``headers`` sent with them."""
+    """Where OTLP sends spans or metrics: the ``endpoint`` (the exporter's default if ``None``)
+    and the ``headers`` sent with them."""
 
     endpoint: str | None
     headers: Mapping[str, str]
 
 
 def otlp_target(
-    settings: TelemetrySettings, headers: Mapping[str, str], environ: Mapping[str, str]
+    settings: TelemetrySettings,
+    headers: Mapping[str, str],
+    environ: Mapping[str, str],
+    signal: Signal,
 ) -> OtlpTarget:
-    """Where OTLP sends spans as ``settings`` say, with the headers file's ``headers``, the
-    ``OTEL_EXPORTER_OTLP_*`` variables in ``environ`` over both."""
+    """Where OTLP sends ``signal`` as ``settings`` say, with the headers file's ``headers``, the
+    ``OTEL_EXPORTER_OTLP_*`` variables in ``environ`` over both, the signal's own over all."""
     sent = {
         **headers,
         **env_headers(environ.get("OTEL_EXPORTER_OTLP_HEADERS", "")),
-        **env_headers(environ.get("OTEL_EXPORTER_OTLP_TRACES_HEADERS", "")),
+        **env_headers(environ.get(f"{_variable(signal)}_HEADERS", "")),
     }
-    return OtlpTarget(_endpoint(settings, environ), sent)
+    return OtlpTarget(_endpoint(settings, environ, signal), sent)
 
 
-def _endpoint(settings: TelemetrySettings, environ: Mapping[str, str]) -> str | None:
-    """The endpoint spans go to: the traces one in ``environ`` as it is, else the base URL in
-    ``environ`` or ``settings``, with the traces path added over HTTP."""
-    traces = environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
-    if traces:
-        return traces
+def _endpoint(
+    settings: TelemetrySettings, environ: Mapping[str, str], signal: Signal
+) -> str | None:
+    """The endpoint ``signal`` goes to: its own in ``environ`` as it is, else the base URL in
+    ``environ`` or ``settings``, with the signal's path added over HTTP."""
+    own = environ.get(f"{_variable(signal)}_ENDPOINT")
+    if own:
+        return own
     base = environ.get("OTEL_EXPORTER_OTLP_ENDPOINT") or settings.endpoint
     if base is None or settings.protocol == "grpc":
         return base
-    return base.rstrip("/") + TRACES_PATH
+    return f"{base.rstrip('/')}/v1/{signal}"
+
+
+def _variable(signal: Signal) -> str:
+    """The start of the names of ``signal``'s own variables, such as
+    ``OTEL_EXPORTER_OTLP_TRACES``."""
+    return f"OTEL_EXPORTER_OTLP_{signal.upper()}"
 
 
 def env_headers(text: str) -> dict[str, str]:

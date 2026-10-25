@@ -15,7 +15,18 @@ from threading import Thread
 from typing import Any, ClassVar
 
 import pytest
+from google.protobuf.json_format import Parse
+from opentelemetry.proto.collector.metrics.v1.metrics_service_pb2 import (
+    ExportMetricsServiceRequest,
+)
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import (
+    InMemoryMetricReader,
+    MetricExporter,
+    MetricExportResult,
+    MetricsData,
+)
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from opentelemetry.trace import Link
@@ -30,7 +41,13 @@ from orbit.telemetry import (
     TelemetrySettings,
     start_telemetry,
 )
-from orbit.telemetry.file_exporter import OtlpJsonFileExporter, Rotation, otlp_json
+from orbit.telemetry.file_exporter import (
+    OtlpJsonFileExporter,
+    OtlpJsonMetricsFileExporter,
+    Rotation,
+    otlp_json,
+    otlp_json_metrics,
+)
 from orbit.telemetry.otel import OtelTelemetry
 
 
@@ -123,6 +140,54 @@ def test_the_file_exporter_writes_otlp_json_lines_with_the_resource(tmp_path: Pa
     assert "parentSpanId" not in task
     assert run["parentSpanId"] == task["spanId"]
     assert run["traceId"] == task["traceId"]
+
+
+def _metric_lines(directory: Path) -> list[str]:
+    """The lines of the metrics files in ``directory``, oldest first."""
+    files = sorted(directory.glob("metrics-*.jsonl"))
+    return [line for path in files for line in path.read_text().splitlines()]
+
+
+def test_the_file_exporter_writes_metrics_lines_that_parse_as_otlp_json_metrics(
+    tmp_path: Path,
+) -> None:
+    telemetry = start_telemetry(TelemetrySettings(exporter="file"), _run(tmp_path))
+    with telemetry.span("orbit.task", {"orbit.role": "coder", "orbit.task.status": "completed"}):
+        pass
+    telemetry.close()
+
+    [line] = _metric_lines(tmp_path / "state" / "telemetry")
+    Parse(line, ExportMetricsServiceRequest())
+    [resource_metrics] = json.loads(line)["resourceMetrics"]
+    resource = _attributes(resource_metrics["resource"]["attributes"])
+    assert resource["service.name"] == "orbit"
+    assert resource["service.namespace"] == "orbit-serve"
+    [scope] = resource_metrics["scopeMetrics"]
+    assert scope["scope"]["name"] == "orbit"
+    [metric] = scope["metrics"]
+    assert (metric["name"], metric["unit"]) == ("orbit.tasks", "{task}")
+    [point] = metric["sum"]["dataPoints"]
+    assert point["asInt"] == "1"
+    assert _attributes(point["attributes"]) == {
+        "orbit.role": "coder",
+        "orbit.task.status": "completed",
+    }
+
+
+def test_metrics_are_exported_every_metrics_interval(tmp_path: Path) -> None:
+    settings = TelemetrySettings(exporter="file", metrics_interval_s=1)
+    telemetry = start_telemetry(settings, _run(tmp_path))
+    with telemetry.span("orbit.task"):
+        pass
+
+    directory = tmp_path / "state" / "telemetry"
+    deadline = time.monotonic() + 5
+    while not _metric_lines(directory) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    exported = _metric_lines(directory)
+    telemetry.close()
+
+    assert len(exported) == 1
 
 
 def test_each_start_is_a_new_instance_named_as_configured(tmp_path: Path) -> None:
@@ -237,7 +302,77 @@ def test_a_file_export_that_cant_be_written_logs_a_warning(
     assert record.getMessage().startswith(f"Telemetry couldn't write spans to {blocked}: ")
 
 
-def test_the_console_exporter_writes_spans_to_stderr(
+def _metrics(name: str) -> MetricsData:
+    """Metrics holding one counter called ``name``, counted once."""
+    reader = InMemoryMetricReader()
+    MeterProvider(metric_readers=[reader]).get_meter("tests").create_counter(name).add(1)
+    data = reader.get_metrics_data()
+    assert data is not None
+    return data
+
+
+def _metric_names(directory: Path) -> list[str]:
+    """The name of the one metric of each line of the metrics files in ``directory``."""
+    return [
+        json.loads(line)["resourceMetrics"][0]["scopeMetrics"][0]["metrics"][0]["name"]
+        for line in _metric_lines(directory)
+    ]
+
+
+def test_the_metrics_file_exporter_rotates_past_its_size_keeping_the_newest_files(
+    tmp_path: Path,
+) -> None:
+    line = len(json.dumps(otlp_json_metrics(_metrics("m-0")), separators=(",", ":"))) + 1
+    exporter = OtlpJsonMetricsFileExporter(tmp_path, Rotation(2 * line + 10, keep=2), Ticking())
+
+    results = [exporter.export(_metrics(f"m-{n}")) for n in range(5)]
+
+    assert set(results) == {MetricExportResult.SUCCESS}
+    files = sorted(tmp_path.glob("metrics-*.jsonl"))
+    assert [len(path.read_text().splitlines()) for path in files] == [2, 1]
+    assert _metric_names(tmp_path) == ["m-2", "m-3", "m-4"]
+
+
+def test_metrics_and_span_files_rotate_apart(tmp_path: Path) -> None:
+    rotation = Rotation(1_000_000, keep=1)
+    spans = OtlpJsonFileExporter(tmp_path, rotation, Ticking())
+    metrics = OtlpJsonMetricsFileExporter(tmp_path, rotation, Ticking())
+
+    spans.export([_ended("orbit.task")])
+    metrics.export(_metrics("orbit.tasks"))
+
+    assert len(list(tmp_path.glob("spans-*.jsonl"))) == 1
+    assert _metric_names(tmp_path) == ["orbit.tasks"]
+
+
+def test_the_metrics_files_are_readable_by_their_owner_alone(tmp_path: Path) -> None:
+    exporter = OtlpJsonMetricsFileExporter(tmp_path / "telemetry", Rotation(1_000_000, 5))
+    exporter.export(_metrics("orbit.tasks"))
+
+    [path] = (tmp_path / "telemetry").glob("metrics-*.jsonl")
+    assert path.stat().st_mode & 0o077 == 0
+    assert (tmp_path / "telemetry").stat().st_mode & 0o077 == 0
+
+
+def test_a_metrics_file_export_that_cant_be_written_fails_logging_a_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    blocked = tmp_path / "telemetry"
+    blocked.write_text("a file, not a directory")
+    exporter = OtlpJsonMetricsFileExporter(blocked, Rotation(1_000_000, 5))
+
+    with caplog.at_level(logging.WARNING):
+        result = exporter.export(_metrics("orbit.tasks"))
+
+    assert result is MetricExportResult.FAILURE
+    [record] = caplog.records
+    assert (record.name, record.levelno) == ("orbit.telemetry.file_exporter", logging.WARNING)
+    assert record.getMessage().startswith(f"Telemetry couldn't write metrics to {blocked}: ")
+    assert exporter.force_flush()
+    exporter.shutdown()
+
+
+def test_the_console_exporter_writes_spans_and_metrics_to_stderr(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     telemetry = start_telemetry(TelemetrySettings(exporter="console"), _run(tmp_path))
@@ -247,29 +382,45 @@ def test_the_console_exporter_writes_spans_to_stderr(
 
     captured = capsys.readouterr()
     assert '"name": "orbit.task"' in captured.err
+    assert '"name": "orbit.tasks"' in captured.err
     assert captured.out == ""
 
 
 @dataclass
 class Received:
     """What a collector received: each request's path and authorization header, and the spans'
-    names."""
+    and metrics' names."""
 
     paths: list[str] = field(default_factory=list)
     authorization: list[str | None] = field(default_factory=list)
     spans: list[str] = field(default_factory=list)
+    metrics: list[str] = field(default_factory=list)
+
+    def traces(self, body: bytes) -> None:
+        """Keep the names of the spans in ``body``, an OTLP traces request."""
+        request = ExportTraceServiceRequest.FromString(body)
+        for resource in request.resource_spans:
+            for scope in resource.scope_spans:
+                self.spans += [span.name for span in scope.spans]
+
+    def metric_names(self, body: bytes) -> None:
+        """Keep the names of the metrics in ``body``, an OTLP metrics request."""
+        request = ExportMetricsServiceRequest.FromString(body)
+        for resource in request.resource_metrics:
+            for scope in resource.scope_metrics:
+                self.metrics += [metric.name for metric in scope.metrics]
 
 
 def _handler(received: Received) -> type[BaseHTTPRequestHandler]:
     class Collector(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
             body = self.rfile.read(int(self.headers["Content-Length"]))
-            request = ExportTraceServiceRequest.FromString(body)
             received.paths.append(self.path)
             received.authorization.append(self.headers.get("Authorization"))
-            for resource in request.resource_spans:
-                for scope in resource.scope_spans:
-                    received.spans += [span.name for span in scope.spans]
+            if self.path == "/v1/metrics":
+                received.metric_names(body)
+            else:
+                received.traces(body)
             self.send_response(200)
             self.end_headers()
 
@@ -314,7 +465,7 @@ def _write_headers(tmp_path: Path, mode: int = 0o600) -> None:
     path.chmod(mode)
 
 
-def test_otlp_sends_spans_to_the_collector_with_the_headers_files_headers(
+def test_otlp_sends_spans_and_metrics_to_the_collector_with_the_headers_files_headers(
     tmp_path: Path, collector: tuple[str, Received]
 ) -> None:
     url, received = collector
@@ -323,9 +474,10 @@ def test_otlp_sends_spans_to_the_collector_with_the_headers_files_headers(
 
     _span_through(start_telemetry(settings, _run(tmp_path)))
 
-    assert received.paths == ["/v1/traces"]
-    assert received.authorization == ["Bearer abc"]
+    assert sorted(received.paths) == ["/v1/metrics", "/v1/traces"]
+    assert received.authorization == ["Bearer abc", "Bearer abc"]
     assert received.spans == ["orbit.task"]
+    assert received.metrics == ["orbit.tasks"]
 
 
 def test_the_environments_endpoint_overrides_the_configured_one(
@@ -338,6 +490,7 @@ def test_the_environments_endpoint_overrides_the_configured_one(
     _span_through(start_telemetry(settings, run))
 
     assert received.spans == ["orbit.task"]
+    assert received.metrics == ["orbit.tasks"]
 
 
 def test_a_headers_file_others_can_read_stops_telemetry_starting(tmp_path: Path) -> None:
@@ -372,7 +525,7 @@ def test_closing_with_an_unreachable_collector_returns_in_time_warning_of_the_dr
 
 
 class Recorded(SpanExporter):
-    """A stand-in for the gRPC exporter, recording how it was made."""
+    """A stand-in for the gRPC span exporter, recording how it was made."""
 
     made: ClassVar[list[dict[str, Any]]] = []
 
@@ -383,12 +536,32 @@ class Recorded(SpanExporter):
         return SpanExportResult.SUCCESS
 
 
+class RecordedMetrics(MetricExporter):
+    """A stand-in for the gRPC metric exporter, recording how it was made with the span
+    exporter's."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__()
+        Recorded.made.append(kwargs)
+
+    def export(
+        self, metrics_data: MetricsData, timeout_millis: float = 10_000, **kwargs: Any
+    ) -> MetricExportResult:
+        return MetricExportResult.SUCCESS
+
+    def force_flush(self, timeout_millis: float = 10_000) -> bool:
+        return True
+
+    def shutdown(self, timeout_millis: float = 30_000, **kwargs: Any) -> None:
+        """Nothing to shut down."""
+
+
 def test_otlp_over_grpc_sends_lowercase_headers_to_the_endpoint_as_given(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(
-        "opentelemetry.exporter.otlp.proto.grpc.trace_exporter.OTLPSpanExporter", Recorded
-    )
+    grpc = "opentelemetry.exporter.otlp.proto.grpc"
+    monkeypatch.setattr(f"{grpc}.trace_exporter.OTLPSpanExporter", Recorded)
+    monkeypatch.setattr(f"{grpc}.metric_exporter.OTLPMetricExporter", RecordedMetrics)
     Recorded.made = []
     _write_headers(tmp_path)
     settings = TelemetrySettings(
@@ -397,6 +570,9 @@ def test_otlp_over_grpc_sends_lowercase_headers_to_the_endpoint_as_given(
 
     start_telemetry(settings, _run(tmp_path)).close()
 
-    assert Recorded.made == [
-        {"endpoint": "collector:4317", "headers": {"authorization": "Bearer abc"}, "timeout": 5.0}
-    ]
+    made = {
+        "endpoint": "collector:4317",
+        "headers": {"authorization": "Bearer abc"},
+        "timeout": 5.0,
+    }
+    assert Recorded.made == [made, made]

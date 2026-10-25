@@ -5,7 +5,7 @@ from typing import Protocol
 
 from orbit.telemetry.headers import read_headers
 from orbit.telemetry.run import FLUSH_SECONDS, TelemetryRun
-from orbit.telemetry.settings import TelemetrySettings, otlp_target
+from orbit.telemetry.settings import TelemetrySettings
 from orbit.tracing import NoTelemetry, Telemetry
 
 
@@ -41,11 +41,11 @@ def start_telemetry(
     if settings.exporter == "none":
         return Off()
     path = settings.headers_path(run.config_dir) if settings.exporter == "otlp" else None
-    target = otlp_target(settings, read_headers(path) if path else {}, run.environ)
+    headers = read_headers(path) if path else {}
     try:
         from orbit.telemetry.exporters import started
 
-        return started(settings, run, target, flush_seconds)
+        return started(settings, run, headers, flush_seconds)
     except ImportError:
         raise TelemetryNotInstalled(
             f"Telemetry is configured but not installed: pip install 'orbit[{settings.extra}]'"

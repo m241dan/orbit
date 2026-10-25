@@ -1,9 +1,9 @@
 # Telemetry
 
-What orbit records as OpenTelemetry spans once telemetry is turned on (README.md's
-**Telemetry** says how). Span names are low-cardinality and start with `orbit.`; attribute names
-follow OpenTelemetry's GenAI conventions where one fits (`gen_ai.*`) and start with `orbit.`
-otherwise.
+What orbit records as OpenTelemetry spans, and the metrics it records from them, once telemetry is
+turned on (README.md's **Telemetry** says how). Span names are low-cardinality and start with
+`orbit.`; metric and attribute names follow OpenTelemetry's GenAI conventions where one fits
+(`gen_ai.*`) and start with `orbit.` otherwise.
 
 Nothing a person or an agent wrote travels on a span beyond what is listed here: no prompt, agent
 message, diff or check output. A task's title is its prompt's first line, and its reason the one
@@ -318,3 +318,23 @@ Each event published, a workspace's or the control plane's own, carries, in its 
 `traceparent` and `tracestate`, the trace context of the span current as it's published, so what a
 frontend shows can be tied to the span that caused it. An event published outside any span
 carries none.
+
+## Metrics
+
+Orbit records metrics from its spans as each ends, and exports them where the spans go every
+`metrics_interval_s` seconds, and once more as it closes. Counters and histograms are cumulative
+over each run of orbit, its `service.instance.id`. Each takes its attributes from its span: a span
+lacking one records without it, as a planner turn, which has no `orbit.role`, does. A count of 0,
+or none, isn't recorded. Metrics carry no exemplars.
+
+| Metric | Kind | Unit | Attributes | Source |
+| --- | --- | --- | --- | --- |
+| `orbit.tasks` | counter | `{task}` | `orbit.task.status`, `orbit.role`, `orbit.workspace.id` | 1 for each `orbit.task` span. |
+| `orbit.verify.step.duration` | histogram | `s` | `orbit.verify.step.name`, `orbit.verify.step.result` | The duration of each `orbit.verify.step` span. |
+| `orbit.agent.duration` | histogram | `s` | `orbit.role`, `orbit.runtime` | The duration of each `orbit.agent.process` span. |
+| `gen_ai.client.token.usage` | histogram | `{token}` | `gen_ai.request.model`, `gen_ai.token.type`, `orbit.role` | One record for each kind of token an `orbit.task`, `orbit.planner.turn` or `orbit.review` span counts, `gen_ai.token.type` naming it: `input` (`gen_ai.usage.input_tokens`), `output` (`gen_ai.usage.output_tokens`), `cache_creation` (`gen_ai.usage.cache_creation.input_tokens`) or `cache_read` (`gen_ai.usage.cache_read.input_tokens`). |
+| `orbit.cost` | counter | `USD` | `gen_ai.request.model`, `orbit.role` | The `orbit.cost.usd` of those spans. |
+| `orbit.review.suggestions` | counter | `{suggestion}` | `orbit.review.outcome`, `orbit.role` | The `orbit.review.suggestions` of each `orbit.review` span, with `orbit.review.outcome` `made`, and its `orbit.review.refused`, with `refused`. |
+
+`gen_ai.client.token.usage` has the buckets the GenAI conventions give it, 1, 4, 16 and so on, each
+4 times the last, to 67108864; the durations have the SDK's default buckets, 0 to 10000 seconds.

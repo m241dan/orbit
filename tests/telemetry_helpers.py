@@ -1,5 +1,6 @@
 """Telemetry exporting its spans to memory, and the trace context naming them."""
 
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -9,12 +10,13 @@ from orbit.telemetry.otel import OtelTelemetry, otel_telemetry
 
 
 class Traced:
-    """Telemetry exporting its spans to memory."""
+    """Telemetry exporting its spans to memory, and recording metrics there."""
 
     def __init__(self) -> None:
         self.exporter = InMemorySpanExporter()
+        self.metrics = InMemoryMetricReader()
         self.telemetry: OtelTelemetry = otel_telemetry(
-            self.exporter, Resource.create({"service.name": "orbit-tests"})
+            self.exporter, self.metrics, Resource.create({"service.name": "orbit-tests"})
         )
 
         self._closed = False
