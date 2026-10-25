@@ -13,26 +13,30 @@ from opentelemetry.trace import StatusCode
 from orbit.agent import ControlPlane, Verification, VerificationStep, WorkspaceHost
 from orbit.agent.application.agent_trace import (
     PROCESS_SPAN,
+    REQUEST_ERROR,
     REQUEST_SPAN,
     STEP_SPAN,
     tool_attributes,
 )
-from orbit.agent.application.desk import AgentDesk
+from orbit.agent.application.desk import STOPPED_HANDLING, UNKNOWN_AGENT, AgentDesk
 from orbit.agent.application.planner_trace import TURN_SPAN
-from orbit.agent.application.ports import CallHandler, Reply
+from orbit.agent.application.ports import CallHandler, Reply, ResumeFailed
 from orbit.agent.application.review_trace import REVIEW_SPAN
 from orbit.agent.application.task_trace import RUN_SPAN
 from orbit.protocol import (
     CODER,
     PLANNER,
     REVIEWER,
+    ActivateSession,
     AddTask,
+    AgentReply,
     CancelTurn,
     Event,
     RunTasks,
     SendMessage,
     TaskSpec,
     TurnEndReason,
+    TurnStarted,
 )
 from tests.agent_fakes import (
     STEP,
@@ -43,10 +47,13 @@ from tests.agent_fakes import (
     ScriptedLauncher,
     Steps,
     agents_for,
+    chats,
     claims_done,
     close,
     events_until,
+    hangs,
     idle,
+    plan,
     proposes_two,
     run,
     send,
@@ -54,7 +61,9 @@ from tests.agent_fakes import (
     settle,
     suggests,
 )
+from tests.session_builders import opened, saved, store_with, switching
 from tests.telemetry_helpers import Traced
+from tests.waiting import eventually
 
 LINT = VerificationStep(name="Lint", command=("ruff", "check"))
 
@@ -138,6 +147,27 @@ async def ends_in_error(call: Call) -> TurnEndReason:
 
 async def fails(call: Call) -> TurnEndReason:
     raise RuntimeError("Could not start 'claude'.")
+
+
+async def resume_lost(call: Call) -> TurnEndReason:
+    raise ResumeFailed("No conversation found with session ID: saved-1")
+
+
+async def checks_until_stopped(call: Call) -> TurnEndReason:
+    await call("get_task")
+    await call("run_check", step=STEP.name)
+    raise AssertionError("unreachable")
+
+
+async def ignored(event: Event) -> None:
+    pass
+
+
+def hanging_steps() -> Steps:
+    """Steps whose step runs until it's stopped; its ``runs`` say once it's running."""
+    steps = Steps()
+    steps.gate = asyncio.Event()
+    return steps
 
 
 def test_tool_attributes_name_the_tools_sorted_with_their_counts_aligned() -> None:
@@ -287,6 +317,53 @@ async def test_an_agent_the_user_stops_was_killed() -> None:
     assert process.status.status_code is StatusCode.UNSET
 
 
+async def stopped_while_checking(traced: Traced, script: Script, steps: Steps) -> list[Event]:
+    """The events from stopping a task, traced by ``traced``, whose agent plays ``script``, once
+    the step ``steps`` runs is running, until the session goes idle."""
+    session = traced_session(traced, script, verification=Verification((STEP,), steps))
+    await send(session, AddTask(task=TaskSpec(prompt="a")))
+    await send(session, RunTasks())
+    await eventually(lambda: steps.runs)
+    await send(session, CancelTurn())
+    return await events_until(session, idle())
+
+
+async def test_a_call_orbit_stops_handling_is_an_error_under_its_process() -> None:
+    traced = Traced()
+    events = await stopped_while_checking(traced, checks_until_stopped, hanging_steps())
+
+    *_, reply = [event for event in events if isinstance(event, AgentReply)]
+    assert (reply.text, reply.is_error) == (STOPPED_HANDLING.text, True)
+    [process] = traced.spans(PROCESS_SPAN)
+    _, check = requests(traced)
+    assert child_of(check, process)
+    assert dict(attributes(check)) == {"orbit.agent.tool": "run_check", REQUEST_ERROR: True}
+    assert check.status.status_code is StatusCode.UNSET
+
+
+async def test_a_step_the_runs_end_cuts_short_is_a_span_with_no_result() -> None:
+    traced = Traced()
+    checking: list[asyncio.Future[Reply]] = []
+
+    async def checks_aside(call: Call) -> TurnEndReason:
+        await call("get_task")
+        # Apart from the agent's work, as an MCP server handles it, so the run's end stops the
+        # step rather than the agent's being stopped.
+        checking.append(asyncio.ensure_future(call("run_check", step=STEP.name)))
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    await stopped_while_checking(traced, checks_aside, hanging_steps())
+    ended = await asyncio.wait_for(checking[0], 5)
+
+    assert ended == Reply("The run ended before the check finished.", is_error=True)
+    _, check = requests(traced)
+    [step] = traced.spans(STEP_SPAN)
+    assert child_of(step, check)
+    assert dict(attributes(step)) == {"orbit.verify.step.name": "Unit tests"}
+    assert step.status.status_code is StatusCode.UNSET
+
+
 def traced_plane(
     traced: Traced, *scripts: Script, **options: Any
 ) -> tuple[ControlPlane, ScriptedLauncher]:
@@ -330,6 +407,45 @@ async def test_a_planner_process_ending_its_turn_in_error_crashed() -> None:
     assert attributes(process)["orbit.agent.exit_reason"] == "crashed"
 
 
+async def test_a_planner_process_whose_turn_the_user_cancels_was_killed() -> None:
+    traced = Traced()
+    plane, launcher = traced_plane(traced)
+    launcher.planner_turns = [hangs]
+    await send(plane, SendMessage(agent=PLANNER, text="Plan."))
+    await events_until(plane, lambda e: isinstance(e, TurnStarted))
+    await send(plane, CancelTurn(lane="planner"))
+    await events_until(plane, idle("planner"))
+    await close(plane)
+
+    [turn] = traced.spans(TURN_SPAN)
+    [process] = traced.spans(PROCESS_SPAN)
+    assert child_of(process, turn)
+    assert attributes(process)["orbit.agent.exit_reason"] == "killed"
+    assert attributes(process)["orbit.agent.turns"] == 1
+    assert process.status.status_code is StatusCode.UNSET
+
+
+async def test_a_planner_turn_that_cannot_resume_has_a_process_for_each_try_under_it() -> None:
+    traced = Traced()
+    store = store_with(saved("auth", conversations={PLANNER: "saved-1"}))
+    session, launcher = switching(store, reviews=False, telemetry=traced.telemetry)
+    await opened(session, ActivateSession(session="auth"))
+    launcher.planner_turns = [resume_lost, chats]
+    await plan(session, "Plan.")
+    await session.close()
+
+    [turn] = traced.spans(TURN_SPAN)
+    lost, fresh = in_order(traced.spans(PROCESS_SPAN))
+    assert child_of(lost, turn) and child_of(fresh, turn)
+    assert attributes(lost)["orbit.agent.exit_reason"] == "crashed"
+    assert attributes(lost)["orbit.agent.turns"] == 1
+    assert lost.status.status_code is StatusCode.ERROR
+    assert lost.status.description == "No conversation found with session ID: saved-1"
+    assert attributes(fresh)["orbit.agent.exit_reason"] == "finished"
+    assert attributes(fresh)["orbit.agent.turns"] == 1
+    assert fresh.status.status_code is StatusCode.UNSET
+
+
 async def test_a_reviewers_process_is_under_its_review() -> None:
     traced = Traced()
     plane, _ = traced_plane(
@@ -367,3 +483,22 @@ async def test_a_call_from_an_agent_whose_process_isnt_traced_is_under_the_span_
     [outer] = traced.spans("outer")
     [request] = traced.spans(REQUEST_SPAN)
     assert child_of(request, outer)
+
+
+async def test_a_call_with_a_token_orbit_doesnt_know_has_no_span() -> None:
+    traced = Traced()
+    agents, _ = agents_for()
+    desk = AgentDesk(agents, ignored, traced.telemetry)
+
+    class Target:
+        async def handle(self, tool: str, arguments: dict[str, Any]) -> Reply:
+            raise AssertionError("unreachable")
+
+    expired = desk.open(Target(), CODER, "1")
+    desk.close(expired)
+    with traced.telemetry.span("outer"):
+        assert await desk.handle("token-unknown", "get_task", {}) == UNKNOWN_AGENT
+        assert await desk.handle(expired.token, "get_task", {}) == UNKNOWN_AGENT
+
+    assert traced.spans(REQUEST_SPAN) == []
+    assert len(traced.spans("outer")) == 1
