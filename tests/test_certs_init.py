@@ -81,6 +81,30 @@ def test_init_without_names_makes_the_certificate_for_the_machines_hostname(
     assert common_name.value == f"orbit CA ({hostname})"
 
 
+def test_init_for_a_name_longer_than_a_common_name_holds_it_whole(config_dir: Path) -> None:
+    name = f"{'x' * 88}.example.com"
+    result = _init(config_dir, name)
+
+    assert result.exit_code == 0, result.output
+    certs = CertsDir(config_dir)
+    assert sorted(certs.path.iterdir()) == sorted(_files(certs))
+    assert _alternative_names(certs.server)[0] == x509.DNSName(name)
+    _certificate(certs.server).verify_directly_issued_by(_certificate(certs.ca))
+
+
+def test_init_on_a_machine_with_a_long_hostname_names_its_ca_for_as_much_as_fits(
+    config_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hostname = "box-" * 15
+    monkeypatch.setattr(socket, "gethostname", lambda: hostname)
+    result = _init(config_dir, "orbit.example.com")
+
+    assert result.exit_code == 0, result.output
+    certs = CertsDir(config_dir)
+    [common_name] = _certificate(certs.ca).subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+    assert common_name.value == f"orbit CA ({hostname[:50]}…)"
+
+
 def test_init_makes_ed25519_keys_by_default(config_dir: Path) -> None:
     _init(config_dir, "box")
 
@@ -220,14 +244,17 @@ def test_init_sets_aside_the_files_a_ca_left_without_its_certificate(config_dir:
     assert (old / "server.pem").read_bytes() == server
 
 
-def test_a_name_that_isnt_a_hostname_is_refused_setting_nothing_aside(config_dir: Path) -> None:
+@pytest.mark.parametrize("name", ["two words", "-", ".", "a..b", "a*b", "box-.example.com"])
+def test_a_name_that_isnt_a_hostname_is_refused_setting_nothing_aside(
+    config_dir: Path, name: str
+) -> None:
     _init(config_dir, "box")
     certs = CertsDir(config_dir)
-    result = _init(config_dir, "two words", "--force")
+    result = _init(config_dir, name, "--force")
 
     assert result.exit_code == 2
     assert result.stderr.startswith(
-        "Can't make a certificate for \"two words\": it's neither a hostname nor an IP address."
+        f"Can't make a certificate for \"{name}\": it's neither a hostname nor an IP address."
     )
     assert not list(certs.path.glob("old-*"))
     assert all(path.exists() for path in _files(certs))

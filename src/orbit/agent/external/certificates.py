@@ -70,7 +70,13 @@ NOT_A_CLIENT_NAME = (
     " digits, dots, dashes and underscores, starting with a letter or digit, such as laptop."
 )
 
-_HOSTNAME = re.compile(r"[A-Za-z0-9_*.-]+")
+# A hostname is labels of letters, digits, dashes and underscores, not starting or ending with a
+# dash, the first of them maybe a wildcard, then maybe a dot: one a client can match.
+_LABEL = r"[A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?"
+_HOSTNAME = re.compile(rf"(?:\*\.)?{_LABEL}(?:\.{_LABEL})*\.?")
+# X.509 holds a common name to 64 bytes in UTF-8; a longer one is cut short and ends with this.
+_COMMON_NAME_BYTES = 64
+_CUT = "…"
 # A client's name is a file name, and its certificate's common name, which can't exceed 64.
 _CLIENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
@@ -110,7 +116,7 @@ def make_ca(
     """A new CA of the machine ``hostname``, with a ``key_type`` key, valid from now for
     ``days``, and its key."""
     key = _new_key(key_type)
-    name = _name(f"orbit CA ({hostname})")
+    name = _name(_ca_name(hostname))
     certificate = (
         _builder(name, name, key, days)
         .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
@@ -317,9 +323,27 @@ def _hash(key: PrivateKey) -> hashes.SHA256 | None:
     return None if isinstance(key, ed25519.Ed25519PrivateKey) else hashes.SHA256()
 
 
+def _ca_name(hostname: str) -> str:
+    """The common name of a CA of the machine ``hostname``: ``orbit CA (<hostname>)``, with as
+    much of ``hostname`` as fits."""
+    room = _COMMON_NAME_BYTES - len("orbit CA ()")
+    return f"orbit CA ({_shortened(hostname, room)})"
+
+
 def _name(common_name: str) -> x509.Name:
-    """The name with ``common_name`` alone."""
-    return x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    """The name with ``common_name`` alone, as much of it as a common name holds."""
+    shortened = _shortened(common_name, _COMMON_NAME_BYTES)
+    return x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, shortened)])
+
+
+def _shortened(text: str, room: int) -> str:
+    """``text`` if it takes at most ``room`` bytes in UTF-8, else as much of it as fits in them
+    before ``…``, cut between letters."""
+    encoded = text.encode()
+    if len(encoded) <= room:
+        return text
+    kept = encoded[: room - len(_CUT.encode())]
+    return kept.decode(errors="ignore") + _CUT  # Ignored: a letter cut in two.
 
 
 def _builder(
@@ -403,14 +427,17 @@ class CertsDir:
         return sorted(path for path in files if not path.name.endswith("-key.pem"))
 
     def server_name(self) -> str:
-        """The first name the server certificate in ``certs`` was made for: its common name.
+        """The first name the server certificate in ``certs`` was made for: the first it holds,
+        whole where its common name may be cut short, else its common name.
 
         Raises :class:`CertificateError` if there's none, or it can't be read or isn't a
         certificate in PEM.
         """
         if not self.server.exists():
             raise CertificateError(NO_SERVER.format(path=self.server))
-        return _common_name(read_certificate(self.server))
+        certificate = read_certificate(self.server)
+        names = _alternative_names(certificate)
+        return names[0] if names else _common_name(certificate)
 
     def issuer(self, key: Path | None = None) -> tuple[x509.Certificate, PrivateKey]:
         """The CA in ``certs`` and its key, read from ``key`` (default: ``ca-key.pem`` in

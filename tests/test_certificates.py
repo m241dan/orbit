@@ -42,6 +42,7 @@ from orbit.protocol import PROTOCOL_VERSION, CommandEnvelope, Hello, Welcome, de
 from tests.server_fakes import Lines, serving_plane
 
 NAMES = ("orbit.example.com", "10.0.0.5")
+LONG_NAME = f"{'x' * 88}.example.com"  # 100 characters, more than a common name's 64.
 NOW = datetime(2026, 10, 25, 9, 30, tzinfo=UTC)
 
 
@@ -182,7 +183,25 @@ def test_certificates_have_serial_numbers_of_their_own(
     assert len(serials | {ca[0].serial_number}) == 4
 
 
-@pytest.mark.parametrize("name", ["", "two words", "héllo.example.com", "orbit/serve"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "",
+        "two words",
+        "héllo.example.com",
+        "orbit/serve",
+        "-",
+        ".",
+        "a..b",
+        "a*b",
+        "-box.example.com",
+        "box-.example.com",
+        "*",
+        "*.",
+        "box.*.com",
+        "box.example.com..",
+    ],
+)
 def test_a_name_that_is_neither_a_hostname_nor_an_address_is_refused_naming_it(
     ca: tuple[x509.Certificate, PrivateKey], name: str
 ) -> None:
@@ -193,6 +212,63 @@ def test_a_name_that_is_neither_a_hostname_nor_an_address_is_refused_naming_it(
         " Give names such as orbit.example.com or 10.0.0.5, an internationalized name in its"
         " xn-- form."
     )
+
+
+@pytest.mark.parametrize(
+    "name", ["*.example.com", "my_host.lan", "box.example.com.", "a-b.c_d.example", "box"]
+)
+def test_a_hostname_of_labels_a_wildcard_first_or_a_trailing_dot_is_held_as_a_dns_name(
+    ca: tuple[x509.Certificate, PrivateKey], name: str
+) -> None:
+    certificate, _ = issue_server(*ca, [name])
+    assert _alternative_names(certificate)[0] == x509.DNSName(name)
+    assert _common_name(certificate.subject) == name
+
+
+def test_a_ca_of_a_long_hostname_is_named_for_as_much_of_it_as_fits() -> None:
+    hostname = "box-" * 15
+    certificate, _ = make_ca(hostname)
+    assert _common_name(certificate.subject) == f"orbit CA ({hostname[:50]}…)"
+    assert len(_common_name(certificate.subject).encode()) == 64
+    certificate.verify_directly_issued_by(certificate)
+
+
+def test_a_ca_of_a_hostname_that_just_fits_is_named_for_all_of_it() -> None:
+    certificate, _ = make_ca("h" * 53)
+    assert _common_name(certificate.subject) == f"orbit CA ({'h' * 53})"
+
+
+def test_a_server_certificate_of_a_long_first_name_is_named_for_its_start_holding_it_whole(
+    ca: tuple[x509.Certificate, PrivateKey],
+) -> None:
+    certificate, _ = issue_server(*ca, [LONG_NAME, "10.0.0.5"])
+    assert _common_name(certificate.subject) == f"{'x' * 61}…"
+    assert _alternative_names(certificate)[:2] == [
+        x509.DNSName(LONG_NAME),
+        x509.IPAddress(ipaddress.ip_address("10.0.0.5")),
+    ]
+    certificate.verify_directly_issued_by(ca[0])
+
+
+def test_a_client_certificate_of_a_long_name_is_named_for_its_start(
+    ca: tuple[x509.Certificate, PrivateKey],
+) -> None:
+    certificate, _ = issue_client(*ca, "c" * 100)
+    assert _common_name(certificate.subject) == f"{'c' * 61}…"
+
+
+def test_a_client_certificate_of_a_name_that_just_fits_is_named_for_all_of_it(
+    ca: tuple[x509.Certificate, PrivateKey],
+) -> None:
+    certificate, _ = issue_client(*ca, "c" * 64)
+    assert _common_name(certificate.subject) == "c" * 64
+
+
+def test_a_long_name_is_cut_between_letters_not_inside_one(
+    ca: tuple[x509.Certificate, PrivateKey],
+) -> None:
+    certificate, _ = issue_client(*ca, "é" * 40)
+    assert _common_name(certificate.subject) == f"{'é' * 30}…"
 
 
 def test_a_client_certificate_is_named_for_its_client_for_client_authentication(
@@ -582,12 +658,12 @@ def test_without_certs_no_certificates_are_listed(tmp_path: Path) -> None:
     assert CertsDir(tmp_path).listed() == ()
 
 
-def test_a_certificate_without_a_common_name_or_names_is_listed_by_its_subject(
-    tmp_path: Path,
-) -> None:
+def _without_names(attribute: x509.NameAttribute[str]) -> x509.Certificate:
+    """A certificate holding no names, of the subject with ``attribute`` alone, that signs
+    itself."""
     key = ed25519.Ed25519PrivateKey.generate()
-    subject = x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Example")])
-    certificate = (
+    subject = x509.Name([attribute])
+    return (
         x509.CertificateBuilder()
         .subject_name(subject)
         .issuer_name(subject)
@@ -597,10 +673,34 @@ def test_a_certificate_without_a_common_name_or_names_is_listed_by_its_subject(
         .not_valid_after(NOW + timedelta(days=1))
         .sign(key, None)
     )
+
+
+def test_a_certificate_without_a_common_name_or_names_is_listed_by_its_subject(
+    tmp_path: Path,
+) -> None:
+    certificate = _without_names(x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Example"))
     certs = CertsDir(tmp_path)
     certs.write(certs.server, certificate)
 
     assert certs.listed() == (_listed(certificate, "server", "O=Example"),)
+
+
+def test_the_server_name_is_the_whole_first_name_its_certificate_holds(
+    ca: tuple[x509.Certificate, PrivateKey], tmp_path: Path
+) -> None:
+    certs = CertsDir(tmp_path)
+    certs.write(certs.server, issue_server(*ca, [LONG_NAME, "10.0.0.5"])[0])
+
+    assert certs.server_name() == LONG_NAME
+
+
+def test_the_server_name_of_a_certificate_holding_no_names_is_its_common_name(
+    tmp_path: Path,
+) -> None:
+    certs = CertsDir(tmp_path)
+    certs.write(certs.server, _without_names(x509.NameAttribute(NameOID.COMMON_NAME, "box")))
+
+    assert certs.server_name() == "box"
 
 
 def test_a_file_listed_that_isnt_a_certificate_is_refused_naming_it(

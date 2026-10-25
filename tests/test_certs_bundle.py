@@ -97,6 +97,16 @@ def test_the_default_url_takes_the_first_name_of_the_server_certificate_there_is
     assert _remote(bundle)["url"] == "wss://orbit.example.com:7433"
 
 
+def test_the_default_url_takes_the_whole_of_a_long_first_name(
+    certs: CertsDir, config_dir: Path, bundle: Path
+) -> None:
+    name = f"{'x' * 88}.example.com"
+    _certs(config_dir, "server", name)
+    _certs(config_dir, "client", "laptop", "--bundle", str(bundle))
+
+    assert _remote(bundle)["url"] == f"wss://{name}:7433"
+
+
 def test_the_default_url_takes_the_port_in_server(
     certs: CertsDir, config_dir: Path, bundle: Path
 ) -> None:
