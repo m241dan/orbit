@@ -139,6 +139,24 @@ def test_a_new_task_starts_blank_with_the_sessions_settings_and_its_title_select
     assert (view.selections, view.typing, view.dismissed) == ([], [], [])
 
 
+def test_a_new_task_starts_with_effort_unset_whatever_the_sessions_effort() -> None:
+    editor, view, _ = editing(None, Settings(model="opus", tool_access="full", effort="max"))
+    assert editor.settings_shown == ("opus", "full (auto-approved)", "unset")
+    view.typed_title = "fix it"
+    editor.save()
+    task = TaskSpec(prompt="fix it", settings=Settings(model="opus", tool_access="full"))
+    assert view.dismissed == [task]
+    assert task.settings.effort is None
+
+
+def test_an_edited_task_keeps_its_own_effort() -> None:
+    task = TaskSpec(prompt="Think", settings=Settings(effort="high"))
+    editor, view, _ = editing(task, Settings(effort="max"))
+    assert editor.settings_shown[2] == "high"
+    editor.save()
+    assert view.dismissed == [task]
+
+
 def test_the_editor_builds_a_task_field_by_field() -> None:
     editor, view, pickers = editing(None)
     editor.insert()

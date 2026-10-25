@@ -100,7 +100,7 @@ In the app:
 | `ctrl+e` | Set up (or redo) the verification steps: after you confirm (`y` to go ahead, `n`/`esc` to cancel), queue a configurator task first and run it (see [Setting up verification](#setting-up-verification); hidden while the `configurator` is disabled) |
 | `ctrl+o` | Pick the model of the conversational role whose tab is shown, or the planner's on any other tab (default, fable, opus, sonnet, haiku; new tasks opened there default to it too) |
 | `ctrl+l` | Pick the tool access level new tasks start with in the task editor (off, restricted, full), kept with the conversational role whose tab is shown, or the planner's on any other tab |
-| `ctrl+y` | Pick the effort of the conversational role whose tab is shown, or the planner's on any other tab (unset, low, medium, high, xhigh, max; new tasks opened there default to it too); not while typing, where it's the prompt's redo |
+| `ctrl+y` | Pick the effort of the conversational role whose tab is shown, or the planner's on any other tab (unset, low, medium, high, xhigh, max; it's that role's own, so new tasks still start with effort unset); not while typing, where it's the prompt's redo |
 | `ctrl+p` | Session picker: view or switch to a saved session, or start a new one (see [Sessions](#sessions)) |
 | `ctrl+w` | Workspace picker, connected to an `orbit serve`: move to another workspace it serves, add one or remove one (see [Workspaces](#workspaces)); not while typing |
 | `esc` | Stop typing, close the conversation's detail pane, leave a list or close a picker; with the conversation selected and nothing active, let go of its held entry, closing the detail pane, and follow the latest output again; with the detail pane selected, close it; with the Task list selected and nothing active, let go of the held list and follow the active task again |
@@ -303,7 +303,9 @@ agent takes the task, picked among the roles enabled in the session's workspace 
 new task; **Model**;
 **Tool access**; and **Effort**: unset, `low`, `medium`, `high`, `xhigh` or `max`, where unset
 leaves it to the role's (see `effort` under
-[Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)). Picking a role sets the model, tool
+[Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)). A new task starts with the model
+and tool access of the conversational role whose tab is shown (or the planner's), but effort
+unset, whatever that role's effort. Picking a role sets the model, tool
 access and effort to that role's defaults, as the session's workspace configures it, except those
 you've already picked in this edit. `j`/`k`
 pick a field, `J`/`K` scroll the prompt box one line at a time (whichever field is selected), `i`
@@ -1114,7 +1116,7 @@ merges, whether it's enabled and how hard its agents think:
   agents add coder tasks then: a reviewer's `suggest_task` and a conversational role's
   `propose_task` get an error reply naming the `coder` as disabled, adding nothing to the task
   list or the review's batch. A disabled `planner`'s settings can still be picked with `ctrl+o`,
-  `ctrl+l` and `ctrl+y`, as new tasks start with them.
+  `ctrl+l` and `ctrl+y`, as new tasks start with its model and tool access.
 - `effort`: how hard its agents think: `low`, `medium`, `high`, `xhigh` or `max`, the levels
   `claude --help` lists; any other value is refused, listing those. Left out, the CLI's default.
   Like its model and tool access, it's the default for tasks orbit queues in the role, and what

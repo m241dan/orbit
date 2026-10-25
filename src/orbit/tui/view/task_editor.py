@@ -16,8 +16,8 @@ TEXT_FIELDS = FIELDS[:2]
 
 @dataclass(frozen=True)
 class TaskChoices:
-    """What the editor offers a task: the session's ``settings``, which a new task starts with,
-    and the ``agents`` the catalog lists, whose task roles it can take."""
+    """What the editor offers a task: the session's ``settings``, whose model and tool access a
+    new task starts with, and the ``agents`` the catalog lists, whose task roles it can take."""
 
     settings: Settings
     agents: tuple[AgentEntry, ...] = ()
@@ -26,6 +26,12 @@ class TaskChoices:
 def task_roles(agents: Iterable[AgentEntry]) -> tuple[AgentEntry, ...]:
     """The roles among ``agents`` a task can take: those that aren't conversational."""
     return tuple(agent for agent in agents if not agent.conversational)
+
+
+def new_task_settings(settings: Settings) -> Settings:
+    """The settings a new task starts with: ``settings``' model and tool access, with effort
+    unset, as the session's effort is its conversational role's own."""
+    return settings.model_copy(update={"effort": None})
 
 
 def role_defaults(settings: Settings, role: AgentEntry, picked: Iterable[str]) -> Settings:
@@ -113,9 +119,9 @@ class TaskEditorView(Protocol):
 
 class TaskEditor:
     """The editor of one task, ``task``, or of a new task in the ``coder`` role taking the
-    session's settings, shown in ``view``, offering the ``choices``' task roles and changing
-    its role, model, tool access and effort with ``pickers``: it closes with the task saved, or
-    none.
+    session's model and tool access, with effort unset, shown in ``view``, offering the
+    ``choices``' task roles and changing its role, model, tool access and effort with
+    ``pickers``: it closes with the task saved, or none.
 
     The title is the prompt's first line and the prompt box its body, joined on save by
     ``join_prompt``; a task without a title isn't saved. j/k select a field, i types in the
@@ -135,7 +141,7 @@ class TaskEditor:
         self._pickers = pickers
         self.heading = task_editor_title(new=task is None)
         self._prompt = "" if task is None else task.prompt
-        self.settings = choices.settings if task is None else task.settings
+        self.settings = new_task_settings(choices.settings) if task is None else task.settings
         self._role = TaskSpec.model_fields["role"].default if task is None else task.role
         self._roles = task_roles(choices.agents)
         self._picked: set[str] = set()  # The settings' fields picked in this edit.
