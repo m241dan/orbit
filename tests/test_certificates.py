@@ -420,13 +420,28 @@ def test_a_directory_to_set_aside_in_that_cant_be_made_is_refused_naming_it(
 
 
 @pytest.mark.parametrize(
-    "name", ["", ".laptop", "-laptop", "../laptop", "lap/top", "two words", "läptop", "a" * 65]
+    "name",
+    [
+        "",
+        ".laptop",
+        "-laptop",
+        "../laptop",
+        "lap/top",
+        "two words",
+        "läptop",
+        "\u212alaptop",
+        "a" * 65,
+        "laptop-key",
+        "laptop-KEY",
+    ],
 )
 def test_a_client_name_that_isnt_a_safe_file_name_is_refused(tmp_path: Path, name: str) -> None:
     certs = CertsDir(tmp_path)
     message = (
         f'Can\'t name a client "{name}": its files are named for it, so give up to 64 letters,'
-        " digits, dots, dashes and underscores, starting with a letter or digit, such as laptop."
+        " digits, dots, dashes and underscores, starting with a letter or digit and not ending in"
+        " -key, such as laptop; laptop-key.pem is laptop's key, so a client named laptop-key"
+        " would share it."
     )
     with pytest.raises(CertificateError, match=f"^{re.escape(message)}$"):
         certs.client(name)
@@ -434,7 +449,9 @@ def test_a_client_name_that_isnt_a_safe_file_name_is_refused(tmp_path: Path, nam
         certs.client_key(name)
 
 
-@pytest.mark.parametrize("name", ["laptop", "Work-Laptop_2.home", "7", "a" * 64])
+@pytest.mark.parametrize(
+    "name", ["laptop", "Work-Laptop_2.home", "7", "a" * 64, "key-laptop", "laptop-keyboard"]
+)
 def test_a_client_name_of_letters_digits_dots_dashes_and_underscores_is_taken(
     tmp_path: Path, name: str
 ) -> None:

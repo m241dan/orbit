@@ -197,7 +197,7 @@ def test_client_without_a_ca_is_refused_pointing_to_init(config_dir: Path) -> No
     assert not certs.path.exists()
 
 
-@pytest.mark.parametrize("name", ["../laptop", ".laptop", "lap/top"])
+@pytest.mark.parametrize("name", ["../laptop", ".laptop", "lap/top", "laptop-key"])
 def test_a_client_name_that_isnt_a_safe_file_name_is_refused_writing_nothing(
     certs: CertsDir, config_dir: Path, name: str
 ) -> None:
@@ -207,3 +207,15 @@ def test_a_client_name_that_isnt_a_safe_file_name_is_refused_writing_nothing(
     assert result.stderr.startswith(f'Can\'t name a client "{name}": its files are named for it')
     assert not (certs.path / "clients").exists()
     assert sorted(path.name for path in certs.path.parent.iterdir()) == ["certs"]
+
+
+def test_a_client_named_for_anothers_key_is_refused_leaving_its_pair_alone(
+    certs: CertsDir, config_dir: Path
+) -> None:
+    _certs(config_dir, "client", "laptop")
+    before = {path: path.read_bytes() for path in certs.path.rglob("*") if path.is_file()}
+    result = _certs(config_dir, "client", "laptop-key")
+
+    assert result.exit_code == 2
+    assert result.stderr.startswith('Can\'t name a client "laptop-key"')
+    assert {path: path.read_bytes() for path in certs.path.rglob("*") if path.is_file()} == before

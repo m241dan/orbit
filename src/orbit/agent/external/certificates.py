@@ -67,7 +67,9 @@ NO_SERVER = (
 CANT_WRITE_BUNDLE = "Can't write {path}: {reason}. Check that you can write to {directory}."
 NOT_A_CLIENT_NAME = (
     'Can\'t name a client "{name}": its files are named for it, so give up to 64 letters,'
-    " digits, dots, dashes and underscores, starting with a letter or digit, such as laptop."
+    " digits, dots, dashes and underscores, starting with a letter or digit and not ending in"
+    " -key, such as laptop; laptop-key.pem is laptop's key, so a client named laptop-key would"
+    " share it."
 )
 
 # A hostname is labels of letters, digits, dashes and underscores, not starting or ending with a
@@ -77,8 +79,9 @@ _HOSTNAME = re.compile(rf"(?:\*\.)?{_LABEL}(?:\.{_LABEL})*\.?")
 # X.509 holds a common name to 64 bytes in UTF-8; a longer one is cut short and ends with this.
 _COMMON_NAME_BYTES = 64
 _CUT = "…"
-# A client's name is a file name, and its certificate's common name, which can't exceed 64.
-_CLIENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+# A client's name is a file name, and its certificate's common name, which can't exceed 64. It
+# can't end in -key, in any case, or its certificate's file would be another client's key's.
+_CLIENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?<!-[Kk][Ee][Yy])")
 
 # Python's strict verification wants a CA that says it signs certificates, and a certificate
 # that says what its key is for.

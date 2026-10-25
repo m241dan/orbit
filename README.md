@@ -1673,11 +1673,12 @@ It writes `clients/laptop.pem` and `clients/laptop-key.pem` in `certs/`, the key
 alone: a certificate named `CN=laptop`, for client authentication, valid for a year or `--days`,
 with `--key-type` as for `init`. It prints their paths and the certificate's SHA-256
 fingerprint, as connect lines show it and `revoked` takes it. As the name names the files, it's
-up to 64 letters, digits, dots, dashes and underscores, starting with a letter or digit; another
-stops it with status 2. Bundle them for the client machine with `--bundle`, as below, or copy the
-pair and `ca.pem` there over a trusted channel, such as `scp`, for `orbit chat`'s `--cert`,
-`--key` and `--ca`. A missing `ca.pem` or CA key stops it with status 2, as for `orbit certs
-server`.
+up to 64 letters, digits, dots, dashes and underscores, starting with a letter or digit and not
+ending in `-key` in any case, as `laptop-key.pem` is `laptop`'s key, so a client named
+`laptop-key` would share it; another stops it with status 2, writing nothing. Bundle them for the
+client machine with `--bundle`, as below, or copy the pair and `ca.pem` there over a trusted
+channel, such as `scp`, for `orbit chat`'s `--cert`, `--key` and `--ca`. A missing `ca.pem` or CA
+key stops it with status 2, as for `orbit certs server`.
 
 A name that already has a certificate stops it with status 2, as a new one would leave the old
 working. `--force` issues a new one anyway, moving the old pair to `certs/old-<UTC timestamp>/`
