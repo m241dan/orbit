@@ -11,7 +11,7 @@ yet passed to agents; a task the user queues keeps its own settings. It also say
 it, where it works, whether you talk to it, whether its work merges and whether it's enabled,
 which are checked here. The enabled task roles' lanes are the session's lanes, the one whose
 roles merge running on the user's asking; where a role works decides whether its tasks take a
-coder's slot.
+coder's slot; and the work asked of a disabled role is refused.
 """
 
 import re
@@ -30,10 +30,12 @@ from pydantic import (
 from pydantic_core import PydanticCustomError
 
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
+from orbit.agent.domain.refusals import Refused
 from orbit.protocol import (
     AGENT_FAILED,
     BUILT_IN_ROLE_NAMES,
     CODER,
+    NOT_CONFIGURED,
     TIMED_OUT,
     WORK_LANE,
     Effort,
@@ -251,6 +253,26 @@ def merging_lane(roles: Mapping[str, Role]) -> str:
     user's asking: there's one at most, as only roles in the worktree merge and they share a
     lane. It's the work lane if none merges."""
     return next((role.lane for role in roles.values() if role.enabled and role.merge), WORK_LANE)
+
+
+def disabled_roles(roles: Mapping[str, Role]) -> frozenset[str]:
+    """The names of the roles among ``roles`` that are disabled, whose work is refused."""
+    return frozenset(name for name, role in roles.items() if not role.enabled)
+
+
+def disabled_note(name: str) -> str:
+    """Why the work asked of role ``name`` is refused: it's disabled."""
+    return f"{name} is disabled in this project's configuration."
+
+
+def check_enabled(roles: Mapping[str, Role], name: str) -> None:
+    """Refuse the work asked of role ``name`` if it's disabled among ``roles``; a role they
+    don't have isn't.
+
+    Raises :class:`Refused`, coded ``not_configured``, naming the role.
+    """
+    if name in disabled_roles(roles):
+        raise Refused(NOT_CONFIGURED, disabled_note(name))
 
 
 def _task_roles_in(roles: Mapping[str, Role], lane: str) -> list[str]:

@@ -238,7 +238,7 @@ async def test_closing_the_session_stops_it() -> None:
 
 
 async def test_closing_before_it_starts_is_harmless() -> None:
-    check = StartupCheck(checked(Steps()), CheckSite(None, "."), asyncio.Queue[Event]().put, None)  # type: ignore[arg-type]
+    check = StartupCheck(checked(Steps()), CheckSite(None, "."), asyncio.Queue[Event]().put, None)
     await check.close()
     assert not check.running
 

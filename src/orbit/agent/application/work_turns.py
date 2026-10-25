@@ -19,7 +19,7 @@ from orbit.agent.application.verifier import Verifier
 from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.domain.checks import configure_prompt
 from orbit.agent.domain.refusals import Refused
-from orbit.agent.domain.roles import role_task
+from orbit.agent.domain.roles import disabled_note, role_task
 from orbit.agent.domain.usage_limits import (
     OUTAGE_RESUMING_NOTE,
     RESUMING_NOTE,
@@ -125,8 +125,8 @@ class WorkTurns:
         return self._paused
 
     async def run_tasks(self) -> None:
-        """Start a run for the user, lifting a hold; refused without agents, or while one
-        runs."""
+        """Start a run for the user, lifting a hold; refused without agents, with a task still
+        to run whose role is disabled, or while one runs."""
         self.check_run_tasks()
         await self._start_asked()
 
@@ -146,9 +146,14 @@ class WorkTurns:
             await self._start_asked()
 
     def check_run_tasks(self) -> None:
-        """Refuse :meth:`run_tasks` if it couldn't start a run at all: without agents."""
-        if self._parts.work is None:
+        """Refuse :meth:`run_tasks` if it couldn't start a run at all, without agents, or if a
+        task still to run is in a disabled role, which no run runs, naming that role."""
+        work = self._parts.work
+        if work is None:
             raise Refused(NOT_CONFIGURED, NO_AGENTS_MESSAGE)
+        disabled = work.disabled_waiting
+        if disabled is not None:
+            raise Refused(NOT_CONFIGURED, disabled_note(disabled))
 
     def check_configure_checks(self) -> None:
         """Refuse :meth:`configure_checks` if it couldn't run at all: without agents or

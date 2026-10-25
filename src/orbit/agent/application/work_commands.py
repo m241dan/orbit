@@ -1,6 +1,6 @@
 """The work commands: prompts to the planner, tasks and the board, and the agents' work."""
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import assert_never
 
@@ -19,8 +19,9 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.work_turns import WorkTurns
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.catalog import CONVERSATIONAL_ROLES, TRIGGER_NAMES
+from orbit.agent.domain.catalog import CONVERSATIONAL_ROLES, trigger_names
 from orbit.agent.domain.refusals import Refused, unknown
+from orbit.agent.domain.roles import Role, check_enabled
 from orbit.protocol import (
     CONFIGURE_CHECKS,
     INVALID,
@@ -95,7 +96,8 @@ class WorkCommands:
     """Handles the work commands on the session held in ``parts``; while it's read-only, or
     taking ownership, those that start work are queued, in order, rather than run, each later
     run in the span current as it was queued, its own command's, so what it starts links
-    there. A task added, accepted or edited starts at once if its lane starts by itself."""
+    there. A task added, accepted or edited starts at once if its lane starts by itself; one
+    added or edited into a disabled role is refused, as is a trigger whose role is disabled."""
 
     def __init__(self, parts: CommandParts) -> None:
         self._parts = parts
@@ -211,9 +213,15 @@ class WorkCommands:
             MessageSent(command_id=command_id, agent=command.agent, text=command.text)
         )
 
+    def _roles(self) -> Mapping[str, Role]:
+        """The session's roles; none without agents."""
+        desk = self._parts.desk
+        return desk.agents.roles if desk else {}
+
     async def _handle_tasks(self, command: AddTask | RunTasks) -> None:
         match command:
             case AddTask(task=task):
+                check_enabled(self._roles(), task.role)
                 await self._parts.tasks.change(lambda board: board.add(task))
                 self._parts.lanes.kick_for(task.role)
             case RunTasks():
@@ -243,8 +251,10 @@ class WorkCommands:
         self._parts.lanes.kick_for(state.task.role)
 
     async def _edit(self, task_id: str, task: TaskSpec) -> None:
-        """Edit a task, if the board allows it, and start it if its lane starts by itself. An
-        edited task in a review batch has to finish again before the batch does."""
+        """Edit a task, if the board allows it and its new role isn't disabled, and start it if
+        its lane starts by itself. An edited task in a review batch has to finish again before
+        the batch does."""
+        check_enabled(self._roles(), task.role)
         lane = self._parts.lane
 
         def edit(board: TaskBoard) -> TaskState:
@@ -306,17 +316,19 @@ class WorkCommands:
         await self._parts.seat.reset()
 
     async def _fire_trigger(self, command: FireTrigger) -> None:
-        """Run the built-in trigger ``command`` names; refused for any other name, or any input,
-        since the built-ins take none."""
+        """Run the built-in trigger ``command`` names; refused for any other name, one whose role
+        is disabled, or any input, since the built-ins take none."""
         self._check_trigger(command)
         configure = self._parts.turns.configure_checks
         runs = {SUPER_REVIEW: self._super_review, CONFIGURE_CHECKS: configure}
         await runs[command.trigger]()
 
     def _check_trigger(self, command: FireTrigger) -> None:
-        """Refuse a trigger that isn't built in, given input, or that couldn't run here."""
-        if command.trigger not in TRIGGER_NAMES:
-            raise unknown(f"No trigger {command.trigger!r}", "the triggers are", TRIGGER_NAMES)
+        """Refuse a trigger that isn't built in, or whose role is disabled, as there's none of
+        it; one given input; or one that couldn't run here."""
+        names = trigger_names(self._roles())
+        if command.trigger not in names:
+            raise unknown(f"No trigger {command.trigger!r}", "the triggers are", names)
         if command.input:
             raise Refused(INVALID, f"The {command.trigger} trigger takes no input.")
         if command.trigger == SUPER_REVIEW:

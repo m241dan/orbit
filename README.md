@@ -87,8 +87,8 @@ In the app:
 | `ctrl+b` | Hide the sidebar so the conversation takes the full width (`h`/`j`/`k`/`l` skip its windows meanwhile); again, show it as it was (not while typing) |
 | `ctrl+t` | Jump to the **planner** tab; again, back to the tab you were on |
 | `ctrl+r` | Run the tasks that haven't completed yet |
-| `ctrl+g` | Ask for a super review of the whole codebase now (works while tasks run) |
-| `ctrl+e` | Set up (or redo) the verification steps: after you confirm (`y` to go ahead, `n`/`esc` to cancel), queue a configurator task first and run it (see [Setting up verification](#setting-up-verification)) |
+| `ctrl+g` | Ask for a super review of the whole codebase now (works while tasks run; hidden while the `super-reviewer` is disabled) |
+| `ctrl+e` | Set up (or redo) the verification steps: after you confirm (`y` to go ahead, `n`/`esc` to cancel), queue a configurator task first and run it (see [Setting up verification](#setting-up-verification); hidden while the `configurator` is disabled) |
 | `ctrl+o` | Pick the planner's model (default, fable, opus, sonnet, haiku; new tasks default to it too) |
 | `ctrl+l` | Pick the tool access level new tasks start with in the task editor (off, restricted, full) |
 | `ctrl+p` | Session picker: view or switch to a saved session, or start a new one (see [Sessions](#sessions)) |
@@ -601,8 +601,8 @@ timing as a task's verification, until a task starts and its own verification ta
 over. It's listed in the agents pane as `startup-check`, where `c` cancels it. When it finishes,
 the conversation notes `✅ Startup check passed`, or on a failure the step that failed (`setup`
 if the setup command did) and its output, with a 📝 draft task "Fix failing check:
-<step>" whose prompt holds that output, and a reminder that `ctrl+e` reconfigures the steps if
-they're what's wrong. `--no-verify` skips it, as does having no steps.
+<step>" whose prompt holds that output (none while the `coder` is disabled), and a reminder that
+`ctrl+e` reconfigures the steps if they're what's wrong. `--no-verify` skips it, as does having no steps.
 
 With no steps configured, nothing is verified: the conversation says so at startup (`No verification
 steps configured. Press ctrl+e to set them up.`), and each task that would have
@@ -1001,9 +1001,9 @@ none names changes nothing; one that's missing or can't be read is refused, nami
 the role.
 
 A role also says which lane runs it, where it works, whether you talk to it, whether its work
-merges, whether it's enabled and how hard its agents think. Its `lane` takes effect, as does
-`merge` in choosing the lane that runs on `ctrl+r`, and its `workspace` decides whether its tasks
-count toward `max_coders` (see Taking turns under
+merges, whether it's enabled and how hard its agents think. Its `lane` takes effect, as do
+`merge` in choosing the lane that runs on `ctrl+r` and `enabled`, and its `workspace` decides
+whether its tasks count toward `max_coders` (see Taking turns under
 [Serving the control plane](#serving-the-control-plane)); the rest are **accepted now; take effect
 in a later version**: orbit loads and checks them, but nothing acts on them yet.
 
@@ -1025,7 +1025,16 @@ in a later version**: orbit loads and checks them, but nothing acts on them yet.
 - `conversation`: whether you talk to it at the prompt, as you do the planner, rather than it
   taking tasks.
 - `merge`: whether its finished work is committed and merged.
-- `enabled`: whether it runs at all.
+- `enabled`: whether it runs at all. A disabled role is left out of the Catalog's agents, and its
+  lane out of the Catalog's lanes unless an enabled role shares it. A disabled `reviewer` queues no
+  reviews as work lands, and a disabled `super-reviewer` no super reviews, however many commits
+  land; a disabled `super-reviewer` also takes the `super-review` trigger out of the Catalog,
+  hiding `ctrl+g`, as a disabled `configurator` does `configure-checks` and `ctrl+e`, and firing
+  either is then refused as an unknown trigger. A message to a disabled `planner`, or resetting its
+  conversation, is refused (`planner is disabled in this project's configuration.`), as are adding
+  a task in a disabled role or editing one into it, naming the role, and `ctrl+r` while a task in
+  one is still to run. Nothing runs such a task, which stays on the task list until you edit or
+  remove it, and a failing startup check adds no draft while the `coder` is disabled.
 - `effort`: how hard its agents think: `low`, `medium`, `high`, `xhigh` or `max`, the levels
   `claude --help` lists; any other value is refused, listing those. Left out, the CLI's default.
   Like its model and tool access, it's the default for tasks orbit queues in the role, and is

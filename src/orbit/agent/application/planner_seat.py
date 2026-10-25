@@ -14,6 +14,7 @@ from orbit.agent.application.planner_trace import PlannerTracing
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.refusals import Refused
+from orbit.agent.domain.roles import Role, disabled_note
 from orbit.protocol import (
     BUSY,
     INVALID,
@@ -56,8 +57,8 @@ class SeatHooks:
 
 
 class PlannerSeat:
-    """The planner of a session with ``desk``'s agents (none without them, or without a
-    planner role), proposing into ``tasks``; it publishes into ``events``."""
+    """The planner of a session with ``desk``'s agents (none without them, without a planner
+    role or while it's disabled), proposing into ``tasks``; it publishes into ``events``."""
 
     def __init__(
         self,
@@ -97,9 +98,21 @@ class PlannerSeat:
         return self._planner.notes if self._planner else self._kept_notes
 
     def _chat(self) -> PlannerChat | None:
-        if self._desk is None or PLANNER not in self._desk.agents.roles:
+        role = self._role()
+        if self._desk is None or role is None or not role.enabled:
             return None
         return PlannerChat(self._desk, self._tasks, self._hooks.step_names)
+
+    def _role(self) -> Role | None:
+        """The planner's role; none without agents or a planner role."""
+        return self._desk.agents.roles.get(PLANNER) if self._desk else None
+
+    def _absent(self) -> Refused:
+        """The refusal of the planner's work while there's no planner: the planner role is
+        disabled, or there are no agents or planner role."""
+        role = self._role()
+        disabled = role is not None and not role.enabled
+        return Refused(NOT_CONFIGURED, disabled_note(PLANNER) if disabled else NO_PLANNER_MESSAGE)
 
     def tell(self, note: str) -> None:
         """Have the planner, if there is one, hear ``note`` ahead of its next prompt."""
@@ -113,7 +126,7 @@ class PlannerSeat:
         if self._planner is None:
             # Frees the prompt of a frontend that marked the lane busy when it sent this.
             await self._events.put(BusyChanged(busy=False, lane=PLANNER_LANE))
-            raise Refused(NOT_CONFIGURED, NO_PLANNER_MESSAGE)
+            raise self._absent()
         self._hooks.use()
         await self._hooks.save()
         self._hooks.check()  # The save may have halted the session.
@@ -163,7 +176,7 @@ class PlannerSeat:
         """End the planner's conversation, re-reading its role; refused while it answers, and
         noted when it has no conversation yet."""
         if self._desk is None or self._planner is None:
-            raise Refused(NOT_CONFIGURED, NO_PLANNER_MESSAGE)
+            raise self._absent()
         if self._turns.running:
             raise Refused(BUSY, PLANNER_BUSY_RESET)
         if not self._planner.started:

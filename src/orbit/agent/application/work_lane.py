@@ -70,7 +70,8 @@ class Beside:
     its next task; its seat at the ``coders``' slots, if any, which a task whose role works in
     the worktree takes one of before it starts; the ``tracing`` of its tasks; the ``records``
     moves, if any, which move a record a task names whose number another took before the task
-    runs; and the roles whose tasks run ``elsewhere``, in lanes that start by themselves."""
+    runs; the roles whose tasks run ``elsewhere``, in lanes that start by themselves; and the
+    ``disabled`` roles, whose tasks run nowhere."""
 
     review: ReviewLane | None = None
     startup: StartupCheck | None = None
@@ -79,13 +80,15 @@ class Beside:
     tracing: TaskTracing = field(default_factory=TaskTracing)
     records: RecordMoves | None = None
     elsewhere: frozenset[str] = frozenset()
+    disabled: frozenset[str] = frozenset()
 
 
 class WorkLane:
     """Runs ``tasks``' tasks through ``desk``'s agents, checked by ``verifier`` if any.
 
-    Reviews are left to ``beside``'s review lane, when there's one, and the tasks of the roles it
-    says run elsewhere to their own lanes. :meth:`run` is meant to run as
+    Reviews are left to ``beside``'s review lane, when there's one, the tasks of the roles it
+    says run elsewhere to their own lanes, and the tasks of the roles it says are disabled on
+    the board, unrun. :meth:`run` is meant to run as
     a task of its own: cancelling it cancels the task running, and the cancel goes on once that
     task has ended. The user's stop, :meth:`stopped_by_user`, cancels only the agent's run, and
     the run ends by itself: work the agent finished before the stop is still settled, and
@@ -115,6 +118,7 @@ class WorkLane:
         self._tracing = beside.tracing
         self._records = beside.records
         self._elsewhere = beside.elsewhere
+        self._disabled = beside.disabled
         self._seated = False  # The run holds a coder's slot, for the task about to run or running.
         # Task id -> the commit it merged into the base, until reported.
         self._landed: dict[str, str] = {}
@@ -180,10 +184,18 @@ class WorkLane:
 
     def next_work(self, tried: Collection[str] = ()) -> str | None:
         """The next task for the work lane, the one a run stopped at first; the roles of the
-        review lane, if there is one, and of the lanes that start by themselves run there."""
+        review lane, if there is one, and of the lanes that start by themselves run there, and
+        the disabled roles' run nowhere."""
         reviews = self._review.roles if self._review is not None else frozenset()
-        exclude = self._elsewhere | reviews
+        exclude = self._elsewhere | reviews | self._disabled
         return self._board.next_runnable(skip=tried, exclude=exclude, first=self._resume)
+
+    @property
+    def disabled_waiting(self) -> str | None:
+        """The role of the first task still to run whose role is disabled, which no run runs;
+        none if there's no such task."""
+        task_id = self._board.next_runnable(roles=self._disabled)
+        return None if task_id is None else self._board.get(task_id).task.role
 
     async def run(self) -> RunEnd:
         """Run the tasks waiting, in order but the one the last run stopped at first, until

@@ -64,6 +64,13 @@ def _last_seq(hosts: Iterable[WorkspaceHost], mark: SeqMark | None) -> int:
     return max([marked, *(host.outbox.last_seq for host in hosts)])
 
 
+def _across(
+    hosts: Iterable[WorkspaceHost], names: Callable[[WorkspaceHost], Iterable[str]]
+) -> list[str]:
+    """The ``names`` each of ``hosts`` has, in turn."""
+    return [name for host in hosts for name in names(host)]
+
+
 async def _untold(entry: WorkspaceEntry) -> None:
     """Tell no one of ``entry``."""
 
@@ -315,11 +322,13 @@ class ControlPlane:
 
     async def _catalog(self, changed: WorkspaceEntry | None = None) -> Catalog:
         """What exists: every workspace served, the one ``changed`` names with that entry, if
-        given, and the others with their sessions as they are now, and their agents' roles."""
+        given, and the others with their sessions as they are now, and their agents' enabled
+        roles, the triggers and the lanes, each listed if any workspace has it."""
         hosts = tuple(self._hosts.values())  # Workspaces may be added or removed meanwhile.
         entries = [await self._entry(host, changed) for host in hosts]
-        roles = (role for host in hosts for role in host.roles)
-        return catalog(entries, roles)
+        roles = _across(hosts, lambda host: host.roles)
+        triggers = _across(hosts, lambda host: host.triggers)
+        return catalog(entries, roles, triggers, _across(hosts, lambda host: host.lanes))
 
     @staticmethod
     async def _entry(host: WorkspaceHost, changed: WorkspaceEntry | None) -> WorkspaceEntry:

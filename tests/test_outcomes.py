@@ -6,6 +6,7 @@ import asyncio
 import pytest
 
 from orbit.agent import WorkspaceHost
+from orbit.agent.application.lane_runner import Lanes
 from orbit.agent.application.planner_seat import (
     NO_PLANNER_MESSAGE,
     NOTHING_TO_RESET,
@@ -13,7 +14,7 @@ from orbit.agent.application.planner_seat import (
 )
 from orbit.agent.application.ports import StoreFailed
 from orbit.agent.application.work_turns import CONFIGURING_NOTE, NO_AGENTS_MESSAGE
-from orbit.agent.domain.catalog import LANES, TRIGGERS
+from orbit.agent.domain.catalog import TRIGGERS
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
     BUSY,
@@ -351,9 +352,10 @@ async def test_every_catalogued_trigger_is_run_by_fire_trigger(trigger: str) -> 
     assert refused.code == NOT_CONFIGURED
 
 
-@pytest.mark.parametrize("lane", LANES)
+@pytest.mark.parametrize("lane", Lanes().names)
 async def test_every_catalogued_lane_is_accepted_by_cancel_turn(lane: str) -> None:
     session = WorkspaceHost()
+    assert lane in session.lanes
     await send_as(session, "c1", CancelTurn(lane=lane))
     events = await outcome(session)
     await session.close()

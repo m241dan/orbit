@@ -55,14 +55,14 @@ class CheckSite:
 class StartupCheck:
     """Runs ``verification``'s steps once at ``site``, in a snapshot set up with its tree's
     setup when it has a tree, publishing progress and the result. A failure goes to
-    ``add_fix``. Each run, its steps and its result are traced with :attr:`tracing`."""
+    ``add_fix``, if given. Each run, its steps and its result are traced with :attr:`tracing`."""
 
     def __init__(
         self,
         verification: Verification,
         site: CheckSite,
         publish: Publish,
-        add_fix: AddFix,
+        add_fix: AddFix | None,
     ) -> None:
         self._verification = verification
         self._tree = site.tree
@@ -180,8 +180,9 @@ class StartupCheck:
             await self._publish(StartupChecked(passed=True))
             return
         step, output = failure
-        await self._add_fix(step, output)
-        fix_added()
+        if self._add_fix is not None:
+            await self._add_fix(step, output)
+            fix_added()
         await self._publish(
             StartupChecked(passed=False, step=step.name, output=trim_output(output))
         )

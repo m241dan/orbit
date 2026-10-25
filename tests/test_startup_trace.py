@@ -13,6 +13,7 @@ from orbit.agent.application.agent_trace import STEP_SPAN
 from orbit.agent.application.ports import TreeFailed
 from orbit.agent.application.startup_trace import STARTUP_SPAN
 from orbit.protocol import (
+    CODER,
     AgentExited,
     CancelAgent,
     EventEnvelope,
@@ -21,6 +22,7 @@ from orbit.protocol import (
     VerificationChanged,
 )
 from tests.agent_fakes import (
+    ROLES,
     FakeTree,
     Steps,
     agent_exited,
@@ -103,6 +105,24 @@ async def test_a_failing_check_names_the_step_that_failed_and_the_fix_it_added()
     }
     [step] = steps_of(traced, span)
     assert attributes(step)["orbit.verify.step.result"] == "failed"
+
+
+async def test_a_failing_check_adds_no_fix_while_the_coder_is_disabled() -> None:
+    traced = Traced()
+    coder = ROLES[CODER].model_copy(update={"enabled": False})
+    session, _, _ = session_for(
+        verification=checked(Steps(False)),
+        tree=FakeTree(),
+        check_at_startup=True,
+        telemetry=traced.telemetry,
+        roles={**ROLES, CODER: coder},
+    )
+    await events_until(session, agent_exited("startup-check"))
+    await session.close()
+
+    span = startup(traced)
+    assert attributes(span)["orbit.verify.result"] == "failed"
+    assert attributes(span)["orbit.startup_check.fix_added"] is False
 
 
 async def test_the_trees_setup_is_a_step_of_its_own() -> None:

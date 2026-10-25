@@ -7,7 +7,7 @@ reviewed: review pauses until the user's next task lands, which bounds how much 
 generate by themselves.
 """
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 
 from pydantic import BaseModel, ConfigDict
@@ -158,10 +158,12 @@ class LaneSnapshot(BaseModel):
 
 
 class ReviewPlanner:
-    """Tracks batches and decides when to review, within ``limits``."""
+    """Tracks batches and decides when to review, within ``limits``: only the reviews of the
+    ``reviewers``, the review roles enabled, fall due."""
 
-    def __init__(self, limits: ReviewLimits) -> None:
+    def __init__(self, limits: ReviewLimits, reviewers: Collection[str] = REVIEW_ROLES) -> None:
         self.limits = limits
+        self._reviewers = frozenset(reviewers)
         self.paused = False
         self.since_super = 0  # Commits since the last super review.
         self._next_batch = 1
@@ -272,8 +274,9 @@ class ReviewPlanner:
         review is due now. Only the user's and the planner's commits count: a suggested task's
         doesn't. One that falls due waits, as it does while review is paused, while a suggested
         task or a review (any task with origin review or super_review) is pending or running,
-        and comes with the first of the user's commits to find none."""
-        if not _users_work(state):
+        and comes with the first of the user's commits to find none. None falls due while the
+        super reviewer is disabled."""
+        if not _users_work(state) or SUPER_REVIEWER not in self._reviewers:
             return False
         self.since_super += 1
         if self.since_super < self.limits.super_every or self._holds_super_review(tasks):
@@ -295,12 +298,14 @@ class ReviewPlanner:
         return ReviewJob(commits=(commit,), round=0, batch=None, whole=True)
 
     def landed(self, state: TaskState, commit: str) -> ReviewJob | None:
-        """Task ``state`` landed ``commit``; returns the review that's due, if any."""
+        """Task ``state`` landed ``commit``; returns the review that's due, if any: none while
+        the reviewer is disabled."""
         if state.batch is None:
             if state.origin not in (MANUAL_ORIGIN, PLANNER_ORIGIN):
                 return None
             self.paused = False
-            return ReviewJob(commits=(commit,), round=0, batch=None, reviewed=(state.id,))
+            job = ReviewJob(commits=(commit,), round=0, batch=None, reviewed=(state.id,))
+            return job if REVIEWER in self._reviewers else None
         batch = self._open.get(state.batch)
         if batch is None:
             return None
@@ -338,11 +343,18 @@ class ReviewPlanner:
         _forget_finish(batch, state.id)
 
     def _due(self, batch_id: str) -> ReviewJob | None:
+        """The review of batch ``batch_id`` that's due, if any; a batch whose tasks have all
+        finished closes, reviewed or not."""
         batch = self._open[batch_id]
         if batch.filling or any(task not in batch.finished for task in batch.tasks):
             return None
         del self._open[batch_id]
-        if not batch.commits:
+        return self._batch_review(batch_id, batch)
+
+    def _batch_review(self, batch_id: str, batch: _Batch) -> ReviewJob | None:
+        """The review of ``batch``, ``batch_id``, which just closed: due if it landed commits
+        and the reviewer is enabled, unless it's at the last round, which pauses review."""
+        if not batch.commits or REVIEWER not in self._reviewers:
             return None
         if batch.round >= self.limits.rounds:
             self.paused = True

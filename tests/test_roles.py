@@ -4,10 +4,13 @@ import pytest
 from pydantic import ValidationError
 
 from orbit.agent.domain.config_errors import ConfigError
+from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.roles import (
     ORBIT_TOOLS,
     Role,
     built_in_roles,
+    check_enabled,
+    disabled_roles,
     load_built_in_roles,
     merging_lane,
     out_of_time,
@@ -22,6 +25,7 @@ from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.protocol import (
     AGENT_FAILED,
     BUILT_IN_ROLE_NAMES,
+    NOT_CONFIGURED,
     TIMED_OUT,
     WORK_LANE,
     Settings,
@@ -371,3 +375,24 @@ def test_the_merging_lane_is_the_lane_of_the_roles_that_merge() -> None:
 def test_without_an_enabled_merging_role_the_merging_lane_is_the_work_lane() -> None:
     coder = BUILT_IN_ROLES["coder"].model_copy(update={"lane": "build", "enabled": False})
     assert merging_lane({**BUILT_IN_ROLES, "coder": coder}) == WORK_LANE
+
+
+def test_the_disabled_roles_are_those_with_enabled_false() -> None:
+    reviewer = BUILT_IN_ROLES["reviewer"].model_copy(update={"enabled": False})
+    assert disabled_roles(BUILT_IN_ROLES) == frozenset()
+    assert disabled_roles({**BUILT_IN_ROLES, "reviewer": reviewer}) == frozenset({"reviewer"})
+
+
+def test_work_in_a_disabled_role_is_refused_as_not_configured_naming_it() -> None:
+    coder = BUILT_IN_ROLES["coder"].model_copy(update={"enabled": False})
+    with pytest.raises(Refused) as refused:
+        check_enabled({**BUILT_IN_ROLES, "coder": coder}, "coder")
+    assert (refused.value.code, refused.value.message) == (
+        NOT_CONFIGURED,
+        "coder is disabled in this project's configuration.",
+    )
+
+
+@pytest.mark.parametrize("name", ["coder", "nobody"])
+def test_work_in_an_enabled_role_or_one_there_is_none_of_is_not_refused(name: str) -> None:
+    check_enabled(BUILT_IN_ROLES, name)

@@ -58,3 +58,9 @@ def test_stopping_on_an_error_that_says_nothing_names_its_type() -> None:
     assert stopped_on("The event log writer", RuntimeError("")) == (
         "The event log writer stopped on an unexpected error: RuntimeError"
     )
+
+
+def test_with_no_choices_the_refusal_says_there_are_none() -> None:
+    refused = unknown("No trigger 'x'", "the triggers are", ())
+
+    assert (refused.code, refused.message) == (UNKNOWN, "No trigger 'x'; there are none.")

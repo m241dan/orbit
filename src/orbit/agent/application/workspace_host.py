@@ -5,7 +5,7 @@ It takes commands from the frontends, asks the domain what follows from them, dr
 ports to do it, and reports what happened as events.
 """
 
-from collections.abc import Awaitable, Callable, Collection, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import replace
 from datetime import datetime
@@ -48,7 +48,7 @@ from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
 from orbit.agent.application.review_trace import ReviewTracing
 from orbit.agent.application.session_state import SessionStates, StateParts
 from orbit.agent.application.settings import SessionSettings
-from orbit.agent.application.startup_check import CheckSite, StartupCheck
+from orbit.agent.application.startup_check import AddFix, CheckSite, StartupCheck
 from orbit.agent.application.startup_trace import StartupTracing
 from orbit.agent.application.storage_halt import HaltHooks, StorageHalt
 from orbit.agent.application.storage_resume import ResumeParts, StorageResume
@@ -78,17 +78,19 @@ from orbit.agent.application.work_lane import Beside, WorkLane
 from orbit.agent.application.work_turns import WorkParts, WorkTurns
 from orbit.agent.domain.activity import Activity
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.catalog import workspace_entry
+from orbit.agent.domain.catalog import trigger_names, workspace_entry
 from orbit.agent.domain.ownership import WorkspaceOwner, queued_dropped_note, read_only_note
 from orbit.agent.domain.refusals import STOPPING, Refused
 from orbit.agent.domain.reviews import ReviewPlanner
-from orbit.agent.domain.roles import merging_lane, role_task, task_lanes
+from orbit.agent.domain.roles import Role, disabled_roles, merging_lane, role_task, task_lanes
 from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     CODER,
     INVALID,
+    PLANNER,
     PLANNER_LANE,
+    REVIEW_ROLES,
     REVIEWER,
     ActivateSession,
     Attach,
@@ -185,7 +187,11 @@ class WorkspaceHost:
 
     With ``check_at_startup``, the ``verification`` steps also run once in the background as
     its background work starts, on the base commit; a failure adds a draft task to
-    fix it.
+    fix it, unless the coder is disabled.
+
+    A disabled role is left out of its catalog entries: its agents, the triggers that queue its
+    tasks and its lane, unless an enabled role shares it; it queues no reviews, and the work
+    asked of it is refused.
 
     A task whose role works in the worktree, such as a coder's or configurator's, takes one of
     :attr:`coder_slots` as it starts, waiting in line for one while every one is taken, and
@@ -523,6 +529,7 @@ class WorkspaceHost:
             tracing,
             self._record_moves,
             self._lanes.elsewhere,
+            disabled_roles(self._roles()),
         )
         return WorkLane(self._desk, self._tasks, self._verifier, beside)
 
@@ -536,9 +543,14 @@ class WorkspaceHost:
         site = self._check_site()
         if site is None:
             return None
-        check = StartupCheck(verification, site, self._events.put, self._add_startup_fix)
+        check = StartupCheck(verification, site, self._events.put, self._startup_fixes())
         check.tracing = StartupTracing(self.telemetry, self._workspace_id)
         return check
+
+    def _startup_fixes(self) -> AddFix | None:
+        """What adds a draft task to fix a step that failed at startup: none while the coder is
+        disabled, as the draft couldn't run."""
+        return None if CODER in disabled_roles(self._roles()) else self._add_startup_fix
 
     def _check_site(self) -> CheckSite | None:
         """Where the startup check runs: where the agents work, else in the workspace given."""
@@ -666,8 +678,28 @@ class WorkspaceHost:
 
     @property
     def roles(self) -> tuple[str, ...]:
-        """The roles of this workspace's agents; none without agents."""
-        return tuple(self._desk.agents.roles) if self._desk else ()
+        """The enabled roles of this workspace's agents; none without agents."""
+        roles = self._roles()
+        disabled = disabled_roles(roles)
+        return tuple(name for name in roles if name not in disabled)
+
+    @property
+    def triggers(self) -> tuple[str, ...]:
+        """The names of the built-in triggers that can be fired here: those whose role isn't
+        disabled."""
+        return trigger_names(self._roles())
+
+    @property
+    def lanes(self) -> tuple[str, ...]:
+        """The names of this workspace's lanes: the work lane, the planner's unless the planner
+        is disabled, and those that start by themselves, which only enabled roles have."""
+        planner = PLANNER not in disabled_roles(self._roles())
+        return tuple(lane for lane in self._lanes.names if planner or lane != PLANNER_LANE)
+
+    def _roles(self) -> Mapping[str, Role]:
+        """The roles of this workspace's agents, whether enabled or not; none without
+        agents."""
+        return self._desk.agents.roles if self._desk else {}
 
     async def attach(self, connection: SessionConnection, session: str) -> None:
         """Have ``connection`` view the session ``session`` and publish its snapshot to it;
@@ -786,15 +818,17 @@ class WorkspaceHost:
         return self._desk.working_on(task_id).id
 
     def _review_lane(self) -> ReviewLane | None:
-        """The review lane, if reviews are on and run beside the work: in a tree, with the
-        reviewer in a lane of its own; none otherwise."""
+        """The review lane, if reviews are on and run beside the work: in a tree, with a review
+        role enabled and the reviewer in a lane of its own; none otherwise. Only the enabled
+        review roles' reviews are queued."""
         desk = self._desk
         if desk is None or not desk.agents.review or desk.agents.tree is None:
             return None
         roles = desk.agents.roles
-        if roles[REVIEWER].lane == merging_lane(roles):
+        reviewers = REVIEW_ROLES - disabled_roles(roles)
+        if not reviewers or roles[REVIEWER].lane == merging_lane(roles):
             return None
-        planner = ReviewPlanner(desk.agents.review_limits)
+        planner = ReviewPlanner(desk.agents.review_limits, reviewers)
         hooks = ReviewHooks(
             lambda: self._turns.wake(),
             self._reviews_changed,
@@ -825,9 +859,8 @@ class WorkspaceHost:
     def _session_lanes(self) -> Lanes:
         """The session's lanes: the one whose roles merge, which runs on the user's asking, and
         those that start by themselves, the review lane among them."""
-        roles = self._desk.agents.roles if self._desk else {}
         review = (self._lane.runner,) if self._lane else ()
-        return Lanes(merging_lane(roles), (*review, *self._runners))
+        return Lanes(merging_lane(self._roles()), (*review, *self._runners))
 
     def _paused(self) -> bool:
         """Whether the work lane waits out a pause, when no other lane starts a task."""

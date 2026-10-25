@@ -21,7 +21,9 @@ class Refused(ValueError):
 
 def unknown(problem: str, listing: str, choices: Sequence[str]) -> Refused:
     """The refusal of a name that isn't among ``choices``: the ``problem`` with it, then the
-    ``listing`` (such as "the lanes are") naming the choices."""
+    ``listing`` (such as "the lanes are") naming the choices, or that there are none."""
+    if not choices:
+        return Refused(UNKNOWN, f"{problem}; there are none.")
     return Refused(UNKNOWN, f"{problem}; {listing} {joined(choices)}.")
 
 

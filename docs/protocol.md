@@ -92,7 +92,10 @@ and the backend's `server_version`. `Welcome` is Hello's outcome: it takes the p
 `CommandAccepted`. A `Catalog` follows it: what exists, namely the workspaces served, each with
 its id, label, path, sessions and `read_only`, true when another orbit owns its repository (see
 [Read-only orbits](#read-only-orbits)) and `managed`, true for a clone the server made from a
-URL, whose directory purging it deletes, then the agents' roles, the triggers and the lanes. Each
+URL, whose directory purging it deletes, then the agents' roles, the triggers and the lanes, each
+listed if any workspace served has it: a role that's disabled (`enabled = false`) is left out, as
+are the triggers that queue its tasks (`super-review` the super reviewer's, `configure-checks` the
+configurator's) and its lane, unless an enabled role shares it. Each
 session carries its state (see [Session state](#session-state)).
 
 `Hello` attaches the connection to nothing, and nothing more reaches it until its first
@@ -452,7 +455,8 @@ owns it, and runs its work. Any other orbit on it is read-only: the workspace's 
 `Catalog`, and its `Snapshot`, have `read_only` true, and a `Notice` after the Snapshot names the owner. A read-only orbit accepts
 `RunTasks` and `FireTrigger` with `CommandAccepted` and queues them, in order, rather than running
 them, after refusing, as an owning orbit would, those that couldn't run here (an unknown trigger,
-input to one, or work without the agents, reviews or verification it needs), and starts no work by itself, such as reviews or the startup check; the planner, sessions,
+input to one, a run with a task still to run whose role is disabled, refused with `not_configured`
+naming the role, or work without the agents, reviews or verification it needs), and starts no work by itself, such as reviews or the startup check; the planner, sessions,
 drafts and settings work as usual. The queue is dropped when the orbit exits.
 
 A read-only orbit tries the repository's lock every 5 seconds from its first `Welcome`. Once the
@@ -494,10 +498,12 @@ The task list is the session's, and every change to it publishes the whole list 
 is refused with `unknown`: `No task with id 't9'.`
 
 - `AddTask(task)` appends `task`, a `TaskSpec` with its `prompt`, `settings` and `role`, to the
-  list as a pending task, with the next id.
+  list as a pending task, with the next id. It's refused with `not_configured` for a disabled
+  role: `coder is disabled in this project's configuration.`
 - `EditTask(task_id, task)` replaces task `task_id`'s `TaskSpec` with `task` and makes it pending
   again, its attempts and the reason it last ended cleared; an edited task in a review batch has
-  to finish again before the batch does. It's refused with `busy` while the task runs or is
+  to finish again before the batch does. It's refused with `not_configured` for a disabled role,
+  as `AddTask` is, and with `busy` while the task runs or is
   verified (`Task 't3' can't be edited while it runs.`), and with `invalid` for a review orbit
   queued itself, whose batch is spent: `Reviews can't be edited; remove it instead.`
 - `AcceptTask(task_id)` makes the draft task `task_id`, one the planner proposed, a pending
@@ -536,7 +542,8 @@ config, keeping the role it has, with a `Notice` saying why, when the config is 
 publishes `ConversationReset(agent)` and saves the session; with no conversation yet, a `Notice`
 says there's nothing to reset. It's refused with `unknown` for any other agent, with
 `not_configured` without agents and a planner role (`Planning needs agents and a planner
-role.`), and with `busy` while the planner answers: `The planner is answering; press ctrl+x to
+role.`) or while the planner is disabled (`planner is disabled in this project's
+configuration.`), as `SendMessage` to it is, and with `busy` while the planner answers: `The planner is answering; press ctrl+x to
 stop it first.`
 
 ## Paging through history
