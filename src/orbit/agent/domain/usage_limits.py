@@ -26,6 +26,11 @@ RESUMING_NOTE = "Starting the run again after the usage limit."
 OUTAGE_RESUMING_NOTE = "Starting the run again now Claude's API may be answering."
 """Said as a run an outage stopped starts again by itself."""
 
+PLANNER_OUTAGE_NOTE = (
+    "Claude's API isn't answering, so the planner couldn't reply; send your message again later."
+)
+"""Said in place of the error when Claude's API not answering fails a planner turn."""
+
 WAIT_CANCELLED_NOTE = "The run won't start again by itself."
 """Said when the user stops a run that was waiting to start again."""
 

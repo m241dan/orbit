@@ -526,7 +526,9 @@ such an error, however its task ends. The conversation says when (`Claude's API 
 ctrl+r starts it now and ctrl+s cancels that.`) and again as it starts (`Starting the run again now
 Claude's API may be answering.`). The task it stopped at runs first, and a fix carries on from the
 coder's tree, as at the usage limit; `ctrl+r`, `ctrl+s`, switching sessions and quitting work on the
-wait as they do there. Reviews and planner turns don't pause.
+wait as they do there. Reviews and planner turns don't pause: a planner turn ends in error saying
+so in place of the API's own text (`Claude's API isn't answering, so the planner couldn't reply;
+send your message again later.`), and nothing is sent again by itself.
 [docs/00023-bugfix-pause-runs-when-claude-is-down.md](docs/00023-bugfix-pause-runs-when-claude-is-down.md)
 records the requirements.
 

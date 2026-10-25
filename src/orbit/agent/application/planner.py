@@ -25,6 +25,7 @@ from orbit.agent.domain.roles import (
     task_suggestion,
     timeout_ending,
 )
+from orbit.agent.domain.usage_limits import PLANNER_OUTAGE_NOTE, api_unavailable
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
     AGENT_FAILED,
@@ -113,10 +114,11 @@ class PlannerChat:
         A turn cancelled before its TurnFinished is out ends as cancelled rather than raising,
         and one that fails or runs out of the planner role's time then ends in error. Once its
         TurnFinished is out, a cancelled or failed turn returns that TurnFinished's reason
-        without publishing another; a failure is still reported with ErrorOccurred.
+        without publishing another; a failure is still reported with ErrorOccurred. An error
+        saying Claude's API isn't answering is published as the planner couldn't reply.
 
-        The span current, the turn's, records each error the turn reports as it does, and what
-        the turn cost, the drafts it proposed and how it ended as it ends.
+        The span current, the turn's, records each error the turn reports as it does, in its own
+        words, and what the turn cost, the drafts it proposed and how it ended as it ends.
         """
         self._usage, self._drafts = Usage(), 0
         reason: TurnEndReason = "cancelled"  # What a turn cancelled again as it ends escapes as.
@@ -146,10 +148,10 @@ class PlannerChat:
         return finished or "completed"
 
     async def _publish(self, event: Event, finished: TurnEndReason | None) -> TurnEndReason | None:
-        """Publish ``event``, recording an error it reports on the turn's span and adding what
-        it says the turn cost; returns how the turn ended, once its TurnFinished is out, given
-        ``finished`` before it."""
-        await self._desk.publish(event)
+        """Publish ``event``, an error as the user hears it, recording the error it reports on
+        the turn's span as it is and adding what it says the turn cost; returns how the turn
+        ended, once its TurnFinished is out, given ``finished`` before it."""
+        await self._desk.publish(_heard(event) if isinstance(event, ErrorOccurred) else event)
         if isinstance(event, ErrorOccurred):
             current_span().error(event.message)
         if not isinstance(event, TurnFinished):
@@ -165,13 +167,12 @@ class PlannerChat:
         ending: tuple[str, str],
     ) -> TurnEndReason:
         """Report turn ``turn_id`` failing with ``failure``, as the code and message of
-        ``ending``, on its span too, and end it in error unless ``finished`` says how it already
-        ended."""
+        ``ending``, on its span too, the message as the user hears it, and end it in error unless
+        ``finished`` says how it already ended."""
         code, message = ending
         current_span().error(message, failure)
-        await self._desk.publish(
-            ErrorOccurred(turn_id=turn_id, agent_id=self.agent_id, code=code, message=message)
-        )
+        error = ErrorOccurred(turn_id=turn_id, agent_id=self.agent_id, code=code, message=message)
+        await self._desk.publish(_heard(error))
         return await self._end(turn_id, finished, "error")
 
     async def _end(
@@ -279,3 +280,11 @@ class PlannerChat:
     async def _report_progress(self, arguments: dict[str, Any]) -> Reply:
         assert self._agent is not None  # It called, so it was opened.
         return await report_progress(self._desk.publish, self._agent.id, PLAN_TASK, arguments)
+
+
+def _heard(error: ErrorOccurred) -> ErrorOccurred:
+    """``error`` as the user hears it: saying the planner couldn't reply in place of its text
+    when that says Claude's API isn't answering."""
+    if not api_unavailable(error.message):
+        return error
+    return error.model_copy(update={"message": PLANNER_OUTAGE_NOTE})

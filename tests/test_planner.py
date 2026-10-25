@@ -11,6 +11,7 @@ from orbit.agent.application.ports import Reply, ResumeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.roles import Role
+from orbit.agent.domain.usage_limits import PLANNER_OUTAGE_NOTE
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
     AGENT_FAILED,
@@ -574,4 +575,62 @@ async def test_a_timeout_that_is_not_the_planners_own_is_a_failure(minutes: floa
     ]
     assert finished_turns(published) == [
         TurnFinished(turn_id=turn_id, agent_id="agent-1", reason="error")
+    ]
+
+
+OVERLOADED = 'API Error: 529 {"type":"error","error":{"type":"overloaded_error"}}'
+
+
+def errors(events: list[Event]) -> list[ErrorOccurred]:
+    return [e for e in events if isinstance(e, ErrorOccurred)]
+
+
+async def test_a_turn_claudes_api_fails_says_the_planner_couldnt_reply_and_the_next_runs() -> None:
+    session, _, launcher = session_for()
+    launcher.planner_turns = [chats, chats]
+    launcher.planner_errors = [OVERLOADED]
+    failed = await plan(session, "Plan.")
+    turn_id = turn_id_of(failed)
+    assert errors(failed) == [
+        ErrorOccurred(
+            turn_id=turn_id, agent_id="agent-1", code=AGENT_FAILED, message=PLANNER_OUTAGE_NOTE
+        )
+    ]
+    assert finished_turns(failed) == [
+        TurnFinished(turn_id=turn_id, agent_id="agent-1", reason="error")
+    ]
+    later = await plan(session, "Again.")
+    assert not errors(later)
+    assert finished_turns(later) == [
+        TurnFinished(turn_id=turn_id_of(later), agent_id="agent-1", reason="completed")
+    ]
+    assert len(launcher.launches) == 2  # Nothing was sent again by itself.
+
+
+async def cannot_connect(call: Call) -> TurnEndReason:
+    raise RuntimeError("API Error (Connection error.)")
+
+
+async def test_a_turn_raising_as_claudes_api_fails_says_the_planner_couldnt_reply() -> None:
+    published: list[Event] = []
+    chat, _, _ = steps_chat(cannot_connect, published=published)
+    assert await chat.answer("Plan.", Settings()) == "error"
+    turn_id = turn_id_of(published)
+    assert published[-2:] == [
+        ErrorOccurred(
+            turn_id=turn_id, agent_id="agent-1", code=AGENT_FAILED, message=PLANNER_OUTAGE_NOTE
+        ),
+        TurnFinished(turn_id=turn_id, agent_id="agent-1", reason="error"),
+    ]
+
+
+async def test_a_turn_failing_with_another_api_error_shows_its_own_text() -> None:
+    published: list[Event] = []
+    chat, launcher, _ = steps_chat(chats, published=published)
+    message = 'API Error: 400 {"error":{"type":"invalid_request_error"}}'
+    launcher.planner_errors = [message]
+    assert await chat.answer("Plan.", Settings()) == "error"
+    turn_id = turn_id_of(published)
+    assert errors(published) == [
+        ErrorOccurred(turn_id=turn_id, agent_id="agent-1", code=AGENT_FAILED, message=message)
     ]
