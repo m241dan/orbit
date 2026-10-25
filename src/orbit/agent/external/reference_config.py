@@ -16,6 +16,7 @@ from pydantic import BaseModel, TypeAdapter
 
 from orbit.agent.domain.checks import Setup, VerificationConfig
 from orbit.agent.domain.config import LIMIT_KEYS, OrbitConfig, load_config
+from orbit.agent.domain.config_update import FOR_EXAMPLE
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
@@ -175,7 +176,7 @@ def _example(description: str, header: str, example: BaseModel | VerificationSte
     """The table under ``header`` that sets the fields ``example`` does, under ``description``."""
     values = TypeAdapter(type(example)).dump_python(example, mode="json", exclude_unset=True)
     return [
-        f"# {description} For example:",
+        f"# {description} {FOR_EXAMPLE}",
         f"# {header}",
         *_described(values, _descriptions(type(example))),
     ]

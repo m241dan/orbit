@@ -698,8 +698,11 @@ closes and the task is cancelled. When several agents propose checks, their wind
 time, in the order they proposed.
 
 Accepted checks take effect at once. Orbit itself (not the agent) writes them into
-`.orbit/config.toml`, replacing its `[[verification.steps]]` and `[setup]` and keeping every other
-key and comment, creating the file if it's missing. In the worktree the change is committed as
+`.orbit/config.toml`, replacing its `[[verification.steps]]` tables and its `[setup]` and leaving
+every other line as it was, the comments after them included. Without a file, it starts one from
+the reference config (see [Starting from the reference config](#starting-from-the-reference-config)),
+with the steps and setup in place of its commented-out examples of them, under the lines saying
+what they are; without a setup, the example of one stays. In the worktree the change is committed as
 "Configure verification steps", with the steps listed in the body, and lands on the base like any
 task's work; with `--no-worktree` the file is written in the workspace's directory and not
 committed.
@@ -2454,7 +2457,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     git repository a workspace is in, fingerprints it, and places orbit's directory in it
     (`orbit_dir`: `.git/orbit`, or `.orbit` outside git); `config_file` reads
     `.orbit/config.toml`, and for `orbit config show` what the configuration is resolved from
-    (`read_config_sources`), and `role_instructions` the instructions files its roles and your
+    (`read_config_sources`), and writes the configurator's checks into it (`write_checks`),
+    starting a missing file from the reference config, and `role_instructions` the instructions files its roles and your
     personal roles name (`resolve_instructions`);
     `built_in_roles` reads the built-in roles from `instructions/roles.toml` and their
     instructions from the Markdown files it names (`read_instruction_files` names them);
@@ -2571,7 +2575,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `agents`: agent ids and tokens), `roles` (built-in roles, loaded from their `roles.toml` and
     given their instructions, which of a role's fields go together, and the tasks orbit queues in
     them), `config` (`OrbitConfig`: the
-    limits, roles, verification steps and setup a project file sets over the built-in defaults), `layers` (the layers a setting comes from, the user config's role fields and personal roles, and each role resolved across them field by field), `config_report` (what `orbit config show` reports: each setting in effect by its dotted key with the layer it came from, and a key's settings), `config_update` (what `orbit init --update` adds to a project file from the reference config: the keys a table it has doesn't mention, after the table's last line, and the tables it lacks, at the end, never changing a line of it; and the lines `orbit init --roles` adds, pointing each built-in role at its copy of its instructions) and `config_errors` (`ConfigError`,
+    limits, roles, verification steps and setup a project file sets over the built-in defaults), `layers` (the layers a setting comes from, the user config's role fields and personal roles, and each role resolved across them field by field), `config_report` (what `orbit config show` reports: each setting in effect by its dotted key with the layer it came from, and a key's settings), `config_update` (what `orbit init --update` adds to a project file from the reference config: the keys a table it has doesn't mention, after the table's last line, and the tables it lacks, at the end, never changing a line of it; and the lines `orbit init --roles` adds, pointing each built-in role at its copy of its instructions; and the checks the configurator writes, in place of a file's steps and setup without changing its other lines, or of the reference config's examples of them) and `config_errors` (`ConfigError`,
     and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]` with its `TlsSettings`, which files each TLS mode needs, where now falls in a certificate's validity, and which hosts are loopback), `certificate_list` (what `orbit certs list` shows of each certificate: its expiry, days left, fingerprint and marks), `client_bundle` (what `orbit certs client --bundle` puts in a client's bundle: the CA, its certificate and key, and the `[remotes.<name>]` lines naming them where it's unpacked), `remotes` (`RemoteSettings`, a `[remotes.<name>]` table, and which credentials go together), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
     setup step that makes a fresh worktree ready, and the checks a configurator proposes), the
     `Catalog` (in `catalog`: the workspace and its sessions, the agents' roles, the triggers and

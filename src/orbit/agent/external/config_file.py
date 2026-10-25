@@ -1,16 +1,14 @@
 """Orbit's project configuration file, ``.orbit/config.toml``."""
 
+from importlib.resources import files
 from pathlib import Path
-
-import tomlkit
-from tomlkit.exceptions import TOMLKitError
-from tomlkit.items import AoT, Table
 
 from orbit.agent.application.ports import ConfigWriteFailed
 from orbit.agent.domain.checks import ChecksProposal
 from orbit.agent.domain.config import LayeredConfig, OrbitConfig, load_layered
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.config_report import ConfigSources, Written
+from orbit.agent.domain.config_update import reference_with_checks, with_checks
 from orbit.agent.domain.layers import Layer, PersonalRoleError
 from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
 from orbit.agent.external.role_instructions import with_instructions
@@ -19,6 +17,10 @@ from orbit.agent.external.user_config import read_user_config, read_user_roles, 
 from orbit.agent.external.whole_files import write_whole
 
 CONFIG_PATH = ".orbit/config.toml"
+
+REFERENCE = files(__package__) / "reference" / "config.toml"
+"""The reference config shipped with orbit, as
+:func:`~orbit.agent.external.reference_config.reference_config` generates it."""
 
 
 def read_config(root: str, config_dir: Path) -> OrbitConfig:
@@ -76,43 +78,26 @@ def _read_layered(root: str, config_dir: Path) -> LayeredConfig:
 
 
 def write_checks(root: str, checks: ChecksProposal) -> None:
-    """Make ``checks`` the verification steps and setup in ``root``'s file, creating it if it's
-    missing. The file's steps and setup are replaced; everything else in it stays as it was.
+    """Make ``checks`` the verification steps and setup in ``root``'s file, replacing its steps
+    and setup and leaving its other lines as they were, as
+    :func:`~orbit.agent.domain.config_update.with_checks` does. Without a file, write the
+    reference config there, making ``.orbit/`` if it's missing, with ``checks`` in place of its
+    examples of steps and setup, as
+    :func:`~orbit.agent.domain.config_update.reference_with_checks` puts them.
 
     Raises :class:`ConfigWriteFailed`, naming the file, when it can't be read, parsed or written.
     """
     path = Path(root) / CONFIG_PATH
     try:
         _write_checks(path, checks)
-    except (OSError, UnicodeDecodeError, TOMLKitError) as exc:
+    except (OSError, UnicodeDecodeError, ConfigError) as exc:
         raise ConfigWriteFailed(f"Couldn't save the checks to {path}: {exc}") from exc
 
 
 def _write_checks(path: Path, checks: ChecksProposal) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    document = (
-        tomlkit.parse(path.read_text(encoding="utf-8")) if path.exists() else tomlkit.document()
-    )
-    verification = tomlkit.table(is_super_table=True)
-    verification["steps"] = _steps(checks)
-    document["verification"] = verification
-    if checks.setup is None:
-        document.pop("setup", None)
+    if path.exists():
+        text = with_checks(path.read_text(encoding="utf-8"), checks)
     else:
-        setup = tomlkit.table()
-        setup["command"] = list(checks.setup.command)
-        if checks.setup.watch:
-            setup["watch"] = list(checks.setup.watch)
-        document["setup"] = setup
-    write_whole(path, tomlkit.dumps(document))
-
-
-def _steps(checks: ChecksProposal) -> AoT:
-    steps = tomlkit.aot()
-    for step in checks.steps:
-        table: Table = tomlkit.table()
-        table["name"] = step.name
-        table["command"] = list(step.command)
-        steps.append(table)
-    steps[-1].add(tomlkit.nl())  # A blank line before whatever follows.
-    return steps
+        text = reference_with_checks(REFERENCE.read_text(encoding="utf-8"), checks)
+    write_whole(path, text)

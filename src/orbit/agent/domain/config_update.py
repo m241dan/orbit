@@ -1,24 +1,34 @@
 """What ``orbit init --update`` adds to a project's ``.orbit/config.toml`` from the reference
 config: each setting the reference has that the file doesn't mention, set or commented out; and
 what ``orbit init --roles`` adds: a commented-out line pointing each built-in role at its copy of
-its instructions. Neither changes, moves or removes any of the file's lines."""
+its instructions. Neither changes, moves or removes any of the file's lines. Also the checks the
+configurator writes: in place of a file's verification steps and setup, changing no other line,
+or of the reference config's examples of them, when it starts a file from the reference."""
 
 import re
-from collections.abc import Sequence
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import date
 from enum import Enum, auto
-from itertools import chain
+from itertools import chain, groupby, pairwise
 from typing import Any
 
 import tomlkit
+from tomlkit import TOMLDocument
 from tomlkit.exceptions import TOMLKitError
+from tomlkit.items import AoT, Table
 
+from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.config_errors import ConfigError
 
 ADDED_NOTE = "# Added by orbit init --update on {date}: settings this file didn't mention."
 """The line the tables a file lacks are appended under, with the day they're added."""
 
+FOR_EXAMPLE = "For example:"
+"""What ends the line describing each of the reference config's examples, just above it."""
+
+_STEPS = "[[verification.steps]]"
+_SETUP = "[setup]"
 _HEADER = re.compile(r"\s*(?:#\s*)?(\[\[?)\s*([\w\-.\"' ]+?)\s*\]\]?\s*(?:#.*)?")
 _COMMENTED_KEY = re.compile(r"\s*#\s*([\w-]+)\s*[=:]")
 _COMMENTED_VALUE = re.compile(r"\s*#\s*[\w-]+\s*=")
@@ -103,6 +113,25 @@ class _Insertion:
     header: str
     keys: tuple[str, ...]
     lines: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _SetTable:
+    """A table a file sets under a header of its own: its ``header``, from whose line,
+    ``start``, it runs to after its last setting, ``end``."""
+
+    header: str
+    start: int
+    end: int
+
+
+@dataclass(frozen=True, order=True)
+class _Span:
+    """The lines from ``start`` to ``end``, and the ``lines`` that take their place."""
+
+    start: int
+    end: int
+    lines: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -209,6 +238,44 @@ def add_instructions(
     updated = _appended(_inserted(file.lines, list(insertions.values())), sections, today)
     lines = InstructionLines(tuple(insertions), appended)
     return InstructionsUpdate("\n".join(updated) + "\n", lines)
+
+
+def with_checks(text: str, checks: ChecksProposal) -> str:
+    """``text``, a project file, with ``checks`` as its verification steps and setup, as the
+    configurator writes them.
+
+    The file's ``[[verification.steps]]`` tables, from the first one's header to the last one's
+    last setting, give way to the new ones, and its ``[setup]`` table, to its last setting, to
+    the new one or, without one, goes with the blank lines just above it; those it lacks are
+    appended at the end. Every other line stays as it was, in order, the comments after a
+    table's last setting among them. Where that wouldn't read as replacing the steps and setup,
+    as when the file sets them some other way, such as inline, it's rewritten as TOML instead,
+    keeping its other keys and comments but those after a replaced table's last setting, which
+    TOML counts as the table's.
+
+    Raises :class:`ConfigError` if ``text`` isn't valid TOML.
+    """
+    try:
+        rewritten = _rewritten(tomlkit.parse(text), checks)
+    except TOMLKitError as exc:
+        raise ConfigError(str(exc)) from None
+    edited = _edited(_scanned(text), checks)
+    return edited if _same_settings(edited, rewritten) else rewritten
+
+
+def reference_with_checks(reference: str, checks: ChecksProposal) -> str:
+    """``reference``, the reference config, with ``checks``' steps and setup in place of its
+    commented-out examples of them: each example's header and keys give way to the tables,
+    under the comments describing it, without the :data:`FOR_EXAMPLE` they end with. Without a
+    setup, its example stays as it is."""
+    lines = _scanned(reference)
+    regions = {region.header: region for region in _regions(lines)}
+    spans = [
+        _example(lines, regions[header], tables)
+        for header, tables in _check_tables(checks).items()
+        if tables
+    ]
+    return "\n".join(_spliced(lines, spans)) + "\n"
 
 
 def _read(text: str) -> _File:
@@ -433,3 +500,146 @@ def _role_sections(reference: Sequence[_Line], roles: Sequence[str]) -> list[lis
 def _instructions_line(name: str) -> str:
     """The line pointing role ``name`` at its copy of its instructions, commented out."""
     return f"# {instructions_setting(name)}"
+
+
+def _rewritten(document: TOMLDocument, checks: ChecksProposal) -> str:
+    """``document`` as TOML with ``checks`` in place of its steps and setup, however it sets
+    them."""
+    document["verification"] = _verification(checks)
+    if checks.setup is None:
+        document.pop("setup", None)
+    else:
+        document["setup"] = _setup(checks.setup)
+    return tomlkit.dumps(document)
+
+
+def _verification(checks: ChecksProposal) -> Table:
+    """The table of ``checks``' steps."""
+    verification = tomlkit.table(is_super_table=True)
+    verification["steps"] = _steps(checks)
+    return verification
+
+
+def _steps(checks: ChecksProposal) -> AoT:
+    """The tables of ``checks``' steps, each of its own."""
+    steps = tomlkit.aot()
+    for step in checks.steps:
+        table: Table = tomlkit.table()
+        table["name"] = step.name
+        table["command"] = list(step.command)
+        steps.append(table)
+    steps[-1].add(tomlkit.nl())  # A blank line before whatever follows.
+    return steps
+
+
+def _setup(setup: Setup) -> Table:
+    """The table of ``setup``."""
+    table = tomlkit.table()
+    table["command"] = list(setup.command)
+    if setup.watch:
+        table["watch"] = list(setup.watch)
+    return table
+
+
+def _check_tables(checks: ChecksProposal) -> dict[str, tuple[str, ...]]:
+    """The lines of ``checks``' steps' tables and of its setup's, none without one, by header."""
+    setup = () if checks.setup is None else _toml_lines("setup", _setup(checks.setup))
+    return {_STEPS: _toml_lines("verification", _verification(checks)), _SETUP: setup}
+
+
+def _toml_lines(key: str, table: Table) -> tuple[str, ...]:
+    """The lines of ``table``, under ``key``, as TOML."""
+    document = tomlkit.document()
+    document[key] = table
+    return tuple(tomlkit.dumps(document).strip("\n").split("\n"))
+
+
+def _same_settings(text: str, other: str) -> bool:
+    """Whether ``text`` is valid TOML setting what ``other`` does."""
+    try:
+        return tomlkit.parse(text).unwrap() == tomlkit.parse(other).unwrap()
+    except TOMLKitError:
+        return False
+
+
+def _edited(lines: Sequence[_Line], checks: ChecksProposal) -> str:
+    """The text of ``lines`` with ``checks`` in place of the steps' and setup's tables they set
+    under headers of their own, and appended if they set none, as :func:`with_checks` has it."""
+    tables = _set_tables(lines)
+    new = _check_tables(checks)
+    runs = {header: _runs(tables, header) for header in new}
+    spans = chain.from_iterable(_replacing(runs[header], new[header]) for header in new)
+    text = _spliced(lines, spans)
+    for header, block in new.items():
+        if block and not runs[header]:
+            text = [*text, *_apart(text), *block]
+    return "\n".join(text) + "\n"
+
+
+def _set_tables(lines: Sequence[_Line]) -> list[_SetTable]:
+    """The tables ``lines`` set under headers of their own, in order."""
+    starts = [
+        index
+        for index, line in enumerate(lines)
+        if line.kind is _Kind.HEADER and not line.text.lstrip().startswith("#")
+    ]
+    return [
+        _SetTable(lines[start].name, start, _last_setting(lines, start, stop))
+        for start, stop in pairwise([*starts, len(lines)])
+    ]
+
+
+def _last_setting(lines: Sequence[_Line], start: int, stop: int) -> int:
+    """After the last setting of ``lines`` between the header at ``start`` and ``stop``; after
+    the header if there's none."""
+    settings = [index for index in range(start + 1, stop) if lines[index].kind is _Kind.SETTING]
+    return settings[-1] + 1 if settings else start + 1
+
+
+def _runs(tables: Sequence[_SetTable], header: str) -> list[_Span]:
+    """Each run of ``tables`` under ``header`` with no other table between them, from the first
+    one's start to the last one's end."""
+    runs = [
+        list(run)
+        for matches, run in groupby(tables, lambda table: table.header == header)
+        if matches
+    ]
+    return [_Span(run[0].start, run[-1].end) for run in runs]
+
+
+def _replacing(runs: Sequence[_Span], lines: tuple[str, ...]) -> list[_Span]:
+    """``runs``, the first giving way to ``lines`` and the others to none."""
+    return [replace(run, lines=lines) for run in runs[:1]] + list(runs[1:])
+
+
+def _example(lines: Sequence[_Line], region: _Region, tables: tuple[str, ...]) -> _Span:
+    """``region`` of ``lines``, an example, from the comments describing it to its last key,
+    giving way to ``tables`` under those comments, without the :data:`FOR_EXAMPLE` they end
+    with."""
+    header = next(
+        index for index in range(region.start, region.end) if lines[index].kind is _Kind.HEADER
+    )
+    described = (line.text.removesuffix(f" {FOR_EXAMPLE}") for line in lines[region.start : header])
+    return _Span(region.start, region.end, (*described, *tables))
+
+
+def _spliced(lines: Sequence[_Line], spans: Iterable[_Span]) -> list[str]:
+    """The text of ``lines`` with each of ``spans``' lines in place of those it runs over; one
+    giving way to none takes the blank lines just above it with it."""
+    text: list[str] = []
+    position = 0
+    for span in sorted(spans):
+        text += [line.text for line in lines[position : span.start]]
+        if not span.lines:
+            text = _unpadded(text)
+        text += span.lines
+        position = span.end
+    return text + [line.text for line in lines[position:]]
+
+
+def _unpadded(text: list[str]) -> list[str]:
+    """``text`` without the blank lines it ends with."""
+    end = len(text)
+    while end and not text[end - 1].strip():
+        end -= 1
+    return text[:end]

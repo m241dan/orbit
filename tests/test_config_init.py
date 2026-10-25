@@ -17,9 +17,8 @@ from orbit.agent.external.built_in_roles import (
     read_built_in_roles,
     read_instruction_files,
 )
-from orbit.agent.external.config_file import CONFIG_PATH, read_config
+from orbit.agent.external.config_file import CONFIG_PATH, REFERENCE, read_config
 from orbit.agent.external.config_init import (
-    REFERENCE,
     ConfigExists,
     InitResult,
     RolesResult,

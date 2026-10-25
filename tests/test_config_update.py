@@ -1,12 +1,16 @@
 """What ``orbit init --update`` adds to a project file from the reference config: the keys a
 table it has doesn't mention, after the table's last line, and the tables it lacks, at the end
 under a dated line, never changing, moving or removing a line it had; and the lines ``orbit init
---roles`` adds, pointing each built-in role at its copy of its instructions."""
+--roles`` adds, pointing each built-in role at its copy of its instructions; and the checks the
+configurator writes, in place of a file's steps and setup, or of the reference's examples of
+them."""
 
+import tomllib
 from datetime import date
 
 import pytest
 
+from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.config_update import (
     Additions,
@@ -15,8 +19,11 @@ from orbit.agent.domain.config_update import (
     InstructionsUpdate,
     add_instructions,
     instructions_setting,
+    reference_with_checks,
     update_text,
+    with_checks,
 )
+from orbit.agent.domain.verification import VerificationStep
 
 TODAY = date(2026, 10, 25)
 
@@ -326,3 +333,102 @@ def test_adding_instructions_to_a_file_that_isnt_toml_is_refused() -> None:
 def test_adding_instructions_again_adds_nothing(text: str) -> None:
     once = with_instructions(text).text
     assert with_instructions(once) == InstructionsUpdate(once, InstructionLines())
+
+
+LINT = VerificationStep("Lint", ("ruff", "check"))
+TESTS = VerificationStep("Tests", ("pytest",))
+SYNC = Setup(command=("uv", "sync"), watch=("uv.lock",))
+CHECKS = ChecksProposal(steps=(LINT, TESTS), setup=SYNC)
+LINT_ONLY = ChecksProposal(steps=(LINT,))
+
+LINT_TABLE = '[[verification.steps]]\nname = "Lint"\ncommand = ["ruff", "check"]\n'
+STEP_TABLES = f'{LINT_TABLE}\n[[verification.steps]]\nname = "Tests"\ncommand = ["pytest"]\n'
+SYNC_TABLE = '[setup]\ncommand = ["uv", "sync"]\nwatch = ["uv.lock"]\n'
+EXAMPLES = f"# The file's header.\n\n{STEPS}\n{SETUP_SECTION}\n{CODER_SECTION}"
+
+
+def test_the_reference_gets_the_tables_in_place_of_its_examples_under_their_descriptions() -> None:
+    expected = (
+        f"# The file's header.\n\n# The steps.\n{STEP_TABLES}\n"
+        f"# How the tree is set up.\n{SYNC_TABLE}\n{CODER_SECTION}"
+    )
+    assert reference_with_checks(EXAMPLES, CHECKS) == expected
+
+
+def test_without_a_setup_the_references_example_of_one_stays() -> None:
+    expected = (
+        f"# The file's header.\n\n# The steps.\n{LINT_TABLE}\n{SETUP_SECTION}\n{CODER_SECTION}"
+    )
+    assert reference_with_checks(EXAMPLES, LINT_ONLY) == expected
+
+
+def test_steps_from_the_firsts_header_to_the_lasts_last_setting_give_way_to_the_new_ones() -> None:
+    old_steps = (
+        '[[verification.steps]]\nname = "Old lint"\ncommand = ["flake8"]\n\n# The slow one.\n'
+        '[[verification.steps]]\nname = "Old tests"\ncommand = [\n  "nose",\n]\n'
+    )
+    after = '# name = "Commented"\n\n# After the steps.\n[roles.coder]\nmodel = "opus"\n'
+    text = f"# Ours.\nfix_attempts = 2\n\n# Quick ones first.\n{old_steps}{after}"
+    expected = f"# Ours.\nfix_attempts = 2\n\n# Quick ones first.\n{LINT_TABLE}{after}"
+    assert with_checks(text, LINT_ONLY) == expected
+
+
+def test_the_setup_to_its_last_setting_gives_way_to_the_new_one() -> None:
+    after = "\n# The roles.\n# [roles.coder]\n"
+    text = f'{LINT_TABLE}\n# Setup.\n[setup]\n# Old.\ncommand = ["make"]\n{after}'
+    expected = f"{STEP_TABLES}\n# Setup.\n{SYNC_TABLE}{after}"
+    assert with_checks(text, CHECKS) == expected
+
+
+def test_a_setup_watching_nothing_has_no_watch_line() -> None:
+    checks = ChecksProposal(steps=(LINT,), setup=Setup(command=("make",)))
+    assert with_checks("", checks) == f'{LINT_TABLE}\n[setup]\ncommand = ["make"]\n'
+
+
+def test_without_a_new_setup_the_old_one_goes_with_the_blank_lines_above_it() -> None:
+    text = f'{LINT_TABLE}\n\n[setup]\ncommand = ["make"]\n\n# The roles.\n'
+    assert with_checks(text, LINT_ONLY) == f"{LINT_TABLE}\n# The roles.\n"
+
+
+@pytest.mark.parametrize(
+    ("text", "start"),
+    [("", ""), (LIMITS, f"{LIMITS}\n"), (f"{LIMITS}\n", f"{LIMITS}\n")],
+)
+def test_steps_and_setup_a_file_lacks_are_appended_apart_from_it(text: str, start: str) -> None:
+    assert with_checks(text, CHECKS) == f"{start}{STEP_TABLES}\n{SYNC_TABLE}"
+
+
+def test_steps_split_by_another_table_are_replaced_where_the_first_were() -> None:
+    later = '\n[[verification.steps]]\nname = "Old"\ncommand = ["nose"]\n'
+    text = f'{LINT_TABLE}\n[roles.coder]\nmodel = "opus"\n{later}'
+    assert with_checks(text, CHECKS) == (
+        f'{STEP_TABLES}\n[roles.coder]\nmodel = "opus"\n\n{SYNC_TABLE}'
+    )
+
+
+def test_a_setup_set_inline_is_replaced_as_toml() -> None:
+    text = 'fix_attempts = 2\nsetup = { command = ["make"] }\n'
+    assert tomllib.loads(with_checks(text, LINT_ONLY)) == {
+        "fix_attempts": 2,
+        "verification": {"steps": [{"name": "Lint", "command": ["ruff", "check"]}]},
+    }
+
+
+def test_steps_set_inline_are_replaced_as_toml() -> None:
+    text = '# Ours.\n[verification]\nsteps = [{ name = "Old", command = ["nose"] }]\n'
+    checked = with_checks(text, LINT_ONLY)
+    assert checked.startswith("# Ours.\n")
+    assert tomllib.loads(checked) == {
+        "verification": {"steps": [{"name": "Lint", "command": ["ruff", "check"]}]}
+    }
+
+
+def test_writing_checks_into_a_file_that_isnt_toml_is_refused() -> None:
+    with pytest.raises(ConfigError):
+        with_checks("[setup\n", CHECKS)
+
+
+@pytest.mark.parametrize("checks", [CHECKS, LINT_ONLY])
+def test_writing_the_same_checks_again_changes_nothing(checks: ChecksProposal) -> None:
+    once = with_checks(reference_with_checks(EXAMPLES, CHECKS), checks)
+    assert with_checks(once, checks) == once

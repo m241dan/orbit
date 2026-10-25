@@ -6,7 +6,6 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
-from importlib.resources import files
 from pathlib import Path
 
 from orbit.agent.domain.config_errors import ConfigError
@@ -18,12 +17,8 @@ from orbit.agent.domain.config_update import (
     update_text,
 )
 from orbit.agent.external.built_in_roles import ROLE_DIRECTORY, read_instruction_files
-from orbit.agent.external.config_file import CONFIG_PATH
+from orbit.agent.external.config_file import CONFIG_PATH, REFERENCE
 from orbit.agent.external.whole_files import create_whole, write_whole
-
-REFERENCE = files(__package__) / "reference" / "config.toml"
-"""The reference config shipped with orbit, as
-:func:`~orbit.agent.external.reference_config.reference_config` generates it."""
 
 
 class ConfigExists(Exception):

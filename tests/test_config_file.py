@@ -17,6 +17,7 @@ from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.agent.external.config_file import (
     CONFIG_PATH,
+    REFERENCE,
     read_config,
     read_config_sources,
     write_checks,
@@ -431,6 +432,82 @@ def test_writing_checks_creates_the_file_and_its_directory(tmp_path: Path) -> No
     config = read_config(str(tmp_path), tmp_path / "config")
     assert config.verification.steps == (LINT, TESTS)
     assert config.setup == SYNC
+
+
+REFERENCE_TEXT = REFERENCE.read_text(encoding="utf-8")
+STEPS_DESCRIPTION = "# The steps that verify a task, run in order; with none, nothing is verified."
+STEPS_EXAMPLE = f"""\
+{STEPS_DESCRIPTION} For example:
+# [[verification.steps]]
+# What the step is called; no two steps share a name.
+# name = "Tests"
+# The command run in the working directory; it passes if it exits 0.
+# command = ["uv", "run", "pytest"]
+"""
+SETUP_DESCRIPTION = "# How the coder's worktree is set up; with none, nothing is."
+SETUP_EXAMPLE = f"""\
+{SETUP_DESCRIPTION} For example:
+# [setup]
+# The command run in a fresh worktree, and again when a watched file changes.
+# command = ["uv", "sync"]
+# Files, relative to the tree, whose changes run the command again.
+# watch = ["uv.lock"]
+"""
+STEP_TABLES = """\
+[[verification.steps]]
+name = "Lint"
+command = ["ruff", "check"]
+
+[[verification.steps]]
+name = "Tests"
+command = ["pytest", "-q"]
+"""
+SYNC_TABLE = '[setup]\ncommand = ["uv", "sync"]\nwatch = ["uv.lock"]\n'
+
+
+def test_the_references_examples_are_those_a_new_file_replaces() -> None:
+    assert STEPS_EXAMPLE in REFERENCE_TEXT
+    assert SETUP_EXAMPLE in REFERENCE_TEXT
+
+
+def test_writing_checks_without_a_file_starts_it_from_the_reference(tmp_path: Path) -> None:
+    write_checks(str(tmp_path), ChecksProposal(steps=(LINT, TESTS), setup=SYNC))
+    expected = REFERENCE_TEXT.replace(STEPS_EXAMPLE, f"{STEPS_DESCRIPTION}\n{STEP_TABLES}").replace(
+        SETUP_EXAMPLE, f"{SETUP_DESCRIPTION}\n{SYNC_TABLE}"
+    )
+    assert (tmp_path / CONFIG_PATH).read_text(encoding="utf-8") == expected
+    config = read_config(str(tmp_path), tmp_path / "config")
+    assert config.verification.steps == (LINT, TESTS)
+    assert config.setup == SYNC
+
+
+def test_writing_checks_without_a_file_or_a_setup_keeps_the_references_setup_example(
+    tmp_path: Path,
+) -> None:
+    write_checks(str(tmp_path), ChecksProposal(steps=(LINT, TESTS)))
+    expected = REFERENCE_TEXT.replace(STEPS_EXAMPLE, f"{STEPS_DESCRIPTION}\n{STEP_TABLES}")
+    assert (tmp_path / CONFIG_PATH).read_text(encoding="utf-8") == expected
+    assert read_config(str(tmp_path), tmp_path / "config").setup is None
+
+
+def test_writing_checks_changes_only_the_files_steps_and_setup(tmp_path: Path) -> None:
+    before = "# Ours.\nfix_attempts = 2\n\n# Quick ones first.\n"
+    after_steps = "\n# Keep the environment in step with the lock file.\n"
+    after_setup = '\n# The roles.\n# [roles.coder]\n# model = "opus"\n'
+    steps = '[[verification.steps]]\nname = "Old"\ncommand = ["nose"]\n'
+    setup = '[setup]\ncommand = ["make"]\n'
+    path = write(tmp_path, f"{before}{steps}{after_steps}{setup}{after_setup}")
+    write_checks(str(tmp_path), ChecksProposal(steps=(LINT, TESTS), setup=SYNC))
+    assert path.read_text() == f"{before}{STEP_TABLES}{after_steps}{SYNC_TABLE}{after_setup}"
+
+
+def test_rewriting_checks_without_a_setup_removes_only_its_table(tmp_path: Path) -> None:
+    write_checks(str(tmp_path), ChecksProposal(steps=(LINT, TESTS), setup=SYNC))
+    write_checks(str(tmp_path), ChecksProposal(steps=(LINT, TESTS)))
+    expected = REFERENCE_TEXT.replace(STEPS_EXAMPLE, f"{STEPS_DESCRIPTION}\n{STEP_TABLES}").replace(
+        SETUP_EXAMPLE, f"{SETUP_DESCRIPTION}\n"
+    )
+    assert (tmp_path / CONFIG_PATH).read_text(encoding="utf-8") == expected
 
 
 def test_writing_checks_keeps_every_other_key_and_comment(tmp_path: Path) -> None:
