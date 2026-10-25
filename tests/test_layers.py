@@ -146,6 +146,24 @@ def test_a_personal_role_is_held_to_a_roles_rules_naming_the_key(
     assert len(str(raised.value).splitlines()) == 1
 
 
+ROLE_NAME_RULE = "a role's name is a plain name: letters, digits, - and _"
+
+
+@pytest.mark.parametrize("fields", [HELPER, {"model": "opus"}])
+def test_a_user_configs_role_table_whose_name_isnt_plain_is_refused_naming_its_key(
+    fields: dict[str, object],
+) -> None:
+    with pytest.raises(ConfigError) as raised:
+        user({"roles": {"qa.lead": fields}})
+    assert str(raised.value) == f"roles.qa.lead: {ROLE_NAME_RULE}"
+
+
+def test_a_user_configs_role_table_with_a_plain_name_loads() -> None:
+    roles = user({"roles": {"qa_lead": HELPER, "qa-lead": {"model": "opus"}}})
+    assert roles.personal == {"qa_lead": Role.model_validate(HELPER)}
+    assert roles.named == {"qa-lead": RoleFields(model="opus")}
+
+
 def test_every_problem_with_the_user_configs_roles_is_named_on_a_line_of_its_own() -> None:
     with pytest.raises(ConfigError) as raised:
         user({"roles": {"model": 3, "coder": {"lane": "b"}}})
@@ -311,6 +329,7 @@ def test_a_role_only_the_user_config_names_isnt_a_role() -> None:
         ({"coder": {"tools": ["launch_rockets"]}}, "roles.coder.tools: "),
         ({"coder": "everything"}, "roles.coder: "),
         ({"new": {"tools": ["get_task"]}}, "roles.new.instructions: "),
+        ({"qa.lead": {"instructions": "Lead."}}, f"roles.qa.lead: {ROLE_NAME_RULE}$"),
     ],
 )
 def test_an_invalid_project_role_is_refused_naming_it_and_the_field(

@@ -1164,7 +1164,10 @@ enabled, and no effort. A role that doesn't set `merge` merges if it can, being 
 worktree, and a built-in role whose `verify` or `workspace` the file changes without setting
 `merge` follows the same rule, so `[roles.coder] verify = false` alone stops the coder merging. One
 in another workspace must set `verify = false`, and one with `verify = false` doesn't merge, and
-can't be made to. Every other field is optional.
+can't be made to. Every other field is optional. A role's name is a plain name of letters, digits,
+`-` and `_`, as a lane's is, since `orbit config show` keys a role's settings by it between dots
+(`roles.qa-lead.model`): one that isn't, such as `[roles."qa.lead"]`, is refused, naming its key
+and the file (`roles.qa.lead: a role's name is a plain name: letters, digits, - and _`).
 
 Every setting a project can change, with its default and what it does, is in orbit's reference
 config, [`reference/config.toml`](src/orbit/agent/external/reference/config.toml), shipped with
@@ -1218,7 +1221,9 @@ Only `model` and `effort` of orbit's own roles belong to your machine: any other
 such as `[roles.coder] verify = false`, is refused, naming the file, the key and that it belongs
 in the project's `.orbit/config.toml`, so your machine can't turn off a project's verification;
 so is any other field in `[roles]` itself. `effort` takes the levels a role's does, and any other
-value is refused, listing them. `orbit chat` reads
+value is refused, listing them. A `[roles.<name>]` table names its role as a project's does, with
+a plain name of letters, digits, `-` and `_`, and one that doesn't is refused, naming the file and
+the key. `orbit chat` reads
 your `config.toml`'s roles as it opens its workspace, and `orbit serve`, with the config directory
 of the account it runs as, as it opens each workspace it serves; both read them again, with the
 project's, when the planner is reset. An invalid one is refused as an invalid

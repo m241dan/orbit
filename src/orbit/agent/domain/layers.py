@@ -14,8 +14,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, ValidationError
 from pydantic_core import ErrorDetails
 
-from orbit.agent.domain.config_errors import ConfigError, validation_problems
-from orbit.agent.domain.roles import Role, role_clashes
+from orbit.agent.domain.config_errors import ConfigError, dotted, validation_problems
+from orbit.agent.domain.roles import Role, RoleName, role_clashes
 from orbit.protocol import Effort
 
 LayerName = Literal["default", "package", "user", "project"]
@@ -129,8 +129,8 @@ class _UserRoles(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     every: RoleFields
-    named: dict[str, RoleFields]
-    personal: dict[str, Role]
+    named: dict[RoleName, RoleFields]
+    personal: dict[RoleName, Role]
 
 
 def load_user_roles(data: dict[str, Any], layer: Layer, built_in: Collection[str]) -> UserRoles:
@@ -186,7 +186,7 @@ def _user_role_problems(error: ValidationError) -> str:
         # The first part is the table the roles were validated as: "roles", "every", "named" or
         # "personal".
         table, *rest = problem["loc"]
-        where = ".".join(["roles", *(str(part) for part in rest)])
+        where = dotted(("roles", *rest))
         problems.append(f"{where}: {_why(problem, table)}")
     return "\n".join(problems)
 
@@ -203,7 +203,7 @@ def _why(problem: ErrorDetails, table: int | str) -> str:
 class _Roles(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    roles: dict[str, Role]
+    roles: dict[RoleName, Role]
 
 
 def resolve_roles(

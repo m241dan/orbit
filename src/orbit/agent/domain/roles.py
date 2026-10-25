@@ -18,9 +18,10 @@ the work asked of a disabled role is refused.
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -82,8 +83,22 @@ Workspace = Literal["worktree", "snapshot", "checkout", "none"]
 snapshot of the base commit; the user's checkout, read in place; or an empty temporary
 directory."""
 
-LANE_NAME = re.compile(r"[A-Za-z0-9_-]+")
-"""What a lane's name is made of."""
+PLAIN_NAME = re.compile(r"[A-Za-z0-9_-]+")
+"""What a lane's or a role's name is made of."""
+
+
+def _plain_role_name(name: str) -> str:
+    """The role's ``name``, refused unless it's a plain name."""
+    if not PLAIN_NAME.fullmatch(name):
+        raise PydanticCustomError(
+            "role_name", "a role's name is a plain name: letters, digits, - and _"
+        )
+    return name
+
+
+RoleName = Annotated[str, AfterValidator(_plain_role_name)]
+"""A role's name, a plain name as a lane's is, since a role's settings are keyed by it between
+dots, as in ``roles.coder.model``."""
 
 
 class _Config(BaseModel):
@@ -169,7 +184,7 @@ class Role(_Config):
     @field_validator("lane")
     @classmethod
     def _plain_lane(cls, lane: str) -> str:
-        if not LANE_NAME.fullmatch(lane):
+        if not PLAIN_NAME.fullmatch(lane):
             raise ValueError("a lane is a plain name: letters, digits, - and _")
         return lane
 

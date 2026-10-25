@@ -321,6 +321,34 @@ def test_a_lane_that_isnt_a_plain_name_is_refused(lane: str) -> None:
         load_config(custom(lane=lane), BUILT_IN_ROLES)
 
 
+ROLE_NAME_RULE = "a role's name is a plain name: letters, digits, - and _"
+
+
+@pytest.mark.parametrize(
+    ("name", "key"), [("qa.lead", "roles.qa.lead"), ("qa lead", "roles.qa lead")]
+)
+def test_a_role_name_that_isnt_a_plain_name_is_refused_naming_its_key(name: str, key: str) -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_config({"roles": {name: {"instructions": "Lead."}}}, BUILT_IN_ROLES)
+    assert str(raised.value) == f"{key}: {ROLE_NAME_RULE}"
+
+
+def test_a_badly_named_role_is_refused_with_its_other_problems() -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_config({"roles": {"qa.lead": {"lane": "qa"}}}, BUILT_IN_ROLES)
+    lines = str(raised.value).splitlines()
+    assert lines == [
+        f"roles.qa.lead: {ROLE_NAME_RULE}",
+        "roles.qa.lead.instructions: Field required",
+    ]
+
+
+@pytest.mark.parametrize("name", ["qa-lead", "qa_lead", "QA2"])
+def test_a_role_with_a_plain_name_loads(name: str) -> None:
+    roles = load_config({"roles": {name: {"instructions": "Lead."}}}, BUILT_IN_ROLES).roles
+    assert roles[name].instructions == "Lead."
+
+
 def test_a_conversational_role_sharing_its_lane_with_task_roles_is_refused_naming_them() -> None:
     with pytest.raises(ConfigError) as raised:
         load_config(talker(lane="review"), BUILT_IN_ROLES)

@@ -21,7 +21,7 @@ from orbit.agent.domain.layers import (
     replaced_note,
 )
 from orbit.agent.domain.reviews import ReviewLimits
-from orbit.agent.domain.roles import Role, role_clashes
+from orbit.agent.domain.roles import Role, RoleName, role_clashes
 from orbit.agent.domain.verification import MAX_FALLBACK_FIXES
 
 
@@ -73,7 +73,7 @@ class _FileConfig(_Config):
         ge=1,
         description="Tasks one super review may suggest.",
     )
-    roles: dict[str, Role] = Field(
+    roles: dict[RoleName, Role] = Field(
         description="The roles agents work in, by name: the built-in ones, and your own."
     )
     verification: VerificationConfig = Field(

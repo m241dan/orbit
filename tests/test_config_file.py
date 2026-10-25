@@ -165,6 +165,27 @@ def test_a_personal_role_breaking_a_rule_across_the_roles_names_the_user_config(
     assert "lane 'helper' has ['helper']" in str(raised.value)
 
 
+ROLE_NAME_RULE = "a role's name is a plain name: letters, digits, - and _"
+
+
+def test_a_project_role_that_isnt_plainly_named_names_the_key_and_the_project_file(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    path = write(tmp_path, '[roles."qa.lead"]\ninstructions = "Lead."\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value) == f"{path}: roles.qa.lead: {ROLE_NAME_RULE}"
+
+
+def test_a_personal_role_that_isnt_plainly_named_names_the_key_and_the_user_config(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    path = write_helper(config_dir, HELPER.replace("[roles.helper]", '[roles."qa.lead"]'))
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value) == f"{path}: roles.qa.lead: {ROLE_NAME_RULE}"
+
+
 def test_the_projects_own_clash_beside_a_personal_role_names_the_project_file(
     tmp_path: Path, config_dir: Path
 ) -> None:

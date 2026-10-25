@@ -10,6 +10,7 @@ from typer.testing import CliRunner, Result
 from orbit.agent import INVALID_CONFIG
 from orbit.agent.domain.config_report import Instructions, Setting
 from orbit.agent.domain.layers import DEFAULT, Layer
+from orbit.agent.domain.roles import Role
 from orbit.agent.external.built_in_roles import ROLE_DIRECTORY
 from orbit.cli import app
 from orbit.cli.config_text import config_json, config_text
@@ -199,6 +200,45 @@ def test_an_invalid_configuration_exits_2_naming_its_file(
     assert result.exit_code == 2
     assert result.stderr.startswith(f"{INVALID_CONFIG}{paths[problem]}: ")
     assert result.stdout == ""
+
+
+ROLE_NAME_PROBLEM = "roles.qa.lead: a role's name is a plain name: letters, digits, - and _"
+
+QA_LEAD = """
+[roles."qa.lead"]
+instructions = "Lead."
+lane = "qa"
+workspace = "snapshot"
+merge = false
+verify = false
+"""
+"""A role whose quoted name has a dot in it."""
+
+
+@pytest.mark.parametrize("problem", ["project", "user"])
+def test_a_role_whose_name_isnt_plain_exits_2_naming_its_key_and_file(
+    project: Path, config_dir: Path, problem: str
+) -> None:
+    if problem == "project":
+        path = project_file(project, QA_LEAD)
+    else:
+        path = user_file(config_dir, QA_LEAD)
+    result = show(project)
+    assert result.exit_code == 2
+    assert result.stderr == f"{INVALID_CONFIG}{path}: {ROLE_NAME_PROBLEM}\n"
+    assert result.stdout == ""
+
+
+def test_a_plainly_named_roles_key_lists_only_its_fields(project: Path) -> None:
+    project_file(
+        project,
+        '[roles.qa]\ninstructions = "QA."\n\n[roles.qa-lead]\ninstructions = "Lead."\n\n'
+        '[roles.qa_lead]\ninstructions = "Lead too."\n',
+    )
+    result = show(project, "roles.qa-lead")
+    assert result.exit_code == 0, result.output
+    keys = [line.split(" = ")[0] for line in result.stdout.splitlines()]
+    assert keys == [f"roles.qa-lead.{key}" for key in Role.model_fields]
 
 
 def test_a_missing_workspace_exits_2(tmp_path: Path) -> None:
