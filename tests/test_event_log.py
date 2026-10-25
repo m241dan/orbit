@@ -1,6 +1,7 @@
 """The SQLite store's event log: its rows, its highest ``seq``, and what deleting and failing do
 to it."""
 
+import logging
 import sqlite3
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -9,7 +10,7 @@ import pytest
 
 from orbit.agent.application.ports import EventLog, ReadFailed, StorageFailed
 from orbit.agent.domain.replay import LogBounds, can_replay
-from orbit.agent.external import sqlite_schema
+from orbit.agent.external import sqlite_log, sqlite_schema
 from orbit.agent.external.workspace_registry import register
 from orbit.protocol import EventEnvelope, TasksChanged, decode_event, encode
 from tests.agent_fakes import notice
@@ -635,6 +636,65 @@ async def test_the_log_size_drops_the_sessions_forgotten_or_deleted(
 
     assert after_forget == sizes_of_events(state)["ghi"] + len(encode(notice(3, "def")).encode())
     assert store.log_size() == sizes_of_events(state)["ghi"]
+
+
+def failing_size(connection: sqlite3.Connection, workspace: str) -> int:
+    """Fails as reading a workspace's log size does when the disk fails."""
+    raise sqlite3.OperationalError("disk I/O error")
+
+
+async def test_an_append_whose_log_size_cant_be_read_again_is_kept_and_the_size_last_read_too(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    open_store: Opener,
+    state: Path,
+    workspace: Path,
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [notice(1)])
+    before = store.log_size()
+    monkeypatch.setattr(sqlite_log, "log_size", failing_size)
+    with caplog.at_level(logging.WARNING):
+        assert await store.append("abc", [notice(2), notice(3)]) == 2
+
+    assert [seq for _, seq, *_ in logged(state)] == [1, 2, 3]
+    assert store.log_size() == before
+    assert f"logs from {state / 'orbit.db'}: disk I/O error" in caplog.text
+
+
+@pytest.mark.parametrize("call", ["forget", "delete"])
+async def test_a_forget_or_delete_whose_log_size_cant_be_read_again_still_drops_the_log(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    open_store: Opener,
+    workspace: Path,
+    call: str,
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [notice(1), notice(2)])
+    before = store.log_size()
+    monkeypatch.setattr(sqlite_log, "log_size", failing_size)
+    with caplog.at_level(logging.WARNING):
+        await (store.forget("abc") if call == "forget" else store.delete("abc"))
+
+    assert await store.recent("abc", 10) == []
+    assert store.log_size() == before
+    assert "disk I/O error" in caplog.text
+
+
+async def test_the_log_size_once_read_again_counts_the_writes_it_missed(
+    monkeypatch: pytest.MonkeyPatch, open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    monkeypatch.setattr(sqlite_log, "log_size", failing_size)
+    await store.append("abc", [big(1), big(2)])
+    await store.trim("abc", 1, 1)
+    missed = store.log_size()
+    monkeypatch.undo()
+    await store.append("abc", [notice(3)])
+
+    assert missed == 0
+    assert store.log_size() == workspace_sizes(state)[store.workspace_id] > 0
 
 
 async def test_upgrading_counts_the_size_of_the_events_logged_before(

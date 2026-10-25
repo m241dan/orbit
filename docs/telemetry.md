@@ -360,7 +360,7 @@ warning, once until it reads again; the other gauges still report.
 | `orbit.queue.depth` | gauge | `{task}` | | How many tasks wait in line for a coder's slot (`max_coders`), across the workspaces served. |
 | `orbit.tasks.pending` | gauge | `{task}` | `orbit.workspace.id` | How many tasks are `pending` in each workspace's open session. |
 | `orbit.frontends.connected` | gauge | `{connection}` | | How many frontends are connected whose `Hello` was welcomed, attached to a workspace or not. |
-| `orbit.event_log.size` | gauge | `By` | `orbit.workspace.id` | The bytes the logs of each workspace's sessions hold in the store, their events' JSON, as the store last knew them: as it opened, and after each write to them since; 0 for a workspace with no store. |
+| `orbit.event_log.size` | gauge | `By` | `orbit.workspace.id` | The bytes the logs of each workspace's sessions hold in the store, their events' JSON, as the store last knew them: as it opened, and after each write to them since, unless it couldn't read them again then; 0 for a workspace with no store. |
 
 ## Agents' own telemetry
 

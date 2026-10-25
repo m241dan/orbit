@@ -204,8 +204,9 @@ class SqliteStore:
         return await self._or_raise("Couldn't read the latest seq from", self._latest_seq)
 
     def log_size(self, workspace: str) -> int:
-        """The bytes the logs of the workspace ``workspace``'s sessions hold, as the store read
-        them when it opened or after it last wrote them; never waits for the database."""
+        """The bytes the logs of the workspace ``workspace``'s sessions hold, as the store last
+        read them: when it opened, or after a write to them since; never waits for the
+        database."""
         return self._log_sizes.get(workspace, 0)
 
     async def reserve(self, seq: int) -> None:
@@ -532,8 +533,13 @@ class SqliteStore:
 
     def _read_log_size(self, workspace: str) -> None:
         """Read again the bytes the logs of the workspace ``workspace``'s sessions hold, counted
-        in :meth:`log_size` from then on."""
-        self._log_sizes[workspace] = sqlite_log.log_size(self._db, workspace)
+        in :meth:`log_size` from then on; when the database fails, keep the size last read and
+        log why, since the write it follows has committed."""
+        try:
+            self._log_sizes[workspace] = sqlite_log.log_size(self._db, workspace)
+        except sqlite3.Error as error:
+            message = "Couldn't read the size of the workspace %s's logs from %s: %s"
+            logger.warning(message, workspace, self._database, error)
 
     def _reserve(self, seq: int) -> None:
         """Raise the mark to ``seq``, counted in :meth:`max_seq` from then on."""
