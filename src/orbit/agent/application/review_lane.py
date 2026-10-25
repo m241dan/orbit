@@ -1,10 +1,9 @@
 """The review lane: reviews of landed work, run one at a time beside the work lane.
 
 Each review runs in a read-only snapshot of the commit it reviews, on the :class:`LaneRunner` of
-the review roles' lane, which runs the tasks of every role in it, the others in their role's
-workspace. Its suggestions become tasks at the
-end of the queue, which the work lane then runs; :class:`ReviewPlanner` decides when a review is
-due and stops reviews generating work forever.
+the review roles' lane, which runs the tasks of every role in it, the others as any lane runs its
+tasks. Its suggestions become tasks at the end of the queue, which the work lane then runs;
+:class:`ReviewPlanner` decides when a review is due and stops reviews generating work forever.
 """
 
 from collections.abc import Awaitable, Callable, Collection, Iterator
@@ -42,6 +41,7 @@ from orbit.agent.domain.roles import review_lane, role_task, suggested_task, tas
 from orbit.protocol import (
     CODER,
     GIT_FAILED,
+    REVIEW_ROLES,
     ErrorOccurred,
     Event,
     Notice,
@@ -101,8 +101,9 @@ class ReviewLane:
         self._status: ReviewStatus | None = None
 
     def _runner(self, hooks: ReviewHooks) -> LaneRunner:
-        """The runner of the review roles' lane, running the reviews and the tasks of the other
-        roles in it, reaching the rest of the session through ``hooks``."""
+        """The runner of the review roles' lane, running the reviews, and the tasks of the other
+        roles in it as it runs any lane's, reaching the rest of the session through
+        ``hooks``."""
         roles = self._desk.agents.roles
         lane = review_lane(roles)
         work = LaneWork(self._next_review, self._review, self._spent)
@@ -128,13 +129,20 @@ class ReviewLane:
     @property
     def reviewing(self) -> tuple[str, ...] | None:
         """The tasks whose work the review running or, before the lane picks one, the one it
-        will pick reviews, in task order; none when there's no review, and no tasks for a
-        review of no particular task."""
+        will pick reviews, in task order; none when there's no review, such as while the lane
+        is on another role's task, and no tasks for a review of no particular task."""
         review = self.runner.current
-        if review is None:
+        if review is None or not self._is_review(review):
             return None
         job = self._jobs.get(review)
         return job.reviewed if job else ()
+
+    @property
+    def task(self) -> str | None:
+        """The task of another role than the review roles that the lane, while it runs, is on
+        or, before it picks one, will pick; none when that's a review, or there's none."""
+        task_id = self.runner.current if self.running else None
+        return None if task_id is None or self._is_review(task_id) else task_id
 
     def on_stopped(self, stopped: Callable[[], None]) -> None:
         """Have ``stopped`` called whenever the reviews stop running."""
@@ -334,7 +342,19 @@ class ReviewLane:
         running them again could suggest nothing."""
         return {t for t, b in self._batches.items() if not self.planner.filling(b)}
 
+    def _is_review(self, task_id: str) -> bool:
+        """Whether task ``task_id`` is a review: a review role's task, whether orbit queued it
+        or the user added it. One taken off the board is a review the lane still follows up, as
+        only a review is followed up once it ends."""
+        state = self._board.find(task_id)
+        return state is None or state.task.role in REVIEW_ROLES
+
     async def _review(self, task_id: str) -> None:
+        """Run task ``task_id`` to its end: as a review if it's one, else as any lane runs its
+        tasks."""
+        if not self._is_review(task_id):
+            await self.runner.run_in_workspace(task_id)
+            return
         # Only :meth:`cancel`, which the user asks for, stops a review on its own.
         run = partial(self._reviewed, task_id)
         stop = UserStop(REVIEW_STOPPED_BY_YOU)
@@ -381,8 +401,8 @@ class ReviewLane:
         return await self.runner.alone(task_id, partial(self._run_reviewer, task_id, commit))
 
     async def _run_reviewer(self, task_id: str, commit: str | None) -> Outcome:
-        """Run the reviewer in a snapshot of ``commit``; a review the user queued, or another
-        task of the lane's roles, works in its role's workspace."""
+        """Run the reviewer in a snapshot of ``commit``; a review the user queued works in its
+        role's workspace."""
         run = AgentRun(task_id, self._tasks, None, self._desk).run
         if not commit:
             role = self._desk.agents.roles[self._board.get(task_id).task.role]

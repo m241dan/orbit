@@ -1008,9 +1008,11 @@ comes with your next commit once none is.
 
 The reviews orbit queued can't be edited: remove one instead. Reviews run in the review roles'
 lane, `review`, which starts its tasks by itself: a `reviewer` task you add starts there at once
-too. Reviews need the worktree, and the review roles in a lane of their own; `--no-review` turns
-them off, and a `reviewer` task you add then runs in its lane on a read-only snapshot of the base
-commit.
+too. A task of another role in that lane, such as an `auditor` with `lane = "review"`, runs there
+as in any other lane rather than as a review: in its role's `workspace`, shown as a task running
+in a lane of its own, and ending as `Stopped by you` if you stop it. Reviews need the worktree, and
+the review roles in a lane of their own; `--no-review` turns them off, and a `reviewer` task you
+add then runs in its lane on a read-only snapshot of the base commit.
 
 ### Roles and `.orbit/config.toml`
 
@@ -2535,7 +2537,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     (in `lane_runner`), which starts its tasks by itself, one at a time, unless a pause or a halt
     stops it, and `Lanes` (also there) holds the lanes by name; `ReviewLane` (in `review_lane`)
     queues reviews and runs them on its lane's runner, beside the work, each traced as
-    an `orbit.review` span by `ReviewTracing` (in `review_trace`); `StartupCheck`
+    an `orbit.review` span by `ReviewTracing` (in `review_trace`), and the lane's tasks of other
+    roles as the runner runs any lane's; `StartupCheck`
     (in `startup_check`) runs the steps once on the base commit as orbit starts, each run traced
     as an `orbit.startup_check` span by `StartupTracing` (in `startup_trace`); `UsageMonitor`
     (in `usage_monitor`) fetches the usage limits on a schedule and after an agent's turn; these

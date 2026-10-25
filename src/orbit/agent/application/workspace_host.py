@@ -1022,9 +1022,11 @@ class WorkspaceHost:
         )
 
     def _lane_tasks(self) -> tuple[str, ...]:
-        """The tasks running in the lanes that start by themselves, reviews aside."""
+        """The tasks running in the lanes that start by themselves, reviews aside: the review
+        lane's task of another role, then the other lanes'."""
+        review = self._lane.task if self._lane else None
         running = (runner.current for runner in self._runners if runner.running)
-        return tuple(task for task in running if task is not None)
+        return tuple(task for task in (review, *running) if task is not None)
 
     def _work_activity(self) -> tuple[str | None, int | None, int | None]:
         """The task the run is on, where it waits for a coder and behind how many busy; none

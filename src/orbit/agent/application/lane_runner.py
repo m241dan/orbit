@@ -73,7 +73,7 @@ class LaneRunner:
         self._desk = parts.desk
         self._tasks = parts.tasks
         self._parts = parts
-        self._work = work or LaneWork(self._next_in_lane, self._run_in_workspace)
+        self._work = work or LaneWork(self._next_in_lane, self.run_in_workspace)
         self._background = Background(lane, parts.desk.publish)
         self._background.ended = self._ended
         self._stopped: Callable[[], None] = _unwatched
@@ -134,6 +134,13 @@ class LaneRunner:
         finally:
             self._agent = None
 
+    async def run_in_workspace(self, task_id: str) -> None:
+        """Run task ``task_id`` to its end through a new agent, as :meth:`_run_agent` does; the
+        user's stop ends it as stopped by them."""
+        run = partial(self.alone, task_id, partial(self._run_agent, task_id))
+        stop = UserStop(STOPPED_BY_YOU)
+        await run_task_to_end(self._tasks, task_id, run, stop, self._desk.publish)
+
     def _blocked(self) -> bool:
         """Whether no task may start: this orbit is read-only, the session is halted or the work
         lane waits out a pause."""
@@ -171,13 +178,6 @@ class LaneRunner:
     def _next_in_lane(self, tried: Collection[str]) -> str | None:
         """The board's next task in one of the lane's roles, skipping those ``tried``."""
         return self._tasks.board.next_runnable(skip=tried, roles=self.roles)
-
-    async def _run_in_workspace(self, task_id: str) -> None:
-        """Run task ``task_id`` to its end through a new agent, as :meth:`_run_agent` does; the
-        user's stop ends it as stopped by them."""
-        run = partial(self.alone, task_id, partial(self._run_agent, task_id))
-        stop = UserStop(STOPPED_BY_YOU)
-        await run_task_to_end(self._tasks, task_id, run, stop, self._desk.publish)
 
     async def _run_agent(self, task_id: str) -> Outcome:
         """How task ``task_id``'s run through a new agent ended, in its role's workspace."""

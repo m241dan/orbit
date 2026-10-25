@@ -9,6 +9,7 @@ import pytest
 
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.limit_pause import LimitPause
+from orbit.agent.application.review_trace import REVIEW_SPAN
 from orbit.agent.application.takeover import Takeover
 from orbit.agent.domain.activity import LANE_TASK_RUNNING, reported
 from orbit.agent.domain.endings import STOPPED_BY_YOU
@@ -69,6 +70,7 @@ from tests.agent_fakes import (
     turns_of,
 )
 from tests.lane_fakes import SECURITY, WITH_SECURITY, audit
+from tests.telemetry_helpers import Traced
 
 LIMIT = "You've hit your session limit · resets 6pm (UTC)"
 
@@ -402,14 +404,64 @@ async def test_with_the_reviewer_disabled_super_reviews_run_in_the_super_reviewe
     assert [e for e in events if isinstance(e, ReviewStatus)][-1].open_batches == 0
 
 
+WITH_AUDITOR = {**ROLES, "auditor": SECURITY.model_copy(update={"lane": "review"})}
+"""The built-in roles, with ``auditor`` in the review lane, working in a snapshot."""
+
+AUDIT = TaskSpec(prompt="Audit it.", role="auditor")
+"""A task for the ``auditor`` role."""
+
+
 async def test_the_review_lane_runs_the_other_roles_in_its_lane() -> None:
-    roles = {**ROLES, "auditor": SECURITY.model_copy(update={"lane": "review"})}
-    session, _, launcher = session_for(claims_done, roles=roles, tree=FakeTree(), review=True)
+    session, _, launcher = session_for(
+        claims_done, roles=WITH_AUDITOR, tree=FakeTree(), review=True
+    )
     assert lane_of(session).roles == frozenset({"reviewer", "super-reviewer", "auditor"})
-    await send(session, AddTask(task=TaskSpec(prompt="Audit it.", role="auditor")))
+    await send(session, AddTask(task=AUDIT))
     await events_until(session, idle("review"))
-    assert roles_of(launcher) == ["auditor"]
+    assert [(la.agent.role, la.cwd) for la in launcher.launches] == [
+        ("auditor", "/work/review-base")
+    ]
+    assert state_of(session, "1").status == "completed"
     await session.close()
+
+
+async def test_another_roles_task_in_the_review_lane_is_reported_as_a_task_run() -> None:
+    held = Held()
+    session, _, _ = session_for(
+        held.script("auditor"), roles=WITH_AUDITOR, tree=FakeTree(), review=True
+    )
+    await send(session, AddTask(task=AUDIT))
+    await held.until_started("auditor")
+    assert reported(session.activity) == (Activity(kind="task_run", task_id="1"),)
+
+    await send(session, NewSession())
+    events = await events_until(session, of_type(CommandRefused))
+    assert events[-1] == refused(BUSY, LANE_TASK_RUNNING)
+    held.let("auditor")
+    await events_until(session, idle("review"))
+    assert not session.activity.running
+    await session.close()
+
+
+async def test_stopping_another_roles_task_in_the_review_lane_stops_it_as_a_task() -> None:
+    traced = Traced()
+    held = Held()
+    session, _, _ = session_for(
+        held.script("auditor"),
+        roles=WITH_AUDITOR,
+        tree=FakeTree(),
+        review=True,
+        telemetry=traced.telemetry,
+    )
+    await send(session, AddTask(task=AUDIT))
+    await held.until_started("auditor")
+
+    await send(session, CancelTurn(lane="review"))
+    await events_until(session, idle("review"))
+    stopped = state_of(session, "1")
+    assert (stopped.status, stopped.reason) == ("cancelled", STOPPED_BY_YOU)
+    await session.close()
+    assert traced.spans(REVIEW_SPAN) == []
 
 
 async def test_a_takeover_ending_as_the_session_closes_starts_no_lane(

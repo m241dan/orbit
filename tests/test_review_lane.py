@@ -9,6 +9,7 @@ from orbit.agent import WorkspaceHost
 from orbit.agent.application.ports import Reply, TreeFailed
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.work_turns import WorkTurns
+from orbit.agent.domain.activity import reported
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.config import load_config
 from orbit.agent.domain.endings import BUG, CANCELLED, REVIEW_STOPPED_BY_YOU, STOPPED_BY_YOU
@@ -20,6 +21,7 @@ from orbit.protocol import (
     NOT_CONFIGURED,
     SUPER_REVIEW,
     UNKNOWN,
+    Activity,
     AddTask,
     AgentExited,
     CancelAgent,
@@ -692,6 +694,30 @@ async def test_a_task_landing_as_the_session_closes_starts_no_review(
     assert any(t.task.role == "reviewer" for t in board(queued(session)))
     assert not lane_of(session).running
     assert {t for t in asyncio.all_tasks() if not t.done()} == {asyncio.current_task()}
+
+
+async def test_a_review_removed_as_it_is_followed_up_is_still_reported_as_a_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    following, release = asyncio.Event(), asyncio.Event()
+    publish_status = ReviewLane._publish_status
+
+    async def held_once_its_batch_closes(lane: ReviewLane) -> None:
+        if not (lane.planner.open_batches or following.is_set()):
+            following.set()
+            await release.wait()
+        await publish_status(lane)
+
+    monkeypatch.setattr(ReviewLane, "_publish_status", held_once_its_batch_closes)
+    session, _, _ = session_for(claims_done, reviewers=(suggests(),), tree=FakeTree(), review=True)
+    await start(session)
+    await asyncio.wait_for(following.wait(), 10)
+    await send(session, RemoveTask(task_id="2"))
+    assert reported(session.activity) == (Activity(kind="review"),)
+    release.set()
+    events = await asyncio.wait_for(settle(session), 10)
+    await session.close()
+    assert [(t.id, t.status) for t in board(events)] == [("1", "completed")]
 
 
 async def test_a_cancelled_reviewer_that_suggested_is_not_run_again() -> None:
