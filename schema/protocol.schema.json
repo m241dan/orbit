@@ -164,18 +164,64 @@
       "type": "object"
     },
     "AgentEntry": {
-      "description": "An agent role ``name``, shown as ``label``; ``conversational`` if the user can message\nit.",
+      "description": "An agent role ``name``, shown as ``label``; ``conversational`` if the user can message\nit. It runs in ``lane``, and its ``model``, ``tool_access`` and ``effort`` are the defaults\nof a task in it, as ``Settings`` hold them.",
       "properties": {
         "conversational": {
           "title": "Conversational",
           "type": "boolean"
         },
+        "effort": {
+          "anyOf": [
+            {
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effort"
+        },
         "label": {
           "title": "Label",
           "type": "string"
         },
+        "lane": {
+          "default": "work",
+          "title": "Lane",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
         "name": {
           "title": "Name",
+          "type": "string"
+        },
+        "tool_access": {
+          "default": "restricted",
+          "enum": [
+            "off",
+            "restricted",
+            "full"
+          ],
+          "title": "Tool Access",
           "type": "string"
         }
       },

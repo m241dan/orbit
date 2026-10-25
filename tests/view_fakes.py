@@ -218,11 +218,12 @@ class ProposalModal:
 
 
 class PickerScreens:
-    """Where the pickers show: the labels the model picker was given, in turn, and each picker
-    opened, with the option it opened on and what takes the pick."""
+    """Where the pickers show: the labels the model picker and the role picker were given, in
+    turn, and each picker opened, with the option it opened on and what takes the pick."""
 
     def __init__(self) -> None:
         self.labels: list[list[str]] = []
+        self.roles: list[list[str]] = []
         self.opened: list[tuple[str, int | None, Chosen]] = []
 
     def label_models(self, labels: Sequence[str]) -> None:
@@ -233,6 +234,13 @@ class PickerScreens:
 
     def pick_tool_access(self, current: int | None, chosen: Chosen) -> None:
         self.opened.append(("tools", current, chosen))
+
+    def pick_effort(self, current: int | None, chosen: Chosen) -> None:
+        self.opened.append(("effort", current, chosen))
+
+    def pick_role(self, labels: Sequence[str], current: int | None, chosen: Chosen) -> None:
+        self.roles.append(list(labels))
+        self.opened.append(("role", current, chosen))
 
     async def pick(self, index: int) -> None:
         """Pick option ``index`` in the picker opened last."""

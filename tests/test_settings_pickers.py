@@ -4,7 +4,7 @@ in test_pickers."""
 from textual.app import App
 from textual.widgets import OptionList
 
-from orbit.protocol import Settings
+from orbit.protocol import AgentEntry, Settings
 from orbit.tui.settings_pickers import SettingsPickers
 from orbit.tui.widgets import PickerScreen
 
@@ -80,3 +80,32 @@ async def test_new_model_choices_relabel_the_model_picker_and_apply_to_picks() -
         assert shown(app)[1] == ["default", "haiku", "fable"]
         await pilot.press("end", "enter")
         assert app.picked == [Settings(model="fable")]
+
+
+async def test_choosing_an_effort_passes_on_the_effort_picked() -> None:
+    app = PickersApp(Settings(model="opus", effort="high"))
+    async with app.run_test() as pilot:
+        app.pickers.model.choose_effort(app.current, app.pick)
+        await pilot.pause()
+        assert shown(app) == ("Effort", ["unset", "low", "medium", "high", "xhigh", "max"], 3)
+        assert app.screen is app.get_screen("pick-effort")
+        await pilot.press("end", "enter")
+        assert app.picked == [Settings(model="opus", effort="max")]
+
+
+async def test_choosing_a_role_offers_the_roles_given_and_passes_on_the_role_picked() -> None:
+    coder = AgentEntry(name="coder", label="Coder", conversational=False)
+    security = AgentEntry(name="security", label="security", conversational=False, lane="audit")
+    app = PickersApp(Settings())
+    picked: list[AgentEntry] = []
+    async with app.run_test() as pilot:
+        app.pickers.model.choose_role((coder,), "coder", picked.append)
+        await pilot.pause()
+        assert shown(app) == ("Role", ["Coder · work"], 0)
+        await pilot.press("escape")
+        app.pickers.model.choose_role((coder, security), "coder", picked.append)
+        await pilot.pause()
+        assert shown(app) == ("Role", ["Coder · work", "security · audit"], 0)
+        assert app.screen is app.get_screen("pick-role")
+        await pilot.press("down", "enter")
+        assert picked == [security]

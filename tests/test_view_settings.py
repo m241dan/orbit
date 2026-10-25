@@ -1,16 +1,24 @@
 import pytest
 
 from orbit.protocol import (
+    AgentEntry,
     Settings,
     ToolAccess,
 )
 from orbit.tui.view.settings import (
+    EFFORT_TITLE,
     MODEL_TITLE,
+    ROLE_TITLE,
     TOOL_ACCESS_TITLE,
+    effort_choices,
+    effort_label,
+    effort_labels,
     model_choices,
     model_options,
+    picked_effort,
     picked_model,
     picked_tool_access,
+    role_label,
     settings_fields,
     settings_summary,
     tool_access_choices,
@@ -28,6 +36,10 @@ def test_settings_summary_names_the_model_and_new_tasks_tool_access() -> None:
 
 def test_the_settings_are_titled_model_and_tool_access() -> None:
     assert (MODEL_TITLE, TOOL_ACCESS_TITLE) == ("Model", "Tool access")
+
+
+def test_the_role_and_effort_are_titled_role_and_effort() -> None:
+    assert (ROLE_TITLE, EFFORT_TITLE) == ("Role", "Effort")
 
 
 def test_model_options_offer_only_the_default_without_choices() -> None:
@@ -109,3 +121,37 @@ def test_settings_fields_show_the_model_and_the_tool_access_label(
 
 def test_settings_fields_call_no_model_the_default() -> None:
     assert settings_fields(Settings())[0] == "default"
+
+
+def test_effort_labels_offer_unset_then_each_level_in_order() -> None:
+    assert effort_labels() == ["unset", "low", "medium", "high", "xhigh", "max"]
+
+
+def test_effort_label_calls_no_effort_unset() -> None:
+    assert (effort_label(None), effort_label("xhigh")) == ("unset", "xhigh")
+
+
+def test_effort_choices_offer_unset_then_each_level_and_mark_the_current_one() -> None:
+    settings = Settings(model="opus", effort="high")
+    options, current = effort_choices(settings)
+    assert options == [
+        Settings(model="opus"),
+        Settings(model="opus", effort="low"),
+        Settings(model="opus", effort="medium"),
+        Settings(model="opus", effort="high"),
+        Settings(model="opus", effort="xhigh"),
+        Settings(model="opus", effort="max"),
+    ]
+    assert current == 3
+    assert effort_choices(Settings())[1] == 0
+
+
+def test_picked_effort_changes_only_the_effort() -> None:
+    settings = Settings(model="opus", tool_access="off", effort="low")
+    assert picked_effort(settings, 5) == Settings(model="opus", tool_access="off", effort="max")
+    assert picked_effort(settings, 0) == Settings(model="opus", tool_access="off")
+
+
+def test_a_role_shows_its_label_and_lane() -> None:
+    security = AgentEntry(name="security", label="Security", conversational=False, lane="audit")
+    assert role_label(security) == "Security · audit"

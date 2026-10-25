@@ -680,11 +680,11 @@ class WorkspaceHost:
         return 0 if self._store is None else self._store.log_size()
 
     @property
-    def roles(self) -> tuple[str, ...]:
-        """The enabled roles of this workspace's agents; none without agents."""
+    def roles(self) -> dict[str, Role]:
+        """The enabled roles of this workspace's agents, by name; none without agents."""
         roles = self._roles()
         disabled = disabled_roles(roles)
-        return tuple(name for name in roles if name not in disabled)
+        return {name: role for name, role in roles.items() if name not in disabled}
 
     @property
     def triggers(self) -> tuple[str, ...]:

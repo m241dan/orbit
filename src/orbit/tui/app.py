@@ -12,7 +12,7 @@ from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Tabs
 
-from orbit.protocol import Command, Connected, Link, LinkState, Session, Settings, TaskSpec
+from orbit.protocol import Command, Connected, Link, LinkState, Session, TaskSpec
 from orbit.tracing import NoTelemetry, Telemetry
 from orbit.tui.agents import AgentsPane
 from orbit.tui.detail import DetailPane
@@ -35,6 +35,7 @@ from orbit.tui.view.actions import carrying
 from orbit.tui.view.frontend import Frontend, Parts, Saved
 from orbit.tui.view.opening import Opening
 from orbit.tui.view.outcomes import Awaited
+from orbit.tui.view.task_editor import TaskChoices
 from orbit.tui.warning_capture import WarningCapture
 from orbit.tui.widgets import ChatPrompt, StatusLine, confirm, mark_selected
 from orbit.tui.workspaces import WorkspacesHost
@@ -227,8 +228,8 @@ class OrbitApp(App[None], inherit_bindings=False):
     ) -> None:
         confirm(self.push_screen, title, message, yes, then)
 
-    def edit_task(self, task: TaskSpec | None, settings: Settings, saved: Saved) -> None:
-        self.push_screen(TaskEditorScreen(task, settings, self._pickers.model), saved)
+    def edit_task(self, task: TaskSpec | None, choices: TaskChoices, saved: Saved) -> None:
+        self.push_screen(TaskEditorScreen(task, choices, self._pickers.model), saved)
 
     def label_triggers(self, labels: dict[str, str | None]) -> None:
         """Label each trigger's key in the footer with its label in ``labels``, hiding those

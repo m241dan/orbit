@@ -284,14 +284,20 @@ The Conversation window's title ends with the open session's name, cut to 30 cha
 
 ### Tasks
 
-The task list queues prompts to run later. Each task has its own prompt, model and tool access, set
-in the task editor's four fields: **Title**, the prompt's first line, which is what the task list
-shows; **Prompt**, the rest of it, in a box that scrolls; **Model** and **Tool access**. `j`/`k` pick a
-field, `J`/`K` scroll the prompt box one line at a time (whichever field is selected), `i` types in
-the title or prompt (`esc` stops; `enter` stops in the title and adds a line in the prompt),
-`enter` on model or tools opens a picker, `ctrl+s` saves (from anywhere, even while typing) and
-`esc` discards. A task needs a title; the prompt may be empty. `enter` on a running or verifying
-task, or on a review orbit queued, only shows why it can't be edited.
+The task list queues prompts to run later. Each task has its own prompt, role, model, tool access
+and effort, set in the task editor's six fields: **Title**, the prompt's first line, which is what
+the task list shows; **Prompt**, the rest of it, in a box that scrolls; **Role**, the role whose
+agent takes the task, picked among the enabled roles that take tasks (those that aren't
+conversational), each shown with its lane (`Coder · work`), and `coder` for a new task; **Model**;
+**Tool access**; and **Effort**: unset, `low`, `medium`, `high`, `xhigh` or `max`, where unset
+leaves it to the role's (see `effort` under
+[Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)). Picking a role sets the model, tool
+access and effort to that role's defaults, except those you've already picked in this edit. `j`/`k`
+pick a field, `J`/`K` scroll the prompt box one line at a time (whichever field is selected), `i`
+types in the title or prompt (`esc` stops; `enter` stops in the title and adds a line in the
+prompt), `enter` on role, model, tools or effort opens a picker, `ctrl+s` saves (from anywhere,
+even while typing) and `esc` discards. A task needs a title; the prompt may be empty. `enter` on a
+running or verifying task, or on a review orbit queued, only shows why it can't be edited.
 
 The task list belongs to the open session, which orbit saves as you go (see [Sessions](#sessions)).
 It keeps the topmost running or verifying task in view, scrolling just enough to show it with the
@@ -1043,8 +1049,8 @@ in a later version**: orbit loads and checks them, but nothing acts on them yet.
   remove it, and a failing startup check adds no draft while the `coder` is disabled.
 - `effort`: how hard its agents think: `low`, `medium`, `high`, `xhigh` or `max`, the levels
   `claude --help` lists; any other value is refused, listing those. Left out, the CLI's default.
-  Like its model and tool access, it's the default for tasks orbit queues in the role, and is
-  saved with them and the session. An agent runs with its task's effort, or for a conversational
+  Like its model and tool access, it's the default for tasks orbit queues in the role, and what
+  the task editor fills in when you pick the role, and is saved with them and the session. An agent runs with its task's effort, or for a conversational
   role its session's, and otherwise with its role's, passed to the CLI as `--effort`; with none,
   no flag is passed and the CLI's default applies. `CLAUDE_CODE_EFFORT_LEVEL` is removed from
   every agent's environment, so one set where orbit runs never overrides orbit's setting or the

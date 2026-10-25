@@ -97,7 +97,10 @@ listed if any workspace served has it: a role that's disabled (`enabled = false`
 are the triggers that queue its tasks (`super-review` the super reviewer's, `configure-checks` the
 configurator's) and its lane, unless an enabled role shares it. An agent role is `conversational`
 when the user can message it: the planner, and any other enabled role with `conversation = true`,
-whose lane is listed too. Each
+whose lane is listed too. Each agent role also carries its `lane` and the defaults of a task in
+it, its `model`, `tool_access` and `effort`, as a `Settings` holds them, from the first workspace
+served that has a role of that name; these were added to version 2, defaulting to the `work`
+lane, the backend's model, `restricted` and no effort. Each
 session carries its state (see [Session state](#session-state)).
 
 `Hello` attaches the connection to nothing, and nothing more reaches it until its first

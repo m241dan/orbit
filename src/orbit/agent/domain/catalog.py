@@ -46,11 +46,18 @@ NO_WORKSPACE_LABEL = "default"
 """The workspace's label outside a repository."""
 
 
-def agent_entry(role: str, conversational: bool) -> AgentEntry:
-    """The catalog's entry for the agents of ``role``, ``conversational`` if the user can message
-    them."""
-    label = ROLE_LABELS.get(role, role)
-    return AgentEntry(name=role, label=label, conversational=conversational)
+def agent_entry(name: str, role: Role, conversational: bool) -> AgentEntry:
+    """The catalog's entry for the agents of ``role``, named ``name``, ``conversational`` if the
+    user can message them, with its lane and the defaults of its tasks' settings."""
+    return AgentEntry(
+        name=name,
+        label=ROLE_LABELS.get(name, name),
+        conversational=conversational,
+        lane=role.lane,
+        model=role.model,
+        tool_access=role.tool_access,
+        effort=role.effort,
+    )
 
 
 def workspace_entry(
@@ -90,19 +97,22 @@ def trigger_names(roles: Mapping[str, Role]) -> tuple[str, ...]:
 
 def catalog(
     workspaces: Sequence[WorkspaceEntry],
-    roles: Iterable[str],
+    roles: Iterable[tuple[str, Role]],
     triggers: Iterable[str],
     lanes: Iterable[str],
     conversational: Iterable[str],
 ) -> Catalog:
-    """The catalog of the ``workspaces`` served, with agents in ``roles``, those among them in
-    ``conversational`` ones the user can message, the built-in ``triggers`` named, in their
-    order, and ``lanes``, each listed once."""
+    """The catalog of the ``workspaces`` served, with agents in ``roles``, each named once, as
+    the first of that name is, those among them in ``conversational`` ones the user can message,
+    the built-in ``triggers`` named, in their order, and ``lanes``, each listed once."""
     named = frozenset(triggers)
     talking = frozenset(conversational)
+    first: dict[str, Role] = {}
+    for name, role in roles:
+        first.setdefault(name, role)
     return Catalog(
         workspaces=tuple(workspaces),
-        agents=tuple(agent_entry(role, role in talking) for role in dict.fromkeys(roles)),
+        agents=tuple(agent_entry(name, role, name in talking) for name, role in first.items()),
         triggers=tuple(trigger for trigger in TRIGGERS if trigger.name in named),
         lanes=tuple(dict.fromkeys(lanes)),
     )

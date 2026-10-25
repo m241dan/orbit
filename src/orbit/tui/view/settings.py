@@ -3,11 +3,16 @@
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Protocol, get_args
 
-from orbit.protocol import Settings, ToolAccess
+from orbit.protocol import AgentEntry, Effort, Settings, ToolAccess
 from orbit.tui.view.common import model_label
 
 MODEL_TITLE = "Model"
 TOOL_ACCESS_TITLE = "Tool access"
+EFFORT_TITLE = "Effort"
+ROLE_TITLE = "Role"
+EFFORT_OPTIONS: tuple[Effort | None, ...] = (None, *get_args(Effort))
+"""The efforts a picker offers, none (unset) first."""
+UNSET_EFFORT = "unset"
 TOOL_ACCESS_OPTIONS: tuple[ToolAccess, ...] = get_args(ToolAccess)
 TOOL_ACCESS_LABELS: dict[ToolAccess, str] = {
     "off": "off",
@@ -40,6 +45,13 @@ def tool_access_choices(settings: Settings) -> tuple[list[Settings], int | None]
     return _with_current(options, settings)
 
 
+def effort_choices(settings: Settings) -> tuple[list[Settings], int | None]:
+    """The settings each option of the effort picker gives, ``settings`` with each of
+    ``EFFORT_OPTIONS``, and the index of ``settings`` among them."""
+    options = [settings.model_copy(update={"effort": e}) for e in EFFORT_OPTIONS]
+    return _with_current(options, settings)
+
+
 def picked_model(choices: Sequence[str], settings: Settings, index: int) -> Settings:
     """``settings`` with the model of option ``index`` of the model picker offering
     ``choices``."""
@@ -49,6 +61,11 @@ def picked_model(choices: Sequence[str], settings: Settings, index: int) -> Sett
 def picked_tool_access(settings: Settings, index: int) -> Settings:
     """``settings`` with the tool access of option ``index`` of the tool access picker."""
     return tool_access_choices(settings)[0][index]
+
+
+def picked_effort(settings: Settings, index: int) -> Settings:
+    """``settings`` with the effort of option ``index`` of the effort picker."""
+    return effort_choices(settings)[0][index]
 
 
 def _with_current(options: list[Settings], settings: Settings) -> tuple[list[Settings], int | None]:
@@ -64,6 +81,22 @@ def tool_access_labels() -> list[str]:
 def tool_access_label(access: ToolAccess) -> str:
     """How ``access`` is shown beside a model: ``full (auto-approved)``."""
     return TOOL_ACCESS_LABELS[access]
+
+
+def effort_label(effort: Effort | None) -> str:
+    """How ``effort`` shows: its level, or ``unset`` for none."""
+    return UNSET_EFFORT if effort is None else effort
+
+
+def effort_labels() -> list[str]:
+    """The labels a picker shows for ``EFFORT_OPTIONS``, in the same order."""
+    return [effort_label(e) for e in EFFORT_OPTIONS]
+
+
+def role_label(role: AgentEntry) -> str:
+    """How ``role`` shows among the roles a task can take: ``Coder · work``, its label and its
+    lane."""
+    return f"{role.label} · {role.lane}"
 
 
 def settings_fields(settings: Settings) -> tuple[str, str]:
@@ -86,10 +119,13 @@ Picked = Callable[[Settings], Awaitable[None] | None]
 """Takes the settings picked."""
 Chosen = Callable[[int], Awaitable[None] | None]
 """Takes the index of the option picked."""
+PickedRole = Callable[[AgentEntry], None]
+"""Takes the role picked."""
 
 
 class PickersView(Protocol):
-    """Where :class:`Pickers` show: a model picker and a tool access picker."""
+    """Where :class:`Pickers` show: a model picker, a tool access picker, an effort picker and a
+    role picker."""
 
     def label_models(self, labels: Sequence[str]) -> None:
         """Label the model picker's options ``labels``."""
@@ -102,10 +138,18 @@ class PickersView(Protocol):
         """Open the tool access picker on option ``current``, calling ``chosen`` with the
         option picked; closed, it calls nothing."""
 
+    def pick_effort(self, current: int | None, chosen: Chosen) -> None:
+        """Open the effort picker on option ``current``, calling ``chosen`` with the option
+        picked; closed, it calls nothing."""
+
+    def pick_role(self, labels: Sequence[str], current: int | None, chosen: Chosen) -> None:
+        """Open the role picker offering ``labels`` on option ``current``, calling ``chosen``
+        with the option picked; closed, it calls nothing."""
+
 
 class Pickers:
-    """The model and tool access pickers, shown in ``view``, and the model choices the model
-    picker offers, its labels following them.
+    """The model, tool access, effort and role pickers, shown in ``view``, and the model choices
+    the model picker offers, its labels following them.
 
     The settings may change while a picker is open, so a pick changes only its own setting of
     the settings as they are when picked.
@@ -136,3 +180,17 @@ class Pickers:
         self._view.pick_tool_access(
             current, lambda index: then(picked_tool_access(settings(), index))
         )
+
+    def choose_effort(self, settings: Callable[[], Settings], then: Picked) -> None:
+        """Open the effort picker on the effort of ``settings``, the settings now, and call
+        ``then`` with them, as they are when picked, with the effort picked."""
+        _, current = effort_choices(settings())
+        self._view.pick_effort(current, lambda index: then(picked_effort(settings(), index)))
+
+    def choose_role(self, roles: Sequence[AgentEntry], role: str, then: PickedRole) -> None:
+        """Open the role picker offering ``roles`` on the one named ``role``, if it's among
+        them, and call ``then`` with the role picked."""
+        names = [entry.name for entry in roles]
+        current = names.index(role) if role in names else None
+        labels = [role_label(entry) for entry in roles]
+        self._view.pick_role(labels, current, lambda index: then(roles[index]))

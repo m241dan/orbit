@@ -334,9 +334,19 @@ EVENTS: tuple[EventEnvelope, ...] = (
                     id="w1", label="Orbit", path="/src/orbit", read_only=True, sessions=(SUMMARY,)
                 ),
             ),
-            agents=(AgentEntry(name=PLANNER, label="Planner", conversational=True),),
+            agents=(
+                AgentEntry(name=PLANNER, label="Planner", conversational=True, lane=PLANNER_LANE),
+                AgentEntry(
+                    name="auditor",
+                    label="auditor",
+                    conversational=False,
+                    lane="audit",
+                    model="opus",
+                    effort="high",
+                ),
+            ),
             triggers=(TriggerEntry(name="super-review", label="Super review", manual=True),),
-            lanes=("work", PLANNER_LANE),
+            lanes=("work", PLANNER_LANE, "audit"),
         )
     ),
     event(

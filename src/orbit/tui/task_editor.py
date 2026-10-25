@@ -9,9 +9,9 @@ from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Input, Static
 
-from orbit.protocol import Settings, TaskSpec
-from orbit.tui.view.settings import MODEL_TITLE, TOOL_ACCESS_TITLE
-from orbit.tui.view.task_editor import SettingsChooser, TaskEditor
+from orbit.protocol import TaskSpec
+from orbit.tui.view.settings import EFFORT_TITLE, MODEL_TITLE, ROLE_TITLE, TOOL_ACCESS_TITLE
+from orbit.tui.view.task_editor import SettingsChooser, TaskChoices, TaskEditor
 from orbit.tui.view.tasks import (
     TASK_EDITOR_HINT,
     TASK_PROMPT_TITLE,
@@ -38,14 +38,14 @@ class FieldBox(Static):
 
 
 class TaskEditorScreen(ModalScreen[TaskSpec | None]):
-    """Shows the :class:`TaskEditor` of one task's title, prompt, model and tool access.
-    Dismisses with the task, or None.
+    """Shows the :class:`TaskEditor` of one task's title, prompt, role, model, tool access and
+    effort. Dismisses with the task, or None.
 
     Works like the main screen: j/k select a field, J/K scroll the prompt box from any field,
     i types in the title or prompt (escape stops; enter stops in the title and adds a line in
-    the prompt), enter on model or tools opens its picker, ctrl+s saves and escape discards.
-    The pickers are the app's ``pickers``, built once so they open instantly and offering the
-    app's current model choices.
+    the prompt), enter on role, model, tools or effort opens its picker, ctrl+s saves and
+    escape discards. The pickers are the app's ``pickers``, built once so they open instantly
+    and offering the app's current model choices.
     """
 
     AUTO_FOCUS = None
@@ -74,11 +74,11 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
     def __init__(
         self,
         task: TaskSpec | None,
-        settings: Settings,
+        choices: TaskChoices,
         pickers: SettingsChooser,
     ) -> None:
         super().__init__()
-        self.editor = TaskEditor(self, task, settings, pickers)
+        self.editor = TaskEditor(self, task, choices, pickers)
 
     @property
     def title_text(self) -> str:
@@ -87,15 +87,17 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
 
     def compose(self) -> ComposeResult:
         title, body = self.editor.text
-        model, tools = self.editor.settings_shown
+        model, tools, effort = self.editor.settings_shown
         # Fields are reached with j/k, not by tabbing or clicking; the wheel still scrolls.
         with VerticalScroll(can_focus=False) as box:
             box.border_title = self.editor.heading
             box.border_subtitle = TASK_EDITOR_HINT
             yield PromptInput(value=title, placeholder=TASK_TITLE_PLACEHOLDER, id="task-title")
             yield PromptBox(body, id="task-prompt")
+            yield FieldBox(ROLE_TITLE, self.editor.role_shown, id="task-role")
             yield FieldBox(MODEL_TITLE, model, id="task-model")
             yield FieldBox(TOOL_ACCESS_TITLE, tools, id="task-tools")
+            yield FieldBox(EFFORT_TITLE, effort, id="task-effort")
 
     def on_mount(self) -> None:
         self.query_one(PromptInput).border_title = TASK_TITLE_TITLE
@@ -146,6 +148,10 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
     def type_body(self) -> None:
         self.query_one(PromptBox).enter_insert_mode()
 
-    def show_settings(self, model: str, tools: str) -> None:
+    def show_role(self, role: str) -> None:
+        self.query_one("#task-role", FieldBox).update(role)
+
+    def show_settings(self, model: str, tools: str, effort: str) -> None:
         self.query_one("#task-model", FieldBox).update(model)
         self.query_one("#task-tools", FieldBox).update(tools)
+        self.query_one("#task-effort", FieldBox).update(effort)

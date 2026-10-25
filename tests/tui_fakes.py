@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator, Callable
 from rich.console import Console
 from rich.segment import Segment
 from rich.style import Style
+from textual.app import App
 from textual.pilot import Pilot
 from textual.widgets import OptionList, Tab
 
@@ -105,7 +106,7 @@ async def show_settings(session: FakeSession, pilot: Pilot[None], settings: Sett
     await pilot.pause()
 
 
-def picker(app: OrbitApp) -> tuple[str, list[str], int | None]:
+def picker(app: App[None]) -> tuple[str, list[str], int | None]:
     """The open picker's title, option labels and highlighted index."""
     screen = app.screen
     assert isinstance(screen, PickerScreen)

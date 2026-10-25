@@ -6,10 +6,14 @@ import asyncio
 from orbit.agent import ControlPlane, Verification, WorkspaceHost, WorkspaceOwner
 from orbit.agent.domain.workspaces import ATTACH_FIRST
 from orbit.protocol import (
+    CODER,
     INVALID,
+    PLANNER,
+    REVIEWER,
     UNKNOWN,
     WRONG_SESSION,
     AddTask,
+    AgentEntry,
     Attach,
     Catalog,
     CommandAccepted,
@@ -25,9 +29,9 @@ from orbit.protocol import (
     Welcome,
     WorkspaceEntry,
 )
-from tests.agent_fakes import HELLO, STEP, FakeLock, Steps, board_of
+from tests.agent_fakes import HELLO, ROLES, STEP, FakeLock, Steps, board_of
 from tests.connection_helpers import joined, say, taken
-from tests.plane_fakes import idle, offered, payloads, working, workspace
+from tests.plane_fakes import agent_workspace, idle, offered, payloads, working, workspace
 from tests.server_fakes import TASK
 from tests.waiting import eventually
 
@@ -174,6 +178,37 @@ async def test_a_change_to_one_workspaces_sessions_sends_everyone_the_whole_cata
     in_first, in_second = catalog.workspaces
     assert [s.name for s in in_first.sessions] == ["Renamed"]
     assert [s.id for s in in_second.sessions] == ["b-1"]
+
+
+async def test_the_catalogs_agents_carry_the_lane_and_defaults_of_the_first_role_named() -> None:
+    audit = {"lane": "audit", "model": "opus", "effort": "high"}
+    auditor = ROLES[REVIEWER].model_copy(update=audit)
+    first, _ = agent_workspace("a", roles={**ROLES, "auditor": auditor})
+    second, _ = agent_workspace("b", roles={**ROLES, "auditor": ROLES[REVIEWER]})
+    plane = ControlPlane([first, second])
+    connection = plane.connect()
+    await say(connection, "hello", HELLO)
+    _, catalog = payloads(taken(connection))
+    await plane.close()
+
+    assert isinstance(catalog, Catalog)
+    agents = {agent.name: agent for agent in catalog.agents}
+    assert len(catalog.agents) == len(agents) == len(ROLES) + 1
+    assert agents["auditor"] == AgentEntry(
+        name="auditor",
+        label="auditor",
+        conversational=False,
+        lane="audit",
+        model="opus",
+        tool_access="restricted",
+        effort="high",
+    )
+    assert agents[CODER] == AgentEntry(
+        name=CODER, label="Coder", conversational=False, lane="work", tool_access="full"
+    )
+    assert agents[PLANNER] == AgentEntry(
+        name=PLANNER, label="Planner", conversational=True, lane="planner"
+    )
 
 
 def read_only_in(envelopes: list[EventEnvelope]) -> list[dict[str, bool]]:

@@ -64,11 +64,11 @@ def _last_seq(hosts: Iterable[WorkspaceHost], mark: SeqMark | None) -> int:
     return max([marked, *(host.outbox.last_seq for host in hosts)])
 
 
-def _across(
-    hosts: Iterable[WorkspaceHost], names: Callable[[WorkspaceHost], Iterable[str]]
-) -> list[str]:
-    """The ``names`` each of ``hosts`` has, in turn."""
-    return [name for host in hosts for name in names(host)]
+def _across[T](
+    hosts: Iterable[WorkspaceHost], items: Callable[[WorkspaceHost], Iterable[T]]
+) -> list[T]:
+    """The ``items`` each of ``hosts`` has, in turn."""
+    return [item for host in hosts for item in items(host)]
 
 
 async def _untold(entry: WorkspaceEntry) -> None:
@@ -327,7 +327,7 @@ class ControlPlane:
         listed if any workspace has it."""
         hosts = tuple(self._hosts.values())  # Workspaces may be added or removed meanwhile.
         entries = [await self._entry(host, changed) for host in hosts]
-        roles = _across(hosts, lambda host: host.roles)
+        roles = _across(hosts, lambda host: host.roles.items())
         triggers = _across(hosts, lambda host: host.triggers)
         lanes = _across(hosts, lambda host: host.lanes)
         conversational = _across(hosts, lambda host: host.conversational)

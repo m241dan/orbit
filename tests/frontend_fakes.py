@@ -11,7 +11,6 @@ from orbit.protocol import (
     CommandRefused,
     Event,
     Hello,
-    Settings,
     TaskSpec,
     UsageChanged,
     Watch,
@@ -29,6 +28,7 @@ from orbit.tui.view.settings import Pickers
 from orbit.tui.view.storage import StorageHalt
 from orbit.tui.view.tab_strip import ALL_TAB_ID, OPENING, TabStrip
 from orbit.tui.view.takeover import TakeoverOffer
+from orbit.tui.view.task_editor import TaskChoices
 from orbit.tui.view.tasks import TaskBoard
 from tests.navigation_fakes import Modals, WorkspaceViews
 from tests.transcript_fakes import Window
@@ -103,7 +103,7 @@ class AppShell:
         self.sidebar_shown = True
         self.warnings: list[str] = []
         self.questions: list[tuple[str, str, str, Callable[[], Awaitable[object]]]] = []
-        self.editors: list[tuple[TaskSpec | None, Settings, Saved]] = []
+        self.editors: list[tuple[TaskSpec | None, TaskChoices, Saved]] = []
         self.labels: dict[str, str | None] = {}
         self.selected: set[str] = set()
         self.entered: list[str] = []
@@ -126,8 +126,8 @@ class AppShell:
     ) -> None:
         self.questions.append((title, message, yes, then))
 
-    def edit_task(self, task: TaskSpec | None, settings: Settings, saved: Saved) -> None:
-        self.editors.append((task, settings, saved))
+    def edit_task(self, task: TaskSpec | None, choices: TaskChoices, saved: Saved) -> None:
+        self.editors.append((task, choices, saved))
 
     def label_triggers(self, labels: dict[str, str | None]) -> None:
         self.labels = labels

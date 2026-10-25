@@ -5,6 +5,8 @@ from textual.pilot import Pilot
 
 from orbit.protocol import (
     AddTask,
+    AgentEntry,
+    Catalog,
     EditTask,
     Settings,
     SettingsChanged,
@@ -14,6 +16,7 @@ from orbit.tui import OrbitApp
 from orbit.tui.settings_pickers import SettingsPickers
 from orbit.tui.task_editor import TaskEditorScreen
 from orbit.tui.tasks import TaskList
+from orbit.tui.view.task_editor import TaskChoices
 from orbit.tui.widgets import PromptBox, PromptInput
 from tests.tui_fakes import (
     FakeSession,
@@ -25,10 +28,18 @@ from tests.tui_fakes import (
     show_settings,
 )
 
+PLANNER = AgentEntry(name="planner", label="Planner", conversational=True, lane="planner")
+CODER = AgentEntry(name="coder", label="Coder", conversational=False, tool_access="full")
+SECURITY = AgentEntry(
+    name="security", label="security", conversational=False, lane="security", effort="high"
+)
+AGENTS = (PLANNER, CODER, SECURITY)
+
 
 class EditorApp(App[None]):
     """An app opening just the task editor, on ``task`` or a new task, with the default
-    settings, for what the editor does on its own; ``saved`` is what it closes with."""
+    settings and the roles of :data:`AGENTS`, for what the editor does on its own; ``saved`` is
+    what it closes with."""
 
     def __init__(self, task: TaskSpec | None) -> None:
         super().__init__()
@@ -36,7 +47,9 @@ class EditorApp(App[None]):
         self.saved: list[TaskSpec | None] = []
 
     def on_mount(self) -> None:
-        editor = TaskEditorScreen(self.editing, Settings(), SettingsPickers().model)
+        pickers = SettingsPickers()
+        pickers.install(self)
+        editor = TaskEditorScreen(self.editing, TaskChoices(Settings(), AGENTS), pickers.model)
         self.push_screen(editor, self.saved.append)
 
 
@@ -58,6 +71,14 @@ def editor_fields(app: App[None]) -> tuple[str, str, str, str]:
     )
 
 
+def role_and_effort(app: App[None]) -> tuple[str, str]:
+    """The open editor's role and effort values."""
+    screen = editor_screen(app)
+    return str(screen.query_one("#task-role").render()), str(
+        screen.query_one("#task-effort").render()
+    )
+
+
 async def test_new_task_editor_defaults_to_session_settings() -> None:
     session = FakeSession()
     app = OrbitApp(session)
@@ -70,8 +91,11 @@ async def test_new_task_editor_defaults_to_session_settings() -> None:
         assert app.focused is None
         assert editor_screen(app).query_one(PromptInput).border_title == "Title"
         assert editor_screen(app).query_one(PromptBox).border_title == "Prompt"
+        assert editor_screen(app).query_one("#task-role").border_title == "Role"
         assert editor_screen(app).query_one("#task-model").border_title == "Model"
         assert editor_screen(app).query_one("#task-tools").border_title == "Tool access"
+        assert editor_screen(app).query_one("#task-effort").border_title == "Effort"
+        assert role_and_effort(app) == ("coder", "unset")
 
 
 async def test_editor_builds_a_task_with_vim_keys() -> None:
@@ -90,8 +114,9 @@ async def test_editor_builds_a_task_with_vim_keys() -> None:
         assert editor_fields(app)[0] == "fix it"
         assert app.focused is None
 
-        # j moves past the prompt to the model field; enter opens a picker that j/k drive.
-        await pilot.press("j", "j")
+        # j moves past the prompt and the role to the model field; enter opens a picker that
+        # j/k drive.
+        await pilot.press("j", "j", "j")
         assert [w.id for w in screen.query(".selected")] == ["task-model"]
         await pilot.press("enter")
         assert picker(app)[1] == ["default", "opus", "sonnet"]
@@ -110,13 +135,13 @@ async def test_editor_builds_a_task_with_vim_keys() -> None:
         assert [w.id for w in screen.query(".selected")] == ["task-title"]
         assert app.focused is None  # enter stops typing rather than submitting
         assert session.commands == []
-        await pilot.press("j", "j", "i")
+        await pilot.press("j", "j", "j", "i")
         assert [w.id for w in screen.query(".selected")] == ["task-title"]
         assert app.focused is screen.query_one(PromptInput)
         await pilot.press("escape")
 
         # A title alone saves a single-line prompt, from whichever field is selected.
-        await pilot.press("k", "k", "j", "j", "ctrl+s")
+        await pilot.press("k", "k", "j", "j", "j", "ctrl+s")
         assert not isinstance(app.screen, TaskEditorScreen)
         task = TaskSpec(prompt="fix it!", settings=Settings(model="opus", tool_access="full"))
         assert session.commands == [AddTask(task=task)]
@@ -199,7 +224,7 @@ async def test_editor_model_picker_uses_choices_that_arrive_while_open() -> None
         await feed_events(
             session, pilot, SettingsChanged(settings=Settings(), model_choices=choices)
         )
-        await pilot.press("j", "j", "enter", "j", "j", "j", "enter", "ctrl+s")
+        await pilot.press("j", "j", "j", "enter", "j", "j", "j", "enter", "ctrl+s")
         task = TaskSpec(prompt="Add a widget", settings=Settings(model="haiku"))
         assert session.commands == [AddTask(task=task)]
 
@@ -213,7 +238,7 @@ async def test_editor_border_follows_the_selected_field() -> None:
         screen = editor_screen(app)
         title, model = screen.query_one("#task-title"), screen.query_one("#task-model")
         selected_border, unselected_border = title.styles.border_top, model.styles.border_top
-        await pilot.press("j", "j")
+        await pilot.press("j", "j", "j")
         assert title.styles.border_top == unselected_border
         assert model.styles.border_top == selected_border != unselected_border
 
@@ -283,11 +308,11 @@ async def test_editor_scrolls_every_field_into_view_in_a_small_terminal() -> Non
         box = screen.query_one(VerticalScroll)
         assert box.scroll_y == 0
 
-        await pilot.press("j", "j", "j")
+        await pilot.press("j", "j", "j", "j", "j")
         assert box.scroll_y > 0
-        assert box.content_region.contains_region(screen.query_one("#task-tools").region)
+        assert box.content_region.contains_region(screen.query_one("#task-effort").region)
 
-        await pilot.press("k", "k", "k")
+        await pilot.press("k", "k", "k", "k", "k")
         assert box.scroll_y == 0
         assert box.content_region.contains_region(screen.query_one("#task-title").region)
 
@@ -337,7 +362,15 @@ async def test_shift_j_scrolls_the_prompt_box_from_every_field() -> None:
     app = EditorApp(TaskSpec(prompt=LONG_PROMPT))
     async with app.run_test() as pilot:
         box = await prompt_box(pilot)
-        for field, expected in enumerate(["task-title", "task-prompt", "task-model", "task-tools"]):
+        fields = [
+            "task-title",
+            "task-prompt",
+            "task-role",
+            "task-model",
+            "task-tools",
+            "task-effort",
+        ]
+        for field, expected in enumerate(fields):
             if field:
                 await pilot.press("j")
             await pilot.press("J")
@@ -393,3 +426,72 @@ async def test_editor_hint_mentions_shift_j_and_k_scrolling() -> None:
         await prompt_box(pilot)
         hint = editor_screen(app).query_one(VerticalScroll).border_subtitle
         assert hint == "j/k move · J/K scroll · i type · enter choose · ctrl+s save · esc cancel"
+
+
+async def test_a_new_tasks_role_is_the_coder_and_picking_a_role_fills_its_defaults() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings(model="opus", tool_access="full"))
+        await feed_events(
+            session, pilot, Catalog(workspaces=(), agents=AGENTS, triggers=(), lanes=())
+        )
+        await open_task_list(pilot)
+        await pilot.press("enter", "i", *"Audit it", "escape")
+        assert role_and_effort(app) == ("Coder · work", "unset")
+
+        # The role picker offers the task roles alone, opening on the task's.
+        await pilot.press("j", "j", "enter")
+        assert picker(app) == ("Role", ["Coder · work", "security · security"], 0)
+        await pilot.press("j", "enter")
+        assert role_and_effort(app) == ("security · security", "high")
+        assert editor_fields(app)[2:] == ("default", "restricted")
+        await pilot.press("ctrl+s")
+        task = TaskSpec(prompt="Audit it", settings=Settings(effort="high"), role="security")
+        assert session.commands == [AddTask(task=task)]
+
+
+async def test_picking_a_role_keeps_a_model_changed_first() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings(tool_access="full"))
+        catalog = Catalog(workspaces=(), agents=AGENTS, triggers=(), lanes=())
+        await feed_events(session, pilot, catalog)
+        await open_task_list(pilot)
+        await pilot.press("enter", "i", *"Audit it", "escape")
+        await pilot.press("j", "j", "j", "enter", "j", "enter")  # opus
+        await pilot.press("k", "enter", "j", "enter")  # the security role
+        assert role_and_effort(app) == ("security · security", "high")
+        assert editor_fields(app)[2:] == ("opus", "restricted")
+        await pilot.press("ctrl+s")
+        settings = Settings(model="opus", effort="high")
+        task = TaskSpec(prompt="Audit it", settings=settings, role="security")
+        assert session.commands == [AddTask(task=task)]
+
+
+async def test_an_effort_picked_is_saved_and_unset_saves_none() -> None:
+    app = EditorApp(TaskSpec(prompt="Think", settings=Settings(effort="low")))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert role_and_effort(app) == ("Coder · work", "low")
+        await pilot.press("j", "j", "j", "j", "j", "enter")
+        assert picker(app) == ("Effort", ["unset", "low", "medium", "high", "xhigh", "max"], 1)
+        await pilot.press("end", "enter")
+        assert role_and_effort(app)[1] == "max"
+        await pilot.press("ctrl+s")
+        assert app.saved == [TaskSpec(prompt="Think", settings=Settings(effort="max"))]
+
+    app = EditorApp(TaskSpec(prompt="Think", settings=Settings(effort="low")))
+    async with app.run_test() as pilot:
+        await pilot.press("j", "j", "j", "j", "j", "enter", "home", "enter", "ctrl+s")
+        assert app.saved == [TaskSpec(prompt="Think")]
+
+
+async def test_an_edited_task_shows_its_role() -> None:
+    app = EditorApp(TaskSpec(prompt="Audit it", role="security"))
+    async with app.run_test() as pilot:
+        await pilot.press("j", "j", "enter")
+        assert picker(app) == ("Role", ["Coder · work", "security · security"], 1)
+        await pilot.press("escape")
+        assert role_and_effort(app) == ("security · security", "unset")

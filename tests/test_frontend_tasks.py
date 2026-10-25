@@ -6,6 +6,7 @@ from orbit.protocol import (
     SUPER_REVIEW,
     Activity,
     AddTask,
+    AgentEntry,
     BusyChanged,
     EditTask,
     ErrorOccurred,
@@ -22,6 +23,7 @@ from orbit.protocol import (
     TurnFinished,
     Usage,
 )
+from orbit.tui.view.task_editor import TaskChoices
 from tests.frontend_fakes import Shell
 from tests.session_apps import CATALOG
 from tests.tui_fakes import board, opened
@@ -154,8 +156,8 @@ async def test_the_editor_opens_with_the_settings_shown_and_its_task_is_saved() 
     pending = TaskState(id="2", task=TaskSpec(prompt="go"))
     shell.frontend.edit_task(None)
     shell.frontend.edit_task(pending)
-    [(new, new_settings, add), (old, _, edit)] = shell.app.editors
-    assert (new, new_settings, old) == (None, settings, pending.task)
+    [(new, new_choices, add), (old, _, edit)] = shell.app.editors
+    assert (new, new_choices, old) == (None, TaskChoices(settings), pending.task)
     await add(TaskSpec(prompt="new"))
     await edit(TaskSpec(prompt="changed"))
     await edit(None)
@@ -168,5 +170,14 @@ async def test_the_editor_opens_with_the_settings_shown_and_its_task_is_saved() 
 async def test_the_editor_opens_with_the_default_settings_before_any_are_reported() -> None:
     shell = Shell()
     shell.frontend.edit_task(None)
-    [(_, settings, _)] = shell.app.editors
-    assert settings == Settings()
+    [(_, choices, _)] = shell.app.editors
+    assert choices == TaskChoices(Settings())
+
+
+async def test_the_editor_offers_the_agents_of_the_latest_catalog() -> None:
+    shell = Shell()
+    security = AgentEntry(name="security", label="security", conversational=False)
+    await shell.feed(CATALOG.model_copy(update={"agents": (security,)}))
+    shell.frontend.edit_task(None)
+    [(_, choices, _)] = shell.app.editors
+    assert choices.agents == (security,)

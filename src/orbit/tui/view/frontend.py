@@ -73,6 +73,7 @@ from orbit.tui.view.settings import Pickers
 from orbit.tui.view.storage import StorageHalt
 from orbit.tui.view.tab_strip import TabStrip
 from orbit.tui.view.takeover import TakeoverOffer
+from orbit.tui.view.task_editor import TaskChoices
 from orbit.tui.view.tasks import TaskBoard, edit_refusal
 from orbit.tui.view.transcript import PLANNER_BUSY, warning_entry
 from orbit.tui.view.windows import SIDEBAR_WINDOWS, Windows
@@ -110,9 +111,9 @@ class AppView(Protocol):
         """Ask ``title`` with ``message``, ``yes`` naming what ``y`` does, and await ``then``
         only if the user answers yes."""
 
-    def edit_task(self, task: TaskSpec | None, settings: Settings, saved: Saved) -> None:
-        """Open the task editor on ``task``, or a new one, with ``settings``, the settings now,
-        passing on what it saves to ``saved``."""
+    def edit_task(self, task: TaskSpec | None, choices: TaskChoices, saved: Saved) -> None:
+        """Open the task editor on ``task``, or a new one, offering ``choices``, the settings
+        and agents now, passing on what it saves to ``saved``."""
 
     def label_triggers(self, labels: dict[str, str | None]) -> None:
         """Label each trigger's key with its label in ``labels``, hiding those with none."""
@@ -510,9 +511,9 @@ class Frontend:
             await self.pager.earlier()
 
     def edit_task(self, current: TaskState | None) -> None:
-        """Open the editor on the task ``current``, or a new one, unless it can't be edited,
-        which the user is told; the list changes when the backend reports the new task
-        list."""
+        """Open the editor on the task ``current``, or a new one, offering the settings shown
+        and the catalog's agents, unless it can't be edited, which the user is told; the list
+        changes when the backend reports the new task list."""
         refusal = None if current is None else edit_refusal(current)
         if refusal is not None:
             self._app.warn(refusal)
@@ -527,7 +528,8 @@ class Frontend:
                 await self._act("edit_task", EditTask(task_id=current.id, task=result))
 
         task = None if current is None else current.task
-        self._app.edit_task(task, self.router.settings or Settings(), saved)
+        choices = TaskChoices(self.router.settings or Settings(), self.navigation.catalog.agents)
+        self._app.edit_task(task, choices, saved)
 
     def list_sessions(self) -> None:
         """Show the session picker, the session viewed first."""

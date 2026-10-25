@@ -20,6 +20,7 @@ from pydantic import (
 from orbit.protocol.commands import ProposalAction
 from orbit.protocol.models import (
     Activity,
+    Effort,
     ProposedSetup,
     ProposedStep,
     SessionRef,
@@ -28,6 +29,7 @@ from orbit.protocol.models import (
     Settings,
     StepState,
     TaskState,
+    ToolAccess,
     Usage,
     UsageLimit,
     _Message,
@@ -582,11 +584,16 @@ class WorkspaceEntry(_Message):
 
 class AgentEntry(_Message):
     """An agent role ``name``, shown as ``label``; ``conversational`` if the user can message
-    it."""
+    it. It runs in ``lane``, and its ``model``, ``tool_access`` and ``effort`` are the defaults
+    of a task in it, as ``Settings`` hold them."""
 
     name: str
     label: str
     conversational: bool
+    lane: str = WORK_LANE
+    model: str | None = None
+    tool_access: ToolAccess = "restricted"
+    effort: Effort | None = None
 
 
 class TriggerEntry(_Message):
