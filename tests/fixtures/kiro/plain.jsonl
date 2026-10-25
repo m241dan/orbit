@@ -1,0 +1,6 @@
+{"type":"runStarted","data":{"payloadSchema":"acp","acpProtocolVersion":1,"engine":"v2"}}
+{"type":"metadata","data":{"sessionId":"00000000-0000-0000-0000-000000000001","contextUsagePercentage":30.515501022338867,"reasoning":{"support":"unavailable","effortLevels":[]}}}
+{"type":"sessionUpdate","data":{"sessionId":"00000000-0000-0000-0000-000000000001","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"ok"}}}}
+{"type":"metadata","data":{"sessionId":"00000000-0000-0000-0000-000000000001","contextUsagePercentage":5.959700107574463,"reasoning":{"support":"unavailable","effortLevels":[]}}}
+{"type":"metadata","data":{"sessionId":"00000000-0000-0000-0000-000000000001","contextUsagePercentage":5.959700107574463,"meteringUsage":[{"value":0.18810689734660035,"unit":"credit","unitPlural":"credits"}],"turnDurationMs":5711,"reasoning":{"support":"unavailable","effortLevels":[]}}}
+{"type":"runFinished","data":{"sessionId":"00000000-0000-0000-0000-000000000001","status":"success","stopReason":"end_turn","finalText":"ok","finalTextTruncated":false}}

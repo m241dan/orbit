@@ -1,0 +1,3 @@
+{"type":"runStarted","data":{"payloadSchema":"acp","acpProtocolVersion":1,"engine":"v2"}}
+{"type":"metadata","data":{"sessionId":"00000000-0000-0000-0000-000000000001","contextUsagePercentage":30.515501022338867}}
+{"type":"runError","data":{"sessionId":"00000000-0000-0000-0000-000000000001","stage":"prompt","message":"Internal error (code -32603): Encountered an error in the response stream: An unknown error occurred: dispatch failure"}}
