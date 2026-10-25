@@ -1062,7 +1062,10 @@ merges, whether it's enabled and how hard its agents think:
 - `workspace`: where its agent works: `worktree` (the coder's separate worktree, the only one whose
   work can merge), `snapshot` (a fresh read-only snapshot of the base commit, made for each run and
   dropped after it), `checkout` (your checkout, read in place) or `none` (an empty temporary
-  directory, made for each run and removed after it, however the run ends). Outside a git
+  directory, made for each run and removed after it, however the run ends). A conversational
+  role's run is its whole conversation: its snapshot or directory is made on its first turn and
+  kept for the turns after, as Claude Code resumes a conversation only from the directory it ran
+  in, until the conversation ends with the session or a reset. Outside a git
   repository, or with `--no-worktree`, `worktree` and `snapshot` work in place. Tasks in
   a role with `workspace = "worktree"` count toward `max_coders` (see Taking turns under
   [Serving the control plane](#serving-the-control-plane)).

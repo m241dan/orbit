@@ -7,12 +7,14 @@ proposes tasks with ``propose_task``, and they wait on the board as drafts until
 them. Its first prompt, and the first after the verification steps change, tells it the steps
 each task must pass; the next prompt also carries what orbit told it since, such as a record that
 moved. A restored session carries on its saved conversation, or starts a fresh one if that can't
-be resumed.
+be resumed. A conversation runs in one directory, as its role's workspace says, from its first
+turn until it ends, as Claude Code resumes a conversation only from the directory it ran in.
 """
 
 import asyncio
 import uuid
 from collections.abc import AsyncIterator, Callable
+from contextlib import AsyncExitStack
 from typing import Any
 
 from orbit.agent.application.desk import AgentDesk, Tool, dispatch, report_progress
@@ -77,6 +79,8 @@ class PlannerChat:
         self._told: tuple[str, ...] | None = None  # The steps the planner last heard about.
         self._notes: list[str] = []  # What it's been told, until a turn surely delivers it.
         self._saved: str | None = None  # The saved conversation, until a turn resumes it.
+        self._root: str | None = None  # The directory the conversation runs in, once made.
+        self._workspace = AsyncExitStack()  # Removes that directory as the conversation ends.
         self._usage = Usage()  # What the turn running, or the last, cost.
         self._drafts = 0  # The drafts it proposed.
         self._tools: dict[str, Tool] = {
@@ -235,7 +239,8 @@ class PlannerChat:
     async def _start_fresh(
         self, turn_id: str, prompt: str, settings: Settings
     ) -> AsyncIterator[Event]:
-        """Turn ``turn_id`` again, in a fresh conversation, after its TurnStarted is out."""
+        """Turn ``turn_id`` again, in a fresh conversation, after its TurnStarted is out, in the
+        directory made for the one it replaces, as it needs no other."""
         assert self._agent is not None  # It was opened to try resuming.
         self._desk.agents.launcher.set_conversation(self._agent.id, None)
         self._told = None  # A fresh conversation hasn't heard the steps.
@@ -247,19 +252,10 @@ class PlannerChat:
     async def _converse(
         self, turn_id: str, prompt: str, settings: Settings
     ) -> AsyncIterator[Event]:
-        """Turn ``turn_id`` of the planner's conversation, on ``prompt``, in its role's
-        workspace, its process traced under the span current, the turn's."""
-        role = self._desk.agents.roles[self._role]
-        async with workspace_for(role.workspace, self._desk) as root:
-            async for event in self._converse_in(turn_id, prompt, settings, root):
-                yield event
-
-    async def _converse_in(
-        self, turn_id: str, prompt: str, settings: Settings, root: str
-    ) -> AsyncIterator[Event]:
-        """Turn ``turn_id`` of the planner's conversation, on ``prompt``, in ``root``, as
-        :meth:`_converse` takes it."""
+        """Turn ``turn_id`` of the planner's conversation, on ``prompt``, in the conversation's
+        directory, its process traced under the span current, the turn's."""
         assert self._agent is not None
+        root = await self._conversation_root()
         role = self._desk.agents.roles[self._role]
         own = Settings(
             model=self.model(settings), tool_access=role.tool_access, effort=settings.effort
@@ -278,6 +274,18 @@ class PlannerChat:
                     del self._notes[: len(notes)]
                 yield event
 
+    async def _conversation_root(self) -> str:
+        """The directory the planner's conversation runs in, as its role's workspace says: made
+        on the conversation's first turn and kept for the turns after it, until :meth:`close`.
+
+        Making it raises as :func:`workspace_for` does, leaving the next turn to try again.
+        """
+        if self._root is None:
+            role = self._desk.agents.roles[self._role]  # Read again on a reset.
+            where = workspace_for(role.workspace, self._desk)
+            self._root = await self._workspace.enter_async_context(where)
+        return self._root
+
     def _with_notes(self, prompt: str, steps: tuple[str, ...], notes: tuple[str, ...]) -> str:
         """``prompt``, after a note of ``steps`` if the planner hasn't heard them, and then
         ``notes``."""
@@ -289,10 +297,13 @@ class PlannerChat:
         return await dispatch(self._role, role, self._tools, tool, arguments)
 
     async def close(self) -> None:
-        """End the planner's conversation, at the session's end or on a reset."""
-        if self._agent is not None:
-            self._desk.close(self._agent)
-            await self._desk.publish(AgentExited(agent_id=self._agent.id, reason="finished"))
+        """End the planner's conversation, at the session's end or on a reset, removing the
+        directory it ran in, if one was made, even if ending it fails."""
+        workspace, self._workspace, self._root = self._workspace, AsyncExitStack(), None
+        async with workspace:
+            if self._agent is not None:
+                self._desk.close(self._agent)
+                await self._desk.publish(AgentExited(agent_id=self._agent.id, reason="finished"))
 
     async def _propose_task(self, arguments: dict[str, Any]) -> Reply:
         suggestion = task_suggestion(arguments)
