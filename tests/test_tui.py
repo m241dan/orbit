@@ -49,6 +49,7 @@ from tests.tui_fakes import (
     picker,
     result,
     said,
+    scrolled_to_end,
     selected,
     show_settings,
     shown,
@@ -231,7 +232,7 @@ async def test_display_follows_latest_output() -> None:
 
         log = app.query_one("Transcript > TranscriptLog.-shown", TranscriptLog)
         assert log.max_scroll_y > 0
-        assert log.scroll_y == log.max_scroll_y
+        assert await scrolled_to_end(pilot, log)
 
 
 async def test_pickers_are_built_once_and_reused() -> None:
