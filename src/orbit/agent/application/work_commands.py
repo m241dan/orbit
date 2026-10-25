@@ -22,7 +22,7 @@ from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.catalog import trigger_names
 from orbit.agent.domain.refusals import Refused, unknown
-from orbit.agent.domain.roles import Role, check_enabled, check_model
+from orbit.agent.domain.roles import Role, check_enabled, check_model, check_settings
 from orbit.protocol import (
     CONFIGURE_CHECKS,
     INVALID,
@@ -204,7 +204,8 @@ class WorkCommands:
 
     async def _update_settings(self, settings: Settings, role: str) -> None:
         """Have the conversational role ``role`` use ``settings``, publishing them, then save;
-        refused for a role without a seat, or with a model its runtime doesn't take."""
+        refused for a role without a seat, or with a model or levels its runtime doesn't
+        take."""
         problem = f"Role {role!r} has no settings of its own"
         self._parts.seats.seat(role, problem, "the roles with them are")
         self._check_model(role, settings)
@@ -234,6 +235,18 @@ class WorkCommands:
         agents."""
         desk = self._parts.desk
         check_model(role, settings.model, desk.agents.model_aliases(role) if desk else None)
+        self._check_capabilities(role, settings)
+
+    def _check_capabilities(self, role: str, settings: Settings) -> None:
+        """Refuse ``settings`` for role ``role`` if they ask for more than its runtime's
+        launcher can do, as :func:`~orbit.agent.domain.roles.check_settings` says; nothing is
+        refused without agents, for a role they don't have or on a runtime without a
+        launcher."""
+        desk = self._parts.desk
+        runtime = desk.agents.runtime(role) if desk else None
+        if desk is None or runtime is None or runtime not in desk.agents.launchers:
+            return
+        check_settings(role, runtime, settings, desk.agents.launcher(role).capabilities)
 
     async def _handle_tasks(self, command: AddTask | RunTasks) -> None:
         match command:

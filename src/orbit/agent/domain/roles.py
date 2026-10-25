@@ -495,6 +495,22 @@ def check_model(name: str, model: str | None, models: ModelAliases | None) -> No
     raise Refused(INVALID, f"{name}'s model \"{model}\" doesn't resolve: {known_models(models)}.")
 
 
+def check_settings(name: str, runtime: str, settings: Settings, capabilities: Capabilities) -> None:
+    """Refuse ``settings``, a task's or a conversation's in role ``name`` on ``runtime``, if
+    they ask for a level of tool access or effort its ``capabilities`` don't accept; a level
+    left unset isn't refused.
+
+    Raises :class:`Refused`, coded ``invalid``, naming the role, the runtime, the request and
+    what the runtime accepts.
+    """
+    asks = _level_ask("tool_access", settings.tool_access, capabilities.tool_access, TOOL_ACCESSES)
+    asks += _level_ask("effort", settings.effort, capabilities.effort, EFFORTS)
+    if asks:
+        request, supported = asks[0]
+        message = f"Role {name}'s runtime {runtime} {supported}, so it can't take {request}."
+        raise Refused(INVALID, message)
+
+
 def _task_roles_in(roles: Mapping[str, Role], lane: str) -> list[str]:
     """The roles among ``roles`` in ``lane`` that aren't conversational."""
     return [name for name, role in roles.items() if not role.conversation and role.lane == lane]
