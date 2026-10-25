@@ -44,6 +44,7 @@ from orbit.protocol import (
     CommandRefused,
     Connected,
     Ended,
+    ErrorOccurred,
     Event,
     EventEnvelope,
     HandshakeFailed,
@@ -91,8 +92,8 @@ def status(
     It asks the orbit serve running here, or the one --connect or --remote names, showing it
     the token or client certificate orbit chat would, and prints the answer, as text or with
     --json as one JSON object. Exits with status 1 if no orbit serve is running here, and 2 if
-    the control plane can't be asked: a connection, TLS or credential error, or no answer
-    within 10 seconds.
+    the control plane can't be asked: a connection, TLS or credential error, usage totals it
+    can't read, or no answer within 10 seconds.
     """
     # #lizard forgives(parameter_count): Typer takes each of the command's options as a parameter.
     user_config = resolve_config_dir(config_dir, os.environ)
@@ -146,8 +147,9 @@ once its events end."""
 async def _reported(client: _Client, url: str, seconds: float) -> StatusReport:
     """What the control plane at ``url`` reports through ``client``, which is closed after.
 
-    Raises :class:`_Unreachable` if the link fails, a command is refused or the events end
-    before every answer has come, or they don't all come within ``seconds``.
+    Raises :class:`_Unreachable` if the link fails, a command is refused, the usage totals
+    can't be read or the events end before every answer has come, or they don't all come
+    within ``seconds``.
     """
     try:
         async with asyncio.timeout(seconds):
@@ -164,8 +166,8 @@ async def _asked(client: _Client, url: str) -> StatusReport:
     """What the control plane at ``url`` reports through ``client``, greeted, then asked to
     tell the control-plane stream.
 
-    Raises :class:`_Unreachable` if the link fails, a command is refused or the events end
-    before every answer has come.
+    Raises :class:`_Unreachable` if the link fails, a command is refused, the usage totals
+    can't be read or the events end before every answer has come.
     """
     items: asyncio.Queue[_Item] = asyncio.Queue()
     client.watch(items.put_nowait)
@@ -214,8 +216,8 @@ class _Answers:
         """These answers with ``item``, from the client of the control plane at ``url``, taken
         in, an answer in place of the one before it.
 
-        Raises :class:`_Unreachable` if it says the link failed or a command was refused, or
-        it's the end of the events.
+        Raises :class:`_Unreachable` if it says the link failed, a command was refused or the
+        usage totals couldn't be read, or it's the end of the events.
         """
         if item is None:
             raise _Unreachable(
@@ -238,7 +240,10 @@ class _Answers:
         return self
 
     def _with(self, event: Event) -> _Answers:
-        """These answers with ``event`` in place of the one before it, if it's one of them."""
+        """These answers with ``event`` in place of the one before it, if it's one of them.
+
+        Raises :class:`_Unreachable` if it's the error saying the usage totals couldn't be read.
+        """
         match event:
             case Welcome():
                 return replace(self, welcome=event)
@@ -248,7 +253,20 @@ class _Answers:
                 return replace(self, agents=event)
             case UsageTotals():
                 return replace(self, totals=event)
+            case ErrorOccurred():
+                return self._erred(event)
         return self
+
+    def _erred(self, error: ErrorOccurred) -> _Answers:
+        """These answers, ``error`` having come.
+
+        Raises :class:`_Unreachable` if it came after the agents and before any usage totals:
+        the control plane tells those back to back, telling the error in place of the totals
+        when it can't read them.
+        """
+        if self.agents is None or self.totals is not None:
+            return self
+        raise _Unreachable(f"The control plane couldn't read its usage totals: {error.message}")
 
 
 def _link_failure(state: LinkState) -> str | None:

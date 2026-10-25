@@ -2014,7 +2014,8 @@ when no `orbit serve` is running here, saying `No orbit serve is running for thi
 2 when the control plane can't be asked, saying why: a connection, TLS or credential error, with
 its message from **TLS and connection errors** above (a token refused says `The control plane
 refused the token.`), a server that can't be reached, is shutting down, closes the connection or
-refuses its `Hello`, or no answer within 10 seconds.
+refuses its `Hello`, usage totals it can't read, saying `The control plane couldn't read its usage
+totals:` and the server's reason, or no answer within 10 seconds.
 
 **Two machines.** To run the control plane on a server, `orbit.example.lan` (192.168.1.20), and
 chat from a laptop under mutual TLS: on the server, make the CA, the server's certificate and the

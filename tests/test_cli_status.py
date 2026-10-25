@@ -32,6 +32,7 @@ from orbit.protocol import (
     CommandRefused,
     Connected,
     Ended,
+    ErrorOccurred,
     Event,
     EventEnvelope,
     HandshakeFailed,
@@ -301,6 +302,7 @@ CATALOG = Catalog(workspaces=(), agents=(), triggers=(), lanes=())
 CODER = AgentRef(workspace="w", session="s", agent_id="agent-1", role="coder", task_id="t1")
 AGENTS = AgentsChanged(agents=(CODER,))
 TOTALS = UsageTotals(workspaces=(), total=UsageTotal(today=TODAY, lifetime=LIFETIME))
+DISK_ERROR = ErrorOccurred(code="internal", message="disk I/O error")
 
 
 async def test_the_report_says_hello_watches_the_control_plane_and_closes_once_answered() -> None:
@@ -360,6 +362,31 @@ async def test_a_link_that_fails_before_every_answer_comes_is_unreachable(
 
     assert str(raised.value) == message
     assert session.closed
+
+
+async def test_an_error_in_place_of_the_usage_totals_is_unreachable_saying_why() -> None:
+    session = ScriptedSession(WELCOME, CATALOG, AGENTS, DISK_ERROR)
+
+    with pytest.raises(_Unreachable) as raised:
+        await _reported(session, URL, 5)
+
+    assert str(raised.value) == "The control plane couldn't read its usage totals: disk I/O error"
+    assert session.closed
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        (WELCOME, CATALOG, DISK_ERROR, AGENTS, TOTALS),
+        (WELCOME, AGENTS, TOTALS, DISK_ERROR, CATALOG),
+    ],
+)
+async def test_an_error_at_any_other_time_is_ignored(script: tuple[Step, ...]) -> None:
+    session = ScriptedSession(*script)
+
+    report = await _reported(session, URL, 5)
+
+    assert report.usage.today.tokens == 1200
 
 
 async def test_an_event_that_cant_be_read_ends_the_events_before_every_answer_comes() -> None:
