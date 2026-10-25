@@ -3,6 +3,7 @@ config directory that hold them."""
 
 import asyncio
 import ipaddress
+import re
 import ssl
 import stat
 from datetime import UTC, datetime, timedelta
@@ -10,22 +11,30 @@ from pathlib import Path
 
 import pytest
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ec, ed25519
-from cryptography.hazmat.primitives.serialization import load_pem_private_key
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
+from cryptography.hazmat.primitives.serialization import (
+    BestAvailableEncryption,
+    Encoding,
+    KeySerializationEncryption,
+    PrivateFormat,
+    load_pem_private_key,
+)
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from websockets.asyncio.client import connect
 
 from orbit.agent import ControlPlane, WorkspaceHost
-from orbit.agent.domain.server import ServerSettings
+from orbit.agent.domain.server import ServerSettings, client_fingerprint
 from orbit.agent.external.certificates import (
     CertificateError,
     CertsDir,
     KeyType,
     PrivateKey,
+    fingerprint,
     issue_client,
     issue_server,
     make_ca,
+    read_certificate,
 )
 from orbit.agent.external.tls import tls_warnings
 from orbit.protocol import PROTOCOL_VERSION, CommandEnvelope, Hello, Welcome, decode_event, encode
@@ -331,6 +340,178 @@ def test_a_directory_to_set_aside_in_that_cant_be_made_is_refused_naming_it(
     assert str(refused.value) == (
         f"Can't make {old}: Not a directory. Check that you can write to {certs.path}."
     )
+
+
+@pytest.mark.parametrize(
+    "name", ["", ".laptop", "-laptop", "../laptop", "lap/top", "two words", "läptop", "a" * 65]
+)
+def test_a_client_name_that_isnt_a_safe_file_name_is_refused(tmp_path: Path, name: str) -> None:
+    certs = CertsDir(tmp_path)
+    message = (
+        f'Can\'t name a client "{name}": its files are named for it, so give up to 64 letters,'
+        " digits, dots, dashes and underscores, starting with a letter or digit, such as laptop."
+    )
+    with pytest.raises(CertificateError, match=f"^{re.escape(message)}$"):
+        certs.client(name)
+    with pytest.raises(CertificateError, match=f"^{re.escape(message)}$"):
+        certs.client_key(name)
+
+
+@pytest.mark.parametrize("name", ["laptop", "Work-Laptop_2.home", "7", "a" * 64])
+def test_a_client_name_of_letters_digits_dots_dashes_and_underscores_is_taken(
+    tmp_path: Path, name: str
+) -> None:
+    certs = CertsDir(tmp_path)
+    assert certs.client(name) == certs.path / "clients" / f"{name}.pem"
+    assert certs.client_key(name) == certs.path / "clients" / f"{name}-key.pem"
+
+
+def _pem(key: PrivateKey, encryption: KeySerializationEncryption | None = None) -> bytes:
+    return key.private_bytes(
+        Encoding.PEM, PrivateFormat.PKCS8, encryption or serialization.NoEncryption()
+    )
+
+
+def _with_ca(certs: CertsDir, ca: tuple[x509.Certificate, PrivateKey]) -> None:
+    certs.write(certs.ca, ca[0])
+    certs.write_key(certs.ca_key, ca[1])
+
+
+def test_a_certificate_is_read_from_its_pem(
+    ca: tuple[x509.Certificate, PrivateKey], tmp_path: Path
+) -> None:
+    certs = CertsDir(tmp_path)
+    certs.write(certs.server, ca[0])
+    assert read_certificate(certs.server) == ca[0]
+
+
+def test_a_file_that_isnt_a_pem_certificate_is_refused_naming_it(tmp_path: Path) -> None:
+    path = tmp_path / "laptop.pem"
+    path.write_text("not a certificate")
+    with pytest.raises(CertificateError) as refused:
+        read_certificate(path)
+    assert str(refused.value) == (
+        f"Can't read {path}: it isn't a certificate in PEM. Put back the one orbit certs wrote"
+        " there, or move it away."
+    )
+
+
+def test_a_file_that_cant_be_read_is_refused_naming_it(tmp_path: Path) -> None:
+    with pytest.raises(CertificateError) as refused:
+        read_certificate(tmp_path)
+    assert str(refused.value) == (
+        f"Can't read {tmp_path}: Is a directory. Check that you can read it."
+    )
+
+
+def test_a_fingerprint_is_the_certificates_sha256_as_orbit_serve_shows_it(
+    ca: tuple[x509.Certificate, PrivateKey],
+) -> None:
+    certificate, _ = issue_client(*ca, "laptop")
+    shown = fingerprint(certificate)
+    assert shown == client_fingerprint(certificate.public_bytes(Encoding.DER))
+    assert re.fullmatch(r"[0-9A-F]{2}(:[0-9A-F]{2}){31}", shown)
+
+
+@pytest.mark.parametrize("key_type", ["ed25519", "p256"])
+def test_the_issuer_is_the_ca_in_certs_and_its_key(tmp_path: Path, key_type: KeyType) -> None:
+    ca = make_ca("box", key_type)
+    certs = CertsDir(tmp_path)
+    _with_ca(certs, ca)
+    certificate, key = certs.issuer()
+    assert certificate == ca[0]
+    assert key.public_key() == ca[1].public_key()
+
+
+def test_the_issuers_key_is_read_from_where_its_given(
+    ca: tuple[x509.Certificate, PrivateKey], tmp_path: Path
+) -> None:
+    certs = CertsDir(tmp_path / "config")
+    certs.write(certs.ca, ca[0])
+    (tmp_path / "offline.pem").write_bytes(_pem(ca[1]))
+    _, key = certs.issuer(tmp_path / "offline.pem")
+    assert key.public_key() == ca[1].public_key()
+
+
+def test_the_issuers_key_may_be_given_from_the_home_directory(
+    ca: tuple[x509.Certificate, PrivateKey], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    certs = CertsDir(tmp_path / "config")
+    certs.write(certs.ca, ca[0])
+    (tmp_path / "offline.pem").write_bytes(_pem(ca[1]))
+    _, key = certs.issuer(Path("~/offline.pem"))
+    assert key.public_key() == ca[1].public_key()
+
+
+def test_without_a_ca_certificate_the_issuer_is_refused_pointing_to_init(tmp_path: Path) -> None:
+    certs = CertsDir(tmp_path)
+    with pytest.raises(CertificateError) as refused:
+        certs.issuer()
+    assert str(refused.value) == (
+        f"There's no CA certificate at {certs.ca}; make a CA with orbit certs init."
+    )
+
+
+def test_without_the_cas_key_the_issuer_is_refused_naming_ca_key(
+    ca: tuple[x509.Certificate, PrivateKey], tmp_path: Path
+) -> None:
+    certs = CertsDir(tmp_path)
+    certs.write(certs.ca, ca[0])
+    for given, missing in ((None, certs.ca_key), (tmp_path / "gone.pem", tmp_path / "gone.pem")):
+        with pytest.raises(CertificateError) as refused:
+            certs.issuer(given)
+        assert str(refused.value) == (
+            f"The CA's key isn't at {missing}; pass --ca-key with where it is."
+        )
+
+
+def test_a_key_that_isnt_the_cas_is_refused_naming_ca_key(
+    ca: tuple[x509.Certificate, PrivateKey], tmp_path: Path
+) -> None:
+    certs = CertsDir(tmp_path)
+    _with_ca(certs, (ca[0], make_ca("other")[1]))
+    with pytest.raises(CertificateError) as refused:
+        certs.issuer()
+    assert str(refused.value) == (
+        f"{certs.ca_key} isn't the key of the CA at {certs.ca}; pass --ca-key with the CA's own"
+        " key."
+    )
+
+
+@pytest.mark.parametrize(
+    "pem",
+    [
+        b"not a key",
+        _pem(ed25519.Ed25519PrivateKey.generate(), BestAvailableEncryption(b"secret")),
+        rsa.generate_private_key(65537, 2048).private_bytes(
+            Encoding.PEM, PrivateFormat.PKCS8, serialization.NoEncryption()
+        ),
+    ],
+    ids=["text", "encrypted", "rsa"],
+)
+def test_a_ca_key_orbit_cant_sign_with_is_refused_naming_ca_key(
+    ca: tuple[x509.Certificate, PrivateKey], tmp_path: Path, pem: bytes
+) -> None:
+    certs = CertsDir(tmp_path)
+    certs.write(certs.ca, ca[0])
+    certs.ca_key.write_bytes(pem)
+    with pytest.raises(CertificateError) as refused:
+        certs.issuer()
+    assert str(refused.value) == (
+        f"Can't read {certs.ca_key}: it isn't an Ed25519 or ECDSA private key in PEM without a"
+        " passphrase. Pass --ca-key with the CA's key in that form."
+    )
+
+
+def test_a_ca_certificate_that_isnt_pem_is_refused_naming_it(
+    ca: tuple[x509.Certificate, PrivateKey], tmp_path: Path
+) -> None:
+    certs = CertsDir(tmp_path)
+    _with_ca(certs, ca)
+    certs.ca.write_text("not a certificate")
+    with pytest.raises(CertificateError, match="it isn't a certificate in PEM"):
+        certs.issuer()
 
 
 async def _welcomed(url: str, context: ssl.SSLContext) -> bool:

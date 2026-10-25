@@ -38,8 +38,13 @@ _BACKEND = (
         (["db", "backup"], ("PATH", "--force", "--state-dir")),
         (["token"], ("rotate",)),
         (["token", "rotate"], ("--config-dir",)),
-        (["certs"], ("init",)),
+        (["certs"], ("init", "server", "client")),
         (["certs", "init"], ("NAMES", "--key-type", "--days", "--force", "--config-dir")),
+        (["certs", "server"], ("NAMES", "--key-type", "--days", "--ca-key", "--config-dir")),
+        (
+            ["certs", "client"],
+            ("NAME", "--key-type", "--days", "--ca-key", "--force", "--config-dir"),
+        ),
     ],
 )
 def test_help_lists_the_commands_and_options(args: list[str], listed: tuple[str, ...]) -> None:

@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
+from orbit.agent.domain.server import client_fingerprint
 from orbit.agent.external.whole_files import PRIVATE, write_whole
 
 KeyType = Literal["ed25519", "p256"]
@@ -43,8 +44,26 @@ CANT_WRITE = (
 )
 CANT_MAKE = "Can't make {path}: {reason}. Check that you can write to {directory}."
 CANT_MOVE = "Can't move {path} to {old}: {reason}. Check that you can write to {directory}."
+CANT_READ = "Can't read {path}: {reason}. Check that you can read it."
+NOT_A_CERTIFICATE = (
+    "Can't read {path}: it isn't a certificate in PEM. Put back the one orbit certs wrote there,"
+    " or move it away."
+)
+NOT_A_CA_KEY = (
+    "Can't read {path}: it isn't an Ed25519 or ECDSA private key in PEM without a passphrase."
+    " Pass --ca-key with the CA's key in that form."
+)
+NOT_THE_CA_KEY = "{key} isn't the key of the CA at {ca}; pass --ca-key with the CA's own key."
+NO_CA = "There's no CA certificate at {path}; make a CA with orbit certs init."
+NO_CA_KEY = "The CA's key isn't at {path}; pass --ca-key with where it is."
+NOT_A_CLIENT_NAME = (
+    'Can\'t name a client "{name}": its files are named for it, so give up to 64 letters,'
+    " digits, dots, dashes and underscores, starting with a letter or digit, such as laptop."
+)
 
 _HOSTNAME = re.compile(r"[A-Za-z0-9_*.-]+")
+# A client's name is a file name, and its certificate's common name, which can't exceed 64.
+_CLIENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 # Python's strict verification wants a CA that says it signs certificates, and a certificate
 # that says what its key is for.
@@ -134,6 +153,47 @@ def issue_client(
     return certificate, key
 
 
+def fingerprint(certificate: x509.Certificate) -> str:
+    """The SHA-256 fingerprint of ``certificate``, as ``orbit serve`` shows it and ``[server]
+    revoked`` takes it."""
+    return client_fingerprint(certificate.public_bytes(serialization.Encoding.DER))
+
+
+def read_certificate(path: Path) -> x509.Certificate:
+    """The certificate in PEM at ``path``.
+
+    Raises :class:`CertificateError` if it can't be read or isn't a certificate in PEM.
+    """
+    try:
+        return x509.load_pem_x509_certificate(_read(path))
+    except ValueError:
+        raise CertificateError(NOT_A_CERTIFICATE.format(path=path)) from None
+
+
+def _read_ca_key(path: Path) -> PrivateKey:
+    """The private key in PEM at ``path``, unencrypted, that a CA signs with.
+
+    Raises :class:`CertificateError` if it can't be read or isn't such a key.
+    """
+    pem = _read(path)
+    try:
+        key = serialization.load_pem_private_key(pem, password=None)
+    except ValueError, TypeError:  # TypeError: it's encrypted.
+        raise CertificateError(NOT_A_CA_KEY.format(path=path)) from None
+    if not isinstance(key, ed25519.Ed25519PrivateKey | ec.EllipticCurvePrivateKey):
+        raise CertificateError(NOT_A_CA_KEY.format(path=path))
+    return key
+
+
+def _read(path: Path) -> bytes:
+    """What's in the file at ``path``; raises :class:`CertificateError` if it can't be read."""
+    try:
+        return path.read_bytes()
+    except OSError as exc:
+        reason = exc.strerror or str(exc)
+        raise CertificateError(CANT_READ.format(path=path, reason=reason)) from None
+
+
 def server_names(names: Iterable[str]) -> tuple[str, ...]:
     """The names a server certificate for ``names`` holds: each of them once, then
     ``localhost`` and ``127.0.0.1`` unless among them."""
@@ -216,12 +276,43 @@ class CertsDir:
         self.server_key = self.path / "server-key.pem"
 
     def client(self, name: str) -> Path:
-        """Where the certificate of the client ``name`` is."""
-        return self.path / "clients" / f"{name}.pem"
+        """Where the certificate of the client ``name`` is.
+
+        Raises :class:`CertificateError` if ``name`` isn't a safe file name.
+        """
+        return self._client_file(name, f"{name}.pem")
 
     def client_key(self, name: str) -> Path:
-        """Where the private key of the client ``name`` is."""
-        return self.path / "clients" / f"{name}-key.pem"
+        """Where the private key of the client ``name`` is.
+
+        Raises :class:`CertificateError` if ``name`` isn't a safe file name.
+        """
+        return self._client_file(name, f"{name}-key.pem")
+
+    def _client_file(self, name: str, file_name: str) -> Path:
+        """The file ``file_name`` in ``clients``, of the client ``name``; raises
+        :class:`CertificateError` if ``name`` isn't a safe file name."""
+        if not _CLIENT_NAME.fullmatch(name):
+            raise CertificateError(NOT_A_CLIENT_NAME.format(name=name))
+        return self.path / "clients" / file_name
+
+    def issuer(self, key: Path | None = None) -> tuple[x509.Certificate, PrivateKey]:
+        """The CA in ``certs`` and its key, read from ``key`` (default: ``ca-key.pem`` in
+        ``certs``), which may start with ``~``.
+
+        Raises :class:`CertificateError` if either is missing or can't be read, or the key isn't
+        the CA's.
+        """
+        key = (key or self.ca_key).expanduser()
+        if not self.ca.exists():
+            raise CertificateError(NO_CA.format(path=self.ca))
+        if not key.exists():
+            raise CertificateError(NO_CA_KEY.format(path=key))
+        ca = read_certificate(self.ca)
+        ca_key = _read_ca_key(key)
+        if ca_key.public_key() != ca.public_key():
+            raise CertificateError(NOT_THE_CA_KEY.format(key=key, ca=self.ca))
+        return ca, ca_key
 
     def write(self, path: Path, certificate: x509.Certificate) -> None:
         """Write ``certificate`` to ``path``, whole or not at all, readable by anyone.

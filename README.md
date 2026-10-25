@@ -56,6 +56,8 @@ uv run orbit status                            # what the orbit serve running he
 uv run orbit status --remote work --json       # the same of another, as one JSON object
 uv run orbit token rotate                      # replace the token frontends show orbit serve
 uv run orbit certs init orbit.example.lan      # make a CA and a server certificate for TLS
+uv run orbit certs server orbit.example.lan    # renew the server certificate
+uv run orbit certs client laptop               # issue a client certificate for mutual TLS
 uv run orbit version                           # show the installed version
 ```
 
@@ -722,7 +724,7 @@ your checkout out of its way, it doesn't sandbox it.
 | Config files | `.orbit/config.toml` in the repository | the verification steps, setup, roles and limits, committed with your code |
 | User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]`, `[server]`, `[remotes]` and `[telemetry]` |
 | The token | `token` in the config directory | what frontends show `orbit serve` to connect (see [Serving the control plane](#serving-the-control-plane)) |
-| Certificates | `certs/` in the config directory | the CA, server certificate and keys `orbit certs` makes for TLS (see [Serving the control plane](#serving-the-control-plane)) |
+| Certificates | `certs/` in the config directory | the CA, server and client certificates and keys `orbit certs` makes for TLS and mutual TLS (see [Serving the control plane](#serving-the-control-plane)) |
 | The run file | `run/server.json` in the state directory | where the `orbit serve` running on that state directory listens, beside `run/serve.lock`, which that serve holds |
 | Runtime-owned | `~/.claude` | Claude Code's own: your login, read for usage limits, and the agents' conversations |
 
@@ -1322,7 +1324,8 @@ can be read by anyone but you (`chmod 600 <path>`), a file can't be read or isn'
 isn't the certificate's, or the certificate has expired or isn't valid yet (naming its dates). A
 certificate expiring within 14 days starts it with a warning. In a container, mount the
 certificate and key with the config directory (see [Hosting in a container](#hosting-in-a-container)). The certificate is read once, at
-start: to renew it, replace the files and restart `orbit serve`; frontends reconnect on their own.
+start: to renew it, replace the files (`orbit certs server` does) and restart `orbit serve`;
+frontends reconnect on their own.
 
 `orbit certs init` makes a private CA and a server certificate it signs, for the hostnames and
 IP addresses frontends reach the server by (here `orbit.example.lan` and its address):
@@ -1348,6 +1351,19 @@ old one signed; `--force` replaces it. Any of the four files already there are f
 `certs/old-<UTC timestamp>/`, so nothing is lost. A name that's neither a hostname nor an IP
 address stops it with status 2 before anything is moved, and files that can't be moved or
 written stop it with status 2, naming the file and the fix.
+
+To renew the server certificate, before it expires or to change its names, run `orbit certs
+server` with the names (none for the machine's hostname, as for `init`):
+
+```sh
+orbit certs server orbit.example.lan 192.168.1.20
+```
+
+It moves `server.pem` and `server-key.pem` to `certs/old-<UTC timestamp>/` and writes new ones
+the CA signs, holding the names, `localhost` and `127.0.0.1`; `--key-type` and `--days` work as
+for `init`. `orbit serve` uses them once restarted. The CA stays, so clients need nothing new.
+Without `ca.pem` it stops with status 2, pointing to `orbit certs init`, and without the CA's key
+it stops with status 2, naming `--ca-key` (see **Keeping the CA's key offline** below).
 
 Or, to make a private CA and a server certificate with openssl, name the server's hostname (here
 `orbit.example.lan`, and its address) as a subject alternative name, which clients check:
@@ -1386,8 +1402,33 @@ certificate is the client's identity: the token isn't asked for, and any sent is
 connect line names the certificate's subject and SHA-256 fingerprint, such as `orbit-chat
 connected from 192.168.1.30:51234 as CN=laptop (3F:A2:…:9C)`.
 
-To make a client certificate for each client machine, signed by the CA above (which may serve
-as `client_ca` too), make its key on the client and sign its request on the machine holding
+`orbit certs client` issues a certificate for each client machine, signed by the CA `orbit certs
+init` made, which `init`'s lines name as `client_ca` too:
+
+```sh
+orbit certs client laptop
+```
+
+It writes `clients/laptop.pem` and `clients/laptop-key.pem` in `certs/`, the key readable by you
+alone: a certificate named `CN=laptop`, for client authentication, valid for a year or `--days`,
+with `--key-type` as for `init`. It prints their paths and the certificate's SHA-256
+fingerprint, as connect lines show it and `revoked` takes it. As the name names the files, it's
+up to 64 letters, digits, dots, dashes and underscores, starting with a letter or digit; another
+stops it with status 2. Copy the pair and `ca.pem` to the client machine over a trusted channel,
+such as `scp`, and connect with them as below. A missing `ca.pem` or CA key stops it with status
+2, as for `orbit certs server`.
+
+A name that already has a certificate stops it with status 2, as a new one would leave the old
+working. `--force` issues a new one anyway, moving the old pair to `certs/old-<UTC timestamp>/`
+and printing the old certificate's fingerprint, to add to `revoked` (see below) to stop it
+working:
+
+```sh
+orbit certs client laptop --force
+```
+
+Or, to make a client certificate with openssl, signed by the CA above (which may serve as
+`client_ca` too), make its key on the client and sign its request on the machine holding
 `ca-key.pem`:
 
 ```sh
@@ -1416,8 +1457,8 @@ orbit chat --connect wss://orbit.example.lan:7433/ --ca ca.pem --cert laptop.pem
 don't go with `--token-file`; one without the other, a key others can read (`chmod 600`), or
 files that can't be read or don't match stop it with status 2.
 
-To revoke a lost machine's certificate, add its fingerprint, as its connect line shows it (in
-either case, with or without colons), to `revoked` in `[server]`. Each entry must be a full
+To revoke a lost machine's certificate, add its fingerprint, as its connect line or `orbit certs
+client` shows it (in either case, with or without colons), to `revoked` in `[server]`. Each entry must be a full
 SHA-256 fingerprint, all 64 hex digits, as the connect line or `openssl x509 -noout -fingerprint
 -sha256` shows it; one cut short, with a stray character or from SHA-1 could never match, so it's
 refused as invalid, naming the entry:
@@ -1432,6 +1473,26 @@ connection with that certificate is refused at the upgrade with HTTP 403, naming
 while one already open stays open until it disconnects (restart `orbit serve` to drop it). While
 the config file is invalid, it warns and keeps the fingerprints it read last.
 
+**Keeping the CA's key offline.** `ca-key.pem` signs the certificates the server and its clients
+trust, so whoever reads it can make their own. `orbit certs` leaves it in `certs/`, so the
+server's account can renew the server certificate and issue client certificates unattended; to
+keep it off the server, move it, once `init` is done, to a drive kept offline or another machine:
+
+```sh
+mv ~/.config/orbit/certs/ca-key.pem /media/offline/orbit-ca-key.pem
+```
+
+`orbit serve` never reads it (`client_ca` is `ca.pem`, which stays). Then `orbit certs server`
+and `orbit certs client` take `--ca-key` with where it is, with the drive mounted; without it they
+stop with status 2, saying the CA's key isn't in `certs/` and naming `--ca-key`:
+
+```sh
+orbit certs client laptop --ca-key /media/offline/orbit-ca-key.pem
+```
+
+A key that isn't the CA's in `ca.pem`, or isn't an Ed25519 or ECDSA key in PEM without a
+passphrase, stops them with status 2 too.
+
 **TLS and connection errors.** Each message `orbit serve` stops (or warns) with, and each one
 `orbit chat` stops with or shows when it can't connect, starts with what's wrong, then names the
 setting, file or URL:
@@ -1443,7 +1504,7 @@ setting, file or URL:
 | A TLS file can't be read. | Check the path it names, in `[server]` or the flag, and that the file is PEM (an unencrypted key). |
 | The private key can be read by others. | Run the `chmod 600 <path>` it gives. |
 | The certificate and key don't match. | Give the key the certificate was made for, or make a new certificate for the key. |
-| The server certificate has expired. | Renew it, replace the file and restart `orbit serve`. |
+| The server certificate has expired. | Renew it, with `orbit certs server` or by replacing the file, and restart `orbit serve`. |
 | The server certificate isn't valid yet. | Check the machine's clock, or make a certificate valid from now. |
 | The server certificate expires soon. | A warning: renew it and restart `orbit serve` before the date it names. |
 | A client showed no certificate. | Printed by `orbit serve` under mTLS, and the body of the HTTP 401: make the client a certificate the client CA signs, and connect with `--cert` and `--key`. |
