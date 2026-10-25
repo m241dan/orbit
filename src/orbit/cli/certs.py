@@ -9,23 +9,32 @@ from typing import Annotated
 
 import tomlkit
 import typer
+from cryptography import x509
 
 from orbit.agent import (
     CA_DAYS,
     CERTIFICATE_DAYS,
+    REMOTE_FILE,
     USER_CONFIG_FILE,
     CertificateError,
     CertsDir,
     KeyType,
+    PrivateKey,
+    bundle_directory,
+    bundle_url,
     certificate_lines,
+    certificate_pem,
+    client_bundle,
     fingerprint,
     issue_client,
     issue_server,
+    key_pem,
     make_ca,
     read_certificate,
     read_server,
     resolve_config_dir,
     server_names,
+    write_bundle,
 )
 from orbit.cli.errors import _configured, _exit_on
 from orbit.cli.options import ConfigDirOption
@@ -39,6 +48,8 @@ CLIENT_EXISTS = (
     " valid until you add its fingerprint to [server] revoked)."
 )
 REVOKE_OLD = "Add {fingerprint} to [server] revoked to stop the old certificate working."
+BUNDLE_EXISTS = "{path} exists; use --force to replace it, or give --bundle another file."
+URL_WITHOUT_BUNDLE = "--url sets the URL in the bundle's remote.toml, so it needs --bundle."
 NO_CERTIFICATES = (
     "There are no certificates in {directory}; make a CA and a server certificate with orbit"
     " certs init."
@@ -105,7 +116,27 @@ ReissueOption = Annotated[
     typer.Option(
         "--force",
         help="Issue a new certificate for a client that has one, setting the old pair aside in"
-        " certs/old-<time>; the old one stays valid until you revoke it.",
+        " certs/old-<time>; the old one stays valid until you revoke it. Replaces the --bundle"
+        " file too.",
+    ),
+]
+BundleOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--bundle",
+        help="Also write the certificate, its key, the CA's certificate and a remote.toml naming"
+        " them to this tar, readable by you alone, to unpack on the client in"
+        " ~/.config/orbit/certs/NAME.",
+        show_default=False,
+    ),
+]
+UrlOption = Annotated[
+    str | None,
+    typer.Option(
+        "--url",
+        help="The URL the bundle's remote.toml connects to (default: wss://, the server"
+        " certificate's first name and the port in [server]).",
+        show_default=False,
     ),
 ]
 
@@ -159,25 +190,30 @@ def client(
     days: CertificateDaysOption = CERTIFICATE_DAYS,
     ca_key: CaKeyOption = None,
     force: ReissueOption = False,
+    bundle: BundleOption = None,
+    url: UrlOption = None,
     config_dir: ConfigDirOption = None,
 ) -> None:
     """Issue a certificate the CA signs for the client NAME, in certs/clients in your config
-    directory, and print its fingerprint."""
+    directory, and print its fingerprint; with --bundle, bundle it for the client too."""
     # #lizard forgives(parameter_count): Typer takes each of the command's options as a parameter.
-    certs = CertsDir(resolve_config_dir(config_dir, os.environ))
+    config = resolve_config_dir(config_dir, os.environ)
+    certs = CertsDir(config)
     with _exit_on(CertificateError):
         pair = (certs.client(name), certs.client_key(name))
         if pair[0].exists() and not force:
             typer.echo(CLIENT_EXISTS.format(name=name), err=True)
             raise typer.Exit(2)
+        target = _bundle_target(certs, config, bundle, url, force)
         ca, signer = certs.issuer(ca_key)
         certificate, key = issue_client(ca, signer, name, key_type, days)
         replaced = read_certificate(pair[0]) if pair[0].exists() else None
         old = _set_aside(certs, pair)
         certs.write_key(pair[1], key)
         certs.write(pair[0], certificate)
+        _write_bundle(target, name, ca, certificate, key)
     _say_moved(old)
-    typer.echo(_client_note(certs, name, fingerprint(certificate)))
+    typer.echo(_client_note(certs, name, fingerprint(certificate), bundle))
     if replaced is not None:
         typer.echo("\n" + REVOKE_OLD.format(fingerprint=fingerprint(replaced)))
 
@@ -215,6 +251,59 @@ def _initialized(
     certs.write_key(certs.server_key, server_key)
     certs.write(certs.server, server)
     return old
+
+
+def _bundle_target(
+    certs: CertsDir, config: Path, bundle: Path | None, url: str | None, force: bool
+) -> tuple[Path, str] | None:
+    """Where the bundle goes, ``bundle``, if anywhere, and the URL its remote connects to:
+    ``url``, else the first name of the server certificate in ``certs`` on the port in
+    ``config``'s ``[server]``.
+
+    Exits with status 2 if ``url`` is given without ``bundle``, ``bundle`` exists and isn't to
+    be replaced by ``force``, or the config is invalid; raises :class:`CertificateError` if
+    the server certificate is needed and missing or can't be read.
+    """
+    if bundle is None:
+        if url is not None:
+            typer.echo(URL_WITHOUT_BUNDLE, err=True)
+            raise typer.Exit(2)
+        return None
+    if bundle.exists() and not force:
+        typer.echo(BUNDLE_EXISTS.format(path=bundle), err=True)
+        raise typer.Exit(2)
+    return bundle, _server_url(certs, config) if url is None else url
+
+
+def _server_url(certs: CertsDir, config: Path) -> str:
+    """The URL of the server by the first name of the server certificate in ``certs``, on the
+    port in ``config``'s ``[server]``.
+
+    Exits with status 2 if the config is invalid; raises :class:`CertificateError` if the
+    server certificate is missing or can't be read.
+    """
+    name = certs.server_name()
+    return bundle_url(name, _configured(lambda: read_server(config)).port)
+
+
+def _write_bundle(
+    target: tuple[Path, str] | None,
+    name: str,
+    ca: x509.Certificate,
+    certificate: x509.Certificate,
+    key: PrivateKey,
+) -> None:
+    """Write the bundle of the client ``name``, its ``certificate`` and ``key`` with the CA's
+    certificate ``ca``, to the path of ``target`` with a remote connecting to its URL, if
+    there's a ``target``.
+
+    Raises :class:`CertificateError` if it can't be written.
+    """
+    if target is None:
+        return
+    path, url = target
+    pems = (certificate_pem(ca), certificate_pem(certificate), key_pem(key))
+    write_bundle(path, client_bundle(name, *pems, url))
 
 
 def _set_aside(certs: CertsDir, paths: Sequence[Path]) -> Path | None:
@@ -272,12 +361,31 @@ def _server_note(certs: CertsDir, names: tuple[str, ...]) -> str:
     )
 
 
-def _client_note(certs: CertsDir, name: str, shown: str) -> str:
+def _client_note(certs: CertsDir, name: str, shown: str, bundle: Path | None) -> str:
     """What's said once ``certs`` holds a new certificate for the client ``name``, with the
-    fingerprint ``shown``."""
-    return (
+    fingerprint ``shown``, and it's bundled in ``bundle`` if that's given."""
+    wrote = (
         f"Wrote a certificate for the client {name}, with the SHA-256 fingerprint {shown}:\n"
         f"  {certs.client(name)}\n  {certs.client_key(name)}\n\n"
+    )
+    if bundle is not None:
+        return wrote + _bundle_note(certs, name, bundle)
+    return wrote + (
         f"Copy them and {certs.ca} to the client machine over a trusted channel, such as scp,"
         " for orbit chat's --cert, --key and --ca."
+    )
+
+
+def _bundle_note(certs: CertsDir, name: str, bundle: Path) -> str:
+    """What's said of the bundle ``bundle`` of the client ``name`` once it's written: how to
+    use it on the client."""
+    directory = bundle_directory(name)
+    return (
+        f"Bundled them with {certs.ca} and a {REMOTE_FILE} naming them in {bundle}, readable by"
+        " you alone. Copy it to the client machine over a trusted channel, such as scp, and"
+        " there unpack it and add the remote to orbit's config:\n\n"
+        f"  mkdir -p -m 700 {directory}\n"
+        f"  tar -xpf {bundle.name} -C {directory}\n"
+        f"  cat {directory}/{REMOTE_FILE} >> ~/.config/orbit/config.toml\n\n"
+        f"Then connect with orbit chat --remote {name}."
     )

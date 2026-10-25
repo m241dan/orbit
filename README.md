@@ -58,6 +58,7 @@ uv run orbit token rotate                      # replace the token frontends sho
 uv run orbit certs init orbit.example.lan      # make a CA and a server certificate for TLS
 uv run orbit certs server orbit.example.lan    # renew the server certificate
 uv run orbit certs client laptop               # issue a client certificate for mutual TLS
+uv run orbit certs client desktop --bundle desktop.tar  # the same, bundled to copy to the desktop
 uv run orbit certs list                        # each certificate's expiry and fingerprint
 uv run orbit version                           # show the installed version
 ```
@@ -1328,8 +1329,12 @@ certificate and key with the config directory (see [Hosting in a container](#hos
 start: to renew it, replace the files (`orbit certs server` does) and restart `orbit serve`;
 frontends reconnect on their own.
 
-`orbit certs init` makes a private CA and a server certificate it signs, for the hostnames and
-IP addresses frontends reach the server by (here `orbit.example.lan` and its address):
+**Certificates.** `orbit certs` makes them all: a private CA, the server's certificate, and one
+for each client machine under mutual TLS, bundled to copy to it; it renews them, lists them for
+revoking, and leaves the CA's key wherever you keep it. (Or make them with openssl, as in
+**Certificates with openssl** below.) To set up, `orbit certs init` makes a private CA and a
+server certificate it signs, for the hostnames and IP addresses frontends reach the server by
+(here `orbit.example.lan` and its address):
 
 ```sh
 orbit certs init orbit.example.lan 192.168.1.20
@@ -1344,14 +1349,22 @@ instead, for a browser or load balancer in front that needs them. The CA is vali
 the server certificate for one, or `--days` (up to 3650; the CA stays 10 years). It leaves your
 `config.toml` alone, printing the `[server]` lines to put there for mutual TLS (`tls = "mtls"`, and
 `cert`, `key` and `client_ca` naming the files); for TLS without client certificates, use `tls =
-"tls"`, with `ca` in place of `client_ca`. Copy `ca.pem` to each client machine; `ca-key.pem` signs
-certificates the server trusts, so keep it secret.
+"tls"`, with `ca` in place of `client_ca`. `ca-key.pem` signs certificates the server trusts, so
+keep it secret (see **Keeping the CA's key offline** below).
 
 A second `init` stops with status 2, as a new CA would invalidate every client certificate the
 old one signed; `--force` replaces it. Any of the four files already there are first moved to
 `certs/old-<UTC timestamp>/`, so nothing is lost. A name that's neither a hostname nor an IP
 address stops it with status 2 before anything is moved, and files that can't be moved or
 written stop it with status 2, naming the file and the fix.
+
+Under `tls`, `server.pem` and `server-key.pem` stay on the server; copy `ca.pem` and the token to
+each client machine over a trusted channel, such as `scp`. Then connect by a name the certificate
+gives, trusting the CA (see **Connecting** below):
+
+```sh
+orbit chat --connect wss://orbit.example.lan:7433/ --ca ~/.config/orbit/tls/work-ca.pem
+```
 
 To renew the server certificate, before it expires (`orbit certs list` shows when) or to change
 its names, run `orbit certs server` with the names (none for the machine's hostname, as for
@@ -1366,33 +1379,6 @@ the CA signs, holding the names, `localhost` and `127.0.0.1`; `--key-type` and `
 for `init`. `orbit serve` uses them once restarted. The CA stays, so clients need nothing new.
 Without `ca.pem` it stops with status 2, pointing to `orbit certs init`, and without the CA's key
 it stops with status 2, naming `--ca-key` (see **Keeping the CA's key offline** below).
-
-Or, to make a private CA and a server certificate with openssl, name the server's hostname (here
-`orbit.example.lan`, and its address) as a subject alternative name, which clients check:
-
-```sh
-mkdir -p ~/.config/orbit/tls && cd ~/.config/orbit/tls
-# The CA: keep ca-key.pem secret, ideally off the server; ca.pem goes to every client.
-openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
-  -subj "/CN=orbit CA" -keyout ca-key.pem -out ca.pem
-# The server's key and certificate, signed by the CA.
-openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
-  -subj "/CN=orbit.example.lan" -keyout server-key.pem -out server.csr
-openssl x509 -req -in server.csr -CA ca.pem -CAkey ca-key.pem -days 365 -out server.pem \
-  -extfile <(printf "subjectAltName=DNS:orbit.example.lan,IP:192.168.1.20")
-chmod 600 ca-key.pem server-key.pem
-cd -
-orbit serve --tls tls --cert ~/.config/orbit/tls/server.pem \
-  --key ~/.config/orbit/tls/server-key.pem --host 0.0.0.0
-```
-
-`server.pem` and `server-key.pem` stay on the server; copy `ca.pem` and the token to each client
-machine over a trusted channel, such as `scp`. Then connect by the name the certificate gives,
-trusting the CA (see **Connecting** below):
-
-```sh
-orbit chat --connect wss://orbit.example.lan:7433/ --ca ~/.config/orbit/tls/ca.pem
-```
 
 **Client certificates.** With `tls = "mtls"` (`--tls mtls --client-ca <path>`), `orbit serve`
 needs `client_ca` too, the CA that signs client certificates. The TLS handshake asks for a
@@ -1416,9 +1402,10 @@ alone: a certificate named `CN=laptop`, for client authentication, valid for a y
 with `--key-type` as for `init`. It prints their paths and the certificate's SHA-256
 fingerprint, as connect lines show it and `revoked` takes it. As the name names the files, it's
 up to 64 letters, digits, dots, dashes and underscores, starting with a letter or digit; another
-stops it with status 2. Copy the pair and `ca.pem` to the client machine over a trusted channel,
-such as `scp`, and connect with them as below. A missing `ca.pem` or CA key stops it with status
-2, as for `orbit certs server`.
+stops it with status 2. Bundle them for the client machine with `--bundle`, as below, or copy the
+pair and `ca.pem` there over a trusted channel, such as `scp`, for `orbit chat`'s `--cert`,
+`--key` and `--ca`. A missing `ca.pem` or CA key stops it with status 2, as for `orbit certs
+server`.
 
 A name that already has a certificate stops it with status 2, as a new one would leave the old
 working. `--force` issues a new one anyway, moving the old pair to `certs/old-<UTC timestamp>/`
@@ -1429,35 +1416,49 @@ working:
 orbit certs client laptop --force
 ```
 
-Or, to make a client certificate with openssl, signed by the CA above (which may serve as
-`client_ca` too), make its key on the client and sign its request on the machine holding
-`ca-key.pem`:
-
-```sh
-# On the client: its key, which never leaves it, and a request to sign.
-mkdir -p ~/.config/orbit/tls && cd ~/.config/orbit/tls
-openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
-  -subj "/CN=laptop" -keyout laptop-key.pem -out laptop.csr
-chmod 600 laptop-key.pem
-# On the CA's machine, given laptop.csr: the certificate, sent back to the client.
-openssl x509 -req -in laptop.csr -CA ca.pem -CAkey ca-key.pem -days 365 -out laptop.pem
-# Its fingerprint, as orbit serve shows it.
-openssl x509 -in laptop.pem -noout -fingerprint -sha256
-```
-
-The server keeps `server.pem`, `server-key.pem` and `ca.pem` (as `client_ca`); each client keeps
-its own `laptop.pem` and `laptop-key.pem` and a copy of `ca.pem` to verify the server by. Only
-certificates and requests travel, never a key; `ca-key.pem` is best kept off both. Serve and
-connect with:
-
-```sh
-orbit serve --tls mtls --cert server.pem --key server-key.pem --client-ca ca.pem --host 0.0.0.0
-orbit chat --connect wss://orbit.example.lan:7433/ --ca ca.pem --cert laptop.pem --key laptop-key.pem
-```
-
 `orbit chat` with `--cert` and `--key` shows the certificate rather than the token, so they
 don't go with `--token-file`; one without the other, a key others can read (`chmod 600`), or
 files that can't be read or don't match stop it with status 2.
+
+**Bundles.** `--bundle <file>` writes, besides the pair, one tar holding all the client machine
+needs, readable by you alone: `ca.pem`, `laptop.pem`, `laptop-key.pem` (readable by its owner
+alone in the tar too) and `remote.toml`, the lines that name the server in the client's
+`config.toml`, with the files where they're unpacked, in `~/.config/orbit/certs/laptop/`:
+
+```sh
+orbit certs client laptop --bundle laptop.tar
+```
+
+```toml
+# Add these lines to ~/.config/orbit/config.toml, then connect with orbit chat --remote laptop.
+[remotes.laptop]
+url = "wss://orbit.example.lan:7433"
+ca = "~/.config/orbit/certs/laptop/ca.pem"
+cert = "~/.config/orbit/certs/laptop/laptop.pem"
+key = "~/.config/orbit/certs/laptop/laptop-key.pem"
+```
+
+`url` is `wss://` with the server certificate's first name (the first name given to `init` or
+`server`) and `port` in `[server]` (7433 unless set), or the URL `--url` gives, such as `--url
+wss://orbit.example.com:9000` for a proxy in front. These stop it with status 2 before anything
+is issued: no `server.pem` without `--url` (naming `--url`), `--url` without `--bundle`, an
+invalid `config.toml`, and a file already at the bundle's path, which `--force` replaces
+(issuing a new certificate for a client that has one, as above). A bundle that can't be written
+stops it with status 2 once the pair is written, naming the file. Copy the bundle to the client
+machine over a trusted channel, unpack it into the directory its `remote.toml` names, keeping the
+files' permissions (`tar -p`), add its lines to the client's `config.toml`, and connect by the
+remote's name:
+
+```sh
+scp laptop.tar laptop.lan:                      # on the server, to the laptop
+# On the laptop.
+mkdir -p -m 700 ~/.config/orbit/certs/laptop
+tar -xpf laptop.tar -C ~/.config/orbit/certs/laptop && rm laptop.tar
+cat ~/.config/orbit/certs/laptop/remote.toml >> ~/.config/orbit/config.toml
+orbit chat --remote laptop
+```
+
+The bundle holds the client's key, so remove it from both machines once it's unpacked.
 
 `orbit certs list` shows each certificate in `certs/`, one per line, leaving out those moved to
 `old-<UTC timestamp>/`: its kind (`CA`, `server` or `client`), its name (its CN, or a client's
@@ -1512,6 +1513,64 @@ orbit certs client laptop --ca-key /media/offline/orbit-ca-key.pem
 
 A key that isn't the CA's in `ca.pem`, or isn't an Ed25519 or ECDSA key in PEM without a
 passphrase, stops them with status 2 too.
+
+**Certificates with openssl.** Or make the CA and the server's certificate with openssl, naming
+the server's hostname (here `orbit.example.lan`, and its address) as a subject alternative name,
+which clients check. The CA must say it signs certificates (`keyUsage`), or clients refuse the
+server's certificate. With Ed25519 keys:
+
+```sh
+mkdir -p ~/.config/orbit/tls && cd ~/.config/orbit/tls
+# The CA: keep ca-key.pem secret, ideally off the server; ca.pem goes to every client.
+openssl req -x509 -newkey ed25519 -nodes -days 3650 -subj "/CN=orbit CA" \
+  -addext "keyUsage=critical,keyCertSign,cRLSign" -keyout ca-key.pem -out ca.pem
+# The server's key and certificate, signed by the CA.
+openssl req -newkey ed25519 -nodes -subj "/CN=orbit.example.lan" \
+  -keyout server-key.pem -out server.csr
+openssl x509 -req -in server.csr -CA ca.pem -CAkey ca-key.pem -days 365 -out server.pem \
+  -extfile <(printf "subjectAltName=DNS:orbit.example.lan,IP:192.168.1.20\nextendedKeyUsage=serverAuth")
+chmod 600 ca-key.pem server-key.pem
+cd -
+orbit serve --tls tls --cert ~/.config/orbit/tls/server.pem \
+  --key ~/.config/orbit/tls/server-key.pem --host 0.0.0.0
+```
+
+With ECDSA P-256 keys, for a browser or load balancer in front that needs them, each `openssl req`
+takes `-newkey ec -pkeyopt ec_paramgen_curve:P-256` in place of `-newkey ed25519`:
+
+```sh
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
+  -subj "/CN=orbit CA" -addext "keyUsage=critical,keyCertSign,cRLSign" \
+  -keyout ca-key.pem -out ca.pem
+openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -subj "/CN=orbit.example.lan" \
+  -keyout server-key.pem -out server.csr
+```
+
+To make a client certificate with openssl, signed by the CA above (which may serve as
+`client_ca` too), make its key on the client and sign its request on the machine holding
+`ca-key.pem` (for P-256, `-newkey ec -pkeyopt ec_paramgen_curve:P-256` again):
+
+```sh
+# On the client: its key, which never leaves it, and a request to sign.
+mkdir -p ~/.config/orbit/tls && cd ~/.config/orbit/tls
+openssl req -newkey ed25519 -nodes -subj "/CN=laptop" -keyout laptop-key.pem -out laptop.csr
+chmod 600 laptop-key.pem
+# On the CA's machine, given laptop.csr: the certificate, sent back to the client.
+openssl x509 -req -in laptop.csr -CA ca.pem -CAkey ca-key.pem -days 365 -out laptop.pem \
+  -extfile <(printf "extendedKeyUsage=clientAuth")
+# Its fingerprint, as orbit serve shows it.
+openssl x509 -in laptop.pem -noout -fingerprint -sha256
+```
+
+The server keeps `server.pem`, `server-key.pem` and `ca.pem` (as `client_ca`); each client keeps
+its own `laptop.pem` and `laptop-key.pem` and a copy of `ca.pem` to verify the server by. Only
+certificates and requests travel, never a key; `ca-key.pem` is best kept off both. Serve and
+connect with:
+
+```sh
+orbit serve --tls mtls --cert server.pem --key server-key.pem --client-ca ca.pem --host 0.0.0.0
+orbit chat --connect wss://orbit.example.lan:7433/ --ca ca.pem --cert laptop.pem --key laptop-key.pem
+```
 
 **TLS and connection errors.** Each message `orbit serve` stops (or warns) with, and each one
 `orbit chat` stops with or shows when it can't connect, starts with what's wrong, then names the
@@ -1690,48 +1749,67 @@ refused the token.`), a server that can't be reached, is shutting down, closes t
 refuses its `Hello`, or no answer within 10 seconds.
 
 **Two machines.** To run the control plane on a server, `orbit.example.lan` (192.168.1.20), and
-chat from a laptop: on the server, make the CA and the server's certificate as in **TLS** above,
-in `~/.config/orbit/tls`, and serve with
+chat from a laptop under mutual TLS: on the server, make the CA, the server's certificate and the
+laptop's bundle with `orbit certs` (see **Certificates** and **Bundles** above):
+
+```sh
+# On the server.
+orbit certs init orbit.example.lan 192.168.1.20
+orbit certs client laptop --bundle laptop.tar
+```
+
+put the `[server]` lines `init` printed in its `config.toml`, listening beyond loopback:
 
 ```toml
 # The server's ~/.config/orbit/config.toml
 [server]
 host = "0.0.0.0"
-tls = "tls"   # or "mtls", with client_ca
-cert = "/home/me/.config/orbit/tls/server.pem"
-key = "/home/me/.config/orbit/tls/server-key.pem"
-ca = "/home/me/.config/orbit/tls/ca.pem"
-# client_ca = "/home/me/.config/orbit/tls/ca.pem"   # for mtls
+tls = "mtls"
+cert = "/home/me/.config/orbit/certs/server.pem"
+key = "/home/me/.config/orbit/certs/server-key.pem"
+client_ca = "/home/me/.config/orbit/certs/ca.pem"
 ```
 
-and `orbit serve`, which makes the token on first start. Then copy `ca.pem` and, under `tls`, the
-token to the laptop over a trusted channel, keeping both readable by you alone:
+and run `orbit serve`. Then fetch the bundle to the laptop over a trusted channel, unpack it,
+keeping its permissions, add its remote to the laptop's `config.toml` and connect:
+
+```sh
+# On the laptop.
+scp orbit.example.lan:laptop.tar . && ssh orbit.example.lan rm laptop.tar
+mkdir -p -m 700 ~/.config/orbit/certs/laptop
+tar -xpf laptop.tar -C ~/.config/orbit/certs/laptop && rm laptop.tar
+cat ~/.config/orbit/certs/laptop/remote.toml >> ~/.config/orbit/config.toml
+orbit chat --remote laptop
+```
+
+The remote is named `laptop`, for the certificate; rename its table, `[remotes.laptop]`, in the
+laptop's `config.toml` to connect by another name, such as `orbit chat --remote work`.
+
+Under `tls` instead (`tls = "tls"`, with `ca` in place of `client_ca`), there are no client
+certificates or bundles: `orbit serve` makes the token on first start, and you copy `ca.pem` and
+the token to the laptop over a trusted channel, keeping both readable by you alone, and name them
+in a remote:
 
 ```sh
 # On the laptop.
 mkdir -p ~/.config/orbit/tls && chmod 700 ~/.config/orbit
-scp orbit.example.lan:.config/orbit/tls/ca.pem ~/.config/orbit/tls/work-ca.pem
-scp orbit.example.lan:.config/orbit/token ~/.config/orbit/work-token   # under tls
+scp orbit.example.lan:.config/orbit/certs/ca.pem ~/.config/orbit/tls/work-ca.pem
+scp orbit.example.lan:.config/orbit/token ~/.config/orbit/work-token
 chmod 600 ~/.config/orbit/work-token
 ```
-
-Under `mtls` copy no token: make the laptop's key and certificate as in **Client certificates**
-above, its key staying on the laptop and only `laptop.csr` and `laptop.pem` travelling. On the
-laptop, name the server:
 
 ```toml
 # The laptop's ~/.config/orbit/config.toml
 [remotes.work]
 url = "wss://orbit.example.lan:7433/"
 ca = "tls/work-ca.pem"
-token_file = "work-token"    # under tls
-# cert = "tls/laptop.pem"    # under mtls, instead of token_file
-# key = "tls/laptop-key.pem"
+token_file = "work-token"
 ```
 
-and connect with `orbit chat --remote work`. In all, the server keeps `ca.pem`, `server.pem`,
-`server-key.pem` and the token (`ca-key.pem` is best kept off it); the laptop keeps its copy of
-`ca.pem`, and the token's copy under `tls`, or `laptop.pem` and `laptop-key.pem` under `mtls`.
+and connect with `orbit chat --remote work`. In all, the server keeps `ca.pem`, `server.pem` and
+`server-key.pem`, and the token under `tls` (`ca-key.pem` is best moved off it once the laptop's
+certificate is made, see **Keeping the CA's key offline** above); the laptop keeps its copy of
+`ca.pem`, with `laptop.pem` and `laptop-key.pem` under `mtls`, or the token's copy under `tls`.
 
 ### Hosting in a container
 
@@ -2204,7 +2282,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `agents`: agent ids and tokens), `roles` (built-in roles, given their instructions, and the
     tasks orbit queues in them), `config` (`OrbitConfig`: the limits, roles, verification steps
     and setup a project file sets over the built-in defaults) and `config_errors` (`ConfigError`,
-    and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]` with its `TlsSettings`, which files each TLS mode needs, where now falls in a certificate's validity, and which hosts are loopback), `certificate_list` (what `orbit certs list` shows of each certificate: its expiry, days left, fingerprint and marks), `remotes` (`RemoteSettings`, a `[remotes.<name>]` table, and which credentials go together), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
+    and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]` with its `TlsSettings`, which files each TLS mode needs, where now falls in a certificate's validity, and which hosts are loopback), `certificate_list` (what `orbit certs list` shows of each certificate: its expiry, days left, fingerprint and marks), `client_bundle` (what `orbit certs client --bundle` puts in a client's bundle: the CA, its certificate and key, and the `[remotes.<name>]` lines naming them where it's unpacked), `remotes` (`RemoteSettings`, a `[remotes.<name>]` table, and which credentials go together), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
     setup step that makes a fresh worktree ready, and the checks a configurator proposes), the
     `Catalog` (in `catalog`: the workspace and its sessions, the agents' roles, the triggers and
     the lanes), `ReviewPlanner` (in `reviews`: when to review, batches, rounds and caps), commit

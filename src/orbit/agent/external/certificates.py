@@ -1,9 +1,11 @@
-"""orbit's own private CA, the server and client certificates it signs, and the files in
-``certs`` in the config directory that hold them."""
+"""orbit's own private CA, the server and client certificates it signs, the files in ``certs``
+in the config directory that hold them, and the bundles that carry a client's to it."""
 
+import io
 import ipaddress
 import os
 import re
+import tarfile
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -15,8 +17,9 @@ from cryptography.hazmat.primitives.asymmetric import ec, ed25519
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from orbit.agent.domain.certificate_list import CertificateKind, ListedCertificate
+from orbit.agent.domain.client_bundle import BundledFile
 from orbit.agent.domain.server import client_fingerprint
-from orbit.agent.external.whole_files import PRIVATE, write_whole
+from orbit.agent.external.whole_files import PRIVATE, replacing, write_whole
 
 KeyType = Literal["ed25519", "p256"]
 """The kind of key a certificate is made for: Ed25519, or ECDSA on P-256 for a browser or load
@@ -57,6 +60,11 @@ NOT_A_CA_KEY = (
 NOT_THE_CA_KEY = "{key} isn't the key of the CA at {ca}; pass --ca-key with the CA's own key."
 NO_CA = "There's no CA certificate at {path}; make a CA with orbit certs init."
 NO_CA_KEY = "The CA's key isn't at {path}; pass --ca-key with where it is."
+NO_SERVER = (
+    "There's no server certificate at {path} to name the server in the bundle's URL; pass --url"
+    " with the URL clients connect to, or make one with orbit certs server."
+)
+CANT_WRITE_BUNDLE = "Can't write {path}: {reason}. Check that you can write to {directory}."
 NOT_A_CLIENT_NAME = (
     'Can\'t name a client "{name}": its files are named for it, so give up to 64 letters,'
     " digits, dots, dashes and underscores, starting with a letter or digit, such as laptop."
@@ -158,6 +166,52 @@ def fingerprint(certificate: x509.Certificate) -> str:
     """The SHA-256 fingerprint of ``certificate``, as ``orbit serve`` shows it and ``[server]
     revoked`` takes it."""
     return client_fingerprint(certificate.public_bytes(serialization.Encoding.DER))
+
+
+def certificate_pem(certificate: x509.Certificate) -> str:
+    """``certificate`` in PEM."""
+    return certificate.public_bytes(serialization.Encoding.PEM).decode("ascii")
+
+
+def key_pem(key: PrivateKey) -> str:
+    """``key`` in PEM, unencrypted."""
+    pem = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    return pem.decode("ascii")
+
+
+def write_bundle(path: Path, files: Iterable[BundledFile]) -> None:
+    """Write a tar of ``files`` to ``path``, whole or not at all, readable by its owner alone,
+    each file in it readable by anyone unless it's private.
+
+    Raises :class:`CertificateError` if it can't be written.
+    """
+    mtime = int(datetime.now(UTC).timestamp())
+    try:
+        with replacing(path, PRIVATE) as temporary, temporary.open("wb") as tar:
+            with tarfile.open(fileobj=tar, mode="w") as archive:
+                for file in files:
+                    _add(archive, file, mtime)
+            tar.flush()
+            os.fsync(tar.fileno())
+    except OSError as exc:
+        reason = exc.strerror or str(exc)
+        directory = path.absolute().parent
+        message = CANT_WRITE_BUNDLE.format(path=path, reason=reason, directory=directory)
+        raise CertificateError(message) from None
+
+
+def _add(archive: tarfile.TarFile, file: BundledFile, mtime: int) -> None:
+    """Add ``file`` to ``archive``, modified at ``mtime``, with its mode."""
+    data = file.text.encode("utf-8")
+    member = tarfile.TarInfo(file.name)
+    member.size = len(data)
+    member.mode = PRIVATE if file.private else PUBLIC
+    member.mtime = mtime
+    archive.addfile(member, io.BytesIO(data))
 
 
 def read_certificate(path: Path) -> x509.Certificate:
@@ -348,6 +402,16 @@ class CertsDir:
         files = (self.path / "clients").glob("*.pem")
         return sorted(path for path in files if not path.name.endswith("-key.pem"))
 
+    def server_name(self) -> str:
+        """The first name the server certificate in ``certs`` was made for: its common name.
+
+        Raises :class:`CertificateError` if there's none, or it can't be read or isn't a
+        certificate in PEM.
+        """
+        if not self.server.exists():
+            raise CertificateError(NO_SERVER.format(path=self.server))
+        return _common_name(read_certificate(self.server))
+
     def issuer(self, key: Path | None = None) -> tuple[x509.Certificate, PrivateKey]:
         """The CA in ``certs`` and its key, read from ``key`` (default: ``ca-key.pem`` in
         ``certs``), which may start with ``~``.
@@ -371,7 +435,7 @@ class CertsDir:
 
         Raises :class:`CertificateError` if it can't be written.
         """
-        self._write(path, certificate.public_bytes(serialization.Encoding.PEM), PUBLIC)
+        self._write(path, certificate_pem(certificate), PUBLIC)
 
     def write_key(self, path: Path, key: PrivateKey) -> None:
         """Write ``key`` to ``path``, unencrypted, whole or not at all, readable by its owner
@@ -379,20 +443,15 @@ class CertsDir:
 
         Raises :class:`CertificateError` if it can't be written.
         """
-        pem = key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.PKCS8,
-            serialization.NoEncryption(),
-        )
-        self._write(path, pem, PRIVATE)
+        self._write(path, key_pem(key), PRIVATE)
 
-    def _write(self, path: Path, pem: bytes, mode: int) -> None:
+    def _write(self, path: Path, pem: str, mode: int) -> None:
         """Write ``pem`` to ``path``, in ``certs``, with ``mode``, making its directory, and
         ``certs``, owner-only if they have to be made."""
         try:
             self.path.mkdir(mode=0o700, parents=True, exist_ok=True)
             path.parent.mkdir(mode=0o700, exist_ok=True)
-            write_whole(path, pem.decode("ascii"), mode)
+            write_whole(path, pem, mode)
         except OSError as exc:
             reason = exc.strerror or str(exc)
             message = CANT_WRITE.format(path=path, reason=reason, directory=self.path)

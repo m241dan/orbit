@@ -31,6 +31,12 @@ from orbit.agent.application.workspace_source import WorkspaceSource, WorkspaceU
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.certificate_list import certificate_lines
 from orbit.agent.domain.checks import ChecksProposal, Setup
+from orbit.agent.domain.client_bundle import (
+    REMOTE_FILE,
+    bundle_directory,
+    bundle_url,
+    client_bundle,
+)
 from orbit.agent.domain.config import OrbitConfig
 from orbit.agent.domain.config_errors import INVALID_CONFIG, ConfigError
 from orbit.agent.domain.ownership import WorkspaceOwner
@@ -47,12 +53,16 @@ from orbit.agent.external.certificates import (
     CertificateError,
     CertsDir,
     KeyType,
+    PrivateKey,
+    certificate_pem,
     fingerprint,
     issue_client,
     issue_server,
+    key_pem,
     make_ca,
     read_certificate,
     server_names,
+    write_bundle,
 )
 from orbit.agent.external.checks import run_step
 from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner
@@ -107,6 +117,7 @@ __all__ = [
     "INVALID_CONFIG",
     "MODEL_ALIASES",
     "NO_STEPS_NOTE",
+    "REMOTE_FILE",
     "USER_CONFIG_FILE",
     "Agents",
     "Browsing",
@@ -136,6 +147,7 @@ __all__ = [
     "Opening",
     "OrbitConfig",
     "PathKind",
+    "PrivateKey",
     "ProposalDecision",
     "ProposalReview",
     "PurgeRefused",
@@ -174,7 +186,11 @@ __all__ = [
     "WorkspaceSource",
     "WorkspaceStore",
     "WorkspaceUnavailable",
+    "bundle_directory",
+    "bundle_url",
     "certificate_lines",
+    "certificate_pem",
+    "client_bundle",
     "file_names",
     "fingerprint",
     "forget_workspace",
@@ -183,6 +199,7 @@ __all__ = [
     "in_git_work_tree",
     "issue_client",
     "issue_server",
+    "key_pem",
     "local_tls",
     "make_ca",
     "open_workspace",
@@ -204,5 +221,6 @@ __all__ = [
     "tls_warnings",
     "top_level",
     "workspace_state",
+    "write_bundle",
     "write_checks",
 ]

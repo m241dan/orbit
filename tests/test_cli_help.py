@@ -43,7 +43,16 @@ _BACKEND = (
         (["certs", "server"], ("NAMES", "--key-type", "--days", "--ca-key", "--config-dir")),
         (
             ["certs", "client"],
-            ("NAME", "--key-type", "--days", "--ca-key", "--force", "--config-dir"),
+            (
+                "NAME",
+                "--key-type",
+                "--days",
+                "--ca-key",
+                "--force",
+                "--bundle",
+                "--url",
+                "--config-dir",
+            ),
         ),
         (["certs", "list"], ("--config-dir",)),
     ],
