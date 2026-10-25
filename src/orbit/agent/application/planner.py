@@ -231,7 +231,8 @@ class PlannerChat:
     async def _converse(
         self, turn_id: str, prompt: str, settings: Settings
     ) -> AsyncIterator[Event]:
-        """Turn ``turn_id`` of the planner's conversation, on ``prompt``."""
+        """Turn ``turn_id`` of the planner's conversation, on ``prompt``, its process traced
+        under the span current, the turn's."""
         assert self._agent is not None
         role = self._desk.agents.roles[PLANNER]
         own = Settings(model=self.model(settings), tool_access=role.tool_access)
@@ -239,13 +240,15 @@ class PlannerChat:
         launch = await self._desk.launch(
             self._agent, self._with_notes(prompt, steps, notes), own, self._desk.agents.root
         )
-        async for event in self._desk.agents.launcher.converse(turn_id, launch):
-            # Only a completed turn surely delivered the notes; otherwise the next prompt repeats
-            # them. Notes told during the turn wait for the next.
-            if isinstance(event, TurnFinished) and event.reason == "completed":
-                self._told = steps
-                del self._notes[: len(notes)]
-            yield event
+        with self._desk.traced(self._agent, current_span()) as process:
+            async for event in self._desk.agents.launcher.converse(turn_id, launch):
+                process.saw(event)
+                # Only a completed turn surely delivered the notes; otherwise the next prompt
+                # repeats them. Notes told during the turn wait for the next.
+                if isinstance(event, TurnFinished) and event.reason == "completed":
+                    self._told = steps
+                    del self._notes[: len(notes)]
+                yield event
 
     def _with_notes(self, prompt: str, steps: tuple[str, ...], notes: tuple[str, ...]) -> str:
         """``prompt``, after a note of ``steps`` if the planner hasn't heard them, and then

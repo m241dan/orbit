@@ -1782,8 +1782,13 @@ to what started it rather than nesting under it: each task's span links to the `
 for a configurator, `FireTrigger`) command that started its run, or to the review whose
 suggestions it runs, and keeps that link when a run the usage limit stopped starts again; each
 review's links to the task whose landing made it due, or, for a super review, to the
-`FireTrigger` command or the landing that called for it. Spans hold no prompts, agent messages,
-diffs or check output. [docs/telemetry.md](docs/telemetry.md) lists every span, attribute, event
+`FireTrigger` command or the landing that called for it. Each agent process is one span,
+`orbit.agent.process`, under the task's run, the planner's turn or the review it works for: its
+role, how it exited, its turns and the tools it called, as sorted names with their counts; each
+call it makes to orbit's tools is a child span, `orbit.agent.request`, with the tool and whether
+the reply was an error, and each verification step a call runs, verifying a `complete_task` claim
+or for `run_check`, is a child of that call, `orbit.verify.step`, with its name and result. Spans
+hold no prompts, agent messages, tool arguments or replies, diffs or check output. [docs/telemetry.md](docs/telemetry.md) lists every span, attribute, event
 and link.
 
 The TUI traces what the user does: each action that sends commands, such as pressing ctrl+r or
@@ -1901,8 +1906,11 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     linked to the span that started its run, which `WorkTurns` keeps for the run.
     `AgentRun` (in `agent_run`) sees one task through one agent, and a
     `ProposalTrial` (in `proposal_trial`) tries the checks a configurator proposes and has the
-    user decide on them; `AgentDesk` (in `desk`) launches agents and routes their calls by token;
-    `Verifier` (in `verifier`) runs the steps; `Lander` (in `landing`) commits and merges
+    user decide on them; `AgentDesk` (in `desk`) launches agents and routes their calls by token,
+    tracing each agent's process as an `orbit.agent.process` span and each of its calls as an
+    `orbit.agent.request` child of it with `AgentTracing` (in `agent_trace`);
+    `Verifier` (in `verifier`) runs the steps, each run for an agent's call timed as an
+    `orbit.verify.step` child of the call's span; `Lander` (in `landing`) commits and merges
     verified work; `ReviewLane` (in `review_lane`) runs reviews beside the work, each traced as
     an `orbit.review` span by `ReviewTracing` (in `review_trace`); `StartupCheck`
     (in `startup_check`) runs the steps once on the base commit as orbit starts; `UsageMonitor`

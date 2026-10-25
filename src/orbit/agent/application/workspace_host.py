@@ -115,12 +115,15 @@ def _verifier(
     tasks: Tasks,
     events: EventSink,
     agents: Agents | None,
+    telemetry: Telemetry,
 ) -> Verifier | None:
-    """What checks ``tasks`` (in the agents' tree, if any); none without
-    ``verification``."""
+    """What checks ``tasks`` (in the agents' tree, if any), timing the steps agents' calls run
+    with ``telemetry``; none without ``verification``."""
     if verification is None:
         return None
-    return Verifier(verification, tasks, events.put, agents.tree if agents else None)
+    verifier = Verifier(verification, tasks, events.put, agents.tree if agents else None)
+    verifier.telemetry = telemetry
+    return verifier
 
 
 def _reviewed(agents: Agents | None, review: ProposalReview) -> Agents | None:
@@ -298,8 +301,8 @@ class WorkspaceHost:
         self._board = self._tasks.board
         self._proposals = FrontendReview(self._events.put, self._agent_on)
         agents = _reviewed(agents, self._proposals)
-        self._verifier = _verifier(verification, self._tasks, self._events, agents)
-        self._desk = AgentDesk(agents, self._publish_agents) if agents else None
+        self._verifier = _verifier(verification, self._tasks, self._events, agents, telemetry)
+        self._desk = AgentDesk(agents, self._publish_agents, telemetry) if agents else None
         self._workspace = workspace
         self._managed = managed
         self._recover = recover

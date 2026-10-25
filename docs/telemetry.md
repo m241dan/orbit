@@ -72,7 +72,7 @@ waited has one.
 ### `orbit.task.run`
 
 A child of `orbit.task`, timing the task's run from its agent's start until its work is settled
-and merged. It has no attributes.
+and merged. It has no attributes; its agent's `orbit.agent.process` span is its child.
 
 ## The TUI
 
@@ -124,8 +124,9 @@ command's doing.
 
 One span for each turn of the planner's conversation, from when the turn starts in the planner's
 lane until it ends, its duration the span's own. It's a child of the `orbit.command` span of the
-`SendMessage` asking for it, and current while the turn runs. A message refused, as one sent
-while the planner answers, starts no turn and has none.
+`SendMessage` asking for it, and current while the turn runs; the planner's `orbit.agent.process`
+span for the turn is its child. A message refused, as one sent while the planner answers, starts
+no turn and has none.
 
 | Attribute | Type | Meaning |
 | --- | --- | --- |
@@ -154,7 +155,8 @@ error for has the span's error status with the error's message; a failure also r
 One span for each review the review lane runs, a reviewer's or a super reviewer's, from when it
 starts until it's followed up: its batch's review queued, if that's due, or the work lane asked
 to run its suggestions. Each starts its own trace: it's a root span, linked to what queued it (see
-**Links**). The span is current while the review runs and is followed up.
+**Links**). The span is current while the review runs and is followed up; the reviewer's
+`orbit.agent.process` span is its child.
 
 | Attribute | Type | Meaning |
 | --- | --- | --- |
@@ -186,6 +188,61 @@ Events:
 | --- | --- | --- |
 | `orbit.task.gave_up` | | The review's agent gave up. |
 | `exception` | `exception.type`, `exception.message` | The review ended in error. |
+
+## Agents
+
+### `orbit.agent.process`
+
+One span for each agent process orbit runs, from its start until it exits: a task's agent, a
+child of the task's `orbit.task.run`; the planner's, one for each turn's process, a child of the
+`orbit.planner.turn`; and a reviewer's, a child of the `orbit.review`. A planner turn whose saved
+conversation couldn't be resumed runs a second process, and has a span for each.
+
+| Attribute | Type | Meaning |
+| --- | --- | --- |
+| `orbit.agent.id` | string | The agent's id, such as `agent-3`; the planner's is the same for each of its turns. |
+| `orbit.role` | string | The agent's role, such as `coder`, `planner` or `reviewer`. |
+| `orbit.runtime` | string | What runs the agent: `claude`. |
+| `orbit.agent.exit_reason` | string | How the process ended: `finished`, `crashed` (it failed, or a turn ended in error) or `killed` (orbit stopped it, as when the user stops the task or cancels the turn). |
+| `orbit.agent.turns` | int | How many turns the process started. |
+| `orbit.agent.tool_names` | string[] | The tools the agent called, by name as the CLI reports them (`Bash`, `Edit`, `mcp__orbit__get_task`, …), sorted. |
+| `orbit.agent.tool_counts` | int[] | How many times it called each of those tools, in the same order. |
+| `orbit.agent.tool_calls_total` | int | How many tool calls it made in all. |
+
+A process that fails, rather than ending a turn in error, has the span's error status with the
+failure's message, and an `exception` event.
+
+### `orbit.agent.request`
+
+One span for each call an agent makes to one of orbit's tools (`get_task`, `complete_task`,
+`run_check`, `report_progress`, `propose_task` and so on), from when orbit receives it until it
+replies; its duration is the span's own. It's a child of the calling agent's
+`orbit.agent.process` span, though orbit's MCP server handles the call apart from the agent's
+work, and current while the call is handled, so the events it publishes carry its trace context.
+A call arriving once the agent's process has ended is a child of the span current, if any. A call
+with a token orbit doesn't know has no span. Neither the call's arguments nor its reply are
+recorded.
+
+| Attribute | Type | Meaning |
+| --- | --- | --- |
+| `orbit.agent.tool` | string | The tool called, such as `complete_task`. |
+| `orbit.agent.request.error` | boolean | Whether orbit's reply was an error, such as a refusal or the reply to a call orbit stopped handling; a check that ran and failed isn't one. |
+
+A `complete_task` call's span lasts until its claim is verified, as the agent waits that long
+for the reply.
+
+### `orbit.verify.step`
+
+One span for each verification step run for an agent's call, a child of that call's
+`orbit.agent.request` span: each step verifying a `complete_task` claim, and the step a
+`run_check` runs. Its duration is the step's own. The steps verifying a task are still events of
+its `orbit.task` span too; steps run with no call to answer, as for an agent that exited without
+claiming its task done or for checks a configurator proposes, have no span.
+
+| Attribute | Type | Meaning |
+| --- | --- | --- |
+| `orbit.verify.step.name` | string | The step's name, such as `Unit tests`. |
+| `orbit.verify.step.result` | string | How it came out: `passed` or `failed`; absent when it was cut short. |
 
 ## Links
 

@@ -81,12 +81,12 @@ class TaskTracing:
                 _ended(span, board.find(task_id), failed=escaped)
 
     @contextmanager
-    def run(self) -> Iterator[None]:
-        """Time the block as the current task's ``orbit.task.run``, leaving the task's span
-        current."""
+    def run(self) -> Iterator[Span]:
+        """Time the block as the current task's ``orbit.task.run``, whose span it yields, leaving
+        the task's span current."""
         span = self.telemetry.start(RUN_SPAN)
         try:
-            yield
+            yield span
         finally:
             span.end()
 

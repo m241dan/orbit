@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, replace
 from typing import TypeVar
 
+from orbit.agent.application.agent_trace import traced_steps
 from orbit.agent.application.ports import CoderTree, Publish, StepRunner, Workspace
 from orbit.agent.application.task_trace import (
     VERIFY_FAILED_STEP,
@@ -28,9 +29,11 @@ from orbit.protocol import (
     VerificationSkipped,
     VerificationStarted,
 )
-from orbit.tracing import Attributes, current_span
+from orbit.tracing import Attributes, NoTelemetry, Span, Telemetry, current_span
 
 T = TypeVar("T")
+
+_NO_TELEMETRY = NoTelemetry()
 
 Failure = tuple[VerificationStep, str]
 """The step that failed and its output."""
@@ -75,7 +78,9 @@ class Verification:
 
 class Verifier:
     """Runs ``verification``'s steps on ``tasks``, publishing their progress as it
-    goes; a task's verification is recorded on the current span, its result and each step's."""
+    goes; a task's verification is recorded on the current span, its result and each step's,
+    and each step run for an agent's call is timed as a child of the call's span, with
+    :attr:`telemetry`."""
 
     def __init__(
         self,
@@ -90,6 +95,7 @@ class Verifier:
         self._board = tasks.board
         self._publish = publish
         self._tree = tree
+        self.telemetry: Telemetry = _NO_TELEMETRY
 
     @property
     def step_names(self) -> tuple[str, ...]:
@@ -116,11 +122,14 @@ class Verifier:
             return None
         return await self.fingerprint(root)
 
-    async def check(self, task_id: str, before: object, root: str) -> Failure | None:
+    async def check(
+        self, task_id: str, before: object, root: str, request: Span | None = None
+    ) -> Failure | None:
         """Verify task ``task_id`` at ``root``, unless there's nothing to verify; returns the
         first failure.
 
-        ``before`` is what :meth:`state_before` returned when the task started.
+        ``before`` is what :meth:`state_before` returned when the task started, and ``request``
+        the span of the agent's call it's verified for, if any.
         """
         state = self._board.get(task_id)
         after = None if before is None else await self.fingerprint(root)
@@ -138,13 +147,22 @@ class Verifier:
             current_span().set_attributes({VERIFY_RESULT: "skipped"})
             return None
         await self._tasks.change(lambda board: board.set_status(task_id, "verifying"))
-        failure = await self._tidily(self._verify(task_id, root))
+        failure = await self._tidily(self._verify(task_id, root, self._runner(request)))
         _record_result(failure)
         return failure
 
-    async def run_one(self, step: VerificationStep, root: str) -> tuple[bool, str]:
-        """Run ``step`` at ``root`` on its own, as an agent asked; returns its result."""
-        return await self._tidily(self.verification.run_step(step, root))
+    async def run_one(
+        self, step: VerificationStep, root: str, request: Span | None = None
+    ) -> tuple[bool, str]:
+        """Run ``step`` at ``root`` on its own, as an agent asked, in the call whose span is
+        ``request``, if any; returns its result."""
+        return await self._tidily(self._runner(request)(step, root))
+
+    def _runner(self, request: Span | None) -> StepRunner:
+        """What runs a step: timing it as a child of ``request``, the span of the agent's call
+        it runs for, if there is one."""
+        run_step = self.verification.run_step
+        return run_step if request is None else traced_steps(self.telemetry, request, run_step)
 
     async def _tidily(self, checks: Awaitable[T]) -> T:
         """Run ``checks`` in the coder's tree, then have git ignore files they created."""
@@ -184,8 +202,9 @@ class Verifier:
         if self.verification.steps:
             await self._publish(VerificationChanged(steps=self._progress.steps))
 
-    async def _verify(self, task_id: str, root: str) -> Failure | None:
-        """Run the steps at ``root`` after task ``task_id``; returns the first failure."""
+    async def _verify(self, task_id: str, root: str, run_step: StepRunner) -> Failure | None:
+        """Run the steps at ``root`` after task ``task_id`` through ``run_step``; returns the
+        first failure."""
 
         started = time.monotonic()
 
@@ -203,9 +222,7 @@ class Verifier:
                     VerificationFinished(task_id=task_id, step=number, passed=passed)
                 )
 
-        return await first_failure(
-            self.verification.steps, self.verification.run_step, root, on_step
-        )
+        return await first_failure(self.verification.steps, run_step, root, on_step)
 
 
 def _record_step(name: str, result: StepStatus, started: float) -> None:

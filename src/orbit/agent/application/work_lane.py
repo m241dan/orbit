@@ -382,9 +382,9 @@ class WorkLane:
         task = self._board.get(task_id).task
         verifier = self._verifier
         before = await verifier.state_before(task, root) if verifier is not None else None
-        with self._tracing.run():
+        with self._tracing.run() as run:
             agent = AgentRun(task_id, self._tasks, verifier, self._desk)
-            outcome = await self._run_alone(agent.run(before, root))
+            outcome = await self._run_alone(agent.run(before, root, run))
             return await self._settle(task_id, outcome, root)
 
     async def _settle(self, task_id: str, outcome: Outcome, root: str) -> Outcome:

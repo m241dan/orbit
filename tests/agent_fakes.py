@@ -94,6 +94,7 @@ from orbit.protocol import (
     TasksChanged,
     TaskSpec,
     TaskState,
+    ToolCallStarted,
     TurnEndReason,
     TurnFinished,
     TurnStarted,
@@ -182,6 +183,8 @@ class ScriptedLauncher:
         self.planner_afters: list[Callable[[], Awaitable[None]]] = []
         # The usage of each launch's turns, one launch at a time; one unmetered turn if none.
         self.usages: list[tuple[Usage, ...]] = []
+        # The tools each launch's agent calls, by name, one launch at a time; none once out.
+        self.tool_calls: list[tuple[str, ...]] = []
         # The error each launch's turn reports before it finishes, one launch at a time; none
         # once out, as the CLI reports one for a turn that ends in error.
         self.turn_errors: list[str] = []
@@ -193,8 +196,8 @@ class ScriptedLauncher:
         agent = launch.agent
         reviewing = agent.role in REVIEW_ROLES
         script = (self.reviewers if reviewing else self.scripts).pop(0)
-        yield TurnStarted(turn_id=agent.id, agent_id=agent.id)
-        yield AssistantMessage(turn_id=agent.id, text="on it", agent_id=agent.id)
+        for event in self._opening(agent.id):
+            yield event
 
         async def call(tool: str, **arguments: Any) -> Reply:
             return await self.host.call(agent.token, tool, **arguments)
@@ -206,6 +209,25 @@ class ScriptedLauncher:
             )
         for usage in self.usages.pop(0) if self.usages else (None,):
             yield TurnFinished(turn_id=agent.id, reason=reason, agent_id=agent.id, usage=usage)
+
+    def _opening(self, agent_id: str) -> list[Event]:
+        """What agent ``agent_id``'s turn starts with: its start, a message, and the next
+        launch's tool calls, if any."""
+        names = self.tool_calls.pop(0) if self.tool_calls else ()
+        return [
+            TurnStarted(turn_id=agent_id, agent_id=agent_id),
+            AssistantMessage(turn_id=agent_id, text="on it", agent_id=agent_id),
+            *(
+                ToolCallStarted(
+                    turn_id=agent_id,
+                    agent_id=agent_id,
+                    call_id=f"call-{n}",
+                    name=name,
+                    arguments={},
+                )
+                for n, name in enumerate(names)
+            ),
+        ]
 
     def conversation(self, agent_id: str) -> str | None:
         return self.conversations.get(agent_id)

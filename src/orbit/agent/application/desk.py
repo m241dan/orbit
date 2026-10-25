@@ -8,10 +8,12 @@ agent's role allows.
 
 import asyncio
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
+from orbit.agent.application.agent_trace import REQUEST_ERROR, AgentProcess, AgentTracing
 from orbit.agent.application.failures import unexpected
 from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.application.ports import (
@@ -44,13 +46,15 @@ from orbit.protocol import (
     RunningAgent,
     Settings,
 )
-from orbit.tracing import no_span
+from orbit.tracing import NoTelemetry, Span, Telemetry, current_span, no_span
 
 # The refusal of a call from an agent that isn't running.
 UNKNOWN_AGENT = Reply("Unknown or expired agent token.", is_error=True)
 
 # The reply published for a call whose handling was cancelled, so it doesn't look unanswered.
 STOPPED_HANDLING = Reply("Orbit stopped handling this call.", is_error=True)
+
+_NO_TELEMETRY = NoTelemetry()
 
 # Longest progress note shown; agents can be chatty.
 NOTE_LIMIT = 200
@@ -139,12 +143,19 @@ class CallTarget(Protocol):
 
 
 class AgentDesk:
-    """Answers agents' calls by passing them to their runs, publishing each call and reply."""
+    """Answers agents' calls by passing them to their runs, publishing each call and reply.
 
-    def __init__(self, agents: Agents, publish: Publish) -> None:
+    Each call is traced with ``telemetry`` under the span of its agent's process, while that's
+    traced (see :meth:`traced`), and otherwise under the span current."""
+
+    def __init__(
+        self, agents: Agents, publish: Publish, telemetry: Telemetry = _NO_TELEMETRY
+    ) -> None:
         self.agents = agents
         self.registry = AgentRegistry(agents.new_token)
         self._publish = publish
+        self._tracing = AgentTracing(telemetry)
+        self._processes: dict[str, Span] = {}  # The spans of the agents' processes, by agent id.
         # Takes a review task's suggestions: its id, then the suggestion's title and prompt.
         self.suggest: Callable[[str, str, str], Awaitable[Reply]] | None = None
         self._runs: dict[str, CallTarget] = {}
@@ -247,10 +258,31 @@ class AgentDesk:
         self._launches.pop(agent.id, None)
         self._announced.discard(agent.id)
 
+    @contextmanager
+    def traced(self, agent: Agent, parent: Span) -> Iterator[AgentProcess]:
+        """``agent``'s process, traced over the block in a span that's a child of ``parent``, as
+        :meth:`AgentTracing.process` traces it, with the agent's calls traced under it
+        meanwhile."""
+        with self._tracing.process(agent, parent) as process:
+            self._processes[agent.id] = process.span
+            try:
+                yield process
+            finally:
+                del self._processes[agent.id]
+
     async def handle(self, token: str, tool: str, arguments: dict[str, Any]) -> Reply:
         agent = self.registry.by_token(token)
         if agent is None:
             return UNKNOWN_AGENT
+        process = self._processes.get(agent.id, current_span())
+        with self._tracing.request(process, tool) as request:
+            return await self._handle(agent, tool, arguments, request)
+
+    async def _handle(
+        self, agent: Agent, tool: str, arguments: dict[str, Any], request: Span
+    ) -> Reply:
+        """The answer to ``agent``'s call to ``tool``, publishing the call and the reply and
+        recording on ``request``, the call's span, whether the reply is an error."""
         request_id = uuid.uuid4().hex
         await self.publish(
             AgentRequest(agent_id=agent.id, request_id=request_id, tool=tool, arguments=arguments)
@@ -262,6 +294,7 @@ class AgentDesk:
             reply = await self._request(agent, tool, arguments)
         finally:
             del self._requests[request_id]
+            request.set_attributes({REQUEST_ERROR: reply.is_error})
             # Publishing never suspends, so a cancelled call's reply doesn't swallow the cancel.
             await self.publish(
                 AgentReply(

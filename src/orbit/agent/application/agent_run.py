@@ -67,10 +67,18 @@ from orbit.protocol import (
     TurnFinished,
     Usage,
 )
-from orbit.tracing import current_span
+from orbit.tracing import Span, current_span
 
 Wake = Literal["exited", "gave_up"]
 """Why the run loop wakes up, other than a claim that the task is done."""
+
+
+@dataclass(frozen=True)
+class _Claim:
+    """A claim that the task is done: the call waiting for orbit's verdict, and its span."""
+
+    answer: asyncio.Future[Reply]
+    request: Span
 
 
 @dataclass(frozen=True)
@@ -105,7 +113,8 @@ class AgentRun:
     """One agent working on task ``task_id`` of ``tasks``, from launch until it exits.
 
     Its check runs, fixes asked and giving up are recorded on the span current as it's made,
-    which the agent's calls, arriving from elsewhere, don't see as current."""
+    which the agent's calls, arriving from elsewhere, don't see as current. The agent's process
+    is traced under that span too, unless the run is told another."""
 
     def __init__(
         self, task_id: str, tasks: Tasks, verifier: Verifier | None, desk: AgentDesk
@@ -116,6 +125,7 @@ class AgentRun:
         self._verifier = verifier
         self._desk = desk
         self._span = current_span()
+        self._within = self._span  # The span the agent's process is traced under.
         self._check_runs = 0
         self._publish = self._noting
         self._error: str | None = None  # The first error published while the agent ran.
@@ -123,7 +133,7 @@ class AgentRun:
         self._work = AgentTask(self._board.get(task_id).task, desk.agents.limits)
         self._role: Role | None = desk.agents.roles.get(self._work.task.role)
         self._stream_task: asyncio.Task[None] | None = None  # The agent's process, once launched.
-        self._inbox: asyncio.Queue[asyncio.Future[Reply] | _Proposal | Wake] = asyncio.Queue()
+        self._inbox: asyncio.Queue[_Claim | _Proposal | Wake] = asyncio.Queue()
         self._checking = asyncio.Lock()  # One verification step at a time.
         self._checks: set[asyncio.Task[tuple[bool, str]]] = set()  # The agent's, in flight.
         self._failure: Failure | None = None
@@ -153,9 +163,12 @@ class AgentRun:
         assert self._role is not None  # A run without its role ends before the agent starts.
         return self._role
 
-    async def run(self, before: object, root: str) -> Outcome:
+    async def run(self, before: object, root: str, within: Span | None = None) -> Outcome:
         """Launch the agent in ``root`` and see the task through; ``before`` is the tree's
-        state there beforehand."""
+        state there beforehand, and ``within``, if given, the span the agent's process is traced
+        under."""
+        if within is not None:
+            self._within = within
         task = self._work.task
         if self._role is None:
             message = f"No role named {task.role!r}."
@@ -230,18 +243,19 @@ class AgentRun:
             self._inbox.put_nowait("exited")
 
     async def _follow(self) -> AgentExitReason:
-        reason: AgentExitReason = "finished"
+        """Launch the agent's process and publish what it does, traced, until it ends; returns
+        how it exited, unless that's by raising."""
         launch = await self._desk.launch(
             self.agent, bootstrap_prompt(self.agent), self._work.task.settings, self._root
         )
         events = self._desk.agents.launcher.run_agent(launch)
-        async for event in events:
-            if isinstance(event, TurnFinished) and event.reason == "error":
-                reason = "crashed"
-            await self._publish(event)
-            if isinstance(event, TurnFinished) and event.usage is not None:
-                await self._count(event.usage)
-        return reason
+        with self._desk.traced(self.agent, self._within) as process:
+            async for event in events:
+                process.saw(event)
+                await self._publish(event)
+                if isinstance(event, TurnFinished) and event.usage is not None:
+                    await self._count(event.usage)
+        return process.reason
 
     async def _count(self, usage: Usage) -> None:
         """Add what one of the agent's turns cost to its task's total, unless the task was
@@ -269,8 +283,8 @@ class AgentRun:
             if item == "exited":
                 await self._exited(before)
                 return
-            if isinstance(item, asyncio.Future):
-                await self._verify(before, item)
+            if isinstance(item, _Claim):
+                await self._verify(before, item.answer, item.request)
             elif isinstance(item, _Proposal):
                 await self._consider(item)
 
@@ -285,9 +299,7 @@ class AgentRun:
         """Answer the calls left in the inbox once the run loop has stopped taking them."""
         while not self._inbox.empty():
             item = self._inbox.get_nowait()
-            if isinstance(item, asyncio.Future):
-                _cancel(item)
-            elif isinstance(item, _Proposal):
+            if isinstance(item, _Claim | _Proposal):
                 _cancel(item.answer)
 
     async def _exited(self, before: object) -> None:
@@ -312,21 +324,24 @@ class AgentRun:
         assert self._verifier is not None  # Only a verification failure records a state.
         return await self._verifier.fingerprint(self._root) == self._failed_state
 
-    async def _verify(self, before: object, claim: asyncio.Future[Reply] | None) -> None:
-        """Check the work, then answer ``claim`` (if the agent made one) with the verdict."""
+    async def _verify(
+        self, before: object, claim: asyncio.Future[Reply] | None, request: Span | None = None
+    ) -> None:
+        """Check the work, then answer ``claim`` (if the agent made one, in the call whose span is
+        ``request``) with the verdict."""
         try:
-            failure = await self._check(before)
+            failure = await self._check(before, request)
             reply = self._work.passed() if failure is None else await self._failed(failure)
         except BaseException as exc:
             _fail(claim, exc)
             raise
         _answer(claim, Reply(reply))
 
-    async def _check(self, before: object) -> Failure | None:
+    async def _check(self, before: object, request: Span | None) -> Failure | None:
         if self._verifier is None or not self.role.verify:
             return None
         async with self._checking:
-            return await self._verifier.check(self._task_id, before, self._root)
+            return await self._verifier.check(self._task_id, before, self._root, request)
 
     async def _failed(self, failure: Failure) -> str:
         reply = self._work.failed(*failure, can_check=self.role.runs_checks)
@@ -385,7 +400,7 @@ class AgentRun:
         if not claim.verify:
             return Reply(claim.reply or "", is_error=True)
         answer: asyncio.Future[Reply] = asyncio.get_running_loop().create_future()
-        self._inbox.put_nowait(answer)
+        self._inbox.put_nowait(_Claim(answer, current_span()))
         # Shielded: if the agent disconnects, the claim is still verified.
         return await asyncio.shield(answer)
 
@@ -405,8 +420,8 @@ class AgentRun:
 
     async def _checked(self, step: VerificationStep) -> Reply:
         """The result of running ``step`` for the agent, in a task the run stops if it ends
-        first."""
-        check = asyncio.create_task(self._run_one(step))
+        first, timed under the span of the agent's call, the current one."""
+        check = asyncio.create_task(self._run_one(step, current_span()))
         self._checks.add(check)
         # Kept until it has ended, not just the call, so the run's end waits for it.
         check.add_done_callback(self._checks.discard)
@@ -418,10 +433,10 @@ class AgentRun:
             return Reply("The run ended before the check finished.", is_error=True)
         return Reply(check_reply(step, passed, output))
 
-    async def _run_one(self, step: VerificationStep) -> tuple[bool, str]:
+    async def _run_one(self, step: VerificationStep, request: Span) -> tuple[bool, str]:
         assert self._verifier is not None  # Checks are refused without one.
         async with self._checking:
-            return await self._verifier.run_one(step, self._root)
+            return await self._verifier.run_one(step, self._root, request)
 
     async def _report_progress(self, arguments: dict[str, Any]) -> Reply:
         return await report_progress(self._publish, self.agent.id, self._task_id, arguments)
