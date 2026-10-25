@@ -40,6 +40,16 @@ from orbit.agent.domain.server import LocalTls, RunningServer, ServerSettings, T
 from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.domain.workspaces import PathKind
+from orbit.agent.external.certificates import (
+    CA_DAYS,
+    CERTIFICATE_DAYS,
+    CertificateError,
+    CertsDir,
+    KeyType,
+    issue_server,
+    make_ca,
+    server_names,
+)
 from orbit.agent.external.checks import run_step
 from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner
 from orbit.agent.external.cloner import Cloner
@@ -88,12 +98,16 @@ from orbit.agent.external.workspace_purge import StorePurging, forget_workspace,
 from orbit.agent.external.workspace_registry import WorkspaceRegistry
 
 __all__ = [
+    "CA_DAYS",
+    "CERTIFICATE_DAYS",
     "INVALID_CONFIG",
     "MODEL_ALIASES",
     "NO_STEPS_NOTE",
     "USER_CONFIG_FILE",
     "Agents",
     "Browsing",
+    "CertificateError",
+    "CertsDir",
     "ChecksProposal",
     "ClaudeCliRunner",
     "CloneFailed",
@@ -107,6 +121,7 @@ __all__ = [
     "GitCoderTree",
     "HostMaker",
     "ImportBlocked",
+    "KeyType",
     "Limits",
     "ListenFailed",
     "LocalDiscoveryUnavailable",
@@ -160,7 +175,9 @@ __all__ = [
     "git_top_level",
     "has_git_identity",
     "in_git_work_tree",
+    "issue_server",
     "local_tls",
+    "make_ca",
     "open_workspace",
     "open_workspace_store",
     "orbit_dir",
@@ -175,6 +192,7 @@ __all__ = [
     "resolve_state_dir",
     "run_step",
     "running_server",
+    "server_names",
     "tls_warnings",
     "top_level",
     "workspace_state",

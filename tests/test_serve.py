@@ -22,6 +22,9 @@ from typing import Any, cast
 
 import pytest
 import typer
+from cryptography import x509
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from typer.testing import CliRunner
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect as open_websocket
@@ -44,6 +47,7 @@ from orbit.agent import (
     WorkspaceRegistry,
 )
 from orbit.agent.domain.server import client_fingerprint, is_revoked
+from orbit.agent.external.certificates import CertsDir, PrivateKey, issue_client
 from orbit.agent.external.repository import in_git_work_tree
 from orbit.cli import app, backend, chat, serve
 from orbit.protocol import (
@@ -1144,6 +1148,33 @@ def test_serve_over_mtls_neither_needs_nor_makes_a_token_file(
 
     assert [type(e) for e in frontend.events] == ATTACHED
     assert not (config_dir / "token").exists()
+
+
+def _issuer(certs: CertsDir) -> tuple[x509.Certificate, PrivateKey]:
+    """The CA in ``certs`` and its key."""
+    key = load_pem_private_key(certs.ca_key.read_bytes(), password=None)
+    assert isinstance(key, ed25519.Ed25519PrivateKey)
+    return x509.load_pem_x509_certificate(certs.ca.read_bytes()), key
+
+
+def test_serve_over_mtls_as_certs_init_says_welcomes_a_client_its_ca_issued(
+    state: Path, config_dir: Path
+) -> None:
+    init = runner.invoke(app, ["certs", "init", "orbit.example.com", "10.0.0.5"])
+    assert init.exit_code == 0, init.output
+    table = init.stdout[init.stdout.index("[server]\n") :]
+    (config_dir / "config.toml").write_text(table[: table.index("\n\n") + 1] + "port = 0\n")
+    certs = CertsDir(config_dir)
+    client, client_key = issue_client(*_issuer(certs), "laptop")
+    certs.write(certs.client("laptop"), client)
+    certs.write_key(certs.client_key("laptop"), client_key)
+    trust = ssl.create_default_context(cafile=certs.ca)
+    trust.load_cert_chain(certs.client("laptop"), certs.client_key("laptop"))
+    frontend = Frontend(state, config_dir, trust=trust)
+    output = served(frontend)
+
+    assert [type(e) for e in frontend.events] == ATTACHED
+    assert "as CN=laptop (" in output
 
 
 def test_under_mtls_frontends_are_given_no_token_and_the_token_file_is_left_alone(

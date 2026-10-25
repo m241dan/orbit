@@ -59,7 +59,8 @@ ConfigDirOption = Annotated[
         "--config-dir",
         help="The directory of your own config.toml, whose [storage] sets what orbit keeps of"
         " sessions, [server] how orbit serve listens and [remotes] the control planes orbit chat"
-        " --remote joins, and of the token frontends show it"
+        " --remote joins, of the token frontends show it and of the certificates orbit certs"
+        " makes"
         " (default: $ORBIT_CONFIG_DIR, else $XDG_CONFIG_HOME/orbit, else ~/.config/orbit).",
     ),
 ]

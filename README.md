@@ -55,6 +55,7 @@ uv run orbit chat --local                      # run in-process even with orbit 
 uv run orbit status                            # what the orbit serve running here is doing
 uv run orbit status --remote work --json       # the same of another, as one JSON object
 uv run orbit token rotate                      # replace the token frontends show orbit serve
+uv run orbit certs init orbit.example.lan      # make a CA and a server certificate for TLS
 uv run orbit version                           # show the installed version
 ```
 
@@ -721,6 +722,7 @@ your checkout out of its way, it doesn't sandbox it.
 | Config files | `.orbit/config.toml` in the repository | the verification steps, setup, roles and limits, committed with your code |
 | User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]`, `[server]`, `[remotes]` and `[telemetry]` |
 | The token | `token` in the config directory | what frontends show `orbit serve` to connect (see [Serving the control plane](#serving-the-control-plane)) |
+| Certificates | `certs/` in the config directory | the CA, server certificate and keys `orbit certs` makes for TLS (see [Serving the control plane](#serving-the-control-plane)) |
 | The run file | `run/server.json` in the state directory | where the `orbit serve` running on that state directory listens, beside `run/serve.lock`, which that serve holds |
 | Runtime-owned | `~/.claude` | Claude Code's own: your login, read for usage limits, and the agents' conversations |
 
@@ -1322,7 +1324,32 @@ certificate expiring within 14 days starts it with a warning. In a container, mo
 certificate and key with the config directory (see [Hosting in a container](#hosting-in-a-container)). The certificate is read once, at
 start: to renew it, replace the files and restart `orbit serve`; frontends reconnect on their own.
 
-To make a private CA and a server certificate with openssl, naming the server's hostname (here
+`orbit certs init` makes a private CA and a server certificate it signs, for the hostnames and
+IP addresses frontends reach the server by (here `orbit.example.lan` and its address):
+
+```sh
+orbit certs init orbit.example.lan 192.168.1.20
+```
+
+It writes them to `certs/` in the config directory (`--config-dir` applies): `ca.pem` and
+`ca-key.pem`, the CA, and `server.pem` and `server-key.pem`, the server's certificate and key, the
+keys and `certs/` readable by you alone. The server certificate holds the names given, IP addresses
+as such, then `localhost` and `127.0.0.1`, so chats on the server's machine reach it too; with no
+names, it's for the machine's hostname. Keys are Ed25519; `--key-type p256` makes ECDSA P-256 keys
+instead, for a browser or load balancer in front that needs them. The CA is valid for 10 years and
+the server certificate for one, or `--days` (up to 3650; the CA stays 10 years). It leaves your
+`config.toml` alone, printing the `[server]` lines to put there for mutual TLS (`tls = "mtls"`, and
+`cert`, `key` and `client_ca` naming the files); for TLS without client certificates, use `tls =
+"tls"`, with `ca` in place of `client_ca`. Copy `ca.pem` to each client machine; `ca-key.pem` signs
+certificates the server trusts, so keep it secret.
+
+A second `init` stops with status 2, as a new CA would invalidate every client certificate the
+old one signed; `--force` replaces it. Any of the four files already there are first moved to
+`certs/old-<UTC timestamp>/`, so nothing is lost. A name that's neither a hostname nor an IP
+address stops it with status 2 before anything is moved, and files that can't be moved or
+written stop it with status 2, naming the file and the fix.
+
+Or, to make a private CA and a server certificate with openssl, name the server's hostname (here
 `orbit.example.lan`, and its address) as a subject alternative name, which clients check:
 
 ```sh

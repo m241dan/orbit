@@ -27,7 +27,7 @@ _BACKEND = (
 @pytest.mark.parametrize(
     ("args", "listed"),
     [
-        ([], ("chat", "serve", "status", "version", "db", "token")),
+        ([], ("chat", "serve", "status", "version", "db", "token", "certs")),
         (
             ["chat"],
             (*_BACKEND, *_CHAT),
@@ -38,6 +38,8 @@ _BACKEND = (
         (["db", "backup"], ("PATH", "--force", "--state-dir")),
         (["token"], ("rotate",)),
         (["token", "rotate"], ("--config-dir",)),
+        (["certs"], ("init",)),
+        (["certs", "init"], ("NAMES", "--key-type", "--days", "--force", "--config-dir")),
     ],
 )
 def test_help_lists_the_commands_and_options(args: list[str], listed: tuple[str, ...]) -> None:
