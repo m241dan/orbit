@@ -1,13 +1,14 @@
 """The task list."""
 
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Protocol
 
 from rich.cells import cell_len
 from rich.text import Text
 
-from orbit.protocol import ACTIVE_STATUSES, Activity, TaskState, Usage
+from orbit.protocol import ACTIVE_STATUSES, WORK_LANE, Activity, AgentEntry, TaskState, Usage
 from orbit.protocol import edit_refusal as shared_edit_refusal
 from orbit.tui.view.common import (
     CODER_WAIT,
@@ -52,32 +53,86 @@ def task_numbers(tasks: Sequence[TaskState]) -> list[str]:
     return numbers
 
 
+@dataclass(frozen=True)
+class RowNotes:
+    """What a task's row says that its task doesn't: that it's ``waiting`` for a coder, as
+    this note says, and the ``lane`` its role runs in, if known."""
+
+    waiting: str | None = None
+    lane: str | None = None
+
+
+NO_NOTES = RowNotes()
+
+
 def task_label(
     state: TaskState,
     number: str,
     frame: str,
     *,
     width: int | None = None,
-    waiting: str | None = None,
+    notes: RowNotes = NO_NOTES,
 ) -> Text:
-    """A row: number, status and title, with the settings lined up under the title, and
-    under them why the task ended, if it has a reason.
+    """A row: number, status, title and its lane's tag, with the settings lined up under the
+    title, and under them why the task ended, if it has a reason.
 
     Fix tasks are indented under the task they belong to. A running task shows the
-    spinner ``frame``. A pending task about to run says it's ``waiting`` for a coder, if
-    given. The reason's line is cut to ``width`` cells with an ellipsis, if given.
+    spinner ``frame``. A pending task about to run says it's waiting for a coder, if
+    ``notes`` say so, and they give the lane. The reason's line is cut to ``width`` cells with
+    an ellipsis, if given.
     """
     head = f"{number}. " if state.fixes is None else f"   {number} "
     icon = frame if state.status == "running" else STATUS_ICONS[state.status]
     # Long prompts (like fix tasks) are titled by their first line.
     title = split_prompt(state.task.prompt)[0]
-    label = Text(f"{head}{icon} {title}\n")
+    label = Text(f"{head}{icon} {title}")
+    label.append_text(lane_tag(notes.lane))
+    label.append("\n")
     indent = " " * (len(head) + cell_len(icon) + 1)
-    label.append(indent + _details(state, waiting), style="dim")
+    label.append(indent + _details(state, notes.waiting), style="dim")
     if state.reason:
         label.append("\n")
         label.append_text(_reason_line(f"{indent}↳ {state.reason}", width))
     return label
+
+
+def lane_tag(lane: str | None) -> Text:
+    """The dim tag after a row's title naming ``lane``, its role's; none for the work lane, or
+    a lane not known."""
+    if lane is None or lane == WORK_LANE:
+        return Text()
+    return Text(f"  {lane}", style="dim")
+
+
+def role_lanes(agents: Iterable[AgentEntry]) -> dict[str, str]:
+    """Each role among the catalog's ``agents``, with the lane it runs in, in their order."""
+    return {agent.name: agent.lane for agent in agents}
+
+
+def lanes_present(tasks: Iterable[TaskState], lanes: Mapping[str, str]) -> tuple[str, ...]:
+    """The lanes some of ``tasks`` run in, as ``lanes`` gives each role's, in its order; a role
+    it doesn't list has no lane."""
+    used = {lanes.get(state.task.role) for state in tasks}
+    return tuple(dict.fromkeys(lane for lane in lanes.values() if lane in used))
+
+
+def in_lane(
+    tasks: Sequence[TaskState], lanes: Mapping[str, str], lane: str | None
+) -> tuple[TaskState, ...]:
+    """Those of ``tasks`` whose role runs in ``lane``, as ``lanes`` gives each role's; all of
+    them for none."""
+    if lane is None:
+        return tuple(tasks)
+    return tuple(state for state in tasks if lanes.get(state.task.role) == lane)
+
+
+def next_lane(lane: str | None, present: Sequence[str]) -> str | None:
+    """The lane filter after ``lane``: the first of the lanes ``present`` after all (none),
+    each in turn, then all again after the last; all, too, after a lane no longer present."""
+    cycle = (None, *present)
+    if lane not in cycle:
+        return None
+    return cycle[(cycle.index(lane) + 1) % len(cycle)]
 
 
 def _details(state: TaskState, waiting: str | None) -> str:
@@ -206,9 +261,11 @@ def edit_refusal(state: TaskState) -> str | None:
     return None if refusal is None else refusal.message
 
 
-def task_list_title(*, held: bool) -> str:
-    """The task list's border title, which says when the list is held from following."""
-    return "Task list · held" if held else "Task list"
+def task_list_title(*, held: bool, lane: str | None = None) -> str:
+    """The task list's border title, which says when the list is held from following, and the
+    ``lane`` it's narrowed to, if any."""
+    parts = ["Task list", *(["held"] if held else []), *([lane] if lane is not None else [])]
+    return " · ".join(parts)
 
 
 def task_editor_title(*, new: bool) -> str:
@@ -311,37 +368,67 @@ class TaskBoard:
     tasks, telling the time for its spinners with ``clock``.
 
     It numbers the tasks and labels their rows at the view's width, the task about to run
-    saying when it waits for a coder, and redraws as the tasks change and while any runs. It
-    totals what the session's turns cost. While following, it scrolls to keep the active task
-    (``active_task``) in view; held, it stays where it is, until let go.
+    saying when it waits for a coder and each task its role's lane, and redraws as the tasks
+    change and while any runs. Narrowed to a lane, it shows just that lane's tasks, numbered
+    as on the whole list. It totals what the session's turns cost. While following, it
+    scrolls to keep the active task (``active_task``) in view; held, it stays where it is,
+    until let go.
     """
 
     def __init__(self, view: TaskBoardView, clock: Callable[[], float]) -> None:
         self._view = view
         self._clock = clock
         self.tasks: tuple[TaskState, ...] = ()
+        self.shown: tuple[TaskState, ...] = ()  # The tasks in the lane shown, all for none.
         self.numbers: list[str] = []
         self.numbers_by_id: dict[str, str] = {}
         self.session_usage = Usage()
         self.waiting: tuple[str, str] | None = None  # The task waiting for a coder, and its note.
+        self.lanes: dict[str, str] = {}  # Each role's lane, as the catalog lists them.
+        self.lane: str | None = None  # The lane the list is narrowed to, if any.
         self.following = True
 
     def start(self) -> None:
         """Show the list's title and its rows, following."""
-        self._view.show_title(task_list_title(held=False))
+        self._show_title()
         self.redraw()
 
     def show(self, tasks: Sequence[TaskState]) -> None:
-        """Show ``tasks``, turning their spinners while any runs and following the active one;
-        nothing for the tasks already shown."""
+        """Show ``tasks``, those in the lane shown, turning their spinners while any runs and
+        following the active one; nothing for the tasks already shown."""
         tasks = tuple(tasks)
         if tasks == self.tasks:
             return
         self.tasks, self.numbers = tasks, task_numbers(tasks)
         self.numbers_by_id = dict(zip((t.id for t in tasks), self.numbers, strict=True))
-        self.redraw()
+        self._narrow()
         self._view.keep_ticking(ticking(tasks))
+
+    def show_lanes(self, lanes: Mapping[str, str]) -> None:
+        """Tag each task with its role's lane as ``lanes`` gives it, and narrow the list by
+        them; nothing for the lanes already known."""
+        lanes = dict(lanes)
+        if lanes == self.lanes:
+            return
+        self.lanes = lanes
+        self._narrow()
+
+    def cycle_lane(self) -> None:
+        """Narrow the list to the next of the lanes its tasks run in, all of them once more
+        after the last, saying so in its title."""
+        self.lane = next_lane(self.lane, lanes_present(self.tasks, self.lanes))
+        self._show_title()
+        self._narrow()
+
+    def _narrow(self) -> None:
+        """Show the tasks in the lane shown, following the active one."""
+        self.shown = in_lane(self.tasks, self.lanes, self.lane)
+        self.redraw()
         self.follow()
+
+    def _show_title(self) -> None:
+        """Title the list with whether it's held and the lane it's narrowed to."""
+        self._view.show_title(task_list_title(held=not self.following, lane=self.lane))
 
     def show_waiting(self, waiting: tuple[str, str] | None) -> None:
         """Have the task ``waiting`` names say it waits for a coder as it says, or none do."""
@@ -351,22 +438,28 @@ class TaskBoard:
         self.redraw()
 
     def redraw(self) -> None:
-        """Label the tasks' rows afresh, as the spinners are now and at the view's width."""
+        """Label the shown tasks' rows afresh, as the spinners are now and at the view's
+        width."""
         frame, width = spinner_frame(self._clock()), self._view.row_width
-        waiting_id, note = self.waiting or (None, None)
         rows = [
             (
                 t.id,
-                task_label(t, n, frame, width=width, waiting=note if t.id == waiting_id else None),
+                task_label(t, self.numbers_by_id[t.id], frame, width=width, notes=self._notes(t)),
             )
-            for t, n in zip(self.tasks, self.numbers, strict=True)
+            for t in self.shown
         ]
         self._view.show_labels(rows, new_task_row())
 
+    def _notes(self, state: TaskState) -> RowNotes:
+        """What ``state``'s row says beyond its task: the wait for a coder, if it's the task
+        waiting, and its role's lane."""
+        waiting_id, note = self.waiting or (None, None)
+        return RowNotes(note if state.id == waiting_id else None, self.lanes.get(state.task.role))
+
     def follow(self) -> None:
-        """Scroll just enough to bring the active task into view, if following and the list
-        is measured; the highlight stays where it is."""
-        index = active_task(self.tasks)
+        """Scroll just enough to bring the active task shown into view, if following and the
+        list is measured; the highlight stays where it is."""
+        index = active_task(self.shown)
         if not self.following or index is None:
             return
         rows = self._view.row_lines()
@@ -379,20 +472,20 @@ class TaskBoard:
     def hold(self) -> None:
         """Stop following, so the list stays where the user put it."""
         self.following = False
-        self._view.show_title(task_list_title(held=True))
+        self._show_title()
 
     def let_go(self) -> None:
         """Follow the active task again, scrolling to it at once; nothing if not held."""
         if self.following:
             return
         self.following = True
-        self._view.show_title(task_list_title(held=False))
+        self._show_title()
         self.follow()
 
     def activated(self, focused: bool) -> None:
-        """Highlight the active task, if there is one, now the list is activated, if it took
-        the focus (``focused``), as a disabled list doesn't."""
-        index = active_task(self.tasks)
+        """Highlight the active task shown, if there is one, now the list is activated, if it
+        took the focus (``focused``), as a disabled list doesn't."""
+        index = active_task(self.shown)
         if focused and index is not None:
             self._view.highlight(index)
 
@@ -400,7 +493,7 @@ class TaskBoard:
     def highlighted_task(self) -> TaskState | None:
         """The task the highlight is on; none on the new-task row or with nothing highlighted."""
         index = self._view.highlighted
-        return self.tasks[index] if index is not None and index < len(self.tasks) else None
+        return self.shown[index] if index is not None and index < len(self.shown) else None
 
     def select(self) -> None:
         """Ask to edit the task highlighted, or a new task on the new-task row; nothing with

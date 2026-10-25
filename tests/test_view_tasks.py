@@ -1,7 +1,10 @@
 from rich.text import Text
 
 from orbit.protocol import (
+    CODER,
     REVIEW_ORIGIN,
+    REVIEWER,
+    AgentEntry,
     TaskSpec,
     TaskState,
     TaskStatus,
@@ -19,8 +22,13 @@ from orbit.tui.view.tasks import (
     active_task,
     edit_refusal,
     follow_top,
+    in_lane,
     join_prompt,
+    lane_tag,
+    lanes_present,
     new_task_row,
+    next_lane,
+    role_lanes,
     session_usage_subtitle,
     split_prompt,
     task_editor_title,
@@ -165,6 +173,71 @@ def test_a_tall_row_shows_from_its_top_when_the_view_is_too_short() -> None:
 def test_a_held_task_list_says_so_in_its_title() -> None:
     assert task_list_title(held=False) == "Task list"
     assert task_list_title(held=True) == "Task list · held"
+
+
+def test_a_task_list_narrowed_to_a_lane_names_it_in_its_title() -> None:
+    assert task_list_title(held=False, lane="review") == "Task list · review"
+    assert task_list_title(held=True, lane="review") == "Task list · held · review"
+
+
+def test_a_lane_other_than_work_is_a_dim_tag() -> None:
+    tag = lane_tag("review")
+    assert str(tag) == "  review"
+    assert tag.style == "dim"
+
+
+def test_the_work_lane_and_an_unknown_one_have_no_tag() -> None:
+    assert str(lane_tag("work")) == ""
+    assert str(lane_tag(None)) == ""
+
+
+def test_each_roles_lane_comes_from_the_catalogs_agents() -> None:
+    agents = (
+        AgentEntry(name=CODER, label="Coder", conversational=False),
+        AgentEntry(name=REVIEWER, label="Reviewer", conversational=False, lane="review"),
+    )
+    assert role_lanes(agents) == {CODER: "work", REVIEWER: "review"}
+
+
+def roled(*roles: str) -> list[TaskState]:
+    return [
+        TaskState(id=str(i), task=TaskSpec(prompt=str(i), role=role))
+        for i, role in enumerate(roles)
+    ]
+
+
+LANES = {"planner": "planner", CODER: "work", REVIEWER: "review", "security": "security"}
+
+
+def test_the_lanes_present_are_those_of_the_tasks_in_the_catalogs_order() -> None:
+    tasks = roled("security", REVIEWER, "security")
+    assert lanes_present(tasks, LANES) == ("review", "security")
+    assert lanes_present([*tasks, *roled(CODER)], LANES) == ("work", "review", "security")
+
+
+def test_a_role_the_catalog_does_not_list_has_no_lane_present() -> None:
+    assert lanes_present(roled("gone"), LANES) == ()
+
+
+def test_a_lane_keeps_just_its_tasks_and_no_lane_keeps_them_all() -> None:
+    tasks = roled(CODER, REVIEWER, "security", REVIEWER, "gone")
+    assert [t.id for t in in_lane(tasks, LANES, "review")] == ["1", "3"]
+    assert in_lane(tasks, LANES, None) == tuple(tasks)
+
+
+def test_the_lane_filter_cycles_from_all_through_each_lane_back_to_all() -> None:
+    present = ("review", "security")
+    assert next_lane(None, present) == "review"
+    assert next_lane("review", present) == "security"
+    assert next_lane("security", present) is None
+
+
+def test_the_lane_filter_stays_on_all_with_no_lanes_present() -> None:
+    assert next_lane(None, ()) is None
+
+
+def test_a_lane_filter_whose_lane_has_gone_goes_back_to_all() -> None:
+    assert next_lane("security", ("review",)) is None
 
 
 def test_the_task_editor_is_titled_for_a_new_task_or_an_edit() -> None:

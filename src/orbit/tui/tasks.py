@@ -20,8 +20,9 @@ class TaskList(ListPane):
 
     Like the prompt, it only takes focus once activated (``enter_list_mode``);
     then j/k move, enter edits a row, ``a`` accepts a draft, ``x`` removes a task, ``f`` shows
-    why a task ended and escape returns to window navigation. Its border shows what the
-    session's turns cost, and the task about to run says when it waits for a coder. While
+    why a task ended, ``L`` narrows it to the next lane and escape returns to window
+    navigation. Its border shows what the session's turns cost, the task about to run says
+    when it waits for a coder, and a task outside the work lane is tagged with its lane. While
     following, it scrolls to keep the active task in view; activating it or scrolling it with
     the mouse wheel holds it where it is, until the board lets go of it.
     """
@@ -66,6 +67,7 @@ class TaskList(ListPane):
         Binding("a", "accept", show=False),
         Binding("x", "remove", show=False),
         Binding("f", "show_reason", show=False),
+        Binding("L", "cycle_lane", show=False),
     ]
 
     def __init__(self, *, id: str) -> None:
@@ -123,6 +125,9 @@ class TaskList(ListPane):
 
     def action_show_reason(self) -> None:
         self.board.explain()
+
+    def action_cycle_lane(self) -> None:
+        self.board.cycle_lane()
 
     def show(self, tasks: Sequence[TaskState]) -> None:
         """Show ``tasks``; the highlight stays on its task, or on the new-task row.

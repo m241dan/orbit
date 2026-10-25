@@ -97,7 +97,7 @@ def test_a_snapshot_shows_its_tasks_before_its_transcript_and_its_usage_after() 
     ]
 
 
-def test_a_catalog_labels_the_triggers_and_pins_the_conversations_then_follows_workspaces() -> None:
+def test_a_catalog_labels_triggers_pins_conversations_tags_lanes_then_follows_workspaces() -> None:
     catalog = Catalog(workspaces=(), agents=(), triggers=(), lanes=())
 
     assert routed(catalog) == [
@@ -106,6 +106,7 @@ def test_a_catalog_labels_the_triggers_and_pins_the_conversations_then_follows_w
         "prompt.show_target",
         "prompt.show_busy",
         "tabs.pin",
+        "task_list.show_lanes",
         "navigation.follow_catalog",
         "transcript.show_session",
         "viewing.show",

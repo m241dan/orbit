@@ -5,9 +5,12 @@ from textual.pilot import Pilot
 
 from orbit.agent import WorkspaceHost
 from orbit.protocol import (
+    CODER,
+    REVIEWER,
     AcceptTask,
     ActivateSession,
     Activity,
+    AgentEntry,
     Catalog,
     RemoveTask,
     SessionSummary,
@@ -22,9 +25,16 @@ from orbit.tui import OrbitApp
 from orbit.tui.sessions import SessionsScreen
 from orbit.tui.tasks import TaskList
 from orbit.tui.view.common import spinner_frame
-from orbit.tui.view.tasks import coder_wait_row, task_label, task_numbers, usage_label
+from orbit.tui.view.tasks import (
+    RowNotes,
+    coder_wait_row,
+    task_label,
+    task_numbers,
+    usage_label,
+)
 from orbit.tui.widgets import ChatPrompt
 from tests.agent_fakes import frontend
+from tests.session_apps import CATALOG
 from tests.tui_fakes import (
     FakeSession,
     board,
@@ -129,14 +139,29 @@ def test_a_long_reason_is_cut_to_the_width_with_an_ellipsis() -> None:
 
 def test_a_pending_task_waiting_for_a_coder_says_so_after_its_settings() -> None:
     state = TaskState(id="1", task=TaskSpec(prompt="go"))
-    label = task_label(state, "2", "◠ ", waiting="⏳ waiting: 3 coders busy")
+    label = task_label(state, "2", "◠ ", notes=RowNotes(waiting="⏳ waiting: 3 coders busy"))
     assert str(label) == "2. ⏳ go\n      default · restricted · ⏳ waiting: 3 coders busy"
 
 
 def test_a_task_that_started_no_longer_says_it_waits() -> None:
     state = TaskState(id="1", task=TaskSpec(prompt="go"), status="running")
-    label = task_label(state, "2", "◠ ", waiting="⏳ waiting: 3 coders busy")
+    label = task_label(state, "2", "◠ ", notes=RowNotes(waiting="⏳ waiting: 3 coders busy"))
     assert str(label) == "2. ◠  go\n      default · restricted"
+
+
+def test_a_task_in_a_lane_other_than_work_shows_it_as_a_dim_tag_after_its_title() -> None:
+    state = TaskState(id="1", task=TaskSpec(prompt="Review it", role="reviewer"))
+    label = task_label(state, "1", "◠ ", notes=RowNotes(lane="review"))
+    assert str(label) == "1. ⏳ Review it  review\n      default · restricted"
+    tag_start = str(label).index("review\n")
+    assert any(span.style == "dim" and span.start <= tag_start < span.end for span in label.spans)
+
+
+def test_a_task_in_the_work_lane_or_an_unknown_one_shows_no_tag() -> None:
+    state = TaskState(id="1", task=TaskSpec(prompt="go"))
+    for lane in ("work", None):
+        label = task_label(state, "1", "◠ ", notes=RowNotes(lane=lane))
+        assert str(label) == "1. ⏳ go\n      default · restricted"
 
 
 def waiting(busy: int | None) -> tuple[Activity, ...]:
@@ -591,3 +616,64 @@ async def test_switching_session_through_ctrl_p_while_the_list_is_active_leaves_
         assert task_list.following
         assert title(task_list) == "Task list"
         assert in_view(task_list, 25)
+
+
+LANED = CATALOG.model_copy(
+    update={
+        "agents": (
+            AgentEntry(name=CODER, label="Coder", conversational=False),
+            AgentEntry(name=REVIEWER, label="Reviewer", conversational=False, lane="review"),
+            AgentEntry(name="security", label="security", conversational=False, lane="security"),
+        )
+    }
+)
+"""A catalog listing the coder, in lane work, the reviewer, in review, and a security role, in
+its own lane."""
+
+
+def in_roles(*roles: str) -> TasksChanged:
+    """A board whose tasks have ids "1", "2", …, each in the role given and prompted with its
+    name."""
+    return TasksChanged(
+        tasks=tuple(
+            TaskState(id=str(i), task=TaskSpec(prompt=role, role=role))
+            for i, role in enumerate(roles, 1)
+        )
+    )
+
+
+def titles(task_list: TaskList) -> list[str]:
+    """The first line of each row ``task_list`` shows."""
+    return [row.split("\n")[0] for row in shown_rows(task_list)]
+
+
+async def test_a_review_tasks_row_shows_its_lane_and_a_coder_tasks_none() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, LANED, in_roles(CODER, REVIEWER))
+        assert shown_rows(app.query_one(TaskList))[:2] == [
+            "1. ⏳ coder\n      default · restricted",
+            "2. ⏳ reviewer  review\n      default · restricted",
+        ]
+
+
+async def test_l_in_list_mode_cycles_the_lane_filter_through_the_lanes_present() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        await feed_events(session, pilot, LANED, in_roles("security", REVIEWER))
+        await open_task_list(pilot)
+        seen: list[tuple[str, list[str]]] = []
+        for _ in range(3):
+            await pilot.press("L")
+            seen.append((title(task_list), titles(task_list)))
+        assert seen == [
+            ("Task list · held · review", ["2. ⏳ reviewer  review", "+ new task"]),
+            ("Task list · held · security", ["1. ⏳ security  security", "+ new task"]),
+            (
+                "Task list · held",
+                ["1. ⏳ security  security", "2. ⏳ reviewer  review", "+ new task"],
+            ),
+        ]

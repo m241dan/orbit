@@ -1,6 +1,6 @@
 """The task list's board without the widget showing it: its rows and numbers, its spinners,
 following the active task, holding and letting go, the tasks the user picks, the session's
-total and the wait for a coder."""
+total, the wait for a coder and the lanes, as tags and a filter."""
 
 from rich.cells import cell_len
 
@@ -525,3 +525,137 @@ def test_find_gives_the_task_with_an_id_on_the_list() -> None:
     one, two = board("one", "two")
     tasks.show((one, two))
     assert (tasks.find("2"), tasks.find("3")) == (two, None)
+
+
+LANES = {"coder": "work", "reviewer": "review", "security": "security"}
+
+
+def in_roles(*roles: str, status: TaskStatus = "pending") -> tuple[TaskState, ...]:
+    """Tasks with ids "1", "2", …, each in the role given and prompted with its name."""
+    return tuple(
+        TaskState(id=str(i), task=TaskSpec(prompt=role, role=role), status=status)
+        for i, role in enumerate(roles, 1)
+    )
+
+
+def narrowed(*roles: str, lanes: int = 1) -> tuple[TaskBoard, TaskView]:
+    """A started board of tasks in ``roles``, knowing :data:`LANES`, with the lane filter moved
+    on ``lanes`` times."""
+    tasks, view = started()
+    tasks.show_lanes(LANES)
+    tasks.show(in_roles(*roles))
+    for _ in range(lanes):
+        tasks.cycle_lane()
+    return tasks, view
+
+
+def test_a_review_task_shows_its_lane_once_the_lanes_are_known_and_a_coder_task_none() -> None:
+    tasks, view = started()
+    tasks.show(in_roles("coder", "reviewer"))
+    assert view.rows[1] == "2. ⏳ reviewer\n      default · restricted"
+    tasks.show_lanes(LANES)
+    assert view.rows[:2] == [
+        "1. ⏳ coder\n      default · restricted",
+        "2. ⏳ reviewer  review\n      default · restricted",
+    ]
+
+
+def test_the_same_lanes_again_leave_the_board_alone() -> None:
+    tasks, view = started()
+    tasks.show(in_roles("reviewer"))
+    tasks.show_lanes(LANES)
+    redraws = view.redraws
+    tasks.show_lanes(dict(LANES))
+    assert view.redraws == redraws
+
+
+def test_cycling_the_lanes_goes_from_all_through_each_lane_back_to_all() -> None:
+    tasks, view = narrowed("security", "reviewer", "security", lanes=0)
+    tasks.cycle_lane()
+    assert (view.title, view.keys) == ("Task list · review", ["2", None])
+    tasks.cycle_lane()
+    assert (view.title, view.keys) == ("Task list · security", ["1", "3", None])
+    tasks.cycle_lane()
+    assert (view.title, view.keys) == ("Task list", ["1", "2", "3", None])
+
+
+def test_the_work_lane_is_cycled_through_when_its_tasks_are_listed() -> None:
+    tasks, view = narrowed("reviewer", "coder", lanes=0)
+    titles: list[str] = []
+    for _ in range(3):
+        tasks.cycle_lane()
+        titles.append(view.title)
+    assert titles == ["Task list · work", "Task list · review", "Task list"]
+
+
+def test_with_no_lanes_known_the_list_stays_whole() -> None:
+    tasks, view = started()
+    tasks.show(in_roles("coder", "reviewer"))
+    tasks.cycle_lane()
+    assert (view.title, view.keys) == ("Task list", ["1", "2", None])
+
+
+def test_a_narrowed_list_held_says_both() -> None:
+    tasks, view = narrowed("reviewer")
+    tasks.hold()
+    assert view.title == "Task list · held · review"
+    tasks.let_go()
+    assert view.title == "Task list · review"
+
+
+def test_a_narrowed_list_keeps_the_numbers_of_the_whole_list() -> None:
+    tasks, view = narrowed("coder", "reviewer", lanes=2)
+    assert view.rows == ["2. ⏳ reviewer  review\n      default · restricted", "+ new task"]
+    assert tasks.numbers_by_id == {"1": "1", "2": "2"}
+    assert tasks.find("1") is not None
+
+
+def test_a_narrowed_list_picks_tasks_among_the_rows_it_shows() -> None:
+    tasks, view = narrowed("coder", "reviewer", "reviewer", lanes=2)
+    view.highlighted = 1
+    tasks.select()
+    tasks.remove()
+    view.highlighted = 2  # The new-task row.
+    tasks.select()
+    assert view.edits == [tasks.tasks[2], None]
+    assert view.removed == ["3"]
+
+
+def test_a_narrowed_list_explains_a_task_by_its_number_on_the_whole_list() -> None:
+    tasks, view = started()
+    tasks.show_lanes(LANES)
+    coder, review = in_roles("coder", "reviewer")
+    failed = review.model_copy(update={"status": "error", "reason": "boom"})
+    tasks.show((coder, failed))
+    tasks.cycle_lane()
+    tasks.cycle_lane()
+    view.highlighted = 0
+    tasks.explain()
+    assert view.whys == [(failed, "2")]
+
+
+def test_a_narrowed_list_follows_and_highlights_the_active_task_among_its_rows() -> None:
+    tasks, view = started(height=4)
+    tasks.show_lanes(LANES)
+    reviews = in_roles(*["reviewer"] * 5)
+    running = reviews[4].model_copy(update={"status": "running"})
+    tasks.show((*in_roles("coder", status="running"), *reviews[1:4], running))
+    tasks.cycle_lane()
+    tasks.cycle_lane()
+    assert view.title == "Task list · review"
+    assert in_view(view, 3)
+    activate(tasks, view)
+    assert view.highlighted == 3
+
+
+def test_tasks_changing_on_a_narrowed_list_show_only_those_in_its_lane() -> None:
+    tasks, view = narrowed("reviewer")
+    tasks.show(in_roles("reviewer", "coder", "reviewer"))
+    assert view.keys == ["1", "3", None]
+
+
+def test_lanes_changing_on_a_narrowed_list_narrow_it_afresh() -> None:
+    tasks, view = narrowed("reviewer", "security")
+    tasks.show_lanes({**LANES, "security": "review"})
+    assert view.keys == ["1", "2", None]
+    assert view.rows[1] == "2. ⏳ security  review\n      default · restricted"

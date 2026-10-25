@@ -80,7 +80,7 @@ In the app:
 | `i` | Jump to the prompt, which talks to the conversational role whose tab is shown, or the planner on any other tab, and start typing (vim-style insert mode): long text wraps and the box grows up to 8 lines, then scrolls; `enter` sends, pasted text keeps its newlines, `esc` stops typing |
 | `enter` | On the conversation: activate it (`j`/`k` move between entries, `k` on the first loading earlier ones, `enter` collapses or expands the one marked `▌` in the left gutter, or opens the detail pane on a tool call or request, `J`/`K` scroll the open detail pane, `y` copies its call's whole output, `tab` activates it, `esc` closes the detail pane if it's open, else leaves and holds the marked entry); again, resume at the held entry |
 | `enter` | On the conversation's detail pane: activate it (`j`/`k` scroll it, `y` copies its call's whole output, `esc` leaves with the pane still open) |
-| `enter` | On the task list: activate and hold it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `f` shows why a task failed or stopped, `esc` leaves, the list still held) |
+| `enter` | On the task list: activate and hold it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `f` shows why a task failed or stopped, `L` narrows it to each lane its tasks run in, in turn, then shows them all again, `esc` leaves, the list still held) |
 | `enter` | On the agents pane: activate it (`j`/`k` move, `c` cancels the highlighted agent's work, `esc` leaves) |
 | `enter` | On the prompt, while viewing a session read-only: ask whether to make it the active session (see [Sessions](#sessions)) |
 | `t` | Hide agents' dim messages, still thinking out loud, in every tab; again, show them (works with the conversation activated too) |
@@ -309,6 +309,13 @@ leaves the list still held, with its highlight where it was; `esc` again, with t
 selected, lets go: the list scrolls to the running task at once and follows it again. Switching
 sessions lets go too, leaving list mode if the list was active.
 [docs/task-list.md](docs/task-list.md) records the requirements.
+
+A task whose role runs in a lane other than `work` shows the lane as a dim tag after its title
+(`2. ⏳ Review the change  review`); a coder task shows none (see `lane` under
+[Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)). With the list active, `L` narrows
+it to one lane: all tasks, then each lane its tasks run in, in the order the roles are listed,
+then all again. While narrowed, only that lane's tasks show, still numbered as on the whole list,
+and the title names the lane: `Task list · review`, or `Task list · held · review` while held.
 
 With the list active, `f` on a task that failed, gave up or stopped opens a modal saying why in
 full, titled `Why task 3 failed` (or `stopped`, for a cancelled task): the reason on the row's
@@ -1015,11 +1022,7 @@ none names changes nothing; one that's missing or can't be read is refused, nami
 the role.
 
 A role also says which lane runs it, where it works, whether you talk to it, whether its work
-merges, whether it's enabled and how hard its agents think. Its `lane` takes effect, as do
-`merge` in choosing the lane that runs on `ctrl+r`, `enabled`, `conversation` and `effort`, and its
-`workspace` decides whether its tasks count toward `max_coders` (see Taking turns under
-[Serving the control plane](#serving-the-control-plane)); the rest are **accepted now; take effect
-in a later version**: orbit loads and checks them, but nothing acts on them yet.
+merges, whether it's enabled and how hard its agents think:
 
 - `lane`: the lane that runs the role's agents, a plain name of letters, digits, `-` and `_`. Each
   lane of the enabled roles that aren't conversational runs one task at a time, the next on the
@@ -1029,20 +1032,25 @@ in a later version**: orbit loads and checks them, but nothing acts on them yet.
   (added, accepted or edited), and `ctrl+r` runs what waits there too; stopping it, with `c` in
   the agents pane or the protocol's `CancelTurn`, stops just its task, and the lane goes on with
   the next. While the work lane waits out Claude's usage limit or an outage, no lane starts a
-  task; they start again with it, or once `ctrl+s` cancels its wait. Until a role's `workspace`
-  takes effect, a task in a lane other than the work lane runs in a read-only snapshot of the
-  base commit, as reviews do (in place outside a git repository). Each lane shows in the
-  Snapshot's `busy`, by name.
+  task; they start again with it, or once `ctrl+s` cancels its wait. Each lane shows in the
+  Snapshot's `busy`, by name. On the task list, a task in a lane other than `work` is tagged with
+  its lane, and `L` narrows the list to each lane in turn (see [Tasks](#tasks)).
 - `workspace`: where its agent works: `worktree` (the coder's separate worktree, the only one whose
-  work can merge), `snapshot` (a read-only snapshot of the base commit), `checkout` (your checkout,
-  read in place) or `none` (an empty temporary directory).
+  work can merge), `snapshot` (a fresh read-only snapshot of the base commit, made for each run and
+  dropped after it), `checkout` (your checkout, read in place) or `none` (an empty temporary
+  directory, made for each run and removed after it, however the run ends). Outside a git
+  repository, or with `--no-worktree`, `worktree` and `snapshot` work in place. Tasks in
+  a role with `workspace = "worktree"` count toward `max_coders` (see Taking turns under
+  [Serving the control plane](#serving-the-control-plane)).
 - `conversation`: whether you talk to it, as you do the planner, rather than it taking tasks.
   Each enabled conversational role has a seat of its own: its own conversation, which the session
   saves and carries on when you open it again, and which resetting it ends alone; its own model,
   tool access and effort, saved with the session; and its turns in its own lane, so it answers
   while the planner does. It's listed as conversational in the Catalog, and its lane in the
-  Catalog's lanes and the Snapshot's `busy`. Each has a pinned tab after the built-in roles',
-  which `ctrl+t` reaches after the planner's; on it, the prompt talks to that role, `ctrl+x` stops
+  Catalog's lanes and the Snapshot's `busy`. Each has a pinned tab after the built-in roles':
+  `ctrl+t`, which with the built-in roles alone toggles the planner's tab, goes to the planner's
+  tab, then each other conversational role's in turn, then back to the tab you were on. On a
+  conversational role's tab, the prompt talks to that role, `ctrl+x` stops
   its turn, `ctrl+n` resets it (its role isn't read again, unlike the planner's), and `ctrl+o`,
   `ctrl+l` and `ctrl+y` pick its settings. The protocol's `SendMessage`, `ResetConversation`,
   `CancelTurn` and `UpdateSettings` reach it too (see [docs/protocol.md](docs/protocol.md)).
@@ -1065,6 +1073,12 @@ in a later version**: orbit loads and checks them, but nothing acts on them yet.
   no flag is passed and the CLI's default applies. `CLAUDE_CODE_EFFORT_LEVEL` is removed from
   every agent's environment, so one set where orbit runs never overrides orbit's setting or the
   CLI's default.
+
+In the TUI, the task editor's **Role** field picks a task's role among the enabled roles that
+aren't conversational, each shown with its lane (`Coder · work`), and fills in the role's model,
+tool access and effort; its **Effort** field sets the task's own effort, or leaves it unset for the
+role's (see [Tasks](#tasks)). `ctrl+y` picks the effort of the conversational role whose tab is
+shown, or the planner's elsewhere, as `ctrl+o` and `ctrl+l` pick its model and tool access.
 
 The `coder` works in lane `work` in a `worktree` and merges; the `configurator` works in `work` in
 a `worktree` and doesn't merge; the `reviewer` and `super-reviewer` work in `review` on a
