@@ -1712,15 +1712,16 @@ key = "~/.config/orbit/certs/laptop/laptop-key.pem"
 ```
 
 `url` is `wss://` with the server certificate's first name (the first name given to `init` or
-`server`) and `port` in `[server]` (7433 unless set), or the URL `--url` gives, such as `--url
-wss://orbit.example.com:9000` for a proxy in front. These stop it with status 2 before anything
-is issued: no `server.pem` without `--url` (naming `--url`), `--url` without `--bundle`, an
-invalid `config.toml`, and a file already at the bundle's path, which `--force` replaces
-(issuing a new certificate for a client that has one, as above). A bundle that can't be written
-stops it with status 2 once the pair is written, naming the file. Copy the bundle to the client
-machine over a trusted channel, unpack it into the directory its `remote.toml` names, keeping the
-files' permissions (`tar -p`), add its lines to the client's `config.toml`, and connect by the
-remote's name:
+`server`) and `port` in `[server]` (7433 unless set), or the `wss://` URL `--url` gives, such as
+`--url wss://orbit.example.com:9000` for a proxy in front. These stop it with status 2 before
+anything is issued: no `server.pem` without `--url` (naming `--url`), `--url` without
+`--bundle`, a `--url` that isn't `wss://` (`ws://` too, as the client certificate works over TLS
+alone), an invalid `config.toml`, and a file already at the bundle's path, which `--force`
+replaces (issuing a new certificate for a client that has one, as above). A bundle that can't be
+written stops it with status 2 once the pair is written, naming the file. Copy the bundle to the
+client machine over a trusted channel, unpack it into the directory its `remote.toml` names,
+keeping the files' permissions (`tar -p`), add its lines to the client's `config.toml`, and
+connect by the remote's name:
 
 ```sh
 scp laptop.tar laptop.lan:                      # on the server, to the laptop
@@ -2574,7 +2575,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     given their instructions, which of a role's fields go together, and the tasks orbit queues in
     them), `config` (`OrbitConfig`: the
     limits, roles, verification steps and setup a project file sets over the built-in defaults), `layers` (the layers a setting comes from, the user config's role fields and personal roles, and each role resolved across them field by field), `config_report` (what `orbit config show` reports: each setting in effect by its dotted key with the layer it came from, and a key's settings), `config_update` (what `orbit init --update` adds to a project file from the reference config: the keys a table it has doesn't mention, after the table's last line, and the tables it lacks, at the end, never changing a line of it; and the lines `orbit init --roles` adds, pointing each built-in role at its copy of its instructions; and the checks the configurator writes, in place of a file's steps and setup without changing its other lines, or of the reference config's examples of them) and `config_errors` (`ConfigError`,
-    and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]` with its `TlsSettings`, which files each TLS mode needs, where now falls in a certificate's validity, and which hosts are loopback), `certificate_list` (what `orbit certs list` shows of each certificate: its expiry, days left, fingerprint and marks), `client_bundle` (what `orbit certs client --bundle` puts in a client's bundle: the CA, its certificate and key, and the `[remotes.<name>]` lines naming them where it's unpacked), `remotes` (`RemoteSettings`, a `[remotes.<name>]` table, and which credentials go together), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
+    and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]` with its `TlsSettings`, which files each TLS mode needs, where now falls in a certificate's validity, and which hosts are loopback), `certificate_list` (what `orbit certs list` shows of each certificate: its expiry, days left, fingerprint and marks), `client_bundle` (what `orbit certs client --bundle` puts in a client's bundle: the CA, its certificate and key, and the `[remotes.<name>]` lines naming them where it's unpacked, which connect to a `wss://` URL alone), `remotes` (`RemoteSettings`, a `[remotes.<name>]` table, and which credentials go together), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
     setup step that makes a fresh worktree ready, and the checks a configurator proposes), the
     `Catalog` (in `catalog`: the workspace and its sessions, the agents' roles, the triggers and
     the lanes), `ReviewPlanner` (in `reviews`: when to review, batches, rounds and caps), commit

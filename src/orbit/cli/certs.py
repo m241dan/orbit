@@ -26,6 +26,7 @@ from orbit.agent import (
     certificate_pem,
     client_bundle,
     fingerprint,
+    is_bundle_url,
     issue_client,
     issue_server,
     key_pem,
@@ -50,6 +51,10 @@ CLIENT_EXISTS = (
 REVOKE_OLD = "Add {fingerprint} to [server] revoked to stop the old certificate working."
 BUNDLE_EXISTS = "{path} exists; use --force to replace it, or give --bundle another file."
 URL_WITHOUT_BUNDLE = "--url sets the URL in the bundle's remote.toml, so it needs --bundle."
+URL_NOT_WSS = (
+    "--url {url} isn't a wss:// URL; the bundle's client certificate works over TLS alone, so"
+    " give one such as wss://orbit.example.com:9000."
+)
 NO_CERTIFICATES = (
     "There are no certificates in {directory}; make a CA and a server certificate with orbit"
     " certs init."
@@ -134,7 +139,7 @@ UrlOption = Annotated[
     str | None,
     typer.Option(
         "--url",
-        help="The URL the bundle's remote.toml connects to (default: wss://, the server"
+        help="The wss:// URL the bundle's remote.toml connects to (default: wss://, the server"
         " certificate's first name and the port in [server]).",
         show_default=False,
     ),
@@ -261,8 +266,8 @@ def _bundle_target(
     ``config``'s ``[server]``.
 
     Exits with status 2 if ``url`` is given without ``bundle``, ``bundle`` exists and isn't to
-    be replaced by ``force``, or the config is invalid; raises :class:`CertificateError` if
-    the server certificate is needed and missing or can't be read.
+    be replaced by ``force``, ``url`` isn't a ``wss://`` one, or the config is invalid; raises
+    :class:`CertificateError` if the server certificate is needed and missing or can't be read.
     """
     if bundle is None:
         if url is not None:
@@ -272,7 +277,22 @@ def _bundle_target(
     if bundle.exists() and not force:
         typer.echo(BUNDLE_EXISTS.format(path=bundle), err=True)
         raise typer.Exit(2)
-    return bundle, _server_url(certs, config) if url is None else url
+    return bundle, _bundle_url(certs, config, url)
+
+
+def _bundle_url(certs: CertsDir, config: Path, url: str | None) -> str:
+    """The URL the bundle's remote connects to: ``url``, else the first name of the server
+    certificate in ``certs`` on the port in ``config``'s ``[server]``.
+
+    Exits with status 2 if ``url`` isn't a ``wss://`` one, or the config is invalid; raises
+    :class:`CertificateError` if the server certificate is needed and missing or can't be read.
+    """
+    if url is None:
+        return _server_url(certs, config)
+    if not is_bundle_url(url):
+        typer.echo(URL_NOT_WSS.format(url=url), err=True)
+        raise typer.Exit(2)
+    return url
 
 
 def _server_url(certs: CertsDir, config: Path) -> str:

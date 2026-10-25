@@ -36,6 +36,7 @@ from orbit.agent.domain.client_bundle import (
     bundle_directory,
     bundle_url,
     client_bundle,
+    is_bundle_url,
 )
 from orbit.agent.domain.config import LIMIT_KEYS, OrbitConfig
 from orbit.agent.domain.config_errors import INVALID_CONFIG, ConfigError
@@ -235,6 +236,7 @@ __all__ = [
     "in_git_work_tree",
     "init_config",
     "instructions_setting",
+    "is_bundle_url",
     "issue_client",
     "issue_server",
     "key_pem",

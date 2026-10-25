@@ -40,6 +40,12 @@ def bundle_url(server_name: str, port: int) -> str:
     return f"wss://{netloc(server_name, port)}"
 
 
+def is_bundle_url(url: str) -> bool:
+    """Whether ``url`` can go in a bundle's remote: a ``wss://`` one, as the client certificate
+    the bundle carries works over TLS alone."""
+    return url.startswith("wss://")
+
+
 def client_bundle(
     name: str, ca: str, certificate: str, key: str, url: str
 ) -> tuple[BundledFile, ...]:

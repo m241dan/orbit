@@ -3,7 +3,9 @@ the ``[remotes.<name>]`` lines that connect with them once unpacked on the clien
 
 import tomllib
 
-from orbit.agent.domain.client_bundle import BundledFile, bundle_url, client_bundle
+import pytest
+
+from orbit.agent.domain.client_bundle import BundledFile, bundle_url, client_bundle, is_bundle_url
 
 CA = "-----BEGIN CERTIFICATE-----\nca\n-----END CERTIFICATE-----\n"
 CERTIFICATE = "-----BEGIN CERTIFICATE-----\nlaptop\n-----END CERTIFICATE-----\n"
@@ -69,3 +71,23 @@ def test_the_default_url_is_wss_to_the_server_name_on_the_port() -> None:
 
 def test_the_default_url_puts_an_ipv6_address_in_brackets() -> None:
     assert bundle_url("::1", 7433) == "wss://[::1]:7433"
+
+
+@pytest.mark.parametrize("url", ["wss://orbit.example.com:9000", "wss://[::1]:7433", "wss://box"])
+def test_a_wss_url_can_go_in_a_bundle(url: str) -> None:
+    assert is_bundle_url(url)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "orbit.example.com:9000",
+        "https://orbit.example.com",
+        "ws://orbit.example.com:7433",
+        "WSS://orbit.example.com:9000",
+        " wss://orbit.example.com:9000",
+        "",
+    ],
+)
+def test_a_url_without_tls_or_a_scheme_cant_go_in_a_bundle(url: str) -> None:
+    assert not is_bundle_url(url)

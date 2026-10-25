@@ -190,6 +190,23 @@ def test_url_without_bundle_is_refused_issuing_nothing(certs: CertsDir, config_d
     assert not (certs.path / "clients").exists()
 
 
+@pytest.mark.parametrize(
+    "url", ["orbit.example.com:9000", "https://orbit.example.com", "ws://orbit.example.com:7433"]
+)
+def test_a_url_that_isnt_wss_is_refused_issuing_nothing(
+    certs: CertsDir, config_dir: Path, bundle: Path, url: str
+) -> None:
+    result = _certs(config_dir, "client", "laptop", "--bundle", str(bundle), "--url", url)
+
+    assert result.exit_code == 2
+    assert result.stderr == (
+        f"--url {url} isn't a wss:// URL; the bundle's client certificate works over TLS alone,"
+        " so give one such as wss://orbit.example.com:9000.\n"
+    )
+    assert not (certs.path / "clients").exists()
+    assert not bundle.exists()
+
+
 def test_the_default_url_without_a_server_certificate_is_refused_naming_url(
     certs: CertsDir, config_dir: Path, bundle: Path
 ) -> None:
