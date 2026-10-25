@@ -80,6 +80,15 @@ def removing_once_finished(board: TaskBoard, task_id: str) -> Changed:
     return save
 
 
+async def cancel_once_landed(lane: WorkLane, held: Gate) -> None:
+    """Run ``lane`` and cancel it once ``held`` holds the board with its task completed: once
+    the task has landed, but before the run has reported it."""
+    run = asyncio.create_task(lane.run())
+    await asyncio.wait_for(held.reached.wait(), 5)
+    run.cancel()
+    await asyncio.gather(run, return_exceptions=True)
+
+
 async def run_reused(lane: WorkLane, tasks: Tasks, task_id: str) -> None:
     """Run ``lane`` once ``tasks``' board is emptied, as for a new session, and given a task
     that reuses id ``task_id``."""
@@ -108,10 +117,7 @@ async def test_a_reused_id_after_a_cancelled_landing_reports_it_ended_not_the_ol
     tasks = Tasks(TaskBoard(), held)
     task_id = tasks.board.add(TaskSpec(prompt="a"))
     lane, review = lane_for(held, tasks, claims_done, gives_up)
-    run = asyncio.create_task(lane.run())
-    await asyncio.wait_for(held.reached.wait(), 5)
-    run.cancel()
-    await asyncio.gather(run, return_exceptions=True)
+    await cancel_once_landed(lane, held)
 
     await run_reused(lane, tasks, task_id)
 
@@ -119,10 +125,11 @@ async def test_a_reused_id_after_a_cancelled_landing_reports_it_ended_not_the_ol
 
 
 async def test_after_a_reset_a_reused_id_that_lands_nothing_reports_it_ended() -> None:
-    tasks = Tasks(TaskBoard(), quiet)
+    held = Gate(completed)
+    tasks = Tasks(TaskBoard(), held)
     task_id = tasks.board.add(TaskSpec(prompt="a"))
-    lane, review = lane_for(quiet, tasks, claims_done, gives_up)
-    assert await asyncio.wait_for(lane.run(), 5) == "finished"
+    lane, review = lane_for(held, tasks, claims_done, gives_up)
+    await cancel_once_landed(lane, held)
 
     lane.reset()
     await run_reused(lane, tasks, task_id)

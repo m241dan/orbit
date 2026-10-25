@@ -28,9 +28,7 @@ from orbit.protocol import (
     Attach,
     Catalog,
     CommandAccepted,
-    CommandEnvelope,
     CommandRefused,
-    Event,
     EventEnvelope,
     Notice,
     RemoveWorkspace,
@@ -435,19 +433,22 @@ async def test_a_workspace_being_added_as_the_control_plane_closes_is_closed_wit
     assert host.closing
 
 
-async def test_a_change_once_closed_is_refused() -> None:
-    plane = ControlPlane(workspaces=FakeSource())
-    connection = await welcomed(plane)
-    await plane.close()
-    outcomes: list[Event] = []
+async def test_a_change_waiting_its_turn_as_the_control_plane_closes_is_refused() -> None:
+    source = FakeSource()
+    source.gate = asyncio.Event()
+    plane = ControlPlane(workspaces=source)
+    first, second = await welcomed(plane), await welcomed(plane)
+    adding = asyncio.create_task(say(first, "add", AddWorkspace(path="/src/c")))
+    await eventually(lambda: source.opened)
 
-    async def publish(event: Event) -> None:
-        outcomes.append(event)
+    # Started in this order, the change waits for the add to end, and the close after it.
+    waiting = asyncio.create_task(say(second, "again", AddWorkspace(path="/src/d")))
+    closing = asyncio.create_task(plane.close())
+    source.gate.set()
+    await asyncio.gather(adding, waiting, closing)
 
-    envelope = CommandEnvelope(command_id="add", payload=AddWorkspace(path="/src/c"))
-    await plane._answer(envelope, connection, publish)
-
-    assert outcomes == [refused("add", INVALID, "Orbit is stopping.")]
+    assert payloads(taken(second)) == [refused("again", INVALID, "Orbit is stopping.")]
+    assert source.opened == ["/src/c"]
 
 
 async def test_a_workspace_whose_latest_session_fails_to_open_is_let_go() -> None:

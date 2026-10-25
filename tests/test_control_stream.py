@@ -33,13 +33,7 @@ from orbit.protocol import (
     Watch,
     WorkspaceUsage,
 )
-from tests.agent_fakes import (
-    FakeLedger,
-    board_of,
-    claims_done,
-    publish,
-    settled,
-)
+from tests.agent_fakes import FakeLedger, board_of, claims_done, settled
 from tests.connection_helpers import joined, say, taken
 from tests.plane_fakes import FakeSource, agent_workspace, idle, payloads, welcomed
 
@@ -180,7 +174,7 @@ async def test_watchers_are_told_the_agents_already_running_as_they_start_watchi
     a = workspace("a")
     plane = plane_of(a)
     in_a = await joined(plane, host=a)
-    await publish(a, AgentStarted(agent_id="agent-7", role="planner", task_id="plan"))
+    await a.outbox.put(AgentStarted(agent_id="agent-7", role="planner", task_id="plan"))
     watcher = await welcomed(plane)
 
     await say(watcher, "watch", WATCH)
@@ -200,7 +194,7 @@ async def test_an_exit_of_an_agent_never_started_tells_nothing() -> None:
     await say(watcher, "watch", WATCH)
     taken(watcher)
 
-    await publish(a, AgentExited(agent_id="agent-9", reason="finished"))
+    await a.outbox.put(AgentExited(agent_id="agent-9", reason="finished"))
 
     assert told(watcher, AgentsChanged) == []
     await plane.close()

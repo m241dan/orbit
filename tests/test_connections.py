@@ -11,10 +11,13 @@ from orbit.agent import WorkspaceHost
 from orbit.agent.application.connection import (
     QUEUE_LIMIT,
     TOO_FAR_BEHIND,
+    Answer,
     ConnectionDropped,
+    ConnectionParts,
+    Publish,
     SessionConnection,
 )
-from orbit.agent.application.handshake import HELLO_FIRST_MESSAGE
+from orbit.agent.application.handshake import HELLO_FIRST_MESSAGE, HandshakeParts
 from orbit.agent.domain.usage import UsageReport
 from orbit.protocol import (
     INTERNAL,
@@ -23,6 +26,7 @@ from orbit.protocol import (
     Attach,
     Catalog,
     CommandAccepted,
+    CommandEnvelope,
     CommandRefused,
     DeleteSession,
     ErrorOccurred,
@@ -442,21 +446,31 @@ async def test_a_connection_whose_held_events_overflow_is_closed_as_too_far_behi
     while_held: list[tuple[bool, int]] = []
 
     def check(connection: SessionConnection) -> None:
-        while_held.append((connection._dropped is not None, connection._handshake.held))
+        while_held.append((connection.listening, connection.handshake.held))
 
     connection = await rejoined(store, 15, live, check)
 
-    assert while_held == [(True, QUEUE_LIMIT - 2)]  # The Welcome and the Catalog, unread.
+    assert while_held == [(False, QUEUE_LIMIT - 2)]  # Closed, the Welcome and Catalog unread.
     with pytest.raises(ConnectionDropped, match=TOO_FAR_BEHIND):
         await everything(connection)
+
+
+async def never_fetched() -> Catalog:
+    """The catalog of a connection that never says Hello."""
+    raise AssertionError("A connection that never said Hello fetched the catalog.")
+
+
+def answered_by(session: WorkspaceHost, answer: Answer) -> SessionConnection:
+    """A connection in ``session``'s workspace from the start, whose commands ``answer``
+    handles."""
+    handshake = HandshakeParts(never_fetched, lambda: None, lambda: 0)
+    return SessionConnection(ConnectionParts(handshake, session.place, answer))
 
 
 async def test_a_catalog_from_a_task_a_command_started_reaches_every_connection() -> None:
     session = WorkspaceHost()
     first = await joined(session, "first")
     catalog = next(e for e in await received(first) if isinstance(e, Catalog))
-    asker = await joined(session, "asker")
-    await received(asker)
     go = asyncio.Event()
     started: list[asyncio.Task[None]] = []
 
@@ -464,10 +478,12 @@ async def test_a_catalog_from_a_task_a_command_started_reaches_every_connection(
         await go.wait()
         await publish(session, catalog)
 
-    async def spawned(*args: object) -> None:
+    async def spawned(
+        envelope: CommandEnvelope, connection: SessionConnection, outcome: Publish
+    ) -> None:
         started.append(asyncio.create_task(later()))
 
-    asker._answer = spawned
+    asker = answered_by(session, spawned)
     await say(asker, "spawn", AddTask(task=TASK))
     await asker.close()
     go.set()

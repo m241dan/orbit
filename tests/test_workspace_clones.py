@@ -20,7 +20,6 @@ from orbit.protocol import (
     AddWorkspace,
     Catalog,
     CommandAccepted,
-    CommandEnvelope,
     ErrorOccurred,
     Event,
     EventEnvelope,
@@ -290,20 +289,22 @@ async def test_a_local_orbit_refuses_a_url() -> None:
     assert outcome == [refused("add", INVALID, LOCAL_ONLY)]
 
 
-async def test_a_url_once_closed_is_refused() -> None:
+async def test_a_url_as_the_control_plane_closes_is_refused() -> None:
     source = FakeSource()
+    source.gate = asyncio.Event()
     plane = ControlPlane(workspaces=source)
-    connection = await welcomed(plane)
-    await plane.close()
-    outcomes: list[Event] = []
+    first, second = await welcomed(plane), await welcomed(plane)
+    adding = asyncio.create_task(say(first, "add", AddWorkspace(path="/src/c")))
+    await eventually(lambda: source.opened)
 
-    async def publish(event: Event) -> None:
-        outcomes.append(event)
+    # Started in this order, the close begins, then waits for the add to end.
+    closing = asyncio.create_task(plane.close())
+    asking = asyncio.create_task(say(second, "clone", AddWorkspace(url=URL)))
+    await asking
+    source.gate.set()
+    await asyncio.gather(adding, closing)
 
-    envelope = CommandEnvelope(command_id="add", payload=AddWorkspace(url=URL))
-    await plane._answer(envelope, connection, publish)
-
-    assert outcomes == [refused("add", INVALID, "Orbit is stopping.")]
+    assert payloads(taken(second)) == [refused("clone", INVALID, "Orbit is stopping.")]
     assert source.cloning == []
 
 
