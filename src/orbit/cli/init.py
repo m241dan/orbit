@@ -41,7 +41,14 @@ UPDATE_FAILED = "Couldn't update the config from orbit's reference config: "
 
 ROLES_FAILED = "Couldn't copy the built-in roles' instructions: "
 
-SWITCHES = "Uncommenting a role's instructions line switches that role to its copy."
+SWITCHES = "Uncommenting a role's instructions line switches that role to its copy: {headers}."
+
+HEADERS_TOO = (
+    "Uncommenting a role's commented-out header as well as its instructions line switches that"
+    " role to its copy: {headers}."
+)
+
+INLINE = "{header} is set inline or by dotted keys; add its instructions line yourself: {setting}."
 
 NO_LINES = "Each role's table already has an instructions line."
 
@@ -69,7 +76,8 @@ InitRolesOption = Annotated[
     typer.Option(
         "--roles",
         help="Copy each built-in role's instructions to .orbit/roles/<name>.md to edit, and add"
-        " a commented-out line to its table that switches it to its copy once uncommented.",
+        " a commented-out line to its table that switches it to its copy once uncommented, with"
+        " the table's header if that's commented out too.",
     ),
 ]
 
@@ -91,7 +99,9 @@ def init(
     --roles, by itself or after --update, copies each built-in role's instructions to
     .orbit/roles/<name>.md, keeping a file already there, and adds to each role's table without
     an instructions line a commented-out one naming the copy, writing the reference first if
-    there's no file; the role keeps orbit's own instructions until the line is uncommented.
+    there's no file; the role keeps orbit's own instructions until the line is uncommented,
+    with the table's header if that's commented out too. A role set only inline or by dotted
+    keys gets no line, and is named for its line to be added by hand.
     """
     _refuse_with_force(force, update=update, roles=roles)
     root = _workspace(workspace)
@@ -156,7 +166,8 @@ def _added(keys: dict[str, tuple[str, ...]], tables: tuple[str, ...]) -> list[st
 def _copied(result: RolesResult, root: Path) -> str:
     """What's said once ``result`` is done in the workspace at ``root``: that the reference was
     written, if it was; each role's instructions copied or file kept; and the lines added to
-    the file, and what uncommenting one does, or that there were none to add."""
+    the file, and what uncommenting them does, and the roles set inline that were given none,
+    or that there were none to add."""
     said = [_written(InitResult(result.path))] if result.wrote else []
     said += [
         f"Copied the {name}'s instructions to {path.relative_to(root)}."
@@ -167,14 +178,39 @@ def _copied(result: RolesResult, root: Path) -> str:
 
 
 def _lines_added(path: Path, lines: InstructionLines) -> list[str]:
+    """What's said of ``lines``' instructions lines added to the file at ``path``, then a line
+    per role set inline that was given none; that every role's table has one, if neither."""
+    inline = [
+        INLINE.format(header=_header(name), setting=instructions_setting(name))
+        for name in lines.inline
+    ]
+    return [*_added_lines(path, lines), *inline] or [NO_LINES]
+
+
+def _added_lines(path: Path, lines: InstructionLines) -> list[str]:
     """A line per role whose table at ``path`` was given ``lines``' instructions line, then one
-    per role whose table was appended with it, under where and over what uncommenting one does;
-    that there were none, if there weren't."""
-    if not lines.added and not lines.appended:
-        return [NO_LINES]
-    added = [f"  in [roles.{name}]: {instructions_setting(name)}" for name in lines.added]
+    per role whose table was appended with it, under where and over what uncommenting them does;
+    none if there were none."""
+    in_tables = lines.added + lines.commented
+    if not in_tables and not lines.appended:
+        return []
+    added = [f"  in {_header(name)}: {instructions_setting(name)}" for name in in_tables]
     appended = [
-        f"  at the end: [roles.{name}], with {instructions_setting(name)}"
+        f"  at the end: {_header(name)}, with {instructions_setting(name)}"
         for name in lines.appended
     ]
-    return [f"Added to {path}, commented out:", *added, *appended, SWITCHES]
+    return [f"Added to {path}, commented out:", *added, *appended, *_switches(lines)]
+
+
+def _switches(lines: InstructionLines) -> list[str]:
+    """What uncommenting ``lines``' instructions lines does: for the roles under set headers,
+    then for those under commented-out ones, if there are any."""
+    said = ((SWITCHES, lines.added), (HEADERS_TOO, lines.under_commented_headers))
+    return [
+        message.format(headers=", ".join(map(_header, names))) for message, names in said if names
+    ]
+
+
+def _header(name: str) -> str:
+    """Role ``name``'s table's header."""
+    return f"[roles.{name}]"

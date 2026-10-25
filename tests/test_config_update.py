@@ -348,8 +348,25 @@ def test_the_references_note_of_orbits_own_instructions_isnt_an_instructions_lin
         "# merge = true\n", f"# merge = true\n{CODER_LINE}\n"
     ).replace("reviewer.md\n", f"reviewer.md\n{REVIEWER_LINE}\n")
     assert with_instructions(ROLES_REFERENCE) == InstructionsUpdate(
-        expected, InstructionLines(added=ROLES)
+        expected, InstructionLines(commented=ROLES)
     )
+
+
+def test_a_line_under_a_commented_header_is_told_apart_from_one_under_a_set_header() -> None:
+    text = "[roles.reviewer]\nmerge = false\n\n# [roles.coder]\n# merge = true\n"
+    expected = (
+        f"[roles.reviewer]\nmerge = false\n{REVIEWER_LINE}\n\n"
+        f"# [roles.coder]\n# merge = true\n{CODER_LINE}\n"
+    )
+    assert with_instructions(text) == InstructionsUpdate(
+        expected, InstructionLines(added=("reviewer",), commented=("coder",))
+    )
+
+
+def test_the_header_the_line_goes_under_decides_whether_its_set() -> None:
+    text = "# [roles.coder]\n# merge = true\n\n[roles.coder]\nmodel = 'x'\n"
+    update = add_instructions(text, ROLES_REFERENCE, ("coder",), TODAY)
+    assert update == InstructionsUpdate(f"{text}{CODER_LINE}\n", InstructionLines(added=("coder",)))
 
 
 def test_a_table_setting_its_instructions_gets_no_line() -> None:
@@ -386,7 +403,18 @@ def test_a_line_and_a_table_can_be_added_at_once() -> None:
 
 def test_a_role_set_inline_gets_nothing_as_its_table_has_no_lines_of_its_own() -> None:
     text = "[roles]\ncoder = { model = 'x' }\n\n[roles.reviewer]\ninstructions = 'r.md'\n"
-    assert with_instructions(text) == InstructionsUpdate(text, InstructionLines())
+    assert with_instructions(text) == InstructionsUpdate(text, InstructionLines(inline=("coder",)))
+
+
+def test_a_role_set_by_dotted_keys_gets_nothing_and_is_named_as_set_inline() -> None:
+    update = with_instructions("roles.coder.model = 'x'\n")
+    assert update.lines == InstructionLines(appended=("reviewer",), inline=("coder",))
+    assert CODER_LINE not in update.text
+
+
+def test_roles_under_commented_headers_are_those_commented_then_those_appended() -> None:
+    lines = InstructionLines(added=("a",), commented=("b",), appended=("c",), inline=("d",))
+    assert lines.under_commented_headers == ("b", "c")
 
 
 def test_only_the_roles_named_get_lines() -> None:

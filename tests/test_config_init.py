@@ -318,7 +318,7 @@ def test_roles_without_a_file_write_the_reference_with_a_line_in_each_roles_tabl
     result = add(tmp_path)
     path = tmp_path / CONFIG_PATH
     assert result == RolesResult(
-        path, copies(tmp_path), {}, InstructionLines(added=NAMES), wrote=True
+        path, copies(tmp_path), {}, InstructionLines(commented=NAMES), wrote=True
     )
     reference = reference_config()
     expected = add_instructions(reference, reference, NAMES, TODAY).text
@@ -369,7 +369,8 @@ def test_roles_keep_every_line_of_the_file_unchanged_and_in_order(tmp_path: Path
 def test_roles_add_no_line_to_a_role_setting_its_instructions(tmp_path: Path) -> None:
     path = write(tmp_path, '[roles.coder]\ninstructions = "x.md"\n')
     result = add(tmp_path)
-    assert "coder" not in result.lines.added + result.lines.appended
+    lines = result.lines
+    assert "coder" not in lines.added + lines.commented + lines.appended + lines.inline
     assert path.read_text(encoding="utf-8").startswith('[roles.coder]\ninstructions = "x.md"\n\n')
     assert '# instructions = "roles/coder.md"' not in path.read_text(encoding="utf-8")
 

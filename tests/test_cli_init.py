@@ -11,7 +11,8 @@ from typer.testing import CliRunner, Result
 
 from orbit.agent.domain.config import LIMIT_KEYS
 from orbit.agent.domain.roles import Role
-from orbit.agent.external.built_in_roles import read_instruction_files
+from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
+from orbit.agent.external.config_file import read_config
 from orbit.agent.external.reference_config import reference_config
 from orbit.cli import app
 from tests.git_repo import init_repo
@@ -24,7 +25,27 @@ WRITTEN = "Every setting is commented out at its default; uncomment what you cha
 
 NAMES = tuple(read_instruction_files())
 
-SWITCHES = "Uncommenting a role's instructions line switches that role to its copy."
+
+def switches(*names: str) -> str:
+    """What ``--roles`` says uncommenting the line does for the roles ``names`` names, whose
+    headers are set."""
+    return (
+        f"Uncommenting a role's instructions line switches that role to its copy: {headers(names)}."
+    )
+
+
+def headers_too(*names: str) -> str:
+    """What ``--roles`` says uncommenting the line does for the roles ``names`` names, whose
+    headers are commented out."""
+    return (
+        "Uncommenting a role's commented-out header as well as its instructions line switches"
+        f" that role to its copy: {headers(names)}."
+    )
+
+
+def headers(names: tuple[str, ...]) -> str:
+    """The headers of the roles ``names`` names, as ``--roles`` lists them."""
+    return ", ".join(f"[roles.{name}]" for name in names)
 
 
 @pytest.fixture
@@ -208,7 +229,7 @@ def test_roles_copy_the_instructions_and_append_each_role_table_a_file_lacks(
         *copied(*NAMES),
         f"Added to {path}, commented out:",
         *(f'  at the end: [roles.{name}], with instructions = "roles/{name}.md"' for name in NAMES),
-        SWITCHES,
+        headers_too(*NAMES),
     ]
     assert sorted(p.name for p in (project / ".orbit" / "roles").iterdir()) == sorted(
         f"{name}.md" for name in NAMES
@@ -243,8 +264,62 @@ def test_roles_without_a_file_write_the_reference_first(project: Path) -> None:
         *copied(*NAMES),
         f"Added to {path}, commented out:",
         *(f'  in [roles.{name}]: instructions = "roles/{name}.md"' for name in NAMES),
-        SWITCHES,
+        headers_too(*NAMES),
     ]
+
+
+def test_roles_say_a_set_table_needs_its_line_uncommented_and_the_others_their_header_too(
+    project: Path,
+) -> None:
+    path = written_config(project, '[roles.coder]\nmodel = "opus"\n')
+    result = init(project, "--roles")
+    assert result.exit_code == 0, result.output
+    others = tuple(name for name in NAMES if name != "coder")
+    assert result.stdout.splitlines() == [
+        *copied(*NAMES),
+        f"Added to {path}, commented out:",
+        '  in [roles.coder]: instructions = "roles/coder.md"',
+        *(
+            f'  at the end: [roles.{name}], with instructions = "roles/{name}.md"'
+            for name in others
+        ),
+        switches("coder"),
+        headers_too(*others),
+    ]
+
+
+def test_uncommenting_a_roles_header_and_line_as_said_switches_that_role_alone(
+    project: Path,
+) -> None:
+    said = init(project, "--roles").stdout.splitlines()
+    assert said[-1] == headers_too(*NAMES)
+    path = project / ".orbit" / "config.toml"
+    text = path.read_text(encoding="utf-8")
+    line = 'instructions = "roles/coder.md"'
+    path.write_text(text.replace("# [roles.coder]\n", "[roles.coder]\n").replace(f"# {line}", line))
+    (project / ".orbit" / "roles" / "coder.md").write_text("My coder.\n")
+    roles = read_config(str(project), project.parent / "config").roles
+    built_in = read_built_in_roles()
+    assert roles["coder"] == built_in["coder"].model_copy(update={"instructions": "My coder."})
+    assert {name: role for name, role in roles.items() if name != "coder"} == {
+        name: role for name, role in built_in.items() if name != "coder"
+    }
+
+
+def test_roles_name_a_role_set_inline_as_needing_its_line_added_by_hand(project: Path) -> None:
+    others = "".join(
+        f'\n[roles.{name}]\ninstructions = "{name}.md"\n' for name in NAMES if name != "coder"
+    )
+    path = written_config(project, f'[roles]\ncoder = {{ model = "opus" }}\n{others}')
+    text = path.read_text(encoding="utf-8")
+    result = init(project, "--roles")
+    assert result.exit_code == 0, result.output
+    assert result.stdout.splitlines() == [
+        *copied(*NAMES),
+        "[roles.coder] is set inline or by dotted keys; add its instructions line yourself:"
+        ' instructions = "roles/coder.md".',
+    ]
+    assert path.read_text(encoding="utf-8") == text
 
 
 def test_roles_again_keep_every_copy_and_add_nothing(project: Path) -> None:
@@ -268,7 +343,7 @@ def test_roles_with_update_do_both(project: Path) -> None:
     assert said[0] == f"Added to {path}, commented out:"
     assert said[-len(NAMES) - 1 :] == [
         *(f'  in [roles.{name}]: instructions = "roles/{name}.md"' for name in NAMES),
-        SWITCHES,
+        headers_too(*NAMES),
     ]
     text = path.read_text(encoding="utf-8")
     assert text.count("# Added by orbit init --update on ") == 1

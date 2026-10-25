@@ -57,11 +57,21 @@ class ConfigUpdate:
 @dataclass(frozen=True)
 class InstructionLines:
     """The built-in roles, by name, that ``orbit init --roles`` gave the line pointing at their
-    copies of their instructions: in their tables (``added``), or with their tables appended
-    whole (``appended``)."""
+    copies of their instructions: in their tables, under a set header (``added``) or a
+    commented-out one (``commented``), or with their tables appended whole, commented out
+    (``appended``); and those lacking it that it gave none, their tables being set only inline
+    or by dotted keys (``inline``)."""
 
     added: tuple[str, ...] = ()
+    commented: tuple[str, ...] = ()
     appended: tuple[str, ...] = ()
+    inline: tuple[str, ...] = ()
+
+    @property
+    def under_commented_headers(self) -> tuple[str, ...]:
+        """The roles given the line under a commented-out header, which uncommenting the line
+        alone wouldn't switch: those ``commented``, then those ``appended``."""
+        return self.commented + self.appended
 
 
 @dataclass(frozen=True)
@@ -70,6 +80,16 @@ class InstructionsUpdate:
 
     text: str
     lines: InstructionLines
+
+
+class _Placement(Enum):
+    """Where ``orbit init --roles`` gives a role the line pointing it at its copy of its
+    instructions."""
+
+    ADDED = auto()  # In its table, under a set header.
+    COMMENTED = auto()  # In its table, under a commented-out header.
+    APPENDED = auto()  # With its table, appended commented out.
+    INLINE = auto()  # Nowhere, its table having no header of its own.
 
 
 class _Kind(Enum):
@@ -183,8 +203,22 @@ class _File:
     def end(self, table: str) -> int | None:
         """Where keys added to ``table`` go: the end of its last region; none if it has none,
         being set only inline or by dotted keys."""
-        ends = [region.end for region in self.regions if region.table == table]
-        return ends[-1] if ends else None
+        region = self._last_region(table)
+        return None if region is None else region.end
+
+    def header(self, table: str) -> _Line | None:
+        """The header, set or commented out, that keys added to ``table`` go under: its last
+        region's; none if it has no region."""
+        region = self._last_region(table)
+        if region is None:
+            return None
+        lines = self.lines[region.start : region.end]
+        return next(line for line in lines if line.kind is _Kind.HEADER)
+
+    def _last_region(self, table: str) -> _Region | None:
+        """``table``'s last region; none if it has none."""
+        regions = [region for region in self.regions if region.table == table]
+        return regions[-1] if regions else None
 
     def _lines_of(self, table: str) -> list[_Line]:
         """The lines of ``table``'s regions."""
@@ -246,19 +280,21 @@ def add_instructions(
     A table counts as there if it's set or its header is commented out, as for
     :func:`update_text`; the line follows its last line. Each role whose table isn't there gets
     the table appended at the end, as ``reference`` has it with the line after its last, all
-    under one :data:`ADDED_NOTE`. Every line of ``text`` stays as it was, in order.
+    under one :data:`ADDED_NOTE`. A role whose table has no header of its own, being set only
+    inline or by dotted keys, gets no line. Every line of ``text`` stays as it was, in order.
+    The lines it reports say whether each role's line is under a set header or a commented-out
+    one, the tables appended counting as commented out, and which roles got none.
 
     Raises :class:`ConfigError` if ``text`` isn't valid TOML.
     """
     file = _read(text)
     lacking = _lacking_instructions(file, roles)
     insertions = _instruction_insertions(file, lacking)
-    appended = tuple(name for name in lacking if not file.has(_role_table(name)))
-    if not insertions and not appended:
-        return InstructionsUpdate(text, InstructionLines())
-    sections = _role_sections(_scanned(reference), appended)
+    lines = _instruction_lines(file, lacking)
+    if not insertions and not lines.appended:
+        return InstructionsUpdate(text, lines)
+    sections = _role_sections(_scanned(reference), lines.appended)
     updated = _appended(_inserted(file.lines, list(insertions.values())), sections, today)
-    lines = InstructionLines(tuple(insertions), appended)
     return InstructionsUpdate("\n".join(updated) + "\n", lines)
 
 
@@ -549,6 +585,40 @@ def _lacking_instructions(file: _File, roles: Sequence[str]) -> list[str]:
     return [name for name in roles if not file.gives(_role_table(name), "instructions")]
 
 
+def _instruction_lines(file: _File, roles: Sequence[str]) -> InstructionLines:
+    """Where each of the ``roles``, lacking instructions in ``file``, is given the line pointing
+    it at its copy of them, as :func:`_placement` places it."""
+    placements = {name: _placement(file, _role_table(name)) for name in roles}
+    return InstructionLines(
+        added=_placed(placements, _Placement.ADDED),
+        commented=_placed(placements, _Placement.COMMENTED),
+        appended=_placed(placements, _Placement.APPENDED),
+        inline=_placed(placements, _Placement.INLINE),
+    )
+
+
+def _placement(file: _File, table: str) -> _Placement:
+    """Where a role whose table is ``table`` is given its line: appended with the table if
+    ``file`` lacks it; nowhere if the table has no header of its own; otherwise in it, under its
+    header, set or commented out."""
+    if not file.has(table):
+        return _Placement.APPENDED
+    header = file.header(table)
+    if header is None:
+        return _Placement.INLINE
+    return _Placement.COMMENTED if _commented_out(header) else _Placement.ADDED
+
+
+def _placed(placements: dict[str, _Placement], placement: _Placement) -> tuple[str, ...]:
+    """The roles ``placements`` gives ``placement``, in order."""
+    return tuple(name for name, placed in placements.items() if placed is placement)
+
+
+def _commented_out(line: _Line) -> bool:
+    """Whether ``line`` is commented out."""
+    return line.text.lstrip().startswith("#")
+
+
 def _instruction_insertions(file: _File, roles: Sequence[str]) -> dict[str, _Insertion]:
     """The line pointing each of the ``roles`` at its copy of its instructions, after the end of
     its table, by role; none for a role whose table has no region in ``file``."""
@@ -659,7 +729,7 @@ def _set_tables(lines: Sequence[_Line]) -> list[_SetTable]:
     starts = [
         index
         for index, line in enumerate(lines)
-        if line.kind is _Kind.HEADER and not line.text.lstrip().startswith("#")
+        if line.kind is _Kind.HEADER and not _commented_out(line)
     ]
     return [
         _SetTable(lines[start].name, start, _last_setting(lines, start, stop))
