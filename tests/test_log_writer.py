@@ -98,6 +98,21 @@ class BuggyFor(FakeStore):
         return await super().append(session_id, envelopes)
 
 
+class BuggyForgetsFor(FakeStore):
+    """A log whose forgets of the session ``failing`` raise an error no store should, while
+    ``buggy``."""
+
+    def __init__(self, failing: str) -> None:
+        super().__init__()
+        self.failing = failing
+        self.buggy = True
+
+    async def forget(self, session_id: str) -> None:
+        if self.buggy and session_id == self.failing:
+            raise ValueError("a bug")
+        await super().forget(session_id)
+
+
 def stored_session(store: FakeStore | OwnView) -> WorkspaceHost:
     return WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: "session-1")
 
@@ -241,6 +256,23 @@ async def test_a_forget_pending_at_an_unexpected_append_error_runs_once_resumed(
     assert await writer.resume() == []
     await writer.close()
     assert log.logged == [notice(2, "b")] and log.forgotten == ["a"]
+
+
+async def test_an_unexpected_forget_error_stops_the_writer_but_loses_no_forget() -> None:
+    log, failures = BuggyForgetsFor("b"), list[StoreFailed]()
+    log.logged = [notice(1), notice(2, "b"), notice(3, "c")]
+    writer = LogWriter(log, Published(), overflow=Overflow(FakeFallback(), failures.append))
+    for session in ["a", "b", "c"]:
+        writer.forget(session)
+    await asyncio.sleep(0.01)
+
+    message = "The event log writer stopped on an unexpected error: a bug"
+    assert [str(error) for error in failures] == [message]
+    assert log.logged == [notice(2, "b")] and log.forgotten == ["a", "c"]
+    log.buggy = False
+    assert await writer.resume() == []
+    await writer.close()
+    assert log.logged == [] and log.forgotten == ["a", "c", "b"]
 
 
 async def test_stopping_sends_what_queued_and_what_follows_to_the_fallback() -> None:

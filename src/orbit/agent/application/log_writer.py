@@ -67,7 +67,8 @@ class LogWriter:
     Those envelopes are still read back as still to be written, until :meth:`resume` appends them
     and appending carries on. A session forgotten meanwhile has its envelopes not in the log
     dropped instead, and its events deleted from the log then, or, when that fails, once it
-    resumes. The ``seq`` asked to be reserved meanwhile are reserved once it resumes."""
+    resumes, as are those of a session whose delete raised the unexpected error. The ``seq``
+    asked to be reserved meanwhile are reserved once it resumes."""
 
     def __init__(
         self, log: EventLog, publish: Publish, log_bytes: int = 0, overflow: Overflow = _NO_OVERFLOW
@@ -80,7 +81,7 @@ class LogWriter:
         self._forgets = ReportedOnce(publish, SAVE_FAILED)
         self._queued: Queued = []
         self._forgetting: list[str] = []  # The sessions whose events to delete, once written.
-        self._held: list[str] = []  # Those whose delete failed while stopped, to retry resumed.
+        self._held: list[str] = []  # Those whose delete failed while stopped, or raised, to retry.
         self._writing: Queued = []  # Taken from the queue to write.
         self._diverted: Queued = []  # Sent to the fallback, as the log can't take them.
         self._places: dict[str, str | None] = {}  # Each session's fallback file, if written.
@@ -313,8 +314,7 @@ class LogWriter:
             self._forget_later(forgetting)
             raise
         self._writing = []
-        for session_id in forgetting:
-            await self._forget(session_id)
+        await self._forget_each(forgetting)
         await self._reserve()
 
     async def _write_taken(self) -> None:
@@ -342,6 +342,19 @@ class LogWriter:
             self._halt(error)
             return
         self._reserved = max(self._reserved, seq)
+
+    async def _forget_each(self, forgetting: list[str]) -> None:
+        """Delete the events of the sessions ``forgetting`` from the log in turn; when that
+        raises for one, it's tried again once resumed, and those after it in the next write."""
+        for done, session_id in enumerate(forgetting):
+            try:
+                await self._forget(session_id)
+            except BaseException:
+                # Held for resume, not retried at once: an error that repeats would crash the
+                # writer again on every write.
+                self._held.append(session_id)
+                self._forget_later(forgetting[done + 1 :])
+                raise
 
     async def _forget(self, session_id: str) -> None:
         """Delete the events of the session ``session_id`` from the log; once stopped, drop
