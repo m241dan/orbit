@@ -283,7 +283,9 @@ commits on any branch that none of its remotes has. If it holds any, the purge i
 `invalid`, listing it, and nothing is removed: `Can't purge /srv/orbit/workspaces/proj: deleting
 its clone would lose 1 commit on main not on its remote.` Push the work, or drop it, and purge
 again. If deleting fails once the workspace is removed, it's refused with `internal`: `Removed
-/home/me/src/orbit, but couldn't purge it: …`; the workspace is no longer served.
+/home/me/src/orbit, but couldn't purge it: …; run orbit db forget /home/me/src/orbit to finish.`
+The workspace is no longer served, so purging it again can't finish the job, but `orbit db forget`
+on the server's machine can.
 
 ```json
 {"workspace":null,"traceparent":null,"tracestate":null,"command_id":"c83e52","session":null,"payload":{"type":"remove_workspace","workspace":"4f1c2a9e","purge":true}}

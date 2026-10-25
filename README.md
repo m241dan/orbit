@@ -1140,9 +1140,12 @@ owner (`Can't purge <path>: an orbit chat, pid 4242 owns its repository.`), befo
 removed, though removing it without purging still works, and once the server takes the repository
 over it's purged like any other. The server holds the workspace's lock until the purge is done, so
 no local orbit starts on it meanwhile. Its files go before its records, so if one can't be deleted
-the workspace stays registered and purging it again finishes the job, even for a clone's directory
-left partly deleted, which is moved aside to `.<name>.purging` before it's deleted. A workspace no server serves,
-such as one only a local `orbit chat` used, is purged with `orbit db forget` (see [Where orbit keeps
+the workspace is removed but stays registered, and the refusal says how to finish (`Removed <path>,
+but couldn't purge it: …; run orbit db forget <path> to finish.`): the server no longer serves it,
+so purging it there again can't, but `orbit db forget` on the server's machine finishes the job,
+even while the server runs, and even for a clone's directory left partly deleted, which is moved
+aside to `.<name>.purging` before it's deleted. A workspace no server serves, such as one only a
+local `orbit chat` used, is purged with `orbit db forget` too (see [Where orbit keeps
 things](#where-orbit-keeps-things)). In the TUI, `x` in the workspace picker offers `Delete its
 sessions too` beside keeping them (see [Workspaces](#workspaces)).
 

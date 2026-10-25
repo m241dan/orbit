@@ -157,9 +157,9 @@ async def test_a_busy_workspace_is_refused_before_its_losses_are_counted() -> No
     assert outcome == [refused("purge", BUSY, message)]
 
 
-async def test_a_purge_that_fails_leaves_the_workspace_removed_and_says_so() -> None:
+async def test_a_purge_that_fails_leaves_the_workspace_removed_and_says_how_to_finish() -> None:
     source = FakeSource()
-    source.purge_fails = "The disk is full."
+    source.purge_fails = "The disk is full"
     plane = ControlPlane([workspace("c")], workspaces=source)
     connection = await welcomed(plane)
 
@@ -167,7 +167,10 @@ async def test_a_purge_that_fails_leaves_the_workspace_removed_and_says_so() -> 
     catalog, outcome = payloads(taken(connection))
     await plane.close()
 
-    message = "Removed /src/c, but couldn't purge it: The disk is full."
+    message = (
+        "Removed /src/c, but couldn't purge it: The disk is full; run orbit db forget /src/c to"
+        " finish."
+    )
     assert ids(catalog) == [] and outcome == refused("purge", INTERNAL, message)
     assert source.steps == ["purge c", "close c"] and plane.hosts == ()
 

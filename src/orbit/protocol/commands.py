@@ -243,7 +243,9 @@ class RemoveWorkspace(_Message):
     while another orbit owns its repository, with ``invalid``, listing what would be lost, while
     that clone holds work its remote doesn't, and with the code the failure gives if what it
     would lose can't be found out. If deleting fails once it's removed, it's refused with the
-    code the failure gives (``Removed …, but couldn't purge it: …``), and it stays removed."""
+    code the failure gives (``Removed …, but couldn't purge it: …; run orbit db forget … to
+    finish.``): it stays removed, so purging it again can't finish, but ``orbit db forget`` on
+    the server's machine can."""
 
     type: Literal["remove_workspace"] = "remove_workspace"
     workspace: str

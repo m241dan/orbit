@@ -2,6 +2,7 @@
 deleted, or why it's refused."""
 
 import asyncio
+import os
 import shutil
 import sqlite3
 from contextlib import closing
@@ -13,6 +14,7 @@ from typer.testing import CliRunner
 from orbit.agent import SqliteStore, WorkspaceRegistry
 from orbit.agent.external import workspace_purge
 from orbit.agent.external.clone_loss import clone_loss
+from orbit.agent.external.run_file import RunFile
 from orbit.cli import app
 from tests.agent_fakes import notice
 from tests.git_repo import (
@@ -47,6 +49,24 @@ def used(state: Path, path: Path, sessions: int = 1, *, managed: bool = False) -
     ``sessions`` sessions, each with an event, managed if asked."""
     path.mkdir(parents=True, exist_ok=True)
     return asyncio.run(_used(state, path, sessions, managed=managed))
+
+
+async def _removed_purging_partway(state: Path, workspace_id: str) -> None:
+    store = await SqliteStore.open(state)
+    try:
+        registry = WorkspaceRegistry(store)
+        await registry.set_served(workspace_id, True)
+        await registry.set_served(workspace_id, False)
+        with pytest.raises(PermissionError):
+            await workspace_purge.purge_workspace(store, workspace_id)
+    finally:
+        await store.close()
+
+
+def removed_purging_partway(state: Path, workspace_id: str) -> None:
+    """Have the workspace ``workspace_id`` in the store in ``state`` flagged served and then
+    not, as a server removing it does, then purged as that server purges it, failing partway."""
+    asyncio.run(_removed_purging_partway(state, workspace_id))
 
 
 def registered(state: Path) -> list[str]:
@@ -206,4 +226,24 @@ def test_a_clone_whose_deletion_stops_partway_is_forgotten_by_forgetting_it_agai
 
     message = f"Forgot {clone}: deleted 1 session, 0 fallback files and its clone {clone}.\n"
     assert result.exit_code == 0 and result.stdout == message
+    assert registered(state) == [] and list(clone.parent.iterdir()) == []
+
+
+def test_a_clone_a_server_removed_but_couldnt_purge_is_forgotten_while_it_runs(
+    state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clone = cloned(tmp_path)
+    workspace_id = used(state, clone, managed=True)
+    with monkeypatch.context() as patched:
+        patched.setattr(shutil, "rmtree", rmtree_stopping_partway)
+        removed_purging_partway(state, workspace_id)
+    RunFile(state).write("wss://orbit.example:4567/", os.getpid())
+    assert not clone.exists() and (clone.parent / ".proj.purging").is_dir()
+
+    result = runner.invoke(app, ["db", "forget", str(clone)])
+
+    assert result.exit_code == 0, result.output
+    # The server's purge deleted the session lock and fallback files before it stopped.
+    message = f"Forgot {clone}: deleted 1 session, 0 fallback files and its clone {clone}.\n"
+    assert result.stdout == message
     assert registered(state) == [] and list(clone.parent.iterdir()) == []

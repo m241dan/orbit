@@ -67,11 +67,14 @@ class _ServedPurging:
         await self._stop()
 
     async def delete(self, workspace: RegisteredWorkspace) -> Purged:
-        """Have ``workspaces`` delete what orbit keeps of ``workspace``."""
+        """Have ``workspaces`` delete what orbit keeps of ``workspace``; refused, saying to
+        finish with ``orbit db forget``, which no longer finds it served, if that fails."""
         try:
             return await self._workspaces.purge(workspace.id)
         except WorkspaceUnavailable as exc:
-            raise Refused(exc.code, f"Removed {self._name}, but couldn't purge it: {exc}") from None
+            unpurged = f"Removed {self._name}, but couldn't purge it: {exc}"
+            finish = f"run orbit db forget {self._name} to finish."
+            raise Refused(exc.code, f"{unpurged}; {finish}") from None
 
 
 async def _flag_anyway(host: WorkspaceHost, workspaces: WorkspaceSource, *, served: bool) -> None:
