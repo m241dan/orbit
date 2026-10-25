@@ -175,17 +175,22 @@ class StartupCheck:
         return self.tracing.steps(self._verification.run_step)
 
     async def _report(self, failure: Failure | None) -> None:
-        record_result(failure)
+        """Publish how the check came out, adding a draft task to fix the step that failed
+        first, if it can, and then record it on the run's span."""
         if failure is None:
             await self._publish(StartupChecked(passed=True))
+            record_result(None)
             return
         step, output = failure
         if self._add_fix is not None:
             await self._add_fix(step, output)
-            fix_added()
         await self._publish(
             StartupChecked(passed=False, step=step.name, output=trim_output(output))
         )
+        # Only once it's reported, so a check cancelled or broken meanwhile names no failed step.
+        record_result(failure)
+        if self._add_fix is not None:
+            fix_added()
 
     async def _cancel_running(self) -> None:
         """Mark the step running, if any, cancelled."""

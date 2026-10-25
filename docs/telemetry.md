@@ -286,12 +286,16 @@ trace context, and each step it runs, the tree's setup (`setup`) first if there 
 | Attribute | Type | Meaning |
 | --- | --- | --- |
 | `orbit.workspace.id` | string | The workspace's id (`unregistered` for one no store registers). |
-| `orbit.verify.result` | string | How the check came out: `passed`, `failed`, or `cancelled`, as when the user cancels its agent or orbit closes meanwhile; absent when it couldn't run. |
+| `orbit.verify.result` | string | How the check came out: `passed`, `failed`, or `cancelled`, as when the user cancels its agent or orbit closes meanwhile; absent when it couldn't run or broke on a bug. |
 | `orbit.verify.failed_step` | string | The step that failed, `setup` for the tree's setup; absent unless one did. |
 | `orbit.startup_check.fix_added` | boolean | Whether it added a draft task to fix the step that failed. |
 
-A check that couldn't run, as when git couldn't make its snapshot of the base, or that breaks on
-a bug, has the span's error status with the error's message, and an `exception` event.
+The result, the failed step and the fix are recorded together once the check has published its
+result (`StartupChecked`), after adding its fix draft, so a check cancelled before then, even
+while it adds the draft, is just `cancelled`, with no failed step and no fix added. A check that
+couldn't run, as when git couldn't make its snapshot of the base, or that breaks on a bug before
+then, as when its fix draft can't be saved, has no result, but the span's error status with the
+error's message, and an `exception` event.
 
 ## Links
 

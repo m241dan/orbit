@@ -8,14 +8,16 @@ from typing import Any
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.trace import StatusCode
 
-from orbit.agent import Setup, WorkspaceHost
+from orbit.agent import Setup, VerificationStep, WorkspaceHost
 from orbit.agent.application.agent_trace import STEP_SPAN
 from orbit.agent.application.ports import TreeFailed
-from orbit.agent.application.startup_trace import STARTUP_SPAN
+from orbit.agent.application.startup_check import AddFix, CheckSite, StartupCheck
+from orbit.agent.application.startup_trace import STARTUP_SPAN, StartupTracing
 from orbit.protocol import (
     CODER,
     AgentExited,
     CancelAgent,
+    Event,
     EventEnvelope,
     StartupChecked,
     StepState,
@@ -73,6 +75,15 @@ async def checked_with(steps: Steps, tree: FakeTree | None = None) -> Traced:
     await events_until(session, agent_exited("startup-check"))
     await session.close()
     return traced
+
+
+def failing_check(traced: Traced, add_fix: AddFix) -> StartupCheck:
+    """A startup check, in workspace ``w``, of a step that fails, which goes to ``add_fix``,
+    traced by ``traced``."""
+    site = CheckSite(None, ".")
+    check = StartupCheck(checked(Steps(False)), site, asyncio.Queue[Event]().put, add_fix)
+    check.tracing = StartupTracing(traced.telemetry, "w")
+    return check
 
 
 async def test_a_passing_check_is_a_root_span_with_a_child_for_each_step() -> None:
@@ -193,3 +204,45 @@ async def test_the_events_the_check_publishes_carry_its_trace_context() -> None:
 
     [result] = [envelope for envelope in sent if isinstance(envelope.payload, StartupChecked)]
     assert result.traceparent == traceparent_of(startup(traced))
+
+
+async def test_a_check_cancelled_while_adding_its_fix_is_cancelled_with_no_failed_step() -> None:
+    traced = Traced()
+    adding = asyncio.Event()
+
+    async def add_fix(step: VerificationStep, output: str) -> None:
+        adding.set()
+        await asyncio.Event().wait()
+
+    check = failing_check(traced, add_fix)
+    check.start()
+    await adding.wait()
+    await check.close()
+
+    span = startup(traced)
+    assert attributes(span) == {
+        "orbit.workspace.id": "w",
+        "orbit.verify.result": "cancelled",
+        "orbit.startup_check.fix_added": False,
+    }
+    assert span.status.status_code is StatusCode.UNSET
+
+
+async def test_a_check_that_breaks_adding_its_fix_has_the_spans_error_and_no_fix() -> None:
+    traced = Traced()
+
+    async def add_fix(step: VerificationStep, output: str) -> None:
+        raise OSError("the draft couldn't be saved")
+
+    check = failing_check(traced, add_fix)
+    stopped = asyncio.Event()
+    check.on_stopped(stopped.set)
+    check.start()
+    await stopped.wait()
+    await check.close()
+
+    span = startup(traced)
+    assert attributes(span) == {"orbit.workspace.id": "w", "orbit.startup_check.fix_added": False}
+    assert span.status.status_code is StatusCode.ERROR
+    assert span.status.description == "the draft couldn't be saved"
+    assert [event.name for event in span.events] == ["exception"]
