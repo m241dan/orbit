@@ -2,6 +2,7 @@
 deleted, or why it's refused."""
 
 import asyncio
+import shutil
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -14,7 +15,13 @@ from orbit.agent.external import workspace_purge
 from orbit.agent.external.clone_loss import clone_loss
 from orbit.cli import app
 from tests.agent_fakes import notice
-from tests.git_repo import bare_repository, commit_file, git, init_repo
+from tests.git_repo import (
+    bare_repository,
+    commit_file,
+    git,
+    init_repo,
+    rmtree_stopping_partway,
+)
 from tests.store_views import record
 
 runner = CliRunner()
@@ -96,7 +103,7 @@ def test_a_clean_clone_is_purged_with_its_directory(state: Path, tmp_path: Path)
 
     message = f"Forgot {clone}: deleted 0 sessions, 0 fallback files and its clone {clone}.\n"
     assert result.exit_code == 0 and result.stdout == message
-    assert not clone.exists()
+    assert list(clone.parent.iterdir()) == []
 
 
 def test_a_clone_holding_work_is_refused_listing_it(state: Path, tmp_path: Path) -> None:
@@ -181,3 +188,22 @@ def test_a_clone_that_cant_be_deleted_is_forgotten_by_forgetting_it_again(
     message = f"Forgot {clone}: deleted 1 session, 0 fallback files and its clone {clone}.\n"
     assert result.exit_code == 0 and result.stdout == message
     assert registered(state) == [] and not clone.exists()
+
+
+def test_a_clone_whose_deletion_stops_partway_is_forgotten_by_forgetting_it_again(
+    state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clone = cloned(tmp_path)
+    workspace_id = used(state, clone, managed=True)
+
+    with monkeypatch.context() as patched:
+        patched.setattr(shutil, "rmtree", rmtree_stopping_partway)
+        failed = runner.invoke(app, ["db", "forget", str(clone)])
+    assert (failed.exit_code, failed.stderr) == (2, "Permission denied\n")
+    assert registered(state) == [workspace_id]
+
+    result = runner.invoke(app, ["db", "forget", str(clone)])
+
+    message = f"Forgot {clone}: deleted 1 session, 0 fallback files and its clone {clone}.\n"
+    assert result.exit_code == 0 and result.stdout == message
+    assert registered(state) == [] and list(clone.parent.iterdir()) == []

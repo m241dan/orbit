@@ -23,7 +23,13 @@ from orbit.agent.external.workspace_lock import WorkspaceLock
 from orbit.agent.external.workspace_purge import StorePurging, forget_workspace, purge_workspace
 from orbit.agent.external.workspace_registry import WorkspaceRegistry
 from tests.agent_fakes import notice
-from tests.git_repo import bare_repository, commit_file, git, init_repo
+from tests.git_repo import (
+    bare_repository,
+    commit_file,
+    git,
+    init_repo,
+    rmtree_stopping_partway,
+)
 from tests.store_views import database, record
 
 
@@ -109,7 +115,7 @@ async def test_purging_a_clean_managed_clone_deletes_its_directory(
     assert purged == Purged(
         RegisteredWorkspace(workspace_id, str(clone), False, True), 1, 2, str(clone)
     )
-    assert not clone.exists()
+    assert list(clone.parent.iterdir()) == []
     assert rows(state, workspace_id)["workspaces"] == 0
 
 
@@ -207,6 +213,42 @@ async def test_a_clone_that_cant_be_deleted_stays_registered_with_its_records_fo
     assert (purged.sessions, purged.fallback_files, purged.clone) == (1, 0, str(clone))
     assert not clone.exists()
     assert rows(state, workspace_id) == dict.fromkeys(rows(state, workspace_id), 0)
+
+
+async def test_a_clone_whose_deletion_stops_partway_is_purged_by_purging_it_again(
+    store: SqliteStore, state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clone = cloned(tmp_path)
+    workspace_id = await used(store, clone, managed=True)
+    with monkeypatch.context() as patched:
+        patched.setattr(shutil, "rmtree", rmtree_stopping_partway)
+        with pytest.raises(PermissionError):
+            await forget_workspace(store, str(clone))
+    assert rows(state, workspace_id) == dict.fromkeys(rows(state, workspace_id), 1)
+
+    purged = await forget_workspace(store, str(clone))
+
+    assert (purged.sessions, purged.fallback_files, purged.clone) == (1, 0, str(clone))
+    assert list(clone.parent.iterdir()) == []
+    assert rows(state, workspace_id) == dict.fromkeys(rows(state, workspace_id), 0)
+
+
+async def test_what_a_purge_stopped_partway_left_goes_with_a_clone_made_in_its_place(
+    store: SqliteStore, state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clone = cloned(tmp_path)
+    workspace_id = await used(store, clone, managed=True)
+    with monkeypatch.context() as patched:
+        patched.setattr(shutil, "rmtree", rmtree_stopping_partway)
+        with pytest.raises(PermissionError):
+            await purge_workspace(store, workspace_id)
+    git(tmp_path, "clone", "-q", str(tmp_path / "proj.git"), str(clone))
+
+    purged = await purge_workspace(store, workspace_id)
+
+    assert purged.clone == str(clone)
+    assert list(clone.parent.iterdir()) == []
+    assert rows(state, workspace_id)["workspaces"] == 0
 
 
 async def test_fallback_files_that_cant_be_deleted_leave_it_registered_for_a_retry(

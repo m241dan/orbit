@@ -124,7 +124,25 @@ def _locked(root: Path) -> Iterator[str | None]:
 
 
 def _remove_clone(clone: Path) -> None:
-    """Delete the directory ``clone`` and all it holds, if it's there; raises ``OSError`` if it
-    can't."""
+    """Delete the directory ``clone`` and all it holds, if it's there, and what an earlier
+    attempt left of it; raises ``OSError`` if it can't. It's moved aside first, so a deletion
+    that stops partway leaves nothing at ``clone`` for the next attempt to find half deleted
+    and unable to say what it holds."""
+    tombstone = _tombstone(clone)
     if clone.exists():
-        shutil.rmtree(clone)
+        _remove_tree(tombstone)
+        clone.rename(tombstone)
+    _remove_tree(tombstone)
+
+
+def _tombstone(clone: Path) -> Path:
+    """Where the clone ``clone`` is moved to be deleted: beside it, named for it with a leading
+    dot, which a clone's own name never has."""
+    return clone.with_name(f".{clone.name}.purging")
+
+
+def _remove_tree(directory: Path) -> None:
+    """Delete the directory ``directory`` and all it holds, if it's there; raises ``OSError``
+    if it can't."""
+    if directory.exists():
+        shutil.rmtree(directory)

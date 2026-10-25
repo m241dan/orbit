@@ -772,7 +772,9 @@ state directory, replace `orbit.db` with the backup, and start orbit again.
 locks in `locks/`, its fallback files, in the state directory and the repository, and its entry, so orbit starts afresh
 there next time; for a clone `orbit serve` made, it deletes the clone's directory too, and never a
 directory orbit didn't clone into. Files go before the records, so a file it can't delete leaves
-the workspace registered, and running it again finishes the job. It says what it deleted, such as `Forgot /home/me/code/old:
+the workspace registered, and running it again finishes the job. A clone's directory is first
+moved aside, to `.<name>.purging` beside it, and deleted there, so one only partly deleted is
+finished off too. It says what it deleted, such as `Forgot /home/me/code/old:
 deleted 3 sessions and 0 fallback files.`, and takes `--state-dir` as `chat` does. It refuses,
 with status 2 and deleting nothing, a path no workspace is registered at, a workspace the `orbit
 serve` running on the state directory serves (remove it there with `purge`, or stop the server),
@@ -1109,7 +1111,8 @@ owner (`Can't purge <path>: an orbit chat, pid 4242 owns its repository.`), befo
 removed, though removing it without purging still works, and once the server takes the repository
 over it's purged like any other. The server holds the workspace's lock until the purge is done, so
 no local orbit starts on it meanwhile. Its files go before its records, so if one can't be deleted
-the workspace stays registered and purging it again finishes the job. A workspace no server serves,
+the workspace stays registered and purging it again finishes the job, even for a clone's directory
+left partly deleted, which is moved aside to `.<name>.purging` before it's deleted. A workspace no server serves,
 such as one only a local `orbit chat` used, is purged with `orbit db forget` (see [Where orbit keeps
 things](#where-orbit-keeps-things)). In the TUI, `x` in the workspace picker offers `Delete its
 sessions too` beside keeping them (see [Workspaces](#workspaces)).
