@@ -34,11 +34,13 @@ from orbit.agent import (
     ServedWorkspaces,
     ServeLock,
     ServerSettings,
+    StoreError,
     StoreFailed,
     TokenFile,
     WorkspaceHost,
     WorkspaceLock,
     WorkspaceOwner,
+    WorkspaceRegistry,
 )
 from orbit.agent.domain.server import client_fingerprint, is_revoked
 from orbit.agent.external.repository import in_git_work_tree
@@ -692,11 +694,82 @@ def test_adding_a_workspace_with_an_invalid_config_exits_and_leaves_it_unflagged
     assert catalog.workspaces == ()
 
 
+def test_serve_adding_a_workspace_keeps_those_flagged_before_flagged(
+    state: Path, config_dir: Path, tmp_path: Path
+) -> None:
+    first, second = _workspace_dirs(tmp_path, "a", "b")
+    served(Frontend(state, config_dir), "--port", "0", added=(str(first),))
+    served(Frontend(state, config_dir), "--port", "0", added=(str(second),))
+
+    with database(state) as connection:
+        rows = connection.execute("SELECT path, served FROM workspaces ORDER BY path").fetchall()
+    assert rows == [(str(first), 1), (str(second), 1)]
+
+
+def test_serve_adding_a_workspace_leaves_it_the_one_added_last(
+    state: Path, config_dir: Path, tmp_path: Path
+) -> None:
+    first, second = _workspace_dirs(tmp_path, "a", "b")
+    served(Frontend(state, config_dir), "--port", "0", added=(str(first),))
+    served(Frontend(state, config_dir), "--port", "0", added=(str(second),))
+
+    with database(state) as connection:
+        rows = connection.execute("SELECT path FROM workspaces ORDER BY added_at").fetchall()
+    assert rows == [(str(first),), (str(second),)]
+
+
+def _store_gone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Have listing the workspaces flagged served fail, as a broken store does."""
+
+    async def gone(self: WorkspaceRegistry) -> list[tuple[str, str]]:
+        raise StoreError("The store is gone.")
+
+    monkeypatch.setattr(WorkspaceRegistry, "served", gone)
+
+
+def test_a_store_failing_as_serve_reads_the_flagged_workspaces_leaves_an_added_one_unflagged(
+    monkeypatch: pytest.MonkeyPatch, project: Path, state: Path
+) -> None:
+    _store_gone(monkeypatch)
+    result = runner.invoke(app, ["serve", *QUIET, "--add", str(project), "--port", "0"])
+    assert result.exit_code == 2
+    assert result.stderr == "The store is gone.\n"
+
+    with database(state) as connection:
+        rows = connection.execute("SELECT path, served FROM workspaces").fetchall()
+    assert rows == [(str(project), 0)]
+
+
+def test_a_store_failing_as_serve_reads_the_flagged_workspaces_removes_a_clone_unflagged(
+    monkeypatch: pytest.MonkeyPatch, state: Path, tmp_path: Path
+) -> None:
+    _store_gone(monkeypatch)
+    url = bare_repository(tmp_path).as_uri()
+    clone = state / "workspaces" / "proj"
+    result = runner.invoke(app, ["serve", *QUIET, "--add", url, "--port", "0"])
+    assert result.exit_code == 2
+    assert not clone.exists()
+
+    with database(state) as connection:
+        rows = connection.execute("SELECT path, served FROM workspaces").fetchall()
+    assert rows == [(str(clone), 0)]
+
+
 def test_adding_a_workspace_twice_serves_it_once(
     project: Path, state: Path, config_dir: Path
 ) -> None:
     frontend = Frontend(state, config_dir)
     served(frontend, "--port", "0", added=(".", str(project)))
+    [catalog] = [e for e in frontend.events if isinstance(e, Catalog)]
+    assert [w.path for w in catalog.workspaces] == [str(project)]
+
+
+def test_adding_a_workspace_flagged_before_serves_it_once(
+    project: Path, state: Path, config_dir: Path
+) -> None:
+    served(Frontend(state, config_dir), "--port", "0")
+    frontend = Frontend(state, config_dir)
+    served(frontend, "--port", "0")
     [catalog] = [e for e in frontend.events if isinstance(e, Catalog)]
     assert [w.path for w in catalog.workspaces] == [str(project)]
 

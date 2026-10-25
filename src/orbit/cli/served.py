@@ -73,10 +73,10 @@ def _serving(
     flagged before whose directory is gone, or that can't be served, is skipped, with a
     warning.
 
-    Exits with status 2 if the store can't be opened, a clone fails, or an ``added`` workspace
-    can't be registered, locked, opened or flagged, git has no identity for its repository with
-    the coder committing there, or its configuration is invalid, leaving each flagged as it was
-    and removing the clones it made.
+    Exits with status 2 if the store can't be opened or the workspaces flagged before can't be
+    read, a clone fails, or an ``added`` workspace can't be registered, locked, opened or
+    flagged, git has no identity for its repository with the coder committing there, or its
+    configuration is invalid, leaving each flagged as it was and removing the clones it made.
     """
     storage = _storage(user_config)
     usage_source = _usage_source(flags)
@@ -85,9 +85,12 @@ def _serving(
         stack.callback(lambda: asyncio.run(store.close()))
         source = _workspaces(stack, flags, store, storage, clone_dir)
         served = [_added(source, root) for root in dict.fromkeys(added)]
+        # Read the flags before setting any, so a store failing leaves them as they were, and
+        # serve the earlier workspaces after, so setting them doesn't stamp those added again.
+        flagged = _flagged(store)
         with _exit_on(WorkspaceUnavailable):
             source.flag_served()
-        served += _earlier(source, store)
+        served += _earlier(source, flagged)
         workspaces = tuple(workspace for workspace, _ in served)
         makers = [make for _, make in served]
 
@@ -128,15 +131,13 @@ def _cloned(source: ServedWorkspaces, url: str) -> Path:
 
 
 def _earlier(
-    source: ServedWorkspaces, store: SqliteStore
+    source: ServedWorkspaces, flagged: list[tuple[str, Path]]
 ) -> list[tuple[ServedWorkspace, Callable[[], WorkspaceHost]]]:
-    """The workspaces flagged as served in ``store`` by an earlier run that ``source`` doesn't
-    serve yet, served by it, but for those that are gone or can't be served, warning of each.
-
-    Exits with status 2 if the store fails.
-    """
+    """The workspaces ``flagged`` as served by an earlier run, by id and directory, that
+    ``source`` doesn't serve yet, served by it, but for those that can't be served, warning of
+    each."""
     served: list[tuple[ServedWorkspace, Callable[[], WorkspaceHost]]] = []
-    for workspace_id, root in _flagged(store):
+    for workspace_id, root in flagged:
         if source.serves(workspace_id):
             continue
         try:
