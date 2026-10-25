@@ -5,11 +5,19 @@ It imports nothing of orbit's and only the standard library; ``NoTelemetry`` rec
 
 from orbit.tracing.context import NoSpan, current_span, no_span, span_block, use_span
 from orbit.tracing.noop import NoTelemetry
-from orbit.tracing.port import Attributes, AttributeValue, Span, SpanHandle, Telemetry
+from orbit.tracing.port import (
+    Attributes,
+    AttributeValue,
+    Carrier,
+    Span,
+    SpanHandle,
+    Telemetry,
+)
 
 __all__ = [
     "AttributeValue",
     "Attributes",
+    "Carrier",
     "NoSpan",
     "NoTelemetry",
     "Span",

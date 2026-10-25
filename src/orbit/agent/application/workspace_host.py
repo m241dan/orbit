@@ -284,6 +284,7 @@ class WorkspaceHost:
         self._workspace_id = workspace_id
         self._events = Outbox(lambda: self._keeper.id, store, storage, overflow)
         self._events.workspace = workspace_id
+        self._events.telemetry = telemetry
         new_sessions = NewSessions(clock, new_id, self._events.forget, self._events.catch_up)
         self._keeper = SessionKeeper(store, self._events.put, self._halt, new_sessions)
         self._keeper.rename(name)

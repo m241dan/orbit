@@ -5,6 +5,7 @@ An envelope's own fields come first, then ``payload``: the command or event, wit
 """
 
 from collections.abc import Mapping
+from typing import Protocol, Self
 
 from pydantic import Field
 
@@ -86,20 +87,36 @@ class EventEnvelope(_Envelope):
     payload: Event
 
 
-_TRACE_FIELDS = ("traceparent", "tracestate")
+class _Traced(Protocol):
+    """What carries a trace context, as both envelopes do: its W3C ``traceparent`` and
+    ``tracestate``, and copies carrying others. Telemetry passes the tracing port's carriers,
+    which share this shape."""
+
+    @property
+    def traceparent(self) -> str | None:
+        """The W3C ``traceparent`` carried, if any."""
+
+    @property
+    def tracestate(self) -> str | None:
+        """The W3C ``tracestate`` carried, if any."""
+
+    def __replace__(self, *, traceparent: str | None = ..., tracestate: str | None = ...) -> Self:
+        """A copy carrying ``traceparent`` and ``tracestate`` instead."""
 
 
-def trace_carrier(envelope: _Envelope) -> dict[str, str]:
+def trace_carrier(envelope: _Traced) -> dict[str, str]:
     """The trace context ``envelope`` carries, by W3C header name, holding only the fields
     set."""
     fields = {"traceparent": envelope.traceparent, "tracestate": envelope.tracestate}
     return {name: value for name, value in fields.items() if value is not None}
 
 
-def with_trace_carrier[E: _Envelope](envelope: E, carrier: Mapping[str, str]) -> E:
+def with_trace_carrier[E: _Traced](envelope: E, carrier: Mapping[str, str]) -> E:
     """A copy of ``envelope`` carrying the trace context in ``carrier``, ignoring its other
     keys."""
-    return envelope.model_copy(update={name: carrier.get(name) for name in _TRACE_FIELDS})
+    # copy.replace would type the copy as a _Traced rather than an E.
+    traceparent, tracestate = carrier.get("traceparent"), carrier.get("tracestate")
+    return envelope.__replace__(traceparent=traceparent, tracestate=tracestate)
 
 
 # The Snapshot's transcript and history pages hold envelopes, so they're complete once those

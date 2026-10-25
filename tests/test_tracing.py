@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
+from orbit.protocol import EventEnvelope, Notice
 from orbit.tracing import (
     Attributes,
     AttributeValue,
@@ -73,6 +74,28 @@ def test_a_started_span_is_current_only_while_used() -> None:
         assert current_span() is handle
     assert current_span() is outside
     handle.end()
+
+
+def test_a_no_op_span_ignores_its_links_but_still_nests() -> None:
+    linked = TELEMETRY.start("orbit.command")
+    handle = TELEMETRY.start("orbit.task", links=[linked])
+    with TELEMETRY.span("orbit.review", links=[linked, handle]) as span:
+        assert current_span() is span
+    assert isinstance(handle, NoSpan) and handle.name == "orbit.task"
+
+
+EVENT = EventEnvelope(seq=1, payload=Notice(message="hi"))
+TRACEPARENT = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+
+
+def test_no_telemetry_carries_an_envelope_unchanged() -> None:
+    with TELEMETRY.span("orbit.command"):
+        assert TELEMETRY.carry(EVENT) is EVENT
+
+
+def test_no_telemetry_finds_a_no_op_span_in_an_envelope_carrying_a_trace_context() -> None:
+    carried = TELEMETRY.carried(EVENT.model_copy(update={"traceparent": TRACEPARENT}))
+    assert isinstance(carried, NoSpan)
 
 
 def test_a_no_op_span_ignores_what_it_records() -> None:

@@ -1,29 +1,20 @@
 """Starting the telemetry the settings ask for: none at all, importing nothing of
 OpenTelemetry, or the SDK's, which needs the extra that installs it."""
 
-from contextlib import AbstractContextManager
 from typing import Protocol
 
 from orbit.telemetry.headers import read_headers
 from orbit.telemetry.run import FLUSH_SECONDS, TelemetryRun
 from orbit.telemetry.settings import TelemetrySettings, otlp_target
-from orbit.tracing import Attributes, NoTelemetry, Span, SpanHandle
+from orbit.tracing import NoTelemetry, Telemetry
 
 
 class TelemetryNotInstalled(Exception):
     """Telemetry is configured, but the extra that installs it isn't; the message names it."""
 
 
-class RunningTelemetry(Protocol):
+class RunningTelemetry(Telemetry, Protocol):
     """Telemetry started, which ends with :meth:`close`."""
-
-    def span(self, name: str, attributes: Attributes | None = None) -> AbstractContextManager[Span]:
-        """A span called ``name``, current for the block and ended on leaving it."""
-        ...
-
-    def start(self, name: str, attributes: Attributes | None = None) -> SpanHandle:
-        """A span called ``name`` that runs until its ``end``."""
-        ...
 
     def close(self) -> None:
         """Export what's left, waiting a short while at most, and stop."""

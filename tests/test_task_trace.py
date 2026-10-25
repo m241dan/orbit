@@ -8,9 +8,7 @@ from functools import partial
 from typing import Any
 
 import pytest
-from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan
-from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import StatusCode
 
 from orbit.agent import Verification, VerificationStep, WorkspaceHost
@@ -29,7 +27,6 @@ from orbit.protocol import (
     TurnEndReason,
     Usage,
 )
-from orbit.telemetry.otel import OtelTelemetry, otel_telemetry
 from tests.agent_fakes import (
     ROLES,
     STEP,
@@ -51,33 +48,10 @@ from tests.agent_fakes import (
     start,
     verified,
 )
+from tests.telemetry_helpers import Traced
 from tests.waiting import eventually
 
 LINT = VerificationStep(name="Lint", command=("ruff", "check"))
-
-
-class Traced:
-    """Telemetry exporting its spans to memory."""
-
-    def __init__(self) -> None:
-        self.exporter = InMemorySpanExporter()
-        self.telemetry: OtelTelemetry = otel_telemetry(
-            self.exporter, Resource.create({"service.name": "orbit-tests"})
-        )
-
-        self._closed = False
-
-    def spans(self, name: str) -> list[ReadableSpan]:
-        """The spans called ``name`` exported, once every span is."""
-        if not self._closed:
-            self._closed = True
-            self.telemetry.close()
-        return [span for span in self.exporter.get_finished_spans() if span.name == name]
-
-    def task(self) -> ReadableSpan:
-        """The one task's span."""
-        [task] = self.spans("orbit.task")
-        return task
 
 
 def attributes(span: ReadableSpan) -> Mapping[str, Any]:

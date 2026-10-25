@@ -22,7 +22,7 @@ from orbit.protocol import (
     trace_carrier,
 )
 from orbit.telemetry.otel import OtelTelemetry, otel_telemetry
-from orbit.tracing import current_span
+from orbit.tracing import NoSpan, Telemetry, current_span, use_span
 
 RESOURCE = Resource.create({"service.name": "orbit-tests"})
 
@@ -200,6 +200,87 @@ def test_an_envelope_without_trace_context_parents_nothing() -> None:
         pass
 
     assert _exported(build)["orbit.command"].parent is None
+
+
+def test_a_span_started_under_a_carried_span_is_its_child_in_the_same_trace() -> None:
+    sender, receiver = Build(), Build()
+    sending: Telemetry = sender.telemetry
+    receiving: Telemetry = receiver.telemetry
+    with sending.span("orbit.tui.action"):
+        carried = sending.carry(HELLO)
+    with use_span(receiving.carried(carried)):
+        receiving.start("orbit.command").end()
+
+    action = _exported(sender)["orbit.tui.action"]
+    command = _exported(receiver)["orbit.command"]
+    assert command.parent is not None and action.context is not None
+    assert command.parent.span_id == action.context.span_id
+    assert command.context is not None
+    assert command.context.trace_id == action.context.trace_id
+
+
+def _ids(span: ReadableSpan) -> tuple[int, int]:
+    """The trace and span ids of ``span``."""
+    assert span.context is not None
+    return span.context.trace_id, span.context.span_id
+
+
+def _linked(span: ReadableSpan) -> list[tuple[int, int]]:
+    """The trace and span ids of each span ``span`` links to, in order."""
+    return [(link.context.trace_id, link.context.span_id) for link in span.links]
+
+
+def test_a_span_started_with_links_links_to_each_in_a_trace_of_its_own() -> None:
+    build = Build()
+    with build.telemetry.span("orbit.command") as command:
+        pass
+    with build.telemetry.span("orbit.task") as task:
+        pass
+    build.telemetry.start("orbit.review", links=[command, task]).end()
+
+    spans = _exported(build)
+    review = spans["orbit.review"]
+    assert _linked(review) == [_ids(spans["orbit.command"]), _ids(spans["orbit.task"])]
+    assert review.parent is None
+    assert _ids(review)[0] not in {_ids(spans["orbit.command"])[0], _ids(spans["orbit.task"])[0]}
+
+
+def test_a_span_block_links_to_its_links() -> None:
+    build = Build()
+    with build.telemetry.span("orbit.command") as command:
+        pass
+    with build.telemetry.span("orbit.task", links=[command]):
+        pass
+
+    spans = _exported(build)
+    assert _linked(spans["orbit.task"]) == [_ids(spans["orbit.command"])]
+
+
+def test_a_no_op_span_in_links_adds_no_link() -> None:
+    build = Build()
+    with build.telemetry.span("orbit.command") as command:
+        pass
+    build.telemetry.start("orbit.task", links=[NoSpan("orbit.command"), command]).end()
+
+    spans = _exported(build)
+    assert _linked(spans["orbit.task"]) == [_ids(spans["orbit.command"])]
+
+
+def test_a_span_links_to_a_carried_span_from_another_process() -> None:
+    sender, receiver = Build(), Build()
+    with sender.telemetry.span("orbit.command"):
+        carried = sender.telemetry.carry(HELLO)
+    receiver.telemetry.start("orbit.task", links=[receiver.telemetry.carried(carried)]).end()
+
+    command = _exported(sender)["orbit.command"]
+    assert _linked(_exported(receiver)["orbit.task"]) == [_ids(command)]
+
+
+def test_a_carried_span_from_an_envelope_without_trace_context_adds_no_link() -> None:
+    build = Build()
+    build.telemetry.start("orbit.task", links=[build.telemetry.carried(HELLO)]).end()
+
+    assert _exported(build)["orbit.task"].links == ()
 
 
 def test_spans_carry_the_resource() -> None:

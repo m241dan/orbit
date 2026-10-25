@@ -1809,10 +1809,12 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   orbit package but `orbit.protocol`, and only `orbit.cli` imports it.
 - `orbit.tracing`: the tracing port, standard library only. `Telemetry` starts `Span`s, each a
   child of the current span, which a `ContextVar` keeps (`current_span`), so it follows the
-  code across awaits and into the tasks started under it; `NoTelemetry` records nothing but
-  still nests spans. It imports no orbit package, and neither `orbit.protocol` nor the
-  backend's domain imports it. Trace context crosses the wire in the envelopes'
-  `traceparent` and `tracestate`, which `orbit.protocol`'s `trace_carrier` and
+  code across awaits and into the tasks started under it, and linked to any others it's given;
+  it carries the current span's trace context in an envelope (`carry`) and finds the remote
+  span one carries (`carried`), knowing envelopes only as `Carrier`s. `NoTelemetry` records
+  and carries nothing but still nests spans. It imports no orbit package, and neither
+  `orbit.protocol` nor the backend's domain imports it. Trace context crosses the wire in the
+  envelopes' `traceparent` and `tracestate`, which `orbit.protocol`'s `trace_carrier` and
   `with_trace_carrier` read and set.
 - `orbit.telemetry`: the tracing port over the OpenTelemetry SDK, the only package that imports
   `opentelemetry`, and only `orbit.cli` imports it. `TelemetrySettings` is the user config's
@@ -1852,9 +1854,10 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   - `application`: `ControlPlane` (in `control_plane`) is what frontends connect to: each
     `SessionConnection` (in `connection`) from its `connect()` implements `Session`. It owns
     what's shared: the connections, the `Outbox` (in `outbox`), which stamps each event with its
-    `seq` and the session it belongs to, every stream's `Handshake` and the `UsageMonitor`; it
-    routes every command to the `WorkspaceHost` of the workspace it's for and passes each host's
-    events to the connections; frontends add and remove workspaces through its
+    `seq`, the session it belongs to and the trace context of the span current, every stream's
+    `Handshake` and the `UsageMonitor`; it routes every command to the `WorkspaceHost` of the
+    workspace it's for and passes each host's events to the connections; frontends add and
+    remove workspaces through its
     `WorkspaceSource` port, which `orbit serve` fills and a local orbit doesn't. `WorkspaceHost` (in `workspace_host`) is one workspace's
     backend: its open session, lanes, agents and workspace lock; it takes the commands routed
     to it, asks the domain what follows, drives the ports and publishes its events. `Tasks` (in

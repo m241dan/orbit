@@ -12,12 +12,20 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter, SpanExportResult
 from opentelemetry.sdk.trace.sampling import ALWAYS_ON
-from opentelemetry.trace import Status, StatusCode
+from opentelemetry.trace import Link, Status, StatusCode
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
-from orbit.protocol import CommandEnvelope, EventEnvelope, trace_carrier, with_trace_carrier
+from orbit.protocol import trace_carrier, with_trace_carrier
 from orbit.telemetry.run import FLUSH_SECONDS
-from orbit.tracing import Attributes, AttributeValue, Span, current_span, span_block, use_span
+from orbit.tracing import (
+    Attributes,
+    AttributeValue,
+    Carrier,
+    Span,
+    current_span,
+    span_block,
+    use_span,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +65,6 @@ class OtelSpan:
         return use_span(self)
 
 
-type Envelope = CommandEnvelope | EventEnvelope
-
-
 class OtelTelemetry:
     """Telemetry over ``provider``, whose spans nest under orbit's current span; ``counts``
     tells how many it couldn't export, and :meth:`close` waits at most ``flush_seconds`` for
@@ -74,27 +79,32 @@ class OtelTelemetry:
         self._flush_seconds = flush_seconds
 
     def span(
-        self, name: str, attributes: Attributes | None = None
+        self, name: str, attributes: Attributes | None = None, links: Sequence[Span] = ()
     ) -> AbstractContextManager[OtelSpan]:
-        """A span called ``name``, current for the block and ended on leaving it."""
-        return span_block(self.start(name, attributes))
+        """A span called ``name``, linked to each of ``links``, current for the block and ended
+        on leaving it."""
+        return span_block(self.start(name, attributes, links))
 
-    def start(self, name: str, attributes: Attributes | None = None) -> OtelSpan:
-        """A span called ``name``, a child of the current span, running until its ``end``."""
+    def start(
+        self, name: str, attributes: Attributes | None = None, links: Sequence[Span] = ()
+    ) -> OtelSpan:
+        """A span called ``name``, a child of the current span and linked to each of ``links``,
+        running until its ``end``."""
         otel = self._tracer.start_span(
-            name, context=_context(current_span()), attributes=attributes
+            name, context=_context(current_span()), attributes=attributes, links=_links(links)
         )
         return OtelSpan(otel)
 
-    def carry[E: Envelope](self, envelope: E) -> E:
+    def carry[E: Carrier](self, envelope: E) -> E:
         """``envelope`` carrying the current span's trace context."""
         carrier: dict[str, str] = {}
         _PROPAGATOR.inject(carrier, context=_context(current_span()))
         return with_trace_carrier(envelope, carrier)
 
-    def carried(self, envelope: Envelope) -> OtelSpan:
+    def carried(self, envelope: Carrier) -> OtelSpan:
         """The remote span whose trace context ``envelope`` carries, to make current so the
-        spans started under it are its children; one recording nothing if it carries none."""
+        spans started under it are its children, or to link to; one recording nothing if it
+        carries none."""
         context = _PROPAGATOR.extract(trace_carrier(envelope))
         return OtelSpan(trace.get_current_span(context))
 
@@ -119,6 +129,12 @@ def _context(parent: Span) -> Context:
     if isinstance(parent, OtelSpan):
         return trace.set_span_in_context(parent.otel, Context())
     return Context()
+
+
+def _links(spans: Sequence[Span]) -> list[Link]:
+    """Links to those of ``spans`` that are OpenTelemetry's: the others record nothing to link
+    to."""
+    return [Link(span.otel.get_span_context()) for span in spans if isinstance(span, OtelSpan)]
 
 
 class SpanCounts:

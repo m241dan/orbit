@@ -19,6 +19,7 @@ from orbit.protocol import (
     EventEnvelope,
     Snapshot,
 )
+from orbit.tracing import NoTelemetry, Telemetry
 
 TRANSCRIPT_LENGTH = 500
 """How many of a session's latest events its transcript holds."""
@@ -58,6 +59,8 @@ _WHOLE = StorageSettings(tool_output_kb=0, session_log_mb=0)
 """Storage settings that cut nothing and trim nothing."""
 
 _NO_OVERFLOW = Overflow()
+
+_NO_TELEMETRY = NoTelemetry()
 
 
 def _drop(envelope: EventEnvelope) -> None:
@@ -111,7 +114,8 @@ class Outbox:
     envelope stamped when it was put in: the next of the :attr:`seqs`, counted on from the
     highest in ``log`` (if there is one) else from one, and shared with the outboxes of other
     workspaces once they're given the same, the session ``open_session`` names then, unless
-    the event belongs to none, and the :attr:`workspace`, unless it belongs to the control plane.
+    the event belongs to none, the :attr:`workspace`, unless it belongs to the control plane,
+    and the trace context of the span current then, as :attr:`telemetry` carries it.
 
     With a ``log``, each envelope of a session is also written to it in the background, but for
     the events answering one connection; :meth:`catch_up` counts on from its highest ``seq``
@@ -134,6 +138,8 @@ class Outbox:
         self._open = open_session
         # Stamped on every event but the control plane's own, once set.
         self.workspace: str | None = None
+        # What carries the current span's trace context in each envelope, once set.
+        self.telemetry: Telemetry = _NO_TELEMETRY
         self._cut_bytes = storage.tool_output_bytes
         # The last event's place in the stream, counted across sessions and workspaces.
         self.seqs = Seqs(log.max_seq() if log else 0, self.reserve)
@@ -158,7 +164,9 @@ class Outbox:
         session that isn't open, and never logged, as it answers a connection viewing it."""
         seq = self.seqs.next()
         workspace, session = self._place(item, viewed)
-        envelope = EventEnvelope(seq=seq, workspace=workspace, session=session, payload=item)
+        envelope = self.telemetry.carry(
+            EventEnvelope(seq=seq, workspace=workspace, session=session, payload=item)
+        )
         if session is not None and viewed is None and logged:
             self._log(session, envelope)
         return envelope

@@ -30,7 +30,7 @@ A command travels in a `CommandEnvelope`:
   `AddWorkspace`, `RemoveWorkspace`, `Watch` and `ListDirectory`, are for no workspace, and
   carry `null`.
 - `traceparent` and `tracestate`: W3C trace context. They're optional, aren't checked, and
-  aren't set yet.
+  orbit's frontends don't set them yet.
 
 ```json
 {"workspace":null,"traceparent":null,"tracestate":null,"command_id":"9c41e7","session":null,"payload":{"type":"remove_task","task_id":"t3"}}
@@ -63,7 +63,8 @@ An event travels in an `EventEnvelope`:
   events, the types in `CONTROL_PLANE_EVENTS` (`Welcome`, `Catalog`, `UsageChanged`,
   `WorkspaceCloning`, `AgentsChanged`, `UsageTotals` and `DirectoryListing`), which carry `null`, as does the `ErrorOccurred` telling of a failed clone
   (see [Workspaces](#workspaces)), whose `session` is `null` too.
-- `traceparent` and `tracestate`, as on commands.
+- `traceparent` and `tracestate`, as on commands. With telemetry on, the events a workspace
+  publishes carry the trace context of the span current as each is published, if there is one.
 
 ```json
 {"workspace":"4f1c2a9e","traceparent":null,"tracestate":null,"seq":42,"session":"20261018-0801","payload":{"type":"command_refused","command_id":"9c41e7","code":"busy","message":"Task t3 is running."}}

@@ -72,3 +72,9 @@ waited has one.
 
 A child of `orbit.task`, timing the task's run from its agent's start until its work is settled
 and merged. It has no attributes.
+
+## Trace context
+
+Each event a workspace publishes carries, in its envelope's `traceparent` and `tracestate`, the
+trace context of the span current as it's published, so what a frontend shows can be tied to the
+span that caused it. An event published outside any span carries none.

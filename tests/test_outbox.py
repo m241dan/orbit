@@ -6,7 +6,9 @@ from orbit.agent.application.outbox import SEQ_BLOCK, Outbox, Seqs
 from orbit.agent.application.ports import ReadFailed
 from orbit.agent.domain.storage import StorageSettings
 from orbit.protocol import EventEnvelope, Notice, ToolCallFinished, UsageChanged, Welcome
-from tests.agent_fakes import FakeStore
+from orbit.tracing import NoTelemetry
+from tests.agent_fakes import FakeStore, close, delivered, greeted, publish, session_for
+from tests.telemetry_helpers import Traced, traceparent_of
 
 ONE = Notice(message="one")
 TWO = Notice(message="two")
@@ -66,6 +68,43 @@ async def test_an_event_names_the_workspace_but_for_the_control_planes_own() -> 
     await outbox.put(Welcome(command_id="hello", server_version="1"))
 
     assert [envelope.workspace for envelope in sent] == ["w1", None, None]
+
+
+async def test_an_event_published_in_a_span_carries_its_trace_context() -> None:
+    traced = Traced()
+    sent: list[EventEnvelope] = []
+    outbox = Outbox(Open())
+    outbox.telemetry = traced.telemetry
+    outbox.deliver = sent.append
+    with traced.telemetry.span("orbit.command"):
+        await outbox.put(ONE)
+
+    [command] = traced.spans("orbit.command")
+    assert sent[0].traceparent == traceparent_of(command)
+
+
+async def test_without_telemetry_an_event_published_in_a_span_carries_no_trace_context() -> None:
+    sent: list[EventEnvelope] = []
+    outbox = Outbox(Open())
+    outbox.deliver = sent.append
+    with NoTelemetry().span("orbit.command"):
+        await outbox.put(ONE)
+
+    assert sent == [EventEnvelope(seq=1, session="a", payload=ONE)]
+    assert sent[0].traceparent is None
+
+
+async def test_the_events_a_host_publishes_in_a_span_carry_its_trace_context() -> None:
+    traced = Traced()
+    host, _, _ = session_for(telemetry=traced.telemetry)
+    await greeted(host)
+    with traced.telemetry.span("orbit.command"):
+        await publish(host, ONE)
+
+    [published] = [envelope for envelope in delivered(host) if envelope.payload == ONE]
+    [command] = traced.spans("orbit.command")
+    assert published.traceparent == traceparent_of(command)
+    await close(host)
 
 
 async def test_a_stamped_event_is_logged_but_not_delivered() -> None:
