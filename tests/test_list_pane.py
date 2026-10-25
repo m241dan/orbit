@@ -1,5 +1,8 @@
+from typing import Self
+
 import pytest
 from textual.app import App, ComposeResult
+from textual.geometry import Region
 from textual.visual import VisualType
 from textual.widgets.option_list import Option
 
@@ -233,3 +236,77 @@ async def test_a_prompt_replaced_while_hidden_is_measured_once_shown() -> None:
         await pilot.pause()
         assert line_map(pane) == [0, 1, 1, 1, 2]
         assert [pane.render_line(y).text.strip() for y in range(1, 4)] == ["a", "b", "c"]
+
+
+class RefreshSpy(ListPane):
+    """A pane recording the regions each refresh asked for; empty for the whole pane."""
+
+    def __init__(self, *, id: str) -> None:
+        self.refreshed: list[tuple[Region, ...]] = []
+        super().__init__(id=id)
+
+    def refresh(self, *regions: Region, **kwargs: bool) -> Self:
+        self.refreshed.append(regions)
+        return super().refresh(*regions, **kwargs)
+
+
+class SpyApp(ListApp):
+    def compose(self) -> ComposeResult:
+        pane = RefreshSpy(id="pane")
+        pane.add_options(self.options)
+        yield pane
+
+
+async def test_a_prompt_of_the_same_height_repaints_only_its_lines() -> None:
+    app = SpyApp("one", "a\nb", "three")
+    async with app.run_test() as pilot:
+        pane = app.query_one(RefreshSpy)
+        await pilot.pause()  # Measured.
+        pane.refreshed = []
+        pane.replace_prompt(1, "c\nd")
+        assert pane.refreshed == [(Region(0, 1, pane.size.width, 2),)]
+        await pilot.pause()
+        assert pane.render_line(2).text.strip() == "d"
+
+
+async def test_a_prompt_of_another_height_repaints_the_whole_pane() -> None:
+    app = SpyApp("one", "two", "three")
+    async with app.run_test():
+        pane = app.query_one(RefreshSpy)
+        pane.refreshed = []
+        pane.replace_prompt(1, "a\nb")
+        assert () in pane.refreshed
+
+
+class ClearSpy(ListPane):
+    """A pane counting how often OptionList forgets its rows' measurements."""
+
+    clears = 0
+
+    def _clear_caches(self) -> None:
+        self.clears += 1
+        super()._clear_caches()
+
+
+class ClearApp(ListApp):
+    CSS = "ClearSpy { height: 1fr; }"
+
+    def compose(self) -> ComposeResult:
+        pane = ClearSpy(id="pane")
+        pane.add_options(self.options)
+        yield pane
+
+
+async def test_only_a_new_width_makes_the_pane_measure_its_rows_again() -> None:
+    app = ClearApp("one", "two", "three")
+    async with app.run_test(size=(80, 24)) as pilot:
+        pane = app.query_one(ClearSpy)
+        await pilot.pause()
+        pane.clears = 0
+        await pilot.resize_terminal(80, 30)
+        await pilot.pause()
+        assert pane.clears == 0
+        assert pane.render_line(2).text.strip() == "three"
+        await pilot.resize_terminal(60, 30)
+        await pilot.pause()
+        assert pane.clears == 1
