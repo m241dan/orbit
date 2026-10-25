@@ -65,7 +65,8 @@ one row per workspace, or anything from `.orbit/config.toml`, which is read at s
 - **Switching.** The session picker, at startup and on `ctrl+p`, opens a saved session or starts a
   new one. Switching
   is refused while tasks run, a review runs or a conversational role answers, so nothing is running when the
-  session's contents are replaced. Opening a session never starts work. Drafts orbit added before
+  session's contents are replaced; the refusal says what runs, naming the roles answering (`Can't
+  switch: the architect is answering. Press ctrl+x to stop it.`). Opening a session never starts work. Drafts orbit added before
   you picked at startup carry over into the session you pick, and the session they were added to
   is then deleted.
 - **Crash recovery.** Tasks saved as running or verifying come back cancelled, so the next run

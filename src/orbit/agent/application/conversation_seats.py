@@ -65,9 +65,9 @@ class ConversationSeats:
         raise unknown(problem, listing, self.names)
 
     @property
-    def running(self) -> bool:
-        """Whether any of the roles is answering."""
-        return any(seat.running for seat in self._seats.values())
+    def answering(self) -> tuple[str, ...]:
+        """The roles answering: the planner, if it is, then the others, in order."""
+        return tuple(name for name, seat in self._seats.items() if seat.running)
 
     @property
     def lanes(self) -> tuple[BusyLane, ...]:

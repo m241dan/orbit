@@ -13,7 +13,7 @@ from orbit.agent.domain.workspaces import (
     check_removable,
     served_workspace,
 )
-from orbit.protocol import BUSY, INVALID, UNKNOWN, WRONG_SESSION
+from orbit.protocol import BUSY, INVALID, PLANNER, UNKNOWN, WRONG_SESSION
 
 
 def refusal(error: pytest.ExceptionInfo[Refused]) -> tuple[str, str]:
@@ -118,10 +118,11 @@ def test_the_startup_check_alone_leaves_a_workspace_idle_for_switching_and_remov
     [
         (Activity(tasks=True), "tasks are running"),
         (Activity(review=True), "a review is running"),
-        (Activity(planner=True), "the planner is answering"),
-        (Activity(tasks=True, review=True, planner=True), "tasks are running"),
-        (Activity(tasks=True, planner=True), "tasks are running"),
-        (Activity(review=True, planner=True), "a review is running"),
+        (Activity(answering=(PLANNER,)), "the planner is answering"),
+        (Activity(tasks=True, review=True, answering=(PLANNER,)), "tasks are running"),
+        (Activity(tasks=True, answering=(PLANNER,)), "tasks are running"),
+        (Activity(review=True, answering=(PLANNER,)), "a review is running"),
+        (Activity(answering=("architect",)), "the architect is answering"),
     ],
 )
 def test_a_workspace_running_work_is_busy_naming_it(activity: Activity, work: str) -> None:

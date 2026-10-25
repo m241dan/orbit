@@ -14,7 +14,11 @@ from orbit.agent.domain.activity import (
     reported,
     switch_refusal,
 )
+from orbit.protocol import PLANNER
 from orbit.protocol import Activity as Reported
+
+PLANNING = (PLANNER,)
+"""The planner answering, alone."""
 
 
 @pytest.mark.parametrize(
@@ -23,7 +27,7 @@ from orbit.protocol import Activity as Reported
         (Activity(tasks=True), TASKS_RUNNING),
         (Activity(lane_tasks=("4",)), LANE_TASK_RUNNING),
         (Activity(review=True), REVIEW_RUNNING),
-        (Activity(planner=True), PLANNER_ANSWERING),
+        (Activity(answering=PLANNING), PLANNER_ANSWERING),
     ],
 )
 def test_each_activity_alone_refuses_a_switch_saying_so_and_is_running(
@@ -35,9 +39,9 @@ def test_each_activity_alone_refuses_a_switch_saying_so_and_is_running(
 @pytest.mark.parametrize(
     ("activity", "refusal"),
     [
-        (Activity(tasks=True, review=True, planner=True), TASKS_RUNNING),
-        (Activity(review=True, planner=True), REVIEW_RUNNING),
-        (Activity(tasks=True, planner=True), TASKS_RUNNING),
+        (Activity(tasks=True, review=True, answering=PLANNING), TASKS_RUNNING),
+        (Activity(review=True, answering=PLANNING), REVIEW_RUNNING),
+        (Activity(tasks=True, answering=PLANNING), TASKS_RUNNING),
         (Activity(tasks=True, lane_tasks=("4",)), TASKS_RUNNING),
         (Activity(lane_tasks=("4",), review=True), LANE_TASK_RUNNING),
     ],
@@ -51,11 +55,11 @@ def test_several_at_once_refuse_with_the_first_in_order(activity: Activity, refu
     [
         (Activity(tasks=True), Running.TASKS),
         (Activity(review=True), Running.REVIEW),
-        (Activity(planner=True), Running.PLANNER),
-        (Activity(tasks=True, review=True, planner=True), Running.TASKS),
-        (Activity(tasks=True, planner=True), Running.TASKS),
-        (Activity(review=True, planner=True), Running.REVIEW),
-        (Activity(lane_tasks=("4",), planner=True), Running.LANES),
+        (Activity(answering=PLANNING), Running.PLANNER),
+        (Activity(tasks=True, review=True, answering=PLANNING), Running.TASKS),
+        (Activity(tasks=True, answering=PLANNING), Running.TASKS),
+        (Activity(review=True, answering=PLANNING), Running.REVIEW),
+        (Activity(lane_tasks=("4",), answering=PLANNING), Running.LANES),
         (Activity(startup_check=True), None),
     ],
 )
@@ -70,9 +74,9 @@ def test_the_first_running_kind_is_in_order_and_ignores_the_startup_check(
     [
         (Activity(tasks=True), "tasks are running"),
         (Activity(review=True), "a review is running"),
-        (Activity(planner=True), "the planner is answering"),
-        (Activity(tasks=True, review=True, planner=True), "tasks are running"),
-        (Activity(review=True, planner=True), "a review is running"),
+        (Activity(answering=PLANNING), "the planner is answering"),
+        (Activity(tasks=True, review=True, answering=PLANNING), "tasks are running"),
+        (Activity(review=True, answering=PLANNING), "a review is running"),
         (Activity(lane_tasks=("4",)), "a task is running in its own lane"),
         (Activity(startup_check=True), None),
     ],
@@ -81,6 +85,48 @@ def test_what_runs_first_is_called_by_its_kind_and_nothing_when_idle(
     activity: Activity, work: str | None
 ) -> None:
     assert doing(activity) == work
+
+
+@pytest.mark.parametrize(
+    ("answering", "refusal"),
+    [
+        (("architect",), "Can't switch: the architect is answering. Press ctrl+x to stop it."),
+        (
+            (PLANNER, "architect"),
+            "Can't switch: the planner and the architect are answering. Press ctrl+x to stop them.",
+        ),
+    ],
+)
+def test_conversational_roles_answering_refuse_a_switch_naming_them(
+    answering: tuple[str, ...], refusal: str
+) -> None:
+    assert switch_refusal(Activity(answering=answering)) == refusal
+
+
+def test_the_planner_answering_alone_refuses_a_switch_naming_the_planner() -> None:
+    refusal = "Can't switch: the planner is answering. Press ctrl+x to stop it."
+
+    assert switch_refusal(Activity(answering=PLANNING)) == refusal == PLANNER_ANSWERING
+
+
+@pytest.mark.parametrize(
+    ("answering", "work"),
+    [
+        (("architect",), "the architect is answering"),
+        (
+            (PLANNER, "architect", "critic"),
+            "the planner, the architect and the critic are answering",
+        ),
+    ],
+)
+def test_conversational_roles_answering_are_named_by_what_runs(
+    answering: tuple[str, ...], work: str
+) -> None:
+    assert doing(Activity(answering=answering)) == work
+
+
+def test_a_conversational_role_answering_is_reported_as_a_planner_turn() -> None:
+    assert reported(Activity(answering=("architect", "critic"))) == (Reported(kind="planner"),)
 
 
 def test_nothing_in_progress_refuses_nothing_and_is_idle() -> None:
@@ -97,7 +143,7 @@ def test_everything_in_progress_is_reported_in_order_with_its_task() -> None:
     activity = Activity(
         tasks=True,
         review=True,
-        planner=True,
+        answering=PLANNING,
         startup_check=True,
         task_id="t1",
         reviewing=("t2",),
@@ -117,7 +163,7 @@ def test_everything_in_progress_is_reported_in_order_with_its_task() -> None:
 
 
 def test_only_what_is_in_progress_is_reported() -> None:
-    activity = Activity(planner=True, task_id="t1", reviewing=("t2",))
+    activity = Activity(answering=PLANNING, task_id="t1", reviewing=("t2",))
 
     assert reported(activity) == (Reported(kind="planner"),)
 

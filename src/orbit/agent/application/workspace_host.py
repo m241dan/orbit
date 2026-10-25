@@ -1003,15 +1003,15 @@ class WorkspaceHost:
         self._states.check()
 
     def _activity(self) -> Activity:
-        """What's in progress now: a task run, a review, a conversational role's turn, reported
-        as a planner turn, the startup check and the tasks running in the other lanes that start
-        by themselves, with the tasks the run and the review are on, and where the run waits for
-        a coder, behind how many busy."""
+        """What's in progress now: a task run, a review, the conversational roles answering, the
+        startup check and the tasks running in the other lanes that start by themselves, with
+        the tasks the run and the review are on, and where the run waits for a coder, behind how
+        many busy."""
         task_id, waiting, busy = self._work_activity()
         return Activity(
             tasks=self._turns.running,
             review=self._lane is not None and self._lane.running,
-            planner=self._seats.running,
+            answering=self._seats.answering,
             startup_check=self._startup is not None and self._startup.running,
             task_id=task_id,
             reviewing=self._lane.reviewing if self._lane else None,

@@ -56,7 +56,7 @@ from tests.agent_fakes import (
 )
 from tests.connection_helpers import say, taken
 from tests.plane_fakes import payloads
-from tests.session_builders import opened
+from tests.session_builders import opened, saved
 from tests.waiting import eventually
 
 ARCHITECT = "architect"
@@ -232,6 +232,20 @@ async def test_resetting_the_architect_while_it_answers_is_refused_naming_it() -
     await session.close()
 
 
+async def test_switching_while_the_architect_answers_is_refused_naming_it() -> None:
+    store = FakeStore()
+    store.saved = [saved("auth")]
+    session, launcher = talking(store)
+    launcher.planner_turns = [hangs]
+    await send(session, SendMessage(agent=ARCHITECT, text="Design."))
+    await eventually(lambda: launcher.launches, poll=0)
+    message = "Can't switch: the architect is answering. Press ctrl+x to stop it."
+    assert await refusal_of(session, ActivateSession(session="auth")) == refused(BUSY, message)
+    assert await refusal_of(session, NewSession(name="other")) == refused(BUSY, message)
+    assert session.saved_session.name != "other"
+    await session.close()
+
+
 async def test_cancelling_the_architects_lane_stops_its_turn_alone() -> None:
     gate = asyncio.Event()
     session, launcher = talking()
@@ -364,14 +378,14 @@ async def test_roles_sharing_a_lane_take_turns_in_it_each_keeping_its_own_turn_a
         await critiquing.submit("Critique.", Settings())
     assert (refusal.value.code, str(refusal.value)) == (BUSY, ARCHITECT_ANSWERING)
     assert (designing.running, critiquing.running, critiquing.turn) == (True, False, None)
-    assert seats.busy() == {"planner": False, DESIGN: True}
+    assert (seats.busy(), seats.answering) == ({"planner": False, DESIGN: True}, (ARCHITECT,))
     await critiquing.reset()  # Its conversation isn't the one answering, so it isn't busy.
     critiquing.cancel()
     assert designing.turn is not None and not designing.turn.cancelling()
     seats.cancel(DESIGN)
-    await eventually(lambda: not seats.running)
+    await eventually(lambda: not seats.answering)
     assert seats.busy() == {"planner": False, DESIGN: False}
     await critiquing.submit("Critique.", Settings())
-    await eventually(lambda: not seats.running)
+    await eventually(lambda: not seats.answering)
     assert launcher.launches[-1].instructions == "You critique."
     await seats.close()
