@@ -19,6 +19,7 @@ from orbit.agent.domain.roles import (
     review_lane,
     role_task,
     suggested_task,
+    suggestion_refusal,
     task_lanes,
     task_suggestion,
     timeout_ending,
@@ -447,6 +448,16 @@ def test_work_in_a_disabled_role_is_refused_as_not_configured_naming_it() -> Non
 @pytest.mark.parametrize("name", ["coder", "nobody"])
 def test_work_in_an_enabled_role_or_one_there_is_none_of_is_not_refused(name: str) -> None:
     check_enabled(BUILT_IN_ROLES, name)
+
+
+def test_a_suggested_task_is_refused_while_the_coder_is_disabled_naming_it() -> None:
+    coder = BUILT_IN_ROLES["coder"].model_copy(update={"enabled": False})
+    refusal = suggestion_refusal({**BUILT_IN_ROLES, "coder": coder})
+    assert refusal == "coder is disabled in this project's configuration."
+
+
+def test_a_suggested_task_is_not_refused_while_the_coder_is_enabled() -> None:
+    assert suggestion_refusal(BUILT_IN_ROLES) is None
 
 
 @pytest.mark.parametrize(

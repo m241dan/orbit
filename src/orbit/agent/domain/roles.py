@@ -422,6 +422,12 @@ def suggested_task(coder: Role, title: str, prompt: str) -> TaskSpec:
     return role_task(CODER, coder, f"{title}\n\n{prompt}" if prompt else title)
 
 
+def suggestion_refusal(roles: Mapping[str, Role]) -> str | None:
+    """Why a task an agent suggests or proposes is refused, if it is: it's a coder's task, and
+    nothing would run it while the coder is disabled among ``roles``."""
+    return disabled_note(CODER) if CODER in disabled_roles(roles) else None
+
+
 def task_suggestion(arguments: Mapping[str, Any]) -> tuple[str, str] | str:
     """The title, on one line, and prompt of the task an agent suggested or proposed with
     ``arguments``; or why it's refused."""

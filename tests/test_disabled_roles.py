@@ -1,9 +1,11 @@
 """Roles with ``enabled = false``: left out of the catalog with their triggers and lanes, queuing
-no reviews, and refusing the work asked of them: messages, tasks, accepted drafts and runs."""
+no reviews, and refusing the work asked of them: messages, tasks, accepted drafts and runs, and,
+for the coder, agents' suggestions and proposals."""
 
 import asyncio
 
 from orbit.agent import ControlPlane, WorkspaceHost
+from orbit.agent.application.ports import Reply
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import Role
 from orbit.protocol import (
@@ -34,14 +36,19 @@ from orbit.protocol import (
     StartupChecked,
     TasksChanged,
     TaskSpec,
+    TurnEndReason,
+    TurnFinished,
 )
 from orbit.tui.view.triggers import trigger_key_labels
 from tests.agent_fakes import (
     ACCEPTED,
     HELLO,
     ROLES,
+    SETTLED,
+    Call,
     Configurator,
     FakeTree,
+    Script,
     Steps,
     agent_exited,
     board,
@@ -49,7 +56,9 @@ from tests.agent_fakes import (
     checked,
     claims_done,
     events_until,
+    lane_of,
     of_type,
+    plan,
     put_on_board,
     refused,
     send,
@@ -76,6 +85,10 @@ def disabling(*names: str) -> dict[str, Role]:
 def disabled(role: str) -> CommandRefused:
     """The refusal of work in ``role``, which is disabled."""
     return refused(NOT_CONFIGURED, f"{role} is disabled in this project's configuration.")
+
+
+CODER_DISABLED = Reply("coder is disabled in this project's configuration.", is_error=True)
+"""The reply to an agent suggesting or proposing a task while the coder is disabled."""
 
 
 async def catalog_of(host: WorkspaceHost) -> Catalog:
@@ -287,3 +300,77 @@ async def test_a_failing_startup_check_adds_no_draft_while_the_coder_is_disabled
     assert StartupChecked(passed=False, step="Lint", output="1 test failed") in events
     assert not any(isinstance(event, TasksChanged) for event in events)
     assert board_of(session).tasks == ()
+
+
+def super_reviewed(events: list[Event]) -> bool:
+    """Whether the board ``events`` last showed has a finished super review."""
+    shown = [event.tasks for event in events if isinstance(event, TasksChanged)]
+    return bool(shown) and any(
+        t.task.role == SUPER_REVIEWER and t.status in SETTLED for t in shown[-1]
+    )
+
+
+async def super_review_suggesting(roles: dict[str, Role], replies: list[Reply]) -> list[Event]:
+    """The events until a super review, with ``roles``, suggests a task and finishes, its replies
+    going to ``replies``; the session is closed after."""
+    session, _, _ = session_for(
+        reviewers=(suggests("Add tests", replies=replies),),
+        tree=FakeTree(),
+        review=True,
+        roles=roles,
+    )
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
+    events = await asyncio.wait_for(settle(session, until=super_reviewed), 10)
+    assert not lane_of(session).planner.open_batches  # A batch with no tasks closes.
+    await session.close()
+    return events
+
+
+async def test_a_reviewers_suggestion_is_refused_while_the_coder_is_disabled() -> None:
+    replies: list[Reply] = []
+    events = await super_review_suggesting(disabling(CODER), replies)
+    assert replies == [CODER_DISABLED]
+    assert [t.task.role for t in board(events)] == [SUPER_REVIEWER]
+
+
+async def test_with_every_role_enabled_a_reviewers_suggestion_is_queued() -> None:
+    replies: list[Reply] = []
+    session, _, _ = session_for(
+        reviewers=(suggests("Add tests", replies=replies),), tree=FakeTree(), review=True
+    )
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
+    events = await asyncio.wait_for(settle(session, until=super_reviewed), 10)
+    await session.close()
+    assert replies == [Reply("Queued as task 2.")]
+    assert [t.task.role for t in board(events)] == [SUPER_REVIEWER, CODER]
+
+
+def proposes_the_flag(replies: list[Reply]) -> Script:
+    """A planner's turn proposing a task, its reply going to ``replies``."""
+
+    async def turn(call: Call) -> TurnEndReason:
+        replies.append(await call("propose_task", title="Add the flag", prompt="Add --fast."))
+        return "completed"
+
+    return turn
+
+
+async def test_a_planners_proposal_is_refused_while_the_coder_is_disabled() -> None:
+    replies: list[Reply] = []
+    session, _, launcher = session_for(roles=disabling(CODER))
+    launcher.planner_turns = [proposes_the_flag(replies)]
+    events = await plan(session, "Plan it.")
+    await session.close()
+    assert replies == [CODER_DISABLED]
+    assert any(isinstance(e, TurnFinished) and e.reason == "completed" for e in events)
+    assert board_of(session).tasks == ()
+
+
+async def test_with_every_role_enabled_a_planners_proposal_becomes_a_draft() -> None:
+    replies: list[Reply] = []
+    session, _, launcher = session_for()
+    launcher.planner_turns = [proposes_the_flag(replies)]
+    await plan(session, "Plan it.")
+    await session.close()
+    assert replies == [Reply("Added draft task 1; the user will accept or drop it.")]
+    assert [(t.task.role, t.status) for t in board_of(session).tasks] == [(CODER, "draft")]

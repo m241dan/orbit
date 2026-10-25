@@ -37,7 +37,13 @@ from orbit.agent.domain.reviews import (
     pending_titles,
     review_prompt,
 )
-from orbit.agent.domain.roles import review_lane, role_task, suggested_task, task_lanes
+from orbit.agent.domain.roles import (
+    review_lane,
+    role_task,
+    suggested_task,
+    suggestion_refusal,
+    task_lanes,
+)
 from orbit.protocol import (
     CODER,
     GIT_FAILED,
@@ -234,10 +240,11 @@ class ReviewLane:
         batch = self._batches.get(task_id)
         if batch is None:
             return Reply("Only reviews orbit queued itself can suggest tasks.", is_error=True)
-        refusal = self.planner.refusal(batch, title, self._board.tasks)
+        roles = self._desk.agents.roles
+        refusal = suggestion_refusal(roles) or self.planner.refusal(batch, title, self._board.tasks)
         if refusal is not None:
             return Reply(refusal, is_error=True)
-        task = suggested_task(self._desk.agents.roles[CODER], title, prompt)
+        task = suggested_task(roles[CODER], title, prompt)
         origin = self._jobs[task_id].origin
 
         def add(board: TaskBoard) -> str:

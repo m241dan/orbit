@@ -1106,7 +1106,10 @@ merges, whether it's enabled and how hard its agents think:
   conversation, is refused (`planner is disabled in this project's configuration.`), as are adding
   a task in a disabled role, editing one into it or accepting a draft in it, naming the role, and
   `ctrl+r` while a task in one is still to run. Nothing runs such a task, which stays on the task list until you edit or
-  remove it, and a failing startup check adds no draft while the `coder` is disabled.
+  remove it, and a failing startup check adds no draft while the `coder` is disabled. Nor can
+  agents add coder tasks then: a reviewer's `suggest_task` and a conversational role's
+  `propose_task` get an error reply naming the `coder` as disabled, adding nothing to the task
+  list or the review's batch.
 - `effort`: how hard its agents think: `low`, `medium`, `high`, `xhigh` or `max`, the levels
   `claude --help` lists; any other value is refused, listing those. Left out, the CLI's default.
   Like its model and tool access, it's the default for tasks orbit queues in the role, and what
