@@ -5,6 +5,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from orbit.agent.application.closing import close_all
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import TurnSlot
 from orbit.agent.application.outbox import EventSink
@@ -138,9 +139,10 @@ class PlannerSeat:
             self._planner.tell(note)
 
     async def close_retired(self) -> None:
-        """Close the planners retired by leaving a session or by a reset."""
-        while self._retired:
-            await self._retired.pop().close()
+        """Close the planners retired by leaving a session or by a reset, the last retired
+        first, each even if closing one before it fails, as :func:`close_all` does."""
+        retired, self._retired = self._retired, []
+        await close_all([planner.close for planner in reversed(retired)])
 
     async def reset(self) -> None:
         """End the planner's conversation, re-reading its role; refused while it answers, and

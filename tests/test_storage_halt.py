@@ -421,6 +421,36 @@ async def test_halting_cancels_the_startup_check() -> None:
     assert steps.results == [True]  # The step never finished.
 
 
+async def test_a_review_lane_failing_to_stop_still_lets_halting_cancel_the_turns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+    store = FakeStore()
+    session, _, launcher = session_for(
+        waiting_agent(started), tree=FakeTree(), review=True, store=store, fallback=FakeFallback()
+    )
+
+    async def fails() -> None:
+        raise RuntimeError("The review lane failed to stop.")
+
+    monkeypatch.setattr(lane_of(session), "stop", fails)
+    launcher.planner_turns = [gated_planner(asyncio.Event())]
+    await send(session, AddTask(task=TASK))
+    await send(session, RunTasks())
+    await asyncio.wait_for(started.wait(), 5)
+    await send(session, SendMessage(agent=PLANNER, text="Plan it."))
+    turn = planner_turn(session)
+    assert turn is not None
+    store.append_failure = "disk full"
+    await publish(session, Notice(message="now"))
+    sent = await envelopes_until(session, lambda sent: "failed to stop" in str(sent[-1].payload))
+    working, planning = turns_of(session).running, not turn.done()
+    await session.close()
+
+    assert any(halted(envelope) for envelope in sent)
+    assert not working and not planning and turn.result() == "cancelled"
+
+
 async def test_a_review_ending_while_halted_starts_no_work_on_its_fixes() -> None:
     store, sessions = GatedLog(), list[WorkspaceHost]()
 

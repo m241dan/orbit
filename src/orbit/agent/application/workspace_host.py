@@ -829,11 +829,10 @@ class WorkspaceHost:
 
     async def _stop_work(self) -> None:
         """Cancel the reviews and the startup check, then the work lane's and the planner's
-        turns, as the session halts, and wait for them to end; nothing that could wake the work
-        lane runs once its turn is cancelled, but a run the usage limit stopped still waits to
-        start again."""
-        for stop in self._work_stops(self._halt_turns, final=False):
-            await stop()
+        turns, as the session halts, and wait for them to end, each even if stopping one before
+        it fails, as :func:`close_all` does; nothing that could wake the work lane runs once its
+        turn is cancelled, but a run the usage limit stopped still waits to start again."""
+        await close_all(self._work_stops(self._halt_turns, final=False))
 
     def _work_stops(
         self, stop_turns: Callable[[], Awaitable[None]], *, final: bool

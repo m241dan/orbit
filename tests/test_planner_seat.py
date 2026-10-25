@@ -69,16 +69,27 @@ def seated(
     roles: Mapping[str, Role] | None = ROLES,
     planner_role: PlannerRoleReader | None = None,
     halts: bool = False,
+    failed_exits: int = 0,
 ) -> Seated:
     """A seat with agents in ``roles``, or none if None, whose planner role reads again with
-    ``planner_role``, and whose session halts as it's saved if ``halts``."""
+    ``planner_role``, whose session halts as it's saved if ``halts``, and whose first
+    ``failed_exits`` agents' exits fail to be published."""
     events: asyncio.Queue[Event] = asyncio.Queue()
     host = FakeHost()
     launcher = ScriptedLauncher(host)
+    tokens = iter(f"token-{n}" for n in range(1, 100))
     agents = Agents(
-        host, launcher, lambda: "token-1", roles or {}, planner_role=planner_role, root="."
+        host, launcher, lambda: next(tokens), roles or {}, planner_role=planner_role, root="."
     )
-    desk = AgentDesk(agents, events.put) if roles is not None else None
+
+    async def publish(event: Event) -> None:
+        nonlocal failed_exits
+        if isinstance(event, AgentExited) and failed_exits:
+            failed_exits -= 1
+            raise RuntimeError(f"Publishing {event.agent_id}'s exit failed.")
+        await events.put(event)
+
+    desk = AgentDesk(agents, publish) if roles is not None else None
     calls: list[str] = []
 
     halted = False
@@ -175,6 +186,17 @@ async def test_a_replaced_planner_is_closed_only_once_the_retired_are() -> None:
     await seated_.seat.close_retired()
     assert seated_.published() == [EXITED]
     assert seated_.seat.conversation_id is None
+
+
+async def test_a_retired_planner_failing_to_close_leaves_none_of_the_others_open() -> None:
+    seated_ = seated(failed_exits=1)
+    await answered(seated_)
+    seated_.seat.replace(None)
+    await answered(seated_)
+    seated_.seat.replace(None)
+    with pytest.raises(RuntimeError, match="Publishing agent-2's exit failed"):
+        await seated_.seat.close_retired()
+    assert seated_.published() == [EXITED]
 
 
 async def test_a_replacing_planner_carries_on_the_conversation_given() -> None:
