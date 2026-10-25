@@ -25,6 +25,7 @@ from orbit.protocol import (
     BusyLane,
     ConversationReset,
     ErrorOccurred,
+    Event,
     Notice,
     Settings,
     TurnEndReason,
@@ -69,23 +70,41 @@ class SeatHooks:
     tracing: PlannerTracing = _UNTRACED
 
 
+class SeatLanes:
+    """The turn slots of the seats' lanes, posting through ``post``: one for each lane, shared
+    by every seat whose turns run in it, so a lane runs one turn at a time."""
+
+    def __init__(self, post: Callable[[Event], None]) -> None:
+        self._post = post
+        self._slots: dict[BusyLane, TurnSlot] = {}
+
+    def slot(self, lane: BusyLane) -> TurnSlot:
+        """Lane ``lane``'s turn slot, made when first asked for."""
+        if lane not in self._slots:
+            self._slots[lane] = TurnSlot(lane, f"The {lane} lane is busy.", self._post)
+        return self._slots[lane]
+
+
 @dataclass(frozen=True)
 class SeatParts:
     """What a seat works with: the ``desk`` running the session's agents, if it has any, the
-    ``tasks`` its role proposes into, the ``events`` it publishes into, and the ``hooks`` it
-    asks its session by."""
+    ``tasks`` its role proposes into, the ``events`` it publishes into, the ``hooks`` it asks
+    its session by, and the ``lanes`` whose slots it shares with the other seats; without, its
+    lane's slot is its own."""
 
     desk: AgentDesk | None
     tasks: Tasks
     events: EventSink
     hooks: SeatHooks
+    lanes: SeatLanes | None = None
 
 
 class PlannerSeat:
     """The planner of a session with the ``parts``' desk's agents (none without them, without a
     planner role or while it's disabled), proposing into their tasks and publishing into their
     events. Given another conversational ``role``, it's that role's seat, its turns in that
-    role's lane, as the planner's are in its role's, or in ``planner`` without one."""
+    role's lane, as the planner's are in its role's, or in ``planner`` without one, one at a
+    time with those of the other seats in the lane."""
 
     def __init__(self, parts: SeatParts, role: str = PLANNER) -> None:
         self._desk = parts.desk
@@ -99,8 +118,10 @@ class PlannerSeat:
         self._kept_notes: tuple[str, ...] = ()  # Its notes, kept the same way.
         found = self._role()
         self._lane: BusyLane = found.lane if found else PLANNER_LANE
-        refusal = f"The {role} is already answering."
-        self._turns = TurnSlot(self._lane, refusal, parts.events.put_nowait)
+        lanes = parts.lanes or SeatLanes(parts.events.put_nowait)
+        self._turns = lanes.slot(self._lane)  # The lane's, which other seats may share.
+        self._refusal = f"The {role} is already answering."
+        self._turn: asyncio.Task[object] | None = None
 
     @property
     def lane(self) -> BusyLane:
@@ -110,12 +131,12 @@ class PlannerSeat:
     @property
     def running(self) -> bool:
         """Whether the planner is answering."""
-        return self._turns.running
+        return self._turn is not None and not self._turn.done()
 
     @property
     def turn(self) -> asyncio.Task[object] | None:
         """The planner's current or last turn; none before the first."""
-        return self._turns.turn
+        return self._turn
 
     @property
     def conversation_id(self) -> str | None:
@@ -153,15 +174,19 @@ class PlannerSeat:
     async def submit(self, text: str, settings: Settings) -> None:
         """Start a turn of the planner's conversation on ``text`` with ``settings``, in its
         own lane, traced as a child of the span current, the command's asking for it; refused
-        without a planner, while it answers, or once saving the session halted it."""
+        without a planner, while a role in its lane answers, naming that role, or once saving
+        the session halted it."""
         if self._planner is None:
-            # Frees the prompt of a frontend that marked the lane busy when it sent this.
-            await self._events.put(BusyChanged(busy=False, lane=self.lane))
+            # Frees the prompt of a frontend that marked the lane busy when it sent this,
+            # unless another seat's turn holds the lane.
+            if not self._turns.running:
+                await self._events.put(BusyChanged(busy=False, lane=self.lane))
             raise self._absent()
         self._hooks.use()
         await self._hooks.save()
         self._hooks.check()  # The save may have halted the session.
-        await self._turns.start(self._answer(self._planner, text, settings, current_span()))
+        work = self._answer(self._planner, text, settings, current_span())
+        self._turn = await self._turns.start(work, self._refusal)
 
     async def _answer(
         self, planner: PlannerChat, text: str, settings: Settings, parent: Span
@@ -176,8 +201,9 @@ class PlannerSeat:
         return reason
 
     def cancel(self) -> None:
-        """Cancel the planner's turn, if it runs."""
-        self._turns.cancel()
+        """Cancel the planner's turn, if it runs, leaving another seat's in its lane."""
+        if self.running:
+            self._turns.cancel()
 
     def replace(self, conversation: str | None, notes: tuple[str, ...] = ()) -> None:
         """Have a new planner, carrying on ``conversation`` if there is one and still to hear
@@ -208,7 +234,7 @@ class PlannerSeat:
         noted when it has no conversation yet. Another role's seat keeps its role."""
         if self._desk is None or self._planner is None:
             raise self._absent()
-        if self._turns.running:
+        if self.running:
             raise Refused(BUSY, busy_reset(self._name))
         if not self._planner.started:
             await self._events.put(Notice(message=nothing_to_reset(self._name)))
@@ -233,7 +259,8 @@ class PlannerSeat:
 
     async def stop_turn(self) -> None:
         """Cancel the planner's turn, if it runs, and wait for it to end."""
-        await self._turns.close()
+        if self.running:
+            await self._turns.close()
 
     async def close(self) -> None:
         """End the current planner's conversation, at the session's end."""

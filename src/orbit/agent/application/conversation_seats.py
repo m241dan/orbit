@@ -7,7 +7,12 @@ from functools import partial
 from orbit.agent.application.closing import close_all
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.outbox import EventSink
-from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks, SeatParts
+from orbit.agent.application.planner_seat import (
+    PlannerSeat,
+    SeatHooks,
+    SeatLanes,
+    SeatParts,
+)
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.refusals import Refused, unknown
 from orbit.agent.domain.roles import conversational_roles, disabled_note
@@ -19,8 +24,9 @@ class ConversationSeats:
     ``tasks`` and publishing into ``events``, each asking ``hooks`` of the session: the planner's
     first, there even without agents or a planner role, or while it's disabled, as it refuses
     their work then, and then one for each other enabled role with ``conversation = true``, in
-    the roles' order. The conversations of roles without a seat that a session was opened with
-    are kept, to save back."""
+    the roles' order. The seats in a lane take turns: one answers there at a time. The
+    conversations of roles without a seat that a session was opened with are kept, to save
+    back."""
 
     def __init__(
         self, desk: AgentDesk | None, tasks: Tasks, events: EventSink, hooks: SeatHooks
@@ -28,7 +34,7 @@ class ConversationSeats:
         self._desk = desk
         roles = desk.agents.roles if desk else {}
         names = dict.fromkeys((PLANNER, *conversational_roles(roles)))
-        parts = SeatParts(desk, tasks, events, hooks)
+        parts = SeatParts(desk, tasks, events, hooks, SeatLanes(events.put_nowait))
         self._seats = {name: PlannerSeat(parts, name) for name in names}
         self._kept: dict[str, str] = {}  # The conversations opened of roles without a seat.
 

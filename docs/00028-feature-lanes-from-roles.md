@@ -23,7 +23,7 @@ A role's configuration decides where its agent works, which lane runs it and whe
 
 ## Conversations
 
-7. One seat per enabled conversational role, each with its own conversation, lane and settings. The session record's `planner_conversation` and `settings` become per conversational role (`conversations: {role: id}`, `role_settings: {role: Settings}`); older records load as the planner's. `SendMessage`, `ResetConversation` and `CancelTurn` already take names. Over one conversational role: half the gap left open; over a shared seat: switching loses an in-flight turn.
+7. One seat per enabled conversational role, each with its own conversation, lane and settings. The session record's `planner_conversation` and `settings` become per conversational role (`conversations: {role: id}`, `role_settings: {role: Settings}`); older records load as the planner's. `SendMessage`, `ResetConversation` and `CancelTurn` already take names. Conversational roles sharing a lane take turns in it, one turn at a time, a message to one while another answers refused with `busy`, naming the one answering. Over one conversational role: half the gap left open; over a shared seat: switching loses an in-flight turn; over refusing a shared lane in the config: a lane is what a role names to take turns.
 8. The prompt talks to the conversational role whose tab is shown, or the planner on any other tab; its placeholder names who. ctrl+t cycles the conversational roles' tabs (footer "Conversations"); ctrl+x and ctrl+n act on the one shown, or the planner elsewhere. Over a target key: more state; over `@mentions`: parsing and typos.
 
 ## TUI

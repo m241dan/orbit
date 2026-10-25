@@ -143,12 +143,14 @@ class Background:
 
 class TurnSlot:
     """Runs one turn at a time in busy lane ``lane``, which the frontend shows as busy while a
-    turn runs. A second turn is refused, as busy, with ``refusal``. Events go out through
-    ``post``, which must not block: a turn's end is reported from its done-callback."""
+    turn runs. A second turn is refused, as busy, with ``refusal``, unless the turn running
+    has a refusal of its own. Events go out through ``post``, which must not block: a turn's
+    end is reported from its done-callback."""
 
     def __init__(self, lane: BusyLane, refusal: str, post: Callable[[Event], None]) -> None:
         self._lane: BusyLane = lane
         self._refusal = refusal
+        self._busy = refusal  # What a turn is refused with while the current one runs.
         self._post = post
         self._turn: asyncio.Task[object] | None = None
 
@@ -161,17 +163,22 @@ class TurnSlot:
         """The current or last turn; none before the first."""
         return self._turn
 
-    async def start(self, work: Coroutine[Any, Any, object]) -> None:
-        """Run ``work`` as the lane's turn, unless a turn still runs: then close ``work`` and
-        raise :class:`Refused`."""
+    async def start(
+        self, work: Coroutine[Any, Any, object], refusal: str | None = None
+    ) -> asyncio.Task[object]:
+        """Run ``work`` as the lane's turn and return it, unless a turn still runs: then close
+        ``work`` and raise :class:`Refused`, with the running turn's refusal. While this turn
+        runs, another is refused with ``refusal``, if given, or else the slot's."""
         if self.running:
             work.close()
-            raise Refused(BUSY, self._refusal)
-        self._turn = _detached(work)
+            raise Refused(BUSY, self._busy)
+        self._busy = self._refusal if refusal is None else refusal
+        turn = self._turn = _detached(work)
         # A callback, so it also runs if the work is cancelled before it starts.
-        self._turn.add_done_callback(self._ended)
+        turn.add_done_callback(self._ended)
         # Posted once the turn is running, so what it reaches sees the lane busy.
         self._post(BusyChanged(busy=True, lane=self._lane))
+        return turn
 
     def cancel(self) -> bool:
         """Cancel the turn if it still runs; returns whether it did."""

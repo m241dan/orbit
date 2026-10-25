@@ -4,12 +4,15 @@ messaged, reset and stopped by name."""
 
 import asyncio
 
+import pytest
+
 from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.agent.application.conversation_seats import ConversationSeats
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.planner_seat import SeatHooks
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.roles import Role
 from orbit.protocol import (
     BUSY,
@@ -64,6 +67,15 @@ ARCHITECT_ROLE = ROLES[PLANNER].model_copy(update={"instructions": "You design."
 
 TALKING = {**ROLES, ARCHITECT: ARCHITECT_ROLE}
 """The built-in roles and the architect."""
+
+CRITIC = "critic"
+CRITIC_ROLE = ARCHITECT_ROLE.model_copy(update={"instructions": "You critique."})
+
+SHARING = {**TALKING, CRITIC: CRITIC_ROLE}
+"""The built-in roles, the architect and a critic answering in the architect's lane."""
+
+ARCHITECT_ANSWERING = "The architect is already answering."
+"""What a message is refused with while the architect answers in its lane."""
 
 
 def talking(
@@ -241,6 +253,44 @@ async def test_cancelling_the_architects_agent_stops_its_turn() -> None:
     await session.close()
 
 
+async def test_a_message_while_another_role_answers_in_its_lane_is_refused_naming_it() -> None:
+    gate = asyncio.Event()
+    session, launcher = talking(roles=SHARING)
+    launcher.planner_turns = [gated_planner(gate), chats]
+    await send(session, SendMessage(agent=ARCHITECT, text="Design."))
+    await eventually(lambda: launcher.launches, poll=0)
+    await send(session, SendMessage(agent=CRITIC, text="Critique."))
+    events = await events_until(session, of_type(CommandRefused))
+    assert events[-1] == refused(BUSY, ARCHITECT_ANSWERING)
+    assert BusyChanged(busy=False, lane=DESIGN) not in events
+    assert len(launcher.launches) == 1
+    gate.set()
+    ended = await events_until(session, idle(DESIGN))
+    assert [e for e in ended if isinstance(e, BusyChanged)] == [
+        BusyChanged(busy=False, lane=DESIGN)
+    ]
+    await talk(session, CRITIC, DESIGN)
+    assert launcher.launches[-1].instructions == "You critique."
+    await session.close()
+
+
+async def test_a_message_to_a_disabled_role_leaves_its_lane_busy_while_another_answers() -> None:
+    muted = ROLES[PLANNER].model_copy(update={"enabled": False})
+    planning = ARCHITECT_ROLE.model_copy(update={"lane": "planner"})
+    session, launcher = talking(roles={**ROLES, PLANNER: muted, ARCHITECT: planning})
+    launcher.planner_turns = [hangs]
+    await send(session, SendMessage(agent=ARCHITECT, text="Design."))
+    await eventually(lambda: launcher.launches, poll=0)
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    events = await events_until(session, of_type(CommandRefused))
+    disabled = "planner is disabled in this project's configuration."
+    assert events[-1] == refused(NOT_CONFIGURED, disabled)
+    assert BusyChanged(busy=False, lane="planner") not in events
+    await send(session, CancelTurn(lane="planner"))
+    await events_until(session, idle("planner"))
+    await session.close()
+
+
 async def test_the_architects_lane_shows_in_the_snapshot_and_the_catalog() -> None:
     session, _ = talking()
     busy = {"work": False, "planner": False, DESIGN: False, "review": False}
@@ -274,22 +324,29 @@ async def nothing() -> None:
     return None
 
 
-async def test_roles_sharing_a_lane_keep_it_busy_while_either_answers_and_stop_together() -> None:
-    critic = ARCHITECT_ROLE.model_copy(update={"instructions": "You critique."})
-    agents, launcher = agents_for(roles={**TALKING, "critic": critic})
+async def test_roles_sharing_a_lane_take_turns_in_it_each_keeping_its_own_turn_and_reset() -> None:
+    agents, launcher = agents_for(roles=SHARING)
     events: asyncio.Queue[Event] = asyncio.Queue()
     hooks = SeatHooks(nothing, lambda: None, tuple)
     tasks = Tasks(TaskBoard(), events.put)
     seats = ConversationSeats(AgentDesk(agents, events.put), tasks, events, hooks)
-    assert (seats.names, seats.lanes) == ((PLANNER, ARCHITECT, "critic"), ("planner", DESIGN))
-    launcher.planner_turns = [hangs, hangs]
-    critiquing = seats.seat("critic", "", "")
-    await seats.seat(ARCHITECT, "", "").submit("Design.", Settings())
-    await critiquing.submit("Critique.", Settings())
-    critiquing.cancel()
-    await eventually(lambda: not critiquing.running)
+    assert (seats.names, seats.lanes) == ((PLANNER, ARCHITECT, CRITIC), ("planner", DESIGN))
+    launcher.planner_turns = [hangs, chats]
+    designing, critiquing = seats.seat(ARCHITECT, "", ""), seats.seat(CRITIC, "", "")
+    await designing.submit("Design.", Settings())
+    await eventually(lambda: launcher.planner_turns == [chats], poll=0)
+    with pytest.raises(Refused) as refusal:
+        await critiquing.submit("Critique.", Settings())
+    assert (refusal.value.code, str(refusal.value)) == (BUSY, ARCHITECT_ANSWERING)
+    assert (designing.running, critiquing.running, critiquing.turn) == (True, False, None)
     assert seats.busy() == {"planner": False, DESIGN: True}
+    await critiquing.reset()  # Its conversation isn't the one answering, so it isn't busy.
+    critiquing.cancel()
+    assert designing.turn is not None and not designing.turn.cancelling()
     seats.cancel(DESIGN)
     await eventually(lambda: not seats.running)
     assert seats.busy() == {"planner": False, DESIGN: False}
+    await critiquing.submit("Critique.", Settings())
+    await eventually(lambda: not seats.running)
+    assert launcher.launches[-1].instructions == "You critique."
     await seats.close()

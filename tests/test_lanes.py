@@ -326,6 +326,24 @@ async def test_a_turn_while_one_runs_is_refused_and_closed() -> None:
     await turns.close()
 
 
+async def test_a_turn_with_a_refusal_of_its_own_refuses_the_next_with_it() -> None:
+    turns, _ = slot()
+    work = Work()
+    turn = await turns.start(work("first"), "The architect is already answering.")
+    assert turn is turns.turn
+
+    with pytest.raises(Refused) as answering:
+        await turns.start(work("second"))
+    await turns.close()
+    await turns.start(work("third"))
+    with pytest.raises(Refused) as busy:
+        await turns.start(work("fourth"))
+    await turns.close()
+
+    assert str(answering.value) == "The architect is already answering."
+    assert str(busy.value) == "Busy already."
+
+
 async def test_a_crash_is_reported_once_before_the_lane_frees(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

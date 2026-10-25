@@ -543,7 +543,7 @@ both are.
 `CancelTurn(lane)` stops the work in `lane`, `work` unless given: in the work lane (the lane
 whose roles merge their work, `work` for the built-in roles), the task run, or its wait to start
 again, which holds the lane until the user asks for work again; in a conversational role's lane
-(`planner` for the planner), that role's turn; in any other lane of the roles' (such as `review`), whose tasks start by
+(`planner` for the planner), the turn of the role answering there; in any other lane of the roles' (such as `review`), whose tasks start by
 themselves, the task running there, and the lane goes on with its next. Stopping a lane with
 nothing running is accepted and does nothing more. It's refused with `unknown` for a lane there's
 none of, naming those there are.
@@ -556,8 +556,10 @@ other agent's, the task run it's in, as `CancelTurn` does for the `work` lane. I
 `SendMessage(agent, text)` starts a turn of the conversational agent `agent`: the planner, or
 any other enabled role with `conversation = true`. Each has a seat of its own: its own
 conversation, saved with the session and carried on when it's opened again, its own settings,
-and its turns in its role's lane, so one answers while another does; a second message to one
-still answering is refused with `busy` (`The planner is already answering.`). It's refused with
+and its turns in its role's lane, so roles in different lanes answer at once. A lane runs one
+turn at a time: a message to a role while it, or another conversational role in its lane, is
+still answering is refused with `busy`, naming the role answering (`The planner is already
+answering.`), and the lane's `BusyChanged(busy=false)` comes once no turn in it runs. It's refused with
 `unknown` for an agent that isn't conversational, naming those that are (`Agent 'coder' can't
 be messaged; the agents you can message are planner and architect.`), with `not_configured`
 for a disabled conversational role (`architect is disabled in this project's configuration.`),

@@ -1088,8 +1088,10 @@ merges, whether it's enabled and how hard its agents think:
   Each enabled conversational role has a seat of its own: its own conversation, which the session
   saves and carries on when you open it again, and which resetting it ends alone; its own model,
   tool access and effort, saved with the session; and its turns in its own lane, so it answers
-  while the planner does. It's listed as conversational in the Catalog, and its lane in the
-  Catalog's lanes and the Snapshot's `busy`. Each has a pinned tab after the built-in roles':
+  while the planner does. Conversational roles that share a lane take turns in it: a message to
+  one while another there answers is refused, naming the one answering (`The planner is already
+  answering.`), and the lane shows busy until no turn in it runs. It's listed as conversational
+  in the Catalog, and its lane in the Catalog's lanes and the Snapshot's `busy`. Each has a pinned tab after the built-in roles':
   `ctrl+t`, which with the built-in roles alone toggles the planner's tab, goes to the planner's
   tab, then each other conversational role's in turn, then back to the tab you were on. On a
   conversational role's tab, the prompt talks to that role, `ctrl+x` stops
