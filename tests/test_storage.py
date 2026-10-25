@@ -4,7 +4,15 @@ import pytest
 
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.storage import StorageSettings, cut_fields, load_storage, trim_target
-from orbit.protocol import AssistantMessage, Notice, ToolCallFinished, ToolCallStarted
+from orbit.protocol import (
+    AssistantMessage,
+    Notice,
+    TasksChanged,
+    TaskSpec,
+    TaskState,
+    ToolCallFinished,
+    ToolCallStarted,
+)
 
 MARKER = "\n… 4 KB cut by orbit's tool_output_kb …\n"
 
@@ -137,3 +145,17 @@ def test_the_marker_names_a_small_cut_in_bytes() -> None:
     cut = cut_fields(Notice(message="x" * 1100), 1024)
     assert isinstance(cut, Notice)
     assert "\n… 76 bytes cut by orbit's tool_output_kb …\n" in cut.message
+
+
+def test_an_event_with_nothing_to_cut_is_kept_as_it_is_without_copying() -> None:
+    event = TasksChanged(tasks=(TaskState(id="1", task=TaskSpec(prompt="x" * 50)),))
+    assert cut_fields(event, 50) is event
+
+
+def test_only_the_parts_holding_a_long_string_are_copied() -> None:
+    short, long = (
+        TaskState(id=n, task=TaskSpec(prompt=p)) for n, p in (("1", "x"), ("2", "y" * 99))
+    )
+    cut = cut_fields(TasksChanged(tasks=(short, long)), 50)
+    assert isinstance(cut, TasksChanged)
+    assert cut.tasks[0] is short and cut.tasks[1].task.prompt != long.task.prompt

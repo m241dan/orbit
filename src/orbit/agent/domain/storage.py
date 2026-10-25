@@ -68,9 +68,17 @@ def _cut(value: Any, limit: int) -> Any:
     if isinstance(value, str):
         return _cut_text(value, limit)
     if isinstance(value, BaseModel):
-        fields = {name: _cut(getattr(value, name), limit) for name in type(value).model_fields}
-        return value.model_copy(update=fields)
+        return _cut_model(value, limit)
     return _cut_items(value, limit)
+
+
+def _cut_model(model: BaseModel, limit: int) -> BaseModel:
+    """``model`` with the strings in its fields cut as :func:`cut_fields` says; ``model`` itself
+    if none is, so a big event with nothing to cut isn't copied, field by field, for nothing."""
+    fields = {name: getattr(model, name) for name in type(model).model_fields}
+    cut = {name: _cut(field, limit) for name, field in fields.items()}
+    changed = {name: field for name, field in cut.items() if field is not fields[name]}
+    return model.model_copy(update=changed) if changed else model
 
 
 def _cut_items(value: Any, limit: int) -> Any:
@@ -79,8 +87,16 @@ def _cut_items(value: Any, limit: int) -> Any:
     if isinstance(value, dict):
         return {key: _cut(item, limit) for key, item in value.items()}
     if isinstance(value, list | tuple):
-        return type(value)(_cut(item, limit) for item in value)
+        return _cut_sequence(value, limit)
     return value
+
+
+def _cut_sequence(value: list[Any] | tuple[Any, ...], limit: int) -> list[Any] | tuple[Any, ...]:
+    """``value`` with the strings in its items cut as :func:`cut_fields` says; ``value`` itself
+    if none is."""
+    items = [_cut(item, limit) for item in value]
+    same = all(new is old for new, old in zip(items, value, strict=True))
+    return value if same else type(value)(items)
 
 
 def _cut_text(text: str, limit: int) -> str:
