@@ -628,13 +628,20 @@ is the message's first line, and `position` is 1 once it runs next, or runs. A `
 a role busy with a consultation or a reply, or with turns waiting, joins its line rather than
 being refused.
 
-When the consulted turn ends, its last assistant message, or its error for a turn that failed,
-is the reply: the backend publishes `ConsultationAnswered(consultation, asker, consultant, title,
+When the consulted turn ends, its last assistant message is the reply: the backend publishes `ConsultationAnswered(consultation, asker, consultant, title,
 reply, interrupted)` and delivers it to the asking role as a message, `Experimenter's reply to
 'Check X' (consultation 1):` and the reply. The asking role hears it in a turn of its own: at
 once if it's idle, after its current turn otherwise, after any message of the user's waiting for
 it, and several replies waiting together in one turn. `interrupted` says why a consultation didn't
 run to its end; it's `null` for one answered. Both events are logged.
+
+A consultation that can't reply is still answered: `ConsultationAnswered` has an empty `reply`
+and `interrupted` saying why, and the asking role hears `The experimenter's consultation 'Check
+X' was interrupted: <why>.` the same way. `<why>` is `it was cancelled` (a `CancelTurn` of the
+consulted role's lane), `it failed: <error>`, `Claude's usage limit was reached` or `Claude's
+API wasn't answering` (naming the runtime), `the session was switched` or `orbit restarted`.
+Consultations pending are saved in the session record; those still pending as the session is
+switched away from or orbit stops are answered so as the session opens again.
 
 ## Paging through history
 

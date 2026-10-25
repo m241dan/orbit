@@ -6,19 +6,27 @@ together. A consulted turn runs in an ``orbit.consultation`` span linked to the 
 import asyncio
 from collections.abc import Callable
 
+from orbit.agent import WorkspaceHost
 from orbit.agent.application.consultations import title_of
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.planner import PlannerChat
 from orbit.agent.application.planner_trace import CONSULTATION_SPAN, TURN_SPAN
-from orbit.agent.application.ports import Reply
+from orbit.agent.application.ports import Reply, StoreFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.consultations import failed
 from orbit.agent.domain.roles import Role
+from orbit.agent.domain.runtimes import CLAUDE, Failure
+from orbit.agent.domain.sessions import SavedConsultation
+from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import (
     PLANNER,
+    ActivateSession,
+    CancelTurn,
     ConsultationAnswered,
     ConsultationAsked,
     Event,
+    NewSession,
     SendMessage,
     TurnEndReason,
     TurnFinished,
@@ -26,15 +34,21 @@ from orbit.protocol import (
 from tests.agent_fakes import (
     ROLES,
     Call,
+    FakeStore,
     Script,
     ScriptedLauncher,
+    Ticks,
     agents_for,
     chats,
     events_until,
+    halt_of,
+    idle,
+    resume_storage,
     send,
     session_for,
     sole,
 )
+from tests.session_builders import opened, saved, store_with
 from tests.telemetry_helpers import Traced, linked_to
 from tests.waiting import eventually
 
@@ -185,16 +199,32 @@ async def test_a_consultation_waits_second_in_line_while_its_consultant_answers_
     assert prompts(launcher)[2][1].endswith("Check X")
 
 
-async def test_a_failed_consulted_turns_reply_is_its_error() -> None:
+async def failing(*failures: tuple[str, Failure]) -> tuple[list[Event], str]:
+    """The events of a planner's turn consulting the experimenter, whose turn fails with
+    "The experiment broke.", up to the planner's turn hearing of it, and that turn's prompt; the
+    launcher tells each of ``failures``."""
     heard: list[Reply] = []
     session, _, launcher = session_for(roles=CONSULTING)
+    launcher.failures = dict(failures)
     launcher.planner_turns = [consults("Check X", heard=heard), fails, chats]
     await send(session, SendMessage(agent=PLANNER, text="Plan."))
     events = await events_until(session, finished("agent-1", 2))
     await session.close()
+    role, prompt = prompts(launcher)[-1]
+    assert role == PLANNER
+    return events, prompt
 
-    assert sole(events, ConsultationAnswered).reply == "The experiment broke."
-    assert prompts(launcher)[-1][1].endswith(reply(1, "Check X", "The experiment broke."))
+
+async def test_a_failed_consulted_turn_is_interrupted_with_its_error() -> None:
+    events, prompt = await failing()
+    assert sole(events, ConsultationAnswered) == interrupted("it failed: The experiment broke.")
+    assert prompt.endswith(told("it failed: The experiment broke."))
+
+
+async def test_a_consulted_turn_stopped_by_the_usage_limit_names_it_and_the_runtime() -> None:
+    events, prompt = await failing(("The experiment broke.", Failure(kind="usage_limit")))
+    assert prompt.endswith(told("Claude's usage limit was reached"))
+    assert sole(events, ConsultationAnswered) == interrupted("Claude's usage limit was reached")
 
 
 async def refusal(roles: dict[str, Role], *messages: str, role: str = EXPERIMENTER) -> Reply:
@@ -298,3 +328,121 @@ async def test_a_users_message_joins_the_line_behind_a_waiting_consultation() ->
     experimenter = [prompt for role, prompt in prompts(launcher) if role == EXPERIMENTER]
     assert experimenter[1].endswith("Check X")
     assert experimenter[2].endswith("And this.")
+
+
+def interrupted(why: str, asker: str = PLANNER) -> ConsultationAnswered:
+    return ConsultationAnswered(
+        consultation=1,
+        asker=asker,
+        consultant=EXPERIMENTER,
+        title="Check X",
+        reply="",
+        interrupted=why,
+    )
+
+
+def told(why: str) -> str:
+    """The message telling the planner its consultation was interrupted for ``why``."""
+    return f"The experimenter's consultation 'Check X' was interrupted: {why}."
+
+
+def test_a_consulted_turn_stopped_by_an_outage_names_the_runtimes_api() -> None:
+    outage = Failure(kind="api_unavailable")
+    assert failed("API Error: 529", outage, CLAUDE) == "Claude's API wasn't answering"
+
+
+async def test_cancelling_the_consulted_turn_tells_the_asker_it_was_cancelled() -> None:
+    heard: list[Reply] = []
+    session, _, launcher = session_for(roles=CONSULTING)
+    launcher.planner_turns = [consults("Check X", heard=heard), gated(asyncio.Event()), chats]
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    await eventually(lambda: len(launcher.launches) == 2, poll=0)
+    await send(session, CancelTurn(lane=EXPERIMENTER))
+    events = await events_until(session, finished("agent-1", 2))
+    await session.close()
+
+    assert sole(events, ConsultationAnswered) == interrupted("it was cancelled")
+    role, prompt = prompts(launcher)[-1]
+    assert (role, prompt.endswith(told("it was cancelled"))) == (PLANNER, True)
+
+
+def consulting_host(store: FakeStore) -> tuple[WorkspaceHost, ScriptedLauncher]:
+    """A session saved in ``store``, as ``session-1`` and so on, whose planner consults the
+    experimenter."""
+    agents, launcher = agents_for(roles=CONSULTING)
+    ids = iter(f"session-{n}" for n in range(1, 100))
+    host = WorkspaceHost(agents=agents, store=store, clock=Ticks(), new_id=lambda: next(ids))
+    return host, launcher
+
+
+PENDING = SavedConsultation(number=1, asker=PLANNER, consultant=EXPERIMENTER, title="Check X")
+
+
+async def asking(store: FakeStore, gate: asyncio.Event) -> tuple[WorkspaceHost, ScriptedLauncher]:
+    """A session saved in ``store`` whose planner consulted the experimenter, whose turn
+    waits for ``gate``."""
+    heard: list[Reply] = []
+    session, launcher = consulting_host(store)
+    launcher.planner_turns = [consults("Check X", heard=heard), gated(gate), chats]
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    await eventually(lambda: len(launcher.launches) == 2, poll=0)
+    return session, launcher
+
+
+async def test_stopping_orbit_saves_the_consultation_in_progress_unanswered() -> None:
+    store = FakeStore()
+    session, _ = await asking(store, asyncio.Event())
+    await session.close()
+    assert store.last.consultations == (PENDING,)
+    assert not any(isinstance(e.payload, ConsultationAnswered) for e in store.logged)
+
+
+async def test_a_session_saved_with_a_consultation_tells_the_asker_orbit_restarted() -> None:
+    store = store_with(saved("talks", consultations=(PENDING,)))
+    session, launcher = consulting_host(store)
+    launcher.planner_turns = [chats]
+    events = await opened(session, ActivateSession(session="talks"))
+    events += await events_until(session, finished("agent-1", 1))
+    await session.close()
+
+    assert sole(events, ConsultationAnswered) == interrupted("orbit restarted")
+    [(role, prompt)] = prompts(launcher)
+    assert (role, prompt.endswith(told("orbit restarted"))) == (PLANNER, True)
+    assert store.last.consultations == ()
+
+
+async def test_a_switch_saves_the_consultations_left_pending_as_switched_away_from() -> None:
+    store = FakeStore()
+    session, _ = await asking(store, asyncio.Event())
+    halt_of(session).fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))  # Stops the turns.
+    await events_until(session, idle(EXPERIMENTER))
+    await resume_storage(session)
+    await opened(session, NewSession())
+    await session.close()
+
+    *_, left = [record for record in store.saved if record.id == "session-1"]
+    assert left.consultations == (PENDING.model_copy(update={"why": "the session was switched"}),)
+
+
+async def test_a_session_left_with_a_consultation_tells_the_asker_it_was_switched() -> None:
+    switched = PENDING.model_copy(update={"why": "the session was switched"})
+    store = store_with(saved("talks", consultations=(switched,)))
+    session, launcher = consulting_host(store)
+    launcher.planner_turns = [chats]
+    events = await opened(session, ActivateSession(session="talks"))
+    events += await events_until(session, finished("agent-1", 1))
+    await session.close()
+
+    assert sole(events, ConsultationAnswered) == interrupted("the session was switched")
+    assert prompts(launcher)[0][1].endswith(told("the session was switched"))
+
+
+async def test_a_consultation_saved_for_a_role_without_a_seat_is_still_answered() -> None:
+    ghost = PENDING.model_copy(update={"asker": "ghost"})
+    store = store_with(saved("talks", consultations=(ghost,)))
+    session, launcher = consulting_host(store)
+    events = await opened(session, ActivateSession(session="talks"))
+    await session.close()
+
+    assert sole(events, ConsultationAnswered) == interrupted("orbit restarted", asker="ghost")
+    assert launcher.launches == []

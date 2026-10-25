@@ -17,7 +17,7 @@ from orbit.agent.application.planner_seat import (
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.refusals import Refused, unknown
 from orbit.agent.domain.roles import Role, conversational_roles, disabled_note
-from orbit.agent.domain.sessions import SavedConversation, SavedCopy
+from orbit.agent.domain.sessions import SavedConsultation, SavedConversation, SavedCopy
 from orbit.protocol import NOT_CONFIGURED, PLANNER, BusyLane
 
 
@@ -41,7 +41,8 @@ class ConversationSeats:
         self._copies = hooks.copies
         roles = desk.agents.roles if desk else {}
         names = dict.fromkeys((PLANNER, *conversational_roles(roles)))
-        consultations = Consultations(self.get, self._roles, events.put_nowait, hooks.tracing)
+        consultations = Consultations(self.get, self._roles, events.put_nowait, hooks)
+        self._consultations = consultations
         lanes = SeatLanes(events.put_nowait, self._advance)
         parts = SeatParts(desk, tasks, events, hooks, lanes, consultations.ask)
         self._seats = {name: PlannerSeat(parts, name) for name in names}
@@ -125,6 +126,19 @@ class ConversationSeats:
         return self._copies.held if self._copies else {}
 
     @property
+    def consultations(self) -> tuple[SavedConsultation, ...]:
+        """The consultations pending, to save."""
+        return self._consultations.saved
+
+    def leave(self) -> None:
+        """Have the consultations pending saved as interrupted by a switch of session."""
+        self._consultations.leave()
+
+    async def settle(self) -> None:
+        """Answer each consultation the session opened was saved with, as interrupted."""
+        await self._consultations.settle()
+
+    @property
     def notes(self) -> tuple[str, ...]:
         """What the planner is still to hear, to save."""
         return self.planner.notes
@@ -138,13 +152,18 @@ class ConversationSeats:
         conversations: Mapping[str, SavedConversation],
         notes: tuple[str, ...] = (),
         copies: Mapping[str, SavedCopy] | None = None,
+        consultations: tuple[SavedConsultation, ...] = (),
     ) -> None:
         """Have each role carry on its conversation among ``conversations``, if it has one, the
         planner still to hear ``notes``, keeping those of roles without a seat, and work in its
         copy among ``copies``; the old ones are closed by :meth:`close_retired`, once the switch
-        is done, and the old copies kept where they are."""
+        is done, and the old copies kept where they are. The turns waiting are forgotten, and the
+        consultations pending with them, saved with the session left; ``consultations``, those
+        of the session opened, are answered by :meth:`settle`."""
         self._hold_copies(copies or {})
+        self._consultations.replace(consultations)
         for name, seat in self._seats.items():
+            seat.drop_waiting()
             seat.replace(conversations.get(name), notes if name == PLANNER else ())
         self._kept = {name: c for name, c in conversations.items() if name not in self._seats}
 
@@ -160,7 +179,9 @@ class ConversationSeats:
 
     async def stop_turns(self) -> None:
         """Cancel each role's turn, if it runs, and wait for them to end, starting none of the
-        turns waiting meanwhile, which are forgotten."""
+        turns waiting meanwhile, which are forgotten; the consultations they answered stay
+        pending, to answer as the session opens again."""
+        self._consultations.hold()
         for seat in self._seats.values():
             seat.hold()
         try:
@@ -168,6 +189,7 @@ class ConversationSeats:
         finally:
             for seat in self._seats.values():
                 seat.drop_waiting()
+            self._consultations.release()
 
     async def close(self) -> None:
         """End each role's current conversation, at the session's end."""

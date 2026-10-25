@@ -2,7 +2,7 @@
 another, or a new one, in place of the one open."""
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -29,8 +29,6 @@ from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
 from orbit.agent.domain.sessions import (
     EMPTY_NAME,
-    SavedConversation,
-    SavedCopy,
     SessionRecord,
     resumed_notes,
     session_name,
@@ -192,6 +190,7 @@ class SessionSwitcher:
             spent=self.spent,
             planner_notes=self._parts.seats.notes,
             copies=self._parts.seats.copies,
+            consultations=self._parts.seats.consultations,
         )
 
     async def save(self) -> None:
@@ -232,6 +231,7 @@ class SessionSwitcher:
         if session_id == self._keeper.id:
             return ALREADY_OPEN
         self._may_switch()
+        await self._leave_consultations()
         opened = await self._keeper.open(session_id, self._load)
         if not isinstance(opened, Opened):
             return opened
@@ -246,9 +246,17 @@ class SessionSwitcher:
         """Start a new session ``name``d so in place of this one; returns the id of the session
         left if its lock was held, then let go of or deleted, or none, as :meth:`activate`
         does. Refused while anything runs."""
+        self._may_switch()
+        await self._leave_consultations()
         left = await self._keeper.renew(name, self._clear)
         await self._switched(left, (), None)
         return left.id
+
+    async def _leave_consultations(self) -> None:
+        """Save the session with its consultations pending as interrupted by a switch, to
+        answer as it opens again; a switch refused after leaves them to run on, answered."""
+        self._parts.seats.leave()
+        await self.save()
 
     def _may_switch(self) -> None:
         """Refuse a switch, raising :class:`Refused`, while anything runs, saying what runs."""
@@ -263,7 +271,7 @@ class SessionSwitcher:
         tasks = interrupted(record.tasks)[0]
         self.spent = record.spent
         self._settings.resume(record.role_settings)
-        self._hold(tasks, record.conversations, record.reviews, record.planner_notes, record.copies)
+        self._hold(tasks, record)
 
     def _clear(self) -> None:
         """Hold what a new session does, keeping the settings and having spent nothing; refused
@@ -271,28 +279,31 @@ class SessionSwitcher:
         self._may_switch()
         self._leaving()
         self.spent = Usage()
-        self._hold((), {}, None)
+        self._hold((), None)
 
     def _leaving(self) -> None:
         """Say a switch is under way, with whether the session left stays saved: it does once
         it's saved, unless no session was picked yet, as then it's deleted."""
         self._parts.switching(self._keeper.kept and not self._picking)
 
-    def _hold(
-        self,
-        tasks: tuple[TaskState, ...],
-        conversations: Mapping[str, SavedConversation],
-        reviews: LaneSnapshot | None,
-        notes: tuple[str, ...] = (),
-        copies: Mapping[str, SavedCopy] | None = None,
-    ) -> None:
-        """Hold a session's ``tasks``, its roles' ``conversations``, ``reviews``, the ``notes``
-        its planner is still to hear and its roles' ``copies``, with no fix counts."""
+    def _hold(self, tasks: tuple[TaskState, ...], record: SessionRecord | None) -> None:
+        """Hold a session's ``tasks`` and what else its ``record`` holds, if it has one: its
+        roles' conversations, reviews, the notes its planner is still to hear, its roles' copies
+        and its consultations pending; with no fix counts."""
         parts = self._parts
         self._replace_board(tasks)
         if parts.work is not None:
             parts.work.reset()
-        parts.seats.replace(conversations, notes, copies)
+        if record is None:
+            parts.seats.replace({})
+        else:
+            parts.seats.replace(
+                record.conversations,
+                record.planner_notes,
+                record.copies,
+                record.consultations,
+            )
+        reviews = record.reviews if record else None
         if parts.lane is not None:
             parts.lane.load(reviews or NO_REVIEWS)
         self._kept_reviews = reviews
@@ -324,6 +335,7 @@ class SessionSwitcher:
         await parts.tasks.changed_elsewhere()
         await self.publish_catalog()
         await (await parts.snapshot(last_active)).publish(self._to_everyone)
+        await parts.seats.settle()
         if parts.lane is not None:
             await parts.lane.note_pause()
 

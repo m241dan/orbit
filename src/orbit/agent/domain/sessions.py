@@ -16,6 +16,7 @@ from typing import Any
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 from pydantic_core import from_json
 
+from orbit.agent.domain.consultations import RESTARTED
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot
 from orbit.agent.domain.runtimes import CLAUDE
@@ -31,7 +32,7 @@ from orbit.protocol import (
     Usage,
 )
 
-FORMAT_VERSION = 12
+FORMAT_VERSION = 13
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
@@ -64,8 +65,8 @@ def _without_rounds(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def _unchanged(record: dict[str, Any]) -> dict[str, Any]:
-    """Version 3, 4, 5, 6, 7, 10 or 11 ``record`` as it is: the next version only added fields that
-    have defaults."""
+    """Version 3, 4, 5, 6, 7, 10, 11 or 12 ``record`` as it is: the next version only added fields
+    that have defaults."""
     return record
 
 
@@ -103,7 +104,8 @@ def _on_claude(record: dict[str, Any]) -> dict[str, Any]:
 # runtime it ran on, as only that runtime's launcher understands its handle, so a handle can't
 # be misread; its migration puts version 9's bare handles on Claude. Version 11 added the credits
 # in what the session and its tasks spent, which an older record spent none of. Version 12
-# added the copies the conversational roles work in, which an older record has none of.
+# added the copies the conversational roles work in, which an older record has none of, and
+# version 13 the consultations pending, which an older record has none of.
 _MIGRATIONS: dict[int, Migration] = {
     1: _spent_by_tasks,
     2: _without_rounds,
@@ -116,6 +118,7 @@ _MIGRATIONS: dict[int, Migration] = {
     9: _on_claude,
     10: _unchanged,
     11: _unchanged,
+    12: _unchanged,
 }
 
 EMPTY_NAME = "A session needs a name."
@@ -143,11 +146,25 @@ class SavedCopy(BaseModel):
     last_turn: AwareDatetime
 
 
+class SavedConsultation(BaseModel):
+    """A consultation pending as a session saves it: consultation ``number``, the role ``asker``
+    asking ``consultant`` the message titled ``title``, and why it's interrupted as the session
+    opens again (``why``): orbit restarted, unless it was left for another session."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    number: int
+    asker: str = Field(min_length=1)
+    consultant: str = Field(min_length=1)
+    title: str
+    why: str = RESTARTED
+
+
 class SessionRecord(BaseModel):
     """A saved session ``id``, ``name``d by the user, with the settings each conversational role
     uses, by role (``role_settings``), the planner's for new tasks too, each one's conversation
-    (``conversations``), the copies those working in one work in (``copies``), the
-    ``planner_notes`` the planner is still to hear, its
+    (``conversations``), the copies those working in one work in (``copies``), the consultations
+    pending (``consultations``), the ``planner_notes`` the planner is still to hear, its
     ``tasks`` and, when reviews are on, its ``reviews``' state, and what its agents have
     ``spent`` in all, the planner and tasks since removed included."""
 
@@ -161,6 +178,7 @@ class SessionRecord(BaseModel):
     role_settings: dict[str, Settings] = Field(default={})
     conversations: dict[str, SavedConversation] = Field(default={})
     copies: dict[str, SavedCopy] = Field(default={})
+    consultations: tuple[SavedConsultation, ...] = ()
     planner_notes: tuple[str, ...] = ()
     tasks: tuple[TaskState, ...] = ()
     reviews: LaneSnapshot | None = None

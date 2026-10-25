@@ -45,13 +45,13 @@ RESUMING_NOTE = "Starting the run again after the usage limit."
 
 def outage_resuming_note(runtime: str) -> str:
     """Said as a run an outage of ``runtime``'s API stopped starts again by itself."""
-    return f"Starting the run again now {_named(runtime)}'s API may be answering."
+    return f"Starting the run again now {runtime_name(runtime)}'s API may be answering."
 
 
 def tasks_resuming_note(runtime: str) -> str:
     """Said as ``runtime``'s tasks start again by themselves, after a pause a lane that starts
     by itself started."""
-    return f"Starting {_named(runtime)}'s tasks again."
+    return f"Starting {runtime_name(runtime)}'s tasks again."
 
 
 def outage_note(role: str) -> str:
@@ -156,7 +156,7 @@ def paused_note(at: datetime, runtime: str) -> str:
     """What's said when ``runtime``'s usage limit stops the run, which starts again by itself
     ``at``."""
     return (
-        f"{_named(runtime)}'s usage limit is reached, so the run stopped. It starts again by "
+        f"{runtime_name(runtime)}'s usage limit is reached, so the run stopped. It starts again by "
         f"itself at {_when(at)}; ctrl+r starts it now and ctrl+s cancels that."
     )
 
@@ -228,12 +228,12 @@ def outage_paused_note(at: datetime, error: str, runtime: str) -> str:
     """What's said when ``runtime``'s API not answering, with ``error``, stops the run, which
     starts again by itself ``at``."""
     return (
-        f"{_named(runtime)}'s API isn't answering ({first_line(error)}), so the run stopped. It "
-        f"starts again by itself at {_when(at)}; ctrl+r starts it now and ctrl+s cancels that."
+        f"{runtime_name(runtime)}'s API isn't answering ({first_line(error)}), so the run stopped. "
+        f"It starts again by itself at {_when(at)}; ctrl+r starts it now and ctrl+s cancels that."
     )
 
 
-def _named(runtime: str) -> str:
+def runtime_name(runtime: str) -> str:
     """How the notes name the runtime ``runtime``: ``Claude`` for Claude, else its name."""
     return _RUNTIME_NAMES.get(runtime, runtime)
 

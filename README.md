@@ -1232,11 +1232,17 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   tool `consult(role, message)`, which returns at once (`Asked the experimenter (consultation
   1); its reply will arrive as a message.`); the consultation waits in the consulted role's line,
   in order with your own messages to it, and runs as one of its turns. That turn's last message
-  (its error, if it failed) is the reply: it reaches the asking role as a message (`Experimenter's
-  reply to '<first line>' (consultation 1):` and the reply), starting its turn at once if it's
-  idle, or after its turn and any message of yours waiting for it, several replies waiting
-  together in one turn. A message you send to a role busy with a consultation or a reply, or
-  with one waiting, waits its turn too, rather than being refused.
+  is the reply: it reaches the asking role as a message (`Experimenter's reply to '<first line>'
+  (consultation 1):` and the reply), starting its turn at once if it's idle, or after its turn
+  and any message of yours waiting for it, several replies waiting together in one turn. The
+  asking role always hears back: a consultation that can't reply reaches it the same way as
+  `The experimenter's consultation '<first line>' was interrupted: <why>.`, `<why>` being `it was
+  cancelled` (ctrl+x on the consulted role's tab), `it failed: <error>`, `Claude's usage limit
+  was reached` or `Claude's API wasn't answering` (naming the role's runtime), `the session was
+  switched` or `orbit restarted`. Consultations pending are saved with the session, and those
+  a switch or orbit stopping interrupted are answered so when the session opens again. A
+  message you send to a role busy with a consultation or a reply, or with one waiting, waits its
+  turn too, rather than being refused.
 - `consult_limit_per_hour`: how many consultations it may start in an hour, 6 by default; 0 means
   no limit, and a negative number is refused.
 - `copy_ttl_hours`: how long, in hours, a conversational role working in a `copy` keeps its copy

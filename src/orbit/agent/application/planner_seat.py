@@ -74,7 +74,7 @@ def _unplaced(position: int) -> None:
     """Note nothing of a waiting turn's place."""
 
 
-async def _unanswered(reason: TurnEndReason, reply: str) -> None:
+async def _unanswered(reason: TurnEndReason, reply: str, why: str | None) -> None:
     """Do nothing with a turn's reply."""
 
 
@@ -86,13 +86,14 @@ def _under(span: Span) -> Callable[[], AbstractContextManager[Span]]:
 @dataclass(frozen=True)
 class WaitingTurn:
     """A turn waiting in a seat's line: on ``text`` with ``settings``, run under the span
-    ``opened`` makes current, telling ``answered`` how it ended and its reply, under that span
-    still, and ``placed`` its place in line: 1 once it runs next, or runs."""
+    ``opened`` makes current, telling ``answered`` how it ended, its reply and why it gave none,
+    if it didn't, under that span still, and ``placed`` its place in line: 1 once it runs next,
+    or runs."""
 
     text: str
     settings: Settings
     opened: Callable[[], AbstractContextManager[Span]]
-    answered: Callable[[TurnEndReason, str], Awaitable[None]] = _unanswered
+    answered: Callable[[TurnEndReason, str, str | None], Awaitable[None]] = _unanswered
     placed: Callable[[int], None] = _unplaced
 
 
@@ -338,10 +339,10 @@ class PlannerSeat:
 
     async def _answer_waiting(self, planner: PlannerChat, turn: WaitingTurn) -> TurnEndReason:
         """``planner``'s ``turn`` that waited in the line, under its span, telling it how it
-        ended and what it answered."""
+        ended, what it answered and why it didn't, if it didn't."""
         with turn.opened() as parent:
             reason = await self._answer(planner, turn.text, turn.settings, parent)
-            await turn.answered(reason, planner.reply)
+            await turn.answered(reason, planner.reply, planner.interruption(reason))
         return reason
 
     async def _free_prompt(self) -> None:
