@@ -12,14 +12,14 @@ which lane runs it, where it works, whether you talk to it, whether its work mer
 it's enabled, which are checked here. The enabled task roles' lanes are the session's lanes, the
 one whose roles merge running on the user's asking; the enabled conversational roles each have a
 conversation of their own; where a role works decides whether its tasks take a coder's slot; the
-runtimes the enabled roles run on are those orbit must start agents on; and the work asked of a
-disabled role is refused.
+runtimes the enabled roles run on are those orbit must start agents on, and must be able to do
+what those roles ask; and the work asked of a disabled role is refused.
 """
 
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Literal, Self, get_args
 
 from pydantic import (
     AfterValidator,
@@ -34,7 +34,15 @@ from pydantic_core import PydanticCustomError
 
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.agent.domain.refusals import Refused
-from orbit.agent.domain.runtimes import CLAUDE, knows_runtime, unknown_runtime
+from orbit.agent.domain.runtimes import (
+    CLAUDE,
+    UNCHECKED,
+    Capabilities,
+    accepted,
+    asks_beyond,
+    knows_runtime,
+    unknown_runtime,
+)
 from orbit.protocol import (
     AGENT_FAILED,
     BUILT_IN_ROLE_NAMES,
@@ -84,6 +92,12 @@ Workspace = Literal["worktree", "snapshot", "checkout", "none"]
 """Where an agent in a role works: the coder's separate worktree, which can merge; a read-only
 snapshot of the base commit; the user's checkout, read in place; or an empty temporary
 directory."""
+
+TOOL_ACCESSES: tuple[ToolAccess, ...] = get_args(ToolAccess)
+"""Every level of tool access, in order."""
+
+EFFORTS: tuple[Effort, ...] = get_args(Effort)
+"""Every level of effort, in order."""
 
 PLAIN_NAME = re.compile(r"[A-Za-z0-9_-]+")
 """What a lane's or a role's name is made of."""
@@ -381,20 +395,59 @@ def runtime_roles(roles: Mapping[str, Role]) -> dict[str, tuple[str, ...]]:
     return {runtime: tuple(names) for runtime, names in runtimes.items()}
 
 
-def runtime_problems(roles: Mapping[str, Role]) -> list[str]:
-    """Why each of ``roles`` whose runtime this version of orbit doesn't know is refused, naming
-    it and its runtime, in order."""
+def runtime_problems(
+    roles: Mapping[str, Role], capabilities: Mapping[str, Capabilities] = UNCHECKED
+) -> list[str]:
+    """Why each of ``roles`` is refused for its runtime, naming it and its runtime, in order: its
+    runtime is one this version of orbit doesn't know, or it's enabled and asks for what its
+    runtime can't do, as ``capabilities`` say by runtime (see :func:`capability_problems`); a
+    runtime they don't name isn't checked."""
     return [
-        unknown_runtime(f"roles.{name}.runtime", role.runtime)
+        problem
         for name, role in roles.items()
-        if not knows_runtime(role.runtime)
+        for problem in _role_problems(name, role, capabilities)
     ]
 
 
-def check_runtimes(roles: Mapping[str, Role]) -> None:
-    """Raise :class:`ConfigError` naming each of ``roles`` whose runtime this version of orbit
-    doesn't know, on a line of its own, if any."""
-    problems = runtime_problems(roles)
+def _role_problems(name: str, role: Role, capabilities: Mapping[str, Capabilities]) -> list[str]:
+    """Why role ``name``, ``role``, is refused for its runtime, as :func:`runtime_problems`
+    says."""
+    if not knows_runtime(role.runtime):
+        return [unknown_runtime(f"roles.{name}.runtime", role.runtime)]
+    can = capabilities.get(role.runtime)
+    if not role.enabled or can is None:
+        return []
+    return capability_problems(name, role, can)
+
+
+def capability_problems(name: str, role: Role, capabilities: Capabilities) -> list[str]:
+    """What role ``name``, ``role``, asks for that its runtime can't do, as its ``capabilities``
+    say, in order, each naming the role, the runtime, the request and what the runtime does: a
+    level of tool access or effort it doesn't accept, and a conversation it can't carry on."""
+    asks = _level_ask("tool_access", role.tool_access, capabilities.tool_access, TOOL_ACCESSES)
+    asks += _level_ask("effort", role.effort, capabilities.effort, EFFORTS)
+    if role.conversation and not capabilities.resume:
+        asks.append(("conversation = true", "doesn't support resume"))
+    return [asks_beyond(name, role.runtime, request, supported) for request, supported in asks]
+
+
+def _level_ask(
+    setting: str, level: str | None, supported: frozenset[str], levels: Sequence[str]
+) -> list[tuple[str, str]]:
+    """``level`` of ``setting``, if it's asked for and isn't ``supported``, with what says which
+    of the setting's ``levels`` are, in order; nothing otherwise."""
+    if level is None or level in supported:
+        return []
+    shown = [each for each in levels if each in supported]
+    return [(f'{setting} "{level}"', accepted(setting, shown))]
+
+
+def check_runtimes(
+    roles: Mapping[str, Role], capabilities: Mapping[str, Capabilities] = UNCHECKED
+) -> None:
+    """Raise :class:`ConfigError` naming each of ``roles`` refused for its runtime, as
+    :func:`runtime_problems` says with ``capabilities``, on a line of its own, if any."""
+    problems = runtime_problems(roles, capabilities)
     if problems:
         raise ConfigError("\n".join(problems))
 

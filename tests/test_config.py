@@ -8,6 +8,7 @@ from orbit.agent.domain.config import OrbitConfig, load_config, load_layered
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.layers import (
     DEFAULT,
+    NO_USER_ROLES,
     PACKAGE,
     Layer,
     PersonalRoleError,
@@ -16,9 +17,11 @@ from orbit.agent.domain.layers import (
 )
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import Role, built_in_roles
+from orbit.agent.domain.runtimes import CLAUDE
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.protocol import BUILT_IN_ROLE_NAMES
+from tests.agent_fakes import EVERYTHING, KNOWN_CAPABILITIES, LIMITED_RUNTIME
 
 INSTRUCTIONS = {name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES}
 BUILT_IN_ROLES = built_in_roles(read_built_in_roles(), INSTRUCTIONS)
@@ -574,6 +577,91 @@ def test_a_layered_config_records_where_each_roles_runtime_came_from() -> None:
         "project", "/src/app/.orbit/config.toml"
     )
     assert layered.role_layers["reviewer"]["runtime"] == USER
+
+
+# What a role asks of its runtime
+
+
+def on_lite(name: str, **fields: object) -> dict[str, object]:
+    """A project file putting role ``name`` on :data:`LIMITED_RUNTIME`, with ``fields``."""
+    return {"roles": {name: {"runtime": LIMITED_RUNTIME, **fields}}}
+
+
+def refusal(data: dict[str, object], user: UserRoles = NO_USER_ROLES) -> str:
+    """Why the project file ``data`` is refused over the roles ``user`` sets, its roles held to
+    what :data:`KNOWN_CAPABILITIES` say their runtimes can do."""
+    with pytest.raises(ConfigError) as raised:
+        load_config(data, BUILT_IN_ROLES, user, capabilities=KNOWN_CAPABILITIES)
+    return str(raised.value)
+
+
+@pytest.mark.usefixtures("limited_runtime")
+def test_a_role_asking_for_effort_its_runtime_takes_none_of_is_refused() -> None:
+    assert refusal(on_lite("reviewer", effort="max")) == (
+        'roles.reviewer asks for effort "max", but its runtime lite accepts no effort setting.'
+    )
+
+
+@pytest.mark.usefixtures("limited_runtime")
+def test_a_role_asking_for_tool_access_its_runtime_doesnt_take_is_refused_listing_it() -> None:
+    assert refusal(on_lite("coder")) == (
+        'roles.coder asks for tool_access "full", but its runtime lite accepts only tool_access'
+        ' "restricted".'
+    )
+
+
+@pytest.mark.usefixtures("limited_runtime")
+def test_a_conversational_role_on_a_runtime_that_cant_resume_is_refused() -> None:
+    assert refusal(on_lite("planner")) == (
+        "roles.planner asks for conversation = true, but its runtime lite doesn't support resume."
+    )
+
+
+@pytest.mark.usefixtures("limited_runtime")
+def test_the_user_configs_effort_for_every_role_is_held_to_each_roles_runtime() -> None:
+    every = load_user_roles({"roles": {"effort": "low"}}, USER, BUILT_IN_ROLES)
+    assert refusal(on_lite("reviewer"), every) == (
+        'roles.reviewer asks for effort "low", but its runtime lite accepts no effort setting.'
+    )
+
+
+@pytest.mark.usefixtures("limited_runtime")
+def test_each_role_asking_beyond_its_runtime_is_named_on_a_line_of_its_own() -> None:
+    data: dict[str, object] = {
+        "roles": {"planner": {"runtime": LIMITED_RUNTIME}, "coder": {"runtime": LIMITED_RUNTIME}}
+    }
+    assert [line.split(" asks")[0] for line in refusal(data).splitlines()] == [
+        "roles.planner",
+        "roles.coder",
+    ]
+
+
+@pytest.mark.usefixtures("limited_runtime")
+def test_a_role_on_a_runtime_without_usage_loads() -> None:
+    config = load_config(on_lite("reviewer"), BUILT_IN_ROLES, capabilities=KNOWN_CAPABILITIES)
+    assert config.roles["reviewer"].runtime == LIMITED_RUNTIME
+
+
+@pytest.mark.usefixtures("limited_runtime")
+def test_a_disabled_role_asking_beyond_its_runtime_loads() -> None:
+    data = on_lite("coder", effort="max", enabled=False)
+    config = load_config(data, BUILT_IN_ROLES, capabilities=KNOWN_CAPABILITIES)
+    assert not config.roles["coder"].enabled
+
+
+def test_on_claude_every_valid_configuration_loads_as_it_did() -> None:
+    data = {
+        "roles": {
+            "planner": {"effort": "low", "tool_access": "off"},
+            "coder": {"effort": "max"},
+            "reviewer": {"effort": "xhigh", "tool_access": "full", "workspace": "snapshot"},
+        }
+    }
+    claude = {CLAUDE: EVERYTHING}
+    assert load_config(data, BUILT_IN_ROLES, capabilities=claude) == load_config(
+        data, BUILT_IN_ROLES
+    )
+    assert load_config({}, BUILT_IN_ROLES, capabilities=claude).roles == BUILT_IN_ROLES
 
 
 # Settings of a later version of orbit

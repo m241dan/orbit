@@ -183,6 +183,22 @@ EVERYTHING = Capabilities(
 )
 """What a runtime that can do everything orbit asks, at every level, can do."""
 
+LIMITED_RUNTIME = "lite"
+"""A runtime that can do little, as :data:`LIMITED` says."""
+
+LIMITED = Capabilities(
+    resume=False,
+    usage=False,
+    max_turns=False,
+    tool_access=frozenset({"restricted"}),
+    effort=frozenset(),
+)
+"""What :data:`LIMITED_RUNTIME` can do: run an agent with restricted tool access, and nothing
+more; it carries no conversation on, reports no usage and takes no effort."""
+
+KNOWN_CAPABILITIES = {CLAUDE: EVERYTHING, LIMITED_RUNTIME: LIMITED}
+"""What Claude Code and :data:`LIMITED_RUNTIME` can do, by runtime."""
+
 
 class ScriptedLauncher:
     """Each launch plays the next script as the agent, calling orbit through the host. It can

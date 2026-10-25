@@ -17,7 +17,7 @@ from pydantic_core import ErrorDetails
 
 from orbit.agent.domain.config_errors import ConfigError, dotted, validation_problems
 from orbit.agent.domain.roles import Role, RoleName, check_runtimes, role_clashes
-from orbit.agent.domain.runtimes import knows_runtime, unknown_runtime
+from orbit.agent.domain.runtimes import UNCHECKED, Capabilities, knows_runtime, unknown_runtime
 from orbit.protocol import Effort
 
 LayerName = Literal["default", "package", "user", "project"]
@@ -236,7 +236,10 @@ class _Roles(BaseModel):
 
 
 def resolve_roles(
-    package: Mapping[str, Role], user: UserRoles, project: ProjectRoles
+    package: Mapping[str, Role],
+    user: UserRoles,
+    project: ProjectRoles,
+    capabilities: Mapping[str, Capabilities] = UNCHECKED,
 ) -> ResolvedRoles:
     """The ``package``'s roles, then the ``user``'s personal roles, then those ``project`` adds,
     each field resolved most specific first: the ``project``'s value, the ``user``'s value for
@@ -244,15 +247,17 @@ def resolve_roles(
     value, then the default. A role's ``merge`` is the default, which merges if it can, when
     the ``project`` changes its ``verify`` or ``workspace`` but not its ``merge``. A project role
     replaces a personal role of its name entirely; a role the ``user`` only sets fields bound to
-    the machine for, and no other layer has, isn't a role.
+    the machine for, and no other layer has, isn't a role. Each enabled role is held to what
+    its runtime can do, as ``capabilities`` say by runtime.
 
     Raises :class:`ConfigError` naming the role and field if a role is invalid, or each role
-    whose runtime this version of orbit doesn't know, and :class:`PersonalRoleError` if the
+    whose runtime this version of orbit doesn't know or can't do what it asks (see
+    :func:`~orbit.agent.domain.roles.runtime_problems`), and :class:`PersonalRoleError` if the
     personal roles break a rule across the roles that the others keep.
     """
     merged = merge_roles(package, user, project)
     roles = _validated(merged.tables)
-    check_runtimes(roles)
+    check_runtimes(roles, capabilities)
     _check_personal(roles, merged.personal)
     return ResolvedRoles(roles, merged.layers, merged.personal, merged.replaced)
 

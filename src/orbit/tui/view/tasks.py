@@ -27,6 +27,7 @@ TASK_PROMPT_TITLE = "Prompt"
 TASK_TITLE_PLACEHOLDER = "Press i to type"
 REASON_HINT = "j/k scroll · y copy · esc close"
 NEW_TASK_LABEL = "+ new task"
+USAGE_UNKNOWN = "usage unknown"
 
 
 def task_numbers(tasks: Sequence[TaskState]) -> list[str]:
@@ -56,10 +57,12 @@ def task_numbers(tasks: Sequence[TaskState]) -> list[str]:
 @dataclass(frozen=True)
 class RowNotes:
     """What a task's row says that its task doesn't: that it's ``waiting`` for a coder, as
-    this note says, and the ``lane`` its role runs in, if known."""
+    this note says, the ``lane`` its role runs in, if known, and whether what its role's agents
+    spend is unknown (``usage_unknown``), as their runtime doesn't report it."""
 
     waiting: str | None = None
     lane: str | None = None
+    usage_unknown: bool = False
 
 
 NO_NOTES = RowNotes()
@@ -78,8 +81,8 @@ def task_label(
 
     Fix tasks are indented under the task they belong to. A running task shows the
     spinner ``frame``. A pending task about to run says it's waiting for a coder, if
-    ``notes`` say so, and they give the lane. The reason's line is cut to ``width`` cells with
-    an ellipsis, if given.
+    ``notes`` say so, and they give the lane and whether its usage is unknown. The reason's line
+    is cut to ``width`` cells with an ellipsis, if given.
     """
     head = f"{number}. " if state.fixes is None else f"   {number} "
     icon = frame if state.status == "running" else STATUS_ICONS[state.status]
@@ -89,7 +92,7 @@ def task_label(
     label.append_text(lane_tag(notes.lane))
     label.append("\n")
     indent = " " * (len(head) + cell_len(icon) + 1)
-    label.append(indent + _details(state, notes.waiting), style="dim")
+    label.append(indent + _details(state, notes), style="dim")
     if state.reason:
         label.append("\n")
         label.append_text(_reason_line(f"{indent}↳ {state.reason}", width))
@@ -107,6 +110,11 @@ def lane_tag(lane: str | None) -> Text:
 def role_lanes(agents: Iterable[AgentEntry]) -> dict[str, str]:
     """Each role among the catalog's ``agents``, with the lane it runs in, in their order."""
     return {agent.name: agent.lane for agent in agents}
+
+
+def usage_unknown_roles(agents: Iterable[AgentEntry]) -> frozenset[str]:
+    """The roles among the catalog's ``agents`` whose agents' usage is unknown."""
+    return frozenset(agent.name for agent in agents if not agent.usage_known)
 
 
 def lanes_present(tasks: Iterable[TaskState], lanes: Mapping[str, str]) -> tuple[str, ...]:
@@ -135,17 +143,25 @@ def next_lane(lane: str | None, present: Sequence[str]) -> str | None:
     return cycle[(cycle.index(lane) + 1) % len(cycle)]
 
 
-def _details(state: TaskState, waiting: str | None) -> str:
-    """What a row says under its title: the settings, the fix it's on, what it spent, and that
-    it's ``waiting`` for a coder, if pending and given."""
+def _details(state: TaskState, notes: RowNotes) -> str:
+    """What a row says under its title: the settings, the fix it's on, what it spent, or that
+    that's unknown if ``notes`` say so, and that it's waiting for a coder, if pending and they
+    say so."""
     details = " · ".join(settings_fields(state.task.settings))
     if state.attempt:
         details += f" · fix {state.attempt}/{state.max_attempts}"
-    if state.usage != Usage():
-        details += f" · {usage_label(state.usage)}"
-    if waiting is not None and state.status == "pending":
-        details += f" · {waiting}"
+    details += _spent(state.usage, notes.usage_unknown)
+    if notes.waiting is not None and state.status == "pending":
+        details += f" · {notes.waiting}"
     return details
+
+
+def _spent(usage: Usage, unknown: bool) -> str:
+    """What a row's details end with for what its task spent, ``usage``: that it's unknown, if
+    it is, else the usage, if any."""
+    if unknown:
+        return f" · {USAGE_UNKNOWN}"
+    return "" if usage == Usage() else f" · {usage_label(usage)}"
 
 
 def _reason_line(line: str, width: int | None) -> Text:
@@ -368,11 +384,11 @@ class TaskBoard:
     tasks, telling the time for its spinners with ``clock``.
 
     It numbers the tasks and labels their rows at the view's width, the task about to run
-    saying when it waits for a coder and each task its role's lane, and redraws as the tasks
-    change and while any runs. Narrowed to a lane, it shows just that lane's tasks, numbered
-    as on the whole list, until widened. It totals what the session's turns cost. While
-    following, it scrolls to keep the active task (``active_task``) in view; held, it stays
-    where it is, until let go.
+    saying when it waits for a coder and each task its role's lane, and whether its role's
+    usage is unknown, and redraws as the tasks change and while any runs. Narrowed to a lane, it
+    shows just that lane's tasks, numbered as on the whole list, until widened. It totals what
+    the session's turns cost. While following, it scrolls to keep the active task
+    (``active_task``) in view; held, it stays where it is, until let go.
     """
 
     def __init__(self, view: TaskBoardView, clock: Callable[[], float]) -> None:
@@ -385,6 +401,7 @@ class TaskBoard:
         self.session_usage = Usage()
         self.waiting: tuple[str, str] | None = None  # The task waiting for a coder, and its note.
         self.lanes: dict[str, str] = {}  # Each role's lane, as the catalog lists them.
+        self.usage_unknown: frozenset[str] = frozenset()  # Roles whose usage is unknown.
         self.lane: str | None = None  # The lane the list is narrowed to, if any.
         self.following = True
 
@@ -412,6 +429,14 @@ class TaskBoard:
             return
         self.lanes = lanes
         self._narrow()
+
+    def show_usage_unknown(self, roles: frozenset[str]) -> None:
+        """Have the tasks in ``roles`` say what they spent is unknown, and those in other roles
+        what they spent; nothing for the roles already known."""
+        if roles == self.usage_unknown:
+            return
+        self.usage_unknown = roles
+        self.redraw()
 
     def cycle_lane(self) -> None:
         """Narrow the list to the next of the lanes its tasks run in, all of them once more
@@ -461,9 +486,11 @@ class TaskBoard:
 
     def _notes(self, state: TaskState) -> RowNotes:
         """What ``state``'s row says beyond its task: the wait for a coder, if it's the task
-        waiting, and its role's lane."""
+        waiting, its role's lane, and whether its role's usage is unknown."""
         waiting_id, note = self.waiting or (None, None)
-        return RowNotes(note if state.id == waiting_id else None, self.lanes.get(state.task.role))
+        role = state.task.role
+        waiting = note if state.id == waiting_id else None
+        return RowNotes(waiting, self.lanes.get(role), role in self.usage_unknown)
 
     def follow(self) -> None:
         """Scroll just enough to bring the active task shown into view, if following and the

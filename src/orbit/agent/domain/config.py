@@ -22,6 +22,7 @@ from orbit.agent.domain.layers import (
 )
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import Role, RoleName, check_runtimes, role_clashes
+from orbit.agent.domain.runtimes import UNCHECKED, Capabilities
 from orbit.agent.domain.verification import MAX_FALLBACK_FIXES
 
 
@@ -134,18 +135,21 @@ def load_config(
     built_in: Mapping[str, Role],
     user: UserRoles = NO_USER_ROLES,
     path: str | None = None,
+    capabilities: Mapping[str, Capabilities] = UNCHECKED,
 ) -> OrbitConfig:
     """The configuration ``data`` (the contents of the project file at ``path``, if known)
     describes over the role fields and personal roles ``user`` sets and the defaults, whose
     roles are ``built_in``, with a notice for each personal role a project role replaces.
 
     A role it names that's built in keeps the fields it doesn't set; any other role is new. Each
-    role's fields are resolved as :func:`~orbit.agent.domain.layers.resolve_roles` says.
+    role's fields are resolved as :func:`~orbit.agent.domain.layers.resolve_roles` says, and
+    each enabled role is held to what its runtime can do, as ``capabilities`` say by runtime.
     Raises :class:`ConfigError` naming each problem if it's invalid, as it is when a role's
-    runtime is one this version of orbit doesn't know, a :class:`PersonalRoleError` if the
+    runtime is one this version of orbit doesn't know or can't do what the role asks (see
+    :func:`~orbit.agent.domain.roles.runtime_problems`), a :class:`PersonalRoleError` if the
     personal roles are at fault.
     """
-    return load_layered(data, built_in, user, path).config
+    return load_layered(data, built_in, user, path, capabilities).config
 
 
 @dataclass(frozen=True)
@@ -162,9 +166,10 @@ def load_layered(
     built_in: Mapping[str, Role],
     user: UserRoles = NO_USER_ROLES,
     path: str | None = None,
+    capabilities: Mapping[str, Capabilities] = UNCHECKED,
 ) -> LayeredConfig:
-    """The configuration :func:`load_config` loads from ``data``, ``built_in``, ``user`` and
-    ``path``, with the layer each of its roles' fields came from.
+    """The configuration :func:`load_config` loads from ``data``, ``built_in``, ``user``,
+    ``path`` and ``capabilities``, with the layer each of its roles' fields came from.
 
     Raises :class:`ConfigError` as :func:`load_config` does, naming the first setting of a later
     version of orbit ``data`` sets, if any, ahead of anything else.
@@ -177,7 +182,7 @@ def load_layered(
     check_personal(merged)
     notices = tuple(replaced_note(name) for name in merged.replaced)
     config = _validated({**data, "roles": merged.tables}, merged.personal, notices)
-    check_runtimes(config.roles)
+    check_runtimes(config.roles, capabilities)
     return LayeredConfig(config, merged.layers)
 
 

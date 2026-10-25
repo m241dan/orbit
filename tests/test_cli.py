@@ -1007,6 +1007,35 @@ def test_chat_doesnt_look_for_claude_when_no_enabled_role_runs_on_it(
     assert list(session.agents.launchers) == ["fake"]
 
 
+@pytest.mark.usefixtures("limited_runtime")
+def test_chat_stops_naming_a_role_that_asks_for_what_its_runtime_cant_do(
+    launched: list[WorkspaceHost], tmp_path: Path
+) -> None:
+    (tmp_path / ".orbit").mkdir()
+    path = tmp_path / ".orbit" / "config.toml"
+    path.write_text('[roles.coder]\nruntime = "lite"\n')
+    result = runner.invoke(app, ["chat", "-C", str(tmp_path)])
+
+    assert result.exit_code == 2
+    assert result.stderr == (
+        f'Invalid orbit configuration: {path}: roles.coder asks for tool_access "full", but its'
+        ' runtime lite accepts only tool_access "restricted".\n'
+    )
+    assert launched == []
+
+
+@pytest.mark.usefixtures("limited_runtime")
+def test_chat_runs_a_role_on_a_runtime_without_usage_leaving_its_usage_unknown(
+    launched: list[WorkspaceHost], tmp_path: Path
+) -> None:
+    (tmp_path / ".orbit").mkdir()
+    (tmp_path / ".orbit" / "config.toml").write_text('[roles.reviewer]\nruntime = "lite"\n')
+    assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
+
+    [session] = launched
+    assert session.usage_unknown == frozenset({"reviewer"})
+
+
 def test_rereading_an_invalid_project_file_gives_its_problems(
     launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

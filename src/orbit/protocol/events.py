@@ -575,7 +575,8 @@ class AgentEntry(_Message):
     it. It runs in ``lane``, and its ``model``, ``tool_access`` and ``effort`` are the defaults
     of a task in it, as ``Settings`` hold them. It's ``personal`` if the user's own config
     defines it, rather than orbit or the project. Its agents run on ``runtime``, such as
-    ``claude``."""
+    ``claude``; ``usage_known`` is false when that runtime doesn't report what their turns cost,
+    so their usage is unknown."""
 
     name: str
     label: str
@@ -586,6 +587,7 @@ class AgentEntry(_Message):
     effort: Effort | None = None
     personal: bool = False
     runtime: str = "claude"
+    usage_known: bool = True
 
 
 class WorkspaceEntry(_Message):

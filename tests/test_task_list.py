@@ -164,6 +164,16 @@ def test_a_task_in_the_work_lane_or_an_unknown_one_shows_no_tag() -> None:
         assert str(label) == "1. ⏳ go\n      default · restricted"
 
 
+def test_a_task_whose_roles_usage_is_unknown_says_so_in_place_of_what_it_spent() -> None:
+    usage = Usage(input_tokens=1_500, cost_usd=0.2)
+    state = TaskState(id="1", task=TaskSpec(prompt="go"), status="completed", usage=usage)
+    label = task_label(state, "1", "◠ ", notes=RowNotes(usage_unknown=True))
+    assert str(label) == "1. ✅ go\n      default · restricted · usage unknown"
+    pending = TaskState(id="1", task=TaskSpec(prompt="go"))
+    label = task_label(pending, "1", "◠ ", notes=RowNotes(usage_unknown=True))
+    assert str(label) == "1. ⏳ go\n      default · restricted · usage unknown"
+
+
 def waiting(busy: int | None) -> tuple[Activity, ...]:
     """A task run whose task ``t1`` waits next in line for a coder while ``busy`` run."""
     return (
@@ -655,6 +665,19 @@ async def test_a_review_tasks_row_shows_its_lane_and_a_coder_tasks_none() -> Non
         assert shown_rows(app.query_one(TaskList))[:2] == [
             "1. ⏳ coder\n      default · restricted",
             "2. ⏳ reviewer  review\n      default · restricted",
+        ]
+
+
+async def test_a_task_rows_usage_is_unknown_when_its_roles_runtime_doesnt_report_it() -> None:
+    unmetered = AgentEntry(name=REVIEWER, label="Reviewer", conversational=False, usage_known=False)
+    catalog = CATALOG.model_copy(update={"agents": (LANED.agents[0], unmetered)})
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, catalog, in_roles(CODER, REVIEWER))
+        assert shown_rows(app.query_one(TaskList))[:2] == [
+            "1. ⏳ coder\n      default · restricted",
+            "2. ⏳ reviewer\n      default · restricted · usage unknown",
         ]
 
 

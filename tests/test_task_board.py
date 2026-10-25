@@ -569,6 +569,26 @@ def test_the_same_lanes_again_leave_the_board_alone() -> None:
     assert view.redraws == redraws
 
 
+def test_a_task_in_a_role_whose_usage_is_unknown_says_so_once_that_is_known() -> None:
+    tasks, view = started()
+    tasks.show(in_roles("coder", "reviewer"))
+    assert view.rows[1] == "2. ⏳ reviewer\n      default · restricted"
+    tasks.show_usage_unknown(frozenset({"reviewer"}))
+    assert view.rows[:2] == [
+        "1. ⏳ coder\n      default · restricted",
+        "2. ⏳ reviewer\n      default · restricted · usage unknown",
+    ]
+
+
+def test_the_same_roles_of_unknown_usage_again_leave_the_board_alone() -> None:
+    tasks, view = started()
+    tasks.show(in_roles("reviewer"))
+    tasks.show_usage_unknown(frozenset({"reviewer"}))
+    redraws = view.redraws
+    tasks.show_usage_unknown(frozenset({"reviewer"}))
+    assert view.redraws == redraws
+
+
 def test_cycling_the_lanes_goes_from_all_through_each_lane_back_to_all() -> None:
     tasks, view = narrowed("security", "reviewer", "security", lanes=0)
     tasks.cycle_lane()

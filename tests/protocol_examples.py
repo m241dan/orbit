@@ -346,6 +346,7 @@ EVENTS: tuple[EventEnvelope, ...] = (
                     effort="high",
                     personal=True,
                     runtime="claude",
+                    usage_known=False,
                 ),
             ),
             triggers=(TriggerEntry(name="super-review", label="Super review", manual=True),),

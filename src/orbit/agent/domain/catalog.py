@@ -46,10 +46,13 @@ NO_WORKSPACE_LABEL = "default"
 """The workspace's label outside a repository."""
 
 
-def agent_entry(name: str, role: Role, conversational: bool, personal: bool) -> AgentEntry:
+def agent_entry(
+    name: str, role: Role, conversational: bool, personal: bool, usage_known: bool = True
+) -> AgentEntry:
     """The catalog's entry for the agents of ``role``, named ``name``, ``conversational`` if the
     user can message them, ``personal`` if it's defined whole in the user config, with its lane,
-    the defaults of its tasks' settings and its runtime."""
+    the defaults of its tasks' settings and its runtime, and whether their usage is known
+    (``usage_known``)."""
     return AgentEntry(
         name=name,
         label=ROLE_LABELS.get(name, name),
@@ -60,17 +63,23 @@ def agent_entry(name: str, role: Role, conversational: bool, personal: bool) -> 
         effort=role.effort,
         personal=personal,
         runtime=role.runtime,
+        usage_known=usage_known,
     )
 
 
 def agent_entries(
-    roles: Mapping[str, Role], conversational: Iterable[str], personal: Iterable[str]
+    roles: Mapping[str, Role],
+    conversational: Iterable[str],
+    personal: Iterable[str],
+    usage_unknown: Iterable[str] = (),
 ) -> tuple[AgentEntry, ...]:
     """The catalog's entries for the agents of ``roles``, by name, those in ``conversational``
-    ones the user can message and those in ``personal`` personal."""
-    talking, own = frozenset(conversational), frozenset(personal)
+    ones the user can message, those in ``personal`` personal and those in ``usage_unknown``
+    ones whose usage is unknown."""
+    talking, own, unknown = frozenset(conversational), frozenset(personal), frozenset(usage_unknown)
     return tuple(
-        agent_entry(name, role, name in talking, name in own) for name, role in roles.items()
+        agent_entry(name, role, name in talking, name in own, name not in unknown)
+        for name, role in roles.items()
     )
 
 
@@ -111,25 +120,25 @@ def trigger_names(roles: Mapping[str, Role]) -> tuple[str, ...]:
 
 def catalog(
     workspaces: Sequence[WorkspaceEntry],
-    roles: Iterable[tuple[str, Role, bool]],
+    roles: Iterable[tuple[str, Role, bool, bool]],
     triggers: Iterable[str],
     lanes: Iterable[str],
     conversational: Iterable[str],
 ) -> Catalog:
     """The catalog of the ``workspaces`` served, with agents in ``roles``, each given with its
-    name and whether it's personal, and named once, as the first of that name is, those among
-    them in ``conversational`` ones the user can message, the built-in ``triggers`` named, in
-    their order, and ``lanes``, each listed once."""
+    name, whether it's personal and whether its agents' usage is known, and named once, as the
+    first of that name is, those among them in ``conversational`` ones the user can message, the
+    built-in ``triggers`` named, in their order, and ``lanes``, each listed once."""
     named = frozenset(triggers)
     talking = frozenset(conversational)
-    first: dict[str, tuple[Role, bool]] = {}
-    for name, role, personal in roles:
-        first.setdefault(name, (role, personal))
+    first: dict[str, tuple[Role, bool, bool]] = {}
+    for name, role, personal, usage_known in roles:
+        first.setdefault(name, (role, personal, usage_known))
     return Catalog(
         workspaces=tuple(workspaces),
         agents=tuple(
-            agent_entry(name, role, name in talking, personal)
-            for name, (role, personal) in first.items()
+            agent_entry(name, role, name in talking, personal, usage_known)
+            for name, (role, personal, usage_known) in first.items()
         ),
         triggers=tuple(trigger for trigger in TRIGGERS if trigger.name in named),
         lanes=tuple(dict.fromkeys(lanes)),

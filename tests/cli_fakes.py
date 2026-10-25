@@ -17,20 +17,24 @@ from orbit.agent.application.ports import AgentLaunch, UsageSource
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.runtimes import CLAUDE
 from orbit.agent.domain.server import ServerSettings
+from orbit.agent.external.runtimes import RUNTIME_CAPABILITIES
 from orbit.cli.runtimes import RUNTIMES, Runtime
 from orbit.cli.threaded import ThreadedSession
 from orbit.protocol import PROTOCOL_VERSION, CommandEnvelope, Hello, Settings
 from orbit.telemetry import Off, TelemetryRun, TelemetrySettings
 from orbit.tracing import NoTelemetry, Telemetry
 from orbit.tui import Opening, WarningCapture
+from tests.agent_fakes import LIMITED, LIMITED_RUNTIME
 from tests.server_fakes import serving_plane
 from tests.stand_ins import stand_in
 
 FAKE_RUNTIME = "fake"
-"""A second runtime the tests that ask for it have orbit know."""
+"""A second runtime the tests that ask for it have orbit know, which can do all Claude Code
+can."""
 
 FAKE_EXECUTABLE = "fake-agent"
-"""The executable :data:`FAKE_RUNTIME` needs on PATH."""
+"""The executable :data:`FAKE_RUNTIME` and :data:`~tests.agent_fakes.LIMITED_RUNTIME` need on
+PATH."""
 
 
 class FakeRuntimeLauncher(ClaudeCliRunner):
@@ -40,18 +44,43 @@ class FakeRuntimeLauncher(ClaudeCliRunner):
         super().__init__((FAKE_EXECUTABLE,))
 
 
+class LimitedLauncher(FakeRuntimeLauncher):
+    """:data:`~tests.agent_fakes.LIMITED_RUNTIME`'s launcher, which can do as little as
+    :data:`~tests.agent_fakes.LIMITED` says."""
+
+    capabilities = LIMITED
+
+
+def know_runtime(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, name: str, launcher: type[FakeRuntimeLauncher]
+) -> Path:
+    """Have orbit know a second runtime, ``name``, launched by a ``launcher``, which can do what
+    its capabilities say, and put a stand-in for its executable on PATH in the directory
+    returned."""
+    directory = tmp_path / "fake-bin"
+    stand_in(directory, FAKE_EXECUTABLE)
+    monkeypatch.setenv("PATH", f"{directory}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setattr("orbit.agent.domain.runtimes.RUNTIME_NAMES", (CLAUDE, name))
+    runtime = Runtime(FAKE_EXECUTABLE, "Install the fake", lambda collector: launcher())
+    monkeypatch.setitem(RUNTIMES, name, runtime)
+    monkeypatch.setitem(RUNTIME_CAPABILITIES, name, launcher.capabilities)
+    return directory
+
+
 @pytest.fixture
 def fake_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """Have orbit know a second runtime, :data:`FAKE_RUNTIME`, launched by a
     :class:`FakeRuntimeLauncher`, and put a stand-in for its executable on PATH in the directory
     returned."""
-    directory = tmp_path / "fake-bin"
-    stand_in(directory, FAKE_EXECUTABLE)
-    monkeypatch.setenv("PATH", f"{directory}{os.pathsep}{os.environ.get('PATH', '')}")
-    monkeypatch.setattr("orbit.agent.domain.runtimes.RUNTIME_NAMES", (CLAUDE, FAKE_RUNTIME))
-    runtime = Runtime(FAKE_EXECUTABLE, "Install the fake", lambda collector: FakeRuntimeLauncher())
-    monkeypatch.setitem(RUNTIMES, FAKE_RUNTIME, runtime)
-    return directory
+    return know_runtime(monkeypatch, tmp_path, FAKE_RUNTIME, FakeRuntimeLauncher)
+
+
+@pytest.fixture
+def limited_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Have orbit know a second runtime, :data:`~tests.agent_fakes.LIMITED_RUNTIME`, launched by
+    a :class:`LimitedLauncher`, and put a stand-in for its executable on PATH in the directory
+    returned."""
+    return know_runtime(monkeypatch, tmp_path, LIMITED_RUNTIME, LimitedLauncher)
 
 
 @dataclass

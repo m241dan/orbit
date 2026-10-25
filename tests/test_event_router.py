@@ -108,6 +108,7 @@ def test_a_catalog_labels_triggers_pins_conversations_tags_lanes_then_follows_wo
         "prompt.show_busy",
         "tabs.pin",
         "task_list.show_lanes",
+        "task_list.show_usage_unknown",
         "navigation.follow_catalog",
         "transcript.show_session",
         "viewing.show",

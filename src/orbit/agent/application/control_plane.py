@@ -72,10 +72,13 @@ def _across[T](
     return [item for host in hosts for item in items(host)]
 
 
-def _listed_roles(host: WorkspaceHost) -> list[tuple[str, Role, bool]]:
-    """``host``'s enabled roles, each with its name and whether it's personal."""
-    personal = host.personal
-    return [(name, role, name in personal) for name, role in host.roles.items()]
+def _listed_roles(host: WorkspaceHost) -> list[tuple[str, Role, bool, bool]]:
+    """``host``'s enabled roles, each with its name, whether it's personal and whether its
+    agents' usage is known."""
+    personal, unknown = host.personal, host.usage_unknown
+    return [
+        (name, role, name in personal, name not in unknown) for name, role in host.roles.items()
+    ]
 
 
 async def _untold(entry: WorkspaceEntry) -> None:

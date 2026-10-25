@@ -20,8 +20,10 @@ from orbit.agent.domain.config_update import (
     update_text,
 )
 from orbit.agent.domain.layers import Layer
+from orbit.agent.domain.runtimes import CLAUDE, RUNTIME_NAMES
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
+from orbit.agent.external.claude_cli import ClaudeCliRunner
 from orbit.agent.external.config_file import (
     CONFIG_PATH,
     REFERENCE,
@@ -30,7 +32,9 @@ from orbit.agent.external.config_file import (
     write_checks,
 )
 from orbit.agent.external.role_instructions import resolve_instructions
+from orbit.agent.external.runtimes import RUNTIME_CAPABILITIES
 from orbit.protocol import BUILT_IN_ROLE_NAMES, PLANNER
+from tests.agent_fakes import LIMITED_RUNTIME
 
 BUILT_IN_ROLES = read_built_in_roles()
 
@@ -94,6 +98,30 @@ def test_a_runs_runtime_is_every_roles_but_those_naming_their_own(
 
 def test_without_a_runs_runtime_the_roles_keep_theirs(tmp_path: Path, config_dir: Path) -> None:
     assert read_config(str(tmp_path), config_dir, runtime=None) == OrbitConfig(roles=BUILT_IN_ROLES)
+
+
+def test_roles_are_held_to_what_each_runtime_this_version_knows_says_it_can_do() -> None:
+    assert tuple(RUNTIME_CAPABILITIES) == RUNTIME_NAMES
+    assert RUNTIME_CAPABILITIES[CLAUDE] is ClaudeCliRunner.capabilities
+
+
+@pytest.mark.usefixtures("limited_runtime")
+def test_a_role_asking_for_what_its_runtime_cant_do_is_refused_naming_the_file(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    path = write(tmp_path, '[roles.coder]\nruntime = "lite"\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value) == (
+        f'{path}: roles.coder asks for tool_access "full", but its runtime lite accepts only'
+        ' tool_access "restricted".'
+    )
+
+
+@pytest.mark.usefixtures("limited_runtime")
+def test_a_role_on_a_runtime_without_usage_is_read(tmp_path: Path, config_dir: Path) -> None:
+    write(tmp_path, '[roles.reviewer]\nruntime = "lite"\n')
+    assert read_config(str(tmp_path), config_dir).roles["reviewer"].runtime == LIMITED_RUNTIME
 
 
 def test_a_user_config_without_roles_leaves_them_as_they_are(

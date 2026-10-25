@@ -150,6 +150,17 @@ class Agents:
         be one of the roles, on a runtime there's a launcher for."""
         return self.launchers[self.roles[role].runtime]
 
+    @property
+    def usage_unknown(self) -> frozenset[str]:
+        """The names of the roles whose agents' usage is unknown: the launcher of the runtime
+        each runs on says it doesn't report what their turns cost."""
+        return frozenset(
+            name
+            for name, role in self.roles.items()
+            if role.runtime in self.launchers
+            and not self.launchers[role.runtime].capabilities.usage
+        )
+
 
 class CallTarget(Protocol):
     """Whatever answers an agent's calls: its run, or the planner's conversation."""

@@ -531,7 +531,9 @@ Each row of the task list shows its status: 📝 a draft the planner proposed, �
 (spinning), 🔍 verifying, ✅ done, ❗ failed verification, 🏳 the agent gave up, 🛑 cancelled, ❌
 failed. A task that failed, gave up or stopped shows why on a line under it (`↳ Unit tests
 failed`), cut to the list's width. Once a task has spent anything, its row ends with the tokens and dollars it
-spent (`1.2M tok · $0.84`), and the task list's subtitle shows the open session's total
+spent (`1.2M tok · $0.84`), or `usage unknown` when its role runs on a runtime that doesn't
+report what its agents spend (see `runtime` in
+[Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)), and the task list's subtitle shows the open session's total
 (`session: 1.2M tok · $0.84`): everything the session's agents have spent, the planner's turns and
 tasks since removed included. It's saved with the session, so a session opened again (or listed
 with `ctrl+p`) shows the same total; a new session starts with none, and shows no total. Token
@@ -1138,7 +1140,20 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   runtime and what to install (`Roles planner, coder, reviewer, super-reviewer, configurator use
   the runtime claude, but claude isn't on PATH. Install Claude Code, or set those roles' runtime
   to one you have.`), and makes a workspace `orbit serve` can't open. The Catalog lists each
-  role's `runtime`, and telemetry's `orbit.runtime` is it.
+  role's `runtime`, and telemetry's `orbit.runtime` is it. Each runtime says what it can do:
+  carry a conversation on (resume), report what its agents' turns cost (usage), and which
+  levels of `tool_access` and `effort` it takes; Claude Code can do all of it, at every level.
+  An enabled role asking for more than its runtime can do is refused as the configuration
+  loads, before anything runs, naming the role, the runtime, what it asks for and what the
+  runtime takes. For a runtime `lite` that took only restricted tool access, no effort and
+  couldn't resume, that's a `tool_access` level it doesn't take (`roles.coder asks for
+  tool_access "full", but its runtime lite accepts only tool_access "restricted".`), an `effort`
+  it doesn't take, the role's own or the one your `config.toml` sets for every role
+  (`roles.reviewer asks for effort "max", but its runtime lite accepts no effort setting.`, or,
+  for a runtime taking some, listing those), and `conversation = true` (`roles.planner asks for
+  conversation = true, but its runtime lite doesn't support resume.`). A runtime that doesn't
+  report usage is fine: its agents' turns report none, and the task list shows `usage unknown`
+  on their tasks' rows rather than what they spent.
 
 In the TUI, the task editor's **Role** field picks a task's role among the roles enabled in the
 session's workspace that aren't conversational, each shown with its lane (`Coder · work`) and a

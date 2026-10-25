@@ -55,7 +55,7 @@ from orbit.tui.view.rules import reset_entry
 from orbit.tui.view.seats import Seats
 from orbit.tui.view.storage import StorageHalt
 from orbit.tui.view.takeover import TakeoverOffer
-from orbit.tui.view.tasks import role_lanes
+from orbit.tui.view.tasks import role_lanes, usage_unknown_roles
 from orbit.tui.view.triggers import trigger_key_labels
 
 
@@ -107,6 +107,8 @@ class TaskListPane(Protocol):
     def show(self, tasks: Sequence[TaskState]) -> None: ...
 
     def show_lanes(self, lanes: Mapping[str, str]) -> None: ...
+
+    def show_usage_unknown(self, roles: frozenset[str]) -> None: ...
 
     def show_waiting(self, waiting: tuple[str, str] | None) -> None: ...
 
@@ -286,14 +288,15 @@ class EventRouter:
     def _render_catalog(self, catalog: Catalog) -> None:
         """Label the trigger keys from ``catalog``, pin a tab for each conversational role it
         lists, which the prompt talks to while its tab is shown, tag the tasks with their roles'
-        lanes, and list its workspaces and sessions, titling the conversation with the name of
-        the session viewed, renamed perhaps; one that no longer lists the workspace the app is on
-        opens the workspace picker. In process, the first catalog opens the session picker, if
-        the app picks one."""
+        lanes and whether their usage is unknown, and list its workspaces and sessions, titling
+        the conversation with the name of the session viewed, renamed perhaps; one that no
+        longer lists the workspace the app is on opens the workspace picker. In process, the
+        first catalog opens the session picker, if the app picks one."""
         self._hooks.label_triggers(trigger_key_labels(catalog.triggers))
         self.seats.follow_catalog(catalog.agents)
         self._panes.tabs.pin(self.seats.lanes)
         self._panes.task_list.show_lanes(role_lanes(catalog.agents))
+        self._panes.task_list.show_usage_unknown(usage_unknown_roles(catalog.agents))
         navigation = self._handlers.navigation
         navigation.follow_catalog(catalog)
         attached = navigation.place.attached_session

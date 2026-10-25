@@ -164,7 +164,7 @@
       "type": "object"
     },
     "AgentEntry": {
-      "description": "An agent role ``name``, shown as ``label``; ``conversational`` if the user can message\nit. It runs in ``lane``, and its ``model``, ``tool_access`` and ``effort`` are the defaults\nof a task in it, as ``Settings`` hold them. It's ``personal`` if the user's own config\ndefines it, rather than orbit or the project. Its agents run on ``runtime``, such as\n``claude``.",
+      "description": "An agent role ``name``, shown as ``label``; ``conversational`` if the user can message\nit. It runs in ``lane``, and its ``model``, ``tool_access`` and ``effort`` are the defaults\nof a task in it, as ``Settings`` hold them. It's ``personal`` if the user's own config\ndefines it, rather than orbit or the project. Its agents run on ``runtime``, such as\n``claude``; ``usage_known`` is false when that runtime doesn't report what their turns cost,\nso their usage is unknown.",
       "properties": {
         "conversational": {
           "title": "Conversational",
@@ -233,6 +233,11 @@
           ],
           "title": "Tool Access",
           "type": "string"
+        },
+        "usage_known": {
+          "default": true,
+          "title": "Usage Known",
+          "type": "boolean"
         }
       },
       "required": [

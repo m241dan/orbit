@@ -36,6 +36,7 @@ from orbit.tui.view.tasks import (
     task_numbers,
     ticking,
     usage_label,
+    usage_unknown_roles,
 )
 
 
@@ -197,6 +198,14 @@ def test_each_roles_lane_comes_from_the_catalogs_agents() -> None:
         AgentEntry(name=REVIEWER, label="Reviewer", conversational=False, lane="review"),
     )
     assert role_lanes(agents) == {CODER: "work", REVIEWER: "review"}
+
+
+def test_the_roles_whose_usage_is_unknown_come_from_the_catalogs_agents() -> None:
+    agents = (
+        AgentEntry(name=CODER, label="Coder", conversational=False),
+        AgentEntry(name=REVIEWER, label="Reviewer", conversational=False, usage_known=False),
+    )
+    assert usage_unknown_roles(agents) == frozenset({REVIEWER})
 
 
 def roled(*roles: str) -> list[TaskState]:

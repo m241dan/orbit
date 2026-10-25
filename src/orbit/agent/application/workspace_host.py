@@ -705,6 +705,12 @@ class WorkspaceHost:
         return self._desk.agents.personal if self._desk else frozenset()
 
     @property
+    def usage_unknown(self) -> frozenset[str]:
+        """The names of this workspace's roles whose agents' usage is unknown, as their runtime
+        doesn't report it; none without agents."""
+        return self._desk.agents.usage_unknown if self._desk else frozenset()
+
+    @property
     def triggers(self) -> tuple[str, ...]:
         """The names of the built-in triggers that can be fired here: those whose role isn't
         disabled."""
@@ -1111,7 +1117,7 @@ class WorkspaceHost:
             managed=self._managed,
             live=live,
         )
-        agents = agent_entries(self.roles, self.conversational, self.personal)
+        agents = agent_entries(self.roles, self.conversational, self.personal, self.usage_unknown)
         return entry.model_copy(update={"agents": agents})
 
     def _steps_shown(self) -> tuple[tuple[StepState, ...], str]:

@@ -30,7 +30,18 @@ from orbit.protocol import (
     Welcome,
     WorkspaceEntry,
 )
-from tests.agent_fakes import HELLO, ROLES, STEP, FakeLock, Steps, board_of
+from tests.agent_fakes import (
+    HELLO,
+    LIMITED,
+    LIMITED_RUNTIME,
+    ROLES,
+    STEP,
+    FakeHost,
+    FakeLock,
+    ScriptedLauncher,
+    Steps,
+    board_of,
+)
 from tests.connection_helpers import joined, say, taken
 from tests.plane_fakes import agent_workspace, idle, offered, payloads, working, workspace
 from tests.server_fakes import TASK
@@ -221,6 +232,38 @@ async def test_the_catalogs_agents_carry_their_roles_runtime() -> None:
     assert agents == {**dict.fromkeys(ROLES, "claude"), "auditor": "fake"}
     [in_a] = agents_by_workspace(catalog)
     assert in_a["auditor"].runtime == "fake"
+
+
+def audited_on_lite(name: str) -> WorkspaceHost:
+    """The host of the workspace ``name``, whose auditor runs on :data:`LIMITED_RUNTIME`, which
+    doesn't report its agents' usage."""
+    auditor = ROLES[REVIEWER].model_copy(update={"lane": "audit", "runtime": LIMITED_RUNTIME})
+    lite = ScriptedLauncher(FakeHost())
+    lite.capabilities = LIMITED
+    roles = {**ROLES, "auditor": auditor}
+    host, _ = agent_workspace(name, roles=roles, launchers={LIMITED_RUNTIME: lite})
+    return host
+
+
+def audited_on_claude(name: str) -> WorkspaceHost:
+    """The host of the workspace ``name``, whose auditor runs on Claude."""
+    host, _ = agent_workspace(name, roles={**ROLES, "auditor": ROLES[REVIEWER]})
+    return host
+
+
+async def test_the_catalogs_agents_say_whose_usage_their_runtime_leaves_unknown() -> None:
+    catalog = await catalog_served(audited_on_lite("a"), audited_on_claude("b"))
+    assert [agent.name for agent in catalog.agents if not agent.usage_known] == ["auditor"]
+    in_a, in_b = agents_by_workspace(catalog)
+    assert [name for name, agent in in_a.items() if not agent.usage_known] == ["auditor"]
+    assert all(agent.usage_known for agent in in_b.values())
+
+
+async def test_the_catalogs_agents_usage_is_known_as_the_first_role_named_has_it() -> None:
+    catalog = await catalog_served(audited_on_claude("b"), audited_on_lite("a"))
+    assert all(agent.usage_known for agent in catalog.agents)
+    _, in_a = agents_by_workspace(catalog)
+    assert not in_a["auditor"].usage_known
 
 
 async def test_the_catalogs_agents_are_personal_as_the_first_role_named_is() -> None:
