@@ -1,7 +1,7 @@
-"""What tracing offers the code it traces: spans, the telemetry that starts them, and the
-envelopes that carry their trace context between processes."""
+"""What tracing offers the code it traces: spans, the telemetry that starts them, the envelopes
+that carry their trace context between processes, and the gauges that report live values."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from typing import Protocol, Self
 
@@ -11,7 +11,10 @@ type AttributeValue = (
 """What a span attribute may hold: a value, or a sequence of values of one kind."""
 
 type Attributes = Mapping[str, AttributeValue]
-"""A span's or an event's attributes, by name."""
+"""A span's, an event's or a gauge's value's attributes, by name."""
+
+type Reading = tuple[float, Attributes]
+"""A gauge's value, with its attributes."""
 
 
 class Span(Protocol):
@@ -78,3 +81,14 @@ class Telemetry(Protocol):
     def carried(self, envelope: Carrier) -> Span:
         """The remote span whose trace context ``envelope`` carries, to make current so the
         spans started under it are its children, or to link to."""
+
+
+class Gauges(Protocol):
+    """What reports live values, each gauge read as metrics are collected."""
+
+    def register(
+        self, name: str, unit: str, description: str, read: Callable[[], Iterable[Reading]]
+    ) -> None:
+        """Have the gauge ``name``, measured in ``unit`` and described by ``description``,
+        report what ``read`` gives each time metrics are collected: a value for each set of
+        attributes. ``read`` may be called from any thread, so it only reads, and quickly."""

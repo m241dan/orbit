@@ -288,6 +288,7 @@ class WorkspaceHost:
         overflow = Overflow(fallback, self._halt.log_failed)
         self._connections = Connections(lambda: self._states.check(), lambda: self._keeper.id)
         self._workspace_id = workspace_id
+        self._store = store
         self._events = Outbox(lambda: self._keeper.id, store, storage, overflow)
         self._events.workspace = workspace_id
         self._events.telemetry = telemetry
@@ -621,6 +622,17 @@ class WorkspaceHost:
     async def entry(self) -> WorkspaceEntry:
         """This workspace's entry in the catalog: its sessions as they are now."""
         return await self._switcher.entry()
+
+    @property
+    def pending_tasks(self) -> int:
+        """How many of the open session's tasks are pending."""
+        return self._board.pending
+
+    @property
+    def log_size(self) -> int:
+        """The bytes the logs of this workspace's sessions hold in the store, as it last knew
+        them; 0 without a store."""
+        return 0 if self._store is None else self._store.log_size()
 
     @property
     def roles(self) -> tuple[str, ...]:

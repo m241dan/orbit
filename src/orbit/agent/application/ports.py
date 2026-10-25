@@ -476,6 +476,11 @@ class EventLog(SeqMark, Protocol):
         :class:`ReadFailed` when that can't be read."""
         ...
 
+    def log_size(self) -> int:
+        """The bytes the logs of the sessions hold, as last known: when the log was opened, or
+        since it last wrote them; never waits for the log, so it may be read from any thread."""
+        ...
+
     async def forget(self, session_id: str) -> None:
         """Delete the events of the session ``session_id`` from its log, and its log with them;
         raises :class:`StorageFailed` when it can't."""

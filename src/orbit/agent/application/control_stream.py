@@ -75,6 +75,12 @@ class ControlStream:
         if self._changes != changes:  # A change during the read may be missing from it.
             self._refresh()
 
+    @property
+    def agents(self) -> tuple[AgentRef, ...]:
+        """Every agent running, oldest first, copied at once, so it may be read from any
+        thread."""
+        return tuple(self._agents.values())
+
     def observe(self, workspace_id: str, envelope: EventEnvelope) -> None:
         """Note the agent ``envelope``, just published in the workspace ``workspace_id``, says
         started or exited, if it does, telling the watchers every agent running."""

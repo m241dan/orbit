@@ -102,6 +102,7 @@ from orbit.protocol import (
     UsageLimit,
     VerificationChanged,
     Welcome,
+    encode,
 )
 from orbit.tracing import NoTelemetry, Telemetry
 from tests.loop_quiet import quiet_within
@@ -384,11 +385,12 @@ class FakeStore:
     logged before or deleted since; ``append_failure``, while set, is the error every append
     raises. Each trim asked for is in ``trims``, as the session's id, the limit and the target,
     but no event is trimmed: tests of trimming itself use the real store. The sessions in
-    ``trimmed_logs`` count as trimmed. Each session whose events were forgotten is in
-    ``forgotten``, and ``forgotten_seq`` is the highest ``seq`` forgotten or deleted with a
-    session, counted as another session's in the bounds; ``forget_failure``, while set, is the
-    error forgetting raises. Each ``seq`` reserved is in ``reservations``, counted in the mark
-    as the port says; ``reserve_failure``, while set, is the error reserving raises.
+    ``trimmed_logs`` count as trimmed. The log's size is that of the events logged, as encoded.
+    Each session whose events were forgotten is in ``forgotten``, and ``forgotten_seq`` is the
+    highest ``seq`` forgotten or deleted with a session, counted as another session's in the
+    bounds; ``forget_failure``, while set, is the error forgetting raises. Each ``seq`` reserved
+    is in ``reservations``, counted in the mark as the port says; ``reserve_failure``, while
+    set, is the error reserving raises.
     ``after_failure`` and ``bounds_failure``, while set, are the errors reading the events after
     a ``seq`` and the bounds raise, as :class:`ReadFailed`.
 
@@ -559,6 +561,9 @@ class FakeStore:
 
     async def trimmed(self, session_id: str) -> bool:
         return session_id in self.trimmed_logs
+
+    def log_size(self) -> int:
+        return sum(len(encode(envelope).encode()) for envelope in self.logged)
 
     async def forget(self, session_id: str) -> None:
         if self.forget_failure is not None:

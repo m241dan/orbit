@@ -99,6 +99,9 @@ class SqliteStore:
         self._closed = False
         # The highest seq ever logged or reserved when it opened or was last read, or since.
         self._max_seq = 0
+        # The bytes each workspace's sessions' logs hold, by its id, as read when it opened and
+        # after each write to them since; written on the database's thread, read on any.
+        self._log_sizes: dict[str, int] = {}
         # Each workspace's session locks, by its id, made as they're first used.
         self._locks: dict[str, SessionLocks] = {}
 
@@ -200,6 +203,11 @@ class SqliteStore:
     async def latest_seq(self) -> int:
         return await self._or_raise("Couldn't read the latest seq from", self._latest_seq)
 
+    def log_size(self, workspace: str) -> int:
+        """The bytes the logs of the workspace ``workspace``'s sessions hold, as the store read
+        them when it opened or after it last wrote them; never waits for the database."""
+        return self._log_sizes.get(workspace, 0)
+
     async def reserve(self, seq: int) -> None:
         message = f"Couldn't reserve the seq numbers up to {seq} in"
         await self._or_raise(message, self._reserve, seq, write=True)
@@ -261,9 +269,7 @@ class SqliteStore:
     async def trim(self, workspace: str, session_id: str, limit: int, target: int) -> None:
         check_session_id(session_id)
         message = f"Couldn't trim the events of the session {session_id} in"
-        await self._or_raise(
-            message, self._log(sqlite_log.trim), workspace, session_id, limit, target, write=True
-        )
+        await self._or_raise(message, self._trim, workspace, session_id, limit, target, write=True)
 
     async def trimmed(self, workspace: str, session_id: str) -> bool:
         check_session_id(session_id)
@@ -431,6 +437,7 @@ class SqliteStore:
     def _connect(self) -> None:
         self._connection = open_database(self._database)
         self._max_seq = sqlite_log.max_seq(self._connection)
+        self._log_sizes = sqlite_log.log_sizes(self._connection)
 
     def _connect_existing(self) -> None:
         self._connection = open_existing(self._database)
@@ -516,7 +523,17 @@ class SqliteStore:
         holds already; returns how many it added."""
         added, highest = sqlite_log.append(self._db, workspace, session_id, envelopes)
         self._max_seq = max(self._max_seq, highest)
+        self._read_log_size(workspace)
         return added
+
+    def _trim(self, workspace: str, session_id: str, limit: int, target: int) -> None:
+        sqlite_log.trim(self._db, workspace, session_id, limit, target)
+        self._read_log_size(workspace)
+
+    def _read_log_size(self, workspace: str) -> None:
+        """Read again the bytes the logs of the workspace ``workspace``'s sessions hold, counted
+        in :meth:`log_size` from then on."""
+        self._log_sizes[workspace] = sqlite_log.log_size(self._db, workspace)
 
     def _reserve(self, seq: int) -> None:
         """Raise the mark to ``seq``, counted in :meth:`max_seq` from then on."""
@@ -532,6 +549,7 @@ class SqliteStore:
     def _forget(self, workspace: str, session_id: str) -> None:
         with transaction(self._db):
             sqlite_log.forget_log(self._db, workspace, session_id)
+        self._read_log_size(workspace)
 
     def _delete(self, workspace: str, session_id: str) -> None:
         with transaction(self._db):
@@ -540,6 +558,7 @@ class SqliteStore:
                 "DELETE FROM sessions WHERE workspace_id = ? AND id = ?",
                 (workspace, session_id),
             )
+        self._read_log_size(workspace)
 
     def _review_count(self, workspace: str) -> int:
         row = self._db.execute(
@@ -626,6 +645,10 @@ class WorkspaceStore:
 
     async def latest_seq(self) -> int:
         return await self._store.latest_seq()
+
+    def log_size(self) -> int:
+        """The bytes the logs of this workspace's sessions hold, as the store knows them."""
+        return self._store.log_size(self._id)
 
     async def reserve(self, seq: int) -> None:
         await self._store.reserve(seq)

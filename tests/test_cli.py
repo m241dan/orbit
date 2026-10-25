@@ -57,7 +57,7 @@ from orbit.protocol import (
     TaskSpec,
     decode_event,
 )
-from orbit.tracing import NoTelemetry, Telemetry
+from orbit.tracing import Gauges, NoGauges, NoTelemetry, Telemetry
 from tests.agent_fakes import greeted, queued, send, sole, startup_of, store_of
 from tests.cli_fakes import LocalApp
 from tests.conftest import OFFLINE
@@ -138,9 +138,11 @@ def launched(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[WorkspaceH
         usage: UsageSource | None = None,
         ledger: UsageLedger | None = None,
         telemetry: Telemetry | None = None,
+        gauges: Gauges | None = None,
     ) -> ControlPlane:
         LocalApp.usage_sources.append(usage)
-        return ControlPlane(hosts, usage, ledger=ledger, telemetry=telemetry or NoTelemetry())
+        telemetry, gauges = telemetry or NoTelemetry(), gauges or NoGauges()
+        return ControlPlane(hosts, usage, ledger=ledger, telemetry=telemetry, gauges=gauges)
 
     monkeypatch.setattr("orbit.cli.chat.OrbitApp", LocalApp)
     monkeypatch.setattr("orbit.cli.backend.WorkspaceHost", session)

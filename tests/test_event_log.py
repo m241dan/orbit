@@ -576,6 +576,67 @@ async def test_deleting_a_session_forgets_its_trimmed_log(
     assert stored_sizes(state) == {} and not await store.trimmed("abc")
 
 
+def workspace_sizes(state: Path) -> dict[str, int]:
+    """The sum of each workspace's events' sizes in ``events``, by its id."""
+    with database(state) as connection:
+        rows = connection.execute(
+            "SELECT workspace_id, sum(size) FROM events GROUP BY workspace_id"
+        )
+        return {workspace: size for workspace, size in rows}
+
+
+async def test_the_log_size_is_read_at_open_as_the_workspaces_sessions_sizes_alone(
+    open_store: Opener, state: Path, tmp_path: Path, workspace: Path
+) -> None:
+    other_workspace = tmp_path / "other"
+    other_workspace.mkdir()
+    first = await open_store(workspace)
+    await first.append("abc", [notice(1), notice(2)])
+    await first.append("def", [notice(3, "def")])
+    await (await open_store(other_workspace)).append("abc", [big(4)])
+
+    store = await open_store(workspace)
+
+    assert store.log_size() == workspace_sizes(state)[store.workspace_id]
+    assert store.log_size() == sum(sizes_of_events(state).values()) - len(encode(big(4)).encode())
+
+
+async def test_a_workspace_with_nothing_logged_has_a_log_size_of_0(
+    open_store: Opener, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    assert store.log_size() == 0
+
+
+async def test_the_log_size_counts_what_appends_add_and_trims_delete(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [big(seq) for seq in range(1, 211)])  # About 2 MB.
+    await store.append("def", [notice(211, "def")])
+    appended = (store.log_size(), workspace_sizes(state)[store.workspace_id])
+    await store.trim("abc", MB, MB * 9 // 10)
+
+    assert appended[0] == appended[1] > 2 * MB
+    assert store.log_size() == workspace_sizes(state)[store.workspace_id] < MB
+
+
+async def test_the_log_size_drops_the_sessions_forgotten_or_deleted(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [notice(1), notice(2)])
+    await store.append("def", [notice(3, "def")])
+    await store.append("ghi", [notice(4, "ghi")])
+
+    await store.forget("abc")
+    after_forget = store.log_size()
+    await store.delete("def")
+
+    assert after_forget == sizes_of_events(state)["ghi"] + len(encode(notice(3, "def")).encode())
+    assert store.log_size() == sizes_of_events(state)["ghi"]
+
+
 async def test_upgrading_counts_the_size_of_the_events_logged_before(
     monkeypatch: pytest.MonkeyPatch, open_store: Opener, state: Path, workspace: Path
 ) -> None:

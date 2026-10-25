@@ -1,12 +1,21 @@
 """Telemetry exporting its spans to memory, and the trace context naming them."""
 
-from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+from opentelemetry.sdk.metrics.export import (
+    Gauge,
+    InMemoryMetricReader,
+    Metric,
+    MetricsData,
+    NumberDataPoint,
+)
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from orbit.agent.application.command_trace import COMMAND_SPAN
 from orbit.telemetry.otel import OtelTelemetry, otel_telemetry
+
+GaugePoint = tuple[dict[str, object], float]
+"""A gauge's point: its attributes and its value."""
 
 
 class Traced:
@@ -28,6 +37,12 @@ class Traced:
             self.telemetry.close()
         return [span for span in self.exporter.get_finished_spans() if span.name == name]
 
+    def gauge(self, name: str) -> list[GaugePoint]:
+        """The points of the gauge called ``name``, as metrics are collected now; none if it has
+        none."""
+        gauges = _gauges(_metrics(self.metrics.get_metrics_data()), name)
+        return [_point(point) for gauge in gauges for point in gauge.data_points]
+
     def task(self) -> ReadableSpan:
         """The one task's span."""
         [task] = self.spans("orbit.task")
@@ -40,6 +55,24 @@ class Traced:
             span for span in commands if (span.attributes or {})["orbit.command.type"] == kind
         ]
         return span
+
+
+def _metrics(data: MetricsData | None) -> list[Metric]:
+    """Every metric ``data`` holds; none without data."""
+    resources = data.resource_metrics if data is not None else []
+    scopes = [scope for resource in resources for scope in resource.scope_metrics]
+    return [metric for scope in scopes for metric in scope.metrics]
+
+
+def _gauges(metrics: list[Metric], name: str) -> list[Gauge]:
+    """The gauges among ``metrics`` called ``name``."""
+    data = [metric.data for metric in metrics if metric.name == name]
+    return [gauge for gauge in data if isinstance(gauge, Gauge)]
+
+
+def _point(point: NumberDataPoint) -> GaugePoint:
+    """``point``'s attributes and value."""
+    return dict(point.attributes or {}), point.value
 
 
 def linked_to(span: ReadableSpan, target: ReadableSpan) -> bool:

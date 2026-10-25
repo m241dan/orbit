@@ -104,6 +104,7 @@ def _serving(
                 ledger=store,
                 browsing=browsing,
                 telemetry=flags.telemetry,
+                gauges=flags.gauges,
             )
 
         source.keep_clones()

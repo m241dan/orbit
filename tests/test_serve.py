@@ -1616,6 +1616,7 @@ def test_serve_traces_with_the_telemetry_configured_and_closes_it_before_stoppin
     assert (telemetry.run.config_dir, telemetry.run.state_dir) == (config_dir, state)
     assert [served_host.telemetry for served_host in hosts] == [telemetry]
     assert [served_plane.telemetry for served_plane in planes] == [telemetry]
+    assert [served_plane.gauges for served_plane in planes] == [telemetry.gauges]
     assert telemetry.closed
 
 

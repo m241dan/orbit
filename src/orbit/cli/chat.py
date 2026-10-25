@@ -141,7 +141,7 @@ def chat(
     picking = not flags.fresh
     # The TUI captures the warnings logged while it runs; those as telemetry stops go to stderr.
     with _telemetry(run) as telemetry:
-        flags = replace(flags, telemetry=telemetry)
+        flags = replace(flags, telemetry=telemetry, gauges=telemetry.gauges)
         with _in_process(flags, directories, pick_session=picking, make=_backend) as backend:
             session = ThreadedSession(backend.build, _thread_context(profile))
             opening = Opening(pick=picking, repository=str(root))

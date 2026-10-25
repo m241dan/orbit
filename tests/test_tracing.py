@@ -1,4 +1,5 @@
-"""The tracing port: the current span, and the no-op telemetry that still nests spans."""
+"""The tracing port: the current span, the no-op telemetry that still nests spans, and the no-op
+gauges."""
 
 import asyncio
 from contextlib import AbstractContextManager
@@ -10,8 +11,11 @@ from orbit.protocol import EventEnvelope, Notice
 from orbit.tracing import (
     Attributes,
     AttributeValue,
+    Gauges,
+    NoGauges,
     NoSpan,
     NoTelemetry,
+    Reading,
     Span,
     Telemetry,
     current_span,
@@ -109,6 +113,19 @@ def test_a_no_op_span_ignores_what_it_records() -> None:
     span.error("failed")
     span.end()
     assert span.name == "orbit.task"
+
+
+def test_no_gauges_never_read_what_is_registered() -> None:
+    reads: list[str] = []
+
+    def read() -> list[Reading]:
+        reads.append("read")
+        return [(1, {})]
+
+    gauges: Gauges = NoGauges()
+    gauges.register("orbit.queue.depth", "{task}", "Tasks waiting.", read)
+
+    assert reads == []
 
 
 @dataclass

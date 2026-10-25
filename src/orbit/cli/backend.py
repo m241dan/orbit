@@ -47,9 +47,10 @@ from orbit.agent import (
 )
 from orbit.cli.errors import _configured, _exit_on
 from orbit.protocol import PLANNER, Settings, ToolAccess
-from orbit.tracing import NoTelemetry, Telemetry
+from orbit.tracing import Gauges, NoGauges, NoTelemetry, Telemetry
 
 _NO_TELEMETRY = NoTelemetry()
+_NO_GAUGES = NoGauges()
 
 
 def _workspace(path: Path) -> Path:
@@ -73,7 +74,8 @@ class _Backend:
     whether to ``verify``, run tasks in a ``worktree``, ``review`` landed work and show the
     ``usage`` limits; a ``new`` session, perhaps with a ``name``; the ``owner`` of the
     repository, if another orbit owns it, making this one read-only, with the workspace
-    ``lock`` it tries until it's free; and the ``telemetry`` its work is traced with."""
+    ``lock`` it tries until it's free; the ``telemetry`` its work is traced with, and the
+    ``gauges`` its control plane reports live values through."""
 
     model: str | None
     tools: ToolAccess | None
@@ -86,6 +88,7 @@ class _Backend:
     owner: WorkspaceOwner | None = None
     lock: WorkspaceLock | None = None
     telemetry: Telemetry = _NO_TELEMETRY
+    gauges: Gauges = _NO_GAUGES
 
     @property
     def fresh(self) -> bool:
@@ -166,7 +169,11 @@ def _backend(flags: _Backend, directories: _Directories, *, pick_session: bool) 
     served = opened.served
     return _InProcess(
         lambda: ControlPlane(
-            [opened.make()], usage_source, ledger=store, telemetry=flags.telemetry
+            [opened.make()],
+            usage_source,
+            ledger=store,
+            telemetry=flags.telemetry,
+            gauges=flags.gauges,
         ),
         store,
         opened.workspace_id,

@@ -23,6 +23,7 @@ from orbit.agent.application.failures import command_failure
 from orbit.agent.application.handshake import HandshakeParts
 from orbit.agent.application.keeper import Clock, local_now
 from orbit.agent.application.outbox import Seqs
+from orbit.agent.application.plane_gauges import PlaneGauges
 from orbit.agent.application.ports import SeqMark, UsageLedger, UsageSource
 from orbit.agent.application.seq_mark import MarkReservations
 from orbit.agent.application.served_set import ServedParts, ServedSet
@@ -51,9 +52,10 @@ from orbit.protocol import (
     Watch,
     WorkspaceEntry,
 )
-from orbit.tracing import NoTelemetry, Span, Telemetry
+from orbit.tracing import Gauges, NoGauges, NoTelemetry, Span, Telemetry
 
 _NO_TELEMETRY = NoTelemetry()
+_NO_GAUGES = NoGauges()
 
 
 def _last_seq(hosts: Iterable[WorkspaceHost], mark: SeqMark | None) -> int:
@@ -170,6 +172,11 @@ class ControlPlane:
     the trace context of the span current as they're stamped. A connection's first ``Hello``,
     each ``Attach`` accepted and its detaching from a workspace are recorded on its
     :attr:`~SessionConnection.trace`.
+
+    It reports live gauges through the ``gauges`` given, reporting nothing by default, as
+    :class:`PlaneGauges` says: the agents running by role and workspace, the tasks waiting for a
+    coder's slot, the pending tasks of each workspace's open session, the frontends welcomed and
+    the bytes each workspace's sessions' logs hold in the store.
     """
 
     def __init__(
@@ -182,8 +189,10 @@ class ControlPlane:
         clock: Clock = local_now,
         browsing: Browsing | None = None,
         telemetry: Telemetry = _NO_TELEMETRY,
+        gauges: Gauges = _NO_GAUGES,
     ) -> None:
         self._telemetry = telemetry
+        self._gauges = gauges
         self._hosts = {host.workspace_id: host for host in hosts}
         self._workspaces = workspaces
         self._browsing = browsing
@@ -197,6 +206,9 @@ class ControlPlane:
         self._clones = Clones(self._events.announce)
         self._coders = CoderSlots(changed=self._check_states)
         self._stream = ControlStream(self._events, self._everywhere, ledger, clock)
+        PlaneGauges(
+            lambda: self.hosts, lambda: self._stream.agents, self._coders, self._lobby
+        ).register(gauges)
         for host in self._hosts.values():
             self._serve(host)
         self._started = False
@@ -248,6 +260,11 @@ class ControlPlane:
     def telemetry(self) -> Telemetry:
         """What traces the commands handled here."""
         return self._telemetry
+
+    @property
+    def gauges(self) -> Gauges:
+        """What the live gauges are registered with."""
+        return self._gauges
 
     def cap_coders(self, limit: int) -> None:
         """Run at most ``limit`` coders at once across the workspaces served, or any number if

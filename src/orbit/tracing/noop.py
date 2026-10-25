@@ -1,10 +1,11 @@
-"""Telemetry that records nothing, so traced code runs the same with tracing off."""
+"""Telemetry that records nothing, and gauges that report nothing, so traced code runs the same
+with tracing off."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Iterable, Sequence
 from contextlib import AbstractContextManager
 
 from orbit.tracing.context import NoSpan, span_block
-from orbit.tracing.port import Attributes, Carrier, Span
+from orbit.tracing.port import Attributes, Carrier, Reading, Span
 
 
 class NoTelemetry:
@@ -30,3 +31,12 @@ class NoTelemetry:
     def carried(self, envelope: Carrier) -> NoSpan:
         """A no-op span, whatever trace context ``envelope`` carries."""
         return NoSpan("carried")
+
+
+class NoGauges:
+    """Gauges that report nothing, never reading what's registered."""
+
+    def register(
+        self, name: str, unit: str, description: str, read: Callable[[], Iterable[Reading]]
+    ) -> None:
+        """Ignore the gauge ``name``."""

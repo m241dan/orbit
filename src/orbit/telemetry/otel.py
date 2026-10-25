@@ -1,6 +1,6 @@
 """The tracing port over the OpenTelemetry SDK: spans batched to an exporter, the current span
-following orbit's own, the trace context carried in envelopes, and metrics recorded from the
-spans."""
+following orbit's own, the trace context carried in envelopes, metrics recorded from the spans,
+and live gauges."""
 
 import logging
 import threading
@@ -20,6 +20,7 @@ from opentelemetry.trace import Link, Status, StatusCode
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from orbit.protocol import trace_carrier, with_trace_carrier
+from orbit.telemetry.gauges import OtelGauges
 from orbit.telemetry.metrics import MetricsFromSpans
 from orbit.telemetry.run import FLUSH_SECONDS
 from orbit.tracing import (
@@ -72,9 +73,9 @@ class OtelSpan:
 
 class OtelTelemetry:
     """Telemetry over ``provider``, whose spans nest under orbit's current span, and ``meters``,
-    which exports the metrics recorded from them; ``counts`` tells how many spans it couldn't
-    export, and :meth:`close` waits at most ``flush_seconds`` for the spans and metrics not yet
-    exported."""
+    which exports the metrics recorded from them and the :attr:`gauges` registered; ``counts``
+    tells how many spans it couldn't export, and :meth:`close` waits at most ``flush_seconds``
+    for the spans and metrics not yet exported."""
 
     def __init__(
         self,
@@ -86,8 +87,14 @@ class OtelTelemetry:
         self._provider = provider
         self._meters = meters
         self._tracer = provider.get_tracer("orbit")
+        self._gauges = OtelGauges(meters.get_meter("orbit"))
         self._counts = counts
         self._flush_seconds = flush_seconds
+
+    @property
+    def gauges(self) -> OtelGauges:
+        """What the live gauges are registered with, exported with the metrics."""
+        return self._gauges
 
     def span(
         self, name: str, attributes: Attributes | None = None, links: Sequence[Span] = ()

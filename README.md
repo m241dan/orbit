@@ -1839,8 +1839,12 @@ and role (`gen_ai.client.token.usage`), and what they cost (`orbit.cost`); and t
 reviews made and had refused (`orbit.review.suggestions`). They go where the spans go, every
 `metrics_interval_s` seconds, 60 unless set; a value that isn't a whole number of seconds, at
 least 1, stops orbit with status 2 naming the key. With `exporter = "none"`, orbit records none.
-[docs/telemetry.md](docs/telemetry.md) lists every metric, with its kind, unit, attributes and
-source.
+Live gauges, read from the control plane as the metrics are exported, go with them: the agents
+running, by role and workspace (`orbit.agents.active`), the tasks waiting for a coder's slot
+(`orbit.queue.depth`), the pending tasks of each workspace's open session (`orbit.tasks.pending`),
+the frontends connected (`orbit.frontends.connected`) and the bytes each workspace's sessions' events
+take in the store (`orbit.event_log.size`). [docs/telemetry.md](docs/telemetry.md) lists every
+metric, with its kind, unit, attributes and source.
 
 The TUI traces what the user does: each action that sends commands, such as pressing ctrl+r or
 picking a session, is one span, `orbit.tui.action`, with `orbit.action` naming it (`run_tasks`,
@@ -1908,7 +1912,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   code across awaits and into the tasks started under it, and linked to any others it's given;
   it carries the current span's trace context in an envelope (`carry`) and finds the remote
   span one carries (`carried`), knowing envelopes only as `Carrier`s. `NoTelemetry` records
-  and carries nothing but still nests spans. It imports no orbit package, and neither
+  and carries nothing but still nests spans. `Gauges` reports live values, each gauge a
+  callback read as metrics are collected; `NoGauges` reports nothing. It imports no orbit package, and neither
   `orbit.protocol` nor the backend's domain imports it. Trace context crosses the wire in the
   envelopes' `traceparent` and `tracestate`, which `orbit.protocol`'s `trace_carrier` and
   `with_trace_carrier` read and set.
@@ -1918,8 +1923,10 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   `OtelTelemetry` (in `otel`), whose spans nest under `orbit.tracing`'s current span and are
   batched to an OTLP, console or `OtlpJsonFileExporter` (in `file_exporter`) exporter, whose
   `MetricsFromSpans` (in `metrics`) records metrics from those spans as they end, exported every
-  `metrics_interval_s` by the matching OTLP, console or `OtlpJsonMetricsFileExporter` exporter,
-  and which carries trace context into and out of envelopes with the W3C propagator. It knows neither the
+  `metrics_interval_s` by the matching OTLP, console or `OtlpJsonMetricsFileExporter` exporter
+  with the observable gauges its `OtelGauges` (in `gauges`) registers, and which carries trace
+  context into and out of envelopes with the W3C propagator; each gives the CLI the `Gauges` it
+  hands the control plane. It knows neither the
   backend nor the frontends.
 - `orbit.agent`: backend, with no UI imports. Three layers, each importing only the ones below:
   - `external`: adapters that reach outside the backend. `ClaudeCliRunner` launches agents as
@@ -1958,7 +1965,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     workspace it's for, handling each in an `orbit.command` span (`command_span`, in
     `command_trace`) and recording a connection's `Hello`, attaching and detaching on its
     `orbit.connection` span (in `connection_trace`), and passes each host's events to the
-    connections; frontends add and
+    connections; `PlaneGauges` (in `plane_gauges`) registers its live gauges with the `Gauges`
+    port; frontends add and
     remove workspaces through its
     `WorkspaceSource` port, which `orbit serve` fills and a local orbit doesn't. `WorkspaceHost` (in `workspace_host`) is one workspace's
     backend: its open session, lanes, agents and workspace lock; it takes the commands routed

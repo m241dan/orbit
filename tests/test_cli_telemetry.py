@@ -15,7 +15,9 @@ from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.cli import app
 from orbit.protocol import RunTasks
 from orbit.telemetry import Off
+from orbit.telemetry.gauges import OtelGauges
 from orbit.telemetry.otel import OtelTelemetry
+from orbit.tracing import NoGauges
 from orbit.tui.view.actions import action, carried
 from tests.cli_fakes import HELLO, FakeApp, LocalApp, StartedTelemetry
 from tests.server_fakes import URL
@@ -73,11 +75,14 @@ def _configure(config_dir: Path, table: str) -> Path:
     return path
 
 
-def test_without_telemetry_configured_chat_traces_nothing(hosts: list[WorkspaceHost]) -> None:
+def test_without_telemetry_configured_chat_traces_nothing(
+    hosts: list[WorkspaceHost], planes: list[ControlPlane]
+) -> None:
     assert runner.invoke(app, ["chat"]).exit_code == 0
 
-    [host] = hosts
+    [host], [plane] = hosts, planes
     assert isinstance(host.telemetry, Off)
+    assert isinstance(plane.gauges, NoGauges)
 
 
 def test_chat_hands_its_backend_and_tui_the_telemetry_it_starts_and_closes_it_on_exit(
@@ -97,6 +102,7 @@ def test_chat_hands_its_backend_and_tui_the_telemetry_it_starts_and_closes_it_on
     assert (telemetry.run.config_dir, telemetry.run.state_dir) == (config_dir, state)
     assert [host.telemetry for host in hosts] == [telemetry]
     assert [plane.telemetry for plane in planes] == [telemetry]
+    assert [plane.gauges for plane in planes] == [telemetry.gauges]
     assert LocalApp.telemetries == [telemetry]
     assert telemetry.closed
 
@@ -131,14 +137,15 @@ def test_a_connected_chat_without_telemetry_sends_no_trace_context() -> None:
 
 
 def test_chat_with_the_file_exporter_traces_with_opentelemetry(
-    hosts: list[WorkspaceHost], config_dir: Path
+    hosts: list[WorkspaceHost], planes: list[ControlPlane], config_dir: Path
 ) -> None:
     _configure(config_dir, 'exporter = "file"')
 
     assert runner.invoke(app, ["chat"]).exit_code == 0
 
-    [host] = hosts
+    [host], [plane] = hosts, planes
     assert isinstance(host.telemetry, OtelTelemetry)
+    assert isinstance(plane.gauges, OtelGauges)
 
 
 @pytest.mark.parametrize("flags", [[], ["--local"], ["--connect", "ws://127.0.0.1:1"]])

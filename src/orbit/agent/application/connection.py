@@ -106,6 +106,12 @@ class Connections:
         asker = _asker()
         return sorted({self.viewed_by(c) for c in self._open if c is not asker})
 
+    @property
+    def welcomed(self) -> int:
+        """How many connections here had a ``Hello`` welcomed."""
+        # Copied first, as the gauges read this from another thread while the set may change.
+        return sum(c.handshake.welcomed for c in tuple(self._open))
+
     def watching(self, stream: str) -> list[SessionConnection]:
         """The connections here watching the optional stream ``stream``."""
         return [c for c in self._open if stream in c.streams]

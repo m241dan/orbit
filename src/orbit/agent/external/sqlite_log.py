@@ -186,6 +186,21 @@ def trim(
         )
 
 
+def log_sizes(connection: sqlite3.Connection) -> dict[str, int]:
+    """The bytes the logs of each workspace's sessions hold, by the workspace's id, for those
+    with a log."""
+    rows = connection.execute("SELECT workspace_id, sum(size) FROM logs GROUP BY workspace_id")
+    return {str(workspace): int(size) for workspace, size in rows}
+
+
+def log_size(connection: sqlite3.Connection, workspace: str) -> int:
+    """The bytes the logs of the workspace ``workspace``'s sessions hold."""
+    (size,) = connection.execute(
+        "SELECT coalesce(sum(size), 0) FROM logs WHERE workspace_id = ?", (workspace,)
+    ).fetchone()
+    return int(size)
+
+
 def trimmed(connection: sqlite3.Connection, workspace: str, session_id: str) -> bool:
     """Whether events were ever trimmed from the session ``session_id``'s log in the workspace
     ``workspace``."""

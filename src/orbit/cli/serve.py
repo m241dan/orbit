@@ -116,7 +116,11 @@ def serve(
         with (
             _telemetry(TelemetryRun("orbit-serve", user_config, state, os.environ)) as telemetry,
             _serving(
-                replace(flags, telemetry=telemetry), added, state, user_config, clone_dir
+                replace(flags, telemetry=telemetry, gauges=telemetry.gauges),
+                added,
+                state,
+                user_config,
+                clone_dir,
             ) as serving,
         ):
             parts = _ServeParts(

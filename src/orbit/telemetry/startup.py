@@ -6,7 +6,9 @@ from typing import Protocol
 from orbit.telemetry.headers import read_headers
 from orbit.telemetry.run import FLUSH_SECONDS, TelemetryRun
 from orbit.telemetry.settings import TelemetrySettings
-from orbit.tracing import NoTelemetry, Telemetry
+from orbit.tracing import Gauges, NoGauges, NoTelemetry, Telemetry
+
+_NO_GAUGES = NoGauges()
 
 
 class TelemetryNotInstalled(Exception):
@@ -14,7 +16,12 @@ class TelemetryNotInstalled(Exception):
 
 
 class RunningTelemetry(Telemetry, Protocol):
-    """Telemetry started, which ends with :meth:`close`."""
+    """Telemetry started, with the :attr:`gauges` it reports, which ends with :meth:`close`."""
+
+    @property
+    def gauges(self) -> Gauges:
+        """What the live gauges are registered with."""
+        ...
 
     def close(self) -> None:
         """Export what's left, waiting a short while at most, and stop."""
@@ -22,7 +29,13 @@ class RunningTelemetry(Telemetry, Protocol):
 
 
 class Off(NoTelemetry):
-    """Telemetry turned off: it records nothing, so closing it has nothing to do."""
+    """Telemetry turned off: it records nothing and reports no gauges, so closing it has
+    nothing to do."""
+
+    @property
+    def gauges(self) -> NoGauges:
+        """Gauges that report nothing."""
+        return _NO_GAUGES
 
     def close(self) -> None:
         """Do nothing: nothing was recorded."""

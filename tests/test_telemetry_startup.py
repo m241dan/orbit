@@ -49,6 +49,7 @@ from orbit.telemetry.file_exporter import (
     otlp_json_metrics,
 )
 from orbit.telemetry.otel import OtelTelemetry
+from orbit.tracing import NoGauges
 
 
 def _run(tmp_path: Path, environ: dict[str, str] | None = None) -> TelemetryRun:
@@ -63,6 +64,7 @@ def test_with_no_exporter_telemetry_is_off_and_closes_doing_nothing(tmp_path: Pa
     telemetry = start_telemetry(TelemetrySettings(), _run(tmp_path))
 
     assert isinstance(telemetry, Off)
+    assert isinstance(telemetry.gauges, NoGauges)
     with telemetry.span("orbit.task"):
         pass
     telemetry.close()

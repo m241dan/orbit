@@ -1,7 +1,7 @@
 # Telemetry
 
-What orbit records as OpenTelemetry spans, and the metrics it records from them, once telemetry is
-turned on (README.md's **Telemetry** says how). Span names are low-cardinality and start with
+What orbit records as OpenTelemetry spans, the metrics it records from them, and the live gauges it
+reports, once telemetry is turned on (README.md's **Telemetry** says how). Span names are low-cardinality and start with
 `orbit.`; metric and attribute names follow OpenTelemetry's GenAI conventions where one fits
 (`gen_ai.*`) and start with `orbit.` otherwise.
 
@@ -338,3 +338,18 @@ or none, isn't recorded. Metrics carry no exemplars.
 
 `gen_ai.client.token.usage` has the buckets the GenAI conventions give it, 1, 4, 16 and so on, each
 4 times the last, to 67108864; the durations have the SDK's default buckets, 0 to 10000 seconds.
+
+### Gauges
+
+Orbit also reports live gauges, which no span can give: each is read from what the control plane
+holds as the metrics are collected, every `metrics_interval_s` seconds and once more as it closes,
+and exported with them. A gauge whose read fails reports nothing that time, and orbit logs a
+warning, once until it reads again; the other gauges still report.
+
+| Metric | Kind | Unit | Attributes | Source |
+| --- | --- | --- | --- | --- |
+| `orbit.agents.active` | gauge | `{agent}` | `orbit.role`, `orbit.workspace.id` | The agents running in each workspace served, by role, as their `AgentStarted` and `AgentExited` events tell it, as `AgentsChanged` does: a value for each role the workspace configures, 0 while none runs, and for any other role while one runs, such as the startup check's `checker`. |
+| `orbit.queue.depth` | gauge | `{task}` | | How many tasks wait in line for a coder's slot (`max_coders`), across the workspaces served. |
+| `orbit.tasks.pending` | gauge | `{task}` | `orbit.workspace.id` | How many tasks are `pending` in each workspace's open session. |
+| `orbit.frontends.connected` | gauge | `{connection}` | | How many frontends are connected whose `Hello` was welcomed, attached to a workspace or not. |
+| `orbit.event_log.size` | gauge | `By` | `orbit.workspace.id` | The bytes the logs of each workspace's sessions hold in the store, their events' JSON, as the store last knew them: as it opened, and after each write to them since; 0 for a workspace with no store. |

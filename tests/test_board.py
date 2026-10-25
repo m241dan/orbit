@@ -45,6 +45,16 @@ def test_add_appends_pending_tasks_with_distinct_ids() -> None:
     assert board.position(second) == 1
 
 
+def test_pending_counts_the_tasks_waiting_to_run_alone() -> None:
+    board = TaskBoard()
+    running, _, done = board.add(ONE), board.add(TWO), board.add(FIX)
+    board.add_draft(ONE)
+    board.set_status(running, "running")
+    board.set_status(done, "completed")
+
+    assert board.pending == 1
+
+
 def test_a_fix_goes_right_behind_the_task_it_fixes() -> None:
     board = TaskBoard()
     first = board.add(ONE)
