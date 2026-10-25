@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 import pytest
+from opentelemetry.sdk.metrics.export import Metric
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.trace import StatusCode
 
@@ -21,6 +22,7 @@ from orbit.protocol import (
     AddTask,
     FireTrigger,
     RunTasks,
+    Settings,
     TaskSpec,
     TurnEndReason,
     Usage,
@@ -99,11 +101,32 @@ def task_span(traced: Traced, task_id: str) -> ReadableSpan:
     return span
 
 
-def unit_tracing(traced: Traced) -> tuple[ReviewTracing, TaskBoard, str]:
-    """Tracing by ``traced``, and a board with one review on it, and its id."""
+def unit_tracing(
+    traced: Traced, settings: Settings | None = None
+) -> tuple[ReviewTracing, TaskBoard, str]:
+    """Tracing by ``traced``, and a board with one review on it, with ``settings`` if given,
+    and its id."""
     board = TaskBoard()
-    task_id = board.add_review(TaskSpec(prompt="Review commit c1", role=REVIEWER))
+    spec = TaskSpec(prompt="Review commit c1", role=REVIEWER, settings=settings or Settings())
+    task_id = board.add_review(spec)
     return ReviewTracing(traced.telemetry, "workspace", lambda: "session"), board, task_id
+
+
+def recorded(traced: Traced, name: str) -> list[Metric]:
+    """The metrics called ``name`` that ``traced`` recorded."""
+    data = traced.metrics.get_metrics_data()
+    assert data is not None
+    scopes = [scope for resource in data.resource_metrics for scope in resource.scope_metrics]
+    return [metric for scope in scopes for metric in scope.metrics if metric.name == name]
+
+
+def points(traced: Traced, name: str) -> list[dict[str, Any]]:
+    """The attributes of each point of the metric called ``name`` that ``traced`` recorded."""
+    metrics = recorded(traced, name)
+    return [dict(point.attributes or {}) for metric in metrics for point in metric.data.data_points]
+
+
+OPUS = Settings(model="claude-opus-5-5")
 
 
 async def test_a_review_after_landing_links_to_that_task_with_what_it_reviewed() -> None:
@@ -334,3 +357,40 @@ def test_a_review_removed_as_it_ends_records_its_suggestions_but_no_usage() -> N
     [review] = traced.spans(REVIEW_SPAN)
     assert attributes(review)["orbit.review.suggestions"] == 1
     assert "orbit.cost.usd" not in attributes(review)
+
+
+def test_a_review_whose_task_names_a_model_records_it() -> None:
+    traced = Traced()
+    tracing, board, task_id = unit_tracing(traced, OPUS)
+
+    with tracing.review(board, task_id, None):
+        pass
+
+    [review] = traced.spans(REVIEW_SPAN)
+    assert attributes(review)["gen_ai.request.model"] == "claude-opus-5-5"
+
+
+def test_a_review_whose_task_names_no_model_records_none() -> None:
+    traced = Traced()
+    tracing, board, task_id = unit_tracing(traced)
+
+    with tracing.review(board, task_id, None):
+        pass
+
+    [review] = traced.spans(REVIEW_SPAN)
+    assert "gen_ai.request.model" not in attributes(review)
+
+
+def test_a_review_whose_task_names_a_model_records_its_tokens_and_cost_on_it() -> None:
+    traced = Traced()
+    tracing, board, task_id = unit_tracing(traced, OPUS)
+
+    with tracing.review(board, task_id, None):
+        board.add_usage(task_id, REVIEW_COST)
+
+    usage = {"gen_ai.request.model": "claude-opus-5-5", "orbit.role": REVIEWER}
+    kinds = ("input", "output", "cache_creation", "cache_read")
+    assert points(traced, "gen_ai.client.token.usage") == [
+        {**usage, "gen_ai.token.type": kind} for kind in kinds
+    ]
+    assert points(traced, "orbit.cost") == [usage]
