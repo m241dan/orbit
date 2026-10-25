@@ -1,6 +1,8 @@
 from datetime import UTC, datetime, timedelta, timezone
 
 from orbit.protocol import (
+    PAUSED_FOR_API_UNAVAILABLE,
+    PAUSED_FOR_USAGE_LIMIT,
     ActivateSession,
     Activity,
     Attach,
@@ -33,6 +35,7 @@ from orbit.tui.view.sessions import (
     local_time,
     name_hint,
     opening_attach,
+    paused_words,
     picked_commands,
     picker_rows,
     picker_sessions,
@@ -117,6 +120,44 @@ def test_a_session_waiting_for_a_coder_says_so_rather_than_running() -> None:
     assert session_label(summary, UTC).plain == (
         "  today · active · waiting for a coder: 2nd in line"
     )
+
+
+TWO_AHEAD = timezone(timedelta(hours=2))
+"""A local zone two hours ahead of UTC."""
+
+
+def paused(reason: str | None, until: datetime) -> SessionSummary:
+    """The active session, its run paused for ``reason`` until ``until``."""
+    return SessionSummary(id="s", name="today", active=True, paused_until=until, paused_for=reason)
+
+
+def test_a_run_an_outage_paused_says_when_it_tries_again_in_local_time() -> None:
+    summary = paused(PAUSED_FOR_API_UNAVAILABLE, datetime(2026, 10, 23, 12, 20, tzinfo=UTC))
+    assert paused_words(summary, TWO_AHEAD) == (
+        "run paused: Claude's API isn't answering; trying again at 14:20"
+    )
+
+
+def test_a_run_the_usage_limit_paused_says_when_it_starts_again() -> None:
+    summary = paused(PAUSED_FOR_USAGE_LIMIT, datetime(2026, 10, 23, 16, 1, tzinfo=UTC))
+    assert paused_words(summary, TWO_AHEAD) == "run paused: usage limit; starts again at 18:01"
+
+
+def test_a_run_paused_for_a_reason_not_known_says_only_when_it_starts_again() -> None:
+    until = datetime(2026, 10, 23, 12, 20, tzinfo=UTC)
+    words = [paused_words(paused(reason, until), TWO_AHEAD) for reason in ("maintenance", None)]
+    assert words == ["run paused; starts again at 14:20"] * 2
+
+
+def test_a_run_not_paused_has_no_words_for_it() -> None:
+    assert paused_words(SessionSummary(id="s", name="today")) is None
+
+
+def test_a_paused_sessions_row_and_state_notes_say_its_run_is_paused() -> None:
+    summary = paused(PAUSED_FOR_USAGE_LIMIT, datetime(2026, 10, 23, 16, 1, tzinfo=UTC))
+    words = "run paused: usage limit; starts again at 18:01"
+    assert state_notes(summary, zone=TWO_AHEAD) == ["active", words]
+    assert session_label(summary, TWO_AHEAD).plain == f"  today · active · {words}"
 
 
 def test_a_session_never_active_shows_only_its_name() -> None:

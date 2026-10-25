@@ -1,5 +1,5 @@
-"""The protocol's names: its version, and the lanes, triggers, roles, task origins and
-pseudo-tasks both sides refer to."""
+"""The protocol's names: its version, and the lanes, triggers, roles, task origins, pause
+reasons and pseudo-tasks both sides refer to."""
 
 PROTOCOL_VERSION = 2
 """The protocol's major version, which a ``Hello`` must name to be welcomed."""
@@ -42,6 +42,15 @@ PLANNER_ORIGIN = "planner"
 REVIEW_ORIGIN = "review"
 SUPER_REVIEW_ORIGIN = "super_review"
 """The task origins' names: the user, the planner, a review and a super review."""
+
+
+PauseReason = str
+"""Why a session's run waits to start again by itself: ``usage_limit``, Claude's usage limit
+stopped it, or ``api_unavailable``, Claude's API not answering did; a peer may send others."""
+
+PAUSED_FOR_USAGE_LIMIT = "usage_limit"
+PAUSED_FOR_API_UNAVAILABLE = "api_unavailable"
+"""The pause reasons' names: Claude's usage limit and Claude's API not answering."""
 
 
 STARTUP_TASK = "startup"

@@ -198,7 +198,9 @@ sessions follow, the most recently active first, then `New session`; with none s
 offers only `New session`. Each row shows the session's name, when it was last active (local time),
 `active` on the workspace's active session, `running` while it runs work (a task run, a review or a
 planner turn), or `waiting for a coder: 2nd in line` while its task run waits for a coder (see
-[Taking turns](#serving-the-control-plane); `next in line` when it's next), `viewed by N` when N other frontends view it, how many of its
+[Taking turns](#serving-the-control-plane); `next in line` when it's next), `run paused: usage
+limit; starts again at 18:01` while its run waits to start again (see **Usage limits** under
+[Tasks](#tasks)), `viewed by N` when N other frontends view it, how many of its
 tasks stand at each status, by the task list's icons (`3 ✅ 2 ⏳ 1 📝`), and what they cost
 (`1.2M tok · $0.84`); `●` marks the session this chat views. The marks follow the sessions live while
 the picker is open, as do sessions another frontend starts, renames or deletes. `j`/`k` (or the arrow keys) move and `enter` picks the highlighted session. On
@@ -531,6 +533,13 @@ so in place of the API's own text (`Claude's API isn't answering, so the planner
 send your message again later.`), and nothing is sent again by itself.
 [docs/00023-bugfix-pause-runs-when-claude-is-down.md](docs/00023-bugfix-pause-runs-when-claude-is-down.md)
 records the requirements.
+
+While a run waits to start again, after a usage limit or an outage, a line by the prompt says so,
+with the time it starts again in local time: `run paused: Claude's API isn't answering; trying
+again at 14:20` for an outage, or `run paused: usage limit; starts again at 18:01` for the usage
+limit (`run paused; starts again at 14:20` for a reason this orbit doesn't know, from a newer
+server). The session's row in the picker says the same. The line goes once the run starts again,
+`ctrl+s` cancels the wait, switching sessions drops it, or a run you start replaces it.
 
 Edge cases:
 
@@ -1943,7 +1952,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     and lands work that passes, and `WorkTurns` (in `work_turns`) decides when it runs: when the
     user asks (`ctrl+r`), when a review queues work unless the user held it, first for a
     configurator, and again by itself once the usage limit that stopped it resets, timed by a
-    `LimitPause` (in `limit_pause`); each coder's task takes one of the control plane's
+    `LimitPause` (in `limit_pause`), saying meanwhile until when and why it's paused, which
+    `SessionStates` (in `session_state`) publishes with the session's state; each coder's task takes one of the control plane's
     `CoderSlots` (in `coder_slots`) first, and each is traced as an `orbit.task` span by
     `TaskTracing` (in `task_trace`), current while it runs so what runs it records on it, and
     linked to the span that started its run, which `WorkTurns` keeps for the run.

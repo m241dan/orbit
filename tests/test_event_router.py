@@ -41,6 +41,7 @@ def calls_of(event: Event) -> Mock:
         calls.tabs,
         calls.prompt,
         calls.viewing,
+        calls.paused,
         calls.task_list,
         calls.verification,
         calls.usage,
@@ -85,6 +86,7 @@ def test_a_snapshot_shows_its_tasks_before_its_transcript_and_its_usage_after() 
         "task_list.reset_usage",
         "navigation.view",
         "viewing.show",
+        "paused.show",
         "task_list.show_waiting",
         "prompt.show_read_only",
         "takeover.follow",
@@ -101,17 +103,19 @@ def test_a_catalog_labels_the_triggers_then_follows_workspaces_and_sessions() ->
         "navigation.follow_catalog",
         "transcript.show_session",
         "viewing.show",
+        "paused.show",
         "task_list.show_waiting",
     ]
 
 
-def test_a_sessions_state_reaches_the_catalog_then_the_pickers_and_the_viewing_mark() -> None:
+def test_a_sessions_state_reaches_the_catalog_then_the_pickers_and_the_prompt_lines() -> None:
     state = SessionStateChanged(session="s1", active=True, state="running", viewers=1)
 
     assert routed(state) == [
         *TRACKED,
         "navigation.follow_state",
         "viewing.show",
+        "paused.show",
         "task_list.show_waiting",
     ]
 

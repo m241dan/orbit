@@ -2045,7 +2045,7 @@
       "type": "object"
     },
     "SessionStateChanged": {
-      "description": "Session ``session`` is now ``active`` (the workspace's open session) or not, in\n``state``, with ``viewers`` connections viewing it, and ``activity`` in progress in it; sent\nto every connection whenever one of them changes, and never logged.",
+      "description": "Session ``session`` is now ``active`` (the workspace's open session) or not, in\n``state``, with ``viewers`` connections viewing it, ``activity`` in progress in it, and,\nwhile its run waits to start again by itself, starting again at ``paused_until``, stopped\nfor ``paused_for``; sent to every connection whenever one of them changes, and never\nlogged.",
       "properties": {
         "active": {
           "title": "Active",
@@ -2058,6 +2058,31 @@
           },
           "title": "Activity",
           "type": "array"
+        },
+        "paused_for": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Paused For"
+        },
+        "paused_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Paused Until"
         },
         "session": {
           "title": "Session",
@@ -2094,7 +2119,7 @@
       "type": "object"
     },
     "SessionSummary": {
-      "description": "A saved session as the list of sessions shows it: how many of its tasks stand at each\nstatus in ``counts``, and what they cost together in ``usage``. ``current`` marks the\nsession open here, ``locked`` one open in another orbit, and ``unreadable`` says why a\nsession can't be opened, if it can't. In a ``Catalog``, ``active`` marks the workspace's\nopen session, ``state`` says whether it's running, ``viewers`` counts the connections\nviewing it, and ``activity`` says what's in progress in it.",
+      "description": "A saved session as the list of sessions shows it: how many of its tasks stand at each\nstatus in ``counts``, and what they cost together in ``usage``. ``current`` marks the\nsession open here, ``locked`` one open in another orbit, and ``unreadable`` says why a\nsession can't be opened, if it can't. In a ``Catalog``, ``active`` marks the workspace's\nopen session, ``state`` says whether it's running, ``viewers`` counts the connections\nviewing it, ``activity`` says what's in progress in it, and, while its run waits to start\nagain by itself, ``paused_until`` says when it does and ``paused_for`` why.",
       "properties": {
         "active": {
           "default": false,
@@ -2160,6 +2185,31 @@
         "name": {
           "title": "Name",
           "type": "string"
+        },
+        "paused_for": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Paused For"
+        },
+        "paused_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Paused Until"
         },
         "state": {
           "default": "idle",

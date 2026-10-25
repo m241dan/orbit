@@ -4,7 +4,7 @@ from typing import Any, Literal, get_args
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationInfo, model_validator
 
-from orbit.protocol.names import CODER, MANUAL_ORIGIN, TaskOrigin
+from orbit.protocol.names import CODER, MANUAL_ORIGIN, PauseReason, TaskOrigin
 
 
 class WireTolerant(BaseModel):
@@ -207,7 +207,8 @@ class SessionSummary(_Message):
     session open here, ``locked`` one open in another orbit, and ``unreadable`` says why a
     session can't be opened, if it can't. In a ``Catalog``, ``active`` marks the workspace's
     open session, ``state`` says whether it's running, ``viewers`` counts the connections
-    viewing it, and ``activity`` says what's in progress in it."""
+    viewing it, ``activity`` says what's in progress in it, and, while its run waits to start
+    again by itself, ``paused_until`` says when it does and ``paused_for`` why."""
 
     id: str
     name: str
@@ -221,6 +222,8 @@ class SessionSummary(_Message):
     state: SessionState = "idle"
     viewers: int = Field(default=0, ge=0)
     activity: tuple[Activity, ...] = ()
+    paused_until: AwareDatetime | None = None
+    paused_for: PauseReason | None = None
 
 
 class SessionRef(_Message):

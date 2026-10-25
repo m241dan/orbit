@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
 import pytest
@@ -23,12 +23,13 @@ from orbit.agent.application.work_turns import (
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.endings import STOPPED_BY_YOU
 from orbit.agent.domain.refusals import Refused
-from orbit.agent.domain.usage_limits import RESUMING_NOTE, paused_note
+from orbit.agent.domain.usage_limits import RESUMING_NOTE, Paused, paused_note
 from orbit.protocol import (
     BUSY,
     CONFIGURATOR,
     INTERNAL,
     NOT_CONFIGURED,
+    PAUSED_FOR_USAGE_LIMIT,
     STORAGE_FAILED,
     WORK_LANE,
     BusyChanged,
@@ -99,7 +100,8 @@ class Halt:
 
 @dataclass
 class Lane:
-    """Work turns over a ``work`` lane and a board, with the events they posted."""
+    """Work turns over a ``work`` lane and a board, with the events they posted, and what their
+    pause was each time they told it changed."""
 
     turns: WorkTurns
     work: StopsCounted
@@ -107,6 +109,7 @@ class Lane:
     posted: list[Event]
     halt: Halt
     sleeps: Sleeps
+    pauses: list[Paused | None] = field(default_factory=list)
 
     def roles(self) -> list[str]:
         return [state.task.role for state in self.tasks.board.tasks]
@@ -145,10 +148,12 @@ async def lane() -> AsyncIterator[Lane]:
     posted: list[Event] = []
     halt, sleeps = Halt(), Sleeps()
     tasks = Tasks(TaskBoard(), lambda _: asyncio.sleep(0))
+    pauses: list[Paused | None] = []
     parts = lane_parts(tasks, posted, True, halt, sleeps.pause)
+    parts = replace(parts, paused_changed=lambda: pauses.append(turns.paused))
     turns = WorkTurns(parts)
     assert isinstance(parts.work, StopsCounted)
-    yield Lane(turns, parts.work, tasks, posted, halt, sleeps)
+    yield Lane(turns, parts.work, tasks, posted, halt, sleeps, pauses)
     await turns.close()
     assert parts.desk is not None
     await parts.desk.stop()
@@ -492,3 +497,53 @@ async def test_a_configurator_run_limited_again_starts_again_at_the_new_reset(
     reset = START + timedelta(minutes=20)
     assert notes(lane)[-1] == paused_note(reset)
     assert lane.sleeps.until == [START + timedelta(minutes=15), reset]
+
+
+LIMIT_PAUSE = Paused(START + timedelta(minutes=15), PAUSED_FOR_USAGE_LIMIT)
+"""The pause of a run the usage limit stopped at :data:`START`, with no reset known."""
+
+
+async def test_a_run_the_usage_limit_stopped_is_paused_for_it_until_it_starts_again(
+    lane: Lane,
+) -> None:
+    await limited(lane)
+    paused = lane.turns.paused
+    lane.sleeps.release.set()
+    await settled()
+    assert (paused, lane.turns.paused) == (LIMIT_PAUSE, None)
+    assert lane.pauses == [LIMIT_PAUSE, None]
+
+
+async def test_a_hold_during_the_wait_ends_the_pause(lane: Lane) -> None:
+    await limited(lane)
+    lane.turns.hold()
+    assert lane.turns.paused is None
+    assert lane.pauses == [LIMIT_PAUSE, None]
+
+
+async def test_a_wait_failing_ends_the_pause(lane: Lane) -> None:
+    await limited(lane)
+    lane.sleeps.error = RuntimeError("clock broke")
+    lane.sleeps.release.set()
+    await settled()
+    assert lane.turns.paused is None
+    assert lane.pauses == [LIMIT_PAUSE, None]
+
+
+async def test_a_wait_ending_while_halted_stays_paused_until_the_run_starts_again(
+    lane: Lane,
+) -> None:
+    await limited(lane)
+    lane.halt.on = True
+    lane.sleeps.release.set()
+    await settled()
+    halted = lane.turns.paused
+    lane.halt.on = False
+    await lane.turns.lifted()
+    assert (halted, lane.turns.paused) == (LIMIT_PAUSE, None)
+    assert lane.turns.running
+
+
+async def test_forgetting_no_wait_tells_of_no_change(lane: Lane) -> None:
+    lane.turns.forget_wait()
+    assert lane.pauses == []

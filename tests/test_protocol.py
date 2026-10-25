@@ -8,6 +8,7 @@ from orbit.protocol import (
     CONFIGURE_CHECKS,
     INTERNAL,
     MANUAL_ORIGIN,
+    PAUSED_FOR_API_UNAVAILABLE,
     PLANNER,
     PLANNER_LANE,
     PLANNER_ORIGIN,
@@ -432,6 +433,26 @@ def test_a_state_change_sets_its_session_active_running_viewed_and_doing() -> No
 
     update = {"active": False, "state": "running", "viewers": 2, "activity": doing}
     assert updated == summary.model_copy(update=update)
+
+
+def test_a_state_change_sets_its_sessions_pause_and_clears_it() -> None:
+    summary = SessionSummary(id="s1", name="auth", active=True)
+    until = datetime(2026, 10, 23, 14, 20, tzinfo=UTC)
+    paused = SessionStateChanged(
+        session="s1",
+        active=True,
+        state="idle",
+        viewers=1,
+        paused_until=until,
+        paused_for=PAUSED_FOR_API_UNAVAILABLE,
+    )
+    resumed = paused.model_copy(update={"paused_until": None, "paused_for": None})
+
+    shown = with_state(summary, paused)
+    cleared = with_state(shown, resumed)
+
+    assert (shown.paused_until, shown.paused_for) == (until, "api_unavailable")
+    assert (cleared.paused_until, cleared.paused_for) == (None, None)
 
 
 def test_a_state_change_leaves_other_sessions_alone() -> None:

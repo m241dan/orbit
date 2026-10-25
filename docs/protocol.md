@@ -418,13 +418,22 @@ Each session in a `Catalog` carries its state as it is when the Catalog is sent:
   A review of several tasks' work, such as a batch's, is one `review` per task, in task order;
   a super review reviews no particular task, so it's one `review` whose `task_id` is null. It's
   empty for any other session. The startup check shows here though it leaves the state `idle`.
+- `paused_until` and `paused_for`: while the open session's task run waits to start again by
+  itself, because Claude's usage limit or Claude's API not answering stopped it, when it starts
+  again (timezone-aware) and why: `usage_limit` or `api_unavailable`. `paused_for` is an open
+  string, so later versions may add reasons; a frontend shows one it doesn't know as a pause
+  without a reason. Both are set as the run stops and cleared once it starts again, once its
+  wait is cancelled (`CancelTurn`), dropped (a switch to another session, or the server
+  closing), or replaced by a run the user starts (`RunTasks`, or `FireTrigger` for
+  `configure-checks`); a wait that ends while storage is halted keeps them until the halt lifts.
+  Both are null for any other session.
 
 Whenever one of them changes for a session, every welcomed connection gets
-`SessionStateChanged(session, active, state, viewers, activity)` with the new values: a task run,
-review, planner turn or the startup check starting or ending, a run moving on to its next task,
-its place in line for a coder changing, joining the line or leaving it as it gets one, a
-connection joining, closing or attaching to
-another session, which sends one for the session it left and one for the session it views, and
+`SessionStateChanged(session, active, state, viewers, activity, paused_until, paused_for)` with
+the new values: a task run, review, planner turn or the startup check starting or ending, a run
+moving on to its next task, its place in line for a coder changing, joining the line or leaving
+it as it gets one, a run pausing or its pause ending, a connection joining, closing or attaching
+to another session, which sends one for the session it left and one for the session it views, and
 another session activated, which sends one for the session left (inactive, idle, no viewers unless
 connections attached to it) and one for the session activated. A connection joins once everything that follows its `Welcome` is sent, so the
 change counting it comes after those. The event belongs to no session and isn't logged, and the

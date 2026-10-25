@@ -353,12 +353,14 @@ class WorkspaceHost:
         return StorageResume(self._halt, parts)
 
     def _session_states(self) -> SessionStates:
-        """What publishes the open session's state as it changes."""
+        """What publishes the open session's state as it changes, its run paused as the work
+        lane's turns say."""
         parts = StateParts(
             lambda: self._keeper.id,
             self._activity,
             self._connections,
             self._events.put_nowait,
+            lambda: self._turns.paused,
         )
         return SessionStates(parts)
 
@@ -462,7 +464,8 @@ class WorkspaceHost:
         )
 
     def _work_turns(self) -> WorkTurns:
-        """What decides when the work lane runs."""
+        """What decides when the work lane runs, publishing the open session's state as its run's
+        pause changes."""
         parts = WorkParts(
             self._work,
             self._lane,
@@ -472,6 +475,7 @@ class WorkspaceHost:
             self._events.put_nowait,
             self._gate,
             lambda: self.latest_usage(),
+            lambda: self._states.check(),
         )
         return WorkTurns(parts)
 

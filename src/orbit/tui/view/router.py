@@ -148,13 +148,14 @@ class ModelChoices(Protocol):
 @dataclass(frozen=True)
 class Panes:
     """The app's widgets that show events: the conversation's ``transcript`` and ``tabs``, the
-    ``prompt`` and the ``viewing`` mark by it, and the sidebar's ``task_list``,
-    ``verification`` steps, ``usage`` and ``agents``."""
+    ``prompt`` and, by it, the ``viewing`` mark and the line saying the run is ``paused``, and
+    the sidebar's ``task_list``, ``verification`` steps, ``usage`` and ``agents``."""
 
     transcript: TranscriptPane
     tabs: TabsPane
     prompt: PromptPane
     viewing: StatusPane
+    paused: StatusPane
     task_list: TaskListPane
     verification: StepsPane
     usage: UsagePane
@@ -234,10 +235,12 @@ class EventRouter:
             self._panes.tabs.set_planner_busy(busy)
 
     def show_viewing(self) -> None:
-        """Mark the prompt while the session viewed isn't the active one, or hide the mark, and
-        have the task about to run say when the session viewed waits for a coder."""
+        """Mark the prompt while the session viewed isn't the active one, or hide the mark, say
+        by it while the session viewed's run is paused, and have the task about to run say when
+        the session viewed waits for a coder."""
         place = self._handlers.navigation.place
         self._panes.viewing.show(place.mark)
+        self._panes.paused.show(place.paused)
         self._panes.task_list.show_waiting(place.coder_wait)
 
     def _render_ownership(self, event: OwnershipEvent) -> None:

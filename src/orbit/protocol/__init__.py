@@ -166,6 +166,8 @@ from orbit.protocol.names import (
     CONFIGURE_CHECKS,
     CONTROL_PLANE_STREAM,
     MANUAL_ORIGIN,
+    PAUSED_FOR_API_UNAVAILABLE,
+    PAUSED_FOR_USAGE_LIMIT,
     PLAN_TASK,
     PLANNER,
     PLANNER_LANE,
@@ -181,6 +183,7 @@ from orbit.protocol.names import (
     SUPER_REVIEWER,
     WORK_LANE,
     BusyLane,
+    PauseReason,
     TaskOrigin,
 )
 from orbit.protocol.session import Session, SharedSession
@@ -229,6 +232,8 @@ __all__ = [
     "NOT_ACTIVE",
     "NOT_CONFIGURED",
     "NOT_CONNECTED",
+    "PAUSED_FOR_API_UNAVAILABLE",
+    "PAUSED_FOR_USAGE_LIMIT",
     "PLANNER",
     "PLANNER_LANE",
     "PLANNER_ORIGIN",
@@ -310,6 +315,7 @@ __all__ = [
     "OwnershipDeclined",
     "OwnershipOffered",
     "OwnershipTaken",
+    "PauseReason",
     "ProgressNoted",
     "ProposalAction",
     "ProposalDecided",

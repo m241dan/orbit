@@ -35,7 +35,7 @@ from orbit.protocol.models import (
     message_types,
     oldest_seq_if_dropped,
 )
-from orbit.protocol.names import WORK_LANE, BusyLane
+from orbit.protocol.names import WORK_LANE, BusyLane, PauseReason
 
 if TYPE_CHECKING:  # Envelopes carry events, so those events hold are resolved in envelope.py.
     from orbit.protocol.envelope import EventEnvelope
@@ -518,8 +518,10 @@ class OwnershipDeclined(_Message):
 
 class SessionStateChanged(_Message):
     """Session ``session`` is now ``active`` (the workspace's open session) or not, in
-    ``state``, with ``viewers`` connections viewing it, and ``activity`` in progress in it; sent
-    to every connection whenever one of them changes, and never logged."""
+    ``state``, with ``viewers`` connections viewing it, ``activity`` in progress in it, and,
+    while its run waits to start again by itself, starting again at ``paused_until``, stopped
+    for ``paused_for``; sent to every connection whenever one of them changes, and never
+    logged."""
 
     type: Literal["session_state_changed"] = "session_state_changed"
     session: str
@@ -527,11 +529,13 @@ class SessionStateChanged(_Message):
     state: SessionState
     viewers: int = Field(ge=0)
     activity: tuple[Activity, ...] = ()
+    paused_until: AwareDatetime | None = None
+    paused_for: PauseReason | None = None
 
 
 def with_state(summary: SessionSummary, changed: SessionStateChanged) -> SessionSummary:
-    """``summary``, as active, running, viewed and doing what ``changed`` says, if ``changed``
-    is about its session."""
+    """``summary``, as active, running, viewed, doing and paused as ``changed`` says, if
+    ``changed`` is about its session."""
     if changed.session != summary.id:
         return summary
     update = {
@@ -539,6 +543,8 @@ def with_state(summary: SessionSummary, changed: SessionStateChanged) -> Session
         "state": changed.state,
         "viewers": changed.viewers,
         "activity": changed.activity,
+        "paused_until": changed.paused_until,
+        "paused_for": changed.paused_for,
     }
     return summary.model_copy(update=update)
 

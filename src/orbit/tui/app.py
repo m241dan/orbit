@@ -123,6 +123,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._halt_status = StatusLine(id="storage-halt", classes="error")
         self._link_status = StatusLine(id="link-status")
         self._viewing = StatusLine(id="viewing")
+        self._paused = StatusLine(id="paused")
         self._halt = StorageHaltHost(self.push_screen, self._send, self._halt_status.show).halt
         self._link_host = LinkHost(
             self.push_screen, self.exit, self._link_status.show, self.set_timer
@@ -142,6 +143,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 yield self._halt_status
                 yield self._link_status
                 yield self._viewing
+                yield self._paused
                 yield ChatPrompt(
                     placeholder="Press i to talk to the planner, esc to stop typing", id="prompt"
                 )
@@ -188,6 +190,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             prompt=prompt,
             marks=prompt.marks,
             viewing=self._viewing,
+            paused=self._paused,
             tasks=self._task_list.board,
             steps=self.query_one(VerificationPanel).verification,
             usage=self.query_one(UsagePanel),

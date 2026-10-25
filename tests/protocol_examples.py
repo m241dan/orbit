@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 
 from orbit.protocol import (
     CONTROL_PLANE_STREAM,
+    PAUSED_FOR_API_UNAVAILABLE,
+    PAUSED_FOR_USAGE_LIMIT,
     PLANNER,
     PLANNER_LANE,
     REVIEW_ORIGIN,
@@ -142,6 +144,8 @@ SUMMARY = SessionSummary(
     state="running",
     viewers=2,
     activity=(Activity(kind="task_run", task_id="t1"), Activity(kind="startup_check")),
+    paused_until=WHEN,
+    paused_for=PAUSED_FOR_USAGE_LIMIT,
 )
 STEP = StepState(name="Unit tests", status="failed")
 REVIEW = ReviewStatus(paused=True, open_batches=2)
@@ -282,6 +286,8 @@ EVENTS: tuple[EventEnvelope, ...] = (
                 Activity(kind="review", task_id="t2"),
                 Activity(kind="planner"),
             ),
+            paused_until=WHEN,
+            paused_for=PAUSED_FOR_API_UNAVAILABLE,
         )
     ),
     event(

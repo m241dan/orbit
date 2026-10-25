@@ -180,10 +180,10 @@ class PromptBox(Protocol):
 class Parts:
     """What the frontend shows in and asks of: the ``app``; the ``conversation``, the
     ``paging`` above it and the ``tabs`` over it; the ``prompt``, its ``marks`` and the
-    ``viewing`` line by it; the sidebar's ``tasks``, ``steps``, ``usage`` and ``agents``; where
-    the pickers of a session (``place``) and a workspace (``workspaces``), ``proposals`` and
-    the settings ``pickers`` show; the storage ``halt`` and the ``takeover`` offer; and the
-    ``clock`` turns are timed by."""
+    ``viewing`` and ``paused`` lines by it; the sidebar's ``tasks``, ``steps``, ``usage`` and
+    ``agents``; where the pickers of a session (``place``) and a workspace (``workspaces``),
+    ``proposals`` and the settings ``pickers`` show; the storage ``halt`` and the ``takeover``
+    offer; and the ``clock`` turns are timed by."""
 
     app: AppView
     conversation: ConversationPane
@@ -192,6 +192,7 @@ class Parts:
     prompt: PromptBox
     marks: PromptMarks
     viewing: StatusPane
+    paused: StatusPane
     tasks: TaskBoard
     steps: VerificationSteps
     usage: UsagePane
@@ -231,6 +232,7 @@ class Frontend:
             parts.tabs,
             parts.marks,
             parts.viewing,
+            parts.paused,
             parts.tasks,
             parts.steps,
             parts.usage,

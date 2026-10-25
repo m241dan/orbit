@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from orbit.agent.domain.endings import first_line
-from orbit.protocol import UsageChanged
+from orbit.protocol import PauseReason, UsageChanged
 
 _LIMIT_HIT = re.compile(r"\bhit your\b.*\blimit\b|\busage limit reached\b", re.IGNORECASE)
 
@@ -39,6 +39,15 @@ FIX_ERROR_NOTE = (
     "until the fix runs again (ctrl+r)."
 )
 """Said when a fix task's error stops the run."""
+
+
+@dataclass(frozen=True)
+class Paused:
+    """A run a usage limit or an outage stopped, waiting to start again by itself ``until``
+    then, stopped for ``reason``: ``usage_limit`` or ``api_unavailable``."""
+
+    until: datetime
+    reason: PauseReason
 
 
 @dataclass(frozen=True)

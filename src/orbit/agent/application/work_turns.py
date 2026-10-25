@@ -1,8 +1,8 @@
 """When the work lane runs: on the user's asking, after a review queues work unless the user
 held it or the session halted, first for a configurator, and again by itself once Claude's
 usage limit that stopped it resets, or, if Claude's API not answering stopped it, after a backoff
-that grows with each outage in a row. A run remembers what started it, which its tasks' spans
-link to."""
+that grows with each outage in a row, saying meanwhile until when and why it's paused. A run
+remembers what started it, which its tasks' spans link to."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
@@ -24,6 +24,7 @@ from orbit.agent.domain.usage_limits import (
     RESUMING_NOTE,
     WAIT_CANCELLED_NOTE,
     Outage,
+    Paused,
     outage_delay,
     outage_paused_note,
     paused_note,
@@ -32,6 +33,8 @@ from orbit.agent.domain.usage_limits import (
 from orbit.protocol import (
     CONFIGURATOR,
     NOT_CONFIGURED,
+    PAUSED_FOR_API_UNAVAILABLE,
+    PAUSED_FOR_USAGE_LIMIT,
     WORK_LANE,
     Event,
     Notice,
@@ -51,7 +54,8 @@ class WorkParts:
     """What decides when the work lane runs: the ``work`` lane and review ``lane``, if any, the
     ``tasks`` they run, the ``verifier`` and agents' ``desk``, if any, ``post``, which
     publishes events without blocking, the session's ``gate``, which tells whether it's
-    halted, and ``usage``, the usage limits fetched last, if any."""
+    halted, ``usage``, the usage limits fetched last, if any, and ``paused_changed``, called
+    whenever :attr:`WorkTurns.paused` changes."""
 
     work: WorkLane | None
     lane: ReviewLane | None
@@ -61,6 +65,7 @@ class WorkParts:
     post: Callable[[Event], None]
     gate: SessionGate
     usage: Callable[[], UsageChanged | None] = lambda: None
+    paused_changed: Callable[[], None] = lambda: None
 
 
 @dataclass(frozen=True)
@@ -82,7 +87,9 @@ class WorkTurns:
     answering stopped after a backoff, longer for each outage in a row, unless the user runs the
     work, sets up checks or holds it first, or :meth:`forget_wait` is called as the session is
     left; a halt's :meth:`stop_turn` keeps the wait, and one ending while halted starts the run
-    once :meth:`lifted` is called. Once :meth:`close` is called, nothing starts.
+    once :meth:`lifted` is called. Until the run starts again or its wait is cancelled or
+    dropped, :attr:`paused` says when it starts again and why. Once :meth:`close` is called,
+    nothing starts.
 
     A run is started by the span current as it's asked for: the command's asking for it, or the
     review's whose suggestions it runs. The run keeps that span when it starts again by itself,
@@ -100,10 +107,17 @@ class WorkTurns:
         self._waiting = False  # The wait hasn't ended yet.
         # How the run whose wait ended while the session was halted starts again, if one did.
         self._due: _Restart | None = None
+        self._paused: Paused | None = None  # Until the waiting run starts again, and why.
 
     @property
     def running(self) -> bool:
         return self._turns.running
+
+    @property
+    def paused(self) -> Paused | None:
+        """When the run the usage limit or an outage stopped starts again, and why, until it
+        does or its wait is cancelled or dropped; none while no run waits to."""
+        return self._paused
 
     async def run_tasks(self) -> None:
         """Start a run for the user, lifting a hold; refused without agents, or while one
@@ -161,6 +175,7 @@ class WorkTurns:
         waiting, self._waiting = self._waiting, False
         due, self._due = self._due is not None, None
         self._wait.cancel()
+        self._pause_as(None)
         return due or waiting
 
     async def stop_turn(self) -> None:
@@ -239,23 +254,34 @@ class WorkTurns:
         start it then."""
         pause = self._pause
         at = resume_time(self._parts.usage(), pause.now(), pause.waits)
-        self._pause_until(at, paused_note(at), _Restart(cause, RESUMING_NOTE))
+        paused = Paused(at, PAUSED_FOR_USAGE_LIMIT)
+        self._pause_until(paused, paused_note(at), _Restart(cause, RESUMING_NOTE))
 
     def _wait_out(self, outage: Outage, cause: Span) -> None:
         """Say when the run ``outage`` stopped, started by ``cause``, starts again, after the
         backoff at its level, and start it then."""
         at = self._pause.now() + outage_delay(outage.level)
         note = outage_paused_note(at, outage.error)
-        self._pause_until(at, note, _Restart(cause, OUTAGE_RESUMING_NOTE))
+        paused = Paused(at, PAUSED_FOR_API_UNAVAILABLE)
+        self._pause_until(paused, note, _Restart(cause, OUTAGE_RESUMING_NOTE))
 
-    def _pause_until(self, at: datetime, note: str, restart: _Restart) -> None:
+    def _pause_until(self, paused: Paused, note: str, restart: _Restart) -> None:
         """Say ``note`` about the run that just stopped, and start it again as ``restart`` says
-        at ``at``."""
+        once it's ``paused`` no longer."""
         self._parts.post(Notice(message=note))
         stopped = self._turns.turn
         assert stopped is not None  # This runs as the turn stopped.
         self._waiting = True
-        self._wait.start(self._start_again(stopped, at, restart))
+        self._pause_as(paused)
+        self._wait.start(self._start_again(stopped, paused.until, restart))
+
+    def _pause_as(self, paused: Paused | None) -> None:
+        """Note the run waiting to start again is ``paused`` so, or none is, telling of it if
+        that changed."""
+        changed = paused != self._paused
+        self._paused = paused
+        if changed:
+            self._parts.paused_changed()
 
     async def _start_again(
         self, stopped: asyncio.Task[object], at: datetime, restart: _Restart
@@ -268,6 +294,7 @@ class WorkTurns:
             await pause.sleep(max(0.0, (at - pause.now()).total_seconds()))
         except Exception:  # Failed, it no longer keeps work waiting; reported as it goes on.
             self._waiting = False
+            self._pause_as(None)
             raise
         self._waiting = False
         if self._parts.gate.halted():
@@ -277,7 +304,9 @@ class WorkTurns:
 
     async def _start_now(self, restart: _Restart) -> None:
         """Start the run the usage limit or an outage stopped again, as ``restart`` says, if
-        nothing keeps it waiting and work is left, and say so."""
+        nothing keeps it waiting and work is left, and say so; either way it's paused no
+        longer."""
+        self._pause_as(None)
         work = self._startable(asked=False)
         if work is None:
             return

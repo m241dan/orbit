@@ -256,7 +256,7 @@ class Shell:
         self.app = AppShell(self.prompt, self.window)
         self.strip = Strip(self)
         self.marks = Marks()
-        self.viewing = Line()
+        self.viewing, self.paused = Line(), Line()
         self.task_view, self.steps_view, self.agents_view = TaskView(), StepsView(), AgentsView()
         self.usage, self.paging = Usage(), Paging()
         self.modals = Modals(self.send)
@@ -283,6 +283,7 @@ class Shell:
             prompt=self.prompt,
             marks=self.prompt_marks,
             viewing=self.viewing,
+            paused=self.paused,
             tasks=self.tasks,
             steps=self.steps,
             usage=self.usage,

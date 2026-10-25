@@ -7,6 +7,8 @@ from datetime import datetime, tzinfo
 from rich.text import Text
 
 from orbit.protocol import (
+    PAUSED_FOR_API_UNAVAILABLE,
+    PAUSED_FOR_USAGE_LIMIT,
     ActivateSession,
     Activity,
     ActivityKind,
@@ -46,6 +48,14 @@ SESSIONS_HINTS = ListHints(closing=LIST_HINT, quitting=STARTUP_HINT)
 ACTIVATION_TITLE = "Not the active session"
 ACTIVATE_CHOICE = "Make this the active session"
 JUST_LOOK_CHOICE = "Just look"
+PAUSED_PREFIX = "run paused"
+
+# What a paused run says of why it's paused, by reason, before the time it starts again.
+PAUSED_REASONS = {
+    PAUSED_FOR_API_UNAVAILABLE: ": Claude's API isn't answering; trying again at",
+    PAUSED_FOR_USAGE_LIMIT: ": usage limit; starts again at",
+}
+PAUSED_UNKNOWN = "; starts again at"
 
 # The order a session's task counts are shown in: finished work first, then what's still to do.
 COUNT_ORDER: tuple[TaskStatus, ...] = (
@@ -281,7 +291,7 @@ def _details(summary: SessionSummary, zone: tzinfo | None, attached: bool) -> li
     details = [] if summary.last_active is None else [local_time(summary.last_active, zone)]
     if summary.locked:
         return [*details, LOCKED_NOTE]
-    details.extend(state_notes(summary, attached))
+    details.extend(state_notes(summary, attached, zone))
     counts = task_counts(summary.counts)
     if counts:
         details.append(counts)
@@ -290,18 +300,36 @@ def _details(summary: SessionSummary, zone: tzinfo | None, attached: bool) -> li
     return details
 
 
-def state_notes(summary: SessionSummary, attached: bool = False) -> list[str]:
+def state_notes(
+    summary: SessionSummary, attached: bool = False, zone: tzinfo | None = None
+) -> list[str]:
     """Whether ``summary``'s session is the active one, whether it runs work or waits for a
-    coder, and how many other frontends view it, besides this one if ``attached``: ``active ·
-    running · viewed by 2``."""
+    coder, whether its run is paused, until a time in ``zone`` (the local one by default), and
+    how many other frontends view it, besides this one if ``attached``: ``active · running ·
+    viewed by 2``."""
     notes = [ACTIVE_NOTE] if summary.active else []
     if summary.state == "running":
         wait = coder_wait(summary.activity)
         notes.append(RUNNING_NOTE if wait is None else waiting_words(wait.position))
+    paused = paused_words(summary, zone)
+    if paused is not None:
+        notes.append(paused)
     others = _others(summary, attached)
     if others:
         notes.append(f"viewed by {others}")
     return notes
+
+
+def paused_words(summary: SessionSummary, zone: tzinfo | None = None) -> str | None:
+    """What ``summary``'s session says of its run while it's paused, until a time in ``zone``
+    (the local one by default): ``run paused: Claude's API isn't answering; trying again at
+    14:20``, ``run paused: usage limit; starts again at 18:01``, or ``run paused; starts again at
+    14:20`` for a reason not known; none while it isn't paused."""
+    until = summary.paused_until
+    if until is None:
+        return None
+    reason = PAUSED_REASONS.get(summary.paused_for or "", PAUSED_UNKNOWN)
+    return f"{PAUSED_PREFIX}{reason} {until.astimezone(zone):%H:%M}"
 
 
 def local_time(when: datetime, zone: tzinfo | None = None) -> str:

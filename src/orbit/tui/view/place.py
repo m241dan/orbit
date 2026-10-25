@@ -31,6 +31,7 @@ from orbit.tui.view.sessions import (
     held_back,
     idle_now_message,
     opening_attach,
+    paused_words,
     picker_viewing,
     running_words,
     session_turned_idle,
@@ -162,6 +163,13 @@ class Place:
         row says; none while it doesn't wait."""
         attached = self.attached_session
         return None if attached is None else coder_wait_row(attached.activity)
+
+    @property
+    def paused(self) -> str | None:
+        """What the line by the prompt says while the session viewed's run is paused; none
+        while it isn't, or no session is viewed."""
+        attached = self.attached_session
+        return None if attached is None else paused_words(attached)
 
     @property
     def viewed_name(self) -> str:
