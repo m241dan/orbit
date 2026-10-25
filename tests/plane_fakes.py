@@ -116,7 +116,8 @@ class FakeSource:
     ``clone_gate``, if given, and failing as ``clone_fails`` says, if it does; the clones
     ``removed`` are noted, by path. Purging a workspace would lose what ``lost`` says, by id,
     failing as ``losses_fail`` says, if it does, counting how often it's ``losses_asked``;
-    those ``purged`` are noted, failing as ``purge_fails`` says, if it does. Each workspace
+    each purge calls ``purging``, if given, as it begins, and those ``purged`` are noted,
+    failing as ``purge_fails`` says, if it does. Each workspace
     closed or purged, even if that fails, is noted in ``steps``, in order. The workspace added
     last is at ``latest``, if any, unless finding it fails as ``latest_fails`` says."""
 
@@ -145,6 +146,7 @@ class FakeSource:
         self.lost: dict[str, list[str]] = {}
         self.losses_fail: str | None = None
         self.losses_asked = 0
+        self.purging: Callable[[], None] | None = None
         self.purged: list[str] = []
         self.purge_fails: str | None = None
         self.steps: list[str] = []
@@ -214,6 +216,8 @@ class FakeSource:
         return self.lost.get(workspace_id, [])
 
     async def purge(self, workspace_id: str) -> Purged:
+        if self.purging is not None:
+            self.purging()
         assert (workspace_id, False) in self.flags
         self.steps.append(f"purge {workspace_id}")
         if self.purge_fails is not None:

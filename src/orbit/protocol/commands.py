@@ -235,11 +235,15 @@ class RemoveWorkspace(_Message):
     kept for when it's added again, and a ``Catalog`` without it follows; the connection sending
     it, if attached there, is attached to no workspace again. A control-plane command: its
     envelope's ``workspace`` is ``null``. Refused with ``unknown`` for a workspace not served,
-    ``busy`` while it runs work or another connection views one of its sessions, and
-    ``invalid`` by a local orbit. With ``purge``, its records are deleted too: its sessions,
+    ``busy`` while it runs work or another connection views one of its sessions, ``invalid`` by
+    a local orbit, and the code the store gives, still served, if it can't stop flagging it
+    served. With ``purge``, under the same refusals, its records are deleted too: its sessions,
     events, logs, review count, record moves, session locks, fallback files and registry entry,
-    and, for a clone orbit made, its directory; refused with ``invalid``, listing what would be
-    lost and removing nothing, while that clone holds work its remote doesn't."""
+    and, for a clone orbit made, its directory; refused too, removing nothing, with ``busy``
+    while another orbit owns its repository, with ``invalid``, listing what would be lost, while
+    that clone holds work its remote doesn't, and with the code the failure gives if what it
+    would lose can't be found out. If deleting fails once it's removed, it's refused with the
+    code the failure gives (``Removed …, but couldn't purge it: …``), and it stays removed."""
 
     type: Literal["remove_workspace"] = "remove_workspace"
     workspace: str
