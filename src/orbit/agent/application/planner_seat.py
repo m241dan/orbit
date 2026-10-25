@@ -1,5 +1,5 @@
-"""The planner's seat in a session: its current conversation, those a switch or reset retired,
-and the lane its turns run in."""
+"""The planner's seat in a session, or another conversational role's: its current conversation,
+those a switch or reset retired, and the lane its turns run in."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
@@ -22,6 +22,7 @@ from orbit.protocol import (
     PLANNER,
     PLANNER_LANE,
     BusyChanged,
+    BusyLane,
     ConversationReset,
     ErrorOccurred,
     Notice,
@@ -31,9 +32,21 @@ from orbit.protocol import (
 from orbit.tracing import Span, current_span
 
 NO_PLANNER_MESSAGE = "Planning needs agents and a planner role."
-PLANNER_BUSY_RESET = "The planner is answering; press ctrl+x to stop it first."
-NOTHING_TO_RESET = "The planner has no conversation to reset."
 ROLE_KEPT = "Kept the planner's role, as the config is invalid"
+
+
+def busy_reset(role: str) -> str:
+    """Why the conversation of the conversational role ``role`` can't be reset as it answers."""
+    return f"The {role} is answering; press ctrl+x to stop it first."
+
+
+def nothing_to_reset(role: str) -> str:
+    """Why the conversational role ``role`` has nothing to reset before its first turn."""
+    return f"The {role} has no conversation to reset."
+
+
+PLANNER_BUSY_RESET = busy_reset(PLANNER)
+NOTHING_TO_RESET = nothing_to_reset(PLANNER)
 
 
 _UNTRACED = PlannerTracing()
@@ -56,26 +69,43 @@ class SeatHooks:
     tracing: PlannerTracing = _UNTRACED
 
 
-class PlannerSeat:
-    """The planner of a session with ``desk``'s agents (none without them, without a planner
-    role or while it's disabled), proposing into ``tasks``; it publishes into ``events``."""
+@dataclass(frozen=True)
+class SeatParts:
+    """What a seat works with: the ``desk`` running the session's agents, if it has any, the
+    ``tasks`` its role proposes into, the ``events`` it publishes into, and the ``hooks`` it
+    asks its session by."""
 
-    def __init__(
-        self,
-        desk: AgentDesk | None,
-        tasks: Tasks,
-        events: EventSink,
-        hooks: SeatHooks,
-    ) -> None:
-        self._desk = desk
-        self._tasks = tasks
-        self._events = events
-        self._hooks = hooks
+    desk: AgentDesk | None
+    tasks: Tasks
+    events: EventSink
+    hooks: SeatHooks
+
+
+class PlannerSeat:
+    """The planner of a session with the ``parts``' desk's agents (none without them, without a
+    planner role or while it's disabled), proposing into their tasks and publishing into their
+    events. Given another conversational ``role``, it's that role's seat, its turns in that
+    role's lane, as the planner's are in its role's, or in ``planner`` without one."""
+
+    def __init__(self, parts: SeatParts, role: str = PLANNER) -> None:
+        self._desk = parts.desk
+        self._tasks = parts.tasks
+        self._events = parts.events
+        self._hooks = parts.hooks
+        self._name = role
         self._planner = self._chat()
         self._retired: list[PlannerChat] = []  # Planners of sessions left or reset, still to close.
         self._kept: str | None = None  # The conversation opened, kept to save without a planner.
         self._kept_notes: tuple[str, ...] = ()  # Its notes, kept the same way.
-        self._turns = TurnSlot(PLANNER_LANE, "The planner is already answering.", events.put_nowait)
+        found = self._role()
+        self._lane: BusyLane = found.lane if found else PLANNER_LANE
+        refusal = f"The {role} is already answering."
+        self._turns = TurnSlot(self._lane, refusal, parts.events.put_nowait)
+
+    @property
+    def lane(self) -> BusyLane:
+        """The lane the seat's turns run in."""
+        return self._lane
 
     @property
     def running(self) -> bool:
@@ -101,18 +131,19 @@ class PlannerSeat:
         role = self._role()
         if self._desk is None or role is None or not role.enabled:
             return None
-        return PlannerChat(self._desk, self._tasks, self._hooks.step_names)
+        return PlannerChat(self._desk, self._tasks, self._hooks.step_names, self._name)
 
     def _role(self) -> Role | None:
-        """The planner's role; none without agents or a planner role."""
-        return self._desk.agents.roles.get(PLANNER) if self._desk else None
+        """The seat's role; none without agents or that role."""
+        return self._desk.agents.roles.get(self._name) if self._desk else None
 
     def _absent(self) -> Refused:
-        """The refusal of the planner's work while there's no planner: the planner role is
-        disabled, or there are no agents or planner role."""
+        """The refusal of the seat's work while it has no planner: its role is disabled, or
+        there are no agents or role."""
         role = self._role()
         disabled = role is not None and not role.enabled
-        return Refused(NOT_CONFIGURED, disabled_note(PLANNER) if disabled else NO_PLANNER_MESSAGE)
+        message = disabled_note(self._name) if disabled else NO_PLANNER_MESSAGE
+        return Refused(NOT_CONFIGURED, message)
 
     def tell(self, note: str) -> None:
         """Have the planner, if there is one, hear ``note`` ahead of its next prompt."""
@@ -125,7 +156,7 @@ class PlannerSeat:
         without a planner, while it answers, or once saving the session halted it."""
         if self._planner is None:
             # Frees the prompt of a frontend that marked the lane busy when it sent this.
-            await self._events.put(BusyChanged(busy=False, lane=PLANNER_LANE))
+            await self._events.put(BusyChanged(busy=False, lane=self.lane))
             raise self._absent()
         self._hooks.use()
         await self._hooks.save()
@@ -174,25 +205,25 @@ class PlannerSeat:
 
     async def reset(self) -> None:
         """End the planner's conversation, re-reading its role; refused while it answers, and
-        noted when it has no conversation yet."""
+        noted when it has no conversation yet. Another role's seat keeps its role."""
         if self._desk is None or self._planner is None:
             raise self._absent()
         if self._turns.running:
-            raise Refused(BUSY, PLANNER_BUSY_RESET)
+            raise Refused(BUSY, busy_reset(self._name))
         if not self._planner.started:
-            await self._events.put(Notice(message=NOTHING_TO_RESET))
+            await self._events.put(Notice(message=nothing_to_reset(self._name)))
         else:
             await self._reread_role(self._desk)
             self.replace(None)
             await self.close_retired()
-            await self._events.put(ConversationReset(agent=PLANNER))
+            await self._events.put(ConversationReset(agent=self._name))
             await self._hooks.save()
 
     async def _reread_role(self, desk: AgentDesk) -> None:
-        """Have the planner's role as the project's config says now, if it can be read again;
-        an invalid config keeps the role it has, saying why."""
+        """Have the planner's role as the project's config says now, if it can be read again
+        and this is its seat; an invalid config keeps the role it has, saying why."""
         read = desk.agents.planner_role
-        if read is None:
+        if read is None or self._name != PLANNER:
             return
         role = read()
         if isinstance(role, ConfigError):

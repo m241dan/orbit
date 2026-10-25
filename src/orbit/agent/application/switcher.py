@@ -2,13 +2,14 @@
 another, or a new one, in place of the one open."""
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from typing import assert_never
 
 from orbit.agent.application.connection import to_everyone
+from orbit.agent.application.conversation_seats import ConversationSeats
 from orbit.agent.application.keeper import (
     ALREADY_OPEN,
     AlreadyOpen,
@@ -18,7 +19,6 @@ from orbit.agent.application.keeper import (
     SessionKeeper,
 )
 from orbit.agent.application.outbox import EventSink, Shown
-from orbit.agent.application.planner_seat import PlannerSeat
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.tasks import Tasks
@@ -62,8 +62,8 @@ def _stopped(saved: Sequence[TaskState], now: Sequence[TaskState]) -> list[str]:
 @dataclass(frozen=True)
 class SwitchParts:
     """What a switch replaces the contents of: the ``keeper`` saving the session, its ``tasks``,
-    its planner ``seat``, its review ``lane`` and ``work`` lane, if any, and the ``activity``
-    now in progress there; the ``snapshot`` of the session
+    its conversational roles' ``seats``, its review ``lane`` and ``work`` lane, if any, and the
+    ``activity`` now in progress there; the ``snapshot`` of the session
     open, last active then, that follows a switch; the workspace's ``entry`` in the catalog,
     holding the sessions given, which ``broadcast`` sends every listening connection, in the
     catalog, whenever they change; and
@@ -72,7 +72,7 @@ class SwitchParts:
 
     keeper: SessionKeeper
     tasks: Tasks
-    seat: PlannerSeat
+    seats: ConversationSeats
     lane: ReviewLane | None
     work: WorkLane | None
     activity: Callable[[], Activity]
@@ -183,12 +183,12 @@ class SessionSwitcher:
         reviews it has no lane to hold."""
         lane = self._parts.lane
         return Contents(
-            settings=self._settings.current,
-            planner_conversation=self._parts.seat.conversation_id,
+            role_settings=self._settings.roles,
+            conversations=self._parts.seats.conversations,
             tasks=self._parts.tasks.board.tasks,
             reviews=lane.snapshot() if lane else self._kept_reviews,
             spent=self.spent,
-            planner_notes=self._parts.seat.notes,
+            planner_notes=self._parts.seats.notes,
         )
 
     async def save(self) -> None:
@@ -259,8 +259,8 @@ class SessionSwitcher:
         self._leaving()
         tasks = interrupted(record.tasks)[0]
         self.spent = record.spent
-        self._settings.resume(record.settings)
-        self._hold(tasks, record.planner_conversation, record.reviews, record.planner_notes)
+        self._settings.resume(record.role_settings)
+        self._hold(tasks, record.conversations, record.reviews, record.planner_notes)
 
     def _clear(self) -> None:
         """Hold what a new session does, keeping the settings and having spent nothing; refused
@@ -268,7 +268,7 @@ class SessionSwitcher:
         self._may_switch()
         self._leaving()
         self.spent = Usage()
-        self._hold((), None, None)
+        self._hold((), {}, None)
 
     def _leaving(self) -> None:
         """Say a switch is under way, with whether the session left stays saved: it does once
@@ -278,17 +278,17 @@ class SessionSwitcher:
     def _hold(
         self,
         tasks: tuple[TaskState, ...],
-        conversation: str | None,
+        conversations: Mapping[str, str],
         reviews: LaneSnapshot | None,
         notes: tuple[str, ...] = (),
     ) -> None:
-        """Hold a session's ``tasks``, planner ``conversation``, ``reviews`` and the ``notes``
-        its planner is still to hear, with no fix counts."""
+        """Hold a session's ``tasks``, its roles' ``conversations``, ``reviews`` and the
+        ``notes`` its planner is still to hear, with no fix counts."""
         parts = self._parts
         self._replace_board(tasks)
         if parts.work is not None:
             parts.work.reset()
-        parts.seat.replace(conversation, notes)
+        parts.seats.replace(conversations, notes)
         if parts.lane is not None:
             parts.lane.load(reviews or NO_REVIEWS)
         self._kept_reviews = reviews
@@ -307,14 +307,14 @@ class SessionSwitcher:
         self, left: Left, stopped: Collection[str], last_active: datetime | None
     ) -> None:
         """Finish a switch from the session ``left``, deleting it if its tasks carried over:
-        close its planner, end the reviews ``stopped`` when it was saved, then save the session
-        opened and publish to every connection the catalog and its snapshot, last active at
-        ``last_active``, which alone shows what ending the reviews changed, and then note a
+        close its conversations, end the reviews ``stopped`` when it was saved, then save the
+        session opened and publish to every connection the catalog and its snapshot, last active
+        at ``last_active``, which alone shows what ending the reviews changed, and then note a
         review pause."""
         parts = self._parts
         discard, self._picking = self._picking, False
         await self._keeper.leave(left, discard)
-        await parts.seat.close_retired()
+        await parts.seats.close_retired()
         if parts.lane is not None:
             await parts.lane.end_interrupted(stopped)
         await parts.tasks.changed_elsewhere()

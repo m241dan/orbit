@@ -95,7 +95,9 @@ its id, label, path, sessions and `read_only`, true when another orbit owns its 
 URL, whose directory purging it deletes, then the agents' roles, the triggers and the lanes, each
 listed if any workspace served has it: a role that's disabled (`enabled = false`) is left out, as
 are the triggers that queue its tasks (`super-review` the super reviewer's, `configure-checks` the
-configurator's) and its lane, unless an enabled role shares it. Each
+configurator's) and its lane, unless an enabled role shares it. An agent role is `conversational`
+when the user can message it: the planner, and any other enabled role with `conversation = true`,
+whose lane is listed too. Each
 session carries its state (see [Session state](#session-state)).
 
 `Hello` attaches the connection to nothing, and nothing more reaches it until its first
@@ -513,8 +515,14 @@ is refused with `unknown`: `No task with id 't9'.`
   the tasks fixing it fix what it fixed instead, or become tasks of their own. It's refused with
   `busy` while the task runs: `Task 't3' can't be removed while it runs.`
 
-`UpdateSettings(settings)` replaces the session's settings, which apply from the next turn: it
-publishes `SettingsChanged` and saves the session.
+`UpdateSettings(settings, role)` replaces the session's settings for the conversational role
+`role`, which apply from its next turn: it publishes `SettingsChanged(settings, model_choices,
+role)` and saves the session. The session keeps settings for each conversational role (see
+`SendMessage` below), and a role's turns run with its own; the planner's are the ones the
+`Snapshot`'s `settings` hold. `role` was added to version 2 of both, defaulting to `planner`, so
+an older peer's settings are the planner's. It's refused with `unknown` for a role that isn't
+conversational here (`Role 'coder' has no settings of its own; the roles with them are planner.`)
+and with `not_configured` for a disabled one, as `SendMessage` to it is.
 
 A `Settings`, the session's or a task's, holds the `model` (`null` for the backend's default), the
 `tool_access` (`off`, `restricted` or `full`) and the `effort` (`low`, `medium`, `high`, `xhigh`
@@ -525,26 +533,36 @@ passed to agents yet.
 
 `CancelTurn(lane)` stops the work in `lane`, `work` unless given: in the work lane (the lane
 whose roles merge their work, `work` for the built-in roles), the task run, or its wait to start
-again, which holds the lane until the user asks for work again; in the `planner` lane, the
-planner's turn; in any other lane of the roles' (such as `review`), whose tasks start by
+again, which holds the lane until the user asks for work again; in a conversational role's lane
+(`planner` for the planner), that role's turn; in any other lane of the roles' (such as `review`), whose tasks start by
 themselves, the task running there, and the lane goes on with its next. Stopping a lane with
 nothing running is accepted and does nothing more. It's refused with `unknown` for a lane there's
 none of, naming those there are.
 
 `CancelAgent(agent_id)` stops agent `agent_id`'s work: the startup check, or the task of an agent
-in a lane whose tasks start by themselves, such as a reviewer's review, on its own; the planner's turn, as `CancelTurn` does for the `planner` lane; and any
+in a lane whose tasks start by themselves, such as a reviewer's review, on its own; a conversational role's turn, such as the planner's, as `CancelTurn` does for its lane; and any
 other agent's, the task run it's in, as `CancelTurn` does for the `work` lane. It's refused with
 `unknown` for an agent that isn't running: `No running agent 'agent-9'.`
 
+`SendMessage(agent, text)` starts a turn of the conversational agent `agent`: the planner, or
+any other enabled role with `conversation = true`. Each has a seat of its own: its own
+conversation, saved with the session and carried on when it's opened again, its own settings,
+and its turns in its role's lane, so one answers while another does; a second message to one
+still answering is refused with `busy` (`The planner is already answering.`). It's refused with
+`unknown` for an agent that isn't conversational, naming those that are (`Agent 'coder' can't
+be messaged; the agents you can message are planner and architect.`), with `not_configured`
+for a disabled conversational role (`architect is disabled in this project's configuration.`),
+and, for the planner, without agents and a planner role (`Planning needs agents and a planner
+role.`).
+
 `ResetConversation(agent)` ends the conversation of the conversational agent `agent`, the
-planner, so its next message starts a fresh one, and re-reads its role from the project's
-config, keeping the role it has, with a `Notice` saying why, when the config is invalid. It
-publishes `ConversationReset(agent)` and saves the session; with no conversation yet, a `Notice`
-says there's nothing to reset. It's refused with `unknown` for any other agent, with
-`not_configured` without agents and a planner role (`Planning needs agents and a planner
-role.`) or while the planner is disabled (`planner is disabled in this project's
-configuration.`), as `SendMessage` to it is, and with `busy` while the planner answers: `The planner is answering; press ctrl+x to
-stop it first.`
+planner or another, so its next message starts a fresh one, leaving the others' as they are.
+Resetting the planner also re-reads its role from the project's config, keeping the role it
+has, with a `Notice` saying why, when the config is invalid. It publishes
+`ConversationReset(agent)` and saves the session; with no conversation yet, a `Notice` says
+there's nothing to reset (`The planner has no conversation to reset.`). It's refused as
+`SendMessage` to it is, and with `busy` while the agent answers: `The planner is answering;
+press ctrl+x to stop it first.`
 
 ## Paging through history
 

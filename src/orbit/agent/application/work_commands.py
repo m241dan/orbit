@@ -1,15 +1,16 @@
-"""The work commands: prompts to the planner, tasks and the board, and the agents' work."""
+"""The work commands: prompts to the conversational roles, tasks and the board, and the agents'
+work."""
 
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import assert_never
 
+from orbit.agent.application.conversation_seats import ConversationSeats
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.failures import command_failure
 from orbit.agent.application.lane_runner import Lanes
 from orbit.agent.application.lanes import OPEN_GATE, SessionGate
 from orbit.agent.application.outbox import EventSink
-from orbit.agent.application.planner_seat import PlannerSeat
 from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.settings import SessionSettings
@@ -19,14 +20,13 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.work_turns import WorkTurns
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.catalog import CONVERSATIONAL_ROLES, trigger_names
+from orbit.agent.domain.catalog import trigger_names
 from orbit.agent.domain.refusals import Refused, unknown
 from orbit.agent.domain.roles import Role, check_enabled
 from orbit.protocol import (
     CONFIGURE_CHECKS,
     INVALID,
     NOT_CONFIGURED,
-    PLANNER,
     SUPER_REVIEW,
     UNKNOWN,
     AcceptTask,
@@ -43,6 +43,7 @@ from orbit.protocol import (
     ResetConversation,
     RunTasks,
     SendMessage,
+    Settings,
     TaskSpec,
     TaskState,
     UpdateSettings,
@@ -71,16 +72,16 @@ QueuedWork = RunTasks | FireTrigger
 @dataclass(frozen=True)
 class CommandParts:
     """What the work commands act on: the session's ``settings``, the ``events`` it publishes
-    into, its ``tasks``, its planner ``seat``, the work lane's ``turns``, its review ``lane``,
-    if any, the ``proposals`` waiting for the user, the ``desk`` running its agents and the
-    ``startup`` check, if any; ``save`` saves the session and ``reviews_changed`` saves its
-    review state; the session's ``gate`` says whether another orbit owns the repository; and
-    its ``lanes`` are the lanes work runs in, by name."""
+    into, its ``tasks``, its conversational roles' ``seats``, the work lane's ``turns``, its
+    review ``lane``, if any, the ``proposals`` waiting for the user, the ``desk`` running its
+    agents and the ``startup`` check, if any; ``save`` saves the session and ``reviews_changed``
+    saves its review state; the session's ``gate`` says whether another orbit owns the
+    repository; and its ``lanes`` are the lanes work runs in, by name."""
 
     settings: SessionSettings
     events: EventSink
     tasks: Tasks
-    seat: PlannerSeat
+    seats: ConversationSeats
     turns: WorkTurns
     lane: ReviewLane | None
     proposals: FrontendReview
@@ -194,20 +195,26 @@ class WorkCommands:
                 await self._send_message(command, command_id)
             case CancelTurn(lane=lane):
                 await self._cancel_turn(lane)
-            case UpdateSettings(settings=settings):
-                self._parts.settings.update(settings)
-                await self._parts.events.put(self._parts.settings.changed())
-                await self._parts.save()
+            case UpdateSettings(settings=settings, role=role):
+                await self._update_settings(settings, role)
             case _:
                 assert_never(command)
 
+    async def _update_settings(self, settings: Settings, role: str) -> None:
+        """Have the conversational role ``role`` use ``settings``, publishing them, then save;
+        refused for a role without a seat."""
+        problem = f"Role {role!r} has no settings of its own"
+        self._parts.seats.seat(role, problem, "the roles with them are")
+        self._parts.settings.update(settings, role)
+        await self._parts.events.put(self._parts.settings.changed(role))
+        await self._parts.save()
+
     async def _send_message(self, command: SendMessage, command_id: str) -> None:
-        """Start a planner turn with the message's text, publishing the message once accepted;
-        refused for any other agent."""
-        if command.agent not in CONVERSATIONAL_ROLES:
-            problem = f"Agent {command.agent!r} can't be messaged"
-            raise unknown(problem, "the agents you can message are", CONVERSATIONAL_ROLES)
-        await self._parts.seat.submit(command.text, self._parts.settings.current)
+        """Start a turn of the conversational role the message names with its text, with that
+        role's settings, publishing the message once accepted; refused for any other agent."""
+        problem = f"Agent {command.agent!r} can't be messaged"
+        seat = self._parts.seats.seat(command.agent, problem, "the agents you can message are")
+        await seat.submit(command.text, self._parts.settings.of(command.agent))
         # Put at once, before the turn just started runs, so the log has it ahead of the answer.
         self._parts.events.put_nowait(
             MessageSent(command_id=command_id, agent=command.agent, text=command.text)
@@ -278,8 +285,8 @@ class WorkCommands:
 
     async def _cancel_turn(self, lane: str) -> None:
         """Stop the work in ``lane``: the work lane's run, holding it; the task running in a lane
-        that starts by itself, which carries on; or the planner's turn. Refused for a lane
-        there's none of."""
+        that starts by itself, which carries on; or the turn of the conversational role
+        answering in it. Refused for a lane there's none of."""
         lanes = self._parts.lanes
         if lane not in lanes.names:
             raise unknown(f"No lane {lane!r}", "the lanes are", lanes.names)
@@ -289,7 +296,7 @@ class WorkCommands:
         elif runner is not None:
             runner.cancel()
         else:
-            self._parts.seat.cancel()
+            self._parts.seats.cancel(lane)
 
     async def _handle_agents(
         self,
@@ -309,11 +316,11 @@ class WorkCommands:
                 assert_never(command)
 
     async def _reset_conversation(self, command: ResetConversation) -> None:
-        """Reset the planner's conversation; refused for any other agent."""
-        if command.agent not in CONVERSATIONAL_ROLES:
-            problem = f"Agent {command.agent!r} has no conversation to reset"
-            raise unknown(problem, "the agents with one are", CONVERSATIONAL_ROLES)
-        await self._parts.seat.reset()
+        """Reset the conversation of the conversational role the command names; refused for
+        any other agent."""
+        problem = f"Agent {command.agent!r} has no conversation to reset"
+        seat = self._parts.seats.seat(command.agent, problem, "the agents with one are")
+        await seat.reset()
 
     async def _fire_trigger(self, command: FireTrigger) -> None:
         """Run the built-in trigger ``command`` names; refused for any other name, one whose role
@@ -365,12 +372,13 @@ class WorkCommands:
 
     def _cancel_work_of(self, agent: Agent) -> None:
         """Stop the task of an agent in a lane that starts by itself, such as a reviewer's review,
-        or the planner's turn, on its own; else the work lane's."""
+        or a conversational role's turn, on its own; else the work lane's."""
         runner = self._parts.lanes.of_role(agent.role)
+        seat = self._parts.seats.get(agent.role)
         if runner is not None:
             runner.cancel(agent.task_id)
-        elif agent.role == PLANNER:
-            self._parts.seat.cancel()
+        elif seat is not None:
+            seat.cancel()
         else:
             self._parts.turns.hold()
 

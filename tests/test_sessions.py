@@ -61,8 +61,8 @@ def record(tasks: tuple[TaskState, ...] = (), reviews: LaneSnapshot | None = Non
         name="Oct 7 09:05",
         created=CREATED,
         last_active=ACTIVE,
-        settings=Settings(model="opus", tool_access="full"),
-        planner_conversation="conversation-1",
+        role_settings={"planner": Settings(model="opus", tool_access="full")},
+        conversations={"planner": "conversation-1"},
         tasks=tasks,
         reviews=reviews,
     )
@@ -83,7 +83,7 @@ def test_the_default_name_drops_the_days_leading_zero_but_pads_the_time() -> Non
 
 
 def test_a_new_record_carries_the_current_format_version() -> None:
-    assert record().version == FORMAT_VERSION == 8
+    assert record().version == FORMAT_VERSION == 9
 
 
 def test_a_record_round_trips_through_json() -> None:
@@ -157,13 +157,13 @@ def rename_title(record: dict[str, Any]) -> dict[str, Any]:
 def test_an_older_record_is_migrated_and_stamped_with_the_new_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(sessions, "FORMAT_VERSION", 9)
-    monkeypatch.setitem(sessions._MIGRATIONS, 8, rename_title)
+    monkeypatch.setattr(sessions, "FORMAT_VERSION", 10)
+    monkeypatch.setitem(sessions._MIGRATIONS, 9, rename_title)
     data = {key: value for key, value in fields().items() if key != "name"}
-    old = data | {"version": 8, "title": "Old name"}
+    old = data | {"version": 9, "title": "Old name"}
     result = parse_record(json.dumps(old))
     assert isinstance(result, SessionRecord)
-    assert (result.version, result.name) == (9, "Old name")
+    assert (result.version, result.name) == (10, "Old name")
 
 
 def version_1(tasks: tuple[TaskState, ...]) -> dict[str, Any]:

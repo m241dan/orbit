@@ -323,12 +323,15 @@ class ControlPlane:
     async def _catalog(self, changed: WorkspaceEntry | None = None) -> Catalog:
         """What exists: every workspace served, the one ``changed`` names with that entry, if
         given, and the others with their sessions as they are now, and their agents' enabled
-        roles, the triggers and the lanes, each listed if any workspace has it."""
+        roles, those any workspace converses with marked so, the triggers and the lanes, each
+        listed if any workspace has it."""
         hosts = tuple(self._hosts.values())  # Workspaces may be added or removed meanwhile.
         entries = [await self._entry(host, changed) for host in hosts]
         roles = _across(hosts, lambda host: host.roles)
         triggers = _across(hosts, lambda host: host.triggers)
-        return catalog(entries, roles, triggers, _across(hosts, lambda host: host.lanes))
+        lanes = _across(hosts, lambda host: host.lanes)
+        conversational = _across(hosts, lambda host: host.conversational)
+        return catalog(entries, roles, triggers, lanes, conversational)
 
     @staticmethod
     async def _entry(host: WorkspaceHost, changed: WorkspaceEntry | None) -> WorkspaceEntry:

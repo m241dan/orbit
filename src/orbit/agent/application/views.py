@@ -24,6 +24,7 @@ from orbit.agent.domain.sessions import (
 )
 from orbit.protocol import (
     NOT_ACTIVE,
+    PLANNER,
     PLANNER_LANE,
     UNKNOWN,
     WORK_LANE,
@@ -243,7 +244,7 @@ class SessionViews:
         transcript = await parts.events.transcript(record.id)
         view = self.snapshot(
             session=summarize(record),
-            settings=record.settings,
+            settings=record.role_settings.get(PLANNER, Settings()),
             busy={WORK_LANE: False, PLANNER_LANE: False},
             tasks=record.tasks,
             steps=(),

@@ -109,10 +109,10 @@ async def test_a_prompt_saves_the_session_then_its_planners_conversation() -> No
     session, _, launcher = session_for(store=store)
     launcher.planner_turns = [chats]
     await send(session, SendMessage(agent=PLANNER, text="hello"))
-    assert [(r.tasks, r.planner_conversation) for r in store.saved] == [((), None)]
+    assert [(r.tasks, r.conversations) for r in store.saved] == [((), {})]
 
     await events_until(session, idle("planner"))
-    assert store.last.planner_conversation == "conversation-agent-1"
+    assert store.last.conversations == {PLANNER: "conversation-agent-1"}
     await session.close()
 
 
@@ -146,7 +146,7 @@ async def test_a_settings_change_is_saved_once_the_session_is_used() -> None:
     session, _, _ = session_for(store=store)
     await send(session, AddTask(task=TASK))
     await send(session, UpdateSettings(settings=Settings(model="opus", tool_access="full")))
-    assert store.last.settings == Settings(model="opus", tool_access="full")
+    assert store.last.role_settings == {PLANNER: Settings(model="opus", tool_access="full")}
     await session.close()
 
 

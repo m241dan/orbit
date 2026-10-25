@@ -186,6 +186,7 @@ COMMANDS: tuple[CommandEnvelope, ...] = (
     command(SendMessage(agent=PLANNER, text="hello")),
     command(CancelTurn(lane=PLANNER_LANE)),
     command(UpdateSettings(settings=SETTINGS)),
+    command(UpdateSettings(role="architect", settings=SETTINGS)),
     command(AddTask(task=SPEC)),
     command(EditTask(task_id="t1", task=SPEC)),
     command(RunTasks()),
@@ -214,6 +215,7 @@ COMMANDS: tuple[CommandEnvelope, ...] = (
 
 EVENTS: tuple[EventEnvelope, ...] = (
     event(SettingsChanged(settings=SETTINGS, model_choices=("opus", "sonnet"))),
+    event(SettingsChanged(role="architect", settings=SETTINGS)),
     event(TurnStarted(turn_id="turn-1", agent_id="agent-1")),
     event(AssistantMessage(turn_id="turn-1", agent_id="agent-1", text="Done")),
     event(

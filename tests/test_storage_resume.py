@@ -13,9 +13,9 @@ from orbit.agent.application.storage_halt import HaltHooks, RetriedWrite, Storag
 from orbit.agent.application.storage_resume import ResumeParts, StorageResume
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.storage_halt import FailedWrite, SeqSpan
-from orbit.protocol import Event, LogGap, Settings, Usage
+from orbit.protocol import PLANNER, Event, LogGap, Settings, Usage
 
-CONTENTS = Contents(Settings(), None, (), None, Usage())
+CONTENTS = Contents({PLANNER: Settings()}, {}, (), None, Usage())
 
 
 @dataclass

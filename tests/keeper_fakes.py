@@ -3,14 +3,14 @@
 from dataclasses import replace
 
 from orbit.agent.application.keeper import Contents, SessionKeeper
-from orbit.protocol import ErrorOccurred, Event, Settings, TaskState, Usage
+from orbit.protocol import PLANNER, ErrorOccurred, Event, Settings, TaskState, Usage
 from tests import server_fakes
 
 TASK = TaskState(id="1", task=server_fakes.TASK)
 
 
 EMPTY = Contents(
-    settings=Settings(), planner_conversation=None, tasks=(), reviews=None, spent=Usage()
+    role_settings={PLANNER: Settings()}, conversations={}, tasks=(), reviews=None, spent=Usage()
 )
 
 

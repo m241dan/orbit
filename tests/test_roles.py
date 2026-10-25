@@ -10,6 +10,7 @@ from orbit.agent.domain.roles import (
     Role,
     built_in_roles,
     check_enabled,
+    conversational_roles,
     disabled_roles,
     load_built_in_roles,
     merging_lane,
@@ -362,6 +363,17 @@ def test_a_disabled_role_adds_no_lane() -> None:
         instructions="Audit.", verify=False, lane="security", workspace="snapshot", enabled=False
     )
     assert "security" not in task_lanes({**BUILT_IN_ROLES, "security": security})
+
+
+def test_the_built_in_conversational_role_is_the_planner() -> None:
+    assert conversational_roles(BUILT_IN_ROLES) == ("planner",)
+
+
+def test_the_conversational_roles_are_the_enabled_ones_in_conversation_in_order() -> None:
+    architect = BUILT_IN_ROLES["planner"].model_copy(update={"lane": "design"})
+    muted = architect.model_copy(update={"lane": "muted", "enabled": False})
+    roles = {"architect": architect, **BUILT_IN_ROLES, "muted": muted}
+    assert conversational_roles(roles) == ("architect", "planner")
 
 
 def test_the_merging_lane_is_the_lane_of_the_roles_that_merge() -> None:

@@ -634,3 +634,50 @@ async def test_a_turn_failing_with_another_api_error_shows_its_own_text() -> Non
     assert errors(published) == [
         ErrorOccurred(turn_id=turn_id, agent_id="agent-1", code=AGENT_FAILED, message=message)
     ]
+
+
+ARCHITECT = "architect"
+ARCHITECT_ROLE = ROLES[PLANNER].model_copy(
+    update={"instructions": "You design.", "lane": "design", "model": "haiku"}
+)
+
+
+def architects(minutes: float | None = None) -> dict[str, Role]:
+    """The roles, with an architect in conversation, its turns limited to ``minutes``."""
+    return {**ROLES, ARCHITECT: ARCHITECT_ROLE.model_copy(update={"timeout_minutes": minutes})}
+
+
+async def test_another_conversational_roles_chat_runs_its_agent_in_that_role() -> None:
+    published: list[Event] = []
+    chat, launcher, _ = steps_chat(
+        resume_lost, chats, published=published, roles=architects(), role=ARCHITECT
+    )
+    chat.restore("saved-1")
+    assert chat.model(Settings()) == "haiku"
+    assert await chat.answer("Carry on.", Settings()) == "completed"
+    assert published[0] == AgentStarted(agent_id="agent-1", role=ARCHITECT, task_id=PLAN_TASK)
+    resumed = "Couldn't resume the architect's conversation; starting fresh."
+    assert Notice(message=resumed) in published
+    assert launcher.launches[-1].instructions == "You design."
+    reply = await launcher.host.call("token-1", "report_progress", note="Sketching.")
+    assert reply == Reply("Noted.")
+
+
+async def test_another_conversational_role_is_named_when_claudes_api_fails_its_turn() -> None:
+    published: list[Event] = []
+    chat, _, _ = steps_chat(cannot_connect, published=published, roles=architects(), role=ARCHITECT)
+    assert await chat.answer("Design.", Settings()) == "error"
+    note = (
+        "Claude's API isn't answering, so the architect couldn't reply; "
+        "send your message again later."
+    )
+    assert [e.message for e in errors(published)] == [note]
+
+
+async def test_another_conversational_role_is_named_when_its_turn_runs_out_of_time() -> None:
+    published: list[Event] = []
+    roles = architects(0.0001)
+    chat, _, _ = steps_chat(hangs, published=published, roles=roles, role=ARCHITECT)
+    assert await chat.answer("Design.", Settings()) == "error"
+    message = "The architect ran out of time (0.0001 minutes)."
+    assert [e.message for e in errors(published)] == [message]

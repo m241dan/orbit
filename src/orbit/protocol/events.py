@@ -35,7 +35,7 @@ from orbit.protocol.models import (
     message_types,
     oldest_seq_if_dropped,
 )
-from orbit.protocol.names import WORK_LANE, BusyLane, PauseReason
+from orbit.protocol.names import PLANNER, WORK_LANE, BusyLane, PauseReason
 
 if TYPE_CHECKING:  # Envelopes carry events, so those events hold are resolved in envelope.py.
     from orbit.protocol.envelope import EventEnvelope
@@ -44,11 +44,13 @@ TurnEndReason = Literal["completed", "cancelled", "max_steps", "error"]
 
 
 class SettingsChanged(_Message):
-    """Current settings, sent on connect and after every change."""
+    """The current settings of the conversational role ``role``, the planner unless given, sent
+    after every change to them."""
 
     type: Literal["settings_changed"] = "settings_changed"
     settings: Settings
     model_choices: tuple[str, ...] = ()
+    role: str = PLANNER
 
 
 # Turn events carry ``agent_id`` when an agent runs the turn, and none when orbit ends it itself.

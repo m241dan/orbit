@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from orbit.agent.domain.endings import first_line
-from orbit.protocol import PauseReason, UsageChanged
+from orbit.protocol import PLANNER, PauseReason, UsageChanged
 
 _LIMIT_HIT = re.compile(r"\bhit your\b.*\blimit\b|\busage limit reached\b", re.IGNORECASE)
 
@@ -26,9 +26,17 @@ RESUMING_NOTE = "Starting the run again after the usage limit."
 OUTAGE_RESUMING_NOTE = "Starting the run again now Claude's API may be answering."
 """Said as a run an outage stopped starts again by itself."""
 
-PLANNER_OUTAGE_NOTE = (
-    "Claude's API isn't answering, so the planner couldn't reply; send your message again later."
-)
+
+def outage_note(role: str) -> str:
+    """Said in place of the error when Claude's API not answering fails a turn of the
+    conversational role ``role``."""
+    return (
+        f"Claude's API isn't answering, so the {role} couldn't reply; "
+        "send your message again later."
+    )
+
+
+PLANNER_OUTAGE_NOTE = outage_note(PLANNER)
 """Said in place of the error when Claude's API not answering fails a planner turn."""
 
 WAIT_CANCELLED_NOTE = "The run won't start again by itself."

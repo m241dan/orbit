@@ -1238,7 +1238,7 @@ def startup_of(session: WorkspaceHost) -> StartupCheck | None:
 
 def planner_turn(session: WorkspaceHost) -> asyncio.Task[object] | None:
     """The planner's current turn, if it has one."""
-    return session._seat.turn
+    return session._seats.planner.turn
 
 
 def store_of(session: WorkspaceHost) -> SessionStore | None:
@@ -1362,10 +1362,13 @@ async def plan(session: WorkspaceHost, text: str) -> list[Event]:
 
 
 def steps_chat(
-    *turns: Script, published: list[Event] | None = None, roles: Mapping[str, Role] = ROLES
+    *turns: Script,
+    published: list[Event] | None = None,
+    roles: Mapping[str, Role] = ROLES,
+    role: str = PLANNER,
 ) -> tuple[PlannerChat, ScriptedLauncher, list[tuple[str, ...]]]:
-    """A planner chat playing ``turns`` with ``roles``, whose steps are the last in the list it
-    returns; what it publishes goes to ``published``."""
+    """A chat with the planner, or the conversational ``role``, playing ``turns`` with ``roles``,
+    whose steps are the last in the list it returns; what it publishes goes to ``published``."""
     agents, launcher = agents_for(roles=roles)
     launcher.planner_turns = list(turns)
     sink = published if published is not None else []
@@ -1375,7 +1378,8 @@ def steps_chat(
 
     desk = AgentDesk(agents, publish)
     steps: list[tuple[str, ...]] = [("Ruff lint",)]
-    return PlannerChat(desk, Tasks(TaskBoard(), publish), lambda: steps[-1]), launcher, steps
+    chat = PlannerChat(desk, Tasks(TaskBoard(), publish), lambda: steps[-1], role)
+    return chat, launcher, steps
 
 
 async def hangs(call: Call) -> TurnEndReason:

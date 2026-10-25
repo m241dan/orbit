@@ -6,7 +6,7 @@ sessions, each under its lock.
 
 import asyncio
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -168,12 +168,13 @@ _NEW_SESSIONS = NewSessions()
 
 @dataclass(frozen=True)
 class Contents:
-    """What a saved session holds of the work: the ``settings`` its planner and new tasks use,
-    the planner's Claude conversation, its ``tasks``, its ``reviews``' state, if any, what its
-    agents have ``spent`` in all, and the ``planner_notes`` its planner is still to hear."""
+    """What a saved session holds of the work: the settings each conversational role uses, by
+    role (``role_settings``), the planner's for new tasks too, each one's Claude conversation
+    (``conversations``), its ``tasks``, its ``reviews``' state, if any, what its agents have
+    ``spent`` in all, and the ``planner_notes`` its planner is still to hear."""
 
-    settings: Settings
-    planner_conversation: str | None
+    role_settings: Mapping[str, Settings]
+    conversations: Mapping[str, str]
     tasks: tuple[TaskState, ...]
     reviews: LaneSnapshot | None
     spent: Usage
@@ -321,8 +322,8 @@ class SessionKeeper:
             name=self.name,
             created=self.created,
             last_active=self._clock(),
-            settings=contents.settings,
-            planner_conversation=contents.planner_conversation,
+            role_settings=dict(contents.role_settings),
+            conversations=dict(contents.conversations),
             planner_notes=contents.planner_notes,
             tasks=contents.tasks,
             reviews=contents.reviews,

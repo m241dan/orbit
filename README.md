@@ -1002,8 +1002,8 @@ the role.
 
 A role also says which lane runs it, where it works, whether you talk to it, whether its work
 merges, whether it's enabled and how hard its agents think. Its `lane` takes effect, as do
-`merge` in choosing the lane that runs on `ctrl+r` and `enabled`, and its `workspace` decides
-whether its tasks count toward `max_coders` (see Taking turns under
+`merge` in choosing the lane that runs on `ctrl+r`, `enabled` and `conversation`, and its
+`workspace` decides whether its tasks count toward `max_coders` (see Taking turns under
 [Serving the control plane](#serving-the-control-plane)); the rest are **accepted now; take effect
 in a later version**: orbit loads and checks them, but nothing acts on them yet.
 
@@ -1022,8 +1022,14 @@ in a later version**: orbit loads and checks them, but nothing acts on them yet.
 - `workspace`: where its agent works: `worktree` (the coder's separate worktree, the only one whose
   work can merge), `snapshot` (a read-only snapshot of the base commit), `checkout` (your checkout,
   read in place) or `none` (an empty temporary directory).
-- `conversation`: whether you talk to it at the prompt, as you do the planner, rather than it
-  taking tasks.
+- `conversation`: whether you talk to it, as you do the planner, rather than it taking tasks.
+  Each enabled conversational role has a seat of its own: its own conversation, which the session
+  saves and carries on when you open it again, and which resetting it ends alone; its own model,
+  tool access and effort, saved with the session; and its turns in its own lane, so it answers
+  while the planner does. It's listed as conversational in the Catalog, and its lane in the
+  Catalog's lanes and the Snapshot's `busy`. For now the prompt talks to the planner; other
+  conversational roles are reached through the protocol's `SendMessage`, `ResetConversation`,
+  `CancelTurn` and `UpdateSettings` (see [docs/protocol.md](docs/protocol.md)).
 - `merge`: whether its finished work is committed and merged.
 - `enabled`: whether it runs at all. A disabled role is left out of the Catalog's agents, and its
   lane out of the Catalog's lanes unless an enabled role shares it. A disabled `reviewer` queues no

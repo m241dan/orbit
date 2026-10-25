@@ -136,6 +136,24 @@ def test_settings_changed_round_trip() -> None:
     assert event_adapter.validate_json(event.model_dump_json()) == event
 
 
+def test_settings_are_the_planners_unless_they_name_a_role() -> None:
+    assert UpdateSettings(settings=Settings()).role == PLANNER
+    assert SettingsChanged(settings=Settings()).role == PLANNER
+    named = UpdateSettings(role="architect", settings=Settings())
+    assert command_adapter.validate_json(named.model_dump_json()) == named
+
+
+def test_settings_from_an_older_peer_without_a_role_are_the_planners() -> None:
+    wire = {"type": "settings_changed", "settings": {"model": "opus"}}
+    event = event_adapter.validate_python(wire, context={"wire": True})
+    assert isinstance(event, SettingsChanged) and event.role == PLANNER
+
+
+def test_rejects_settings_for_no_role() -> None:
+    with pytest.raises(ValidationError):
+        UpdateSettings(role="", settings=Settings())
+
+
 def test_rejects_unknown_tool_access() -> None:
     with pytest.raises(ValidationError):
         Settings.model_validate({"tool_access": "sometimes"})

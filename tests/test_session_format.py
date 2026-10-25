@@ -23,8 +23,8 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit these for a format change: they're what orbits at versions 1 to 8 wrote, and
-# they still need to read. A new version gets its own fixture (session-v9.json) and a
+# Never edit these for a format change: they're what orbits at versions 1 to 9 wrote, and
+# they still need to read. A new version gets its own fixture (session-v10.json) and a
 # migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
 SESSION_V2 = FIXTURES / "session-v2.json"
@@ -34,6 +34,7 @@ SESSION_V5 = FIXTURES / "session-v5.json"
 SESSION_V6 = FIXTURES / "session-v6.json"
 SESSION_V7 = FIXTURES / "session-v7.json"
 SESSION_V8 = FIXTURES / "session-v8.json"
+SESSION_V9 = FIXTURES / "session-v9.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -147,13 +148,13 @@ def expected(
     lane: LaneSnapshot | None = None,
 ) -> SessionRecord:
     return SessionRecord(
-        version=8,
+        version=9,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
         last_active=datetime(2026, 10, 17, 14, 30, tzinfo=timezone(timedelta(hours=2))),
-        settings=Settings(model="opus", tool_access="full"),
-        planner_conversation="conversation-1",
+        role_settings={"planner": Settings(model="opus", tool_access="full")},
+        conversations={"planner": "conversation-1"},
         tasks=tasks() if states is None else states,
         reviews=reviews() if lane is None else lane,
         spent=spent,
@@ -221,22 +222,49 @@ def straining() -> SessionRecord:
     effort."""
     record = telling()
     first, *others = record.tasks
+    settings = Settings(model="opus", tool_access="full", effort="high")
     return record.model_copy(
         update={
-            "settings": record.settings.model_copy(update={"effort": "high"}),
+            "role_settings": {"planner": settings},
             "tasks": (with_effort(first, "low"), *others),
         }
     )
 
 
-def test_a_version_8_session_file_reads_as_its_record() -> None:
+def test_a_version_8_session_file_migrates_to_the_planners_settings_and_conversation() -> None:
     assert parse_record(SESSION_V8.read_text(encoding="utf-8")) == straining()
 
 
-def test_a_session_record_is_written_in_the_version_8_format() -> None:
-    written = json.loads(record_json(straining()))
+def test_a_version_8_record_without_a_conversation_migrates_to_none() -> None:
     golden = json.loads(SESSION_V8.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V8.name)
+    del golden["settings"]
+    golden["planner_conversation"] = None
+    record = parse_record(json.dumps(golden))
+    assert isinstance(record, SessionRecord)
+    assert (record.conversations, record.role_settings) == ({}, {"planner": Settings()})
+
+
+def conversing() -> SessionRecord:
+    """The golden record as version 9 keeps it, with an architect's conversation and settings
+    beside the planner's."""
+    record = straining()
+    architect = Settings(model="sonnet", tool_access="restricted", effort="max")
+    return record.model_copy(
+        update={
+            "role_settings": {**record.role_settings, "architect": architect},
+            "conversations": {**record.conversations, "architect": "conversation-2"},
+        }
+    )
+
+
+def test_a_version_9_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V9.read_text(encoding="utf-8")) == conversing()
+
+
+def test_a_session_record_is_written_in_the_version_9_format() -> None:
+    written = json.loads(record_json(conversing()))
+    golden = json.loads(SESSION_V9.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V9.name)
 
 
 def test_a_version_1_review_count_reads_as_its_count() -> None:

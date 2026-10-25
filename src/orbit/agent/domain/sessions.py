@@ -1,8 +1,9 @@
 """Saved sessions: stretches of work the user can come back to.
 
-A saved session keeps its task list, its review state, the planner's conversation and the
-settings it ran with. It is unrelated to the backend's connection, :class:`WorkspaceHost`. The
-caller reads and writes the store and the clock; these rules only shape what's in them.
+A saved session keeps its task list, its review state, and each conversational role's
+conversation and the settings it ran with. It is unrelated to the backend's connection,
+:class:`WorkspaceHost`. The caller reads and writes the store and the clock; these rules only
+shape what's in them.
 """
 
 from collections import Counter
@@ -21,6 +22,7 @@ from orbit.protocol import (
     BUSY,
     INVALID,
     LOCKED,
+    PLANNER,
     WRONG_SESSION,
     SessionSummary,
     Settings,
@@ -28,7 +30,7 @@ from orbit.protocol import (
     Usage,
 )
 
-FORMAT_VERSION = 8
+FORMAT_VERSION = 9
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
@@ -66,6 +68,16 @@ def _unchanged(record: dict[str, Any]) -> dict[str, Any]:
     return record
 
 
+def _per_role(record: dict[str, Any]) -> dict[str, Any]:
+    """Version 8 ``record`` with its settings and the planner's conversation, if it had one, as
+    the planner's among those of every conversational role."""
+    fields = {k: v for k, v in record.items() if k not in ("settings", "planner_conversation")}
+    conversation = record.get("planner_conversation")
+    conversations = {} if conversation is None else {PLANNER: conversation}
+    role_settings = {PLANNER: record.get("settings", {})}
+    return fields | {"role_settings": role_settings, "conversations": conversations}
+
+
 # By version N: what takes a record of version N and returns its fields in version N+1's shape.
 # The upgrade sets the version for it. Version 3 dropped the planner's rounds through a migration
 # rather than by having the snapshot ignore them, so that the format stays pinned by its fixtures
@@ -74,6 +86,8 @@ def _unchanged(record: dict[str, Any]) -> dict[str, Any]:
 # has suggested, version 7 the notes the planner is still to hear, and version 8 the effort in
 # the session's and its tasks' settings; their versions stop an older orbit, which forbids fields
 # it doesn't know, at a clear "written by a newer orbit" rather than a field it can't read.
+# Version 9 keeps the settings and conversation of each conversational role, not just the
+# planner's, so its migration moves them into place.
 _MIGRATIONS: dict[int, Migration] = {
     1: _spent_by_tasks,
     2: _without_rounds,
@@ -82,6 +96,7 @@ _MIGRATIONS: dict[int, Migration] = {
     5: _unchanged,
     6: _unchanged,
     7: _unchanged,
+    8: _per_role,
 }
 
 EMPTY_NAME = "A session needs a name."
@@ -90,9 +105,10 @@ OPEN_UNRENAMABLE = "Can't rename the session as a saved one: it was opened meanw
 
 
 class SessionRecord(BaseModel):
-    """A saved session ``id``, ``name``d by the user, with the ``settings`` its planner and new
-    tasks use, the planner's Claude conversation and the ``planner_notes`` it's still to hear,
-    its ``tasks`` and, when reviews are on, its ``reviews``' state, and what its agents have
+    """A saved session ``id``, ``name``d by the user, with the settings each conversational role
+    uses, by role (``role_settings``), the planner's for new tasks too, each one's Claude
+    conversation (``conversations``), the ``planner_notes`` the planner is still to hear, its
+    ``tasks`` and, when reviews are on, its ``reviews``' state, and what its agents have
     ``spent`` in all, the planner and tasks since removed included."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -102,8 +118,8 @@ class SessionRecord(BaseModel):
     name: str
     created: AwareDatetime
     last_active: AwareDatetime
-    settings: Settings = Settings()
-    planner_conversation: str | None = None
+    role_settings: dict[str, Settings] = Field(default={})
+    conversations: dict[str, str] = Field(default={})
     planner_notes: tuple[str, ...] = ()
     tasks: tuple[TaskState, ...] = ()
     reviews: LaneSnapshot | None = None

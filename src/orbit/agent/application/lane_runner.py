@@ -195,17 +195,24 @@ class Kickable(Protocol):
 
 class Lanes:
     """The session's lanes, by name: ``work``, the lane whose roles merge, which runs on the
-    user's asking, the planner's, and those the ``runners`` run, which start by themselves."""
+    user's asking, those the conversational roles answer in (``conversing``), the planner's
+    unless given, and those the ``runners`` run, which start by themselves."""
 
-    def __init__(self, work: BusyLane = WORK_LANE, runners: Iterable[LaneRunner] = ()) -> None:
+    def __init__(
+        self,
+        work: BusyLane = WORK_LANE,
+        runners: Iterable[LaneRunner] = (),
+        conversing: Iterable[BusyLane] = (PLANNER_LANE,),
+    ) -> None:
         self.work = work
         self._runners = {runner.lane: runner for runner in runners}
+        self._conversing = tuple(conversing)
 
     @property
     def names(self) -> tuple[BusyLane, ...]:
-        """Every lane's name: the work lane's, the planner's, then those that start by
-        themselves."""
-        return (self.work, PLANNER_LANE, *self._runners)
+        """Every lane's name: the work lane's, the conversational roles', then those that start
+        by themselves."""
+        return (self.work, *self._conversing, *self._runners)
 
     @property
     def elsewhere(self) -> frozenset[str]:

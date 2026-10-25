@@ -114,8 +114,8 @@ async def test_a_session_with_a_task_is_saved_as_it_is() -> None:
     keeper, _ = keeper_for(store)
     reviews = LaneSnapshot(planner=PlannerSnapshot())
     contents = Contents(
-        settings=Settings(model="opus"),
-        planner_conversation="c1",
+        role_settings={"planner": Settings(model="opus")},
+        conversations={"planner": "c1"},
         tasks=(TASK,),
         reviews=reviews,
         spent=SPENT,
@@ -124,7 +124,8 @@ async def test_a_session_with_a_task_is_saved_as_it_is() -> None:
     assert keeper.used
     [record] = store.saved
     assert (record.id, record.name, record.created) == ("session-1", "Oct 17 14:30", START)
-    assert record.settings == Settings(model="opus") and record.planner_conversation == "c1"
+    assert record.role_settings == {"planner": Settings(model="opus")}
+    assert record.conversations == {"planner": "c1"}
     assert record.tasks == (TASK,) and record.reviews == reviews and record.spent == SPENT
 
 

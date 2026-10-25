@@ -28,6 +28,13 @@ async def test_the_settings_show_under_the_prompt_as_reported() -> None:
     assert shell.marks.subtitle == "planner's model: default · new tasks' tools: off"
 
 
+async def test_another_roles_settings_leave_the_planners_shown() -> None:
+    shell = Shell()
+    await shown(shell, Settings(model="opus"))
+    await shell.feed(SettingsChanged(role="architect", settings=Settings(model="haiku")))
+    assert shell.marks.subtitle == "planner's model: opus · new tasks' tools: restricted"
+
+
 async def test_the_pickers_open_only_once_the_backend_has_reported_settings() -> None:
     shell = Shell()
     shell.frontend.pick_model()

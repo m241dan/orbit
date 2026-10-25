@@ -6,9 +6,10 @@ from itertools import count
 
 import pytest
 
+from orbit.agent.application.conversation_seats import ConversationSeats
 from orbit.agent.application.keeper import NewSessions, SessionKeeper
 from orbit.agent.application.outbox import Shown
-from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
+from orbit.agent.application.planner_seat import SeatHooks
 from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.switcher import SessionSwitcher, SwitchParts
 from orbit.agent.application.tasks import Tasks
@@ -19,6 +20,7 @@ from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
     BUSY,
+    PLANNER,
     ActivateSession,
     Catalog,
     DeleteSession,
@@ -92,11 +94,11 @@ def switcher_for(
     ids = (f"session-{n}" for n in count(1))
     keeper = SessionKeeper(store, events.put, FakeHalt(), NewSessions(Ticks(), lambda: next(ids)))
     tasks = Tasks(TaskBoard(), events.put)
-    seat = PlannerSeat(None, tasks, events, SeatHooks(nothing, keeper.use, tuple))
+    seats = ConversationSeats(None, tasks, events, SeatHooks(nothing, keeper.use, tuple))
     parts = SwitchParts(
         keeper,
         tasks,
-        seat,
+        seats,
         None,
         None,
         lambda: held.activity,
@@ -252,7 +254,7 @@ async def test_a_new_session_keeps_the_settings_and_has_spent_nothing() -> None:
 
 async def test_an_opened_session_keeps_the_pinned_settings_as_given() -> None:
     store = FakeStore()
-    store.saved = [saved(settings=Settings(model="sonnet", tool_access="full"))]
+    store.saved = [saved(role_settings={PLANNER: Settings(model="sonnet", tool_access="full")})]
     held = Held(Settings(model="opus", tool_access="restricted"))
     switcher, _, _ = switcher_for(store, held, pinned=("model",))
     await switcher.handle(ActivateSession(session="auth"))
@@ -292,5 +294,17 @@ async def test_contents_hold_the_board_and_settings() -> None:
     switcher, _, tasks = switcher_for(FakeStore(), held)
     await tasks.change(lambda board: board.add(TaskSpec(prompt="Fix it.")))
     contents = switcher.contents()
-    assert contents.settings == Settings(model="opus")
+    assert contents.role_settings == {PLANNER: Settings(model="opus")}
     assert [t.task.prompt for t in contents.tasks] == ["Fix it."]
+
+
+async def test_an_opened_sessions_conversations_and_settings_are_saved_back() -> None:
+    store = FakeStore()
+    architects = Settings(model="haiku")
+    conversations = {PLANNER: "c1", "architect": "c2"}
+    store.saved = [saved(conversations=conversations, role_settings={"architect": architects})]
+    switcher, _, _ = switcher_for(store, Held(Settings(model="opus")))
+    await switcher.handle(ActivateSession(session="auth"))
+    contents = switcher.contents()
+    assert contents.conversations == conversations
+    assert contents.role_settings == {PLANNER: Settings(model="opus"), "architect": architects}

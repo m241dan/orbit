@@ -14,6 +14,7 @@ from pathlib import PurePath
 from orbit.agent.application.closing import close_all
 from orbit.agent.application.coder_slots import CoderSeat, CoderSlots
 from orbit.agent.application.connection import Connections, Place, SessionConnection
+from orbit.agent.application.conversation_seats import ConversationSeats
 from orbit.agent.application.desk import AgentDesk, Agents
 from orbit.agent.application.handover import Handover, HandoverParts
 from orbit.agent.application.handshake import HostGreeting
@@ -31,7 +32,7 @@ from orbit.agent.application.lane_runner import LaneParts, LaneRunner, Lanes
 from orbit.agent.application.lanes import Background, SessionGate
 from orbit.agent.application.log_writer import Overflow
 from orbit.agent.application.outbox import EventSink, Outbox, Shown
-from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
+from orbit.agent.application.planner_seat import SeatHooks
 from orbit.agent.application.planner_trace import PlannerTracing
 from orbit.agent.application.ports import (
     Fallback,
@@ -89,7 +90,6 @@ from orbit.protocol import (
     CODER,
     INVALID,
     PLANNER,
-    PLANNER_LANE,
     REVIEW_ROLES,
     REVIEWER,
     ActivateSession,
@@ -171,11 +171,13 @@ class WorkspaceHost:
     """One workspace's backend: takes the commands the control plane routes to it, runs work in
     the background and publishes its events.
 
-    The session owns the task board and reports it whole on every change. It starts the
-    planner's lane, whose turns answer prompts, and a lane for each lane of the enabled task
-    roles: the work lane, the one whose roles merge, runs its tasks on the user's asking, and
-    the others start theirs by themselves, each on a ``LaneRunner``. ``PlannerSeat`` holds the
-    planner and its turns; ``WorkLane`` holds the rules of a task run: verification and fixes;
+    The session owns the task board and reports it whole on every change. It starts the lanes
+    of the conversational roles, whose turns answer prompts, and a lane for each lane of the
+    enabled task roles: the work lane, the one whose roles merge, runs its tasks on the user's
+    asking, and the others start theirs by themselves, each on a ``LaneRunner``.
+    ``ConversationSeats`` holds a seat for the planner and for each other enabled conversational
+    role, each with its own conversation, settings and turns in its role's lane; ``WorkLane``
+    holds the rules of a task run: verification and fixes;
     ``WorkTurns`` decides when it runs; ``ReviewLane`` queues the reviews and runs them on the
     runner of the reviewer's lane, if that isn't the work lane; ``SessionSwitcher`` switches
     between saved sessions; ``WorkCommands`` handles the other commands; ``SessionHistory``
@@ -233,8 +235,8 @@ class WorkspaceHost:
     they do, the session open is a new one, and what orbit adds to it carries over into the one
     picked.
 
-    When a write to the store fails, the session halts: the agents running, the planner's turn,
-    the reviews and the startup check are cancelled, an ``ErrorOccurred`` coded
+    When a write to the store fails, the session halts: the agents running, the conversational
+    roles' turns, the reviews and the startup check are cancelled, an ``ErrorOccurred`` coded
     ``storage_failed`` explains why, and every command but ``Hello``, a connection's first
     ``Attach`` and ``ResumeStorage`` is refused so. Nothing is written to the store from then
     on: the events not logged go to the ``fallback`` instead. ``ResumeStorage`` retries the
@@ -328,11 +330,11 @@ class WorkspaceHost:
         self._startup_notes = (*owner_notes, *startup_notes)
         self._closing = False
         self._started = False
+        self._seats = self._conversation_seats()
         self._lane = self._review_lane()
         self._runners = self._lane_runners()
         self._lanes = self._session_lanes()
         self._coders = CoderSeat(lambda: self.coder_slots, workspace_id, lambda: self._keeper.id)
-        self._seat = self._planner_seat()
         self._record_moves = self._moves_kept_in(store)
         self._startup = self._startup_check(
             verification, check_at_startup and not self._takeover.read_only
@@ -349,11 +351,12 @@ class WorkspaceHost:
         self._views = self._session_views()
         self._watch_background()
 
-    def _planner_seat(self) -> PlannerSeat:
-        """The planner's seat in this session, its turns traced with :attr:`telemetry`."""
+    def _conversation_seats(self) -> ConversationSeats:
+        """The conversational roles' seats in this session, their turns traced with
+        :attr:`telemetry`."""
         tracing = PlannerTracing(self.telemetry, self._workspace_id, lambda: self._keeper.id)
         hooks = SeatHooks(self._save, self._keeper.use, self._step_names, self._halt.check, tracing)
-        return PlannerSeat(self._desk, self._tasks, self._events, hooks)
+        return ConversationSeats(self._desk, self._tasks, self._events, hooks)
 
     def _storage_halt(self) -> StorageHalt:
         """What halts the session as a write to the store fails: it stops the log and the work,
@@ -419,7 +422,7 @@ class WorkspaceHost:
         parts = SwitchParts(
             self._keeper,
             self._tasks,
-            self._seat,
+            self._seats,
             self._lane,
             self._work,
             self._activity,
@@ -447,7 +450,7 @@ class WorkspaceHost:
             self._settings,
             self._events,
             self._tasks,
-            self._seat,
+            self._seats,
             self._turns,
             self._lane,
             self._proposals,
@@ -514,7 +517,7 @@ class WorkspaceHost:
         """What moves the records tasks name whose numbers others took, keeping each move in
         ``store``; records keep their numbers without agents that can list files."""
         names = self._desk.agents.file_names if self._desk else None
-        hooks = MoveHooks(names, self._events.put, self._seat.tell)
+        hooks = MoveHooks(names, self._events.put, self._seats.tell)
         return RecordMoves(self._tasks, store, self._halt, hooks)
 
     def _work_lane(self) -> WorkLane | None:
@@ -691,10 +694,18 @@ class WorkspaceHost:
 
     @property
     def lanes(self) -> tuple[str, ...]:
-        """The names of this workspace's lanes: the work lane, the planner's unless the planner
-        is disabled, and those that start by themselves, which only enabled roles have."""
+        """The names of this workspace's lanes: the work lane, the conversational roles', but
+        the planner's while the planner is disabled, and those that start by themselves, which
+        only enabled roles have."""
         planner = PLANNER not in disabled_roles(self._roles())
-        return tuple(lane for lane in self._lanes.names if planner or lane != PLANNER_LANE)
+        shut = self._seats.planner.lane
+        return tuple(lane for lane in self._lanes.names if planner or lane != shut)
+
+    @property
+    def conversational(self) -> tuple[str, ...]:
+        """The roles the user can message here: the planner and the other enabled conversational
+        roles."""
+        return self._seats.names
 
     def _roles(self) -> Mapping[str, Role]:
         """The roles of this workspace's agents, whether enabled or not; none without
@@ -857,10 +868,10 @@ class WorkspaceHost:
         )
 
     def _session_lanes(self) -> Lanes:
-        """The session's lanes: the one whose roles merge, which runs on the user's asking, and
-        those that start by themselves, the review lane among them."""
+        """The session's lanes: the one whose roles merge, which runs on the user's asking, the
+        conversational roles', and those that start by themselves, the review lane among them."""
         review = (self._lane.runner,) if self._lane else ()
-        return Lanes(merging_lane(self._roles()), (*review, *self._runners))
+        return Lanes(merging_lane(self._roles()), (*review, *self._runners), self._seats.lanes)
 
     def _paused(self) -> bool:
         """Whether the work lane waits out a pause, when no other lane starts a task."""
@@ -915,12 +926,12 @@ class WorkspaceHost:
         """Stop a storage halt under way, the tries of the repository's lock and the loading of
         the super review count, then the work, as :meth:`_stop_work` does: the review lane, the
         other lanes that start by themselves and the startup check, so that nothing wakes the
-        work lane, then the work in progress, which
-        stops its agent, and the planner's turn; then stop the retired planners, the planner,
-        the agents' host, the recording of turns' usage, the saving of the session, releasing
-        its lock, and the writing of its events to the store, then end every connection's
-        stream, in that order. Each is stopped
-        even if one before it fails or the close is cancelled, as :func:`close_all` does."""
+        work lane, then the work in progress, which stops its agent, and the conversational
+        roles' turns; then stop their retired conversations, their conversations, the agents'
+        host, the recording of turns' usage, the saving of the session, releasing its lock, and
+        the writing of its events to the store, then end every connection's stream, in that
+        order. Each is stopped even if one before it fails or the close is cancelled, as
+        :func:`close_all` does."""
         self._closing = True
         await close_all(self._stops())
 
@@ -933,7 +944,7 @@ class WorkspaceHost:
             self._count_loader.close,
         ]
         stops += self._work_stops(self._stop_turns, final=True)
-        stops += [self._seat.close_retired, self._seat.close]
+        stops += [self._seats.close_retired, self._seats.close]
         if self._desk is not None:
             stops.append(self._desk.stop)
         stops += [self._usage.close, self._keeper.close, self._events.close, self._end_connections]
@@ -944,23 +955,23 @@ class WorkspaceHost:
         self._connections.end()
 
     async def _stop_turns(self) -> None:
-        """Cancel the work lane's and the planner's turns, and wait for them to end; the work
-        lane's turns stop for good."""
+        """Cancel the work lane's and the conversational roles' turns, and wait for them to end;
+        the work lane's turns stop for good."""
         await self._turns.close()
-        await self._seat.stop_turn()
+        await self._seats.stop_turns()
 
     async def _halt_turns(self) -> None:
-        """Cancel the work lane's and the planner's turns as the session halts, and wait for
-        them to end; a run the usage limit stopped still starts again."""
+        """Cancel the work lane's and the conversational roles' turns as the session halts, and
+        wait for them to end; a run the usage limit stopped still starts again."""
         await self._turns.stop_turn()
-        await self._seat.stop_turn()
+        await self._seats.stop_turns()
 
     async def _stop_work(self) -> None:
         """Cancel the reviews, the other lanes that start by themselves and the startup check,
-        then the work lane's and the planner's turns, as the session halts, and wait for them to
-        end, each even if stopping one before it fails, as :func:`close_all` does; nothing that
-        could wake the work lane runs once its turn is cancelled, but a run the usage limit
-        stopped still waits to start again."""
+        then the work lane's and the conversational roles' turns, as the session halts, and wait
+        for them to end, each even if stopping one before it fails, as :func:`close_all` does;
+        nothing that could wake the work lane runs once its turn is cancelled, but a run the
+        usage limit stopped still waits to start again."""
         await close_all(self._work_stops(self._halt_turns, final=False))
 
     def _work_stops(
@@ -968,8 +979,8 @@ class WorkspaceHost:
     ) -> list[Callable[[], Awaitable[None]]]:
         """What :meth:`_stop_work` awaits, in order: the review lane, the other lanes that start
         by themselves, the startup check, then ``stop_turns``, which stops the work lane's and the
-        planner's turns. The lanes and the check are closed for good if ``final``, else stopped,
-        to start again later."""
+        conversational roles' turns. The lanes and the check are closed for good if ``final``,
+        else stopped, to start again later."""
         parts = (self._lane, *self._runners, self._startup)
         stops: list[Callable[[], Awaitable[None]]] = [
             p.close if final else p.stop for p in parts if p is not None
@@ -981,14 +992,15 @@ class WorkspaceHost:
         self._states.check()
 
     def _activity(self) -> Activity:
-        """What's in progress now: a task run, a review, a planner turn, the startup check and
-        the tasks running in the other lanes that start by themselves, with the tasks the run and
-        the review are on, and where the run waits for a coder, behind how many busy."""
+        """What's in progress now: a task run, a review, a conversational role's turn, reported
+        as a planner turn, the startup check and the tasks running in the other lanes that start
+        by themselves, with the tasks the run and the review are on, and where the run waits for
+        a coder, behind how many busy."""
         task_id, waiting, busy = self._work_activity()
         return Activity(
             tasks=self._turns.running,
             review=self._lane is not None and self._lane.running,
-            planner=self._seat.running,
+            planner=self._seats.running,
             startup_check=self._startup is not None and self._startup.running,
             task_id=task_id,
             reviewing=self._lane.reviewing if self._lane else None,
@@ -1061,10 +1073,10 @@ class WorkspaceHost:
         return Shown(snapshot, transcript.error)
 
     def _busy(self) -> dict[str, bool]:
-        """Whether each lane is busy, by name: the work lane, the planner's and those that start
-        by themselves."""
-        work = {self._lanes.work: self._turns.running, PLANNER_LANE: self._seat.running}
-        return work | self._lanes.busy()
+        """Whether each lane is busy, by name: the work lane, the conversational roles' and those
+        that start by themselves."""
+        work = {self._lanes.work: self._turns.running}
+        return work | self._seats.busy() | self._lanes.busy()
 
     def _entry(self, sessions: tuple[SessionSummary, ...]) -> WorkspaceEntry:
         """This workspace's entry in the catalog, holding ``sessions``, the open one's state as

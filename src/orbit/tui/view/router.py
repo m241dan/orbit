@@ -333,8 +333,8 @@ class EventRouter:
     def _render_state(self, event: StateEvent) -> None:
         """Show a snapshot of backend state, or a decision it waits for."""
         match event:
-            case SettingsChanged(settings=settings, model_choices=choices):
-                self._show_settings(settings, choices)
+            case SettingsChanged():
+                self._follow_settings(event)
             case BusyChanged(busy=busy, lane=lane):
                 self.set_busy(lane, busy)
             case TasksChanged(tasks=tasks):
@@ -343,6 +343,11 @@ class EventRouter:
                 self._follow_stream(event)
             case _:
                 self._show_progress(event)
+
+    def _follow_settings(self, event: SettingsChanged) -> None:
+        """Show the settings ``event`` reports if they're the planner's; no other role's show."""
+        if event.role == PLANNER:
+            self._show_settings(event.settings, event.model_choices)
 
     def _follow_stream(self, event: AgentsChanged | UsageTotals | DirectoryListing) -> None:
         """Show the agents running across workspaces in the workspace picker, and the server's

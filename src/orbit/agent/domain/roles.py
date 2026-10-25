@@ -10,8 +10,9 @@ defaults for tasks orbit queues in that role, as is its effort, which is stored 
 yet passed to agents; a task the user queues keeps its own settings. It also says which lane runs
 it, where it works, whether you talk to it, whether its work merges and whether it's enabled,
 which are checked here. The enabled task roles' lanes are the session's lanes, the one whose
-roles merge running on the user's asking; where a role works decides whether its tasks take a
-coder's slot; and the work asked of a disabled role is refused.
+roles merge running on the user's asking; the enabled conversational roles each have a
+conversation of their own; where a role works decides whether its tasks take a coder's slot; and
+the work asked of a disabled role is refused.
 """
 
 import re
@@ -246,6 +247,12 @@ def task_lanes(roles: Mapping[str, Role]) -> dict[str, frozenset[str]]:
         if role.enabled and not role.conversation:
             lanes.setdefault(role.lane, set()).add(name)
     return {lane: frozenset(names) for lane, names in lanes.items()}
+
+
+def conversational_roles(roles: Mapping[str, Role]) -> tuple[str, ...]:
+    """The names of the enabled conversational roles among ``roles``, in order: those the user
+    talks to, each with a conversation of its own."""
+    return tuple(name for name, role in roles.items() if role.enabled and role.conversation)
 
 
 def merging_lane(roles: Mapping[str, Role]) -> str:

@@ -221,7 +221,7 @@ async def test_opening_a_session_without_interruptions_only_notes_its_resumption
 
 
 async def test_an_opened_session_carries_on_its_planners_conversation() -> None:
-    session, launcher = switching(store_with(saved("auth", planner_conversation="talk-9")))
+    session, launcher = switching(store_with(saved("auth", conversations={PLANNER: "talk-9"})))
     await opened(session, ActivateSession(session="auth"))
     launcher.planner_turns = [chats]
     await send(session, SendMessage(agent=PLANNER, text="Where were we?"))
@@ -254,7 +254,7 @@ async def test_a_session_without_a_planner_keeps_the_notes_it_was_saved_with() -
 
 async def test_an_opened_session_has_its_saved_settings() -> None:
     settings = Settings(model="opus", tool_access="full")
-    session, _ = switching(store_with(saved("auth", settings=settings)))
+    session, _ = switching(store_with(saved("auth", role_settings={PLANNER: settings})))
     events = await opened(session, ActivateSession(session="auth"))
     assert last_of(Snapshot, events).settings == settings
     assert session.settings == settings
@@ -262,7 +262,7 @@ async def test_an_opened_session_has_its_saved_settings() -> None:
 
 
 async def test_settings_given_on_the_command_line_override_the_saved_ones() -> None:
-    record = saved("auth", settings=Settings(model="opus", tool_access="full"))
+    record = saved("auth", role_settings={PLANNER: Settings(model="opus", tool_access="full")})
     session, _ = switching(store_with(record), settings=Settings(model="haiku"), pinned=("model",))
     await opened(session, ActivateSession(session="auth"))
     assert session.settings == Settings(model="haiku", tool_access="full")
@@ -819,7 +819,7 @@ async def test_a_switch_whose_old_lock_cant_be_released_still_opens_the_session(
 
 async def test_a_session_without_agents_opens_its_board_and_settings() -> None:
     settings = Settings(model="opus")
-    store = store_with(saved("auth", state("1", "pending"), settings=settings))
+    store = store_with(saved("auth", state("1", "pending"), role_settings={PLANNER: settings}))
     session = WorkspaceHost(store=store, clock=Ticks())
     events = await opened(session, ActivateSession(session="auth"))
     assert [t.id for t in last_of(Snapshot, events).tasks] == ["1"]
@@ -844,12 +844,13 @@ async def test_a_session_without_reviews_keeps_the_reviews_of_the_session_it_ope
 
 
 async def test_a_session_without_a_planner_keeps_the_conversation_of_the_session_it_opens() -> None:
-    store = store_with(saved("auth", state("1", "pending"), planner_conversation="conv-1"))
+    record = saved("auth", state("1", "pending"), conversations={PLANNER: "conv-1"})
+    store = store_with(record)
     session = WorkspaceHost(store=store, clock=Ticks())
     await opened(session, ActivateSession(session="auth"))
-    assert store.last.id == "auth" and store.last.planner_conversation == "conv-1"
+    assert store.last.id == "auth" and store.last.conversations == {PLANNER: "conv-1"}
     await opened(session, NewSession())
     await send(session, AddTask(task=TASK))
     await events_until(session, of_type(TasksChanged))
-    assert store.last.id != "auth" and store.last.planner_conversation is None
+    assert store.last.id != "auth" and store.last.conversations == {}
     await session.close()

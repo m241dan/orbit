@@ -6,9 +6,10 @@ from dataclasses import dataclass, field
 
 import pytest
 
+from orbit.agent.application.conversation_seats import ConversationSeats
 from orbit.agent.application.lanes import OPEN_GATE, SessionGate
 from orbit.agent.application.outbox import EventSink
-from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
+from orbit.agent.application.planner_seat import SeatHooks
 from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
 from orbit.agent.application.settings import SessionSettings
@@ -130,14 +131,15 @@ def commands_for(
     and its runs are scripted by them."""
     events: EventSink = recorded
     tasks = Tasks(TaskBoard(), recorded.put)
-    seat = PlannerSeat(None, tasks, events, SeatHooks(recorded.save, lambda: None, tuple))
+    hooks = SeatHooks(recorded.save, lambda: None, tuple)
+    seats = ConversationSeats(None, tasks, events, hooks)
     work = WorkParts(None, None, tasks, None, None, recorded.put_nowait, OPEN_GATE)
     turns = WorkTurns(work) if outcomes is None else ScriptedTurns(work, outcomes, recorded.causes)
     parts = CommandParts(
         SessionSettings(Settings()),
         events,
         tasks,
-        seat,
+        seats,
         turns,
         review_lane_for(tasks) if review else None,
         FrontendReview(recorded.put, str),
@@ -163,6 +165,18 @@ async def test_updating_the_settings_publishes_them_then_saves() -> None:
     settings = Settings(model="haiku")
     await commands.handle(UpdateSettings(settings=settings), COMMAND_ID)
     assert recorded.effects == [SettingsChanged(settings=settings), "saved"]
+
+
+async def test_settings_for_a_role_without_a_conversation_are_refused() -> None:
+    recorded = Recorded()
+    commands, _ = commands_for(recorded)
+    update = UpdateSettings(role="architect", settings=Settings(model="haiku"))
+    code, message = await refusal(commands, update)
+    assert code == UNKNOWN
+    assert message == (
+        "Role 'architect' has no settings of its own; the roles with them are planner."
+    )
+    assert recorded.effects == []
 
 
 async def test_only_the_planner_can_be_messaged() -> None:

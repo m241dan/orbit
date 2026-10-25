@@ -30,9 +30,6 @@ ROLE_LABELS = {
 }
 """The built-in roles' labels; a custom role is labelled by its name."""
 
-CONVERSATIONAL_ROLES = (PLANNER,)
-"""The roles the user can message."""
-
 TRIGGERS = (
     TriggerEntry(name=SUPER_REVIEW, label="Super review", manual=True),
     TriggerEntry(name=CONFIGURE_CHECKS, label="Set up checks", manual=True),
@@ -49,10 +46,11 @@ NO_WORKSPACE_LABEL = "default"
 """The workspace's label outside a repository."""
 
 
-def agent_entry(role: str) -> AgentEntry:
-    """The catalog's entry for the agents of ``role``."""
+def agent_entry(role: str, conversational: bool) -> AgentEntry:
+    """The catalog's entry for the agents of ``role``, ``conversational`` if the user can message
+    them."""
     label = ROLE_LABELS.get(role, role)
-    return AgentEntry(name=role, label=label, conversational=role in CONVERSATIONAL_ROLES)
+    return AgentEntry(name=role, label=label, conversational=conversational)
 
 
 def workspace_entry(
@@ -95,13 +93,16 @@ def catalog(
     roles: Iterable[str],
     triggers: Iterable[str],
     lanes: Iterable[str],
+    conversational: Iterable[str],
 ) -> Catalog:
-    """The catalog of the ``workspaces`` served, with agents in ``roles``, the built-in
-    ``triggers`` named, in their order, and ``lanes``, each listed once."""
+    """The catalog of the ``workspaces`` served, with agents in ``roles``, those among them in
+    ``conversational`` ones the user can message, the built-in ``triggers`` named, in their
+    order, and ``lanes``, each listed once."""
     named = frozenset(triggers)
+    talking = frozenset(conversational)
     return Catalog(
         workspaces=tuple(workspaces),
-        agents=tuple(agent_entry(role) for role in dict.fromkeys(roles)),
+        agents=tuple(agent_entry(role, role in talking) for role in dict.fromkeys(roles)),
         triggers=tuple(trigger for trigger in TRIGGERS if trigger.name in named),
         lanes=tuple(dict.fromkeys(lanes)),
     )

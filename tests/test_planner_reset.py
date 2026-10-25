@@ -103,10 +103,10 @@ async def test_a_reset_saves_the_cleared_conversation() -> None:
     session, _, launcher = session_for(store=store)
     launcher.planner_turns = [chats]
     await plan(session, "Plan.")
-    assert store.last.planner_conversation == "conversation-agent-1"
+    assert store.last.conversations == {PLANNER: "conversation-agent-1"}
     await reset(session)
     await asyncio.sleep(0.01)  # Saving takes a while.
-    assert store.last.planner_conversation is None
+    assert store.last.conversations == {}
     await session.close()
 
 
@@ -179,13 +179,13 @@ async def test_a_restored_conversation_can_be_reset_before_its_first_prompt() ->
 
 
 async def test_resetting_a_restored_conversation_starts_the_next_prompt_afresh() -> None:
-    store = store_with(saved("auth", planner_conversation="conversation-x"))
+    store = store_with(saved("auth", conversations={PLANNER: "conversation-x"}))
     session, launcher = switching(store)
     await opened(session, ActivateSession(session="auth"))
     events = await reset(session)
     assert not any(isinstance(e, AgentExited | Notice) for e in events)
     await asyncio.sleep(0.01)  # Saving takes a while.
-    assert store.last.planner_conversation is None
+    assert store.last.conversations == {}
     launcher.planner_turns = [chats]
     await plan(session, "Plan.")
     assert launcher.resumed == [None]
@@ -205,5 +205,5 @@ async def test_only_the_planners_conversation_can_be_reset() -> None:
         assert events[-1] == refused(UNKNOWN, message)
         assert not any(isinstance(e, ConversationReset | AgentExited) for e in events)
     await asyncio.sleep(0.01)  # Saving takes a while.
-    assert store.last.planner_conversation == "conversation-agent-1"
+    assert store.last.conversations == {PLANNER: "conversation-agent-1"}
     await session.close()

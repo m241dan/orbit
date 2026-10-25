@@ -15,6 +15,7 @@ from orbit.agent.application.planner_seat import (
     ROLE_KEPT,
     PlannerSeat,
     SeatHooks,
+    SeatParts,
 )
 from orbit.agent.application.ports import PlannerRoleReader
 from orbit.agent.application.tasks import Tasks
@@ -66,27 +67,41 @@ class Seated:
         await asyncio.sleep(0)
 
 
+@dataclass(frozen=True)
+class Exits:
+    """How the first agents' exits go as they're published: the first ``replacing`` replace the
+    seat's planner, as a switch or reset does, and the first ``failed`` then fail to be
+    published."""
+
+    replacing: int = 0
+    failed: int = 0
+
+
+QUIET_EXITS = Exits()
+"""Exits that all go as they should."""
+
+
 def seated(
     roles: Mapping[str, Role] | None = ROLES,
     planner_role: PlannerRoleReader | None = None,
     halts: bool = False,
-    failed_exits: int = 0,
-    replacing_exits: int = 0,
+    exits: Exits = QUIET_EXITS,
+    role: str = PLANNER,
 ) -> Seated:
-    """A seat with agents in ``roles``, or none if None, whose planner role reads again with
-    ``planner_role``, whose session halts as it's saved if ``halts``, whose first
-    ``replacing_exits`` agents' exits replace its planner as they're published, as a switch or
-    reset does, and whose first ``failed_exits`` agents' exits then fail to be published."""
+    """The seat of the planner, or the conversational ``role``, with agents in ``roles``, or none
+    if None, whose planner role reads again with ``planner_role``, whose session halts as it's
+    saved if ``halts``, and whose first agents' exits go as ``exits`` says."""
     events: asyncio.Queue[Event] = asyncio.Queue()
     agents, launcher = agents_for(roles=roles or {}, planner_role=planner_role)
+    replacing, failed = exits.replacing, exits.failed
 
     async def publish(event: Event) -> None:
-        nonlocal failed_exits, replacing_exits
-        if isinstance(event, AgentExited) and replacing_exits:
-            replacing_exits -= 1
+        nonlocal failed, replacing
+        if isinstance(event, AgentExited) and replacing:
+            replacing -= 1
             seat.replace(None)
-        if isinstance(event, AgentExited) and failed_exits:
-            failed_exits -= 1
+        if isinstance(event, AgentExited) and failed:
+            failed -= 1
             raise RuntimeError(f"Publishing {event.agent_id}'s exit failed.")
         await events.put(event)
 
@@ -105,7 +120,7 @@ def seated(
             raise Refused(STORAGE_FAILED, HALTED_MESSAGE)
 
     hooks = SeatHooks(save, lambda: calls.append("use"), lambda: (), check)
-    seat = PlannerSeat(desk, Tasks(TaskBoard(), events.put), events, hooks)
+    seat = PlannerSeat(SeatParts(desk, Tasks(TaskBoard(), events.put), events, hooks), role)
     return Seated(seat, events, launcher, calls)
 
 
@@ -189,7 +204,7 @@ async def test_a_replaced_planner_is_closed_only_once_the_retired_are() -> None:
 
 
 async def test_a_retired_planner_failing_to_close_leaves_none_of_the_others_open() -> None:
-    seated_ = seated(failed_exits=1)
+    seated_ = seated(exits=Exits(failed=1))
     await answered(seated_)
     seated_.seat.replace(None)
     await answered(seated_)
@@ -200,7 +215,7 @@ async def test_a_retired_planner_failing_to_close_leaves_none_of_the_others_open
 
 
 async def test_a_planner_retired_while_the_retired_close_is_closed_too() -> None:
-    seated_ = seated(replacing_exits=1)
+    seated_ = seated(exits=Exits(replacing=1))
     await answered(seated_)
     seated_.seat.replace(None)
     await answered(seated_)
@@ -209,7 +224,7 @@ async def test_a_planner_retired_while_the_retired_close_is_closed_too() -> None
 
 
 async def test_a_retired_planner_failing_to_close_leaves_none_retired_meanwhile_open() -> None:
-    seated_ = seated(failed_exits=1, replacing_exits=1)
+    seated_ = seated(exits=Exits(replacing=1, failed=1))
     await answered(seated_)
     seated_.seat.replace(None)
     await answered(seated_)
@@ -292,3 +307,46 @@ async def test_closing_without_a_planner_does_nothing() -> None:
     seated_ = seated(roles=None)
     await seated_.seat.close()
     assert seated_.published() == []
+
+
+ARCHITECT = "architect"
+ARCHITECTS = {**ROLES, ARCHITECT: ROLES[PLANNER].model_copy(update={"lane": "design"})}
+"""The roles, with an architect in conversation, answering in its own lane."""
+
+
+def test_a_seat_runs_its_turns_in_its_roles_lane_or_the_planners_without_one() -> None:
+    assert seated(ARCHITECTS, role=ARCHITECT).seat.lane == "design"
+    assert seated(roles=None).seat.lane == "planner"
+
+
+async def test_another_roles_seat_answers_in_its_lane_and_names_itself() -> None:
+    seated_ = seated(ARCHITECTS, role=ARCHITECT)
+    seated_.launcher.planner_turns = [hangs]
+    await seated_.seat.submit("Design.", Settings())
+    assert seated_.published()[0] == BusyChanged(busy=True, lane="design")
+    with pytest.raises(Refused, match="The architect is already answering"):
+        await seated_.seat.submit("More.", Settings())
+    with pytest.raises(Refused, match="The architect is answering; press ctrl"):
+        await seated_.seat.reset()
+    await seated_.seat.stop_turn()
+
+
+async def test_another_roles_seat_has_nothing_to_reset_before_its_first_turn() -> None:
+    seated_ = seated(ARCHITECTS, role=ARCHITECT)
+    await seated_.seat.reset()
+    assert seated_.published() == [Notice(message="The architect has no conversation to reset.")]
+
+
+async def test_resetting_another_roles_seat_keeps_its_role_as_it_is() -> None:
+    seated_ = seated(ARCHITECTS, planner_role=lambda: ConfigError("bad tools"), role=ARCHITECT)
+    await answered(seated_)
+    await seated_.seat.reset()
+    assert seated_.published() == [EXITED, ConversationReset(agent=ARCHITECT)]
+
+
+async def test_a_disabled_roles_seat_refuses_its_work_naming_it() -> None:
+    muted = ROLES[PLANNER].model_copy(update={"lane": "design", "enabled": False})
+    seated_ = seated({**ROLES, ARCHITECT: muted}, role=ARCHITECT)
+    with pytest.raises(Refused, match="architect is disabled in this project's configuration"):
+        await seated_.seat.submit("Design.", Settings())
+    assert seated_.published() == [BusyChanged(busy=False, lane="design")]

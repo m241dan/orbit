@@ -9,7 +9,7 @@ from typing import Annotated, Literal
 from pydantic import Field, TypeAdapter
 
 from orbit.protocol.models import Settings, TaskSpec, _Message
-from orbit.protocol.names import WORK_LANE, BusyLane
+from orbit.protocol.names import PLANNER, WORK_LANE, BusyLane
 
 
 class Hello(_Message):
@@ -43,10 +43,12 @@ class CancelTurn(_Message):
 
 
 class UpdateSettings(_Message):
-    """Replace the session settings; they apply from the next turn."""
+    """Replace the session's settings for the conversational role ``role``, the planner unless
+    given; they apply from its next turn."""
 
     type: Literal["update_settings"] = "update_settings"
     settings: Settings
+    role: str = Field(default=PLANNER, min_length=1)
 
 
 class AddTask(_Message):

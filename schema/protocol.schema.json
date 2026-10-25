@@ -2307,7 +2307,7 @@
       "type": "object"
     },
     "SettingsChanged": {
-      "description": "Current settings, sent on connect and after every change.",
+      "description": "The current settings of the conversational role ``role``, the planner unless given, sent\nafter every change to them.",
       "properties": {
         "model_choices": {
           "default": [],
@@ -2316,6 +2316,11 @@
           },
           "title": "Model Choices",
           "type": "array"
+        },
+        "role": {
+          "default": "planner",
+          "title": "Role",
+          "type": "string"
         },
         "settings": {
           "$ref": "#/$defs/Settings"
@@ -3011,8 +3016,14 @@
       "type": "object"
     },
     "UpdateSettings": {
-      "description": "Replace the session settings; they apply from the next turn.",
+      "description": "Replace the session's settings for the conversational role ``role``, the planner unless\ngiven; they apply from its next turn.",
       "properties": {
+        "role": {
+          "default": "planner",
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
         "settings": {
           "$ref": "#/$defs/Settings"
         },
