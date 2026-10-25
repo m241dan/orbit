@@ -29,7 +29,7 @@ def _no_session() -> str:
 class Queued:
     """What orbit queued a review for: to review ``job``, its suggestions joining ``batch``, at
     most ``cap`` of them; ``cause`` is the span current as it was queued, unless the review was
-    queued before the session was last opened."""
+    already queued when the session was last opened."""
 
     job: ReviewJob
     batch: str

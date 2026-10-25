@@ -3,8 +3,9 @@ the reviews its crash interrupted ended."""
 
 import asyncio
 
-from orbit.agent import WorkspaceHost
+from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.agent.application.ports import Reply
+from orbit.agent.application.review_trace import REVIEW_SPAN
 from orbit.agent.domain.reviews import BatchSnapshot, LaneSnapshot, PlannerSnapshot, ReviewJob
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
@@ -29,6 +30,7 @@ from tests.agent_fakes import (
     FakeTree,
     ScriptedLauncher,
     claims_done,
+    close,
     events_until,
     of_type,
     send,
@@ -38,6 +40,7 @@ from tests.agent_fakes import (
     suggests,
 )
 from tests.session_builders import last_of, messages, opened, saved, store_with, switching
+from tests.telemetry_helpers import Traced, linked_to
 
 
 async def suggesting() -> tuple[WorkspaceHost, FakeStore]:
@@ -214,6 +217,28 @@ async def test_an_interrupted_reviews_queued_review_is_published_only_in_the_sna
     assert not [e for e in before if isinstance(e, TasksChanged | ReviewStatus)]
     assert last_of(Snapshot, events).review == ReviewStatus(paused=False, open_batches=1)
     await session.close()
+
+
+def last_review_completed(events: list[Event]) -> bool:
+    changes = [e for e in events if isinstance(e, TasksChanged)]
+    return bool(changes) and changes[-1].tasks[-1].status == "completed"
+
+
+async def test_an_interrupted_reviews_queued_review_links_to_the_command_opening_it() -> None:
+    traced = Traced()
+    snapshot = reviewing("3", finished=frozenset({"3"}))
+    store = store_with(saved("auth", *crashed("completed"), reviews=snapshot))
+    session, launcher = switching(store, telemetry=traced.telemetry)
+    launcher.reviewers.append(suggests())
+    plane = ControlPlane([session], telemetry=traced.telemetry)
+    await send(plane, ActivateSession(session="auth"))
+    await events_until(plane, of_type(CommandAccepted))
+    await send(plane, RunTasks())
+    await asyncio.wait_for(settle(plane, until=last_review_completed), 10)
+    await close(plane)
+
+    [review] = traced.spans(REVIEW_SPAN)
+    assert linked_to(review, traced.command("activate_session"))
 
 
 async def test_interrupted_tasks_that_are_not_open_reviews_change_nothing() -> None:

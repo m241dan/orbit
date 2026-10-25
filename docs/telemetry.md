@@ -310,8 +310,10 @@ so no trace stays open for hours while each can still be followed back to its ca
   once its last task landed) or whose ending without a commit finished its batch; for a super
   review, the `orbit.command` span of the `FireTrigger` asking for it, or the `orbit.task` span of
   the landing whose count made it due; or the `orbit.review` span of the review whose end
-  finished its batch. A review the user queued, and one queued before the session was last
-  opened, has no link.
+  finished its batch, or, for a review a crash interrupted, the `orbit.command` span of the
+  `ActivateSession` opening its session, which ends it. A review stopped as the session halts
+  keeps its link when it runs again. A review the user queued, and one already queued when the
+  session was last opened, has no link.
 
 ## Trace context
 

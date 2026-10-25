@@ -79,7 +79,8 @@ class ReviewLane:
         self._publish = desk.publish
         self._jobs: dict[str, ReviewJob] = {}  # Review task id -> what it reviews.
         self._batches: dict[str, str] = {}  # Review task id -> the batch it suggests into.
-        # Review task id -> the span current as it was queued, this time the session was open.
+        # Review task id -> the span current as it was queued, this time the session was open,
+        # until it ends.
         self._causes: dict[str, Span] = {}
         self._tallies: dict[str, ReviewTally] = {}  # Review task id -> its suggestions, as it runs.
         self._background = Background("review", desk.publish)
@@ -355,9 +356,11 @@ class ReviewLane:
         return Queued(job, batch, self.planner.cap_of(batch), self._causes.get(task_id))
 
     async def _ended(self, task_id: str) -> None:
-        """The review of ``task_id`` ended: go on as :meth:`_after` says, unless the lane is
-        stopping, which leaves its batches as they are."""
+        """The review of ``task_id`` ended: forget what queued it and go on as :meth:`_after`
+        says, unless the lane is stopping, which leaves its batches as they are and the review
+        to run again, linked to what queued it."""
         if not cancelling():
+            self._causes.pop(task_id, None)  # Its batch no longer fills, so it won't run again.
             await self._after(self._batches.get(task_id))
 
     async def _reviewed(self, task_id: str) -> Outcome:

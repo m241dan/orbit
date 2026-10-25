@@ -22,15 +22,19 @@ from orbit.protocol import (
     FireTrigger,
     RunTasks,
     TaskSpec,
+    TurnEndReason,
     Usage,
 )
 from tests.agent_fakes import (
     WORKSPACE,
+    Call,
     FakeTree,
     Script,
     ScriptedLauncher,
     claims_done,
     close,
+    host_of,
+    lane_of,
     send,
     session_for,
     settle,
@@ -146,6 +150,42 @@ async def test_a_batch_review_links_to_the_task_whose_landing_finished_the_batch
     assert linked_to(batch_review, task_span(traced, "3"))
     assert attributes(batch_review)["orbit.review.round"] == 1
     assert attributes(batch_review)["orbit.review.batch"] == "batch-2"
+
+
+async def test_a_review_that_ran_leaves_the_lane_holding_nothing_of_what_queued_it() -> None:
+    traced = Traced()
+    plane, _ = traced_plane(traced, claims_done, reviewers=(suggests(),))
+    await reviewed(plane, FLAG)
+    causes = dict(lane_of(host_of(plane))._causes)
+    await close(plane)
+
+    [review] = reviews(traced)
+    assert linked_to(review, task_span(traced, "1"))
+    assert causes == {}
+
+
+async def test_a_review_stopped_with_the_lane_and_run_again_still_links_to_what_queued_it() -> None:
+    traced, started = Traced(), asyncio.Event()
+
+    async def waits(call: Call) -> TurnEndReason:
+        await call("get_task")
+        started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    plane, _ = traced_plane(traced, claims_done, reviewers=(waits, suggests()))
+    await send(plane, AddTask(task=FLAG))
+    await send(plane, RunTasks())
+    await asyncio.wait_for(started.wait(), 10)
+    lane = lane_of(host_of(plane))
+    await lane.stop()  # As a halt stops it.
+    lane.kick()  # As the halt lifts.
+    await asyncio.wait_for(settle(plane), 10)
+    await close(plane)
+
+    stopped, again = reviews(traced)
+    assert linked_to(stopped, task_span(traced, "1"))
+    assert linked_to(again, task_span(traced, "1"))
 
 
 async def test_a_super_review_asked_for_links_to_its_fire_trigger_command() -> None:
