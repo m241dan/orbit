@@ -9,7 +9,8 @@ claims of being done are verified, and how long it may take. Its model and tool 
 defaults for tasks orbit queues in that role, as is its effort, which is stored with them but not
 yet passed to agents; a task the user queues keeps its own settings. It also says which lane runs
 it, where it works, whether you talk to it, whether its work merges and whether it's enabled,
-which are checked here but not yet acted on.
+which are checked here; of these, only where it works is acted on yet, deciding whether its
+tasks take a coder's slot.
 """
 
 import re
@@ -32,7 +33,6 @@ from orbit.protocol import (
     AGENT_FAILED,
     BUILT_IN_ROLE_NAMES,
     CODER,
-    CONFIGURATOR,
     TIMED_OUT,
     Effort,
     Settings,
@@ -69,10 +69,6 @@ disables it unless the built-in tool set is replaced to name it."""
 WRITE_TOOLS = ("Edit", "Write", "NotebookEdit")
 """The tools a restricted agent is denied, which write files."""
 
-CODER_ROLES = frozenset({CODER, CONFIGURATOR})
-"""The roles whose tasks take one of the coders' slots a control plane shares across its
-workspaces."""
-
 Workspace = Literal["worktree", "snapshot", "checkout", "none"]
 """Where an agent in a role works: the coder's separate worktree, which can merge; a read-only
 snapshot of the base commit; the user's checkout, read in place; or an empty temporary
@@ -88,7 +84,8 @@ class _Config(BaseModel):
 
 def _can_merge(fields: dict[str, Any]) -> bool:
     """Whether a role with the validated ``fields`` can merge its work: it's verified, in a
-    worktree. A role that leaves ``merge`` out merges if it can, so one that can't still loads."""
+    worktree. A role that leaves ``merge`` out merges if it can, so an unverified one still
+    loads; a verified one that can't is refused, as its checked work would vanish."""
     verify: bool = fields["verify"]
     return verify and fields["workspace"] == "worktree"
 
@@ -128,10 +125,21 @@ class Role(_Config):
 
     @model_validator(mode="after")
     def _fields_agree(self) -> Self:
-        problems = _merge_problems(self) + _checkout_problems(self) + _conversation_problems(self)
+        problems = (
+            _merge_problems(self)
+            + _verify_problems(self)
+            + _checkout_problems(self)
+            + _conversation_problems(self)
+        )
         if problems:
             raise PydanticCustomError("role_rules", "; ".join(problems))
         return self
+
+    @property
+    def takes_coder_slot(self) -> bool:
+        """Whether a task in this role takes one of the coders' slots a control plane shares
+        across its workspaces: it works in the coder's worktree."""
+        return self.workspace == "worktree"
 
     @property
     def runs_checks(self) -> bool:
@@ -166,6 +174,14 @@ def _merge_problems(role: Role) -> list[str]:
         return []
     needs = {'workspace = "worktree"': role.workspace == "worktree", "verify = true": role.verify}
     return _unmet("merge = true needs", needs)
+
+
+def _verify_problems(role: Role) -> list[str]:
+    """Why ``role``'s verified work would go nowhere, if it would: work checked but not merged
+    vanishes once it's put aside."""
+    if role.verify and not role.merge:
+        return ["verify = true needs merge = true"]
+    return []
 
 
 def _checkout_problems(role: Role) -> list[str]:
@@ -203,6 +219,19 @@ def lane_clashes(roles: Mapping[str, Role]) -> list[str]:
                 f" task roles {shared}"
             )
     return clashes
+
+
+def worktree_lane_clashes(roles: Mapping[str, Role]) -> list[str]:
+    """Why the enabled roles among ``roles`` that work in the worktree can't, if they're in more
+    than one lane, naming them by lane: there's one worktree, and lanes run beside each other."""
+    lanes: dict[str, list[str]] = {}
+    for name, role in roles.items():
+        if role.enabled and role.workspace == "worktree":
+            lanes.setdefault(role.lane, []).append(name)
+    if len(lanes) < 2:
+        return []
+    named = " and ".join(f"lane {lane!r} has {names}" for lane, names in lanes.items())
+    return [f'the enabled roles with workspace = "worktree" must share one lane, but {named}']
 
 
 def _task_roles_in(roles: Mapping[str, Role], lane: str) -> list[str]:

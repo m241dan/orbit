@@ -1,6 +1,7 @@
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.roles import (
@@ -96,11 +97,16 @@ def test_a_role_leaving_out_where_and_how_it_works_gets_the_coders_defaults() ->
     assert (role.conversation, role.merge, role.verify, role.enabled) == (False, True, True, True)
 
 
-@pytest.mark.parametrize(
-    "fields", [{"verify": False}, {"workspace": "snapshot"}, {"workspace": "none"}]
-)
-def test_a_role_that_cant_merge_doesnt_by_default(fields: dict[str, Any]) -> None:
-    assert not Role.model_validate({"instructions": "Do it."} | fields).merge
+@pytest.mark.parametrize("workspace", ["worktree", "snapshot", "checkout", "none"])
+def test_an_unverified_role_doesnt_merge_by_default(workspace: str) -> None:
+    fields = {"instructions": "Do it.", "verify": False, "workspace": workspace}
+    assert not Role.model_validate(fields).merge
+
+
+@pytest.mark.parametrize("workspace", ["snapshot", "checkout", "none"])
+def test_a_verified_role_outside_the_worktree_is_refused_as_it_cant_merge(workspace: str) -> None:
+    with pytest.raises(ValidationError, match="verify = true needs merge = true"):
+        Role.model_validate({"instructions": "Do it.", "workspace": workspace})
 
 
 @pytest.mark.parametrize("lane", ["work", "review-2", "my_lane", "Lane9"])

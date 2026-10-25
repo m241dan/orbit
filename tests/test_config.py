@@ -216,6 +216,7 @@ def test_conversational_roles_can_share_a_lane() -> None:
     [
         (custom(merge=True, workspace="snapshot"), 'merge = true needs workspace = "worktree"'),
         (custom(verify=False, merge=True), "merge = true needs verify = true"),
+        (custom(verify=True, merge=False), "verify = true needs merge = true"),
         (
             custom(workspace="checkout", tool_access="full"),
             'workspace = "checkout" can\'t have tool_access = "full"',
@@ -245,7 +246,7 @@ def test_a_role_breaking_several_rules_is_refused_naming_each() -> None:
     with pytest.raises(ConfigError) as raised:
         load_config(talker(verify=True, workspace="worktree", merge=False), BUILT_IN_ROLES)
     assert str(raised.value) == (
-        "roles.x: conversation = true needs verify = false;"
+        "roles.x: verify = true needs merge = true; conversation = true needs verify = false;"
         ' conversation = true needs a workspace other than "worktree"'
     )
 
@@ -266,8 +267,41 @@ def test_a_conversational_role_sharing_its_lane_with_task_roles_is_refused_namin
 
 
 def test_a_task_role_in_the_planners_lane_is_refused_naming_both() -> None:
+    reader = custom(lane="planner", workspace="snapshot", verify=False)
     with pytest.raises(ConfigError, match=r"'planner' can't share its lane 'planner'.*\['x'\]$"):
-        load_config(custom(lane="planner"), BUILT_IN_ROLES)
+        load_config(reader, BUILT_IN_ROLES)
+
+
+def test_worktree_roles_in_more_than_one_lane_are_refused_naming_them_and_their_lanes() -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_config(custom(lane="b"), BUILT_IN_ROLES)
+    assert str(raised.value) == (
+        'roles: the enabled roles with workspace = "worktree" must share one lane, but'
+        " lane 'work' has ['coder', 'configurator'] and lane 'b' has ['x']"
+    )
+
+
+@pytest.mark.parametrize(
+    "disabled",
+    [
+        {"x": {"instructions": "Do it.", "lane": "b", "enabled": False}},
+        {
+            "x": {"instructions": "Do it.", "lane": "b"},
+            "coder": {"enabled": False},
+            "configurator": {"enabled": False},
+        },
+    ],
+)
+def test_a_disabled_worktree_role_can_be_in_a_lane_of_its_own(
+    disabled: dict[str, dict[str, object]],
+) -> None:
+    assert load_config({"roles": disabled}, BUILT_IN_ROLES).roles["x"].lane == "b"
+
+
+def test_worktree_roles_sharing_a_lane_other_than_work_load() -> None:
+    roles = {"x": {"instructions": "Do it.", "lane": "b"}, "coder": {"lane": "b"}}
+    roles["configurator"] = {"lane": "b"}
+    assert load_config({"roles": roles}, BUILT_IN_ROLES).roles["coder"].lane == "b"
 
 
 def test_an_invalid_field_isnt_also_reported_as_the_merge_default_it_stopped() -> None:

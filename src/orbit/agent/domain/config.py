@@ -11,7 +11,7 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.checks import Setup, VerificationConfig
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.agent.domain.reviews import ReviewLimits
-from orbit.agent.domain.roles import Role, lane_clashes
+from orbit.agent.domain.roles import Role, lane_clashes, worktree_lane_clashes
 from orbit.agent.domain.verification import MAX_FALLBACK_FIXES
 
 
@@ -51,7 +51,7 @@ class OrbitConfig(_Config):
     @field_validator("roles")
     @classmethod
     def _lanes_apart(cls, roles: dict[str, Role]) -> dict[str, Role]:
-        clashes = lane_clashes(roles)
+        clashes = lane_clashes(roles) + worktree_lane_clashes(roles)
         if clashes:
             raise PydanticCustomError("role_lanes", "; ".join(clashes))
         return roles

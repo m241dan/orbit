@@ -33,7 +33,6 @@ from orbit.agent.domain.endings import (
     WORK_GONE,
     gave_up,
 )
-from orbit.agent.domain.roles import CODER_ROLES
 from orbit.agent.domain.usage_limits import (
     FIX_ERROR_NOTE,
     Outage,
@@ -67,8 +66,8 @@ stops the run or its workspace closes or switches sessions."""
 class Beside:
     """What runs beside the work lane: the review lane, if any, and the startup check, if any,
     whose panel each task takes over; the session's ``gate``, which stops a run halted before
-    its next task; its seat at the ``coders``' slots, if any, which a coder's or
-    configurator's task takes one of before it starts; the ``tracing`` of its tasks; and the
+    its next task; its seat at the ``coders``' slots, if any, which a task whose role works in
+    the worktree takes one of before it starts; the ``tracing`` of its tasks; and the
     ``records`` moves, if any, which move a record a task names whose number another took
     before the task runs."""
 
@@ -87,8 +86,8 @@ class WorkLane:
     a task of its own: cancelling it cancels the task running, and the cancel goes on once that
     task has ended. The user's stop, :meth:`stopped_by_user`, cancels only the agent's run, and
     the run ends by itself: work the agent finished before the stop is still settled, and
-    lands. A coder's or configurator's task takes a slot at ``beside``'s coders, waiting in
-    line for one, before it starts, and gives it back once it has ended, however it does; the
+    lands. A task whose role works in the worktree takes a slot at ``beside``'s coders, waiting
+    in line for one, before it starts, and gives it back once it has ended, however it does; the
     user's stop leaves the line. Each task is traced, from before it
     waits for a slot until its status is final, with ``beside``'s tracing, linked to the span
     current as its run started: what started the run.
@@ -267,8 +266,13 @@ class WorkLane:
         coders.drop()
 
     def _takes_slot(self, task_id: str | None) -> bool:
-        """Whether task ``task_id``, if any, is of a role that takes a coder's slot."""
-        return task_id is not None and self._board.get(task_id).task.role in CODER_ROLES
+        """Whether task ``task_id``, if any, is of a role that takes a coder's slot, as the
+        session's roles say; one of a role it doesn't have takes none, failing without an
+        agent."""
+        if task_id is None:
+            return False
+        role = self._desk.agents.roles.get(self._board.get(task_id).task.role)
+        return role is not None and role.takes_coder_slot
 
     def _unseat(self) -> None:
         """Give back the coder's slot held, if any."""

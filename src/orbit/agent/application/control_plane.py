@@ -151,10 +151,10 @@ class ControlPlane:
     with a path are refused as ``invalid`` outside it. Without, as for a local orbit,
     ``ListDirectory`` is refused as ``invalid``.
 
-    Coders' and configurators' tasks share the control plane's coder slots across every
-    workspace served: as many run at once as :meth:`cap_coders` allows, any number until it's
-    called, and the others wait in line, first come, first served, each session's state saying
-    where.
+    Tasks whose roles work in the worktree, such as coders' and configurators', share the
+    control plane's coder slots across every workspace served: as many run at once as
+    :meth:`cap_coders` allows, any number until it's called, and the others wait in line, first
+    come, first served, each session's state saying where.
 
     A connection welcomed, attached or not, chooses the optional streams it receives with
     ``Watch``: the control-plane stream tells it every agent running across the workspaces

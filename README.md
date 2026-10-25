@@ -998,7 +998,9 @@ the role.
 
 A role also says which lane runs it, where it works, whether you talk to it, whether its work
 merges, whether it's enabled and how hard its agents think. These fields are **accepted now; take
-effect in a later version**: orbit loads and checks them, but nothing acts on them yet.
+effect in a later version**: orbit loads and checks them, but nothing acts on them yet, except
+that a role's `workspace` decides whether its tasks count toward `max_coders` (see
+Taking turns under [Serving the control plane](#serving-the-control-plane)).
 
 - `lane`: the lane that runs the role's agents, a plain name of letters, digits, `-` and `_`. Each
   lane runs one agent at a time, beside the others.
@@ -1019,11 +1021,13 @@ a `worktree` and doesn't merge; the `reviewer` and `super-reviewer` work in `rev
 `snapshot`; the `planner` works in `planner` in your `checkout`, in conversation; all are enabled,
 and none sets an effort.
 A role whose fields don't go together is refused, naming the role and the rule: `merge = true`
-needs `workspace = "worktree"` and `verify = true`; `workspace = "checkout"` can't have
+needs `workspace = "worktree"` and `verify = true`; `verify = true` needs `merge = true`, as checked
+work that doesn't merge would vanish once put aside; `workspace = "checkout"` can't have
 `tool_access = "full"`, as the agent could edit your tree; `conversation = true` needs
 `propose_task` in its tools and `get_task` left out, `merge = false`, `verify = false` and a
 workspace other than `worktree`; and no role that isn't conversational may share a conversational
-role's lane.
+role's lane. There's one worktree, so every enabled role with `workspace = "worktree"` must share
+one lane, or the config is refused, naming the roles and their lanes.
 
 An agent calling a tool its role doesn't have gets an error reply (the CLI only allows its role's
 tools, too, and orbit's others are disallowed so the agent doesn't see them); an agent still
@@ -1038,8 +1042,8 @@ A project can change these, orbit's limits, its verification steps (see
 name adds a role, which must set `instructions` and otherwise gets `get_task`, `complete_task`,
 `report_progress` and `give_up` as its tools, `restricted` tool access, the default model, its
 claims verified, no time limit, the coder's lane `work`, `worktree`, no conversation and
-enabled, and no effort. It merges if it can, being verified and in a worktree; one with `verify = false` or
-another workspace doesn't merge, and can't be made to. Every other field is optional:
+enabled, and no effort. It merges, being verified and in a worktree; one in another workspace must
+set `verify = false`, and one with `verify = false` doesn't merge, and can't be made to. Every other field is optional:
 
 ```toml
 fix_attempts = 5               # in-session fixes asked of one agent before its task falls back
@@ -1311,9 +1315,9 @@ max_coders = 4       # coders running at once across the workspaces; 0 for no ca
 browse_root = "/srv/repos"  # the one tree frontends may browse and add from; unset: anywhere
 ```
 
-**Taking turns.** `max_coders` (4 unless set; 0 for no cap) caps how many coder and configurator
-tasks run at once across every workspace the server serves: tasks, fixes and startup-check
-fixes alike. Each task takes a coder's slot as its agent starts and gives it back once it has
+**Taking turns.** `max_coders` (4 unless set; 0 for no cap) caps how many tasks whose roles have
+`workspace = "worktree"`, the coder's and configurator's among the built-in roles, run at once
+across every workspace the server serves: tasks, fixes and startup-check fixes alike. Each task takes a coder's slot as its agent starts and gives it back once it has
 ended, its verification and merge included, however it ends; while every slot is taken, it
 waits in line behind those that asked before it, and a workspace's next task joins the back, so
 workspaces take turns. A run waiting stays running, and its session's state says where it is
@@ -1324,8 +1328,8 @@ workspace picker show (`waiting for a coder: 2nd in line`, `⏳ waiting: 4 coder
 `ctrl+s` takes it out of line and holds it, as it stops any run. A run waiting follows its
 board: it leaves the line as soon as its next task no longer takes a slot (removed, or one taking
 none put ahead), running that task or finishing, and keeps its place, and then its slot, for a coder
-task put ahead of the one it waited for. Reviews, super reviews and the
-planner don't count and never wait, and a run stopped at the usage limit or an API outage holds
+task put ahead of the one it waited for. Reviews, super reviews, the planner and tasks of roles
+working elsewhere don't count and never wait, and a run stopped at the usage limit or an API outage holds
 no slot until it starts again. A local `orbit chat` serves one workspace and has no cap.
 
 **Browsing.** Frontends can list the directories on the server's host, as its account sees

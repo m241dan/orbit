@@ -4,8 +4,11 @@ turns between workspaces, say where they wait, and always give their slot back."
 import asyncio
 from collections.abc import Callable
 
+import pytest
+
 from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
+from orbit.agent.domain.roles import Role
 from orbit.protocol import (
     CONFIGURATOR,
     PLANNER,
@@ -22,6 +25,7 @@ from orbit.protocol import (
     TurnEndReason,
 )
 from tests.agent_fakes import (
+    ROLES,
     Call,
     FakeTree,
     Script,
@@ -34,6 +38,14 @@ from tests.plane_fakes import agent_workspace, idle, payloads
 from tests.waiting import eventually
 
 WAITING_FIRST = Activity(kind="waiting_for_coder", position=1, busy=1)
+
+WITH_CUSTOM_ROLES = {
+    **ROLES,
+    "writer": Role(instructions="Write the docs."),
+    "reader": Role(instructions="Read the code.", workspace="snapshot", verify=False),
+}
+"""The built-in roles, with ``writer`` working in the worktree and ``reader`` on a snapshot,
+both in the work lane."""
 
 
 class Gates:
@@ -177,19 +189,20 @@ async def test_a_review_starts_while_every_coder_is_busy() -> None:
     await plane.close()
 
 
-async def test_a_configurator_takes_a_coders_slot() -> None:
+@pytest.mark.parametrize("role", [CONFIGURATOR, "writer"])
+async def test_a_task_whose_role_works_in_the_worktree_takes_a_coders_slot(role: str) -> None:
     gates = Gates()
-    a, _ = agent_workspace("a", gates.script("configure"))
+    a, _ = agent_workspace("a", gates.script("worktree"), roles=WITH_CUSTOM_ROLES)
     b, _ = agent_workspace("b", gates.script("b1"))
     plane = capped(1, a, b)
     in_a, in_b = await joined(plane, host=a), await joined(plane, host=b)
-    await runs(in_a, task("Set up the checks.", CONFIGURATOR))
-    await gates.until_started("configure")
+    await runs(in_a, task("Do the work.", role))
+    await gates.until_started("worktree")
     await runs(in_b, task())
 
     await eventually(lambda: b.activity.waiting_for_coder == 1)
-    gates.let("configure")
-    await gates.until_started("configure", "b1")
+    gates.let("worktree")
+    await gates.until_started("worktree", "b1")
     gates.let("b1")
     await asyncio.wait_for(idle(in_b), 5)
     await plane.close()
@@ -210,6 +223,23 @@ async def test_a_planner_turn_and_a_review_task_take_no_coders_slot() -> None:
     await eventually(lambda: sorted(gates.started) == ["a1", "planner", "review"])
     assert b.activity.waiting_for_coder is None
     gates.let("a1", "planner", "review")
+    await asyncio.wait_for(idle(in_b), 5)
+    await plane.close()
+
+
+async def test_a_task_whose_role_works_on_a_snapshot_takes_no_coders_slot() -> None:
+    gates = Gates()
+    a, _ = agent_workspace("a", gates.script("a1"))
+    b, _ = agent_workspace("b", gates.script("read"), roles=WITH_CUSTOM_ROLES)
+    plane = capped(1, a, b)
+    in_a, in_b = await joined(plane, host=a), await joined(plane, host=b)
+    await runs(in_a, task())
+    await gates.until_started("a1")
+    await runs(in_b, task("Read the code.", "reader"))
+
+    await gates.until_started("a1", "read")
+    assert b.activity.waiting_for_coder is None
+    gates.let("a1", "read")
     await asyncio.wait_for(idle(in_b), 5)
     await plane.close()
 

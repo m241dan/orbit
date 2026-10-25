@@ -183,9 +183,10 @@ class WorkspaceHost:
     its background work starts, on the base commit; a failure adds a draft task to
     fix it.
 
-    A coder's or configurator's task takes one of :attr:`coder_slots` as it starts, waiting in
-    line for one while every one is taken, and gives it back once it ends; the control plane
-    serving the host shares its slots across its workspaces.
+    A task whose role works in the worktree, such as a coder's or configurator's, takes one of
+    :attr:`coder_slots` as it starts, waiting in line for one while every one is taken, and
+    gives it back once it ends; the control plane serving the host shares its slots across its
+    workspaces.
 
     The one-off notices of a greeting are the workspace, no verification steps, the
     ``startup_notes`` and work left by earlier runs; like the rest of a greeting, they reach
