@@ -1,7 +1,7 @@
 """Orbit's configuration: the limits, roles, verification steps and setup a project file sets
 over the user config's role fields and personal roles and the built-in defaults."""
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -104,6 +104,15 @@ class _FileConfig(_Config):
         )
 
 
+LATER_TABLES = ("triggers", "mcp", "models")
+"""The top-level tables of a later version of orbit's settings."""
+
+LATER_VERSION = (
+    "isn't supported by this version of orbit yet; it's in the reference config for a later"
+    " version. Leave it commented out."
+)
+"""Why a setting of a later version of orbit is refused, after the setting's name."""
+
 LIMIT_KEYS = tuple(
     key for key in _FileConfig.model_fields if key not in {"roles", "verification", "setup"}
 )
@@ -154,8 +163,10 @@ def load_layered(
     """The configuration :func:`load_config` loads from ``data``, ``built_in``, ``user`` and
     ``path``, with the layer each of its roles' fields came from.
 
-    Raises :class:`ConfigError` as :func:`load_config` does.
+    Raises :class:`ConfigError` as :func:`load_config` does, naming the first setting of a later
+    version of orbit ``data`` sets, if any, ahead of anything else.
     """
+    _refuse_later_settings(data)
     roles = data.get("roles", {})
     if not isinstance(roles, dict):
         return LayeredConfig(_validated(data), {})  # Refused: the roles aren't a table.
@@ -163,6 +174,47 @@ def load_layered(
     notices = tuple(replaced_note(name) for name in resolved.replaced)
     config = _validated({**data, "roles": resolved.roles}, resolved.personal, notices)
     return LayeredConfig(config, resolved.layers)
+
+
+def _refuse_later_settings(data: dict[str, Any]) -> None:
+    """Raise :class:`ConfigError` naming the first setting of a later version of orbit that
+    ``data`` sets, if it sets one."""
+    setting = next(_later_settings(data), None)
+    if setting is not None:
+        raise ConfigError(f"{setting} {LATER_VERSION}")
+
+
+def _later_settings(data: dict[str, Any]) -> Iterator[str]:
+    """The settings of a later version of orbit ``data`` sets, in order, each named as the
+    reference config names it: its :data:`LATER_TABLES`, and its roles' ``runtime`` keys and
+    ``tools`` tables."""
+    for key, value in data.items():
+        if key in LATER_TABLES:
+            yield _table_name(key, value)
+        elif key == "roles" and isinstance(value, dict):
+            for name, fields in value.items():
+                yield from _later_role_settings(name, fields)
+
+
+def _table_name(key: str, value: object) -> str:
+    """The later version's top-level ``key``, set to ``value``, named by its first table,
+    ``[key.<name>]``, or as ``[key]`` if it has none."""
+    if not isinstance(value, dict):
+        return f"[{key}]"
+    names = [name for name, table in value.items() if isinstance(table, dict)]
+    return f"[{key}.{names[0]}]" if names else f"[{key}]"
+
+
+def _later_role_settings(name: str, fields: object) -> Iterator[str]:
+    """The settings of a later version of orbit the ``fields`` of role ``name`` set, in order:
+    its ``runtime``, and its ``tools`` as a table rather than a list of orbit's tools."""
+    if not isinstance(fields, dict):
+        return
+    for key, value in fields.items():
+        if key == "runtime":
+            yield f"roles.{name}.runtime"
+        elif key == "tools" and isinstance(value, dict):
+            yield f"[roles.{name}.tools]"
 
 
 def _validated(

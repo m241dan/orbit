@@ -1,3 +1,5 @@
+import tomllib
+
 import pytest
 
 from orbit.agent.domain.agent_task import Limits
@@ -394,3 +396,63 @@ def test_a_layered_config_is_the_config_with_the_layer_each_role_field_came_from
     assert layered.role_layers["coder"]["model"] == Layer("project", path)
     assert layered.role_layers["planner"]["model"] == USER
     assert layered.role_layers["coder"]["tools"] == PACKAGE
+
+
+# Settings of a later version of orbit
+
+LATER_VERSION = (
+    "isn't supported by this version of orbit yet; it's in the reference config for a later"
+    " version. Leave it commented out."
+)
+
+
+@pytest.mark.parametrize(
+    ("toml", "setting"),
+    [
+        ('[triggers.review-each-commit]\non = "task_landed"', "[triggers.review-each-commit]"),
+        ('[roles.coder]\nruntime = "harness"', "roles.coder.runtime"),
+        ('[roles.coder.tools]\nmcp = ["semgrep"]', "[roles.coder.tools]"),
+        ('[mcp.github]\ncommand = ["github-mcp-server", "stdio"]', "[mcp.github]"),
+        ('[models.local]\nmodel = "openai:qwen3-coder"', "[models.local]"),
+        ('[roles.helper]\ninstructions = "You help."\nruntime = "kiro"', "roles.helper.runtime"),
+        ("[triggers]", "[triggers]"),
+        ("[mcp]\nshared = true\n\n[mcp.github]\nshared = false", "[mcp.github]"),
+        ('models = "local"', "[models]"),
+    ],
+)
+def test_a_later_versions_setting_is_refused_naming_it(toml: str, setting: str) -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_config(tomllib.loads(toml), BUILT_IN_ROLES)
+    assert str(raised.value) == f"{setting} {LATER_VERSION}"
+
+
+def test_the_first_later_versions_setting_in_the_file_is_the_one_named() -> None:
+    toml = '[roles.coder]\nruntime = "harness"\n\n[mcp.github]\nurl = "http://127.0.0.1:3010/mcp"'
+    with pytest.raises(ConfigError, match=r"^roles\.coder\.runtime isn't supported"):
+        load_config(tomllib.loads(toml), BUILT_IN_ROLES)
+
+
+def test_a_layered_config_refuses_a_later_versions_setting_too() -> None:
+    with pytest.raises(ConfigError, match=r"^\[mcp\.github\] isn't supported"):
+        load_layered({"mcp": {"github": {"shared": True}}}, BUILT_IN_ROLES)
+
+
+def test_a_roles_list_of_orbit_tools_still_loads() -> None:
+    tools = ("get_task", "complete_task", "report_progress", "give_up")
+    toml = f"[roles.coder]\ntools = {list(tools)}"
+    assert load_config(tomllib.loads(toml), BUILT_IN_ROLES).roles["coder"].tools == tools
+
+
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        ({"roles": {"coder": {"colour": "red"}}}, "roles.coder.colour: Extra inputs"),
+        ({"roles": {"coder": "harness"}}, "roles.coder: Input should be a valid dictionary"),
+        ({"runtime": "harness"}, "runtime: Extra inputs are not permitted"),
+    ],
+)
+def test_other_unknown_settings_keep_their_errors(data: dict[str, object], message: str) -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_config(data, BUILT_IN_ROLES)
+    assert str(raised.value).startswith(message)
+    assert "later version" not in str(raised.value)
