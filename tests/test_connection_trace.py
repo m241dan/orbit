@@ -11,13 +11,15 @@ from opentelemetry.sdk.trace import ReadableSpan
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed
 
-from orbit.agent import ControlPlane, WorkspaceHost
-from orbit.agent.application.connection_trace import CONNECTION_SPAN
-from orbit.agent.external.control_plane import ControlPlaneServer
+from orbit.agent import ControlPlane, WorkspaceHost, WorkspaceSource
+from orbit.agent.application.connection_trace import CONNECTION_SPAN, connection_span
+from orbit.agent.external.control_plane import ControlPlaneServer, close_reason
 from orbit.protocol import (
+    GOING_AWAY,
     NORMAL,
     POLICY_VIOLATION,
     PROTOCOL_VERSION,
+    SHUTTING_DOWN,
     Attach,
     Catalog,
     Command,
@@ -27,10 +29,12 @@ from orbit.protocol import (
     Event,
     EventEnvelope,
     Hello,
+    RemoveWorkspace,
     decode_event,
     encode,
 )
-from tests.server_fakes import TOKEN, serving_plane
+from tests.plane_fakes import FakeSource
+from tests.server_fakes import LOOPBACK, TOKEN, quiet, serving_plane, the_token
 from tests.telemetry_helpers import Traced, trace_id
 from tests.waiting import eventually
 
@@ -39,11 +43,14 @@ type Recorded = list[tuple[str, Mapping[str, Any]]]
 
 @asynccontextmanager
 async def traced_server(
-    traced: Traced, *hosts: WorkspaceHost
+    traced: Traced, *hosts: WorkspaceHost, workspaces: WorkspaceSource | None = None
 ) -> AsyncIterator[tuple[str, ControlPlaneServer]]:
-    """The URL of a server of a control plane serving ``hosts``, or a new one if none, traced by
-    ``traced``, and the server; stopped and closed after."""
-    plane = ControlPlane(hosts or [WorkspaceHost()], telemetry=traced.telemetry)
+    """The URL of a server of a control plane serving ``hosts``, or a new one if none, from the
+    source ``workspaces``, if given, traced by ``traced``, and the server; stopped and closed
+    after."""
+    plane = ControlPlane(
+        hosts or [WorkspaceHost()], workspaces=workspaces, telemetry=traced.telemetry
+    )
     async with serving_plane(plane, plane.close) as served:
         yield served
 
@@ -177,6 +184,26 @@ async def test_moving_to_another_workspace_detaches_then_attaches_there() -> Non
     ]
 
 
+async def test_removing_the_workspace_attached_to_detaches_from_it() -> None:
+    traced = Traced()
+    host = WorkspaceHost(workspace_id="w")
+    async with (
+        traced_server(traced, host, workspaces=FakeSource()) as (url, server),
+        frontend(url, server) as websocket,
+    ):
+        session = await attach(websocket, await hello(websocket, "orbit-tui"), "w")
+        await say(websocket, "remove", RemoveWorkspace(workspace="w"))
+        await until(websocket, CommandAccepted)
+
+    [span] = connections(traced)
+    assert events(span) == [
+        ("hello", {}),
+        ("attach", {"orbit.workspace.id": "w", "orbit.session.id": session}),
+        ("detach", {}),
+        closing(NORMAL),
+    ]
+
+
 async def test_a_connection_that_never_says_hello_still_ends_its_span_closed() -> None:
     traced = Traced()
     async with traced_server(traced) as (url, server), frontend(url, server):
@@ -197,6 +224,41 @@ async def test_a_websocket_the_server_closes_records_its_code_and_reason() -> No
     [span] = connections(traced)
     reason = "Send each envelope as JSON in a text frame."
     assert events(span) == [closing(POLICY_VIOLATION, reason)]
+
+
+async def test_a_websocket_the_frontend_closes_records_its_own_code_and_reason() -> None:
+    traced = Traced()
+    async with traced_server(traced) as (url, server), frontend(url, server) as websocket:
+        await websocket.close(4000, "bye")
+
+    [span] = connections(traced)
+    assert events(span) == [closing(4000, "bye")]
+
+
+async def test_a_connection_open_as_the_server_stops_records_it_going_away_once() -> None:
+    traced = Traced()
+    plane = ControlPlane([WorkspaceHost(workspace_id="w")], telemetry=traced.telemetry)
+    server = ControlPlaneServer(plane, the_token, LOOPBACK, quiet)
+    url = await server.start()
+    async with frontend(url, server) as websocket:
+        session = await attach(websocket, await hello(websocket, "orbit-tui"), "w")
+        await server.stop(plane.close)
+
+    [span] = connections(traced)
+    assert events(span) == [
+        ("hello", {}),
+        ("attach", {"orbit.workspace.id": "w", "orbit.session.id": session}),
+        closing(GOING_AWAY, close_reason(SHUTTING_DOWN)),
+    ]
+
+
+def test_a_connection_from_a_peer_the_server_cant_tell_has_no_peer_attributes() -> None:
+    traced = Traced()
+
+    connection_span(traced.telemetry, None).end()
+
+    [span] = connections(traced)
+    assert attributes(span) == {}
 
 
 async def test_an_incompatible_hello_records_the_version_it_speaks() -> None:
