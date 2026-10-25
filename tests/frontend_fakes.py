@@ -24,6 +24,7 @@ from orbit.tui.view.opening import Opening
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.panels import VerificationSteps
 from orbit.tui.view.prompt import PromptMarks
+from orbit.tui.view.reports import ReportShelf
 from orbit.tui.view.settings import Pickers
 from orbit.tui.view.storage import StorageHalt
 from orbit.tui.view.tab_strip import ALL_TAB_ID, OPENING, TabStrip
@@ -38,6 +39,7 @@ from tests.view_fakes import (
     OfferView,
     PickerScreens,
     ProposalModal,
+    ReportsView,
     StepsView,
     TaskView,
 )
@@ -277,6 +279,7 @@ class Shell:
         self.modals = Modals(self.send)
         self.proposals, self.pickers = ProposalModal(), PickerScreens()
         self.halt_view, self.offer_view = HaltView(), OfferView()
+        self.reports_view = ReportsView()
         self._posted: list[Message] = []
         self.tabs = TabStrip(self.strip)
         self.tasks = TaskBoard(self.task_view, self.clock)
@@ -309,6 +312,7 @@ class Shell:
             pickers=Pickers(self.pickers),
             halt=StorageHalt(self.halt_view, self.send),
             takeover=TakeoverOffer(self.offer_view, self.send),
+            reports=ReportShelf(self.reports_view, self.send),
             clock=clock,
         )
 

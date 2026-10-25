@@ -5,8 +5,9 @@ The database is ``orbit.db`` in the state directory, in WAL mode. One connection
 by a single thread: every database call runs there, a statement or a transaction at a time, so a
 caller that's cancelled while awaiting one never leaves the connection mid-transaction. The schema
 and opening it are :mod:`sqlite_schema`'s, the events' log's statements :mod:`sqlite_log`'s, the
-turns' usage :mod:`sqlite_usage`'s, and copying it to a backup :mod:`sqlite_backup`'s; this module
-holds the sessions' and review counts' statements, and runs them all on the database's thread.
+turns' usage :mod:`sqlite_usage`'s, the reports :mod:`sqlite_reports`'s, and copying it to a
+backup :mod:`sqlite_backup`'s; this module holds the sessions' and review counts' statements,
+and runs them all on the database's thread.
 
 Session locks are :class:`SessionLocks` lock files in ``locks/<workspace id>`` in the state
 directory, so that a crash leaves no stale lock behind.
@@ -32,9 +33,10 @@ from orbit.agent.application.ports import (
     StoreFailed,
 )
 from orbit.agent.domain.replay import LogBounds
+from orbit.agent.domain.reports import NewReport
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, parse_record, record_json
 from orbit.agent.domain.usage_totals import UsageRow, UsageTotalsData
-from orbit.agent.external import sqlite_log, sqlite_usage
+from orbit.agent.external import sqlite_log, sqlite_reports, sqlite_usage
 from orbit.agent.external.session_locks import SessionLocks, check_session_id
 from orbit.agent.external.shielding import shielded
 from orbit.agent.external.sqlite_backup import copy_to, is_database_file
@@ -45,7 +47,7 @@ from orbit.agent.external.sqlite_schema import (
     open_existing,
     transaction,
 )
-from orbit.protocol import EventEnvelope
+from orbit.protocol import EventEnvelope, ReportShown, ReportSummary
 
 DATABASE = "orbit.db"
 LOCKS = "locks"
@@ -319,6 +321,26 @@ class SqliteStore:
         message = "Couldn't save the record moves to"
         await self._or_raise(message, self._save_record_moves, workspace, moves, write=True)
 
+    async def save_report(self, workspace: str, report: NewReport) -> int:
+        message = "Couldn't save a report to"
+        return await self._or_raise(
+            message, self._log(sqlite_reports.save), workspace, report, write=True
+        )
+
+    async def reports(self, workspace: str) -> list[ReportSummary]:
+        message = "Couldn't list the reports in"
+        return await self._or_raise(message, self._log(sqlite_reports.listed), workspace)
+
+    async def report(self, workspace: str, report_id: int) -> ReportShown | None:
+        message = f"Couldn't read the report {report_id} from"
+        return await self._or_raise(message, self._log(sqlite_reports.shown), workspace, report_id)
+
+    async def delete_report(self, workspace: str, report_id: int) -> bool:
+        message = f"Couldn't delete the report {report_id} from"
+        return await self._or_raise(
+            message, self._log(sqlite_reports.delete), workspace, report_id, write=True
+        )
+
     async def record(self, row: UsageRow) -> None:
         message = f"Couldn't record the usage of a turn in the session {row.session_id} in"
         await self._or_raise(message, self._log(sqlite_usage.record), row, write=True)
@@ -417,8 +439,8 @@ class SqliteStore:
         return self._connection
 
     def _log[*A, T](self, function: Callable[[sqlite3.Connection, *A], T]) -> Callable[[*A], T]:
-        """``function`` of :mod:`sqlite_log` or :mod:`sqlite_usage`, given the open connection;
-        only on the database's thread."""
+        """``function`` of :mod:`sqlite_log`, :mod:`sqlite_usage` or :mod:`sqlite_reports`,
+        given the open connection; only on the database's thread."""
         return lambda *args: function(self._db, *args)
 
     def _locks_of(self, workspace: str) -> SessionLocks:
@@ -702,6 +724,18 @@ class WorkspaceStore:
 
     async def save_record_moves(self, moves: Mapping[str, str]) -> None:
         await self._store.save_record_moves(self._id, moves)
+
+    async def save_report(self, report: NewReport) -> int:
+        return await self._store.save_report(self._id, report)
+
+    async def reports(self) -> list[ReportSummary]:
+        return await self._store.reports(self._id)
+
+    async def report(self, report_id: int) -> ReportShown | None:
+        return await self._store.report(self._id, report_id)
+
+    async def delete_report(self, report_id: int) -> bool:
+        return await self._store.delete_report(self._id, report_id)
 
     async def insert_new(
         self,

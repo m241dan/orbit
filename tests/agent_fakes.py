@@ -52,6 +52,7 @@ from orbit.agent.domain.checks import Setup
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.replay import LogBounds
+from orbit.agent.domain.reports import NewReport
 from orbit.agent.domain.roles import Role, built_in_roles
 from orbit.agent.domain.runtimes import (
     CLAUDE,
@@ -96,6 +97,8 @@ from orbit.protocol import (
     History,
     HistoryPage,
     Notice,
+    ReportShown,
+    ReportSummary,
     ResumeStorage,
     RunTasks,
     SendMessage,
@@ -465,6 +468,7 @@ class FakeStore:
 
     The record moves kept are ``moves``; ``moves_failure``, while set, is the error saving them
     raises, and ``moves_load_failure`` the error reading them raises, as :class:`ReadFailed`.
+    The reports kept are ``reports_kept``, by id.
     """
 
     def __init__(self, count: int = 0) -> None:
@@ -508,6 +512,7 @@ class FakeStore:
         self.moves: dict[str, str] = {}
         self.moves_failure: str | None = None
         self.moves_load_failure: str | None = None
+        self.reports_kept: dict[int, NewReport] = {}
 
     @property
     def last(self) -> SessionRecord:
@@ -670,6 +675,32 @@ class FakeStore:
             raise StoreFailed(self.moves_failure)
         await asyncio.sleep(0)  # Saving takes a while, as writing a file does.
         self.moves |= moves
+
+    async def save_report(self, report: NewReport) -> int:
+        await asyncio.sleep(0)  # Saving takes a while, as writing a file does.
+        report_id = max(self.reports_kept, default=0) + 1
+        self.reports_kept[report_id] = report
+        return report_id
+
+    async def reports(self) -> list[ReportSummary]:
+        await self._read(None)
+        return [
+            ReportSummary(id=report_id, title=kept.title, author=kept.author, time=kept.at)
+            for report_id, kept in sorted(self.reports_kept.items(), reverse=True)
+        ]
+
+    async def report(self, report_id: int) -> ReportShown | None:
+        await self._read(None)
+        kept = self.reports_kept.get(report_id)
+        if kept is None:
+            return None
+        return ReportShown(
+            id=report_id, title=kept.title, body=kept.body, author=kept.author, time=kept.at
+        )
+
+    async def delete_report(self, report_id: int) -> bool:
+        await asyncio.sleep(0)  # Deleting takes a while, as writing a file does.
+        return self.reports_kept.pop(report_id, None) is not None
 
 
 STEP = VerificationStep(name="Unit tests", command=("pytest",))

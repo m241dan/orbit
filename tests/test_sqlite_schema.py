@@ -306,8 +306,25 @@ async def test_a_version_9_database_upgrades_to_10_with_no_credits_spent_by_its_
     store = await SqliteStore.open(state)
     await store.close()
     with database(state) as connection:
-        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (10,)
+        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (
+            len(MIGRATIONS),
+        )
         assert connection.execute("SELECT cost_usd, credits FROM usage").fetchall() == [(0.5, 0)]
+
+
+async def test_a_version_10_database_upgrades_to_11_with_no_reports(
+    monkeypatch: pytest.MonkeyPatch, state: Path, workspace: Path
+) -> None:
+    with monkeypatch.context() as patched:
+        patched.setattr(sqlite_schema, "MIGRATIONS", MIGRATIONS[:10])
+        connection = sqlite_schema.open_database(state / "orbit.db")
+        register(connection, workspace.resolve(), None)
+        connection.close()
+    store = await SqliteStore.open(state)
+    await store.close()
+    with database(state) as connection:
+        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (11,)
+        assert connection.execute("SELECT count(*) FROM reports").fetchone() == (0,)
 
 
 # Transactions

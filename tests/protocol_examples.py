@@ -37,6 +37,7 @@ from orbit.protocol import (
     ConsultationAsked,
     ConversationReset,
     DecideProposal,
+    DeleteReport,
     DeleteSession,
     DirectoryEntry,
     DirectoryListing,
@@ -49,6 +50,7 @@ from orbit.protocol import (
     History,
     HistoryPage,
     ListDirectory,
+    ListReports,
     LogGap,
     MessageSent,
     NewSession,
@@ -64,6 +66,9 @@ from orbit.protocol import (
     RemoveTask,
     RemoveWorkspace,
     RenameSession,
+    ReportShown,
+    ReportsListed,
+    ReportSummary,
     ResetConversation,
     ResumeStorage,
     ReviewStatus,
@@ -75,6 +80,7 @@ from orbit.protocol import (
     SessionSummary,
     Settings,
     SettingsChanged,
+    ShowReport,
     Snapshot,
     StartupChecked,
     StepState,
@@ -185,6 +191,8 @@ def event(payload: Event) -> EventEnvelope:
     )
 
 
+REPORT_TIME = datetime(2026, 10, 25, 12, 0, tzinfo=UTC)
+
 COMMANDS: tuple[CommandEnvelope, ...] = (
     command(Hello(client="tui", protocol_version=2, since=4)),
     command(SendMessage(agent=PLANNER, text="hello")),
@@ -215,6 +223,9 @@ COMMANDS: tuple[CommandEnvelope, ...] = (
     command(Watch(streams=(CONTROL_PLANE_STREAM,))),
     command(ListDirectory()),
     command(ListDirectory(path="/home/me/src")),
+    command(ListReports()),
+    command(ShowReport(id=3)),
+    command(DeleteReport(id=3)),
 )
 
 EVENTS: tuple[EventEnvelope, ...] = (
@@ -422,6 +433,16 @@ EVENTS: tuple[EventEnvelope, ...] = (
             ),
             truncated=True,
             total=2001,
+        )
+    ),
+    event(
+        ReportsListed(
+            reports=(ReportSummary(id=3, title="Timings", author="experimenter", time=REPORT_TIME),)
+        )
+    ),
+    event(
+        ReportShown(
+            id=3, title="Timings", body="It took 3s.", author="experimenter", time=REPORT_TIME
         )
     ),
     event(Welcome(command_id="c1", server_version="0.1.0")),

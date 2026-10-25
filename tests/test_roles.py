@@ -495,7 +495,7 @@ def test_a_task_suggestion_without_a_prompt_has_an_empty_one() -> None:
     assert task_suggestion({"title": "Tidy"}) == ("Tidy", "")
 
 
-def test_orbit_tools_are_the_nine_in_order() -> None:
+def test_orbit_tools_are_the_twelve_in_order() -> None:
     assert ORBIT_TOOLS == (
         "get_task",
         "complete_task",
@@ -506,6 +506,9 @@ def test_orbit_tools_are_the_nine_in_order() -> None:
         "propose_task",
         "propose_checks",
         "consult",
+        "save_report",
+        "list_reports",
+        "read_report",
     )
 
 
@@ -560,6 +563,9 @@ def test_unrestricted_tool_rules_allow_the_roles_orbit_tools_and_deny_its_others
         "mcp__orbit__propose_task",
         "mcp__orbit__propose_checks",
         "mcp__orbit__consult",
+        "mcp__orbit__save_report",
+        "mcp__orbit__list_reports",
+        "mcp__orbit__read_report",
     )
 
 
@@ -581,6 +587,9 @@ def test_restricted_tool_rules_add_reading_and_searching_and_deny_writing() -> N
         "mcp__orbit__suggest_task",
         "mcp__orbit__propose_checks",
         "mcp__orbit__consult",
+        "mcp__orbit__save_report",
+        "mcp__orbit__list_reports",
+        "mcp__orbit__read_report",
         "Edit",
         "Write",
         "NotebookEdit",

@@ -51,13 +51,13 @@ An event travels in an `EventEnvelope`:
   store, while it's halted, reserves the block once it resumes.
 - `session`: the session the event belongs to. The event's type decides it: the types in
   `SESSIONLESS_EVENTS` (`UsageChanged`, `Catalog`, `SessionStateChanged`, `WorkspaceCloning`,
-  `AgentsChanged`, `UsageTotals` and `DirectoryListing`)
+  `AgentsChanged`, `UsageTotals`, `DirectoryListing`, `ReportsListed` and `ReportShown`)
   belong to no session, carry `null` and are never logged, and every other event carries the
   open session's id, but for the answers to a connection viewing another session (its
   `Snapshot`, `CommandAccepted` and `CommandRefused`), which carry that session's id and are
   never logged. Every event of a session is kept in the store's event log but for
   `CONNECTION_EVENTS` (`Welcome`, `Catalog`, `Snapshot`, `HistoryPage`, `AgentsChanged`,
-  `UsageTotals` and `DirectoryListing`), which answer one connection or the connections watching a stream, and a
+  `UsageTotals`, `DirectoryListing`, `ReportsListed` and `ReportShown`), which answer one connection or the connections watching a stream, and a
   connection's greeting (see [The handshake](#the-handshake)).
 - `workspace`: the id of the workspace the event belongs to, but for the control plane's own
   events, the types in `CONTROL_PLANE_EVENTS` (`Welcome`, `Catalog`, `UsageChanged`,
@@ -642,6 +642,19 @@ consulted role's lane), `it failed: <error>`, `Claude's usage limit was reached`
 API wasn't answering` (naming the runtime), `the session was switched` or `orbit restarted`.
 Consultations pending are saved in the session record; those still pending as the session is
 switched away from or orbit stops are answered so as the session opens again.
+
+## Reports
+
+Reports are findings agents keep, per workspace, with the orbit tools `save_report`,
+`list_reports` and `read_report`; a body over 200 KB is refused. `ListReports()` asks for the
+workspace's reports: the backend answers the asking connection alone with
+`ReportsListed(reports)`, newest first, each a `ReportSummary(id, title, author, time)`, then
+`CommandAccepted`; `id` counts from 1 in each workspace, `author` is the role that saved it and
+`time` when. `ShowReport(id)` is answered the same way with `ReportShown(id, title, body,
+author, time)`, `body` in Markdown. `DeleteReport(id)` deletes the report; only the user deletes
+reports, never a tool, and purging a workspace deletes its reports. `ShowReport` and
+`DeleteReport` for a report there's none of are refused with `unknown`. They work from a
+read-only view of a session too, as reports are the workspace's.
 
 ## Paging through history
 

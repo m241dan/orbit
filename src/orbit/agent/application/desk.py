@@ -217,6 +217,8 @@ class AgentDesk:
         self._processes: dict[str, Span] = {}  # The spans of the agents' processes, by agent id.
         # Takes a review task's suggestions: its id, then the suggestion's title and prompt.
         self.suggest: Callable[[str, str, str], Awaitable[Reply]] | None = None
+        # The report tools as an agent in the role named calls them; none without a store.
+        self.report_tools: Callable[[str], Mapping[str, Tool]] = lambda role: {}
         self._runs: dict[str, CallTarget] = {}
         # The agents whose start was published and whose exit wasn't, so a snapshot shows what
         # the events have told the frontend.

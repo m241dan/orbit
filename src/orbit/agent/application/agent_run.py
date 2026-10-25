@@ -222,7 +222,9 @@ class AgentRun:
             await self._publish(ErrorOccurred(agent_id=self.agent.id, code=code, message=message))
 
     async def handle(self, tool: str, arguments: dict[str, Any]) -> Reply:
-        return await dispatch(self._work.task.role, self.role, self._tools, tool, arguments)
+        name = self._work.task.role
+        tools = {**self._tools, **self._desk.report_tools(name)}
+        return await dispatch(name, self.role, tools, tool, arguments)
 
     # The agent's process
 

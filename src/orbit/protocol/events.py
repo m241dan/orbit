@@ -732,6 +732,38 @@ class DirectoryListing(_Message):
     total: int = Field(ge=0)
 
 
+class ReportSummary(_Message):
+    """A report saved in the workspace, as ``ReportsListed`` lists it: its ``id``, numbered in
+    the workspace from 1, its ``title``, the role it's by (``author``) and when it was saved
+    (``time``)."""
+
+    id: int = Field(ge=1)
+    title: str
+    author: str
+    time: AwareDatetime
+
+
+class ReportsListed(_Message):
+    """The workspace's saved reports, newest first, which ``ListReports`` asked for; sent to the
+    connection that asked alone and never logged."""
+
+    type: Literal["reports_listed"] = "reports_listed"
+    reports: tuple[ReportSummary, ...]
+
+
+class ReportShown(_Message):
+    """The report ``id`` that ``ShowReport`` asked for: its ``title``, its Markdown ``body``,
+    the role it's by (``author``) and when it was saved (``time``); sent to the connection that
+    asked alone and never logged."""
+
+    type: Literal["report_shown"] = "report_shown"
+    id: int = Field(ge=1)
+    title: str
+    body: str
+    author: str
+    time: AwareDatetime
+
+
 Event = Annotated[
     SettingsChanged
     | TurnStarted
@@ -776,6 +808,8 @@ Event = Annotated[
     | AgentsChanged
     | UsageTotals
     | DirectoryListing
+    | ReportsListed
+    | ReportShown
     | Welcome
     | CommandAccepted
     | CommandRefused,

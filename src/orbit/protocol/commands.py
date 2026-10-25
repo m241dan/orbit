@@ -279,6 +279,29 @@ class ListDirectory(_Message):
     path: str | None = Field(default=None, min_length=1)
 
 
+class ListReports(_Message):
+    """Ask for the workspace's saved reports, answered to this connection alone with
+    ``ReportsListed``."""
+
+    type: Literal["list_reports"] = "list_reports"
+
+
+class ShowReport(_Message):
+    """Ask for the workspace's report ``id``, answered to this connection alone with
+    ``ReportShown``. Refused with ``unknown`` for a report there's none of."""
+
+    type: Literal["show_report"] = "show_report"
+    id: int = Field(ge=1)
+
+
+class DeleteReport(_Message):
+    """Delete the workspace's report ``id``; reports are deleted only so, by the user. Refused
+    with ``unknown`` for a report there's none of."""
+
+    type: Literal["delete_report"] = "delete_report"
+    id: int = Field(ge=1)
+
+
 Command = Annotated[
     Hello
     | SendMessage
@@ -304,7 +327,10 @@ Command = Annotated[
     | AddWorkspace
     | RemoveWorkspace
     | Watch
-    | ListDirectory,
+    | ListDirectory
+    | ListReports
+    | ShowReport
+    | DeleteReport,
     Field(discriminator="type"),
 ]
 

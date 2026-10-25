@@ -44,6 +44,7 @@ from orbit.agent.application.ports import (
 )
 from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.record_moves import MoveHooks, RecordMoves
+from orbit.agent.application.reports import ReportCommand, Reports
 from orbit.agent.application.review_count import ReviewCount
 from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
 from orbit.agent.application.review_trace import ReviewTracing
@@ -102,9 +103,11 @@ from orbit.protocol import (
     REVIEW_ROLES,
     ActivateSession,
     Attach,
+    DeleteReport,
     DeleteSession,
     Event,
     History,
+    ListReports,
     NewSession,
     Notice,
     RenameSession,
@@ -112,6 +115,7 @@ from orbit.protocol import (
     RunningAgent,
     SessionSummary,
     Settings,
+    ShowReport,
     StepState,
     TakeOwnership,
     TaskSpec,
@@ -172,6 +176,8 @@ _DEFAULT_STORAGE = StorageSettings()
 _NO_TELEMETRY = NoTelemetry()
 
 UNREGISTERED_WORKSPACE = "unregistered"
+
+NO_REPORTS_KEPT = "This orbit has no store to keep reports in."
 """The id of a host's workspace when it's given none, as one with no store isn't registered."""
 
 
@@ -355,6 +361,9 @@ class WorkspaceHost:
         self._desk = _desk(
             agents, self._publish_agents, telemetry, workspace_id, lambda: self._keeper.id
         )
+        self._reports = None if store is None else Reports(store, lambda: self._keeper.id, clock)
+        if self._desk is not None and self._reports is not None:
+            self._desk.report_tools = self._reports.tools
         self._workspace = workspace
         self._managed = managed
         self._recover = recover
@@ -821,7 +830,13 @@ class WorkspaceHost:
 
     async def handle(
         self,
-        command: SessionCommand | WorkCommand | History | ResumeStorage | TakeOwnership | Attach,
+        command: SessionCommand
+        | WorkCommand
+        | History
+        | ResumeStorage
+        | TakeOwnership
+        | Attach
+        | ReportCommand,
         command_id: str,
         connection: SessionConnection,
     ) -> None:
@@ -834,7 +849,13 @@ class WorkspaceHost:
 
     async def _admitted(
         self,
-        command: SessionCommand | WorkCommand | History | ResumeStorage | TakeOwnership | Attach,
+        command: SessionCommand
+        | WorkCommand
+        | History
+        | ResumeStorage
+        | TakeOwnership
+        | Attach
+        | ReportCommand,
         command_id: str,
         connection: SessionConnection,
     ) -> None:
@@ -853,7 +874,7 @@ class WorkspaceHost:
         if isinstance(command, ActivateSession | NewSession):
             await self._activate(command, connection)
             return
-        await self._handle(command, command_id)
+        await self._handle(command, command_id, connection)
 
     async def _activate(
         self, command: ActivateSession | NewSession, connection: SessionConnection
@@ -870,11 +891,19 @@ class WorkspaceHost:
 
     async def _handle(
         self,
-        command: RenameSession | DeleteSession | WorkCommand | History | TakeOwnership,
+        command: RenameSession
+        | DeleteSession
+        | WorkCommand
+        | History
+        | TakeOwnership
+        | ReportCommand,
         command_id: str,
+        connection: SessionConnection,
     ) -> None:
         if isinstance(command, History):
             await self._events.put(await self._history.page(command))
+        elif isinstance(command, ListReports | ShowReport | DeleteReport):
+            await self._answer_reports(command, connection)
         elif isinstance(command, RenameSession | DeleteSession):
             await self._change_saved(command)
         elif isinstance(command, TakeOwnership):
@@ -882,6 +911,13 @@ class WorkspaceHost:
         else:
             self._switcher.stay()
             await self._commands.handle(command, command_id)
+
+    async def _answer_reports(self, command: ReportCommand, connection: SessionConnection) -> None:
+        """Carry out ``command``, sending ``connection`` alone the list or the report it asks
+        for; refused without a store to keep reports in."""
+        if self._reports is None:
+            raise Refused(INVALID, NO_REPORTS_KEPT)
+        await self._reports.answer(command, connection.publish_here)
 
     async def _change_saved(self, command: RenameSession | DeleteSession) -> None:
         """Rename or delete the session ``command`` names, and only once it's done, have the

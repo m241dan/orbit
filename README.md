@@ -104,6 +104,7 @@ In the app:
 | `ctrl+y` | Pick the effort of the conversational role whose tab is shown, or the planner's on any other tab (unset, low, medium, high, xhigh, max; it's that role's own, so new tasks still start with effort unset); not while typing, where it's the prompt's redo |
 | `ctrl+p` | Session picker: view or switch to a saved session, or start a new one (see [Sessions](#sessions)) |
 | `ctrl+w` | Workspace picker, connected to an `orbit serve`: move to another workspace it serves, add one or remove one (see [Workspaces](#workspaces)); not while typing |
+| `ctrl+k` | Reports: the workspace's saved reports, newest first; `enter` shows one, `y` copies it there, `x` deletes the highlighted one after you confirm (see [Reports](#reports)) |
 | `esc` | Stop typing, close the conversation's detail pane, leave a list or close a picker; with the conversation selected and nothing active, let go of its held entry, closing the detail pane, and follow the latest output again; with the detail pane selected, close it; with the Task list selected and nothing active, let go of the held list and follow the active task again |
 | `ctrl+s` | Stop the task run (on any tab) |
 | `ctrl+x` | Stop the turn of the conversational role whose tab is shown, or the planner's on any other tab, leaving the task run going |
@@ -114,7 +115,8 @@ In the app:
 
 In a picker, `j`/`k` (or the arrow keys) move and `enter` chooses. In the list of sessions, `r`
 renames the highlighted session and `x` deletes it (see [Sessions](#sessions)); in the list of
-workspaces, `x` removes the highlighted workspace (see [Workspaces](#workspaces)).
+workspaces, `x` removes the highlighted workspace (see [Workspaces](#workspaces)); in the list of
+reports, `x` deletes the highlighted report (see [Reports](#reports)).
 
 ### Workspaces
 
@@ -883,7 +885,7 @@ miss writes still in its `-wal` file, or catch one half done. To restore, stop e
 state directory, replace `orbit.db` with the backup, and start orbit again.
 
 `orbit db forget PATH` deletes everything orbit keeps of the workspace at `PATH`, or the repository
-`PATH` is in, as `orbit chat` finds it (or with the id `PATH`): its saved sessions and their events, its review count, its record moves, its turns' usage, its session
+`PATH` is in, as `orbit chat` finds it (or with the id `PATH`): its saved sessions and their events, its review count, its record moves, its reports, its turns' usage, its session
 locks in `locks/`, its fallback files, in the state directory and the repository, and its entry, so orbit starts afresh
 there next time; for a clone `orbit serve` made, it deletes the clone's directory too, and never a
 directory orbit didn't clone into. Files go before the records, so a file it can't delete leaves
@@ -1028,6 +1030,23 @@ opens as usual, its conversation kept but not carried on, and a prompt to the pl
 its tab) to start one on kiro.`. `ctrl+n` drops that conversation, and the next prompt starts one
 on the planner's runtime. Another conversational role's conversation works the same way, and each
 role's is its own: one whose runtime changed leaves the others carrying on theirs.
+
+### Reports
+
+A report is a finding an agent keeps for later, in Markdown, saved per workspace in orbit's store
+with its title, the role that wrote it, the session it was saved in and when. Three orbit tools
+work with them, granted through a role's `tools` like any other (no built-in role has them yet):
+`save_report(title, body)` saves one and answers `Saved report <id>.`, numbering reports from 1 in
+each workspace; a report without a title is refused, and so is a body over 200 KB (`That report
+is over 200 KB; summarise it and keep only the essential output.`). `list_reports()` lists each
+report's id, title, author and date, newest first, and `read_report(id)` gives one's title and
+body, refusing an id there's none of. A workspace sees only its own reports.
+
+**ctrl+k** opens the list of reports, newest first, each row its title, author and date; `j`/`k`
+(or the arrow keys) move, `enter` shows the highlighted report in a scrollable view where `y`
+copies it, and `esc` goes back. `x` deletes the highlighted report after you confirm (`y` to
+delete, `n`/`esc` to keep it). Only you delete reports, never an agent; purging the workspace
+deletes them too.
 
 ### Reviews
 
@@ -1715,7 +1734,7 @@ it; a frontend that never watches is sent neither.
 
 **Purging.** A frontend removing a workspace can have its records deleted too, with
 `RemoveWorkspace`'s `purge`: under the same refusals as removing, its sessions, their events, its
-review count, record moves, session locks, fallback files and registry entry go, so adding it again
+review count, record moves, reports, session locks, fallback files and registry entry go, so adding it again
 starts afresh, and so does a managed clone's directory. A directory orbit didn't clone into is never
 deleted. A clone holding work that exists nowhere else, uncommitted changes, stashes or commits on
 any branch, or on a detached HEAD, that its remote doesn't have, isn't purged: the refusal lists

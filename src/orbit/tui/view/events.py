@@ -26,6 +26,8 @@ from orbit.protocol import (
     OwnershipOffered,
     OwnershipTaken,
     ProposalDecided,
+    ReportShown,
+    ReportsListed,
     ReviewStatus,
     SessionStateChanged,
     SettingsChanged,
@@ -69,10 +71,20 @@ ConsultationEvent = ConsultationAsked | ConsultationAnswered
 """A consultation asked, or its place in line, and its reply, which the asker hears as a
 message."""
 
+ReportEvent = ReportsListed | ReportShown
+"""The workspace's reports, or one of them, which the reports list asked for."""
+
 StateEvent = (
-    SettingsChanged | BusyChanged | TasksChanged | ProgressEvent | StreamEvent | ConsultationEvent
+    SettingsChanged
+    | BusyChanged
+    | TasksChanged
+    | ProgressEvent
+    | StreamEvent
+    | ConsultationEvent
+    | ReportEvent
 )
-"""Snapshots of backend state, or a decision it waits for, and consultations' progress."""
+"""Snapshots of backend state, or a decision it waits for, consultations' progress, and the
+reports asked for."""
 
 TurnEvent = (
     TurnStarted

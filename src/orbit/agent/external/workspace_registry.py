@@ -141,6 +141,7 @@ _PURGES = (
     "DELETE FROM sessions WHERE workspace_id = ?",
     "DELETE FROM reviews WHERE workspace_id = ?",
     "DELETE FROM record_moves WHERE workspace_id = ?",
+    "DELETE FROM reports WHERE workspace_id = ?",
     "DELETE FROM usage WHERE workspace_id = ?",
     "DELETE FROM workspaces WHERE id = ?",
 )

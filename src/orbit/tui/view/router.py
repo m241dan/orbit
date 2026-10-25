@@ -25,6 +25,8 @@ from orbit.protocol import (
     MessageSent,
     OwnershipOffered,
     OwnershipTaken,
+    ReportShown,
+    ReportsListed,
     ReviewStatus,
     SessionSummary,
     Settings,
@@ -50,6 +52,7 @@ from orbit.tui.view.events import (
     ConsultationEvent,
     OwnershipEvent,
     ProgressEvent,
+    ReportEvent,
     SessionEvent,
     StateEvent,
     in_group,
@@ -57,6 +60,7 @@ from orbit.tui.view.events import (
 from orbit.tui.view.feed import ConversationFeed
 from orbit.tui.view.history import HistoryPager
 from orbit.tui.view.navigation import Navigation
+from orbit.tui.view.reports import ReportShelf
 from orbit.tui.view.rules import reset_entry
 from orbit.tui.view.seats import Seats
 from orbit.tui.view.storage import StorageHalt
@@ -193,6 +197,7 @@ class Handlers:
     navigation: Navigation
     halt: StorageHalt
     takeover: TakeoverOffer
+    reports: ReportShelf
 
 
 @dataclass(frozen=True)
@@ -390,6 +395,8 @@ class EventRouter:
                 | DirectoryListing()
                 | ConsultationAsked()
                 | ConsultationAnswered()
+                | ReportsListed()
+                | ReportShown()
             ):
                 self._follow_stream(event)
             case _:
@@ -402,15 +409,18 @@ class EventRouter:
         self.seats.follow_settings(event.role, event.settings)
 
     def _follow_stream(
-        self, event: AgentsChanged | UsageTotals | DirectoryListing | ConsultationEvent
+        self,
+        event: AgentsChanged | UsageTotals | DirectoryListing | ConsultationEvent | ReportEvent,
     ) -> None:
-        """Show the agents running across workspaces in the workspace picker, and the server's
-        directories in its explorer; nothing shows what turns cost across them, nor
-        consultations, which the asker's turns show."""
+        """Show the agents running across workspaces in the workspace picker, the server's
+        directories in its explorer, and the reports asked for in their list; nothing shows
+        what turns cost across them, nor consultations, which the asker's turns show."""
         if isinstance(event, AgentsChanged):
             self._handlers.navigation.follow_agents(event)
         elif isinstance(event, DirectoryListing):
             self._handlers.navigation.follow_listing(event)
+        elif isinstance(event, ReportsListed | ReportShown):
+            self._handlers.reports.follow(event)
 
     def _follow_agents(self, event: Event) -> None:
         panes = self._panes

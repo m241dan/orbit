@@ -17,12 +17,13 @@ from orbit.agent.application.ports import (
     StoredSession,
     StoreFailed,
 )
+from orbit.agent.domain.reports import NewReport
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.storage_halt import StorageErrorKind
 from orbit.agent.external import sqlite_store
 from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import NewRows, SqliteStore
-from orbit.protocol import EventEnvelope, Notice
+from orbit.protocol import EventEnvelope, Notice, ReportShown
 from tests.git_repo import git
 from tests.store_views import (
     WHEN,
@@ -98,6 +99,40 @@ async def test_record_moves_survive_closing_and_a_later_move_replaces_an_earlier
     }
 
 
+def new_report(title: str, body: str = "It took 3s.") -> NewReport:
+    return NewReport(title, body, "experimenter", "abc", WHEN)
+
+
+async def test_reports_are_numbered_from_1_listed_newest_first_and_survive_closing(
+    open_store: Opener, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    assert await store.reports() == []
+    assert await store.save_report(new_report("Timings")) == 1
+    assert await store.save_report(new_report("Memory", "Peaked at 2 GB.")) == 2
+    await store.close()
+    reopened = await open_store(workspace)
+    assert [(report.id, report.title) for report in await reopened.reports()] == [
+        (2, "Memory"),
+        (1, "Timings"),
+    ]
+    assert await reopened.report(2) == ReportShown(
+        id=2, title="Memory", body="Peaked at 2 GB.", author="experimenter", time=WHEN
+    )
+    assert (await reopened.reports())[0].time == WHEN
+
+
+async def test_a_report_deleted_is_gone_and_an_unknown_one_is_none(
+    open_store: Opener, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.save_report(new_report("Timings"))
+    assert await store.delete_report(1)
+    assert not await store.delete_report(1)
+    assert await store.report(1) is None
+    assert await store.reports() == []
+
+
 async def test_a_workspace_is_registered_once_by_path_and_its_fingerprint_kept_current(
     open_store: Opener, state: Path, workspace: Path
 ) -> None:
@@ -153,6 +188,10 @@ async def test_two_views_of_one_store_see_only_their_own_sessions_and_review_cou
     assert (await mine.review_count(), await theirs.review_count()) == (3, 0)
     await mine.save_record_moves({"docs/00001-a.md": "docs/00002-a.md"})
     assert await theirs.record_moves() == {}
+    assert await mine.save_report(new_report("Mine")) == 1
+    assert await theirs.reports() == []
+    assert await theirs.save_report(new_report("Theirs")) == 1
+    assert await theirs.report(1) != await mine.report(1)
     assert (mine.workspace_id, theirs.workspace_id) == ("mine", "theirs")
 
 
@@ -317,6 +356,10 @@ type Outcome = type[StoreFailed] | Callable[[Path], object]
         (lambda store: store.save_review_count(1), StorageFailed),
         (lambda store: store.record_moves(), ReadFailed),
         (lambda store: store.save_record_moves({"00001-a.md": "00002-a.md"}), StorageFailed),
+        (lambda store: store.save_report(new_report("Timings")), StorageFailed),
+        (lambda store: store.reports(), ReadFailed),
+        (lambda store: store.report(1), ReadFailed),
+        (lambda store: store.delete_report(1), StorageFailed),
     ],
 )
 async def test_each_call_on_a_closed_store_has_its_own_failure(

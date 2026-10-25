@@ -75,6 +75,9 @@ SUGGEST_TASK = "suggest_task"
 PROPOSE_TASK = "propose_task"
 PROPOSE_CHECKS = "propose_checks"
 CONSULT = "consult"
+SAVE_REPORT = "save_report"
+LIST_REPORTS = "list_reports"
+READ_REPORT = "read_report"
 
 ORBIT_TOOLS = (
     GET_TASK,
@@ -86,6 +89,9 @@ ORBIT_TOOLS = (
     PROPOSE_TASK,
     PROPOSE_CHECKS,
     CONSULT,
+    SAVE_REPORT,
+    LIST_REPORTS,
+    READ_REPORT,
 )
 """Every tool orbit's MCP server offers agents."""
 

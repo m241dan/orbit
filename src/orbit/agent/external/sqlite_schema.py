@@ -113,6 +113,20 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         # credits were counted cost none.
         "ALTER TABLE usage ADD COLUMN credits REAL NOT NULL DEFAULT 0",
     ),
+    (
+        # The reports agents saved in each workspace, numbered in it from 1; each one's time is
+        # an ISO UTC time.
+        """CREATE TABLE reports (
+            workspace_id TEXT NOT NULL REFERENCES workspaces (id),
+            id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            author TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            at TEXT NOT NULL,
+            PRIMARY KEY (workspace_id, id)
+        )""",
+    ),
 )
 
 

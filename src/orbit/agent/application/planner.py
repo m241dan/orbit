@@ -353,7 +353,8 @@ class PlannerChat:
 
     async def handle(self, tool: str, arguments: dict[str, Any]) -> Reply:
         role = self._desk.agents.roles[self._role]
-        return await dispatch(self._role, role, self._tools, tool, arguments)
+        tools = {**self._tools, **self._desk.report_tools(self._role)}
+        return await dispatch(self._role, role, tools, tool, arguments)
 
     async def close(self) -> None:
         """End the planner's conversation, at the session's end or on a reset, removing the

@@ -33,9 +33,11 @@ from orbit.protocol import (
     BusyLane,
     ChecksProposed,
     Command,
+    DeleteReport,
     DeleteSession,
     EventEnvelope,
     History,
+    ListReports,
     NewSession,
     RenameSession,
     ResumeStorage,
@@ -44,6 +46,7 @@ from orbit.protocol import (
     SessionRef,
     SessionSummary,
     Settings,
+    ShowReport,
     Snapshot,
     StepState,
     TaskState,
@@ -57,9 +60,13 @@ VIEW_COMMANDS = (
     RenameSession,
     DeleteSession,
     ResumeStorage,
+    ListReports,
+    ShowReport,
+    DeleteReport,
 )
 """The commands a connection viewing a session that isn't open may send, ``ResumeStorage``
-among them as a storage halt is the workspace's rather than the session's; the others are
+among them as a storage halt is the workspace's rather than the session's, and the reports'
+as they're the workspace's; the others are
 refused as ``not_active``."""
 
 

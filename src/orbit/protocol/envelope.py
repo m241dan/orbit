@@ -16,6 +16,8 @@ from orbit.protocol.events import (
     DirectoryListing,
     Event,
     HistoryPage,
+    ReportShown,
+    ReportsListed,
     SessionStateChanged,
     Snapshot,
     UsageChanged,
@@ -33,6 +35,8 @@ SESSIONLESS_EVENTS: tuple[type[Event], ...] = (
     AgentsChanged,
     UsageTotals,
     DirectoryListing,
+    ReportsListed,
+    ReportShown,
 )
 """The event types that belong to no session: their envelopes carry ``session=None``."""
 
@@ -44,6 +48,8 @@ CONNECTION_EVENTS: tuple[type[Event], ...] = (
     AgentsChanged,
     UsageTotals,
     DirectoryListing,
+    ReportsListed,
+    ReportShown,
 )
 """The event types that answer one connection, and so are never kept in a session's log."""
 

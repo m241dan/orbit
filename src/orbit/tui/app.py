@@ -22,6 +22,7 @@ from orbit.tui.link import LinkHost
 from orbit.tui.panels import UsagePanel, VerificationPanel
 from orbit.tui.proposals import ProposalHost
 from orbit.tui.reason import ReasonScreen
+from orbit.tui.reports import ReportsHost
 from orbit.tui.sessions import SessionsHost
 from orbit.tui.settings_pickers import SettingsPickers
 from orbit.tui.storage_halt import StorageHaltHost
@@ -94,6 +95,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("ctrl+p", "list_sessions", "Sessions"),
         # check_action keeps it to a control plane in another process, which serves several.
         Binding("ctrl+w", "list_workspaces", "Workspaces"),
+        Binding("ctrl+k", "list_reports", "Reports"),
         # check_action keeps it from the prompt while typing, which may want ctrl+b itself.
         Binding("ctrl+b", "toggle_sidebar", "Sidebar"),
     ]
@@ -124,6 +126,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         )
         self._workspaces = WorkspacesHost(self.push_screen, self._send)
         self._takeover = TakeoverHost(self.push_screen, self._send).offer
+        self._reports = ReportsHost(self.push_screen, self._send)
         # The lines by the prompt, built here so their hosts can show statuses on them.
         self._halt_status = StatusLine(id="storage-halt", classes="error")
         self._link_status = StatusLine(id="link-status")
@@ -204,6 +207,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             pickers=self._pickers.model,
             halt=self._halt,
             takeover=self._takeover,
+            reports=self._reports.shelf,
             # Read through, so a clock set later still times the conversation.
             clock=lambda: self.clock(),
         )
@@ -394,6 +398,10 @@ class OrbitApp(App[None], inherit_bindings=False):
     def action_list_workspaces(self) -> None:
         """Show the workspace picker."""
         self._frontend.list_workspaces()
+
+    async def action_list_reports(self) -> None:
+        """Show the workspace's reports."""
+        await self._frontend.list_reports()
 
     async def action_cancel_turn(self) -> None:
         await self._frontend.cancel_turn()

@@ -19,10 +19,13 @@ from orbit.agent.domain.roles import (
     CONSULT,
     GET_TASK,
     GIVE_UP,
+    LIST_REPORTS,
     PROPOSE_CHECKS,
     PROPOSE_TASK,
+    READ_REPORT,
     REPORT_PROGRESS,
     RUN_CHECK,
+    SAVE_REPORT,
     SUGGEST_TASK,
 )
 from orbit.agent.external.embedded_server import EmbeddedServer
@@ -131,6 +134,23 @@ def build_server(handler: CallHandler) -> MCPServer:
         It returns at once; carry on meanwhile. The role's reply arrives later as a message.
         """
         return await call(ctx, CONSULT, {"role": role, "message": message})
+
+    @server.tool(structured_output=False)
+    async def save_report(title: str, body: str, ctx: Context) -> str:
+        """Save a finding that will matter later as a report for this workspace: a short title,
+        and a Markdown body of at most 200 KB. Returns the report's id."""
+        return await call(ctx, SAVE_REPORT, {"title": title, "body": body})
+
+    @server.tool(structured_output=False)
+    async def list_reports(ctx: Context) -> str:
+        """List this workspace's saved reports, newest first: each one's id, title, author and
+        date."""
+        return await call(ctx, LIST_REPORTS, {})
+
+    @server.tool(structured_output=False)
+    async def read_report(id: int, ctx: Context) -> str:
+        """Read a saved report, by its id from list_reports: its title and body."""
+        return await call(ctx, READ_REPORT, {"id": id})
 
     return server
 

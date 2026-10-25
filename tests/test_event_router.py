@@ -1,5 +1,6 @@
 """The router taking each event to the widgets and hosts that show it, in order."""
 
+from datetime import UTC, datetime
 from unittest.mock import Mock
 
 from orbit.protocol import (
@@ -15,6 +16,9 @@ from orbit.protocol import (
     OwnershipDeclined,
     OwnershipOffered,
     OwnershipTaken,
+    ReportShown,
+    ReportsListed,
+    ReportSummary,
     SessionStateChanged,
     StepState,
     Usage,
@@ -60,6 +64,7 @@ def calls_of(event: Event) -> Mock:
         calls.navigation,
         calls.halt,
         calls.takeover,
+        calls.reports,
     )
     hooks = AppHooks(calls.label_triggers, calls.leave_closed_detail, calls.unfocus_task_list)
     EventRouter(panes, handlers, hooks).render(event)
@@ -177,6 +182,17 @@ def test_consultations_reach_nothing_but_the_tracked_agents() -> None:
 
     assert routed(asked) == TRACKED
     assert routed(answered) == TRACKED
+
+
+def test_reports_reach_the_reports_list() -> None:
+    when = datetime(2026, 10, 25, 12, 0, tzinfo=UTC)
+    listed = ReportsListed(
+        reports=(ReportSummary(id=1, title="Timings", author="planner", time=when),)
+    )
+    shown = ReportShown(id=1, title="Timings", body="3s", author="planner", time=when)
+
+    assert routed(listed) == [*TRACKED, "reports.follow"]
+    assert routed(shown) == [*TRACKED, "reports.follow"]
 
 
 def test_verification_steps_reach_their_panel_with_what_they_check() -> None:

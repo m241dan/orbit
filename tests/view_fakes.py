@@ -6,7 +6,7 @@ from math import ceil
 
 from rich.text import Text
 
-from orbit.protocol import ChecksProposed, DecideProposal, TaskState
+from orbit.protocol import ChecksProposed, DecideProposal, ReportShown, ReportSummary, TaskState
 from orbit.tui.view.common import kept_highlight
 from orbit.tui.view.proposals import Decided
 from orbit.tui.view.settings import Chosen
@@ -248,3 +248,22 @@ class PickerScreens:
         result = chosen(index)
         if result is not None:
             await result
+
+
+class ReportsView:
+    """What the shelf shows: whether the list is open, the lists shown in it, in turn, and the
+    reports shown over it."""
+
+    def __init__(self) -> None:
+        self.list_open = False
+        self.lists: list[tuple[ReportSummary, ...]] = []
+        self.reports: list[ReportShown] = []
+
+    def open_list(self) -> None:
+        self.list_open = True
+
+    def show_list(self, reports: Sequence[ReportSummary]) -> None:
+        self.lists.append(tuple(reports))
+
+    def show_report(self, report: ReportShown) -> None:
+        self.reports.append(report)

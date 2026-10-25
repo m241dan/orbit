@@ -15,6 +15,7 @@ from orbit.agent.domain.listings import FoundDirectory
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.purging import Purged
 from orbit.agent.domain.replay import LogBounds
+from orbit.agent.domain.reports import NewReport
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.runtimes import Capabilities, Failure
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
@@ -28,6 +29,8 @@ from orbit.protocol import (
     EventEnvelope,
     MergeResult,
     ProposalAction,
+    ReportShown,
+    ReportSummary,
     Settings,
     WorkspaceCloning,
 )
@@ -607,6 +610,28 @@ class SessionStore(EventLog, Protocol):
         """Keep ``moves``, each record's old path mapped to its new one, replacing a move kept
         from the same old path; raises :class:`StoreFailed`, a :class:`StorageFailed` when the
         database failed, when they can't be saved."""
+        ...
+
+    async def save_report(self, report: NewReport) -> int:
+        """Save ``report``, numbered after the highest report kept; returns its id. Raises
+        :class:`StoreFailed`, a :class:`StorageFailed` when the database failed, when it can't
+        be saved."""
+        ...
+
+    async def reports(self) -> list[ReportSummary]:
+        """The reports kept, newest first. Raises :class:`ReadFailed` when they can't be
+        read."""
+        ...
+
+    async def report(self, report_id: int) -> ReportShown | None:
+        """The report ``report_id``, if one is kept. Raises :class:`ReadFailed` when it can't be
+        read."""
+        ...
+
+    async def delete_report(self, report_id: int) -> bool:
+        """Delete the report ``report_id``; returns whether one was kept. Raises
+        :class:`StoreFailed`, a :class:`StorageFailed` when the database failed, when it
+        can't."""
         ...
 
 

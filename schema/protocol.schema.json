@@ -705,12 +705,14 @@
               "cancel_agent": "#/$defs/CancelAgent",
               "cancel_turn": "#/$defs/CancelTurn",
               "decide_proposal": "#/$defs/DecideProposal",
+              "delete_report": "#/$defs/DeleteReport",
               "delete_session": "#/$defs/DeleteSession",
               "edit_task": "#/$defs/EditTask",
               "fire_trigger": "#/$defs/FireTrigger",
               "hello": "#/$defs/Hello",
               "history": "#/$defs/History",
               "list_directory": "#/$defs/ListDirectory",
+              "list_reports": "#/$defs/ListReports",
               "new_session": "#/$defs/NewSession",
               "remove_task": "#/$defs/RemoveTask",
               "remove_workspace": "#/$defs/RemoveWorkspace",
@@ -719,6 +721,7 @@
               "resume_storage": "#/$defs/ResumeStorage",
               "run_tasks": "#/$defs/RunTasks",
               "send_message": "#/$defs/SendMessage",
+              "show_report": "#/$defs/ShowReport",
               "take_ownership": "#/$defs/TakeOwnership",
               "update_settings": "#/$defs/UpdateSettings",
               "watch": "#/$defs/Watch"
@@ -800,6 +803,15 @@
             },
             {
               "$ref": "#/$defs/ListDirectory"
+            },
+            {
+              "$ref": "#/$defs/ListReports"
+            },
+            {
+              "$ref": "#/$defs/ShowReport"
+            },
+            {
+              "$ref": "#/$defs/DeleteReport"
             }
           ],
           "title": "Payload"
@@ -1043,6 +1055,28 @@
       "title": "DecideProposal",
       "type": "object"
     },
+    "DeleteReport": {
+      "description": "Delete the workspace's report ``id``; reports are deleted only so, by the user. Refused\nwith ``unknown`` for a report there's none of.",
+      "properties": {
+        "id": {
+          "minimum": 1,
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "delete_report",
+          "default": "delete_report",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type"
+      ],
+      "title": "DeleteReport",
+      "type": "object"
+    },
     "DeleteSession": {
       "description": "Delete the saved session ``session_id``; refused for the open session, or one open in\nanother orbit. A ``Catalog`` follows.",
       "properties": {
@@ -1282,6 +1316,8 @@
               "ownership_taken": "#/$defs/OwnershipTaken",
               "progress_noted": "#/$defs/ProgressNoted",
               "proposal_decided": "#/$defs/ProposalDecided",
+              "report_shown": "#/$defs/ReportShown",
+              "reports_listed": "#/$defs/ReportsListed",
               "review_status": "#/$defs/ReviewStatus",
               "session_state_changed": "#/$defs/SessionStateChanged",
               "settings_changed": "#/$defs/SettingsChanged",
@@ -1435,6 +1471,12 @@
             },
             {
               "$ref": "#/$defs/DirectoryListing"
+            },
+            {
+              "$ref": "#/$defs/ReportsListed"
+            },
+            {
+              "$ref": "#/$defs/ReportShown"
             },
             {
               "$ref": "#/$defs/Welcome"
@@ -1677,6 +1719,22 @@
         "type"
       ],
       "title": "ListDirectory",
+      "type": "object"
+    },
+    "ListReports": {
+      "description": "Ask for the workspace's saved reports, answered to this connection alone with\n``ReportsListed``.",
+      "properties": {
+        "type": {
+          "const": "list_reports",
+          "default": "list_reports",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "ListReports",
       "type": "object"
     },
     "LogGap": {
@@ -2047,6 +2105,104 @@
         "type"
       ],
       "title": "RenameSession",
+      "type": "object"
+    },
+    "ReportShown": {
+      "description": "The report ``id`` that ``ShowReport`` asked for: its ``title``, its Markdown ``body``,\nthe role it's by (``author``) and when it was saved (``time``); sent to the connection that\nasked alone and never logged.",
+      "properties": {
+        "author": {
+          "title": "Author",
+          "type": "string"
+        },
+        "body": {
+          "title": "Body",
+          "type": "string"
+        },
+        "id": {
+          "minimum": 1,
+          "title": "Id",
+          "type": "integer"
+        },
+        "time": {
+          "format": "date-time",
+          "title": "Time",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "type": {
+          "const": "report_shown",
+          "default": "report_shown",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "body",
+        "author",
+        "time",
+        "type"
+      ],
+      "title": "ReportShown",
+      "type": "object"
+    },
+    "ReportSummary": {
+      "description": "A report saved in the workspace, as ``ReportsListed`` lists it: its ``id``, numbered in\nthe workspace from 1, its ``title``, the role it's by (``author``) and when it was saved\n(``time``).",
+      "properties": {
+        "author": {
+          "title": "Author",
+          "type": "string"
+        },
+        "id": {
+          "minimum": 1,
+          "title": "Id",
+          "type": "integer"
+        },
+        "time": {
+          "format": "date-time",
+          "title": "Time",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "author",
+        "time"
+      ],
+      "title": "ReportSummary",
+      "type": "object"
+    },
+    "ReportsListed": {
+      "description": "The workspace's saved reports, newest first, which ``ListReports`` asked for; sent to the\nconnection that asked alone and never logged.",
+      "properties": {
+        "reports": {
+          "items": {
+            "$ref": "#/$defs/ReportSummary"
+          },
+          "title": "Reports",
+          "type": "array"
+        },
+        "type": {
+          "const": "reports_listed",
+          "default": "reports_listed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reports",
+        "type"
+      ],
+      "title": "ReportsListed",
       "type": "object"
     },
     "ResetConversation": {
@@ -2533,6 +2689,28 @@
         "type"
       ],
       "title": "SettingsChanged",
+      "type": "object"
+    },
+    "ShowReport": {
+      "description": "Ask for the workspace's report ``id``, answered to this connection alone with\n``ReportShown``. Refused with ``unknown`` for a report there's none of.",
+      "properties": {
+        "id": {
+          "minimum": 1,
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "show_report",
+          "default": "show_report",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type"
+      ],
+      "title": "ShowReport",
       "type": "object"
     },
     "Snapshot": {

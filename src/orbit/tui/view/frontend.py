@@ -59,6 +59,7 @@ from orbit.tui.view.panels import VerificationSteps
 from orbit.tui.view.place import PlaceView
 from orbit.tui.view.prompt import PromptMarks
 from orbit.tui.view.proposals import ProposalQueue, ProposalsView, decision_entry
+from orbit.tui.view.reports import ReportShelf
 from orbit.tui.view.router import (
     AgentsPane,
     AppHooks,
@@ -187,7 +188,7 @@ class Parts:
     ``viewing`` and ``paused`` lines by it; the sidebar's ``tasks``, ``steps``, ``usage`` and
     ``agents``; where the pickers of a session (``place``) and a workspace (``workspaces``),
     ``proposals`` and the settings ``pickers`` show; the storage ``halt`` and the ``takeover``
-    offer; and the ``clock`` turns are timed by."""
+    offer; the ``reports`` list; and the ``clock`` turns are timed by."""
 
     app: AppView
     conversation: ConversationPane
@@ -207,6 +208,7 @@ class Parts:
     pickers: Pickers
     halt: StorageHalt
     takeover: TakeoverOffer
+    reports: ReportShelf
     clock: Callable[[], float]
 
 
@@ -254,6 +256,7 @@ class Frontend:
             self.navigation,
             parts.halt,
             parts.takeover,
+            parts.reports,
         )
 
     def _hooks(self) -> AppHooks:
@@ -561,6 +564,10 @@ class Frontend:
     def list_workspaces(self) -> None:
         """Show the workspace picker."""
         self.navigation.workspaces.open()
+
+    async def list_reports(self) -> None:
+        """Show the workspace's reports."""
+        await self._parts.reports.open()
 
     # The settings pickers, which set the settings of the role the prompt talks to, and open
     # once the backend has reported settings.
