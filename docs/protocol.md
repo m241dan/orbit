@@ -613,6 +613,29 @@ there's nothing to reset (`The planner has no conversation to reset.`). It's ref
 `SendMessage` to it is, and with `busy` while the agent answers: `The planner is answering;
 press ctrl+x to stop it first.`
 
+## Consultations
+
+A conversational role whose role has `consults` can ask the roles named there through the orbit
+tool `consult(role, message)`, which agents of other roles are refused, as for any tool their
+role lacks. It returns at once: `Asked the experimenter (consultation 1); its reply will arrive
+as a message.`, the number unique in the session. It's refused for a role it doesn't consult, a
+disabled one, or an empty message.
+
+The consultation waits in the consulted role's line, in order with the user's messages to it, and
+runs as one of its turns, one at a time. As it's asked, and each time its place changes, the
+backend publishes `ConsultationAsked(consultation, asker, consultant, title, position)`: `title`
+is the message's first line, and `position` is 1 once it runs next, or runs. A `SendMessage` to
+a role busy with a consultation or a reply, or with turns waiting, joins its line rather than
+being refused.
+
+When the consulted turn ends, its last assistant message, or its error for a turn that failed,
+is the reply: the backend publishes `ConsultationAnswered(consultation, asker, consultant, title,
+reply, interrupted)` and delivers it to the asking role as a message, `Experimenter's reply to
+'Check X' (consultation 1):` and the reply. The asking role hears it in a turn of its own: at
+once if it's idle, after its current turn otherwise, after any message of the user's waiting for
+it, and several replies waiting together in one turn. `interrupted` says why a consultation didn't
+run to its end; it's `null` for one answered. Both events are logged.
+
 ## Paging through history
 
 The Snapshot's transcript holds a session's last 500 events; `History` reads further back.

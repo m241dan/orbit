@@ -33,6 +33,8 @@ from orbit.protocol import (
     CommandAccepted,
     CommandEnvelope,
     CommandRefused,
+    ConsultationAnswered,
+    ConsultationAsked,
     ConversationReset,
     DecideProposal,
     DeleteSession,
@@ -282,6 +284,21 @@ EVENTS: tuple[EventEnvelope, ...] = (
     ),
     event(MessageSent(command_id="c1", agent=PLANNER, text="hello")),
     event(ConversationReset(agent=PLANNER)),
+    event(
+        ConsultationAsked(
+            consultation=1, asker=PLANNER, consultant="experimenter", title="Check X", position=2
+        )
+    ),
+    event(
+        ConsultationAnswered(
+            consultation=1,
+            asker=PLANNER,
+            consultant="experimenter",
+            title="Check X",
+            reply="X is 3",
+            interrupted="it was cancelled",
+        )
+    ),
     event(LogGap(first_seq=1204, last_seq=1210)),
     event(OwnershipOffered()),
     event(OwnershipTaken()),

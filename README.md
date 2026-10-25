@@ -1228,7 +1228,15 @@ merges, whether it's enabled, how hard its agents think and what they run on:
 - `consults`: the other enabled conversational roles a conversational role may consult, by name;
   none by default. It's refused on a role that isn't conversational, naming a role that isn't
   another enabled conversational role, and in a cycle (`architect` consulting the `planner` while
-  the `planner` consults `architect`), naming the roles. Nothing consults yet.
+  the `planner` consults `architect`), naming the roles. A role with `consults` gets the orbit
+  tool `consult(role, message)`, which returns at once (`Asked the experimenter (consultation
+  1); its reply will arrive as a message.`); the consultation waits in the consulted role's line,
+  in order with your own messages to it, and runs as one of its turns. That turn's last message
+  (its error, if it failed) is the reply: it reaches the asking role as a message (`Experimenter's
+  reply to '<first line>' (consultation 1):` and the reply), starting its turn at once if it's
+  idle, or after its turn and any message of yours waiting for it, several replies waiting
+  together in one turn. A message you send to a role busy with a consultation or a reply, or
+  with one waiting, waits its turn too, rather than being refused.
 - `consult_limit_per_hour`: how many consultations it may start in an hour, 6 by default; 0 means
   no limit, and a negative number is refused.
 - `copy_ttl_hours`: how long, in hours, a conversational role working in a `copy` keeps its copy
@@ -2614,7 +2622,9 @@ client that sent it and whether it was accepted or refused, with the code; it's 
 span whose trace context its envelope carries, if any, else it starts its own trace, and the
 events it publishes carry its own. Each planner turn is one span, `orbit.planner.turn`, a child of
 the `SendMessage` command's: the workspace, session and model, what the turn cost, the drafts it
-proposed and how it ended. Each review, a reviewer's or a super reviewer's, is one span,
+proposed and how it ended. Each consulted turn runs in an `orbit.consultation` span, starting its
+own trace linked to the asking turn's: who asked whom, how long it waited in line and how it
+ended. Each review, a reviewer's or a super reviewer's, is one span,
 `orbit.review`, starting its own trace: the commits, round and batch it reviewed, its cap, the
 suggestions it made and had refused, and what it cost. Work that runs on in the background links
 to what started it rather than nesting under it: each task's span links to the `RunTasks` (or,

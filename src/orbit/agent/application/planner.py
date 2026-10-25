@@ -14,7 +14,7 @@ role working in a copy has its session's copy, which outlives the conversation's
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AsyncExitStack
 from typing import Any
 
@@ -26,6 +26,7 @@ from orbit.agent.application.role_workspace import workspace_for
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.roles import (
+    CONSULT,
     PROPOSE_TASK,
     REPORT_PROGRESS,
     suggested_task,
@@ -42,6 +43,7 @@ from orbit.protocol import (
     PLANNER,
     AgentExited,
     AgentStarted,
+    AssistantMessage,
     ErrorOccurred,
     Event,
     Notice,
@@ -51,7 +53,15 @@ from orbit.protocol import (
     TurnStarted,
     Usage,
 )
-from orbit.tracing import current_span
+from orbit.tracing import NoSpan, Span, current_span
+
+Consult = Callable[[str, str, str, Span], Awaitable[Reply]]
+"""Asks a consultation: given the asking role, the role it consults, its message, and the
+asking turn's span; returns what the asking agent is told at once."""
+
+
+async def _no_consultants(asker: str, consultant: str, message: str, cause: Span) -> Reply:
+    return Reply(f"The {asker} has no one to consult.", is_error=True)
 
 
 def resume_failed_note(role: str) -> str:
@@ -77,6 +87,8 @@ class PlannerChat:
         self._desk = desk
         # The session's copies, which a role working in a copy takes its turns in.
         self.copies: RoleCopies | None = None
+        # How it asks the roles it consults, once given.
+        self.consult: Consult = _no_consultants
         self._role = role
         self._tasks = tasks
         self._board = tasks.board
@@ -89,9 +101,13 @@ class PlannerChat:
         self._workspace = AsyncExitStack()  # Removes that directory as the conversation ends.
         self._usage = Usage()  # What the turn running, or the last, cost.
         self._drafts = 0  # The drafts it proposed.
+        self._said = ""  # The last message of the turn running, or the last.
+        self._error: str | None = None  # The last error that turn reported.
+        self._span: Span = NoSpan("none")  # That turn's span, which its consultations link to.
         self._tools: dict[str, Tool] = {
             PROPOSE_TASK: self._propose_task,
             REPORT_PROGRESS: self._report_progress,
+            CONSULT: self._consult,
         }
 
     @property
@@ -112,6 +128,12 @@ class PlannerChat:
     def runtime(self) -> str:
         """The runtime the planner's role runs on, and so its conversation."""
         return self._desk.agents.roles[self._role].runtime
+
+    @property
+    def reply(self) -> str:
+        """What the turn running, or the last, answered: its last message, or, once it reported
+        an error, that error's text."""
+        return self._said if self._error is None else self._error
 
     @property
     def started(self) -> bool:
@@ -151,6 +173,7 @@ class PlannerChat:
         words, and what the turn cost, the drafts it proposed and how it ended as it ends.
         """
         self._usage, self._drafts = Usage(), 0
+        self._said, self._error, self._span = "", None, current_span()
         reason: TurnEndReason = "cancelled"  # What a turn cancelled again as it ends escapes as.
         try:
             reason = await self._answer(text, settings)
@@ -183,7 +206,10 @@ class PlannerChat:
         ended, once its TurnFinished is out, given ``finished`` before it."""
         heard = self._heard(event) if isinstance(event, ErrorOccurred) else event
         await self._desk.publish(heard)
+        if isinstance(event, AssistantMessage):
+            self._said = event.text
         if isinstance(event, ErrorOccurred):
+            self._error = self._heard(event).message
             current_span().error(event.message)
         if not isinstance(event, TurnFinished):
             return finished
@@ -203,7 +229,9 @@ class PlannerChat:
         code, message = ending
         current_span().error(message, failure)
         error = ErrorOccurred(turn_id=turn_id, agent_id=self.agent_id, code=code, message=message)
-        await self._desk.publish(self._heard(error))
+        heard = self._heard(error)
+        self._error = heard.message
+        await self._desk.publish(heard)
         return await self._end(turn_id, finished, "error")
 
     async def _end(
@@ -334,6 +362,10 @@ class PlannerChat:
         task_id = await self._tasks.change(lambda board: board.add_draft(task))
         self._drafts += 1
         return Reply(f"Added draft task {task_id}; the user will accept or drop it.")
+
+    async def _consult(self, arguments: dict[str, Any]) -> Reply:
+        role, message = str(arguments.get("role", "")), str(arguments.get("message", ""))
+        return await self.consult(self._role, role, message, self._span)
 
     async def _report_progress(self, arguments: dict[str, Any]) -> Reply:
         assert self._agent is not None  # It called, so it was opened.

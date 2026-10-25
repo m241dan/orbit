@@ -87,7 +87,7 @@ async def dispatch(
     if tool not in ORBIT_TOOLS:
         return Reply(f"Orbit has no tool {tool!r}.", is_error=True)
     answer = tools.get(tool)
-    if answer is None or tool not in role.tools:
+    if answer is None or tool not in role.granted_tools:
         return Reply(f"Your role ({role_name}) can't use {tool}.", is_error=True)
     return await answer(arguments)
 
@@ -282,7 +282,7 @@ class AgentDesk:
             own,
             cwd,
             role.instructions,
-            role.tools,
+            role.granted_tools,
             self._workspace_id,
             self.session(),
         )

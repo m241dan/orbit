@@ -16,6 +16,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from orbit.agent.application.ports import CallHandler
 from orbit.agent.domain.roles import (
     COMPLETE_TASK,
+    CONSULT,
     GET_TASK,
     GIVE_UP,
     PROPOSE_CHECKS,
@@ -121,6 +122,15 @@ def build_server(handler: CallHandler) -> MCPServer:
         they accepted or ended it.
         """
         return await call(ctx, PROPOSE_CHECKS, {"steps": steps, "setup": setup})
+
+    @server.tool(structured_output=False)
+    async def consult(role: str, message: str, ctx: Context) -> str:
+        """Ask another conversational role, by name, something only it can find out, such as by
+        running code: the message's first line is its title, and the rest the details.
+
+        It returns at once; carry on meanwhile. The role's reply arrives later as a message.
+        """
+        return await call(ctx, CONSULT, {"role": role, "message": message})
 
     return server
 

@@ -391,7 +391,13 @@ class WorkspaceHost:
         :attr:`telemetry`."""
         tracing = PlannerTracing(self.telemetry, self._workspace_id, lambda: self._keeper.id)
         hooks = SeatHooks(
-            self._save, self._keeper.use, self._step_names, self._halt.check, tracing, self._copies
+            self._save,
+            self._keeper.use,
+            self._step_names,
+            self._halt.check,
+            tracing,
+            self._copies,
+            lambda role: self._settings.of(role),
         )
         return ConversationSeats(self._desk, self._tasks, self._events, hooks)
 

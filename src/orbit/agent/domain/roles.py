@@ -74,6 +74,7 @@ GIVE_UP = "give_up"
 SUGGEST_TASK = "suggest_task"
 PROPOSE_TASK = "propose_task"
 PROPOSE_CHECKS = "propose_checks"
+CONSULT = "consult"
 
 ORBIT_TOOLS = (
     GET_TASK,
@@ -84,6 +85,7 @@ ORBIT_TOOLS = (
     SUGGEST_TASK,
     PROPOSE_TASK,
     PROPOSE_CHECKS,
+    CONSULT,
 )
 """Every tool orbit's MCP server offers agents."""
 
@@ -224,6 +226,8 @@ class Role(_Config):
         unknown = [tool for tool in tools if tool not in ORBIT_TOOLS]
         if unknown:
             raise ValueError(f"unknown tools {unknown}; orbit's tools are {list(ORBIT_TOOLS)}")
+        if CONSULT in tools:
+            raise ValueError(f"{CONSULT} comes with consults, not tools")
         return tools
 
     @field_validator("lane")
@@ -251,6 +255,12 @@ class Role(_Config):
         """Whether a task in this role takes one of the coders' slots a control plane shares
         across its workspaces: it works in the coder's worktree."""
         return self.workspace == "worktree"
+
+    @property
+    def granted_tools(self) -> tuple[str, ...]:
+        """The orbit tools its agents may call: its tools, and ``consult`` when it consults
+        anyone."""
+        return (*self.tools, CONSULT) if self.consults else self.tools
 
     @property
     def runs_checks(self) -> bool:

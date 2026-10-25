@@ -177,6 +177,22 @@ A turn that fails, such as by running out of the planner role's time, or that th
 error for has the span's error status with the error's message; a failure also records an
 `exception` event.
 
+### `orbit.consultation`
+
+One span for each turn of a conversational role answering a consultation another role asked
+through `consult`, from when the turn starts in the consulted role's lane until it ends. Each
+starts its own trace: it's a root span, linked to the asking turn's `orbit.planner.turn` span
+(see **Links**). The consulted role's `orbit.planner.turn` span for the turn is its child.
+
+| Attribute | Type | Meaning |
+| --- | --- | --- |
+| `orbit.workspace.id` | string | The workspace's id (`unregistered` for one no store registers). |
+| `orbit.session.id` | string | The id of the session open as the turn started. |
+| `orbit.consultation.asker` | string | The role that asked, such as `planner`. |
+| `orbit.consultation.consultant` | string | The role consulted, such as `experimenter`. |
+| `orbit.consultation.wait_ms` | int | How long the consultation waited in the consulted role's line, in milliseconds. |
+| `orbit.consultation.outcome` | string | How the turn ended: `completed`, `cancelled`, `max_steps` or `error`. |
+
 ## Reviews
 
 ### `orbit.review`
@@ -322,6 +338,9 @@ so no trace stays open for hours while each can still be followed back to its ca
   `ActivateSession` opening its session, which ends it. A review stopped as the session halts
   keeps its link when it runs again. A review the user queued, and one already queued when the
   session was last opened, has no link.
+
+- Each `orbit.consultation` span links to the `orbit.planner.turn` span of the turn that asked
+  for the consultation.
 
 ## Trace context
 

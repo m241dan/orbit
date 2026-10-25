@@ -1,15 +1,17 @@
 """The planner's seat in a session, or another conversational role's: its current conversation,
-those a switch or reset retired, and the lane its turns run in."""
+those a switch or reset retired, the lane its turns run in, and the turns waiting for it."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from contextlib import AbstractContextManager, nullcontext
+from dataclasses import dataclass, field
+from functools import partial
 
 from orbit.agent.application.closing import close_all
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import TurnSlot
 from orbit.agent.application.outbox import EventSink
-from orbit.agent.application.planner import PlannerChat
+from orbit.agent.application.planner import Consult, PlannerChat
 from orbit.agent.application.planner_trace import PlannerTracing
 from orbit.agent.application.role_copies import RoleCopies
 from orbit.agent.application.tasks import Tasks
@@ -64,12 +66,43 @@ def _admit() -> None:
     """Refuse nothing."""
 
 
+def _default_settings(role: str) -> Settings:
+    return Settings()
+
+
+def _unplaced(position: int) -> None:
+    """Note nothing of a waiting turn's place."""
+
+
+async def _unanswered(reason: TurnEndReason, reply: str) -> None:
+    """Do nothing with a turn's reply."""
+
+
+def _under(span: Span) -> Callable[[], AbstractContextManager[Span]]:
+    """What makes ``span``, already started, current for a waiting turn."""
+    return lambda: nullcontext(span)
+
+
+@dataclass(frozen=True)
+class WaitingTurn:
+    """A turn waiting in a seat's line: on ``text`` with ``settings``, run under the span
+    ``opened`` makes current, telling ``answered`` how it ended and its reply, under that span
+    still, and ``placed`` its place in line: 1 once it runs next, or runs."""
+
+    text: str
+    settings: Settings
+    opened: Callable[[], AbstractContextManager[Span]]
+    answered: Callable[[TurnEndReason, str], Awaitable[None]] = _unanswered
+    placed: Callable[[int], None] = _unplaced
+
+
 @dataclass(frozen=True)
 class SeatHooks:
     """What the seat asks of its session: to ``save`` it, to mark it ``use``d, the
     ``step_names`` verifying tasks now, to ``check`` it, refusing a turn by raising
-    :class:`Refused` while it's halted, the ``tracing`` its turns are traced by, and its
-    ``copies``, which a role working in a copy takes its turns in."""
+    :class:`Refused` while it's halted, the ``tracing`` its turns are traced by, its
+    ``copies``, which a role working in a copy takes its turns in, and the ``settings`` of each
+    role, which the turns it didn't ask for run with."""
 
     save: Callable[[], Awaitable[None]]
     use: Callable[[], None]
@@ -77,20 +110,31 @@ class SeatHooks:
     check: Callable[[], None] = _admit
     tracing: PlannerTracing = _UNTRACED
     copies: RoleCopies | None = None
+    settings: Callable[[str], Settings] = _default_settings
+
+
+def _unwatched(lane: BusyLane) -> None:
+    """Note nothing of a lane freed."""
 
 
 class SeatLanes:
     """The turn slots of the seats' lanes, posting through ``post``: one for each lane, shared
-    by every seat whose turns run in it, so a lane runs one turn at a time."""
+    by every seat whose turns run in it, so a lane runs one turn at a time; ``freed`` is told
+    each lane that's free again."""
 
-    def __init__(self, post: Callable[[Event], None]) -> None:
+    def __init__(
+        self, post: Callable[[Event], None], freed: Callable[[BusyLane], None] = _unwatched
+    ) -> None:
         self._post = post
+        self._freed = freed
         self._slots: dict[BusyLane, TurnSlot] = {}
 
     def slot(self, lane: BusyLane) -> TurnSlot:
         """Lane ``lane``'s turn slot, made when first asked for."""
         if lane not in self._slots:
-            self._slots[lane] = TurnSlot(lane, f"The {lane} lane is busy.", self._post)
+            slot = TurnSlot(lane, f"The {lane} lane is busy.", self._post)
+            slot.freed = partial(self._freed, lane)
+            self._slots[lane] = slot
         return self._slots[lane]
 
 
@@ -99,13 +143,14 @@ class SeatParts:
     """What a seat works with: the ``desk`` running the session's agents, if it has any, the
     ``tasks`` its role proposes into, the ``events`` it publishes into, the ``hooks`` it asks
     its session by, and the ``lanes`` whose slots it shares with the other seats; without, its
-    lane's slot is its own."""
+    lane's slot is its own; and how its role ``consult``s others, if it can."""
 
     desk: AgentDesk | None
     tasks: Tasks
     events: EventSink
     hooks: SeatHooks
     lanes: SeatLanes | None = None
+    consult: Consult | None = field(default=None, compare=False)
 
 
 class PlannerSeat:
@@ -114,7 +159,9 @@ class PlannerSeat:
     events. Given another conversational ``role``, it's that role's seat, its turns in that
     role's lane, as the planner's are in its role's, or in ``planner`` without one, one at a
     time with those of the other seats in the lane. A conversation opened from another runtime
-    than its role runs on isn't carried on: it refuses the planner's turns until a reset."""
+    than its role runs on isn't carried on: it refuses the planner's turns until a reset. Turns
+    it didn't ask for, such as consultations, wait in its line, as do the messages sent while
+    one runs or waits; the messages delivered to it wait for one turn after the line."""
 
     def __init__(self, parts: SeatParts, role: str = PLANNER) -> None:
         self._desk = parts.desk
@@ -122,7 +169,12 @@ class PlannerSeat:
         self._events = parts.events
         self._hooks = parts.hooks
         self._copies = parts.hooks.copies
+        self._consult = parts.consult
         self._name = role
+        self._line: list[WaitingTurn] = []  # The turns waiting to run, in order.
+        self._delivered: list[str] = []  # The messages waiting to be heard, in one turn.
+        self._waited = False  # Whether the turn running, or the last, waited in the line.
+        self._held = False  # Whether waiting turns are kept from starting, as turns stop.
         self._planner = self._chat()
         self._retired: list[PlannerChat] = []  # Planners of sessions left or reset, still to close.
         # The conversation opened, kept to save without a planner, or while it's stale.
@@ -180,6 +232,8 @@ class PlannerSeat:
             return None
         chat = PlannerChat(self._desk, self._tasks, self._hooks.step_names, self._name)
         chat.copies = self._copies
+        if self._consult is not None:
+            chat.consult = self._consult
         return chat
 
     def _role(self) -> Role | None:
@@ -212,8 +266,83 @@ class PlannerSeat:
         self._hooks.use()
         await self._hooks.save()
         self._hooks.check()  # The save may have halted the session.
+        if self._waiting():
+            self.wait(WaitingTurn(text, settings, _under(current_span())))
+            return
         work = self._answer(self._planner, text, settings, current_span())
         self._turn = await self._turns.start(work, self._refusal)
+        self._waited = False
+
+    @property
+    def settings(self) -> Settings:
+        """The settings of the seat's role, which the turns it didn't ask for run with."""
+        return self._hooks.settings(self._name)
+
+    def _waiting(self) -> bool:
+        """Whether a message waits its turn: the seat has turns or messages waiting, or the
+        turn running waited in its line."""
+        return bool(self._line or self._delivered) or (self.running and self._waited)
+
+    def wait(self, turn: WaitingTurn) -> None:
+        """Put ``turn`` at the end of the seat's line, starting it at once if nothing is ahead
+        and the seat's lane is free."""
+        self._line.append(turn)
+        self.advance()
+        self._place()
+
+    def deliver(self, message: str) -> None:
+        """Have the seat's role hear ``message`` in a turn after those in its line, with every
+        other message delivered meanwhile, starting it at once if the seat's lane is free."""
+        self._delivered.append(message)
+        self.advance()
+
+    def advance(self) -> None:
+        """Start the seat's next waiting turn, if it has one and its lane is free: the first in
+        its line, else one hearing every message delivered."""
+        if self._held or self._planner is None or self._turns.running:
+            return
+        turn = self._next()
+        if turn is None:
+            return
+        work = self._answer_waiting(self._planner, turn)
+        self._turn = self._turns.begin(work, self._refusal)
+        self._waited = True
+        turn.placed(1)
+        self._place()
+
+    def hold(self) -> None:
+        """Keep the turns waiting from starting, as the seat's turn stops, until
+        :meth:`drop_waiting`."""
+        self._held = True
+
+    def drop_waiting(self) -> None:
+        """Forget the turns and messages waiting, as turns stop, and start those waiting from
+        now on again."""
+        self._line, self._delivered, self._held = [], [], False
+
+    def _next(self) -> WaitingTurn | None:
+        """The next waiting turn, taken from the line, or made of the messages delivered; none
+        if nothing waits."""
+        if self._line:
+            return self._line.pop(0)
+        if not self._delivered:
+            return None
+        text, self._delivered = "\n\n".join(self._delivered), []
+        return WaitingTurn(text, self.settings, _under(current_span()))
+
+    def _place(self) -> None:
+        """Tell each turn in the line its place: after the turn running, if one is."""
+        ahead = 1 if self.running else 0
+        for position, turn in enumerate(self._line, start=1 + ahead):
+            turn.placed(position)
+
+    async def _answer_waiting(self, planner: PlannerChat, turn: WaitingTurn) -> TurnEndReason:
+        """``planner``'s ``turn`` that waited in the line, under its span, telling it how it
+        ended and what it answered."""
+        with turn.opened() as parent:
+            reason = await self._answer(planner, turn.text, turn.settings, parent)
+            await turn.answered(reason, planner.reply)
+        return reason
 
     async def _free_prompt(self) -> None:
         """Free the prompt of a frontend that marked the seat's lane busy as it sent a message

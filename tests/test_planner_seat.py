@@ -412,3 +412,13 @@ async def test_a_disabled_roles_seat_refuses_its_work_naming_it() -> None:
     with pytest.raises(Refused, match="architect is disabled in this project's configuration"):
         await seated_.seat.submit("Design.", Settings())
     assert seated_.published() == [BusyChanged(busy=False, lane="design")]
+
+
+async def test_a_message_delivered_to_an_idle_seat_starts_a_turn_on_its_roles_settings() -> None:
+    seated_ = seated()
+    seated_.launcher.planner_turns = [chats]
+    seated_.seat.deliver("The reply.")
+    await seated_.turn_ended()
+    [launch] = seated_.launcher.launches
+    assert launch.prompt.endswith("The reply.")
+    assert launch.settings.effort is None

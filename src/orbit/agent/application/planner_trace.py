@@ -1,5 +1,7 @@
 """Tracing the planner: the ``orbit.planner.turn`` span of each of its turns, a child of the
-``SendMessage`` command that asked for it (the remaining spans plan's decisions 1 and 8).
+``SendMessage`` command that asked for it (the remaining spans plan's decisions 1 and 8), and
+the ``orbit.consultation`` span of each turn answering a consultation, starting its own trace and
+linked to the asking turn's span (the consultants plan's decision 14).
 
 The turn's span is the current one while the turn runs, so the planner records on it, through
 :func:`current_span`, what the turn cost, the drafts it proposed, how it ended and the errors it
@@ -12,9 +14,18 @@ from dataclasses import dataclass, field
 
 from orbit.agent.application.span_usage import usage_attributes
 from orbit.protocol import TurnEndReason, Usage
-from orbit.tracing import AttributeValue, NoTelemetry, Span, Telemetry, span_block, use_span
+from orbit.tracing import (
+    AttributeValue,
+    NoTelemetry,
+    Span,
+    Telemetry,
+    no_span,
+    span_block,
+    use_span,
+)
 
 TURN_SPAN = "orbit.planner.turn"
+CONSULTATION_SPAN = "orbit.consultation"
 
 
 def _no_session() -> str:
@@ -37,6 +48,24 @@ class PlannerTracing:
         escaping the block is recorded on it."""
         with use_span(parent):
             span = self.telemetry.start(TURN_SPAN, self._identity(model))
+        with span_block(span):
+            yield span
+
+    @contextmanager
+    def consultation(
+        self, cause: Span, asker: str, consultant: str, wait_ms: int
+    ) -> Iterator[Span]:
+        """The span of a turn of ``consultant`` answering ``asker``'s consultation, which waited
+        ``wait_ms`` milliseconds in line, current for the block and ended on leaving it: it
+        starts its own trace, linked to ``cause``, the asking turn's span."""
+        attributes: dict[str, AttributeValue] = {
+            **self._identity(None),
+            "orbit.consultation.asker": asker,
+            "orbit.consultation.consultant": consultant,
+            "orbit.consultation.wait_ms": wait_ms,
+        }
+        with no_span():  # So the span starts its own trace.
+            span = self.telemetry.start(CONSULTATION_SPAN, attributes, (cause,))
         with span_block(span):
             yield span
 

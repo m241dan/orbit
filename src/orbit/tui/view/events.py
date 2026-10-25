@@ -14,6 +14,8 @@ from orbit.protocol import (
     ChecksProposed,
     CommandAccepted,
     CommandRefused,
+    ConsultationAnswered,
+    ConsultationAsked,
     ConversationReset,
     DirectoryListing,
     ErrorOccurred,
@@ -63,8 +65,14 @@ StreamEvent = AgentsChanged | UsageTotals | DirectoryListing
 workspaces, which the TUI doesn't watch; and a listing of the server's directories, which the
 workspace picker's explorer asks for."""
 
-StateEvent = SettingsChanged | BusyChanged | TasksChanged | ProgressEvent | StreamEvent
-"""Snapshots of backend state, or a decision it waits for."""
+ConsultationEvent = ConsultationAsked | ConsultationAnswered
+"""A consultation asked, or its place in line, and its reply, which the asker hears as a
+message."""
+
+StateEvent = (
+    SettingsChanged | BusyChanged | TasksChanged | ProgressEvent | StreamEvent | ConsultationEvent
+)
+"""Snapshots of backend state, or a decision it waits for, and consultations' progress."""
 
 TurnEvent = (
     TurnStarted

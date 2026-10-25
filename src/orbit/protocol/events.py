@@ -373,6 +373,33 @@ class ConversationReset(_Message):
     agent: str
 
 
+class ConsultationAsked(_Message):
+    """The conversational role ``asker`` asked the role ``consultant`` consultation
+    ``consultation``, whose message's first line is ``title``; it's ``position`` in the
+    consultant's line, 1 once it runs next or runs. Published again as its position changes."""
+
+    type: Literal["consultation_asked"] = "consultation_asked"
+    consultation: int
+    asker: str
+    consultant: str
+    title: str
+    position: int = Field(ge=1)
+
+
+class ConsultationAnswered(_Message):
+    """The role ``consultant`` answered consultation ``consultation`` from the role ``asker``,
+    titled ``title``, with ``reply``, its turn's last message, which goes to the asker as a
+    message; ``interrupted`` says why, for one that didn't run to its end."""
+
+    type: Literal["consultation_answered"] = "consultation_answered"
+    consultation: int
+    asker: str
+    consultant: str
+    title: str
+    reply: str
+    interrupted: str | None = None
+
+
 class OpenRequest(_Message):
     """A call ``request_id`` to orbit's ``tool`` that an agent made and orbit hasn't answered."""
 
@@ -735,6 +762,8 @@ Event = Annotated[
     | UsageChanged
     | MessageSent
     | ConversationReset
+    | ConsultationAsked
+    | ConsultationAnswered
     | LogGap
     | OwnershipOffered
     | OwnershipTaken

@@ -153,6 +153,8 @@ class TurnSlot:
         self._busy = refusal  # What a turn is refused with while the current one runs.
         self._post = post
         self._turn: asyncio.Task[object] | None = None
+        # Called once the lane is free again, after its BusyChanged, to start what waits.
+        self.freed: Callable[[], None] = _unwatched
 
     @property
     def running(self) -> bool:
@@ -164,6 +166,12 @@ class TurnSlot:
         return self._turn
 
     async def start(
+        self, work: Coroutine[Any, Any, object], refusal: str | None = None
+    ) -> asyncio.Task[object]:
+        """Run ``work`` as the lane's turn and return it, as :meth:`begin` does."""
+        return self.begin(work, refusal)
+
+    def begin(
         self, work: Coroutine[Any, Any, object], refusal: str | None = None
     ) -> asyncio.Task[object]:
         """Run ``work`` as the lane's turn and return it, unless a turn still runs: then close
@@ -201,3 +209,4 @@ class TurnSlot:
         # A turn started since then reports its own end; staying quiet keeps it shown busy.
         if turn is self._turn:
             self._post(BusyChanged(busy=False, lane=self._lane))
+            self.freed()

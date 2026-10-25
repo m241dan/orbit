@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable, Iterator, Mapping
 from functools import partial
 
 from orbit.agent.application.closing import close_all
+from orbit.agent.application.consultations import Consultations
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.outbox import EventSink
 from orbit.agent.application.planner_seat import (
@@ -15,7 +16,7 @@ from orbit.agent.application.planner_seat import (
 )
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.refusals import Refused, unknown
-from orbit.agent.domain.roles import conversational_roles, disabled_note
+from orbit.agent.domain.roles import Role, conversational_roles, disabled_note
 from orbit.agent.domain.sessions import SavedConversation, SavedCopy
 from orbit.protocol import NOT_CONFIGURED, PLANNER, BusyLane
 
@@ -29,7 +30,9 @@ class ConversationSeats:
     there. The seats in a lane take turns: one answers there at a time. The conversations of
     roles without a seat that a session was opened with are kept, to save back, as are those
     of roles that now run on another runtime than their conversation's, until they're reset.
-    The roles working in a copy take their turns in theirs among the ``hooks``' copies."""
+    The roles working in a copy take their turns in theirs among the ``hooks``' copies. The roles
+    consult those their role names, each consultation waiting in its consultant's line; a lane
+    freed starts the next turn waiting for a seat in it."""
 
     def __init__(
         self, desk: AgentDesk | None, tasks: Tasks, events: EventSink, hooks: SeatHooks
@@ -38,10 +41,22 @@ class ConversationSeats:
         self._copies = hooks.copies
         roles = desk.agents.roles if desk else {}
         names = dict.fromkeys((PLANNER, *conversational_roles(roles)))
-        parts = SeatParts(desk, tasks, events, hooks, SeatLanes(events.put_nowait))
+        consultations = Consultations(self.get, self._roles, events.put_nowait, hooks.tracing)
+        lanes = SeatLanes(events.put_nowait, self._advance)
+        parts = SeatParts(desk, tasks, events, hooks, lanes, consultations.ask)
         self._seats = {name: PlannerSeat(parts, name) for name in names}
         # The conversations opened of roles without a seat.
         self._kept: dict[str, SavedConversation] = {}
+
+    def _roles(self) -> Mapping[str, Role]:
+        """The session's roles, as they are now, which only its agents, consulting, ask for."""
+        assert self._desk is not None
+        return self._desk.agents.roles
+
+    def _advance(self, lane: BusyLane) -> None:
+        """Start the next turn waiting for a seat in ``lane``, now that it's free."""
+        for seat in self._in(lane):
+            seat.advance()
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -144,8 +159,15 @@ class ConversationSeats:
         await close_all(self._each(PlannerSeat.close_retired))
 
     async def stop_turns(self) -> None:
-        """Cancel each role's turn, if it runs, and wait for them to end."""
-        await close_all(self._each(PlannerSeat.stop_turn))
+        """Cancel each role's turn, if it runs, and wait for them to end, starting none of the
+        turns waiting meanwhile, which are forgotten."""
+        for seat in self._seats.values():
+            seat.hold()
+        try:
+            await close_all(self._each(PlannerSeat.stop_turn))
+        finally:
+            for seat in self._seats.values():
+                seat.drop_waiting()
 
     async def close(self) -> None:
         """End each role's current conversation, at the session's end."""

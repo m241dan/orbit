@@ -7,6 +7,8 @@ from orbit.protocol import (
     AgentsChanged,
     Catalog,
     CommandRefused,
+    ConsultationAnswered,
+    ConsultationAsked,
     DirectoryListing,
     ErrorOccurred,
     Event,
@@ -163,6 +165,18 @@ def test_the_streams_agents_and_listings_reach_the_navigation_and_its_totals_not
     assert routed(agents) == [*TRACKED, "navigation.follow_agents"]
     assert routed(listing) == [*TRACKED, "navigation.follow_listing"]
     assert routed(totals) == TRACKED
+
+
+def test_consultations_reach_nothing_but_the_tracked_agents() -> None:
+    asked = ConsultationAsked(
+        consultation=1, asker="planner", consultant="experimenter", title="Check X", position=1
+    )
+    answered = ConsultationAnswered(
+        consultation=1, asker="planner", consultant="experimenter", title="Check X", reply="3"
+    )
+
+    assert routed(asked) == TRACKED
+    assert routed(answered) == TRACKED
 
 
 def test_verification_steps_reach_their_panel_with_what_they_check() -> None:

@@ -891,6 +891,101 @@
       "title": "CommandRefused",
       "type": "object"
     },
+    "ConsultationAnswered": {
+      "description": "The role ``consultant`` answered consultation ``consultation`` from the role ``asker``,\ntitled ``title``, with ``reply``, its turn's last message, which goes to the asker as a\nmessage; ``interrupted`` says why, for one that didn't run to its end.",
+      "properties": {
+        "asker": {
+          "title": "Asker",
+          "type": "string"
+        },
+        "consultant": {
+          "title": "Consultant",
+          "type": "string"
+        },
+        "consultation": {
+          "title": "Consultation",
+          "type": "integer"
+        },
+        "interrupted": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interrupted"
+        },
+        "reply": {
+          "title": "Reply",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "type": {
+          "const": "consultation_answered",
+          "default": "consultation_answered",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "consultation",
+        "asker",
+        "consultant",
+        "title",
+        "reply",
+        "type"
+      ],
+      "title": "ConsultationAnswered",
+      "type": "object"
+    },
+    "ConsultationAsked": {
+      "description": "The conversational role ``asker`` asked the role ``consultant`` consultation\n``consultation``, whose message's first line is ``title``; it's ``position`` in the\nconsultant's line, 1 once it runs next or runs. Published again as its position changes.",
+      "properties": {
+        "asker": {
+          "title": "Asker",
+          "type": "string"
+        },
+        "consultant": {
+          "title": "Consultant",
+          "type": "string"
+        },
+        "consultation": {
+          "title": "Consultation",
+          "type": "integer"
+        },
+        "position": {
+          "minimum": 1,
+          "title": "Position",
+          "type": "integer"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "type": {
+          "const": "consultation_asked",
+          "default": "consultation_asked",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "consultation",
+        "asker",
+        "consultant",
+        "title",
+        "position",
+        "type"
+      ],
+      "title": "ConsultationAsked",
+      "type": "object"
+    },
     "ConversationReset": {
       "description": "The conversation of the agent ``agent`` ended at the user's ``ResetConversation``; its\nnext message starts a fresh one.",
       "properties": {
@@ -1173,6 +1268,8 @@
               "checks_proposed": "#/$defs/ChecksProposed",
               "command_accepted": "#/$defs/CommandAccepted",
               "command_refused": "#/$defs/CommandRefused",
+              "consultation_answered": "#/$defs/ConsultationAnswered",
+              "consultation_asked": "#/$defs/ConsultationAsked",
               "conversation_reset": "#/$defs/ConversationReset",
               "directory_listing": "#/$defs/DirectoryListing",
               "error_occurred": "#/$defs/ErrorOccurred",
@@ -1296,6 +1393,12 @@
             },
             {
               "$ref": "#/$defs/ConversationReset"
+            },
+            {
+              "$ref": "#/$defs/ConsultationAsked"
+            },
+            {
+              "$ref": "#/$defs/ConsultationAnswered"
             },
             {
               "$ref": "#/$defs/LogGap"

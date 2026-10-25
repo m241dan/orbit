@@ -114,6 +114,7 @@ async def test_passes_calls_with_the_token_to_the_handler_and_returns_its_text()
         ("give_up", {"reason": "blocked"}),
         ("suggest_task", {"title": "Add tests", "prompt": "Cover parse()."}),
         ("propose_task", {"title": "Add a CLI flag", "prompt": "Add --fast."}),
+        ("consult", {"role": "experimenter", "message": "Check X"}),
         (
             "propose_checks",
             {

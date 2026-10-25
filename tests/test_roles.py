@@ -495,7 +495,7 @@ def test_a_task_suggestion_without_a_prompt_has_an_empty_one() -> None:
     assert task_suggestion({"title": "Tidy"}) == ("Tidy", "")
 
 
-def test_orbit_tools_are_the_eight_in_order() -> None:
+def test_orbit_tools_are_the_nine_in_order() -> None:
     assert ORBIT_TOOLS == (
         "get_task",
         "complete_task",
@@ -505,7 +505,22 @@ def test_orbit_tools_are_the_eight_in_order() -> None:
         "suggest_task",
         "propose_task",
         "propose_checks",
+        "consult",
     )
+
+
+def test_a_role_that_consults_is_granted_consult_after_its_tools() -> None:
+    role = BUILT_IN_ROLES["planner"].model_copy(update={"consults": ("experimenter",)})
+    assert role.granted_tools == (*BUILT_IN_ROLES["planner"].tools, "consult")
+
+
+def test_a_role_that_consults_no_one_is_granted_its_tools_alone() -> None:
+    assert BUILT_IN_ROLES["planner"].granted_tools == BUILT_IN_ROLES["planner"].tools
+
+
+def test_consult_among_a_roles_tools_is_refused() -> None:
+    with pytest.raises(ValidationError, match="consult comes with consults, not tools"):
+        Role(instructions="Plan.", tools=("consult",))
 
 
 @pytest.mark.parametrize(
@@ -544,6 +559,7 @@ def test_unrestricted_tool_rules_allow_the_roles_orbit_tools_and_deny_its_others
         "mcp__orbit__suggest_task",
         "mcp__orbit__propose_task",
         "mcp__orbit__propose_checks",
+        "mcp__orbit__consult",
     )
 
 
@@ -564,6 +580,7 @@ def test_restricted_tool_rules_add_reading_and_searching_and_deny_writing() -> N
         "mcp__orbit__give_up",
         "mcp__orbit__suggest_task",
         "mcp__orbit__propose_checks",
+        "mcp__orbit__consult",
         "Edit",
         "Write",
         "NotebookEdit",

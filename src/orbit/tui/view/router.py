@@ -16,6 +16,8 @@ from orbit.protocol import (
     Catalog,
     ChecksProposed,
     CommandRefused,
+    ConsultationAnswered,
+    ConsultationAsked,
     DirectoryListing,
     ErrorOccurred,
     Event,
@@ -45,6 +47,7 @@ from orbit.tui.view.events import (
     SESSION_EVENTS,
     STATE_EVENTS,
     AnswerEvent,
+    ConsultationEvent,
     OwnershipEvent,
     ProgressEvent,
     SessionEvent,
@@ -381,7 +384,13 @@ class EventRouter:
                 self.set_busy(lane, busy)
             case TasksChanged(tasks=tasks):
                 self._show_tasks(tasks)
-            case AgentsChanged() | UsageTotals() | DirectoryListing():
+            case (
+                AgentsChanged()
+                | UsageTotals()
+                | DirectoryListing()
+                | ConsultationAsked()
+                | ConsultationAnswered()
+            ):
                 self._follow_stream(event)
             case _:
                 self._show_progress(event)
@@ -392,9 +401,12 @@ class EventRouter:
         self._handlers.pickers.show_choices(event.model_choices, event.model_ids)
         self.seats.follow_settings(event.role, event.settings)
 
-    def _follow_stream(self, event: AgentsChanged | UsageTotals | DirectoryListing) -> None:
+    def _follow_stream(
+        self, event: AgentsChanged | UsageTotals | DirectoryListing | ConsultationEvent
+    ) -> None:
         """Show the agents running across workspaces in the workspace picker, and the server's
-        directories in its explorer; nothing shows what turns cost across them."""
+        directories in its explorer; nothing shows what turns cost across them, nor
+        consultations, which the asker's turns show."""
         if isinstance(event, AgentsChanged):
             self._handlers.navigation.follow_agents(event)
         elif isinstance(event, DirectoryListing):
