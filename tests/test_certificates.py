@@ -450,7 +450,17 @@ def test_a_client_name_that_isnt_a_safe_file_name_is_refused(tmp_path: Path, nam
 
 
 @pytest.mark.parametrize(
-    "name", ["laptop", "Work-Laptop_2.home", "7", "a" * 64, "key-laptop", "laptop-keyboard"]
+    "name",
+    [
+        "laptop",
+        "Work-Laptop_2.home",
+        "7",
+        "a" * 64,
+        "keyboard",
+        "monkey",
+        "key-laptop",
+        "laptop-keyboard",
+    ],
 )
 def test_a_client_name_of_letters_digits_dots_dashes_and_underscores_is_taken(
     tmp_path: Path, name: str
