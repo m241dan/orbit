@@ -1751,8 +1751,9 @@ before the TUI starts, suggesting `"file"` or `"otlp"` instead. `"file"` writes 
 before one would grow past `file_max_mb`, deleting the oldest so `file_keep` remain.
 
 Every span is kept: there's no sampling. Spans describe the orbit that made them with
-`service.name`, `service.version`, `service.namespace` (`orbit-serve` or `orbit-chat`, for a chat
-running its own control plane), `service.instance.id`, new each start, and `host.name`. Spans are
+`service.name`, `service.version`, `service.namespace` (`orbit-serve`, or `orbit-chat` for a chat,
+running its own control plane or joining one), `service.instance.id`, new each start, and
+`host.name`. Spans are
 batched and sent in the background; when `orbit chat` closes, or `orbit serve` stops gracefully,
 orbit waits at most 5 seconds for those not yet sent, then logs one warning naming how many it
 dropped, such as `Telemetry dropped 3 spans it couldn't export.` `orbit serve` logs warnings, from
@@ -1774,6 +1775,19 @@ client that sent it and whether it was accepted or refused, with the code; it's 
 span whose trace context its envelope carries, if any, else it starts its own trace, and the
 events it publishes carry its own. Spans hold no prompts, agent messages, diffs or check output.
 [docs/telemetry.md](docs/telemetry.md) lists every span, attribute and event.
+
+The TUI traces what the user does: each action that sends commands, such as pressing ctrl+r or
+picking a session, is one span, `orbit.tui.action`, with `orbit.action` naming it (`run_tasks`,
+`submit_prompt`, `pick_session` and so on), and every command it sends carries its trace context,
+so their `orbit.command` spans are its children and one trace reads from the key pressed to what
+its commands did. An action sending several commands, such as picking a session (`Attach`, then
+`ActivateSession`), is one span; one sending nothing, such as hiding the sidebar, has none, and
+what the TUI sends on its own, such as its `Hello`, carries no trace context. A chat running its
+own control plane traces its TUI with the control plane's telemetry. A chat joining one
+(`--connect`, `--remote`, or an `orbit serve` found running here) starts its own from the
+`[telemetry]` in the user config where it runs, the frontend user's, as the control plane's
+collector may be out of its reach, and flushes and stops it as it closes; without one, its
+commands carry no trace context, and their `orbit.command` spans start traces of their own.
 
 ## Development
 
@@ -1933,12 +1947,15 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     sessions summarizes and orders them, when one may be opened, renamed or deleted, and the
     notes and settings a resumed session starts with, and the note on sessions imported from an
     older orbit's files.
-- `orbit.tui`: frontend. Sends commands and renders events. Imports only `orbit.protocol`.
+- `orbit.tui`: frontend. Sends commands and renders events. Imports only `orbit.protocol`, and
+  `orbit.tracing` to trace the user's actions with the `Telemetry` the app is given.
   `view` holds its decisions and doesn't import Textual: `frontend` is the `Frontend` the app
   hands everything but Textual's part to (what it shows of each event, what the keys and prompts
   send, which window is selected), over `router`, which takes each event to the panes and hosts
-  that show it, `commands`, the `CommandDesk` that sends commands and follows their outcomes, and
-  `feed`, the `ConversationFeed` that turns events into the transcript's entries; `navigation`,
+  that show it, `commands`, the `CommandDesk` that sends commands and follows their outcomes,
+  `actions`, which runs each user action as an `orbit.tui.action` span, started as it sends its
+  first command, whose trace context the envelopes it sends carry (`carrying`), and `feed`, the
+  `ConversationFeed` that turns events into the transcript's entries; `navigation`,
   `place`, `opening` and `catalog`, with the pickers' models (`session_picker`, `workspace_list`,
   `workspace_picker`, `explorer` and `typing_list`), are where the frontend is and how it moves;
   each window and modal has a model (`conversation`, `log`, `tab_strip`, `prompt`, `tasks`,
@@ -1957,11 +1974,13 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   hands the rest to `Frontend`.
 - `orbit.cli`: the composition root, and the only place the two sides are wired together: it
   plugs the external adapters into a `WorkspaceHost`, builds a `ControlPlane` around it and
-  hands that to the TUI. It runs the backend on its own thread and event loop through
+  hands that to the TUI, with the telemetry both trace with. It runs the backend on its own
+  thread and event loop through
   `ThreadedSession` (in `threaded`), so neither side's work stalls the other. `orbit serve`
   plugs them in the same way but hands the `ControlPlane` to `ControlPlaneServer` instead, on the main thread's event loop. `orbit chat --connect` builds no
   backend: it hands the TUI an `orbit.client.WebSocketSession`, which runs on the TUI's own event
-  loop; neither does a chat that `discover_control_plane` finds a running `orbit serve` for.
+  loop, and telemetry of its own; neither does a chat that `discover_control_plane` finds a
+  running `orbit serve` for.
   It's a module per command (`chat`, `serve`, and `maintenance` for `version`, `db` and
   `token`), with `backend` wiring the adapters for both chat and serve, `options` the options
   they share and `errors` how they exit; its `__init__` registers the commands on the app.

@@ -3,6 +3,7 @@ event, what the user's keys and prompts send, and which window they move to."""
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, replace
+from functools import partial
 from typing import Protocol
 
 from orbit import __version__
@@ -36,6 +37,7 @@ from orbit.protocol import (
     TaskState,
     UpdateSettings,
 )
+from orbit.tui.view.actions import ActionName, action
 from orbit.tui.view.commands import CommandDesk, Send
 from orbit.tui.view.common import EntryKind
 from orbit.tui.view.confirm import (
@@ -269,6 +271,11 @@ class Frontend:
         it."""
         return await self.desk.send(command, awaited, failure)
 
+    async def _act(self, name: ActionName, command: Command) -> bool:
+        """Whether ``command`` was sent, as the user's action ``name``."""
+        with action(name):
+            return await self.send(command)
+
     def render(self, event: Event) -> None:
         """Show ``event`` wherever it concerns."""
         self.router.render(event)
@@ -320,9 +327,10 @@ class Frontend:
         self.router.set_busy(PLANNER_LANE, True)
         # A newer prompt supersedes an earlier one: only its outcome frees the planner.
         outcome = Awaited(accepted=lambda: self._sent(text), refused=self._unsend, supersedes=True)
-        await self._show_and_send(
-            (text, "prompt"), PLANNER, SendMessage(agent=PLANNER, text=text), outcome
-        )
+        with action("submit_prompt"):
+            await self._show_and_send(
+                (text, "prompt"), PLANNER, SendMessage(agent=PLANNER, text=text), outcome
+            )
 
     async def _show_and_send(
         self, shown: tuple[str, EntryKind], agent: str, command: Command, awaited: Awaited
@@ -359,7 +367,8 @@ class Frontend:
             if code != UNKNOWN:
                 self.proposals.reopen(proposal)
 
-        await self._show_and_send(shown, proposal.agent_id, decision, Awaited(code=undecide))
+        with action("decide_proposal"):
+            await self._show_and_send(shown, proposal.agent_id, decision, Awaited(code=undecide))
 
     # Moving between windows, which only applies with nothing focused.
 
@@ -452,45 +461,51 @@ class Frontend:
     async def run_tasks(self) -> None:
         """Ask the backend to run the task list, unless something is already running."""
         if not self.router.busy(WORK_LANE):
-            await self.send(RunTasks())
+            await self._act("run_tasks", RunTasks())
 
     async def super_review(self) -> None:
         # Reviews have their own lane, so this works while tasks run.
-        await self.send(FireTrigger(trigger=SUPER_REVIEW))
+        await self._act("super_review", FireTrigger(trigger=SUPER_REVIEW))
 
     def configure_checks(self) -> None:
         """Ask first, so a stray key doesn't queue a configurator."""
         # The backend queues it first and runs it, or says one is already on its way.
         command = FireTrigger(trigger=CONFIGURE_CHECKS)
         self._app.confirm(
-            CONFIGURE_TITLE, CONFIGURE_MESSAGE, CONFIGURE_YES, lambda: self.send(command)
+            CONFIGURE_TITLE,
+            CONFIGURE_MESSAGE,
+            CONFIGURE_YES,
+            lambda: self._act("configure_checks", command),
         )
 
     def reset_planner(self) -> None:
         """Ask first, so a stray key doesn't end the planner's conversation."""
         # The backend refuses while the planner answers, or notes there's nothing to reset.
         command = ResetConversation(agent=PLANNER)
-        self._app.confirm(RESET_TITLE, RESET_MESSAGE, RESET_YES, lambda: self.send(command))
+        self._app.confirm(
+            RESET_TITLE, RESET_MESSAGE, RESET_YES, lambda: self._act("reset_planner", command)
+        )
 
     async def cancel_turn(self) -> None:
         # The planner has its own lane, stopped with ctrl+x; ctrl+s stops the task run.
-        await self.send(CancelTurn(lane=WORK_LANE))
+        await self._act("cancel_turn", CancelTurn(lane=WORK_LANE))
 
     async def stop_planner(self) -> None:
-        await self.send(CancelTurn(lane=PLANNER_LANE))
+        await self._act("stop_planner", CancelTurn(lane=PLANNER_LANE))
 
     async def cancel_agent(self, agent_id: str) -> None:
-        await self.send(CancelAgent(agent_id=agent_id))
+        await self._act("cancel_agent", CancelAgent(agent_id=agent_id))
 
     async def accept_task(self, task_id: str) -> None:
-        await self.send(AcceptTask(task_id=task_id))
+        await self._act("accept_task", AcceptTask(task_id=task_id))
 
     async def remove_task(self, task_id: str) -> None:
-        await self.send(RemoveTask(task_id=task_id))
+        await self._act("remove_task", RemoveTask(task_id=task_id))
 
     async def page_back(self) -> None:
         """Show the page of the session's history before the conversation shown, if any."""
-        await self.pager.earlier()
+        with action("page_history"):
+            await self.pager.earlier()
 
     def edit_task(self, current: TaskState | None) -> None:
         """Open the editor on the task ``current``, or a new one, unless it can't be edited,
@@ -505,9 +520,9 @@ class Frontend:
             if result is None:
                 return
             if current is None:
-                await self.send(AddTask(task=result))
+                await self._act("add_task", AddTask(task=result))
             else:
-                await self.send(EditTask(task_id=current.id, task=result))
+                await self._act("edit_task", EditTask(task_id=current.id, task=result))
 
         task = None if current is None else current.task
         self._app.edit_task(task, self.router.settings or Settings(), saved)
@@ -524,17 +539,19 @@ class Frontend:
 
     def pick_model(self) -> None:
         if self.router.settings is not None:
-            self._parts.pickers.choose_model(self._shown_settings, self._request_settings)
+            request = partial(self._request_settings, "pick_model")
+            self._parts.pickers.choose_model(self._shown_settings, request)
 
     def pick_tool_access(self) -> None:
         if self.router.settings is not None:
-            self._parts.pickers.choose_tools(self._shown_settings, self._request_settings)
+            request = partial(self._request_settings, "pick_tool_access")
+            self._parts.pickers.choose_tools(self._shown_settings, request)
 
     def _shown_settings(self) -> Settings:
         settings = self.router.settings
         assert settings is not None  # Only picked once settings were shown.
         return settings
 
-    async def _request_settings(self, settings: Settings) -> None:
+    async def _request_settings(self, name: ActionName, settings: Settings) -> None:
         # The display updates when the backend confirms with SettingsChanged.
-        await self.send(UpdateSettings(settings=settings))
+        await self._act(name, UpdateSettings(settings=settings))

@@ -1,4 +1,5 @@
-"""The telemetry ``orbit chat`` starts from the user config, hands its backend and stops."""
+"""The telemetry ``orbit chat`` starts from the user config, hands its backend and its TUI,
+or a TUI joining a control plane its own, and stops."""
 
 import io
 import logging
@@ -12,9 +13,12 @@ from typer.testing import CliRunner
 
 from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.cli import app
+from orbit.protocol import RunTasks
 from orbit.telemetry import Off
 from orbit.telemetry.otel import OtelTelemetry
-from tests.cli_fakes import LocalApp, StartedTelemetry
+from orbit.tui.view.actions import action, carried
+from tests.cli_fakes import HELLO, FakeApp, LocalApp, StartedTelemetry
+from tests.server_fakes import URL
 
 runner = CliRunner()
 
@@ -42,6 +46,7 @@ def hosts(monkeypatch: pytest.MonkeyPatch) -> list[WorkspaceHost]:
     monkeypatch.setattr("orbit.cli.chat.OrbitApp", LocalApp)
     monkeypatch.setattr("orbit.cli.backend.WorkspaceHost", host)
     LocalApp.launched = []
+    LocalApp.telemetries = []
     LocalApp.during = None
     LocalApp.halted = None
     return built
@@ -75,7 +80,7 @@ def test_without_telemetry_configured_chat_traces_nothing(hosts: list[WorkspaceH
     assert isinstance(host.telemetry, Off)
 
 
-def test_chat_hands_its_backend_the_telemetry_it_starts_and_closes_it_on_exit(
+def test_chat_hands_its_backend_and_tui_the_telemetry_it_starts_and_closes_it_on_exit(
     hosts: list[WorkspaceHost],
     planes: list[ControlPlane],
     started_telemetry: list[StartedTelemetry],
@@ -92,7 +97,37 @@ def test_chat_hands_its_backend_the_telemetry_it_starts_and_closes_it_on_exit(
     assert (telemetry.run.config_dir, telemetry.run.state_dir) == (config_dir, state)
     assert [host.telemetry for host in hosts] == [telemetry]
     assert [plane.telemetry for plane in planes] == [telemetry]
+    assert LocalApp.telemetries == [telemetry]
     assert telemetry.closed
+
+
+@pytest.mark.usefixtures("fakes", "token_file")
+def test_a_connected_chat_traces_its_tui_with_the_telemetry_configured_here(
+    started_telemetry: list[StartedTelemetry], config_dir: Path, state: Path
+) -> None:
+    _configure(config_dir, 'exporter = "file"')
+
+    result = runner.invoke(app, ["chat", "--connect", URL])
+
+    assert result.exit_code == 0, result.output
+    [telemetry] = started_telemetry
+    assert telemetry.settings.exporter == "file"
+    assert telemetry.run.namespace == "orbit-chat"
+    assert (telemetry.run.config_dir, telemetry.run.state_dir) == (config_dir, state)
+    [tui] = FakeApp.built
+    assert tui.telemetry is telemetry and tui.ran
+    assert telemetry.closed
+
+
+@pytest.mark.usefixtures("fakes", "token_file")
+def test_a_connected_chat_without_telemetry_sends_no_trace_context() -> None:
+    assert runner.invoke(app, ["chat", "--connect", URL]).exit_code == 0
+
+    [tui] = FakeApp.built
+    assert isinstance(tui.telemetry, Off)
+    with action("run_tasks"):
+        sent = carried(HELLO.model_copy(update={"payload": RunTasks()}), tui.telemetry)
+    assert (sent.traceparent, sent.tracestate) == (None, None)
 
 
 def test_chat_with_the_file_exporter_traces_with_opentelemetry(

@@ -12,6 +12,7 @@ from orbit.protocol import (
     RenameSession,
     SessionSummary,
 )
+from orbit.tui.view.actions import ActionName, action
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.sessions import (
     DELETE_TITLE,
@@ -164,7 +165,7 @@ class SessionPicker(TypingList[tuple[SessionChoice, ...]]):
         renaming = self._renaming
         self._naming(False)
         if name:
-            await self._change(RenameSession(session_id=renaming.id, name=name))
+            await self._change("rename_session", RenameSession(session_id=renaming.id, name=name))
 
     def rename(self) -> None:
         """Ask for the highlighted session's new name, starting from its name."""
@@ -180,15 +181,19 @@ class SessionPicker(TypingList[tuple[SessionChoice, ...]]):
             return
         deleting = DeleteSession(session_id=summary.id)
         if not can_delete(summary):
-            await self._change(deleting)
+            await self._change("delete_session", deleting)
             return
         message = delete_message(summary)
-        self._picker_view.confirm(DELETE_TITLE, message, DELETE_YES, lambda: self._change(deleting))
+        self._picker_view.confirm(
+            DELETE_TITLE, message, DELETE_YES, lambda: self._change("delete_session", deleting)
+        )
 
-    async def _change(self, change: SessionChange) -> None:
-        """Send ``change``, showing why it's refused here, in place of any refusal shown."""
+    async def _change(self, name: ActionName, change: SessionChange) -> None:
+        """Send ``change`` as the user's action ``name``, showing why it's refused here, in place
+        of any refusal shown."""
         self._view.show_note(None)
-        await self._picker_view.manage(change, Awaited(why=self._refused))
+        with action(name):
+            await self._picker_view.manage(change, Awaited(why=self._refused))
 
     def _naming(self, on: bool, renaming: SessionSummary | None = None) -> None:
         """Show the box for the name of a new session, or the new name of the session

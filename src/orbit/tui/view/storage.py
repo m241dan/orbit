@@ -3,6 +3,7 @@
 from typing import Protocol
 
 from orbit.protocol import ResumeStorage
+from orbit.tui.view.actions import action
 from orbit.tui.view.outcomes import Awaited, Send
 
 HALT_TITLE = "Session stopped: storage failed"
@@ -74,4 +75,5 @@ class StorageHalt:
 
     async def retry(self) -> None:
         """Try again, lifting the halt once the try is accepted, unless a later one is sent."""
-        await self._send(ResumeStorage(), Awaited(accepted=self.lifted, supersedes=True))
+        with action("resume_storage"):
+            await self._send(ResumeStorage(), Awaited(accepted=self.lifted, supersedes=True))

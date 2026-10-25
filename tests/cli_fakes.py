@@ -16,6 +16,7 @@ from orbit.agent.domain.server import ServerSettings
 from orbit.cli.threaded import ThreadedSession
 from orbit.protocol import PROTOCOL_VERSION, CommandEnvelope, Hello
 from orbit.telemetry import Off, TelemetryRun, TelemetrySettings
+from orbit.tracing import NoTelemetry, Telemetry
 from orbit.tui import Opening, WarningCapture
 from tests.server_fakes import serving_plane
 
@@ -32,13 +33,14 @@ class FakeClient:
 
 @dataclass
 class FakeApp:
-    """The TUI built over a control plane, run once."""
+    """The TUI built over a control plane, its actions traced with ``telemetry``, run once."""
 
     built: ClassVar[list[FakeApp]] = []
 
     session: object
     link: object = None
     opening: Opening = field(default_factory=Opening)
+    telemetry: Telemetry = field(default_factory=NoTelemetry)
     storage_halt: str | None = None
     ran: bool = field(default=False)
     warnings: WarningCapture = field(default_factory=WarningCapture)
@@ -86,13 +88,16 @@ class LocalApp:
     picks: ClassVar[list[bool]] = []
     # The repository each app was to open on the workspace of.
     repositories: ClassVar[list[str | None]] = []
+    # The telemetry each app traced its actions with.
+    telemetries: ClassVar[list[Telemetry]] = []
 
-    def __init__(self, session: ThreadedSession, *, opening: Opening) -> None:
+    def __init__(self, session: ThreadedSession, *, opening: Opening, telemetry: Telemetry) -> None:
         self.session = session
         self.storage_halt = LocalApp.halted
         self.warnings = WarningCapture()
         LocalApp.picks.append(opening.pick)
         LocalApp.repositories.append(opening.repository)
+        LocalApp.telemetries.append(telemetry)
 
     def run(self) -> None:
         asyncio.run(self._open_and_close())

@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable
 from typing import Protocol
 
 from orbit.protocol import TakeOwnership
+from orbit.tui.view.actions import action
 from orbit.tui.view.outcomes import Awaited, Send
 
 Answered = Callable[[bool | None], Awaitable[None]]
@@ -47,7 +48,8 @@ class TakeoverOffer:
 
     async def _answered(self, take: bool | None) -> None:
         """Send the user's choice to ``take`` over the repository, or not."""
-        await self._send(TakeOwnership(take=bool(take)), Awaited(refused=self._refused))
+        with action("take_ownership"):
+            await self._send(TakeOwnership(take=bool(take)), Awaited(refused=self._refused))
 
     def _refused(self) -> None:
         """Ask again, if the offer is still open after an answer was refused."""

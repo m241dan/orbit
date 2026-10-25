@@ -65,6 +65,7 @@ from orbit.profiling import profiled
 from orbit.protocol import NewSession
 from orbit.protocol.transport import is_loopback
 from orbit.telemetry import TelemetryRun
+from orbit.tracing import Telemetry
 from orbit.tui import Opening, OrbitApp
 
 
@@ -112,22 +113,23 @@ def chat(
     given = _ClientFiles(token_file, ca, cert, key)
     flags = _Backend(model, tools, verify, worktree, review, usage, new, name)
     target = _target(connect, remote, user_config, given)
+    state = resolve_state_dir(state, os.environ)
+    run = TelemetryRun("orbit-chat", user_config, state, os.environ)
     if target is not None:
         _refuse_local(local, target.flag)
         _refuse_state_dir(ctx, target.flag)
         joining = _joining(ctx, target.files, user_config, _opening(flags))
         where = f"not orbit chat {target.flag}"
         repository = _repository_for(target.url, workspace)
-        _join(replace(joining, repository=repository), target.url, where)
+        _join(replace(joining, repository=repository), target.url, where, run)
         return
-    state = resolve_state_dir(state, os.environ)
     root = _workspace(workspace)
     found = None if local else _discovered(state, given, user_config)
     if found is not None:
         joining = _joining(ctx, found.files, user_config, _opening(flags))
         joining = replace(joining, repository=str(root))
         where = f"which runs at {found.url}; or pass --local to run one here"
-        _join(joining, found.url, where)
+        _join(joining, found.url, where, run)
         return
     _refuse_client_files(
         given, "--local runs one here" if local else "no orbit serve was found here"
@@ -137,14 +139,13 @@ def chat(
     profile = profile.expanduser().resolve() if profile else None
     directories = _Directories(root, state, user_config)
     picking = not flags.fresh
-    run = TelemetryRun("orbit-chat", user_config, state, os.environ)
     # The TUI captures the warnings logged while it runs; those as telemetry stops go to stderr.
     with _telemetry(run) as telemetry:
         flags = replace(flags, telemetry=telemetry)
         with _in_process(flags, directories, pick_session=picking, make=_backend) as backend:
             session = ThreadedSession(backend.build, _thread_context(profile))
             opening = Opening(pick=picking, repository=str(root))
-            _launch(OrbitApp(session, opening=opening), profile)
+            _launch(OrbitApp(session, opening=opening, telemetry=telemetry), profile)
 
 
 @dataclass(frozen=True)
@@ -346,14 +347,18 @@ def _refuse_local(local: bool, flag: str) -> None:
         raise typer.Exit(2)
 
 
-def _join(joining: _Joining, url: str, where: str) -> None:
-    """Run the TUI over the control plane at ``url``, as ``joining`` says.
+def _join(joining: _Joining, url: str, where: str, run: TelemetryRun) -> None:
+    """Run the TUI over the control plane at ``url``, as ``joining`` says, tracing its actions
+    with the telemetry the user config here asks for, for orbit running as ``run`` says, then
+    flush and stop it.
 
     Exits with status 2 if a flag that configures the control plane was given, saying it
-    belongs on orbit serve, ``where`` saying which.
+    belongs on orbit serve, ``where`` saying which, or the telemetry configured can't start.
     """
     _refuse_serve_flags(joining.ctx, where)
-    _launch(_connected_app(url, joining), None)
+    # The frontend user's own: the control plane's collector may be out of its reach.
+    with _telemetry(run) as telemetry:
+        _launch(_connected_app(url, joining, telemetry), None)
 
 
 class LocalCertMissing(Exception):
@@ -477,8 +482,9 @@ def _given(ctx: typer.Context, name: str) -> bool:
     return source is not None and source.name != "DEFAULT"
 
 
-def _connected_app(url: str, joining: _Joining) -> OrbitApp:
-    """The TUI over the control plane at ``url``, joined as ``joining`` says.
+def _connected_app(url: str, joining: _Joining, telemetry: Telemetry) -> OrbitApp:
+    """The TUI over the control plane at ``url``, joined as ``joining`` says, tracing its
+    actions with ``telemetry``.
 
     Exits with status 2 if ``url`` is a ws:// one beyond loopback, or the token, the CA or the
     client certificate can't be read.
@@ -489,7 +495,7 @@ def _connected_app(url: str, joining: _Joining) -> OrbitApp:
         context = _ssl_context(url, joining)
         client = WebSocketSession(url, joining.token_file, ssl_context=context)
     opening = Opening(joining.opening, joining.opening is None, joining.repository)
-    return OrbitApp(client, client, opening)
+    return OrbitApp(client, client, opening, telemetry=telemetry)
 
 
 def _ssl_context(url: str, joining: _Joining) -> ssl.SSLContext | None:

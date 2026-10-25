@@ -14,6 +14,7 @@ from orbit.protocol import (
     WorkspaceCloning,
     WorkspaceEntry,
 )
+from orbit.tui.view.actions import action
 from orbit.tui.view.confirm import Question
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.typing_list import TypingList, TypingListView
@@ -187,7 +188,8 @@ class WorkspacePicker(TypingList[str | None]):
         listed."""
         self._view.show_note(None)
         awaited = Awaited(accepted=lambda: self._added(adding), why=self._refused)
-        await self._picker_view.change(adding, awaited)
+        with action("add_workspace"):
+            await self._picker_view.change(adding, awaited)
 
     def _added(self, adding: AddWorkspace) -> None:
         """Go back to the list now ``adding`` is accepted, unless the picker is closed: pick the
@@ -226,7 +228,8 @@ class WorkspacePicker(TypingList[str | None]):
             removing = None if index is None else removal(row, index)
             if removing is not None:
                 self._view.show_note(None)
-                await self._picker_view.change(removing, Awaited(why=self._refused))
+                with action("remove_workspace"):
+                    await self._picker_view.change(removing, Awaited(why=self._refused))
 
         question = Question(remove_title(row), REMOVE_MESSAGE, remove_choices(row), CANCEL_INDEX)
         self._picker_view.ask(question, chosen)

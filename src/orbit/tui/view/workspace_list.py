@@ -13,6 +13,7 @@ from orbit.protocol import (
     WorkspaceCloning,
     WorkspaceEntry,
 )
+from orbit.tui.view.actions import action
 from orbit.tui.view.catalog import CatalogState
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.workspace_picker import Change, WorkspacePicker
@@ -130,7 +131,8 @@ class WorkspaceList:
             assert picker is not None  # Opened before it can close.
             await self._change(Watch(streams=()), Awaited())
             if workspace is not None:
-                await self._chosen(workspace, picker.startup)
+                with action("pick_workspace"):
+                    await self._chosen(workspace, picker.startup)
 
         picker = self._view.open_picker(self.workspaces, self._repository, startup, picked)
         picker.cloning = self.cloning

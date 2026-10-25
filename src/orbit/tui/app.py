@@ -13,6 +13,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Tabs
 
 from orbit.protocol import Command, Connected, Link, LinkState, Session, Settings, TaskSpec
+from orbit.tracing import NoTelemetry, Telemetry
 from orbit.tui.agents import AgentsPane
 from orbit.tui.detail import DetailPane
 from orbit.tui.event_stream import event_batches
@@ -30,6 +31,7 @@ from orbit.tui.task_editor import TaskEditorScreen
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.transcript_log import TranscriptLog
+from orbit.tui.view.actions import carrying
 from orbit.tui.view.frontend import Frontend, Parts, Saved
 from orbit.tui.view.opening import Opening
 from orbit.tui.view.outcomes import Awaited
@@ -38,6 +40,7 @@ from orbit.tui.widgets import ChatPrompt, StatusLine, confirm, mark_selected
 from orbit.tui.workspaces import WorkspacesHost
 
 _PLAIN_OPENING = Opening()
+_NO_TELEMETRY = NoTelemetry()
 
 
 # Not inheriting App's bindings drops its ctrl+q quit and ctrl+c "how to quit" hint.
@@ -95,6 +98,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         session: Session,
         link: Link | None = None,
         opening: Opening = _PLAIN_OPENING,
+        telemetry: Telemetry = _NO_TELEMETRY,
     ) -> None:
         """The app over ``session``, showing how its ``link`` to a control plane in another
         process stands, if it has one. Over a ``link``, the first catalog opens the workspace
@@ -102,11 +106,13 @@ class OrbitApp(App[None], inherit_bindings=False):
         that workspace, or the first. The app attaches to the active session of the workspace
         opened on, then sends the ``opening``'s command, if any; or, if the ``opening`` says to
         pick, opens the session picker, offering to resume the active session only over a
-        ``link``, as a session opened in process isn't one picked yet."""
+        ``link``, as a session opened in process isn't one picked yet. Each user action sending
+        commands is traced with ``telemetry``, its commands carrying its span's context."""
         super().__init__()
         self._session = session
         self._link = link
         self._opening = opening
+        self._telemetry = telemetry
         self._proposals = ProposalHost(self.push_screen)
         self._sessions = SessionsHost(
             self.push_screen, self._send, lambda: self._frontend.router.show_viewing()
@@ -162,9 +168,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._task_list = self.query_one(TaskList)
         self._agents = self.query_one(AgentsPane)
         self._side = self.query_one("#side")
-        self._frontend = Frontend(
-            self._parts(), self._session.send, self._opening, self._link is not None
-        )
+        send = carrying(self._session.send, self._telemetry)
+        self._frontend = Frontend(self._parts(), send, self._opening, self._link is not None)
         self._frontend.start()
         self._pickers.install(self)
         if self._link is not None:  # Before the events start, which start the link.

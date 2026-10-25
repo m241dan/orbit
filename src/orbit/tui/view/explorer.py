@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from orbit.protocol import AddWorkspace, DirectoryEntry, DirectoryListing, ListDirectory
+from orbit.tui.view.actions import action
 from orbit.tui.view.common import kept_highlight
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.workspaces import add_command
@@ -207,7 +208,8 @@ class Explorer:
         self._held = None
         self._view.show_note(None)
         awaited = Awaited(accepted=self._listed, why=self._unlisted, supersedes=True)
-        await self._browse(ListDirectory(path=path), awaited)
+        with action("browse"):
+            await self._browse(ListDirectory(path=path), awaited)
 
     def show_listing(self, listing: DirectoryListing) -> None:
         """Show ``listing`` if it answers the listing last asked for, by its path; else hold it
@@ -309,7 +311,9 @@ class Explorer:
         assert self.listing is not None  # Entries are only shown with their listing.
         adding = AddWorkspace(path=added_path(self.listing, entry))
         self._view.show_note(None)
-        await self._browse(adding, Awaited(accepted=lambda: self._added(adding), why=self._refused))
+        awaited = Awaited(accepted=lambda: self._added(adding), why=self._refused)
+        with action("add_workspace"):
+            await self._browse(adding, awaited)
 
     def _added(self, adding: AddWorkspace) -> None:
         """Close with ``adding`` now it's accepted, or once the explorer is on top again if
@@ -350,7 +354,8 @@ class Explorer:
             accepted=lambda: self._completed(request),
             why=lambda why: self._uncompleted(request, why),
         )
-        await self._browse(ListDirectory(path=parent), awaited)
+        with action("browse"):
+            await self._browse(ListDirectory(path=parent), awaited)
 
     def _completed(self, request: int) -> None:
         """Complete the path typed from the listing come for the ``request``, the number of the
@@ -403,7 +408,8 @@ class Explorer:
         adding = add_command(text)
         self._view.show_field_note("")
         awaited = Awaited(accepted=lambda: self._added(adding), why=self._refused_typed)
-        await self._browse(adding, awaited)
+        with action("add_workspace"):
+            await self._browse(adding, awaited)
 
     def _refused_typed(self, why: str) -> None:
         """Show ``why`` what was typed was refused in the field's hint; nothing once the

@@ -16,6 +16,8 @@ from orbit.protocol import (
     UsageChanged,
     Watch,
 )
+from orbit.tracing import NoTelemetry, Telemetry
+from orbit.tui.view.actions import carrying
 from orbit.tui.view.agents import AgentsList
 from orbit.tui.view.common import EntryKind
 from orbit.tui.view.frontend import Frontend, Parts, Saved
@@ -41,6 +43,8 @@ from tests.view_fakes import (
 )
 
 Message = Callable[[], None]
+
+_NO_TELEMETRY = NoTelemetry()
 
 
 class Wire:
@@ -235,10 +239,16 @@ class Usage:
 
 class Shell:
     """A frontend over fake views holding the widgets' real models, opening as ``opening``
-    says, over a link if ``linked``, sending to a fake session, timed by ``now``. What the
-    widgets and Textual do later, a test has done with :meth:`settle`."""
+    says, over a link if ``linked``, sending to a fake session, its actions traced with
+    ``telemetry``, timed by ``now``. What the widgets and Textual do later, a test has done
+    with :meth:`settle`."""
 
-    def __init__(self, opening: Opening | None = None, linked: bool = False) -> None:
+    def __init__(
+        self,
+        opening: Opening | None = None,
+        linked: bool = False,
+        telemetry: Telemetry = _NO_TELEMETRY,
+    ) -> None:
         self.now = 0.0
         self.wire = Wire()
         self.window = Window()
@@ -259,7 +269,8 @@ class Shell:
         self.agents = AgentsList(self.agents_view)
         self.prompt_marks = PromptMarks(self.marks)
         self.parts = self._parts()
-        self.frontend = Frontend(self.parts, self.wire.send, opening or Opening(), linked)
+        send = carrying(self.wire.send, telemetry)
+        self.frontend = Frontend(self.parts, send, opening or Opening(), linked)
         self._mount()
 
     def _parts(self) -> Parts:

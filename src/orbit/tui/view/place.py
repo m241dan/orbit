@@ -14,6 +14,7 @@ from orbit.protocol import (
     Snapshot,
     WorkspaceEntry,
 )
+from orbit.tui.view.actions import action
 from orbit.tui.view.catalog import CatalogState
 from orbit.tui.view.confirm import Question
 from orbit.tui.view.outcomes import Awaited
@@ -275,7 +276,8 @@ class Place:
 
         async def answered(index: int | None) -> None:
             if index is not None and choices[index] == ACTIVATE_CHOICE:
-                await self._send(ActivateSession(session=viewed), Awaited())
+                with action("activate_session"):
+                    await self._send(ActivateSession(session=viewed), Awaited())
 
         question = Question(
             ACTIVATION_TITLE, message, tuple(choices), choices.index(JUST_LOOK_CHOICE)
@@ -299,7 +301,8 @@ class Place:
             was = self._move(viewing.workspace) if choice and not viewing.joined else None
             # The sessions as last shown, as they may have changed since the picker opened.
             refused = Awaited(why=lambda why: self._pick_refused(why, startup, workspace))
-            await self._send_choice(choice or (), picker.sessions, refused, was)
+            with action("pick_session"):
+                await self._send_choice(choice or (), picker.sessions, refused, was)
 
         picker = self._view.open_picker(sessions, viewing, startup, chosen)
 
