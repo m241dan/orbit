@@ -798,6 +798,7 @@ your checkout out of its way, it doesn't sandbox it.
 | Certificates | `certs/` in the config directory | the CA, server and client certificates and keys `orbit certs` makes for TLS and mutual TLS (see [Serving the control plane](#serving-the-control-plane)) |
 | The run file | `run/server.json` in the state directory | where the `orbit serve` running on that state directory listens, beside `run/serve.lock`, which that serve holds |
 | Runtime-owned | `~/.claude` | Claude Code's own: your login, read for usage limits, and the agents' conversations |
+| Kiro agent configs | `~/.kiro/agents` | `orbit-<agent id>.json`, the temporary config each Kiro agent runs with, readable by you alone as it holds the agent's token; written just before the agent starts and removed when it ends, while ones left behind for over a day are removed when orbit next starts its Kiro runtime |
 
 The state directory is `--state-dir`, else `$ORBIT_STATE_DIR`, else `$XDG_STATE_HOME/orbit`, else
 `~/.local/state/orbit`. Orbit creates it readable by you alone, and `orbit.db` likewise. One
