@@ -72,10 +72,13 @@ NOT_A_CLIENT_NAME = (
     " share it."
 )
 
-# A hostname is labels of letters, digits, dashes and underscores, not starting or ending with a
-# dash, the first of them maybe a wildcard, then maybe a dot: one a client can match.
-_LABEL = r"[A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?"
+# A hostname is labels of 1 to 63 letters, digits, dashes and underscores, not starting or ending
+# with a dash, the first of them maybe a wildcard, then maybe a dot, and 253 characters at most
+# without it: one a client can match, as DNS holds names and Python's idna codec, which ssl
+# encodes them with, takes them.
+_LABEL = r"[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?"
 _HOSTNAME = re.compile(rf"(?:\*\.)?{_LABEL}(?:\.{_LABEL})*\.?")
+_HOSTNAME_LENGTH = 253
 # X.509 holds a common name to 64 bytes in UTF-8; a longer one is cut short and ends with this.
 _COMMON_NAME_BYTES = 64
 _CUT = "…"
@@ -309,7 +312,7 @@ def _alternative(name: str) -> x509.GeneralName:
         return x509.IPAddress(ipaddress.ip_address(name))
     except ValueError:
         pass
-    if not _HOSTNAME.fullmatch(name):
+    if len(name.removesuffix(".")) > _HOSTNAME_LENGTH or not _HOSTNAME.fullmatch(name):
         raise CertificateError(NOT_A_NAME.format(name=name))
     return x509.DNSName(name)
 

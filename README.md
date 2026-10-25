@@ -1677,12 +1677,13 @@ keep it secret (see **Keeping the CA's key offline** below).
 A second `init` stops with status 2, as a new CA would invalidate every client certificate the
 old one signed; `--force` replaces it. Any of the four files already there are first moved to
 `certs/old-<UTC timestamp>/`, so nothing is lost. A name that's neither a hostname (dot-separated
-labels of letters, digits, `-` and `_`, none starting or ending with `-`, the first maybe `*`, as
-in `*.example.com`, and maybe a dot at the end) nor an IP address stops it with status 2 before
-anything is moved, and files that can't be moved or written stop it with status 2, naming the file
-and the fix. The CA is named `orbit CA (<hostname>)` and the server certificate for its first name;
-a name past the 64 bytes a certificate's name holds is cut short there with `…`, while the names
-the certificate holds, which clients check, stay whole.
+labels of up to 63 letters, digits, `-` and `_`, none starting or ending with `-`, the first maybe
+`*`, as in `*.example.com`, and maybe a dot at the end, up to 253 characters in all without it) nor
+an IP address stops it with status 2 before anything is moved, and files that can't be moved or
+written stop it with status 2, naming the file and the fix. The CA is named `orbit CA (<hostname>)`
+and the server certificate for its first name; a name past the 64 bytes a certificate's name holds
+is cut short there with `…`, while the names the certificate holds, which clients check, stay
+whole.
 
 Under `tls`, `server.pem` and `server-key.pem` stay on the server; copy `ca.pem` and the token to
 each client machine over a trusted channel, such as `scp`. Then connect by a name the certificate

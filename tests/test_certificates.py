@@ -42,7 +42,9 @@ from orbit.protocol import PROTOCOL_VERSION, CommandEnvelope, Hello, Welcome, de
 from tests.server_fakes import Lines, serving_plane
 
 NAMES = ("orbit.example.com", "10.0.0.5")
-LONG_NAME = f"{'x' * 88}.example.com"  # 100 characters, more than a common name's 64.
+LONG_NAME = f"{'x' * 60}.{'y' * 30}.example.com"  # 103 characters, more than a common name's 64.
+LONGEST_LABEL = "x" * 63  # DNS holds a label to 63 characters.
+LONGEST_NAME = f"{LONGEST_LABEL}.{LONGEST_LABEL}.{LONGEST_LABEL}.{'x' * 61}"  # And a name to 253.
 NOW = datetime(2026, 10, 25, 9, 30, tzinfo=UTC)
 
 
@@ -200,6 +202,9 @@ def test_certificates_have_serial_numbers_of_their_own(
         "*.",
         "box.*.com",
         "box.example.com..",
+        f"{LONGEST_LABEL}x.example.com",
+        f"{LONGEST_NAME}x",
+        f"{LONGEST_NAME}x.",
     ],
 )
 def test_a_name_that_is_neither_a_hostname_nor_an_address_is_refused_naming_it(
@@ -225,6 +230,14 @@ def test_a_hostname_of_labels_a_wildcard_first_or_a_trailing_dot_is_held_as_a_dn
     assert _common_name(certificate.subject) == name
 
 
+@pytest.mark.parametrize("name", [f"{LONGEST_LABEL}.example.com", LONGEST_NAME, f"{LONGEST_NAME}."])
+def test_a_hostname_of_the_longest_labels_and_length_dns_holds_is_held_as_a_dns_name(
+    ca: tuple[x509.Certificate, PrivateKey], name: str
+) -> None:
+    certificate, _ = issue_server(*ca, [name])
+    assert _alternative_names(certificate)[0] == x509.DNSName(name)
+
+
 def test_a_ca_of_a_long_hostname_is_named_for_as_much_of_it_as_fits() -> None:
     hostname = "box-" * 15
     certificate, _ = make_ca(hostname)
@@ -242,7 +255,7 @@ def test_a_server_certificate_of_a_long_first_name_is_named_for_its_start_holdin
     ca: tuple[x509.Certificate, PrivateKey],
 ) -> None:
     certificate, _ = issue_server(*ca, [LONG_NAME, "10.0.0.5"])
-    assert _common_name(certificate.subject) == f"{'x' * 61}…"
+    assert _common_name(certificate.subject) == f"{'x' * 60}.…"
     assert _alternative_names(certificate)[:2] == [
         x509.DNSName(LONG_NAME),
         x509.IPAddress(ipaddress.ip_address("10.0.0.5")),

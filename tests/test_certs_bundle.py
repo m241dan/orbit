@@ -100,7 +100,7 @@ def test_the_default_url_takes_the_first_name_of_the_server_certificate_there_is
 def test_the_default_url_takes_the_whole_of_a_long_first_name(
     certs: CertsDir, config_dir: Path, bundle: Path
 ) -> None:
-    name = f"{'x' * 88}.example.com"
+    name = f"{'x' * 60}.{'y' * 30}.example.com"
     _certs(config_dir, "server", name)
     _certs(config_dir, "client", "laptop", "--bundle", str(bundle))
 

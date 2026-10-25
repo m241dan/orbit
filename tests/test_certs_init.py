@@ -82,7 +82,7 @@ def test_init_without_names_makes_the_certificate_for_the_machines_hostname(
 
 
 def test_init_for_a_name_longer_than_a_common_name_holds_it_whole(config_dir: Path) -> None:
-    name = f"{'x' * 88}.example.com"
+    name = f"{'x' * 60}.{'y' * 30}.example.com"
     result = _init(config_dir, name)
 
     assert result.exit_code == 0, result.output
@@ -90,6 +90,14 @@ def test_init_for_a_name_longer_than_a_common_name_holds_it_whole(config_dir: Pa
     assert sorted(certs.path.iterdir()) == sorted(_files(certs))
     assert _alternative_names(certs.server)[0] == x509.DNSName(name)
     _certificate(certs.server).verify_directly_issued_by(_certificate(certs.ca))
+
+
+def test_init_for_a_name_with_a_label_as_long_as_dns_holds_holds_it(config_dir: Path) -> None:
+    name = f"{'x' * 63}.example.com"
+    result = _init(config_dir, name)
+
+    assert result.exit_code == 0, result.output
+    assert _alternative_names(CertsDir(config_dir).server)[0] == x509.DNSName(name)
 
 
 def test_init_on_a_machine_with_a_long_hostname_names_its_ca_for_as_much_as_fits(
@@ -244,7 +252,19 @@ def test_init_sets_aside_the_files_a_ca_left_without_its_certificate(config_dir:
     assert (old / "server.pem").read_bytes() == server
 
 
-@pytest.mark.parametrize("name", ["two words", "-", ".", "a..b", "a*b", "box-.example.com"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "two words",
+        "-",
+        ".",
+        "a..b",
+        "a*b",
+        "box-.example.com",
+        f"{'x' * 64}.example.com",
+        ".".join(["x" * 63] * 3 + ["x" * 62]),
+    ],
+)
 def test_a_name_that_isnt_a_hostname_is_refused_setting_nothing_aside(
     config_dir: Path, name: str
 ) -> None:
