@@ -27,13 +27,14 @@ _BACKEND = (
 @pytest.mark.parametrize(
     ("args", "listed"),
     [
-        ([], ("chat", "serve", "status", "config", "version", "db", "token", "certs")),
+        ([], ("chat", "serve", "status", "init", "config", "version", "db", "token", "certs")),
         (
             ["chat"],
             (*_BACKEND, *_CHAT),
         ),
         (["serve"], (*_BACKEND, "--add", "--host", "--port")),
         (["status"], (*_CONNECTION, "--json", "--state-dir", "--config-dir")),
+        (["init"], ("--workspace", "-C", "--force")),
         (["config"], ("show",)),
         (
             ["config", "show"],

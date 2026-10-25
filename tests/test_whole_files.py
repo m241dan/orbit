@@ -7,7 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent.external.whole_files import create_private, write_private, write_whole
+from orbit.agent.external.whole_files import (
+    create_private,
+    create_whole,
+    write_private,
+    write_whole,
+)
 
 
 def mode(path: Path) -> int:
@@ -73,6 +78,26 @@ def test_a_temporary_file_whose_mode_cant_be_set_is_removed(
     with pytest.raises(PermissionError, match="refused"):
         write_whole(tmp_path / "target", "text", 0o600)
     assert list(tmp_path.iterdir()) == []
+
+
+def test_a_created_whole_file_gets_the_umasks_mode(tmp_path: Path) -> None:
+    umask = os.umask(0o027)
+    try:
+        create_whole(tmp_path / "target", "text")
+    finally:
+        os.umask(umask)
+    assert (tmp_path / "target").read_text() == "text"
+    assert mode(tmp_path / "target") == 0o640
+    assert [p.name for p in tmp_path.iterdir()] == ["target"]
+
+
+def test_a_whole_file_that_exists_is_not_replaced_by_creating_it(tmp_path: Path) -> None:
+    path = tmp_path / "target"
+    path.write_text("first")
+    with pytest.raises(FileExistsError):
+        create_whole(path, "second")
+    assert path.read_text() == "first"
+    assert [p.name for p in tmp_path.iterdir()] == ["target"]
 
 
 def test_a_private_file_is_owner_only_even_over_an_open_one(tmp_path: Path) -> None:

@@ -2,7 +2,7 @@
 
 import typer
 
-from orbit.cli import certs, chat, config, maintenance, serve, status
+from orbit.cli import certs, chat, config, init, maintenance, serve, status
 
 app = typer.Typer(help="Orbit command-line tool.", no_args_is_help=True)
 db = typer.Typer(help="Look after orbit's database of saved sessions.", no_args_is_help=True)
@@ -20,6 +20,7 @@ app.add_typer(config_app, name="config")
 app.command()(chat.chat)
 app.command()(serve.serve)
 app.command()(status.status)
+app.command()(init.init)
 app.command()(maintenance.version)
 config_app.command()(config.show)
 db.command()(maintenance.backup)

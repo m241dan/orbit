@@ -31,7 +31,14 @@ def create_private(path: Path, text: str) -> None:
     there yet, so that the first of several writers wins. Raises ``FileExistsError`` if there
     is one, and ``OSError`` when it can't."""
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    temporary = _create_beside(path, PRIVATE)
+    create_whole(path, text, PRIVATE)
+
+
+def create_whole(path: Path, text: str, mode: int | None = None) -> None:
+    """Write ``text`` to ``path`` as :func:`write_whole` does, but only if there's no file there
+    yet, so that the first of several writers wins. Raises ``FileExistsError`` if there is one,
+    and ``OSError`` when it can't."""
+    temporary = _create_beside(path, mode)
     try:
         _write_synced(temporary, text)
         os.link(temporary, path)

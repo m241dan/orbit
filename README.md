@@ -19,7 +19,9 @@ orbit works from its top level, so a subdirectory picks the whole repository; th
 notes the workspace at startup. Each project brings its own verification steps, worktree setup,
 roles and limits in its `.orbit/config.toml` (see [Verification steps](#verification-steps) and
 [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)); without one, nothing is verified and
-no setup runs. `orbit config show` prints every setting in effect and where it came from (see
+no setup runs. `orbit init` starts one with every setting commented out at its default (see
+[Starting from the reference config](#starting-from-the-reference-config)), and
+`orbit config show` prints every setting in effect and where it came from (see
 [Seeing the configuration in effect](#seeing-the-configuration-in-effect)).
 
 To develop orbit itself, work in a clone and run it with `uv run`:
@@ -55,6 +57,8 @@ uv run orbit chat --remote work                # connect to the control plane [r
 uv run orbit chat --local                      # run in-process even with orbit serve running
 uv run orbit status                            # what the orbit serve running here is doing
 uv run orbit status --remote work --json       # the same of another, as one JSON object
+uv run orbit init                              # start .orbit/config.toml from the reference config
+uv run orbit init --force                      # replace it, keeping the old one as a backup
 uv run orbit config show                       # every setting in effect here, and where it's from
 uv run orbit config show roles.reviewer --full # one role's, with its instructions whole
 uv run orbit token rotate                      # replace the token frontends show orbit serve
@@ -1214,6 +1218,19 @@ A project's `.orbit/config.toml` can always define a role of the same name: the 
 replaces yours entirely, none of your role's fields carrying over (your `[roles]` `model` and
 `effort` still apply beneath it, as to any of the project's roles), and the workspace's startup
 notices say so: `The project's role helper replaces your personal role of that name.`
+
+### Starting from the reference config
+
+`orbit init` writes orbit's reference config to the workspace's `.orbit/config.toml` (the current
+directory's, or the one `-C PATH` names, picked as `orbit chat` picks it), making `.orbit/` if it
+has to: every setting a project can change, commented out at its default under a line saying what
+it does, as in [`reference/config.toml`](src/orbit/agent/external/reference/config.toml), the copy
+shipped with orbit. Uncomment the settings you change; the others keep their defaults.
+
+A file that's already there is left as it is, and `orbit init` stops with status 2, naming it.
+`--force` replaces it with the reference after keeping it beside it as the next free
+`config.toml.bak.N`, counting from `config.toml.bak.1`, so each `--force` keeps one more backup
+and none is overwritten; it prints where the old file was kept and where the new one is.
 
 ### Seeing the configuration in effect
 
@@ -2415,7 +2432,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `reference_config` generates the reference config from the models and the built-in roles,
     every setting a project can change commented out at its default under what it does
     (`reference_config()`), and `uv run python -m orbit.agent.external.reference_config` writes
-    it to `reference/config.toml`, the copy shipped with orbit, which a test keeps in step; `checks`
+    it to `reference/config.toml`, the copy shipped with orbit, which a test keeps in step;
+    `config_init` writes that copy to a project's `.orbit/config.toml` for `orbit init`
+    (`init_config`), keeping a file it replaces as the next free numbered backup; `checks`
     runs a verification step as a process (`run_step`); `processes` runs a program to completion
     without leaving it behind; `workspace`
     fingerprints the git working tree; `usage_api` fetches the Claude subscription's usage
@@ -2566,7 +2585,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   backend: it hands the TUI an `orbit.client.WebSocketSession`, which runs on the TUI's own event
   loop, and telemetry of its own; neither does a chat that `discover_control_plane` finds a
   running `orbit serve` for.
-  It's a module per command (`chat`, `serve`, `status`, `config` for `orbit config show`, and
+  It's a module per command (`chat`, `serve`, `status`, `init`, `config` for `orbit config show`, and
   `maintenance` for `version`, `db` and `token`), with `backend` wiring the adapters for both chat
   and serve, `status_report` what `orbit status` reports and how it prints it, `config_text` how
   `orbit config show` prints the configuration, `options` the options they share and `errors` how
