@@ -359,6 +359,12 @@ def task_suggestion(arguments: Mapping[str, Any]) -> tuple[str, str] | str:
     return title, str(arguments.get("prompt", "")).strip()
 
 
+def names_file(instructions: str) -> bool:
+    """Whether a role's ``instructions``, as a file gives them, name the Markdown file whose
+    text they are: they're one line ending in ``.md``."""
+    return "\n" not in instructions and instructions.endswith(".md")
+
+
 class _BuiltInRoles(_Config):
     roles: dict[str, Role]
 

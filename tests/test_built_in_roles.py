@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from orbit.agent.domain.config_errors import ConfigError
-from orbit.agent.external.built_in_roles import read_built_in_roles
+from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
 from orbit.protocol import BUILT_IN_ROLE_NAMES
 
 FOLDER = files("orbit.agent.external") / "instructions"
@@ -145,6 +145,16 @@ def test_the_built_in_roles_are_read_from_the_directory_given(tmp_path: Path) ->
     roles = read_built_in_roles(role_directory(tmp_path, roles_toml))
     assert roles["super-reviewer"].model == "haiku"
     assert roles["coder"] == read_built_in_roles()["coder"]
+
+
+def test_each_built_in_roles_instructions_are_in_the_file_roles_toml_names() -> None:
+    assert read_instruction_files() == {name: f"{name}.md" for name in BUILT_IN_ROLE_NAMES}
+
+
+def test_the_instructions_files_are_read_from_the_directory_given(tmp_path: Path) -> None:
+    roles_toml = ROLES_TOML.replace('"coder.md"', '"coding.md"')
+    files = read_instruction_files(role_directory(tmp_path, roles_toml))
+    assert (files["coder"], files["reviewer"]) == ("coding.md", "reviewer.md")
 
 
 def test_an_unknown_field_in_a_role_raises_config_error_naming_it(tmp_path: Path) -> None:

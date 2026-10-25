@@ -19,7 +19,8 @@ orbit works from its top level, so a subdirectory picks the whole repository; th
 notes the workspace at startup. Each project brings its own verification steps, worktree setup,
 roles and limits in its `.orbit/config.toml` (see [Verification steps](#verification-steps) and
 [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)); without one, nothing is verified and
-no setup runs.
+no setup runs. `orbit config show` prints every setting in effect and where it came from (see
+[Seeing the configuration in effect](#seeing-the-configuration-in-effect)).
 
 To develop orbit itself, work in a clone and run it with `uv run`:
 
@@ -54,6 +55,8 @@ uv run orbit chat --remote work                # connect to the control plane [r
 uv run orbit chat --local                      # run in-process even with orbit serve running
 uv run orbit status                            # what the orbit serve running here is doing
 uv run orbit status --remote work --json       # the same of another, as one JSON object
+uv run orbit config show                       # every setting in effect here, and where it's from
+uv run orbit config show roles.reviewer --full # one role's, with its instructions whole
 uv run orbit token rotate                      # replace the token frontends show orbit serve
 uv run orbit certs init orbit.example.lan      # make a CA and a server certificate for TLS
 uv run orbit certs server orbit.example.lan    # renew the server certificate
@@ -1206,6 +1209,43 @@ A project's `.orbit/config.toml` can always define a role of the same name: the 
 replaces yours entirely, none of your role's fields carrying over (your `[roles]` `model` and
 `effort` still apply beneath it, as to any of the project's roles), and the workspace's startup
 notices say so: `The project's role helper replaces your personal role of that name.`
+
+### Seeing the configuration in effect
+
+`orbit config show` prints the configuration orbit resolves for a workspace (the current
+directory's, or the one `-C PATH` names, picked as `orbit chat` picks it) from this machine's
+files, each value with the layer it came from: the limits, each role field by field, the
+verification steps, the setup, and your `config.toml`'s `[storage]`, `[server]` and
+`[telemetry]` (the config directory is `--config-dir`, as for `orbit chat`). It needs no running
+`orbit serve`, and writes nothing. Each value is a line, `<key> = <value>   <layer>`, the value as
+JSON, with the limits, each role and each other section in groups of their own:
+
+```
+$ orbit config show roles.reviewer
+roles.reviewer.instructions = (reviewer.md, 64 lines)   package
+roles.reviewer.model = "sonnet"   project .orbit/config.toml
+roles.reviewer.tool_access = "restricted"   package
+...
+roles.reviewer.effort = "low"   user ~/.config/orbit/config.toml
+```
+
+The layers, least specific first:
+
+- `default`: orbit's own default, in no file.
+- `package`: the roles shipped with orbit (see [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)).
+- `user <path>`: your `config.toml` in the config directory.
+- `project <path>`: the workspace's `.orbit/config.toml`.
+
+A file inside the workspace shows relative to it, and one in your home directory from `~`. A
+role's instructions show as the file they're in and their length, `(reviewer.md, 64 lines)`, or
+`(inline, 3 lines)` for text the file gives itself; `--full` prints their text instead, between
+lines of `"""`. A `KEY`, dotted as in the TOML it comes from, shows only the settings at or under
+it: `roles` every role's, `roles.reviewer` one role's, `server.port` one value and
+`verification.steps.1` the first step's. `--json` prints the same as one JSON object, nested by
+the parts of each key, each value an object `{"value": …, "layer": …, "file": …}` of its value,
+its layer's name (`default`, `package`, `user` or `project`) and that layer's file, its whole
+path, or `null` for `default` and `package`. A `KEY` that names no setting stops it with status 2
+naming the key, and an invalid configuration with status 2 and the message `orbit chat` gives.
 
 ### How agents reach orbit
 
@@ -2362,10 +2402,11 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     MCP server; `GitCoderTree` is the coder's worktree and its snapshots; `repository` finds the
     git repository a workspace is in, fingerprints it, and places orbit's directory in it
     (`orbit_dir`: `.git/orbit`, or `.orbit` outside git); `config_file` reads
-    `.orbit/config.toml` and `role_instructions` the instructions files its roles and your
+    `.orbit/config.toml`, and for `orbit config show` what the configuration is resolved from
+    (`read_config_sources`), and `role_instructions` the instructions files its roles and your
     personal roles name (`resolve_instructions`);
     `built_in_roles` reads the built-in roles from `instructions/roles.toml` and their
-    instructions from the Markdown files it names; `checks`
+    instructions from the Markdown files it names (`read_instruction_files` names them); `checks`
     runs a verification step as a process (`run_step`); `processes` runs a program to completion
     without leaving it behind; `workspace`
     fingerprints the git working tree; `usage_api` fetches the Claude subscription's usage
@@ -2470,7 +2511,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `agents`: agent ids and tokens), `roles` (built-in roles, loaded from their `roles.toml` and
     given their instructions, which of a role's fields go together, and the tasks orbit queues in
     them), `config` (`OrbitConfig`: the
-    limits, roles, verification steps and setup a project file sets over the built-in defaults) and `config_errors` (`ConfigError`,
+    limits, roles, verification steps and setup a project file sets over the built-in defaults), `layers` (the layers a setting comes from, the user config's role fields and personal roles, and each role resolved across them field by field), `config_report` (what `orbit config show` reports: each setting in effect by its dotted key with the layer it came from, and a key's settings) and `config_errors` (`ConfigError`,
     and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]` with its `TlsSettings`, which files each TLS mode needs, where now falls in a certificate's validity, and which hosts are loopback), `certificate_list` (what `orbit certs list` shows of each certificate: its expiry, days left, fingerprint and marks), `client_bundle` (what `orbit certs client --bundle` puts in a client's bundle: the CA, its certificate and key, and the `[remotes.<name>]` lines naming them where it's unpacked), `remotes` (`RemoteSettings`, a `[remotes.<name>]` table, and which credentials go together), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
     setup step that makes a fresh worktree ready, and the checks a configurator proposes), the
     `Catalog` (in `catalog`: the workspace and its sessions, the agents' roles, the triggers and
@@ -2516,9 +2557,10 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   backend: it hands the TUI an `orbit.client.WebSocketSession`, which runs on the TUI's own event
   loop, and telemetry of its own; neither does a chat that `discover_control_plane` finds a
   running `orbit serve` for.
-  It's a module per command (`chat`, `serve`, `status`, and `maintenance` for `version`, `db`
-  and `token`), with `backend` wiring the adapters for both chat and serve, `status_report` what
-  `orbit status` reports and how it prints it, `options` the options they share and `errors` how
+  It's a module per command (`chat`, `serve`, `status`, `config` for `orbit config show`, and
+  `maintenance` for `version`, `db` and `token`), with `backend` wiring the adapters for both chat
+  and serve, `status_report` what `orbit status` reports and how it prints it, `config_text` how
+  `orbit config show` prints the configuration, `options` the options they share and `errors` how
   they exit; its `__init__` registers the commands on the app. `orbit status` joins a control
   plane as `orbit chat --connect` does, through an `orbit.client.WebSocketSession`, on an event
   loop of its own.

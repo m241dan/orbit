@@ -183,6 +183,26 @@ JsonOption = Annotated[
     bool, typer.Option("--json", help="Print the status as one JSON object rather than text.")
 ]
 
+KeyArgument = Annotated[
+    str | None,
+    typer.Argument(
+        metavar="KEY",
+        show_default=False,
+        help="Show only the settings at or under this dotted key, such as roles.reviewer or"
+        " server.port.",
+    ),
+]
+ConfigJsonOption = Annotated[
+    bool,
+    typer.Option("--json", help="Print the configuration as one JSON object rather than text."),
+]
+FullOption = Annotated[
+    bool,
+    typer.Option(
+        "--full", help="Print roles' instructions whole rather than their file and length."
+    ),
+]
+
 # The chat flags that configure the control plane, which a connected chat doesn't run.
 _SERVE_FLAGS = ("model", "tools", "verify", "worktree", "review", "usage", "profile")
 

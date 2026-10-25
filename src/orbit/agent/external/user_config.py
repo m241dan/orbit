@@ -74,12 +74,17 @@ def read_user_roles(config_dir: Path, built_in: Collection[str]) -> UserRoles:
     can't be read or is invalid, as it is when it sets a built-in role's field other than its
     model and effort.
     """
-    layer = Layer("user", str(config_dir / USER_CONFIG_FILE))
+    layer = user_layer(config_dir)
 
     def load(data: dict[str, Any]) -> UserRoles:
         return load_user_roles(with_instructions(data, config_dir, built_in), layer, built_in)
 
     return read_user_config(config_dir, load, UserRoles(layer))
+
+
+def user_layer(config_dir: Path) -> Layer:
+    """The layer of the user config in ``config_dir``, named by its file."""
+    return Layer("user", str(config_dir / USER_CONFIG_FILE))
 
 
 def _resolved[M: BaseModel](settings: M, keys: tuple[str, ...], config_dir: Path) -> M:

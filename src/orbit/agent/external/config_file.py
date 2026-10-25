@@ -8,13 +8,14 @@ from tomlkit.items import AoT, Table
 
 from orbit.agent.application.ports import ConfigWriteFailed
 from orbit.agent.domain.checks import ChecksProposal
-from orbit.agent.domain.config import OrbitConfig, load_config
+from orbit.agent.domain.config import LayeredConfig, OrbitConfig, load_layered
 from orbit.agent.domain.config_errors import ConfigError
-from orbit.agent.domain.layers import PersonalRoleError
-from orbit.agent.external.built_in_roles import read_built_in_roles
+from orbit.agent.domain.config_report import ConfigSources, Written
+from orbit.agent.domain.layers import Layer, PersonalRoleError
+from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
 from orbit.agent.external.role_instructions import with_instructions
 from orbit.agent.external.toml_files import read_toml
-from orbit.agent.external.user_config import read_user_roles
+from orbit.agent.external.user_config import read_user_config, read_user_roles, user_layer
 from orbit.agent.external.whole_files import write_whole
 
 CONFIG_PATH = ".orbit/config.toml"
@@ -32,13 +33,42 @@ def read_config(root: str, config_dir: Path) -> OrbitConfig:
     instructions file can't be read or is invalid; it names the user config if the personal
     roles break a rule across the roles that the others keep.
     """
+    return _read_layered(root, config_dir).config
+
+
+def read_config_sources(root: str, config_dir: Path) -> ConfigSources:
+    """What the configuration in effect in ``root`` is resolved from: the configuration
+    :func:`read_config` reads, with the layer each of its roles' fields came from, ``root``'s
+    file and the user config in ``config_dir`` as written, and the files the built-in roles'
+    instructions are in.
+
+    Raises :class:`ConfigError` as :func:`read_config` does.
+    """
+    layered = _read_layered(root, config_dir)
+    path = Path(root) / CONFIG_PATH
+    project = read_toml(path, dict) if path.exists() else {}
+    return ConfigSources(
+        layered.config,
+        layered.role_layers,
+        Written(Layer("project", str(path)), project),
+        Written(user_layer(config_dir), read_user_config(config_dir, dict, {})),
+        read_instruction_files(),
+    )
+
+
+def _read_layered(root: str, config_dir: Path) -> LayeredConfig:
+    """The configuration :func:`read_config` reads, with the layer each of its roles' fields
+    came from.
+
+    Raises :class:`ConfigError` as :func:`read_config` does.
+    """
     built_in = read_built_in_roles()
     user = read_user_roles(config_dir, built_in)
     path = Path(root) / CONFIG_PATH
     exists = path.exists()
     data = read_toml(path, lambda table: with_instructions(table, path.parent)) if exists else {}
     try:
-        return load_config(data, built_in, user, str(path) if exists else None)
+        return load_layered(data, built_in, user, str(path) if exists else None)
     except PersonalRoleError as exc:
         raise ConfigError(f"{user.layer.path}: {exc}") from None
     except ConfigError as exc:  # Without a file, only the personal roles can be at fault.

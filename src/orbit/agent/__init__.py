@@ -37,8 +37,17 @@ from orbit.agent.domain.client_bundle import (
     bundle_url,
     client_bundle,
 )
-from orbit.agent.domain.config import OrbitConfig
+from orbit.agent.domain.config import LIMIT_KEYS, OrbitConfig
 from orbit.agent.domain.config_errors import INVALID_CONFIG, ConfigError
+from orbit.agent.domain.config_report import (
+    ConfigReport,
+    Instructions,
+    Setting,
+    UnknownKey,
+    config_report,
+    subtree,
+)
+from orbit.agent.domain.layers import Layer
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.purging import Purged, PurgeRefused
 from orbit.agent.domain.remotes import RemoteSettings
@@ -67,7 +76,7 @@ from orbit.agent.external.certificates import (
 from orbit.agent.external.checks import run_step
 from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner
 from orbit.agent.external.cloner import Cloner
-from orbit.agent.external.config_file import read_config, write_checks
+from orbit.agent.external.config_file import read_config, read_config_sources, write_checks
 from orbit.agent.external.control_plane import ControlPlaneServer, ListenFailed
 from orbit.agent.external.directories import resolve_config_dir, resolve_state_dir
 from orbit.agent.external.directory_lister import DirectoryLister
@@ -117,6 +126,7 @@ __all__ = [
     "CA_DAYS",
     "CERTIFICATE_DAYS",
     "INVALID_CONFIG",
+    "LIMIT_KEYS",
     "MODEL_ALIASES",
     "NO_STEPS_NOTE",
     "REMOTE_FILE",
@@ -130,6 +140,7 @@ __all__ = [
     "CloneFailed",
     "Cloner",
     "ConfigError",
+    "ConfigReport",
     "ConfigWriter",
     "Configuring",
     "ControlPlane",
@@ -139,7 +150,9 @@ __all__ = [
     "GitCoderTree",
     "HostMaker",
     "ImportBlocked",
+    "Instructions",
     "KeyType",
+    "Layer",
     "Limits",
     "ListenFailed",
     "LocalDiscoveryUnavailable",
@@ -166,6 +179,7 @@ __all__ = [
     "ServedWorkspaces",
     "ServerSettings",
     "SessionStore",
+    "Setting",
     "Setup",
     "SqliteStore",
     "StepRunner",
@@ -179,6 +193,7 @@ __all__ = [
     "TlsMode",
     "TokenError",
     "TokenFile",
+    "UnknownKey",
     "UsageApi",
     "Verification",
     "VerificationStep",
@@ -195,6 +210,7 @@ __all__ = [
     "certificate_lines",
     "certificate_pem",
     "client_bundle",
+    "config_report",
     "file_names",
     "fingerprint",
     "forget_workspace",
@@ -213,6 +229,7 @@ __all__ = [
     "purge_workspace",
     "read_certificate",
     "read_config",
+    "read_config_sources",
     "read_remotes",
     "read_server",
     "read_storage",
@@ -222,6 +239,7 @@ __all__ = [
     "run_step",
     "running_server",
     "server_names",
+    "subtree",
     "tls_warnings",
     "top_level",
     "workspace_state",

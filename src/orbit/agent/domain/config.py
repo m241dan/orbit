@@ -2,6 +2,7 @@
 over the user config's role fields and personal roles and the built-in defaults."""
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -78,6 +79,12 @@ class _FileConfig(_Config):
         )
 
 
+LIMIT_KEYS = tuple(
+    key for key in _FileConfig.model_fields if key not in {"roles", "verification", "setup"}
+)
+"""The keys of the limits a project file sets, in order."""
+
+
 class OrbitConfig(_FileConfig):
     """Orbit's configuration in effect: the limits and roles a project file sets, with the names
     of the roles that are ``personal``, defined whole in the user config, and the ``notices``
@@ -101,12 +108,36 @@ def load_config(
     role's fields are resolved as :func:`resolve_roles` says. Raises :class:`ConfigError` if
     it's invalid, a :class:`PersonalRoleError` if the personal roles are at fault.
     """
+    return load_layered(data, built_in, user, path).config
+
+
+@dataclass(frozen=True)
+class LayeredConfig:
+    """Orbit's ``config`` in effect, with the layer each of its roles' fields came from,
+    ``role_layers``, by role and field name."""
+
+    config: OrbitConfig
+    role_layers: Mapping[str, Mapping[str, Layer]]
+
+
+def load_layered(
+    data: dict[str, Any],
+    built_in: Mapping[str, Role],
+    user: UserRoles = NO_USER_ROLES,
+    path: str | None = None,
+) -> LayeredConfig:
+    """The configuration :func:`load_config` loads from ``data``, ``built_in``, ``user`` and
+    ``path``, with the layer each of its roles' fields came from.
+
+    Raises :class:`ConfigError` as :func:`load_config` does.
+    """
     roles = data.get("roles", {})
     if not isinstance(roles, dict):
-        return _validated(data)  # Refused: the roles aren't a table.
+        return LayeredConfig(_validated(data), {})  # Refused: the roles aren't a table.
     resolved = resolve_roles(built_in, user, ProjectRoles(Layer("project", path), roles))
     notices = tuple(replaced_note(name) for name in resolved.replaced)
-    return _validated({**data, "roles": resolved.roles}, resolved.personal, notices)
+    config = _validated({**data, "roles": resolved.roles}, resolved.personal, notices)
+    return LayeredConfig(config, resolved.layers)
 
 
 def _validated(

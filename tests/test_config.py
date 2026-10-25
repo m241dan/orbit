@@ -2,9 +2,15 @@ import pytest
 
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.checks import Setup
-from orbit.agent.domain.config import OrbitConfig, load_config
+from orbit.agent.domain.config import OrbitConfig, load_config, load_layered
 from orbit.agent.domain.config_errors import ConfigError
-from orbit.agent.domain.layers import Layer, PersonalRoleError, UserRoles, load_user_roles
+from orbit.agent.domain.layers import (
+    PACKAGE,
+    Layer,
+    PersonalRoleError,
+    UserRoles,
+    load_user_roles,
+)
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import Role, built_in_roles
 from orbit.agent.domain.verification import VerificationStep
@@ -374,3 +380,17 @@ def test_the_projects_own_clash_beside_a_personal_role_is_the_projects() -> None
 def test_a_project_file_cant_mark_roles_personal_or_add_notices(key: str) -> None:
     with pytest.raises(ConfigError, match=f"^{key}: Extra inputs are not permitted"):
         load_config({key: ["coder"]}, BUILT_IN_ROLES)
+
+
+# Where each role's fields came from
+
+
+def test_a_layered_config_is_the_config_with_the_layer_each_role_field_came_from() -> None:
+    user = personal(planner={"model": "opus"})
+    data = {"fix_attempts": 2, "roles": {"coder": {"model": "sonnet"}}}
+    path = "/src/app/.orbit/config.toml"
+    layered = load_layered(data, BUILT_IN_ROLES, user, path)
+    assert layered.config == load_config(data, BUILT_IN_ROLES, user, path)
+    assert layered.role_layers["coder"]["model"] == Layer("project", path)
+    assert layered.role_layers["planner"]["model"] == USER
+    assert layered.role_layers["coder"]["tools"] == PACKAGE

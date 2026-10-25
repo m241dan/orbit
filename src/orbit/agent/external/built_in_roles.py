@@ -25,6 +25,16 @@ def read_built_in_roles(directory: Traversable = ROLE_DIRECTORY) -> dict[str, Ro
     )
 
 
+def read_instruction_files(directory: Traversable = ROLE_DIRECTORY) -> dict[str, str]:
+    """The Markdown file each built-in role's instructions are in, by role, as ``directory``'s
+    ``roles.toml`` names it.
+
+    Raises :class:`ConfigError`, naming the file, if ``roles.toml`` can't be read or is invalid.
+    """
+    roles = read_toml(directory / "roles.toml", load_built_in_roles)
+    return {name: role.instructions for name, role in roles.items()}
+
+
 def _read_text(path: Traversable) -> str:
     try:
         return path.read_text(encoding="utf-8").strip()

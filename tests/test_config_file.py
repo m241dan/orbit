@@ -11,11 +11,18 @@ from orbit.agent.application.ports import ConfigWriteFailed
 from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.config import OrbitConfig
 from orbit.agent.domain.config_errors import ConfigError
+from orbit.agent.domain.config_report import Written
+from orbit.agent.domain.layers import Layer
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
-from orbit.agent.external.config_file import CONFIG_PATH, read_config, write_checks
+from orbit.agent.external.config_file import (
+    CONFIG_PATH,
+    read_config,
+    read_config_sources,
+    write_checks,
+)
 from orbit.agent.external.role_instructions import resolve_instructions
-from orbit.protocol import PLANNER
+from orbit.protocol import BUILT_IN_ROLE_NAMES, PLANNER
 
 BUILT_IN_ROLES = read_built_in_roles()
 
@@ -163,6 +170,43 @@ def test_the_projects_own_clash_beside_a_personal_role_names_the_project_file(
     with pytest.raises(ConfigError) as raised:
         read_config(str(tmp_path), config_dir)
     assert str(raised.value).startswith(f"{path}: roles: the enabled roles")
+
+
+# What orbit config show reads
+
+
+def test_the_sources_hold_the_files_as_written_and_where_each_role_field_came_from(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    path = write(tmp_path, '[roles.reviewer]\nmodel = "sonnet"\ninstructions = "roles/r.md"\n')
+    (path.parent / "roles").mkdir()
+    (path.parent / "roles" / "r.md").write_text("Review.\n", encoding="utf-8")
+    user_path = write_user_config(config_dir, '[roles.planner]\nmodel = "opus"\n')
+    sources = read_config_sources(str(tmp_path), config_dir)
+    project, user = Layer("project", str(path)), Layer("user", str(user_path))
+    reviewer = {"model": "sonnet", "instructions": "roles/r.md"}
+    assert sources.project == Written(project, {"roles": {"reviewer": reviewer}})
+    assert sources.user == Written(user, {"roles": {"planner": {"model": "opus"}}})
+    assert sources.config == read_config(str(tmp_path), config_dir)
+    assert sources.config.roles["reviewer"].instructions == "Review."
+    assert sources.role_layers["reviewer"]["model"] == project
+    assert sources.role_layers["planner"]["model"] == user
+    assert sources.package_files == {name: f"{name}.md" for name in BUILT_IN_ROLE_NAMES}
+
+
+def test_without_files_the_sources_hold_nothing_as_written(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    sources = read_config_sources(str(tmp_path), config_dir)
+    assert sources.project == Written(Layer("project", str(tmp_path / CONFIG_PATH)), {})
+    assert sources.user == Written(Layer("user", str(config_dir / "config.toml")), {})
+    assert sources.config == OrbitConfig(roles=BUILT_IN_ROLES)
+
+
+def test_reading_the_sources_of_an_invalid_file_names_it(tmp_path: Path, config_dir: Path) -> None:
+    path = write(tmp_path, "fix_attempts = 0\n")
+    with pytest.raises(ConfigError, match=f"^{re.escape(str(path))}: fix_attempts: "):
+        read_config_sources(str(tmp_path), config_dir)
 
 
 def test_invalid_toml_names_the_file(tmp_path: Path) -> None:

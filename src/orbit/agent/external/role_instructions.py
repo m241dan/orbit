@@ -6,15 +6,17 @@ from pathlib import Path
 from typing import Any
 
 from orbit.agent.domain.config_errors import ConfigError
+from orbit.agent.domain.roles import names_file
 
 
 def resolve_instructions(value: str, base: Path) -> str:
     """A role's instructions given as ``value``: the text of the UTF-8 file it names, relative
-    to ``base``, if it's one line ending in ``.md``; otherwise ``value`` itself.
+    to ``base``, if it names one (see :func:`~orbit.agent.domain.roles.names_file`); otherwise
+    ``value`` itself.
 
     Raises :class:`ConfigError`, naming the file, if it can't be read.
     """
-    if "\n" in value or not value.endswith(".md"):
+    if not names_file(value):
         return value
     path = base / value
     try:

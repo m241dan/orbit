@@ -14,6 +14,7 @@ from orbit.agent.domain.roles import (
     disabled_roles,
     load_built_in_roles,
     merging_lane,
+    names_file,
     out_of_time,
     role_task,
     suggested_task,
@@ -421,3 +422,19 @@ def test_work_in_a_disabled_role_is_refused_as_not_configured_naming_it() -> Non
 @pytest.mark.parametrize("name", ["coder", "nobody"])
 def test_work_in_an_enabled_role_or_one_there_is_none_of_is_not_refused(name: str) -> None:
     check_enabled(BUILT_IN_ROLES, name)
+
+
+@pytest.mark.parametrize(
+    ("instructions", "names"),
+    [
+        ("coder.md", True),
+        ("roles/coder.md", True),
+        ("Review for security.", False),
+        ("Read the notes in\nREADME.md", False),
+        ("Follow coder.md closely.", False),
+    ],
+)
+def test_instructions_name_a_file_when_they_are_one_line_ending_in_md(
+    instructions: str, names: bool
+) -> None:
+    assert names_file(instructions) is names
