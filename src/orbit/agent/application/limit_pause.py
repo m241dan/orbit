@@ -1,4 +1,4 @@
-"""How a run that Claude's usage limit stopped waits to start again."""
+"""How a run that Claude's usage limit or an API outage stopped waits to start again."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
@@ -14,8 +14,8 @@ def _utc_now() -> datetime:
 
 @dataclass(frozen=True)
 class LimitPause:
-    """How a run a usage limit stopped waits: ``now`` tells the time, ``sleep`` waits a number
-    of seconds, and ``waits`` says how long."""
+    """How a run a usage limit or an outage stopped waits: ``now`` tells the time, ``sleep``
+    waits a number of seconds, and ``waits`` says how long a usage limit's wait lasts."""
 
     now: Callable[[], datetime] = _utc_now
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep

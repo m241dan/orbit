@@ -2,9 +2,9 @@
 
 After each task that completes, the verification steps run until one fails; a failure adds a
 task to fix it right after the failed one. Work that passes lands, and the review lane, if any,
-hears how each task ended. A run stops at a task its agent couldn't do for Claude's usage limit,
-at a fix that ends in error, which must run before anything puts its work aside, and once the
-session halts.
+hears how each task ended. A run stops at a task its agent couldn't do for Claude's usage limit
+or for Claude's API not answering, at a fix that ends in error, which must run before anything
+puts its work aside, and once the session halts.
 """
 
 import asyncio
@@ -34,7 +34,13 @@ from orbit.agent.domain.endings import (
     gave_up,
 )
 from orbit.agent.domain.roles import CODER_ROLES
-from orbit.agent.domain.usage_limits import FIX_ERROR_NOTE, limit_hit
+from orbit.agent.domain.usage_limits import (
+    FIX_ERROR_NOTE,
+    Outage,
+    api_unavailable,
+    limit_hit,
+    outage_after,
+)
 from orbit.agent.domain.verification import FallbackFixes, failure_reason, fix_prompt
 from orbit.protocol import (
     CHECKS_EXHAUSTED,
@@ -47,9 +53,9 @@ from orbit.protocol import (
 )
 from orbit.tracing import Span, current_span
 
-RunEnd = Literal["finished", "cancelled", "limited", "fix_failed"]
+RunEnd = Literal["finished", "cancelled", "limited", "api_unavailable", "fix_failed"]
 """Why a run ended: no task was left to run, one was cancelled, an agent hit Claude's usage
-limit, or a fix ended in error."""
+limit or found Claude's API not answering, or a fix ended in error."""
 
 Seating = Literal["seated", "unneeded", "dropped"]
 """How seating a task for a coder's slot ended: it may run, the board's next task stopped
@@ -120,6 +126,9 @@ class WorkLane:
         # The task a run stopped at, which the next one runs first: a fix must run before
         # another task puts its work aside.
         self._resume: str | None = None
+        # Claude's API not answering, as it last stopped a run, until an agent finishes its
+        # run without it.
+        self._outage: Outage | None = None
 
     def reset(self) -> None:
         """Forget the fix counts, the task a run stopped at and what its tasks landed and
@@ -148,6 +157,12 @@ class WorkLane:
         return self._current or self.next_work()
 
     @property
+    def outage(self) -> Outage | None:
+        """Claude's API not answering, as it last stopped a run, with the runs it stopped in a
+        row; none once a task's agent finished its run without it, or before it stopped one."""
+        return self._outage
+
+    @property
     def waiting_for_coder(self) -> int | None:
         """Where the run waits in line for a coder's slot, 1 next; none if it doesn't."""
         return None if self._coders is None else self._coders.position
@@ -169,8 +184,9 @@ class WorkLane:
     async def run(self) -> RunEnd:
         """Run the tasks waiting, in order but the one the last run stopped at first, until
         none are left, the user stops one, the session halts, which ends it as cancelled, or one
-        ends in error for the usage limit or as a fix; returns which. Any other cancel goes on
-        once the task running has ended. Each task's span links to the span current now."""
+        ends in error for the usage limit, for Claude's API not answering or as a fix; returns
+        which. Any other cancel goes on once the task running has ended. Each task's span links
+        to the span current now."""
         self._running, self._stopped = True, False
         try:
             return await self._run_tasks(current_span())
@@ -285,10 +301,14 @@ class WorkLane:
         return None
 
     async def _stop_at(self, error: Outcome, fixing: bool) -> RunEnd | None:
-        """Why the run stops at a task that ended in ``error``: its agent hit the usage limit,
-        or it was ``fixing`` another, said so; none if the run goes on."""
+        """Why the run stops at a task that ended in ``error``: its agent hit the usage limit or
+        found Claude's API not answering, noted as an :attr:`outage`, or it was ``fixing``
+        another, said so; none if the run goes on."""
         if limit_hit(error.detail):
             return "limited"
+        if api_unavailable(error.detail):
+            self._outage = outage_after(self._outage, error.detail)
+            return "api_unavailable"
         if not fixing:
             return None
         await self._publish(Notice(message=FIX_ERROR_NOTE))
@@ -385,7 +405,14 @@ class WorkLane:
         with self._tracing.run() as run:
             agent = AgentRun(task_id, self._tasks, verifier, self._desk)
             outcome = await self._run_alone(agent.run(before, root, run))
+            self._heard_from_claude(outcome)
             return await self._settle(task_id, outcome, root)
+
+    def _heard_from_claude(self, outcome: Outcome) -> None:
+        """Forget the :attr:`outage`, once an agent finished its run in ``outcome`` without
+        Claude's API not answering, however its task ended."""
+        if outcome.status != "error" or not api_unavailable(outcome.detail):
+            self._outage = None
 
     async def _settle(self, task_id: str, outcome: Outcome, root: str) -> Outcome:
         """What task ``task_id``'s run ending in ``outcome`` at ``root`` comes to: the checks

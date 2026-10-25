@@ -1,8 +1,19 @@
-"""Usage limits: telling that an agent hit one, and when a run it stopped starts again."""
+"""Usage limits and API outages: telling that an agent hit one, and when a run it stopped
+starts again."""
 
 from datetime import UTC, datetime, timedelta
 
-from orbit.agent.domain.usage_limits import LimitWaits, limit_hit, paused_note, resume_time
+from orbit.agent.domain.usage_limits import (
+    LimitWaits,
+    Outage,
+    api_unavailable,
+    limit_hit,
+    outage_after,
+    outage_delay,
+    outage_paused_note,
+    paused_note,
+    resume_time,
+)
 from orbit.protocol import UsageChanged, UsageLimit
 
 NOW = datetime(2026, 10, 21, 15, 30, tzinfo=UTC)
@@ -67,4 +78,48 @@ def test_the_pause_note_names_the_time_in_utc() -> None:
     assert paused_note(at) == (
         "Claude's usage limit is reached, so the run stopped. It starts again by itself at "
         "Wed 21 Oct 18:01 UTC; ctrl+r starts it now and ctrl+s cancels that."
+    )
+
+
+def test_claude_code_api_errors_for_an_unavailable_api_say_so() -> None:
+    assert api_unavailable('API Error: 529 {"type":"error","error":{"type":"overloaded_error"}}')
+    assert api_unavailable("API Error: 503 Service Unavailable")
+    assert api_unavailable("API Error (Connection error.)")
+    assert api_unavailable("Request timed out")
+
+
+def test_every_server_error_and_an_overload_say_so_in_any_case() -> None:
+    for code in ("500", "502", "503", "504", "529"):
+        assert api_unavailable(f"API Error: {code} upstream")
+    assert api_unavailable("API Error: OVERLOADED_ERROR")
+    assert api_unavailable("api error (connection ERROR.)")
+    assert api_unavailable("request TIMED OUT after 600s")
+
+
+def test_client_errors_limits_and_other_failures_are_not_outages() -> None:
+    assert not api_unavailable('API Error: 400 {"error":{"type":"invalid_request_error"}}')
+    assert not api_unavailable('API Error: 401 {"error":{"type":"authentication_error"}}')
+    assert not api_unavailable("API Error: 403 Forbidden")
+    assert not api_unavailable("You've hit your session limit")
+    assert not api_unavailable("agent-1 exited without calling get_task.")
+    assert not api_unavailable("")
+
+
+def test_the_backoff_grows_to_half_an_hour_and_stays_there() -> None:
+    minutes = [outage_delay(level) / timedelta(minutes=1) for level in range(6)]
+    assert minutes == [2, 5, 10, 20, 30, 30]
+
+
+def test_a_first_outage_starts_the_backoff_and_each_after_it_goes_a_level_up() -> None:
+    first = outage_after(None, "API Error: 529")
+    assert first == Outage("API Error: 529", level=0)
+    assert outage_after(first, "Request timed out") == Outage("Request timed out", level=1)
+
+
+def test_the_outage_note_names_the_error_s_first_line_and_the_time_in_utc() -> None:
+    at = datetime(2026, 10, 23, 14, 20, tzinfo=UTC)
+    error = "\nAPI Error: 529 Overloaded\n  retrying later"
+    assert outage_paused_note(at, error) == (
+        "Claude's API isn't answering (API Error: 529 Overloaded), so the run stopped. It starts "
+        "again by itself at Fri 23 Oct 14:20 UTC; ctrl+r starts it now and ctrl+s cancels that."
     )

@@ -494,7 +494,8 @@ counts are rounded as in a turn's rule (see above). While the session's run wait
 with how many coders hold the slots: `⏳ waiting: 3 coders busy`, or `⏳ waiting for a coder` if
 that isn't known; it goes once the task gets a coder. A failed task doesn't stop the rest, but for
 two: a fix task that ends in error stops the run, so the work it fixes stays in the coder's tree
-until the fix runs again, and so does a task whose agent hit Claude's usage limit (see below);
+until the fix runs again, and so does a task whose agent hit Claude's usage limit or found
+Claude's API not answering (see below);
 the next run starts with the task it stopped at, ahead of any that failed before it, and any
 run, even after switching sessions or reopening orbit, starts with a fix that ended in error or
 was cancelled;
@@ -513,6 +514,20 @@ minutes later, when a limit still reached stops it again at once. The conversati
 hit the limit runs again first, afresh, as any rerun does. While the run waits, `ctrl+r` starts it
 at once, as does a confirmed `ctrl+e`, configurator first; `ctrl+s` cancels the wait (`The run
 won't start again by itself.`), and switching sessions or quitting drops it. [docs/00016-bugfix-fix-chains-and-usage-limits.md](docs/00016-bugfix-fix-chains-and-usage-limits.md)
+records the requirements.
+
+**API outages.** When an agent's error says Claude's API isn't answering (`API Error: 500`,
+`502`, `503`, `504` or `529`, `overloaded_error`, `API Error (Connection error.)` or `Request timed
+out`; not a client error such as `400` or `401`), the run stops there in the same way, and starts
+again by itself after a backoff: 2 minutes, then 5, 10, 20, and every 30 minutes from then on, with
+no limit. The backoff starts over at 2 minutes as soon as any task's agent finishes its run without
+such an error, however its task ends. The conversation says when (`Claude's API isn't answering
+(API Error: 529 Overloaded), so the run stopped. It starts again by itself at Fri 23 Oct 14:20 UTC;
+ctrl+r starts it now and ctrl+s cancels that.`) and again as it starts (`Starting the run again now
+Claude's API may be answering.`). The task it stopped at runs first, and a fix carries on from the
+coder's tree, as at the usage limit; `ctrl+r`, `ctrl+s`, switching sessions and quitting work on the
+wait as they do there. Reviews and planner turns don't pause.
+[docs/00023-bugfix-pause-runs-when-claude-is-down.md](docs/00023-bugfix-pause-runs-when-claude-is-down.md)
 records the requirements.
 
 Edge cases:
@@ -822,8 +837,9 @@ with an error, if that session was deleted or another orbit has it open since), 
 count, the record moves and the event log. When they work, the events in the fallback file and those still waiting
 are appended to the log in `seq` order in one go, skipping any it already holds, the fallback file
 is deleted and the halt is lifted: commands are accepted again, the reviews waiting on the board
-start, a run the usage limit had stopped starts again if its wait ended meanwhile, and work can
-carry on; a startup check the halt cancelled stays cancelled, like one you cancelled. Events that
+start, a run the usage limit or an API outage had stopped starts again if its wait ended
+meanwhile, and work can carry on; a startup check the halt cancelled stays cancelled, like one
+you cancelled. Events that
 reached neither the log nor a fallback file are recorded as a gap, which the conversation, and
 paging back through it, shows in their place as a line such as "Events 1204–1210 weren't saved".
 If a write still fails, or the store still can't list, lock or read the session a rename is
@@ -1249,8 +1265,8 @@ workspace picker show (`waiting for a coder: 2nd in line`, `⏳ waiting: 4 coder
 board: it leaves the line as soon as its next task no longer takes a slot (removed, or one taking
 none put ahead), running that task or finishing, and keeps its place, and then its slot, for a coder
 task put ahead of the one it waited for. Reviews, super reviews and the
-planner don't count and never wait, and a run stopped at the usage limit holds no slot until it
-starts again. A local `orbit chat` serves one workspace and has no cap.
+planner don't count and never wait, and a run stopped at the usage limit or an API outage holds
+no slot until it starts again. A local `orbit chat` serves one workspace and has no cap.
 
 **Browsing.** Frontends can list the directories on the server's host, as its account sees
 them, to find a repository to add (the protocol's `ListDirectory`, see
@@ -1780,8 +1796,9 @@ proposed and how it ended. Each review, a reviewer's or a super reviewer's, is o
 suggestions it made and had refused, and what it cost. Work that runs on in the background links
 to what started it rather than nesting under it: each task's span links to the `RunTasks` (or,
 for a configurator, `FireTrigger`) command that started its run, or to the review whose
-suggestions it runs, and keeps that link when a run the usage limit stopped starts again; each
-review's links to the task whose landing made it due, or, for a super review, to the
+suggestions it runs, and keeps that link when a run the usage limit or an API outage stopped
+starts again; each review's links to the task whose landing made it due, or, for a super review,
+to the
 `FireTrigger` command or the landing that called for it. Each agent process is one span,
 `orbit.agent.process`, under the task's run, the planner's turn or the review it works for: its
 role, how it exited, its turns and the tools it called, as sorted names with their counts; each
