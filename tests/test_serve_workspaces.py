@@ -23,6 +23,7 @@ from orbit.agent import (
     SqliteStore,
     StorageSettings,
     StoreError,
+    SystemTempDirs,
     WorkspaceHost,
     WorkspaceLock,
     WorkspaceRegistry,
@@ -380,6 +381,7 @@ async def test_a_workspace_elsewhere_is_configured_verified_and_worked_in_at_its
     assert StartupChecked(passed=True) in events
     assert seen.read_text() == str(root)
     assert host.agents.root == str(root)
+    assert isinstance(host.agents.temp_dirs, SystemTempDirs)
 
 
 async def test_a_failure_making_the_host_lets_the_lock_go(

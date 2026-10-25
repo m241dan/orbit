@@ -1,7 +1,8 @@
 """The review lane: reviews of landed work, run one at a time beside the work lane.
 
 Each review runs in a read-only snapshot of the commit it reviews, on the :class:`LaneRunner` of
-the reviewer's lane, which runs the tasks of every role in it. Its suggestions become tasks at the
+the reviewer's lane, which runs the tasks of every role in it, the others in their role's
+workspace. Its suggestions become tasks at the
 end of the queue, which the work lane then runs; :class:`ReviewPlanner` decides when a review is
 due and stops reviews generating work forever.
 """
@@ -24,6 +25,7 @@ from orbit.agent.application.lanes import SessionGate
 from orbit.agent.application.outcomes import Outcome, UserStop, cancelling, run_task_to_end
 from orbit.agent.application.ports import CoderTree, Reply, TreeFailed
 from orbit.agent.application.review_trace import Queued, ReviewTally, ReviewTracing
+from orbit.agent.application.role_workspace import workspace_for
 from orbit.agent.application.snapshots import snapshot_of
 from orbit.agent.application.tasks import Changed, Tasks
 from orbit.agent.domain.board import TaskBoard
@@ -380,10 +382,13 @@ class ReviewLane:
         return await self.runner.alone(task_id, partial(self._run_reviewer, task_id, commit))
 
     async def _run_reviewer(self, task_id: str, commit: str | None) -> Outcome:
-        """Run the reviewer in a snapshot of ``commit``; a review the user queued works in place."""
+        """Run the reviewer in a snapshot of ``commit``; a review the user queued, or another
+        task of the lane's roles, works in its role's workspace."""
         run = AgentRun(task_id, self._tasks, None, self._desk).run
         if not commit:
-            return await run(None, self._desk.agents.root)
+            role = self._desk.agents.roles[self._board.get(task_id).task.role]
+            async with workspace_for(role.workspace, self._desk) as root:
+                return await run(None, root)
         async with snapshot_of(self._tree, commit, self._publish) as root:
             return await run(None, root)
 

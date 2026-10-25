@@ -21,6 +21,7 @@ from orbit.agent.application.lanes import OPEN_GATE, SessionGate, stop, waited_o
 from orbit.agent.application.outcomes import Outcome, UserStop, ended, run_task_to_end
 from orbit.agent.application.record_moves import RecordMoves
 from orbit.agent.application.review_lane import ReviewLane
+from orbit.agent.application.role_workspace import workspace_for
 from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.task_trace import TaskTracing
 from orbit.agent.application.tasks import Tasks
@@ -33,6 +34,7 @@ from orbit.agent.domain.endings import (
     WORK_GONE,
     gave_up,
 )
+from orbit.agent.domain.roles import Workspace
 from orbit.agent.domain.usage_limits import (
     FIX_ERROR_NOTE,
     Outage,
@@ -392,17 +394,20 @@ class WorkLane:
             await self._review.ended(state)
 
     async def _run_agent(self, task_id: str) -> Outcome:
-        """Run task ``task_id`` through a new agent and land its work; a fallback queues a fix
-        for a fresh one."""
-        root = await self._prepare(task_id)
+        """Run task ``task_id`` through a new agent in its role's workspace and land its work;
+        a fallback queues a fix for a fresh one."""
+        # A fix carries on from the work it fixes.
+        keep = self._board.get(task_id).fixes is not None
         try:
-            return await self._run_prepared(task_id, root)
+            async with workspace_for(self._workspace(task_id), self._desk, keep) as root:
+                await self._note_start(task_id)
+                return await self._run_prepared(task_id, root)
         finally:
             self._starts.pop(task_id, None)
 
     async def _run_prepared(self, task_id: str, root: str) -> Outcome:
-        """Run task ``task_id``, its tree readied at ``root``, through a new agent and land its
-        work, as :meth:`_run_agent` does."""
+        """Run task ``task_id``, its workspace readied at ``root``, through a new agent and land
+        its work, as :meth:`_run_agent` does."""
         if not await self._holds_fixed_work(task_id):
             return ended("gave_up", gave_up(WORK_GONE))
         await self._move_records(task_id, root)
@@ -449,11 +454,11 @@ class WorkLane:
         await verifier.use_steps(checks.steps)
 
     async def _land(self, task_id: str, outcome: Outcome, root: str) -> Outcome:
-        """Commit and merge a completed task's work, when there's a tree to do it from: the
+        """Commit and merge a completed task's work, when it worked in the coder's tree: the
         checks the user accepted from it, or else the work itself. A rebase is rechecked only
         if the task's role is verified. The work has landed, for review, only once it merged:
         the task stays completed either way, with the merge's detail."""
-        if self._desk.agents.tree is None:
+        if self._desk.agents.tree is None or self._workspace(task_id) != "worktree":
             return outcome
         state = self._board.get(task_id)
         if outcome.checks is not None:
@@ -478,15 +483,18 @@ class WorkLane:
             if lander.merged is not None:
                 self._landed[task_id] = lander.merged
 
-    async def _prepare(self, task_id: str) -> str:
-        """Where task ``task_id`` is worked on: the coder's tree, readied for it."""
-        if self._desk.agents.tree is None:
-            return self._desk.agents.root
-        # A fix carries on from the work it fixes.
+    def _workspace(self, task_id: str) -> Workspace:
+        """Where task ``task_id``'s agent works, as its role says; the coder's tree for a role
+        the session doesn't have, as such a task fails without an agent."""
+        role = self._desk.agents.roles.get(self._board.get(task_id).task.role)
+        return "worktree" if role is None else role.workspace
+
+    async def _note_start(self, task_id: str) -> None:
+        """Note the coder's tree's head as task ``task_id`` starts, if it works there, so its
+        landing counts the commits its agent makes itself."""
         tree = self._desk.agents.tree
-        root = await tree.prepare(keep=self._board.get(task_id).fixes is not None)
-        self._starts[task_id] = await tree.head()
-        return root
+        if tree is not None and self._workspace(task_id) == "worktree":
+            self._starts[task_id] = await tree.head()
 
     async def _move_records(self, task_id: str, root: str) -> None:
         """Move each record task ``task_id`` names whose number another record at ``root``

@@ -16,6 +16,7 @@ from typing import Any
 from orbit.agent.application.desk import AgentDesk, Tool, dispatch, report_progress
 from orbit.agent.application.planner_trace import turn_ended
 from orbit.agent.application.ports import Reply, ResumeFailed
+from orbit.agent.application.role_workspace import workspace_for
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.roles import (
@@ -232,14 +233,24 @@ class PlannerChat:
     async def _converse(
         self, turn_id: str, prompt: str, settings: Settings
     ) -> AsyncIterator[Event]:
-        """Turn ``turn_id`` of the planner's conversation, on ``prompt``, its process traced
-        under the span current, the turn's."""
+        """Turn ``turn_id`` of the planner's conversation, on ``prompt``, in its role's
+        workspace, its process traced under the span current, the turn's."""
+        role = self._desk.agents.roles[PLANNER]
+        async with workspace_for(role.workspace, self._desk) as root:
+            async for event in self._converse_in(turn_id, prompt, settings, root):
+                yield event
+
+    async def _converse_in(
+        self, turn_id: str, prompt: str, settings: Settings, root: str
+    ) -> AsyncIterator[Event]:
+        """Turn ``turn_id`` of the planner's conversation, on ``prompt``, in ``root``, as
+        :meth:`_converse` takes it."""
         assert self._agent is not None
         role = self._desk.agents.roles[PLANNER]
         own = Settings(model=self.model(settings), tool_access=role.tool_access)
         steps, notes = self._step_names(), tuple(self._notes)
         launch = await self._desk.launch(
-            self._agent, self._with_notes(prompt, steps, notes), own, self._desk.agents.root
+            self._agent, self._with_notes(prompt, steps, notes), own, root
         )
         with self._desk.traced(self._agent, current_span()) as process:
             async for event in self._desk.agents.launcher.converse(turn_id, launch):

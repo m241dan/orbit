@@ -31,6 +31,7 @@ from orbit.agent.application.ports import (
     SessionStore,
     StoredSession,
     StoreFailed,
+    TempDirFailed,
     TreeFailed,
     UsageLedger,
     UsageSource,
@@ -713,6 +714,27 @@ class FakeTree:
             raise failure
 
 
+class FakeTempDirs:
+    """Temporary directories, named ``/tmp/orbit-1``, ``/tmp/orbit-2`` and so on, that record
+    which were made and removed; making one raises :attr:`failure`, if set, once."""
+
+    def __init__(self) -> None:
+        self.made: list[str] = []
+        self.removed: list[str] = []
+        self.failure: TempDirFailed | None = None
+
+    async def make(self) -> str:
+        failure, self.failure = self.failure, None
+        if failure is not None:
+            raise failure
+        path = f"/tmp/orbit-{len(self.made) + 1}"
+        self.made.append(path)
+        return path
+
+    async def remove(self, path: str) -> None:
+        self.removed.append(path)
+
+
 def verified(
     steps: Steps, workspace: FakeWorkspace | None = None, fallback_fixes: int = 3
 ) -> Verification:
@@ -745,13 +767,15 @@ def agents_for(
     ``<tokens>-2`` and so on.
 
     ``options`` go to :class:`Agents`, such as ``limits``, ``tree`` or ``roles`` (:data:`ROLES`
-    unless given); agents work in ``root``, ``.`` unless given, and have ``exit_grace``, half a
-    second unless given, to exit.
+    unless given); agents work in ``root``, ``.`` unless given, or in ``temp_dirs``, new
+    :class:`FakeTempDirs` unless given, and have ``exit_grace``, half a second unless given, to
+    exit.
     """
     host = host or FakeHost()
     launcher = ScriptedLauncher(host, *scripts, reviewers=reviewers)
     numbers = itertools.count(1)
-    options = {"limits": Limits(), "exit_grace": 0.5, "roles": ROLES, "root": ".", **options}
+    defaults = {"limits": Limits(), "exit_grace": 0.5, "roles": ROLES, "root": "."}
+    options = {**defaults, "temp_dirs": FakeTempDirs(), **options}
     return Agents(host, launcher, lambda: f"{tokens}-{next(numbers)}", **options), launcher
 
 

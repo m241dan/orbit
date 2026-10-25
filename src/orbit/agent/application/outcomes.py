@@ -5,7 +5,13 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from orbit.agent.application.ports import ConfigWriteFailed, HostFailed, Publish, TreeFailed
+from orbit.agent.application.ports import (
+    ConfigWriteFailed,
+    HostFailed,
+    Publish,
+    TempDirFailed,
+    TreeFailed,
+)
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Failure
 from orbit.agent.domain.checks import ChecksProposal
@@ -65,9 +71,12 @@ async def tree_failed(publish: Publish, exc: TreeFailed) -> Outcome:
     return await _failed(publish, GIT_FAILED, exc)
 
 
-async def run_failed(publish: Publish, exc: HostFailed | ConfigWriteFailed) -> Outcome:
+async def run_failed(
+    publish: Publish, exc: HostFailed | TempDirFailed | ConfigWriteFailed
+) -> Outcome:
     """A task's ending in error because its run failed with ``exc``, the host agents reach orbit
-    through not serving or the checks it proposed not saving, published with ``publish``."""
+    through not serving, its temporary directory not being made or the checks it proposed not
+    saving, published with ``publish``."""
     return await _failed(publish, AGENT_FAILED, exc)
 
 
@@ -100,7 +109,8 @@ async def run_task_to_end(
     """How task ``task_id`` of ``tasks``, started and then ``run``, ended, recorded as its end.
     Stopped on its own, it ends as ``stop`` says; when the lane itself is stopping, it ends as
     cancelled and the cancellation goes on. A failure of the tree, of the host agents reach orbit
-    through or of saving the config is published with ``publish``; anything else is a bug."""
+    through, of making a temporary directory for the agent or of saving the config is published
+    with ``publish``; anything else is a bug."""
     default = ended("cancelled", (CANCELLED, ""))  # What the lane stopping leaves it as.
     return await see_to_end(
         tasks, task_id, default, _run_from_start(tasks, task_id, run, stop, publish)
@@ -125,5 +135,5 @@ async def _run_from_start(
         return ended("cancelled", (stop.reason, ""))
     except TreeFailed as exc:
         return await tree_failed(publish, exc)
-    except (HostFailed, ConfigWriteFailed) as exc:
+    except (HostFailed, TempDirFailed, ConfigWriteFailed) as exc:
         return await run_failed(publish, exc)

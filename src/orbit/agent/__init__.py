@@ -96,6 +96,7 @@ from orbit.agent.external.session_import import ImportBlocked
 from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import SqliteStore, WorkspaceStore
 from orbit.agent.external.store_startup import OpenedStore, open_workspace_store
+from orbit.agent.external.temp_dirs import SystemTempDirs
 from orbit.agent.external.tls import LocalDiscoveryUnavailable, TlsError, local_tls, tls_warnings
 from orbit.agent.external.token_file import TokenError, TokenFile
 from orbit.agent.external.usage_api import UsageApi
@@ -171,6 +172,7 @@ __all__ = [
     "StoreFailed",
     "StorePurging",
     "StoredSession",
+    "SystemTempDirs",
     "TlsError",
     "TlsMode",
     "TokenError",

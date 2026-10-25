@@ -29,6 +29,7 @@ from orbit.agent import (
     SqliteStore,
     StorageSettings,
     StoreError,
+    SystemTempDirs,
     UsageApi,
     Verification,
     WorkspaceHost,
@@ -319,6 +320,7 @@ def _agents(
         planner_role=lambda: _planner_role(where),
         file_names=file_names,
         root=where,
+        temp_dirs=SystemTempDirs(),
     )
 
 

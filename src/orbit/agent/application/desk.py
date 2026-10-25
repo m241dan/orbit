@@ -27,6 +27,7 @@ from orbit.agent.application.ports import (
     ProposalReview,
     Publish,
     Reply,
+    TempDirs,
 )
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.agents import Agent, AgentRegistry
@@ -114,9 +115,10 @@ class Agents:
     ``planner_role`` reads the planner's role from the project's config again when the planner
     is reset; without it, the planner keeps its role. ``file_names`` lists the files in a
     directory, for moving a record a task names whose number another record took; without it,
-    records keep the numbers tasks give them. ``root`` is the workspace's directory,
-    where agents work without a tree, the planner always. ``pause`` times a run that Claude's
-    usage limit stopped, until it starts again.
+    records keep the numbers tasks give them. ``root`` is the workspace's directory, the user's
+    checkout, where agents work without a tree; ``temp_dirs`` makes the empty directories
+    agents whose role works in none work in. ``pause`` times a run that Claude's usage limit
+    stopped, until it starts again.
     """
 
     host: AgentHost
@@ -133,6 +135,7 @@ class Agents:
     planner_role: PlannerRoleReader | None = None
     file_names: FileNames | None = None
     root: str = field(kw_only=True)
+    temp_dirs: TempDirs = field(kw_only=True)
     pause: LimitPause = field(default_factory=LimitPause)
 
 

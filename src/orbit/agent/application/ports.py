@@ -70,6 +70,10 @@ class ConfigWriteFailed(Exception):
     """Saving to the project's config file failed, as the message says."""
 
 
+class TempDirFailed(Exception):
+    """A temporary directory for an agent to work in couldn't be made, as the message says."""
+
+
 class CloneFailed(Exception):
     """Cloning a repository failed, as the message says, starting ``Couldn't clone <url>: ``:
     git's message, perhaps with a hint."""
@@ -247,6 +251,20 @@ class AgentLauncher(Protocol):
 class Merge:
     result: MergeResult
     detail: str = ""
+
+
+class TempDirs(Protocol):
+    """Makes the empty temporary directories agents whose role works in none work in, and
+    removes them."""
+
+    async def make(self) -> str:
+        """A new, empty temporary directory's path. Raises :class:`TempDirFailed` if one can't be
+        made; cancelled, it removes the one it was making before the cancellation ends."""
+        ...
+
+    async def remove(self, path: str) -> None:
+        """Remove the temporary directory at ``path``, with everything in it, as far as it can."""
+        ...
 
 
 class CoderTree(Protocol):

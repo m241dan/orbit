@@ -14,7 +14,7 @@ from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import Background, SessionGate
 from orbit.agent.application.outcomes import Outcome, UserStop, run_task_to_end
-from orbit.agent.application.snapshots import snapshot_of
+from orbit.agent.application.role_workspace import workspace_for
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.endings import STOPPED_BY_YOU
 from orbit.protocol import PLANNER_LANE, WORK_LANE, BusyChanged, BusyLane, Event
@@ -61,10 +61,9 @@ class LaneRunner:
     """Runs lane ``lane``'s tasks, those whose role is among ``roles``, one at a time in the
     background with ``parts``.
 
-    Each task's agent works in a read-only snapshot of the base commit, or in place without a
-    tree, unless ``work`` says what to run and how. The lane shows busy from when its run picks a
-    task until the run ends; the user's :meth:`cancel` stops the task running, and the lane
-    carries on with the next."""
+    Each task's agent works in its role's workspace, unless ``work`` says what to run and how.
+    The lane shows busy from when its run picks a task until the run ends; the user's
+    :meth:`cancel` stops the task running, and the lane carries on with the next."""
 
     def __init__(
         self, lane: BusyLane, roles: Collection[str], parts: LaneParts, work: LaneWork | None = None
@@ -74,7 +73,7 @@ class LaneRunner:
         self._desk = parts.desk
         self._tasks = parts.tasks
         self._parts = parts
-        self._work = work or LaneWork(self._next_in_lane, self._run_in_snapshot)
+        self._work = work or LaneWork(self._next_in_lane, self._run_in_workspace)
         self._background = Background(lane, parts.desk.publish)
         self._background.ended = self._ended
         self._stopped: Callable[[], None] = _unwatched
@@ -173,7 +172,7 @@ class LaneRunner:
         """The board's next task in one of the lane's roles, skipping those ``tried``."""
         return self._tasks.board.next_runnable(skip=tried, roles=self.roles)
 
-    async def _run_in_snapshot(self, task_id: str) -> None:
+    async def _run_in_workspace(self, task_id: str) -> None:
         """Run task ``task_id`` to its end through a new agent, as :meth:`_run_agent` does; the
         user's stop ends it as stopped by them."""
         run = partial(self.alone, task_id, partial(self._run_agent, task_id))
@@ -181,14 +180,10 @@ class LaneRunner:
         await run_task_to_end(self._tasks, task_id, run, stop, self._desk.publish)
 
     async def _run_agent(self, task_id: str) -> Outcome:
-        """How task ``task_id``'s run through a new agent ended: in a read-only snapshot of the
-        base commit, or in place without a tree."""
+        """How task ``task_id``'s run through a new agent ended, in its role's workspace."""
         run = AgentRun(task_id, self._tasks, None, self._desk).run
-        tree = self._desk.agents.tree
-        if tree is None:
-            return await run(None, self._desk.agents.root)
-        commit = await tree.base_commit()
-        async with snapshot_of(tree, commit, self._desk.publish) as root:
+        role = self._desk.agents.roles[self._tasks.board.get(task_id).task.role]
+        async with workspace_for(role.workspace, self._desk) as root:
             return await run(None, root)
 
 
