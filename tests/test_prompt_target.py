@@ -18,13 +18,14 @@ from orbit.protocol import (
     SendMessage,
     Settings,
     SettingsChanged,
+    TasksChanged,
     UpdateSettings,
     WorkspaceEntry,
 )
 from orbit.tui.view.seats import PLANNER_SEAT
 from tests.frontend_fakes import Shell
 from tests.session_apps import CURRENT, with_agents
-from tests.tui_fakes import SNAPSHOT
+from tests.tui_fakes import SNAPSHOT, task
 
 ARCHITECT = "architect"
 DESIGN = "design"
@@ -422,3 +423,24 @@ async def test_before_a_workspace_is_open_only_the_planner_is_seated() -> None:
     assert shell.frontend.navigation.place.workspace is None
     assert shell.frontend.router.seats.listed == (PLANNER_SEAT,)
     assert shell.tab_strip == STRIP
+
+
+UNMETERED = AUDITOR.model_copy(update={"usage_known": False})
+"""The auditor, on a runtime that doesn't report usage."""
+
+
+def unmetered_in_a() -> Catalog:
+    """A catalog serving B, which this frontend opens on, running the auditor with its usage
+    known, then A, running it on a runtime without usage; its own agents take B's."""
+    a = WorkspaceEntry(id="A", label="a", sessions=(CURRENT,), agents=(PLANNER_ENTRY, UNMETERED))
+    b = WorkspaceEntry(id="B", label="b", sessions=(CURRENT,), agents=(PLANNER_ENTRY, AUDITOR))
+    return Catalog(workspaces=(b, a), agents=b.agents, triggers=(), lanes=())
+
+
+async def test_a_task_rows_usage_is_unknown_as_the_workspace_it_is_on_runs_its_role() -> None:
+    shell = Shell()
+    await shell.feed(unmetered_in_a(), TasksChanged(tasks=(task("t1", "auditor"),)))
+    assert "usage unknown" not in shell.task_view.rows[0]
+    assert await shell.frontend.navigation.place.join("A")
+    shell.frontend.router.show_viewing()
+    assert "usage unknown" in shell.task_view.rows[0]
