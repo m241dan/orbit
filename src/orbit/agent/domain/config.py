@@ -14,7 +14,10 @@ from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.agent.domain.layers import (
     NO_USER_ROLES,
     Layer,
+    MergedRoles,
     ProjectRoles,
+    RoleFields,
+    UserConfigError,
     UserRoles,
     check_personal,
     merge_roles,
@@ -22,7 +25,14 @@ from orbit.agent.domain.layers import (
 )
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import Role, RoleName, check_runtimes, role_clashes
-from orbit.agent.domain.runtimes import UNCHECKED, ModelAliases, RuntimeRules
+from orbit.agent.domain.runtimes import (
+    UNCHECKED,
+    ModelAliases,
+    RuntimeRules,
+    knows_runtime,
+    resolves,
+    unknown_model,
+)
 from orbit.agent.domain.verification import MAX_FALLBACK_FIXES
 
 
@@ -151,7 +161,8 @@ def load_config(
     if it's invalid, as it is when a role's runtime is one this version of orbit doesn't know,
     doesn't take its model or can't do what the role asks (see
     :func:`~orbit.agent.domain.roles.runtime_problems`), a :class:`PersonalRoleError` if the
-    personal roles are at fault.
+    personal roles are at fault, and a :class:`UserConfigError` if a model the user config sets
+    isn't one its role's runtime takes, after the project's problems.
     """
     return load_layered(data, built_in, user, path, rules).config
 
@@ -186,8 +197,54 @@ def load_layered(
     check_personal(merged)
     notices = tuple(replaced_note(name) for name in merged.replaced)
     config = _validated({**data, "roles": merged.tables}, merged.personal, notices, rules.models)
-    check_runtimes(config.roles, rules)
+    users = _users_models(merged, user)
+    project_set = {
+        name: role.model_copy(update={"model": None}) if name in users else role
+        for name, role in config.roles.items()
+    }
+    check_runtimes(project_set, rules)
+    _check_users_models(config.roles, users, rules)
     return LayeredConfig(config, merged.layers)
+
+
+def _users_models(merged: MergedRoles, user: UserRoles) -> dict[str, str]:
+    """The ``merged`` roles whose model the ``user`` config sets, each with the key it sets it
+    under: ``roles.model`` for the all-roles model, or ``roles.<name>.model``."""
+    return {
+        name: _users_model_key(name, user)
+        for name, layers in merged.layers.items()
+        if layers.get("model") == user.layer
+    }
+
+
+def _users_model_key(name: str, user: UserRoles) -> str:
+    """The key the ``user`` config sets role ``name``'s model under."""
+    own = user.personal.get(name) or user.named.get(name, RoleFields())
+    return f"roles.{name}.model" if own.model is not None else "roles.model"
+
+
+def _check_users_models(
+    roles: Mapping[str, Role], users: Mapping[str, str], rules: RuntimeRules
+) -> None:
+    """Raise :class:`UserConfigError` naming each model the user config sets, under its key in
+    ``users``, that the runtime of its role among ``roles`` doesn't take, as ``rules`` say, once
+    each, on a line of its own, if any."""
+    problems = dict.fromkeys(
+        problem
+        for name, key in users.items()
+        for problem in _model_problem(key, roles[name], rules)
+    )
+    if problems:
+        raise UserConfigError("\n".join(problems))
+
+
+def _model_problem(key: str, role: Role, rules: RuntimeRules) -> list[str]:
+    """Why ``role``'s model, set under ``key``, is refused, if its runtime is one this version of
+    orbit knows and ``rules`` say it doesn't take the model; nothing otherwise."""
+    models = rules.models.get(role.runtime) if knows_runtime(role.runtime) else None
+    if role.model is None or models is None or resolves(models, role.model):
+        return []
+    return [unknown_model(key, role.model, models)]
 
 
 def _refuse_later_settings(data: dict[str, Any]) -> None:

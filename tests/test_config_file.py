@@ -194,6 +194,44 @@ def test_a_roles_model_its_runtime_doesnt_take_is_refused_naming_the_file(
     assert str(raised.value) == f'{path}: roles.reviewer.model = "sonet": {CLAUDES_ALIASES}.'
 
 
+def test_a_users_role_model_its_runtime_doesnt_take_is_refused_naming_the_user_config(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    path = write_user_config(config_dir, '[roles.reviewer]\nmodel = "sonet"\n')
+    write(tmp_path, "")
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value) == f'{path}: roles.reviewer.model = "sonet": {CLAUDES_ALIASES}.'
+
+
+def test_a_users_all_roles_model_its_runtime_doesnt_take_is_refused_once_as_written(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    path = write_user_config(config_dir, '[roles]\nmodel = "sonet"\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value) == f'{path}: roles.model = "sonet": {CLAUDES_ALIASES}.'
+
+
+def test_a_users_role_model_without_a_project_file_doesnt_name_the_project_file(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    write_user_config(config_dir, '[roles.coder]\nmodel = "sonet"\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(CONFIG_PATH) not in str(raised.value)
+
+
+def test_a_projects_bad_model_is_reported_before_the_users(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    write_user_config(config_dir, '[roles.coder]\nmodel = "sonet"\n')
+    path = write(tmp_path, '[roles.reviewer]\nmodel = "opu"\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value) == f'{path}: roles.reviewer.model = "opu": {CLAUDES_ALIASES}.'
+
+
 def test_a_role_runs_on_kiro_with_no_model_of_its_own(tmp_path: Path, config_dir: Path) -> None:
     write(tmp_path, '[roles.coder]\nruntime = "kiro"\n')
     coder = read_config(str(tmp_path), config_dir).roles["coder"]

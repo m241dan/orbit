@@ -115,7 +115,11 @@ class MergedRoles:
     replaced: tuple[str, ...]
 
 
-class PersonalRoleError(ConfigError):
+class UserConfigError(ConfigError):
+    """The user config is at fault; the message says how, and the caller names the file."""
+
+
+class PersonalRoleError(UserConfigError):
     """The personal roles break a rule across the roles that the others keep, so the user
     config is at fault; the message says which rule."""
 

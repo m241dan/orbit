@@ -1345,7 +1345,8 @@ lowercase letters, digits, dots and dashes with at least one dash, such as `glm-
 project's or the one your `[roles]` or `[roles.<name>]` sets, must be an alias or a full id its
 runtime takes, or the configuration is refused as it loads, naming the role, the model and the
 aliases: `roles.reviewer.model = "sonet": the runtime claude takes the aliases fable, opus,
-sonnet, haiku or a full id starting with "claude-".`. A `[runtimes.<name>]` table for a runtime
+sonnet, haiku or a full id starting with "claude-".`, after the path of the file that sets it;
+your all-roles `[roles] model` is named once, as `roles.model`. A `[runtimes.<name>]` table for a runtime
 this version of orbit doesn't know is refused, naming it (`runtimes.nope: this version of orbit
 knows the runtimes claude, kiro.`), as is one setting anything but `models`. `[runtimes]` is yours
 alone: a project's `.orbit/config.toml` setting it is refused (`runtimes: Extra inputs are not

@@ -9,7 +9,7 @@ from orbit.agent.domain.config import LayeredConfig, OrbitConfig, load_layered
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.config_report import ConfigSources, Written
 from orbit.agent.domain.config_update import reference_with_checks, with_checks
-from orbit.agent.domain.layers import Layer, PersonalRoleError, with_runtime
+from orbit.agent.domain.layers import Layer, UserConfigError, with_runtime
 from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
 from orbit.agent.external.role_instructions import with_instructions
 from orbit.agent.external.runtimes import read_runtime_rules
@@ -79,9 +79,9 @@ def _read_layered(root: str, config_dir: Path, runtime: str | None = None) -> La
     try:
         named = str(path) if exists else None
         return load_layered(data, built_in, user, named, rules)
-    except PersonalRoleError as exc:
+    except UserConfigError as exc:
         raise ConfigError(f"{user.layer.path}: {exc}") from None
-    except ConfigError as exc:  # Without a file, only the personal roles can be at fault.
+    except ConfigError as exc:  # Errors the user config is at fault for are raised as above.
         raise ConfigError(f"{path}: {exc}") from None
 
 

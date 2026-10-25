@@ -687,12 +687,10 @@ def test_a_roles_full_model_id_loads_as_it_is() -> None:
     assert config.roles["reviewer"].model == "claude-sonnet-5-5"
 
 
-def test_the_user_configs_model_for_every_role_is_held_to_each_roles_runtime() -> None:
+def test_the_user_configs_model_for_every_role_is_refused_once_as_written() -> None:
     every = load_user_roles({"roles": {"model": "sonet"}}, USER, BUILT_IN_ROLES)
     assert refusal({"roles": {"coder": {"model": "opus"}}}, every).splitlines() == [
-        f'roles.{name}.model = "sonet": {CLAUDES_ALIASES}.'
-        for name in BUILT_IN_ROLE_NAMES
-        if name != "coder"
+        f'roles.model = "sonet": {CLAUDES_ALIASES}.'
     ]
 
 
