@@ -1163,7 +1163,8 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   list or the review's batch. A disabled `planner`'s settings can still be picked with `ctrl+o`,
   `ctrl+l` and `ctrl+y`, as new tasks start with its model and tool access.
 - `effort`: how hard its agents think: `low`, `medium`, `high`, `xhigh` or `max`, the levels
-  `claude --help` lists; any other value is refused, listing those. Left out, the CLI's default.
+  `claude --help` lists; any other value is refused, listing those. Left out, the effort your `config.toml`'s `[roles.<name>]` or `[roles]`
+  sets, if it sets one (see [Your machine's model, effort and runtime](#your-machines-model-effort-and-runtime)), else the CLI's default.
   Like its model and tool access, it's the default for tasks orbit queues in the role, and what
   the task editor fills in when you pick the role, and is saved with them and the session. An agent runs with its task's effort, or for a conversational
   role its session's, and otherwise with its role's, passed to the CLI as `--effort`; with none,
@@ -1488,7 +1489,8 @@ appears in the process list. Agents are started with `--strict-mcp-config` (only
 `ENABLE_TOOL_SEARCH=false` (orbit's tools are loaded up front),
 `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (your Claude Code auto-memory, which worktrees share with the
 repository, stays out of agents' context), and without `CLAUDE_CODE_EFFORT_LEVEL` (an agent's effort
-is orbit's `--effort`, or the CLI's default; see `effort` under
+is orbit's `--effort`, from its task, session or role as `.orbit/config.toml` and your
+`config.toml` set it, or the CLI's default; see `effort` under
 [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)).
 
 A model picked with `ctrl+o` applies from the planner's next prompt and keeps its conversation
