@@ -33,29 +33,54 @@ _REVIEW_LIMITS = ReviewLimits()
 
 
 class _FileConfig(_Config):
-    """Orbit's limits and roles, as a project file sets them.
+    """Orbit's limits and roles, as a project file sets them, each field with its description.
 
-    ``fix_attempts``: in-session fixes, asked of the same agent before its task falls back.
-    ``max_checks``: verification steps an agent may run itself before claiming done.
-    ``fallback_fixes``: fresh-agent fix tasks one task's chain may queue for each failing step.
-    ``review_rounds``: rounds of review-suggested work after which review pauses.
-    ``super_review_every``: commits between super reviews, counting your own and the planner's;
-    a super review that's due waits while suggested tasks are pending.
-    ``review_suggestions`` / ``super_review_suggestions``: tasks one review may suggest.
-    ``verification``: how tasks are verified.
-    ``setup``: how the coder's worktree is set up; ``None`` sets nothing up.
+    A super review that's due after ``super_review_every`` commits waits while suggested tasks
+    are pending.
     """
 
-    fix_attempts: int = Field(default=_LIMITS.max_attempts, ge=1)
-    max_checks: int = Field(default=_LIMITS.max_checks, ge=1)
-    fallback_fixes: int = Field(default=MAX_FALLBACK_FIXES, ge=1)
-    review_rounds: int = Field(default=_REVIEW_LIMITS.rounds, ge=1)
-    super_review_every: int = Field(default=_REVIEW_LIMITS.super_every, ge=1)
-    review_suggestions: int = Field(default=_REVIEW_LIMITS.suggestions, ge=1)
-    super_review_suggestions: int = Field(default=_REVIEW_LIMITS.super_suggestions, ge=1)
-    roles: dict[str, Role]
-    verification: VerificationConfig = VerificationConfig()
-    setup: Setup | None = None
+    fix_attempts: int = Field(
+        default=_LIMITS.max_attempts,
+        ge=1,
+        description="In-session fixes asked of the same agent before its task falls back.",
+    )
+    max_checks: int = Field(
+        default=_LIMITS.max_checks,
+        ge=1,
+        description="Verification steps an agent may run itself before claiming done.",
+    )
+    fallback_fixes: int = Field(
+        default=MAX_FALLBACK_FIXES,
+        ge=1,
+        description="Fresh-agent fix tasks one task's chain may queue for each failing step.",
+    )
+    review_rounds: int = Field(
+        default=_REVIEW_LIMITS.rounds,
+        ge=1,
+        description="Rounds of review-suggested work after which review pauses.",
+    )
+    super_review_every: int = Field(
+        default=_REVIEW_LIMITS.super_every,
+        ge=1,
+        description="Commits between super reviews, counting yours and the planner's.",
+    )
+    review_suggestions: int = Field(
+        default=_REVIEW_LIMITS.suggestions, ge=1, description="Tasks one review may suggest."
+    )
+    super_review_suggestions: int = Field(
+        default=_REVIEW_LIMITS.super_suggestions,
+        ge=1,
+        description="Tasks one super review may suggest.",
+    )
+    roles: dict[str, Role] = Field(
+        description="The roles agents work in, by name: the built-in ones, and your own."
+    )
+    verification: VerificationConfig = Field(
+        default=VerificationConfig(), description="How tasks are verified."
+    )
+    setup: Setup | None = Field(
+        default=None, description="How the coder's worktree is set up; with none, nothing is."
+    )
 
     @field_validator("roles")
     @classmethod

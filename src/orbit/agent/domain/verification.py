@@ -3,6 +3,9 @@
 import shlex
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
+from typing import Annotated
+
+from pydantic import Field
 
 from orbit.protocol import SkipReason, StepState, StepStatus, TaskSpec
 
@@ -11,8 +14,11 @@ from orbit.protocol import SkipReason, StepState, StepStatus, TaskSpec
 class VerificationStep:
     """A command run in the working directory; the step passes when it exits with status 0."""
 
-    name: str
-    command: tuple[str, ...]
+    name: Annotated[str, Field(description="What the step is called; no two steps share a name.")]
+    command: Annotated[
+        tuple[str, ...],
+        Field(description="The command run in the working directory; it passes if it exits 0."),
+    ]
 
 
 @dataclass(frozen=True)

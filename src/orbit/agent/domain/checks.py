@@ -18,7 +18,10 @@ class _Config(BaseModel):
 class VerificationConfig(_Config):
     """The steps that verify a task, run in order; with none, nothing is verified."""
 
-    steps: tuple[VerificationStep, ...] = ()
+    steps: tuple[VerificationStep, ...] = Field(
+        default=(),
+        description="The steps that verify a task, run in order; with none, nothing is verified.",
+    )
 
     @field_validator("steps")
     @classmethod
@@ -41,8 +44,13 @@ class Setup(_Config):
     """What makes a fresh worktree ready to work in: ``command`` runs there when it's first
     prepared, and again whenever a file in ``watch`` (paths relative to the tree) changes."""
 
-    command: tuple[str, ...] = Field(min_length=1)
-    watch: tuple[str, ...] = ()
+    command: tuple[str, ...] = Field(
+        min_length=1,
+        description="The command run in a fresh worktree, and again when a watched file changes.",
+    )
+    watch: tuple[str, ...] = Field(
+        default=(), description="Files, relative to the tree, whose changes run the command again."
+    )
 
     @field_validator("watch")
     @classmethod

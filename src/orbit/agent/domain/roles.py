@@ -96,18 +96,60 @@ def _can_merge(fields: dict[str, Any]) -> bool:
 
 
 class Role(_Config):
-    instructions: str = Field(min_length=1)
-    model: str | None = None
-    tool_access: ToolAccess = "restricted"
-    tools: tuple[str, ...] = (GET_TASK, COMPLETE_TASK, REPORT_PROGRESS, GIVE_UP)
-    verify: bool = True
-    timeout_minutes: float | None = Field(default=None, gt=0)
-    lane: str = "work"
-    workspace: Workspace = "worktree"
-    conversation: bool = False
-    merge: bool = Field(default_factory=_can_merge)
-    enabled: bool = True
-    effort: Effort | None = None
+    instructions: str = Field(
+        min_length=1,
+        description=(
+            "What its agents are told about their job: the text, or a Markdown file under .orbit/"
+            " it names."
+        ),
+    )
+    model: str | None = Field(
+        default=None,
+        description=(
+            'The model of its tasks, an alias such as "opus" or a full id; unset, the'
+            " CLI's default."
+        ),
+    )
+    tool_access: ToolAccess = Field(
+        default="restricted",
+        description=(
+            "How its tasks may use the CLI's tools:"
+            ' "off", "restricted" (read and search) or "full".'
+        ),
+    )
+    tools: tuple[str, ...] = Field(
+        default=(GET_TASK, COMPLETE_TASK, REPORT_PROGRESS, GIVE_UP),
+        description="The orbit tools its agents may call.",
+    )
+    verify: bool = Field(
+        default=True, description="Whether its agents' claims of being done are verified."
+    )
+    timeout_minutes: float | None = Field(
+        default=None, gt=0, description="How long its agents may take, in minutes; unset, no limit."
+    )
+    lane: str = Field(
+        default="work",
+        description="The lane that runs its agents, a plain name; a lane runs one task at a time.",
+    )
+    workspace: Workspace = Field(
+        default="worktree",
+        description='Where its agents work: "worktree", "snapshot", "checkout" or "none".',
+    )
+    conversation: bool = Field(
+        default=False,
+        description="Whether you talk to it, as you do the planner, rather than it taking tasks.",
+    )
+    merge: bool = Field(
+        default_factory=_can_merge, description="Whether its finished work is committed and merged."
+    )
+    enabled: bool = Field(default=True, description="Whether it runs at all.")
+    effort: Effort | None = Field(
+        default=None,
+        description=(
+            'How hard its agents think: "low", "medium", "high", "xhigh" or "max"; unset, the'
+            " CLI's default."
+        ),
+    )
 
     @field_validator("tools")
     @classmethod

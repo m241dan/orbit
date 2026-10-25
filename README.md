@@ -2406,7 +2406,11 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     (`read_config_sources`), and `role_instructions` the instructions files its roles and your
     personal roles name (`resolve_instructions`);
     `built_in_roles` reads the built-in roles from `instructions/roles.toml` and their
-    instructions from the Markdown files it names (`read_instruction_files` names them); `checks`
+    instructions from the Markdown files it names (`read_instruction_files` names them);
+    `reference_config` generates the reference config from the models and the built-in roles,
+    every setting a project can change commented out at its default under what it does
+    (`reference_config()`), and `uv run python -m orbit.agent.external.reference_config` writes
+    it to `reference/config.toml`, the copy shipped with orbit, which a test keeps in step; `checks`
     runs a verification step as a process (`run_step`); `processes` runs a program to completion
     without leaving it behind; `workspace`
     fingerprints the git working tree; `usage_api` fetches the Claude subscription's usage
