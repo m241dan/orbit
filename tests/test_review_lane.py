@@ -843,7 +843,7 @@ async def test_an_unexpected_error_in_the_review_lane_is_reported() -> None:
     session, _, _ = session_for(claims_done, tree=tree, review=True)
     await start(session)
     events = await asyncio.wait_for(settle(session), 10)
-    message = "The review lane stopped on an unexpected error: ValueError('the lane tripped')"
+    message = "The review lane stopped on an unexpected error: the lane tripped"
     assert ErrorOccurred(code=INTERNAL, message=message) in events
     [review] = [t for t in board(events) if t.task.role == "reviewer"]
     assert (review.status, review.reason, review.reason_detail) == (

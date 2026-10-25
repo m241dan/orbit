@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from orbit.agent.application.failures import ReportedOnce, outcome, unexpected
 from orbit.agent.application.ports import EventLog, Fallback, Publish, StoreFailed
+from orbit.agent.domain.refusals import stopped_on
 from orbit.agent.domain.replay import LogBounds, in_order, latest, pending_bounds
 from orbit.agent.domain.storage import trim_target
 from orbit.agent.domain.storage_halt import SeqSpan, lost_spans
@@ -287,7 +288,7 @@ class LogWriter:
         """Stop the appending on ``exc``, which escaped a write, as a failed append does: what
         wasn't appended goes to the fallback, and the failure is told to ``failed``."""
         writing, self._writing = self._writing, []
-        message = f"The event log writer stopped on an unexpected error: {exc!r}"
+        message = stopped_on("The event log writer", exc)
         self._halt(StoreFailed(unexpected(message, exc)))
         await self._divert(writing)
 

@@ -17,6 +17,7 @@ from orbit.agent.domain.config import OrbitConfig
 from orbit.agent.domain.config_errors import INVALID_CONFIG, ConfigError
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.purging import Purged, PurgeRefused
+from orbit.agent.domain.refusals import failed_to
 from orbit.agent.domain.workspaces import PathKind
 from orbit.agent.external.config_file import read_config
 from orbit.agent.external.repository import (
@@ -455,4 +456,4 @@ async def _unflag_anyway(registry: WorkspaceRegistry, workspace_id: str, root: P
     try:
         await registry.set_served(workspace_id, False)
     except StoreError as exc:
-        unexpected(f"Orbit failed to flag {root} not served: {exc}", exc)
+        unexpected(failed_to(f"flag {root} not served", exc), exc)

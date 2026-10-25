@@ -12,7 +12,7 @@ from typing import Any
 from orbit.agent.application.failures import unexpected
 from orbit.agent.application.outcomes import cancelling
 from orbit.agent.application.ports import Publish
-from orbit.agent.domain.refusals import Refused
+from orbit.agent.domain.refusals import Refused, stopped_on
 from orbit.protocol import BUSY, INTERNAL, BusyChanged, BusyLane, ErrorOccurred, Event
 from orbit.tracing import no_span
 
@@ -50,7 +50,7 @@ def crash_of(task: asyncio.Task[object]) -> BaseException | None:
 
 def crash_report(lane: str, exc: BaseException) -> ErrorOccurred:
     """The event telling the user that ``lane`` stopped on ``exc``, which nothing expected."""
-    message = unexpected(f"The {lane} lane stopped on an unexpected error: {exc!r}", exc)
+    message = unexpected(stopped_on(f"The {lane} lane", exc), exc)
     return ErrorOccurred(code=INTERNAL, message=message)
 
 

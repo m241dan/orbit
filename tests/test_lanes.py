@@ -249,7 +249,7 @@ async def test_a_crash_is_reported_once_and_close_does_not_raise_it(
     await lane.close()
     await lane.close()
 
-    message = "The test lane stopped on an unexpected error: ValueError('boom')"
+    message = "The test lane stopped on an unexpected error: boom"
     assert report == ErrorOccurred(code=INTERNAL, message=message)
     assert events.empty()
     assert logged_with_traceback(caplog.records, message)
@@ -338,7 +338,7 @@ async def test_a_crash_is_reported_once_before_the_lane_frees(
     await ended(turns.turn)
     await turns.close()
 
-    message = "The planner lane stopped on an unexpected error: ValueError('boom')"
+    message = "The planner lane stopped on an unexpected error: boom"
     assert posted == [BUSY, ErrorOccurred(code=INTERNAL, message=message), IDLE]
     assert logged_with_traceback(caplog.records, message)
 

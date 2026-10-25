@@ -5,7 +5,7 @@ import logging
 from collections.abc import Awaitable
 
 from orbit.agent.application.ports import Publish, StoreFailed
-from orbit.agent.domain.refusals import Refused
+from orbit.agent.domain.refusals import Refused, failed_to, reason
 from orbit.protocol import INTERNAL, ErrorOccurred
 
 logger = logging.getLogger(__name__)
@@ -22,8 +22,8 @@ def command_failure(command: object, exc: Exception) -> tuple[str, str]:
     """The code and message of handling ``command`` failing with ``exc``: a refusal's own, or
     ``internal`` naming the command for any other error, which is logged as unexpected."""
     if isinstance(exc, Refused):
-        return exc.code, exc.message
-    return INTERNAL, unexpected(f"Orbit failed to handle {type(command).__name__}: {exc}", exc)
+        return exc.code, reason(exc)
+    return INTERNAL, unexpected(failed_to(f"handle {type(command).__name__}", exc), exc)
 
 
 async def outcome[T](call: Awaitable[T]) -> T | StoreFailed:

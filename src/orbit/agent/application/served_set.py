@@ -18,7 +18,7 @@ from orbit.agent.application.workspace_host import WorkspaceHost
 from orbit.agent.application.workspace_source import WorkspaceSource, WorkspaceUnavailable
 from orbit.agent.domain.clones import added_url, local_clone_source
 from orbit.agent.domain.purging import Purged, owned_refusal
-from orbit.agent.domain.refusals import STOPPING, Refused
+from orbit.agent.domain.refusals import STOPPING, Refused, failed_to
 from orbit.agent.domain.workspaces import (
     RegisteredWorkspace,
     check_addable,
@@ -85,7 +85,7 @@ async def _flag_anyway(host: WorkspaceHost, workspaces: WorkspaceSource, *, serv
             await workspaces.set_served(host.workspace_id, False)
     except WorkspaceUnavailable as exc:
         flag = "served" if served else "not served"
-        unexpected(f"Orbit failed to flag {host.display_name} {flag}: {exc}", exc)
+        unexpected(failed_to(f"flag {host.display_name} {flag}", exc), exc)
 
 
 @dataclass(frozen=True)

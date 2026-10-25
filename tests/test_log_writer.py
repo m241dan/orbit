@@ -195,7 +195,7 @@ async def test_an_unexpected_append_error_stops_the_appending_and_diverts_the_ba
     writer.add("b", notice(2, "b"))
     await asyncio.sleep(0.01)
 
-    message = "The event log writer stopped on an unexpected error: ValueError('a bug')"
+    message = "The event log writer stopped on an unexpected error: a bug"
     assert [str(error) for error in failures] == [message]
     assert logged_with_traceback(caplog.records, message)
     assert log.logged == [notice(1)] and fallback.files == {"b": [notice(2, "b")]}
@@ -1198,7 +1198,7 @@ async def test_an_unexpected_log_error_halts_the_session_as_a_failing_log_does()
     sent = delivered(session)
     assert payloads_of(Notice, sent) == [Notice(message="n0")]
     [error] = payloads_of(ErrorOccurred, sent)
-    assert error.code == STORAGE_FAILED and "ValueError('a bug')" in error.message
+    assert error.code == STORAGE_FAILED and "unexpected error: a bug" in error.message
 
 
 async def test_a_failing_log_halts_the_session_and_the_frontend_gets_every_event() -> None:

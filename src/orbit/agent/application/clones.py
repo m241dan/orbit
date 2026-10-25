@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from orbit.agent.application.failures import unexpected
 from orbit.agent.application.ports import CloneFailed, Cloner
 from orbit.agent.domain.clones import clone_served
-from orbit.agent.domain.refusals import Refused
+from orbit.agent.domain.refusals import Refused, failed_to, reason
 from orbit.protocol import (
     BUSY,
     GIT_FAILED,
@@ -47,9 +47,9 @@ class Clones:
         except CloneFailed as exc:  # Its message names the URL already.
             self._failed(url, GIT_FAILED, str(exc))
         except Refused as refusal:
-            self._failed(url, refusal.code, clone_failure_message(url, refusal.message))
+            self._failed(url, refusal.code, clone_failure_message(url, reason(refusal)))
         except Exception as exc:  # A bug mustn't go unreported, as no command waits on it.
-            why = f"Orbit failed to serve the clone: {exc}"
+            why = failed_to("serve the clone", exc)
             self._failed(url, INTERNAL, unexpected(clone_failure_message(url, why), exc))
         else:
             self._tell(clone_served(url, workspace))

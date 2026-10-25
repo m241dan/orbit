@@ -28,6 +28,7 @@ from orbit.agent.application.ports import (
 )
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.agents import Agent, AgentRegistry
+from orbit.agent.domain.refusals import failed_to
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import ORBIT_TOOLS, Role
 from orbit.protocol import (
@@ -285,6 +286,6 @@ class AgentDesk:
         try:
             return await run.handle(tool, arguments)
         except Exception as exc:
-            message = unexpected(f"Orbit failed to handle {tool}: {exc}", exc)
+            message = unexpected(failed_to(f"handle {tool}", exc), exc)
             await self.publish(ErrorOccurred(agent_id=agent.id, code=INTERNAL, message=message))
             return Reply(message, is_error=True)

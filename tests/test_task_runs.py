@@ -598,7 +598,7 @@ async def test_an_unexpected_error_in_the_work_lane_is_reported() -> None:
     tree.failures["show"] = ValueError("the lane tripped")
     session, _, launcher = session_for(claims_done, claims_done, tree=tree, review=True)
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
-    message = "The work lane stopped on an unexpected error: ValueError('the lane tripped')"
+    message = "The work lane stopped on an unexpected error: the lane tripped"
     assert ErrorOccurred(code=INTERNAL, message=message) in events
     assert len(launcher.launches) == 1
 
@@ -628,7 +628,7 @@ async def test_a_task_whose_lane_crashes_ends_in_error() -> None:
     tree.failures["prepare"] = ValueError("boom")
     session, _, launcher = session_for(claims_done, tree=tree)
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="a")), 5)
-    message = "The work lane stopped on an unexpected error: ValueError('boom')"
+    message = "The work lane stopped on an unexpected error: boom"
     assert ErrorOccurred(code=INTERNAL, message=message) in events
     assert launcher.launches == []
     [task] = board(events)

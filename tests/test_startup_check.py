@@ -332,7 +332,7 @@ async def test_a_crash_is_reported_and_closing_still_stops_the_host(
 
     assert events[-1] == ErrorOccurred(
         code=INTERNAL,
-        message="The startup check lane stopped on an unexpected error: ValueError('bug')",
+        message="The startup check lane stopped on an unexpected error: bug",
     )
     assert AgentExited(agent_id="startup-check", reason="killed") in events
     await session.close()

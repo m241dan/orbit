@@ -19,7 +19,7 @@ from orbit.agent.application.ports import (
     StoreFailed,
 )
 from orbit.agent.application.storage_halt import Halting, written
-from orbit.agent.domain.refusals import STOPPING, Refused
+from orbit.agent.domain.refusals import STOPPING, Refused, reason
 from orbit.agent.domain.reviews import LaneSnapshot
 from orbit.agent.domain.sessions import (
     OPEN_UNDELETABLE,
@@ -255,7 +255,7 @@ class SessionKeeper:
         try:
             renamed = await self._rename(renaming, resuming=True)
         except Refused as refusal:
-            await self._publish(ErrorOccurred(code=refusal.code, message=refusal.message))
+            await self._publish(ErrorOccurred(code=refusal.code, message=reason(refusal)))
             return None
         if renamed is False:
             self._renaming = renaming
