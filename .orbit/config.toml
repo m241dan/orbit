@@ -55,7 +55,7 @@ watch = ["uv.lock"]
 # [roles.planner]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
 # instructions: orbit's own planner.md
-# The model of its tasks, an alias such as "opus" or a full id; unset, the CLI's default.
+# Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
 # model: unset
 # How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
 # tool_access = "restricted"
@@ -75,13 +75,13 @@ watch = ["uv.lock"]
 # merge = false
 # Whether it runs at all.
 # enabled = true
-# How hard its agents think: "low", "medium", "high", "xhigh" or "max"; unset, the CLI's default.
+# Its effort: "low", "medium", "high", "xhigh" or "max"; unset, the user config's, else the CLI's.
 # effort: unset
 
 # [roles.coder]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
 # instructions: orbit's own coder.md
-# The model of its tasks, an alias such as "opus" or a full id; unset, the CLI's default.
+# Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
 # model: unset
 # How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
 # tool_access = "full"
@@ -101,13 +101,13 @@ watch = ["uv.lock"]
 # merge = true
 # Whether it runs at all.
 # enabled = true
-# How hard its agents think: "low", "medium", "high", "xhigh" or "max"; unset, the CLI's default.
+# Its effort: "low", "medium", "high", "xhigh" or "max"; unset, the user config's, else the CLI's.
 # effort: unset
 
 # [roles.reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
 # instructions: orbit's own reviewer.md
-# The model of its tasks, an alias such as "opus" or a full id; unset, the CLI's default.
+# Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
 # model: unset
 # How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
 # tool_access = "restricted"
@@ -127,13 +127,13 @@ watch = ["uv.lock"]
 # merge = false
 # Whether it runs at all.
 # enabled = true
-# How hard its agents think: "low", "medium", "high", "xhigh" or "max"; unset, the CLI's default.
+# Its effort: "low", "medium", "high", "xhigh" or "max"; unset, the user config's, else the CLI's.
 # effort: unset
 
 # [roles.super-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
 # instructions: orbit's own super-reviewer.md
-# The model of its tasks, an alias such as "opus" or a full id; unset, the CLI's default.
+# Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
 # model = "opus"
 # How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
 # tool_access = "restricted"
@@ -153,13 +153,13 @@ watch = ["uv.lock"]
 # merge = false
 # Whether it runs at all.
 # enabled = true
-# How hard its agents think: "low", "medium", "high", "xhigh" or "max"; unset, the CLI's default.
+# Its effort: "low", "medium", "high", "xhigh" or "max"; unset, the user config's, else the CLI's.
 # effort: unset
 
 # [roles.configurator]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
 # instructions: orbit's own configurator.md
-# The model of its tasks, an alias such as "opus" or a full id; unset, the CLI's default.
+# Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
 # model: unset
 # How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
 # tool_access = "restricted"
@@ -179,7 +179,7 @@ watch = ["uv.lock"]
 # merge = false
 # Whether it runs at all.
 # enabled = true
-# How hard its agents think: "low", "medium", "high", "xhigh" or "max"; unset, the CLI's default.
+# Its effort: "low", "medium", "high", "xhigh" or "max"; unset, the user config's, else the CLI's.
 # effort: unset
 
 # A role of your own, which must set its instructions. For example:

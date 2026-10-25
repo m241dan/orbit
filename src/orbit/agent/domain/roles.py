@@ -124,8 +124,9 @@ class Role(_Config):
     model: str | None = Field(
         default=None,
         description=(
-            'The model of its tasks, an alias such as "opus" or a full id; unset, the'
-            " CLI's default."
+            "Its tasks' model, an alias such as"
+            ' "opus" or a full id;'
+            " unset, the user config's, else the CLI's."
         ),
     )
     tool_access: ToolAccess = Field(
@@ -164,8 +165,8 @@ class Role(_Config):
     effort: Effort | None = Field(
         default=None,
         description=(
-            'How hard its agents think: "low", "medium", "high", "xhigh" or "max"; unset, the'
-            " CLI's default."
+            'Its effort: "low", "medium", "high", "xhigh" or "max";'
+            " unset, the user config's, else the CLI's."
         ),
     )
 

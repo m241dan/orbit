@@ -209,6 +209,11 @@ def test_unset_fields_say_so() -> None:
     assert {"# model: unset", "# timeout_minutes: unset", "# effort: unset"} <= set(coder)
 
 
+@pytest.mark.parametrize("key", ["model", "effort"])
+def test_unset_machine_fields_say_the_user_config_sets_them(key: str) -> None:
+    assert "the user config's" in described(key, table("coder"))
+
+
 def test_built_in_instructions_name_the_file_shipped_with_orbit() -> None:
     assert "# instructions: orbit's own coder.md" in table("coder")
     assert "# instructions: orbit's own super-reviewer.md" in table("super-reviewer")
