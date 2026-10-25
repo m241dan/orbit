@@ -15,6 +15,7 @@ from orbit.agent.application.ports import Reply, ResumeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.roles import Role
+from orbit.agent.domain.runtimes import Failure
 from orbit.agent.domain.usage_limits import PLANNER_OUTAGE_NOTE
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
@@ -710,6 +711,28 @@ async def test_a_turn_failing_with_another_api_error_shows_its_own_text() -> Non
     assert errors(published) == [
         ErrorOccurred(turn_id=turn_id, agent_id="agent-1", code=AGENT_FAILED, message=message)
     ]
+
+
+async def test_a_turn_its_launcher_tells_the_api_is_down_in_says_the_planner_cant_reply() -> None:
+    published: list[Event] = []
+    chat, launcher, _ = steps_chat(chats, published=published)
+    launcher.planner_errors = ["Gateway down"]
+    launcher.failures["Gateway down"] = Failure("api_unavailable")
+    assert await chat.answer("Plan.", Settings()) == "error"
+    assert [e.message for e in errors(published)] == [PLANNER_OUTAGE_NOTE]
+
+
+@pytest.mark.parametrize("failure", [Failure("usage_limit"), None])
+async def test_a_turn_failing_otherwise_as_the_launcher_tells_shows_its_own_text(
+    failure: Failure | None,
+) -> None:
+    published: list[Event] = []
+    chat, launcher, _ = steps_chat(chats, published=published)
+    launcher.planner_errors = ["Gateway down"]
+    if failure is not None:
+        launcher.failures["Gateway down"] = failure
+    assert await chat.answer("Plan.", Settings()) == "error"
+    assert [e.message for e in errors(published)] == ["Gateway down"]
 
 
 ARCHITECT = "architect"

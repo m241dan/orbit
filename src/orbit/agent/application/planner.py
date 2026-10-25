@@ -31,7 +31,7 @@ from orbit.agent.domain.roles import (
     task_suggestion,
     timeout_ending,
 )
-from orbit.agent.domain.usage_limits import api_unavailable, outage_note
+from orbit.agent.domain.usage_limits import outage_note
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
     AGENT_FAILED,
@@ -332,7 +332,8 @@ class PlannerChat:
 
     def _heard(self, error: ErrorOccurred) -> ErrorOccurred:
         """``error`` as the user hears it: saying its role couldn't reply in place of its text
-        when that says Claude's API isn't answering."""
-        if not api_unavailable(error.message):
+        when its launcher tells that says the API isn't answering."""
+        failure = self._desk.agents.launcher(self._role).failure(error.message)
+        if failure is None or failure.kind != "api_unavailable":
             return error
         return error.model_copy(update={"message": outage_note(self._role)})
