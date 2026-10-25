@@ -531,3 +531,35 @@ def test_writing_checks_into_a_file_that_isnt_toml_is_refused() -> None:
 def test_writing_the_same_checks_again_changes_nothing(checks: ChecksProposal) -> None:
     once = with_checks(reference_with_checks(EXAMPLES, CHECKS), checks)
     assert with_checks(once, checks) == once
+
+
+def test_a_key_missing_from_the_table_before_the_heading_goes_above_it() -> None:
+    lacking = CURRENT.removesuffix("merge = true\n")
+    text = f"{lacking}\n{HEADING}\n\n{LATER_SECTIONS}"
+    update = later_updated(text)
+    assert update.additions == MERGE_ADDED
+    above, below = update.text.split(HEADING)
+    assert "merge" in above
+    assert "merge" not in below
+
+
+def test_a_runtime_only_under_the_heading_isnt_appended_again() -> None:
+    text = f"{CURRENT}\n{HEADING}\n\n{LATER_SECTIONS}"
+    assert later_updated(text) == ConfigUpdate(text, Additions())
+
+
+def test_keys_added_after_the_heading_was_appended_go_above_the_dated_line() -> None:
+    lacking = CURRENT.removesuffix("merge = true\n")
+    reference = f"{REFERENCE.replace(MERGE_LINES, '')}\n{HEADING}\n\n{RUNTIME_LINES}"
+    once = update_text(lacking, reference, TODAY, later_heading=LATER).text
+    assert once == f"{lacking}\n{ADDED}\n\n{HEADING}\n\n{RUNTIME_LINES}"
+    again = update_text(once, f"{REFERENCE}\n{HEADING}\n\n{RUNTIME_LINES}", TODAY, LATER)
+    assert again.text.startswith(f"{lacking}{MERGE_LINES}\n{ADDED}\n")
+    roles = add_instructions(once, ROLES_REFERENCE, ("coder",), TODAY, later_heading=LATER)
+    assert roles.text.startswith(f"{lacking}{CODER_LINE}\n\n{ADDED}\n")
+
+
+def test_without_the_heading_keys_go_after_the_lines_below_the_table() -> None:
+    text = f"[roles.coder]\nmodel = 'x'\n\n{HEADING}\n# runtime = 'claude'\n"
+    roles = add_instructions(text, ROLES_REFERENCE, ("coder",), TODAY)
+    assert roles.text == f"{text}{CODER_LINE}\n"

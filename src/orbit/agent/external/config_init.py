@@ -127,7 +127,9 @@ def add_roles(root: Path, today: Callable[[], date] = date.today) -> RolesResult
         init_config(root, force=False)
     built_in = read_instruction_files()
     with _naming(path):
-        update = add_instructions(text, reference, tuple(built_in), today())
+        update = add_instructions(
+            text, reference, tuple(built_in), today(), later_heading=LATER_HEADING
+        )
     copied, kept = _copy_instructions(path.parent, built_in)
     if update.text != text:
         write_whole(path, update.text)

@@ -32,6 +32,7 @@ _SETUP = "[setup]"
 _HEADER = re.compile(r"\s*(?:#\s*)?(\[\[?)\s*([\w\-.\"' ]+?)\s*\]\]?\s*(?:#.*)?")
 _COMMENTED_KEY = re.compile(r"\s*#\s*([\w-]+)\s*[=:]")
 _COMMENTED_VALUE = re.compile(r"\s*#\s*[\w-]+\s*=")
+_LATER = "#later"  # The region a later version's heading starts, no table's name.
 _QUOTES = ('"""', "'''")
 
 
@@ -245,11 +246,12 @@ def update_text(
     With ``later_heading``, the settings of ``reference`` from the line commenting it out on are
     a later version's, belonging to no table before it. Those appended go after the others,
     under that line, and a key ahead of their tables is never added to a table: it's appended
-    on its own unless ``text`` mentions it anywhere.
+    on its own unless ``text`` mentions it anywhere. In ``text`` too, a table's last line comes
+    before the line commenting it out, so keys added to the table go above it.
 
     Raises :class:`ConfigError` if ``text`` isn't valid TOML.
     """
-    file = _read(text)
+    file = _read(text, later_heading)
     current, later = _split(_scanned(reference), later_heading)
     part = _joined(_part(file, current, _regions(current)), _later_part(file, later))
     if not part.insertions and not part.sections:
@@ -271,7 +273,11 @@ def instructions_setting(name: str) -> str:
 
 
 def add_instructions(
-    text: str, reference: str, roles: Sequence[str], today: date
+    text: str,
+    reference: str,
+    roles: Sequence[str],
+    today: date,
+    later_heading: str | None = None,
 ) -> InstructionsUpdate:
     """``text``, a project file, with :func:`instructions_setting` commented out for each of the
     built-in ``roles`` whose table neither sets its instructions nor has them commented out with
@@ -280,14 +286,15 @@ def add_instructions(
     A table counts as there if it's set or its header is commented out, as for
     :func:`update_text`; the line follows its last line. Each role whose table isn't there gets
     the table appended at the end, as ``reference`` has it with the line after its last, all
-    under one :data:`ADDED_NOTE`. A role whose table has no header of its own, being set only
-    inline or by dotted keys, gets no line. Every line of ``text`` stays as it was, in order.
-    The lines it reports say whether each role's line is under a set header or a commented-out
-    one, the tables appended counting as commented out, and which roles got none.
+    under one :data:`ADDED_NOTE`. With ``later_heading``, a table's last line comes before the
+    line commenting it out, as for :func:`update_text`. A role whose table has no header of its
+    own, being set only inline or by dotted keys, gets no line. Every line of ``text`` stays as
+    it was, in order. The lines it reports say whether each role's line is under a set header or
+    a commented-out one, the tables appended counting as commented out, and which roles got none.
 
     Raises :class:`ConfigError` if ``text`` isn't valid TOML.
     """
-    file = _read(text)
+    file = _read(text, later_heading)
     lacking = _lacking_instructions(file, roles)
     insertions = _instruction_insertions(file, lacking)
     lines = _instruction_lines(file, lacking)
@@ -336,14 +343,15 @@ def reference_with_checks(reference: str, checks: ChecksProposal) -> str:
     return "\n".join(_spliced(lines, spans)) + "\n"
 
 
-def _read(text: str) -> _File:
-    """``text`` as an update reads it. Raises :class:`ConfigError` if it isn't valid TOML."""
+def _read(text: str, heading: str | None = None) -> _File:
+    """``text`` as an update reads it, the comment that's ``heading`` ending the region before
+    it. Raises :class:`ConfigError` if it isn't valid TOML."""
     try:
         data = tomlkit.parse(text).unwrap()
     except TOMLKitError as exc:
         raise ConfigError(str(exc)) from None
     lines = _scanned(text)
-    return _File(data, lines, _regions(lines))
+    return _File(data, lines, _regions(lines, heading))
 
 
 def _set_keys(data: dict[str, Any], table: str) -> set[str] | None:
@@ -411,11 +419,7 @@ def _split(lines: list[_Line], heading: str | None) -> tuple[list[_Line], list[_
     if heading is None:
         return lines, []
     at = next(
-        (
-            index
-            for index, line in enumerate(lines)
-            if line.kind is _Kind.COMMENT and line.text == f"# {heading}"
-        ),
+        (index for index, line in enumerate(lines) if _is_heading(line, heading)),
         len(lines),
     )
     return lines[:at], lines[at:]
@@ -462,16 +466,32 @@ def _joined(first: _Part, second: _Part) -> _Part:
     )
 
 
-def _regions(lines: Sequence[_Line]) -> list[_Region]:
-    """The top level's region of ``lines``, then each table's, in order."""
-    headers = [index for index, line in enumerate(lines) if line.kind is _Kind.HEADER]
+def _regions(lines: Sequence[_Line], heading: str | None = None) -> list[_Region]:
+    """The top level's region of ``lines``, then each table's, in order; with ``heading``, each
+    comment that's it starts a region of no table, under :data:`_LATER`."""
+    headers = [index for index, line in enumerate(lines) if _starts_region(line, heading)]
     starts = [0, *(_comments_above(lines, index) for index in headers)]
     bounds = zip(starts, [*starts[1:], len(lines)], strict=True)
-    names = ["", *(lines[index].name for index in headers)]
+    names = ["", *(_name(lines[index]) for index in headers)]
     return [
         _Region(name, start, _end(lines, start, stop))
         for name, (start, stop) in zip(names, bounds, strict=True)
     ]
+
+
+def _name(line: _Line) -> str:
+    """The name of the region ``line`` starts: its header's, or :data:`_LATER` for a heading."""
+    return line.name or _LATER
+
+
+def _starts_region(line: _Line, heading: str | None) -> bool:
+    """Whether ``line`` is a header or the comment that's ``heading``."""
+    return line.kind is _Kind.HEADER or (heading is not None and _is_heading(line, heading))
+
+
+def _is_heading(line: _Line, heading: str) -> bool:
+    """Whether ``line`` is the comment that's ``heading``."""
+    return line.kind is _Kind.COMMENT and line.text == f"# {heading}"
 
 
 def _comments_above(lines: Sequence[_Line], index: int) -> int:
