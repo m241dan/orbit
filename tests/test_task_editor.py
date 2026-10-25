@@ -11,6 +11,7 @@ from orbit.protocol import (
     Settings,
     SettingsChanged,
     TaskSpec,
+    WorkspaceEntry,
 )
 from orbit.tui import OrbitApp
 from orbit.tui.settings_pickers import SettingsPickers
@@ -34,6 +35,13 @@ SECURITY = AgentEntry(
     name="security", label="security", conversational=False, lane="security", effort="high"
 )
 AGENTS = (PLANNER, CODER, SECURITY)
+CATALOG = Catalog(
+    workspaces=(WorkspaceEntry(id="w", label="project", sessions=(), agents=AGENTS),),
+    agents=AGENTS,
+    triggers=(),
+    lanes=(),
+)
+"""A catalog serving one workspace, whose roles are those of :data:`AGENTS`."""
 
 
 class EditorApp(App[None]):
@@ -433,9 +441,7 @@ async def test_a_new_tasks_role_is_the_coder_and_picking_a_role_fills_its_defaul
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         await show_settings(session, pilot, Settings(model="opus", tool_access="full"))
-        await feed_events(
-            session, pilot, Catalog(workspaces=(), agents=AGENTS, triggers=(), lanes=())
-        )
+        await feed_events(session, pilot, CATALOG)
         await open_task_list(pilot)
         await pilot.press("enter", "i", *"Audit it", "escape")
         assert role_and_effort(app) == ("Coder · work", "unset")
@@ -456,8 +462,7 @@ async def test_picking_a_role_keeps_a_model_changed_first() -> None:
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         await show_settings(session, pilot, Settings(tool_access="full"))
-        catalog = Catalog(workspaces=(), agents=AGENTS, triggers=(), lanes=())
-        await feed_events(session, pilot, catalog)
+        await feed_events(session, pilot, CATALOG)
         await open_task_list(pilot)
         await pilot.press("enter", "i", *"Audit it", "escape")
         await pilot.press("j", "j", "j", "enter", "j", "enter")  # opus

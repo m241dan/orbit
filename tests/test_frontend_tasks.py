@@ -8,6 +8,7 @@ from orbit.protocol import (
     AddTask,
     AgentEntry,
     BusyChanged,
+    Catalog,
     EditTask,
     ErrorOccurred,
     FireTrigger,
@@ -22,8 +23,10 @@ from orbit.protocol import (
     TaskState,
     TurnFinished,
     Usage,
+    WorkspaceEntry,
 )
-from orbit.tui.view.task_editor import TaskChoices
+from orbit.tui.view.opening import Opening
+from orbit.tui.view.task_editor import TaskChoices, role_defaults
 from tests.frontend_fakes import Shell
 from tests.session_apps import CATALOG
 from tests.tui_fakes import board, opened
@@ -174,10 +177,43 @@ async def test_the_editor_opens_with_the_default_settings_before_any_are_reporte
     assert choices == TaskChoices(Settings())
 
 
-async def test_the_editor_offers_the_agents_of_the_latest_catalog() -> None:
-    shell = Shell()
-    security = AgentEntry(name="security", label="security", conversational=False)
-    await shell.feed(CATALOG.model_copy(update={"agents": (security,)}))
+SECURITY = AgentEntry(name="security", label="security", conversational=False, lane="security")
+AUDITOR = AgentEntry(name="auditor", label="auditor", conversational=False)
+IN_A = SECURITY.model_copy(update={"effort": "high", "model": "opus"})
+IN_B = SECURITY.model_copy(update={"effort": "low", "tool_access": "full"})
+TWO = Catalog(
+    workspaces=(
+        WorkspaceEntry(id="a", label="a", path="/src/a", sessions=(), agents=(IN_A, AUDITOR)),
+        WorkspaceEntry(id="b", label="b", path="/src/b", sessions=(), agents=(IN_B,)),
+    ),
+    agents=(IN_A, AUDITOR),
+    triggers=(),
+    lanes=(),
+)
+
+
+def edited_choices(shell: Shell) -> TaskChoices:
+    """What the editor ``shell``'s frontend opens on a new task offers."""
     shell.frontend.edit_task(None)
     [(_, choices, _)] = shell.app.editors
-    assert choices.agents == (security,)
+    return choices
+
+
+async def test_the_editor_offers_the_agents_of_the_open_sessions_workspace() -> None:
+    shell = Shell(Opening(repository="/src/a"))
+    await shell.feed(TWO)
+    assert edited_choices(shell).agents == (IN_A, AUDITOR)
+
+
+async def test_another_workspaces_agents_and_their_defaults_arent_offered() -> None:
+    shell = Shell(Opening(repository="/src/b"))
+    await shell.feed(TWO)
+    choices = edited_choices(shell)
+    assert choices.agents == (IN_B,)
+    assert role_defaults(choices.settings, IN_B, ()) == Settings(tool_access="full", effort="low")
+
+
+async def test_before_a_workspace_is_open_the_editor_offers_no_agents() -> None:
+    shell = Shell(linked=True)
+    await shell.feed(TWO)
+    assert edited_choices(shell).agents == ()

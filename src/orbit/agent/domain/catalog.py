@@ -62,6 +62,17 @@ def agent_entry(name: str, role: Role, conversational: bool, personal: bool) -> 
     )
 
 
+def agent_entries(
+    roles: Mapping[str, Role], conversational: Iterable[str], personal: Iterable[str]
+) -> tuple[AgentEntry, ...]:
+    """The catalog's entries for the agents of ``roles``, by name, those in ``conversational``
+    ones the user can message and those in ``personal`` personal."""
+    talking, own = frozenset(conversational), frozenset(personal)
+    return tuple(
+        agent_entry(name, role, name in talking, name in own) for name, role in roles.items()
+    )
+
+
 def workspace_entry(
     workspace: tuple[str, str | None, str | None],
     sessions: tuple[SessionSummary, ...],

@@ -79,7 +79,7 @@ from orbit.agent.application.work_lane import Beside, WorkLane
 from orbit.agent.application.work_turns import WorkParts, WorkTurns
 from orbit.agent.domain.activity import Activity
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.catalog import trigger_names, workspace_entry
+from orbit.agent.domain.catalog import agent_entries, trigger_names, workspace_entry
 from orbit.agent.domain.ownership import WorkspaceOwner, queued_dropped_note, read_only_note
 from orbit.agent.domain.refusals import STOPPING, Refused
 from orbit.agent.domain.reviews import ReviewPlanner
@@ -670,7 +670,8 @@ class WorkspaceHost:
         return self._greeting
 
     async def entry(self) -> WorkspaceEntry:
-        """This workspace's entry in the catalog: its sessions as they are now."""
+        """This workspace's entry in the catalog: its sessions as they are now, and its agents'
+        enabled roles."""
         return await self._switcher.entry()
 
     @property
@@ -1094,16 +1095,18 @@ class WorkspaceHost:
 
     def _entry(self, sessions: tuple[SessionSummary, ...]) -> WorkspaceEntry:
         """This workspace's entry in the catalog, holding ``sessions``, the open one's state as
-        a connection joining would see it."""
+        a connection joining would see it, and its agents' enabled roles."""
         live = self._states.current(joining=True).values()
         workspace = (self._workspace_id, _workspace_label(self._workspace), self._workspace)
-        return workspace_entry(
+        entry = workspace_entry(
             workspace,
             sessions,
             read_only=self._takeover.read_only,
             managed=self._managed,
             live=live,
         )
+        agents = agent_entries(self.roles, self.conversational, self.personal)
+        return entry.model_copy(update={"agents": agents})
 
     def _steps_shown(self) -> tuple[tuple[StepState, ...], str]:
         """The verification steps the panel shows, and their title: the startup check's while

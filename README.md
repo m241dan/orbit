@@ -297,14 +297,15 @@ The Conversation window's title ends with the open session's name, cut to 30 cha
 The task list queues prompts to run later. Each task has its own prompt, role, model, tool access
 and effort, set in the task editor's six fields: **Title**, the prompt's first line, which is what
 the task list shows; **Prompt**, the rest of it, in a box that scrolls; **Role**, the role whose
-agent takes the task, picked among the enabled roles that take tasks (those that aren't
-conversational), each shown with its lane (`Coder · work`) and a personal role marked so
+agent takes the task, picked among the roles enabled in the session's workspace that take tasks
+(those that aren't conversational), each shown with its lane (`Coder · work`) and a personal role marked so
 (`helper · helper · personal`; see [Your personal roles](#your-personal-roles)), and `coder` for a
 new task; **Model**;
 **Tool access**; and **Effort**: unset, `low`, `medium`, `high`, `xhigh` or `max`, where unset
 leaves it to the role's (see `effort` under
 [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)). Picking a role sets the model, tool
-access and effort to that role's defaults, except those you've already picked in this edit. `j`/`k`
+access and effort to that role's defaults, as the session's workspace configures it, except those
+you've already picked in this edit. `j`/`k`
 pick a field, `J`/`K` scroll the prompt box one line at a time (whichever field is selected), `i`
 types in the title or prompt (`esc` stops; `enter` stops in the title and adds a line in the
 prompt), `enter` on role, model, tools or effort opens a picker, `ctrl+s` saves (from anywhere,
@@ -1123,10 +1124,10 @@ merges, whether it's enabled and how hard its agents think:
   every agent's environment, so one set where orbit runs never overrides orbit's setting or the
   CLI's default.
 
-In the TUI, the task editor's **Role** field picks a task's role among the enabled roles that
-aren't conversational, each shown with its lane (`Coder · work`) and a personal role marked
-`personal` (`helper · helper · personal`), and fills in the role's model,
-tool access and effort; its **Effort** field sets the task's own effort, or leaves it unset for the
+In the TUI, the task editor's **Role** field picks a task's role among the roles enabled in the
+session's workspace that aren't conversational, each shown with its lane (`Coder · work`) and a
+personal role marked `personal` (`helper · helper · personal`), and fills in the role's model,
+tool access and effort as that workspace configures them; its **Effort** field sets the task's own effort, or leaves it unset for the
 role's (see [Tasks](#tasks)). `ctrl+y` picks the effort of the conversational role whose tab is
 shown, or the planner's elsewhere, as `ctrl+o` and `ctrl+l` pick its model and tool access.
 

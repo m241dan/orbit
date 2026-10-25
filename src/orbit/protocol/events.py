@@ -570,20 +570,6 @@ class WorkspaceCloning(_Message):
     workspace: str | None = None
 
 
-class WorkspaceEntry(_Message):
-    """Workspace ``id``, shown as ``label``, at ``path`` on the backend's host, if it has one,
-    whether it's ``read_only``, as another orbit owns its repository, whether it's ``managed``,
-    a clone orbit made at ``path``, which purging it deletes, and its ``sessions`` as the list
-    of sessions shows them."""
-
-    id: str
-    label: str
-    path: str | None = None
-    read_only: bool = False
-    managed: bool = False
-    sessions: tuple[SessionSummary, ...]
-
-
 class AgentEntry(_Message):
     """An agent role ``name``, shown as ``label``; ``conversational`` if the user can message
     it. It runs in ``lane``, and its ``model``, ``tool_access`` and ``effort`` are the defaults
@@ -598,6 +584,22 @@ class AgentEntry(_Message):
     tool_access: ToolAccess = "restricted"
     effort: Effort | None = None
     personal: bool = False
+
+
+class WorkspaceEntry(_Message):
+    """Workspace ``id``, shown as ``label``, at ``path`` on the backend's host, if it has one,
+    whether it's ``read_only``, as another orbit owns its repository, whether it's ``managed``,
+    a clone orbit made at ``path``, which purging it deletes, its ``sessions`` as the list of
+    sessions shows them, and the ``agents`` of its enabled roles, with their lanes and
+    defaults."""
+
+    id: str
+    label: str
+    path: str | None = None
+    read_only: bool = False
+    managed: bool = False
+    sessions: tuple[SessionSummary, ...]
+    agents: tuple[AgentEntry, ...] = ()
 
 
 class TriggerEntry(_Message):

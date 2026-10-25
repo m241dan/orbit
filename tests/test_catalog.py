@@ -3,6 +3,7 @@
 from textual.app import App
 
 from orbit.protocol import (
+    AgentEntry,
     Catalog,
     SessionStateChanged,
     SessionSummary,
@@ -20,12 +21,13 @@ NOW = SessionSummary(id="now", name="today", current=True, active=True, viewers=
 OLD = SessionSummary(id="old", name="auth rework")
 FAR = SessionSummary(id="far", name="elsewhere", active=True)
 RUNNING = SessionStateChanged(session="now", active=True, state="running", viewers=1)
+SECURITY = AgentEntry(name="security", label="security", conversational=False)
 TWO = Catalog(
     workspaces=(
-        WorkspaceEntry(id="w1", label="one", sessions=(NOW, OLD)),
+        WorkspaceEntry(id="w1", label="one", sessions=(NOW, OLD), agents=(SECURITY,)),
         WorkspaceEntry(id="w2", label="two", sessions=(FAR, NOW)),
     ),
-    agents=(),
+    agents=(SECURITY,),
     triggers=(),
     lanes=(),
 )
@@ -33,7 +35,7 @@ TWO = Catalog(
 
 def test_it_lists_nothing_before_a_catalog() -> None:
     state = CatalogState()
-    assert (state.workspaces, state.sessions("w1")) == ((), ())
+    assert (state.workspaces, state.sessions("w1"), state.agents("w1")) == ((), (), ())
 
 
 def test_a_catalog_lists_its_workspaces_and_each_ones_sessions() -> None:
@@ -43,6 +45,15 @@ def test_a_catalog_lists_its_workspaces_and_each_ones_sessions() -> None:
     assert state.sessions("w2") == (FAR, NOW)
     assert state.sessions("gone") == ()
     assert state.sessions(None) == ()
+
+
+def test_each_workspace_keeps_its_own_agents_through_state_changes() -> None:
+    state = CatalogState()
+    state.follow(TWO)
+    state.follow_state(RUNNING)
+    assert state.agents("w1") == (SECURITY,)
+    assert state.agents("w2") == ()
+    assert state.agents("gone") == state.agents(None) == ()
 
 
 def test_a_state_change_applies_to_its_session_in_every_workspace_alone() -> None:

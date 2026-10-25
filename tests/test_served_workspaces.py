@@ -6,6 +6,7 @@ import asyncio
 from orbit.agent import ControlPlane, Verification, WorkspaceHost, WorkspaceOwner
 from orbit.agent.domain.workspaces import ATTACH_FIRST
 from orbit.protocol import (
+    BUILT_IN_ROLE_NAMES,
     CODER,
     INVALID,
     PLANNER,
@@ -242,6 +243,69 @@ async def test_a_role_personal_only_in_a_later_workspace_isnt_listed_personal() 
     assert isinstance(catalog, Catalog)
     assert [agent.name for agent in catalog.agents if agent.personal] == []
     assert second.personal == {"helper"}
+
+
+async def catalog_served(*hosts: WorkspaceHost) -> Catalog:
+    """The catalog a control plane serving ``hosts`` sends a connection saying hello."""
+    plane = ControlPlane(list(hosts))
+    connection = plane.connect()
+    await say(connection, "hello", HELLO)
+    _, catalog = payloads(taken(connection))
+    await plane.close()
+    assert isinstance(catalog, Catalog)
+    return catalog
+
+
+def agents_by_workspace(catalog: Catalog) -> list[dict[str, AgentEntry]]:
+    """The agents of each workspace ``catalog`` lists, by name."""
+    return [{agent.name: agent for agent in entry.agents} for entry in catalog.workspaces]
+
+
+async def test_each_workspaces_entry_carries_the_lane_and_defaults_of_its_own_roles() -> None:
+    security = ROLES[REVIEWER].model_copy(update={"lane": "security"})
+    high, low = (security.model_copy(update={"effort": effort}) for effort in ("high", "low"))
+    personal = frozenset({"security"})
+    first, _ = agent_workspace("a", roles={**ROLES, "security": high})
+    second, _ = agent_workspace("b", roles={**ROLES, "security": low}, personal=personal)
+    catalog = await catalog_served(first, second)
+
+    in_a, in_b = agents_by_workspace(catalog)
+    assert in_a["security"] == AgentEntry(
+        name="security", label="security", conversational=False, lane="security", effort="high"
+    )
+    assert in_b["security"] == in_a["security"].model_copy(
+        update={"effort": "low", "personal": True}
+    )
+    planner = AgentEntry(name=PLANNER, label="Planner", conversational=True, lane="planner")
+    assert in_a[PLANNER] == in_b[PLANNER] == planner
+
+
+async def test_a_workspaces_entry_leaves_out_the_roles_it_disables_or_lacks() -> None:
+    auditor = ROLES[REVIEWER].model_copy(update={"lane": "audit"})
+    security = ROLES[REVIEWER].model_copy(update={"lane": "security"})
+    first, _ = agent_workspace("a", roles={**ROLES, "auditor": auditor, "security": security})
+    disabled = auditor.model_copy(update={"enabled": False})
+    second, _ = agent_workspace("b", roles={**ROLES, "auditor": disabled})
+    catalog = await catalog_served(first, second, workspace("c"))
+
+    in_a, in_b, in_c = agents_by_workspace(catalog)
+    assert list(in_a) == [*BUILT_IN_ROLE_NAMES, "auditor", "security"]
+    assert (list(in_b), list(in_c)) == (list(BUILT_IN_ROLE_NAMES), [])
+    assert [agent.name for agent in catalog.agents] == list(in_a)
+
+
+async def test_the_catalog_a_change_sends_carries_each_workspaces_agents() -> None:
+    first, _ = agent_workspace("a")
+    plane = ControlPlane([first, workspace("b")])
+    connection = await joined(plane, host=first)
+    taken(connection)
+
+    await say(connection, "rename", RenameSession(session_id="a-1", name="Renamed"))
+    [catalog] = [e for e in payloads(taken(connection)) if isinstance(e, Catalog)]
+    await plane.close()
+
+    in_a, in_b = agents_by_workspace(catalog)
+    assert (list(in_a), list(in_b)) == (list(BUILT_IN_ROLE_NAMES), [])
 
 
 def read_only_in(envelopes: list[EventEnvelope]) -> list[dict[str, bool]]:

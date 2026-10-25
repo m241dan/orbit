@@ -528,9 +528,9 @@ class Frontend:
 
     def edit_task(self, current: TaskState | None) -> None:
         """Open the editor on the task ``current``, or a new one, offering the settings shown,
-        those of the role the prompt talks to, and the catalog's agents, unless it can't be
-        edited, which the user is told; the list changes when the backend reports the new task
-        list."""
+        those of the role the prompt talks to, and the agents of the workspace this frontend is
+        on, as the catalog lists them, unless it can't be edited, which the user is told; the
+        list changes when the backend reports the new task list."""
         refusal = None if current is None else edit_refusal(current)
         if refusal is not None:
             self._app.warn(refusal)
@@ -545,9 +545,8 @@ class Frontend:
                 await self._act("edit_task", EditTask(task_id=current.id, task=result))
 
         task = None if current is None else current.task
-        choices = TaskChoices(
-            self.router.seats.settings or Settings(), self.navigation.catalog.agents
-        )
+        agents = self.navigation.catalog.agents(self.navigation.place.workspace)
+        choices = TaskChoices(self.router.seats.settings or Settings(), agents)
         self._app.edit_task(task, choices, saved)
 
     def list_sessions(self) -> None:

@@ -102,8 +102,11 @@ it, its `model`, `tool_access` and `effort`, as a `Settings` holds them, from th
 served that has a role of that name; these were added to version 2, defaulting to the `work`
 lane, the backend's model, `restricted` and no effort. It's `personal` when the user's own config
 defines it, rather than orbit or the project (a personal role), in that first workspace; this was
-added to version 2 too, defaulting to false. Each
-session carries its state (see [Session state](#session-state)).
+added to version 2 too, defaulting to false. Each workspace also carries its own `agents`: the
+roles enabled there, each with that workspace's lane, defaults and `conversational` and
+`personal` flags, so a frontend offers the task editor the roles of the workspace it's on, with
+that workspace's defaults, rather than the catalog's merged list; this was added to version 2,
+defaulting to none. Each session carries its state (see [Session state](#session-state)).
 
 `Hello` attaches the connection to nothing, and nothing more reaches it until its first
 `Attach(workspace, session)` (see [Attaching](#attaching)); every command but `Attach` and the

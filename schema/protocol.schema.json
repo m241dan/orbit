@@ -3510,8 +3510,16 @@
       "type": "object"
     },
     "WorkspaceEntry": {
-      "description": "Workspace ``id``, shown as ``label``, at ``path`` on the backend's host, if it has one,\nwhether it's ``read_only``, as another orbit owns its repository, whether it's ``managed``,\na clone orbit made at ``path``, which purging it deletes, and its ``sessions`` as the list\nof sessions shows them.",
+      "description": "Workspace ``id``, shown as ``label``, at ``path`` on the backend's host, if it has one,\nwhether it's ``read_only``, as another orbit owns its repository, whether it's ``managed``,\na clone orbit made at ``path``, which purging it deletes, its ``sessions`` as the list of\nsessions shows them, and the ``agents`` of its enabled roles, with their lanes and\ndefaults.",
       "properties": {
+        "agents": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/AgentEntry"
+          },
+          "title": "Agents",
+          "type": "array"
+        },
         "id": {
           "title": "Id",
           "type": "string"

@@ -1,5 +1,5 @@
-"""The latest catalog's workspaces and sessions, which every picker reads, and its agents, whose
-roles the task editor offers."""
+"""The latest catalog's workspaces and sessions, which every picker reads, and each workspace's
+agents, whose roles the task editor offers."""
 
 from orbit.protocol import (
     AgentEntry,
@@ -14,17 +14,15 @@ from orbit.tui.view.workspaces import with_states
 
 class CatalogState:
     """Keeps the workspaces the latest ``Catalog`` lists, as ``SessionStateChanged`` changes
-    their sessions: the one copy the hosts read, so every picker shows the same states; and the
-    agents it lists."""
+    their sessions, with each one's agents: the one copy the hosts read, so every picker shows
+    the same states."""
 
     def __init__(self) -> None:
         self.workspaces: tuple[WorkspaceEntry, ...] = ()
-        self.agents: tuple[AgentEntry, ...] = ()
 
     def follow(self, catalog: Catalog) -> None:
-        """Keep the workspaces and agents ``catalog`` lists."""
+        """Keep the workspaces ``catalog`` lists."""
         self.workspaces = catalog.workspaces
-        self.agents = catalog.agents
 
     def follow_state(self, changed: SessionStateChanged) -> None:
         """Note ``changed``'s session's state, in whichever workspace lists it."""
@@ -33,3 +31,8 @@ class CatalogState:
     def sessions(self, workspace: str | None) -> tuple[SessionSummary, ...]:
         """The sessions of the workspace ``workspace``; none if it isn't listed."""
         return workspace_sessions(self.workspaces, workspace)
+
+    def agents(self, workspace: str | None) -> tuple[AgentEntry, ...]:
+        """The agents of the workspace ``workspace``; none if it isn't listed."""
+        entry = next((entry for entry in self.workspaces if entry.id == workspace), None)
+        return entry.agents if entry else ()
