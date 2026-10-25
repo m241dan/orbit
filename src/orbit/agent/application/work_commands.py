@@ -98,7 +98,8 @@ class WorkCommands:
     taking ownership, those that start work are queued, in order, rather than run, each later
     run in the span current as it was queued, its own command's, so what it starts links
     there. A task added, accepted or edited starts at once if its lane starts by itself; one
-    added or edited into a disabled role is refused, as is a trigger whose role is disabled."""
+    added, accepted or edited into a disabled role is refused, as is a trigger whose role is
+    disabled."""
 
     def __init__(self, parts: CommandParts) -> None:
         self._parts = parts
@@ -248,7 +249,11 @@ class WorkCommands:
                 assert_never(command)
 
     async def _accept(self, task_id: str) -> None:
-        """Accept a draft, if it is one, and start it if its lane starts by itself."""
+        """Accept a draft, if it is one and its role isn't disabled, and start it if its lane
+        starts by itself."""
+        draft = self._parts.tasks.board.find(task_id)
+        if draft is not None and draft.status == "draft":
+            check_enabled(self._roles(), draft.task.role)
 
         def accept(board: TaskBoard) -> TaskState:
             board.accept(task_id)

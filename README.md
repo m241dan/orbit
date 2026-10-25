@@ -1104,8 +1104,8 @@ merges, whether it's enabled and how hard its agents think:
   hiding `ctrl+g`, as a disabled `configurator` does `configure-checks` and `ctrl+e`, and firing
   either is then refused as an unknown trigger. A message to a disabled `planner`, or resetting its
   conversation, is refused (`planner is disabled in this project's configuration.`), as are adding
-  a task in a disabled role or editing one into it, naming the role, and `ctrl+r` while a task in
-  one is still to run. Nothing runs such a task, which stays on the task list until you edit or
+  a task in a disabled role, editing one into it or accepting a draft in it, naming the role, and
+  `ctrl+r` while a task in one is still to run. Nothing runs such a task, which stays on the task list until you edit or
   remove it, and a failing startup check adds no draft while the `coder` is disabled.
 - `effort`: how hard its agents think: `low`, `medium`, `high`, `xhigh` or `max`, the levels
   `claude --help` lists; any other value is refused, listing those. Left out, the CLI's default.

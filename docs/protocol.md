@@ -516,8 +516,9 @@ is refused with `unknown`: `No task with id 't9'.`
   verified (`Task 't3' can't be edited while it runs.`), and with `invalid` for a review orbit
   queued itself, whose batch is spent: `Reviews can't be edited; remove it instead.`
 - `AcceptTask(task_id)` makes the draft task `task_id`, one the planner proposed, a pending
-  task, to be run. It's refused with `invalid` for a task that isn't a draft: `Task 't3' isn't
-  a draft.`
+  task, to be run. It's refused with `not_configured` for a draft in a disabled role, as `AddTask`
+  and `EditTask` are, leaving it a draft, and with `invalid` for a task that isn't a draft: `Task
+  't3' isn't a draft.`
 - `RemoveTask(task_id)` takes task `task_id` off the list, and out of its review batch, if any;
   the tasks fixing it fix what it fixed instead, or become tasks of their own. It's refused with
   `busy` while the task runs: `Task 't3' can't be removed while it runs.`

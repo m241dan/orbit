@@ -1,5 +1,5 @@
 """Roles with ``enabled = false``: left out of the catalog with their triggers and lanes, queuing
-no reviews, and refusing the work asked of them: messages, tasks and runs."""
+no reviews, and refusing the work asked of them: messages, tasks, accepted drafts and runs."""
 
 import asyncio
 
@@ -11,16 +11,19 @@ from orbit.protocol import (
     CODER,
     CONFIGURATOR,
     CONFIGURE_CHECKS,
+    INVALID,
     NOT_CONFIGURED,
     PLANNER,
     REVIEWER,
     SUPER_REVIEW,
     SUPER_REVIEWER,
     UNKNOWN,
+    AcceptTask,
     AddTask,
     BusyChanged,
     Catalog,
     Command,
+    CommandAccepted,
     CommandRefused,
     EditTask,
     Event,
@@ -34,6 +37,7 @@ from orbit.protocol import (
 )
 from orbit.tui.view.triggers import trigger_key_labels
 from tests.agent_fakes import (
+    ACCEPTED,
     HELLO,
     ROLES,
     Configurator,
@@ -208,6 +212,40 @@ async def test_editing_a_task_into_a_disabled_role_is_refused_naming_it() -> Non
     await session.close()
     assert events[-1] == disabled(CODER)
     assert [state.task.role for state in board_of(session).tasks] == [CONFIGURATOR]
+
+
+async def test_accepting_a_draft_in_a_disabled_role_is_refused_leaving_it_a_draft() -> None:
+    session, _, _ = session_for(roles=disabling(CODER))
+    board_of(session).add_draft(CODE)
+    events = await refusal_of(session, AcceptTask(task_id="1"))
+    await session.close()
+    assert events[-1] == disabled(CODER)
+    assert [state.status for state in board_of(session).tasks] == ["draft"]
+
+
+async def test_accepting_a_task_in_a_disabled_role_that_isnt_a_draft_is_refused_as_such() -> None:
+    session, _, _ = session_for(roles=disabling(CODER))
+    put_on_board(session, CODE)
+    events = await refusal_of(session, AcceptTask(task_id="1"))
+    await session.close()
+    assert events[-1] == refused(INVALID, "Task '1' isn't a draft.")
+
+
+async def test_accepting_a_missing_task_with_a_role_disabled_is_refused_as_unknown() -> None:
+    session, _, _ = session_for(roles=disabling(CODER))
+    events = await refusal_of(session, AcceptTask(task_id="9"))
+    await session.close()
+    assert events[-1] == refused(UNKNOWN, "No task with id '9'.")
+
+
+async def test_with_every_role_enabled_accepting_a_coder_draft_makes_it_pending() -> None:
+    session, _, _ = session_for()
+    board_of(session).add_draft(CODE)
+    await send(session, AcceptTask(task_id="1"))
+    events = await events_until(session, of_type(CommandAccepted))
+    await session.close()
+    assert events[-1] == ACCEPTED
+    assert [state.status for state in board_of(session).tasks] == ["pending"]
 
 
 async def test_running_tasks_with_one_pending_in_a_disabled_role_is_refused_naming_it() -> None:
