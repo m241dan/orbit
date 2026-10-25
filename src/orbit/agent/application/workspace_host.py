@@ -83,7 +83,14 @@ from orbit.agent.domain.catalog import trigger_names, workspace_entry
 from orbit.agent.domain.ownership import WorkspaceOwner, queued_dropped_note, read_only_note
 from orbit.agent.domain.refusals import STOPPING, Refused
 from orbit.agent.domain.reviews import ReviewPlanner
-from orbit.agent.domain.roles import Role, disabled_roles, merging_lane, role_task, task_lanes
+from orbit.agent.domain.roles import (
+    Role,
+    disabled_roles,
+    merging_lane,
+    review_lane,
+    role_task,
+    task_lanes,
+)
 from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
@@ -91,7 +98,6 @@ from orbit.protocol import (
     INVALID,
     PLANNER,
     REVIEW_ROLES,
-    REVIEWER,
     ActivateSession,
     Attach,
     DeleteSession,
@@ -179,7 +185,7 @@ class WorkspaceHost:
     role, each with its own conversation, settings and turns in its role's lane; ``WorkLane``
     holds the rules of a task run: verification and fixes;
     ``WorkTurns`` decides when it runs; ``ReviewLane`` queues the reviews and runs them on the
-    runner of the reviewer's lane, if that isn't the work lane; ``SessionSwitcher`` switches
+    runner of the review roles' lane, if that isn't the work lane; ``SessionSwitcher`` switches
     between saved sessions; ``WorkCommands`` handles the other commands; ``SessionHistory``
     answers ``History``. Its ``Outbox`` stamps its
     events, in envelopes naming the workspace by ``workspace_id``, and its ``Connections`` route
@@ -836,14 +842,14 @@ class WorkspaceHost:
 
     def _review_lane(self) -> ReviewLane | None:
         """The review lane, if reviews are on and run beside the work: in a tree, with a review
-        role enabled and the reviewer in a lane of its own; none otherwise. Only the enabled
-        review roles' reviews are queued."""
+        role enabled and the enabled ones in a lane of their own; none otherwise. Only the
+        enabled review roles' reviews are queued."""
         desk = self._desk
         if desk is None or not desk.agents.review or desk.agents.tree is None:
             return None
         roles = desk.agents.roles
         reviewers = REVIEW_ROLES - disabled_roles(roles)
-        if not reviewers or roles[REVIEWER].lane == merging_lane(roles):
+        if not reviewers or review_lane(roles) == merging_lane(roles):
             return None
         planner = ReviewPlanner(desk.agents.review_limits, reviewers)
         hooks = ReviewHooks(

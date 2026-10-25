@@ -37,6 +37,9 @@ from orbit.protocol import (
     BUILT_IN_ROLE_NAMES,
     CODER,
     NOT_CONFIGURED,
+    REVIEW_ROLES,
+    REVIEWER,
+    SUPER_REVIEWER,
     TIMED_OUT,
     WORK_LANE,
     Effort,
@@ -276,21 +279,40 @@ def lane_clashes(roles: Mapping[str, Role]) -> list[str]:
 def worktree_lane_clashes(roles: Mapping[str, Role]) -> list[str]:
     """Why the enabled roles among ``roles`` that work in the worktree can't, if they're in more
     than one lane, naming them by lane: there's one worktree, and lanes run beside each other."""
+    worktree = {
+        name: role for name, role in roles.items() if role.enabled and role.workspace == "worktree"
+    }
+    return _lanes_apart('the enabled roles with workspace = "worktree"', worktree)
+
+
+def review_lane_clashes(roles: Mapping[str, Role]) -> list[str]:
+    """Why the enabled reviewer and super-reviewer among ``roles`` can't be where they are, if
+    they're in different lanes, naming them by lane: orbit's reviews keep their rules only in the
+    review lane, which runs one lane's roles."""
+    reviewers = {
+        name: role for name, role in roles.items() if role.enabled and name in REVIEW_ROLES
+    }
+    return _lanes_apart("the enabled reviewer and super-reviewer", reviewers)
+
+
+def _lanes_apart(who: str, roles: Mapping[str, Role]) -> list[str]:
+    """That ``who``, the ``roles``, must share one lane, if they're in more than one, naming
+    them by lane."""
     lanes: dict[str, list[str]] = {}
     for name, role in roles.items():
-        if role.enabled and role.workspace == "worktree":
-            lanes.setdefault(role.lane, []).append(name)
+        lanes.setdefault(role.lane, []).append(name)
     if len(lanes) < 2:
         return []
     named = " and ".join(f"lane {lane!r} has {names}" for lane, names in lanes.items())
-    return [f'the enabled roles with workspace = "worktree" must share one lane, but {named}']
+    return [f"{who} must share one lane, but {named}"]
 
 
 def role_clashes(roles: Mapping[str, Role]) -> list[str]:
     """How ``roles`` break the rules across roles: the conversational roles whose lanes task
-    roles share (see :func:`lane_clashes`), and the worktree's roles in more than one lane (see
-    :func:`worktree_lane_clashes`)."""
-    return lane_clashes(roles) + worktree_lane_clashes(roles)
+    roles share (see :func:`lane_clashes`), the worktree's roles in more than one lane (see
+    :func:`worktree_lane_clashes`), and the review roles in different lanes (see
+    :func:`review_lane_clashes`)."""
+    return lane_clashes(roles) + worktree_lane_clashes(roles) + review_lane_clashes(roles)
 
 
 def task_lanes(roles: Mapping[str, Role]) -> dict[str, frozenset[str]]:
@@ -314,6 +336,14 @@ def merging_lane(roles: Mapping[str, Role]) -> str:
     user's asking: there's one at most, as only roles in the worktree merge and they share a
     lane. It's the work lane if none merges."""
     return next((role.lane for role in roles.values() if role.enabled and role.merge), WORK_LANE)
+
+
+def review_lane(roles: Mapping[str, Role]) -> str:
+    """The lane that runs orbit's reviews among ``roles``: the enabled reviewer's, or the
+    super-reviewer's while the reviewer is disabled, as enabled ones share a lane. It's the
+    reviewer's if both are disabled, when none is queued."""
+    enabled = (roles[name].lane for name in (REVIEWER, SUPER_REVIEWER) if roles[name].enabled)
+    return next(enabled, roles[REVIEWER].lane)
 
 
 def disabled_roles(roles: Mapping[str, Role]) -> frozenset[str]:

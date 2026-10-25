@@ -1,7 +1,7 @@
 """The review lane: reviews of landed work, run one at a time beside the work lane.
 
 Each review runs in a read-only snapshot of the commit it reviews, on the :class:`LaneRunner` of
-the reviewer's lane, which runs the tasks of every role in it, the others in their role's
+the review roles' lane, which runs the tasks of every role in it, the others in their role's
 workspace. Its suggestions become tasks at the
 end of the queue, which the work lane then runs; :class:`ReviewPlanner` decides when a review is
 due and stops reviews generating work forever.
@@ -38,11 +38,10 @@ from orbit.agent.domain.reviews import (
     pending_titles,
     review_prompt,
 )
-from orbit.agent.domain.roles import role_task, suggested_task, task_lanes
+from orbit.agent.domain.roles import review_lane, role_task, suggested_task, task_lanes
 from orbit.protocol import (
     CODER,
     GIT_FAILED,
-    REVIEWER,
     ErrorOccurred,
     Event,
     Notice,
@@ -102,10 +101,10 @@ class ReviewLane:
         self._status: ReviewStatus | None = None
 
     def _runner(self, hooks: ReviewHooks) -> LaneRunner:
-        """The runner of the reviewer's lane, running the reviews and the tasks of the other
+        """The runner of the review roles' lane, running the reviews and the tasks of the other
         roles in it, reaching the rest of the session through ``hooks``."""
         roles = self._desk.agents.roles
-        lane = roles[REVIEWER].lane
+        lane = review_lane(roles)
         work = LaneWork(self._next_review, self._review, self._spent)
         parts = LaneParts(self._desk, self._tasks, hooks.gate, hooks.paused, hooks.post)
         return LaneRunner(lane, task_lanes(roles).get(lane, frozenset()), parts, work)
@@ -123,7 +122,7 @@ class ReviewLane:
 
     @property
     def roles(self) -> frozenset[str]:
-        """The roles whose tasks the lane runs: those in the reviewer's lane."""
+        """The roles whose tasks the lane runs: those in the review roles' lane."""
         return self.runner.roles
 
     @property

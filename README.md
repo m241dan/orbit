@@ -1006,10 +1006,11 @@ rather than to a session, so it carries on across sessions and restarts. A super
 due waits while review is paused, and while suggested tasks (or reviews) are pending or running; it
 comes with your next commit once none is.
 
-The reviews orbit queued can't be edited: remove one instead. Reviews run in the reviewer's lane,
-`review`, which starts its tasks by itself: a `reviewer` task you add starts there at once too.
-Reviews need the worktree, and a reviewer in a lane of its own; `--no-review` turns them off, and a
-`reviewer` task you add then runs in its lane on a read-only snapshot of the base commit.
+The reviews orbit queued can't be edited: remove one instead. Reviews run in the review roles'
+lane, `review`, which starts its tasks by itself: a `reviewer` task you add starts there at once
+too. Reviews need the worktree, and the review roles in a lane of their own; `--no-review` turns
+them off, and a `reviewer` task you add then runs in its lane on a read-only snapshot of the base
+commit.
 
 ### Roles and `.orbit/config.toml`
 
@@ -1051,7 +1052,11 @@ merges, whether it's enabled and how hard its agents think:
   the next. While the work lane waits out Claude's usage limit or an outage, no lane starts a
   task; they start again with it, or once `ctrl+s` cancels its wait. Each lane shows in the
   Snapshot's `busy`, by name. On the task list, a task in a lane other than `work` is tagged with
-  its lane, and `L` narrows the list to each lane in turn (see [Tasks](#tasks)).
+  its lane, and `L` narrows the list to each lane in turn (see [Tasks](#tasks)). Orbit's reviews
+  run in one lane, the one the enabled `reviewer` and `super-reviewer` share, so the config is
+  refused, naming them and their lanes, if they're in different lanes, the merging lane included;
+  a disabled one can be in any lane. With the `reviewer` disabled, reviews run in the
+  `super-reviewer`'s lane.
 - `workspace`: where its agent works: `worktree` (the coder's separate worktree, the only one whose
   work can merge), `snapshot` (a fresh read-only snapshot of the base commit, made for each run and
   dropped after it), `checkout` (your checkout, read in place) or `none` (an empty temporary

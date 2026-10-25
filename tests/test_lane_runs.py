@@ -12,9 +12,13 @@ from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.application.takeover import Takeover
 from orbit.agent.domain.activity import LANE_TASK_RUNNING, reported
 from orbit.agent.domain.endings import STOPPED_BY_YOU
+from orbit.agent.domain.roles import Role
 from orbit.agent.domain.usage_limits import WAIT_CANCELLED_NOTE
 from orbit.protocol import (
     BUSY,
+    REVIEWER,
+    SUPER_REVIEW,
+    SUPER_REVIEWER,
     UNKNOWN,
     AcceptTask,
     Activity,
@@ -25,9 +29,11 @@ from orbit.protocol import (
     CommandRefused,
     EditTask,
     Event,
+    FireTrigger,
     NewSession,
     Notice,
     OwnershipOffered,
+    ReviewStatus,
     RunTasks,
     TakeOwnership,
     TasksChanged,
@@ -56,8 +62,10 @@ from tests.agent_fakes import (
     run,
     send,
     session_for,
+    settle,
     settled,
     snapshot_of,
+    suggests,
     turns_of,
 )
 from tests.lane_fakes import SECURITY, WITH_SECURITY, audit
@@ -356,16 +364,42 @@ async def test_the_merging_lane_is_named_by_its_roles() -> None:
     await session.close()
 
 
+def with_review_roles(
+    reviewer: dict[str, object], super_reviewer: dict[str, object]
+) -> dict[str, Role]:
+    """The built-in roles, with the ``reviewer`` and ``super_reviewer`` fields changed."""
+    return {
+        **ROLES,
+        REVIEWER: ROLES[REVIEWER].model_copy(update=reviewer),
+        SUPER_REVIEWER: ROLES[SUPER_REVIEWER].model_copy(update=super_reviewer),
+    }
+
+
 async def test_reviews_are_off_while_the_reviewer_shares_the_merging_lane() -> None:
-    roles = {**ROLES, "reviewer": ROLES["reviewer"].model_copy(update={"lane": "work"})}
+    roles = with_review_roles({"lane": "work"}, {"lane": "work"})
     session, _, _ = session_for(roles=roles, tree=FakeTree(), review=True)
     assert session._lane is None
-    assert (await snapshot_of(session)).busy == {
-        "work": False,
-        "planner": False,
-        "review": False,
-    }
+    assert (await snapshot_of(session)).busy == {"work": False, "planner": False}
     await session.close()
+
+
+async def test_reviews_are_off_while_the_super_reviewer_alone_is_in_the_merging_lane() -> None:
+    roles = with_review_roles({"enabled": False}, {"lane": "work"})
+    session, _, _ = session_for(roles=roles, tree=FakeTree(), review=True)
+    assert session._lane is None
+    await session.close()
+
+
+async def test_with_the_reviewer_disabled_super_reviews_run_in_the_super_reviewers_lane() -> None:
+    roles = with_review_roles({"enabled": False}, {"lane": "audit"})
+    session, _, _ = session_for(reviewers=(suggests(),), tree=FakeTree(), review=True, roles=roles)
+    lane = lane_of(session)
+    assert (lane.runner.lane, lane.roles) == ("audit", frozenset({SUPER_REVIEWER}))
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
+    events = await asyncio.wait_for(settle(session), 10)
+    await session.close()
+    assert [t.task.role for t in board(events)] == [SUPER_REVIEWER]
+    assert [e for e in events if isinstance(e, ReviewStatus)][-1].open_batches == 0
 
 
 async def test_the_review_lane_runs_the_other_roles_in_its_lane() -> None:

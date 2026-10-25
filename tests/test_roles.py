@@ -16,6 +16,7 @@ from orbit.agent.domain.roles import (
     merging_lane,
     names_file,
     out_of_time,
+    review_lane,
     role_task,
     suggested_task,
     task_lanes,
@@ -401,6 +402,30 @@ def test_the_merging_lane_is_the_lane_of_the_roles_that_merge() -> None:
 def test_without_an_enabled_merging_role_the_merging_lane_is_the_work_lane() -> None:
     coder = BUILT_IN_ROLES["coder"].model_copy(update={"lane": "build", "enabled": False})
     assert merging_lane({**BUILT_IN_ROLES, "coder": coder}) == WORK_LANE
+
+
+def with_review_roles(reviewer: dict[str, Any], super_reviewer: dict[str, Any]) -> dict[str, Role]:
+    """The built-in roles, with the ``reviewer`` and ``super_reviewer`` fields changed."""
+    return {
+        **BUILT_IN_ROLES,
+        "reviewer": BUILT_IN_ROLES["reviewer"].model_copy(update=reviewer),
+        "super-reviewer": BUILT_IN_ROLES["super-reviewer"].model_copy(update=super_reviewer),
+    }
+
+
+@pytest.mark.parametrize(
+    ("reviewer", "super_reviewer", "lane"),
+    [
+        ({}, {}, "review"),
+        ({}, {"lane": "audit"}, "review"),
+        ({"enabled": False}, {"lane": "audit"}, "audit"),
+        ({"enabled": False}, {"lane": "audit", "enabled": False}, "review"),
+    ],
+)
+def test_the_review_lane_is_the_enabled_reviewers_else_the_super_reviewers(
+    reviewer: dict[str, Any], super_reviewer: dict[str, Any], lane: str
+) -> None:
+    assert review_lane(with_review_roles(reviewer, super_reviewer)) == lane
 
 
 def test_the_disabled_roles_are_those_with_enabled_false() -> None:

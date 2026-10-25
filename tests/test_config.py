@@ -351,6 +351,51 @@ def test_worktree_roles_sharing_a_lane_other_than_work_load() -> None:
     assert load_config({"roles": roles}, BUILT_IN_ROLES).roles["coder"].lane == "b"
 
 
+@pytest.mark.parametrize(
+    ("roles", "lanes"),
+    [
+        (
+            {"super-reviewer": {"lane": "audit"}},
+            "lane 'review' has ['reviewer'] and lane 'audit' has ['super-reviewer']",
+        ),
+        (
+            {"super-reviewer": {"lane": "work"}},
+            "lane 'review' has ['reviewer'] and lane 'work' has ['super-reviewer']",
+        ),
+        (
+            {"reviewer": {"lane": "work"}},
+            "lane 'work' has ['reviewer'] and lane 'review' has ['super-reviewer']",
+        ),
+    ],
+)
+def test_review_roles_in_different_lanes_are_refused_naming_them_and_their_lanes(
+    roles: dict[str, dict[str, object]], lanes: str
+) -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_config({"roles": roles}, BUILT_IN_ROLES)
+    assert str(raised.value) == (
+        f"roles: the enabled reviewer and super-reviewer must share one lane, but {lanes}"
+    )
+
+
+@pytest.mark.parametrize("disabled", ["reviewer", "super-reviewer"])
+@pytest.mark.parametrize("lane", ["audit", "work"])
+def test_a_disabled_review_role_can_be_in_another_lane_than_the_other(
+    disabled: str, lane: str
+) -> None:
+    roles: dict[str, dict[str, object]] = {"reviewer": {}, "super-reviewer": {"lane": lane}}
+    roles[disabled]["enabled"] = False
+    config = load_config({"roles": roles}, BUILT_IN_ROLES)
+    assert config.roles["super-reviewer"].lane == lane
+    assert not config.roles[disabled].enabled
+
+
+@pytest.mark.parametrize("lane", ["audit", "work"])
+def test_review_roles_sharing_a_lane_other_than_review_load(lane: str) -> None:
+    roles = {"reviewer": {"lane": lane}, "super-reviewer": {"lane": lane}}
+    assert load_config({"roles": roles}, BUILT_IN_ROLES).roles["reviewer"].lane == lane
+
+
 def test_an_invalid_field_isnt_also_reported_as_the_merge_default_it_stopped() -> None:
     with pytest.raises(ConfigError) as raised:
         load_config(custom(verify="sometimes"), BUILT_IN_ROLES)
