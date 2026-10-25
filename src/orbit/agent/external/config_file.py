@@ -13,25 +13,32 @@ from orbit.agent.domain.config import OrbitConfig, load_config
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.agent.external.toml_files import read_toml
+from orbit.agent.external.user_config import read_user_roles
 from orbit.agent.external.whole_files import write_whole
 
 CONFIG_PATH = ".orbit/config.toml"
 
 
-def read_config(root: str) -> OrbitConfig:
-    """The configuration in ``root``'s file over the defaults, whose roles are the built-in
-    ones; just the defaults without a file. A role's instructions naming a Markdown file are
-    that file's text (see :func:`resolve_instructions`), taken from the file's directory.
+def read_config(root: str, config_dir: Path) -> OrbitConfig:
+    """The configuration in ``root``'s file over the role fields the user config in
+    ``config_dir`` sets (see :func:`read_user_roles`) and the defaults, whose roles are the
+    built-in ones; without a file, the defaults with the user config's role fields. A role's
+    instructions naming a Markdown file are that file's text (see :func:`resolve_instructions`),
+    taken from the file's directory.
 
-    Raises :class:`ConfigError`, naming the file, if it or a role's instructions file can't be
-    read or is invalid.
+    Raises :class:`ConfigError`, naming the file, if it, the user config or a role's
+    instructions file can't be read or is invalid.
     """
     built_in = read_built_in_roles()
+    user = read_user_roles(config_dir)
     path = Path(root) / CONFIG_PATH
     if not path.exists():
-        return load_config({}, built_in)
+        return load_config({}, built_in, user)
     return read_toml(
-        path, lambda table: load_config(_with_instructions(table, path.parent), built_in)
+        path,
+        lambda table: load_config(
+            _with_instructions(table, path.parent), built_in, user, str(path)
+        ),
     )
 
 

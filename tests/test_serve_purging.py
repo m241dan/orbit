@@ -13,7 +13,6 @@ from orbit.agent import (
     Purged,
     ServedWorkspaces,
     SqliteStore,
-    StorageSettings,
     WorkspaceLock,
     WorkspaceOwner,
     WorkspaceUnavailable,
@@ -38,7 +37,7 @@ from tests.agent_fakes import notice
 from tests.connection_helpers import say, taken
 from tests.git_repo import bare_repository, commit_file, git, init_repo
 from tests.plane_fakes import payloads, refused, welcomed
-from tests.serving import FLAGS, serving, until
+from tests.serving import FLAGS, NO_USER_CONFIG, serving, until
 from tests.store_views import database, record
 
 
@@ -203,7 +202,7 @@ async def test_a_workspace_served_while_a_local_orbit_holds_its_lock_isnt_purged
 
 def source(stack: ExitStack, store: SqliteStore, tmp_path: Path) -> ServedWorkspaces:
     """The workspaces a server serves from ``store``, cloning into ``clones`` in ``tmp_path``."""
-    return _workspaces(stack, FLAGS, store, StorageSettings(), tmp_path / "clones")
+    return _workspaces(stack, FLAGS, store, NO_USER_CONFIG, tmp_path / "clones")
 
 
 async def test_a_workspace_not_registered_would_lose_nothing_and_is_refused_purging(

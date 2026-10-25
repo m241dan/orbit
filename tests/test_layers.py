@@ -1,0 +1,201 @@
+"""The layers orbit's configuration is resolved from, and the roles resolved across them."""
+
+import pytest
+
+from orbit.agent.domain.config_errors import ConfigError
+from orbit.agent.domain.layers import (
+    DEFAULT,
+    NO_USER_ROLES,
+    PACKAGE,
+    Layer,
+    ProjectRoles,
+    RoleFields,
+    UserRoles,
+    load_user_roles,
+    resolve_roles,
+)
+from orbit.agent.domain.roles import Role, built_in_roles
+from orbit.agent.external.built_in_roles import read_built_in_roles
+from orbit.protocol import BUILT_IN_ROLE_NAMES, PLANNER
+
+INSTRUCTIONS = {name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES}
+PACKAGE_ROLES = built_in_roles(read_built_in_roles(), INSTRUCTIONS)
+USER = Layer("user", "/home/me/.config/orbit/config.toml")
+PROJECT = Layer("project", "/src/app/.orbit/config.toml")
+NO_PROJECT_ROLES = ProjectRoles(PROJECT)
+
+
+def user(data: dict[str, object]) -> UserRoles:
+    """The user roles a user config holding ``data`` sets."""
+    return load_user_roles(data, USER)
+
+
+def project(roles: dict[str, object]) -> ProjectRoles:
+    """The roles of a project file whose ``[roles]`` is ``roles``."""
+    return ProjectRoles(PROJECT, roles)
+
+
+# Layers
+
+
+def test_a_layer_reads_as_its_name_then_its_file() -> None:
+    assert (str(DEFAULT), str(PACKAGE)) == ("default", "package")
+    assert str(USER) == "user /home/me/.config/orbit/config.toml"
+    assert str(PROJECT) == "project /src/app/.orbit/config.toml"
+
+
+# The user config's roles
+
+
+def test_a_user_config_without_roles_sets_none_and_its_other_tables_are_ignored() -> None:
+    assert user({"storage": {"tool_output_kb": 1}, "server": {"port": 1}}) == UserRoles(USER)
+
+
+def test_the_user_configs_roles_table_sets_model_and_effort_for_every_role() -> None:
+    roles = user({"roles": {"model": "haiku", "effort": "low"}})
+    assert roles.every == RoleFields(model="haiku", effort="low")
+    assert roles.named == {}
+
+
+def test_a_user_configs_role_table_sets_that_roles_model_and_effort() -> None:
+    roles = user({"roles": {"model": "haiku", "planner": {"model": "opus", "effort": "max"}}})
+    assert roles.named == {PLANNER: RoleFields(model="opus", effort="max")}
+    assert roles.every == RoleFields(model="haiku")
+
+
+@pytest.mark.parametrize(
+    ("roles", "key"),
+    [({"coder": {"verify": False}}, "roles.coder.verify"), ({"verify": False}, "roles.verify")],
+)
+def test_any_other_role_field_belongs_in_the_project_file(
+    roles: dict[str, object], key: str
+) -> None:
+    with pytest.raises(ConfigError) as raised:
+        user({"roles": roles})
+    assert str(raised.value) == (
+        f"{key}: belongs in the project's .orbit/config.toml; the user config sets only a"
+        " role's model and effort"
+    )
+
+
+@pytest.mark.parametrize(
+    ("roles", "key"),
+    [
+        ({"effort": "extreme"}, "roles.effort"),
+        ({"coder": {"effort": "ultracode"}}, "roles.coder.effort"),
+    ],
+)
+def test_an_effort_claude_doesnt_offer_is_refused_listing_those_it_does(
+    roles: dict[str, object], key: str
+) -> None:
+    with pytest.raises(ConfigError, match=f"^{key}: ") as raised:
+        user({"roles": roles})
+    assert "'low', 'medium', 'high', 'xhigh' or 'max'" in str(raised.value)
+
+
+def test_a_roles_value_that_isnt_a_table_is_refused() -> None:
+    with pytest.raises(ConfigError, match=r"^roles: "):
+        user({"roles": "everyone"})
+
+
+def test_every_problem_with_the_user_configs_roles_is_named_on_a_line_of_its_own() -> None:
+    with pytest.raises(ConfigError) as raised:
+        user({"roles": {"model": 3, "coder": {"lane": "b"}}})
+    lines = str(raised.value).splitlines()
+    assert [line.split(":", 1)[0] for line in lines] == ["roles.model", "roles.coder.lane"]
+
+
+# Resolving the roles
+
+
+def test_without_user_or_project_roles_the_packages_roles_are_the_roles() -> None:
+    assert resolve_roles(PACKAGE_ROLES, NO_USER_ROLES, NO_PROJECT_ROLES).roles == PACKAGE_ROLES
+
+
+def test_a_field_the_package_sets_comes_from_it_and_any_other_from_the_defaults() -> None:
+    layers = resolve_roles(PACKAGE_ROLES, NO_USER_ROLES, NO_PROJECT_ROLES).layers
+    assert set(layers) == set(PACKAGE_ROLES)
+    assert set(layers["coder"]) == set(Role.model_fields)
+    assert layers["super-reviewer"]["model"] == PACKAGE
+    assert (layers["coder"]["model"], layers["coder"]["effort"]) == (DEFAULT, DEFAULT)
+    assert layers["coder"]["tools"] == PACKAGE
+
+
+def test_the_user_configs_role_table_sets_that_roles_model() -> None:
+    resolved = resolve_roles(
+        PACKAGE_ROLES, user({"roles": {PLANNER: {"model": "opus"}}}), NO_PROJECT_ROLES
+    )
+    assert resolved.roles[PLANNER].model == "opus"
+    assert resolved.layers[PLANNER]["model"] == USER
+    assert resolved.roles["coder"].model is None
+
+
+def test_the_projects_role_value_wins_over_the_users() -> None:
+    resolved = resolve_roles(
+        PACKAGE_ROLES,
+        user({"roles": {PLANNER: {"model": "opus", "effort": "high"}}}),
+        project({PLANNER: {"model": "sonnet"}}),
+    )
+    planner = resolved.roles[PLANNER]
+    assert (planner.model, resolved.layers[PLANNER]["model"]) == ("sonnet", PROJECT)
+    assert (planner.effort, resolved.layers[PLANNER]["effort"]) == ("high", USER)
+
+
+def test_the_users_value_for_every_role_wins_over_the_packages() -> None:
+    resolved = resolve_roles(PACKAGE_ROLES, user({"roles": {"model": "haiku"}}), NO_PROJECT_ROLES)
+    assert {role.model for role in resolved.roles.values()} == {"haiku"}
+    assert {layers["model"] for layers in resolved.layers.values()} == {USER}
+
+
+def test_the_users_value_for_one_role_wins_over_the_users_value_for_every_role() -> None:
+    roles = {"model": "haiku", "effort": "low", "super-reviewer": {"model": "opus"}}
+    resolved = resolve_roles(PACKAGE_ROLES, user({"roles": roles}), NO_PROJECT_ROLES)
+    reviewer = resolved.roles["super-reviewer"]
+    assert (reviewer.model, reviewer.effort) == ("opus", "low")
+    assert resolved.roles["reviewer"].model == "haiku"
+
+
+def test_the_projects_role_value_wins_over_the_users_value_for_every_role() -> None:
+    resolved = resolve_roles(
+        PACKAGE_ROLES,
+        user({"roles": {"model": "haiku"}}),
+        project({"super-reviewer": {"model": "opus"}}),
+    )
+    assert resolved.roles["super-reviewer"].model == "opus"
+    assert resolved.layers["super-reviewer"]["model"] == PROJECT
+    assert resolved.roles["coder"].model == "haiku"
+
+
+def test_a_role_the_project_adds_takes_the_users_fields_after_the_packages_roles() -> None:
+    writer = {"instructions": "Write docs.", "verify": False}
+    resolved = resolve_roles(
+        PACKAGE_ROLES, user({"roles": {"effort": "max"}}), project({"docs-writer": writer})
+    )
+    assert list(resolved.roles) == [*PACKAGE_ROLES, "docs-writer"]
+    assert resolved.roles["docs-writer"] == Role(
+        instructions="Write docs.", verify=False, effort="max"
+    )
+    layers = resolved.layers["docs-writer"]
+    assert (layers["instructions"], layers["effort"], layers["tools"]) == (PROJECT, USER, DEFAULT)
+
+
+def test_a_role_only_the_user_config_names_isnt_a_role() -> None:
+    resolved = resolve_roles(
+        PACKAGE_ROLES, user({"roles": {"ghost": {"model": "opus"}}}), NO_PROJECT_ROLES
+    )
+    assert "ghost" not in resolved.roles
+
+
+@pytest.mark.parametrize(
+    ("roles", "message"),
+    [
+        ({"coder": {"tools": ["launch_rockets"]}}, "roles.coder.tools: "),
+        ({"coder": "everything"}, "roles.coder: "),
+        ({"new": {"tools": ["get_task"]}}, "roles.new.instructions: "),
+    ],
+)
+def test_an_invalid_project_role_is_refused_naming_it_and_the_field(
+    roles: dict[str, object], message: str
+) -> None:
+    with pytest.raises(ConfigError, match=f"^{message}"):
+        resolve_roles(PACKAGE_ROLES, user({"roles": {"model": "haiku"}}), project(roles))

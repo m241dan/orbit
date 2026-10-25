@@ -14,17 +14,17 @@ from orbit.agent import (
     Browsing,
     CloneFailed,
     Cloner,
+    Configuring,
     ControlPlane,
     ServedWorkspace,
     ServedWorkspaces,
     SqliteStore,
-    StorageSettings,
     StoreError,
     WorkspaceHost,
     WorkspaceRegistry,
     WorkspaceUnavailable,
 )
-from orbit.cli.backend import _Backend, _maker, _open, _storage, _usage_source
+from orbit.cli.backend import _Backend, _maker, _open, _usage_source, _user_config, _UserConfig
 from orbit.cli.errors import _exit_on
 
 
@@ -32,15 +32,16 @@ def _workspaces(
     stack: ExitStack,
     flags: _Backend,
     store: SqliteStore,
-    storage: StorageSettings,
+    user: _UserConfig,
     clone_dir: Path,
 ) -> ServedWorkspaces:
-    """The workspaces ``orbit serve`` serves from the ``store``, each with its host made as
-    ``flags`` ask, keeping its sessions as ``storage`` says, and its lock held until it's
-    removed or ``stack`` closes, those added by URL cloned into ``clone_dir`` and, unless
-    they're kept, removed when ``stack`` closes."""
-    make = _maker(flags, storage, pick_session=False)
-    source = ServedWorkspaces(store, make, Cloner(clone_dir), worktree=flags.worktree)
+    """The workspaces ``orbit serve`` serves from the ``store``, each configured over the
+    ``user`` config, with its host made as ``flags`` ask, keeping its sessions as the ``user``
+    config says, and its lock held until it's removed or ``stack`` closes, those added by URL
+    cloned into ``clone_dir`` and, unless they're kept, removed when ``stack`` closes."""
+    make = _maker(flags, user, pick_session=False)
+    configuring = Configuring(user.directory, flags.worktree)
+    source = ServedWorkspaces(store, make, Cloner(clone_dir), configuring=configuring)
     stack.callback(source.drop_clones)
     stack.callback(source.let_go)
     return source
@@ -78,12 +79,12 @@ def _serving(
     flagged, git has no identity for its repository with the coder committing there, or its
     configuration is invalid, leaving each flagged as it was and removing the clones it made.
     """
-    storage = _storage(user_config)
+    user = _user_config(user_config)
     usage_source = _usage_source(flags)
     with ExitStack() as stack:
         store = _open(state)
         stack.callback(lambda: asyncio.run(store.close()))
-        source = _workspaces(stack, flags, store, storage, clone_dir)
+        source = _workspaces(stack, flags, store, user, clone_dir)
         served = [_added(source, root) for root in dict.fromkeys(added)]
         # Read the flags before setting any, so a store failing leaves them as they were, and
         # serve the earlier workspaces after, so setting them doesn't stamp those added again.

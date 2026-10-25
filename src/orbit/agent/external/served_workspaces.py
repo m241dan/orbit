@@ -73,13 +73,23 @@ class OpenedWorkspace:
 
 
 @dataclass(frozen=True)
+class Configuring:
+    """How a workspace is configured as it's opened: from its file over the user config in
+    ``config_dir``, once git is found to have an identity for commits there if the coder commits
+    in a ``worktree``."""
+
+    config_dir: Path
+    worktree: bool
+
+
+@dataclass(frozen=True)
 class Opening:
-    """How a workspace is opened: checked for a git identity if ``identity``, flagged served if
+    """How a workspace is opened: configured as ``configuring`` says, flagged served if
     ``flag``, its lock naming the server's ``url`` if it's known, and marked as a clone orbit
     made if ``managed``; the lock this server still ``held`` for it, if any, is kept rather than
     another taken."""
 
-    identity: bool
+    configuring: Configuring
     flag: bool
     url: str | None = None
     managed: bool = False
@@ -118,7 +128,7 @@ def _prepared(root: Path, make_host: HostMaker, opening: Opening) -> _Prepared:
     says, and lets the lock go if anything after taking it fails."""
     served = _locked_served(root, opening)
     try:
-        return served, make_host(served, workspace_config(root, worktree=opening.identity))
+        return served, make_host(served, workspace_config(root, opening.configuring))
     except BaseException:
         served.let_go()
         raise
@@ -136,21 +146,21 @@ def _locked_served(root: Path, opening: Opening) -> ServedWorkspace:
 
 class ServedWorkspaces:
     """The workspaces a server serves from the ``store``, each with its host made by
-    ``make_host``, checked for a git identity if the coder works in a ``worktree``, and its
-    workspace lock held, if it's free, until it's removed or :meth:`let_go`: those it starts
-    with, as :meth:`served` serves them, and those frontends add, by their paths or as clones
-    ``cloner`` makes, as a control plane's ``WorkspaceSource``; one added again at the same root
-    while its lock is still held, as it is when unflagging it failed, keeps that lock, while
-    another worktree of its repository takes a lock of its own. Once the server's
-    ``url`` is known, the locks taken name it."""
+    ``make_host``, configured as ``configuring`` says, and its workspace lock held, if it's
+    free, until it's removed or :meth:`let_go`: those it starts with, as :meth:`served` serves
+    them, and those frontends add, by their paths or as clones ``cloner`` makes, as a control
+    plane's ``WorkspaceSource``; one added again at the same root while its lock is still held,
+    as it is when unflagging it failed, keeps that lock, while another worktree of its
+    repository takes a lock of its own. Once the server's ``url`` is known, the locks taken name
+    it."""
 
     def __init__(
-        self, store: SqliteStore, make_host: HostMaker, cloner: Cloner, *, worktree: bool
+        self, store: SqliteStore, make_host: HostMaker, cloner: Cloner, *, configuring: Configuring
     ) -> None:
         self._store = store
         self._make_host = make_host
         self._cloner = cloner
-        self._worktree = worktree
+        self._configuring = configuring
         self._locks: dict[str, WorkspaceLock] = {}
         self._roots: dict[str, Path] = {}
         self._fresh: list[str] = []
@@ -168,7 +178,8 @@ class ServedWorkspaces:
         ``managed``, with what builds its host, its lock held, if it's free, left flagged as it
         was until :meth:`flag_served`. Raises :class:`WorkspaceUnavailable` as :meth:`open`
         says."""
-        return asyncio.run(self._taken(root, Opening(self._worktree, flag=False, managed=managed)))
+        opening = Opening(self._configuring, flag=False, managed=managed)
+        return asyncio.run(self._taken(root, opening))
 
     def cloned(self, url: str) -> str:
         """The path of a new clone of the repository at ``url``, made before serving starts and
@@ -238,7 +249,7 @@ class ServedWorkspaces:
         ``managed``, marked as a clone orbit made, its lock taken if it's free. Raises
         :class:`WorkspaceUnavailable` if git has no identity for the coder's commits there, its
         configuration is invalid, its lock can't be made or the store fails."""
-        opening = Opening(self._worktree, flag=True, managed=managed)
+        opening = Opening(self._configuring, flag=True, managed=managed)
         _, make = await self._taken(Path(root), opening)
         return make()
 
@@ -372,14 +383,15 @@ def _kind(path: Path) -> PathKind:
     return PathKind.FILE if path.exists() else PathKind.MISSING
 
 
-def workspace_config(root: Path, *, worktree: bool) -> OrbitConfig:
-    """The configuration of the workspace at ``root``. Raises :class:`WorkspaceUnavailable`
-    if it's invalid, or, with a ``worktree``, git has no identity for commits there."""
-    problem = _identity_problem(root) if worktree else None
+def workspace_config(root: Path, configuring: Configuring) -> OrbitConfig:
+    """The configuration of the workspace at ``root``, as ``configuring`` says. Raises
+    :class:`WorkspaceUnavailable` if it or the user config is invalid, or, with a worktree, git
+    has no identity for commits there."""
+    problem = _identity_problem(root) if configuring.worktree else None
     if problem is not None:
         raise WorkspaceUnavailable(problem)
     try:
-        return read_config(str(root))
+        return read_config(str(root), configuring.config_dir)
     except ConfigError as exc:
         raise WorkspaceUnavailable(f"{INVALID_CONFIG}{exc}") from None
 

@@ -84,6 +84,7 @@ from orbit.agent.external.repository import (
 )
 from orbit.agent.external.run_file import RunFile, ServeLock, running_server
 from orbit.agent.external.served_workspaces import (
+    Configuring,
     HostMaker,
     OpenedWorkspace,
     Opening,
@@ -130,6 +131,7 @@ __all__ = [
     "Cloner",
     "ConfigError",
     "ConfigWriter",
+    "Configuring",
     "ControlPlane",
     "ControlPlaneServer",
     "DirectoryLister",

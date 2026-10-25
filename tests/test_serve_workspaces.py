@@ -7,7 +7,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import ExitStack
 from pathlib import Path
 
@@ -19,6 +19,7 @@ from orbit.agent import (
     OrbitConfig,
     PathKind,
     RepositoryUnreadable,
+    Role,
     ServedWorkspaces,
     SqliteStore,
     StorageSettings,
@@ -34,19 +35,27 @@ from orbit.agent import (
 from orbit.agent.application.recovery import RecoveryFailed
 from orbit.agent.external import served_workspaces
 from orbit.cli import backend, served
-from orbit.cli.backend import _Backend, _backend, _Directories
+from orbit.cli.backend import _Backend, _backend, _Directories, _UserConfig
 from orbit.cli.served import _added, _workspaces
-from orbit.protocol import INTERNAL, INVALID, StartupChecked
+from orbit.protocol import INTERNAL, INVALID, PLANNER, StartupChecked
 from tests.agent_fakes import agent_exited, events_until, logged_with_traceback
 from tests.waiting import eventually
 
 FLAGS = _Backend(None, None, False, False, False, False, new=False, name=None)
 CLONES = Path("/nonexistent/clones")
 """A clone directory for serving that clones nothing."""
+NO_USER_CONFIG = Path("/nonexistent/config")
+"""A config directory for serving without a user config."""
 
 
-def workspaces(stack: ExitStack, store: SqliteStore, flags: _Backend = FLAGS) -> ServedWorkspaces:
-    return _workspaces(stack, flags, store, StorageSettings(), store.state_dir / "workspaces")
+def workspaces(
+    stack: ExitStack,
+    store: SqliteStore,
+    flags: _Backend = FLAGS,
+    config_dir: Path = NO_USER_CONFIG,
+) -> ServedWorkspaces:
+    user = _UserConfig(config_dir, StorageSettings())
+    return _workspaces(stack, flags, store, user, store.state_dir / "workspaces")
 
 
 def directory(tmp_path: Path, name: str = "repo") -> Path:
@@ -212,6 +221,47 @@ async def test_a_lock_closed_with_its_workspace_isnt_let_go_again_as_the_stack_c
     assert CountedLock.closes == 3
 
 
+def user_config(tmp_path: Path, text: str) -> Path:
+    """A config directory in ``tmp_path`` whose user config reads ``text``."""
+    config_dir = directory(tmp_path, "config")
+    (config_dir / "config.toml").write_text(text)
+    return config_dir
+
+
+async def roles_of(source: ServedWorkspaces, root: Path) -> Mapping[str, Role]:
+    """The roles of the host ``source`` opens for the workspace at ``root``."""
+    host = await source.open(str(root))
+    await host.close()
+    assert host.agents is not None
+    return host.agents.roles
+
+
+async def test_a_workspace_takes_the_role_fields_the_user_config_sets(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path
+) -> None:
+    root = directory(tmp_path)
+    (root / ".orbit").mkdir()
+    (root / ".orbit" / "config.toml").write_text('[roles.coder]\nmodel = "sonnet"\n')
+    config_dir = user_config(tmp_path, '[roles]\nmodel = "haiku"\n')
+
+    roles = await roles_of(workspaces(stack, store, config_dir=config_dir), root)
+
+    assert (roles["coder"].model, roles["super-reviewer"].model) == ("sonnet", "haiku")
+
+
+async def test_an_invalid_user_config_makes_a_workspace_unavailable_naming_it(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path
+) -> None:
+    root = directory(tmp_path)
+    config_dir = user_config(tmp_path, "[roles.coder]\nverify = false\n")
+    problem = f"{config_dir / 'config.toml'}: roles.coder.verify: belongs in the project's"
+
+    with pytest.raises(WorkspaceUnavailable) as refused:
+        await workspaces(stack, store, config_dir=config_dir).open(str(root))
+    assert str(refused.value).startswith(f"Invalid orbit configuration: {problem}")
+    assert refused.value.code == INVALID and free(root)
+
+
 async def test_an_invalid_configuration_is_unavailable_saying_why(
     stack: ExitStack, store: SqliteStore, tmp_path: Path
 ) -> None:
@@ -347,9 +397,9 @@ async def test_the_configuration_is_read_off_the_event_loop(
     root = directory(tmp_path)
     threads: list[threading.Thread] = []
 
-    def recorded(path: str) -> OrbitConfig:
+    def recorded(path: str, config_dir: Path) -> OrbitConfig:
         threads.append(threading.current_thread())
-        return read_config(path)
+        return read_config(path, config_dir)
 
     monkeypatch.setattr(served_workspaces, "read_config", recorded)
 
@@ -579,6 +629,16 @@ def test_serving_with_every_workspace_added_servable_flags_them_all(tmp_path: Pa
     assert sorted(flagged(state)) == [str(first), str(second)]
 
 
+def test_serving_configures_the_workspaces_it_serves_with_its_user_config(tmp_path: Path) -> None:
+    first, second = directory(tmp_path, "first"), directory(tmp_path, "second")
+    config_dir = user_config(tmp_path, '[roles.planner]\nmodel = "opus"\n')
+
+    with served._serving(FLAGS, [first], tmp_path / "state", config_dir, CLONES) as serving:
+        roles = asyncio.run(roles_of(serving.served, second))
+
+    assert roles[PLANNER].model == "opus"
+
+
 def test_serving_stops_with_a_later_workspace_added_unservable_leaving_the_others_unflagged(
     stack: ExitStack, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -727,11 +787,11 @@ def gated(monkeypatch: pytest.MonkeyPatch, gate: threading.Event, fails: bool = 
     """Have opening a workspace wait on ``gate`` as it reads the configuration, then fail if
     ``fails``."""
 
-    def waits(path: str) -> OrbitConfig:
+    def waits(path: str, config_dir: Path) -> OrbitConfig:
         assert gate.wait(10)
         if fails:
             raise RuntimeError("A bug.")
-        return read_config(path)
+        return read_config(path, config_dir)
 
     monkeypatch.setattr(served_workspaces, "read_config", waits)
 

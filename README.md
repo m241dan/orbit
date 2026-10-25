@@ -97,7 +97,7 @@ In the app:
 | `esc` | Stop typing, close the conversation's detail pane, leave a list or close a picker; with the conversation selected and nothing active, let go of its held entry, closing the detail pane, and follow the latest output again; with the detail pane selected, close it; with the Task list selected and nothing active, let go of the held list and follow the active task again |
 | `ctrl+s` | Stop the task run (on any tab) |
 | `ctrl+x` | Stop the turn of the conversational role whose tab is shown, or the planner's on any other tab, leaving the task run going |
-| `ctrl+n` | Reset the conversational role whose tab is shown, or the planner on any other tab: after you confirm (`y` to go ahead, `n`/`esc` to cancel), end its conversation so the next prompt starts a fresh one, the planner's with its role read again from `.orbit/config.toml` (see [Planning with the planner](#planning-with-the-planner)) |
+| `ctrl+n` | Reset the conversational role whose tab is shown, or the planner on any other tab: after you confirm (`y` to go ahead, `n`/`esc` to cancel), end its conversation so the next prompt starts a fresh one, the planner's with its role read again from `.orbit/config.toml` and your `config.toml` (see [Planning with the planner](#planning-with-the-planner)) |
 | `enter` / `esc` | On a storage halt: try again, or close it; `j`/`k` (or the arrow keys) scroll a long explanation (see [Storage failures](#storage-failures)) |
 | `a` / `r` / `x` | On a proposal of checks: accept it, ask for changes (type them, `enter` sends, `esc` goes back), or end the task (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+c` | Quit |
@@ -745,7 +745,7 @@ your checkout out of its way, it doesn't sandbox it.
 | `.git/orbit` | the repository's git directory | the coder's worktree, review snapshots, what earlier runs left there and `workspace.lock`, which says which orbit owns the repository (`.orbit/workspace.lock` outside git; see [Owning the repository](#owning-the-repository)) |
 | The store | the state directory | `orbit.db`, the saved sessions, their event logs, the super review count and the record moves of every repository, `locks/`, and `fallback/` for events a failed write left unsaved (see [Storage failures](#storage-failures)) |
 | Config files | `.orbit/config.toml` in the repository | the verification steps, setup, roles and limits, committed with your code |
-| User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]`, `[server]`, `[remotes]` and `[telemetry]` |
+| User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]`, `[server]`, `[remotes]`, `[telemetry]` and your machine's model and effort for roles in `[roles]` |
 | The token | `token` in the config directory | what frontends show `orbit serve` to connect (see [Serving the control plane](#serving-the-control-plane)) |
 | Certificates | `certs/` in the config directory | the CA, server and client certificates and keys `orbit certs` makes for TLS and mutual TLS (see [Serving the control plane](#serving-the-control-plane)) |
 | The run file | `run/server.json` in the state directory | where the `orbit serve` running on that state directory listens, beside `run/serve.lock`, which that serve holds |
@@ -941,16 +941,18 @@ planner tab gets a `*`.
 The planner is one agent for the whole session: each prompt resumes its conversation, so it
 remembers what you discussed. It reads your checkout and can search the web but can't edit your
 checkout, and uses the model you picked with `ctrl+o`, which is saved with the session; with
-`default` picked, it uses `[roles.planner] model` if `.orbit/config.toml` sets one.
+`default` picked, it uses the planner role's model, if `.orbit/config.toml` or your `config.toml`
+sets one (see [Your machine's model and effort](#your-machines-model-and-effort)).
 
 The planner's conversation is kept with its session, so it carries on across restarts and session
 switches. `ctrl+n` resets it, after you confirm (`y` to go ahead, `n`/`esc` to cancel): to pick up a
 change to the planner's role, or to clear a conversation grown too long. Orbit ends the planner's
 conversation, and its access to orbit, so the next prompt starts a fresh one, told the
 verification steps again, and saves the session without it. It reads `[roles.planner]` from
-`.orbit/config.toml` again, so a change to the planner's instructions, tools or tool access takes
-effect; other roles and settings stay as they were. If the file is invalid, the planner keeps its
-role and orbit shows the problem, but still resets the conversation. Draft tasks stay on the task
+`.orbit/config.toml` again, with the model and effort your `config.toml` sets for it, so a change
+to the planner's instructions, tools, tool access, model or effort takes effect; other roles and
+settings stay as they were. If either file is invalid, the planner keeps its role and orbit shows
+the problem, but still resets the conversation. Draft tasks stay on the task
 list, the planner tab keeps its history, and the conversation shows a dim `── planner reset ──`
 rule under the planner tab and All. The reset is refused while the planner answers (stop it with
 `ctrl+x` first), and before its first prompt there's nothing to reset.
@@ -1133,6 +1135,41 @@ verify = false
 `orbit chat` reads it at startup, and `orbit serve` at startup and as a frontend adds a workspace;
 each refuses an invalid one, naming each problem (for example
 `roles.coder.tool_access: Input should be 'off', 'restricted' or 'full'`).
+
+#### Your machine's model and effort
+
+Which models and how much effort a machine can run is yours to say, not each project's: the
+`[roles]` table in your `config.toml` in the config directory (see
+[Where orbit keeps things](#where-orbit-keeps-things)) sets `model` and `effort` for every role,
+and a `[roles.<name>]` table sets them for one role, in every repository orbit runs in:
+
+```toml
+[roles]
+model = "haiku"   # every role's model
+effort = "low"    # every role's effort
+
+[roles.planner]
+model = "opus"    # the planner's
+```
+
+Each of a role's fields comes from the most specific place that sets it: the project's
+`.orbit/config.toml` for that role, then your `[roles.<name>]`, then your `[roles]`, then the
+roles shipped with orbit, then orbit's defaults. So above, every role runs on `haiku`, the
+`super-reviewer`'s `opus` from the package included, unless the project sets a role's model; the
+planner runs on `opus` unless the project sets the planner's; and a project's
+`[roles.planner] model = "sonnet"` wins over both. Without a `[roles]` table, roles are just the
+project's over orbit's. A `[roles.<name>]` table for a role neither orbit nor the project has
+changes nothing.
+
+Only `model` and `effort` belong to your machine: any other field of a role, such as
+`[roles.coder] verify = false`, is refused, naming the file, the key and that it belongs in the
+project's `.orbit/config.toml`, so your machine can't turn off a project's verification. `effort`
+takes the levels a role's does, and any other value is refused, listing them. `orbit chat` reads
+your `config.toml`'s roles as it opens its workspace, and `orbit serve`, with the config directory
+of the account it runs as, as it opens each workspace it serves; both read them again, with the
+project's, when the planner is reset. An invalid one is refused as an invalid
+`.orbit/config.toml` is: it stops `orbit chat` with status 2, and a workspace `orbit serve` can't
+open.
 
 ### How agents reach orbit
 

@@ -257,7 +257,7 @@ async def test_in_a_real_repository_the_config_lands_on_the_base(tmp_path: Path)
     assert merged.result == "merged"
     assert git(repo, "log", "-1", "--format=%s", "main") == "Configure verification steps"
     assert (repo / CONFIG_PATH).read_text().startswith("# Ours.\nfix_attempts = 2\n")
-    config = read_config(str(repo))
+    config = read_config(str(repo), tmp_path / "config")
     assert config.fix_attempts == 2
     assert config.verification.steps == CHECKS.steps
     assert config.setup == Setup(command=("true",))
@@ -274,5 +274,5 @@ async def test_without_a_worktree_the_real_file_is_written_here(
         write_config=write_checks,
     )
     await asyncio.wait_for(everything(session, CONFIGURE), 5)
-    assert read_config(str(tmp_path)).verification.steps == CHECKS.steps[:1]
+    assert read_config(str(tmp_path), tmp_path / "config").verification.steps == CHECKS.steps[:1]
     assert not (tmp_path / ".git").exists()

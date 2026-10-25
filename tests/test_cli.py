@@ -48,6 +48,7 @@ from orbit.cli import app
 from orbit.cli.backend import _Backend, _backend, _Directories, _in_process
 from orbit.cli.errors import _configured, _exit_on
 from orbit.protocol import (
+    PLANNER,
     AddTask,
     Catalog,
     Notice,
@@ -842,6 +843,50 @@ def test_chat_rereads_the_planners_role_from_the_project_file(
     assert runner.invoke(app, ["chat"]).exit_code == 0
     role = planner_role_read_after(config, '[roles.planner]\nmodel = "opus"\n', launched)
     assert isinstance(role, Role) and role.model == "opus"
+
+
+def test_chat_takes_the_role_fields_the_user_config_sets_beneath_the_project_files(
+    launched: list[WorkspaceHost], config_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        '[roles]\nmodel = "haiku"\n\n[roles.planner]\neffort = "max"\n'
+    )
+    (tmp_path / ".orbit").mkdir()
+    (tmp_path / ".orbit" / "config.toml").write_text('[roles.coder]\nmodel = "sonnet"\n')
+    monkeypatch.chdir(tmp_path)
+    assert runner.invoke(app, ["chat"]).exit_code == 0
+    [session] = launched
+    assert session.agents is not None
+    roles = session.agents.roles
+    assert (roles["coder"].model, roles["reviewer"].model) == ("sonnet", "haiku")
+    assert roles[PLANNER].effort == "max"
+
+
+def test_chat_rereads_the_planners_role_with_the_user_configs_fields(
+    launched: list[WorkspaceHost], config_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert runner.invoke(app, ["chat"]).exit_code == 0
+    config_dir.mkdir()
+    text = '[roles.planner]\nmodel = "opus"\n'
+    role = planner_role_read_after(config_dir / "config.toml", text, launched)
+    assert isinstance(role, Role) and role.model == "opus"
+
+
+def test_a_role_field_the_user_config_cant_set_stops_chat_naming_it_and_the_files(
+    launched: list[WorkspaceHost], config_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config_dir.mkdir()
+    path = config_dir / "config.toml"
+    path.write_text("[roles.coder]\nverify = false\n")
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["chat"])
+    assert result.exit_code == 2
+    assert (
+        f"{path}: roles.coder.verify: belongs in the project's .orbit/config.toml" in result.output
+    )
+    assert launched == []
 
 
 def test_rereading_an_invalid_project_file_gives_its_problems(

@@ -16,6 +16,7 @@ from orbit.agent import (
     Agents,
     ClaudeCliRunner,
     ConfigError,
+    Configuring,
     ControlPlane,
     GitCoderTree,
     HostMaker,
@@ -112,6 +113,15 @@ class _Directories:
 
 
 @dataclass(frozen=True)
+class _UserConfig:
+    """The user config in ``directory``, with the ``storage`` settings it set at startup; the
+    role fields it sets are read again as each workspace is configured."""
+
+    directory: Path
+    storage: StorageSettings
+
+
+@dataclass(frozen=True)
 class _InProcess:
     """A backend set up in this process: what ``build``s its control plane, its ``store``, the
     id of the workspace it serves, and the workspace ``lock``, with the repository's ``owner``
@@ -162,12 +172,12 @@ def _backend(flags: _Backend, directories: _Directories, *, pick_session: bool) 
 
     Exits with status 2 if a configuration is invalid or the workspace can't be opened.
     """
-    storage = _storage(directories.user_config)
+    user = _user_config(directories.user_config)
     usage_source = _usage_source(flags)
-    make = _maker(flags, storage, pick_session=pick_session)
+    make = _maker(flags, user, pick_session=pick_session)
     store = _open(directories.state)
     try:
-        opened = _opened(store, directories.root, make)
+        opened = _opened(store, directories.root, make, user.directory)
     except BaseException:
         asyncio.run(store.close())
         raise
@@ -187,26 +197,27 @@ def _backend(flags: _Backend, directories: _Directories, *, pick_session: bool) 
     )
 
 
-def _opened(store: SqliteStore, root: Path, make: HostMaker) -> OpenedWorkspace:
-    """The workspace at ``root`` opened over ``store`` for a chat, its host made by ``make``.
+def _opened(store: SqliteStore, root: Path, make: HostMaker, config_dir: Path) -> OpenedWorkspace:
+    """The workspace at ``root`` opened over ``store`` for a chat, configured over the user
+    config in ``config_dir``, its host made by ``make``.
 
     Exits with status 2 if it can't be opened.
     """
     with _exit_on(WorkspaceUnavailable):
-        opening = Opening(identity=False, flag=False)
+        opening = Opening(Configuring(config_dir, worktree=False), flag=False)
         return asyncio.run(open_workspace(store, root, make, opening))
 
 
-def _maker(flags: _Backend, storage: StorageSettings, *, pick_session: bool) -> HostMaker:
+def _maker(flags: _Backend, user: _UserConfig, *, pick_session: bool) -> HostMaker:
     """What gives, for a served workspace and its configuration, what builds its host as
-    ``flags`` ask, keeping its sessions as ``storage`` says, listing the saved sessions to pick
-    from if ``pick_session``."""
+    ``flags`` ask, with the ``user`` config, listing the saved sessions to pick from if
+    ``pick_session``."""
 
     def make(
         workspace: ServedWorkspace, config: OrbitConfig
     ) -> Callable[[OpenedStore], WorkspaceHost]:
         backend = replace(flags, owner=workspace.owner, lock=workspace.lock)
-        return _host_maker(backend, workspace.root, config, storage, pick_session=pick_session)
+        return _host_maker(backend, workspace.root, config, user, pick_session=pick_session)
 
     return make
 
@@ -215,21 +226,16 @@ def _host_maker(
     backend: _Backend,
     root: Path,
     config: OrbitConfig,
-    storage: StorageSettings,
+    user: _UserConfig,
     *,
     pick_session: bool,
 ) -> Callable[[OpenedStore], WorkspaceHost]:
     """What builds the host of the workspace at ``root``, configured as ``config`` says, over
-    its view of the store, as ``backend`` asks, keeping its sessions as ``storage`` says,
-    listing the saved sessions to pick from if ``pick_session``."""
+    its view of the store, as ``backend`` asks, keeping its sessions as the ``user`` config's
+    storage settings say and reading its planner's role again over it, listing the saved
+    sessions to pick from if ``pick_session``."""
     verification = _verification(config) if backend.verify else None
-    agents = _agents(
-        config,
-        root,
-        worktree=backend.worktree,
-        review=backend.review,
-        collector=backend.collector,
-    )
+    agents = _agents(config, root, backend, user.directory)
     settings, pinned = _settings(backend.model, backend.tools)
 
     def make(opened: OpenedStore) -> WorkspaceHost:
@@ -246,7 +252,7 @@ def _host_maker(
             pick_session=pick_session,
             name=backend.name,
             startup_notes=opened.notes,
-            storage=storage,
+            storage=user.storage,
             fallback=opened.fallback,
             recover=opened.recover,
             owner=backend.owner,
@@ -264,12 +270,12 @@ def _usage_source(flags: _Backend) -> UsageApi | None:
     return UsageApi() if flags.usage else None
 
 
-def _storage(config_dir: Path) -> StorageSettings:
-    """The storage settings in the user config in ``config_dir``.
+def _user_config(config_dir: Path) -> _UserConfig:
+    """The user config in ``config_dir``, with the storage settings it sets.
 
     Exits with status 2 if the file is invalid.
     """
-    return _configured(lambda: read_storage(config_dir))
+    return _UserConfig(config_dir, _configured(lambda: read_storage(config_dir)))
 
 
 def _open(state: Path) -> SqliteStore:
@@ -294,19 +300,15 @@ def _settings(model: str | None, tools: ToolAccess | None) -> tuple[Settings, li
     return settings, [name for name, given in (("model", model), ("tool_access", tools)) if given]
 
 
-def _agents(
-    config: OrbitConfig,
-    root: Path,
-    *,
-    worktree: bool,
-    review: bool,
-    collector: AgentCollector,
-) -> Agents:
+def _agents(config: OrbitConfig, root: Path, backend: _Backend, config_dir: Path) -> Agents:
     """The agents that run tasks as ``config`` says in the workspace at ``root``, in the coder
-    tree if ``worktree`` and the workspace is a git work tree, reviewing landed work if
-    ``review``, and sending their own telemetry to ``collector``."""
+    tree if ``backend`` asks for a worktree and the workspace is a git work tree, reviewing
+    landed work if it asks to, sending their own telemetry to its collector, and reading the
+    planner's role again over the user config in ``config_dir``."""
     where = str(root)
-    tree = GitCoderTree(where, config.setup) if worktree and in_git_work_tree(where) else None
+    worktree = backend.worktree and in_git_work_tree(where)
+    tree = GitCoderTree(where, config.setup) if worktree else None
+    collector = backend.collector
     return Agents(
         McpHost(),
         ClaudeCliRunner(endpoint=collector.endpoint, protocol=collector.protocol),
@@ -314,20 +316,20 @@ def _agents(
         config.roles,
         config.limits,
         tree=tree,
-        review=review,
+        review=backend.review,
         review_limits=config.review_limits,
         write_config=write_checks,
-        planner_role=lambda: _planner_role(where),
+        planner_role=lambda: _planner_role(where, config_dir),
         file_names=file_names,
         root=where,
         temp_dirs=SystemTempDirs(),
     )
 
 
-def _planner_role(root: str) -> Role | ConfigError:
-    """The planner's role as the project file of the workspace at ``root`` says now, or why the
-    file is invalid."""
+def _planner_role(root: str, config_dir: Path) -> Role | ConfigError:
+    """The planner's role as the project file of the workspace at ``root`` and the user config
+    in ``config_dir`` say now, or why either is invalid."""
     try:
-        return read_config(root).roles[PLANNER]
+        return read_config(root, config_dir).roles[PLANNER]
     except ConfigError as exc:
         return exc

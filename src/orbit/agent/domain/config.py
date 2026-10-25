@@ -1,5 +1,5 @@
 """Orbit's configuration: the limits, roles, verification steps and setup a project file sets
-over the built-in defaults."""
+over the user config's role fields and the built-in defaults."""
 
 from collections.abc import Mapping
 from typing import Any
@@ -10,6 +10,7 @@ from pydantic_core import PydanticCustomError
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.checks import Setup, VerificationConfig
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
+from orbit.agent.domain.layers import NO_USER_ROLES, Layer, ProjectRoles, UserRoles, resolve_roles
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import Role, lane_clashes, worktree_lane_clashes
 from orbit.agent.domain.verification import MAX_FALLBACK_FIXES
@@ -70,26 +71,25 @@ class OrbitConfig(_Config):
         )
 
 
-def load_config(data: dict[str, Any], built_in: Mapping[str, Role]) -> OrbitConfig:
-    """The configuration ``data`` (a project file's contents) describes over the defaults, whose
-    roles are ``built_in``.
+def load_config(
+    data: dict[str, Any],
+    built_in: Mapping[str, Role],
+    user: UserRoles = NO_USER_ROLES,
+    path: str | None = None,
+) -> OrbitConfig:
+    """The configuration ``data`` (the contents of the project file at ``path``, if known)
+    describes over the role fields ``user`` sets and the defaults, whose roles are ``built_in``.
 
-    A role it names that's built in keeps the fields it doesn't set; any other role is new.
-    Raises :class:`ConfigError` if it's invalid.
+    A role it names that's built in keeps the fields it doesn't set; any other role is new. Each
+    role's fields are resolved as :func:`resolve_roles` says. Raises :class:`ConfigError` if
+    it's invalid.
     """
     data = dict(data)
     roles = data.get("roles", {})
     if isinstance(roles, dict):
-        data["roles"] = _with_built_in_roles(roles, built_in)
+        project = ProjectRoles(Layer("project", path), roles)
+        data["roles"] = resolve_roles(built_in, user, project).roles
     try:
         return OrbitConfig.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(validation_problems(exc)) from None
-
-
-def _with_built_in_roles(roles: dict[str, Any], built_in: Mapping[str, Role]) -> dict[str, Any]:
-    merged: dict[str, Any] = {name: role.model_dump() for name, role in built_in.items()}
-    for name, fields in roles.items():
-        base = merged.get(name, {})
-        merged[name] = {**base, **fields} if isinstance(fields, dict) else fields
-    return merged
