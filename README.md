@@ -58,6 +58,7 @@ uv run orbit chat --local                      # run in-process even with orbit 
 uv run orbit status                            # what the orbit serve running here is doing
 uv run orbit status --remote work --json       # the same of another, as one JSON object
 uv run orbit init                              # start .orbit/config.toml from the reference config
+uv run orbit init --update                     # add the settings it doesn't mention, commented out
 uv run orbit init --force                      # replace it, keeping the old one as a backup
 uv run orbit config show                       # every setting in effect here, and where it's from
 uv run orbit config show roles.reviewer --full # one role's, with its instructions whole
@@ -1228,9 +1229,22 @@ it does, as in [`reference/config.toml`](src/orbit/agent/external/reference/conf
 shipped with orbit. Uncomment the settings you change; the others keep their defaults.
 
 A file that's already there is left as it is, and `orbit init` stops with status 2, naming it.
-`--force` replaces it with the reference after keeping it beside it as the next free
+`--update` brings it up to date with the reference instead, adding what it doesn't mention
+without changing, moving or removing any of its lines: a table counts as there if it's set or its
+header is commented out (`# [roles.coder]`), and a key if it's set or commented out under its
+table (`# merge = true`). A key missing from a table that's there is added, commented out under
+the line saying what it does, after the table's last line (the limits, being top-level keys,
+after the file's opening comments and top-level keys); a whole table missing is appended at the
+end, as the reference has it, all under one line
+`# Added by orbit init --update on <YYYY-MM-DD>: settings this file didn't mention.`. It prints
+what it added to which table, or `Nothing to add.`, and without a file it writes the reference
+as `orbit init` does. A file that isn't valid TOML is left as it is, and `orbit init --update`
+stops with status 2.
+
+`--force` replaces the file with the reference after keeping it beside it as the next free
 `config.toml.bak.N`, counting from `config.toml.bak.1`, so each `--force` keeps one more backup
-and none is overwritten; it prints where the old file was kept and where the new one is.
+and none is overwritten; it prints where the old file was kept and where the new one is. It
+can't go with `--update`.
 
 ### Seeing the configuration in effect
 
@@ -2434,7 +2448,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     (`reference_config()`), and `uv run python -m orbit.agent.external.reference_config` writes
     it to `reference/config.toml`, the copy shipped with orbit, which a test keeps in step;
     `config_init` writes that copy to a project's `.orbit/config.toml` for `orbit init`
-    (`init_config`), keeping a file it replaces as the next free numbered backup; `checks`
+    (`init_config`), keeping a file it replaces as the next free numbered backup, and for
+    `orbit init --update` adds to the file what it doesn't mention (`update_config`); `checks`
     runs a verification step as a process (`run_step`); `processes` runs a program to completion
     without leaving it behind; `workspace`
     fingerprints the git working tree; `usage_api` fetches the Claude subscription's usage
@@ -2539,7 +2554,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `agents`: agent ids and tokens), `roles` (built-in roles, loaded from their `roles.toml` and
     given their instructions, which of a role's fields go together, and the tasks orbit queues in
     them), `config` (`OrbitConfig`: the
-    limits, roles, verification steps and setup a project file sets over the built-in defaults), `layers` (the layers a setting comes from, the user config's role fields and personal roles, and each role resolved across them field by field), `config_report` (what `orbit config show` reports: each setting in effect by its dotted key with the layer it came from, and a key's settings) and `config_errors` (`ConfigError`,
+    limits, roles, verification steps and setup a project file sets over the built-in defaults), `layers` (the layers a setting comes from, the user config's role fields and personal roles, and each role resolved across them field by field), `config_report` (what `orbit config show` reports: each setting in effect by its dotted key with the layer it came from, and a key's settings), `config_update` (what `orbit init --update` adds to a project file from the reference config: the keys a table it has doesn't mention, after the table's last line, and the tables it lacks, at the end, never changing a line of it) and `config_errors` (`ConfigError`,
     and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]` with its `TlsSettings`, which files each TLS mode needs, where now falls in a certificate's validity, and which hosts are loopback), `certificate_list` (what `orbit certs list` shows of each certificate: its expiry, days left, fingerprint and marks), `client_bundle` (what `orbit certs client --bundle` puts in a client's bundle: the CA, its certificate and key, and the `[remotes.<name>]` lines naming them where it's unpacked), `remotes` (`RemoteSettings`, a `[remotes.<name>]` table, and which credentials go together), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
     setup step that makes a fresh worktree ready, and the checks a configurator proposes), the
     `Catalog` (in `catalog`: the workspace and its sessions, the agents' roles, the triggers and

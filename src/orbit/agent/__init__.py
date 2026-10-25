@@ -77,7 +77,13 @@ from orbit.agent.external.checks import run_step
 from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner
 from orbit.agent.external.cloner import Cloner
 from orbit.agent.external.config_file import read_config, read_config_sources, write_checks
-from orbit.agent.external.config_init import ConfigExists, InitResult, init_config
+from orbit.agent.external.config_init import (
+    ConfigExists,
+    InitResult,
+    UpdateResult,
+    init_config,
+    update_config,
+)
 from orbit.agent.external.control_plane import ControlPlaneServer, ListenFailed
 from orbit.agent.external.directories import resolve_config_dir, resolve_state_dir
 from orbit.agent.external.directory_lister import DirectoryLister
@@ -197,6 +203,7 @@ __all__ = [
     "TokenError",
     "TokenFile",
     "UnknownKey",
+    "UpdateResult",
     "UsageApi",
     "Verification",
     "VerificationStep",
@@ -246,6 +253,7 @@ __all__ = [
     "subtree",
     "tls_warnings",
     "top_level",
+    "update_config",
     "workspace_state",
     "write_bundle",
     "write_checks",

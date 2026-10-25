@@ -1,11 +1,15 @@
 """``orbit init``: the reference config written to a workspace's ``.orbit/config.toml``, an
-existing one refused, and ``--force`` replacing it after keeping numbered backups."""
+existing one refused, ``--update`` adding to it what it doesn't mention, and ``--force``
+replacing it after keeping numbered backups."""
 
+import re
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner, Result
 
+from orbit.agent.domain.config import LIMIT_KEYS
+from orbit.agent.domain.roles import Role
 from orbit.agent.external.reference_config import reference_config
 from orbit.cli import app
 from tests.git_repo import init_repo
@@ -104,4 +108,72 @@ def test_a_file_that_cant_be_written_exits_with_status_2(project: Path) -> None:
     assert result.exit_code == 2
     assert result.stderr.startswith("Couldn't write orbit's reference config: ")
     assert str(project / ".orbit") in result.stderr
+    assert result.stdout == ""
+
+
+def test_update_without_a_file_writes_the_reference_as_init_does(project: Path) -> None:
+    result = init(project, "--update")
+    assert result.exit_code == 0, result.output
+    path = project / ".orbit" / "config.toml"
+    assert path.read_text(encoding="utf-8") == REFERENCE
+    assert result.stdout.splitlines() == [
+        f"Wrote orbit's reference config to {path}.",
+        WRITTEN,
+    ]
+
+
+def test_update_adds_what_the_file_doesnt_mention_and_says_what(project: Path) -> None:
+    path = project / ".orbit" / "config.toml"
+    path.parent.mkdir()
+    path.write_text('[roles.coder]\nmodel = "opus"\n')
+    result = init(project, "--update")
+    assert result.exit_code == 0, result.output
+    fields = ", ".join(key for key in Role.model_fields if key != "model")
+    assert result.stdout.splitlines() == [
+        f"Added to {path}, commented out:",
+        f"  in the top level: {', '.join(LIMIT_KEYS)}",
+        f"  in [roles.coder]: {fields}",
+        "  at the end: [[verification.steps]], [setup], [roles.planner], [roles.reviewer],"
+        " [roles.super-reviewer], [roles.configurator], [roles.security-reviewer],"
+        " [triggers.review-each-commit], [mcp.github], [mcp.semgrep],"
+        " [roles.security-reviewer.tools], [models.local-coder]",
+    ]
+    added = (
+        r"# Added by orbit init --update on \d{4}-\d{2}-\d{2}: settings this file didn't mention\."
+    )
+    assert re.search(f"^{added}$", path.read_text(encoding="utf-8"), re.MULTILINE)
+
+
+def test_update_with_nothing_to_add_says_so_and_leaves_the_file(project: Path) -> None:
+    init(project)
+    result = init(project, "--update")
+    assert result.exit_code == 0, result.output
+    assert result.stdout == "Nothing to add.\n"
+    assert (project / ".orbit" / "config.toml").read_text(encoding="utf-8") == REFERENCE
+
+
+def test_update_with_force_is_refused(project: Path) -> None:
+    result = init(project, "--update", "--force")
+    assert result.exit_code == 2
+    assert result.stderr.splitlines() == [
+        "--update keeps the file and --force replaces it, so they can't go together."
+    ]
+    assert not (project / ".orbit").exists()
+
+
+def test_update_of_a_file_that_isnt_toml_exits_with_status_2(project: Path) -> None:
+    path = project / ".orbit" / "config.toml"
+    path.parent.mkdir()
+    path.write_text("[roles.coder\n")
+    result = init(project, "--update")
+    assert result.exit_code == 2
+    assert result.stderr.startswith(f"Invalid orbit configuration: {path}: ")
+    assert path.read_text() == "[roles.coder\n"
+
+
+def test_update_of_a_file_that_cant_be_read_exits_with_status_2(project: Path) -> None:
+    (project / ".orbit").write_text("")
+    result = init(project, "--update")
+    assert result.exit_code == 2
+    assert result.stderr.startswith("Couldn't update the config from orbit's reference config: ")
     assert result.stdout == ""
