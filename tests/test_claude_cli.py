@@ -12,9 +12,15 @@ from orbit.agent.application.ports import AgentLaunch, ResumeFailed
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.roles import ORBIT_TOOLS
 from orbit.agent.domain.usage_limits import limit_hit
-from orbit.agent.external.claude_cli import AGENT_RULES, TOOL_TIMEOUT_MS, translate
+from orbit.agent.external.claude_cli import (
+    AGENT_RULES,
+    TOOL_TIMEOUT_MS,
+    agent_telemetry_env,
+    translate,
+)
 from orbit.protocol import (
     AGENT_FAILED,
+    PLAN_TASK,
     AssistantMessage,
     ErrorOccurred,
     Event,
@@ -216,10 +222,15 @@ def test_translate_rejects_messages_missing_what_they_should_hold(
 # ClaudeCliRunner: drives a real subprocess (the fake CLI above)
 
 
-def make_runner(tmp_path: Path, **scenario: Any) -> tuple[ClaudeCliRunner, Path]:
+def make_runner(
+    tmp_path: Path, endpoint: str | None = None, **scenario: Any
+) -> tuple[ClaudeCliRunner, Path]:
+    """A runner of the fake CLI playing ``scenario``, its agents sending their telemetry to the
+    collector at ``endpoint`` over OTLP/gRPC, if given, and where its calls are recorded."""
     scenario_path = tmp_path / "scenario.json"
     scenario_path.write_text(json.dumps(scenario))
-    runner = ClaudeCliRunner(command=(sys.executable, str(FAKE_CLAUDE), str(scenario_path)))
+    command = (sys.executable, str(FAKE_CLAUDE), str(scenario_path))
+    runner = ClaudeCliRunner(command=command, endpoint=endpoint, protocol="grpc")
     return runner, scenario_path
 
 
@@ -235,6 +246,7 @@ def lines(*messages: dict[str, Any]) -> list[str]:
 # The agent the runner's turns below are a conversation with.
 AGENT = Agent(id="agent-3", role="coder", task_id="7", token="s3cret")
 URL = "http://127.0.0.1:5555/mcp"
+WORKSPACE_ID = "workspace-1"
 STREAM = ["-p", "--output-format", "stream-json", "--verbose"]
 
 
@@ -242,7 +254,9 @@ async def run(
     runner: ClaudeCliRunner, prompt: str, settings: Settings | None = None
 ) -> list[Event]:
     """One turn, ``t``, of AGENT's conversation through ``runner``."""
-    launch = AgentLaunch(AGENT, URL, prompt, settings or Settings(), ".", "Plan.", ("x",))
+    launch = AgentLaunch(
+        AGENT, URL, prompt, settings or Settings(), ".", "Plan.", ("x",), WORKSPACE_ID
+    )
     return [e async for e in runner.converse("t", launch)]
 
 
@@ -393,7 +407,9 @@ async def test_an_agent_whose_cli_exits_before_reading_its_prompt_crashes_with_i
     tmp_path: Path,
 ) -> None:
     runner, _ = make_runner(tmp_path, exit_at_once=True, stderr="error: unknown option\n", exit=1)
-    launch = AgentLaunch(AGENT, URL, LARGE_PROMPT, Settings(), ".", "Write code.", TOOLS)
+    launch = AgentLaunch(
+        AGENT, URL, LARGE_PROMPT, Settings(), ".", "Write code.", TOOLS, WORKSPACE_ID
+    )
     with pytest.raises(RuntimeError, match=r"^error: unknown option$"):
         [e async for e in runner.run_agent(launch)]
 
@@ -504,7 +520,7 @@ async def test_runner_reports_missing_cli(tmp_path: Path) -> None:
 async def test_runner_reports_a_missing_directory_not_a_missing_cli(tmp_path: Path) -> None:
     runner, _ = make_runner(tmp_path)
     missing = tmp_path / "gone"
-    launch = AgentLaunch(AGENT, URL, "hi", Settings(), str(missing), "Plan.", ("x",))
+    launch = AgentLaunch(AGENT, URL, "hi", Settings(), str(missing), "Plan.", ("x",), WORKSPACE_ID)
     with pytest.raises(RuntimeError) as raised:
         [e async for e in runner.converse("t", launch)]
     assert str(raised.value) == (
@@ -576,7 +592,14 @@ async def run_agent(
     runner: ClaudeCliRunner, settings: Settings | None = None, cwd: str = "."
 ) -> list[Event]:
     launch = AgentLaunch(
-        AGENT, URL, "You are agent-3.", settings or Settings(), cwd, "Write code.", TOOLS
+        AGENT,
+        URL,
+        "You are agent-3.",
+        settings or Settings(),
+        cwd,
+        "Write code.",
+        TOOLS,
+        WORKSPACE_ID,
     )
     return [e async for e in runner.run_agent(launch)]
 
@@ -673,7 +696,8 @@ async def test_orbit_tools_the_role_lacks_are_hidden_from_the_agent(tmp_path: Pa
 
 async def test_an_agent_with_every_orbit_tool_has_none_hidden(tmp_path: Path) -> None:
     runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
-    launch = AgentLaunch(AGENT, URL, "Go.", Settings(tool_access="full"), ".", "Code.", ORBIT_TOOLS)
+    settings = Settings(tool_access="full")
+    launch = AgentLaunch(AGENT, URL, "Go.", settings, ".", "Code.", ORBIT_TOOLS, WORKSPACE_ID)
     async for _ in runner.run_agent(launch):
         pass
     assert "--disallowedTools" not in calls(scenario)[0]["argv"]
@@ -720,7 +744,9 @@ async def test_an_agent_runs_in_its_working_directory(tmp_path: Path) -> None:
 
 
 async def converse(runner: ClaudeCliRunner, prompt: str, agent: Agent = AGENT) -> list[Event]:
-    launch = AgentLaunch(agent, URL, prompt, Settings(), ".", "Plan.", ("propose_task",))
+    launch = AgentLaunch(
+        agent, URL, prompt, Settings(), ".", "Plan.", ("propose_task",), WORKSPACE_ID
+    )
     return [e async for e in runner.converse("turn-1", launch)]
 
 
@@ -741,3 +767,110 @@ async def test_a_conversation_resumes_its_own_session_turn_after_turn(tmp_path: 
     allowed = "mcp__orbit__propose_task,Read,Glob,Grep,WebSearch"  # The planner is restricted.
     assert two["argv"][two["argv"].index("--allowedTools") + 1] == allowed
     assert two["env"]["ORBIT_AGENT_TOKEN"] == "s3cret"
+
+
+# Agents' own telemetry, sent to the collector orbit's goes to
+
+RESOURCE = {
+    "orbit.task.id": "t1",
+    "orbit.agent.id": "agent-1",
+    "orbit.role": "coder",
+    "orbit.workspace.id": "w",
+}
+TELEMETRY_VARIABLES = (
+    "CLAUDE_CODE_ENABLE_TELEMETRY",
+    "OTEL_METRICS_EXPORTER",
+    "OTEL_LOGS_EXPORTER",
+    "OTEL_EXPORTER_OTLP_PROTOCOL",
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_RESOURCE_ATTRIBUTES",
+)
+HEADER_VARIABLES = (
+    "OTEL_EXPORTER_OTLP_HEADERS",
+    "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+    "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
+    "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
+)
+
+
+@pytest.fixture
+def untelemetered(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An environment for orbit setting none of the variables agents' telemetry takes."""
+    for name in (*TELEMETRY_VARIABLES, *HEADER_VARIABLES):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_agents_send_their_metrics_and_logs_to_the_collector_describing_themselves() -> None:
+    assert agent_telemetry_env("http://c:4318", "http/protobuf", RESOURCE) == {
+        "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+        "OTEL_METRICS_EXPORTER": "otlp",
+        "OTEL_LOGS_EXPORTER": "otlp",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://c:4318",
+        "OTEL_RESOURCE_ATTRIBUTES": (
+            "orbit.task.id=t1,orbit.agent.id=agent-1,orbit.role=coder,orbit.workspace.id=w"
+        ),
+    }
+
+
+def test_the_resource_attributes_values_are_percent_encoded() -> None:
+    env = agent_telemetry_env("http://c:4317", "grpc", {"orbit.task.id": "a b,c=d%é"})
+
+    assert env["OTEL_RESOURCE_ATTRIBUTES"] == "orbit.task.id=a%20b%2Cc%3Dd%25%C3%A9"
+    assert env["OTEL_EXPORTER_OTLP_PROTOCOL"] == "grpc"
+
+
+def test_without_a_collector_agents_send_no_telemetry() -> None:
+    assert agent_telemetry_env(None, "http/protobuf", RESOURCE) == {}
+
+
+@pytest.mark.usefixtures("untelemetered")
+async def test_an_agent_sends_its_telemetry_to_the_collector_without_orbits_headers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name in HEADER_VARIABLES:
+        monkeypatch.setenv(name, "Authorization=Bearer%20orbits-key")
+    stdout = lines(init("connected"), RESULT)
+    runner, scenario = make_runner(tmp_path, endpoint="http://c:4317", stdout=stdout)
+
+    await run_agent(runner)
+
+    env = calls(scenario)[0]["env"]
+    assert {name: env.get(name) for name in TELEMETRY_VARIABLES} == {
+        "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+        "OTEL_METRICS_EXPORTER": "otlp",
+        "OTEL_LOGS_EXPORTER": "otlp",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://c:4317",
+        "OTEL_RESOURCE_ATTRIBUTES": (
+            "orbit.task.id=7,orbit.agent.id=agent-3,orbit.role=coder,orbit.workspace.id=workspace-1"
+        ),
+    }
+    assert not set(HEADER_VARIABLES) & set(env)
+    assert env["ORBIT_AGENT_TOKEN"] == "s3cret"
+
+
+@pytest.mark.usefixtures("untelemetered")
+async def test_the_planners_telemetry_names_no_task(tmp_path: Path) -> None:
+    stdout = lines(init("connected"), RESULT)
+    runner, scenario = make_runner(tmp_path, endpoint="http://c:4317", stdout=stdout)
+    planner = Agent(id="agent-9", role="planner", task_id=PLAN_TASK, token="t9")
+
+    await converse(runner, "Hello.", planner)
+
+    attributes = calls(scenario)[0]["env"]["OTEL_RESOURCE_ATTRIBUTES"]
+    assert attributes == "orbit.agent.id=agent-9,orbit.role=planner,orbit.workspace.id=workspace-1"
+
+
+@pytest.mark.usefixtures("untelemetered")
+async def test_without_a_collector_an_agent_sends_no_telemetry_and_keeps_its_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_HEADERS", "x-key=yours")
+    runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
+
+    await run_agent(runner)
+
+    env = calls(scenario)[0]["env"]
+    assert not set(TELEMETRY_VARIABLES) & set(env)
+    assert env["OTEL_EXPORTER_OTLP_HEADERS"] == "x-key=yours"

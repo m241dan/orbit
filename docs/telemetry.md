@@ -1,7 +1,8 @@
 # Telemetry
 
-What orbit records as OpenTelemetry spans, the metrics it records from them, and the live gauges it
-reports, once telemetry is turned on (README.md's **Telemetry** says how). Span names are low-cardinality and start with
+What orbit records as OpenTelemetry spans, the metrics it records from them, the live gauges it
+reports, and what its agents send of their own, once telemetry is turned on (README.md's
+**Telemetry** says how). Span names are low-cardinality and start with
 `orbit.`; metric and attribute names follow OpenTelemetry's GenAI conventions where one fits
 (`gen_ai.*`) and start with `orbit.` otherwise.
 
@@ -353,3 +354,20 @@ warning, once until it reads again; the other gauges still report.
 | `orbit.tasks.pending` | gauge | `{task}` | `orbit.workspace.id` | How many tasks are `pending` in each workspace's open session. |
 | `orbit.frontends.connected` | gauge | `{connection}` | | How many frontends are connected whose `Hello` was welcomed, attached to a workspace or not. |
 | `orbit.event_log.size` | gauge | `By` | `orbit.workspace.id` | The bytes the logs of each workspace's sessions hold in the store, their events' JSON, as the store last knew them: as it opened, and after each write to them since; 0 for a workspace with no store. |
+
+## Agents' own telemetry
+
+With the OTLP exporter, each agent's Claude Code CLI sends its own metrics and logs, as Claude
+Code's monitoring documentation describes them, to the collector orbit's spans go to, over the
+same protocol; README.md's **Telemetry** lists the variables it's given. Its resource carries these
+attributes beside the CLI's own:
+
+| Attribute | Type | Meaning |
+| --- | --- | --- |
+| `orbit.task.id` | string | The id of the task the agent works on, as on its task's `orbit.task` span; absent for the planner, which has none. |
+| `orbit.agent.id` | string | The agent's id, as on its `orbit.agent.process` span. |
+| `orbit.role` | string | The agent's role, such as `coder`, `planner` or `reviewer`. |
+| `orbit.workspace.id` | string | The id of the workspace it works in. |
+
+No headers are passed, so a collector that needs them receives none of it. With the console or
+file exporter, agents send nothing.

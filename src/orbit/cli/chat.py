@@ -46,7 +46,7 @@ from orbit.cli.options import (
     WorkspaceOption,
     WorktreeOption,
 )
-from orbit.cli.telemetry import _refuse_console, _telemetry
+from orbit.cli.telemetry import _agent_collector, _refuse_console, _telemetry
 from orbit.cli.threaded import ThreadedSession
 from orbit.client import (
     CaUnreadable,
@@ -141,7 +141,8 @@ def chat(
     picking = not flags.fresh
     # The TUI captures the warnings logged while it runs; those as telemetry stops go to stderr.
     with _telemetry(run) as telemetry:
-        flags = replace(flags, telemetry=telemetry, gauges=telemetry.gauges)
+        collector = _agent_collector(run)
+        flags = replace(flags, telemetry=telemetry, gauges=telemetry.gauges, collector=collector)
         with _in_process(flags, directories, pick_session=picking, make=_backend) as backend:
             session = ThreadedSession(backend.build, _thread_context(profile))
             opening = Opening(pick=picking, repository=str(root))

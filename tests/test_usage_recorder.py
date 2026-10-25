@@ -11,7 +11,14 @@ from orbit.protocol import Event, Settings, Usage
 from tests.agent_fakes import START, FakeHalt, FakeLedger, Ticks, settled
 
 LAUNCH = AgentLaunch(
-    Agent("agent-1", "coder", "1", "token-1"), "url", "Go.", Settings(model="opus"), ".", "", ()
+    Agent("agent-1", "coder", "1", "token-1"),
+    "url",
+    "Go.",
+    Settings(model="opus"),
+    ".",
+    "",
+    (),
+    "w",
 )
 USAGE = Usage(input_tokens=10, cost_usd=0.5, turns=1, duration_ms=900)
 

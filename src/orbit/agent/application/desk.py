@@ -144,14 +144,20 @@ class CallTarget(Protocol):
 
 class AgentDesk:
     """Answers agents' calls by passing them to their runs, publishing each call and reply.
+    It launches agents for the workspace ``workspace_id``.
 
     Each call is traced with ``telemetry`` under the span of its agent's process, while that's
     traced (see :meth:`traced`), and otherwise under the span current."""
 
     def __init__(
-        self, agents: Agents, publish: Publish, telemetry: Telemetry = _NO_TELEMETRY
+        self,
+        agents: Agents,
+        publish: Publish,
+        telemetry: Telemetry = _NO_TELEMETRY,
+        workspace_id: str = "",
     ) -> None:
         self.agents = agents
+        self._workspace_id = workspace_id
         self.registry = AgentRegistry(agents.new_token)
         self._publish = publish
         self._tracing = AgentTracing(telemetry)
@@ -208,7 +214,9 @@ class AgentDesk:
         """How to start ``agent`` in its role: told ``prompt``, with ``settings``, in ``cwd``."""
         role = self.agents.roles[agent.role]
         url = await self.url()
-        launch = AgentLaunch(agent, url, prompt, settings, cwd, role.instructions, role.tools)
+        launch = AgentLaunch(
+            agent, url, prompt, settings, cwd, role.instructions, role.tools, self._workspace_id
+        )
         self._launches[agent.id] = launch
         return launch
 

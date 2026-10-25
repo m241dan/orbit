@@ -16,6 +16,12 @@ state directory."""
 OtlpProtocol = Literal["http/protobuf", "grpc"]
 """How spans and metrics reach a collector over OTLP."""
 
+DEFAULT_ENDPOINTS: dict[OtlpProtocol, str] = {
+    "http/protobuf": "http://localhost:4318",
+    "grpc": "http://localhost:4317",
+}
+"""The collector's base URL OTLP sends to by default, by protocol."""
+
 Signal = Literal["traces", "metrics"]
 """What OTLP sends: spans or metrics. OTLP over HTTP adds ``/v1/<signal>`` to a collector's base
 URL for each, and each has variables of its own, ``OTEL_EXPORTER_OTLP_<SIGNAL>_*``."""
@@ -123,6 +129,29 @@ def _endpoint(
     if base is None or settings.protocol == "grpc":
         return base
     return f"{base.rstrip('/')}/v1/{signal}"
+
+
+@dataclass(frozen=True)
+class AgentCollector:
+    """Where agents send the Claude Code CLI's own telemetry: to the collector at the base URL
+    ``endpoint`` over ``protocol``, or nowhere when ``endpoint`` is ``None``."""
+
+    endpoint: str | None = None
+    protocol: OtlpProtocol = "http/protobuf"
+
+
+def agent_collector(settings: TelemetrySettings, environ: Mapping[str, str]) -> AgentCollector:
+    """Where agents send their telemetry as ``settings`` say: to the collector orbit's goes to,
+    at the base URL ``OTEL_EXPORTER_OTLP_ENDPOINT`` in ``environ`` gives, else ``settings``',
+    else OTLP's default; nowhere unless orbit's goes over OTLP."""
+    if settings.exporter != "otlp":
+        return AgentCollector()
+    endpoint = (
+        environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+        or settings.endpoint
+        or DEFAULT_ENDPOINTS[settings.protocol]
+    )
+    return AgentCollector(endpoint, settings.protocol)
 
 
 def _variable(signal: Signal) -> str:

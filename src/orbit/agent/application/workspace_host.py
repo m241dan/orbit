@@ -35,6 +35,7 @@ from orbit.agent.application.planner_trace import PlannerTracing
 from orbit.agent.application.ports import (
     Fallback,
     ProposalReview,
+    Publish,
     RepositoryLock,
     SessionStore,
     UsageLedger,
@@ -132,6 +133,14 @@ def _reviewed(agents: Agents | None, review: ProposalReview) -> Agents | None:
     if agents is None or agents.proposal_review is not None:
         return agents
     return replace(agents, proposal_review=review)
+
+
+def _desk(
+    agents: Agents | None, publish: Publish, telemetry: Telemetry, workspace_id: str
+) -> AgentDesk | None:
+    """The desk launching ``agents`` for the workspace ``workspace_id``, publishing with
+    ``publish`` and tracing with ``telemetry``; none without agents."""
+    return AgentDesk(agents, publish, telemetry, workspace_id) if agents else None
 
 
 def _workspace_label(workspace: str | None) -> str | None:
@@ -304,7 +313,7 @@ class WorkspaceHost:
         self._proposals = FrontendReview(self._events.put, self._agent_on)
         agents = _reviewed(agents, self._proposals)
         self._verifier = _verifier(verification, self._tasks, self._events, agents, telemetry)
-        self._desk = AgentDesk(agents, self._publish_agents, telemetry) if agents else None
+        self._desk = _desk(agents, self._publish_agents, telemetry, workspace_id)
         self._workspace = workspace
         self._managed = managed
         self._recover = recover

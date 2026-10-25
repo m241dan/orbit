@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
-from orbit.agent import ControlPlane, WorkspaceHost
+from orbit.agent import ClaudeCliRunner, ControlPlane, WorkspaceHost
 from orbit.cli import app
 from orbit.protocol import RunTasks
 from orbit.telemetry import Off
@@ -19,7 +19,7 @@ from orbit.telemetry.gauges import OtelGauges
 from orbit.telemetry.otel import OtelTelemetry
 from orbit.tracing import NoGauges
 from orbit.tui.view.actions import action, carried
-from tests.cli_fakes import HELLO, FakeApp, LocalApp, StartedTelemetry
+from tests.cli_fakes import AGENT_LAUNCH, HELLO, FakeApp, LocalApp, StartedTelemetry
 from tests.server_fakes import URL
 
 runner = CliRunner()
@@ -52,6 +52,24 @@ def hosts(monkeypatch: pytest.MonkeyPatch) -> list[WorkspaceHost]:
     LocalApp.during = None
     LocalApp.halted = None
     return built
+
+
+TELEMETRY_VARIABLES = (
+    "CLAUDE_CODE_ENABLE_TELEMETRY",
+    "OTEL_METRICS_EXPORTER",
+    "OTEL_LOGS_EXPORTER",
+    "OTEL_EXPORTER_OTLP_PROTOCOL",
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_RESOURCE_ATTRIBUTES",
+)
+"""The variables that have an agent send its telemetry to a collector."""
+
+
+@pytest.fixture
+def untelemetered(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An environment for orbit setting none of the variables agents' telemetry takes."""
+    for name in (*TELEMETRY_VARIABLES, "OTEL_EXPORTER_OTLP_HEADERS"):
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture
@@ -105,6 +123,42 @@ def test_chat_hands_its_backend_and_tui_the_telemetry_it_starts_and_closes_it_on
     assert [plane.gauges for plane in planes] == [telemetry.gauges]
     assert LocalApp.telemetries == [telemetry]
     assert telemetry.closed
+
+
+@pytest.mark.usefixtures("hosts", "started_telemetry", "untelemetered")
+def test_with_the_otlp_exporter_chats_agents_send_their_telemetry_without_its_headers(
+    runners: list[ClaudeCliRunner], config_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_HEADERS", "Authorization=Bearer%20orbits-key")
+    _configure(config_dir, 'exporter = "otlp"\nendpoint = "http://c:4318"')
+
+    assert runner.invoke(app, ["chat"]).exit_code == 0
+
+    [agents] = runners
+    env = agents.env(AGENT_LAUNCH)
+    assert {name: env[name] for name in TELEMETRY_VARIABLES} == {
+        "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+        "OTEL_METRICS_EXPORTER": "otlp",
+        "OTEL_LOGS_EXPORTER": "otlp",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://c:4318",
+        "OTEL_RESOURCE_ATTRIBUTES": (
+            "orbit.task.id=t1,orbit.agent.id=agent-1,orbit.role=coder,orbit.workspace.id=w"
+        ),
+    }
+    assert "OTEL_EXPORTER_OTLP_HEADERS" not in env
+
+
+@pytest.mark.usefixtures("hosts", "started_telemetry", "untelemetered")
+def test_with_the_file_exporter_chats_agents_send_no_telemetry(
+    runners: list[ClaudeCliRunner], config_dir: Path
+) -> None:
+    _configure(config_dir, 'exporter = "file"\nendpoint = "http://c:4318"')
+
+    assert runner.invoke(app, ["chat"]).exit_code == 0
+
+    [agents] = runners
+    assert not set(TELEMETRY_VARIABLES) & set(agents.env(AGENT_LAUNCH))
 
 
 @pytest.mark.usefixtures("fakes", "token_file")

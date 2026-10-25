@@ -6,7 +6,8 @@ Later turns of a conversation pass ``--resume <session_id>`` so Claude keeps it.
 
 Agents are runs of the CLI connected to orbit's MCP server, told to fetch their task
 from it. Their token travels in the environment, so other users can't read it from the
-process list.
+process list. Given a collector, agents send the CLI's own metrics and logs to it, labelled
+with who they are, but never with orbit's headers.
 """
 
 import asyncio
@@ -15,6 +16,7 @@ import json
 import os
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any
+from urllib.parse import quote
 
 from orbit.agent.application.ports import AgentLaunch, ResumeFailed
 from orbit.agent.domain.agents import Agent
@@ -22,6 +24,7 @@ from orbit.agent.domain.roles import tool_rules
 from orbit.agent.external.processes import spawned, start_failure
 from orbit.protocol import (
     AGENT_FAILED,
+    PLAN_TASK,
     AssistantMessage,
     ErrorOccurred,
     Event,
@@ -59,6 +62,14 @@ TOKEN_VARIABLE = "ORBIT_AGENT_TOKEN"
 TOOL_TIMEOUT_MS = 30 * 60 * 1000
 # Statuses the CLI reports for an MCP server that is, or is about to be, usable.
 LIVE_MCP_STATUSES = ("connected", "pending")
+# The variables that send headers with OTLP, which may hold the key to orbit's collector; an
+# agent, which can run any command, could leak it.
+OTLP_HEADER_VARIABLES = (
+    "OTEL_EXPORTER_OTLP_HEADERS",
+    "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+    "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
+    "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
+)
 # How agents are told to work is in the replies to their calls, which know their role.
 AGENT_RULES = (
     "You are an agent working for orbit, which hands out tasks and verifies the work. Talk to"
@@ -85,15 +96,60 @@ def agent_args(launch: AgentLaunch) -> list[str]:
     return [*args, "--allowedTools", ",".join(tools.allowed), "--append-system-prompt", rules]
 
 
-def agent_env(agent: Agent) -> dict[str, str]:
+def agent_env(agent: Agent, telemetry: Mapping[str, str]) -> dict[str, str]:
+    """The environment ``agent``'s CLI runs in: orbit's own with the agent's token, and with the
+    ``telemetry`` variables, if any, in place of the OTLP headers orbit's holds."""
     return {
-        **os.environ,
+        **_inherited(telemetry),
         TOKEN_VARIABLE: agent.token,
         "ENABLE_TOOL_SEARCH": "false",  # Load orbit's tools up front, not on first use.
         # The user's auto-memory is about their own sessions; an agent's context is its task.
         "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
         "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD": "1",
         "MCP_TOOL_TIMEOUT": str(TOOL_TIMEOUT_MS),
+        **telemetry,
+    }
+
+
+def _inherited(telemetry: Mapping[str, str]) -> dict[str, str]:
+    """Orbit's environment, as an agent inherits it: without the OTLP headers when the agent
+    sends ``telemetry`` to orbit's collector."""
+    if not telemetry:
+        return dict(os.environ)
+    return {name: value for name, value in os.environ.items() if name not in OTLP_HEADER_VARIABLES}
+
+
+def agent_telemetry_env(
+    endpoint: str | None, protocol: str, resource: Mapping[str, str]
+) -> dict[str, str]:
+    """The variables having an agent's CLI send its metrics and logs to the OTLP collector at
+    ``endpoint``, its base URL, over ``protocol`` (``http/protobuf`` or ``grpc``), described by
+    the attributes ``resource``; none without an endpoint."""
+    if endpoint is None:
+        return {}
+    # OpenTelemetry's spec has the values percent-encoded, so commas and equals signs in them
+    # don't split the list.
+    attributes = ",".join(f"{key}={quote(value, safe='')}" for key, value in resource.items())
+    return {
+        "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+        "OTEL_METRICS_EXPORTER": "otlp",
+        "OTEL_LOGS_EXPORTER": "otlp",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": protocol,
+        "OTEL_EXPORTER_OTLP_ENDPOINT": endpoint,
+        "OTEL_RESOURCE_ATTRIBUTES": attributes,
+    }
+
+
+def agent_resource(launch: AgentLaunch) -> dict[str, str]:
+    """The attributes describing ``launch``'s agent in its telemetry: its task's id, unless it's
+    the planner, which has none, its own id, its role and its workspace's id."""
+    agent = launch.agent
+    task = {} if agent.task_id == PLAN_TASK else {"orbit.task.id": agent.task_id}
+    return {
+        **task,
+        "orbit.agent.id": agent.id,
+        "orbit.role": agent.role,
+        "orbit.workspace.id": launch.workspace_id,
     }
 
 
@@ -222,10 +278,19 @@ def _crash(status: int, stderr: str) -> _Crashed:
 
 
 class ClaudeCliRunner:
-    """Runs agents as Claude CLI sessions connected to orbit."""
+    """Runs agents as Claude CLI sessions connected to orbit, run as ``command``, which send
+    their telemetry to the OTLP collector at ``endpoint`` over ``protocol``, if given."""
 
-    def __init__(self, command: Sequence[str] = ("claude",)) -> None:
+    def __init__(
+        self,
+        command: Sequence[str] = ("claude",),
+        *,
+        endpoint: str | None = None,
+        protocol: str = "http/protobuf",
+    ) -> None:
         self._command = tuple(command)
+        self._endpoint = endpoint
+        self._protocol = protocol
         self._conversations: dict[str, str] = {}  # Agent id -> its Claude session's id.
 
     async def run_agent(self, launch: AgentLaunch) -> AsyncIterator[Event]:
@@ -276,7 +341,12 @@ class ClaudeCliRunner:
         if resume:
             args += ["--resume", resume]
         args += agent_args(launch)
-        return _Turn(args, agent_env(launch.agent), launch.cwd, launch.agent.id)
+        return _Turn(args, self.env(launch), launch.cwd, launch.agent.id)
+
+    def env(self, launch: AgentLaunch) -> dict[str, str]:
+        """The environment ``launch``'s agent runs in."""
+        telemetry = agent_telemetry_env(self._endpoint, self._protocol, agent_resource(launch))
+        return agent_env(launch.agent, telemetry)
 
 
 class _Turn:

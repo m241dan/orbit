@@ -47,10 +47,12 @@ from orbit.agent import (
 )
 from orbit.cli.errors import _configured, _exit_on
 from orbit.protocol import PLANNER, Settings, ToolAccess
+from orbit.telemetry import AgentCollector
 from orbit.tracing import Gauges, NoGauges, NoTelemetry, Telemetry
 
 _NO_TELEMETRY = NoTelemetry()
 _NO_GAUGES = NoGauges()
+_NO_COLLECTOR = AgentCollector()
 
 
 def _workspace(path: Path) -> Path:
@@ -74,8 +76,9 @@ class _Backend:
     whether to ``verify``, run tasks in a ``worktree``, ``review`` landed work and show the
     ``usage`` limits; a ``new`` session, perhaps with a ``name``; the ``owner`` of the
     repository, if another orbit owns it, making this one read-only, with the workspace
-    ``lock`` it tries until it's free; the ``telemetry`` its work is traced with, and the
-    ``gauges`` its control plane reports live values through."""
+    ``lock`` it tries until it's free; the ``telemetry`` its work is traced with, the
+    ``gauges`` its control plane reports live values through, and the ``collector`` its agents
+    send their own telemetry to."""
 
     model: str | None
     tools: ToolAccess | None
@@ -89,6 +92,7 @@ class _Backend:
     lock: WorkspaceLock | None = None
     telemetry: Telemetry = _NO_TELEMETRY
     gauges: Gauges = _NO_GAUGES
+    collector: AgentCollector = _NO_COLLECTOR
 
     @property
     def fresh(self) -> bool:
@@ -218,7 +222,13 @@ def _host_maker(
     its view of the store, as ``backend`` asks, keeping its sessions as ``storage`` says,
     listing the saved sessions to pick from if ``pick_session``."""
     verification = _verification(config) if backend.verify else None
-    agents = _agents(config, root, worktree=backend.worktree, review=backend.review)
+    agents = _agents(
+        config,
+        root,
+        worktree=backend.worktree,
+        review=backend.review,
+        collector=backend.collector,
+    )
     settings, pinned = _settings(backend.model, backend.tools)
 
     def make(opened: OpenedStore) -> WorkspaceHost:
@@ -283,15 +293,22 @@ def _settings(model: str | None, tools: ToolAccess | None) -> tuple[Settings, li
     return settings, [name for name, given in (("model", model), ("tool_access", tools)) if given]
 
 
-def _agents(config: OrbitConfig, root: Path, *, worktree: bool, review: bool) -> Agents:
+def _agents(
+    config: OrbitConfig,
+    root: Path,
+    *,
+    worktree: bool,
+    review: bool,
+    collector: AgentCollector,
+) -> Agents:
     """The agents that run tasks as ``config`` says in the workspace at ``root``, in the coder
     tree if ``worktree`` and the workspace is a git work tree, reviewing landed work if
-    ``review``."""
+    ``review``, and sending their own telemetry to ``collector``."""
     where = str(root)
     tree = GitCoderTree(where, config.setup) if worktree and in_git_work_tree(where) else None
     return Agents(
         McpHost(),
-        ClaudeCliRunner(),
+        ClaudeCliRunner(endpoint=collector.endpoint, protocol=collector.protocol),
         secrets.token_urlsafe,
         config.roles,
         config.limits,

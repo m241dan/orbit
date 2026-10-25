@@ -7,10 +7,12 @@ settings turn telemetry on.
 from orbit.telemetry.headers import HeadersFileError, parse_headers, read_headers
 from orbit.telemetry.run import FLUSH_SECONDS, TelemetryRun
 from orbit.telemetry.settings import (
+    AgentCollector,
     OtlpTarget,
     Signal,
     TelemetryConfigError,
     TelemetrySettings,
+    agent_collector,
     env_headers,
     load_telemetry,
     otlp_target,
@@ -24,6 +26,7 @@ from orbit.telemetry.startup import (
 
 __all__ = [
     "FLUSH_SECONDS",
+    "AgentCollector",
     "HeadersFileError",
     "Off",
     "OtlpTarget",
@@ -33,6 +36,7 @@ __all__ = [
     "TelemetryNotInstalled",
     "TelemetryRun",
     "TelemetrySettings",
+    "agent_collector",
     "env_headers",
     "load_telemetry",
     "otlp_target",

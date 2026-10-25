@@ -1846,6 +1846,19 @@ the frontends connected (`orbit.frontends.connected`) and the bytes each workspa
 take in the store (`orbit.event_log.size`). [docs/telemetry.md](docs/telemetry.md) lists every
 metric, with its kind, unit, attributes and source.
 
+With `exporter = "otlp"`, the agents orbit runs send the Claude Code CLI's own telemetry, its
+metrics and logs, to the same collector, so they land beside orbit's. Each agent's environment
+gets `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_METRICS_EXPORTER=otlp`, `OTEL_LOGS_EXPORTER=otlp`,
+`OTEL_EXPORTER_OTLP_PROTOCOL` (the `protocol`), `OTEL_EXPORTER_OTLP_ENDPOINT` (the collector's base
+URL: `OTEL_EXPORTER_OTLP_ENDPOINT` in orbit's environment, else `endpoint`, else OTLP's default,
+`http://localhost:4318`, or `http://localhost:4317` over gRPC) and `OTEL_RESOURCE_ATTRIBUTES`,
+labelling what it sends with `orbit.task.id` (the planner, having no task, has none),
+`orbit.agent.id`, `orbit.role` and `orbit.workspace.id`. The headers are never passed, from the
+headers file or the environment: an agent can run any command, so it could leak the collector's
+key. Agents don't inherit `OTEL_EXPORTER_OTLP_HEADERS`, nor the traces', metrics' or logs' own
+headers variables, so a collector that needs headers won't receive agents' telemetry. With
+`"console"`, `"file"` or `"none"`, orbit passes agents none of these variables.
+
 The TUI traces what the user does: each action that sends commands, such as pressing ctrl+r or
 picking a session, is one span, `orbit.tui.action`, with `orbit.action` naming it (`run_tasks`,
 `submit_prompt`, `pick_session` and so on), and every command it sends carries its trace context,

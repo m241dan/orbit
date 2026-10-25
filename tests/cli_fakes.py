@@ -10,11 +10,12 @@ from typing import Any, ClassVar
 
 import pytest
 
-from orbit.agent import ControlPlane, WorkspaceHost
-from orbit.agent.application.ports import UsageSource
+from orbit.agent import ClaudeCliRunner, ControlPlane, WorkspaceHost
+from orbit.agent.application.ports import AgentLaunch, UsageSource
+from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.server import ServerSettings
 from orbit.cli.threaded import ThreadedSession
-from orbit.protocol import PROTOCOL_VERSION, CommandEnvelope, Hello
+from orbit.protocol import PROTOCOL_VERSION, CommandEnvelope, Hello, Settings
 from orbit.telemetry import Off, TelemetryRun, TelemetrySettings
 from orbit.tracing import NoTelemetry, Telemetry
 from orbit.tui import Opening, WarningCapture
@@ -157,3 +158,22 @@ def started_telemetry(monkeypatch: pytest.MonkeyPatch) -> list[StartedTelemetry]
 
     monkeypatch.setattr("orbit.cli.telemetry.start_telemetry", start)
     return started
+
+
+AGENT_LAUNCH = AgentLaunch(
+    Agent("agent-1", "coder", "t1", "token-1"), "url", "Go.", Settings(), ".", "", (), "w"
+)
+"""A launch whose environment shows what the agents a runner the CLI built runs are given."""
+
+
+@pytest.fixture
+def runners(monkeypatch: pytest.MonkeyPatch) -> list[ClaudeCliRunner]:
+    """The runners of agents the CLI builds, one for each workspace."""
+    built: list[ClaudeCliRunner] = []
+
+    def runner(*args: Any, **kwargs: Any) -> ClaudeCliRunner:
+        built.append(ClaudeCliRunner(*args, **kwargs))
+        return built[-1]
+
+    monkeypatch.setattr("orbit.cli.backend.ClaudeCliRunner", runner)
+    return built

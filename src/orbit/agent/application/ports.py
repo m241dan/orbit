@@ -195,8 +195,8 @@ class AgentHost(Protocol):
 @dataclass(frozen=True)
 class AgentLaunch:
     """How to start ``agent``: connected to orbit at ``url``, told ``prompt``, with ``settings``,
-    working in the directory ``cwd``. ``instructions`` describe its role, and ``tools`` are the
-    orbit tools it may call."""
+    working in the directory ``cwd`` for the workspace ``workspace_id``. ``instructions``
+    describe its role, and ``tools`` are the orbit tools it may call."""
 
     agent: Agent
     url: str
@@ -205,6 +205,7 @@ class AgentLaunch:
     cwd: str
     instructions: str
     tools: tuple[str, ...]
+    workspace_id: str
 
 
 class ResumeFailed(RuntimeError):

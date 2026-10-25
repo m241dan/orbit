@@ -10,12 +10,14 @@ import typer
 from orbit.agent import ConfigError, read_user_config
 from orbit.cli.errors import _configured, _exit_on
 from orbit.telemetry import (
+    AgentCollector,
     HeadersFileError,
     RunningTelemetry,
     TelemetryConfigError,
     TelemetryNotInstalled,
     TelemetryRun,
     TelemetrySettings,
+    agent_collector,
     load_telemetry,
     start_telemetry,
 )
@@ -27,6 +29,15 @@ def _telemetry_settings(config_dir: Path) -> TelemetrySettings:
     Exits with status 2 if the file is invalid.
     """
     return _configured(lambda: read_user_config(config_dir, _load, TelemetrySettings()))
+
+
+def _agent_collector(run: TelemetryRun) -> AgentCollector:
+    """Where the agents of orbit running as ``run`` says send their telemetry, as the user
+    config and the environment say.
+
+    Exits with status 2 if the config is invalid.
+    """
+    return agent_collector(_telemetry_settings(run.config_dir), run.environ)
 
 
 def _refuse_console(config_dir: Path) -> None:

@@ -60,7 +60,7 @@ from orbit.cli.options import (
     WorktreeOption,
 )
 from orbit.cli.served import Added, _serving
-from orbit.cli.telemetry import _telemetry
+from orbit.cli.telemetry import _agent_collector, _telemetry
 from orbit.profiling import profiled
 from orbit.protocol import looks_like_url
 from orbit.telemetry import TelemetryRun
@@ -113,10 +113,12 @@ def serve(
         token = _frontend_token(token_file, settings)
         flags = _Backend(model, tools, verify, worktree, review, usage, new=False, name=None)
         clone_dir = _clone_dir(settings, state)
+        run = TelemetryRun("orbit-serve", user_config, state, os.environ)
+        collector = _agent_collector(run)
         with (
-            _telemetry(TelemetryRun("orbit-serve", user_config, state, os.environ)) as telemetry,
+            _telemetry(run) as telemetry,
             _serving(
-                replace(flags, telemetry=telemetry, gauges=telemetry.gauges),
+                replace(flags, telemetry=telemetry, gauges=telemetry.gauges, collector=collector),
                 added,
                 state,
                 user_config,

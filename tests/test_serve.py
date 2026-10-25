@@ -29,6 +29,7 @@ from websockets.exceptions import ConnectionClosed, InvalidStatus
 
 from orbit.agent import (
     INVALID_CONFIG,
+    ClaudeCliRunner,
     ControlPlane,
     RunFile,
     ServedWorkspaces,
@@ -68,7 +69,7 @@ from orbit.protocol import (
     decode_event,
     encode,
 )
-from tests.cli_fakes import StartedTelemetry
+from tests.cli_fakes import AGENT_LAUNCH, StartedTelemetry
 from tests.git_repo import bare_repository, commit_file, init_repo
 from tests.server_fakes import TASK
 from tests.store_views import database, workspace_id_of
@@ -1618,6 +1619,22 @@ def test_serve_traces_with_the_telemetry_configured_and_closes_it_before_stoppin
     assert [served_plane.telemetry for served_plane in planes] == [telemetry]
     assert [served_plane.gauges for served_plane in planes] == [telemetry.gauges]
     assert telemetry.closed
+
+
+@pytest.mark.usefixtures("started_telemetry")
+def test_with_the_otlp_exporter_serves_agents_send_their_telemetry_to_its_collector(
+    state: Path, config_dir: Path, runners: list[ClaudeCliRunner]
+) -> None:
+    config_dir.mkdir()
+    table = '[telemetry]\nexporter = "otlp"\nendpoint = "http://c:4317"\nprotocol = "grpc"\n'
+    (config_dir / "config.toml").write_text(table)
+
+    served(Frontend(state, config_dir), "--port", "0")
+
+    [agents] = runners
+    env = agents.env(AGENT_LAUNCH)
+    assert env["OTEL_EXPORTER_OTLP_ENDPOINT"] == "http://c:4317"
+    assert env["OTEL_EXPORTER_OTLP_PROTOCOL"] == "grpc"
 
 
 def test_an_invalid_telemetry_setting_stops_serve_naming_the_file_and_the_key(

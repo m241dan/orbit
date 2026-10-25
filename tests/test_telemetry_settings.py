@@ -5,17 +5,20 @@ from pathlib import Path
 import pytest
 
 from orbit.telemetry import (
+    AgentCollector,
     HeadersFileError,
     OtlpTarget,
     Signal,
     TelemetryConfigError,
     TelemetrySettings,
+    agent_collector,
     env_headers,
     load_telemetry,
     otlp_target,
     parse_headers,
     read_headers,
 )
+from orbit.telemetry.settings import Exporter
 
 
 def test_without_a_telemetry_table_telemetry_is_off() -> None:
@@ -156,6 +159,39 @@ def test_the_environments_headers_override_the_files_by_name(signal: Signal) -> 
     headers = otlp_target(TelemetrySettings(), from_file, ENVIRON, signal).headers
 
     assert headers == {"x-team": "env", "x-file": "file", "x-key": signal}
+
+
+def test_agents_send_their_telemetry_to_the_collector_orbits_goes_to() -> None:
+    settings = TelemetrySettings(exporter="otlp", endpoint="http://c:4317", protocol="grpc")
+
+    assert agent_collector(settings, {}) == AgentCollector("http://c:4317", "grpc")
+
+
+def test_agents_send_theirs_to_the_environments_endpoint_without_a_signals_path() -> None:
+    settings = TelemetrySettings(exporter="otlp", endpoint="http://configured:4318")
+
+    assert agent_collector(settings, ENVIRON) == AgentCollector("http://env:4318", "http/protobuf")
+
+
+@pytest.mark.parametrize(
+    ("settings", "endpoint"),
+    [
+        (TelemetrySettings(exporter="otlp"), "http://localhost:4318"),
+        (TelemetrySettings(exporter="otlp", protocol="grpc"), "http://localhost:4317"),
+    ],
+)
+def test_without_an_endpoint_agents_send_theirs_to_the_exporters_default(
+    settings: TelemetrySettings, endpoint: str
+) -> None:
+    assert agent_collector(settings, {}).endpoint == endpoint
+
+
+@pytest.mark.parametrize("exporter", ["none", "console", "file"])
+def test_unless_orbits_telemetry_goes_over_otlp_agents_send_none(exporter: Exporter) -> None:
+    settings = TelemetrySettings(exporter=exporter, endpoint="http://c:4318")
+
+    assert agent_collector(settings, ENVIRON) == AgentCollector()
+    assert AgentCollector().endpoint is None
 
 
 def test_environment_headers_are_percent_decoded_ignoring_pairs_without_a_name() -> None:
