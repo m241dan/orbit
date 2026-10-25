@@ -1002,7 +1002,7 @@ the role.
 
 A role also says which lane runs it, where it works, whether you talk to it, whether its work
 merges, whether it's enabled and how hard its agents think. Its `lane` takes effect, as do
-`merge` in choosing the lane that runs on `ctrl+r`, `enabled` and `conversation`, and its
+`merge` in choosing the lane that runs on `ctrl+r`, `enabled`, `conversation` and `effort`, and its
 `workspace` decides whether its tasks count toward `max_coders` (see Taking turns under
 [Serving the control plane](#serving-the-control-plane)); the rest are **accepted now; take effect
 in a later version**: orbit loads and checks them, but nothing acts on them yet.
@@ -1044,7 +1044,11 @@ in a later version**: orbit loads and checks them, but nothing acts on them yet.
 - `effort`: how hard its agents think: `low`, `medium`, `high`, `xhigh` or `max`, the levels
   `claude --help` lists; any other value is refused, listing those. Left out, the CLI's default.
   Like its model and tool access, it's the default for tasks orbit queues in the role, and is
-  saved with them and the session, but isn't passed to agents yet.
+  saved with them and the session. An agent runs with its task's effort, or for a conversational
+  role its session's, and otherwise with its role's, passed to the CLI as `--effort`; with none,
+  no flag is passed and the CLI's default applies. `CLAUDE_CODE_EFFORT_LEVEL` is removed from
+  every agent's environment, so one set where orbit runs never overrides orbit's setting or the
+  CLI's default.
 
 The `coder` works in lane `work` in a `worktree` and merges; the `configurator` works in `work` in
 a `worktree` and doesn't merge; the `reviewer` and `super-reviewer` work in `review` on a
@@ -1109,9 +1113,11 @@ the CLI in the `ORBIT_AGENT_TOKEN` environment variable, which the MCP config re
 appears in the process list. Agents are started with `--strict-mcp-config` (only orbit's server),
 `--allowedTools` naming the role's orbit tools (allowed at every access level) and
 `--disallowedTools` naming orbit's others,
-`ENABLE_TOOL_SEARCH=false` (orbit's tools are loaded up front), and
+`ENABLE_TOOL_SEARCH=false` (orbit's tools are loaded up front),
 `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (your Claude Code auto-memory, which worktrees share with the
-repository, stays out of agents' context).
+repository, stays out of agents' context), and without `CLAUDE_CODE_EFFORT_LEVEL` (an agent's effort
+is orbit's `--effort`, or the CLI's default; see `effort` under
+[Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)).
 
 A model picked with `ctrl+o` applies from the planner's next prompt and keeps its conversation
 (with `default` picked, the planner uses `[roles.planner] model` if the config sets one); the

@@ -161,7 +161,8 @@ async def test_the_architects_settings_change_alone_and_its_turns_use_them() -> 
     assert session.settings == Settings()
     assert store.last.role_settings == {PLANNER: Settings(), ARCHITECT: architects}
     await talk(session, ARCHITECT, DESIGN)
-    assert launcher.launches[-1].settings.model == "haiku"
+    launched = launcher.launches[-1].settings
+    assert (launched.model, launched.effort) == ("haiku", "max")
     await session.close()
 
 

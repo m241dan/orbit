@@ -528,8 +528,9 @@ A `Settings`, the session's or a task's, holds the `model` (`null` for the backe
 `tool_access` (`off`, `restricted` or `full`) and the `effort` (`low`, `medium`, `high`, `xhigh`
 or `max`, the levels the Claude CLI offers, or `null` for its default). `effort` was added to
 version 2, defaulting to `null`, so an older peer's settings read as having none. Orbit saves it
-with the session and its tasks, and the tasks it queues in a role carry the role's, but it isn't
-passed to agents yet.
+with the session and its tasks, and the tasks it queues in a role carry the role's. An agent runs
+with it as `--effort`, or with its role's effort when it's `null`, and with the CLI's default when
+both are.
 
 `CancelTurn(lane)` stops the work in `lane`, `work` unless given: in the work lane (the lane
 whose roles merge their work, `work` for the built-in roles), the task run, or its wait to start

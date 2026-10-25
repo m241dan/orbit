@@ -261,7 +261,9 @@ class PlannerChat:
         :meth:`_converse` takes it."""
         assert self._agent is not None
         role = self._desk.agents.roles[self._role]
-        own = Settings(model=self.model(settings), tool_access=role.tool_access)
+        own = Settings(
+            model=self.model(settings), tool_access=role.tool_access, effort=settings.effort
+        )
         steps, notes = self._step_names(), tuple(self._notes)
         launch = await self._desk.launch(
             self._agent, self._with_notes(prompt, steps, notes), own, root

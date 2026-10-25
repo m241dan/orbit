@@ -6,7 +6,8 @@ Later turns of a conversation pass ``--resume <session_id>`` so Claude keeps it.
 
 Agents are runs of the CLI connected to orbit's MCP server, told to fetch their task
 from it. Their token travels in the environment, so other users can't read it from the
-process list. Given a collector, agents send the CLI's own metrics and logs to it, labelled
+process list. Their effort is orbit's setting, or the CLI's default, never orbit's own
+environment's. Given a collector, agents send the CLI's own metrics and logs to it, labelled
 with who they are, but never with orbit's headers.
 """
 
@@ -62,6 +63,9 @@ TOKEN_VARIABLE = "ORBIT_AGENT_TOKEN"
 TOOL_TIMEOUT_MS = 30 * 60 * 1000
 # Statuses the CLI reports for an MCP server that is, or is about to be, usable.
 LIVE_MCP_STATUSES = ("connected", "pending")
+# The variable setting the CLI's effort, which would otherwise override orbit's setting, or the
+# CLI's default when orbit has none.
+EFFORT_VARIABLE = "CLAUDE_CODE_EFFORT_LEVEL"
 # The variables that send headers with OTLP, which may hold the key to orbit's collector; an
 # agent, which can run any command, could leak it.
 OTLP_HEADER_VARIABLES = (
@@ -97,8 +101,9 @@ def agent_args(launch: AgentLaunch) -> list[str]:
 
 
 def agent_env(agent: Agent, telemetry: Mapping[str, str]) -> dict[str, str]:
-    """The environment ``agent``'s CLI runs in: orbit's own with the agent's token, and with the
-    ``telemetry`` variables, if any, in place of the OTLP headers orbit's holds."""
+    """The environment ``agent``'s CLI runs in: orbit's own, without its effort level, with the
+    agent's token, and with the ``telemetry`` variables, if any, in place of the OTLP headers
+    orbit's holds."""
     return {
         **_inherited(telemetry),
         TOKEN_VARIABLE: agent.token,
@@ -112,11 +117,10 @@ def agent_env(agent: Agent, telemetry: Mapping[str, str]) -> dict[str, str]:
 
 
 def _inherited(telemetry: Mapping[str, str]) -> dict[str, str]:
-    """Orbit's environment, as an agent inherits it: without the OTLP headers when the agent
-    sends ``telemetry`` to orbit's collector."""
-    if not telemetry:
-        return dict(os.environ)
-    return {name: value for name, value in os.environ.items() if name not in OTLP_HEADER_VARIABLES}
+    """Orbit's environment, as an agent inherits it: without its effort level, and without the
+    OTLP headers when the agent sends ``telemetry`` to orbit's collector."""
+    dropped = (EFFORT_VARIABLE, *(OTLP_HEADER_VARIABLES if telemetry else ()))
+    return {name: value for name, value in os.environ.items() if name not in dropped}
 
 
 def agent_telemetry_env(
@@ -337,6 +341,8 @@ class ClaudeCliRunner:
         args = [*self._command, *STREAM_ARGS]
         if launch.settings.model:
             args += ["--model", launch.settings.model]
+        if launch.settings.effort:
+            args += ["--effort", launch.settings.effort]
         args += TOOL_ACCESS_ARGS[launch.settings.tool_access]
         if resume:
             args += ["--resume", resume]

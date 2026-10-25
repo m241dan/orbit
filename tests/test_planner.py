@@ -1,6 +1,7 @@
 """Planning in conversation: prompts go to the planner, whose proposals become draft tasks."""
 
 import asyncio
+from typing import Any
 
 import pytest
 
@@ -28,6 +29,7 @@ from orbit.protocol import (
     AgentStarted,
     BusyChanged,
     CommandRefused,
+    Effort,
     ErrorOccurred,
     Event,
     Notice,
@@ -218,9 +220,10 @@ async def test_closing_ends_the_planners_access() -> None:
     assert await asyncio.wait_for(anext(payloads(session)), 5) == exited
 
 
-async def planner_model(role_model: str | None, picked: str | None) -> str | None:
-    """The model the planner launches on, with ``role_model`` in its role and ``picked`` chosen."""
-    roles = {**ROLES, "planner": ROLES["planner"].model_copy(update={"model": role_model})}
+async def planner_launch(role: dict[str, Any], picked: Settings) -> Settings:
+    """The settings the planner launches with, its role's fields changed by ``role`` and
+    ``picked`` chosen for its session."""
+    roles = {**ROLES, "planner": ROLES["planner"].model_copy(update=role)}
     agents, launcher = agents_for(roles=roles)
     launcher.planner_turns = [chats]
 
@@ -229,9 +232,20 @@ async def planner_model(role_model: str | None, picked: str | None) -> str | Non
 
     desk = AgentDesk(agents, publish)
     chat = PlannerChat(desk, Tasks(TaskBoard(), publish), lambda: ())
-    async for _ in chat.run_turn("turn", "Plan.", Settings(model=picked)):
+    async for _ in chat.run_turn("turn", "Plan.", picked):
         pass
-    return launcher.launches[-1].settings.model
+    return launcher.launches[-1].settings
+
+
+async def planner_model(role_model: str | None, picked: str | None) -> str | None:
+    """The model the planner launches on, with ``role_model`` in its role and ``picked`` chosen."""
+    return (await planner_launch({"model": role_model}, Settings(model=picked))).model
+
+
+async def planner_effort(role_effort: Effort | None, picked: Effort | None) -> Effort | None:
+    """The effort the planner launches with, with ``role_effort`` in its role and ``picked``
+    chosen."""
+    return (await planner_launch({"effort": role_effort}, Settings(effort=picked))).effort
 
 
 async def test_the_planner_uses_its_roles_model_when_none_is_picked() -> None:
@@ -244,6 +258,22 @@ async def test_a_picked_model_wins_over_the_planner_roles() -> None:
 
 async def test_the_planner_uses_the_default_model_when_neither_names_one() -> None:
     assert await planner_model(None, None) is None
+
+
+async def test_the_planner_launches_with_its_sessions_effort() -> None:
+    assert await planner_effort(None, "xhigh") == "xhigh"
+
+
+async def test_the_sessions_effort_wins_over_the_planner_roles() -> None:
+    assert await planner_effort("low", "xhigh") == "xhigh"
+
+
+async def test_the_planner_uses_its_roles_effort_when_its_session_has_none() -> None:
+    assert await planner_effort("max", None) == "max"
+
+
+async def test_the_planner_has_no_effort_when_neither_sets_one() -> None:
+    assert await planner_effort(None, None) is None
 
 
 async def turn(chat: PlannerChat, launcher: ScriptedLauncher, text: str) -> str:

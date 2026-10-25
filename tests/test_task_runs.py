@@ -24,6 +24,7 @@ from orbit.agent.domain.endings import BUG, CANCELLED
 from orbit.protocol import (
     AGENT_FAILED,
     BUSY,
+    CODER,
     GIT_FAILED,
     INTERNAL,
     NOT_CONFIGURED,
@@ -34,6 +35,7 @@ from orbit.protocol import (
     CommandAccepted,
     CommandRefused,
     EditTask,
+    Effort,
     ErrorOccurred,
     Event,
     Notice,
@@ -59,6 +61,7 @@ from tests.agent_fakes import (
     ACCEPTED,
     ATTACH_ID,
     COMMAND_ID,
+    ROLES,
     STEP,
     Call,
     FakeStore,
@@ -112,6 +115,26 @@ async def test_each_task_gets_its_own_agent_with_its_settings() -> None:
     assert events.index(running) < events.index(TaskStarted(task_id="1"))
     assert statuses(events) == ["completed", "completed"]
     assert session.settings == Settings()
+
+
+async def launched_effort(own: Effort | None, role: Effort | None) -> Effort | None:
+    """The effort a coder's task setting ``own`` launches with, its role's effort being
+    ``role``."""
+    roles = {**ROLES, CODER: ROLES[CODER].model_copy(update={"effort": role})}
+    session, _, launcher = session_for(claims_done, roles=roles)
+    await asyncio.wait_for(run(session, TaskSpec(prompt="a", settings=Settings(effort=own))), 5)
+    [launch] = launcher.launches
+    return launch.settings.effort
+
+
+@pytest.mark.parametrize(
+    ("own", "role", "launched"),
+    [("high", None, "high"), ("high", "max", "high"), (None, "max", "max"), (None, None, None)],
+)
+async def test_a_task_launches_with_its_own_effort_else_its_roles(
+    own: Effort | None, role: Effort | None, launched: Effort | None
+) -> None:
+    assert await launched_effort(own, role) == launched
 
 
 async def test_running_again_runs_only_tasks_that_did_not_finish() -> None:

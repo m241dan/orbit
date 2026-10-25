@@ -214,11 +214,13 @@ class AgentDesk:
             await self.agents.host.stop()  # Also cleans up after a start cut short.
 
     async def launch(self, agent: Agent, prompt: str, settings: Settings, cwd: str) -> AgentLaunch:
-        """How to start ``agent`` in its role: told ``prompt``, with ``settings``, in ``cwd``."""
+        """How to start ``agent`` in its role: told ``prompt``, with ``settings`` (or its role's
+        effort, if they set none), in ``cwd``."""
         role = self.agents.roles[agent.role]
         url = await self.url()
+        own = role.launch_settings(settings)
         launch = AgentLaunch(
-            agent, url, prompt, settings, cwd, role.instructions, role.tools, self._workspace_id
+            agent, url, prompt, own, cwd, role.instructions, role.tools, self._workspace_id
         )
         self._launches[agent.id] = launch
         return launch

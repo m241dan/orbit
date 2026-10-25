@@ -5,9 +5,9 @@ The built-in roles aren't kept here: whoever builds them passes in the contents 
 ``roles.toml`` and the instructions it names.
 
 A role says what an agent is told about its job, which of orbit's tools it may call, whether its
-claims of being done are verified, and how long it may take. Its model and tool access are the
-defaults for tasks orbit queues in that role, as is its effort, which is stored with them but not
-yet passed to agents; a task the user queues keeps its own settings. It also says which lane runs
+claims of being done are verified, and how long it may take. Its model, tool access and effort
+are the defaults for tasks orbit queues in that role; a task the user queues keeps its own
+settings, but one without an effort runs with its role's. It also says which lane runs
 it, where it works, whether you talk to it, whether its work merges and whether it's enabled,
 which are checked here. The enabled task roles' lanes are the session's lanes, the one whose
 roles merge running on the user's asking; the enabled conversational roles each have a
@@ -166,6 +166,11 @@ class Role(_Config):
     def settings(self) -> Settings:
         """The settings of a task orbit queues in this role."""
         return Settings(model=self.model, tool_access=self.tool_access, effort=self.effort)
+
+    def launch_settings(self, settings: Settings) -> Settings:
+        """``settings`` as an agent in this role runs with them: with the role's effort when they
+        set none."""
+        return settings.model_copy(update={"effort": settings.effort or self.effort})
 
 
 def _unmet(rule: str, needs: Mapping[str, bool]) -> list[str]:

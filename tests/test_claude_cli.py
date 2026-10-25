@@ -22,6 +22,7 @@ from orbit.protocol import (
     AGENT_FAILED,
     PLAN_TASK,
     AssistantMessage,
+    Effort,
     ErrorOccurred,
     Event,
     Settings,
@@ -295,9 +296,14 @@ async def test_runner_streams_a_turn(tmp_path: Path) -> None:
         (Settings(model="opus"), ["--model", "opus"]),
         (Settings(tool_access="off"), ["--tools", ""]),
         (Settings(tool_access="full"), ["--permission-mode", "bypassPermissions"]),
+        (Settings(effort="high"), ["--effort", "high"]),
         (
             Settings(model="claude-sonnet-5-5", tool_access="full"),
             ["--model", "claude-sonnet-5-5", "--permission-mode", "bypassPermissions"],
+        ),
+        (
+            Settings(model="opus", tool_access="off", effort="max"),
+            ["--model", "opus", "--effort", "max", "--tools", ""],
         ),
     ],
 )
@@ -711,12 +717,29 @@ async def test_agents_keep_tool_access_flags_and_orbit_tools(tmp_path: Path) -> 
     assert argv[argv.index("--allowedTools") + 1].startswith("mcp__orbit__get_task")
 
 
-async def test_an_agents_effort_leaves_its_launch_unchanged(tmp_path: Path) -> None:
+async def test_an_agents_effort_adds_only_its_flag(tmp_path: Path) -> None:
     runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
     await run_agent(runner, Settings(model="opus", tool_access="full"))
     await run_agent(runner, Settings(model="opus", tool_access="full", effort="max"))
     plain, effortful = calls(scenario)
-    assert (effortful["argv"], effortful["env"]) == (plain["argv"], plain["env"])
+    after_model = plain["argv"].index("opus") + 1
+    flagged = [*plain["argv"][:after_model], "--effort", "max", *plain["argv"][after_model:]]
+    assert (effortful["argv"], effortful["env"]) == (flagged, plain["env"])
+
+
+@pytest.mark.parametrize("effort", [None, "high"])
+@pytest.mark.parametrize("endpoint", [None, "http://c:4317"])
+async def test_agents_run_without_the_effort_level_in_orbits_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, effort: Effort | None, endpoint: str | None
+) -> None:
+    monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "low")
+    stdout = lines(init("connected"), RESULT)
+    runner, scenario = make_runner(tmp_path, endpoint=endpoint, stdout=stdout)
+
+    await run_agent(runner, Settings(effort=effort))
+    await run(runner, "hi", Settings(effort=effort))
+
+    assert all("CLAUDE_CODE_EFFORT_LEVEL" not in call["env"] for call in calls(scenario))
 
 
 async def test_each_agent_run_is_a_fresh_session(tmp_path: Path) -> None:

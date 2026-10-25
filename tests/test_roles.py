@@ -29,6 +29,7 @@ from orbit.protocol import (
     NOT_CONFIGURED,
     TIMED_OUT,
     WORK_LANE,
+    Effort,
     Settings,
     TaskSpec,
     ToolAccess,
@@ -191,6 +192,18 @@ def test_a_roles_settings_are_its_model_tool_access_and_effort() -> None:
 
 def test_a_role_leaving_out_effort_has_none() -> None:
     assert Role(instructions="Do it.").effort is None
+
+
+def test_an_agent_runs_with_its_settings_own_effort_over_its_roles() -> None:
+    settings = Settings(model="opus", tool_access="full", effort="high")
+    assert Role(instructions="Do it.", effort="max").launch_settings(settings) == settings
+
+
+@pytest.mark.parametrize("effort", ["max", None])
+def test_an_agent_whose_settings_set_no_effort_runs_with_its_roles(effort: Effort | None) -> None:
+    settings = Settings(model="opus", tool_access="off")
+    launched = Role(instructions="Do it.", effort=effort).launch_settings(settings)
+    assert launched == Settings(model="opus", tool_access="off", effort=effort)
 
 
 @pytest.mark.parametrize(("minutes", "seconds"), [(2, 120), (0.5, 30), (None, None)])
