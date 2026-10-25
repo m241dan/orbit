@@ -48,7 +48,10 @@ HEADERS_TOO = (
     " role to its copy: {headers}."
 )
 
-INLINE = "{header} is set inline or by dotted keys; add its instructions line yourself: {setting}."
+INLINE = (
+    "{header} is set inline or by dotted keys, so it has no table for a line: put {setting}"
+    " inside its inline table, or set {name}.{setting} under [roles]."
+)
 
 NO_LINES = "Each role's table already has an instructions line."
 
@@ -181,7 +184,7 @@ def _lines_added(path: Path, lines: InstructionLines) -> list[str]:
     """What's said of ``lines``' instructions lines added to the file at ``path``, then a line
     per role set inline that was given none; that every role's table has one, if neither."""
     inline = [
-        INLINE.format(header=_header(name), setting=instructions_setting(name))
+        INLINE.format(header=_header(name), name=name, setting=instructions_setting(name))
         for name in lines.inline
     ]
     return [*_added_lines(path, lines), *inline] or [NO_LINES]

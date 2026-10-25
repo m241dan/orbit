@@ -316,8 +316,9 @@ def test_roles_name_a_role_set_inline_as_needing_its_line_added_by_hand(project:
     assert result.exit_code == 0, result.output
     assert result.stdout.splitlines() == [
         *copied(*NAMES),
-        "[roles.coder] is set inline or by dotted keys; add its instructions line yourself:"
-        ' instructions = "roles/coder.md".',
+        "[roles.coder] is set inline or by dotted keys, so it has no table for a line: put"
+        ' instructions = "roles/coder.md" inside its inline table, or set'
+        ' coder.instructions = "roles/coder.md" under [roles].',
     ]
     assert path.read_text(encoding="utf-8") == text
 
