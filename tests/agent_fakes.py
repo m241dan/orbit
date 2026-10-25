@@ -56,6 +56,7 @@ from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.agent.domain.usage import UsageFetch, UsageUnavailable
 from orbit.agent.domain.usage_totals import UsageRow, UsageTotalsData, usage_totals
+from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.protocol import (
     AGENT_FAILED,
     BUILT_IN_ROLE_NAMES,
@@ -111,7 +112,9 @@ from tests.waiting import eventually
 Backend = WorkspaceHost | ControlPlane
 """A workspace host, driven through the control plane around it, or a control plane."""
 
-ROLES = built_in_roles({name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES})
+ROLES = built_in_roles(
+    read_built_in_roles(), {name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES}
+)
 """The built-in roles, with stand-in instructions."""
 
 URL = "http://orbit.test/mcp"

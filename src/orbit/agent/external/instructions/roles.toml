@@ -1,0 +1,33 @@
+# The built-in roles. Each is told the Markdown file beside this one that its instructions name;
+# a project's .orbit/config.toml can change any of their fields.
+
+[roles.planner]
+instructions = "planner.md"
+tool_access = "restricted"
+tools = ["propose_task", "report_progress"]
+verify = false
+
+[roles.coder]
+instructions = "coder.md"
+tool_access = "full"
+tools = ["get_task", "complete_task", "run_check", "report_progress", "give_up"]
+verify = true
+
+[roles.reviewer]
+instructions = "reviewer.md"
+tool_access = "restricted"
+tools = ["get_task", "complete_task", "report_progress", "give_up", "suggest_task"]
+verify = false
+
+[roles.super-reviewer]
+instructions = "super-reviewer.md"
+model = "opus"
+tool_access = "restricted"
+tools = ["get_task", "complete_task", "report_progress", "give_up", "suggest_task"]
+verify = false
+
+[roles.configurator]
+instructions = "configurator.md"
+tool_access = "restricted"
+tools = ["get_task", "propose_checks", "report_progress", "give_up"]
+verify = false

@@ -985,10 +985,11 @@ defaults for tasks orbit queues in that role; a task you queue keeps its own set
 | `planner` | `propose_task`, `report_progress` | no | default / `restricted` |
 | `configurator` | `get_task`, `propose_checks`, `report_progress`, `give_up` | no | default / `restricted` |
 
-What each built-in role is told, its instructions, is the Markdown file named for it in
-[`src/orbit/agent/external/instructions/`](src/orbit/agent/external/instructions/) (for example
-`coder.md`), shipped with the package and read when orbit starts. A project can still replace a
-role's instructions with `instructions` in `.orbit/config.toml`.
+The built-in roles are data shipped with the package in
+[`src/orbit/agent/external/instructions/`](src/orbit/agent/external/instructions/) and read when
+orbit starts: `roles.toml` has a `[roles.<name>]` table for each, with the fields above, and its
+`instructions` name the Markdown file beside it that the role is told (for example `coder.md`). A
+project can still replace a role's instructions with `instructions` in `.orbit/config.toml`.
 
 An agent calling a tool its role doesn't have gets an error reply (the CLI only allows its role's
 tools, too, and orbit's others are disallowed so the agent doesn't see them); an agent still
@@ -2180,9 +2181,10 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     MCP server; `GitCoderTree` is the coder's worktree and its snapshots; `repository` finds the
     git repository a workspace is in, fingerprints it, and places orbit's directory in it
     (`orbit_dir`: `.git/orbit`, or `.orbit` outside git); `config_file` reads
-    `.orbit/config.toml`; `built_in_roles` reads the built-in roles' instructions from
-    `instructions/*.md`; `checks` runs a verification step as a process (`run_step`);
-    `processes` runs a program to completion without leaving it behind; `workspace`
+    `.orbit/config.toml`; `built_in_roles` reads the built-in roles from
+    `instructions/roles.toml` and their instructions from the Markdown files it names; `checks`
+    runs a verification step as a process (`run_step`); `processes` runs a program to completion
+    without leaving it behind; `workspace`
     fingerprints the git working tree; `usage_api` fetches the Claude subscription's usage
     limits (`UsageApi`) with the token in `~/.claude/.credentials.json`; `sqlite_store` is the
     `SessionStore` port's adapter (`SqliteStore`): saved sessions and each repository's super
@@ -2279,9 +2281,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     agent's error says it hit Claude's usage limit, and when a run it stopped starts again),
     `AgentTask` (in `agent_task`:
     what orbit replies to an agent, and when its work is verified), the `AgentRegistry` (in
-    `agents`: agent ids and tokens), `roles` (built-in roles, given their instructions, and the
-    tasks orbit queues in them), `config` (`OrbitConfig`: the limits, roles, verification steps
-    and setup a project file sets over the built-in defaults) and `config_errors` (`ConfigError`,
+    `agents`: agent ids and tokens), `roles` (built-in roles, loaded from their `roles.toml` and
+    given their instructions, and the tasks orbit queues in them), `config` (`OrbitConfig`: the
+    limits, roles, verification steps and setup a project file sets over the built-in defaults) and `config_errors` (`ConfigError`,
     and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]` with its `TlsSettings`, which files each TLS mode needs, where now falls in a certificate's validity, and which hosts are loopback), `certificate_list` (what `orbit certs list` shows of each certificate: its expiry, days left, fingerprint and marks), `client_bundle` (what `orbit certs client --bundle` puts in a client's bundle: the CA, its certificate and key, and the `[remotes.<name>]` lines naming them where it's unpacked), `remotes` (`RemoteSettings`, a `[remotes.<name>]` table, and which credentials go together), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
     setup step that makes a fresh worktree ready, and the checks a configurator proposes), the
     `Catalog` (in `catalog`: the workspace and its sessions, the agents' roles, the triggers and

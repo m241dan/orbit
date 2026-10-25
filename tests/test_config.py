@@ -7,10 +7,11 @@ from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import Role, built_in_roles
 from orbit.agent.domain.verification import VerificationStep
+from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.protocol import BUILT_IN_ROLE_NAMES
 
 INSTRUCTIONS = {name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES}
-BUILT_IN_ROLES = built_in_roles(INSTRUCTIONS)
+BUILT_IN_ROLES = built_in_roles(read_built_in_roles(), INSTRUCTIONS)
 
 
 def test_defaults_without_a_file() -> None:

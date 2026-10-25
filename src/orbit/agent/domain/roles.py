@@ -1,7 +1,8 @@
 """Roles agents work in: built-in defaults a project file can change, and the tasks orbit
 queues in them.
 
-The built-in roles' instructions aren't kept here: whoever builds the roles passes them in.
+The built-in roles aren't kept here: whoever builds them passes in the contents of their
+``roles.toml`` and the instructions it names.
 
 A role says what an agent is told about its job, which of orbit's tools it may call, whether its
 claims of being done are verified, and how long it may take. Its model and tool access are the
@@ -12,17 +13,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from orbit.agent.domain.config_errors import ConfigError
+from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.protocol import (
     AGENT_FAILED,
     BUILT_IN_ROLE_NAMES,
     CODER,
     CONFIGURATOR,
-    PLANNER,
-    REVIEWER,
-    SUPER_REVIEWER,
     TIMED_OUT,
     Settings,
     TaskSpec,
@@ -169,34 +167,30 @@ def task_suggestion(arguments: Mapping[str, Any]) -> tuple[str, str] | str:
     return title, str(arguments.get("prompt", "")).strip()
 
 
-_BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
-    CODER: {
-        "tool_access": "full",
-        "tools": (GET_TASK, COMPLETE_TASK, RUN_CHECK, REPORT_PROGRESS, GIVE_UP),
-    },
-    REVIEWER: {
-        "tools": (GET_TASK, COMPLETE_TASK, REPORT_PROGRESS, GIVE_UP, SUGGEST_TASK),
-        "verify": False,
-    },
-    SUPER_REVIEWER: {
-        "model": "opus",
-        "tools": (GET_TASK, COMPLETE_TASK, REPORT_PROGRESS, GIVE_UP, SUGGEST_TASK),
-        "verify": False,
-    },
-    PLANNER: {
-        "tools": (PROPOSE_TASK, REPORT_PROGRESS),
-        "verify": False,
-    },
-    CONFIGURATOR: {
-        "tools": (GET_TASK, PROPOSE_CHECKS, REPORT_PROGRESS, GIVE_UP),
-        "verify": False,
-    },
-}
-"""Each built-in role's fields, all but its instructions."""
+class _BuiltInRoles(_Config):
+    roles: dict[str, Role]
 
 
-def built_in_roles(instructions: Mapping[str, str]) -> dict[str, Role]:
-    """The built-in roles, each told ``instructions[its name]``.
+def load_built_in_roles(data: dict[str, Any]) -> dict[str, Role]:
+    """The built-in roles ``data`` (``roles.toml``'s contents) describes, in order, each told the
+    name of its Markdown file.
+
+    Raises :class:`ConfigError`, naming the role and field, if a role is invalid, or naming the
+    roles, if any built-in ones have no table or a table isn't for a built-in role.
+    """
+    try:
+        roles = _BuiltInRoles.model_validate(data).roles
+    except ValidationError as exc:
+        raise ConfigError(validation_problems(exc)) from None
+    if missing := set(BUILT_IN_ROLE_NAMES) - set(roles):
+        raise ConfigError(f"roles: no table for the built-in roles {sorted(missing)}")
+    if unknown := set(roles) - set(BUILT_IN_ROLE_NAMES):
+        raise ConfigError(f"roles: {sorted(unknown)} aren't built-in roles")
+    return {name: roles[name] for name in BUILT_IN_ROLE_NAMES}
+
+
+def built_in_roles(roles: Mapping[str, Role], instructions: Mapping[str, str]) -> dict[str, Role]:
+    """The built-in ``roles``, each told ``instructions[its name]`` instead.
 
     Raises :class:`ConfigError`, naming them, if any have no instructions.
     """
@@ -204,6 +198,6 @@ def built_in_roles(instructions: Mapping[str, str]) -> dict[str, Role]:
     if missing:
         raise ConfigError(f"no instructions for the built-in roles {missing}")
     return {
-        name: Role(instructions=instructions[name], **_BUILT_IN_FIELDS[name])
+        name: roles[name].model_copy(update={"instructions": instructions[name]})
         for name in BUILT_IN_ROLE_NAMES
     }

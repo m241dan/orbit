@@ -1,14 +1,72 @@
-"""The built-in roles' instructions, read from the Markdown files shipped with orbit."""
+"""The built-in roles, read from the roles.toml and Markdown files shipped with orbit."""
 
 import re
+import tomllib
+from collections.abc import Collection
 from importlib.resources import files
 from pathlib import Path
+from typing import Any
 
+import pytest
+
+from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.protocol import BUILT_IN_ROLE_NAMES
 
 FOLDER = files("orbit.agent.external") / "instructions"
 README = Path(__file__).parent.parent / "README.md"
+ROLES_TOML = (FOLDER / "roles.toml").read_text(encoding="utf-8")
+
+REVIEW_TOOLS = ("get_task", "complete_task", "report_progress", "give_up", "suggest_task")
+BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
+    "coder": {
+        "model": None,
+        "tool_access": "full",
+        "tools": ("get_task", "complete_task", "run_check", "report_progress", "give_up"),
+        "verify": True,
+        "timeout_minutes": None,
+    },
+    "reviewer": {
+        "model": None,
+        "tool_access": "restricted",
+        "tools": REVIEW_TOOLS,
+        "verify": False,
+        "timeout_minutes": None,
+    },
+    "super-reviewer": {
+        "model": "opus",
+        "tool_access": "restricted",
+        "tools": REVIEW_TOOLS,
+        "verify": False,
+        "timeout_minutes": None,
+    },
+    "planner": {
+        "model": None,
+        "tool_access": "restricted",
+        "tools": ("propose_task", "report_progress"),
+        "verify": False,
+        "timeout_minutes": None,
+    },
+    "configurator": {
+        "model": None,
+        "tool_access": "restricted",
+        "tools": ("get_task", "propose_checks", "report_progress", "give_up"),
+        "verify": False,
+        "timeout_minutes": None,
+    },
+}
+"""Each built-in role's fields but its instructions, as orbit has always had them."""
+
+
+def role_directory(tmp_path: Path, roles_toml: str, leave_out: Collection[str] = ()) -> Path:
+    """``tmp_path`` holding ``roles_toml`` and the shipped Markdown files but those named in
+    ``leave_out``."""
+    (tmp_path / "roles.toml").write_text(roles_toml, encoding="utf-8")
+    for name in BUILT_IN_ROLE_NAMES:
+        if f"{name}.md" not in leave_out:
+            text = (FOLDER / f"{name}.md").read_text(encoding="utf-8")
+            (tmp_path / f"{name}.md").write_text(text, encoding="utf-8")
+    return tmp_path
 
 
 def readme_tools(name: str) -> tuple[str, ...]:
@@ -31,6 +89,51 @@ def test_each_built_in_role_is_told_its_file() -> None:
     assert tuple(roles) == BUILT_IN_ROLE_NAMES
     for name, role in roles.items():
         assert role.instructions == (FOLDER / f"{name}.md").read_text(encoding="utf-8").strip()
+
+
+def test_roles_toml_ships_in_the_package_naming_each_roles_markdown_file() -> None:
+    tables = tomllib.loads(ROLES_TOML)["roles"]
+    assert set(tables) == set(BUILT_IN_ROLE_NAMES)
+    for name, table in tables.items():
+        assert table["instructions"] == f"{name}.md"
+
+
+@pytest.mark.parametrize("name", BUILT_IN_ROLE_NAMES)
+def test_each_built_in_role_has_the_fields_it_always_had(name: str) -> None:
+    role = read_built_in_roles()[name]
+    assert role.model_dump(exclude={"instructions"}) == BUILT_IN_FIELDS[name]
+
+
+def test_the_built_in_roles_are_read_from_the_directory_given(tmp_path: Path) -> None:
+    roles_toml = ROLES_TOML.replace('model = "opus"', 'model = "haiku"')
+    roles = read_built_in_roles(role_directory(tmp_path, roles_toml))
+    assert roles["super-reviewer"].model == "haiku"
+    assert roles["coder"] == read_built_in_roles()["coder"]
+
+
+def test_an_unknown_field_in_a_role_raises_config_error_naming_it(tmp_path: Path) -> None:
+    roles_toml = ROLES_TOML.replace("[roles.planner]\n", "[roles.planner]\ncolour = 'blue'\n")
+    directory = role_directory(tmp_path, roles_toml)
+    roles_file = re.escape(str(directory / "roles.toml"))
+    with pytest.raises(ConfigError, match=f"^{roles_file}: roles\\.planner\\.colour: "):
+        read_built_in_roles(directory)
+
+
+def test_a_missing_markdown_file_raises_config_error_naming_it(tmp_path: Path) -> None:
+    directory = role_directory(tmp_path, ROLES_TOML, leave_out={"reviewer.md"})
+    markdown_file = re.escape(str(directory / "reviewer.md"))
+    with pytest.raises(ConfigError, match=f"^{markdown_file}: "):
+        read_built_in_roles(directory)
+
+
+@pytest.mark.parametrize("roles_toml", [None, "[roles\n", "roles = 'coder'\n"])
+def test_a_missing_or_malformed_roles_toml_raises_config_error_naming_it(
+    tmp_path: Path, roles_toml: str | None
+) -> None:
+    if roles_toml is not None:
+        (tmp_path / "roles.toml").write_text(roles_toml, encoding="utf-8")
+    with pytest.raises(ConfigError, match=f"^{re.escape(str(tmp_path / 'roles.toml'))}: "):
+        read_built_in_roles(tmp_path)
 
 
 def test_the_coder_leaves_committing_to_orbit() -> None:

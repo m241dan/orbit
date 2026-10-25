@@ -2,13 +2,13 @@
 
 import tomllib
 from collections.abc import Callable
-from pathlib import Path
+from importlib.resources.abc import Traversable
 from typing import Any
 
 from orbit.agent.domain.config_errors import ConfigError
 
 
-def read_toml[T](path: Path, load: Callable[[dict[str, Any]], T]) -> T:
+def read_toml[T](path: Traversable, load: Callable[[dict[str, Any]], T]) -> T:
     """What ``load`` makes of the UTF-8 TOML file ``path``.
 
     Raises :class:`ConfigError`, naming the file, if it can't be read or is invalid.

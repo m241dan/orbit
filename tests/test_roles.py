@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from orbit.agent.domain.config_errors import ConfigError
@@ -5,6 +7,7 @@ from orbit.agent.domain.roles import (
     ORBIT_TOOLS,
     Role,
     built_in_roles,
+    load_built_in_roles,
     out_of_time,
     role_task,
     suggested_task,
@@ -12,6 +15,7 @@ from orbit.agent.domain.roles import (
     timeout_ending,
     tool_rules,
 )
+from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.protocol import (
     AGENT_FAILED,
     BUILT_IN_ROLE_NAMES,
@@ -22,7 +26,74 @@ from orbit.protocol import (
 )
 
 INSTRUCTIONS = {name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES}
-BUILT_IN_ROLES = built_in_roles(INSTRUCTIONS)
+BUILT_IN_ROLES = built_in_roles(read_built_in_roles(), INSTRUCTIONS)
+
+
+def role_tables() -> dict[str, dict[str, Any]]:
+    """A ``roles.toml``'s tables for the built-in roles, each told its Markdown file."""
+    return {name: {"instructions": f"{name}.md"} for name in BUILT_IN_ROLE_NAMES}
+
+
+def test_the_built_in_roles_load_in_order_told_their_markdown_files() -> None:
+    roles = load_built_in_roles({"roles": dict(reversed(role_tables().items()))})
+    assert tuple(roles) == BUILT_IN_ROLE_NAMES
+    assert all(role == Role(instructions=f"{name}.md") for name, role in roles.items())
+
+
+def test_a_built_in_roles_fields_load_from_its_table() -> None:
+    tables = role_tables()
+    tables["reviewer"] |= {
+        "model": "opus",
+        "tool_access": "full",
+        "tools": ["get_task", "run_check"],
+        "verify": False,
+        "timeout_minutes": 5,
+    }
+    assert load_built_in_roles({"roles": tables})["reviewer"] == Role(
+        instructions="reviewer.md",
+        model="opus",
+        tool_access="full",
+        tools=("get_task", "run_check"),
+        verify=False,
+        timeout_minutes=5,
+    )
+
+
+def test_an_unknown_field_in_a_built_in_role_raises_config_error_naming_it() -> None:
+    tables = role_tables()
+    tables["coder"]["colour"] = "blue"
+    with pytest.raises(ConfigError, match=r"^roles\.coder\.colour: Extra inputs"):
+        load_built_in_roles({"roles": tables})
+
+
+@pytest.mark.parametrize(
+    ("data", "key"),
+    [({}, "roles"), ({"roles": "coder"}, "roles"), ({"roles": {}, "colour": "blue"}, "colour")],
+)
+def test_a_roles_toml_not_of_role_tables_raises_config_error_naming_the_key(
+    data: dict[str, Any], key: str
+) -> None:
+    with pytest.raises(ConfigError, match=f"^{key}: "):
+        load_built_in_roles(data)
+
+
+def test_a_built_in_role_without_a_table_raises_config_error_naming_it() -> None:
+    tables = role_tables()
+    del tables["planner"]
+    with pytest.raises(ConfigError, match=r"^roles: no table for the built-in roles \['planner'\]"):
+        load_built_in_roles({"roles": tables})
+
+
+def test_a_table_for_a_role_not_built_in_raises_config_error_naming_it() -> None:
+    tables = role_tables() | {"tester": {"instructions": "tester.md"}}
+    with pytest.raises(ConfigError, match=r"^roles: \['tester'\] aren't built-in roles$"):
+        load_built_in_roles({"roles": tables})
+
+
+def test_the_built_in_roles_are_told_their_instructions() -> None:
+    roles = built_in_roles(load_built_in_roles({"roles": role_tables()}), INSTRUCTIONS)
+    assert tuple(roles) == BUILT_IN_ROLE_NAMES
+    assert all(role == Role(instructions=INSTRUCTIONS[name]) for name, role in roles.items())
 
 
 def test_built_in_roles_cover_coding_reviewing_and_planning() -> None:
@@ -60,8 +131,8 @@ def test_every_built_in_role_needs_instructions(text: str | None) -> None:
     instructions = {name: "x" for name in BUILT_IN_ROLE_NAMES if name != "planner"}
     if text is not None:
         instructions["planner"] = text
-    with pytest.raises(ConfigError, match="planner"):
-        built_in_roles(instructions)
+    with pytest.raises(ConfigError, match=r"^no instructions for the built-in roles \['planner'\]"):
+        built_in_roles(BUILT_IN_ROLES, instructions)
 
 
 def test_the_configurator_proposes_checks_without_editing_or_being_verified() -> None:
