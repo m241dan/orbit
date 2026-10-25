@@ -1125,31 +1125,23 @@ name adds a role, which must set `instructions` and otherwise gets `get_task`, `
 `report_progress` and `give_up` as its tools, `restricted` tool access, the default model, its
 claims verified, no time limit, the coder's lane `work`, `worktree`, no conversation and
 enabled, and no effort. It merges, being verified and in a worktree; one in another workspace must
-set `verify = false`, and one with `verify = false` doesn't merge, and can't be made to. Every other field is optional:
+set `verify = false`, and one with `verify = false` doesn't merge, and can't be made to. Every other field is optional.
 
-```toml
-fix_attempts = 5               # in-session fixes asked of one agent before its task falls back
-max_checks = 20                # checks one agent may run itself before claiming done
-fallback_fixes = 3             # fresh-agent fix tasks a task's chain may queue per failing step
-review_rounds = 3              # rounds of review-suggested work before review pauses
-super_review_every = 10        # commits between super reviews
-review_suggestions = 5         # tasks one review may suggest
-super_review_suggestions = 10  # tasks one super review may suggest
+Every setting a project can change, with its default and what it does, is in orbit's reference
+config, [`reference/config.toml`](src/orbit/agent/external/reference/config.toml), shipped with
+orbit and generated from its own settings and roles, so it keeps up with them. `orbit init` writes
+it to `.orbit/config.toml`, every setting commented out at its default for you to uncomment what
+you change; `--update` adds the settings an older file doesn't mention, never changing a line of
+it; `--force` replaces the file, keeping the old one as a numbered backup (`config.toml.bak.1`,
+`.bak.2`, …); and `--roles` copies the built-in roles' instructions to `.orbit/roles/` with the
+line, commented out, that switches each role to its copy (see
+[Starting from the reference config](#starting-from-the-reference-config)). Its last sections, for
+a later version of orbit, are commented out and refused while uncommented (see below). Orbit's
+own [`.orbit/config.toml`](.orbit/config.toml) is the worked example: the reference with orbit's
+six verification steps and its setup filled in, under its own comments on why.
 
-[roles.coder]
-model = "sonnet"
-timeout_minutes = 45
-instructions = "roles/coder.md"  # the text of .orbit/roles/coder.md
-
-[roles.docs-writer]
-instructions = "You write and update the project's documentation."
-tools = ["get_task", "complete_task", "report_progress", "give_up"]
-tool_access = "full"
-verify = false
-```
-
-`orbit chat` reads it at startup, and `orbit serve` at startup and as a frontend adds a workspace;
-each refuses an invalid one, naming each problem (for example
+`orbit chat` reads `.orbit/config.toml` at startup, and `orbit serve` at startup and as a frontend
+adds a workspace; each refuses an invalid one, naming each problem (for example
 `roles.coder.tool_access: Input should be 'off', 'restricted' or 'full'`). The settings of a later
 version of orbit, which the reference config shows commented out, are refused while uncommented,
 naming the first: a `[triggers.<name>]`, `[mcp.<name>]` or `[models.<name>]` table, a role's

@@ -3,6 +3,7 @@ import re
 import stat
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.config import OrbitConfig
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.config_report import Written
+from orbit.agent.domain.config_update import Additions, ConfigUpdate, update_text
 from orbit.agent.domain.layers import Layer
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
@@ -420,6 +422,12 @@ def test_orbit_syncs_its_worktree_whenever_uv_lock_changes(config_dir: Path) -> 
     root = Path(__file__).parent.parent
     setup = read_config(str(root), config_dir).setup
     assert setup == Setup(command=("uv", "sync", "--frozen"), watch=("uv.lock",))
+
+
+def test_orbits_own_file_mentions_every_setting_of_the_reference() -> None:
+    text = (Path(__file__).parent.parent / CONFIG_PATH).read_text(encoding="utf-8")
+    reference = REFERENCE.read_text(encoding="utf-8")
+    assert update_text(text, reference, date(2026, 10, 25)) == ConfigUpdate(text, Additions())
 
 
 LINT = VerificationStep(name="Lint", command=("ruff", "check"))

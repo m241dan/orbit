@@ -1,5 +1,22 @@
-# Orbit's own configuration: how orbit verifies changes to itself.
+# orbit's project configuration, every setting commented out at its default.
+# Uncomment the settings you change; the others keep their defaults.
 
+# In-session fixes asked of the same agent before its task falls back.
+# fix_attempts = 5
+# Verification steps an agent may run itself before claiming done.
+# max_checks = 20
+# Fresh-agent fix tasks one task's chain may queue for each failing step.
+# fallback_fixes = 3
+# Rounds of review-suggested work after which review pauses.
+# review_rounds = 3
+# Commits between super reviews, counting yours and the planner's.
+# super_review_every = 10
+# Tasks one review may suggest.
+# review_suggestions = 5
+# Tasks one super review may suggest.
+# super_review_suggestions = 10
+
+# The steps that verify a task, run in order; with none, nothing is verified.
 # Quick checks first, so a failure shows up in seconds rather than after the tests.
 [[verification.steps]]
 name = "Ruff lint"
@@ -27,7 +44,203 @@ command = ["uv", "run", "lizard", "src", "tests", "-w", "-C", "6", "-L", "100", 
 name = "Unit tests with 100% coverage"
 command = ["uv", "run", "pytest", "--cov", "--cov-fail-under=100"]
 
+# How the coder's worktree is set up; with none, nothing is.
 # Bring the worktree's environment in line with the lock file whenever it changes.
 [setup]
 command = ["uv", "sync", "--frozen"]
 watch = ["uv.lock"]
+
+# The roles agents work in, by name: the built-in ones, and your own.
+
+# [roles.planner]
+# What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
+# instructions: orbit's own planner.md
+# The model of its tasks, an alias such as "opus" or a full id; unset, the CLI's default.
+# model: unset
+# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
+# tool_access = "restricted"
+# The orbit tools its agents may call.
+# tools = ["propose_task", "report_progress"]
+# Whether its agents' claims of being done are verified.
+# verify = false
+# How long its agents may take, in minutes; unset, no limit.
+# timeout_minutes: unset
+# The lane that runs its agents, a plain name; a lane runs one task at a time.
+# lane = "planner"
+# Where its agents work: "worktree", "snapshot", "checkout" or "none".
+# workspace = "checkout"
+# Whether you talk to it, as you do the planner, rather than it taking tasks.
+# conversation = true
+# Whether its finished work is committed and merged.
+# merge = false
+# Whether it runs at all.
+# enabled = true
+# How hard its agents think: "low", "medium", "high", "xhigh" or "max"; unset, the CLI's default.
+# effort: unset
+
+# [roles.coder]
+# What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
+# instructions: orbit's own coder.md
+# The model of its tasks, an alias such as "opus" or a full id; unset, the CLI's default.
+# model: unset
+# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
+# tool_access = "full"
+# The orbit tools its agents may call.
+# tools = ["get_task", "complete_task", "run_check", "report_progress", "give_up"]
+# Whether its agents' claims of being done are verified.
+# verify = true
+# How long its agents may take, in minutes; unset, no limit.
+# timeout_minutes: unset
+# The lane that runs its agents, a plain name; a lane runs one task at a time.
+# lane = "work"
+# Where its agents work: "worktree", "snapshot", "checkout" or "none".
+# workspace = "worktree"
+# Whether you talk to it, as you do the planner, rather than it taking tasks.
+# conversation = false
+# Whether its finished work is committed and merged.
+# merge = true
+# Whether it runs at all.
+# enabled = true
+# How hard its agents think: "low", "medium", "high", "xhigh" or "max"; unset, the CLI's default.
+# effort: unset
+
+# [roles.reviewer]
+# What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
+# instructions: orbit's own reviewer.md
+# The model of its tasks, an alias such as "opus" or a full id; unset, the CLI's default.
+# model: unset
+# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
+# tool_access = "restricted"
+# The orbit tools its agents may call.
+# tools = ["get_task", "complete_task", "report_progress", "give_up", "suggest_task"]
+# Whether its agents' claims of being done are verified.
+# verify = false
+# How long its agents may take, in minutes; unset, no limit.
+# timeout_minutes: unset
+# The lane that runs its agents, a plain name; a lane runs one task at a time.
+# lane = "review"
+# Where its agents work: "worktree", "snapshot", "checkout" or "none".
+# workspace = "snapshot"
+# Whether you talk to it, as you do the planner, rather than it taking tasks.
+# conversation = false
+# Whether its finished work is committed and merged.
+# merge = false
+# Whether it runs at all.
+# enabled = true
+# How hard its agents think: "low", "medium", "high", "xhigh" or "max"; unset, the CLI's default.
+# effort: unset
+
+# [roles.super-reviewer]
+# What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
+# instructions: orbit's own super-reviewer.md
+# The model of its tasks, an alias such as "opus" or a full id; unset, the CLI's default.
+# model = "opus"
+# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
+# tool_access = "restricted"
+# The orbit tools its agents may call.
+# tools = ["get_task", "complete_task", "report_progress", "give_up", "suggest_task"]
+# Whether its agents' claims of being done are verified.
+# verify = false
+# How long its agents may take, in minutes; unset, no limit.
+# timeout_minutes: unset
+# The lane that runs its agents, a plain name; a lane runs one task at a time.
+# lane = "review"
+# Where its agents work: "worktree", "snapshot", "checkout" or "none".
+# workspace = "snapshot"
+# Whether you talk to it, as you do the planner, rather than it taking tasks.
+# conversation = false
+# Whether its finished work is committed and merged.
+# merge = false
+# Whether it runs at all.
+# enabled = true
+# How hard its agents think: "low", "medium", "high", "xhigh" or "max"; unset, the CLI's default.
+# effort: unset
+
+# [roles.configurator]
+# What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
+# instructions: orbit's own configurator.md
+# The model of its tasks, an alias such as "opus" or a full id; unset, the CLI's default.
+# model: unset
+# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
+# tool_access = "restricted"
+# The orbit tools its agents may call.
+# tools = ["get_task", "propose_checks", "report_progress", "give_up"]
+# Whether its agents' claims of being done are verified.
+# verify = false
+# How long its agents may take, in minutes; unset, no limit.
+# timeout_minutes: unset
+# The lane that runs its agents, a plain name; a lane runs one task at a time.
+# lane = "work"
+# Where its agents work: "worktree", "snapshot", "checkout" or "none".
+# workspace = "worktree"
+# Whether you talk to it, as you do the planner, rather than it taking tasks.
+# conversation = false
+# Whether its finished work is committed and merged.
+# merge = false
+# Whether it runs at all.
+# enabled = true
+# How hard its agents think: "low", "medium", "high", "xhigh" or "max"; unset, the CLI's default.
+# effort: unset
+
+# A role of your own, which must set its instructions. For example:
+# [roles.security-reviewer]
+# What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
+# instructions = "roles/security-reviewer.md"
+# Whether its agents' claims of being done are verified.
+# verify = false
+# The lane that runs its agents, a plain name; a lane runs one task at a time.
+# lane = "security"
+# Where its agents work: "worktree", "snapshot", "checkout" or "none".
+# workspace = "snapshot"
+# Whether its finished work is committed and merged.
+# merge = false
+
+# Coming in a later version of orbit; leave commented out until then.
+
+# On a role, such as the one above: the runtime its agents run on, "claude", "kiro" or "harness".
+# runtime = "claude"
+
+# A trigger, which turns an event into a task for a role.
+# [triggers.review-each-commit]
+# The event it listens for, such as "task_landed", "commits", "manual" or "schedule".
+# on = "task_landed"
+# The events it takes, by their fields: here, work the coder landed.
+# when = { role = "coder" }
+# The role of the task it queues.
+# role = "reviewer"
+# The task's prompt, a template under .orbit/ that can use {commit}, {diff} and {task}.
+# prompt = "triggers/review.md"
+# The named rules that may hold it back: "review-rounds", "not-queued" or "dedupe".
+# guards = ["review-rounds"]
+
+# An MCP server roles may use by name, which orbit proxies through its own.
+# [mcp.github]
+# The command that starts it, as a process of orbit's.
+# command = ["github-mcp-server", "stdio"]
+# Its environment, naming variables whose values come from the control plane, never here.
+# env = { GITHUB_TOKEN = "$GITHUB_TOKEN" }
+# Whether the agents share one connection to it, rather than each having its own.
+# shared = true
+
+# An MCP server that's already running.
+# [mcp.semgrep]
+# The URL it serves MCP at.
+# url = "http://127.0.0.1:3010/mcp"
+
+# The tools a role's agents may use, in place of its tool_access and tools.
+# [roles.security-reviewer.tools]
+# The orbit tools its agents may call.
+# orbit = ["get_task", "complete_task", "suggest_task", "report_progress"]
+# What its agents may do in their workspace: "none", "read", "write" or "shell".
+# workspace = "read"
+# The MCP servers its agents may use, each declared in an [mcp.<name>] table.
+# mcp = ["semgrep"]
+
+# A model endpoint for the built-in harness, which a role's model names.
+# [models.local-coder]
+# The provider and model id, as LangChain reads them.
+# model = "openai:qwen3-coder"
+# The endpoint's URL, such as an OpenAI-compatible server's.
+# base_url = "http://127.0.0.1:11434/v1"
+# How many tokens the model's context holds.
+# context_window = 32768
