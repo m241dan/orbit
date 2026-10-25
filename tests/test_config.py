@@ -165,6 +165,23 @@ def test_mistakes_are_reported_readably(data: dict[str, object], message: str) -
     assert "\n" not in str(raised.value).split(":", 1)[0]
 
 
+@pytest.mark.parametrize(
+    ("roles", "where"),
+    [
+        ({"coder": {"tools": ["launch_rockets"]}}, "roles.coder.tools"),
+        ({"coder": "everything"}, "roles.coder"),
+        ({"x": {"instructions": "Do it.", "lane": "b"}}, "roles"),
+    ],
+)
+def test_a_role_problem_and_another_problem_are_refused_together_each_on_its_own_line(
+    roles: dict[str, object], where: str
+) -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_config({"fix_attempts": 0, "roles": roles}, BUILT_IN_ROLES)
+    lines = str(raised.value).splitlines()
+    assert [line.split(":", 1)[0] for line in lines] == ["fix_attempts", where]
+
+
 def test_a_new_role_must_be_able_to_fetch_its_task() -> None:
     with pytest.raises(ConfigError, match="get_task"):
         roles = {"new": {"instructions": "x", "tools": ["complete_task"]}}
@@ -459,6 +476,15 @@ def test_the_projects_own_clash_beside_a_personal_role_is_the_projects() -> None
         load_config(custom(lane="b"), BUILT_IN_ROLES, personal(helper=helper))
     assert not isinstance(raised.value, PersonalRoleError)
     assert "lane 'b' has ['x']" in str(raised.value)
+
+
+def test_a_project_role_problem_beside_a_personal_role_is_refused_with_the_rest() -> None:
+    roles = {"coder": {"tool_access": "sometimes"}}
+    with pytest.raises(ConfigError) as raised:
+        load_config({"fix_attempts": 0, "roles": roles}, BUILT_IN_ROLES, personal(helper=HELPER))
+    assert not isinstance(raised.value, PersonalRoleError)
+    lines = str(raised.value).splitlines()
+    assert [line.split(":", 1)[0] for line in lines] == ["fix_attempts", "roles.coder.tool_access"]
 
 
 @pytest.mark.parametrize("key", ["personal", "notices"])

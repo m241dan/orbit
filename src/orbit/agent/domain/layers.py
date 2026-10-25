@@ -99,6 +99,19 @@ class ResolvedRoles:
     replaced: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class MergedRoles:
+    """The roles merged across the layers but not yet validated: each role's ``tables`` of
+    fields, by name, as validating a role takes them, and the ``layers`` each field came from,
+    by role and field name; the names of the roles that are ``personal``, and of the personal
+    roles project roles ``replaced``, in order."""
+
+    tables: dict[str, Any]
+    layers: dict[str, dict[str, Layer]]
+    personal: frozenset[str]
+    replaced: tuple[str, ...]
+
+
 class PersonalRoleError(ConfigError):
     """The personal roles break a rule across the roles that the others keep, so the user
     config is at fault; the message says which rule."""
@@ -208,16 +221,34 @@ def resolve_roles(
     :class:`PersonalRoleError` if the personal roles break a rule across the roles that the
     others keep.
     """
+    merged = merge_roles(package, user, project)
+    roles = _validated(merged.tables)
+    _check_personal(roles, merged.personal)
+    return ResolvedRoles(roles, merged.layers, merged.personal, merged.replaced)
+
+
+def merge_roles(package: Mapping[str, Role], user: UserRoles, project: ProjectRoles) -> MergedRoles:
+    """The roles :func:`resolve_roles` resolves from the ``package``, ``user`` and ``project``,
+    left unvalidated so that a caller can validate them with the rest of its file."""
     effective, replaced = _personal_in_effect(user, project)
     personal = effective.personal
     names = [*package, *personal, *(name for name in project.roles if name not in package)]
-    data: dict[str, Any] = {}
+    tables: dict[str, Any] = {}
     layers: dict[str, dict[str, Layer]] = {}
     for name in names:
-        data[name], layers[name] = _resolved(name, package.get(name), effective, project)
-    roles = _validated(data)
-    _check_personal(roles, personal)
-    return ResolvedRoles(roles, layers, frozenset(personal), replaced)
+        tables[name], layers[name] = _resolved(name, package.get(name), effective, project)
+    return MergedRoles(tables, layers, frozenset(personal), replaced)
+
+
+def check_personal(merged: MergedRoles) -> None:
+    """Raise :class:`PersonalRoleError`, as :func:`resolve_roles` does, if the ``merged`` roles
+    are each valid but the personal ones among them break a rule across the roles that the
+    others keep. An invalid role is left for the caller to report with the rest of its file."""
+    try:
+        roles = _Roles.model_validate({"roles": merged.tables}).roles
+    except ValidationError:
+        return
+    _check_personal(roles, merged.personal)
 
 
 def replaced_note(name: str) -> str:

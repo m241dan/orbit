@@ -12,7 +12,9 @@ from orbit.agent.domain.layers import (
     ProjectRoles,
     RoleFields,
     UserRoles,
+    check_personal,
     load_user_roles,
+    merge_roles,
     replaced_note,
     resolve_roles,
 )
@@ -316,3 +318,42 @@ def test_an_invalid_project_role_is_refused_naming_it_and_the_field(
 ) -> None:
     with pytest.raises(ConfigError, match=f"^{message}"):
         resolve_roles(PACKAGE_ROLES, user({"roles": {"model": "haiku"}}), project(roles))
+
+
+# Merging the roles without validating them
+
+
+def test_merged_roles_are_the_resolved_roles_tables_with_their_layers() -> None:
+    roles = {"model": "haiku", "helper": HELPER}
+    layers = (PACKAGE_ROLES, user({"roles": roles}), project({PLANNER: {"model": "opus"}}))
+    merged, resolved = merge_roles(*layers), resolve_roles(*layers)
+    assert {name: Role.model_validate(table) for name, table in merged.tables.items()} == (
+        resolved.roles
+    )
+    assert merged.layers == resolved.layers
+    assert (merged.personal, merged.replaced) == (resolved.personal, resolved.replaced)
+
+
+def test_merged_roles_keep_an_invalid_project_role_as_given() -> None:
+    roles: dict[str, object] = {"coder": {"tools": ["launch_rockets"]}, "new": "everything"}
+    merged = merge_roles(PACKAGE_ROLES, NO_USER_ROLES, project(roles))
+    assert merged.tables["coder"]["tools"] == ["launch_rockets"]
+    assert merged.layers["coder"]["tools"] == PROJECT
+    assert (merged.tables["new"], merged.layers["new"]) == ("everything", {})
+
+
+def test_a_merged_personal_role_breaking_a_rule_across_the_roles_is_a_personal_role_error() -> None:
+    helper = {"instructions": "You help.", "lane": "helper"}
+    merged = merge_roles(PACKAGE_ROLES, user({"roles": {"helper": helper}}), NO_PROJECT_ROLES)
+    with pytest.raises(PersonalRoleError, match=r"^roles: the enabled roles"):
+        check_personal(merged)
+
+
+def test_the_personal_roles_check_leaves_an_invalid_role_to_be_reported_with_the_rest() -> None:
+    helper = {"instructions": "You help.", "lane": "helper"}
+    merged = merge_roles(
+        PACKAGE_ROLES,
+        user({"roles": {"helper": helper}}),
+        project({"coder": {"tools": ["launch_rockets"]}}),
+    )
+    check_personal(merged)

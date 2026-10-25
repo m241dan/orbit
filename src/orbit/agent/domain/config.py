@@ -16,8 +16,9 @@ from orbit.agent.domain.layers import (
     Layer,
     ProjectRoles,
     UserRoles,
+    check_personal,
+    merge_roles,
     replaced_note,
-    resolve_roles,
 )
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import Role, role_clashes
@@ -139,8 +140,9 @@ def load_config(
     roles are ``built_in``, with a notice for each personal role a project role replaces.
 
     A role it names that's built in keeps the fields it doesn't set; any other role is new. Each
-    role's fields are resolved as :func:`resolve_roles` says. Raises :class:`ConfigError` if
-    it's invalid, a :class:`PersonalRoleError` if the personal roles are at fault.
+    role's fields are resolved as :func:`~orbit.agent.domain.layers.resolve_roles` says.
+    Raises :class:`ConfigError` naming each problem if it's invalid, a
+    :class:`PersonalRoleError` if the personal roles are at fault.
     """
     return load_layered(data, built_in, user, path).config
 
@@ -170,10 +172,11 @@ def load_layered(
     roles = data.get("roles", {})
     if not isinstance(roles, dict):
         return LayeredConfig(_validated(data), {})  # Refused: the roles aren't a table.
-    resolved = resolve_roles(built_in, user, ProjectRoles(Layer("project", path), roles))
-    notices = tuple(replaced_note(name) for name in resolved.replaced)
-    config = _validated({**data, "roles": resolved.roles}, resolved.personal, notices)
-    return LayeredConfig(config, resolved.layers)
+    merged = merge_roles(built_in, user, ProjectRoles(Layer("project", path), roles))
+    check_personal(merged)
+    notices = tuple(replaced_note(name) for name in merged.replaced)
+    config = _validated({**data, "roles": merged.tables}, merged.personal, notices)
+    return LayeredConfig(config, merged.layers)
 
 
 def _refuse_later_settings(data: dict[str, Any]) -> None:
