@@ -67,6 +67,7 @@ class RowNotes:
 
 
 NO_NOTES = RowNotes()
+EMPTY_USAGE = Usage()  # Built once: rows compare their usage with it on every redraw.
 
 
 def task_label(
@@ -88,7 +89,7 @@ def task_label(
     head = f"{number}. " if state.fixes is None else f"   {number} "
     icon = frame if state.status == "running" else STATUS_ICONS[state.status]
     # Long prompts (like fix tasks) are titled by their first line.
-    title = split_prompt(state.task.prompt)[0]
+    title = state.task.prompt.partition("\n")[0]
     label = Text(f"{head}{icon} {title}")
     label.append_text(lane_tag(notes.lane))
     label.append("\n")
@@ -164,7 +165,7 @@ def _spent(usage: Usage, unknown: bool) -> str:
     it is, else the usage, if any."""
     if unknown:
         return f" · {USAGE_UNKNOWN}"
-    return "" if usage == Usage() else f" · {usage_label(usage)}"
+    return "" if usage == EMPTY_USAGE else f" · {usage_label(usage)}"
 
 
 def _reason_line(line: str, width: int | None) -> Text:
@@ -262,7 +263,7 @@ def usage_label(usage: Usage) -> str:
 def session_usage_subtitle(usage: Usage) -> str:
     """The task list's border subtitle: what the session has spent, ``usage``; empty when it
     has spent nothing."""
-    return "" if usage == Usage() else f"session: {usage_label(usage)}"
+    return "" if usage == EMPTY_USAGE else f"session: {usage_label(usage)}"
 
 
 def acceptable(state: TaskState) -> bool:
@@ -320,6 +321,15 @@ def follow_top(
         return min(bottom - view_height, top)
     context = rows[index - 1][0] if index else top
     return context if bottom - context <= view_height else top
+
+
+_LabelKey = tuple[TaskState, str, int, RowNotes]
+
+
+def _same(last: _LabelKey, key: _LabelKey) -> bool:
+    """Whether a row labelled from ``last`` reads as one labelled from ``key`` would; the
+    task is compared by identity first, as unchanged tasks usually are the same object."""
+    return (last[0] is key[0] or last[0] == key[0]) and last[1:] == key[1:]
 
 
 class TaskBoardView(Protocol):
@@ -418,6 +428,7 @@ class TaskBoard:
         self.usage_unknown: frozenset[str] = frozenset()  # Roles whose usage is unknown.
         self.lane: str | None = None  # The lane the list is narrowed to, if any.
         self.following = True
+        self._labels: dict[str, tuple[_LabelKey, Text]] = {}  # Each shown row's last label.
 
     def start(self) -> None:
         """Show the list's title and its rows, following."""
@@ -489,14 +500,20 @@ class TaskBoard:
         """Label the shown tasks' rows afresh, as the spinners are now and at the view's
         width."""
         frame, width = spinner_frame(self._clock()), self._view.row_width
-        rows = [
-            (
-                t.id,
-                task_label(t, self.numbers_by_id[t.id], frame, width=width, notes=self._notes(t)),
-            )
-            for t in self.shown
-        ]
+        labels = {t.id: self._label(t, frame, width) for t in self.shown}
+        self._labels = labels
+        rows = [(task_id, label) for task_id, (_, label) in labels.items()]
         self._view.show_labels(rows, new_task_row())
+
+    def _label(self, state: TaskState, frame: str, width: int) -> tuple[_LabelKey, Text]:
+        """``state``'s row label and what it was made from: the last one, unless the task, its
+        number, notes or the ``width`` changed, or it runs, so its spinner shows ``frame``."""
+        key = (state, self.numbers_by_id[state.id], width, self._notes(state))
+        last = self._labels.get(state.id)
+        if last is not None and state.status != "running" and _same(last[0], key):
+            return last
+        number, _, notes = key[1:]
+        return key, task_label(state, number, frame, width=width, notes=notes)
 
     def _notes(self, state: TaskState) -> RowNotes:
         """What ``state``'s row says beyond its task: the wait for a coder, if it's the task

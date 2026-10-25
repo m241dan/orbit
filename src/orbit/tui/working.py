@@ -23,6 +23,8 @@ class WorkingRow(Static):
     WorkingRow.-running { display: block; }
     """
 
+    _line_count = 0
+
     def __init__(self) -> None:
         super().__init__()
         self.clock: Callable[[], float] = time.monotonic
@@ -38,5 +40,7 @@ class WorkingRow(Static):
 
     def show_lines(self, lines: Sequence[str]) -> None:
         unwrapped = Text("\n", no_wrap=True, overflow="ellipsis")
-        self.update(unwrapped.join(Text(line) for line in lines))
+        # Only a new line count changes the row's height; a spinner turning needs no layout.
+        layout, self._line_count = len(lines) != self._line_count, len(lines)
+        self.update(unwrapped.join(Text(line) for line in lines), layout=layout)
         self.set_class(bool(lines), "-running")

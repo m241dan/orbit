@@ -702,3 +702,31 @@ def test_widening_a_whole_list_leaves_it_alone() -> None:
     redraws = view.redraws
     tasks.widen()
     assert view.redraws == redraws
+
+
+def test_a_tick_relabels_only_running_rows() -> None:
+    now = [0.0]
+    view = TaskView()
+    tasks = TaskBoard(view, lambda: now[0])
+    tasks.start()
+    tasks.show(many(3, running=1))
+    before = list(view.labels)
+    now[0] = 1 / 8
+    tasks.redraw()
+    assert view.labels[0] is before[0] and view.labels[2] is before[2]
+    assert view.labels[1] is not before[1]
+    assert str(view.labels[1]) != str(before[1])  # The spinner turned.
+
+
+def test_a_changed_task_or_width_relabels_its_rows() -> None:
+    tasks, view = started()
+    shown = many(2)
+    tasks.show(shown)
+    before = list(view.labels)
+    changed = shown[0].model_copy(update={"status": "completed"})
+    tasks.show((changed, shown[1]))
+    assert view.labels[0] is not before[0] and view.labels[1] is before[1]
+    view.row_width -= 1
+    kept = list(view.labels)
+    tasks.redraw()
+    assert all(new is not old for new, old in zip(view.labels, kept, strict=True))

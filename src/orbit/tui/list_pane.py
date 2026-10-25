@@ -65,7 +65,7 @@ class ListPane(ModalFocus, OptionList):
         """Relabel the shown rows whose label differs in ``rows``, which have the same keys."""
         before, self._shown_rows = self._shown_rows, rows
         for index, ((_, label), (_, old)) in enumerate(zip(rows, before, strict=True)):
-            if label != old:
+            if label is not old and label != old:  # Unchanged labels are usually reused.
                 self.replace_prompt(index, label)
 
     def replace_prompt(self, index: int, prompt: VisualType) -> None:

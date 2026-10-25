@@ -4,6 +4,7 @@ from collections.abc import Mapping
 
 from textual.app import App, ComposeResult
 from textual.pilot import Pilot
+from textual.visual import VisualType
 
 from orbit.protocol import (
     Attach,
@@ -178,3 +179,30 @@ async def test_the_row_sits_below_the_shown_log() -> None:
         await pilot.pause()
         row = app.query_one(WorkingRow)
         assert row.size.height == 1 and row.region.y == transcript.shown.region.bottom
+
+
+class _LayoutSpy(WorkingRow):
+    """A working row that records whether each update asked for a layout."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.layouts: list[bool] = []
+
+    def update(self, content: VisualType = "", *, layout: bool = True) -> None:
+        self.layouts.append(layout)
+        super().update(content, layout=layout)
+
+
+async def test_the_row_lays_out_only_when_its_line_count_changes() -> None:
+    class Host(App[None]):
+        def compose(self) -> ComposeResult:
+            yield _LayoutSpy()
+
+    async with Host().run_test() as pilot:
+        row = pilot.app.query_one(_LayoutSpy)
+        row.layouts.clear()
+        row.show_lines(["◜ one"])
+        row.show_lines(["◠ one"])
+        row.show_lines(["◝ one", "two"])
+        row.show_lines([])
+        assert row.layouts == [True, False, True, True]
