@@ -1215,6 +1215,14 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   conversation with the runtime it ran on, as only that runtime can carry it on: once the role
   runs on another runtime, the session still opens, but messages to the role are refused until
   you reset its conversation (see [Planning with the planner](#planning-with-the-planner)).
+- `consults`: the other enabled conversational roles a conversational role may consult, by name;
+  none by default. It's refused on a role that isn't conversational, naming a role that isn't
+  another enabled conversational role, and in a cycle (`architect` consulting the `planner` while
+  the `planner` consults `architect`), naming the roles. Nothing consults yet.
+- `consult_limit_per_hour`: how many consultations it may start in an hour, 6 by default; 0 means
+  no limit, and a negative number is refused.
+- `copy_ttl_hours`: how long, in hours, a consultation's copy is kept, 24 by default; it must be
+  more than 0.
 
 In the TUI, the task editor's **Role** field picks a task's role among the roles enabled in the
 session's workspace that aren't conversational, each shown with its lane (`Coder · work`) and a
@@ -1231,7 +1239,7 @@ A role whose fields don't go together is refused, naming the role and the rule: 
 needs `workspace = "worktree"` and `verify = true`; `verify = true` needs `merge = true`, as checked
 work that doesn't merge would vanish once put aside; `workspace = "checkout"` can't have
 `tool_access = "full"`, as the agent could edit your tree; `conversation = true` needs
-`propose_task` in its tools and `get_task` left out, `merge = false`, `verify = false` and a
+`get_task` left out of its tools, `merge = false`, `verify = false` and a
 workspace other than `worktree`; and no role that isn't conversational may share a conversational
 role's lane. There's one worktree, so every enabled role with `workspace = "worktree"` must share
 one lane, or the config is refused, naming the roles and their lanes.

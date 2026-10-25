@@ -199,6 +199,16 @@ class Role(_Config):
             ' Left out, the user config\'s, else "claude".'
         ),
     )
+    consults: tuple[str, ...] = Field(
+        default=(),
+        description="The other conversational roles a conversational role may consult, by name.",
+    )
+    consult_limit_per_hour: int = Field(
+        default=6, ge=0, description="Consultations it may start in an hour; 0, no limit."
+    )
+    copy_ttl_hours: float = Field(
+        default=24, gt=0, description="How long a consultation's copy is kept, in hours."
+    )
 
     @field_validator("tools")
     @classmethod
@@ -206,10 +216,6 @@ class Role(_Config):
         unknown = [tool for tool in tools if tool not in ORBIT_TOOLS]
         if unknown:
             raise ValueError(f"unknown tools {unknown}; orbit's tools are {list(ORBIT_TOOLS)}")
-        if GET_TASK not in tools and PROPOSE_TASK not in tools:
-            raise ValueError(
-                "an agent needs get_task to fetch its task, or propose_task to plan in conversation"
-            )
         return tools
 
     @field_validator("lane")
@@ -226,6 +232,7 @@ class Role(_Config):
             + _verify_problems(self)
             + _checkout_problems(self)
             + _conversation_problems(self)
+            + _task_problems(self)
         )
         if problems:
             raise PydanticCustomError("role_rules", "; ".join(problems))
@@ -299,13 +306,27 @@ def _conversation_problems(role: Role) -> list[str]:
     if not role.conversation:
         return []
     needs = {
-        "propose_task in its tools": PROPOSE_TASK in role.tools,
         "get_task left out of its tools": GET_TASK not in role.tools,
         "merge = false": not role.merge,
         "verify = false": not role.verify,
         'a workspace other than "worktree"': role.workspace != "worktree",
     }
     return _unmet("conversation = true needs", needs)
+
+
+def _task_problems(role: Role) -> list[str]:
+    """What a task ``role`` breaks: it needs a way to its work, and consults no one."""
+    if role.conversation:
+        return []
+    fetches = GET_TASK in role.tools or PROPOSE_TASK in role.tools
+    problems = (
+        []
+        if fetches
+        else ["an agent needs get_task to fetch its task, or propose_task to plan in conversation"]
+    )
+    if role.consults:
+        problems.append("consults needs conversation = true")
+    return problems
 
 
 def lane_clashes(roles: Mapping[str, Role]) -> list[str]:
@@ -358,7 +379,51 @@ def role_clashes(roles: Mapping[str, Role]) -> list[str]:
     roles share (see :func:`lane_clashes`), the worktree's roles in more than one lane (see
     :func:`worktree_lane_clashes`), and the review roles in different lanes (see
     :func:`review_lane_clashes`)."""
-    return lane_clashes(roles) + worktree_lane_clashes(roles) + review_lane_clashes(roles)
+    return (
+        lane_clashes(roles)
+        + worktree_lane_clashes(roles)
+        + review_lane_clashes(roles)
+        + consult_clashes(roles)
+    )
+
+
+def consult_clashes(roles: Mapping[str, Role]) -> list[str]:
+    """Why the roles among ``roles`` can't consult whom they name, naming them: each must be
+    another enabled conversational role, and none may consult round in a cycle."""
+    clashes = [
+        f"the role {name!r} can't consult {other!r}, which isn't another enabled"
+        " conversational role"
+        for name, role in roles.items()
+        for other in role.consults
+        if other == name or other not in conversational_roles(roles)
+    ]
+    return clashes + _consult_cycles(roles)
+
+
+def _consult_cycles(roles: Mapping[str, Role]) -> list[str]:
+    """A cycle among the ``roles``' consults, named role by role, if there is one."""
+    for start in roles:
+        cycle = _cycle_from(roles, [start])
+        if cycle:
+            return ["a consults cycle: " + " -> ".join(repr(name) for name in cycle)]
+    return []
+
+
+def _onward(roles: Mapping[str, Role], path: list[str], other: str) -> list[str]:
+    """The cycle ``path`` carried on through ``other`` makes, unless ``other`` is already on
+    it."""
+    return [] if other in path else _cycle_from(roles, [*path, other])
+
+
+def _cycle_from(roles: Mapping[str, Role], path: list[str]) -> list[str]:
+    """The ``path`` of consults carried on until it returns to its start, if it can; nothing
+    otherwise."""
+    role = roles.get(path[-1])
+    for other in role.consults if role else ():
+        cycle = [*path, other] if other == path[0] else _onward(roles, path, other)
+        if cycle:
+            return cycle
+    return []
 
 
 def task_lanes(roles: Mapping[str, Role]) -> dict[str, frozenset[str]]:

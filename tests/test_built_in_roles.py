@@ -32,6 +32,9 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "enabled": True,
         "effort": None,
         "runtime": "claude",
+        "consults": (),
+        "consult_limit_per_hour": 6,
+        "copy_ttl_hours": 24,
     },
     "reviewer": {
         "model": None,
@@ -46,6 +49,9 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "enabled": True,
         "effort": None,
         "runtime": "claude",
+        "consults": (),
+        "consult_limit_per_hour": 6,
+        "copy_ttl_hours": 24,
     },
     "super-reviewer": {
         "model": "opus",
@@ -60,6 +66,9 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "enabled": True,
         "effort": None,
         "runtime": "claude",
+        "consults": (),
+        "consult_limit_per_hour": 6,
+        "copy_ttl_hours": 24,
     },
     "planner": {
         "model": None,
@@ -74,6 +83,9 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "enabled": True,
         "effort": None,
         "runtime": "claude",
+        "consults": (),
+        "consult_limit_per_hour": 6,
+        "copy_ttl_hours": 24,
     },
     "configurator": {
         "model": None,
@@ -88,6 +100,9 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "enabled": True,
         "effort": None,
         "runtime": "claude",
+        "consults": (),
+        "consult_limit_per_hour": 6,
+        "copy_ttl_hours": 24,
     },
 }
 """Each built-in role's fields but its instructions: those orbit has always had, where it

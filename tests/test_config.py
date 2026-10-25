@@ -1,4 +1,5 @@
 import tomllib
+from typing import cast
 
 import pytest
 
@@ -292,7 +293,6 @@ def test_conversational_roles_can_share_a_lane() -> None:
             talker(tools=["get_task", "propose_task"]),
             "conversation = true needs get_task left out of its tools",
         ),
-        (talker(tools=["get_task"]), "conversation = true needs propose_task in its tools"),
         (talker(merge=True), "conversation = true needs merge = false"),
         (talker(verify=True), "conversation = true needs verify = false"),
         (
@@ -756,3 +756,61 @@ def test_other_unknown_settings_keep_their_errors(data: dict[str, object], messa
         load_config(data, BUILT_IN_ROLES)
     assert str(raised.value).startswith(message)
     assert "later version" not in str(raised.value)
+
+
+def test_a_conversational_role_without_propose_task_or_get_task_loads() -> None:
+    role = load_config(talker(tools=["report_progress"]), BUILT_IN_ROLES).roles["x"]
+    assert role.tools == ("report_progress",)
+
+
+def test_a_conversational_role_with_only_get_task_is_refused() -> None:
+    with pytest.raises(ConfigError, match="get_task left out"):
+        load_config(talker(tools=["get_task"]), BUILT_IN_ROLES)
+
+
+def test_consultation_fields_default_to_none_six_and_a_day() -> None:
+    role = load_config(custom(), BUILT_IN_ROLES).roles["x"]
+    assert (role.consults, role.consult_limit_per_hour, role.copy_ttl_hours) == ((), 6, 24)
+
+
+@pytest.mark.parametrize("data", [custom(consult_limit_per_hour=-1), custom(copy_ttl_hours=0)])
+def test_a_negative_consult_limit_or_a_zero_copy_ttl_is_refused(data: dict[str, object]) -> None:
+    with pytest.raises(ConfigError, match=r"^roles\.x\."):
+        load_config(data, BUILT_IN_ROLES)
+
+
+def test_a_conversational_role_may_consult_the_planner() -> None:
+    role = load_config(talker(consults=["planner"]), BUILT_IN_ROLES).roles["x"]
+    assert role.consults == ("planner",)
+
+
+def test_consults_on_a_task_role_is_refused() -> None:
+    roles = {"coder": {"consults": ["planner"]}}
+    with pytest.raises(ConfigError, match=r"^roles\.coder: consults needs conversation = true$"):
+        load_config({"roles": roles}, BUILT_IN_ROLES)
+
+
+@pytest.mark.parametrize("target", ["coder", "x", "nobody"])
+def test_consulting_anything_but_another_enabled_conversational_role_is_refused(
+    target: str,
+) -> None:
+    with pytest.raises(ConfigError, match=f"'x'.*'{target}'"):
+        load_config(talker(consults=[target]), BUILT_IN_ROLES)
+
+
+def with_planner(data: dict[str, object], **fields: object) -> dict[str, object]:
+    """The project file ``data``, a role ``x``, also setting the planner's ``fields``."""
+    roles = cast(dict[str, object], data["roles"])
+    return {"roles": {**roles, "planner": fields}}
+
+
+def test_consulting_a_disabled_conversational_role_is_refused() -> None:
+    data = with_planner(talker(consults=["planner"]), enabled=False)
+    with pytest.raises(ConfigError, match="'planner'"):
+        load_config(data, BUILT_IN_ROLES)
+
+
+def test_roles_consulting_each_other_are_refused_naming_the_cycle() -> None:
+    data = with_planner(talker(consults=["planner"]), consults=["x"])
+    with pytest.raises(ConfigError, match=r"consults cycle.*'planner' -> 'x' -> 'planner'"):
+        load_config(data, BUILT_IN_ROLES)

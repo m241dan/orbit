@@ -79,6 +79,12 @@ watch = ["uv.lock"]
 # effort: unset
 # The runtime its agents run on: "claude" or "kiro". Left out, the user config's, else "claude".
 # runtime = "claude"
+# The other conversational roles a conversational role may consult, by name.
+# consults = []
+# Consultations it may start in an hour; 0, no limit.
+# consult_limit_per_hour = 6
+# How long a consultation's copy is kept, in hours.
+# copy_ttl_hours = 24.0
 
 # [roles.coder]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -107,6 +113,12 @@ watch = ["uv.lock"]
 # effort: unset
 # The runtime its agents run on: "claude" or "kiro". Left out, the user config's, else "claude".
 # runtime = "claude"
+# The other conversational roles a conversational role may consult, by name.
+# consults = []
+# Consultations it may start in an hour; 0, no limit.
+# consult_limit_per_hour = 6
+# How long a consultation's copy is kept, in hours.
+# copy_ttl_hours = 24.0
 
 # [roles.reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -135,6 +147,12 @@ watch = ["uv.lock"]
 # effort: unset
 # The runtime its agents run on: "claude" or "kiro". Left out, the user config's, else "claude".
 # runtime = "claude"
+# The other conversational roles a conversational role may consult, by name.
+# consults = []
+# Consultations it may start in an hour; 0, no limit.
+# consult_limit_per_hour = 6
+# How long a consultation's copy is kept, in hours.
+# copy_ttl_hours = 24.0
 
 # [roles.super-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -163,6 +181,12 @@ watch = ["uv.lock"]
 # effort: unset
 # The runtime its agents run on: "claude" or "kiro". Left out, the user config's, else "claude".
 # runtime = "claude"
+# The other conversational roles a conversational role may consult, by name.
+# consults = []
+# Consultations it may start in an hour; 0, no limit.
+# consult_limit_per_hour = 6
+# How long a consultation's copy is kept, in hours.
+# copy_ttl_hours = 24.0
 
 # [roles.configurator]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -191,6 +215,12 @@ watch = ["uv.lock"]
 # effort: unset
 # The runtime its agents run on: "claude" or "kiro". Left out, the user config's, else "claude".
 # runtime = "claude"
+# The other conversational roles a conversational role may consult, by name.
+# consults = []
+# Consultations it may start in an hour; 0, no limit.
+# consult_limit_per_hour = 6
+# How long a consultation's copy is kept, in hours.
+# copy_ttl_hours = 24.0
 
 # A role of your own, which must set its instructions. For example:
 # [roles.security-reviewer]
