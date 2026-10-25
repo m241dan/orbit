@@ -4,7 +4,11 @@ of the runtime that stopped it resets, or, if that runtime's API not answering s
 backoff that grows with each outage in a row, saying meanwhile until when, why and on which
 runtime it's paused. The lane keeps its order, so it waits; the lanes that start by themselves
 start no task on that runtime meanwhile, and run those with it. A run remembers what started it,
-which its tasks' spans link to."""
+which its tasks' spans link to.
+
+A task in a lane that starts by itself whose agent hits its runtime's usage limit or finds its API
+not answering pauses that runtime too, timed by the same rules, with a backoff of its own for each
+runtime; while one pause is in force, it stays, and the work lane's own stop takes its place."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
@@ -28,10 +32,12 @@ from orbit.agent.domain.usage_limits import (
     Paused,
     RuntimeStop,
     limit_resume_time,
+    outage_after,
     outage_paused_note,
     outage_resume_time,
     outage_resuming_note,
     paused_note,
+    tasks_resuming_note,
 )
 from orbit.protocol import (
     CONFIGURATOR,
@@ -77,10 +83,12 @@ class WorkParts:
 @dataclass(frozen=True)
 class _Restart:
     """A stopped run starting again by itself: the span that started it, ``cause``, and the
-    ``note`` said as it starts again."""
+    ``note`` said as it starts again; with ``work`` false, a pause a lane that starts by itself
+    started, which ends by running the lanes' tasks waiting alone."""
 
     cause: Span
     note: str
+    work: bool = True
 
 
 class WorkTurns:
@@ -115,6 +123,8 @@ class WorkTurns:
         # How the run whose wait ended while the session was halted starts again, if one did.
         self._due: _Restart | None = None
         self._paused: Paused | None = None  # Until the waiting run starts again, and why.
+        # Each runtime's outage, as it last paused the lanes that start by themselves.
+        self._outages: dict[str, Outage] = {}
 
     @property
     def running(self) -> bool:
@@ -192,6 +202,33 @@ class WorkTurns:
         self._pause_as(None)
         return due or waiting
 
+    def pause_for(self, stop: RuntimeStop, error: str) -> bool:
+        """Pause ``stop``'s runtime, whose agent in a lane that starts by itself hit its usage
+        limit or, with ``error``, found its API not answering, timed as the work lane's pauses
+        are, then run the lanes' tasks waiting; returns whether that runtime is paused now. A
+        pause already in force stays, so another runtime isn't paused, and nothing is once
+        closed."""
+        if self._paused is not None or self._closed:
+            return self._paused is not None and self._paused.runtime == stop.runtime
+        paused, note, resuming = self._lane_pause(stop, error)
+        self._wait_until(paused, note, _Restart(current_span(), resuming, work=False), None)
+        return True
+
+    def heard_from(self, runtime: str) -> None:
+        """Forget ``runtime``'s outage, as it paused the lanes that start by themselves, now an
+        agent on it ended its run without it."""
+        self._outages.pop(runtime, None)
+
+    def _lane_pause(self, stop: RuntimeStop, error: str) -> tuple[Paused, str, str]:
+        """How long ``stop`` pauses its runtime, what's said of it, and what's said as it ends,
+        counting an outage, with ``error``, among those in a row of its runtime."""
+        runtime = stop.runtime
+        if stop.failure.kind == "usage_limit":
+            self._outages.pop(runtime, None)
+            return (*self._limit_pause(stop), tasks_resuming_note(runtime))
+        outage = self._outages[runtime] = outage_after(self._outages.get(runtime), runtime, error)
+        return (*self._outage_pause(stop, outage), tasks_resuming_note(runtime))
+
     async def stop_turn(self) -> None:
         """Cancel the run, if any, as the session halts, and wait for it to end, keeping its
         wait to start again."""
@@ -262,6 +299,8 @@ class WorkTurns:
         a runtime's usage limit or API not answering stopped them, wait to start again."""
         with use_span(cause):
             end = await work.run()
+        if end in ("limited", "api_unavailable"):
+            await self._wait.stop()  # The work lane's pause takes a lane's place.
         if end == "limited":
             assert work.runtime_stop is not None  # The usage limit stopped the run.
             self._wait_for_reset(work.runtime_stop, cause)
@@ -269,29 +308,44 @@ class WorkTurns:
             assert work.runtime_stop is not None and work.outage is not None  # So did this.
             self._wait_out(work.runtime_stop, work.outage, cause)
 
+    def _limit_pause(self, stop: RuntimeStop) -> tuple[Paused, str]:
+        """How long the usage limit ``stop`` tells pauses its runtime, and what's said of it."""
+        pause = self._pause
+        at = limit_resume_time(stop, self._parts.usage(), pause.now(), pause.waits)
+        return Paused(at, PAUSED_FOR_USAGE_LIMIT, stop.runtime), paused_note(at, stop.runtime)
+
+    def _outage_pause(self, stop: RuntimeStop, outage: Outage) -> tuple[Paused, str]:
+        """How long ``outage``, as ``stop`` tells it, pauses its runtime, after the backoff at
+        its level unless the failure says when, and what's said of it."""
+        at = outage_resume_time(stop, outage, self._pause.now())
+        note = outage_paused_note(at, outage.error, stop.runtime)
+        return Paused(at, PAUSED_FOR_API_UNAVAILABLE, stop.runtime), note
+
     def _wait_for_reset(self, stop: RuntimeStop, cause: Span) -> None:
         """Say when the run the usage limit ``stop`` tells stopped, started by ``cause``, starts
         again, and start it then."""
-        pause = self._pause
-        at = limit_resume_time(stop, self._parts.usage(), pause.now(), pause.waits)
-        paused = Paused(at, PAUSED_FOR_USAGE_LIMIT, stop.runtime)
-        self._pause_until(paused, paused_note(at, stop.runtime), _Restart(cause, RESUMING_NOTE))
+        paused, note = self._limit_pause(stop)
+        self._pause_until(paused, note, _Restart(cause, RESUMING_NOTE))
 
     def _wait_out(self, stop: RuntimeStop, outage: Outage, cause: Span) -> None:
         """Say when the run ``outage``, as ``stop`` tells it, stopped, started by ``cause``,
-        starts again, after the backoff at its level unless the failure says when, and start it
-        then."""
-        at = outage_resume_time(stop, outage, self._pause.now())
-        note = outage_paused_note(at, outage.error, stop.runtime)
-        paused = Paused(at, PAUSED_FOR_API_UNAVAILABLE, stop.runtime)
+        starts again, and start it then."""
+        paused, note = self._outage_pause(stop, outage)
         self._pause_until(paused, note, _Restart(cause, outage_resuming_note(stop.runtime)))
 
     def _pause_until(self, paused: Paused, note: str, restart: _Restart) -> None:
         """Say ``note`` about the run that just stopped, and start it again as ``restart`` says
         once it's ``paused`` no longer."""
-        self._parts.post(Notice(message=note))
         stopped = self._turns.turn
         assert stopped is not None  # This runs as the turn stopped.
+        self._wait_until(paused, note, restart, stopped)
+
+    def _wait_until(
+        self, paused: Paused, note: str, restart: _Restart, stopped: asyncio.Task[object] | None
+    ) -> None:
+        """Say ``note``, and start again as ``restart`` says once it's ``paused`` no longer and
+        the ``stopped`` turn, if any, has ended."""
+        self._parts.post(Notice(message=note))
         self._waiting = True
         self._pause_as(paused)
         self._wait.start(self._start_again(stopped, paused.until, restart))
@@ -305,12 +359,13 @@ class WorkTurns:
             self._parts.paused_changed()
 
     async def _start_again(
-        self, stopped: asyncio.Task[object], at: datetime, restart: _Restart
+        self, stopped: asyncio.Task[object] | None, at: datetime, restart: _Restart
     ) -> None:
-        """Once the ``stopped`` turn has ended, wait until ``at``, then start the run again as
-        ``restart`` says, or once the halt lifts if the session is halted then."""
+        """Once the ``stopped`` turn, if any, has ended, wait until ``at``, then start the run
+        again as ``restart`` says, or once the halt lifts if the session is halted then."""
         try:
-            await asyncio.wait([stopped])
+            if stopped is not None:
+                await asyncio.wait([stopped])
             pause = self._pause
             await pause.sleep(max(0.0, (at - pause.now()).total_seconds()))
         except Exception:  # Failed, it no longer keeps work waiting; reported as it goes on.
@@ -329,7 +384,9 @@ class WorkTurns:
         so the other lanes start their tasks again."""
         self._pause_as(None)
         self._kick_lanes()
-        work = self._startable(asked=False)
+        work = self._startable(asked=False) if restart.work else None
+        if not restart.work:
+            self._parts.post(Notice(message=restart.note))
         if work is None:
             return
         self._parts.post(Notice(message=restart.note))

@@ -7,7 +7,7 @@ ports to do it, and reports what happened as events.
 
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from contextlib import suppress
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import PurePath
 
@@ -28,7 +28,7 @@ from orbit.agent.application.keeper import (
     local_now,
     new_session_id,
 )
-from orbit.agent.application.lane_runner import LaneParts, LaneRunner, Lanes
+from orbit.agent.application.lane_runner import LaneParts, LaneRunner, Lanes, RuntimePauses
 from orbit.agent.application.lanes import Background, SessionGate
 from orbit.agent.application.log_writer import Overflow
 from orbit.agent.application.outbox import EventSink, Outbox, Shown
@@ -93,6 +93,7 @@ from orbit.agent.domain.roles import (
 )
 from orbit.agent.domain.runtimes import ModelAliases
 from orbit.agent.domain.storage import StorageSettings
+from orbit.agent.domain.usage_limits import RuntimeStop
 from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     CODER,
@@ -180,6 +181,19 @@ async def _unannounced(entry: WorkspaceEntry) -> None:
 async def _nothing_parked() -> Sequence[str]:
     """No notes, as a host given no fallback files to recover recovers none."""
     return ()
+
+
+@dataclass(frozen=True)
+class _LanePauses:
+    """Pauses runtimes through the work lane's ``turns``, made after the lanes that use this."""
+
+    turns: Callable[[], WorkTurns]
+
+    def pause_for(self, stop: RuntimeStop, error: str) -> bool:
+        return self.turns().pause_for(stop, error)
+
+    def heard_from(self, runtime: str) -> None:
+        self.turns().heard_from(runtime)
 
 
 class WorkspaceHost:
@@ -883,6 +897,7 @@ class WorkspaceHost:
             ReviewTracing(self.telemetry, self._workspace_id, lambda: self._keeper.id),
             self._paused,
             self._events.put_nowait,
+            self._pauses,
         )
         lane = ReviewLane(desk, self._tasks, planner, hooks)
         desk.suggest = lane.suggest  # Set here, as the lane needs the desk it takes calls from.
@@ -896,7 +911,8 @@ class WorkspaceHost:
             return ()
         roles = desk.agents.roles
         taken = {merging_lane(roles), *((self._lane.runner.lane,) if self._lane else ())}
-        parts = LaneParts(desk, self._tasks, self._gate, self._paused, self._events.put_nowait)
+        post = self._events.put_nowait
+        parts = LaneParts(desk, self._tasks, self._gate, self._paused, post, self._pauses)
         return tuple(
             LaneRunner(lane, names, parts)
             for lane, names in task_lanes(roles).items()
@@ -911,9 +927,15 @@ class WorkspaceHost:
         runners = (*review, *self._runners)
         return Lanes(merging_lane(self._roles()), runners, lambda: self._seats.lanes)
 
+    @property
+    def _pauses(self) -> RuntimePauses:
+        """What pauses the runtime of a task in a lane that starts by itself whose agent hit
+        its limit or an outage: the work lane's turns, which say each pause."""
+        return _LanePauses(lambda: self._turns)
+
     def _paused(self) -> str | None:
-        """The runtime whose pause the work lane waits out, on which no other lane starts a
-        task; none while it waits out none."""
+        """The runtime paused, on which no lane that starts by itself starts a task; none while
+        none is."""
         paused = self._turns.paused
         return None if paused is None else paused.runtime
 

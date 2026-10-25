@@ -1,7 +1,9 @@
 """Pauses per runtime: a usage limit pauses the tasks of the runtime whose agent hit it, until the
 reset its failure states, else the reset its runtime's usage shows, else the retry, and an
 outage's backoff is its runtime's own. The work lane keeps its order and waits; the review lane
-runs its tasks on other runtimes meanwhile, and those it skipped once the pause ends."""
+runs its tasks on other runtimes meanwhile, and those it skipped once the pause ends. A review
+whose agent hits its runtime's limit pauses that runtime just as the work lane's would, and runs
+again once the pause ends; while one pause is in force, another runtime's is skipped instead."""
 
 import asyncio
 from datetime import timedelta
@@ -12,13 +14,19 @@ from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.runtimes import CLAUDE, Failure
 from orbit.agent.domain.usage import UsageReport
-from orbit.agent.domain.usage_limits import outage_paused_note, paused_note
+from orbit.agent.domain.usage_limits import (
+    WAIT_CANCELLED_NOTE,
+    outage_paused_note,
+    paused_note,
+    tasks_resuming_note,
+)
 from orbit.protocol import (
     CODER,
     PAUSED_FOR_USAGE_LIMIT,
     REVIEWER,
     SUPER_REVIEWER,
     AddTask,
+    CancelTurn,
     Event,
     Notice,
     RemoveTask,
@@ -215,3 +223,136 @@ async def test_an_agent_on_another_runtime_finishing_leaves_claudes_backoff_goin
 
     assert (roles_of(fake), statuses_of(session)) == (["drafter"], ["completed", "error"])
     assert notes(events)[-1] == outage_paused_note(START + timedelta(minutes=5), OVERLOADED, CLAUDE)
+
+
+def reviewing(
+    waits: Waits, *reviewers: Script, **options: Any
+) -> tuple[WorkspaceHost, ScriptedLauncher]:
+    """A session whose reviews run through ``reviewers``, its work lane idle, timed by
+    ``waits``, with the launcher playing Claude; ``options`` go to :func:`session_for`."""
+    every: dict[str, Any] = {"tree": FakeTree(), "review": True, "pause": waits.pause}
+    session, _, claude = session_for(reviewers=reviewers, **every, **options)
+    return session, claude
+
+
+async def review(session: WorkspaceHost, *roles: str) -> None:
+    """Queue a review in each of ``roles``."""
+    for role in roles:
+        await send(session, AddTask(task=TaskSpec(prompt="Review it.", role=role)))
+
+
+def last_pause(events: list[Event]) -> SessionStateChanged:
+    """The last state change among ``events`` saying a runtime is paused."""
+    state = [e for e in events if paused(e)][-1]
+    assert isinstance(state, SessionStateChanged)
+    return state
+
+
+async def test_a_review_hitting_claudes_limit_pauses_claude_and_runs_again_after() -> None:
+    waits = Waits()
+    session, claude = reviewing(waits, errs, claims_done, claims_done)
+    claude.turn_errors.append(LIMIT)
+    await review(session, REVIEWER, REVIEWER)
+    events = await until(session, paused)
+    await events_until(session, idle("review"))
+    assert (roles_of(claude), statuses_of(session)) == ([REVIEWER], ["pending", "pending"])
+    state = last_pause(events)
+
+    waits.release.set()
+    resumed = await events_until(session, idle("review"))
+    await session.close()
+
+    assert (state.paused_for, state.paused_runtime) == (PAUSED_FOR_USAGE_LIMIT, CLAUDE)
+    assert tasks_resuming_note(CLAUDE) in notes(resumed)
+    assert statuses_of(session) == ["completed", "completed"]
+    assert roles_of(claude) == [REVIEWER] * 3
+
+
+async def test_a_review_finding_claudes_api_down_pauses_claude_for_the_backoff() -> None:
+    waits = Waits()
+    session, claude = reviewing(waits, errs, claims_done)
+    claude.turn_errors.append(OVERLOADED)
+    await review(session, REVIEWER)
+    events = await until(session, paused)
+    waits.release.set()
+    await events_until(session, idle("review"))
+    await session.close()
+
+    backoff = START + timedelta(minutes=2)
+    assert notes(events)[-1] == outage_paused_note(backoff, OVERLOADED, CLAUDE)
+    assert last_pause(events).paused_until == backoff
+    assert waits.slept == [120.0]
+    assert statuses_of(session) == ["completed"]
+
+
+async def test_a_lane_runs_another_runtimes_task_while_its_review_paused_claude() -> None:
+    waits = Waits()
+    fake = ScriptedLauncher(FakeHost(), reviewers=(claims_done,))
+    roles = {**ROLES, SUPER_REVIEWER: ROLES[SUPER_REVIEWER].model_copy(update={"runtime": FAKE})}
+    options: dict[str, Any] = {"host": fake.host, "launchers": {FAKE: fake}, "roles": roles}
+    session, claude = reviewing(waits, errs, claims_done, **options)
+    claude.turn_errors.append(LIMIT)
+    await review(session, REVIEWER, SUPER_REVIEWER)
+    await until(session, paused)
+    await events_until(session, idle("review"))
+    assert (roles_of(fake), statuses_of(session)) == ([SUPER_REVIEWER], ["pending", "completed"])
+
+    waits.release.set()
+    await events_until(session, idle("review"))
+    await session.close()
+
+    assert statuses_of(session) == ["completed", "completed"]
+
+
+async def test_cancelling_a_lanes_pause_runs_the_review_it_skipped() -> None:
+    waits = Waits()
+    session, claude = reviewing(waits, errs, claims_done)
+    claude.turn_errors.append(LIMIT)
+    await review(session, REVIEWER)
+    await until(session, paused)
+    await events_until(session, idle("review"))
+    await send(session, CancelTurn())
+    events = await events_until(session, idle("review"))
+    await session.close()
+
+    assert WAIT_CANCELLED_NOTE in notes(events)
+    assert statuses_of(session) == ["completed"]
+
+
+async def test_a_run_for_the_user_replaces_a_lanes_pause_and_runs_the_review_it_skipped() -> None:
+    waits = Waits()
+    session, claude = reviewing(waits, errs, claims_done)
+    claude.turn_errors.append(LIMIT)
+    await review(session, REVIEWER)
+    await until(session, paused)
+    await events_until(session, idle("review"))
+    await send(session, RunTasks())
+    await events_until(session, idle("review"))
+    await session.close()
+
+    assert statuses_of(session) == ["completed"]
+    assert roles_of(claude) == [REVIEWER, REVIEWER]
+
+
+async def test_a_second_runtime_hitting_its_limit_keeps_the_first_pause_and_waits_it_out() -> None:
+    waits = Waits()
+    fake = ScriptedLauncher(FakeHost(), reviewers=(errs, claims_done, claims_done))
+    fake.turn_errors.append(QUOTA)
+    fake.failures[QUOTA] = Failure("usage_limit")
+    roles = {**ROLES, SUPER_REVIEWER: ROLES[SUPER_REVIEWER].model_copy(update={"runtime": FAKE})}
+    options: dict[str, Any] = {"host": fake.host, "launchers": {FAKE: fake}, "roles": roles}
+    session, claude = reviewing(waits, errs, claims_done, **options)
+    claude.turn_errors.append(LIMIT)
+    await review(session, REVIEWER, SUPER_REVIEWER, SUPER_REVIEWER)
+    events = await until(session, paused)
+    await events_until(session, idle("review"))
+    assert statuses_of(session) == ["pending", "pending", "pending"]
+    assert roles_of(fake) == [SUPER_REVIEWER]
+
+    waits.release.set()
+    await events_until(session, idle("review"))
+    await session.close()
+
+    assert last_pause(events).paused_runtime == CLAUDE
+    assert waits.slept == [waits.slept[0]]  # Only Claude's pause was waited out.
+    assert statuses_of(session) == ["completed"] * 3

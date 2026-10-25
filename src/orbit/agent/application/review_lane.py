@@ -17,6 +17,8 @@ from orbit.agent.application.lane_runner import (
     LaneParts,
     LaneRunner,
     LaneWork,
+    RuntimePauses,
+    Unpausable,
     unpaused,
     unposted,
 )
@@ -65,8 +67,9 @@ class ReviewHooks:
     review's span is current, ``changed`` is called after the lane's state may have changed,
     the session's ``gate`` tells whether another orbit owns the repository or the session is
     halted, when no review starts, ``paused`` the runtime whose pause the work lane waits out,
-    if any, on which no review starts, ``tracing`` traces the reviews and ``post`` publishes,
-    without blocking, whether the lane is busy.
+    if any, on which no review starts, ``tracing`` traces the reviews, ``post`` publishes,
+    without blocking, whether the lane is busy, and ``pauses`` pauses the runtime of a task
+    whose agent hit its limit or an outage.
     """
 
     wake_work: Callable[[], Awaitable[None]]
@@ -75,6 +78,7 @@ class ReviewHooks:
     tracing: ReviewTracing = field(default_factory=ReviewTracing)
     paused: Callable[[], str | None] = unpaused
     post: Callable[[Event], None] = unposted
+    pauses: RuntimePauses = field(default_factory=Unpausable)
 
 
 class ReviewLane:
@@ -113,7 +117,9 @@ class ReviewLane:
         roles = self._desk.agents.roles
         lane = review_lane(roles)
         work = LaneWork(self._next_review, self._review, self._spent)
-        parts = LaneParts(self._desk, self._tasks, hooks.gate, hooks.paused, hooks.post)
+        parts = LaneParts(
+            self._desk, self._tasks, hooks.gate, hooks.paused, hooks.post, hooks.pauses
+        )
         return LaneRunner(lane, task_lanes(roles).get(lane, frozenset()), parts, work)
 
     def snapshot(self) -> LaneSnapshot:
@@ -358,18 +364,22 @@ class ReviewLane:
 
     async def _review(self, task_id: str) -> None:
         """Run task ``task_id`` to its end: as a review if it's one, else as any lane runs its
-        tasks."""
+        tasks. A review its runtime's limit or an outage stopped is left to run again, its batch
+        as it was."""
         if not self._is_review(task_id):
             await self.runner.run_in_workspace(task_id)
             return
         # Only :meth:`cancel`, which the user asks for, stops a review on its own.
         run = partial(self._reviewed, task_id)
         stop = UserStop(REVIEW_STOPPED_BY_YOU)
+        again = False
         with self._traced(task_id):
             try:  # Even a bug ends the review, or its batch would stay open.
-                await run_task_to_end(self._tasks, task_id, run, stop, self._publish)
+                outcome = await run_task_to_end(self._tasks, task_id, run, stop, self._publish)
+                again = await self.runner.ran(task_id, outcome)
             finally:
-                await self._ended(task_id)
+                if not again:
+                    await self._ended(task_id)
 
     @contextmanager
     def _traced(self, task_id: str) -> Iterator[None]:

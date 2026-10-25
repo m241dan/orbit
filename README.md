@@ -600,8 +600,15 @@ stops another's work but where order matters. The work lane keeps its order, so 
 pause, starting with the task it stopped at, even if a later task's role runs on another runtime.
 Every other lane, such as `review`, skips the tasks whose role runs on the paused runtime and runs
 its next task on a runtime that isn't paused, then the tasks it skipped once the pause ends or
-`ctrl+s` cancels it. With every role on Claude, the work lane and every lane's tasks wait out
-Claude's pause. What Kiro's limits and outages look like is under
+`ctrl+s` cancels it. A task in any lane can start a pause: when a review, or any task in a lane
+other than `work`, has its agent hit its runtime's usage limit or find its API down, that runtime
+pauses just as it would for the work lane, timed by the same rules and shown by the same line, and
+the task is left pending to run again once the pause ends, `ctrl+s` cancels it or you run the
+tasks. One pause shows at a time: while a runtime is paused, another runtime hitting its limit
+leaves the first pause in force, and its tasks are skipped too until that pause ends, when they
+run again (and pause their runtime then, if its limit still holds); the work lane hitting a limit
+of its own replaces a pause another lane started, as it must wait anyway. With every role on
+Claude, the work lane and every lane's tasks wait out Claude's pause. What Kiro's limits and outages look like is under
 [Running agents on Kiro](#running-agents-on-kiro).
 [docs/00031-feature-runtime-port.md](docs/00031-feature-runtime-port.md) records the requirements.
 

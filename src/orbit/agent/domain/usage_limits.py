@@ -48,6 +48,12 @@ def outage_resuming_note(runtime: str) -> str:
     return f"Starting the run again now {_named(runtime)}'s API may be answering."
 
 
+def tasks_resuming_note(runtime: str) -> str:
+    """Said as ``runtime``'s tasks start again by themselves, after a pause a lane that starts
+    by itself started."""
+    return f"Starting {_named(runtime)}'s tasks again."
+
+
 def outage_note(role: str) -> str:
     """Said in place of the error when Claude's API not answering fails a turn of the
     conversational role ``role``."""

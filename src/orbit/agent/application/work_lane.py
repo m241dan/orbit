@@ -17,6 +17,7 @@ from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.coder_slots import CoderSeat
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.landing import Lander, Landing
+from orbit.agent.application.lane_runner import runtime_stop
 from orbit.agent.application.lanes import OPEN_GATE, SessionGate, stop, waited_out
 from orbit.agent.application.outcomes import Outcome, UserStop, ended, run_task_to_end
 from orbit.agent.application.record_moves import RecordMoves
@@ -458,11 +459,7 @@ class WorkLane:
         """The failure the launcher of ``role``'s runtime tells in the error a task in it ended
         in, ``outcome``, on that runtime; none if it ended otherwise, the launcher tells none,
         or the session has no such role, whose task fails without an agent."""
-        runtime = self._desk.agents.runtime(role)
-        if outcome.status != "error" or runtime is None:
-            return None
-        failure = self._desk.agents.launcher(role).failure(outcome.detail)
-        return None if failure is None else RuntimeStop(runtime, failure)
+        return runtime_stop(self._desk.agents, role, outcome)
 
     async def _settle(self, task_id: str, outcome: Outcome, root: str) -> Outcome:
         """What task ``task_id``'s run ending in ``outcome`` at ``root`` comes to: the checks

@@ -11,6 +11,7 @@ import pytest
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lane_runner import LaneParts, LaneRunner, Lanes, LaneWork
 from orbit.agent.application.lanes import SessionGate
+from orbit.agent.application.outcomes import ended
 from orbit.agent.application.ports import TreeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
@@ -178,6 +179,26 @@ async def test_a_pause_as_a_task_ends_starts_no_other_until_kicked_again() -> No
     await lane.ran(runner)
     assert lane.statuses == ["completed", "completed"]
     assert lane.posted == [BUSY, IDLE, BUSY, IDLE]
+
+
+LIMIT = "You've hit your session limit · resets 6pm (UTC)"
+
+
+async def test_a_task_hitting_its_limit_with_nothing_to_pause_is_left_pending_and_skipped() -> None:
+    lane = Lane()
+    lane.add(audit("a"), audit("b"))
+    runner = lane.runner()
+    await lane.tasks.start("1")
+    again = await runner.ran("1", ended("error", ("Agent failed", LIMIT)))
+    assert (again, lane.statuses, runner.current) == (True, ["pending", "pending"], None)
+
+
+async def test_a_task_in_a_role_without_a_runtime_isnt_left_to_run_again() -> None:
+    lane = Lane()
+    lane.add(TaskSpec(prompt="a", role="ghost"))
+    runner = lane.runner()
+    await lane.tasks.start("1")
+    assert not await runner.ran("1", ended("error", ("Agent failed", LIMIT)))
 
 
 async def test_cancelling_stops_only_the_task_running_and_the_lane_carries_on() -> None:
