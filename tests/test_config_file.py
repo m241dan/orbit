@@ -13,7 +13,12 @@ from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.config import OrbitConfig
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.config_report import Written
-from orbit.agent.domain.config_update import Additions, ConfigUpdate, update_text
+from orbit.agent.domain.config_update import (
+    Additions,
+    ConfigUpdate,
+    reference_with_checks,
+    update_text,
+)
 from orbit.agent.domain.layers import Layer
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
@@ -449,6 +454,41 @@ def test_orbits_own_file_mentions_every_setting_of_the_reference() -> None:
     text = (Path(__file__).parent.parent / CONFIG_PATH).read_text(encoding="utf-8")
     reference = REFERENCE.read_text(encoding="utf-8")
     assert update_text(text, reference, date(2026, 10, 25)) == ConfigUpdate(text, Additions())
+
+
+ORBITS_OWN_COMMENTS = (
+    (
+        "# Quick checks first, so a failure shows up in seconds rather than after the tests.\n",
+        '[[verification.steps]]\nname = "Ruff lint"\n',
+    ),
+    (
+        "# Every function, tests included: cyclomatic complexity at most 6, at most 100 lines and"
+        " at\n# most 5 parameters.\n",
+        '[[verification.steps]]\nname = "Code quality (Lizard)"\n',
+    ),
+    (
+        "# Bring the worktree's environment in line with the lock file whenever it changes.\n",
+        "[setup]\n",
+    ),
+)
+"""The hand-written comments of orbit's own file, each with the start of the step or setup it
+explains, just below it."""
+
+
+def test_orbits_own_file_is_the_reference_with_its_checks_and_its_comments(
+    config_dir: Path,
+) -> None:
+    root = Path(__file__).parent.parent
+    text = (root / CONFIG_PATH).read_text(encoding="utf-8")
+    for comment, explained in ORBITS_OWN_COMMENTS:
+        assert f"\n{comment}{explained}" in text, f"{comment!r} isn't directly above {explained!r}"
+        text = text.replace(f"\n{comment}{explained}", f"\n{explained}", 1)
+    config = read_config(str(root), config_dir)
+    checks = ChecksProposal(steps=config.verification.steps, setup=config.setup)
+    assert text == reference_with_checks(REFERENCE.read_text(encoding="utf-8"), checks), (
+        "Regenerate orbit's .orbit/config.toml from the reference with its checks, keeping its"
+        " hand-written comments above them."
+    )
 
 
 LINT = VerificationStep(name="Lint", command=("ruff", "check"))
