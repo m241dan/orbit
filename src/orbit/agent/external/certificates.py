@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
+from orbit.agent.domain.certificate_list import CertificateKind, ListedCertificate
 from orbit.agent.domain.server import client_fingerprint
 from orbit.agent.external.whole_files import PRIVATE, write_whole
 
@@ -170,6 +171,42 @@ def read_certificate(path: Path) -> x509.Certificate:
         raise CertificateError(NOT_A_CERTIFICATE.format(path=path)) from None
 
 
+def _listed(kind: CertificateKind, path: Path) -> ListedCertificate:
+    """The certificate of ``kind`` at ``path`` as ``orbit certs list`` shows it: a client's
+    named by its file, else by its common name.
+
+    Raises :class:`CertificateError` if it can't be read or isn't a certificate in PEM.
+    """
+    certificate = read_certificate(path)
+    return ListedCertificate(
+        kind=kind,
+        name=path.stem if kind == "client" else _common_name(certificate),
+        not_before=certificate.not_valid_before_utc,
+        not_after=certificate.not_valid_after_utc,
+        fingerprint=fingerprint(certificate),
+        names=_alternative_names(certificate),
+    )
+
+
+def _common_name(certificate: x509.Certificate) -> str:
+    """The common name of ``certificate``'s subject; its whole subject, as RFC 4514 writes it,
+    if it has none."""
+    common_names = certificate.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+    if not common_names:
+        return certificate.subject.rfc4514_string()
+    return str(common_names[0].value)
+
+
+def _alternative_names(certificate: x509.Certificate) -> tuple[str, ...]:
+    """The hostnames and addresses ``certificate`` holds as subject alternative names, in
+    order."""
+    try:
+        extension = certificate.extensions.get_extension_for_class(x509.SubjectAlternativeName)
+    except x509.ExtensionNotFound:
+        return ()
+    return tuple(str(name.value) for name in extension.value)
+
+
 def _read_ca_key(path: Path) -> PrivateKey:
     """The private key in PEM at ``path``, unencrypted, that a CA signs with.
 
@@ -295,6 +332,21 @@ class CertsDir:
         if not _CLIENT_NAME.fullmatch(name):
             raise CertificateError(NOT_A_CLIENT_NAME.format(name=name))
         return self.path / "clients" / file_name
+
+    def listed(self) -> tuple[ListedCertificate, ...]:
+        """The certificates in ``certs``, not those set aside: the CA's, the server's and each
+        client's in ``clients`` by name, those there are, as ``orbit certs list`` shows them.
+
+        Raises :class:`CertificateError` if one can't be read or isn't a certificate in PEM.
+        """
+        found: list[tuple[CertificateKind, Path]] = [("CA", self.ca), ("server", self.server)]
+        found += [("client", path) for path in self._client_certificates()]
+        return tuple(_listed(kind, path) for kind, path in found if path.exists())
+
+    def _client_certificates(self) -> list[Path]:
+        """The certificates in ``clients``, by name: its files but the keys."""
+        files = (self.path / "clients").glob("*.pem")
+        return sorted(path for path in files if not path.name.endswith("-key.pem"))
 
     def issuer(self, key: Path | None = None) -> tuple[x509.Certificate, PrivateKey]:
         """The CA in ``certs`` and its key, read from ``key`` (default: ``ca-key.pem`` in

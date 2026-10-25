@@ -24,6 +24,7 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from websockets.asyncio.client import connect
 
 from orbit.agent import ControlPlane, WorkspaceHost
+from orbit.agent.domain.certificate_list import CertificateKind, ListedCertificate
 from orbit.agent.domain.server import ServerSettings, client_fingerprint
 from orbit.agent.external.certificates import (
     CertificateError,
@@ -512,6 +513,107 @@ def test_a_ca_certificate_that_isnt_pem_is_refused_naming_it(
     certs.ca.write_text("not a certificate")
     with pytest.raises(CertificateError, match="it isn't a certificate in PEM"):
         certs.issuer()
+
+
+def _listed(
+    certificate: x509.Certificate,
+    kind: CertificateKind,
+    name: str,
+    names: tuple[str, ...] = (),
+) -> ListedCertificate:
+    return ListedCertificate(
+        kind=kind,
+        name=name,
+        not_before=certificate.not_valid_before_utc,
+        not_after=certificate.not_valid_after_utc,
+        fingerprint=fingerprint(certificate),
+        names=names,
+    )
+
+
+def test_the_certificates_listed_are_the_cas_the_servers_and_each_clients_in_order(
+    ca: tuple[x509.Certificate, PrivateKey], tmp_path: Path
+) -> None:
+    certs = CertsDir(tmp_path)
+    server, _ = issue_server(*ca, NAMES)
+    laptop, _ = issue_client(*ca, "laptop")
+    desktop, _ = issue_client(*ca, "desktop")
+    certs.write(certs.client("laptop"), laptop)
+    certs.write(certs.server, server)
+    certs.write(certs.ca, ca[0])
+    certs.write(certs.client("desktop"), desktop)
+
+    assert certs.listed() == (
+        _listed(ca[0], "CA", "orbit CA (box)"),
+        _listed(server, "server", "orbit.example.com", (*NAMES, "localhost", "127.0.0.1")),
+        _listed(desktop, "client", "desktop"),
+        _listed(laptop, "client", "laptop"),
+    )
+
+
+def test_a_client_certificate_is_listed_by_the_name_of_its_file(
+    ca: tuple[x509.Certificate, PrivateKey], tmp_path: Path
+) -> None:
+    certs = CertsDir(tmp_path)
+    certificate, _ = issue_client(*ca, "workstation")
+    certs.write(certs.client("desktop"), certificate)
+
+    assert certs.listed() == (_listed(certificate, "client", "desktop"),)
+
+
+def test_keys_and_files_set_aside_arent_listed(
+    ca: tuple[x509.Certificate, PrivateKey], tmp_path: Path
+) -> None:
+    certs = CertsDir(tmp_path)
+    certs.write(certs.ca, make_ca("old")[0])
+    certs.set_aside([certs.ca])
+    _with_ca(certs, ca)
+    laptop, key = issue_client(*ca, "laptop")
+    certs.write(certs.client("laptop"), laptop)
+    certs.write_key(certs.client_key("laptop"), key)
+
+    assert certs.listed() == (
+        _listed(ca[0], "CA", "orbit CA (box)"),
+        _listed(laptop, "client", "laptop"),
+    )
+
+
+def test_without_certs_no_certificates_are_listed(tmp_path: Path) -> None:
+    assert CertsDir(tmp_path).listed() == ()
+
+
+def test_a_certificate_without_a_common_name_or_names_is_listed_by_its_subject(
+    tmp_path: Path,
+) -> None:
+    key = ed25519.Ed25519PrivateKey.generate()
+    subject = x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Example")])
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(NOW)
+        .not_valid_after(NOW + timedelta(days=1))
+        .sign(key, None)
+    )
+    certs = CertsDir(tmp_path)
+    certs.write(certs.server, certificate)
+
+    assert certs.listed() == (_listed(certificate, "server", "O=Example"),)
+
+
+def test_a_file_listed_that_isnt_a_certificate_is_refused_naming_it(
+    ca: tuple[x509.Certificate, PrivateKey], tmp_path: Path
+) -> None:
+    certs = CertsDir(tmp_path)
+    certs.write(certs.client("laptop"), ca[0])
+    certs.client("laptop").write_text("not a certificate")
+
+    with pytest.raises(CertificateError) as refused:
+        certs.listed()
+
+    assert str(refused.value).startswith(f"Can't read {certs.client('laptop')}: it isn't a")
 
 
 async def _welcomed(url: str, context: ssl.SSLContext) -> bool:

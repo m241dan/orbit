@@ -58,6 +58,7 @@ uv run orbit token rotate                      # replace the token frontends sho
 uv run orbit certs init orbit.example.lan      # make a CA and a server certificate for TLS
 uv run orbit certs server orbit.example.lan    # renew the server certificate
 uv run orbit certs client laptop               # issue a client certificate for mutual TLS
+uv run orbit certs list                        # each certificate's expiry and fingerprint
 uv run orbit version                           # show the installed version
 ```
 
@@ -1352,8 +1353,9 @@ old one signed; `--force` replaces it. Any of the four files already there are f
 address stops it with status 2 before anything is moved, and files that can't be moved or
 written stop it with status 2, naming the file and the fix.
 
-To renew the server certificate, before it expires or to change its names, run `orbit certs
-server` with the names (none for the machine's hostname, as for `init`):
+To renew the server certificate, before it expires (`orbit certs list` shows when) or to change
+its names, run `orbit certs server` with the names (none for the machine's hostname, as for
+`init`):
 
 ```sh
 orbit certs server orbit.example.lan 192.168.1.20
@@ -1457,11 +1459,29 @@ orbit chat --connect wss://orbit.example.lan:7433/ --ca ca.pem --cert laptop.pem
 don't go with `--token-file`; one without the other, a key others can read (`chmod 600`), or
 files that can't be read or don't match stop it with status 2.
 
-To revoke a lost machine's certificate, add its fingerprint, as its connect line or `orbit certs
-client` shows it (in either case, with or without colons), to `revoked` in `[server]`. Each entry must be a full
-SHA-256 fingerprint, all 64 hex digits, as the connect line or `openssl x509 -noout -fingerprint
--sha256` shows it; one cut short, with a stray character or from SHA-1 could never match, so it's
-refused as invalid, naming the entry:
+`orbit certs list` shows each certificate in `certs/`, one per line, leaving out those moved to
+`old-<UTC timestamp>/`: its kind (`CA`, `server` or `client`), its name (its CN, or a client's
+file name), the names a server certificate holds, the date it expires and the days left, and its
+SHA-256 fingerprint. It marks one past its expiry date `expired`, one expiring within 14 days
+`expires soon` (renew it before then), one whose validity hasn't started `not yet valid`, and a
+client certificate whose fingerprint is in `revoked` (see below) `revoked`:
+
+```text
+CA      orbit CA (box)                   2036-10-22  3650 days left              E4:53:…:1C
+server  box (box, localhost, 127.0.0.1)  2027-10-25  365 days left               CF:75:…:B1
+client  laptop                           2027-10-25  365 days left, revoked      FE:01:…:DE
+client  phone                            2026-11-04  10 days left, expires soon  F7:4D:…:89
+```
+
+Without `certs/` it says there are no certificates, pointing to `orbit certs init`. A file there
+that isn't a certificate in PEM, or an invalid `config.toml`, stops it with status 2.
+
+To revoke a lost machine's certificate, find its fingerprint on its line of `orbit certs list`
+(or its connect line, or what `orbit certs client` printed) and add it (in either case, with or
+without colons) to `revoked` in `[server]`; `orbit certs list` then marks it `revoked`. Each
+entry must be a full SHA-256 fingerprint, all 64 hex digits, as the connect line or `openssl x509
+-noout -fingerprint -sha256` shows it; one cut short, with a stray character or from SHA-1 could
+never match, so it's refused as invalid, naming the entry:
 
 ```toml
 [server]
@@ -2184,7 +2204,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `agents`: agent ids and tokens), `roles` (built-in roles, given their instructions, and the
     tasks orbit queues in them), `config` (`OrbitConfig`: the limits, roles, verification steps
     and setup a project file sets over the built-in defaults) and `config_errors` (`ConfigError`,
-    and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]` with its `TlsSettings`, which files each TLS mode needs, where now falls in a certificate's validity, and which hosts are loopback), `remotes` (`RemoteSettings`, a `[remotes.<name>]` table, and which credentials go together), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
+    and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]` with its `TlsSettings`, which files each TLS mode needs, where now falls in a certificate's validity, and which hosts are loopback), `certificate_list` (what `orbit certs list` shows of each certificate: its expiry, days left, fingerprint and marks), `remotes` (`RemoteSettings`, a `[remotes.<name>]` table, and which credentials go together), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
     setup step that makes a fresh worktree ready, and the checks a configurator proposes), the
     `Catalog` (in `catalog`: the workspace and its sessions, the agents' roles, the triggers and
     the lanes), `ReviewPlanner` (in `reviews`: when to review, batches, rounds and caps), commit

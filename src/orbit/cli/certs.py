@@ -3,6 +3,7 @@
 import os
 import socket
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -16,15 +17,17 @@ from orbit.agent import (
     CertificateError,
     CertsDir,
     KeyType,
+    certificate_lines,
     fingerprint,
     issue_client,
     issue_server,
     make_ca,
     read_certificate,
+    read_server,
     resolve_config_dir,
     server_names,
 )
-from orbit.cli.errors import _exit_on
+from orbit.cli.errors import _configured, _exit_on
 from orbit.cli.options import ConfigDirOption
 
 CA_EXISTS = (
@@ -36,6 +39,10 @@ CLIENT_EXISTS = (
     " valid until you add its fingerprint to [server] revoked)."
 )
 REVOKE_OLD = "Add {fingerprint} to [server] revoked to stop the old certificate working."
+NO_CERTIFICATES = (
+    "There are no certificates in {directory}; make a CA and a server certificate with orbit"
+    " certs init."
+)
 
 NamesArgument = Annotated[
     list[str] | None,
@@ -173,6 +180,21 @@ def client(
     typer.echo(_client_note(certs, name, fingerprint(certificate)))
     if replaced is not None:
         typer.echo("\n" + REVOKE_OLD.format(fingerprint=fingerprint(replaced)))
+
+
+def list_certificates(config_dir: ConfigDirOption = None) -> None:
+    """List the certificates in certs in your config directory: each one's kind, name, expiry
+    and fingerprint, marking those expired, expiring soon or, a client's, in [server] revoked."""
+    config = resolve_config_dir(config_dir, os.environ)
+    certs = CertsDir(config)
+    with _exit_on(CertificateError):
+        listed = certs.listed()
+    if not listed:
+        typer.echo(NO_CERTIFICATES.format(directory=certs.path))
+        return
+    revoked = _configured(lambda: read_server(config)).revoked
+    for line in certificate_lines(listed, revoked, datetime.now(UTC)):
+        typer.echo(line)
 
 
 def _initialized(

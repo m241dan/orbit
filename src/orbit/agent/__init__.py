@@ -29,6 +29,7 @@ from orbit.agent.application.verifier import Verification
 from orbit.agent.application.workspace_host import WorkspaceHost
 from orbit.agent.application.workspace_source import WorkspaceSource, WorkspaceUnavailable
 from orbit.agent.domain.agent_task import Limits
+from orbit.agent.domain.certificate_list import certificate_lines
 from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.config import OrbitConfig
 from orbit.agent.domain.config_errors import INVALID_CONFIG, ConfigError
@@ -173,6 +174,7 @@ __all__ = [
     "WorkspaceSource",
     "WorkspaceStore",
     "WorkspaceUnavailable",
+    "certificate_lines",
     "file_names",
     "fingerprint",
     "forget_workspace",
