@@ -47,6 +47,7 @@ from orbit.agent.application.record_moves import MoveHooks, RecordMoves
 from orbit.agent.application.review_count import ReviewCount
 from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
 from orbit.agent.application.review_trace import ReviewTracing
+from orbit.agent.application.role_copies import RoleCopies, copy_ttls, saved_copies
 from orbit.agent.application.session_state import SessionStates, StateParts
 from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.startup_check import AddFix, CheckSite, StartupCheck
@@ -362,6 +363,8 @@ class WorkspaceHost:
         self._startup_notes = (*owner_notes, *startup_notes)
         self._closing = False
         self._started = False
+        self._copies = self._role_copies(clock)
+        self._copy_keeper = Background("copies", self._events.put)
         self._seats = self._conversation_seats()
         self._lane = self._review_lane()
         self._runners = self._lane_runners()
@@ -387,8 +390,29 @@ class WorkspaceHost:
         """The conversational roles' seats in this session, their turns traced with
         :attr:`telemetry`."""
         tracing = PlannerTracing(self.telemetry, self._workspace_id, lambda: self._keeper.id)
-        hooks = SeatHooks(self._save, self._keeper.use, self._step_names, self._halt.check, tracing)
+        hooks = SeatHooks(
+            self._save, self._keeper.use, self._step_names, self._halt.check, tracing, self._copies
+        )
         return ConversationSeats(self._desk, self._tasks, self._events, hooks)
+
+    def _role_copies(self, clock: Clock) -> RoleCopies | None:
+        """The copies the conversational roles work in, their turns timed by ``clock``, saving
+        the session as copies are removed by age; none without agents that make copies."""
+        made = self._desk.agents.copies if self._desk else None
+        if made is None:
+            return None
+        copies = RoleCopies(made, clock, self._events.put)
+        copies.changed = self._save
+        return copies
+
+    async def _keep_copies(self, copies: RoleCopies) -> None:
+        """Remove ``copies`` and those of the other saved sessions past their roles' TTL, and
+        those left over, then this session's past their TTL every hour."""
+        assert self._desk is not None  # Only agents make copies.
+        desk = self._desk
+        await copies.keep(
+            lambda: saved_copies(self._store, self._keeper.id), lambda: copy_ttls(desk.agents.roles)
+        )
 
     def _storage_halt(self) -> StorageHalt:
         """What halts the session as a write to the store fails: it stops the log and the work,
@@ -985,15 +1009,15 @@ class WorkspaceHost:
         return self._verifier.step_names if self._verifier else ()
 
     async def close(self) -> None:
-        """Stop a storage halt under way, the tries of the repository's lock and the loading of
-        the super review count, then the work, as :meth:`_stop_work` does: the review lane, the
-        other lanes that start by themselves and the startup check, so that nothing wakes the
-        work lane, then the work in progress, which stops its agent, and the conversational
-        roles' turns; then stop their retired conversations, their conversations, the agents'
-        host, the recording of turns' usage, the saving of the session, releasing its lock, and
-        the writing of its events to the store, then end every connection's stream, in that
-        order. Each is stopped even if one before it fails or the close is cancelled, as
-        :func:`close_all` does."""
+        """Stop a storage halt under way, the tries of the repository's lock, the loading of
+        the super review count and the keeping of the copies, then the work, as
+        :meth:`_stop_work` does: the review lane, the other lanes that start by themselves and
+        the startup check, so that nothing wakes the work lane, then the work in progress,
+        which stops its agent, and the conversational roles' turns; then stop their retired
+        conversations, their conversations, the agents' host, the recording of turns' usage,
+        the saving of the session, releasing its lock, and the writing of its events to the
+        store, then end every connection's stream, in that order. Each is stopped even if one
+        before it fails or the close is cancelled, as :func:`close_all` does."""
         self._closing = True
         await close_all(self._stops())
 
@@ -1004,6 +1028,7 @@ class WorkspaceHost:
             self._halt.close,
             self._takeover.close,
             self._count_loader.close,
+            self._copy_keeper.close,
         ]
         stops += self._work_stops(self._stop_turns, final=True)
         stops += [self._seats.close_retired, self._seats.close]
@@ -1088,14 +1113,17 @@ class WorkspaceHost:
 
     def start_background(self) -> None:
         """Start loading the super review count, the startup check, if there is one and the
-        session isn't halted, and the tries of the repository's lock, unless they were started
-        for an earlier connection attaching here. A startup check a halt kept from starting
+        session isn't halted, the tries of the repository's lock, and the keeping of the
+        copies, unless read-only, as the owner's copies would look left over, unless they were
+        started for an earlier connection attaching here. A startup check a halt kept from starting
         starts once the halt lifts."""
         if self._started:
             return
         self._started = True
         self._count_loader.start(self._load_review_count())
         self._takeover.start()
+        if self._copies is not None and not self._takeover.read_only:
+            self._copy_keeper.start(self._keep_copies(self._copies))
         self._start_startup_check()
 
     def _start_startup_check(self) -> None:

@@ -16,7 +16,7 @@ from orbit.agent.application.planner_seat import (
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.refusals import Refused, unknown
 from orbit.agent.domain.roles import conversational_roles, disabled_note
-from orbit.agent.domain.sessions import SavedConversation
+from orbit.agent.domain.sessions import SavedConversation, SavedCopy
 from orbit.protocol import NOT_CONFIGURED, PLANNER, BusyLane
 
 
@@ -28,12 +28,14 @@ class ConversationSeats:
     the roles' order. A disabled planner's lane is the roles' only while another role answers
     there. The seats in a lane take turns: one answers there at a time. The conversations of
     roles without a seat that a session was opened with are kept, to save back, as are those
-    of roles that now run on another runtime than their conversation's, until they're reset."""
+    of roles that now run on another runtime than their conversation's, until they're reset.
+    The roles working in a copy take their turns in theirs among the ``hooks``' copies."""
 
     def __init__(
         self, desk: AgentDesk | None, tasks: Tasks, events: EventSink, hooks: SeatHooks
     ) -> None:
         self._desk = desk
+        self._copies = hooks.copies
         roles = desk.agents.roles if desk else {}
         names = dict.fromkeys((PLANNER, *conversational_roles(roles)))
         parts = SeatParts(desk, tasks, events, hooks, SeatLanes(events.put_nowait))
@@ -103,6 +105,11 @@ class ConversationSeats:
         return {name: c for name, c in held.items() if c is not None} | self._kept
 
     @property
+    def copies(self) -> dict[str, SavedCopy]:
+        """The copies the roles work in, by role, to save; none without copies."""
+        return self._copies.held if self._copies else {}
+
+    @property
     def notes(self) -> tuple[str, ...]:
         """What the planner is still to hear, to save."""
         return self.planner.notes
@@ -112,14 +119,24 @@ class ConversationSeats:
         self.planner.tell(note)
 
     def replace(
-        self, conversations: Mapping[str, SavedConversation], notes: tuple[str, ...] = ()
+        self,
+        conversations: Mapping[str, SavedConversation],
+        notes: tuple[str, ...] = (),
+        copies: Mapping[str, SavedCopy] | None = None,
     ) -> None:
         """Have each role carry on its conversation among ``conversations``, if it has one, the
-        planner still to hear ``notes``, keeping those of roles without a seat; the old ones are
-        closed by :meth:`close_retired`, once the switch is done."""
+        planner still to hear ``notes``, keeping those of roles without a seat, and work in its
+        copy among ``copies``; the old ones are closed by :meth:`close_retired`, once the switch
+        is done, and the old copies kept where they are."""
+        self._hold_copies(copies or {})
         for name, seat in self._seats.items():
             seat.replace(conversations.get(name), notes if name == PLANNER else ())
         self._kept = {name: c for name, c in conversations.items() if name not in self._seats}
+
+    def _hold_copies(self, copies: Mapping[str, SavedCopy]) -> None:
+        """Have the roles work in ``copies``, if they work in any."""
+        if self._copies is not None:
+            self._copies.replace(copies)
 
     async def close_retired(self) -> None:
         """Close each role's retired conversations, every role's even if one fails, as

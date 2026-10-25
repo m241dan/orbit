@@ -47,7 +47,7 @@
 # timeout_minutes: unset
 # The lane that runs its agents, a plain name; a lane runs one task at a time.
 # lane = "planner"
-# Where its agents work: "worktree", "snapshot", "checkout" or "none".
+# Where its agents work: "worktree", "snapshot", "checkout", "none" or "copy".
 # workspace = "checkout"
 # Whether you talk to it, as you do the planner, rather than it taking tasks.
 # conversation = true
@@ -63,7 +63,7 @@
 # consults = []
 # Consultations it may start in an hour; 0, no limit.
 # consult_limit_per_hour = 6
-# How long a consultation's copy is kept, in hours.
+# How long its copy is kept after its conversation's last turn, in hours.
 # copy_ttl_hours = 24.0
 
 # [roles.coder]
@@ -81,7 +81,7 @@
 # timeout_minutes: unset
 # The lane that runs its agents, a plain name; a lane runs one task at a time.
 # lane = "work"
-# Where its agents work: "worktree", "snapshot", "checkout" or "none".
+# Where its agents work: "worktree", "snapshot", "checkout", "none" or "copy".
 # workspace = "worktree"
 # Whether you talk to it, as you do the planner, rather than it taking tasks.
 # conversation = false
@@ -97,7 +97,7 @@
 # consults = []
 # Consultations it may start in an hour; 0, no limit.
 # consult_limit_per_hour = 6
-# How long a consultation's copy is kept, in hours.
+# How long its copy is kept after its conversation's last turn, in hours.
 # copy_ttl_hours = 24.0
 
 # [roles.reviewer]
@@ -115,7 +115,7 @@
 # timeout_minutes: unset
 # The lane that runs its agents, a plain name; a lane runs one task at a time.
 # lane = "review"
-# Where its agents work: "worktree", "snapshot", "checkout" or "none".
+# Where its agents work: "worktree", "snapshot", "checkout", "none" or "copy".
 # workspace = "snapshot"
 # Whether you talk to it, as you do the planner, rather than it taking tasks.
 # conversation = false
@@ -131,7 +131,7 @@
 # consults = []
 # Consultations it may start in an hour; 0, no limit.
 # consult_limit_per_hour = 6
-# How long a consultation's copy is kept, in hours.
+# How long its copy is kept after its conversation's last turn, in hours.
 # copy_ttl_hours = 24.0
 
 # [roles.super-reviewer]
@@ -149,7 +149,7 @@
 # timeout_minutes: unset
 # The lane that runs its agents, a plain name; a lane runs one task at a time.
 # lane = "review"
-# Where its agents work: "worktree", "snapshot", "checkout" or "none".
+# Where its agents work: "worktree", "snapshot", "checkout", "none" or "copy".
 # workspace = "snapshot"
 # Whether you talk to it, as you do the planner, rather than it taking tasks.
 # conversation = false
@@ -165,7 +165,7 @@
 # consults = []
 # Consultations it may start in an hour; 0, no limit.
 # consult_limit_per_hour = 6
-# How long a consultation's copy is kept, in hours.
+# How long its copy is kept after its conversation's last turn, in hours.
 # copy_ttl_hours = 24.0
 
 # [roles.configurator]
@@ -183,7 +183,7 @@
 # timeout_minutes: unset
 # The lane that runs its agents, a plain name; a lane runs one task at a time.
 # lane = "work"
-# Where its agents work: "worktree", "snapshot", "checkout" or "none".
+# Where its agents work: "worktree", "snapshot", "checkout", "none" or "copy".
 # workspace = "worktree"
 # Whether you talk to it, as you do the planner, rather than it taking tasks.
 # conversation = false
@@ -199,7 +199,7 @@
 # consults = []
 # Consultations it may start in an hour; 0, no limit.
 # consult_limit_per_hour = 6
-# How long a consultation's copy is kept, in hours.
+# How long its copy is kept after its conversation's last turn, in hours.
 # copy_ttl_hours = 24.0
 
 # A role of your own, which must set its instructions. For example:
@@ -210,7 +210,7 @@
 # verify = false
 # The lane that runs its agents, a plain name; a lane runs one task at a time.
 # lane = "security"
-# Where its agents work: "worktree", "snapshot", "checkout" or "none".
+# Where its agents work: "worktree", "snapshot", "checkout", "none" or "copy".
 # workspace = "snapshot"
 # Whether its finished work is committed and merged.
 # merge = false

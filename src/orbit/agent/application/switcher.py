@@ -30,6 +30,7 @@ from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
 from orbit.agent.domain.sessions import (
     EMPTY_NAME,
     SavedConversation,
+    SavedCopy,
     SessionRecord,
     resumed_notes,
     session_name,
@@ -190,6 +191,7 @@ class SessionSwitcher:
             reviews=lane.snapshot() if lane else self._kept_reviews,
             spent=self.spent,
             planner_notes=self._parts.seats.notes,
+            copies=self._parts.seats.copies,
         )
 
     async def save(self) -> None:
@@ -261,7 +263,7 @@ class SessionSwitcher:
         tasks = interrupted(record.tasks)[0]
         self.spent = record.spent
         self._settings.resume(record.role_settings)
-        self._hold(tasks, record.conversations, record.reviews, record.planner_notes)
+        self._hold(tasks, record.conversations, record.reviews, record.planner_notes, record.copies)
 
     def _clear(self) -> None:
         """Hold what a new session does, keeping the settings and having spent nothing; refused
@@ -282,14 +284,15 @@ class SessionSwitcher:
         conversations: Mapping[str, SavedConversation],
         reviews: LaneSnapshot | None,
         notes: tuple[str, ...] = (),
+        copies: Mapping[str, SavedCopy] | None = None,
     ) -> None:
-        """Hold a session's ``tasks``, its roles' ``conversations``, ``reviews`` and the
-        ``notes`` its planner is still to hear, with no fix counts."""
+        """Hold a session's ``tasks``, its roles' ``conversations``, ``reviews``, the ``notes``
+        its planner is still to hear and its roles' ``copies``, with no fix counts."""
         parts = self._parts
         self._replace_board(tasks)
         if parts.work is not None:
             parts.work.reset()
-        parts.seats.replace(conversations, notes)
+        parts.seats.replace(conversations, notes, copies)
         if parts.lane is not None:
             parts.lane.load(reviews or NO_REVIEWS)
         self._kept_reviews = reviews

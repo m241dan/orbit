@@ -281,6 +281,25 @@ class TempDirs(Protocol):
         ...
 
 
+class Copies(Protocol):
+    """Makes the writable copies of the workspace agents whose role works in a copy work in, set
+    up, never the user's checkout, and removes them. Its methods raise :class:`TreeFailed` when
+    a copy can't be made, listed or removed."""
+
+    async def make(self) -> str:
+        """A new copy's path."""
+        ...
+
+    async def remove(self, path: str) -> None:
+        """Remove the copy at ``path``."""
+        ...
+
+    async def leftovers(self) -> list[str]:
+        """The paths of the copies there are that this one didn't make: those earlier runs, or
+        another orbit, made."""
+        ...
+
+
 class CoderTree(Protocol):
     """The working tree the coding agent works in, apart from the user's checkout, and the
     branch its commits are merged into from there.
@@ -329,6 +348,19 @@ class CoderTree(Protocol):
 
     async def drop(self, path: str) -> None:
         """Remove the snapshot at ``path``."""
+        ...
+
+    async def copy(self, commit: str) -> str:
+        """A separate, writable, detached tree at ``commit``, set up as the tree is, under a name
+        of its own in the copies' folder; returns its path."""
+        ...
+
+    async def drop_copy(self, path: str) -> None:
+        """Remove the copy at ``path``."""
+        ...
+
+    async def copies(self) -> list[str]:
+        """The paths of the copies in the copies' folder that this tree didn't make."""
         ...
 
     async def untracked(self) -> frozenset[str]:

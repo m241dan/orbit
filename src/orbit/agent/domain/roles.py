@@ -95,10 +95,14 @@ disables it unless the built-in tool set is replaced to name it."""
 WRITE_TOOLS = ("Edit", "Write", "NotebookEdit")
 """The tools a restricted agent is denied, which write files."""
 
-Workspace = Literal["worktree", "snapshot", "checkout", "none"]
+Workspace = Literal["worktree", "snapshot", "checkout", "none", "copy"]
 """Where an agent in a role works: the coder's separate worktree, which can merge; a read-only
-snapshot of the base commit; the user's checkout, read in place; or an empty temporary
-directory."""
+snapshot of the base commit; the user's checkout, read in place; an empty temporary directory;
+or a writable copy of the base commit, set up, which never merges."""
+
+DEFAULT_COPY_TTL_HOURS = 24.0
+"""How long a role's copy is kept since its conversation's last turn, in hours, unless the role
+says otherwise."""
 
 TOOL_ACCESSES: tuple[ToolAccess, ...] = get_args(ToolAccess)
 """Every level of tool access, in order."""
@@ -175,7 +179,9 @@ class Role(_Config):
     )
     workspace: Workspace = Field(
         default="worktree",
-        description='Where its agents work: "worktree", "snapshot", "checkout" or "none".',
+        description=(
+            'Where its agents work: "worktree", "snapshot", "checkout", "none" or "copy".'
+        ),
     )
     conversation: bool = Field(
         default=False,
@@ -207,7 +213,9 @@ class Role(_Config):
         default=6, ge=0, description="Consultations it may start in an hour; 0, no limit."
     )
     copy_ttl_hours: float = Field(
-        default=24, gt=0, description="How long a consultation's copy is kept, in hours."
+        default=DEFAULT_COPY_TTL_HOURS,
+        gt=0,
+        description="How long its copy is kept after its conversation's last turn, in hours.",
     )
 
     @field_validator("tools")

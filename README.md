@@ -1125,9 +1125,19 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   worktree, readied for each task as
   [Where tasks run, and how their work lands](#where-tasks-run-and-how-their-work-lands) says),
   `snapshot` (a fresh read-only snapshot of the base commit under `.git/orbit`, made for each run
-  and dropped after it), `checkout` (your checkout, read in place) or `none` (a new, empty
+  and dropped after it), `checkout` (your checkout, read in place), `none` (a new, empty
   temporary directory, `orbit-agent-…` in the system's temporary directory, made for each run and
-  removed after it, however the run ends). Only work done in the worktree can land: a task in
+  removed after it, however the run ends) or `copy` (a writable copy of the base commit under
+  `.git/orbit/copies`, with the project's `setup` run in it; outside a git repository, or with
+  `--no-worktree`, a copy of the workspace's directory, without `.orbit/` and `.git/`, under
+  `copies/<workspace id>` in orbit's state directory, set up there; never your checkout, and it
+  never merges). A task in a `copy` role gets a fresh copy for each run, removed after it. A
+  conversational role's copy is made at its conversation's first turn, reused by the turns after
+  it and recorded in the session, so it survives switching sessions and restarting orbit; it's
+  removed when you reset the conversation (ctrl+n), or once its role's `copy_ttl_hours` have
+  passed since the conversation's last turn, checked as orbit starts, for every saved session's
+  copies, along with copy folders no session records, and every hour while it runs; the next turn
+  makes a new one. Only work done in the worktree can land: a task in
   another workspace commits nothing, even in the work lane. A temporary directory that can't be
   made ends the task in error before an agent starts (`Couldn't make a temporary directory: …`).
   Orbit's own reviews of the commits that land still run in a snapshot of the last commit they
@@ -1221,8 +1231,8 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   the `planner` consults `architect`), naming the roles. Nothing consults yet.
 - `consult_limit_per_hour`: how many consultations it may start in an hour, 6 by default; 0 means
   no limit, and a negative number is refused.
-- `copy_ttl_hours`: how long, in hours, a consultation's copy is kept, 24 by default; it must be
-  more than 0.
+- `copy_ttl_hours`: how long, in hours, a conversational role working in a `copy` keeps its copy
+  after its conversation's last turn, 24 by default; it must be more than 0.
 
 In the TUI, the task editor's **Role** field picks a task's role among the roles enabled in the
 session's workspace that aren't conversational, each shown with its lane (`Coder · work`) and a

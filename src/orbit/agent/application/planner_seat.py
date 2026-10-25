@@ -11,6 +11,7 @@ from orbit.agent.application.lanes import TurnSlot
 from orbit.agent.application.outbox import EventSink
 from orbit.agent.application.planner import PlannerChat
 from orbit.agent.application.planner_trace import PlannerTracing
+from orbit.agent.application.role_copies import RoleCopies
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.refusals import Refused
@@ -67,13 +68,15 @@ def _admit() -> None:
 class SeatHooks:
     """What the seat asks of its session: to ``save`` it, to mark it ``use``d, the
     ``step_names`` verifying tasks now, to ``check`` it, refusing a turn by raising
-    :class:`Refused` while it's halted, and the ``tracing`` its turns are traced by."""
+    :class:`Refused` while it's halted, the ``tracing`` its turns are traced by, and its
+    ``copies``, which a role working in a copy takes its turns in."""
 
     save: Callable[[], Awaitable[None]]
     use: Callable[[], None]
     step_names: Callable[[], tuple[str, ...]]
     check: Callable[[], None] = _admit
     tracing: PlannerTracing = _UNTRACED
+    copies: RoleCopies | None = None
 
 
 class SeatLanes:
@@ -118,6 +121,7 @@ class PlannerSeat:
         self._tasks = parts.tasks
         self._events = parts.events
         self._hooks = parts.hooks
+        self._copies = parts.hooks.copies
         self._name = role
         self._planner = self._chat()
         self._retired: list[PlannerChat] = []  # Planners of sessions left or reset, still to close.
@@ -174,7 +178,9 @@ class PlannerSeat:
         role = self._role()
         if self._desk is None or role is None or not role.enabled:
             return None
-        return PlannerChat(self._desk, self._tasks, self._hooks.step_names, self._name)
+        chat = PlannerChat(self._desk, self._tasks, self._hooks.step_names, self._name)
+        chat.copies = self._copies
+        return chat
 
     def _role(self) -> Role | None:
         """The seat's role; none without agents or that role."""
@@ -274,8 +280,9 @@ class PlannerSeat:
 
     async def reset(self) -> None:
         """End the planner's conversation, or drop the one opened from another runtime than its
-        role's, re-reading its role; refused while it answers, and noted when it has no
-        conversation yet. Another role's seat keeps its role."""
+        role's, re-reading its role, and remove its copy, if it has one; refused while it
+        answers, and noted when it has no conversation yet. Another role's seat keeps its
+        role."""
         if self._desk is None or self._planner is None:
             raise self._absent()
         if self.running:
@@ -286,6 +293,8 @@ class PlannerSeat:
             await self._reread_role(self._desk)
             self.replace(None)
             await self.close_retired()
+            if self._copies is not None:
+                await self._copies.drop(self._name)
             await self._events.put(ConversationReset(agent=self._name))
             await self._hooks.save()
 

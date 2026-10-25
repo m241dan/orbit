@@ -26,6 +26,7 @@ from orbit.agent.application.ports import (
 )
 from orbit.agent.application.purge import purge
 from orbit.agent.application.recovery import RecoveryFailed
+from orbit.agent.application.role_copies import TreeCopies
 from orbit.agent.application.verifier import Verification
 from orbit.agent.application.workspace_host import WorkspaceHost
 from orbit.agent.application.workspace_source import WorkspaceSource, WorkspaceUnavailable
@@ -92,6 +93,7 @@ from orbit.agent.external.config_init import (
 )
 from orbit.agent.external.control_plane import ControlPlaneServer, ListenFailed
 from orbit.agent.external.directories import resolve_config_dir, resolve_state_dir
+from orbit.agent.external.directory_copies import DirectoryCopies, copies_folder
 from orbit.agent.external.directory_lister import DirectoryLister
 from orbit.agent.external.fallback_files import FallbackFiles
 from orbit.agent.external.file_names import file_names
@@ -163,6 +165,7 @@ __all__ = [
     "Configuring",
     "ControlPlane",
     "ControlPlaneServer",
+    "DirectoryCopies",
     "DirectoryLister",
     "FallbackFiles",
     "GitCoderTree",
@@ -215,6 +218,7 @@ __all__ = [
     "TlsMode",
     "TokenError",
     "TokenFile",
+    "TreeCopies",
     "UnknownKey",
     "UpdateResult",
     "UsageApi",
@@ -235,6 +239,7 @@ __all__ = [
     "certificate_pem",
     "client_bundle",
     "config_report",
+    "copies_folder",
     "file_names",
     "fingerprint",
     "forget_workspace",

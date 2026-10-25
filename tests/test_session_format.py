@@ -9,6 +9,7 @@ from orbit.agent.domain.reviews import BatchSnapshot, LaneSnapshot, PlannerSnaps
 from orbit.agent.domain.runtimes import CLAUDE
 from orbit.agent.domain.sessions import (
     SavedConversation,
+    SavedCopy,
     SessionRecord,
     parse_record,
     parse_review_count,
@@ -25,8 +26,8 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit these for a format change: they're what orbits at versions 1 to 11 wrote, and
-# they still need to read. A new version gets its own fixture (session-v12.json) and a
+# Never edit these for a format change: they're what orbits at versions 1 to 12 wrote, and
+# they still need to read. A new version gets its own fixture (session-v13.json) and a
 # migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
 SESSION_V2 = FIXTURES / "session-v2.json"
@@ -39,6 +40,7 @@ SESSION_V8 = FIXTURES / "session-v8.json"
 SESSION_V9 = FIXTURES / "session-v9.json"
 SESSION_V10 = FIXTURES / "session-v10.json"
 SESSION_V11 = FIXTURES / "session-v11.json"
+SESSION_V12 = FIXTURES / "session-v12.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -152,7 +154,7 @@ def expected(
     lane: LaneSnapshot | None = None,
 ) -> SessionRecord:
     return SessionRecord(
-        version=11,
+        version=12,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
@@ -280,14 +282,25 @@ def crediting() -> SessionRecord:
     return record.model_copy(update={"tasks": (credited, *others), "spent": spent})
 
 
-def test_a_version_11_session_file_reads_as_its_record() -> None:
+def test_a_version_11_session_file_migrates_to_having_no_copies() -> None:
     assert parse_record(SESSION_V11.read_text(encoding="utf-8")) == crediting()
 
 
-def test_a_session_record_is_written_in_the_version_11_format() -> None:
-    written = json.loads(record_json(crediting()))
-    golden = json.loads(SESSION_V11.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V11.name)
+def copying() -> SessionRecord:
+    """The golden record as version 12 keeps it, with the copy its architect works in."""
+    last_turn = datetime(2026, 10, 17, 14, 25, tzinfo=timezone(timedelta(hours=2)))
+    copy = SavedCopy(path="/repo/.git/orbit/copies/copy-1", last_turn=last_turn)
+    return crediting().model_copy(update={"copies": {"architect": copy}})
+
+
+def test_a_version_12_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V12.read_text(encoding="utf-8")) == copying()
+
+
+def test_a_session_record_is_written_in_the_version_12_format() -> None:
+    written = json.loads(record_json(copying()))
+    golden = json.loads(SESSION_V12.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V12.name)
 
 
 def test_a_version_1_review_count_reads_as_its_count() -> None:

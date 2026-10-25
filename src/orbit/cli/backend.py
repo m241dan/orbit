@@ -16,6 +16,7 @@ from orbit.agent import (
     ConfigError,
     Configuring,
     ControlPlane,
+    DirectoryCopies,
     GitCoderTree,
     HostMaker,
     McpHost,
@@ -29,12 +30,14 @@ from orbit.agent import (
     StorageSettings,
     StoreError,
     SystemTempDirs,
+    TreeCopies,
     UsageApi,
     Verification,
     WorkspaceHost,
     WorkspaceLock,
     WorkspaceOwner,
     WorkspaceUnavailable,
+    copies_folder,
     file_names,
     in_git_work_tree,
     open_workspace,
@@ -246,7 +249,7 @@ def _host_maker(
         return WorkspaceHost(
             settings,
             verification=verification,
-            agents=agents,
+            agents=_with_copies(agents, opened, config),
             workspace=str(root),
             check_at_startup=True,
             workspace_id=opened.store.workspace_id,
@@ -334,6 +337,17 @@ def _agents(config: OrbitConfig, root: Path, backend: _Backend, config_dir: Path
         personal=config.personal,
         models=config.models,
     )
+
+
+def _with_copies(agents: Agents, opened: OpenedStore, config: OrbitConfig) -> Agents:
+    """``agents`` making copies of their workspace, the store ``opened`` for it: of the tree's
+    base commit in a git repository, else of its directory, in the state directory, set up as
+    ``config`` says."""
+    if agents.tree is not None:
+        return replace(agents, copies=TreeCopies(agents.tree))
+    store = opened.store
+    folder = copies_folder(store.ledger.state_dir, store.workspace_id)
+    return replace(agents, copies=DirectoryCopies(agents.root, folder, config.setup))
 
 
 def _planner_role(root: str, config_dir: Path, runtime: str | None) -> Role | ConfigError:

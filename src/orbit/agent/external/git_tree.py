@@ -36,9 +36,12 @@ STASH_MESSAGE = "orbit: unverified work"
 IGNORE_HEADER = "# Created by orbit's verification checks:"
 # Snapshot directories in ``.git/orbit``: ``snapshot-…`` now, ``review-…`` from older versions.
 SNAPSHOT_PREFIXES = ("snapshot-", "review-")
+COPIES_DIR = "copies"
+"""The folder in ``.git/orbit`` the copies are made in."""
+COPY_PREFIX = "copy-"
 
 
-async def _run_setup(command: Sequence[str], cwd: Path) -> tuple[bool, str]:
+async def run_setup(command: Sequence[str], cwd: Path) -> tuple[bool, str]:
     """Run the setup ``command`` in ``cwd``; returns whether it succeeded and its combined
     output.
 
@@ -93,21 +96,22 @@ def _add_ignores(exclude: Path, paths: Collection[str]) -> None:
         raise TreeFailed(f"Couldn't ignore files in {exclude}: {error}") from error
 
 
-def _make_snapshot_dir(parent: Path, commit: str) -> Path:
-    """A new, empty directory in ``parent`` for a snapshot of ``commit``, named so it can't
-    collide with any other, from this process or another.
+def _make_tree_dir(parent: Path, prefix: str, what: str) -> Path:
+    """A new, empty directory in ``parent`` for a ``what``, whose name starts with ``prefix``,
+    named so it can't collide with any other, from this process or another.
 
     Raises ``TreeFailed`` when it can't be made.
     """
     try:
         parent.mkdir(parents=True, exist_ok=True)
-        return Path(tempfile.mkdtemp(prefix=f"snapshot-{commit[:12]}-", dir=parent))
+        return Path(tempfile.mkdtemp(prefix=prefix, dir=parent))
     except OSError as error:
-        raise TreeFailed(f"Couldn't make a snapshot directory in {parent}: {error}") from error
+        raise TreeFailed(f"Couldn't make a {what} directory in {parent}: {error}") from error
 
 
-def _snapshot_dirs(parent: Path) -> set[Path]:
-    """The snapshot directories in ``parent``, by whoever made them; none when it's missing.
+def _tree_dirs(parent: Path, prefixes: tuple[str, ...], what: str) -> set[Path]:
+    """The ``what`` directories in ``parent``, whose names start with one of ``prefixes``, by
+    whoever made them; none when it's missing.
 
     Raises ``TreeFailed`` when ``parent`` can't be listed.
     """
@@ -115,12 +119,10 @@ def _snapshot_dirs(parent: Path) -> set[Path]:
         if not parent.is_dir():
             return set()
         return {
-            path
-            for path in parent.iterdir()
-            if path.is_dir() and path.name.startswith(SNAPSHOT_PREFIXES)
+            path for path in parent.iterdir() if path.is_dir() and path.name.startswith(prefixes)
         }
     except OSError as error:
-        raise TreeFailed(f"Couldn't list the snapshots in {parent}: {error}") from error
+        raise TreeFailed(f"Couldn't list the {what} in {parent}: {error}") from error
 
 
 class GitCoderTree:
@@ -136,6 +138,7 @@ class GitCoderTree:
         self._started = False
         self._base: str | None = None
         self._snapshots: set[Path] = set()
+        self._copies: set[Path] = set()
         self._common: Path | None = None
 
     async def prepare(self, keep: bool) -> str:
@@ -183,8 +186,10 @@ class GitCoderTree:
         return await self._git(self._root, "show", "--stat", "--patch", "--format=medium", *commits)
 
     async def snapshot(self, commit: str) -> str:
-        sha = await self._git(self._root, "rev-parse", "--verify", "-q", f"{commit}^{{commit}}")
-        path = await self._new_snapshot_dir(await self._snapshots_dir(), sha)
+        sha = await self._sha(commit)
+        path = await self._new_tree_dir(
+            await self._snapshots_dir(), f"snapshot-{sha[:12]}-", "snapshot"
+        )
         self._snapshots.add(path)
         try:
             await self._git(self._root, "worktree", "add", "-q", "--detach", str(path), sha)
@@ -193,15 +198,52 @@ class GitCoderTree:
             raise
         return str(path)
 
+    async def copy(self, commit: str) -> str:
+        sha = await self._sha(commit)
+        path = await self._new_tree_dir(
+            await self._copies_dir(), f"{COPY_PREFIX}{sha[:12]}-", "copy"
+        )
+        self._copies.add(path)
+        try:
+            await self._git(self._root, "worktree", "add", "-q", "--detach", str(path), sha)
+            await self._set_up_copy(path)
+        except BaseException:  # Cancellation too: the caller never gets the path to drop.
+            await self._discard_snapshot(path)
+            raise
+        return str(path)
+
+    async def drop_copy(self, path: str) -> None:
+        await self.drop(path)
+        self._copies.discard(Path(path))
+
+    async def copies(self) -> list[str]:
+        found = await asyncio.to_thread(
+            _tree_dirs, await self._copies_dir(), (COPY_PREFIX,), "copies"
+        )
+        return sorted(str(path) for path in found - self._copies)
+
+    async def _sha(self, commit: str) -> str:
+        """The full id of ``commit``."""
+        return await self._git(self._root, "rev-parse", "--verify", "-q", f"{commit}^{{commit}}")
+
+    async def _set_up_copy(self, path: Path) -> None:
+        """Run the setup, if there is one, in the copy at ``path``."""
+        if self.setup is None:
+            return
+        ok, output = await run_setup(self.setup.command, path)
+        if not ok:
+            raise TreeFailed(f"Setting up the copy at {path} failed: {output}")
+
     async def drop(self, path: str) -> None:
         # Twice forced: a snapshot may be locked, as a killed ``git worktree add`` leaves it.
         await self._git(self._root, "worktree", "remove", "--force", "--force", path)
         self._snapshots.discard(Path(path))
 
-    async def _new_snapshot_dir(self, parent: Path, sha: str) -> Path:
-        """A new directory in ``parent`` for a snapshot of ``sha``; when cancelled, the one
-        the thread goes on to make is removed before the cancellation is raised."""
-        making = asyncio.ensure_future(asyncio.to_thread(_make_snapshot_dir, parent, sha))
+    async def _new_tree_dir(self, parent: Path, prefix: str, what: str) -> Path:
+        """A new directory in ``parent`` for a ``what``, whose name starts with ``prefix``; when
+        cancelled, the one the thread goes on to make is removed before the cancellation is
+        raised."""
+        making = asyncio.ensure_future(asyncio.to_thread(_make_tree_dir, parent, prefix, what))
         try:
             return await shielded(making)
         except asyncio.CancelledError:
@@ -210,7 +252,7 @@ class GitCoderTree:
             raise
 
     async def _discard_snapshot(self, path: Path) -> None:
-        """Remove the half-made snapshot at ``path``, whether or not git registered it, even
+        """Remove the half-made snapshot or copy at ``path``, whether or not git registered it, even
         locked as a killed ``git worktree add`` leaves it, ignoring failures so the error that
         stopped it is the one raised."""
         try:
@@ -219,6 +261,7 @@ class GitCoderTree:
             await asyncio.to_thread(shutil.rmtree, path, ignore_errors=True)
         finally:
             self._snapshots.discard(path)
+            self._copies.discard(path)
 
     async def untracked(self) -> frozenset[str]:
         listed = await self._git(
@@ -250,7 +293,9 @@ class GitCoderTree:
         return stashed_note(sum(STASH_MESSAGE in line for line in stashes.splitlines()))
 
     async def _stale_snapshots(self) -> str | None:
-        snapshots = await asyncio.to_thread(_snapshot_dirs, await self._snapshots_dir())
+        snapshots = await asyncio.to_thread(
+            _tree_dirs, await self._snapshots_dir(), SNAPSHOT_PREFIXES, "snapshots"
+        )
         return stale_snapshots_note(len(snapshots - self._snapshots))
 
     # Steps of prepare
@@ -298,7 +343,7 @@ class GitCoderTree:
         stamp = await self._stamp()
         if await asyncio.to_thread(_read_stamp, stamp) == digest:
             return
-        ok, output = await _run_setup(self.setup.command, path)
+        ok, output = await run_setup(self.setup.command, path)
         if not ok:
             raise TreeFailed(f"Setting up the coder's tree failed: {output}")
         try:
@@ -413,6 +458,10 @@ class GitCoderTree:
     async def _snapshots_dir(self) -> Path:
         """Orbit's directory in the repository, where the coder's tree and snapshots live."""
         return await self._common_dir() / ORBIT_DIR
+
+    async def _copies_dir(self) -> Path:
+        """The folder the copies are made in."""
+        return await self._snapshots_dir() / COPIES_DIR
 
     async def _coder(self) -> Path:
         """The coder's tree."""

@@ -712,6 +712,9 @@ class FakeTree:
         self.commits: list[str] = []
         self.snapshots: list[str] = []
         self.dropped: list[str] = []
+        self.copied: list[str] = []  # The commits copies were made of.
+        self.copies_dropped: list[str] = []
+        self.copies_left: list[str] = []  # What copies() says: those it didn't make.
         self.setups: list[Setup | None] = []  # Each setup it was told to use, in order.
         self.setup: Setup | None = None
         self.failures: dict[str, Exception] = {}  # Method name -> what its next call raises.
@@ -757,6 +760,16 @@ class FakeTree:
         self.dropped.append(path)
         self._fail("drop")
 
+    async def copy(self, commit: str) -> str:
+        self.copied.append(commit)
+        return f"/work/copy-{len(self.copied)}"
+
+    async def drop_copy(self, path: str) -> None:
+        self.copies_dropped.append(path)
+
+    async def copies(self) -> list[str]:
+        return self.copies_left
+
     async def untracked(self) -> frozenset[str]:
         return self.untracked_sets.pop(0) if self.untracked_sets else frozenset()
 
@@ -773,6 +786,39 @@ class FakeTree:
 
     def _fail(self, method: str) -> None:
         """Raise the failure scripted for ``method``, if any; it fails once."""
+        failure = self.failures.pop(method, None)
+        if failure is not None:
+            raise failure
+
+
+class FakeCopies:
+    """Copies, named ``/copies/copy-1``, ``/copies/copy-2`` and so on, that record which were
+    made and removed; :attr:`left` are those it didn't make, and each of :attr:`failures`, by
+    method name, is raised by that method's next call."""
+
+    def __init__(self, *left: str) -> None:
+        self.made: list[str] = []
+        self.removed: list[str] = []
+        self.left = list(left)
+        self.failures: dict[str, TreeFailed] = {}
+
+    async def make(self) -> str:
+        self._fail("make")
+        path = f"/copies/copy-{len(self.made) + 1}"
+        self.made.append(path)
+        return path
+
+    async def remove(self, path: str) -> None:
+        self._fail("remove")
+        self.removed.append(path)
+        if path in self.left:
+            self.left.remove(path)
+
+    async def leftovers(self) -> list[str]:
+        self._fail("leftovers")
+        return list(self.left)
+
+    def _fail(self, method: str) -> None:
         failure = self.failures.pop(method, None)
         if failure is not None:
             raise failure

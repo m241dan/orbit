@@ -31,7 +31,7 @@ from orbit.protocol import (
     Usage,
 )
 
-FORMAT_VERSION = 11
+FORMAT_VERSION = 12
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
@@ -64,7 +64,7 @@ def _without_rounds(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def _unchanged(record: dict[str, Any]) -> dict[str, Any]:
-    """Version 3, 4, 5, 6, 7 or 10 ``record`` as it is: the next version only added fields that
+    """Version 3, 4, 5, 6, 7, 10 or 11 ``record`` as it is: the next version only added fields that
     have defaults."""
     return record
 
@@ -102,7 +102,8 @@ def _on_claude(record: dict[str, Any]) -> dict[str, Any]:
 # planner's, so its migration moves them into place. Version 10 keeps each conversation with the
 # runtime it ran on, as only that runtime's launcher understands its handle, so a handle can't
 # be misread; its migration puts version 9's bare handles on Claude. Version 11 added the credits
-# in what the session and its tasks spent, which an older record spent none of.
+# in what the session and its tasks spent, which an older record spent none of. Version 12
+# added the copies the conversational roles work in, which an older record has none of.
 _MIGRATIONS: dict[int, Migration] = {
     1: _spent_by_tasks,
     2: _without_rounds,
@@ -114,6 +115,7 @@ _MIGRATIONS: dict[int, Migration] = {
     8: _per_role,
     9: _on_claude,
     10: _unchanged,
+    11: _unchanged,
 }
 
 EMPTY_NAME = "A session needs a name."
@@ -131,10 +133,21 @@ class SavedConversation(BaseModel):
     handle: str
 
 
+class SavedCopy(BaseModel):
+    """The copy a conversational role works in, as a session saves it: its ``path``, and when
+    the role's conversation last took a turn there (``last_turn``)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    path: str = Field(min_length=1)
+    last_turn: AwareDatetime
+
+
 class SessionRecord(BaseModel):
     """A saved session ``id``, ``name``d by the user, with the settings each conversational role
     uses, by role (``role_settings``), the planner's for new tasks too, each one's conversation
-    (``conversations``), the ``planner_notes`` the planner is still to hear, its
+    (``conversations``), the copies those working in one work in (``copies``), the
+    ``planner_notes`` the planner is still to hear, its
     ``tasks`` and, when reviews are on, its ``reviews``' state, and what its agents have
     ``spent`` in all, the planner and tasks since removed included."""
 
@@ -147,6 +160,7 @@ class SessionRecord(BaseModel):
     last_active: AwareDatetime
     role_settings: dict[str, Settings] = Field(default={})
     conversations: dict[str, SavedConversation] = Field(default={})
+    copies: dict[str, SavedCopy] = Field(default={})
     planner_notes: tuple[str, ...] = ()
     tasks: tuple[TaskState, ...] = ()
     reviews: LaneSnapshot | None = None

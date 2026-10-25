@@ -22,6 +22,7 @@ from orbit.agent.application.ports import (
     AgentLauncher,
     CoderTree,
     ConfigWriter,
+    Copies,
     FileNames,
     PlannerRoleReader,
     ProposalReview,
@@ -120,9 +121,10 @@ class Agents:
     records keep the numbers tasks give them. ``root`` is the workspace's directory, the user's
     checkout, where agents work without a tree; ``temp_dirs`` makes the empty directories
     agents whose role works in none work in. ``pause`` times a run that a runtime's usage limit
-    or outage stopped, until it starts again. ``models`` are the models each runtime takes, by
-    its name, which agents' models resolve through; a runtime without them is given models as
-    they are.
+    or outage stopped, until it starts again. ``copies`` makes the copies agents whose role
+    works in a copy work in; without it, such a role's agents can't run. ``models`` are the
+    models each runtime takes, by its name, which agents' models resolve through; a runtime
+    without them is given models as they are.
     """
 
     host: AgentHost
@@ -143,6 +145,7 @@ class Agents:
     pause: LimitPause = field(default_factory=LimitPause)
     personal: frozenset[str] = field(default=frozenset(), kw_only=True)
     models: Mapping[str, ModelAliases] = field(default_factory=dict, kw_only=True)
+    copies: Copies | None = field(default=None, kw_only=True)
 
     def runtime(self, role: str) -> str | None:
         """The runtime role ``role``'s agents run on; none for a role they don't have."""

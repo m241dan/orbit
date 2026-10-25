@@ -7,11 +7,11 @@ import asyncio
 
 import pytest
 
-from orbit.agent.application.ports import TempDirFailed
-from orbit.agent.application.role_workspace import workspace_for
+from orbit.agent.application.ports import TempDirFailed, TreeFailed
+from orbit.agent.application.role_workspace import NO_COPIES, workspace_for
 from orbit.agent.domain.roles import Workspace
 from orbit.protocol import Event
-from tests.agent_fakes import FakeTempDirs, FakeTree, desk_for
+from tests.agent_fakes import FakeCopies, FakeTempDirs, FakeTree, desk_for
 
 
 class Places:
@@ -120,3 +120,18 @@ async def test_a_temporary_directory_that_cant_be_made_fails_with_nothing_to_rem
     with pytest.raises(TempDirFailed, match="disk full"):
         await entered("none", places)
     assert places.temp_dirs.removed == []
+
+
+async def test_a_copy_role_works_in_a_fresh_copy_removed_after_its_run() -> None:
+    copies = FakeCopies()
+    desk = desk_for(Places().publish, root="/src/app", copies=copies)
+    async with workspace_for("copy", desk) as path:
+        assert (path, copies.removed) == ("/copies/copy-1", [])
+    assert copies.removed == ["/copies/copy-1"]
+    async with workspace_for("copy", desk) as again:
+        assert again == "/copies/copy-2"
+
+
+async def test_a_copy_role_cant_run_without_copies() -> None:
+    with pytest.raises(TreeFailed, match=NO_COPIES):
+        await entered("copy", Places(FakeTree()))

@@ -8,7 +8,8 @@ them. Its first prompt, and the first after the verification steps change, tells
 each task must pass; the next prompt also carries what orbit told it since, such as a record that
 moved. A restored session carries on its saved conversation, or starts a fresh one if that can't
 be resumed. A conversation runs in one directory, as its role's workspace says, from its first
-turn until it ends, as Claude Code resumes a conversation only from the directory it ran in.
+turn until it ends, as Claude Code resumes a conversation only from the directory it ran in; a
+role working in a copy has its session's copy, which outlives the conversation's agent.
 """
 
 import asyncio
@@ -20,6 +21,7 @@ from typing import Any
 from orbit.agent.application.desk import AgentDesk, Tool, dispatch, report_progress
 from orbit.agent.application.planner_trace import turn_ended
 from orbit.agent.application.ports import Reply, ResumeFailed
+from orbit.agent.application.role_copies import RoleCopies
 from orbit.agent.application.role_workspace import workspace_for
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.agents import Agent
@@ -62,7 +64,8 @@ RESUME_FAILED_NOTE = resume_failed_note(PLANNER)
 
 class PlannerChat:
     """The conversation with the planner, or the conversational role ``role``, a turn per
-    prompt; ``step_names`` tells the names of the verification steps tasks must pass now."""
+    prompt; ``step_names`` tells the names of the verification steps tasks must pass now. A role
+    working in a copy takes its turns in its copy among :attr:`copies`, once given."""
 
     def __init__(
         self,
@@ -72,6 +75,8 @@ class PlannerChat:
         role: str = PLANNER,
     ) -> None:
         self._desk = desk
+        # The session's copies, which a role working in a copy takes its turns in.
+        self.copies: RoleCopies | None = None
         self._role = role
         self._tasks = tasks
         self._board = tasks.board
@@ -283,10 +288,14 @@ class PlannerChat:
 
     async def _conversation_root(self) -> str:
         """The directory the planner's conversation runs in, as its role's workspace says: made
-        on the conversation's first turn and kept for the turns after it, until :meth:`close`.
+        on the conversation's first turn and kept for the turns after it, until :meth:`close`; a
+        role working in a copy has its copy among the session's, as each turn starts.
 
         Making it raises as :func:`workspace_for` does, leaving the next turn to try again.
         """
+        copies = self.copies
+        if copies is not None and self._desk.agents.roles[self._role].workspace == "copy":
+            return await copies.enter(self._role)
         if self._root is None:
             role = self._desk.agents.roles[self._role]  # Read again on a reset.
             where = workspace_for(role.workspace, self._desk)

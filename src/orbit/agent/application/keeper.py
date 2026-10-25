@@ -7,7 +7,7 @@ sessions, each under its lock.
 import asyncio
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from orbit.agent.application.failures import ReportedOnce, outcome
@@ -25,6 +25,7 @@ from orbit.agent.domain.sessions import (
     OPEN_UNDELETABLE,
     OPEN_UNRENAMABLE,
     SavedConversation,
+    SavedCopy,
     SessionRecord,
     Unreadable,
     default_name,
@@ -172,7 +173,8 @@ class Contents:
     """What a saved session holds of the work: the settings each conversational role uses, by
     role (``role_settings``), the planner's for new tasks too, each one's conversation, with the
     runtime it ran on (``conversations``), its ``tasks``, its ``reviews``' state, if any, what
-    its agents have ``spent`` in all, and the ``planner_notes`` its planner is still to hear."""
+    its agents have ``spent`` in all, the ``planner_notes`` its planner is still to hear, and
+    the ``copies`` its conversational roles work in, by role."""
 
     role_settings: Mapping[str, Settings]
     conversations: Mapping[str, SavedConversation]
@@ -180,6 +182,7 @@ class Contents:
     reviews: LaneSnapshot | None
     spent: Usage
     planner_notes: tuple[str, ...] = ()
+    copies: Mapping[str, SavedCopy] = field(default_factory=dict)
 
 
 class SessionKeeper:
@@ -325,6 +328,7 @@ class SessionKeeper:
             last_active=self._clock(),
             role_settings=dict(contents.role_settings),
             conversations=dict(contents.conversations),
+            copies=dict(contents.copies),
             planner_notes=contents.planner_notes,
             tasks=contents.tasks,
             reviews=contents.reviews,
