@@ -1,6 +1,6 @@
 """Each task's ``orbit.task`` span links to what started its run: the ``RunTasks`` or
 ``FireTrigger`` command, or the review whose suggestions it runs, even once the run starts again
-after Claude's usage limit stopped it."""
+after Claude's usage limit or an outage of its API stopped it."""
 
 import asyncio
 from collections.abc import Mapping
@@ -47,6 +47,7 @@ from tests.connection_helpers import quiet
 from tests.telemetry_helpers import Traced, linked_to, trace_id
 
 LIMIT = "You've hit your session limit · resets 6pm (UTC)"
+OVERLOADED = 'API Error: 529 {"type":"error","error":{"type":"overloaded_error"}}'
 
 
 class Waits:
@@ -96,14 +97,20 @@ async def errs(call: Call) -> TurnEndReason:
     return "error"
 
 
-def limited(traced: Traced, waits: Waits, **options: Any) -> ControlPlane:
-    """A traced control plane whose first agent hits the usage limit, then claims each task
+def stopped_by(traced: Traced, waits: Waits, error: str, **options: Any) -> ControlPlane:
+    """A traced control plane whose first agent's turn ends in ``error``, then claims each task
     done; ``options`` go to :func:`session_for`."""
     plane, launcher = traced_plane(
         traced, errs, claims_done, claims_done, pause=waits.pause, **options
     )
-    launcher.turn_errors.append(LIMIT)
+    launcher.turn_errors.append(error)
     return plane
+
+
+def limited(traced: Traced, waits: Waits, **options: Any) -> ControlPlane:
+    """A traced control plane whose first agent hits the usage limit, then claims each task
+    done; ``options`` go to :func:`session_for`."""
+    return stopped_by(traced, waits, LIMIT, **options)
 
 
 async def test_each_task_of_a_run_links_to_its_run_tasks_command_from_its_own_trace() -> None:
@@ -138,6 +145,40 @@ async def test_tasks_run_after_a_usage_limit_pause_still_link_to_the_run_tasks_c
 async def test_a_run_started_again_once_a_halt_lifts_links_to_the_run_tasks_command() -> None:
     traced, waits, store = Traced(), Waits(), FakeStore()
     plane = limited(traced, waits, store=store)
+    await ran(plane, "a")
+    store.append_failure = "disk full"
+    [host] = plane.hosts
+    await publish(host, Notice(message="n"))
+    waits.release.set()
+    await quiet(payloads(plane))
+    store.append_failure = None
+    await send(plane, ResumeStorage())
+    await events_until(plane, idle())
+    await close(plane)
+
+    run_tasks = traced.command("run_tasks")
+    again = task_spans(traced, "1")[-1]
+    assert attributes(again)["orbit.task.status"] == "completed"
+    assert linked_to(again, run_tasks)
+
+
+async def test_tasks_run_after_an_outage_pause_still_link_to_the_run_tasks_command() -> None:
+    traced, waits = Traced(), Waits()
+    plane = stopped_by(traced, waits, OVERLOADED)
+    await ran(plane, "a", "b")
+    waits.release.set()
+    await events_until(plane, idle())
+    await close(plane)
+
+    run_tasks = traced.command("run_tasks")
+    tasks = traced.spans(TASK_SPAN)
+    assert [attributes(task)["orbit.task.id"] for task in tasks] == ["1", "1", "2"]
+    assert all(linked_to(task, run_tasks) for task in tasks)
+
+
+async def test_a_run_an_outage_stopped_started_again_once_a_halt_lifts_links_to_run_tasks() -> None:
+    traced, waits, store = Traced(), Waits(), FakeStore()
+    plane = stopped_by(traced, waits, OVERLOADED, store=store)
     await ran(plane, "a")
     store.append_failure = "disk full"
     [host] = plane.hosts
