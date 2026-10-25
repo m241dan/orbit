@@ -50,6 +50,11 @@ RunEnd = Literal["finished", "cancelled", "limited", "fix_failed"]
 """Why a run ended: no task was left to run, one was cancelled, an agent hit Claude's usage
 limit, or a fix ended in error."""
 
+Seating = Literal["seated", "unneeded", "dropped"]
+"""How seating a task for a coder's slot ended: it may run, the board's next task stopped
+needing a slot, or the run's place in line was dropped from outside the lane, as when the user
+stops the run or its workspace closes or switches sessions."""
+
 
 @dataclass(frozen=True)
 class Beside:
@@ -192,36 +197,47 @@ class WorkLane:
         return self._board.get(task_id).task.settings.model
 
     async def _take(self, task_id: str, tried: set[str]) -> RunEnd | None:
-        """Seat task ``task_id`` and run it, as :meth:`_run_seated` does; the run ends cancelled
-        if the user stopped it as it waited for a slot, and goes on, picking its next task
-        again, if the board stopped needing one. A slot is given back once a task has run, and
-        kept for the next task if this one didn't."""
-        if not await self._seat(task_id, tried):
-            return "cancelled" if self._stopped else None
+        """Seat task ``task_id`` and run it, as :meth:`_run_seated` does; the run goes on,
+        picking its next task again, if the board stopped needing a slot as it waited for one,
+        unless the user stopped it, and ends cancelled if its place in line was otherwise
+        dropped. A slot is given back once a task has run, and kept for the next task if this
+        one didn't."""
+        seating = await self._seat(task_id, tried)
+        if seating != "seated":
+            return None if seating == "unneeded" and not self._stopped else "cancelled"
         try:
             return await self._run_seated(task_id, tried)
         finally:
             if task_id in tried:
                 self._unseat()
 
-    async def _seat(self, task_id: str, tried: set[str]) -> bool:
-        """Take a coder's slot for task ``task_id``, waiting in line for one, if its role takes
-        one and no slot is held already, or else give back any held; returns whether it may
-        run, false if the run's place in line was dropped: the user stopped the run, or the
-        board's next task, among those not ``tried``, no longer takes a slot. The watch on the
-        board that drops the place has ended, however this ends; its failure, a bug, escapes."""
+    async def _seat(self, task_id: str, tried: set[str]) -> Seating:
+        """Take a coder's slot for task ``task_id``, waiting in line for one as
+        :meth:`_wait_in_line` does, if its role takes one and no slot is held already, or else
+        give back any held; returns whether it may run or, if not, why not."""
         coders = self._coders
         if coders is None or not self._takes_slot(task_id):
             self._unseat()
-            return True
+            return "seated"
         if self._seated:
-            return True
+            return "seated"
+        return await self._wait_in_line(coders, tried)
+
+    async def _wait_in_line(self, coders: CoderSeat, tried: set[str]) -> Seating:
+        """Take a slot at ``coders``, waiting in line for one; returns whether it took one or,
+        if its place in line was dropped, who dropped it: the watch on the board, as the
+        board's next task, among those not ``tried``, no longer takes a slot, or something
+        outside the lane. The watch has ended, however this ends; its failure, a bug,
+        escapes."""
         watch = asyncio.create_task(self._leave_line_unneeded(coders, tried))
         try:
             self._seated = await self._tracing.seat(coders)
         finally:
             await stop(watch)
-        return self._seated
+        if self._seated:
+            return "seated"
+        # A watch still waiting when stopped didn't drop the place.
+        return "dropped" if watch.cancelled() else "unneeded"
 
     async def _leave_line_unneeded(self, coders: CoderSeat, tried: set[str]) -> None:
         """Drop the run's place in line at ``coders`` once the board's next task, among those

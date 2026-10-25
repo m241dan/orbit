@@ -434,6 +434,21 @@ async def test_stopping_a_run_as_it_waits_leaves_no_watch_behind() -> None:
     assert asyncio.all_tasks() == {asyncio.current_task()}
 
 
+async def test_a_place_dropped_from_outside_the_lane_ends_the_run_cancelled() -> None:
+    tasks = Tasks(TaskBoard(), quiet)
+    tasks.board.add(TaskSpec(prompt="a"))
+    lane, slots = await waiting_lane_for(quiet, tasks, claims_done)
+    run = asyncio.create_task(lane.run())
+    watch = await in_line(lane, run)
+
+    slots.drop("ws")
+    assert await run == "cancelled"
+    assert watch.done()
+    assert slots.waiting == 0
+    assert [state.status for state in tasks.board.tasks] == ["pending"]
+    assert asyncio.all_tasks() == {asyncio.current_task()}
+
+
 async def test_cancelling_a_run_as_it_waits_leaves_no_watch_behind() -> None:
     tasks = Tasks(TaskBoard(), quiet)
     tasks.board.add(TaskSpec(prompt="a"))

@@ -90,6 +90,21 @@ def task(prompt: str = "Add a flag.", role: str = "coder") -> TaskSpec:
     return TaskSpec(prompt=prompt, role=role)
 
 
+def places_in_line(host: WorkspaceHost) -> list[int | None]:
+    """Where ``host``'s open session waits in line for a coder each time the line changes from
+    now on."""
+    slots = host.coder_slots
+    changed = slots.changed
+    places: list[int | None] = []
+
+    def noted() -> None:
+        places.append(host.activity.waiting_for_coder)
+        changed()
+
+    slots.changed = noted
+    return places
+
+
 def states(connection: SessionConnection, session: str) -> list[SessionStateChanged]:
     """The states of ``session`` sent to ``connection`` since last taken."""
     return [
@@ -237,6 +252,29 @@ async def test_closing_while_a_run_waits_leaves_no_slot_taken() -> None:
     await plane.close()
 
     assert plane.coders_running == 0
+
+
+async def test_a_waiting_run_whose_place_the_plane_drops_ends_without_joining_again() -> None:
+    gates = Gates()
+    a, _ = agent_workspace("a", gates.script("a1"))
+    b, _ = agent_workspace("b", gates.script("b1"))
+    plane = capped(1, a, b)
+    in_a, in_b = await joined(plane, host=a), await joined(plane, host=b)
+    await runs(in_a, task())
+    await gates.until_started("a1")
+    await runs(in_b, task())
+    await eventually(lambda: b.activity.waiting_for_coder == 1)
+    places = places_in_line(b)
+    b.coder_slots.drop("b")
+
+    await asyncio.wait_for(idle(in_b), 5)
+    assert b.coder_slots.waiting == 0
+    assert places == [None]
+    gates.let("a1")
+    await asyncio.wait_for(idle(in_a), 5)
+    assert gates.started == ["a1"]
+    assert plane.coders_running == 0
+    await plane.close()
 
 
 async def test_every_slot_is_given_back_however_tasks_end() -> None:
