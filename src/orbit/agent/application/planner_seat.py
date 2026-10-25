@@ -151,9 +151,13 @@ class PlannerSeat:
 
     async def close_retired(self) -> None:
         """Close the planners retired by leaving a session or by a reset, the last retired
-        first, each even if closing one before it fails, as :func:`close_all` does."""
+        first, each even if closing one before it fails, as :func:`close_all` does; then those
+        retired while they closed, round by round until none are left."""
         retired, self._retired = self._retired, []
-        await close_all([planner.close for planner in reversed(retired)])
+        if retired:
+            # The last stop closes the planners a switch or reset retired during the awaits
+            # before it, so close_all collects their failures with the rest.
+            await close_all([*(planner.close for planner in reversed(retired)), self.close_retired])
 
     async def reset(self) -> None:
         """End the planner's conversation, re-reading its role; refused while it answers, and

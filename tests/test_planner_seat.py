@@ -71,15 +71,20 @@ def seated(
     planner_role: PlannerRoleReader | None = None,
     halts: bool = False,
     failed_exits: int = 0,
+    replacing_exits: int = 0,
 ) -> Seated:
     """A seat with agents in ``roles``, or none if None, whose planner role reads again with
-    ``planner_role``, whose session halts as it's saved if ``halts``, and whose first
-    ``failed_exits`` agents' exits fail to be published."""
+    ``planner_role``, whose session halts as it's saved if ``halts``, whose first
+    ``replacing_exits`` agents' exits replace its planner as they're published, as a switch or
+    reset does, and whose first ``failed_exits`` agents' exits then fail to be published."""
     events: asyncio.Queue[Event] = asyncio.Queue()
     agents, launcher = agents_for(roles=roles or {}, planner_role=planner_role)
 
     async def publish(event: Event) -> None:
-        nonlocal failed_exits
+        nonlocal failed_exits, replacing_exits
+        if isinstance(event, AgentExited) and replacing_exits:
+            replacing_exits -= 1
+            seat.replace(None)
         if isinstance(event, AgentExited) and failed_exits:
             failed_exits -= 1
             raise RuntimeError(f"Publishing {event.agent_id}'s exit failed.")
@@ -192,6 +197,25 @@ async def test_a_retired_planner_failing_to_close_leaves_none_of_the_others_open
     with pytest.raises(RuntimeError, match="Publishing agent-2's exit failed"):
         await seated_.seat.close_retired()
     assert seated_.published() == [EXITED]
+
+
+async def test_a_planner_retired_while_the_retired_close_is_closed_too() -> None:
+    seated_ = seated(replacing_exits=1)
+    await answered(seated_)
+    seated_.seat.replace(None)
+    await answered(seated_)
+    await seated_.seat.close_retired()
+    assert seated_.published() == [EXITED, AgentExited(agent_id="agent-2", reason="finished")]
+
+
+async def test_a_retired_planner_failing_to_close_leaves_none_retired_meanwhile_open() -> None:
+    seated_ = seated(failed_exits=1, replacing_exits=1)
+    await answered(seated_)
+    seated_.seat.replace(None)
+    await answered(seated_)
+    with pytest.raises(RuntimeError, match="Publishing agent-1's exit failed"):
+        await seated_.seat.close_retired()
+    assert seated_.published() == [AgentExited(agent_id="agent-2", reason="finished")]
 
 
 async def test_a_replacing_planner_carries_on_the_conversation_given() -> None:
