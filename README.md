@@ -2727,7 +2727,9 @@ uv run lizard src tests -w -C 6 -L 100 -a 5   # code quality: complexity and siz
 Orbit's Kiro runtime is tested against what `kiro-cli` prints, captured in `tests/fixtures/kiro/`.
 `uv run python scripts/capture_kiro_fixtures.py` captures it again, on a machine where
 `kiro-cli` is installed and logged in: it serves orbit's MCP host with a test token, runs
-`kiro-cli` with a temporary `~/.kiro/agents/orbit-capture.json`, and saves each run's output
+`kiro-cli` with a temporary `~/.kiro/agents/orbit-capture.json` (orbit's tools and Kiro's
+built-in `read`) for a plain reply, orbit's tools, Kiro's `read` tool, an outage and an unknown
+model, and saves each run's output and exit code
 with home paths, session ids, tokens and request ids replaced. The checks never run it, and
 each run spends a few Kiro credits.
 

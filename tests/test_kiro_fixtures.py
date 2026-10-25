@@ -1,6 +1,7 @@
 """The Kiro fixtures, captured from kiro-cli by scripts/capture_kiro_fixtures.py: what they hold
 for the tests that use them, and nothing of the machine or token they were captured with."""
 
+import importlib.util
 import json
 import re
 import secrets
@@ -10,6 +11,7 @@ from typing import Any
 import pytest
 
 KIRO = Path(__file__).parent / "fixtures" / "kiro"
+CAPTURE_SCRIPT = Path(__file__).parent.parent / "scripts" / "capture_kiro_fixtures.py"
 FIXTURES = sorted(KIRO.glob("*.jsonl"))
 
 # A home other than the placeholder's, or a token: after ``Bearer`` anything but the placeholder,
@@ -73,3 +75,17 @@ def test_an_outage_ends_in_a_run_error() -> None:
 def test_each_captured_run_has_its_exit_code() -> None:
     exit_codes = json.loads((KIRO / "exit-codes.json").read_text())
     assert exit_codes == {"plain.jsonl": 0, "orbit-tools.jsonl": 0, "outage.jsonl": 1}
+
+
+def test_the_capture_script_runs_exactly_the_captured_fixtures() -> None:
+    spec = importlib.util.spec_from_file_location("capture_kiro_fixtures", CAPTURE_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    assert {f"{run.name}.jsonl" for run in script.RUNS} == {fixture.name for fixture in FIXTURES}
+
+
+def test_a_bad_model_ends_in_a_run_error_naming_it() -> None:
+    last = events(KIRO / "bad-model.jsonl")[-1]
+    assert last["type"] == "runError"
+    assert "no-such-model" in last["data"]["message"]

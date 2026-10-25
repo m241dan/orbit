@@ -62,18 +62,24 @@ OUTAGE = {
 
 @dataclass(frozen=True)
 class Run:
-    """A ``kiro-cli`` run to capture: the fixture's name, the first message and the
-    environment it adds."""
+    """A ``kiro-cli`` run to capture: the fixture's name, the first message, the environment it
+    adds and the extra ``kiro-cli`` arguments it passes."""
 
     name: str
     message: str
     env: Mapping[str, str] = field(default_factory=dict)
+    extra: tuple[str, ...] = ()
 
 
 RUNS = (
     Run("plain", "Say ok"),
     Run("orbit-tools", "Fetch your task and do it"),
     Run("outage", "Fetch your task and do it", OUTAGE),
+    Run(
+        "tools",
+        "List the files in the current directory and tell me the first line of README.md",
+    ),
+    Run("bad-model", "Say ok", extra=("--model", "no-such-model")),
 )
 
 
@@ -102,7 +108,7 @@ def make_handler(token: str, calls: Calls) -> CallHandler:
 
 def agent_config(url: str, token: str) -> dict[str, Any]:
     """The Kiro agent config that reaches orbit's host at ``url`` with ``token``, its tools
-    alone and all pre-trusted."""
+    and Kiro's built-in ``read``, all pre-trusted."""
     return {
         "name": AGENT,
         "description": "Captures Kiro's output for orbit's fixtures.",
@@ -111,13 +117,14 @@ def agent_config(url: str, token: str) -> dict[str, Any]:
             SERVER: {"url": url, "headers": {"Authorization": f"Bearer {token}"}},
         },
         "includeMcpJson": False,
-        "tools": [f"@{SERVER}"],
-        "allowedTools": [f"@{SERVER}"],
+        "tools": [f"@{SERVER}", "read"],
+        "allowedTools": [f"@{SERVER}", "read"],
     }
 
 
-def command(message: str) -> list[str]:
-    """The ``kiro-cli`` command that sends ``message`` to the capture agent."""
+def command(message: str, extra: tuple[str, ...] = ()) -> list[str]:
+    """The ``kiro-cli`` command that sends ``message`` to the capture agent, with the ``extra``
+    arguments."""
     return [
         "kiro-cli",
         "chat",
@@ -128,6 +135,7 @@ def command(message: str) -> list[str]:
         "--agent-engine",
         "v2",
         "--require-mcp-startup",
+        *extra,
         message,
     ]
 
@@ -136,7 +144,7 @@ async def run_kiro(run: Run, cwd: Path) -> tuple[str, int]:
     """What ``kiro-cli`` printed on stdout for ``run`` in ``cwd``, and its exit code; its
     stderr goes to ours. Stops it if it outlasts ``RUN_SECONDS`` or this is cancelled."""
     process = await asyncio.create_subprocess_exec(
-        *command(run.message),
+        *command(run.message, run.extra),
         cwd=cwd,
         env={**os.environ, **run.env},
         stdin=asyncio.subprocess.DEVNULL,
@@ -165,11 +173,20 @@ def session_ids(value: Any) -> Iterator[str]:
             yield from session_ids(item)
 
 
+def parsed(line: str) -> Any:
+    """The JSON value on ``line``, or None if it isn't JSON."""
+    try:
+        return json.loads(line)
+    except json.JSONDecodeError:
+        return None
+
+
 def anonymised(output: str, token: str, home: str) -> str:
-    """``output``, JSON lines, with ``home`` as ``/home/user``, session ids numbered from
-    ``…0001``, ``token`` as ``TOKEN`` and request ids as ``REQUEST``."""
+    """``output``, JSON lines and any other lines kept as they are, with ``home`` as
+    ``/home/user``, session ids numbered from ``…0001``, ``token`` as ``TOKEN``
+    and request ids as ``REQUEST``."""
     text = output.replace(home, HOME).replace(token, TOKEN)
-    events = [json.loads(line) for line in text.splitlines() if line.strip()]
+    events = [event for line in text.splitlines() if (event := parsed(line)) is not None]
     numbered: dict[str, str] = {}
     for session in session_ids(events):
         numbered.setdefault(session, SESSION.format(len(numbered) + 1))
