@@ -28,7 +28,7 @@ from orbit.protocol import (
     Usage,
 )
 
-FORMAT_VERSION = 7
+FORMAT_VERSION = 8
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
@@ -61,8 +61,8 @@ def _without_rounds(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def _unchanged(record: dict[str, Any]) -> dict[str, Any]:
-    """Version 3, 4, 5 or 6 ``record`` as it is: the next version only added fields that have
-    defaults."""
+    """Version 3, 4, 5, 6 or 7 ``record`` as it is: the next version only added fields that
+    have defaults."""
     return record
 
 
@@ -71,9 +71,9 @@ def _unchanged(record: dict[str, Any]) -> dict[str, Any]:
 # rather than by having the snapshot ignore them, so that the format stays pinned by its fixtures
 # and the snapshot model keeps forbidding fields it doesn't know. Version 4 added the reasons tasks
 # ended for, version 5 the tasks each review reviews, version 6 the titles the review planner
-# has suggested, and version 7 the notes the planner is still to hear; their versions stop an
-# older orbit, which forbids fields it doesn't know, at a clear "written by a newer orbit" rather
-# than a field it can't read.
+# has suggested, version 7 the notes the planner is still to hear, and version 8 the effort in
+# the session's and its tasks' settings; their versions stop an older orbit, which forbids fields
+# it doesn't know, at a clear "written by a newer orbit" rather than a field it can't read.
 _MIGRATIONS: dict[int, Migration] = {
     1: _spent_by_tasks,
     2: _without_rounds,
@@ -81,6 +81,7 @@ _MIGRATIONS: dict[int, Migration] = {
     4: _unchanged,
     5: _unchanged,
     6: _unchanged,
+    7: _unchanged,
 }
 
 EMPTY_NAME = "A session needs a name."

@@ -275,3 +275,15 @@ def test_an_invalid_field_isnt_also_reported_as_the_merge_default_it_stopped() -
         load_config(custom(verify="sometimes"), BUILT_IN_ROLES)
     assert str(raised.value).startswith("roles.x.verify: ")
     assert "merge" not in str(raised.value)
+
+
+def test_a_file_sets_a_roles_effort() -> None:
+    roles = {"reviewer": {"effort": "high"}}
+    assert load_config({"roles": roles}, BUILT_IN_ROLES).roles["reviewer"].effort == "high"
+
+
+@pytest.mark.parametrize("effort", ["ultracode", "extreme"])
+def test_an_effort_claude_doesnt_offer_is_refused_listing_those_it_does(effort: str) -> None:
+    with pytest.raises(ConfigError, match=r"^roles\.reviewer\.effort: ") as raised:
+        load_config({"roles": {"reviewer": {"effort": effort}}}, BUILT_IN_ROLES)
+    assert "'low', 'medium', 'high', 'xhigh' or 'max'" in str(raised.value)

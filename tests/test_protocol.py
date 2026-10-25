@@ -33,6 +33,7 @@ from orbit.protocol import (
     ChecksProposed,
     ConversationReset,
     EditTask,
+    Effort,
     ErrorOccurred,
     FireTrigger,
     History,
@@ -106,11 +107,27 @@ def test_rejects_message_to_no_agent() -> None:
 
 
 def test_settings_default_to_claude_default_model_and_restricted_tools() -> None:
-    assert Settings() == Settings(model=None, tool_access="restricted")
+    assert Settings() == Settings(model=None, tool_access="restricted", effort=None)
+
+
+@pytest.mark.parametrize("effort", ["low", "medium", "high", "xhigh", "max"])
+def test_settings_take_each_effort(effort: Effort) -> None:
+    assert Settings(effort=effort).effort == effort
+
+
+@pytest.mark.parametrize("effort", ["ultracode", "extreme"])
+def test_rejects_unknown_effort(effort: str) -> None:
+    with pytest.raises(ValidationError):
+        Settings.model_validate({"effort": effort})
+
+
+def test_settings_without_effort_from_the_wire_have_none() -> None:
+    settings = Settings.model_validate({"model": "opus"}, context={"wire": True})
+    assert settings.effort is None
 
 
 def test_update_settings_round_trip() -> None:
-    command = UpdateSettings(settings=Settings(model="opus", tool_access="full"))
+    command = UpdateSettings(settings=Settings(model="opus", tool_access="full", effort="max"))
     assert command_adapter.validate_json(command.model_dump_json()) == command
 
 

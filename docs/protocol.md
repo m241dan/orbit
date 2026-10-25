@@ -506,6 +506,13 @@ is refused with `unknown`: `No task with id 't9'.`
 `UpdateSettings(settings)` replaces the session's settings, which apply from the next turn: it
 publishes `SettingsChanged` and saves the session.
 
+A `Settings`, the session's or a task's, holds the `model` (`null` for the backend's default), the
+`tool_access` (`off`, `restricted` or `full`) and the `effort` (`low`, `medium`, `high`, `xhigh`
+or `max`, the levels the Claude CLI offers, or `null` for its default). `effort` was added to
+version 2, defaulting to `null`, so an older peer's settings read as having none. Orbit saves it
+with the session and its tasks, and the tasks it queues in a role carry the role's, but it isn't
+passed to agents yet.
+
 `CancelTurn(lane)` stops the work in `lane`, `work` unless given: in the work lane, the task
 run, or its wait to start again, which holds the lane until the user asks for work again; in the
 `planner` lane, the planner's turn. Stopping a lane with nothing running is accepted and does

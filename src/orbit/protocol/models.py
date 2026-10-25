@@ -75,11 +75,17 @@ ToolAccess = Literal["off", "restricted", "full"]
 """
 
 
+Effort = Literal["low", "medium", "high", "xhigh", "max"]
+"""How hard the agent thinks, from ``low`` to ``max``: the levels the Claude CLI offers."""
+
+
 class Settings(_Message):
-    """Per-session agent configuration. ``model=None`` means the backend's default."""
+    """Per-session agent configuration. ``model=None`` means the backend's default, and
+    ``effort=None`` the CLI's."""
 
     model: str | None = None
     tool_access: ToolAccess = "restricted"
+    effort: Effort | None = None
 
 
 class TaskSpec(_Message):

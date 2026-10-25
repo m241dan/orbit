@@ -169,10 +169,14 @@ def test_the_configurator_proposes_checks_without_editing_or_being_verified() ->
     assert "propose_checks" in ORBIT_TOOLS
 
 
-def test_a_roles_settings_are_its_model_and_tool_access() -> None:
-    role = Role(instructions="Do it.", model="opus", tool_access="full")
-    assert role.settings == Settings(model="opus", tool_access="full")
+def test_a_roles_settings_are_its_model_tool_access_and_effort() -> None:
+    role = Role(instructions="Do it.", model="opus", tool_access="full", effort="high")
+    assert role.settings == Settings(model="opus", tool_access="full", effort="high")
     assert BUILT_IN_ROLES["reviewer"].settings == Settings()
+
+
+def test_a_role_leaving_out_effort_has_none() -> None:
+    assert Role(instructions="Do it.").effort is None
 
 
 @pytest.mark.parametrize(("minutes", "seconds"), [(2, 120), (0.5, 30), (None, None)])
@@ -205,6 +209,11 @@ def test_a_role_task_runs_in_the_role_with_its_settings() -> None:
     assert role_task("super-reviewer", reviewer, "Review.") == TaskSpec(
         prompt="Review.", settings=Settings(model="opus"), role="super-reviewer"
     )
+
+
+def test_a_role_task_carries_the_roles_effort() -> None:
+    reviewer = Role(instructions="Review.", effort="xhigh")
+    assert role_task("reviewer", reviewer, "Review.").settings.effort == "xhigh"
 
 
 def test_a_suggested_task_is_a_coders_titled_prompt() -> None:

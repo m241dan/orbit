@@ -10,6 +10,7 @@ from orbit.agent.application.ports import Reply, TreeFailed
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.work_turns import WorkTurns
 from orbit.agent.domain.agent_task import Limits
+from orbit.agent.domain.config import load_config
 from orbit.agent.domain.endings import BUG, CANCELLED, REVIEW_STOPPED_BY_YOU, STOPPED_BY_YOU
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.protocol import (
@@ -39,6 +40,7 @@ from orbit.protocol import (
     TurnEndReason,
 )
 from tests.agent_fakes import (
+    ROLES,
     Call,
     FakeTree,
     ScriptedLauncher,
@@ -140,6 +142,19 @@ async def test_landed_work_is_reviewed_and_suggestions_run_and_are_reviewed_in_t
     assert tree.dropped == ["/work/review-c1", "/work/review-c3"]
     review_launches = [la for la in launcher.launches if la.agent.role == "reviewer"]
     assert [la.cwd for la in review_launches] == ["/work/review-c1", "/work/review-c3"]
+
+
+async def test_a_review_is_queued_with_the_effort_the_reviewer_role_sets() -> None:
+    roles = load_config({"roles": {"reviewer": {"effort": "high"}}}, ROLES).roles
+    session, _, _ = session_for(
+        claims_done, reviewers=(suggests(),), tree=FakeTree(), review=True, roles=roles
+    )
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    [review] = [t for t in board(events) if t.task.role == "reviewer"]
+    assert review.task.settings.effort == "high"
+    [coder] = [t for t in board(events) if t.task.role == "coder"]
+    assert coder.task.settings.effort is None
 
 
 async def test_review_pauses_after_the_last_round_and_says_so() -> None:

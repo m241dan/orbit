@@ -106,7 +106,7 @@ from orbit.protocol import (
 )
 
 WHEN = datetime(2026, 10, 18, 9, 30, tzinfo=UTC)
-SETTINGS = Settings(model="opus", tool_access="full")
+SETTINGS = Settings(model="opus", tool_access="full", effort="high")
 SPEC = TaskSpec(prompt="Fix the bug", settings=SETTINGS, role="reviewer")
 USAGE = Usage(
     input_tokens=10,

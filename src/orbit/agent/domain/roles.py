@@ -6,9 +6,10 @@ The built-in roles aren't kept here: whoever builds them passes in the contents 
 
 A role says what an agent is told about its job, which of orbit's tools it may call, whether its
 claims of being done are verified, and how long it may take. Its model and tool access are the
-defaults for tasks orbit queues in that role; a task the user queues keeps its own settings. It
-also says which lane runs it, where it works, whether you talk to it, whether its work merges and
-whether it's enabled, which are checked here but not yet acted on.
+defaults for tasks orbit queues in that role, as is its effort, which is stored with them but not
+yet passed to agents; a task the user queues keeps its own settings. It also says which lane runs
+it, where it works, whether you talk to it, whether its work merges and whether it's enabled,
+which are checked here but not yet acted on.
 """
 
 import re
@@ -33,6 +34,7 @@ from orbit.protocol import (
     CODER,
     CONFIGURATOR,
     TIMED_OUT,
+    Effort,
     Settings,
     TaskSpec,
     ToolAccess,
@@ -103,6 +105,7 @@ class Role(_Config):
     conversation: bool = False
     merge: bool = Field(default_factory=_can_merge)
     enabled: bool = True
+    effort: Effort | None = None
 
     @field_validator("tools")
     @classmethod
@@ -149,7 +152,7 @@ class Role(_Config):
     @property
     def settings(self) -> Settings:
         """The settings of a task orbit queues in this role."""
-        return Settings(model=self.model, tool_access=self.tool_access)
+        return Settings(model=self.model, tool_access=self.tool_access, effort=self.effort)
 
 
 def _unmet(rule: str, needs: Mapping[str, bool]) -> list[str]:

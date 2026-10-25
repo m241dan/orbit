@@ -2259,8 +2259,27 @@
       "type": "object"
     },
     "Settings": {
-      "description": "Per-session agent configuration. ``model=None`` means the backend's default.",
+      "description": "Per-session agent configuration. ``model=None`` means the backend's default, and\n``effort=None`` the CLI's.",
       "properties": {
+        "effort": {
+          "anyOf": [
+            {
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effort"
+        },
         "model": {
           "anyOf": [
             {
@@ -2625,6 +2644,7 @@
         "settings": {
           "$ref": "#/$defs/Settings",
           "default": {
+            "effort": null,
             "model": null,
             "tool_access": "restricted"
           }

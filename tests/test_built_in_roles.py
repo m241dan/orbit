@@ -30,6 +30,7 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "conversation": False,
         "merge": True,
         "enabled": True,
+        "effort": None,
     },
     "reviewer": {
         "model": None,
@@ -42,6 +43,7 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "conversation": False,
         "merge": False,
         "enabled": True,
+        "effort": None,
     },
     "super-reviewer": {
         "model": "opus",
@@ -54,6 +56,7 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "conversation": False,
         "merge": False,
         "enabled": True,
+        "effort": None,
     },
     "planner": {
         "model": None,
@@ -66,6 +69,7 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "conversation": True,
         "merge": False,
         "enabled": True,
+        "effort": None,
     },
     "configurator": {
         "model": None,
@@ -78,10 +82,11 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "conversation": False,
         "merge": False,
         "enabled": True,
+        "effort": None,
     },
 }
-"""Each built-in role's fields but its instructions: those orbit has always had, and where it
-works, which lane runs it, whether you talk to it and whether its work merges."""
+"""Each built-in role's fields but its instructions: those orbit has always had, where it
+works, which lane runs it, whether you talk to it, whether its work merges, and no effort."""
 
 
 def role_directory(tmp_path: Path, roles_toml: str, leave_out: Collection[str] = ()) -> Path:

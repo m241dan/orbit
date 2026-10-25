@@ -12,7 +12,7 @@ from orbit.agent.domain.sessions import (
     parse_review_count,
     record_json,
 )
-from orbit.protocol import Settings, TaskSpec, TaskState, Usage
+from orbit.protocol import Effort, Settings, TaskSpec, TaskState, Usage
 from tests.session_builders import review_count_json
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -23,8 +23,8 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit these for a format change: they're what orbits at versions 1 to 7 wrote, and
-# they still need to read. A new version gets its own fixture (session-v8.json) and a
+# Never edit these for a format change: they're what orbits at versions 1 to 8 wrote, and
+# they still need to read. A new version gets its own fixture (session-v9.json) and a
 # migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
 SESSION_V2 = FIXTURES / "session-v2.json"
@@ -33,6 +33,7 @@ SESSION_V4 = FIXTURES / "session-v4.json"
 SESSION_V5 = FIXTURES / "session-v5.json"
 SESSION_V6 = FIXTURES / "session-v6.json"
 SESSION_V7 = FIXTURES / "session-v7.json"
+SESSION_V8 = FIXTURES / "session-v8.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -146,7 +147,7 @@ def expected(
     lane: LaneSnapshot | None = None,
 ) -> SessionRecord:
     return SessionRecord(
-        version=7,
+        version=8,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
@@ -205,14 +206,37 @@ def telling() -> SessionRecord:
     return suggesting().model_copy(update={"planner_notes": (NOTE,)})
 
 
-def test_a_version_7_session_file_reads_as_its_record() -> None:
+def test_a_version_7_session_file_migrates_to_settings_without_effort() -> None:
     assert parse_record(SESSION_V7.read_text(encoding="utf-8")) == telling()
 
 
-def test_a_session_record_is_written_in_the_version_7_format() -> None:
-    written = json.loads(record_json(telling()))
-    golden = json.loads(SESSION_V7.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V7.name)
+def with_effort(state: TaskState, effort: Effort) -> TaskState:
+    """``state`` with its task's settings asking for ``effort``."""
+    settings = state.task.settings.model_copy(update={"effort": effort})
+    return state.model_copy(update={"task": state.task.model_copy(update={"settings": settings})})
+
+
+def straining() -> SessionRecord:
+    """The golden record as version 8 keeps it, its settings and its first task's with an
+    effort."""
+    record = telling()
+    first, *others = record.tasks
+    return record.model_copy(
+        update={
+            "settings": record.settings.model_copy(update={"effort": "high"}),
+            "tasks": (with_effort(first, "low"), *others),
+        }
+    )
+
+
+def test_a_version_8_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V8.read_text(encoding="utf-8")) == straining()
+
+
+def test_a_session_record_is_written_in_the_version_8_format() -> None:
+    written = json.loads(record_json(straining()))
+    golden = json.loads(SESSION_V8.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V8.name)
 
 
 def test_a_version_1_review_count_reads_as_its_count() -> None:

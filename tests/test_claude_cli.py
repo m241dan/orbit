@@ -711,6 +711,14 @@ async def test_agents_keep_tool_access_flags_and_orbit_tools(tmp_path: Path) -> 
     assert argv[argv.index("--allowedTools") + 1].startswith("mcp__orbit__get_task")
 
 
+async def test_an_agents_effort_leaves_its_launch_unchanged(tmp_path: Path) -> None:
+    runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
+    await run_agent(runner, Settings(model="opus", tool_access="full"))
+    await run_agent(runner, Settings(model="opus", tool_access="full", effort="max"))
+    plain, effortful = calls(scenario)
+    assert (effortful["argv"], effortful["env"]) == (plain["argv"], plain["env"])
+
+
 async def test_each_agent_run_is_a_fresh_session(tmp_path: Path) -> None:
     runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
     await run_agent(runner)

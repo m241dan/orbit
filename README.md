@@ -997,8 +997,8 @@ none names changes nothing; one that's missing or can't be read is refused, nami
 the role.
 
 A role also says which lane runs it, where it works, whether you talk to it, whether its work
-merges and whether it's enabled. These fields are **accepted now; take effect in a later
-version**: orbit loads and checks them, but nothing acts on them yet.
+merges, whether it's enabled and how hard its agents think. These fields are **accepted now; take
+effect in a later version**: orbit loads and checks them, but nothing acts on them yet.
 
 - `lane`: the lane that runs the role's agents, a plain name of letters, digits, `-` and `_`. Each
   lane runs one agent at a time, beside the others.
@@ -1009,10 +1009,15 @@ version**: orbit loads and checks them, but nothing acts on them yet.
   taking tasks.
 - `merge`: whether its finished work is committed and merged.
 - `enabled`: whether it runs at all.
+- `effort`: how hard its agents think: `low`, `medium`, `high`, `xhigh` or `max`, the levels
+  `claude --help` lists; any other value is refused, listing those. Left out, the CLI's default.
+  Like its model and tool access, it's the default for tasks orbit queues in the role, and is
+  saved with them and the session, but isn't passed to agents yet.
 
 The `coder` works in lane `work` in a `worktree` and merges; the `configurator` works in `work` in
 a `worktree` and doesn't merge; the `reviewer` and `super-reviewer` work in `review` on a
-`snapshot`; the `planner` works in `planner` in your `checkout`, in conversation; all are enabled.
+`snapshot`; the `planner` works in `planner` in your `checkout`, in conversation; all are enabled,
+and none sets an effort.
 A role whose fields don't go together is refused, naming the role and the rule: `merge = true`
 needs `workspace = "worktree"` and `verify = true`; `workspace = "checkout"` can't have
 `tool_access = "full"`, as the agent could edit your tree; `conversation = true` needs
@@ -1032,8 +1037,8 @@ A project can change these, orbit's limits, its verification steps (see
 `.orbit/config.toml`. A role it names that's built in keeps the fields it doesn't set; any other
 name adds a role, which must set `instructions` and otherwise gets `get_task`, `complete_task`,
 `report_progress` and `give_up` as its tools, `restricted` tool access, the default model, its
-claims verified, no time limit, and the coder's lane `work`, `worktree`, no conversation and
-enabled. It merges if it can, being verified and in a worktree; one with `verify = false` or
+claims verified, no time limit, the coder's lane `work`, `worktree`, no conversation and
+enabled, and no effort. It merges if it can, being verified and in a worktree; one with `verify = false` or
 another workspace doesn't merge, and can't be made to. Every other field is optional:
 
 ```toml

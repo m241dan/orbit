@@ -43,8 +43,10 @@ one row per workspace, or anything from `.orbit/config.toml`, which is read at s
   or you prompt the planner. Starting orbit and quitting leaves nothing behind.
 - **Format.** Each record carries a format version. Older versions are upgraded as they're read
   (version 2 added what the session spent, version 3 dropped the review planner's rounds,
-  version 4 added why each task ended badly, version 5 the tasks each review reviews, and
-  version 6 the titles the review planner has suggested); a newer one, or a record that isn't
+  version 4 added why each task ended badly, version 5 the tasks each review reviews,
+  version 6 the titles the review planner has suggested, version 7 the notes the planner is
+  still to hear, and version 8 the effort in the session's and its tasks' settings, which a
+  record of an older version reads as unset); a newer one, or a record that isn't
   valid JSON or doesn't fit the record, is unreadable. Records are kept as raw JSON text in their `sessions`
   row, so an unreadable one stays as it was: it is listed with the reason, can be deleted, and is
   never opened, renamed or overwritten.
@@ -66,8 +68,8 @@ one row per workspace, or anything from `.orbit/config.toml`, which is read at s
 - **Crash recovery.** Tasks saved as running or verifying come back cancelled, so the next run
   picks them up again, and orbit says how many. An interrupted review ends as a cancelled one
   does: if its batch is then due a review, one is queued for the next run.
-- **Settings.** A session's saved model and tool access come back when it opens, except those
-  given on the command line with `--model` or `--tools`, which hold for the whole run.
+- **Settings.** A session's saved model, tool access and effort come back when it opens, except
+  those given on the command line with `--model` or `--tools`, which hold for the whole run.
 - **Layers.** The domain module holds the rules (the record and its format, summaries, when a
   session may be opened, renamed or deleted, crash recovery) without I/O. The application's
   `SessionKeeper` decides when to save and drives switches through the `SessionStore` port, and
