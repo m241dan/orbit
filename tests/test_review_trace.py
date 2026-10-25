@@ -33,6 +33,7 @@ from tests.agent_fakes import (
     ScriptedLauncher,
     claims_done,
     close,
+    gives_up,
     host_of,
     lane_of,
     send,
@@ -41,6 +42,7 @@ from tests.agent_fakes import (
     suggests,
 )
 from tests.telemetry_helpers import Traced, linked_to, trace_id
+from tests.waiting import eventually
 
 REVIEW_COST = Usage(
     input_tokens=10,
@@ -150,6 +152,68 @@ async def test_a_batch_review_links_to_the_task_whose_landing_finished_the_batch
     assert linked_to(batch_review, task_span(traced, "3"))
     assert attributes(batch_review)["orbit.review.round"] == 1
     assert attributes(batch_review)["orbit.review.batch"] == "batch-2"
+
+
+async def test_a_batch_review_links_to_the_task_whose_ending_without_a_commit_finished_it() -> None:
+    traced = Traced()
+    plane, _ = traced_plane(
+        traced,
+        claims_done,
+        claims_done,
+        gives_up,
+        reviewers=(suggests("Add tests", "Rename x"), suggests()),
+    )
+    await reviewed(plane, FLAG)
+    await close(plane)
+
+    batch_review = reviews(traced)[1]
+    assert linked_to(batch_review, task_span(traced, "4"))
+    assert attributes(batch_review)["orbit.review.round"] == 1
+
+
+async def test_a_batch_review_links_to_the_review_whose_end_finished_the_batch() -> None:
+    traced, suggested = Traced(), asyncio.Event()
+    planes: list[ControlPlane] = []
+
+    async def waits_for_suggestion(call: Call) -> TurnEndReason:
+        await suggested.wait()
+        return await claims_done(call)
+
+    async def suggests_and_waits_for_it_to_land(call: Call) -> TurnEndReason:
+        await call("get_task")
+        await call("suggest_task", title="Add tests", prompt="Please add tests.")
+        suggested.set()
+        planner = lane_of(host_of(planes[0])).planner
+        await eventually(lambda: "4" in planner.snapshot().batches["batch-1"].finished)
+        await call("complete_task", summary="Reviewed")
+        return "completed"
+
+    plane, _ = traced_plane(
+        traced,
+        claims_done,
+        waits_for_suggestion,
+        claims_done,
+        reviewers=(suggests_and_waits_for_it_to_land, suggests(), suggests()),
+    )
+    planes.append(plane)
+    await reviewed(plane, FLAG, TaskSpec(prompt="Rename x."))
+    await close(plane)
+
+    first, *rest = reviews(traced)
+    [batch_review] = [span for span in rest if attributes(span)["orbit.review.round"] == 1]
+    assert attributes(first)["orbit.review.batch"] == "batch-1"
+    assert linked_to(batch_review, first)
+
+
+async def test_a_reviewer_that_gives_up_records_it_on_its_review() -> None:
+    traced = Traced()
+    plane, _ = traced_plane(traced, claims_done, reviewers=(gives_up,))
+    await reviewed(plane, FLAG)
+    await close(plane)
+
+    [review] = reviews(traced)
+    assert [event.name for event in review.events] == ["orbit.task.gave_up"]
+    assert not task_span(traced, "1").events
 
 
 async def test_a_review_that_ran_leaves_the_lane_holding_nothing_of_what_queued_it() -> None:
