@@ -347,6 +347,31 @@ async def test_removing_the_only_waiting_task_leaves_the_line_at_once() -> None:
     await plane.close()
 
 
+async def test_a_slotless_task_put_ahead_of_a_waiting_one_runs_at_once() -> None:
+    gates = Gates()
+    a, _ = agent_workspace("a", gates.script("a1"))
+    b, _ = agent_workspace("b", gates.script("b2"), reviewers=(gates.script("review"),))
+    plane = capped(1, a, b)
+    in_a, in_b = await joined(plane, host=a), await joined(plane, host=b)
+    await runs(in_a, task())
+    await gates.until_started("a1")
+    await runs(in_b, task("First."), task("Second."))
+    await eventually(lambda: b.activity.waiting_for_coder == 1)
+    await say(in_b, "edit", EditTask(task_id="1", task=task("Review it.", REVIEWER)))
+
+    await gates.until_started("a1", "review")
+    assert b.activity.waiting_for_coder is None
+    assert plane.coders_running == 1
+    gates.let("review")
+    await eventually(lambda: b.activity.waiting_for_coder == 1)
+    gates.let("a1")
+    await gates.until_started("a1", "review", "b2")
+    gates.let("b2")
+    await asyncio.wait_for(idle(in_b), 5)
+    assert plane.coders_running == 0
+    await plane.close()
+
+
 async def test_a_coder_task_put_ahead_of_a_waiting_one_runs_on_its_turn() -> None:
     gates = Gates()
     a, _ = agent_workspace("a", gates.script("a1"))
