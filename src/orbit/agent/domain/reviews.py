@@ -203,6 +203,11 @@ class ReviewPlanner:
         """The tasks ``job``'s review may suggest."""
         return self.limits.super_suggestions if job.whole else self.limits.suggestions
 
+    def cap_of(self, batch: str) -> int:
+        """The tasks the review behind open ``batch`` may suggest, as capped when it opened;
+        it's only asked about open batches."""
+        return self._open[batch].cap
+
     def open_batch(self, job: ReviewJob) -> str:
         """Start the batch for ``job``'s suggestions; returns its id."""
         batch = f"batch-{self._next_batch}"

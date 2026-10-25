@@ -6,8 +6,9 @@ review is due and stops reviews generating work forever.
 """
 
 import asyncio
-from collections.abc import Awaitable, Callable, Collection
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Collection, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from functools import partial
 
 from orbit.agent.application.agent_run import AgentRun
@@ -15,6 +16,7 @@ from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import Background, SessionGate
 from orbit.agent.application.outcomes import Outcome, UserStop, cancelling, run_task_to_end
 from orbit.agent.application.ports import CoderTree, Reply, TreeFailed
+from orbit.agent.application.review_trace import Queued, ReviewTally, ReviewTracing
 from orbit.agent.application.snapshots import snapshot_of
 from orbit.agent.application.tasks import Changed, Tasks
 from orbit.agent.domain.board import TaskBoard
@@ -37,25 +39,32 @@ from orbit.protocol import (
     ReviewStatus,
     TaskState,
 )
+from orbit.tracing import Span, current_span
 
 
 @dataclass(frozen=True)
 class ReviewHooks:
     """How the review lane reaches the rest of the session.
 
-    ``wake_work`` asks the work lane to run the suggestions a review queued, ``changed`` is
-    called after the lane's state may have changed, and the session's ``gate`` tells whether
-    another orbit owns the repository or the session is halted, when no review starts.
+    ``wake_work`` asks the work lane to run the suggestions a review queued, while the
+    review's span is current, ``changed`` is called after the lane's state may have changed,
+    the session's ``gate`` tells whether another orbit owns the repository or the session is
+    halted, when no review starts, and ``tracing`` traces the reviews.
     """
 
     wake_work: Callable[[], Awaitable[None]]
     changed: Changed
     gate: SessionGate
+    tracing: ReviewTracing = field(default_factory=ReviewTracing)
 
 
 class ReviewLane:
     """Queues and runs reviews of ``tasks``' tasks through ``desk``'s agents, reaching the rest
-    of the session through ``hooks``."""
+    of the session through ``hooks``.
+
+    Each review is traced from its start until it's followed up, linked to the span current as
+    it was queued: the task whose landing, or ending, made it due, the command asking for it,
+    or the review whose end did."""
 
     def __init__(
         self, desk: AgentDesk, tasks: Tasks, planner: ReviewPlanner, hooks: ReviewHooks
@@ -70,6 +79,9 @@ class ReviewLane:
         self._publish = desk.publish
         self._jobs: dict[str, ReviewJob] = {}  # Review task id -> what it reviews.
         self._batches: dict[str, str] = {}  # Review task id -> the batch it suggests into.
+        # Review task id -> the span current as it was queued, this time the session was open.
+        self._causes: dict[str, Span] = {}
+        self._tallies: dict[str, ReviewTally] = {}  # Review task id -> its suggestions, as it runs.
         self._background = Background("review", desk.publish)
         self._current: tuple[str, asyncio.Task[Outcome]] | None = None  # The review running.
         self._reviewing: str | None = None  # The review task running, until it's followed up.
@@ -106,6 +118,7 @@ class ReviewLane:
         """Replace the lane's state with ``snapshot``'s; :meth:`end_interrupted` follows."""
         self.planner.restore(snapshot.planner)
         self._jobs, self._batches = dict(snapshot.jobs), dict(snapshot.batches)
+        self._causes.clear()  # The session's task ids are reused by the next.
         self._status = self.status  # The switch's snapshot shows the restored status,
         self._paused_noted = False  # but a pause is news.
 
@@ -157,6 +170,7 @@ class ReviewLane:
             await self._queue(self.planner.removed(state))
             return
         del self._jobs[task_id]
+        self._causes.pop(task_id, None)
         open_batch = batch in self.planner.open_batches
         await self._queue(self.planner.review_ended(batch) if open_batch else None)
 
@@ -172,7 +186,17 @@ class ReviewLane:
             self.planner.added(batch, task_id)
 
     async def suggest(self, task_id: str, title: str, prompt: str) -> Reply:
-        """Review task ``task_id`` suggests a task; queue it unless it's refused."""
+        """Review task ``task_id`` suggests a task; queue it unless it's refused, counting it on
+        the review's span either way."""
+        # Taken now: the review may end as the suggestion is queued. One ended counts no more.
+        tally = self._tallies.get(task_id, ReviewTally())
+        reply = await self._suggestion(task_id, title, prompt)
+        tally.count(refused=reply.is_error)
+        return reply
+
+    async def _suggestion(self, task_id: str, title: str, prompt: str) -> Reply:
+        """What review task ``task_id`` suggesting a task titled ``title`` comes to: queued, or
+        refused."""
         batch = self._batches.get(task_id)
         if batch is None:
             return Reply("Only reviews orbit queued itself can suggest tasks.", is_error=True)
@@ -251,10 +275,12 @@ class ReviewLane:
         pending = pending_titles(self._board.tasks)
         prompt = review_prompt(job, diff, self.planner.cap(job), pending)
         task = role_task(role, self._desk.agents.roles[role], prompt)
+        cause = current_span()  # What queued the review, which its span links to.
 
         def add(board: TaskBoard) -> None:
             task_id = board.add_review(task)
             self._jobs[task_id], self._batches[task_id] = job, batch
+            self._causes[task_id] = cause
 
         return add
 
@@ -301,10 +327,32 @@ class ReviewLane:
         # Only :meth:`cancel`, which the user asks for, stops a review on its own.
         run = partial(self._reviewed, task_id)
         stop = UserStop(REVIEW_STOPPED_BY_YOU)
-        try:  # Even a bug ends the review, or its batch would stay open.
-            await run_task_to_end(self._tasks, task_id, run, stop, self._publish)
-        finally:
-            await self._ended(task_id)
+        with self._traced(task_id):
+            try:  # Even a bug ends the review, or its batch would stay open.
+                await run_task_to_end(self._tasks, task_id, run, stop, self._publish)
+            finally:
+                await self._ended(task_id)
+
+    @contextmanager
+    def _traced(self, task_id: str) -> Iterator[None]:
+        """Trace review ``task_id`` over the block, its span current, tallying its
+        suggestions."""
+        tracing = self._hooks.tracing
+        with tracing.review(self._board, task_id, self._queued(task_id)) as tally:
+            self._tallies[task_id] = tally
+            try:
+                yield
+            finally:
+                del self._tallies[task_id]
+
+    def _queued(self, task_id: str) -> Queued | None:
+        """What orbit queued review ``task_id`` for; none if the user queued it. A review orbit
+        queued only runs while its batch is open."""
+        job = self._jobs.get(task_id)
+        if job is None:
+            return None
+        batch = self._batches[task_id]
+        return Queued(job, batch, self.planner.cap_of(batch), self._causes.get(task_id))
 
     async def _ended(self, task_id: str) -> None:
         """The review of ``task_id`` ended: go on as :meth:`_after` says, unless the lane is
@@ -334,7 +382,8 @@ class ReviewLane:
             return await run(None, root)
 
     async def _after(self, batch: str | None) -> None:
-        """A review ended: review its batch if that's done, else run the suggestions it made."""
+        """A review ended: review its batch if that's done, else run the suggestions it made;
+        either links to the review's span, the current one."""
         if batch is None:
             return
         await self._queue(self.planner.review_ended(batch))

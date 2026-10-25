@@ -43,6 +43,7 @@ from orbit.protocol import (
     TaskSpec,
     UpdateSettings,
 )
+from orbit.tracing import NoSpan, Span, current_span, use_span
 from tests.agent_fakes import (
     FakeTree,
     desk_for,
@@ -63,6 +64,7 @@ class Recorded:
 
     effects: list[Event | str] = field(default_factory=list)
     meanwhile: Callable[[], None] | None = None
+    causes: list[Span] = field(default_factory=list)  # The span current as each run was asked.
 
     async def put(self, event: Event) -> None:
         self.effects.append(event)
@@ -98,16 +100,20 @@ def review_lane_for(tasks: Tasks) -> ReviewLane:
 
 class ScriptedTurns(WorkTurns):
     """A work lane whose runs take, in turn, the first of ``outcomes``: raising it, or
-    succeeding for None."""
+    succeeding for None, noting in ``causes`` the span current as each is asked for."""
 
-    def __init__(self, parts: WorkParts, outcomes: list[BaseException | None]) -> None:
+    def __init__(
+        self, parts: WorkParts, outcomes: list[BaseException | None], causes: list[Span]
+    ) -> None:
         super().__init__(parts)
         self.outcomes = outcomes
+        self.causes = causes
 
     def check_run_tasks(self) -> None:
         return None
 
     async def run_tasks(self) -> None:
+        self.causes.append(current_span())
         outcome = self.outcomes.pop(0)
         if outcome is not None:
             raise outcome
@@ -126,7 +132,7 @@ def commands_for(
     tasks = Tasks(TaskBoard(), recorded.put)
     seat = PlannerSeat(None, tasks, events, SeatHooks(recorded.save, lambda: None, tuple))
     work = WorkParts(None, None, tasks, None, None, recorded.put_nowait, OPEN_GATE)
-    turns = WorkTurns(work) if outcomes is None else ScriptedTurns(work, outcomes)
+    turns = WorkTurns(work) if outcomes is None else ScriptedTurns(work, outcomes, recorded.causes)
     parts = CommandParts(
         SessionSettings(Settings()),
         events,
@@ -273,6 +279,18 @@ async def test_a_queued_command_that_fails_reports_an_error_and_the_rest_still_r
     assert recorded.effects == [ErrorOccurred(code=INTERNAL, message=message)]
     assert commands.queued == ()
     assert logged_with_traceback(caplog.records, message)
+
+
+async def test_queued_work_runs_in_the_span_current_as_it_was_queued() -> None:
+    recorded = Recorded()
+    commands, _ = commands_for(recorded, [None, None])
+    queued = [NoSpan("first"), NoSpan("second")]
+    for span in queued:
+        with use_span(span):
+            await commands.handle(RunTasks(), COMMAND_ID)
+    with use_span(NoSpan("owning")):
+        await commands.own(COMMAND_ID)
+    assert recorded.causes == queued
 
 
 async def test_a_queued_command_refused_reports_its_refusal_and_the_rest_still_run() -> None:

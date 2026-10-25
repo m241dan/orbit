@@ -7,7 +7,7 @@ verification and landing, records on it through :func:`current_span`.
 """
 
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
@@ -62,13 +62,15 @@ class TaskTracing:
     session: Callable[[], str] = _no_session
 
     @contextmanager
-    def task(self, board: TaskBoard, task_id: str, model: str | None) -> Iterator[Span]:
+    def task(
+        self, board: TaskBoard, task_id: str, model: str | None, links: Sequence[Span] = ()
+    ) -> Iterator[Span]:
         """Task ``task_id`` of ``board``'s span, on ``model`` if known, current for the block
-        and starting its own trace; on leaving it, it's given the task's usage, status and
-        reason as the board has them, and ended."""
+        and starting its own trace, linked to each of ``links``; on leaving it, it's given the
+        task's usage, status and reason as the board has them, and ended."""
         attributes = self._identity(board.get(task_id), model)
         with no_span():  # So the span starts its own trace.
-            span = self.telemetry.start(TASK_SPAN, attributes)
+            span = self.telemetry.start(TASK_SPAN, attributes, links)
         with span_block(span):
             escaped = True
             try:

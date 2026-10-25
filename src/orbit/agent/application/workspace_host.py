@@ -43,6 +43,7 @@ from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.record_moves import MoveHooks, RecordMoves
 from orbit.agent.application.review_count import ReviewCount
 from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
+from orbit.agent.application.review_trace import ReviewTracing
 from orbit.agent.application.session_state import SessionStates, StateParts
 from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.startup_check import CheckSite, StartupCheck
@@ -741,6 +742,7 @@ class WorkspaceHost:
             lambda: self._turns.wake(),
             self._reviews_changed,
             self._gate,
+            ReviewTracing(self.telemetry, self._workspace_id, lambda: self._keeper.id),
         )
         lane = ReviewLane(desk, self._tasks, planner, hooks)
         desk.suggest = lane.suggest  # Set here, as the lane needs the desk it takes calls from.

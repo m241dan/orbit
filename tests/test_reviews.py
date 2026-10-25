@@ -414,6 +414,15 @@ def test_a_super_reviews_batch_has_its_own_cap() -> None:
     assert refusal is not None and "2 tasks" in refusal
 
 
+def test_a_batchs_cap_is_the_one_it_opened_with_even_once_restored_under_other_limits() -> None:
+    reviews = ReviewPlanner(ReviewLimits(suggestions=1, super_suggestions=2))
+    batch = reviews.open_batch(ReviewJob(commits=("abc",), round=0, batch=None))
+    whole = reviews.open_batch(reviews.super_review("abc"))
+    again = ReviewPlanner(ReviewLimits(suggestions=4, super_suggestions=8))
+    again.restore(reviews.snapshot())
+    assert (again.cap_of(batch), again.cap_of(whole)) == (1, 2)
+
+
 def test_a_super_review_prompt_is_its_title_and_its_limit() -> None:
     job = ReviewJob(commits=("abc1234def",), round=0, batch=None, whole=True)
     prompt = review_prompt(job, "", 10, ())

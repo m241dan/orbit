@@ -45,6 +45,7 @@ from orbit.protocol import (
     TaskStarted,
     TaskState,
 )
+from orbit.tracing import Span, current_span
 
 RunEnd = Literal["finished", "cancelled", "limited", "fix_failed"]
 """Why a run ended: no task was left to run, one was cancelled, an agent hit Claude's usage
@@ -83,7 +84,8 @@ class WorkLane:
     lands. A coder's or configurator's task takes a slot at ``beside``'s coders, waiting in
     line for one, before it starts, and gives it back once it has ended, however it does; the
     user's stop leaves the line. Each task is traced, from before it
-    waits for a slot until its status is final, with ``beside``'s tracing.
+    waits for a slot until its status is final, with ``beside``'s tracing, linked to the span
+    current as its run started: what started the run.
     """
 
     def __init__(
@@ -168,21 +170,23 @@ class WorkLane:
         """Run the tasks waiting, in order but the one the last run stopped at first, until
         none are left, the user stops one, the session halts, which ends it as cancelled, or one
         ends in error for the usage limit or as a fix; returns which. Any other cancel goes on
-        once the task running has ended."""
+        once the task running has ended. Each task's span links to the span current now."""
         self._running, self._stopped = True, False
         try:
-            return await self._run_tasks()
+            return await self._run_tasks(current_span())
         finally:
             self._running = False
 
-    async def _run_tasks(self) -> RunEnd:
-        """Run the tasks waiting, as :meth:`run` does; returns why the run ended."""
+    async def _run_tasks(self, cause: Span) -> RunEnd:
+        """Run the tasks waiting, as :meth:`run` does, their spans linked to ``cause``, what
+        started the run; returns why the run ended."""
         tried: set[str] = set()
         try:
             while (task_id := self.next_work(tried)) is not None:
                 if self._gate.halted():  # It may have halted as the last task ended.
                     return "cancelled"
-                with self._tracing.task(self._board, task_id, self._model(task_id)):
+                model = self._model(task_id)
+                with self._tracing.task(self._board, task_id, model, (cause,)):
                     end = await self._take(task_id, tried)
                 if end is not None:
                     return end

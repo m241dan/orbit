@@ -47,6 +47,7 @@ from orbit.protocol import (
     TaskState,
     UpdateSettings,
 )
+from orbit.tracing import Span, current_span, use_span
 
 WorkCommand = (
     SendMessage
@@ -91,17 +92,19 @@ class CommandParts:
 
 class WorkCommands:
     """Handles the work commands on the session held in ``parts``; while it's read-only, or
-    taking ownership, those that start work are queued, in order, rather than run."""
+    taking ownership, those that start work are queued, in order, rather than run, each later
+    run in the span current as it was queued, its own command's, so what it starts links
+    there."""
 
     def __init__(self, parts: CommandParts) -> None:
         self._parts = parts
-        self._queued: list[QueuedWork] = []
+        self._queued: list[tuple[QueuedWork, Span]] = []  # With the span current as queued.
         self._owning = False  # Taking ownership: queued work hasn't all run yet.
 
     @property
     def queued(self) -> tuple[QueuedWork, ...]:
         """The commands queued while read-only, oldest first."""
-        return tuple(self._queued)
+        return tuple(command for command, _ in self._queued)
 
     def drop_queued(self) -> int:
         """Drop the commands queued while read-only, as the session they were asked in was
@@ -117,7 +120,7 @@ class WorkCommands:
         queueing = self._owning or self._parts.gate.read_only()
         if queueing and isinstance(command, QueuedWork):
             self._check(command)
-            self._queued.append(command)
+            self._queued.append((command, current_span()))
             return
         if self._queued:
             self.taking()  # Work sent meanwhile queues behind what's left.
@@ -141,7 +144,9 @@ class WorkCommands:
         next command once owning runs them."""
         try:
             while self._queued:
-                await self._run_queued(self._queued.pop(0), command_id)
+                command, cause = self._queued.pop(0)
+                with use_span(cause):
+                    await self._run_queued(command, command_id)
         finally:
             self.taken()
 

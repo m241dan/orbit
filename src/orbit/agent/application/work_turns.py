@@ -1,6 +1,7 @@
 """When the work lane runs: on the user's asking, after a review queues work unless the user
 held it or the session halted, first for a configurator, and again by itself once Claude's
-usage limit that stopped it resets."""
+usage limit that stopped it resets. A run remembers what started it, which its tasks' spans
+link to."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
@@ -32,6 +33,7 @@ from orbit.protocol import (
     TaskSpec,
     UsageChanged,
 )
+from orbit.tracing import Span, current_span, use_span
 
 NO_AGENTS_MESSAGE = "Tasks need agents, and none are set up."
 NO_VERIFY_MESSAGE = "Setting up checks needs verification on; orbit was started with --no-verify."
@@ -66,6 +68,10 @@ class WorkTurns:
     work, sets up checks or holds it first, or :meth:`forget_wait` is called as the session is
     left; a halt's :meth:`stop_turn` keeps the wait, and one ending while halted starts the run
     once :meth:`lifted` is called. Once :meth:`close` is called, nothing starts.
+
+    A run is started by the span current as it's asked for: the command's asking for it, or the
+    review's whose suggestions it runs. The run keeps that span when it starts again by itself,
+    and its tasks' spans link to it.
     """
 
     def __init__(self, parts: WorkParts) -> None:
@@ -77,7 +83,8 @@ class WorkTurns:
         # A run the usage limit stopped waits here to start again.
         self._wait = Background(WORK_LANE, _posting(parts.post))
         self._waiting = False  # The wait hasn't ended yet.
-        self._due = False  # Its wait ended while the session was halted.
+        # What started the run whose wait ended while the session was halted, if one did.
+        self._due: Span | None = None
 
     @property
     def running(self) -> bool:
@@ -129,15 +136,15 @@ class WorkTurns:
                 self._turns.cancel()  # The turn hasn't begun its run, so nothing is left to end.
 
     async def wake(self) -> None:
-        """Run the work a review queued, unless something runs, the user cancelled or the
-        session is halted."""
-        await self._start(asked=False)
+        """Run the work a review queued, started by the review's span, the current one, unless
+        something runs, the user cancelled or the session is halted."""
+        await self._start(current_span(), asked=False)
 
     def forget_wait(self) -> bool:
         """Cancel the wait to start again of a run the usage limit stopped, or its start once a
         halt lifts; returns whether there was one."""
         waiting, self._waiting = self._waiting, False
-        due, self._due = self._due, False
+        due, self._due = self._due is not None, None
         self._wait.cancel()
         return due or waiting
 
@@ -149,9 +156,9 @@ class WorkTurns:
     async def lifted(self) -> None:
         """Start the run again whose wait ended while the session was halted, now the halt is
         lifted."""
-        if self._due:
-            self._due = False
-            await self._start_now()
+        cause, self._due = self._due, None
+        if cause is not None:
+            await self._start_now(cause)
 
     async def close(self) -> None:
         """Cancel the run, if any, or its wait to start again, wait for it to end, and start
@@ -170,21 +177,21 @@ class WorkTurns:
         return self._held or self.running or self._waiting or self._parts.gate.halted()
 
     async def _start_asked(self) -> None:
-        """Start a run the user asked for: drop the wait to start again of a run the usage limit
-        stopped, which this run replaces, run the reviews waiting, and start the work lane's
-        turn, lifting a hold."""
+        """Start a run the user asked for, started by the span current, the command's: drop the
+        wait to start again of a run the usage limit stopped, which this run replaces, run the
+        reviews waiting, and start the work lane's turn, lifting a hold."""
         self.forget_wait()
         if self._parts.lane is not None:
             self._parts.lane.kick()
-        await self._start(asked=True)
+        await self._start(current_span(), asked=True)
 
-    async def _start(self, *, asked: bool) -> None:
-        """Start the work lane's turn if there is work, unless closed. The user ``asked`` lifts a
-        hold, and a halt or a run already running refuses them; otherwise a hold, a running run
-        or a halt keeps it waiting."""
+    async def _start(self, cause: Span, *, asked: bool) -> None:
+        """Start the work lane's turn, started by ``cause``, if there is work, unless closed.
+        The user ``asked`` lifts a hold, and a halt or a run already running refuses them;
+        otherwise a hold, a running run or a halt keeps it waiting."""
         work = self._startable(asked=asked)
         if work is not None:
-            await self._turns.start(self._run(work))
+            await self._turns.start(self._run(work, cause))
 
     def _startable(self, *, asked: bool) -> WorkLane | None:
         """The work lane, if :meth:`_start` would start its turn now; the user ``asked`` lifts a
@@ -201,24 +208,28 @@ class WorkTurns:
             return None
         return work if work.next_work() is not None else None
 
-    async def _run(self, work: WorkLane) -> None:
-        """Run ``work``'s tasks, then, if the usage limit stopped them, wait to start again."""
-        if await work.run() == "limited":
-            self._wait_for_reset()
+    async def _run(self, work: WorkLane, cause: Span) -> None:
+        """Run ``work``'s tasks, their spans linked to ``cause``, what started the run, then, if
+        the usage limit stopped them, wait to start again."""
+        with use_span(cause):
+            end = await work.run()
+        if end == "limited":
+            self._wait_for_reset(cause)
 
-    def _wait_for_reset(self) -> None:
-        """Say when the run the usage limit stopped starts again, and start it then."""
+    def _wait_for_reset(self, cause: Span) -> None:
+        """Say when the run the usage limit stopped, started by ``cause``, starts again, and
+        start it then."""
         pause = self._pause
         at = resume_time(self._parts.usage(), pause.now(), pause.waits)
         self._parts.post(Notice(message=paused_note(at)))
         stopped = self._turns.turn
         assert stopped is not None  # This runs as the turn stopped.
         self._waiting = True
-        self._wait.start(self._start_again(stopped, at))
+        self._wait.start(self._start_again(stopped, at, cause))
 
-    async def _start_again(self, stopped: asyncio.Task[object], at: datetime) -> None:
-        """Once the ``stopped`` turn has ended, wait until ``at``, then start the run again, or
-        once the halt lifts if the session is halted then."""
+    async def _start_again(self, stopped: asyncio.Task[object], at: datetime, cause: Span) -> None:
+        """Once the ``stopped`` turn has ended, wait until ``at``, then start the run, started by
+        ``cause``, again, or once the halt lifts if the session is halted then."""
         try:
             await asyncio.wait([stopped])
             pause = self._pause
@@ -228,18 +239,18 @@ class WorkTurns:
             raise
         self._waiting = False
         if self._parts.gate.halted():
-            self._due = True
+            self._due = cause
             return
-        await self._start_now()
+        await self._start_now(cause)
 
-    async def _start_now(self) -> None:
-        """Start the run the usage limit stopped again, if nothing keeps it waiting and work is
-        left, and say so."""
+    async def _start_now(self, cause: Span) -> None:
+        """Start the run the usage limit stopped, started by ``cause``, again, if nothing keeps
+        it waiting and work is left, and say so."""
         work = self._startable(asked=False)
         if work is None:
             return
         self._parts.post(Notice(message=RESUMING_NOTE))
-        await self._turns.start(self._run(work))
+        await self._turns.start(self._run(work, cause))
 
     @property
     def _pause(self) -> LimitPause:

@@ -15,8 +15,9 @@ line the task list shows.
 
 One span for each run of a task through the work lane, from when the task is ready to run (before
 any wait for a coder's slot) until its status is final, after its work is merged. Each starts its
-own trace: it's a root span. A task run again, such as after the usage limit stopped it, has a
-span for each run; a fix task queued after verification fails has its own.
+own trace: it's a root span, linked to the span that started its run (see **Links**). A task run
+again, such as after the usage limit stopped it, has a span for each run; a fix task queued after
+verification fails has its own.
 
 | Attribute | Type | Meaning |
 | --- | --- | --- |
@@ -145,6 +146,66 @@ cancelled before it finished.
 A turn that fails, such as by running out of the planner role's time, or that the CLI reports an
 error for has the span's error status with the error's message; a failure also records an
 `exception` event.
+
+## Reviews
+
+### `orbit.review`
+
+One span for each review the review lane runs, a reviewer's or a super reviewer's, from when it
+starts until it's followed up: its batch's review queued, if that's due, or the work lane asked
+to run its suggestions. Each starts its own trace: it's a root span, linked to what queued it (see
+**Links**). The span is current while the review runs and is followed up.
+
+| Attribute | Type | Meaning |
+| --- | --- | --- |
+| `orbit.workspace.id` | string | The workspace's id (`unregistered` for one no store registers). |
+| `orbit.session.id` | string | The id of the session open as the review started. |
+| `orbit.role` | string | The review's role: `reviewer`, or `super-reviewer` for a super review. |
+| `orbit.review.commits` | int | How many commits the review reads: 1 for a commit's own review or a super review (of the codebase at one commit), the batch's for a batch's review. |
+| `orbit.review.round` | int | The round of the work reviewed: 0 for a commit of the user's or the planner's task, and for a super review; one more for each round of review-suggested work. |
+| `orbit.review.batch` | string | The batch the review's suggestions join, such as `batch-2`. |
+| `orbit.review.cap` | int | The most suggestions the review may make. |
+| `orbit.review.suggestions` | int | How many of the review's suggestions were queued as tasks. |
+| `orbit.review.refused` | int | How many were refused: over the cap, repeating a task or an earlier suggestion, once the review's batch was closed, or made by a review the user queued, which can't suggest. |
+| `gen_ai.usage.input_tokens` | int | Input tokens over every turn of the review's agent. |
+| `gen_ai.usage.output_tokens` | int | Output tokens over those turns. |
+| `gen_ai.usage.cache_creation.input_tokens` | int | Input tokens written to the cache over those turns. |
+| `gen_ai.usage.cache_read.input_tokens` | int | Input tokens read from the cache over those turns. |
+| `orbit.cost.usd` | double | What those turns cost, in US dollars. |
+
+A review the user queued, rather than orbit, reviews no particular commits: it has no
+`orbit.review.commits`, `orbit.review.round`, `orbit.review.batch` or `orbit.review.cap`. The
+usage is the task list's as the span ends; a review removed from it by then has none.
+
+A review that ends in error, or whose run breaks on a bug, has the span's error status with its
+reason as the message, and an `exception` event with that message.
+
+Events:
+
+| Event | Attributes | Meaning |
+| --- | --- | --- |
+| `orbit.task.gave_up` | | The review's agent gave up. |
+| `exception` | `exception.type`, `exception.message` | The review ended in error. |
+
+## Links
+
+Work that runs on in the background starts its own trace and links to the span that started it,
+so no trace stays open for hours while each can still be followed back to its cause.
+
+- Each `orbit.task` span links to the span that started its run: the `orbit.command` span of the
+  `RunTasks` asking for it, or of the `FireTrigger` queueing a configurator, or the
+  `orbit.review` span of the review whose suggestions the run was started for. A run the usage
+  limit stopped keeps its link when it starts again by itself, at the reset or once a halt
+  lifts; work asked for while another orbit owned the repository, and run once this one owns it,
+  links to its own command's span. A run started outside any span has no link; `orbit.trigger`
+  still says who queued each task.
+- Each `orbit.review` span links to the span current as orbit queued the review: the
+  `orbit.task` span of the task whose landing made it due (a commit's own review, or a batch's
+  once its last task landed) or whose ending without a commit finished its batch; for a super
+  review, the `orbit.command` span of the `FireTrigger` asking for it, or the `orbit.task` span of
+  the landing whose count made it due; or the `orbit.review` span of the review whose end
+  finished its batch. A review the user queued, and one queued before the session was last
+  opened, has no link.
 
 ## Trace context
 

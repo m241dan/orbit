@@ -1363,7 +1363,7 @@ SETTLING = 10
 
 
 async def settle(
-    session: WorkspaceHost,
+    session: Backend,
     events: list[Event] | None = None,
     until: Callable[[list[Event]], bool] | None = None,
 ) -> list[Event]:

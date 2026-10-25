@@ -1775,8 +1775,16 @@ client that sent it and whether it was accepted or refused, with the code; it's 
 span whose trace context its envelope carries, if any, else it starts its own trace, and the
 events it publishes carry its own. Each planner turn is one span, `orbit.planner.turn`, a child of
 the `SendMessage` command's: the workspace, session and model, what the turn cost, the drafts it
-proposed and how it ended. Spans hold no prompts, agent messages, diffs or check output.
-[docs/telemetry.md](docs/telemetry.md) lists every span, attribute and event.
+proposed and how it ended. Each review, a reviewer's or a super reviewer's, is one span,
+`orbit.review`, starting its own trace: the commits, round and batch it reviewed, its cap, the
+suggestions it made and had refused, and what it cost. Work that runs on in the background links
+to what started it rather than nesting under it: each task's span links to the `RunTasks` (or,
+for a configurator, `FireTrigger`) command that started its run, or to the review whose
+suggestions it runs, and keeps that link when a run the usage limit stopped starts again; each
+review's links to the task whose landing made it due, or, for a super review, to the
+`FireTrigger` command or the landing that called for it. Spans hold no prompts, agent messages,
+diffs or check output. [docs/telemetry.md](docs/telemetry.md) lists every span, attribute, event
+and link.
 
 The TUI traces what the user does: each action that sends commands, such as pressing ctrl+r or
 picking a session, is one span, `orbit.tui.action`, with `orbit.action` naming it (`run_tasks`,
@@ -1889,12 +1897,14 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     configurator, and again by itself once the usage limit that stopped it resets, timed by a
     `LimitPause` (in `limit_pause`); each coder's task takes one of the control plane's
     `CoderSlots` (in `coder_slots`) first, and each is traced as an `orbit.task` span by
-    `TaskTracing` (in `task_trace`), current while it runs so what runs it records on it.
+    `TaskTracing` (in `task_trace`), current while it runs so what runs it records on it, and
+    linked to the span that started its run, which `WorkTurns` keeps for the run.
     `AgentRun` (in `agent_run`) sees one task through one agent, and a
     `ProposalTrial` (in `proposal_trial`) tries the checks a configurator proposes and has the
     user decide on them; `AgentDesk` (in `desk`) launches agents and routes their calls by token;
     `Verifier` (in `verifier`) runs the steps; `Lander` (in `landing`) commits and merges
-    verified work; `ReviewLane` (in `review_lane`) runs reviews beside the work; `StartupCheck`
+    verified work; `ReviewLane` (in `review_lane`) runs reviews beside the work, each traced as
+    an `orbit.review` span by `ReviewTracing` (in `review_trace`); `StartupCheck`
     (in `startup_check`) runs the steps once on the base commit as orbit starts; `UsageMonitor`
     (in `usage_monitor`) fetches the usage limits on a schedule and after an agent's turn; these
     three run their work through `Background` (in `lanes`), which reports a crash rather than

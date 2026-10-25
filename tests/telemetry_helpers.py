@@ -4,6 +4,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
+from orbit.agent.application.command_trace import COMMAND_SPAN
 from orbit.telemetry.otel import OtelTelemetry, otel_telemetry
 
 
@@ -29,6 +30,26 @@ class Traced:
         """The one task's span."""
         [task] = self.spans("orbit.task")
         return task
+
+    def command(self, kind: str) -> ReadableSpan:
+        """The one ``orbit.command`` span of a command of type ``kind``."""
+        commands = self.spans(COMMAND_SPAN)
+        [span] = [
+            span for span in commands if (span.attributes or {})["orbit.command.type"] == kind
+        ]
+        return span
+
+
+def linked_to(span: ReadableSpan, target: ReadableSpan) -> bool:
+    """Whether ``span`` links to ``target``, and to nothing else."""
+    assert target.context is not None
+    return [link.context.span_id for link in span.links] == [target.context.span_id]
+
+
+def trace_id(span: ReadableSpan) -> int:
+    """The id of ``span``'s trace."""
+    assert span.context is not None
+    return int(span.context.trace_id)
 
 
 def traceparent_of(span: ReadableSpan) -> str:
