@@ -38,7 +38,9 @@ _QUOTES = ('"""', "'''")
 @dataclass(frozen=True)
 class Additions:
     """What an update added to a file: ``keys``, by the header of the table they were added to
-    (empty for the top level), and the ``tables`` appended whole, by header."""
+    (empty for the top level), and what it appended at the end (``tables``), in order: each table
+    appended whole, by header, and each key of a later version's appended on its own, such as a
+    role's ``runtime``, by name."""
 
     keys: dict[str, tuple[str, ...]] = field(default_factory=dict)
     tables: tuple[str, ...] = ()
@@ -116,6 +118,17 @@ class _Insertion:
 
 
 @dataclass(frozen=True)
+class _Part:
+    """What an update adds to a file from a part of the reference: the keys it adds to the
+    file's tables (``insertions``), the ``sections`` it appends at the end, and what they add
+    (``appended``): each table, by header, and each key appended on its own, by name."""
+
+    insertions: list[_Insertion]
+    sections: list[list[str]]
+    appended: list[str]
+
+
+@dataclass(frozen=True)
 class _SetTable:
     """A table a file sets under a header of its own: its ``header``, from whose line,
     ``start``, it runs to after its last setting, ``end``."""
@@ -162,6 +175,11 @@ class _File:
         commented = {line.name for line in self._lines_of(table) if line.kind is _Kind.KEY}
         return commented | (_set_keys(self.data, table) or set())
 
+    def mentions_anywhere(self, key: str) -> bool:
+        """Whether the file sets ``key`` or has it commented out in any of its tables or at its
+        top level."""
+        return any(key in self.mentions(region.table) for region in self.regions)
+
     def end(self, table: str) -> int | None:
         """Where keys added to ``table`` go: the end of its last region; none if it has none,
         being set only inline or by dotted keys."""
@@ -178,7 +196,9 @@ class _File:
         ]
 
 
-def update_text(text: str, reference: str, today: date) -> ConfigUpdate:
+def update_text(
+    text: str, reference: str, today: date, later_heading: str | None = None
+) -> ConfigUpdate:
     """``text``, a project file, with what ``reference`` has that it doesn't mention, as
     ``orbit init --update`` adds it on ``today``.
 
@@ -188,18 +208,20 @@ def update_text(text: str, reference: str, today: date) -> ConfigUpdate:
     table's last line; each whole table missing is appended at the end, as ``reference`` has
     it, all under one :data:`ADDED_NOTE`. Every line of ``text`` stays as it was, in order.
 
+    With ``later_heading``, the settings of ``reference`` from the line commenting it out on are
+    a later version's, belonging to no table before it. Those appended go after the others,
+    under that line, and a key ahead of their tables, such as a role's ``runtime``, is never
+    added to a table: it's appended on its own unless ``text`` mentions it anywhere.
+
     Raises :class:`ConfigError` if ``text`` isn't valid TOML.
     """
     file = _read(text)
-    lines = _scanned(reference)
-    regions = _regions(lines)
-    insertions = _insertions(file, lines, regions)
-    appended = [region for region in regions if not file.has(region.table)]
-    if not insertions and not appended:
+    current, later = _split(_scanned(reference), later_heading)
+    part = _joined(_part(file, current, _regions(current)), _later_part(file, later))
+    if not part.insertions and not part.sections:
         return ConfigUpdate(text, Additions())
-    sections = [_section(lines, region) for region in appended]
-    updated = _appended(_inserted(file.lines, insertions), sections, today)
-    return ConfigUpdate("\n".join(updated) + "\n", _additions(insertions, appended))
+    updated = _appended(_inserted(file.lines, part.insertions), part.sections, today)
+    return ConfigUpdate("\n".join(updated) + "\n", _additions(part))
 
 
 def instructions_copy(name: str) -> str:
@@ -347,6 +369,63 @@ def _opened(line: _Line) -> str | None:
     return next((quotes for quotes in _QUOTES if line.text.count(quotes) % 2), None)
 
 
+def _split(lines: list[_Line], heading: str | None) -> tuple[list[_Line], list[_Line]]:
+    """``lines`` before the comment that's ``heading``, and those from it on; all of them, and
+    none, without ``heading`` or such a comment."""
+    if heading is None:
+        return lines, []
+    at = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if line.kind is _Kind.COMMENT and line.text == f"# {heading}"
+        ),
+        len(lines),
+    )
+    return lines[:at], lines[at:]
+
+
+def _part(file: _File, lines: Sequence[_Line], regions: Sequence[_Region]) -> _Part:
+    """What an update adds to ``file`` from the ``regions`` of ``lines``: the keys of each of
+    their tables it has that it doesn't mention, and each table it lacks, whole."""
+    appended = [region for region in regions if not file.has(region.table)]
+    return _Part(
+        _insertions(file, lines, regions),
+        [_section(lines, region) for region in appended],
+        [region.header for region in appended],
+    )
+
+
+def _later_part(file: _File, lines: Sequence[_Line]) -> _Part:
+    """What an update adds to ``file`` from ``lines``, a later version's settings, the first
+    being their heading: what :func:`_part` adds from their tables, after each key ahead of the
+    tables that ``file`` doesn't mention anywhere, appended on its own as it belongs to no table;
+    what's appended goes under the heading."""
+    if not lines:
+        return _Part([], [], [])
+    heading, *settings = lines
+    top, *tables = _regions(settings)
+    keys = {
+        key: list(described)
+        for key, described in _described(settings, top).items()
+        if not file.mentions_anywhere(key)
+    }
+    part = _part(file, settings, tables)
+    sections = [*keys.values(), *part.sections]
+    if not sections:
+        return part
+    return _Part(part.insertions, [[heading.text], *sections], [*keys, *part.appended])
+
+
+def _joined(first: _Part, second: _Part) -> _Part:
+    """What ``first`` adds, then what ``second`` does."""
+    return _Part(
+        first.insertions + second.insertions,
+        first.sections + second.sections,
+        first.appended + second.appended,
+    )
+
+
 def _regions(lines: Sequence[_Line]) -> list[_Region]:
     """The top level's region of ``lines``, then each table's, in order."""
     headers = [index for index, line in enumerate(lines) if line.kind is _Kind.HEADER]
@@ -452,11 +531,10 @@ def _apart(text: Sequence[str]) -> list[str]:
     return [""] if text and text[-1].strip() else []
 
 
-def _additions(insertions: Sequence[_Insertion], appended: Sequence[_Region]) -> Additions:
-    """What ``insertions`` and the ``appended`` regions add to a file."""
+def _additions(part: _Part) -> Additions:
+    """What ``part`` adds to a file."""
     return Additions(
-        {insertion.header: insertion.keys for insertion in insertions},
-        tuple(region.header for region in appended),
+        {insertion.header: insertion.keys for insertion in part.insertions}, tuple(part.appended)
     )
 
 

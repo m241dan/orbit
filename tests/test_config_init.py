@@ -27,7 +27,7 @@ from orbit.agent.external.config_init import (
     init_config,
     update_config,
 )
-from orbit.agent.external.reference_config import reference_config
+from orbit.agent.external.reference_config import LATER_HEADING, reference_config
 
 TODAY = date(2026, 10, 25)
 
@@ -189,6 +189,7 @@ def test_update_says_what_it_added_where(tmp_path: Path) -> None:
                 "[roles.super-reviewer]",
                 "[roles.configurator]",
                 "[roles.security-reviewer]",
+                "runtime",
                 "[triggers.review-each-commit]",
                 "[mcp.github]",
                 "[mcp.semgrep]",
@@ -222,6 +223,53 @@ def test_update_doesnt_add_a_key_its_table_has_commented_out(tmp_path: Path) -> 
     assert result.additions is not None
     assert "merge" not in result.additions.keys["[roles.coder]"]
     assert path.read_text(encoding="utf-8").count("# merge = true") == 1
+
+
+LATER = f"# {LATER_HEADING}"
+
+
+def own_security_reviewer() -> str:
+    """The reference's settings of this version, the example role's table set with ``x`` as its
+    instructions."""
+    current = reference_config().partition(LATER)[0]
+    return current.replace("# [roles.security-reviewer]\n", "[roles.security-reviewer]\n").replace(
+        '# instructions = "roles/security-reviewer.md"', 'instructions = "x"'
+    )
+
+
+def test_update_appends_the_later_settings_a_file_lacks_under_their_heading(
+    tmp_path: Path,
+) -> None:
+    text = own_security_reviewer()
+    path = write(tmp_path, text)
+    update(tmp_path)
+    later = reference_config().partition(LATER)[2]
+    assert path.read_text(encoding="utf-8") == f"{text}{ADDED}\n\n{LATER}{later}"
+
+
+def test_update_gives_a_role_of_the_files_own_no_later_key(tmp_path: Path) -> None:
+    text = own_security_reviewer()
+    path = write(tmp_path, text)
+    result = update(tmp_path)
+    assert result.additions is not None
+    assert result.additions.keys == {}
+    assert path.read_text(encoding="utf-8").partition(ADDED)[0] == text
+
+
+def test_update_appends_a_later_table_alone_under_the_heading(tmp_path: Path) -> None:
+    text, models, rest = reference_config().partition("# A model endpoint")
+    path = write(tmp_path, text)
+    update(tmp_path)
+    assert path.read_text(encoding="utf-8") == f"{text}{ADDED}\n\n{LATER}\n\n{models}{rest}"
+
+
+def test_updating_again_adds_no_second_heading(tmp_path: Path) -> None:
+    path = write(tmp_path, own_security_reviewer())
+    update(tmp_path)
+    text = path.read_text(encoding="utf-8")
+    assert update(tmp_path) == UpdateResult(path, Additions())
+    assert path.read_text(encoding="utf-8") == text
+    assert text.count(LATER) == 1
 
 
 def test_update_refuses_a_file_that_isnt_toml_naming_it(tmp_path: Path) -> None:

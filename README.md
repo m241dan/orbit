@@ -1277,10 +1277,13 @@ table (`# merge = true`). A key missing from a table that's there is added, comm
 the line saying what it does, after the table's last line (the limits, being top-level keys,
 after the file's opening comments and top-level keys); a whole table missing is appended at the
 end, as the reference has it, all under one line
-`# Added by orbit init --update on <YYYY-MM-DD>: settings this file didn't mention.`. It prints
-what it added to which table, or `Nothing to add.`, and without a file it writes the reference
-as `orbit init` does. A file that isn't valid TOML is left as it is, and `orbit init --update`
-stops with status 2.
+`# Added by orbit init --update on <YYYY-MM-DD>: settings this file didn't mention.`. The settings
+of a later version of orbit that it appends go last, under the reference's own
+`# Coming in a later version of orbit; leave commented out until then.`, and a role's `runtime`
+is never added to a table: it's appended there, on its own, unless the file mentions it anywhere.
+It prints what it added to which table, or `Nothing to add.`, and without a file it writes the
+reference as `orbit init` does. A file that isn't valid TOML is left as it is, and
+`orbit init --update` stops with status 2.
 
 `--force` replaces the file with the reference after keeping it beside it as the next free
 `config.toml.bak.N`, counting from `config.toml.bak.1`, so each `--force` keeps one more backup

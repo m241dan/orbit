@@ -146,7 +146,7 @@ def _updated(result: UpdateResult) -> str:
 
 def _added(keys: dict[str, tuple[str, ...]], tables: tuple[str, ...]) -> list[str]:
     """A line per table the ``keys`` were added to, by its header, then one of the ``tables``
-    appended at the end, if there are any."""
+    and keys appended at the end, if there are any."""
     lines = [
         f"in {header or 'the top level'}: {', '.join(added)}" for header, added in keys.items()
     ]

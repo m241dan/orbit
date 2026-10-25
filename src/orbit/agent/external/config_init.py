@@ -18,6 +18,7 @@ from orbit.agent.domain.config_update import (
 )
 from orbit.agent.external.built_in_roles import ROLE_DIRECTORY, read_instruction_files
 from orbit.agent.external.config_file import CONFIG_PATH, REFERENCE
+from orbit.agent.external.reference_config import LATER_HEADING
 from orbit.agent.external.whole_files import create_whole, write_whole
 
 
@@ -86,8 +87,9 @@ def init_config(root: Path, force: bool) -> InitResult:
 def update_config(root: Path, today: Callable[[], date] = date.today) -> UpdateResult:
     """Add to the project file of the workspace at ``root`` what the reference config has that
     it doesn't mention, as :func:`~orbit.agent.domain.config_update.update_text` does on the day
-    ``today`` gives, leaving the file as it was if there's nothing to add; without a file, write
-    the reference there as :func:`init_config` does.
+    ``today`` gives, its settings from :data:`LATER_HEADING` on being a later version's, leaving
+    the file as it was if there's nothing to add; without a file, write the reference there as
+    :func:`init_config` does.
 
     Raises :class:`ConfigError`, naming the file, if it isn't UTF-8 or valid TOML, leaving it as
     it was, and ``OSError`` when it can't read the reference or read or write the file.
@@ -97,7 +99,8 @@ def update_config(root: Path, today: Callable[[], date] = date.today) -> UpdateR
     if text is None:
         return UpdateResult(init_config(root, force=False).path)
     with _naming(path):
-        update = update_text(text, REFERENCE.read_text(encoding="utf-8"), today())
+        reference = REFERENCE.read_text(encoding="utf-8")
+        update = update_text(text, reference, today(), later_heading=LATER_HEADING)
     if update.text != text:
         write_whole(path, update.text)
     return UpdateResult(path, update.additions)

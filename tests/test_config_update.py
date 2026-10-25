@@ -221,6 +221,77 @@ def test_updating_again_adds_nothing(text: str) -> None:
     assert updated(once) == ConfigUpdate(once, Additions())
 
 
+LATER = "Coming later; leave it commented out."
+HEADING = f"# {LATER}"
+RUNTIME_LINES = '# On a role, such as the one above: its runtime.\n# runtime = "claude"\n'
+TRIGGER_SECTION = '# A trigger.\n# [triggers.each]\n# Its event.\n# on = "landed"\n'
+MODEL_SECTION = '# A model.\n# [models.local]\n# Its id.\n# model = "qwen"\n'
+LATER_SECTIONS = f"{RUNTIME_LINES}\n{TRIGGER_SECTION}\n{MODEL_SECTION}"
+LATER_REFERENCE = f"{REFERENCE}\n{HEADING}\n\n{LATER_SECTIONS}"
+CURRENT = f'{LIMITS}\n{SETUP}\n[roles.coder]\nmodel = "x"\nmerge = true\n'
+LATER_ADDED = Additions(tables=("runtime", "[triggers.each]", "[models.local]"))
+
+
+def later_updated(text: str) -> ConfigUpdate:
+    """``text`` updated on :data:`TODAY` from :data:`LATER_REFERENCE`, whose settings from the
+    line commenting out :data:`LATER` on are a later version's."""
+    return update_text(text, LATER_REFERENCE, TODAY, later_heading=LATER)
+
+
+def test_later_settings_a_file_lacks_are_appended_under_the_heading() -> None:
+    expected = f"{CURRENT}\n{ADDED}\n\n{HEADING}\n\n{LATER_SECTIONS}"
+    assert later_updated(CURRENT) == ConfigUpdate(expected, LATER_ADDED)
+
+
+def test_the_table_before_the_heading_doesnt_gain_a_later_key() -> None:
+    update = later_updated(CURRENT)
+    assert update.additions.keys == {}
+    assert update.text.startswith(f"{CURRENT}\n{ADDED}\n")
+
+
+def test_a_file_lacking_only_a_later_table_gets_it_under_the_heading() -> None:
+    text = LATER_REFERENCE.removesuffix(f"\n{MODEL_SECTION}")
+    expected = f"{text}\n{ADDED}\n\n{HEADING}\n\n{MODEL_SECTION}"
+    assert later_updated(text) == ConfigUpdate(expected, Additions(tables=("[models.local]",)))
+
+
+def test_the_heading_follows_the_tables_of_this_version_appended() -> None:
+    expected = (
+        f"{LIMITS}\n{ADDED}\n\n{SETUP_SECTION}\n{CODER_SECTION}\n{HEADING}\n\n{LATER_SECTIONS}"
+    )
+    assert later_updated(LIMITS) == ConfigUpdate(
+        expected, Additions(tables=("[setup]", "[roles.coder]", *LATER_ADDED.tables))
+    )
+
+
+def test_a_later_key_the_file_mentions_anywhere_isnt_appended() -> None:
+    text = f'{CURRENT}# runtime = "kiro"\n\n{TRIGGER_SECTION}\n{MODEL_SECTION}'
+    assert later_updated(text) == ConfigUpdate(text, Additions())
+
+
+def test_a_later_key_alone_is_appended_under_the_heading() -> None:
+    text = f"{CURRENT}\n{TRIGGER_SECTION}\n{MODEL_SECTION}"
+    expected = f"{text}\n{ADDED}\n\n{HEADING}\n\n{RUNTIME_LINES}"
+    assert later_updated(text) == ConfigUpdate(expected, Additions(tables=("runtime",)))
+
+
+def test_a_heading_just_above_a_table_is_put_once() -> None:
+    reference = f"{REFERENCE}\n{HEADING}\n{MODEL_SECTION}"
+    update = update_text(CURRENT, reference, TODAY, later_heading=LATER)
+    assert update.text == f"{CURRENT}\n{ADDED}\n\n{HEADING}\n\n{MODEL_SECTION}"
+
+
+def test_a_file_with_every_setting_gets_neither_the_heading_nor_the_dated_line() -> None:
+    assert later_updated(LATER_REFERENCE) == ConfigUpdate(LATER_REFERENCE, Additions())
+
+
+@pytest.mark.parametrize("text", ["", LIMITS, CURRENT, LATER_REFERENCE.split(HEADING)[0]])
+def test_updating_later_settings_again_adds_nothing(text: str) -> None:
+    once = later_updated(text).text
+    assert later_updated(once) == ConfigUpdate(once, Additions())
+    assert once.count(HEADING) == 1
+
+
 ROLES = ("coder", "reviewer")
 
 ROLES_REFERENCE = """\
