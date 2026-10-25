@@ -1060,6 +1060,7 @@ class WorkspaceHost:
         snapshot = self._views.snapshot(
             session=self._switcher.summary(last_active),
             settings=self._settings.current,
+            role_settings={role: self._settings.of(role) for role in self._seats.names},
             busy=self._busy(),
             tasks=self._board.tasks,
             steps=steps,

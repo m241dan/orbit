@@ -35,7 +35,9 @@ from orbit.tui.view.actions import carrying
 from orbit.tui.view.frontend import Frontend, Parts, Saved
 from orbit.tui.view.opening import Opening
 from orbit.tui.view.outcomes import Awaited
+from orbit.tui.view.seats import PLANNER_SEAT
 from orbit.tui.view.task_editor import TaskChoices
+from orbit.tui.view.transcript import prompt_placeholder
 from orbit.tui.warning_capture import WarningCapture
 from orbit.tui.widgets import ChatPrompt, StatusLine, confirm, mark_selected
 from orbit.tui.workspaces import WorkspacesHost
@@ -81,12 +83,14 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("ctrl+r", "run_tasks", "Run tasks"),
         Binding("ctrl+g", "super_review", "Super review"),
         Binding("ctrl+e", "configure_checks", "Set up checks"),
-        Binding("ctrl+t", "toggle_planner", "Planner"),
+        Binding("ctrl+t", "cycle_conversations", "Conversations"),
         Binding("ctrl+s", "cancel_turn", "Stop run"),
         Binding("ctrl+x", "stop_planner", "Stop planner"),
         Binding("ctrl+n", "reset_planner", "Reset planner"),
         Binding("ctrl+o", "pick_model", "Model"),
         Binding("ctrl+l", "pick_tool_access", "Tools"),
+        # While typing, the prompt's own ctrl+y (redo) comes first.
+        Binding("ctrl+y", "pick_effort", "Effort"),
         Binding("ctrl+p", "list_sessions", "Sessions"),
         # check_action keeps it to a control plane in another process, which serves several.
         Binding("ctrl+w", "list_workspaces", "Workspaces"),
@@ -145,9 +149,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 yield self._link_status
                 yield self._viewing
                 yield self._paused
-                yield ChatPrompt(
-                    placeholder="Press i to talk to the planner, esc to stop typing", id="prompt"
-                )
+                yield ChatPrompt(placeholder=prompt_placeholder(PLANNER_SEAT.label), id="prompt")
             with Vertical(id="side"):
                 yield TaskList(id="task-list")
                 yield VerificationPanel(id="verification-steps")
@@ -355,9 +357,10 @@ class OrbitApp(App[None], inherit_bindings=False):
     async def _cancel_agent(self, message: AgentsPane.Cancel) -> None:
         await self._frontend.cancel_agent(message.agent_id)
 
-    def action_toggle_planner(self) -> None:
-        """Show the planner tab, or go back to the tab shown before it."""
-        self._frontend.toggle_planner()
+    def action_cycle_conversations(self) -> None:
+        """Show the planner tab, from there each other conversational role's, and from the
+        last, the tab shown before."""
+        self._frontend.cycle_conversations()
 
     @on(TaskList.Accept)
     async def _accept_task(self, message: TaskList.Accept) -> None:
@@ -405,6 +408,9 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def action_pick_tool_access(self) -> None:
         self._frontend.pick_tool_access()
+
+    def action_pick_effort(self) -> None:
+        self._frontend.pick_effort()
 
     async def _send(
         self,

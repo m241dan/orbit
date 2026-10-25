@@ -358,23 +358,23 @@ async def test_the_prompt_sends_while_a_run_is_busy() -> None:
 async def test_ctrl_t_jumps_to_the_planner_tab_and_back() -> None:
     shell = Shell()
     await shell.feed(started("agent-1"), started("agent-2", "checker"))
-    await shell.toggle_planner()
+    await shell.cycle_conversations()
     assert shell.active_tab == "planner"
     assert shell.window.title == "Conversation · planner"
-    await shell.toggle_planner()
+    await shell.cycle_conversations()
     assert shell.active_tab == "All"
     await shell.cycle(1, 3)
     assert shell.active_tab == "reviewer"
-    await shell.toggle_planner()
+    await shell.cycle_conversations()
     assert shell.active_tab == "planner"
-    await shell.toggle_planner()
+    await shell.cycle_conversations()
     assert shell.active_tab == "reviewer"
     # Back to All when the tab it came from has gone.
     await shell.cycle(-1, 4)
     assert shell.active_tab == "checker"
-    await shell.toggle_planner()
+    await shell.cycle_conversations()
     await shell.feed(exited("agent-2"))
-    await shell.toggle_planner()
+    await shell.cycle_conversations()
     assert shell.active_tab == "All"
     assert shell.wire.commands == []
 
@@ -391,7 +391,7 @@ async def test_a_roles_tab_is_marked_while_any_of_its_agents_runs() -> None:
 
 async def test_the_planner_tab_is_marked_while_it_answers() -> None:
     shell = Shell()
-    await shell.toggle_planner()
+    await shell.cycle_conversations()
     await shell.submit("hi")
     # Marked as soon as the prompt is sent, before the backend reports the planner busy.
     assert shell.tab_strip == ["All", "● planner", *PINNED[1:]]

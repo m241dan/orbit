@@ -6,8 +6,8 @@ from orbit.protocol import PLANNER, AgentStarted, ConversationReset, ResetConver
 from orbit.tui import OrbitApp
 from orbit.tui.transcript import Transcript
 from orbit.tui.view.common import EntryKind
-from orbit.tui.view.confirm import RESET_MESSAGE, RESET_TITLE
-from orbit.tui.view.rules import planner_reset_entry
+from orbit.tui.view.confirm import reset_message, reset_title
+from orbit.tui.view.rules import reset_entry
 from orbit.tui.widgets import ConfirmScreen, PickerScreen
 from tests.tui_fakes import FakeSession, entries
 
@@ -38,13 +38,14 @@ async def test_the_reset_confirmation_shows_its_question_and_keys() -> None:
     async with app.run_test() as pilot:
         await pilot.press("ctrl+n")
         body = app.screen.query_one("#confirm-message", Static)
-        assert body.border_title == RESET_TITLE
+        assert body.border_title == reset_title(PLANNER)
         assert body.border_subtitle == "y reset · n/esc cancel"
-        assert str(body.render()) == RESET_MESSAGE
+        assert str(body.render()) == reset_message(PLANNER)
 
 
-def test_the_reset_rule_is_a_muted_rule() -> None:
-    assert planner_reset_entry() == ("planner reset", "rule")
+def test_the_reset_rule_is_a_muted_rule_naming_the_role() -> None:
+    assert reset_entry(PLANNER) == ("planner reset", "rule")
+    assert reset_entry("architect") == ("architect reset", "rule")
 
 
 async def test_a_reset_draws_a_rule_under_the_planner_tab_and_all() -> None:

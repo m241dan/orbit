@@ -298,6 +298,7 @@ EVENTS: tuple[EventEnvelope, ...] = (
             settings=SETTINGS,
             model_choices=("opus",),
             busy={"work": True, PLANNER_LANE: False},
+            role_settings={PLANNER: SETTINGS, "architect": Settings(effort="max")},
             tasks=(TASK,),
             steps=(STEP,),
             steps_title="Task t1",

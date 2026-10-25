@@ -18,7 +18,6 @@ from orbit.protocol import (
     TurnFinished,
     TurnStarted,
 )
-from orbit.tui.view.transcript import PLANNER_BUSY
 from tests.frontend_fakes import Shell
 
 BUSY = "Prompt · planner · busy"
@@ -199,7 +198,7 @@ async def test_a_prompt_while_the_planner_is_busy_is_kept_and_sent_once_it_is_fr
     await shell.feed(BusyChanged(busy=True, lane="planner"))
     await shell.submit("hi")
     assert shell.wire.commands == []
-    assert shell.app.warnings == [PLANNER_BUSY]
+    assert shell.app.warnings == ["Planner is busy"]
     assert (shell.prompt.text, shell.prompt.typing) == ("hi", True)
     await shell.feed(BusyChanged(busy=False, lane="planner"))
     assert shell.wire.commands == []

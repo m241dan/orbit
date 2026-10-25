@@ -27,9 +27,11 @@ from orbit.tui.view.tabs import (
     ROLE_TABS,
     ConversationTab,
     follow_running,
-    mark_planner_busy,
+    mark_lane_busy,
     mark_tab_read,
     mark_tab_unread,
+    pin_conversations,
+    pinned_roles,
     replay_tabs,
     reset_tabs,
     running_roles,
@@ -123,6 +125,8 @@ def test_the_pinned_tabs_are_the_built_in_roles_in_order() -> None:
     assert ROLE_TABS == ("planner", "coder", "reviewer", "super-reviewer", "configurator")
     assert PLANNER == "planner"
     assert [tab.key for tab in PINNED_TABS] == list(ROLE_TABS)
+    assert pinned_roles(PINNED_TABS) == frozenset(ROLE_TABS)
+    assert [tab.lane for tab in PINNED_TABS] == ["planner", None, None, None, None]
     assert tab_labels(PINNED_TABS) == [
         "planner",
         "coder",
@@ -242,18 +246,68 @@ def test_the_planner_agents_start_and_exit_dont_mark_its_tab() -> None:
 
 
 def test_the_planner_tab_is_marked_while_the_planner_is_busy() -> None:
-    busy = mark_planner_busy(PINNED_TABS, True)
+    busy = mark_lane_busy(PINNED_TABS, "planner", True)
     assert busy == (replace(PINNED_TABS[0], running=1), *PINNED_TABS[1:])
     assert tab_labels(busy)[0] == "● planner"
-    assert mark_planner_busy(busy, True) == busy
-    assert mark_planner_busy(busy, False) == PINNED_TABS
+    assert mark_lane_busy(busy, "planner", True) == busy
+    assert mark_lane_busy(busy, "planner", False) == PINNED_TABS
+
+
+def test_only_the_tabs_of_the_roles_answering_in_a_lane_follow_it() -> None:
+    tabs = pin_conversations(PINNED_TABS, {"architect": "design", "critic": "design"})
+    busy = mark_lane_busy(tabs, "design", True)
+    assert tab_labels(busy)[-2:] == ["● architect", "● critic"]
+    assert busy[:5] == PINNED_TABS
+    assert mark_lane_busy(tabs, "work", True) == tabs
+
+
+def test_conversational_roles_are_pinned_after_the_built_in_ones_before_the_agents() -> None:
+    own = ConversationTab("agent-1", "checker")
+    tabs = pin_conversations((*PINNED_TABS, own), {PLANNER: "plans", "architect": "design"})
+    architect = ConversationTab("architect", "architect", pinned=True, lane="design")
+    assert tabs == (replace(PINNED_TABS[0], lane="plans"), *PINNED_TABS[1:], architect, own)
+    assert pinned_roles(tabs) == frozenset({*ROLE_TABS, "architect"})
+
+
+def test_the_planner_keeps_its_own_lane_when_the_roles_dont_list_it() -> None:
+    assert pin_conversations(PINNED_TABS, {}) == PINNED_TABS
+
+
+def test_a_built_in_role_made_conversational_follows_its_lane() -> None:
+    tabs = pin_conversations(PINNED_TABS, {"reviewer": "review"})
+    assert tabs[2] == replace(PINNED_TABS[2], lane="review")
+
+
+def test_pinning_again_keeps_the_tabs_still_listed_and_drops_the_others() -> None:
+    tabs = pin_conversations(PINNED_TABS, {"architect": "design", "critic": "review"})
+    tabs = mark_tab_unread(mark_lane_busy(tabs, "design", True), "architect", None)
+    kept = pin_conversations(tabs, {"architect": "design"})
+    assert kept == (*PINNED_TABS, replace(tabs[5], running=1, unread=True))
+
+
+def test_a_conversational_roles_agents_share_its_tab_without_counting() -> None:
+    tabs = pin_conversations(PINNED_TABS, {"architect": "design"})
+    started = AgentStarted(agent_id="agent-1", role="architect", task_id="plan")
+    roles = track_roles({}, started, pinned_roles(tabs))
+    assert roles == {"agent-1": "architect"}
+    assert track_tabs(tabs, started, roles=roles) == tabs
+    exited = AgentExited(agent_id="agent-1", reason="finished")
+    assert track_tabs(tabs, exited, roles=roles) == tabs
+    running = (RunningAgent(agent_id="agent-1", role="architect", task_id="plan"),)
+    assert running_roles(running, pinned_roles(tabs)) == {"agent-1": "architect"}
+    assert follow_running(tabs, running) == tabs
+
+
+def test_resetting_keeps_the_conversational_roles_tabs_busy_as_they_are() -> None:
+    tabs = mark_lane_busy(pin_conversations(PINNED_TABS, {"architect": "design"}), "design", True)
+    assert reset_tabs((*tabs, ConversationTab("agent-4", "checker"))) == tabs
 
 
 def test_the_running_marker_leads_and_the_unread_marker_trails() -> None:
-    tabs = (ConversationTab("coder", "coder", unread=True, running=1),)
+    tabs = (ConversationTab("coder", "coder", unread=True, running=1, pinned=True),)
     assert tab_labels(tabs) == ["● coder *"]
     assert tab_labels(mark_tab_read(tabs, "coder")) == ["● coder"]
-    assert tab_labels(mark_planner_busy((PINNED_TABS[0],), True)) == ["● planner"]
+    assert tab_labels(mark_lane_busy((PINNED_TABS[0],), "planner", True)) == ["● planner"]
     unread = track_tabs(tabs, AgentStarted(agent_id="a", role="coder", task_id="1"))
     assert tab_labels(unread) == ["● coder *"]
 
@@ -281,7 +335,7 @@ def test_marking_a_tab_unread_skips_the_shown_tab_and_all() -> None:
 
 
 def test_resetting_tabs_keeps_the_pinned_ones_read_and_idle_but_a_busy_planner() -> None:
-    busy = mark_planner_busy(PINNED_TABS, True)
+    busy = mark_lane_busy(PINNED_TABS, "planner", True)
     tabs = (*busy, ConversationTab("agent-4", "checker"))
     tabs = track_tabs(tabs, AgentStarted(agent_id="agent-3", role="coder", task_id="1"))
     tabs = mark_tab_unread(tabs, "coder", None)
@@ -299,7 +353,7 @@ def test_running_agents_in_pinned_roles_are_known_by_role() -> None:
 
 
 def test_following_no_running_agents_closes_own_tabs_and_idles_pinned_but_the_planner() -> None:
-    busy = mark_planner_busy(PINNED_TABS, True)
+    busy = mark_lane_busy(PINNED_TABS, "planner", True)
     tabs = (*busy, ConversationTab("agent-4", "checker", unread=True))
     tabs = track_tabs(tabs, AgentStarted(agent_id="agent-3", role="coder", task_id="1"))
     assert follow_running(tabs, ()) == busy

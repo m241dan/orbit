@@ -129,13 +129,21 @@ def coalesce(events: Sequence[Event]) -> list[Event]:
     """The ``events`` to render, in order: without the snapshots a later one replaces before
     anything reads them."""
     kept: list[Event] = []
-    superseded: set[type[Event]] = set()
+    superseded: dict[object, type[Event]] = {}  # The snapshots replaced later, by what replaces.
     for event in reversed(events):
-        kind = type(event)
-        if kind not in superseded:
+        kind, replaced = type(event), _replaced_by(event)
+        if replaced not in superseded:
             kept.append(event)
         if kind in SUPERSEDED_UNLESS:
-            superseded.add(kind)
-        superseded -= {s for s in superseded if kind in SUPERSEDED_UNLESS[s]}
+            superseded[replaced] = kind
+        superseded = {k: s for k, s in superseded.items() if kind not in SUPERSEDED_UNLESS[s]}
     kept.reverse()
     return kept
+
+
+def _replaced_by(event: Event) -> object:
+    """What a later snapshot shares with ``event`` to replace it: its type, and for settings,
+    their role too."""
+    if isinstance(event, SettingsChanged):
+        return SettingsChanged, event.role
+    return type(event)

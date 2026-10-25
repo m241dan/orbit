@@ -2,13 +2,13 @@ from orbit.tui.view.confirm import (
     CONFIGURE_MESSAGE,
     CONFIGURE_TITLE,
     CONFIGURE_YES,
-    RESET_MESSAGE,
-    RESET_TITLE,
     RESET_YES,
     TAKE_OVER_NO,
     TAKE_OVER_TITLE,
     TAKE_OVER_YES,
     confirm_hint,
+    reset_message,
+    reset_title,
 )
 
 
@@ -34,9 +34,17 @@ def test_configure_confirmation_asks_to_set_up_checks() -> None:
 
 
 def test_reset_confirmation_asks_to_reset_the_planner() -> None:
-    assert RESET_TITLE == "Reset the planner?"
-    assert RESET_MESSAGE == (
+    assert reset_title("planner") == "Reset the planner?"
+    assert reset_message("planner") == (
         "The planner's conversation ends, and the next prompt starts a fresh one with its role"
         " read again from .orbit/config.toml. Draft tasks stay."
     )
     assert RESET_YES == "reset"
+
+
+def test_reset_confirmation_for_another_role_names_it_and_keeps_its_role() -> None:
+    assert reset_title("architect") == "Reset the architect?"
+    assert reset_message("architect") == (
+        "The architect's conversation ends, and the next prompt starts a fresh one."
+        " Draft tasks stay."
+    )

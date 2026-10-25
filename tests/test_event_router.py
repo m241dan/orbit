@@ -68,9 +68,12 @@ def test_a_snapshot_shows_its_tasks_before_its_transcript_and_its_usage_after() 
         "tabs.track",
         "proposals.withdraw",
         "pickers.show_choices",
-        "prompt.show_settings",
+        "prompt.show_target",
         "prompt.show_busy",
-        "tabs.set_planner_busy",
+        "prompt.show_settings",
+        "tabs.set_busy",
+        "tabs.set_busy",
+        "prompt.show_busy",
         "task_list.show",
         "agents.number_tasks",
         "verification.show",
@@ -94,12 +97,15 @@ def test_a_snapshot_shows_its_tasks_before_its_transcript_and_its_usage_after() 
     ]
 
 
-def test_a_catalog_labels_the_triggers_then_follows_workspaces_and_sessions() -> None:
+def test_a_catalog_labels_the_triggers_and_pins_the_conversations_then_follows_workspaces() -> None:
     catalog = Catalog(workspaces=(), agents=(), triggers=(), lanes=())
 
     assert routed(catalog) == [
         *TRACKED,
         "label_triggers",
+        "prompt.show_target",
+        "prompt.show_busy",
+        "tabs.pin",
         "navigation.follow_catalog",
         "transcript.show_session",
         "viewing.show",

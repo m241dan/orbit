@@ -180,7 +180,8 @@ async def test_sections_are_labelled() -> None:
     async with app.run_test():
         assert app.query_one(Transcript).border_title == "Conversation"
         assert app.query_one(ChatPrompt).border_title == "Prompt · planner"
-        assert "planner" in str(app.query_one(ChatPrompt).placeholder)
+        placeholder = "Press i to talk to Planner, esc to stop typing"
+        assert app.query_one(ChatPrompt).placeholder == placeholder
 
 
 async def test_prompt_starts_in_normal_mode_and_ignores_typing_and_clicks() -> None:

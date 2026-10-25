@@ -3,6 +3,7 @@ agents run and talk, and how the user moves between them."""
 
 from orbit.protocol import PLANNER, AgentExited, AgentStarted, AssistantMessage, RunningAgent
 from orbit.tui.view.tab_strip import ALL_TAB_ID, OPENING, PLANNER_TAB_ID, TabStrip
+from tests.frontend_fakes import opened_before
 
 STRIP = ["All", "planner", "coder", "reviewer", "super-reviewer", "configurator"]
 
@@ -21,9 +22,9 @@ class Strip:
         assert tab_id in self.labels
         self.active = tab_id
 
-    def open_tab(self, tab_id: str, label: str) -> None:
+    def open_tab(self, tab_id: str, label: str, before: str | None = None) -> None:
         assert tab_id not in self.labels
-        self.labels[tab_id] = label
+        self.labels = opened_before(self.labels, tab_id, label, before)
 
     def close_tab(self, tab_id: str) -> None:
         del self.labels[tab_id]
@@ -161,31 +162,96 @@ def test_following_the_agents_running_opens_their_tabs_and_counts_the_pinned() -
 
 def test_the_planner_tab_is_marked_while_the_planner_is_busy() -> None:
     strip = Strip()
-    strip.tabs.set_planner_busy(True)
+    strip.tabs.set_busy("planner", True)
     assert strip.shown[1] == "● planner"
     assert strip.relabels == []  # The planner's tab isn't the one shown.
     strip.activate(PLANNER_TAB_ID)
-    strip.tabs.set_planner_busy(False)
+    strip.tabs.set_busy("planner", False)
     assert strip.shown[1] == "planner"
     assert strip.relabels == [(PLANNER, "planner")]
 
 
-def test_toggling_the_planner_shows_it_then_the_tab_shown_before() -> None:
+def test_another_lane_going_busy_marks_no_tab() -> None:
+    strip = Strip()
+    strip.tabs.set_busy("work", True)
+    assert strip.shown == STRIP
+
+
+def test_a_conversational_role_is_pinned_after_the_built_in_roles_before_the_agents() -> None:
+    strip = Strip()
+    strip.tabs.track(started("agent-3", "tester"))
+    strip.tabs.pin({PLANNER: "planner", "architect": "design", "critic": "design"})
+    assert strip.shown == [*STRIP, "architect", "critic", "tester"]
+    assert strip.tabs.agent_of(strip.id_of("architect")) == "architect"
+
+
+def test_a_conversational_roles_agents_share_its_tab_marked_only_while_its_lane_is_busy() -> None:
+    strip = Strip()
+    strip.tabs.pin({"architect": "design"})
+    strip.tabs.track(started("agent-3", "architect"))
+    assert strip.shown == [*STRIP, "architect"]
+    assert strip.tabs.key_of("agent-3") == "architect"
+    strip.tabs.set_busy("design", True)
+    assert strip.shown[-1] == "● architect"
+    strip.tabs.track(exited("agent-3"))
+    assert strip.shown[-1] == "● architect"
+
+
+def test_a_role_no_longer_conversational_loses_its_tab_showing_all_if_it_was_shown() -> None:
+    strip = Strip()
+    strip.tabs.pin({"architect": "design"})
+    strip.activate(strip.id_of("architect"))
+    strip.tabs.pin({PLANNER: "planner"})
+    assert strip.shown == STRIP
+    assert strip.active == ALL_TAB_ID
+
+
+def test_pinning_the_same_roles_again_changes_nothing() -> None:
+    strip = Strip()
+    strip.tabs.pin({"architect": "design"})
+    strip.tabs.set_busy("design", True)
+    strip.tabs.pin({"architect": "design"})
+    assert strip.shown == [*STRIP, "● architect"]
+
+
+def test_the_planners_tab_follows_the_lane_the_catalog_gives_it() -> None:
+    strip = Strip()
+    strip.tabs.pin({PLANNER: "plans"})
+    strip.tabs.set_busy("planner", True)
+    assert strip.shown[1] == "planner"
+    strip.tabs.set_busy("plans", True)
+    assert strip.shown[1] == "● planner"
+
+
+def test_cycling_the_conversations_shows_the_planner_then_the_tab_shown_before() -> None:
     strip = Strip()
     strip.activate(strip.id_of("coder"))
-    strip.tabs.toggle_planner()
+    strip.tabs.cycle_conversations()
     assert strip.active == PLANNER_TAB_ID
-    strip.tabs.toggle_planner()
+    strip.tabs.cycle_conversations()
     assert strip.active == strip.id_of("coder")
 
 
-def test_toggling_back_from_the_planner_shows_all_once_the_tab_before_has_closed() -> None:
+def test_cycling_the_conversations_goes_through_each_conversational_roles_tab() -> None:
+    strip = Strip()
+    strip.tabs.pin({"architect": "design", "critic": "review"})
+    strip.tabs.cycle_conversations()
+    assert strip.active == PLANNER_TAB_ID
+    strip.tabs.cycle_conversations()
+    assert strip.active == strip.id_of("architect")
+    strip.tabs.cycle_conversations()
+    assert strip.active == strip.id_of("critic")
+    strip.tabs.cycle_conversations()
+    assert strip.active == ALL_TAB_ID
+
+
+def test_cycling_back_from_the_conversations_shows_all_once_the_tab_before_has_closed() -> None:
     strip = Strip()
     strip.tabs.track(started("agent-3", "tester"))
     strip.activate(strip.id_of("tester"))
-    strip.tabs.toggle_planner()
+    strip.tabs.cycle_conversations()
     strip.tabs.track(exited("agent-3"))
-    strip.tabs.toggle_planner()
+    strip.tabs.cycle_conversations()
     assert strip.active == ALL_TAB_ID
 
 

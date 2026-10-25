@@ -390,18 +390,19 @@ class Snapshot(_Message):
     """The session a connection views as it stands, sent in answer to ``Attach`` and after every
     switch; its envelope's ``seq`` is the point it's current to.
 
-    It holds the ``session``'s summary, its ``settings`` and ``model_choices``, whether each
-    lane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they
-    show under, the ``review`` status (none when reviews are off), the checks ``proposals``
-    waiting for a decision, the ``agents`` running, the ``transcript``: the session's
-    last logged events, at most 500, oldest first, in the envelopes they were sent in, and,
-    while the session is halted because storage failed, ``storage_halt``: why, and how to
-    resume; ``read_only`` says another orbit owns the repository, so the work this one is
-    asked to run waits, and ``ownership_offered`` that the repository is offered, as
-    ``OwnershipOffered`` said, until the offer is settled. ``active`` says whether the session
-    is the workspace's open one, which runs work; one that isn't is a read-only view, from its
-    saved record and its last logged events. ``open_session`` names the workspace's open
-    session, and ``viewers`` counts the connections viewing this one.
+    It holds the ``session``'s summary, its ``settings`` (the planner's), each conversational role's
+    settings by role (``role_settings``, the planner's among them) and the ``model_choices``,
+    whether each lane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title``
+    they show under, the ``review`` status (none when reviews are off), the checks ``proposals``
+    waiting for a decision, the ``agents`` running, the ``transcript``: the session's last logged
+    events, at most 500, oldest first, in the envelopes they were sent in, and, while the session is
+    halted because storage failed, ``storage_halt``: why, and how to resume; ``read_only`` says
+    another orbit owns the repository, so the work this one is asked to run waits, and
+    ``ownership_offered`` that the repository is offered, as ``OwnershipOffered`` said, until the
+    offer is settled. ``active`` says whether the session is the workspace's open one, which runs
+    work; one that isn't is a read-only view, from its saved record and its last logged events.
+    ``open_session`` names the workspace's open session, and ``viewers`` counts the connections
+    viewing this one.
     """
 
     type: Literal["snapshot"] = "snapshot"
@@ -409,6 +410,7 @@ class Snapshot(_Message):
     settings: Settings
     model_choices: tuple[str, ...]
     busy: dict[BusyLane, bool]
+    role_settings: dict[str, Settings] = Field(default_factory=dict)
     tasks: tuple[TaskState, ...]
     steps: tuple[StepState, ...]
     steps_title: str = ""

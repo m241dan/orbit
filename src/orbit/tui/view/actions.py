@@ -23,6 +23,7 @@ type ActionName = Literal[
     "configure_checks",
     "pick_model",
     "pick_tool_access",
+    "pick_effort",
     "cancel_agent",
     "submit_prompt",
     "add_task",

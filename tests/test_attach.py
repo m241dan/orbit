@@ -11,6 +11,7 @@ from orbit.protocol import (
     BUSY,
     INVALID,
     NOT_ACTIVE,
+    PLANNER,
     SAVE_FAILED,
     STORAGE_FAILED,
     UNKNOWN,
@@ -119,6 +120,18 @@ async def test_a_saved_sessions_view_carries_the_same_fields_as_ever() -> None:
         open_session=SessionRef(id=OPEN, name="today"),
         viewers=1,
     )
+
+
+async def test_a_saved_sessions_view_carries_each_roles_saved_settings() -> None:
+    store = stored()
+    saved = {PLANNER: Settings(model="opus"), "architect": Settings(effort="max")}
+    store.saved[0] = store.saved[0].model_copy(update={"role_settings": saved})
+    session = workspace(store)
+    viewer = await joined(session, "viewer", read=True)
+    snapshot = await attached_view(session, viewer)
+    await session.close()
+
+    assert (snapshot.settings, snapshot.role_settings) == (Settings(model="opus"), saved)
 
 
 async def test_a_saved_sessions_view_taken_while_storage_is_halted_carries_the_halt() -> None:

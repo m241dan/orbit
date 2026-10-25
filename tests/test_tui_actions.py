@@ -170,6 +170,13 @@ async def pick_tool_access(telemetry: Telemetry) -> Shell:
     return shell
 
 
+async def pick_effort(telemetry: Telemetry) -> Shell:
+    shell = await _settings_shown(telemetry)
+    shell.frontend.pick_effort()
+    await shell.pickers.pick(5)
+    return shell
+
+
 async def submit_prompt(telemetry: Telemetry) -> Shell:
     shell = Shell(telemetry=telemetry)
     await shell.submit("Add a flag.")
@@ -371,6 +378,7 @@ ACTIONS: list[tuple[str, Act, list[str]]] = [
     ("configure_checks", configure_checks, ["fire_trigger"]),
     ("pick_model", pick_model, ["update_settings"]),
     ("pick_tool_access", pick_tool_access, ["update_settings"]),
+    ("pick_effort", pick_effort, ["update_settings"]),
     ("cancel_agent", calling(lambda frontend: frontend.cancel_agent("a1")), ["cancel_agent"]),
     ("submit_prompt", submit_prompt, ["send_message"]),
     ("add_task", add_task, ["add_task"]),

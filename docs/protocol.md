@@ -109,7 +109,9 @@ control plane's own, `AddWorkspace`, `RemoveWorkspace` and `ListDirectory` (see
 [Workspaces](#workspaces)) and `Watch` (see [The control-plane stream](#the-control-plane-stream)), sent before then is refused
 with `invalid`. The first `Attach` is answered in this order:
 
-1. `Snapshot`: the session as it stands, with its settings, busy lanes (a flag for each lane, by
+1. `Snapshot`: the session as it stands, with its settings (the planner's), each conversational
+   role's settings by role in `role_settings` (the planner's among them; added to version 2, so
+   an older peer's Snapshot has none), busy lanes (a flag for each lane, by
    name: the work lane, the planner's and every other lane of the enabled task roles), tasks,
    verification steps, review status, checks proposals waiting for a decision, running
    agents and its `transcript`: the session's last 500 logged events, oldest first, in the
@@ -184,7 +186,7 @@ counts the connections viewing the session snapshotted, the one asking included.
 
 Attaching to a saved session that isn't the open one gives a read-only view. Its `Snapshot`
 comes from the session's saved record and its last logged events: `active` false, its saved
-settings and tasks, its `transcript`, nothing busy or running, no steps, review or proposals,
+settings (`role_settings` holding those of each role it saved settings for) and tasks, its `transcript`, nothing busy or running, no steps, review or proposals,
 and `open_session` naming the open session. Nothing runs in a viewed session, and it publishes
 no events while it isn't the open one. On a view, `History`, `RenameSession`, `DeleteSession`,
 `Attach`, `ActivateSession` and `NewSession` work as usual, as does `ResumeStorage`, since a
@@ -522,8 +524,8 @@ is refused with `unknown`: `No task with id 't9'.`
 `role`, which apply from its next turn: it publishes `SettingsChanged(settings, model_choices,
 role)` and saves the session. The session keeps settings for each conversational role (see
 `SendMessage` below), and a role's turns run with its own; the planner's are the ones the
-`Snapshot`'s `settings` hold. `role` was added to version 2 of both, defaulting to `planner`, so
-an older peer's settings are the planner's. It's refused with `unknown` for a role that isn't
+`Snapshot`'s `settings` hold, and every role's are in its `role_settings`. `role` was added to
+version 2 of both, defaulting to `planner`, so an older peer's settings are the planner's. It's refused with `unknown` for a role that isn't
 conversational here (`Role 'coder' has no settings of its own; the roles with them are planner.`)
 and with `not_configured` for a disabled one, as `SendMessage` to it is.
 

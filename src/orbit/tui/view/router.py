@@ -51,7 +51,8 @@ from orbit.tui.view.events import (
 from orbit.tui.view.feed import ConversationFeed
 from orbit.tui.view.history import HistoryPager
 from orbit.tui.view.navigation import Navigation
-from orbit.tui.view.rules import planner_reset_entry
+from orbit.tui.view.rules import reset_entry
+from orbit.tui.view.seats import Seats
 from orbit.tui.view.storage import StorageHalt
 from orbit.tui.view.takeover import TakeoverOffer
 from orbit.tui.view.triggers import trigger_key_labels
@@ -73,11 +74,15 @@ class TabsPane(Protocol):
 
     def track(self, event: Event) -> None: ...
 
-    def set_planner_busy(self, busy: bool) -> None: ...
+    def pin(self, lanes: Mapping[str, BusyLane]) -> None: ...
+
+    def set_busy(self, lane: BusyLane, busy: bool) -> None: ...
 
 
 class PromptPane(Protocol):
     """The prompt, as the router marks it."""
+
+    def show_target(self, role: str, label: str) -> None: ...
 
     def show_busy(self, busy: bool) -> None: ...
 
@@ -189,8 +194,8 @@ class AppHooks:
 
 class EventRouter:
     """Shows each event in the ``panes`` and the ``handlers`` it concerns, asking the app for
-    what only it does through ``hooks``; it keeps which lanes are busy and the settings, as
-    last reported."""
+    what only it does through ``hooks``; it keeps which lanes are busy, as last reported, and
+    the conversational roles' ``seats``, with their settings."""
 
     def __init__(self, panes: Panes, handlers: Handlers, hooks: AppHooks) -> None:
         self._panes = panes
@@ -198,17 +203,12 @@ class EventRouter:
         self._hooks = hooks
         # Which lanes have work in progress, as last reported (or just requested).
         self._busy: dict[BusyLane, bool] = {WORK_LANE: False, PLANNER_LANE: False}
-        # Last settings reported by the backend; None until the first report.
-        self._settings: Settings | None = None
+        self.seats = Seats(panes.prompt, self.busy)
 
     def busy(self, lane: BusyLane) -> bool:
-        """Whether ``lane`` has work in progress, as last reported or set."""
-        return self._busy[lane]
-
-    @property
-    def settings(self) -> Settings | None:
-        """The settings last reported; none until the first report."""
-        return self._settings
+        """Whether ``lane`` has work in progress, as last reported or set; a lane not reported
+        yet has none."""
+        return self._busy.get(lane, False)
 
     def render(self, event: Event) -> None:
         """Show ``event`` wherever it concerns."""
@@ -228,11 +228,11 @@ class EventRouter:
             self._handlers.navigation.follow_error(event)
 
     def set_busy(self, lane: BusyLane, busy: bool) -> None:
-        """Note whether ``lane`` is ``busy``, showing it for the planner's lane."""
+        """Note whether ``lane`` is ``busy``, showing it on the tabs of the conversational roles
+        answering in it, and on the prompt if it talks to one."""
         self._busy[lane] = busy
-        if lane == PLANNER_LANE:
-            self._panes.prompt.show_busy(busy)
-            self._panes.tabs.set_planner_busy(busy)
+        self._panes.tabs.set_busy(lane, busy)
+        self.seats.follow_busy(lane, busy)
 
     def show_viewing(self) -> None:
         """Mark the prompt while the session viewed isn't the active one, or hide the mark, say
@@ -264,9 +264,9 @@ class EventRouter:
                 self._handlers.halt.halted(message)
 
     def _render_session(self, event: SessionEvent) -> None:
-        """Rule off the planner's conversation where it was reset, show a snapshot of the session
-        viewed or a page of its history, follow a catalog, or follow the session's hold on the
-        repository."""
+        """Rule off a conversational role's conversation where it was reset, show a snapshot of
+        the session viewed or a page of its history, follow a catalog, or follow the session's
+        hold on the repository."""
         if isinstance(event, Snapshot):
             self._render_snapshot(event)
         elif isinstance(event, Catalog):
@@ -276,14 +276,17 @@ class EventRouter:
         elif in_group(event, OWNERSHIP_EVENTS):
             self._render_ownership(event)
         else:
-            self._handlers.feed.append(*planner_reset_entry(), PLANNER)
+            self._handlers.feed.append(*reset_entry(event.agent), event.agent)
 
     def _render_catalog(self, catalog: Catalog) -> None:
-        """Label the trigger keys from ``catalog`` and list its workspaces and sessions, titling
-        the conversation with the name of the session viewed, renamed perhaps; one that no
-        longer lists the workspace the app is on opens the workspace picker. In process, the
-        first catalog opens the session picker, if the app picks one."""
+        """Label the trigger keys from ``catalog``, pin a tab for each conversational role it
+        lists, which the prompt talks to while its tab is shown, and list its workspaces and
+        sessions, titling the conversation with the name of the session viewed, renamed perhaps;
+        one that no longer lists the workspace the app is on opens the workspace picker. In
+        process, the first catalog opens the session picker, if the app picks one."""
         self._hooks.label_triggers(trigger_key_labels(catalog.triggers))
+        self.seats.follow_catalog(catalog.agents)
+        self._panes.tabs.pin(self.seats.lanes)
         navigation = self._handlers.navigation
         navigation.follow_catalog(catalog)
         attached = navigation.place.attached_session
@@ -305,7 +308,8 @@ class EventRouter:
         the agents pane follows it as it follows every event, and the working row once its
         roles are known."""
         panes, handlers = self._panes, self._handlers
-        self._show_settings(snapshot.settings, snapshot.model_choices)
+        handlers.pickers.show_choices(snapshot.model_choices)
+        self.seats.replace_settings({**snapshot.role_settings, PLANNER: snapshot.settings})
         for lane, busy in snapshot.busy.items():
             self.set_busy(lane, busy)
         self._show_tasks(snapshot.tasks)
@@ -345,9 +349,10 @@ class EventRouter:
                 self._show_progress(event)
 
     def _follow_settings(self, event: SettingsChanged) -> None:
-        """Show the settings ``event`` reports if they're the planner's; no other role's show."""
-        if event.role == PLANNER:
-            self._show_settings(event.settings, event.model_choices)
+        """Offer the model choices ``event`` reports, and note its role's settings, shown under
+        the prompt while it talks to that role."""
+        self._handlers.pickers.show_choices(event.model_choices)
+        self.seats.follow_settings(event.role, event.settings)
 
     def _follow_stream(self, event: AgentsChanged | UsageTotals | DirectoryListing) -> None:
         """Show the agents running across workspaces in the workspace picker, and the server's
@@ -387,8 +392,3 @@ class EventRouter:
         else:
             self._handlers.navigation.follow_state(event)
             self.show_viewing()
-
-    def _show_settings(self, settings: Settings, choices: tuple[str, ...]) -> None:
-        self._handlers.pickers.show_choices(choices)
-        self._settings = settings
-        self._panes.prompt.show_settings(settings)

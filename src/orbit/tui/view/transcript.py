@@ -132,19 +132,27 @@ def _session_name(name: str) -> str:
     return name[: SESSION_NAME_WIDTH - 1] + "…"
 
 
-PLANNER_BUSY = "Planner is busy"
-"""The note when the user sends a prompt while the planner is still answering."""
+def busy_note(label: str) -> str:
+    """The note when the user sends a prompt to the conversational role labelled ``label``
+    while it's still answering: ``Planner is busy``."""
+    return f"{label} is busy"
+
+
+def prompt_placeholder(label: str) -> str:
+    """What the empty prompt says while it talks to the conversational role labelled
+    ``label``."""
+    return f"Press i to talk to {label}, esc to stop typing"
 
 
 READ_ONLY_MARK = "read-only"
 """The prompt box's mark while another orbit owns the repository."""
 
 
-def prompt_title(busy: bool, read_only: bool = False) -> str:
-    """The prompt box's title, naming the planner it talks to, whether it's ``busy`` and
-    whether the orbit is ``read_only``."""
+def prompt_title(busy: bool, read_only: bool = False, role: str = PLANNER) -> str:
+    """The prompt box's title, naming the conversational ``role`` it talks to, whether that's
+    ``busy`` and whether the orbit is ``read_only``."""
     marks = (*(("busy",) if busy else ()), *((READ_ONLY_MARK,) if read_only else ()))
-    return " · ".join(["Prompt", PLANNER, *marks])
+    return " · ".join(["Prompt", role, *marks])
 
 
 def speaker_label(kind: EntryKind, current: str | None, previous: str | None) -> str | None:

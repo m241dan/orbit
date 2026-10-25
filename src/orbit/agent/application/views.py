@@ -69,6 +69,7 @@ class SessionParts(TypedDict):
 
     session: SessionSummary
     settings: Settings
+    role_settings: dict[str, Settings]
     busy: dict[BusyLane, bool]
     tasks: tuple[TaskState, ...]
     steps: tuple[StepState, ...]
@@ -245,6 +246,7 @@ class SessionViews:
         view = self.snapshot(
             session=summarize(record),
             settings=record.role_settings.get(PLANNER, Settings()),
+            role_settings=dict(record.role_settings),
             busy={WORK_LANE: False, PLANNER_LANE: False},
             tasks=record.tasks,
             steps=(),

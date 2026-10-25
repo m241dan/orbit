@@ -77,7 +77,7 @@ In the app:
 | Key | Action |
 |---|---|
 | `h` `j` `k` `l` | Move between windows (the selected one is highlighted); while the conversation's detail pane is open, `j` from the conversation selects the pane, and from the pane `k` goes back, `j` to the prompt and `l` to the task list |
-| `i` | Jump to the prompt, which talks to the planner, and start typing (vim-style insert mode): long text wraps and the box grows up to 8 lines, then scrolls; `enter` sends, pasted text keeps its newlines, `esc` stops typing |
+| `i` | Jump to the prompt, which talks to the conversational role whose tab is shown, or the planner on any other tab, and start typing (vim-style insert mode): long text wraps and the box grows up to 8 lines, then scrolls; `enter` sends, pasted text keeps its newlines, `esc` stops typing |
 | `enter` | On the conversation: activate it (`j`/`k` move between entries, `k` on the first loading earlier ones, `enter` collapses or expands the one marked `▌` in the left gutter, or opens the detail pane on a tool call or request, `J`/`K` scroll the open detail pane, `y` copies its call's whole output, `tab` activates it, `esc` closes the detail pane if it's open, else leaves and holds the marked entry); again, resume at the held entry |
 | `enter` | On the conversation's detail pane: activate it (`j`/`k` scroll it, `y` copies its call's whole output, `esc` leaves with the pane still open) |
 | `enter` | On the task list: activate and hold it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `f` shows why a task failed or stopped, `esc` leaves, the list still held) |
@@ -85,18 +85,19 @@ In the app:
 | `enter` | On the prompt, while viewing a session read-only: ask whether to make it the active session (see [Sessions](#sessions)) |
 | `t` | Hide agents' dim messages, still thinking out loud, in every tab; again, show them (works with the conversation activated too) |
 | `ctrl+b` | Hide the sidebar so the conversation takes the full width (`h`/`j`/`k`/`l` skip its windows meanwhile); again, show it as it was (not while typing) |
-| `ctrl+t` | Jump to the **planner** tab; again, back to the tab you were on |
+| `ctrl+t` | Jump to the **planner** tab; again, to each other conversational role's tab in turn, and from the last, back to the tab you were on (with the built-in roles alone, the planner tab and back) |
 | `ctrl+r` | Run the tasks that haven't completed yet |
 | `ctrl+g` | Ask for a super review of the whole codebase now (works while tasks run; hidden while the `super-reviewer` is disabled) |
 | `ctrl+e` | Set up (or redo) the verification steps: after you confirm (`y` to go ahead, `n`/`esc` to cancel), queue a configurator task first and run it (see [Setting up verification](#setting-up-verification); hidden while the `configurator` is disabled) |
-| `ctrl+o` | Pick the planner's model (default, fable, opus, sonnet, haiku; new tasks default to it too) |
-| `ctrl+l` | Pick the tool access level new tasks start with in the task editor (off, restricted, full) |
+| `ctrl+o` | Pick the model of the conversational role whose tab is shown, or the planner's on any other tab (default, fable, opus, sonnet, haiku; new tasks opened there default to it too) |
+| `ctrl+l` | Pick the tool access level new tasks start with in the task editor (off, restricted, full), kept with the conversational role whose tab is shown, or the planner's on any other tab |
+| `ctrl+y` | Pick the effort of the conversational role whose tab is shown, or the planner's on any other tab (unset, low, medium, high, xhigh, max; new tasks opened there default to it too); not while typing, where it's the prompt's redo |
 | `ctrl+p` | Session picker: view or switch to a saved session, or start a new one (see [Sessions](#sessions)) |
 | `ctrl+w` | Workspace picker, connected to an `orbit serve`: move to another workspace it serves, add one or remove one (see [Workspaces](#workspaces)); not while typing |
 | `esc` | Stop typing, close the conversation's detail pane, leave a list or close a picker; with the conversation selected and nothing active, let go of its held entry, closing the detail pane, and follow the latest output again; with the detail pane selected, close it; with the Task list selected and nothing active, let go of the held list and follow the active task again |
 | `ctrl+s` | Stop the task run (on any tab) |
-| `ctrl+x` | Stop the planner's turn, leaving the task run going |
-| `ctrl+n` | Reset the planner: after you confirm (`y` to go ahead, `n`/`esc` to cancel), end its conversation so the next prompt starts a fresh one, with its role read again from `.orbit/config.toml` (see [Planning with the planner](#planning-with-the-planner)) |
+| `ctrl+x` | Stop the turn of the conversational role whose tab is shown, or the planner's on any other tab, leaving the task run going |
+| `ctrl+n` | Reset the conversational role whose tab is shown, or the planner on any other tab: after you confirm (`y` to go ahead, `n`/`esc` to cancel), end its conversation so the next prompt starts a fresh one, the planner's with its role read again from `.orbit/config.toml` (see [Planning with the planner](#planning-with-the-planner)) |
 | `enter` / `esc` | On a storage halt: try again, or close it; `j`/`k` (or the arrow keys) scroll a long explanation (see [Storage failures](#storage-failures)) |
 | `a` / `r` / `x` | On a proposal of checks: accept it, ask for changes (type them, `enter` sends, `esc` goes back), or end the task (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+c` | Quit |
@@ -354,8 +355,10 @@ agent's id in a muted row whenever the speaker changes, its tool calls, prefixed
 its requests to orbit and orbit's replies (`agent-1 → orbit complete_task … ✓ …`) in their own
 colour. The tabs above it narrow it: **All** shows everything,
 then come a pinned tab for each built-in role, labelled by its name: **planner**, **coder**,
-**reviewer**, **super-reviewer** and **configurator**. The pinned tabs are there from the start and
-keep the whole session's history; every agent in a role shares its tab (two reviewers running at
+**reviewer**, **super-reviewer** and **configurator**, and one for each other conversational role
+the project configures (see `conversation` under
+[Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)), such as **architect**. The pinned
+tabs are there from the start and keep the whole session's history; every agent in a role shares its tab (two reviewers running at
 once both show under **reviewer**), each message headed and every other entry prefixed with its
 agent's id, so you can tell them apart. Whether the speaker changed is judged within the tab: under
 All, where agents interleave, messages are headed more often. The planner's messages are never
@@ -365,10 +368,13 @@ headed. Agents in any other role, such as the startup check (`checker`) or a cus
 role's tab also shows its tasks' headers (`Task 2: …`), verification results and merge notes, so a
 coder task's whole run reads under **coder**; those of a task in a role without a pinned tab, and
 the startup check's, show only under All, as do notices. Click a tab to switch, cycle with
-`tab`/`shift+tab`, or jump to the planner tab with `ctrl+t` (again goes back). A role's tab starts
-with `●` while one of its agents is running (the planner's while it's answering), and a tab with
-output you haven't seen, a task note included, ends in `*`. Whichever tab is shown, the prompt goes
-to the planner.
+`tab`/`shift+tab`, or jump to the planner tab with `ctrl+t` (again goes to each other
+conversational role's tab in turn, then back). A role's tab starts with `●` while one of its agents
+is running (a conversational role's while it's answering), and a tab with output you haven't seen,
+a task note included, ends in `*`. The prompt talks to the conversational role whose tab is shown,
+and to the planner on any other tab: its placeholder names the role (`Press i to talk to
+Planner, esc to stop typing`), its title reads `Prompt · <role>`, and the settings under it are
+that role's.
 
 Each entry is coloured by what it is: your prompts, agents' messages, tool calls and their output,
 verification and notices, and errors. Agents' and the planner's messages render as markdown:
@@ -889,12 +895,14 @@ is reported as an error and left for the next start.
 
 ### Planning with the planner
 
-The prompt talks to the planner (its title reads `Prompt · planner`). It wraps what you type and
+On any tab but another conversational role's, the prompt talks to the planner (its title reads
+`Prompt · planner`). It wraps what you type and
 grows with it up to 8 lines, then scrolls, and shrinks again once sent; `enter` sends, and pasted
 text keeps its newlines. Orbit is for planning, tasks and reviews, with no free-form chat besides.
 The **planner** tab, always second in the strip, shows just the planner conversation: your
 prompts, and the planner's messages, tool calls and exchanges with orbit (`ctrl+t` jumps there,
-and pressed again goes back to the tab you were on). Tell it what you want to build; it asks
+and pressed again goes on to any other conversational role's tab, then back to the tab you were
+on). Tell it what you want to build; it asks
 what's unclear in rounds of a few questions, each offering options with a recommendation, and
 breaks the goal into small tasks, proposing each with `propose_task` (a title is required, and
 kept to one line). Every plan's first task writes the plan's record: a numbered requirements
@@ -1033,9 +1041,11 @@ in a later version**: orbit loads and checks them, but nothing acts on them yet.
   saves and carries on when you open it again, and which resetting it ends alone; its own model,
   tool access and effort, saved with the session; and its turns in its own lane, so it answers
   while the planner does. It's listed as conversational in the Catalog, and its lane in the
-  Catalog's lanes and the Snapshot's `busy`. For now the prompt talks to the planner; other
-  conversational roles are reached through the protocol's `SendMessage`, `ResetConversation`,
-  `CancelTurn` and `UpdateSettings` (see [docs/protocol.md](docs/protocol.md)).
+  Catalog's lanes and the Snapshot's `busy`. Each has a pinned tab after the built-in roles',
+  which `ctrl+t` reaches after the planner's; on it, the prompt talks to that role, `ctrl+x` stops
+  its turn, `ctrl+n` resets it (its role isn't read again, unlike the planner's), and `ctrl+o`,
+  `ctrl+l` and `ctrl+y` pick its settings. The protocol's `SendMessage`, `ResetConversation`,
+  `CancelTurn` and `UpdateSettings` reach it too (see [docs/protocol.md](docs/protocol.md)).
 - `merge`: whether its finished work is committed and merged.
 - `enabled`: whether it runs at all. A disabled role is left out of the Catalog's agents, and its
   lane out of the Catalog's lanes unless an enabled role shares it. A disabled `reviewer` queues no
@@ -1126,9 +1136,10 @@ is orbit's `--effort`, or the CLI's default; see `effort` under
 [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)).
 
 A model picked with `ctrl+o` applies from the planner's next prompt and keeps its conversation
-(with `default` picked, the planner uses `[roles.planner] model` if the config sets one); the
-tool access picked with `ctrl+l` is what new tasks start with in the task editor. Both are saved
-with the session. `ctrl+l` does not
+(with `default` picked, the planner uses `[roles.planner] model` if the config sets one), as does
+an effort picked with `ctrl+y`; the tool access picked with `ctrl+l` is what new tasks start with
+in the task editor. On another conversational role's tab, the three pick that role's settings
+instead, leaving the planner's as they were. All are saved with the session. `ctrl+l` does not
 change the planner's own tool access, which is the planner role's (`[roles.planner] tool_access` in
 `.orbit/config.toml`, `restricted` by default).
 

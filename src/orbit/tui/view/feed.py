@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from typing import Protocol, assert_never, get_args
 
 from orbit.protocol import (
-    PLANNER,
     AgentExited,
     AgentReply,
     AgentRequest,
@@ -38,7 +37,7 @@ from orbit.tui.view.events import (
 from orbit.tui.view.log import Entry
 from orbit.tui.view.progress import TaskProgress, task_note
 from orbit.tui.view.proposals import decision_entry
-from orbit.tui.view.rules import exit_rule, planner_reset_entry, turn_rule_entry
+from orbit.tui.view.rules import exit_rule, reset_entry, turn_rule_entry
 from orbit.tui.view.tabs import stopped_callers
 from orbit.tui.view.transcript import (
     activity_entry,
@@ -245,7 +244,7 @@ class ConversationFeed:
     def _show_logged(self, event: Event) -> None:
         """Show ``event``, read from the session's log, if the conversation shows it."""
         if isinstance(event, ConversationReset):
-            self.append(*planner_reset_entry(), PLANNER)
+            self.append(*reset_entry(event.agent), event.agent)
         elif in_group(event, _SHOWN_EVENTS):
             self.render(event)
 

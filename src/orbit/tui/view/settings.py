@@ -3,7 +3,7 @@
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Protocol, get_args
 
-from orbit.protocol import AgentEntry, Effort, Settings, ToolAccess
+from orbit.protocol import PLANNER, AgentEntry, Effort, Settings, ToolAccess
 from orbit.tui.view.common import model_label
 
 MODEL_TITLE = "Model"
@@ -105,14 +105,16 @@ def settings_fields(settings: Settings) -> tuple[str, str]:
     return model_label(settings), tool_access_label(settings.tool_access)
 
 
-def settings_summary(settings: Settings) -> str:
-    """The settings as the prompt shows them.
+def settings_summary(settings: Settings, role: str = PLANNER) -> str:
+    """The settings of the conversational ``role`` as the prompt shows them, its effort only
+    when it has one.
 
-    The model is the planner's, and the default for new tasks; the tool access is
+    The model and effort are the role's, and the defaults for new tasks; the tool access is
     only the default for new tasks.
     """
     model, tools = settings_fields(settings)
-    return f"planner's model: {model} · new tasks' tools: {tools}"
+    effort = () if settings.effort is None else (f"effort: {settings.effort}",)
+    return " · ".join((f"{role}'s model: {model}", *effort, f"new tasks' tools: {tools}"))
 
 
 Picked = Callable[[Settings], Awaitable[None] | None]

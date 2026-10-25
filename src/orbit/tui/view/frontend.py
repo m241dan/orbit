@@ -10,14 +10,13 @@ from orbit import __version__
 from orbit.protocol import (
     CONFIGURE_CHECKS,
     INTERNAL,
-    PLANNER,
-    PLANNER_LANE,
     PROTOCOL_VERSION,
     SUPER_REVIEW,
     UNKNOWN,
     WORK_LANE,
     AcceptTask,
     AddTask,
+    BusyLane,
     CancelAgent,
     CancelTurn,
     ChecksProposed,
@@ -44,9 +43,9 @@ from orbit.tui.view.confirm import (
     CONFIGURE_MESSAGE,
     CONFIGURE_TITLE,
     CONFIGURE_YES,
-    RESET_MESSAGE,
-    RESET_TITLE,
     RESET_YES,
+    reset_message,
+    reset_title,
 )
 from orbit.tui.view.events import coalesce
 from orbit.tui.view.feed import ConversationFeed, Entries
@@ -69,18 +68,21 @@ from orbit.tui.view.router import (
     TranscriptPane,
     UsagePane,
 )
-from orbit.tui.view.settings import Pickers
+from orbit.tui.view.settings import Picked, Pickers
 from orbit.tui.view.storage import StorageHalt
 from orbit.tui.view.tab_strip import TabStrip
 from orbit.tui.view.takeover import TakeoverOffer
 from orbit.tui.view.task_editor import TaskChoices
 from orbit.tui.view.tasks import TaskBoard, edit_refusal
-from orbit.tui.view.transcript import PLANNER_BUSY, warning_entry
+from orbit.tui.view.transcript import busy_note, warning_entry
 from orbit.tui.view.windows import SIDEBAR_WINDOWS, Windows
 from orbit.tui.view.workspace_list import WorkspaceListView
 
 Saved = Callable[[TaskSpec | None], Awaitable[None]]
 """Takes the task the editor saved, or none if it was discarded."""
+
+Choose = Callable[[Callable[[], Settings], Picked], None]
+"""Opens a settings picker on the settings it reads, passing on those picked."""
 
 
 class AppView(Protocol):
@@ -160,7 +162,7 @@ class ConversationPane(Entries, TranscriptPane, Protocol):
 
 
 class PromptBox(Protocol):
-    """The box the user types prompts to the planner in."""
+    """The box the user types prompts to the conversational roles in."""
 
     @property
     def text(self) -> str:
@@ -314,25 +316,30 @@ class Frontend:
         """Note the warning ``message`` from ``logger`` in the conversation."""
         self.feed.note(*warning_entry(logger, message))
 
-    # Talking to the planner and deciding on proposals.
+    # Talking to the conversational roles and deciding on proposals.
 
     async def submit(self, text: str) -> None:
-        """Send the prompt ``text`` to the planner, unless it's blank or the planner is busy,
-        which keeps it to send again once the planner is free."""
+        """Send the prompt ``text`` to the conversational role the prompt talks to, unless it's
+        blank or that role is busy, which keeps it to send again once the role is free."""
         text = text.strip()
         if not text:
             return
-        if self.router.busy(PLANNER_LANE):
-            self._app.warn(PLANNER_BUSY)
+        seat = self.router.seats.target
+        if self.router.busy(seat.lane):
+            self._app.warn(busy_note(seat.label))
             return
         self._parts.prompt.normal_mode()
         # Busy from now, not from TurnStarted, so a second prompt can't race the turn.
-        self.router.set_busy(PLANNER_LANE, True)
-        # A newer prompt supersedes an earlier one: only its outcome frees the planner.
-        outcome = Awaited(accepted=lambda: self._sent(text), refused=self._unsend, supersedes=True)
+        self.router.set_busy(seat.lane, True)
+        # A newer prompt supersedes an earlier one: only its outcome frees the role.
+        outcome = Awaited(
+            accepted=lambda: self._sent(text),
+            refused=partial(self._unsend, seat.lane),
+            supersedes=True,
+        )
         with action("submit_prompt"):
             await self._show_and_send(
-                (text, "prompt"), PLANNER, SendMessage(agent=PLANNER, text=text), outcome
+                (text, "prompt"), seat.name, SendMessage(agent=seat.name, text=text), outcome
             )
 
     async def _show_and_send(
@@ -349,16 +356,16 @@ class Frontend:
         await self.send(command, replace(awaited, refused=dropped))
 
     def _sent(self, text: str) -> None:
-        """Clear the prompt once the planner accepted ``text``, unless the user has edited the
+        """Clear the prompt once its role accepted ``text``, unless the user has edited the
         draft since."""
         prompt = self._parts.prompt
         if prompt.text.strip() == text:
             prompt.clear()
 
-    def _unsend(self) -> None:
-        """Undo sending a prompt to the planner, refused or not sent: the planner is freed, the
-        prompt's text still in the prompt."""
-        self.router.set_busy(PLANNER_LANE, False)
+    def _unsend(self, lane: BusyLane) -> None:
+        """Undo sending a prompt to a conversational role answering in ``lane``, refused or not
+        sent: the lane is freed, the prompt's text still in the prompt."""
+        self.router.set_busy(lane, False)
 
     async def decide(self, proposal: ChecksProposed, decision: DecideProposal) -> None:
         """Note the user's ``decision`` on ``proposal`` in the conversation and send it; refused
@@ -433,11 +440,12 @@ class Frontend:
 
     def tab_shown(self, tab_id: str, label: str) -> None:
         """Show the conversation of the tab ``tab_id``, labelled ``label``, which the user
-        moved to, marking it read."""
+        moved to, marking it read; the prompt talks to its role if it's conversational."""
         tabs = self._parts.tabs
         agent = tabs.agent_of(tab_id)
         tabs.mark_read(agent)
         self._parts.conversation.show_only(agent, label)
+        self.router.seats.show_tab(agent)
         self.leave_closed_detail()
 
     def retitle(self, key: str | None, label: str) -> None:
@@ -447,9 +455,10 @@ class Frontend:
         if key == conversation.only:
             conversation.relabel(label)
 
-    def toggle_planner(self) -> None:
-        """Show the planner tab, or go back to the tab shown before it."""
-        self._parts.tabs.toggle_planner()
+    def cycle_conversations(self) -> None:
+        """Show the planner tab, from there each other conversational role's, and from the
+        last, the tab shown before."""
+        self._parts.tabs.cycle_conversations()
 
     def cycle_tab(self, step: int) -> None:
         """Show the next tab, or with a negative ``step``, the one before."""
@@ -482,19 +491,26 @@ class Frontend:
         )
 
     def reset_planner(self) -> None:
-        """Ask first, so a stray key doesn't end the planner's conversation."""
-        # The backend refuses while the planner answers, or notes there's nothing to reset.
-        command = ResetConversation(agent=PLANNER)
+        """Ask first, so a stray key doesn't end the conversation of the role the prompt talks
+        to."""
+        # The backend refuses while the role answers, or notes there's nothing to reset.
+        role = self.router.seats.target.name
+        command = ResetConversation(agent=role)
         self._app.confirm(
-            RESET_TITLE, RESET_MESSAGE, RESET_YES, lambda: self._act("reset_planner", command)
+            reset_title(role),
+            reset_message(role),
+            RESET_YES,
+            lambda: self._act("reset_planner", command),
         )
 
     async def cancel_turn(self) -> None:
-        # The planner has its own lane, stopped with ctrl+x; ctrl+s stops the task run.
+        # The conversational roles have their own lanes, stopped with ctrl+x; ctrl+s stops the
+        # task run.
         await self._act("cancel_turn", CancelTurn(lane=WORK_LANE))
 
     async def stop_planner(self) -> None:
-        await self._act("stop_planner", CancelTurn(lane=PLANNER_LANE))
+        """Stop the turn of the role the prompt talks to."""
+        await self._act("stop_planner", CancelTurn(lane=self.router.seats.target.lane))
 
     async def cancel_agent(self, agent_id: str) -> None:
         await self._act("cancel_agent", CancelAgent(agent_id=agent_id))
@@ -511,9 +527,10 @@ class Frontend:
             await self.pager.earlier()
 
     def edit_task(self, current: TaskState | None) -> None:
-        """Open the editor on the task ``current``, or a new one, offering the settings shown
-        and the catalog's agents, unless it can't be edited, which the user is told; the list
-        changes when the backend reports the new task list."""
+        """Open the editor on the task ``current``, or a new one, offering the settings shown,
+        those of the role the prompt talks to, and the catalog's agents, unless it can't be
+        edited, which the user is told; the list changes when the backend reports the new task
+        list."""
         refusal = None if current is None else edit_refusal(current)
         if refusal is not None:
             self._app.warn(refusal)
@@ -528,7 +545,9 @@ class Frontend:
                 await self._act("edit_task", EditTask(task_id=current.id, task=result))
 
         task = None if current is None else current.task
-        choices = TaskChoices(self.router.settings or Settings(), self.navigation.catalog.agents)
+        choices = TaskChoices(
+            self.router.seats.settings or Settings(), self.navigation.catalog.agents
+        )
         self._app.edit_task(task, choices, saved)
 
     def list_sessions(self) -> None:
@@ -539,23 +558,33 @@ class Frontend:
         """Show the workspace picker."""
         self.navigation.workspaces.open()
 
-    # The settings pickers, which open once the backend has reported the settings.
+    # The settings pickers, which set the settings of the role the prompt talks to, and open
+    # once the backend has reported settings.
 
     def pick_model(self) -> None:
-        if self.router.settings is not None:
-            request = partial(self._request_settings, "pick_model")
-            self._parts.pickers.choose_model(self._shown_settings, request)
+        self._pick(self._parts.pickers.choose_model, "pick_model")
 
     def pick_tool_access(self) -> None:
-        if self.router.settings is not None:
-            request = partial(self._request_settings, "pick_tool_access")
-            self._parts.pickers.choose_tools(self._shown_settings, request)
+        self._pick(self._parts.pickers.choose_tools, "pick_tool_access")
 
-    def _shown_settings(self) -> Settings:
-        settings = self.router.settings
-        assert settings is not None  # Only picked once settings were shown.
-        return settings
+    def pick_effort(self) -> None:
+        self._pick(self._parts.pickers.choose_effort, "pick_effort")
 
-    async def _request_settings(self, name: ActionName, settings: Settings) -> None:
+    def _pick(self, choose: Choose, name: ActionName) -> None:
+        """Have ``choose`` open its picker on the settings of the role the prompt talks to,
+        requesting them with the pick as the user's action ``name``, once there are any."""
+        seats = self.router.seats
+        role = seats.target.name
+        if seats.settings_of(role) is None:
+            return
+
+        def settings() -> Settings:
+            shown = seats.settings_of(role)
+            assert shown is not None  # Settings once reported are never forgotten.
+            return shown
+
+        choose(settings, partial(self._request_settings, name, role))
+
+    async def _request_settings(self, name: ActionName, role: str, settings: Settings) -> None:
         # The display updates when the backend confirms with SettingsChanged.
-        await self._act(name, UpdateSettings(settings=settings))
+        await self._act(name, UpdateSettings(settings=settings, role=role))

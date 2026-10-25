@@ -31,8 +31,8 @@ class ConversationTabs(Tabs):
     def activate(self, tab_id: str) -> None:
         self.active = tab_id
 
-    def open_tab(self, tab_id: str, label: str) -> None:
-        self.add_tab(Tab(label, id=tab_id))
+    def open_tab(self, tab_id: str, label: str, before: str | None = None) -> None:
+        self.add_tab(Tab(label, id=tab_id), before=before)
 
     def close_tab(self, tab_id: str) -> None:
         self.remove_tab(tab_id)

@@ -169,9 +169,9 @@ class Strip:
         label = self.labels[tab_id]
         self._shell.post(lambda: self._shell.frontend.tab_shown(tab_id, label))
 
-    def open_tab(self, tab_id: str, label: str) -> None:
+    def open_tab(self, tab_id: str, label: str, before: str | None = None) -> None:
         assert tab_id not in self.labels
-        self.labels[tab_id] = label
+        self.labels = opened_before(self.labels, tab_id, label, before)
 
     def close_tab(self, tab_id: str) -> None:
         assert tab_id != self.active
@@ -188,18 +188,33 @@ class Strip:
         return next(tab_id for tab_id, shown in self.labels.items() if shown == label)
 
 
+def opened_before(
+    labels: dict[str, str], tab_id: str, label: str, before: str | None
+) -> dict[str, str]:
+    """The tabs' ``labels``, by id in order, with the tab ``tab_id`` labelled ``label`` before
+    the tab ``before``, or last without one."""
+    tabs = list(labels.items())
+    at = len(tabs) if before is None else list(labels).index(before)
+    tabs.insert(at, (tab_id, label))
+    return dict(tabs)
+
+
 class Marks:
-    """The prompt's title and subtitle."""
+    """The prompt's title, subtitle and placeholder."""
 
     def __init__(self) -> None:
         self.title = ""
         self.subtitle = ""
+        self.placeholder = ""
 
     def show_title(self, title: str) -> None:
         self.title = title
 
     def show_subtitle(self, subtitle: str) -> None:
         self.subtitle = subtitle
+
+    def show_placeholder(self, placeholder: str) -> None:
+        self.placeholder = placeholder
 
 
 class Line:
@@ -359,9 +374,9 @@ class Shell:
             self.frontend.cycle_tab(step)
             await self.settle()
 
-    async def toggle_planner(self) -> None:
+    async def cycle_conversations(self) -> None:
         """Press ctrl+t."""
-        self.frontend.toggle_planner()
+        self.frontend.cycle_conversations()
         await self.settle()
 
     def entries(self) -> list[tuple[str, EntryKind]]:

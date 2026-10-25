@@ -59,9 +59,10 @@ def _rule(label: str, speaker: str | None, cost: list[str], error: bool) -> tupl
     return " · ".join(parts), "error_rule" if error else "rule"
 
 
-def planner_reset_entry() -> tuple[str, EntryKind]:
-    """The muted rule marking where the user reset the planner's conversation."""
-    return "planner reset", "rule"
+def reset_entry(role: str) -> tuple[str, EntryKind]:
+    """The muted rule marking where the user reset the conversational ``role``'s
+    conversation."""
+    return f"{role} reset", "rule"
 
 
 EXIT_LABELS: dict[AgentExitReason, str] = {

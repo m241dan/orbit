@@ -166,6 +166,16 @@ async def test_the_architects_settings_change_alone_and_its_turns_use_them() -> 
     await session.close()
 
 
+async def test_the_snapshot_carries_each_conversational_roles_settings() -> None:
+    session, _ = talking()
+    architects = Settings(model="haiku", effort="max")
+    await send(session, UpdateSettings(role=ARCHITECT, settings=architects))
+    await events_until(session, of_type(SettingsChanged))
+    snapshot = await snapshot_of(session)
+    assert snapshot.role_settings == {PLANNER: Settings(), ARCHITECT: architects}
+    await session.close()
+
+
 async def test_settings_for_a_role_that_isnt_conversational_are_refused() -> None:
     session, _ = talking()
     refusal = await refusal_of(session, UpdateSettings(role="coder", settings=Settings()))

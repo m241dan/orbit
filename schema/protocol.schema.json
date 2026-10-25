@@ -2386,7 +2386,7 @@
       "type": "object"
     },
     "Snapshot": {
-      "description": "The session a connection views as it stands, sent in answer to ``Attach`` and after every\nswitch; its envelope's ``seq`` is the point it's current to.\n\nIt holds the ``session``'s summary, its ``settings`` and ``model_choices``, whether each\nlane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they\nshow under, the ``review`` status (none when reviews are off), the checks ``proposals``\nwaiting for a decision, the ``agents`` running, the ``transcript``: the session's\nlast logged events, at most 500, oldest first, in the envelopes they were sent in, and,\nwhile the session is halted because storage failed, ``storage_halt``: why, and how to\nresume; ``read_only`` says another orbit owns the repository, so the work this one is\nasked to run waits, and ``ownership_offered`` that the repository is offered, as\n``OwnershipOffered`` said, until the offer is settled. ``active`` says whether the session\nis the workspace's open one, which runs work; one that isn't is a read-only view, from its\nsaved record and its last logged events. ``open_session`` names the workspace's open\nsession, and ``viewers`` counts the connections viewing this one.",
+      "description": "The session a connection views as it stands, sent in answer to ``Attach`` and after every\nswitch; its envelope's ``seq`` is the point it's current to.\n\nIt holds the ``session``'s summary, its ``settings`` (the planner's), each conversational role's\nsettings by role (``role_settings``, the planner's among them) and the ``model_choices``,\nwhether each lane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title``\nthey show under, the ``review`` status (none when reviews are off), the checks ``proposals``\nwaiting for a decision, the ``agents`` running, the ``transcript``: the session's last logged\nevents, at most 500, oldest first, in the envelopes they were sent in, and, while the session is\nhalted because storage failed, ``storage_halt``: why, and how to resume; ``read_only`` says\nanother orbit owns the repository, so the work this one is asked to run waits, and\n``ownership_offered`` that the repository is offered, as ``OwnershipOffered`` said, until the\noffer is settled. ``active`` says whether the session is the workspace's open one, which runs\nwork; one that isn't is a read-only view, from its saved record and its last logged events.\n``open_session`` names the workspace's open session, and ``viewers`` counts the connections\nviewing this one.",
       "properties": {
         "active": {
           "default": true,
@@ -2451,6 +2451,13 @@
               "type": "null"
             }
           ]
+        },
+        "role_settings": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Settings"
+          },
+          "title": "Role Settings",
+          "type": "object"
         },
         "session": {
           "$ref": "#/$defs/SessionSummary"

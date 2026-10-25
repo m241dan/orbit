@@ -120,6 +120,13 @@ def test_coalesce_always_collapses_review_status_and_settings() -> None:
     assert coalesce(events) == events[2:]
 
 
+def test_coalesce_collapses_each_roles_settings_to_its_last() -> None:
+    planners = SettingsChanged(settings=Settings(model="opus"))
+    architects = SettingsChanged(role="architect", settings=Settings(model="haiku"))
+    events: list[Event] = [SettingsChanged(settings=Settings()), planners, architects]
+    assert coalesce(events) == [planners, architects]
+
+
 def test_coalesce_keeps_other_events_in_order() -> None:
     events: list[Event] = [
         AssistantMessage(turn_id="t", text="a"),

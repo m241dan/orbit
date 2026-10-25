@@ -108,7 +108,7 @@ async def test_opening_a_session_replaces_the_total_with_its_saved_spend() -> No
 
 async def test_a_refused_planner_prompt_frees_the_prompt() -> None:
     shell = Shell()
-    await shell.toggle_planner()
+    await shell.cycle_conversations()
     await shell.submit("plan")
     assert shell.marks.title == "Prompt · planner · busy"
     refused = ErrorOccurred(
