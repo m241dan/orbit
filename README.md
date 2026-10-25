@@ -1768,9 +1768,12 @@ Each task the work lane runs is one span, `orbit.task`, starting its own trace: 
 (workspace, session, id, title, role, model and who queued it), what its turns cost in tokens and
 dollars, how long it waited for a coder's slot, its fix attempts and the checks its agent ran,
 how verification and merging came out, and its final status and reason, with each verification
-step, a give-up and a merge conflict as events, and its wait and run as child spans. Spans hold
-no prompts, agent messages, diffs or check output. [docs/telemetry.md](docs/telemetry.md) lists
-every span, attribute and event.
+step, a give-up and a merge conflict as events, and its wait and run as child spans. Each command
+a frontend sends is one span, `orbit.command`: its type, the workspace and session it's for, the
+client that sent it and whether it was accepted or refused, with the code; it's a child of the
+span whose trace context its envelope carries, if any, else it starts its own trace, and the
+events it publishes carry its own. Spans hold no prompts, agent messages, diffs or check output.
+[docs/telemetry.md](docs/telemetry.md) lists every span, attribute and event.
 
 ## Development
 
@@ -1856,7 +1859,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     what's shared: the connections, the `Outbox` (in `outbox`), which stamps each event with its
     `seq`, the session it belongs to and the trace context of the span current, every stream's
     `Handshake` and the `UsageMonitor`; it routes every command to the `WorkspaceHost` of the
-    workspace it's for and passes each host's events to the connections; frontends add and
+    workspace it's for, handling each in an `orbit.command` span (`command_span`, in
+    `command_trace`), and passes each host's events to the connections; frontends add and
     remove workspaces through its
     `WorkspaceSource` port, which `orbit serve` fills and a local orbit doesn't. `WorkspaceHost` (in `workspace_host`) is one workspace's
     backend: its open session, lanes, agents and workspace lock; it takes the commands routed

@@ -9,6 +9,7 @@ from orbit.agent.application.browsing import Browsing
 from orbit.agent.application.clones import Clones
 from orbit.agent.application.closing import close_all
 from orbit.agent.application.coder_slots import CoderSlots
+from orbit.agent.application.command_trace import CommandScope, accepted, command_span, refused
 from orbit.agent.application.connection import (
     ConnectionParts,
     Connections,
@@ -49,6 +50,9 @@ from orbit.protocol import (
     Watch,
     WorkspaceEntry,
 )
+from orbit.tracing import NoTelemetry, Span, Telemetry
+
+_NO_TELEMETRY = NoTelemetry()
 
 
 def _last_seq(hosts: Iterable[WorkspaceHost], mark: SeqMark | None) -> int:
@@ -63,18 +67,25 @@ async def _untold(entry: WorkspaceEntry) -> None:
 
 class _ControlEvents:
     """The control plane's own events, each stamped with the next of ``seqs`` as no workspace's
-    and no session's, and delivered to every listening connection among those ``everywhere``
-    gives, whichever workspace it's attached to."""
+    and no session's, and the trace context of the span current then, as ``telemetry`` carries
+    it, and delivered to every listening connection among those ``everywhere`` gives,
+    whichever workspace it's attached to."""
 
-    def __init__(self, seqs: Seqs, everywhere: Callable[[], Iterable[Connections]]) -> None:
+    def __init__(
+        self,
+        seqs: Seqs,
+        everywhere: Callable[[], Iterable[Connections]],
+        telemetry: Telemetry,
+    ) -> None:
         self._seqs = seqs
         self._everywhere = everywhere
+        self._telemetry = telemetry
 
     def stamp(
         self, item: Event, viewed: str | None = None, *, logged: bool = True
     ) -> EventEnvelope:
         """``item`` in its envelope, stamped now; it's never logged."""
-        return EventEnvelope(seq=self._seqs.next(), payload=item)
+        return self._telemetry.carry(EventEnvelope(seq=self._seqs.next(), payload=item))
 
     def put_nowait(self, item: Event) -> None:
         """Stamp ``item`` and deliver it to every listening connection."""
@@ -152,6 +163,10 @@ class ControlPlane:
     ``seq`` count on past it, and each block of them is reserved there, once, as it's crossed,
     whether any workspace is served or not. Without one, each is reserved in the log of every
     workspace served, and those reserved while none was in that of the next one served.
+
+    Every command is handled in an ``orbit.command`` span of the ``telemetry`` given, recording
+    nothing by default, as :func:`command_span` says, and the control plane's own events carry
+    the trace context of the span current as they're stamped.
     """
 
     def __init__(
@@ -163,7 +178,9 @@ class ControlPlane:
         ledger: UsageLedger | None = None,
         clock: Clock = local_now,
         browsing: Browsing | None = None,
+        telemetry: Telemetry = _NO_TELEMETRY,
     ) -> None:
+        self._telemetry = telemetry
         self._hosts = {host.workspace_id: host for host in hosts}
         self._workspaces = workspaces
         self._browsing = browsing
@@ -171,7 +188,7 @@ class ControlPlane:
         self._reservations = None if mark is None else MarkReservations(mark)
         self._seqs = Seqs(_last_seq(self._hosts.values(), mark), self._reserve)
         self._lobby = Connections(lambda: None, lambda: "")  # Those attached to no workspace.
-        self._events = _ControlEvents(self._seqs, self._everywhere)
+        self._events = _ControlEvents(self._seqs, self._everywhere, telemetry)
         self._place = Place(self._events, self._events.stamp, self._lobby)
         self._usage = UsageMonitor(usage, self._events.put) if usage else None
         self._clones = Clones(self._events.announce)
@@ -223,6 +240,11 @@ class ControlPlane:
             return
         for host in self._hosts.values():
             host.outbox.reserve(seq)
+
+    @property
+    def telemetry(self) -> Telemetry:
+        """What traces the commands handled here."""
+        return self._telemetry
 
     def cap_coders(self, limit: int) -> None:
         """Run at most ``limit`` coders at once across the workspaces served, or any number if
@@ -298,20 +320,46 @@ class ControlPlane:
         outcome: ``CommandRefused`` if it was refused, as it is when it's for no workspace
         attached or the host refuses it, or as ``internal`` if handling it failed, else
         ``CommandAccepted``, or ``Welcome`` for a ``Hello``. Only cancellation escapes, with no
-        outcome."""
+        outcome. It's all traced in the command's span, current meanwhile."""
+        with command_span(self._telemetry, envelope, self._scope(envelope, connection)) as span:
+            outcome = await self._outcome(envelope, connection, span)
+            if outcome is not None:
+                await publish(outcome)
+
+    @staticmethod
+    def _scope(envelope: CommandEnvelope, connection: SessionConnection) -> CommandScope:
+        """Who sent the command in ``envelope``, from ``connection``, and what it's for: the
+        client a ``Hello`` names, or else the one ``connection`` was welcomed as, and the
+        workspace and session ``envelope`` names, or else those ``connection`` is attached to
+        and views."""
+        command = envelope.payload
+        client = command.client if isinstance(command, Hello) else connection.handshake.client
+        return CommandScope(
+            client=client,
+            workspace=envelope.workspace or connection.workspace,
+            session=envelope.session or connection.viewed_id,
+        )
+
+    async def _outcome(
+        self, envelope: CommandEnvelope, connection: SessionConnection, span: Span
+    ) -> CommandAccepted | CommandRefused | None:
+        """Handle the command in ``envelope``, from ``connection``, recording how it came out on
+        its ``span``, and return its outcome to publish, as :meth:`_answer` says: none for a
+        ``Hello`` welcomed, as the handshake published ``Welcome``."""
         command_id = envelope.command_id
         command = envelope.payload
         try:
             if isinstance(command, Hello):
                 await connection.handshake.hello(command, command_id)
-                return
-            connection.handshake.admit()
-            await self._route(envelope, connection)
+            else:
+                connection.handshake.admit()
+                await self._route(envelope, connection)
         except Exception as exc:  # A bug in one handler mustn't leave its command unanswered.
             code, message = command_failure(command, exc)
-            await publish(CommandRefused(command_id=command_id, code=code, message=message))
-            return
-        await publish(CommandAccepted(command_id=command_id))
+            refused(span, code, message, exc)
+            return CommandRefused(command_id=command_id, code=code, message=message)
+        accepted(span)
+        return None if isinstance(command, Hello) else CommandAccepted(command_id=command_id)
 
     async def _route(self, envelope: CommandEnvelope, connection: SessionConnection) -> None:
         """Handle the command in ``envelope``, from ``connection`` once it's welcomed: the

@@ -96,7 +96,15 @@ def _serving(
 
         def build(browsing: Browsing) -> ControlPlane:
             hosts = [make() for make in makers]
-            return ControlPlane(hosts, usage_source, source, store, ledger=store, browsing=browsing)
+            return ControlPlane(
+                hosts,
+                usage_source,
+                source,
+                store,
+                ledger=store,
+                browsing=browsing,
+                telemetry=flags.telemetry,
+            )
 
         source.keep_clones()
         yield _Serving(build, workspaces, source)

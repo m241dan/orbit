@@ -63,8 +63,9 @@ An event travels in an `EventEnvelope`:
   events, the types in `CONTROL_PLANE_EVENTS` (`Welcome`, `Catalog`, `UsageChanged`,
   `WorkspaceCloning`, `AgentsChanged`, `UsageTotals` and `DirectoryListing`), which carry `null`, as does the `ErrorOccurred` telling of a failed clone
   (see [Workspaces](#workspaces)), whose `session` is `null` too.
-- `traceparent` and `tracestate`, as on commands. With telemetry on, the events a workspace
-  publishes carry the trace context of the span current as each is published, if there is one.
+- `traceparent` and `tracestate`, as on commands. With telemetry on, every event carries the
+  trace context of the span current as it's published, if there is one: a command's outcome, and
+  what handling it published, that of the command's span.
 
 ```json
 {"workspace":"4f1c2a9e","traceparent":null,"tracestate":null,"seq":42,"session":"20261018-0801","payload":{"type":"command_refused","command_id":"9c41e7","code":"busy","message":"Task t3 is running."}}

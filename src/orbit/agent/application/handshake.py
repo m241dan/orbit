@@ -85,6 +85,7 @@ class Handshake:
         self._listening = False
         self._held: list[EventEnvelope] | None = None  # None while live events aren't held.
         self._welcomed = False
+        self._client: str | None = None  # The frontend's name, as its Hello said.
         self._since: int | None = None  # The last seq the frontend saw, as its Hello said.
         self._greeted = False
         self._incompatible = False  # A Hello was refused: nothing more is published.
@@ -93,6 +94,11 @@ class Handshake:
     def welcomed(self) -> bool:
         """Whether a ``Hello`` was welcomed."""
         return self._welcomed
+
+    @property
+    def client(self) -> str | None:
+        """The name of the frontend whose ``Hello`` was welcomed, once one was."""
+        return self._client
 
     @property
     def greeted(self) -> bool:
@@ -152,6 +158,7 @@ class Handshake:
             raise Refused(INCOMPATIBLE, message)
         catalog = await self._parts.catalog()  # Before Welcome, so its failure refuses Hello.
         self._welcomed = True
+        self._client = hello.client
         since = hello.since
         # Checked now, as the greeting's own seqs would put it behind.
         self._since = since if since is not None and since <= self._parts.last_seq() else None

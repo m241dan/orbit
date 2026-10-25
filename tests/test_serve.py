@@ -1592,12 +1592,18 @@ def test_serve_traces_with_the_telemetry_configured_and_closes_it_before_stoppin
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     hosts: list[WorkspaceHost] = []
+    planes: list[ControlPlane] = []
 
     def host(*args: Any, **kwargs: Any) -> WorkspaceHost:
         hosts.append(WorkspaceHost(*args, **kwargs))
         return hosts[-1]
 
+    def plane(*args: Any, **kwargs: Any) -> ControlPlane:
+        planes.append(ControlPlane(*args, **kwargs))
+        return planes[-1]
+
     monkeypatch.setattr("orbit.cli.backend.WorkspaceHost", host)
+    monkeypatch.setattr("orbit.cli.served.ControlPlane", plane)
     config_dir.mkdir()
     (config_dir / "config.toml").write_text('[telemetry]\nexporter = "console"\n')
     frontend = Frontend(state, config_dir)
@@ -1609,6 +1615,7 @@ def test_serve_traces_with_the_telemetry_configured_and_closes_it_before_stoppin
     assert telemetry.run.namespace == "orbit-serve"
     assert (telemetry.run.config_dir, telemetry.run.state_dir) == (config_dir, state)
     assert [served_host.telemetry for served_host in hosts] == [telemetry]
+    assert [served_plane.telemetry for served_plane in planes] == [telemetry]
     assert telemetry.closed
 
 

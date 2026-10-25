@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
-from orbit.agent import WorkspaceHost
+from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.cli import app
 from orbit.telemetry import Off
 from orbit.telemetry.otel import OtelTelemetry
@@ -47,6 +47,19 @@ def hosts(monkeypatch: pytest.MonkeyPatch) -> list[WorkspaceHost]:
     return built
 
 
+@pytest.fixture
+def planes(monkeypatch: pytest.MonkeyPatch) -> list[ControlPlane]:
+    """The control planes chat builds over its hosts."""
+    built: list[ControlPlane] = []
+
+    def plane(*args: Any, **kwargs: Any) -> ControlPlane:
+        built.append(ControlPlane(*args, **kwargs))
+        return built[-1]
+
+    monkeypatch.setattr("orbit.cli.backend.ControlPlane", plane)
+    return built
+
+
 def _configure(config_dir: Path, table: str) -> Path:
     """The user config in ``config_dir``, holding ``table`` as its ``[telemetry]``."""
     config_dir.mkdir(exist_ok=True)
@@ -64,6 +77,7 @@ def test_without_telemetry_configured_chat_traces_nothing(hosts: list[WorkspaceH
 
 def test_chat_hands_its_backend_the_telemetry_it_starts_and_closes_it_on_exit(
     hosts: list[WorkspaceHost],
+    planes: list[ControlPlane],
     started_telemetry: list[StartedTelemetry],
     config_dir: Path,
     state: Path,
@@ -77,6 +91,7 @@ def test_chat_hands_its_backend_the_telemetry_it_starts_and_closes_it_on_exit(
     assert telemetry.run.namespace == "orbit-chat"
     assert (telemetry.run.config_dir, telemetry.run.state_dir) == (config_dir, state)
     assert [host.telemetry for host in hosts] == [telemetry]
+    assert [plane.telemetry for plane in planes] == [telemetry]
     assert telemetry.closed
 
 

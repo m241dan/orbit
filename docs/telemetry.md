@@ -73,8 +73,33 @@ waited has one.
 A child of `orbit.task`, timing the task's run from its agent's start until its work is settled
 and merged. It has no attributes.
 
+## Commands
+
+### `orbit.command`
+
+One span for each command a frontend sends, from when the control plane receives it until its
+outcome is published, read-only ones included. It's a child of the span whose trace context the
+command's envelope carries, such as the frontend's own span for what the user did; a command
+carrying none starts its own trace. The span is current while the command is handled, so the work
+it does there nests under it, and the events it publishes, its outcome among them, carry its
+trace context.
+
+| Attribute | Type | Meaning |
+| --- | --- | --- |
+| `orbit.command.type` | string | The command's `type`, such as `add_task` or `hello`. |
+| `orbit.workspace.id` | string | The id of the workspace the command is for: the one its envelope names, else the one its connection is attached to; absent when it's for none, as before the connection attaches. |
+| `orbit.session.id` | string | The id of the session the command is for: the one its envelope names, else the one its connection views; absent when it's for none. |
+| `orbit.client` | string | The name of the client that sent the command, as its connection's `Hello` (or a `Hello` itself) gives it; absent before one. |
+| `orbit.command.outcome` | string | How the command came out: `accepted`, as a `Hello` answered by `Welcome` is, or `refused`. |
+| `orbit.command.code` | string | A refused command's code, such as `busy` or `invalid`; absent when it was accepted. |
+
+A command refused because handling it failed (`internal`) has the span's error status with the
+refusal's message, and an `exception` event; other refusals aren't errors, as they're the
+command's doing.
+
 ## Trace context
 
-Each event a workspace publishes carries, in its envelope's `traceparent` and `tracestate`, the
-trace context of the span current as it's published, so what a frontend shows can be tied to the
-span that caused it. An event published outside any span carries none.
+Each event published, a workspace's or the control plane's own, carries, in its envelope's
+`traceparent` and `tracestate`, the trace context of the span current as it's published, so what a
+frontend shows can be tied to the span that caused it. An event published outside any span
+carries none.

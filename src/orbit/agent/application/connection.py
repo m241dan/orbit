@@ -83,14 +83,14 @@ class Connections:
         """How many connections view each session they view: those greeted, and, if
         ``joining``, the one whose command is being answered, if it's attached or attaching."""
         joined = _joiner() if joining else None
-        return Counter(self._viewed_by(c) for c in self._open if c.greeted or c is joined)
+        return Counter(self.viewed_by(c) for c in self._open if c.greeted or c is joined)
 
     def others_viewing(self, session_id: str) -> int:
         """How many greeted connections view the session ``session_id``, but for the one whose
         command is being answered."""
         asker = _asker()
         viewers = (c for c in self._open if c.greeted and c is not asker)
-        return sum(1 for c in viewers if self._viewed_by(c) == session_id)
+        return sum(1 for c in viewers if self.viewed_by(c) == session_id)
 
     def others_attached(self, session_id: str) -> list[SessionConnection]:
         """The greeted connections attached to the session ``session_id``, but for the one whose
@@ -103,7 +103,7 @@ class Connections:
         """The ids of the sessions the connections here view, each once, by id, but for the one
         whose command is being answered."""
         asker = _asker()
-        return sorted({self._viewed_by(c) for c in self._open if c is not asker})
+        return sorted({self.viewed_by(c) for c in self._open if c is not asker})
 
     def watching(self, stream: str) -> list[SessionConnection]:
         """The connections here watching the optional stream ``stream``."""
@@ -130,7 +130,7 @@ class Connections:
             elif left is not None and self.viewing(connection) is None:
                 connection.attach(left)
 
-    def _viewed_by(self, connection: SessionConnection) -> str:
+    def viewed_by(self, connection: SessionConnection) -> str:
         """The id of the session ``connection`` views."""
         viewing = self.viewing(connection)
         return self._open_session() if viewing is None else viewing.id
@@ -166,7 +166,7 @@ class Connections:
 
     def _sees(self, connection: SessionConnection, session: str | None) -> bool:
         """Whether the events of ``session``, or those of none, reach ``connection``."""
-        return session is None or self._viewed_by(connection) == session
+        return session is None or self.viewed_by(connection) == session
 
     def end(self) -> None:
         """End every connection's stream once what it has queued is read, and that of any added
@@ -289,6 +289,11 @@ class SessionConnection:
     def viewing(self) -> SessionRef | None:
         """The session this connection views, if it isn't the open one."""
         return self._place.connections.viewing(self)
+
+    @property
+    def viewed_id(self) -> str | None:
+        """The id of the session this connection views, once it's attached to a workspace."""
+        return None if self.workspace is None else self._place.connections.viewed_by(self)
 
     @property
     def attached_id(self) -> str | None:
