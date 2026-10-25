@@ -176,6 +176,35 @@ async def test_an_agent_failing_another_way_starts_the_backoff_over_too() -> Non
     assert board(events)[0].reason_detail == "boom"
 
 
+async def test_stopping_an_agent_before_claude_answers_keeps_the_backoff_going() -> None:
+    clock, fetched = Clock(), asyncio.Event()
+
+    async def works_until_stopped(call: Call) -> TurnEndReason:
+        await call("get_task")
+        fetched.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    session, _, launcher = session_for(pause=clock.pause)
+    launcher.scripts.extend(
+        [hits_an_outage(launcher), works_until_stopped, hits_an_outage(launcher)]
+    )
+    await asyncio.wait_for(run(session), 5)
+    await settled()  # The first wait gets as far as its sleep.
+    await send(session, RunTasks())
+    await asyncio.wait_for(fetched.wait(), 5)
+    await send(session, CancelTurn())
+    stopped = await asyncio.wait_for(events_until(session, idle()), 5)
+    await send(session, RunTasks())
+    events = await asyncio.wait_for(events_until(session, idle()), 5)
+    await settled()  # The second wait gets as far as its sleep.
+    await session.close()
+
+    assert statuses(stopped) == ["cancelled"]
+    assert clock.waited == [timedelta(minutes=2), timedelta(minutes=5)]
+    assert notes(events)[-1] == outage_paused_note(START + timedelta(minutes=5), OVERLOADED)
+
+
 async def test_stopping_a_run_waiting_out_an_outage_cancels_its_restart() -> None:
     clock = Clock()
     session, _, launcher = session_for(pause=clock.pause)

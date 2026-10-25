@@ -434,7 +434,8 @@ class WorkLane:
 
     def _heard_from_claude(self, outcome: Outcome) -> None:
         """Forget the :attr:`outage`, once an agent finished its run in ``outcome`` without
-        Claude's API not answering, however its task ended."""
+        Claude's API not answering, however its task ended. The user's stop doesn't reach this,
+        as it cancels the agent's run, so it leaves the outage as it is."""
         if outcome.status != "error" or not api_unavailable(outcome.detail):
             self._outage = None
 
