@@ -90,6 +90,33 @@ def test_a_table_for_a_role_not_built_in_raises_config_error_naming_it() -> None
         load_built_in_roles({"roles": tables})
 
 
+def test_a_role_leaving_out_where_and_how_it_works_gets_the_coders_defaults() -> None:
+    role = Role(instructions="Do it.")
+    assert (role.lane, role.workspace) == ("work", "worktree")
+    assert (role.conversation, role.merge, role.verify, role.enabled) == (False, True, True, True)
+
+
+@pytest.mark.parametrize(
+    "fields", [{"verify": False}, {"workspace": "snapshot"}, {"workspace": "none"}]
+)
+def test_a_role_that_cant_merge_doesnt_by_default(fields: dict[str, Any]) -> None:
+    assert not Role.model_validate({"instructions": "Do it."} | fields).merge
+
+
+@pytest.mark.parametrize("lane", ["work", "review-2", "my_lane", "Lane9"])
+def test_a_lane_is_a_plain_name(lane: str) -> None:
+    assert Role(instructions="Do it.", lane=lane).lane == lane
+
+
+def test_a_built_in_role_breaking_a_rule_raises_config_error_naming_it() -> None:
+    tables = role_tables()
+    tables["reviewer"] |= {"workspace": "snapshot", "merge": True}
+    with pytest.raises(
+        ConfigError, match=r'^roles\.reviewer: merge = true needs workspace = "worktree"$'
+    ):
+        load_built_in_roles({"roles": tables})
+
+
 def test_the_built_in_roles_are_told_their_instructions() -> None:
     roles = built_in_roles(load_built_in_roles({"roles": role_tables()}), INSTRUCTIONS)
     assert tuple(roles) == BUILT_IN_ROLE_NAMES

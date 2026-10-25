@@ -12,9 +12,12 @@ class ConfigError(ValueError):
 
 
 def validation_problems(error: ValidationError) -> str:
-    """``error``'s problems, one per line, each saying where and why."""
+    """``error``'s problems, one per line, each saying where and why. A default left unworked
+    out because another field is invalid isn't a problem of its own."""
     problems = []
     for problem in error.errors():
+        if problem["type"] == "default_factory_not_called":
+            continue
         where = ".".join(str(part) for part in problem["loc"])
         problems.append(f"{where}: {problem['msg']}")
     return "\n".join(problems)

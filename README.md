@@ -996,6 +996,30 @@ itself. Only a file a role's `instructions` names is read, so a `.orbit/roles/re
 none names changes nothing; one that's missing or can't be read is refused, naming the file and
 the role.
 
+A role also says which lane runs it, where it works, whether you talk to it, whether its work
+merges and whether it's enabled. These fields are **accepted now; take effect in a later
+version**: orbit loads and checks them, but nothing acts on them yet.
+
+- `lane`: the lane that runs the role's agents, a plain name of letters, digits, `-` and `_`. Each
+  lane runs one agent at a time, beside the others.
+- `workspace`: where its agent works: `worktree` (the coder's separate worktree, the only one whose
+  work can merge), `snapshot` (a read-only snapshot of the base commit), `checkout` (your checkout,
+  read in place) or `none` (an empty temporary directory).
+- `conversation`: whether you talk to it at the prompt, as you do the planner, rather than it
+  taking tasks.
+- `merge`: whether its finished work is committed and merged.
+- `enabled`: whether it runs at all.
+
+The `coder` works in lane `work` in a `worktree` and merges; the `configurator` works in `work` in
+a `worktree` and doesn't merge; the `reviewer` and `super-reviewer` work in `review` on a
+`snapshot`; the `planner` works in `planner` in your `checkout`, in conversation; all are enabled.
+A role whose fields don't go together is refused, naming the role and the rule: `merge = true`
+needs `workspace = "worktree"` and `verify = true`; `workspace = "checkout"` can't have
+`tool_access = "full"`, as the agent could edit your tree; `conversation = true` needs
+`propose_task` in its tools and `get_task` left out, `merge = false`, `verify = false` and a
+workspace other than `worktree`; and no role that isn't conversational may share a conversational
+role's lane.
+
 An agent calling a tool its role doesn't have gets an error reply (the CLI only allows its role's
 tools, too, and orbit's others are disallowed so the agent doesn't see them); an agent still
 working when its role's time runs out is stopped and the task fails. The planner's limit applies to
@@ -1008,7 +1032,9 @@ A project can change these, orbit's limits, its verification steps (see
 `.orbit/config.toml`. A role it names that's built in keeps the fields it doesn't set; any other
 name adds a role, which must set `instructions` and otherwise gets `get_task`, `complete_task`,
 `report_progress` and `give_up` as its tools, `restricted` tool access, the default model, its
-claims verified, and no time limit. Every other field is optional:
+claims verified, no time limit, and the coder's lane `work`, `worktree`, no conversation and
+enabled. It merges if it can, being verified and in a worktree; one with `verify = false` or
+another workspace doesn't merge, and can't be made to. Every other field is optional:
 
 ```toml
 fix_attempts = 5               # in-session fixes asked of one agent before its task falls back
@@ -2289,7 +2315,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `AgentTask` (in `agent_task`:
     what orbit replies to an agent, and when its work is verified), the `AgentRegistry` (in
     `agents`: agent ids and tokens), `roles` (built-in roles, loaded from their `roles.toml` and
-    given their instructions, and the tasks orbit queues in them), `config` (`OrbitConfig`: the
+    given their instructions, which of a role's fields go together, and the tasks orbit queues in
+    them), `config` (`OrbitConfig`: the
     limits, roles, verification steps and setup a project file sets over the built-in defaults) and `config_errors` (`ConfigError`,
     and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]` with its `TlsSettings`, which files each TLS mode needs, where now falls in a certificate's validity, and which hosts are loopback), `certificate_list` (what `orbit certs list` shows of each certificate: its expiry, days left, fingerprint and marks), `client_bundle` (what `orbit certs client --bundle` puts in a client's bundle: the CA, its certificate and key, and the `[remotes.<name>]` lines naming them where it's unpacked), `remotes` (`RemoteSettings`, a `[remotes.<name>]` table, and which credentials go together), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
     setup step that makes a fresh worktree ready, and the checks a configurator proposes), the

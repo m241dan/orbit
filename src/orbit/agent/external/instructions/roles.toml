@@ -6,18 +6,33 @@ instructions = "planner.md"
 tool_access = "restricted"
 tools = ["propose_task", "report_progress"]
 verify = false
+lane = "planner"
+workspace = "checkout"
+conversation = true
+merge = false
+enabled = true
 
 [roles.coder]
 instructions = "coder.md"
 tool_access = "full"
 tools = ["get_task", "complete_task", "run_check", "report_progress", "give_up"]
 verify = true
+lane = "work"
+workspace = "worktree"
+conversation = false
+merge = true
+enabled = true
 
 [roles.reviewer]
 instructions = "reviewer.md"
 tool_access = "restricted"
 tools = ["get_task", "complete_task", "report_progress", "give_up", "suggest_task"]
 verify = false
+lane = "review"
+workspace = "snapshot"
+conversation = false
+merge = false
+enabled = true
 
 [roles.super-reviewer]
 instructions = "super-reviewer.md"
@@ -25,9 +40,19 @@ model = "opus"
 tool_access = "restricted"
 tools = ["get_task", "complete_task", "report_progress", "give_up", "suggest_task"]
 verify = false
+lane = "review"
+workspace = "snapshot"
+conversation = false
+merge = false
+enabled = true
 
 [roles.configurator]
 instructions = "configurator.md"
 tool_access = "restricted"
 tools = ["get_task", "propose_checks", "report_progress", "give_up"]
 verify = false
+lane = "work"
+workspace = "worktree"
+conversation = false
+merge = false
+enabled = true

@@ -6,14 +6,25 @@ The built-in roles aren't kept here: whoever builds them passes in the contents 
 
 A role says what an agent is told about its job, which of orbit's tools it may call, whether its
 claims of being done are verified, and how long it may take. Its model and tool access are the
-defaults for tasks orbit queues in that role; a task the user queues keeps its own settings.
+defaults for tasks orbit queues in that role; a task the user queues keeps its own settings. It
+also says which lane runs it, where it works, whether you talk to it, whether its work merges and
+whether it's enabled, which are checked here but not yet acted on.
 """
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
+from pydantic_core import PydanticCustomError
 
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.protocol import (
@@ -60,9 +71,24 @@ CODER_ROLES = frozenset({CODER, CONFIGURATOR})
 """The roles whose tasks take one of the coders' slots a control plane shares across its
 workspaces."""
 
+Workspace = Literal["worktree", "snapshot", "checkout", "none"]
+"""Where an agent in a role works: the coder's separate worktree, which can merge; a read-only
+snapshot of the base commit; the user's checkout, read in place; or an empty temporary
+directory."""
+
+LANE_NAME = re.compile(r"[A-Za-z0-9_-]+")
+"""What a lane's name is made of."""
+
 
 class _Config(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+def _can_merge(fields: dict[str, Any]) -> bool:
+    """Whether a role with the validated ``fields`` can merge its work: it's verified, in a
+    worktree. A role that leaves ``merge`` out merges if it can, so one that can't still loads."""
+    verify: bool = fields["verify"]
+    return verify and fields["workspace"] == "worktree"
 
 
 class Role(_Config):
@@ -72,6 +98,11 @@ class Role(_Config):
     tools: tuple[str, ...] = (GET_TASK, COMPLETE_TASK, REPORT_PROGRESS, GIVE_UP)
     verify: bool = True
     timeout_minutes: float | None = Field(default=None, gt=0)
+    lane: str = "work"
+    workspace: Workspace = "worktree"
+    conversation: bool = False
+    merge: bool = Field(default_factory=_can_merge)
+    enabled: bool = True
 
     @field_validator("tools")
     @classmethod
@@ -84,6 +115,20 @@ class Role(_Config):
                 "an agent needs get_task to fetch its task, or propose_task to plan in conversation"
             )
         return tools
+
+    @field_validator("lane")
+    @classmethod
+    def _plain_lane(cls, lane: str) -> str:
+        if not LANE_NAME.fullmatch(lane):
+            raise ValueError("a lane is a plain name: letters, digits, - and _")
+        return lane
+
+    @model_validator(mode="after")
+    def _fields_agree(self) -> Self:
+        problems = _merge_problems(self) + _checkout_problems(self) + _conversation_problems(self)
+        if problems:
+            raise PydanticCustomError("role_rules", "; ".join(problems))
+        return self
 
     @property
     def runs_checks(self) -> bool:
@@ -105,6 +150,61 @@ class Role(_Config):
     def settings(self) -> Settings:
         """The settings of a task orbit queues in this role."""
         return Settings(model=self.model, tool_access=self.tool_access)
+
+
+def _unmet(rule: str, needs: Mapping[str, bool]) -> list[str]:
+    """``rule`` followed by each of ``needs`` that isn't met."""
+    return [f"{rule} {need}" for need, met in needs.items() if not met]
+
+
+def _merge_problems(role: Role) -> list[str]:
+    """What a merging ``role`` lacks to merge: a worktree to merge from, and verified work."""
+    if not role.merge:
+        return []
+    needs = {'workspace = "worktree"': role.workspace == "worktree", "verify = true": role.verify}
+    return _unmet("merge = true needs", needs)
+
+
+def _checkout_problems(role: Role) -> list[str]:
+    """Why ``role`` can't work in the user's checkout, if it can't: with full tool access it
+    could edit the user's tree."""
+    if role.workspace == "checkout" and role.tool_access == "full":
+        return ['workspace = "checkout" can\'t have tool_access = "full"']
+    return []
+
+
+def _conversation_problems(role: Role) -> list[str]:
+    """What a conversational ``role`` breaks: it plans rather than taking tasks, and leaves the
+    worktree and merging to the roles that do."""
+    if not role.conversation:
+        return []
+    needs = {
+        "propose_task in its tools": PROPOSE_TASK in role.tools,
+        "get_task left out of its tools": GET_TASK not in role.tools,
+        "merge = false": not role.merge,
+        "verify = false": not role.verify,
+        'a workspace other than "worktree"': role.workspace != "worktree",
+    }
+    return _unmet("conversation = true needs", needs)
+
+
+def lane_clashes(roles: Mapping[str, Role]) -> list[str]:
+    """Each conversational role among ``roles`` whose lane a task role shares, naming them: a
+    task in that lane would wait on the conversation, or the conversation on it."""
+    clashes = []
+    for name, role in roles.items():
+        shared = _task_roles_in(roles, role.lane) if role.conversation else []
+        if shared:
+            clashes.append(
+                f"the conversational role {name!r} can't share its lane {role.lane!r} with the"
+                f" task roles {shared}"
+            )
+    return clashes
+
+
+def _task_roles_in(roles: Mapping[str, Role], lane: str) -> list[str]:
+    """The roles among ``roles`` in ``lane`` that aren't conversational."""
+    return [name for name, role in roles.items() if not role.conversation and role.lane == lane]
 
 
 @dataclass(frozen=True)

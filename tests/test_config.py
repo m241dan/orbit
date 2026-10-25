@@ -165,3 +165,113 @@ def test_a_conversational_role_plans_instead_of_fetching_a_task() -> None:
     roles = {"architect": {"instructions": "x", "tools": ["propose_task"]}}
     config = load_config({"roles": roles}, BUILT_IN_ROLES)
     assert config.roles["architect"].tools == ("propose_task",)
+
+
+def custom(**fields: object) -> dict[str, object]:
+    """A project file adding the role ``x``, told what to do, with ``fields``."""
+    return {"roles": {"x": {"instructions": "Do it.", **fields}}}
+
+
+def talker(**fields: object) -> dict[str, object]:
+    """A project file adding the conversational role ``x`` in its own lane, with ``fields``."""
+    conversational: dict[str, object] = {
+        "conversation": True,
+        "tools": ["propose_task"],
+        "verify": False,
+        "workspace": "checkout",
+        "lane": "talk",
+    }
+    return custom(**(conversational | fields))
+
+
+def test_a_custom_role_gets_the_coders_lane_workspace_and_merging() -> None:
+    role = load_config(custom(), BUILT_IN_ROLES).roles["x"]
+    assert (role.lane, role.workspace) == ("work", "worktree")
+    assert (role.merge, role.verify, role.conversation, role.enabled) == (True, True, False, True)
+
+
+def test_an_unverified_custom_role_still_loads_without_merging() -> None:
+    role = load_config(custom(verify=False), BUILT_IN_ROLES).roles["x"]
+    assert (role.verify, role.merge) == (False, False)
+
+
+def test_a_file_overrides_a_built_in_roles_lane_and_enabling() -> None:
+    roles = {"reviewer": {"lane": "audit", "enabled": False}}
+    reviewer = load_config({"roles": roles}, BUILT_IN_ROLES).roles["reviewer"]
+    assert (reviewer.lane, reviewer.enabled) == ("audit", False)
+    assert reviewer.workspace == BUILT_IN_ROLES["reviewer"].workspace  # Untouched fields kept.
+
+
+def test_a_conversational_custom_role_loads_in_a_lane_of_its_own() -> None:
+    role = load_config(talker(), BUILT_IN_ROLES).roles["x"]
+    assert (role.conversation, role.merge, role.lane) == (True, False, "talk")
+
+
+def test_conversational_roles_can_share_a_lane() -> None:
+    assert load_config(talker(lane="planner"), BUILT_IN_ROLES).roles["x"].lane == "planner"
+
+
+@pytest.mark.parametrize(
+    ("data", "rule"),
+    [
+        (custom(merge=True, workspace="snapshot"), 'merge = true needs workspace = "worktree"'),
+        (custom(verify=False, merge=True), "merge = true needs verify = true"),
+        (
+            custom(workspace="checkout", tool_access="full"),
+            'workspace = "checkout" can\'t have tool_access = "full"',
+        ),
+        (
+            talker(tools=["get_task", "propose_task"]),
+            "conversation = true needs get_task left out of its tools",
+        ),
+        (talker(tools=["get_task"]), "conversation = true needs propose_task in its tools"),
+        (talker(merge=True), "conversation = true needs merge = false"),
+        (talker(verify=True), "conversation = true needs verify = false"),
+        (
+            talker(workspace="worktree"),
+            'conversation = true needs a workspace other than "worktree"',
+        ),
+    ],
+)
+def test_a_role_whose_fields_dont_go_together_is_refused_naming_it_and_the_rule(
+    data: dict[str, object], rule: str
+) -> None:
+    with pytest.raises(ConfigError, match=r"^roles\.x: ") as raised:
+        load_config(data, BUILT_IN_ROLES)
+    assert rule in str(raised.value)
+
+
+def test_a_role_breaking_several_rules_is_refused_naming_each() -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_config(talker(verify=True, workspace="worktree", merge=False), BUILT_IN_ROLES)
+    assert str(raised.value) == (
+        "roles.x: conversation = true needs verify = false;"
+        ' conversation = true needs a workspace other than "worktree"'
+    )
+
+
+@pytest.mark.parametrize("lane", ["my lane", "", "work/2", "élan"])
+def test_a_lane_that_isnt_a_plain_name_is_refused(lane: str) -> None:
+    with pytest.raises(ConfigError, match=r"^roles\.x\.lane: .*a lane is a plain name"):
+        load_config(custom(lane=lane), BUILT_IN_ROLES)
+
+
+def test_a_conversational_role_sharing_its_lane_with_task_roles_is_refused_naming_them() -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_config(talker(lane="review"), BUILT_IN_ROLES)
+    assert str(raised.value) == (
+        "roles: the conversational role 'x' can't share its lane 'review' with the task roles"
+        " ['reviewer', 'super-reviewer']"
+    )
+
+
+def test_a_task_role_in_the_planners_lane_is_refused_naming_both() -> None:
+    with pytest.raises(ConfigError, match=r"'planner' can't share its lane 'planner'.*\['x'\]$"):
+        load_config(custom(lane="planner"), BUILT_IN_ROLES)
+
+
+def test_an_invalid_field_isnt_also_reported_as_the_merge_default_it_stopped() -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_config(custom(verify="sometimes"), BUILT_IN_ROLES)
+    assert str(raised.value).startswith("roles.x.verify: ")
+    assert "merge" not in str(raised.value)

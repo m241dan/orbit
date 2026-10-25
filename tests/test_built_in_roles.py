@@ -25,6 +25,11 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "tools": ("get_task", "complete_task", "run_check", "report_progress", "give_up"),
         "verify": True,
         "timeout_minutes": None,
+        "lane": "work",
+        "workspace": "worktree",
+        "conversation": False,
+        "merge": True,
+        "enabled": True,
     },
     "reviewer": {
         "model": None,
@@ -32,6 +37,11 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "tools": REVIEW_TOOLS,
         "verify": False,
         "timeout_minutes": None,
+        "lane": "review",
+        "workspace": "snapshot",
+        "conversation": False,
+        "merge": False,
+        "enabled": True,
     },
     "super-reviewer": {
         "model": "opus",
@@ -39,6 +49,11 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "tools": REVIEW_TOOLS,
         "verify": False,
         "timeout_minutes": None,
+        "lane": "review",
+        "workspace": "snapshot",
+        "conversation": False,
+        "merge": False,
+        "enabled": True,
     },
     "planner": {
         "model": None,
@@ -46,6 +61,11 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "tools": ("propose_task", "report_progress"),
         "verify": False,
         "timeout_minutes": None,
+        "lane": "planner",
+        "workspace": "checkout",
+        "conversation": True,
+        "merge": False,
+        "enabled": True,
     },
     "configurator": {
         "model": None,
@@ -53,9 +73,15 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "tools": ("get_task", "propose_checks", "report_progress", "give_up"),
         "verify": False,
         "timeout_minutes": None,
+        "lane": "work",
+        "workspace": "worktree",
+        "conversation": False,
+        "merge": False,
+        "enabled": True,
     },
 }
-"""Each built-in role's fields but its instructions, as orbit has always had them."""
+"""Each built-in role's fields but its instructions: those orbit has always had, and where it
+works, which lane runs it, whether you talk to it and whether its work merges."""
 
 
 def role_directory(tmp_path: Path, roles_toml: str, leave_out: Collection[str] = ()) -> Path:
@@ -98,8 +124,13 @@ def test_roles_toml_ships_in_the_package_naming_each_roles_markdown_file() -> No
         assert table["instructions"] == f"{name}.md"
 
 
+def test_roles_toml_sets_each_roles_lane_workspace_conversation_merging_and_enabling() -> None:
+    for name, table in tomllib.loads(ROLES_TOML)["roles"].items():
+        assert {"lane", "workspace", "conversation", "merge", "enabled"} <= set(table), name
+
+
 @pytest.mark.parametrize("name", BUILT_IN_ROLE_NAMES)
-def test_each_built_in_role_has_the_fields_it_always_had(name: str) -> None:
+def test_each_built_in_role_has_its_fields(name: str) -> None:
     role = read_built_in_roles()[name]
     assert role.model_dump(exclude={"instructions"}) == BUILT_IN_FIELDS[name]
 
