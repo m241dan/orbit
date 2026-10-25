@@ -1098,21 +1098,21 @@ it; a frontend that never watches is sent neither.
 
 **Purging.** A frontend removing a workspace can have its records deleted too, with
 `RemoveWorkspace`'s `purge`: under the same refusals as removing, its sessions, their events, its
-review count, record moves, session locks, fallback files and registry entry go, so adding it again starts
-afresh, and so does a managed clone's directory. A directory orbit didn't clone into is never
+review count, record moves, session locks, fallback files and registry entry go, so adding it again
+starts afresh, and so does a managed clone's directory. A directory orbit didn't clone into is never
 deleted. A clone holding work that exists nowhere else, uncommitted changes, stashes or commits on
 any branch, or on a detached HEAD, that its remote doesn't have, isn't purged: the refusal lists
-what would be lost (`1 commit on main not on its remote`), and nothing is removed until it's
-pushed or dropped. Nor is a workspace another orbit owns, such as a local `orbit chat` in its
-repository: the purge is refused as `busy`, naming the owner, though removing it without purging
-still works. The server
-holds the workspace's lock until the purge is done, so no local orbit starts on it meanwhile. Its
-files go before its records, so if one can't be deleted the workspace stays registered and
-purging it again finishes the job. A
-workspace no server serves, such as one only a local `orbit chat` used, is purged with `orbit db
-forget` (see [Where orbit keeps things](#where-orbit-keeps-things)). In the TUI, `x` in the
-workspace picker offers `Delete its sessions too` beside keeping them (see
-[Workspaces](#workspaces)).
+what would be lost (`1 commit on main not on its remote`), and nothing is removed until it's pushed
+or dropped. Nor is a workspace another orbit owns, such as a local `orbit chat` in its repository
+holding its lock while the server serves it read-only: the purge is refused as `busy`, naming the
+owner (`Can't purge <path>: an orbit chat, pid 4242 owns its repository.`), before anything is
+removed, though removing it without purging still works, and once the server takes the repository
+over it's purged like any other. The server holds the workspace's lock until the purge is done, so
+no local orbit starts on it meanwhile. Its files go before its records, so if one can't be deleted
+the workspace stays registered and purging it again finishes the job. A workspace no server serves,
+such as one only a local `orbit chat` used, is purged with `orbit db forget` (see [Where orbit keeps
+things](#where-orbit-keeps-things)). In the TUI, `x` in the workspace picker offers `Delete its
+sessions too` beside keeping them (see [Workspaces](#workspaces)).
 
 Git clones as the server's account, with its credential helpers and SSH agent, and never
 prompts: `GIT_TERMINAL_PROMPT=0`, and SSH runs with `-o BatchMode=yes` added to any

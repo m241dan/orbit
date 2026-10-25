@@ -3,6 +3,7 @@ itself: their records go, other workspaces' stay, and a clone's directory goes o
 holds nothing its remote doesn't."""
 
 import asyncio
+import os
 from contextlib import ExitStack
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from orbit.agent.application.connection import SessionConnection
 from orbit.agent.external import served_workspaces
 from orbit.cli.served import _workspaces
 from orbit.protocol import (
+    BUSY,
     INTERNAL,
     INVALID,
     AddWorkspace,
@@ -173,6 +175,30 @@ async def test_another_orbit_cant_take_a_workspace_lock_while_its_purge_runs(
     assert outcome == CommandAccepted(command_id="purge")
     assert len(owners) == 1 and owners[0] is not None
     assert free is None
+
+
+async def test_a_workspace_served_while_a_local_orbit_holds_its_lock_isnt_purged(
+    stack: ExitStack, store: SqliteStore, state: Path, tmp_path: Path
+) -> None:
+    root = init_repo(tmp_path / "a")
+    local = WorkspaceLock(orbit_dir(str(root)))
+    stack.callback(local.close)
+    assert local.take() is None
+    plane = serving(stack, store, tmp_path / "clones")
+    connection = await welcomed(plane)
+    workspace_id = (await added(connection, root))[str(root)]
+    await saved(store, workspace_id, 1)
+
+    await say(connection, "purge", RemoveWorkspace(workspace=workspace_id, purge=True))
+    outcome = payloads(taken(connection))
+    left = counts(state, workspace_id)
+    still = [host.workspace_id for host in plane.hosts]
+    await plane.close()
+    stack.close()
+
+    message = f"Can't purge {root}: an orbit chat, pid {os.getpid()} owns its repository."
+    assert outcome == [refused("purge", BUSY, message)]
+    assert left == (1, 1, 1) and still == [workspace_id]
 
 
 def source(stack: ExitStack, store: SqliteStore, tmp_path: Path) -> ServedWorkspaces:

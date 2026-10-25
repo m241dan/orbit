@@ -2,10 +2,13 @@
 its records are deleted once its host is closed, before its lock is let go, unless that would
 lose a clone's work."""
 
+import asyncio
+
 from orbit.agent import ControlPlane, WorkspaceOwner
-from orbit.protocol import BUSY, INTERNAL, INVALID, CommandAccepted, RemoveWorkspace
+from orbit.protocol import BUSY, INTERNAL, INVALID, CommandAccepted, RemoveWorkspace, TakeOwnership
+from tests.agent_fakes import FakeLock
 from tests.connection_helpers import joined, say, taken
-from tests.plane_fakes import FakeSource, ids, payloads, refused, welcomed, workspace
+from tests.plane_fakes import FakeSource, ids, offered, payloads, refused, welcomed, workspace
 
 PURGE = RemoveWorkspace(workspace="c", purge=True)
 
@@ -125,6 +128,22 @@ async def test_a_workspace_another_orbit_owns_can_still_be_removed_without_purge
 
     assert ids(catalog) == [] and accepted == CommandAccepted(command_id="remove")
     assert source.steps == ["close c"] and source.purged == []
+
+
+async def test_a_workspace_taken_over_from_another_orbit_is_purged_as_any_other() -> None:
+    host = workspace("c", owner=WorkspaceOwner(pid=42), lock=FakeLock(free=True))
+    source = FakeSource()
+    plane = ControlPlane([host], workspaces=source)
+    connection = await joined(plane, host=host)
+    await asyncio.wait_for(offered(connection), 5)
+    await say(connection, "take", TakeOwnership(take=True))
+
+    await say(connection, "purge", PURGE)
+    outcome = payloads(taken(connection))[-1]
+    await plane.close()
+
+    assert outcome == CommandAccepted(command_id="purge")
+    assert source.steps == ["purge c", "close c"] and source.purged == ["c"]
 
 
 async def test_a_purge_asks_what_it_would_lose_once() -> None:

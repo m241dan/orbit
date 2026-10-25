@@ -1,8 +1,15 @@
-"""The rules for purging a workspace: what deleting a clone would lose, and refusing then."""
+"""The rules for purging a workspace: what deleting a clone would lose, and refusing then or
+while another orbit owns it."""
 
 import pytest
 
-from orbit.agent.domain.purging import check_purgeable, clone_losses, unchecked_clone
+from orbit.agent.domain.ownership import WorkspaceOwner
+from orbit.agent.domain.purging import (
+    check_purgeable,
+    clone_losses,
+    owned_refusal,
+    unchecked_clone,
+)
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import INVALID
 
@@ -49,4 +56,19 @@ def test_a_clone_that_would_lose_work_is_refused_as_invalid_listing_it() -> None
     assert refusal.value.message == (
         "Can't purge /c/proj: deleting its clone would lose 1 stash; 1 commit on main not on its"
         " remote."
+    )
+
+
+def test_a_workspace_another_orbit_owns_is_refused_naming_the_owner() -> None:
+    assert owned_refusal("/c/proj", WorkspaceOwner(pid=42)) == (
+        "Can't purge /c/proj: an orbit chat, pid 42 owns its repository."
+    )
+    assert owned_refusal("/c/proj", WorkspaceOwner(pid=42, url="http://host:8000")) == (
+        "Can't purge /c/proj: an orbit serve at http://host:8000 owns its repository."
+    )
+
+
+def test_a_workspace_whose_owner_cant_be_read_is_refused_as_another_orbits() -> None:
+    assert owned_refusal("/c/proj", WorkspaceOwner()) == (
+        "Can't purge /c/proj: another orbit owns its repository."
     )

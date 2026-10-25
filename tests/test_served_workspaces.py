@@ -4,7 +4,6 @@ the events of the workspace it's attached to alone, and its commands go there.""
 import asyncio
 
 from orbit.agent import ControlPlane, Verification, WorkspaceHost, WorkspaceOwner
-from orbit.agent.application.connection import SessionConnection
 from orbit.agent.domain.workspaces import ATTACH_FIRST
 from orbit.protocol import (
     INVALID,
@@ -17,7 +16,6 @@ from orbit.protocol import (
     CommandEnvelope,
     CommandRefused,
     EventEnvelope,
-    OwnershipOffered,
     RenameSession,
     RunTasks,
     SessionStateChanged,
@@ -29,7 +27,7 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import HELLO, STEP, FakeLock, Steps, board_of
 from tests.connection_helpers import joined, say, taken
-from tests.plane_fakes import idle, payloads, working, workspace
+from tests.plane_fakes import idle, offered, payloads, working, workspace
 from tests.server_fakes import TASK
 from tests.waiting import eventually
 
@@ -176,13 +174,6 @@ async def test_a_change_to_one_workspaces_sessions_sends_everyone_the_whole_cata
     in_first, in_second = catalog.workspaces
     assert [s.name for s in in_first.sessions] == ["Renamed"]
     assert [s.id for s in in_second.sessions] == ["b-1"]
-
-
-async def offered(connection: SessionConnection) -> None:
-    """Wait until ``connection``'s workspace offers it the repository."""
-    async for envelope in connection.events():
-        if isinstance(envelope.payload, OwnershipOffered):
-            return
 
 
 def read_only_in(envelopes: list[EventEnvelope]) -> list[dict[str, bool]]:

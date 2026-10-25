@@ -25,6 +25,7 @@ from orbit.protocol import (
     CommandRefused,
     Event,
     EventEnvelope,
+    OwnershipOffered,
     TurnEndReason,
     WorkspaceCloning,
 )
@@ -94,6 +95,13 @@ async def idle(connection: SessionConnection) -> None:
     async for envelope in connection.events():
         event = envelope.payload
         if isinstance(event, BusyChanged) and event.lane == "work" and not event.busy:
+            return
+
+
+async def offered(connection: SessionConnection) -> None:
+    """Wait until ``connection``'s workspace offers it the repository."""
+    async for envelope in connection.events():
+        if isinstance(envelope.payload, OwnershipOffered):
             return
 
 
