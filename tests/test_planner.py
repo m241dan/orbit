@@ -4,10 +4,13 @@ import asyncio
 from typing import Any
 
 import pytest
+from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.trace import StatusCode
 
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.planner import RESUME_FAILED_NOTE, PlannerChat
+from orbit.agent.application.planner_trace import TURN_SPAN
 from orbit.agent.application.ports import Reply, ResumeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
@@ -62,6 +65,7 @@ from tests.agent_fakes import (
     steps_chat,
     until_idle,
 )
+from tests.telemetry_helpers import Traced
 from tests.waiting import eventually
 
 
@@ -652,6 +656,34 @@ async def test_a_turn_raising_as_claudes_api_fails_says_the_planner_couldnt_repl
         ),
         TurnFinished(turn_id=turn_id, agent_id="agent-1", reason="error"),
     ]
+
+
+async def traced_turn(chat: PlannerChat) -> ReadableSpan:
+    """The span of a turn ``chat`` answers while it's current."""
+    traced = Traced()
+    with traced.telemetry.span(TURN_SPAN):
+        await chat.answer("Plan.", Settings())
+    [turn] = traced.spans(TURN_SPAN)
+    return turn
+
+
+async def test_an_outage_the_cli_reports_is_on_the_turns_span_in_its_own_words() -> None:
+    published: list[Event] = []
+    chat, launcher, _ = steps_chat(chats, published=published)
+    launcher.planner_errors = [OVERLOADED]
+    turn = await traced_turn(chat)
+    assert turn.status.status_code is StatusCode.ERROR
+    assert turn.status.description == OVERLOADED
+    assert [e.message for e in errors(published)] == [PLANNER_OUTAGE_NOTE]
+
+
+async def test_an_outage_a_turn_raises_is_on_its_span_in_its_own_words() -> None:
+    published: list[Event] = []
+    chat, _, _ = steps_chat(cannot_connect, published=published)
+    turn = await traced_turn(chat)
+    assert turn.status.status_code is StatusCode.ERROR
+    assert turn.status.description == "API Error (Connection error.)"
+    assert [e.message for e in errors(published)] == [PLANNER_OUTAGE_NOTE]
 
 
 async def test_a_turn_failing_with_another_api_error_shows_its_own_text() -> None:
