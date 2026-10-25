@@ -75,11 +75,13 @@ class OpenedWorkspace:
 @dataclass(frozen=True)
 class Configuring:
     """How a workspace is configured as it's opened: from its file over the user config in
-    ``config_dir``, once git is found to have an identity for commits there if the coder commits
+    ``config_dir``, with the run's ``runtime``, if any, as the runtime of every role that doesn't
+    name its own, once git is found to have an identity for commits there if the coder commits
     in a ``worktree``."""
 
     config_dir: Path
     worktree: bool
+    runtime: str | None = None
 
 
 @dataclass(frozen=True)
@@ -391,7 +393,7 @@ def workspace_config(root: Path, configuring: Configuring) -> OrbitConfig:
     if problem is not None:
         raise WorkspaceUnavailable(problem)
     try:
-        return read_config(str(root), configuring.config_dir)
+        return read_config(str(root), configuring.config_dir, configuring.runtime)
     except ConfigError as exc:
         raise WorkspaceUnavailable(f"{INVALID_CONFIG}{exc}") from None
 

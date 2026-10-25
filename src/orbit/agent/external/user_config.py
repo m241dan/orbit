@@ -72,7 +72,7 @@ def read_user_roles(config_dir: Path, built_in: Collection[str]) -> UserRoles:
 
     Raises :class:`ConfigError`, naming the file, if it or a personal role's instructions file
     can't be read or is invalid, as it is when it sets a built-in role's field other than its
-    model and effort.
+    model, effort and runtime, or a runtime this version of orbit doesn't know.
     """
     layer = user_layer(config_dir)
 

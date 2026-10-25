@@ -528,7 +528,13 @@ class WorkspaceHost:
     def _work_lane(self) -> WorkLane | None:
         if self._desk is None:
             return None
-        tracing = TaskTracing(self.telemetry, self._workspace_id, lambda: self._keeper.id)
+        desk = self._desk  # Its agents' roles may be read again, so asked as each task runs.
+        tracing = TaskTracing(
+            self.telemetry,
+            self._workspace_id,
+            lambda: self._keeper.id,
+            lambda role: desk.agents.runtime(role),
+        )
         beside = Beside(
             self._lane,
             self._startup,

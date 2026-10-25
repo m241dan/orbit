@@ -38,6 +38,7 @@ from orbit.cli.options import (
     ProfileOption,
     RemoteOption,
     ReviewOption,
+    RuntimeOption,
     StateDirOption,
     TokenFileOption,
     ToolsOption,
@@ -46,6 +47,7 @@ from orbit.cli.options import (
     WorkspaceOption,
     WorktreeOption,
 )
+from orbit.cli.runtimes import given_runtime
 from orbit.cli.telemetry import _agent_collector, _refuse_console, _telemetry
 from orbit.cli.threaded import ThreadedSession
 from orbit.client import (
@@ -74,6 +76,7 @@ def chat(
     workspace: WorkspaceOption = Path("."),
     model: ModelOption = None,
     tools: ToolsOption = None,
+    runtime: RuntimeOption = None,
     verify: VerifyOption = True,
     worktree: WorktreeOption = True,
     review: ReviewOption = True,
@@ -111,7 +114,9 @@ def chat(
     user_config = resolve_config_dir(config_dir, os.environ)
     _refuse_console(user_config)
     given = _ClientFiles(token_file, ca, cert, key)
-    flags = _Backend(model, tools, verify, worktree, review, usage, new, name)
+    flags = _Backend(
+        model, tools, verify, worktree, review, usage, new, name, given_runtime(runtime)
+    )
     target = _target(connect, remote, user_config, given)
     state = resolve_state_dir(state, os.environ)
     run = TelemetryRun("orbit-chat", user_config, state, os.environ)

@@ -31,8 +31,10 @@ from tests.agent_fakes import (
     ROLES,
     STEP,
     Call,
+    FakeHost,
     FakeTree,
     Script,
+    ScriptedLauncher,
     Steps,
     chats,
     claims_done,
@@ -372,6 +374,27 @@ async def test_a_fix_task_is_its_own_trace_naming_the_task_it_fixes() -> None:
     assert attributes(fix)["orbit.task.status"] == "completed"
     assert fix.parent is None and fix.context is not None and first.context is not None
     assert fix.context.trace_id != first.context.trace_id
+
+
+async def test_a_tasks_span_runs_on_its_roles_runtime() -> None:
+    traced = Traced()
+    fake = ScriptedLauncher(FakeHost(), claims_done)
+    roles = {**ROLES, CODER: ROLES[CODER].model_copy(update={"runtime": "fake"})}
+    session, _, _ = session_for(
+        telemetry=traced.telemetry, host=fake.host, roles=roles, launchers={"fake": fake}
+    )
+    await asyncio.wait_for(run(session), 5)
+
+    assert attributes(traced.task())["orbit.runtime"] == "fake"
+
+
+async def test_a_task_in_a_role_the_session_doesnt_have_runs_on_no_runtime() -> None:
+    traced = Traced()
+    session = traced_session(traced)
+    await asyncio.wait_for(run(session, TaskSpec(prompt="a", role="nobody")), 5)
+
+    assert "orbit.runtime" not in attributes(traced.task())
+    assert attributes(traced.task())["orbit.role"] == "nobody"
 
 
 def test_a_bug_escaping_a_task_is_recorded_once() -> None:

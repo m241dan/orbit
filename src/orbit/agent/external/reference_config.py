@@ -46,11 +46,6 @@ LATER_HEADING = "Coming in a later version of orbit; leave commented out until t
 
 LATER = (
     (
-        'On a role, such as the one above: the runtime its agents run on, "claude", "kiro" or'
-        ' "harness".',
-        'runtime = "claude"',
-    ),
-    (
         "A trigger, which turns an event into a task for a role.",
         "[triggers.review-each-commit]",
         'The event it listens for, such as "task_landed", "commits", "manual" or "schedule".',

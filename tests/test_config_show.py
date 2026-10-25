@@ -90,6 +90,20 @@ def test_a_key_of_one_value_prints_its_line(project: Path) -> None:
     assert result.stdout == "server.port = 7433   default\n"
 
 
+def test_a_roles_runtime_shows_with_its_layer(project: Path) -> None:
+    result = show(project, "roles.coder")
+    assert result.exit_code == 0, result.output
+    assert 'roles.coder.runtime = "claude"   package' in result.stdout.splitlines()
+
+
+def test_the_user_configs_runtime_for_every_role_is_the_users(
+    project: Path, config_dir: Path
+) -> None:
+    path = user_file(config_dir, '[roles]\nruntime = "claude"\n')
+    result = show(project, "roles.reviewer.runtime")
+    assert result.stdout == f'roles.reviewer.runtime = "claude"   user {path}\n'
+
+
 def test_a_value_the_user_config_sets_is_the_users(project: Path, config_dir: Path) -> None:
     path = user_file(config_dir, "[telemetry]\nexporter = 'file'\n")
     result = show(project, "telemetry.exporter")

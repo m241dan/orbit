@@ -103,12 +103,12 @@ async def report_progress(
 class Agents:
     """How tasks are run through agents.
 
-    ``host`` is where agents reach orbit, ``launcher`` starts them, and ``new_token``
-    makes the unguessable tokens they identify themselves with. ``roles`` are the roles tasks
-    can name, those named in ``personal`` defined whole in the user config. ``exit_grace`` is
-    how long, in seconds, an agent may take to exit once its task is finished before it's
-    stopped. ``tree`` is where they work and their work is merged from; without one they work
-    in ``root`` and nothing is committed.
+    ``host`` is where agents reach orbit, ``launchers`` start them, one for each runtime the
+    roles run on, by its name, and ``new_token`` makes the unguessable tokens they identify
+    themselves with. ``roles`` are the roles tasks can name, those named in ``personal`` defined
+    whole in the user config. ``exit_grace`` is how long, in seconds, an agent may take to exit
+    once its task is finished before it's stopped. ``tree`` is where they work and their work is
+    merged from; without one they work in ``root`` and nothing is committed.
     With ``review`` (and a tree), landed work is reviewed, and the whole codebase super
     reviewed, within ``review_limits``. ``proposal_review`` is where the user decides on
     proposed checks; without it, proposals are refused. ``write_config`` saves the checks the
@@ -123,7 +123,7 @@ class Agents:
     """
 
     host: AgentHost
-    launcher: AgentLauncher
+    launchers: Mapping[str, AgentLauncher]
     new_token: Callable[[], str]
     roles: Mapping[str, Role]
     limits: Limits = field(default_factory=Limits)
@@ -139,6 +139,16 @@ class Agents:
     temp_dirs: TempDirs = field(kw_only=True)
     pause: LimitPause = field(default_factory=LimitPause)
     personal: frozenset[str] = field(default=frozenset(), kw_only=True)
+
+    def runtime(self, role: str) -> str | None:
+        """The runtime role ``role``'s agents run on; none for a role they don't have."""
+        found = self.roles.get(role)
+        return None if found is None else found.runtime
+
+    def launcher(self, role: str) -> AgentLauncher:
+        """What starts role ``role``'s agents: the launcher of the runtime it runs on. It must
+        be one of the roles, on a runtime there's a launcher for."""
+        return self.launchers[self.roles[role].runtime]
 
 
 class CallTarget(Protocol):
@@ -278,7 +288,8 @@ class AgentDesk:
         """``agent``'s process, traced over the block in a span that's a child of ``parent``, as
         :meth:`AgentTracing.process` traces it, with the agent's calls traced under it
         meanwhile."""
-        with self._tracing.process(agent, parent) as process:
+        runtime = self.agents.roles[agent.role].runtime
+        with self._tracing.process(agent, runtime, parent) as process:
             self._processes[agent.id] = process.span
             try:
                 yield process

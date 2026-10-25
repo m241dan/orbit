@@ -13,6 +13,7 @@ from orbit.agent.application.control_plane import ControlPlane
 from orbit.agent.application.desk import Agents
 from orbit.agent.application.handshake import NO_STEPS_NOTE
 from orbit.agent.application.ports import (
+    AgentLauncher,
     CloneFailed,
     ConfigWriter,
     ProposalDecision,
@@ -53,7 +54,8 @@ from orbit.agent.domain.layers import Layer
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.purging import Purged, PurgeRefused
 from orbit.agent.domain.remotes import RemoteSettings
-from orbit.agent.domain.roles import Role
+from orbit.agent.domain.roles import Role, runtime_roles
+from orbit.agent.domain.runtimes import CLAUDE, known_runtimes, knows_runtime, not_on_path
 from orbit.agent.domain.server import LocalTls, RunningServer, ServerSettings, TlsMode
 from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.domain.verification import VerificationStep
@@ -136,12 +138,14 @@ from orbit.agent.external.workspace_registry import WorkspaceRegistry
 __all__ = [
     "CA_DAYS",
     "CERTIFICATE_DAYS",
+    "CLAUDE",
     "INVALID_CONFIG",
     "LIMIT_KEYS",
     "MODEL_ALIASES",
     "NO_STEPS_NOTE",
     "REMOTE_FILE",
     "USER_CONFIG_FILE",
+    "AgentLauncher",
     "Agents",
     "Browsing",
     "CertificateError",
@@ -240,8 +244,11 @@ __all__ = [
     "issue_client",
     "issue_server",
     "key_pem",
+    "known_runtimes",
+    "knows_runtime",
     "local_tls",
     "make_ca",
+    "not_on_path",
     "open_workspace",
     "open_workspace_store",
     "orbit_dir",
@@ -258,6 +265,7 @@ __all__ = [
     "resolve_state_dir",
     "run_step",
     "running_server",
+    "runtime_roles",
     "server_names",
     "subtree",
     "tls_warnings",

@@ -11,6 +11,7 @@ workspace = "checkout"
 conversation = true
 merge = false
 enabled = true
+runtime = "claude"
 
 [roles.coder]
 instructions = "coder.md"
@@ -22,6 +23,7 @@ workspace = "worktree"
 conversation = false
 merge = true
 enabled = true
+runtime = "claude"
 
 [roles.reviewer]
 instructions = "reviewer.md"
@@ -33,6 +35,7 @@ workspace = "snapshot"
 conversation = false
 merge = false
 enabled = true
+runtime = "claude"
 
 [roles.super-reviewer]
 instructions = "super-reviewer.md"
@@ -45,6 +48,7 @@ workspace = "snapshot"
 conversation = false
 merge = false
 enabled = true
+runtime = "claude"
 
 [roles.configurator]
 instructions = "configurator.md"
@@ -56,3 +60,4 @@ workspace = "worktree"
 conversation = false
 merge = false
 enabled = true
+runtime = "claude"

@@ -199,6 +199,7 @@ def test_built_in_tables_show_shipped_values() -> None:
         coder
     )
     assert "# merge = true" in coder
+    assert '# runtime = "claude"' in coder
     assert '# model = "opus"' in table("super-reviewer")
     assert '# workspace = "checkout"' in table("planner")
 
@@ -209,8 +210,8 @@ def test_unset_fields_say_so() -> None:
     assert {"# model: unset", "# timeout_minutes: unset", "# effort: unset"} <= set(coder)
 
 
-@pytest.mark.parametrize("key", ["model", "effort"])
-def test_unset_machine_fields_say_the_user_config_sets_them(key: str) -> None:
+@pytest.mark.parametrize("key", ["model", "effort", "runtime"])
+def test_machine_fields_say_the_user_config_sets_them(key: str) -> None:
     assert "the user config's" in described(key, table("coder"))
 
 
@@ -234,14 +235,17 @@ def test_later_version_settings_follow_their_heading_commented_out() -> None:
     for section in ("# [triggers.", "# [mcp.", "# [models."):
         assert section in settings
     assert re.search(r"^# \[roles\.[a-z-]+\.tools\]$", settings, re.MULTILINE)
-    assert re.search(r"^# runtime = ", settings, re.MULTILINE)
     assert all(line.startswith("# ") for line in settings.splitlines() if line)
+
+
+def test_a_roles_runtime_is_among_its_fields_rather_than_a_later_versions() -> None:
+    assert "runtime" not in later()
+    assert '# runtime = "claude"' in table("planner")
 
 
 def test_later_version_settings_are_valid_toml_uncommented() -> None:
     data = loaded(current() + later())
 
-    assert data["roles"][EXAMPLE_ROLE]["runtime"] == "claude"
     assert {"triggers", "mcp", "models"} <= data.keys()
     assert "tools" in data["roles"][EXAMPLE_ROLE]
 

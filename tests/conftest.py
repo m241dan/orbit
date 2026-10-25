@@ -10,6 +10,7 @@ import pytest
 from orbit.agent.domain.usage import UsageFetch, UsageUnavailable
 from orbit.agent.external.directories import CONFIG_DIR_VARIABLE, STATE_DIR_VARIABLE
 from orbit.agent.external.usage_api import UsageApi
+from tests.stand_ins import stand_in
 
 # The tab strip's underline slides for 0.3 s on each activation, and the pilot waits for it;
 # tests check where it lands, not the slide. Set before Textual is imported, which reads it then.
@@ -63,6 +64,21 @@ class OfflineUsageApi(UsageApi):
 def offline_usage(monkeypatch: pytest.MonkeyPatch) -> None:
     """Have the CLI fetch its usage limits with :class:`OfflineUsageApi`."""
     monkeypatch.setattr("orbit.cli.backend.UsageApi", OfflineUsageApi)
+
+
+@pytest.fixture(scope="session")
+def stand_in_bin(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A directory holding a stand-in ``claude``."""
+    directory = tmp_path_factory.mktemp("bin")
+    stand_in(directory, "claude")
+    return directory
+
+
+@pytest.fixture(autouse=True)
+def claude_on_path(monkeypatch: pytest.MonkeyPatch, stand_in_bin: Path) -> None:
+    """Put a stand-in ``claude`` first on PATH, so the CLI finds Claude Code's executable
+    whether or not whoever runs the tests has it. A test can still set PATH itself."""
+    monkeypatch.setenv("PATH", f"{stand_in_bin}{os.pathsep}{os.environ.get('PATH', '')}")
 
 
 @pytest.fixture(autouse=True)

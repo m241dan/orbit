@@ -39,6 +39,7 @@ from orbit.protocol import (
     TurnStarted,
 )
 from tests.agent_fakes import (
+    ROLES,
     STEP,
     Call,
     FakeHost,
@@ -206,6 +207,19 @@ async def test_a_tasks_agent_is_a_process_under_its_run_with_its_tools_tallied()
         "orbit.agent.tool_calls_total": 4,
     }
     assert process.status.status_code is StatusCode.UNSET
+
+
+async def test_an_agents_process_runs_on_its_roles_runtime() -> None:
+    traced = Traced()
+    fake = ScriptedLauncher(FakeHost(), claims_done)
+    roles = {**ROLES, CODER: ROLES[CODER].model_copy(update={"runtime": "fake"})}
+    session, _, _ = session_for(
+        telemetry=traced.telemetry, host=fake.host, roles=roles, launchers={"fake": fake}
+    )
+    await asyncio.wait_for(run(session), 5)
+
+    [process] = traced.spans(PROCESS_SPAN)
+    assert attributes(process)["orbit.runtime"] == "fake"
 
 
 async def test_an_agents_calls_are_requests_under_its_process() -> None:

@@ -248,7 +248,7 @@ class AgentRun:
         launch = await self._desk.launch(
             self.agent, bootstrap_prompt(self.agent), self._work.task.settings, self._root
         )
-        events = self._desk.agents.launcher.run_agent(launch)
+        events = self._desk.agents.launcher(self.agent.role).run_agent(launch)
         with self._desk.traced(self.agent, self._within) as process:
             async for event in events:
                 process.saw(event)

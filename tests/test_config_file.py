@@ -81,6 +81,21 @@ def test_the_user_configs_role_fields_are_read_beneath_the_files(
     assert (planner.model, planner.effort) == ("sonnet", "low")
 
 
+def test_a_runs_runtime_is_every_roles_but_those_naming_their_own(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    write_user_config(config_dir, '[roles]\nruntime = "claude"\n')
+    write(tmp_path, '[roles.coder]\nruntime = "claude"\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir, runtime="kiro")
+    named = re.findall(r"roles\.([a-z-]+)\.runtime = \"kiro\"", str(raised.value))
+    assert named == [name for name in BUILT_IN_ROLE_NAMES if name != "coder"]
+
+
+def test_without_a_runs_runtime_the_roles_keep_theirs(tmp_path: Path, config_dir: Path) -> None:
+    assert read_config(str(tmp_path), config_dir, runtime=None) == OrbitConfig(roles=BUILT_IN_ROLES)
+
+
 def test_a_user_config_without_roles_leaves_them_as_they_are(
     tmp_path: Path, config_dir: Path
 ) -> None:

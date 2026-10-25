@@ -27,7 +27,7 @@ verification fails has its own.
 | `orbit.task.id` | string | The task's id on the session's task list. |
 | `orbit.task.title` | string | The task's prompt's first line, cut to 71 characters. |
 | `orbit.role` | string | The role that takes the task, such as `coder` or `reviewer`. |
-| `orbit.runtime` | string | What runs the agent: `claude`. |
+| `orbit.runtime` | string | The runtime the task's role runs on, such as `claude`; absent for a role the session doesn't have, whose task fails without an agent. |
 | `gen_ai.request.model` | string | The model the task's agent is launched with; absent when the task names none (the CLI's default). |
 | `orbit.trigger` | string | Who queued the task: `manual`, `planner`, `review` or `super_review`. |
 | `orbit.task.fixes` | string | For a fix task, the id of the task it fixes; absent otherwise. |
@@ -230,7 +230,7 @@ conversation couldn't be resumed runs a second process, and has a span for each.
 | --- | --- | --- |
 | `orbit.agent.id` | string | The agent's id, such as `agent-3`; the planner's is the same for each of its turns. |
 | `orbit.role` | string | The agent's role, such as `coder`, `planner` or `reviewer`. |
-| `orbit.runtime` | string | What runs the agent: `claude`. |
+| `orbit.runtime` | string | The runtime the agent's role runs on, such as `claude`. |
 | `orbit.agent.exit_reason` | string | How the process ended: `finished`, `crashed` (it failed, or a turn ended in error) or `killed` (orbit stopped it, as when the user stops the task or cancels the turn). |
 | `orbit.agent.turns` | int | How many turns the process started. |
 | `orbit.agent.tool_names` | string[] | The tools the agent called, by name as the CLI reports them (`Bash`, `Edit`, `mcp__orbit__get_task`, …), sorted. |

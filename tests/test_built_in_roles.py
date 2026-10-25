@@ -31,6 +31,7 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "merge": True,
         "enabled": True,
         "effort": None,
+        "runtime": "claude",
     },
     "reviewer": {
         "model": None,
@@ -44,6 +45,7 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "merge": False,
         "enabled": True,
         "effort": None,
+        "runtime": "claude",
     },
     "super-reviewer": {
         "model": "opus",
@@ -57,6 +59,7 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "merge": False,
         "enabled": True,
         "effort": None,
+        "runtime": "claude",
     },
     "planner": {
         "model": None,
@@ -70,6 +73,7 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "merge": False,
         "enabled": True,
         "effort": None,
+        "runtime": "claude",
     },
     "configurator": {
         "model": None,
@@ -83,6 +87,7 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "merge": False,
         "enabled": True,
         "effort": None,
+        "runtime": "claude",
     },
 }
 """Each built-in role's fields but its instructions: those orbit has always had, where it

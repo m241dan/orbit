@@ -53,7 +53,7 @@ from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.roles import Role, built_in_roles
-from orbit.agent.domain.runtimes import Capabilities, Failure
+from orbit.agent.domain.runtimes import CLAUDE, Capabilities, Failure
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.agent.domain.usage import UsageFetch, UsageUnavailable
@@ -790,14 +790,16 @@ def agents_for(
     ``options`` go to :class:`Agents`, such as ``limits``, ``tree`` or ``roles`` (:data:`ROLES`
     unless given); agents work in ``root``, ``.`` unless given, or in ``temp_dirs``, new
     :class:`FakeTempDirs` unless given, and have ``exit_grace``, half a second unless given, to
-    exit.
+    exit. The launcher runs the roles on Claude, and ``launchers`` among ``options``, by runtime,
+    those on others.
     """
     host = host or FakeHost()
     launcher = ScriptedLauncher(host, *scripts, reviewers=reviewers)
     numbers = itertools.count(1)
+    launchers = {CLAUDE: launcher, **options.pop("launchers", {})}
     defaults = {"limits": Limits(), "exit_grace": 0.5, "roles": ROLES, "root": "."}
     options = {**defaults, "temp_dirs": FakeTempDirs(), **options}
-    return Agents(host, launcher, lambda: f"{tokens}-{next(numbers)}", **options), launcher
+    return Agents(host, launchers, lambda: f"{tokens}-{next(numbers)}", **options), launcher
 
 
 def desk_for(publish: Publish, *scripts: Script, **options: Any) -> AgentDesk:

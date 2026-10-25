@@ -397,9 +397,9 @@ async def test_the_configuration_is_read_off_the_event_loop(
     root = directory(tmp_path)
     threads: list[threading.Thread] = []
 
-    def recorded(path: str, config_dir: Path) -> OrbitConfig:
+    def recorded(path: str, config_dir: Path, runtime: str | None) -> OrbitConfig:
         threads.append(threading.current_thread())
-        return read_config(path, config_dir)
+        return read_config(path, config_dir, runtime)
 
     monkeypatch.setattr(served_workspaces, "read_config", recorded)
 
@@ -787,11 +787,11 @@ def gated(monkeypatch: pytest.MonkeyPatch, gate: threading.Event, fails: bool = 
     """Have opening a workspace wait on ``gate`` as it reads the configuration, then fail if
     ``fails``."""
 
-    def waits(path: str, config_dir: Path) -> OrbitConfig:
+    def waits(path: str, config_dir: Path, runtime: str | None) -> OrbitConfig:
         assert gate.wait(10)
         if fails:
             raise RuntimeError("A bug.")
-        return read_config(path, config_dir)
+        return read_config(path, config_dir, runtime)
 
     monkeypatch.setattr(served_workspaces, "read_config", waits)
 

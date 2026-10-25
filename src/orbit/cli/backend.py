@@ -14,7 +14,6 @@ import typer
 from orbit.agent import (
     MODEL_ALIASES,
     Agents,
-    ClaudeCliRunner,
     ConfigError,
     Configuring,
     ControlPlane,
@@ -48,6 +47,7 @@ from orbit.agent import (
     write_checks,
 )
 from orbit.cli.errors import _configured, _exit_on
+from orbit.cli.runtimes import build_runtimes
 from orbit.protocol import PLANNER, Settings, ToolAccess
 from orbit.telemetry import AgentCollector
 from orbit.tracing import Gauges, NoGauges, NoTelemetry, Telemetry
@@ -76,11 +76,11 @@ def _workspace(path: Path) -> Path:
 class _Backend:
     """What the backend flags ask for: the planner's ``model``, new tasks' ``tools``, and
     whether to ``verify``, run tasks in a ``worktree``, ``review`` landed work and show the
-    ``usage`` limits; a ``new`` session, perhaps with a ``name``; the ``owner`` of the
-    repository, if another orbit owns it, making this one read-only, with the workspace
-    ``lock`` it tries until it's free; the ``telemetry`` its work is traced with, the
-    ``gauges`` its control plane reports live values through, and the ``collector`` its agents
-    send their own telemetry to."""
+    ``usage`` limits; a ``new`` session, perhaps with a ``name``; the ``runtime``, if any, of
+    every role that doesn't name its own; the ``owner`` of the repository, if another orbit
+    owns it, making this one read-only, with the workspace ``lock`` it tries until it's free;
+    the ``telemetry`` its work is traced with, the ``gauges`` its control plane reports live
+    values through, and the ``collector`` its agents send their own telemetry to."""
 
     model: str | None
     tools: ToolAccess | None
@@ -90,6 +90,7 @@ class _Backend:
     usage: bool
     new: bool
     name: str | None
+    runtime: str | None = None
     owner: WorkspaceOwner | None = None
     lock: WorkspaceLock | None = None
     telemetry: Telemetry = _NO_TELEMETRY
@@ -176,8 +177,9 @@ def _backend(flags: _Backend, directories: _Directories, *, pick_session: bool) 
     usage_source = _usage_source(flags)
     make = _maker(flags, user, pick_session=pick_session)
     store = _open(directories.state)
+    configuring = Configuring(user.directory, worktree=False, runtime=flags.runtime)
     try:
-        opened = _opened(store, directories.root, make, user.directory)
+        opened = _opened(store, directories.root, make, configuring)
     except BaseException:
         asyncio.run(store.close())
         raise
@@ -197,14 +199,17 @@ def _backend(flags: _Backend, directories: _Directories, *, pick_session: bool) 
     )
 
 
-def _opened(store: SqliteStore, root: Path, make: HostMaker, config_dir: Path) -> OpenedWorkspace:
-    """The workspace at ``root`` opened over ``store`` for a chat, configured over the user
-    config in ``config_dir``, its host made by ``make``.
+def _opened(
+    store: SqliteStore, root: Path, make: HostMaker, configuring: Configuring
+) -> OpenedWorkspace:
+    """The workspace at ``root`` opened over ``store`` for a chat, configured as
+    ``configuring`` says, its host made by ``make``.
 
-    Exits with status 2 if it can't be opened.
+    Exits with status 2 if it can't be opened, as when a runtime its roles run on isn't on
+    PATH.
     """
     with _exit_on(WorkspaceUnavailable):
-        opening = Opening(Configuring(config_dir, worktree=False), flag=False)
+        opening = Opening(configuring, flag=False)
         return asyncio.run(open_workspace(store, root, make, opening))
 
 
@@ -301,17 +306,21 @@ def _settings(model: str | None, tools: ToolAccess | None) -> tuple[Settings, li
 
 
 def _agents(config: OrbitConfig, root: Path, backend: _Backend, config_dir: Path) -> Agents:
-    """The agents that run tasks as ``config`` says in the workspace at ``root``, in the coder
-    tree if ``backend`` asks for a worktree and the workspace is a git work tree, reviewing
-    landed work if it asks to, sending their own telemetry to its collector, and reading the
-    planner's role again over the user config in ``config_dir``."""
+    """The agents that run tasks as ``config`` says in the workspace at ``root``, on the
+    runtimes its enabled roles run on, in the coder tree if ``backend`` asks for a worktree and
+    the workspace is a git work tree, reviewing landed work if it asks to, sending their own
+    telemetry to its collector, and reading the planner's role again over the user config in
+    ``config_dir``, with its runtime.
+
+    Raises :class:`WorkspaceUnavailable` if a runtime the enabled roles run on isn't on PATH.
+    """
     where = str(root)
     worktree = backend.worktree and in_git_work_tree(where)
     tree = GitCoderTree(where, config.setup) if worktree else None
-    collector = backend.collector
+    runtime = backend.runtime
     return Agents(
         McpHost(),
-        ClaudeCliRunner(endpoint=collector.endpoint, protocol=collector.protocol),
+        build_runtimes(config.roles, backend.collector),
         secrets.token_urlsafe,
         config.roles,
         config.limits,
@@ -319,7 +328,7 @@ def _agents(config: OrbitConfig, root: Path, backend: _Backend, config_dir: Path
         review=backend.review,
         review_limits=config.review_limits,
         write_config=write_checks,
-        planner_role=lambda: _planner_role(where, config_dir),
+        planner_role=lambda: _planner_role(where, config_dir, runtime),
         file_names=file_names,
         root=where,
         temp_dirs=SystemTempDirs(),
@@ -327,10 +336,10 @@ def _agents(config: OrbitConfig, root: Path, backend: _Backend, config_dir: Path
     )
 
 
-def _planner_role(root: str, config_dir: Path) -> Role | ConfigError:
+def _planner_role(root: str, config_dir: Path, runtime: str | None) -> Role | ConfigError:
     """The planner's role as the project file of the workspace at ``root`` and the user config
-    in ``config_dir`` say now, or why either is invalid."""
+    in ``config_dir`` say now, with the run's ``runtime``, if any, or why either is invalid."""
     try:
-        return read_config(root, config_dir).roles[PLANNER]
+        return read_config(root, config_dir, runtime).roles[PLANNER]
     except ConfigError as exc:
         return exc

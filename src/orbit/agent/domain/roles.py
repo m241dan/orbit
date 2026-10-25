@@ -5,14 +5,15 @@ The built-in roles aren't kept here: whoever builds them passes in the contents 
 ``roles.toml`` and the instructions it names.
 
 A role says what an agent is told about its job, which of orbit's tools it may call, whether its
-claims of being done are verified, and how long it may take. Its model, tool access and effort
-are the defaults for tasks orbit queues in that role; a task the user queues keeps its own
-settings, but one without an effort runs with its role's. It also says which lane runs
-it, where it works, whether you talk to it, whether its work merges and whether it's enabled,
-which are checked here. The enabled task roles' lanes are the session's lanes, the one whose
-roles merge running on the user's asking; the enabled conversational roles each have a
-conversation of their own; where a role works decides whether its tasks take a coder's slot; and
-the work asked of a disabled role is refused.
+claims of being done are verified, how long it may take and the runtime it runs on. Its model,
+tool access and effort are the defaults for tasks orbit queues in that role; a task the user
+queues keeps its own settings, but one without an effort runs with its role's. It also says
+which lane runs it, where it works, whether you talk to it, whether its work merges and whether
+it's enabled, which are checked here. The enabled task roles' lanes are the session's lanes, the
+one whose roles merge running on the user's asking; the enabled conversational roles each have a
+conversation of their own; where a role works decides whether its tasks take a coder's slot; the
+runtimes the enabled roles run on are those orbit must start agents on; and the work asked of a
+disabled role is refused.
 """
 
 import re
@@ -33,6 +34,7 @@ from pydantic_core import PydanticCustomError
 
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.agent.domain.refusals import Refused
+from orbit.agent.domain.runtimes import CLAUDE, knows_runtime, unknown_runtime
 from orbit.protocol import (
     AGENT_FAILED,
     BUILT_IN_ROLE_NAMES,
@@ -167,6 +169,13 @@ class Role(_Config):
         description=(
             'Its effort: "low", "medium", "high", "xhigh" or "max";'
             " unset, the user config's, else the CLI's."
+        ),
+    )
+    runtime: str = Field(
+        default=CLAUDE,
+        description=(
+            'The runtime its agents run on; only "claude" so far.'
+            ' Left out, the user config\'s, else "claude".'
         ),
     )
 
@@ -360,6 +369,34 @@ def review_lane(roles: Mapping[str, Role]) -> str:
     reviewer's if both are disabled, when none is queued."""
     enabled = (roles[name].lane for name in (REVIEWER, SUPER_REVIEWER) if roles[name].enabled)
     return next(enabled, roles[REVIEWER].lane)
+
+
+def runtime_roles(roles: Mapping[str, Role]) -> dict[str, tuple[str, ...]]:
+    """The runtimes the enabled roles among ``roles`` run on, in order, each with the names of
+    those roles, in order: those orbit must be able to start agents on."""
+    runtimes: dict[str, list[str]] = {}
+    for name, role in roles.items():
+        if role.enabled:
+            runtimes.setdefault(role.runtime, []).append(name)
+    return {runtime: tuple(names) for runtime, names in runtimes.items()}
+
+
+def runtime_problems(roles: Mapping[str, Role]) -> list[str]:
+    """Why each of ``roles`` whose runtime this version of orbit doesn't know is refused, naming
+    it and its runtime, in order."""
+    return [
+        unknown_runtime(f"roles.{name}.runtime", role.runtime)
+        for name, role in roles.items()
+        if not knows_runtime(role.runtime)
+    ]
+
+
+def check_runtimes(roles: Mapping[str, Role]) -> None:
+    """Raise :class:`ConfigError` naming each of ``roles`` whose runtime this version of orbit
+    doesn't know, on a line of its own, if any."""
+    problems = runtime_problems(roles)
+    if problems:
+        raise ConfigError("\n".join(problems))
 
 
 def disabled_roles(roles: Mapping[str, Role]) -> frozenset[str]:

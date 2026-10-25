@@ -212,6 +212,17 @@ async def test_the_catalogs_agents_carry_the_lane_and_defaults_of_the_first_role
     )
 
 
+async def test_the_catalogs_agents_carry_their_roles_runtime() -> None:
+    auditor = ROLES[REVIEWER].model_copy(update={"lane": "audit", "runtime": "fake"})
+    first, _ = agent_workspace("a", roles={**ROLES, "auditor": auditor})
+    catalog = await catalog_served(first)
+
+    agents = {agent.name: agent.runtime for agent in catalog.agents}
+    assert agents == {**dict.fromkeys(ROLES, "claude"), "auditor": "fake"}
+    [in_a] = agents_by_workspace(catalog)
+    assert in_a["auditor"].runtime == "fake"
+
+
 async def test_the_catalogs_agents_are_personal_as_the_first_role_named_is() -> None:
     helper = ROLES[REVIEWER].model_copy(update={"lane": "helper"})
     roles = {**ROLES, "helper": helper}

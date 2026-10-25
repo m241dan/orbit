@@ -40,7 +40,7 @@ def _workspaces(
     config says, and its lock held until it's removed or ``stack`` closes, those added by URL
     cloned into ``clone_dir`` and, unless they're kept, removed when ``stack`` closes."""
     make = _maker(flags, user, pick_session=False)
-    configuring = Configuring(user.directory, flags.worktree)
+    configuring = Configuring(user.directory, flags.worktree, flags.runtime)
     source = ServedWorkspaces(store, make, Cloner(clone_dir), configuring=configuring)
     stack.callback(source.drop_clones)
     stack.callback(source.let_go)

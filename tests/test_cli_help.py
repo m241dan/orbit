@@ -14,6 +14,7 @@ _CONNECTION = ("--connect", "--remote", "--token-file", "--ca", "--cert", "--key
 _BACKEND = (
     "--model",
     "--tools",
+    "--runtime",
     "--verify",
     "--worktree",
     "--review",

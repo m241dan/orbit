@@ -39,8 +39,8 @@ _QUOTES = ('"""', "'''")
 class Additions:
     """What an update added to a file: ``keys``, by the header of the table they were added to
     (empty for the top level), and what it appended at the end (``tables``), in order: each table
-    appended whole, by header, and each key of a later version's appended on its own, such as a
-    role's ``runtime``, by name."""
+    appended whole, by header, and each key of a later version's appended on its own, by
+    name."""
 
     keys: dict[str, tuple[str, ...]] = field(default_factory=dict)
     tables: tuple[str, ...] = ()
@@ -244,8 +244,8 @@ def update_text(
 
     With ``later_heading``, the settings of ``reference`` from the line commenting it out on are
     a later version's, belonging to no table before it. Those appended go after the others,
-    under that line, and a key ahead of their tables, such as a role's ``runtime``, is never
-    added to a table: it's appended on its own unless ``text`` mentions it anywhere.
+    under that line, and a key ahead of their tables is never added to a table: it's appended
+    on its own unless ``text`` mentions it anywhere.
 
     Raises :class:`ConfigError` if ``text`` isn't valid TOML.
     """

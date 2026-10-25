@@ -50,6 +50,7 @@ from orbit.protocol import (
 from tests.agent_fakes import (
     ROLES,
     Call,
+    FakeHost,
     ScriptedLauncher,
     agents_for,
     board,
@@ -90,6 +91,19 @@ async def test_prompts_to_the_planner_go_to_it_and_proposals_become_drafts() -> 
     ]
     assert drafts[0].task.settings.tool_access == "full"  # The coder role's default.
     assert any(isinstance(e, TurnStarted) and e.agent_id == "agent-1" for e in events)
+
+
+async def test_the_planner_converses_through_its_roles_runtime() -> None:
+    fake = ScriptedLauncher(FakeHost())
+    fake.planner_turns = [chats, chats]
+    roles = {**ROLES, PLANNER: ROLES[PLANNER].model_copy(update={"runtime": "fake"})}
+    session, _, claude = session_for(host=fake.host, roles=roles, launchers={"fake": fake})
+    await plan(session, "Plan.")
+    await plan(session, "More.")
+
+    assert [launch.agent.role for launch in fake.launches] == [PLANNER, PLANNER]
+    assert fake.resumed == [None, "conversation-agent-1"]
+    assert claude.launches == []
 
 
 async def test_a_proposal_without_a_title_is_refused_and_adds_no_draft() -> None:

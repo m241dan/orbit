@@ -30,9 +30,6 @@ TASK_SPAN = "orbit.task"
 WAIT_SPAN = "orbit.task.wait"
 RUN_SPAN = "orbit.task.run"
 
-RUNTIME = "claude"
-"""What runs orbit's agents."""
-
 FIX_ATTEMPTS = "orbit.task.fix_attempts"
 CHECK_RUNS = "orbit.task.check_runs"
 VERIFY_RESULT = "orbit.verify.result"
@@ -52,14 +49,20 @@ def _no_session() -> str:
     return ""
 
 
+def _no_runtime(role: str) -> str | None:
+    return None
+
+
 @dataclass(frozen=True)
 class TaskTracing:
-    """What traces a work lane's tasks: the ``telemetry`` recording them, and the ids of the
-    ``workspace`` and of the ``session`` open there now."""
+    """What traces a work lane's tasks: the ``telemetry`` recording them, the ids of the
+    ``workspace`` and of the ``session`` open there now, and what tells the ``runtime`` a role
+    runs on, none for a role the session doesn't have."""
 
     telemetry: Telemetry = field(default_factory=NoTelemetry)
     workspace: str = ""
     session: Callable[[], str] = _no_session
+    runtime: Callable[[str], str | None] = _no_runtime
 
     @contextmanager
     def task(
@@ -108,19 +111,21 @@ class TaskTracing:
             task.set_attributes({"orbit.task.wait_ms": (time.monotonic() - started) * 1000})
 
     def _identity(self, state: TaskState, model: str | None) -> dict[str, AttributeValue]:
-        """The attributes ``state``'s span starts with, on ``model`` if known."""
+        """The attributes ``state``'s span starts with, on ``model`` and its role's runtime if
+        known."""
         attributes: dict[str, AttributeValue] = {
             "orbit.workspace.id": self.workspace,
             "orbit.session.id": self.session(),
             "orbit.task.id": state.id,
             "orbit.task.title": task_title(state.task),
             "orbit.role": state.task.role,
-            "orbit.runtime": RUNTIME,
             "orbit.trigger": state.origin,
             FIX_ATTEMPTS: 0,
             "orbit.task.wait_ms": 0.0,
             CHECK_RUNS: 0,
         }
+        if (runtime := self.runtime(state.task.role)) is not None:
+            attributes["orbit.runtime"] = runtime
         if model is not None:
             attributes["gen_ai.request.model"] = model
         if state.fixes is not None:

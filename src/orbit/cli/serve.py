@@ -52,6 +52,7 @@ from orbit.cli.options import (
     PortOption,
     ProfileOption,
     ReviewOption,
+    RuntimeOption,
     StateDirOption,
     TlsOption,
     ToolsOption,
@@ -59,6 +60,7 @@ from orbit.cli.options import (
     VerifyOption,
     WorktreeOption,
 )
+from orbit.cli.runtimes import given_runtime
 from orbit.cli.served import Added, _serving
 from orbit.cli.telemetry import _agent_collector, _telemetry
 from orbit.profiling import profiled
@@ -73,6 +75,7 @@ def serve(
     add: AddOption = None,
     model: ModelOption = None,
     tools: ToolsOption = None,
+    runtime: RuntimeOption = None,
     verify: VerifyOption = True,
     worktree: WorktreeOption = True,
     review: ReviewOption = True,
@@ -111,7 +114,8 @@ def serve(
         settings = _server_settings(user_config, {**given, "client_ca": client_ca})
         token_file = TokenFile(user_config)
         token = _frontend_token(token_file, settings)
-        flags = _Backend(model, tools, verify, worktree, review, usage, new=False, name=None)
+        runtime = given_runtime(runtime)
+        flags = _Backend(model, tools, verify, worktree, review, usage, False, None, runtime)
         clone_dir = _clone_dir(settings, state)
         run = TelemetryRun("orbit-serve", user_config, state, os.environ)
         collector = _agent_collector(run)

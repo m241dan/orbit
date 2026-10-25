@@ -18,6 +18,8 @@ from orbit.agent.domain.roles import (
     out_of_time,
     review_lane,
     role_task,
+    runtime_problems,
+    runtime_roles,
     suggested_task,
     suggestion_refusal,
     task_lanes,
@@ -107,6 +109,35 @@ def test_a_role_leaving_out_where_and_how_it_works_gets_the_coders_defaults() ->
     role = Role(instructions="Do it.")
     assert (role.lane, role.workspace) == ("work", "worktree")
     assert (role.conversation, role.merge, role.verify, role.enabled) == (False, True, True, True)
+
+
+def test_a_role_leaving_out_its_runtime_runs_on_claude() -> None:
+    assert Role(instructions="Do it.").runtime == "claude"
+
+
+def test_the_built_in_roles_run_on_claude() -> None:
+    assert {role.runtime for role in BUILT_IN_ROLES.values()} == {"claude"}
+
+
+def test_the_runtimes_the_enabled_roles_use_name_their_roles_in_order() -> None:
+    roles = {
+        "coder": Role(instructions="Code."),
+        "helper": Role(instructions="Help.", runtime="fake"),
+        "reviewer": Role(instructions="Review.", verify=False),
+        "idle": Role(instructions="Rest.", runtime="other", enabled=False),
+    }
+    assert runtime_roles(roles) == {"claude": ("coder", "reviewer"), "fake": ("helper",)}
+
+
+def test_roles_on_runtimes_this_version_knows_have_no_runtime_problems() -> None:
+    assert runtime_problems(BUILT_IN_ROLES) == []
+
+
+def test_each_role_on_a_runtime_this_version_doesnt_know_is_a_runtime_problem() -> None:
+    roles = {**BUILT_IN_ROLES, "coder": Role(instructions="Code.", runtime="kiro")}
+    assert runtime_problems(roles) == [
+        'roles.coder.runtime = "kiro": this version of orbit knows the runtimes claude.'
+    ]
 
 
 @pytest.mark.parametrize("workspace", ["worktree", "snapshot", "checkout", "none"])

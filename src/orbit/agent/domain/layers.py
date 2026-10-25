@@ -1,10 +1,11 @@
 """The layers orbit's configuration is resolved from, and the roles resolved across them.
 
 From least to most specific: orbit's built-in defaults, in no file; the package's roles; the
-user config, which sets the role fields bound to the machine, its model and effort, for every
-role or for one, and defines whole personal roles of its own; and the project file. A role's
-field is the most specific layer's value, but a project role replaces a personal role of its
-name entirely.
+user config, which sets the role fields bound to the machine, its model, effort and runtime, for
+every role or for one, and defines whole personal roles of its own; and the project file. A
+role's field is the most specific layer's value, but a project role replaces a personal role of
+its name entirely. A run can give the roles a runtime of its own, over the user config's for
+every role but under any role's own.
 """
 
 from collections.abc import Collection, Mapping
@@ -15,16 +16,17 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from pydantic_core import ErrorDetails
 
 from orbit.agent.domain.config_errors import ConfigError, dotted, validation_problems
-from orbit.agent.domain.roles import Role, RoleName, role_clashes
+from orbit.agent.domain.roles import Role, RoleName, check_runtimes, role_clashes
+from orbit.agent.domain.runtimes import knows_runtime, unknown_runtime
 from orbit.protocol import Effort
 
 LayerName = Literal["default", "package", "user", "project"]
 
 BELONGS_IN_PROJECT = (
-    "belongs in the project's .orbit/config.toml; the user config sets only a role's model and"
-    " effort"
+    "belongs in the project's .orbit/config.toml; the user config sets only a role's model,"
+    " effort and runtime"
 )
-"""Why the user config can't set a role's field other than its model and effort."""
+"""Why the user config can't set a role's field other than its model, effort and runtime."""
 
 
 @dataclass(frozen=True)
@@ -47,13 +49,14 @@ PACKAGE = Layer("package")
 
 
 class RoleFields(BaseModel):
-    """The fields of a role the user config sets, those bound to the machine: its ``model`` and
-    ``effort``, each ``None`` if it doesn't set it."""
+    """The fields of a role the user config sets, those bound to the machine: its ``model``,
+    ``effort`` and ``runtime``, each ``None`` if it doesn't set it."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     model: str | None = None
     effort: Effort | None = None
+    runtime: str | None = None
 
 
 MACHINE_FIELDS = frozenset(RoleFields.model_fields)
@@ -135,19 +138,45 @@ class _UserRoles(BaseModel):
 
 def load_user_roles(data: dict[str, Any], layer: Layer, built_in: Collection[str]) -> UserRoles:
     """The role fields ``data``, the contents of the user config in ``layer``, sets: ``[roles]``'s
-    ``model`` and ``effort`` for every role, and its ``[roles.<name>]`` tables' for each; and
-    the personal roles it defines, each a table that names a role that isn't ``built_in`` and
-    sets more than a model and effort. Its tables but ``[roles]`` are ignored.
+    ``model``, ``effort`` and ``runtime`` for every role, and its ``[roles.<name>]`` tables' for
+    each; and the personal roles it defines, each a table that names a role that isn't
+    ``built_in`` and sets more than those. Its tables but ``[roles]`` are ignored.
 
     Raises :class:`ConfigError` naming each key that's invalid, as one setting a role's field
-    other than its model and effort is, or one that breaks a personal role's rules.
+    other than its model, effort and runtime is, one that breaks a personal role's rules, or one
+    giving a runtime this version of orbit doesn't know.
     """
     try:
         table = _UserConfig.model_validate(data).roles
         roles = _UserRoles.model_validate(_sorted(table, built_in))
     except ValidationError as exc:
         raise ConfigError(_user_role_problems(exc)) from None
+    if problems := _unknown_runtimes(roles):
+        raise ConfigError("\n".join(problems))
     return UserRoles(layer, roles.every, roles.named, roles.personal)
+
+
+def _unknown_runtimes(roles: _UserRoles) -> list[str]:
+    """Why each runtime the user config's ``roles`` give that this version of orbit doesn't
+    know is refused, naming its key, in order: for every role, for each, then each personal
+    role's."""
+    given = {"roles.runtime": roles.every.runtime}
+    given |= {f"roles.{name}.runtime": fields.runtime for name, fields in roles.named.items()}
+    given |= {f"roles.{name}.runtime": role.runtime for name, role in roles.personal.items()}
+    return [
+        unknown_runtime(key, runtime)
+        for key, runtime in given.items()
+        if runtime is not None and not knows_runtime(runtime)
+    ]
+
+
+def with_runtime(user: UserRoles, runtime: str | None) -> UserRoles:
+    """The ``user``'s roles with ``runtime``, if given, as their runtime for every role, in place
+    of the user config's: as a run gives the roles a runtime, every role that doesn't name its
+    own then runs on it, over the package's runtime too."""
+    if runtime is None:
+        return user
+    return replace(user, every=user.every.model_copy(update={"runtime": runtime}))
 
 
 def _sorted(table: dict[str, Any], built_in: Collection[str]) -> dict[str, dict[str, Any]]:
@@ -214,15 +243,16 @@ def resolve_roles(
     the role (a personal role's own), the ``user``'s value for every role, the ``package``'s
     value, then the default. A role's ``merge`` is the default, which merges if it can, when
     the ``project`` changes its ``verify`` or ``workspace`` but not its ``merge``. A project role
-    replaces a personal role of its name entirely; a role the ``user`` only sets a model or
-    effort for, and no other layer has, isn't a role.
+    replaces a personal role of its name entirely; a role the ``user`` only sets fields bound to
+    the machine for, and no other layer has, isn't a role.
 
-    Raises :class:`ConfigError` naming the role and field if a role is invalid, and
-    :class:`PersonalRoleError` if the personal roles break a rule across the roles that the
-    others keep.
+    Raises :class:`ConfigError` naming the role and field if a role is invalid, or each role
+    whose runtime this version of orbit doesn't know, and :class:`PersonalRoleError` if the
+    personal roles break a rule across the roles that the others keep.
     """
     merged = merge_roles(package, user, project)
     roles = _validated(merged.tables)
+    check_runtimes(roles)
     _check_personal(roles, merged.personal)
     return ResolvedRoles(roles, merged.layers, merged.personal, merged.replaced)
 
@@ -334,7 +364,7 @@ def _layered(
 
 def _users_own(name: str, user: UserRoles) -> dict[str, Any]:
     """The fields the ``user`` config sets for role ``name`` alone: its personal role's, if
-    it's one, or else its model and effort."""
+    it's one, or else those bound to the machine."""
     personal = user.personal.get(name)
     if personal is not None:
         return _fields_set(personal)

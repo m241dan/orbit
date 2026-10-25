@@ -51,6 +51,7 @@ from orbit.agent.external.certificates import CertsDir, PrivateKey, issue_client
 from orbit.agent.external.repository import in_git_work_tree
 from orbit.cli import app, backend, chat, serve
 from orbit.protocol import (
+    BUILT_IN_ROLE_NAMES,
     PROTOCOL_VERSION,
     AddTask,
     AddWorkspace,
@@ -682,6 +683,38 @@ def test_a_workspace_flagged_before_that_git_has_no_identity_for_is_skipped_with
     assert f"Warning: The workspace {no_identity} isn't served: Git has no identity" in output
     [catalog] = [e for e in frontend.events if isinstance(e, Catalog)]
     assert [w.path for w in catalog.workspaces] == [str(fine)]
+
+
+def test_serve_refuses_a_runtime_it_doesnt_know_naming_those_it_does() -> None:
+    result = runner.invoke(app, ["serve", *QUIET, "--runtime", "nope", "--port", "0"])
+    assert result.exit_code == 2
+    assert result.stderr == "--runtime nope: this version of orbit knows the runtimes claude.\n"
+
+
+def test_adding_a_workspace_whose_runtime_isnt_on_path_exits_naming_the_roles(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    result = runner.invoke(app, ["serve", *QUIET, "--add", ".", "--port", "0"])
+    assert result.exit_code == 2
+    assert result.stderr.startswith(
+        "Roles planner, coder, reviewer, super-reviewer, configurator use the runtime claude, but"
+        " claude isn't on PATH."
+    )
+
+
+@pytest.mark.usefixtures("fake_runtime")
+def test_serve_runs_every_role_that_doesnt_name_its_own_runtime_on_the_one_given(
+    project: Path, state: Path, config_dir: Path
+) -> None:
+    (project / ".orbit").mkdir()
+    (project / ".orbit" / "config.toml").write_text('[roles.coder]\nruntime = "claude"\n')
+    frontend = Frontend(state, config_dir)
+    served(frontend, "--port", "0", "--runtime", "fake")
+
+    [catalog] = [e for e in frontend.events if isinstance(e, Catalog)]
+    runtimes = {agent.name: agent.runtime for agent in catalog.agents}
+    assert runtimes == {**dict.fromkeys(BUILT_IN_ROLE_NAMES, "fake"), "coder": "claude"}
 
 
 def test_adding_a_workspace_with_an_invalid_config_exits_and_leaves_it_unflagged(

@@ -9,7 +9,7 @@ from orbit.agent.domain.config import LayeredConfig, OrbitConfig, load_layered
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.config_report import ConfigSources, Written
 from orbit.agent.domain.config_update import reference_with_checks, with_checks
-from orbit.agent.domain.layers import Layer, PersonalRoleError
+from orbit.agent.domain.layers import Layer, PersonalRoleError, with_runtime
 from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
 from orbit.agent.external.role_instructions import with_instructions
 from orbit.agent.external.toml_files import read_toml
@@ -23,19 +23,20 @@ REFERENCE = files(__package__) / "reference" / "config.toml"
 :func:`~orbit.agent.external.reference_config.reference_config` generates it."""
 
 
-def read_config(root: str, config_dir: Path) -> OrbitConfig:
+def read_config(root: str, config_dir: Path, runtime: str | None = None) -> OrbitConfig:
     """The configuration in ``root``'s file over the role fields and personal roles the user
     config in ``config_dir`` sets (see :func:`read_user_roles`) and the defaults, whose roles
     are the built-in ones; without a file, the defaults with the user config's roles. A role's
     instructions naming a Markdown file are that file's text (see
     :func:`~orbit.agent.external.role_instructions.resolve_instructions`), taken from the file's
-    directory.
+    directory. A run's ``runtime``, if given, is the runtime of every role that doesn't name
+    its own (see :func:`~orbit.agent.domain.layers.with_runtime`).
 
     Raises :class:`ConfigError`, naming the file, if it, the user config or a role's
     instructions file can't be read or is invalid; it names the user config if the personal
     roles break a rule across the roles that the others keep.
     """
-    return _read_layered(root, config_dir).config
+    return _read_layered(root, config_dir, runtime).config
 
 
 def read_config_sources(root: str, config_dir: Path) -> ConfigSources:
@@ -58,14 +59,14 @@ def read_config_sources(root: str, config_dir: Path) -> ConfigSources:
     )
 
 
-def _read_layered(root: str, config_dir: Path) -> LayeredConfig:
-    """The configuration :func:`read_config` reads, with the layer each of its roles' fields
-    came from.
+def _read_layered(root: str, config_dir: Path, runtime: str | None = None) -> LayeredConfig:
+    """The configuration :func:`read_config` reads, with the run's ``runtime``, if given, with
+    the layer each of its roles' fields came from.
 
     Raises :class:`ConfigError` as :func:`read_config` does.
     """
     built_in = read_built_in_roles()
-    user = read_user_roles(config_dir, built_in)
+    user = with_runtime(read_user_roles(config_dir, built_in), runtime)
     path = Path(root) / CONFIG_PATH
     exists = path.exists()
     data = read_toml(path, lambda table: with_instructions(table, path.parent)) if exists else {}

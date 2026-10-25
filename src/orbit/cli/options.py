@@ -5,7 +5,7 @@ from typing import Annotated
 
 import typer
 
-from orbit.agent import MODEL_ALIASES, TlsMode
+from orbit.agent import MODEL_ALIASES, TlsMode, known_runtimes
 from orbit.protocol import ToolAccess
 
 # Options declared apart, so chat stays short.
@@ -77,6 +77,15 @@ ToolsOption = Annotated[
     typer.Option(
         help="Default tool access for new tasks: off (none), restricted (read-only; anything"
         " needing approval is refused; the default), full (auto-approve everything)."
+    ),
+]
+RuntimeOption = Annotated[
+    str | None,
+    typer.Option(
+        metavar="NAME",
+        help="The runtime of every role that doesn't name its own, in the project's"
+        " .orbit/config.toml or as [roles.<name>] in your config.toml, for this run, over the"
+        f" package's and your [roles] runtime; {known_runtimes()}",
     ),
 ]
 VerifyOption = Annotated[
@@ -204,7 +213,7 @@ FullOption = Annotated[
 ]
 
 # The chat flags that configure the control plane, which a connected chat doesn't run.
-_SERVE_FLAGS = ("model", "tools", "verify", "worktree", "review", "usage", "profile")
+_SERVE_FLAGS = ("model", "tools", "runtime", "verify", "worktree", "review", "usage", "profile")
 
 
 HostOption = Annotated[

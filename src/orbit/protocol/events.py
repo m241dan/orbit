@@ -574,7 +574,8 @@ class AgentEntry(_Message):
     """An agent role ``name``, shown as ``label``; ``conversational`` if the user can message
     it. It runs in ``lane``, and its ``model``, ``tool_access`` and ``effort`` are the defaults
     of a task in it, as ``Settings`` hold them. It's ``personal`` if the user's own config
-    defines it, rather than orbit or the project."""
+    defines it, rather than orbit or the project. Its agents run on ``runtime``, such as
+    ``claude``."""
 
     name: str
     label: str
@@ -584,6 +585,7 @@ class AgentEntry(_Message):
     tool_access: ToolAccess = "restricted"
     effort: Effort | None = None
     personal: bool = False
+    runtime: str = "claude"
 
 
 class WorkspaceEntry(_Message):

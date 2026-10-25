@@ -535,6 +535,47 @@ def test_a_layered_config_is_the_config_with_the_layer_each_role_field_came_from
     assert layered.role_layers["coder"]["tools"] == PACKAGE
 
 
+# A role's runtime
+
+UNKNOWN_RUNTIME = 'roles.coder.runtime = "kiro": this version of orbit knows the runtimes claude.'
+
+
+def test_every_role_runs_on_claude_unless_it_says_otherwise() -> None:
+    config = load_config(custom(), BUILT_IN_ROLES)
+    assert {role.runtime for role in config.roles.values()} == {"claude"}
+
+
+def test_a_role_on_claude_loads() -> None:
+    config = load_config(tomllib.loads('[roles.coder]\nruntime = "claude"'), BUILT_IN_ROLES)
+    assert config.roles["coder"].runtime == "claude"
+
+
+def test_a_role_on_a_runtime_this_version_doesnt_know_is_refused_naming_it() -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_config(tomllib.loads('[roles.coder]\nruntime = "kiro"'), BUILT_IN_ROLES)
+    assert str(raised.value) == UNKNOWN_RUNTIME
+
+
+def test_each_role_on_a_runtime_this_version_doesnt_know_is_named_on_a_line_of_its_own() -> None:
+    roles = {"coder": {"runtime": "kiro"}, "x": {"instructions": "Do x.", "runtime": "harness"}}
+    with pytest.raises(ConfigError) as raised:
+        load_config({"roles": roles}, BUILT_IN_ROLES)
+    assert str(raised.value).splitlines() == [
+        UNKNOWN_RUNTIME,
+        'roles.x.runtime = "harness": this version of orbit knows the runtimes claude.',
+    ]
+
+
+def test_a_layered_config_records_where_each_roles_runtime_came_from() -> None:
+    user = load_user_roles({"roles": {"runtime": "claude"}}, USER, BUILT_IN_ROLES)
+    data = {"roles": {"coder": {"runtime": "claude"}}}
+    layered = load_layered(data, BUILT_IN_ROLES, user, "/src/app/.orbit/config.toml")
+    assert layered.role_layers["coder"]["runtime"] == Layer(
+        "project", "/src/app/.orbit/config.toml"
+    )
+    assert layered.role_layers["reviewer"]["runtime"] == USER
+
+
 # Settings of a later version of orbit
 
 LATER_VERSION = (
@@ -547,15 +588,12 @@ LATER_VERSION = (
     ("toml", "setting"),
     [
         ('[triggers.review-each-commit]\non = "task_landed"', "[triggers.review-each-commit]"),
-        ('[roles.coder]\nruntime = "harness"', "roles.coder.runtime"),
         ('[roles.coder.tools]\nmcp = ["semgrep"]', "[roles.coder.tools]"),
         ('[mcp.github]\ncommand = ["github-mcp-server", "stdio"]', "[mcp.github]"),
         ('[models.local]\nmodel = "openai:qwen3-coder"', "[models.local]"),
-        ('[roles.helper]\ninstructions = "You help."\nruntime = "kiro"', "roles.helper.runtime"),
         ("[triggers]", "[triggers]"),
         ("[mcp]\nshared = true\n\n[mcp.github]\nshared = false", "[mcp.github]"),
         ('models = "local"', "[models]"),
-        ('runtime = "claude"', "runtime"),
     ],
 )
 def test_a_later_versions_setting_is_refused_naming_it(toml: str, setting: str) -> None:
@@ -565,14 +603,8 @@ def test_a_later_versions_setting_is_refused_naming_it(toml: str, setting: str) 
 
 
 def test_the_first_later_versions_setting_in_the_file_is_the_one_named() -> None:
-    toml = '[roles.coder]\nruntime = "harness"\n\n[mcp.github]\nurl = "http://127.0.0.1:3010/mcp"'
-    with pytest.raises(ConfigError, match=r"^roles\.coder\.runtime isn't supported"):
-        load_config(tomllib.loads(toml), BUILT_IN_ROLES)
-
-
-def test_a_top_level_runtime_ahead_of_a_later_table_is_the_one_named() -> None:
-    toml = 'runtime = "claude"\n\n[mcp.github]\nurl = "http://127.0.0.1:3010/mcp"'
-    with pytest.raises(ConfigError, match=r"^runtime isn't supported"):
+    toml = '[roles.coder.tools]\nmcp = []\n\n[mcp.github]\nurl = "http://127.0.0.1:3010/mcp"'
+    with pytest.raises(ConfigError, match=r"^\[roles\.coder\.tools\] isn't supported"):
         load_config(tomllib.loads(toml), BUILT_IN_ROLES)
 
 
@@ -593,6 +625,7 @@ def test_a_roles_list_of_orbit_tools_still_loads() -> None:
         ({"roles": {"coder": {"colour": "red"}}}, "roles.coder.colour: Extra inputs"),
         ({"roles": {"coder": "harness"}}, "roles.coder: Input should be a valid dictionary"),
         ({"colour": "red"}, "colour: Extra inputs are not permitted"),
+        ({"runtime": "claude"}, "runtime: Extra inputs are not permitted"),
     ],
 )
 def test_other_unknown_settings_keep_their_errors(data: dict[str, object], message: str) -> None:

@@ -77,6 +77,8 @@ watch = ["uv.lock"]
 # enabled = true
 # Its effort: "low", "medium", "high", "xhigh" or "max"; unset, the user config's, else the CLI's.
 # effort: unset
+# The runtime its agents run on; only "claude" so far. Left out, the user config's, else "claude".
+# runtime = "claude"
 
 # [roles.coder]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -103,6 +105,8 @@ watch = ["uv.lock"]
 # enabled = true
 # Its effort: "low", "medium", "high", "xhigh" or "max"; unset, the user config's, else the CLI's.
 # effort: unset
+# The runtime its agents run on; only "claude" so far. Left out, the user config's, else "claude".
+# runtime = "claude"
 
 # [roles.reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -129,6 +133,8 @@ watch = ["uv.lock"]
 # enabled = true
 # Its effort: "low", "medium", "high", "xhigh" or "max"; unset, the user config's, else the CLI's.
 # effort: unset
+# The runtime its agents run on; only "claude" so far. Left out, the user config's, else "claude".
+# runtime = "claude"
 
 # [roles.super-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -155,6 +161,8 @@ watch = ["uv.lock"]
 # enabled = true
 # Its effort: "low", "medium", "high", "xhigh" or "max"; unset, the user config's, else the CLI's.
 # effort: unset
+# The runtime its agents run on; only "claude" so far. Left out, the user config's, else "claude".
+# runtime = "claude"
 
 # [roles.configurator]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -181,6 +189,8 @@ watch = ["uv.lock"]
 # enabled = true
 # Its effort: "low", "medium", "high", "xhigh" or "max"; unset, the user config's, else the CLI's.
 # effort: unset
+# The runtime its agents run on; only "claude" so far. Left out, the user config's, else "claude".
+# runtime = "claude"
 
 # A role of your own, which must set its instructions. For example:
 # [roles.security-reviewer]
@@ -196,9 +206,6 @@ watch = ["uv.lock"]
 # merge = false
 
 # Coming in a later version of orbit; leave commented out until then.
-
-# On a role, such as the one above: the runtime its agents run on, "claude", "kiro" or "harness".
-# runtime = "claude"
 
 # A trigger, which turns an event into a task for a role.
 # [triggers.review-each-commit]

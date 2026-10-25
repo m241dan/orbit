@@ -17,6 +17,7 @@ from orbit.agent.domain.layers import (
     merge_roles,
     replaced_note,
     resolve_roles,
+    with_runtime,
 )
 from orbit.agent.domain.roles import Role, built_in_roles
 from orbit.agent.external.built_in_roles import read_built_in_roles
@@ -86,7 +87,7 @@ def test_any_other_role_field_belongs_in_the_project_file(
         user({"roles": roles})
     assert str(raised.value) == (
         f"{key}: belongs in the project's .orbit/config.toml; the user config sets only a"
-        " role's model and effort"
+        " role's model, effort and runtime"
     )
 
 
@@ -103,6 +104,35 @@ def test_an_effort_claude_doesnt_offer_is_refused_listing_those_it_does(
     with pytest.raises(ConfigError, match=f"^{key}: ") as raised:
         user({"roles": roles})
     assert "'low', 'medium', 'high', 'xhigh' or 'max'" in str(raised.value)
+
+
+def test_the_user_configs_roles_table_sets_the_runtime_for_every_role_and_for_one() -> None:
+    roles = user({"roles": {"runtime": "claude", "planner": {"runtime": "claude"}}})
+    assert roles.every == RoleFields(runtime="claude")
+    assert roles.named == {PLANNER: RoleFields(runtime="claude")}
+
+
+@pytest.mark.parametrize(
+    ("roles", "key"),
+    [
+        ({"runtime": "kiro"}, "roles.runtime"),
+        ({"coder": {"runtime": "kiro"}}, "roles.coder.runtime"),
+        ({"helper": {**HELPER, "runtime": "kiro"}}, "roles.helper.runtime"),
+    ],
+)
+def test_a_runtime_this_version_doesnt_know_is_refused_naming_the_key(
+    roles: dict[str, object], key: str
+) -> None:
+    with pytest.raises(ConfigError) as raised:
+        user({"roles": roles})
+    assert str(raised.value) == f'{key} = "kiro": this version of orbit knows the runtimes claude.'
+
+
+def test_each_unknown_runtime_in_the_user_config_is_named_on_a_line_of_its_own() -> None:
+    with pytest.raises(ConfigError) as raised:
+        user({"roles": {"runtime": "kiro", "coder": {"runtime": "harness"}}})
+    lines = str(raised.value).splitlines()
+    assert [line.split(" = ", 1)[0] for line in lines] == ["roles.runtime", "roles.coder.runtime"]
 
 
 def test_a_roles_value_that_isnt_a_table_is_refused() -> None:
@@ -185,6 +215,38 @@ def test_a_field_the_package_sets_comes_from_it_and_any_other_from_the_defaults(
     assert layers["super-reviewer"]["model"] == PACKAGE
     assert (layers["coder"]["model"], layers["coder"]["effort"]) == (DEFAULT, DEFAULT)
     assert layers["coder"]["tools"] == PACKAGE
+
+
+def test_the_packages_roles_run_on_claude() -> None:
+    resolved = resolve_roles(PACKAGE_ROLES, NO_USER_ROLES, NO_PROJECT_ROLES)
+    assert {role.runtime for role in resolved.roles.values()} == {"claude"}
+    assert {layers["runtime"] for layers in resolved.layers.values()} == {PACKAGE}
+
+
+def test_the_users_runtime_for_every_role_is_every_roles_runtime() -> None:
+    resolved = resolve_roles(
+        PACKAGE_ROLES, user({"roles": {"runtime": "claude"}}), NO_PROJECT_ROLES
+    )
+    assert {role.runtime for role in resolved.roles.values()} == {"claude"}
+    assert {layers["runtime"] for layers in resolved.layers.values()} == {USER}
+
+
+def test_the_projects_runtime_for_a_role_wins_over_the_users_for_every_role() -> None:
+    resolved = resolve_roles(
+        PACKAGE_ROLES,
+        user({"roles": {"runtime": "claude"}}),
+        project({"coder": {"runtime": "claude"}}),
+    )
+    assert resolved.layers["coder"]["runtime"] == PROJECT
+    assert resolved.layers["reviewer"]["runtime"] == USER
+
+
+def test_a_project_role_on_a_runtime_this_version_doesnt_know_is_refused() -> None:
+    with pytest.raises(ConfigError) as raised:
+        resolve_roles(PACKAGE_ROLES, NO_USER_ROLES, project({"coder": {"runtime": "kiro"}}))
+    assert str(raised.value) == (
+        'roles.coder.runtime = "kiro": this version of orbit knows the runtimes claude.'
+    )
 
 
 def test_the_user_configs_role_table_sets_that_roles_model() -> None:
@@ -337,6 +399,46 @@ def test_an_invalid_project_role_is_refused_naming_it_and_the_field(
 ) -> None:
     with pytest.raises(ConfigError, match=f"^{message}"):
         resolve_roles(PACKAGE_ROLES, user({"roles": {"model": "haiku"}}), project(roles))
+
+
+# A run's runtime
+
+
+def runtimes(user: UserRoles, project: ProjectRoles) -> dict[str, str]:
+    """Each role's runtime, by name, as unvalidated merging resolves it from the package's
+    roles, ``user`` and ``project``."""
+    merged = merge_roles(PACKAGE_ROLES, user, project)
+    return {name: table["runtime"] for name, table in merged.tables.items()}
+
+
+def test_a_runs_runtime_is_every_roles_runtime_over_the_packages() -> None:
+    resolved = runtimes(with_runtime(NO_USER_ROLES, "kiro"), NO_PROJECT_ROLES)
+    assert set(resolved.values()) == {"kiro"}
+
+
+def test_a_runs_runtime_wins_over_the_users_runtime_for_every_role() -> None:
+    every = user({"roles": {"runtime": "claude", "effort": "low"}})
+    run = with_runtime(every, "kiro")
+    assert set(runtimes(run, NO_PROJECT_ROLES).values()) == {"kiro"}
+    assert run.every.effort == "low"
+
+
+def test_a_roles_own_runtime_wins_over_a_runs() -> None:
+    own = user(
+        {"roles": {"planner": {"runtime": "claude"}, "helper": {**HELPER, "runtime": "claude"}}}
+    )
+    resolved = runtimes(with_runtime(own, "kiro"), project({"coder": {"runtime": "claude"}}))
+    assert [name for name, runtime in resolved.items() if runtime == "claude"] == [
+        PLANNER,
+        "coder",
+        "helper",
+    ]
+    assert resolved["reviewer"] == "kiro"
+
+
+def test_without_a_runs_runtime_the_users_roles_are_as_they_are() -> None:
+    every = user({"roles": {"runtime": "claude"}})
+    assert with_runtime(every, None) is every
 
 
 # Merging the roles without validating them

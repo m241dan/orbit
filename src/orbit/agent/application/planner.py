@@ -96,11 +96,12 @@ class PlannerChat:
 
     @property
     def conversation_id(self) -> str | None:
-        """The id of the planner's Claude conversation, which may change after each turn; the
-        restored one before the first turn, and otherwise none until a turn starts it."""
+        """The handle of the planner's conversation, as its role's runtime's launcher gives it,
+        which may change after each turn; the restored one before the first turn, and otherwise
+        none until a turn starts it."""
         if self._agent is None:
             return self._saved
-        return self._desk.agents.launcher.conversation(self._agent.id)
+        return self._desk.agents.launcher(self._role).conversation(self._agent.id)
 
     @property
     def started(self) -> bool:
@@ -231,7 +232,7 @@ class PlannerChat:
             return
         self._agent = self._desk.open(self, self._role, PLAN_TASK)
         if self._saved is not None:
-            self._desk.agents.launcher.set_conversation(self._agent.id, self._saved)
+            self._desk.agents.launcher(self._role).set_conversation(self._agent.id, self._saved)
         # The frontend learns from this which agent's output is the planner's, or its role's.
         await self._desk.publish(
             AgentStarted(agent_id=self._agent.id, role=self._role, task_id=PLAN_TASK)
@@ -243,7 +244,7 @@ class PlannerChat:
         """Turn ``turn_id`` again, in a fresh conversation, after its TurnStarted is out, in the
         directory made for the one it replaces, as it needs no other."""
         assert self._agent is not None  # It was opened to try resuming.
-        self._desk.agents.launcher.set_conversation(self._agent.id, None)
+        self._desk.agents.launcher(self._role).set_conversation(self._agent.id, None)
         self._told = None  # A fresh conversation hasn't heard the steps.
         yield Notice(message=resume_failed_note(self._role))
         async for event in self._converse(turn_id, prompt, settings):
@@ -266,7 +267,7 @@ class PlannerChat:
             self._agent, self._with_notes(prompt, steps, notes), own, root
         )
         with self._desk.traced(self._agent, current_span()) as process:
-            async for event in self._desk.agents.launcher.converse(turn_id, launch):
+            async for event in self._desk.agents.launcher(self._role).converse(turn_id, launch):
                 process.saw(event)
                 # Only a completed turn surely delivered the notes; otherwise the next prompt
                 # repeats them. Notes told during the turn wait for the next.

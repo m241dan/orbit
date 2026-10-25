@@ -21,7 +21,7 @@ from orbit.agent.domain.layers import (
     replaced_note,
 )
 from orbit.agent.domain.reviews import ReviewLimits
-from orbit.agent.domain.roles import Role, RoleName, role_clashes
+from orbit.agent.domain.roles import Role, RoleName, check_runtimes, role_clashes
 from orbit.agent.domain.verification import MAX_FALLBACK_FIXES
 
 
@@ -108,9 +108,6 @@ class _FileConfig(_Config):
 LATER_TABLES = ("triggers", "mcp", "models")
 """The top-level tables of a later version of orbit's settings."""
 
-LATER_KEYS = ("runtime",)
-"""The top-level keys of a later version of orbit's settings outside its tables."""
-
 LATER_VERSION = (
     "isn't supported by this version of orbit yet; it's in the reference config for a later"
     " version. Leave it commented out."
@@ -144,8 +141,9 @@ def load_config(
 
     A role it names that's built in keeps the fields it doesn't set; any other role is new. Each
     role's fields are resolved as :func:`~orbit.agent.domain.layers.resolve_roles` says.
-    Raises :class:`ConfigError` naming each problem if it's invalid, a
-    :class:`PersonalRoleError` if the personal roles are at fault.
+    Raises :class:`ConfigError` naming each problem if it's invalid, as it is when a role's
+    runtime is one this version of orbit doesn't know, a :class:`PersonalRoleError` if the
+    personal roles are at fault.
     """
     return load_layered(data, built_in, user, path).config
 
@@ -179,6 +177,7 @@ def load_layered(
     check_personal(merged)
     notices = tuple(replaced_note(name) for name in merged.replaced)
     config = _validated({**data, "roles": merged.tables}, merged.personal, notices)
+    check_runtimes(config.roles)
     return LayeredConfig(config, merged.layers)
 
 
@@ -192,13 +191,10 @@ def _refuse_later_settings(data: dict[str, Any]) -> None:
 
 def _later_settings(data: dict[str, Any]) -> Iterator[str]:
     """The settings of a later version of orbit ``data`` sets, in order, each named as the
-    reference config names it: its :data:`LATER_TABLES`, its :data:`LATER_KEYS`, such as a
-    ``runtime`` uncommented on its own, and its roles' ``runtime`` keys and ``tools`` tables."""
+    reference config names it: its :data:`LATER_TABLES`, and its roles' ``tools`` tables."""
     for key, value in data.items():
         if key in LATER_TABLES:
             yield _table_name(key, value)
-        elif key in LATER_KEYS:
-            yield key
         elif key == "roles":
             yield from _later_roles_settings(value)
 
@@ -221,15 +217,10 @@ def _table_name(key: str, value: object) -> str:
 
 
 def _later_role_settings(name: str, fields: object) -> Iterator[str]:
-    """The settings of a later version of orbit the ``fields`` of role ``name`` set, in order:
-    its ``runtime``, and its ``tools`` as a table rather than a list of orbit's tools."""
-    if not isinstance(fields, dict):
-        return
-    for key, value in fields.items():
-        if key == "runtime":
-            yield f"roles.{name}.runtime"
-        elif key == "tools" and isinstance(value, dict):
-            yield f"[roles.{name}.tools]"
+    """The settings of a later version of orbit the ``fields`` of role ``name`` set: its
+    ``tools`` as a table rather than a list of orbit's tools."""
+    if isinstance(fields, dict) and isinstance(fields.get("tools"), dict):
+        yield f"[roles.{name}.tools]"
 
 
 def _validated(

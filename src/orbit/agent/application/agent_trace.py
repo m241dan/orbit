@@ -14,7 +14,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from orbit.agent.application.ports import StepRunner
-from orbit.agent.application.task_trace import RUNTIME
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import AgentExitReason, Event, ToolCallStarted, TurnFinished, TurnStarted
@@ -77,14 +76,14 @@ class AgentTracing:
     telemetry: Telemetry = field(default_factory=NoTelemetry)
 
     @contextmanager
-    def process(self, agent: Agent, parent: Span) -> Iterator[AgentProcess]:
-        """``agent``'s process, traced over the block in a span that's a child of ``parent``
-        and ended on leaving it: killed if the block is cancelled, and crashed if an error
-        escapes it, which is recorded on it."""
+    def process(self, agent: Agent, runtime: str, parent: Span) -> Iterator[AgentProcess]:
+        """``agent``'s process on ``runtime``, traced over the block in a span that's a child of
+        ``parent`` and ended on leaving it: killed if the block is cancelled, and crashed if an
+        error escapes it, which is recorded on it."""
         attributes = {
             "orbit.agent.id": agent.id,
             "orbit.role": agent.role,
-            "orbit.runtime": RUNTIME,
+            "orbit.runtime": runtime,
         }
         with use_span(parent):
             process = AgentProcess(self.telemetry.start(PROCESS_SPAN, attributes))

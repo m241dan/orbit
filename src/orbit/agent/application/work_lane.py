@@ -301,32 +301,33 @@ class WorkLane:
             return None
         tried.add(task_id)
         self._resume = None
-        fixing = self._board.get(task_id).fixes is not None
+        started = self._board.get(task_id)
         outcome = await self._run_task(task_id)
-        return await self._end_at(task_id, outcome, fixing)
+        return await self._end_at(started, outcome)
 
-    async def _end_at(self, task_id: str, outcome: Outcome, fixing: bool) -> RunEnd | None:
-        """Why the run ends at task ``task_id``, which ended in ``outcome``, ``fixing`` another
-        or not: it was cancelled or stopped, or the run stops at its error, to run it first
+    async def _end_at(self, started: TaskState, outcome: Outcome) -> RunEnd | None:
+        """Why the run ends at the task that was ``started``, as it was then, which ended in
+        ``outcome``: it was cancelled or stopped, or the run stops at its error, to run it first
         next time; none if the run goes on."""
         if outcome.status == "cancelled" or self._stopped:
             return "cancelled"
-        if outcome.status == "error" and (end := await self._stop_at(outcome, fixing)):
-            self._resume = task_id
+        if outcome.status == "error" and (end := await self._stop_at(started, outcome)):
+            self._resume = started.id
             return end
         return None
 
-    async def _stop_at(self, error: Outcome, fixing: bool) -> RunEnd | None:
-        """Why the run stops at a task that ended in ``error``: its agent hit the usage limit or
-        found the API not answering, as the launcher tells, the latter noted as an
-        :attr:`outage`, or it was ``fixing`` another, said so; none if the run goes on."""
-        failure = self._failure(error)
+    async def _stop_at(self, started: TaskState, error: Outcome) -> RunEnd | None:
+        """Why the run stops at the task that was ``started``, as it was then, which ended in
+        ``error``: its agent hit the usage limit or found the API not answering, as its role's
+        launcher tells, the latter noted as an :attr:`outage`, or it was fixing another, said
+        so; none if the run goes on."""
+        failure = self._failure(started.task.role, error)
         if failure == "usage_limit":
             return "limited"
         if failure == "api_unavailable":
             self._outage = outage_after(self._outage, error.detail)
             return "api_unavailable"
-        if not fixing:
+        if started.fixes is None:
             return None
         await self._publish(Notice(message=FIX_ERROR_NOTE))
         return "fix_failed"
@@ -425,22 +426,24 @@ class WorkLane:
         with self._tracing.run() as run:
             agent = AgentRun(task_id, self._tasks, verifier, self._desk)
             outcome = await self._run_alone(agent.run(before, root, run))
-            self._heard_from_claude(outcome)
+            self._heard_from_claude(task.role, outcome)
             return await self._settle(task_id, outcome, root)
 
-    def _heard_from_claude(self, outcome: Outcome) -> None:
-        """Forget the :attr:`outage`, once an agent finished its run in ``outcome`` without
-        the API not answering, as the launcher tells, however its task ended. The user's stop
-        doesn't reach this, as it cancels the agent's run, so it leaves the outage as it is."""
-        if self._failure(outcome) != "api_unavailable":
+    def _heard_from_claude(self, role: str, outcome: Outcome) -> None:
+        """Forget the :attr:`outage`, once an agent in ``role`` finished its run in ``outcome``
+        without the API not answering, as its launcher tells, however its task ended. The user's
+        stop doesn't reach this, as it cancels the agent's run, so it leaves the outage as it
+        is."""
+        if self._failure(role, outcome) != "api_unavailable":
             self._outage = None
 
-    def _failure(self, outcome: Outcome) -> FailureKind | None:
-        """The kind of failure the launcher tells in the error a task ended in, ``outcome``;
-        none if it ended otherwise, or the launcher tells none."""
-        if outcome.status != "error":
+    def _failure(self, role: str, outcome: Outcome) -> FailureKind | None:
+        """The kind of failure the launcher of ``role``'s runtime tells in the error a task in
+        it ended in, ``outcome``; none if it ended otherwise, the launcher tells none, or the
+        session has no such role, whose task fails without an agent."""
+        if outcome.status != "error" or self._desk.agents.runtime(role) is None:
             return None
-        failure = self._desk.agents.launcher.failure(outcome.detail)
+        failure = self._desk.agents.launcher(role).failure(outcome.detail)
         return None if failure is None else failure.kind
 
     async def _settle(self, task_id: str, outcome: Outcome, root: str) -> Outcome:

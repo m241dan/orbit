@@ -21,6 +21,7 @@ from orbit.agent.domain.usage_limits import (
     paused_note,
 )
 from orbit.protocol import (
+    CODER,
     CancelTurn,
     Event,
     NewSession,
@@ -33,8 +34,10 @@ from orbit.protocol import (
     UsageLimit,
 )
 from tests.agent_fakes import (
+    ROLES,
     START,
     Call,
+    FakeHost,
     FakeStore,
     FakeTree,
     Script,
@@ -130,6 +133,40 @@ async def test_a_usage_limit_the_launcher_tells_in_its_own_words_stops_the_run_a
     assert [launch.agent.task_id for launch in launcher.launches] == ["1"]
     assert statuses(events) == ["error", "pending"]
     assert notes(events)[-1] == paused_note(START + timedelta(minutes=15))
+
+
+def coder_on_fake(fake: ScriptedLauncher) -> tuple[WorkspaceHost, ScriptedLauncher]:
+    """A session whose coder runs on the runtime ``fake`` through the launcher ``fake``, with
+    the launcher of its roles on Claude."""
+    roles = {**ROLES, CODER: ROLES[CODER].model_copy(update={"runtime": "fake"})}
+    session, _, claude = session_for(
+        host=fake.host, roles=roles, launchers={"fake": fake}, pause=Waits().pause
+    )
+    return session, claude
+
+
+async def test_a_usage_limit_the_tasks_roles_runtime_tells_stops_the_run() -> None:
+    fake = ScriptedLauncher(FakeHost(), errs, claims_done)
+    fake.turn_errors.append("Quota spent")
+    fake.failures["Quota spent"] = RuntimeFailure("usage_limit")
+    session, _ = coder_on_fake(fake)
+    events = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
+    await session.close()
+
+    assert [launch.agent.task_id for launch in fake.launches] == ["1"]
+    assert statuses(events) == ["error", "pending"]
+
+
+async def test_a_usage_limit_only_another_runtime_tells_doesnt_stop_the_run() -> None:
+    fake = ScriptedLauncher(FakeHost(), errs, claims_done)
+    fake.turn_errors.append("Quota spent")
+    session, claude = coder_on_fake(fake)
+    claude.failures["Quota spent"] = RuntimeFailure("usage_limit")
+    events = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
+    await session.close()
+
+    assert [launch.agent.task_id for launch in fake.launches] == ["1", "2"]
+    assert statuses(events) == ["error", "completed"]
 
 
 async def test_the_run_starts_again_by_itself_at_the_reset_the_usage_shows() -> None:

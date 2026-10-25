@@ -1,6 +1,8 @@
-"""Fakes for the CLI: the TUI it runs and the WebSocket session it connects."""
+"""Fakes for the CLI: the TUI it runs, the WebSocket session it connects and the runtimes it
+finds."""
 
 import asyncio
+import os
 import ssl
 from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import asynccontextmanager
@@ -13,13 +15,43 @@ import pytest
 from orbit.agent import ClaudeCliRunner, ControlPlane, WorkspaceHost
 from orbit.agent.application.ports import AgentLaunch, UsageSource
 from orbit.agent.domain.agents import Agent
+from orbit.agent.domain.runtimes import CLAUDE
 from orbit.agent.domain.server import ServerSettings
+from orbit.cli.runtimes import RUNTIMES, Runtime
 from orbit.cli.threaded import ThreadedSession
 from orbit.protocol import PROTOCOL_VERSION, CommandEnvelope, Hello, Settings
 from orbit.telemetry import Off, TelemetryRun, TelemetrySettings
 from orbit.tracing import NoTelemetry, Telemetry
 from orbit.tui import Opening, WarningCapture
 from tests.server_fakes import serving_plane
+from tests.stand_ins import stand_in
+
+FAKE_RUNTIME = "fake"
+"""A second runtime the tests that ask for it have orbit know."""
+
+FAKE_EXECUTABLE = "fake-agent"
+"""The executable :data:`FAKE_RUNTIME` needs on PATH."""
+
+
+class FakeRuntimeLauncher(ClaudeCliRunner):
+    """:data:`FAKE_RUNTIME`'s launcher: a Claude CLI runner running its executable."""
+
+    def __init__(self) -> None:
+        super().__init__((FAKE_EXECUTABLE,))
+
+
+@pytest.fixture
+def fake_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Have orbit know a second runtime, :data:`FAKE_RUNTIME`, launched by a
+    :class:`FakeRuntimeLauncher`, and put a stand-in for its executable on PATH in the directory
+    returned."""
+    directory = tmp_path / "fake-bin"
+    stand_in(directory, FAKE_EXECUTABLE)
+    monkeypatch.setenv("PATH", f"{directory}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setattr("orbit.agent.domain.runtimes.RUNTIME_NAMES", (CLAUDE, FAKE_RUNTIME))
+    runtime = Runtime(FAKE_EXECUTABLE, "Install the fake", lambda collector: FakeRuntimeLauncher())
+    monkeypatch.setitem(RUNTIMES, FAKE_RUNTIME, runtime)
+    return directory
 
 
 @dataclass
@@ -175,5 +207,5 @@ def runners(monkeypatch: pytest.MonkeyPatch) -> list[ClaudeCliRunner]:
         built.append(ClaudeCliRunner(*args, **kwargs))
         return built[-1]
 
-    monkeypatch.setattr("orbit.cli.backend.ClaudeCliRunner", runner)
+    monkeypatch.setattr("orbit.cli.runtimes.ClaudeCliRunner", runner)
     return built

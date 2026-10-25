@@ -48,8 +48,8 @@ NO_WORKSPACE_LABEL = "default"
 
 def agent_entry(name: str, role: Role, conversational: bool, personal: bool) -> AgentEntry:
     """The catalog's entry for the agents of ``role``, named ``name``, ``conversational`` if the
-    user can message them, ``personal`` if it's defined whole in the user config, with its lane
-    and the defaults of its tasks' settings."""
+    user can message them, ``personal`` if it's defined whole in the user config, with its lane,
+    the defaults of its tasks' settings and its runtime."""
     return AgentEntry(
         name=name,
         label=ROLE_LABELS.get(name, name),
@@ -59,6 +59,7 @@ def agent_entry(name: str, role: Role, conversational: bool, personal: bool) -> 
         tool_access=role.tool_access,
         effort=role.effort,
         personal=personal,
+        runtime=role.runtime,
     )
 
 

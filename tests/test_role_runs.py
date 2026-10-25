@@ -4,7 +4,9 @@ import asyncio
 
 from orbit.agent import WorkspaceHost
 from orbit.agent.domain.agent_task import NO_STEPS
+from orbit.agent.domain.roles import Role
 from orbit.protocol import (
+    CODER,
     NOT_CONFIGURED,
     TIMED_OUT,
     AddTask,
@@ -18,8 +20,11 @@ from orbit.protocol import (
 from tests.agent_fakes import (
     ROLES,
     Call,
+    FakeHost,
+    ScriptedLauncher,
     Steps,
     board,
+    claims_done,
     events_until,
     idle,
     run,
@@ -48,6 +53,32 @@ async def test_an_agent_is_launched_with_its_roles_instructions_and_tools() -> N
     [launch] = launcher.launches
     assert launch.instructions == ROLES["coder"].instructions
     assert launch.tools == ROLES["coder"].tools
+
+
+def on_fake(*names: str) -> dict[str, Role]:
+    """The roles of :data:`ROLES`, those named ``names`` running on the runtime ``fake``."""
+    return {
+        name: role.model_copy(update={"runtime": "fake"}) if name in names else role
+        for name, role in ROLES.items()
+    }
+
+
+async def test_an_agent_is_launched_through_its_roles_runtime() -> None:
+    host = FakeHost()
+    fake = ScriptedLauncher(host, claims_done)
+    session, _, claude = session_for(host=host, roles=on_fake(CODER), launchers={"fake": fake})
+    events = await asyncio.wait_for(run(session), 5)
+    await session.close()
+    assert [launch.agent.role for launch in fake.launches] == [CODER]
+    assert claude.launches == []
+    assert statuses(events) == ["completed"]
+
+
+def test_agents_tell_the_runtime_each_role_runs_on() -> None:
+    session, _, _ = session_for(roles=on_fake(CODER))
+    assert session.agents is not None
+    assert (session.agents.runtime(CODER), session.agents.runtime("reviewer")) == ("fake", "claude")
+    assert session.agents.runtime("nobody") is None
 
 
 async def test_a_verified_agent_is_told_the_checks_and_that_it_may_run_them() -> None:

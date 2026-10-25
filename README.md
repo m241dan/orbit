@@ -39,6 +39,7 @@ uv run orbit chat -C ~/code/other              # work on another project
 uv run orbit chat --new                        # start a new session rather than picking one
 uv run orbit chat --name "auth rework"         # start a new session with that name
 uv run orbit chat --model opus --tools full    # planner's model, new tasks' access (over saved)
+uv run orbit chat --runtime claude             # run roles not naming their own runtime on claude
 uv run orbit chat --no-verify                  # don't verify tasks (ctrl+e is refused)
 uv run orbit chat --no-review                  # don't review landed work
 uv run orbit chat --no-worktree                # tasks edit the current checkout; nothing is committed
@@ -768,7 +769,7 @@ your checkout out of its way, it doesn't sandbox it.
 | Temporary directories | the system's temporary directory | `orbit-agent-…`, the empty directory each run of a role whose `workspace` is `none` works in, removed after it (see [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)) |
 | The store | the state directory | `orbit.db`, the saved sessions, their event logs, the super review count and the record moves of every repository, `locks/`, and `fallback/` for events a failed write left unsaved (see [Storage failures](#storage-failures)) |
 | Config files | `.orbit/config.toml` in the repository | the verification steps, setup, roles and limits, committed with your code |
-| User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]`, `[server]`, `[remotes]`, `[telemetry]`, and in `[roles]` your machine's model and effort for roles and your personal roles, with the instructions files they name |
+| User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]`, `[server]`, `[remotes]`, `[telemetry]`, and in `[roles]` your machine's model, effort and runtime for roles and your personal roles, with the instructions files they name |
 | The token | `token` in the config directory | what frontends show `orbit serve` to connect (see [Serving the control plane](#serving-the-control-plane)) |
 | Certificates | `certs/` in the config directory | the CA, server and client certificates and keys `orbit certs` makes for TLS and mutual TLS (see [Serving the control plane](#serving-the-control-plane)) |
 | The run file | `run/server.json` in the state directory | where the `orbit serve` running on that state directory listens, beside `run/serve.lock`, which that serve holds |
@@ -965,14 +966,14 @@ The planner is one agent for the whole session: each prompt resumes its conversa
 remembers what you discussed. It reads your checkout and can search the web but can't edit your
 checkout, and uses the model you picked with `ctrl+o`, which is saved with the session; with
 `default` picked, it uses the planner role's model, if `.orbit/config.toml` or your `config.toml`
-sets one (see [Your machine's model and effort](#your-machines-model-and-effort)).
+sets one (see [Your machine's model, effort and runtime](#your-machines-model-effort-and-runtime)).
 
 The planner's conversation is kept with its session, so it carries on across restarts and session
 switches. `ctrl+n` resets it, after you confirm (`y` to go ahead, `n`/`esc` to cancel): to pick up a
 change to the planner's role, or to clear a conversation grown too long. Orbit ends the planner's
 conversation, and its access to orbit, so the next prompt starts a fresh one, told the
 verification steps again, and saves the session without it. It reads `[roles.planner]` from
-`.orbit/config.toml` again, with the model and effort your `config.toml` sets for it, so a change
+`.orbit/config.toml` again, with the model, effort and runtime your `config.toml` sets for it (and the run's `--runtime`), so a change
 to the planner's instructions, tools, tool access, model or effort takes effect; other roles and
 settings stay as they were. If either file is invalid, the planner keeps its role and orbit shows
 the problem, but still resets the conversation. Draft tasks stay on the task
@@ -1053,7 +1054,7 @@ the role. `orbit init --roles` copies the built-in instructions there for you to
 [Starting from the reference config](#starting-from-the-reference-config)).
 
 A role also says which lane runs it, where it works, whether you talk to it, whether its work
-merges, whether it's enabled and how hard its agents think:
+merges, whether it's enabled, how hard its agents think and what they run on:
 
 - `lane`: the lane that runs the role's agents, a plain name of letters, digits, `-` and `_`. Each
   lane of the enabled roles that aren't conversational runs one task at a time, the next on the
@@ -1126,6 +1127,18 @@ merges, whether it's enabled and how hard its agents think:
   no flag is passed and the CLI's default applies. `CLAUDE_CODE_EFFORT_LEVEL` is removed from
   every agent's environment, so one set where orbit runs never overrides orbit's setting or the
   CLI's default.
+- `runtime`: the runtime its agents run on. This version of orbit knows one, `claude` (Claude
+  Code, the `claude` CLI), which every role runs on unless it says otherwise; any other value is
+  refused, naming the role: `roles.coder.runtime = "kiro": this version of orbit knows the
+  runtimes claude.`. Your `config.toml` can set it for every role or for one (see
+  [Your machine's model, effort and runtime](#your-machines-model-effort-and-runtime)), and
+  `--runtime NAME` on `orbit chat` or `orbit serve` sets it for a run. Orbit starts agents only on
+  the runtimes its enabled roles run on, once it finds each one's executable on your `PATH`; one
+  that's missing stops `orbit chat` with status 2 before anything runs, naming the roles, the
+  runtime and what to install (`Roles planner, coder, reviewer, super-reviewer, configurator use
+  the runtime claude, but claude isn't on PATH. Install Claude Code, or set those roles' runtime
+  to one you have.`), and makes a workspace `orbit serve` can't open. The Catalog lists each
+  role's `runtime`, and telemetry's `orbit.runtime` is it.
 
 In the TUI, the task editor's **Role** field picks a task's role among the roles enabled in the
 session's workspace that aren't conversational, each shown with its lane (`Coder · work`) and a
@@ -1136,8 +1149,8 @@ shown, or the planner's elsewhere, as `ctrl+o` and `ctrl+l` pick its model and t
 
 The `coder` works in lane `work` in a `worktree` and merges; the `configurator` works in `work` in
 a `worktree` and doesn't merge; the `reviewer` and `super-reviewer` work in `review` on a
-`snapshot`; the `planner` works in `planner` in your `checkout`, in conversation; all are enabled,
-and none sets an effort.
+`snapshot`; the `planner` works in `planner` in your `checkout`, in conversation; all are enabled
+and run on `claude`, and none sets an effort.
 A role whose fields don't go together is refused, naming the role and the rule: `merge = true`
 needs `workspace = "worktree"` and `verify = true`; `verify = true` needs `merge = true`, as checked
 work that doesn't merge would vanish once put aside; `workspace = "checkout"` can't have
@@ -1160,7 +1173,7 @@ A project can change these, orbit's limits, its verification steps (see
 name adds a role, which must set `instructions` and otherwise gets `get_task`, `complete_task`,
 `report_progress` and `give_up` as its tools, `restricted` tool access, the default model, its
 claims verified, no time limit, the coder's lane `work`, `worktree`, no conversation and
-enabled, and no effort. A role that doesn't set `merge` merges if it can, being verified and in a
+enabled, no effort and the runtime `claude`. A role that doesn't set `merge` merges if it can, being verified and in a
 worktree, and a built-in role whose `verify` or `workspace` the file changes without setting
 `merge` follows the same rule, so `[roles.coder] verify = false` alone stops the coder merging. One
 in another workspace must set `verify = false`, and one with `verify = false` doesn't merge, and
@@ -1186,25 +1199,27 @@ six verification steps and its setup filled in, under its own comments on why.
 adds a workspace; each refuses an invalid one, naming each problem (for example
 `roles.coder.tool_access: Input should be 'off', 'restricted' or 'full'`). The settings of a later
 version of orbit, which the reference config shows commented out, are refused while uncommented,
-naming the first: a `[triggers.<name>]`, `[mcp.<name>]` or `[models.<name>]` table, a role's
-`runtime` (or a `runtime` uncommented on its own, outside any role) or a `[roles.<name>.tools]`
-table (`tools` as a list of orbit's tools is still a role's `tools`), as in `roles.coder.runtime isn't supported by this version of orbit yet; it's in the
-reference config for a later version. Leave it commented out.`
+naming the first: a `[triggers.<name>]`, `[mcp.<name>]` or `[models.<name>]` table or a
+`[roles.<name>.tools]` table (`tools` as a list of orbit's tools is still a role's `tools`), as in
+`[mcp.github] isn't supported by this version of orbit yet; it's in the reference config for a
+later version. Leave it commented out.`
 
-#### Your machine's model and effort
+#### Your machine's model, effort and runtime
 
-Which models and how much effort a machine can run is yours to say, not each project's: the
-`[roles]` table in your `config.toml` in the config directory (see
-[Where orbit keeps things](#where-orbit-keeps-things)) sets `model` and `effort` for every role,
-and a `[roles.<name>]` table sets them for one role, in every repository orbit runs in:
+Which models, how much effort and which runtimes a machine can run is yours to say, not each
+project's: the `[roles]` table in your `config.toml` in the config directory (see
+[Where orbit keeps things](#where-orbit-keeps-things)) sets `model`, `effort` and `runtime` for
+every role, and a `[roles.<name>]` table sets them for one role, in every repository orbit runs
+in:
 
 ```toml
 [roles]
-model = "haiku"   # every role's model
-effort = "low"    # every role's effort
+model = "haiku"     # every role's model
+effort = "low"      # every role's effort
+runtime = "claude"  # every role's runtime
 
 [roles.planner]
-model = "opus"    # the planner's
+model = "opus"      # the planner's
 ```
 
 Each of a role's fields comes from the most specific place that sets it: the project's
@@ -1213,15 +1228,25 @@ roles shipped with orbit, then orbit's defaults. So above, every role runs on `h
 `super-reviewer`'s `opus` from the package included, unless the project sets a role's model; the
 planner runs on `opus` unless the project sets the planner's; and a project's
 `[roles.planner] model = "sonnet"` wins over both. Without a `[roles]` table, roles are just the
-project's over orbit's. A `[roles.<name>]` table that sets only `model` and `effort` for a role
-neither orbit nor the project has changes nothing; one that sets any other field defines a
-personal role (see [Your personal roles](#your-personal-roles)).
+project's over orbit's. A `[roles.<name>]` table that sets only `model`, `effort` and `runtime`
+for a role neither orbit nor the project has changes nothing; one that sets any other field
+defines a personal role (see [Your personal roles](#your-personal-roles)).
 
-Only `model` and `effort` of orbit's own roles belong to your machine: any other field of one,
-such as `[roles.coder] verify = false`, is refused, naming the file, the key and that it belongs
-in the project's `.orbit/config.toml`, so your machine can't turn off a project's verification;
-so is any other field in `[roles]` itself. `effort` takes the levels a role's does, and any other
-value is refused, listing them. A `[roles.<name>]` table names its role as a project's does, with
+A run's `--runtime NAME`, on `orbit chat` or `orbit serve`, is the runtime of every role that
+doesn't name its own, in the project's `.orbit/config.toml` or in a `[roles.<name>]` of yours:
+it wins over orbit's `claude` and your `[roles]` `runtime`, but a role's own runtime wins over it,
+so a project that puts one role on a runtime keeps it there. A name this version of orbit doesn't
+know stops it with status 2, naming those it does (`--runtime nope: this version of orbit knows
+the runtimes claude.`). `orbit chat` joining an `orbit serve` refuses it, as the server's runs
+take their runtime from `orbit serve`'s.
+
+Only `model`, `effort` and `runtime` of orbit's own roles belong to your machine: any other field
+of one, such as `[roles.coder] verify = false`, is refused, naming the file, the key and that it
+belongs in the project's `.orbit/config.toml`, so your machine can't turn off a project's
+verification; so is any other field in `[roles]` itself. `effort` takes the levels a role's does,
+and any other value is refused, listing them; `runtime` takes the runtimes this version of orbit
+knows, and any other is refused, naming the key (`roles.runtime = "kiro": this version of orbit
+knows the runtimes claude.`). A `[roles.<name>]` table names its role as a project's does, with
 a plain name of letters, digits, `-` and `_`, and one that doesn't is refused, naming the file and
 the key. `orbit chat` reads
 your `config.toml`'s roles as it opens its workspace, and `orbit serve`, with the config directory
@@ -1233,12 +1258,12 @@ open.
 #### Your personal roles
 
 Roles of your own go with you to every repository: a `[roles.<name>]` table in your
-`config.toml` naming a role orbit doesn't ship, and setting more than its `model` and `effort`,
-defines a **personal role**, available in every workspace orbit opens with that config directory.
+`config.toml` naming a role orbit doesn't ship, and setting more than its `model`, `effort` and
+`runtime`, defines a **personal role**, available in every workspace orbit opens with that config directory.
 It may set every field a role in `.orbit/config.toml` may, and is held to the same rules: like a
 role a project adds, it must set `instructions` and gets the same defaults for the rest (the
-coder's lane `work`, `worktree` and so on), and your `[roles]` `model` and `effort` apply beneath
-its own. Its `instructions` naming a Markdown file are read from the config directory:
+coder's lane `work`, `worktree` and so on), and your `[roles]` `model`, `effort` and `runtime`
+apply beneath its own. Its `instructions` naming a Markdown file are read from the config directory:
 
 ```toml
 [roles.helper]
@@ -1257,8 +1282,8 @@ Catalog marks it `personal`, and the task editor's **Role** picker shows it as
 `<label> · <lane> · personal`.
 
 A project's `.orbit/config.toml` can always define a role of the same name: the project's
-replaces yours entirely, none of your role's fields carrying over (your `[roles]` `model` and
-`effort` still apply beneath it, as to any of the project's roles), and the workspace's startup
+replaces yours entirely, none of your role's fields carrying over (your `[roles]` `model`,
+`effort` and `runtime` still apply beneath it, as to any of the project's roles), and the workspace's startup
 notices say so: `The project's role helper replaces your personal role of that name.`
 
 ### Starting from the reference config
@@ -1279,9 +1304,7 @@ after the file's opening comments and top-level keys); a whole table missing is 
 end, as the reference has it, all under one line
 `# Added by orbit init --update on <YYYY-MM-DD>: settings this file didn't mention.`. The settings
 of a later version of orbit that it appends go last, under the reference's own
-`# Coming in a later version of orbit; leave commented out until then.`, and a role's `runtime`
-is never added to a table: it's appended there, on its own, unless the file mentions it anywhere.
-It prints what it added to which table, or `Nothing to add.`, and without a file it writes the
+`# Coming in a later version of orbit; leave commented out until then.`. It prints what it added to which table, or `Nothing to add.`, and without a file it writes the
 reference as `orbit init` does. A file that isn't valid TOML is left as it is, and
 `orbit init --update` stops with status 2.
 
@@ -1327,6 +1350,7 @@ roles.reviewer.model = "sonnet"   project .orbit/config.toml
 roles.reviewer.tool_access = "restricted"   package
 ...
 roles.reviewer.effort = "low"   user ~/.config/orbit/config.toml
+roles.reviewer.runtime = "claude"   package
 ```
 
 The layers, least specific first:
@@ -1483,8 +1507,8 @@ prompts: `GIT_TERMINAL_PROMPT=0`, and SSH runs with `-o BatchMode=yes` added to 
 repository needs the server's account to have access to it already: an SSH key (in its
 `~/.ssh`, or its agent) or a git credential helper (`git config --global credential.helper
 store`, say). A clone that fails for want of them says so: `The server's account needs access
-to this repository: an SSH key or a git credential helper.` It takes the backend flags `chat` has (`--model`, `--tools`, `--verify`,
-`--worktree`, `--review`, `--usage`, `--profile`, which writes `serve.prof` and
+to this repository: an SSH key or a git credential helper.` It takes the backend flags `chat` has (`--model`, `--tools`, `--runtime`,
+`--verify`, `--worktree`, `--review`, `--usage`, `--profile`, which writes `serve.prof` and
 `serve-blocked.log`), which apply to every workspace it serves, each reading its own
 `.orbit/config.toml`, `--state-dir` and `--config-dir`, and:
 
@@ -1951,8 +1975,9 @@ no way to turn either check off. A CA file that can't be read stops it with stat
 the token in `token` in the config directory, or in the file `--token-file <path>` names; a token
 file that can't be read stops it with status 2. To a server serving mTLS it shows the client
 certificate `--cert <path>` and `--key <path>` give instead (see **Client certificates** above). The backend flags
-(`--model`, `--tools`, `--verify`, `--worktree`, `--review`, `--usage`, `--profile`) configure
-the control plane, so with `--connect` they stop it with status 2: give them to `orbit serve`.
+(`--model`, `--tools`, `--runtime`, `--verify`, `--worktree`, `--review`, `--usage`, `--profile`)
+configure the control plane, so with `--connect` they stop it with status 2: give them to
+`orbit serve`.
 So does `--state-dir`, which says where a control plane run here keeps its state, and so finds
 one running here, neither of which a chat joining by URL does.
 `--new` and `--name` skip the session picker and open a new session in the workspace picked, as

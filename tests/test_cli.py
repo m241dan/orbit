@@ -628,7 +628,8 @@ def test_chat_runs_tui_against_claude_cli(launched: list[WorkspaceHost]) -> None
     assert result.exit_code == 0
     [session] = launched
     assert session.agents is not None
-    assert isinstance(session.agents.launcher, ClaudeCliRunner)  # The planner's too.
+    assert isinstance(session.agents.launcher(PLANNER), ClaudeCliRunner)
+    assert list(session.agents.launchers) == ["claude"]
     assert session.settings == Settings()
     assert session.pinned == ()
     assert session.model_choices == MODEL_ALIASES
@@ -744,7 +745,7 @@ def test_chat_runs_tasks_through_agents_connected_over_mcp(launched: list[Worksp
     agents = session.agents
     assert agents is not None
     assert isinstance(agents.host, McpHost)
-    assert isinstance(agents.launcher, ClaudeCliRunner)
+    assert isinstance(agents.launcher("coder"), ClaudeCliRunner)
     assert agents.limits == Limits(max_attempts=5)
     first, second = agents.new_token(), agents.new_token()
     assert first != second and len(first) >= 32
@@ -922,6 +923,88 @@ def test_chat_notes_a_project_role_replacing_a_personal_one_after_the_snapshot(
     [order] = orders
     note = "The project's role helper replaces your personal role of that name."
     assert order.notices[note] > order.snapshot
+
+
+def runtimes_of(session: WorkspaceHost) -> dict[str, str]:
+    """The runtime each of ``session``'s roles runs on, by name."""
+    assert session.agents is not None
+    return {name: role.runtime for name, role in session.agents.roles.items()}
+
+
+def test_chat_refuses_a_runtime_it_doesnt_know_naming_those_it_does(
+    launched: list[WorkspaceHost],
+) -> None:
+    result = runner.invoke(app, ["chat", "--runtime", "nope"])
+
+    assert result.exit_code == 2
+    assert result.stderr == "--runtime nope: this version of orbit knows the runtimes claude.\n"
+    assert launched == []
+
+
+@pytest.mark.usefixtures("fake_runtime")
+def test_chat_runs_each_role_that_doesnt_name_its_own_runtime_on_the_one_given(
+    launched: list[WorkspaceHost], config_dir: Path, tmp_path: Path
+) -> None:
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        '[roles]\nruntime = "fake"\n\n[roles.planner]\nruntime = "fake"\n'
+    )
+    (tmp_path / ".orbit").mkdir()
+    (tmp_path / ".orbit" / "config.toml").write_text('[roles.reviewer]\nruntime = "fake"\n')
+    assert runner.invoke(app, ["chat", "-C", str(tmp_path), "--runtime", "claude"]).exit_code == 0
+
+    [session] = launched
+    assert runtimes_of(session) == {
+        PLANNER: "fake",
+        "coder": "claude",
+        "reviewer": "fake",
+        "super-reviewer": "claude",
+        "configurator": "claude",
+    }
+    assert session.agents is not None
+    assert set(session.agents.launchers) == {"claude", "fake"}
+
+
+@pytest.mark.usefixtures("fake_runtime")
+def test_chat_rereads_the_planners_role_with_the_runtime_given(
+    launched: list[WorkspaceHost], tmp_path: Path
+) -> None:
+    (tmp_path / ".orbit").mkdir()
+    config = tmp_path / ".orbit" / "config.toml"
+    assert runner.invoke(app, ["chat", "-C", str(tmp_path), "--runtime", "fake"]).exit_code == 0
+    role = planner_role_read_after(config, '[roles.planner]\nmodel = "opus"\n', launched)
+    assert isinstance(role, Role) and (role.model, role.runtime) == ("opus", "fake")
+
+
+def test_chat_stops_naming_the_roles_whose_runtime_isnt_on_path(
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    result = runner.invoke(app, ["chat", "-C", str(tmp_path)])
+
+    assert result.exit_code == 2
+    assert result.stderr == (
+        "Roles planner, coder, reviewer, super-reviewer, configurator use the runtime claude, but"
+        " claude isn't on PATH. Install Claude Code, or set those roles' runtime to one you"
+        " have.\n"
+    )
+    assert launched == []
+
+
+def test_chat_doesnt_look_for_claude_when_no_enabled_role_runs_on_it(
+    launched: list[WorkspaceHost],
+    fake_runtime: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("PATH", str(fake_runtime))
+    result = runner.invoke(app, ["chat", "-C", str(tmp_path), "--runtime", "fake"])
+
+    assert result.exit_code == 0, result.output
+    [session] = launched
+    assert set(runtimes_of(session).values()) == {"fake"}
+    assert session.agents is not None
+    assert list(session.agents.launchers) == ["fake"]
 
 
 def test_rereading_an_invalid_project_file_gives_its_problems(
