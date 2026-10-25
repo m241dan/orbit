@@ -9,9 +9,11 @@ import pytest
 from orbit.agent.domain import sessions
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import BatchSnapshot, LaneSnapshot, PlannerSnapshot, ReviewJob
+from orbit.agent.domain.runtimes import CLAUDE
 from orbit.agent.domain.sessions import (
     EMPTY_NAME,
     FORMAT_VERSION,
+    SavedConversation,
     SessionRecord,
     Unreadable,
     check_addressed_session,
@@ -27,6 +29,8 @@ from orbit.agent.domain.sessions import (
     renamable,
     resumed_notes,
     resumed_settings,
+    runtime_changed,
+    runtime_changed_message,
     session_name,
     stored_summary,
     summarize,
@@ -62,7 +66,7 @@ def record(tasks: tuple[TaskState, ...] = (), reviews: LaneSnapshot | None = Non
         created=CREATED,
         last_active=ACTIVE,
         role_settings={"planner": Settings(model="opus", tool_access="full")},
-        conversations={"planner": "conversation-1"},
+        conversations={"planner": SavedConversation(runtime=CLAUDE, handle="conversation-1")},
         tasks=tasks,
         reviews=reviews,
     )
@@ -83,7 +87,7 @@ def test_the_default_name_drops_the_days_leading_zero_but_pads_the_time() -> Non
 
 
 def test_a_new_record_carries_the_current_format_version() -> None:
-    assert record().version == FORMAT_VERSION == 9
+    assert record().version == FORMAT_VERSION == 10
 
 
 def test_a_record_round_trips_through_json() -> None:
@@ -157,13 +161,13 @@ def rename_title(record: dict[str, Any]) -> dict[str, Any]:
 def test_an_older_record_is_migrated_and_stamped_with_the_new_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(sessions, "FORMAT_VERSION", 10)
-    monkeypatch.setitem(sessions._MIGRATIONS, 9, rename_title)
+    monkeypatch.setattr(sessions, "FORMAT_VERSION", 11)
+    monkeypatch.setitem(sessions._MIGRATIONS, 10, rename_title)
     data = {key: value for key, value in fields().items() if key != "name"}
-    old = data | {"version": 9, "title": "Old name"}
+    old = data | {"version": 10, "title": "Old name"}
     result = parse_record(json.dumps(old))
     assert isinstance(result, SessionRecord)
-    assert (result.version, result.name) == (10, "Old name")
+    assert (result.version, result.name) == (11, "Old name")
 
 
 def version_1(tasks: tuple[TaskState, ...]) -> dict[str, Any]:
@@ -268,6 +272,57 @@ def test_a_version_5_records_planner_reads_without_the_titles_it_suggested() -> 
     assert isinstance(result, SessionRecord) and result.reviews is not None
     assert result.version == FORMAT_VERSION
     assert result.reviews.planner.suggested == frozenset()
+
+
+def test_a_version_9_records_bare_handles_load_as_conversations_on_claude() -> None:
+    data = fields() | {"version": 9, "conversations": {"planner": "c1", "architect": "c2"}}
+    result = parse_record(json.dumps(data))
+    assert isinstance(result, SessionRecord)
+    assert result.conversations == {
+        "planner": SavedConversation(runtime=CLAUDE, handle="c1"),
+        "architect": SavedConversation(runtime=CLAUDE, handle="c2"),
+    }
+
+
+def test_a_version_9_record_without_conversations_has_none() -> None:
+    data = fields() | {"version": 9}
+    del data["conversations"]
+    result = parse_record(json.dumps(data))
+    assert isinstance(result, SessionRecord)
+    assert result.conversations == {}
+
+
+def test_a_version_9_record_whose_conversations_arent_an_object_is_unreadable() -> None:
+    data = fields() | {"version": 9, "conversations": ["c1"]}
+    assert parse_record(json.dumps(data)) == Unreadable(
+        "conversations: Input should be a valid dictionary"
+    )
+
+
+def test_a_saved_conversation_needs_its_runtime() -> None:
+    data = fields() | {"conversations": {"planner": {"runtime": "", "handle": "c1"}}}
+    result = parse_record(json.dumps(data))
+    assert isinstance(result, Unreadable)
+    assert result.reason.startswith("conversations.planner.runtime:")
+
+
+def test_a_conversation_saved_on_the_runtime_its_role_runs_on_hasnt_changed_runtime() -> None:
+    assert not runtime_changed(SavedConversation(runtime=CLAUDE, handle="c1"), CLAUDE)
+
+
+def test_no_saved_conversation_hasnt_changed_runtime() -> None:
+    assert not runtime_changed(None, "kiro")
+
+
+def test_a_conversation_saved_on_another_runtime_than_its_roles_has_changed_runtime() -> None:
+    assert runtime_changed(SavedConversation(runtime=CLAUDE, handle="c1"), "kiro")
+
+
+def test_messaging_a_role_whose_runtime_changed_says_to_reset_it() -> None:
+    assert runtime_changed_message("architect", CLAUDE, "kiro") == (
+        "The architect's saved conversation is from claude, and it now runs on kiro; "
+        "reset it (ctrl+n on its tab) to start one on kiro."
+    )
 
 
 def test_a_record_keeps_why_its_tasks_ended() -> None:

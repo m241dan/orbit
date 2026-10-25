@@ -24,6 +24,7 @@ from orbit.agent.domain.reviews import LaneSnapshot
 from orbit.agent.domain.sessions import (
     OPEN_UNDELETABLE,
     OPEN_UNRENAMABLE,
+    SavedConversation,
     SessionRecord,
     Unreadable,
     default_name,
@@ -169,12 +170,12 @@ _NEW_SESSIONS = NewSessions()
 @dataclass(frozen=True)
 class Contents:
     """What a saved session holds of the work: the settings each conversational role uses, by
-    role (``role_settings``), the planner's for new tasks too, each one's Claude conversation
-    (``conversations``), its ``tasks``, its ``reviews``' state, if any, what its agents have
-    ``spent`` in all, and the ``planner_notes`` its planner is still to hear."""
+    role (``role_settings``), the planner's for new tasks too, each one's conversation, with the
+    runtime it ran on (``conversations``), its ``tasks``, its ``reviews``' state, if any, what
+    its agents have ``spent`` in all, and the ``planner_notes`` its planner is still to hear."""
 
     role_settings: Mapping[str, Settings]
-    conversations: Mapping[str, str]
+    conversations: Mapping[str, SavedConversation]
     tasks: tuple[TaskState, ...]
     reviews: LaneSnapshot | None
     spent: Usage

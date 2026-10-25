@@ -15,8 +15,10 @@ A session is one JSON record (`SessionRecord`, in `orbit.agent.domain.sessions`)
 - its id, its name, and when it was created and last active;
 - the task list, each task with its status, settings and usage;
 - the review lane's state: the review jobs it queued, their batches and rounds;
-- each conversational role's Claude conversation id, the planner's and any other's, so its next
-  prompt resumes that conversation;
+- each conversational role's conversation, the planner's and any other's, as the runtime it ran
+  on and the handle that runtime carries it on by, so its next prompt resumes that conversation;
+  one from another runtime than its role now runs on isn't resumed, and messages to that role are
+  refused until it's reset;
 - each conversational role's model, tool access and effort, the planner's also new tasks'.
 
 The conversation window's transcript isn't in the record: every event of a session is kept in the
@@ -47,8 +49,9 @@ one row per workspace, or anything from `.orbit/config.toml`, which is read at s
   version 4 added why each task ended badly, version 5 the tasks each review reviews,
   version 6 the titles the review planner has suggested, version 7 the notes the planner is
   still to hear, version 8 the effort in the session's and its tasks' settings, which a
-  record of an older version reads as unset, and version 9 the conversation and settings of each
-  conversational role, which an older record reads as the planner's); a newer one, or a record
+  record of an older version reads as unset, version 9 the conversation and settings of each
+  conversational role, which an older record reads as the planner's, and version 10 the runtime
+  each conversation ran on, which an older record reads as `claude`); a newer one, or a record
   that isn't
   valid JSON or doesn't fit the record, is unreadable. Records are kept as raw JSON text in their `sessions`
   row, so an unreadable one stays as it was: it is listed with the reason, can be deleted, and is

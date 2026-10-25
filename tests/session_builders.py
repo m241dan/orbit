@@ -6,7 +6,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from orbit.agent import Verification, VerificationStep, WorkspaceHost
-from orbit.agent.domain.sessions import SessionRecord
+from orbit.agent.domain.runtimes import CLAUDE
+from orbit.agent.domain.sessions import SavedConversation, SessionRecord
 from orbit.protocol import (
     ActivateSession,
     ErrorOccurred,
@@ -40,6 +41,11 @@ def saved(session_id: str, *tasks: TaskState, **fields: Any) -> SessionRecord:
         id=session_id, name=session_id, created=EARLIER, last_active=YESTERDAY, tasks=tasks
     )
     return record.model_copy(update=fields)
+
+
+def on_claude(handle: str) -> SavedConversation:
+    """The conversation ``handle`` as a session saves one Claude ran."""
+    return SavedConversation(runtime=CLAUDE, handle=handle)
 
 
 def store_with(*records: SessionRecord) -> FakeStore:

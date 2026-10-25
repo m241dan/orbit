@@ -6,7 +6,9 @@ from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 from orbit.agent.domain.reviews import BatchSnapshot, LaneSnapshot, PlannerSnapshot, ReviewJob
+from orbit.agent.domain.runtimes import CLAUDE
 from orbit.agent.domain.sessions import (
+    SavedConversation,
     SessionRecord,
     parse_record,
     parse_review_count,
@@ -23,8 +25,8 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit these for a format change: they're what orbits at versions 1 to 9 wrote, and
-# they still need to read. A new version gets its own fixture (session-v10.json) and a
+# Never edit these for a format change: they're what orbits at versions 1 to 10 wrote, and
+# they still need to read. A new version gets its own fixture (session-v11.json) and a
 # migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
 SESSION_V2 = FIXTURES / "session-v2.json"
@@ -35,6 +37,7 @@ SESSION_V6 = FIXTURES / "session-v6.json"
 SESSION_V7 = FIXTURES / "session-v7.json"
 SESSION_V8 = FIXTURES / "session-v8.json"
 SESSION_V9 = FIXTURES / "session-v9.json"
+SESSION_V10 = FIXTURES / "session-v10.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -148,13 +151,13 @@ def expected(
     lane: LaneSnapshot | None = None,
 ) -> SessionRecord:
     return SessionRecord(
-        version=9,
+        version=10,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
         last_active=datetime(2026, 10, 17, 14, 30, tzinfo=timezone(timedelta(hours=2))),
         role_settings={"planner": Settings(model="opus", tool_access="full")},
-        conversations={"planner": "conversation-1"},
+        conversations={"planner": SavedConversation(runtime=CLAUDE, handle="conversation-1")},
         tasks=tasks() if states is None else states,
         reviews=reviews() if lane is None else lane,
         spent=spent,
@@ -249,22 +252,27 @@ def conversing() -> SessionRecord:
     beside the planner's."""
     record = straining()
     architect = Settings(model="sonnet", tool_access="restricted", effort="max")
+    conversation = SavedConversation(runtime=CLAUDE, handle="conversation-2")
     return record.model_copy(
         update={
             "role_settings": {**record.role_settings, "architect": architect},
-            "conversations": {**record.conversations, "architect": "conversation-2"},
+            "conversations": {**record.conversations, "architect": conversation},
         }
     )
 
 
-def test_a_version_9_session_file_reads_as_its_record() -> None:
+def test_a_version_9_session_file_migrates_to_conversations_on_claude() -> None:
     assert parse_record(SESSION_V9.read_text(encoding="utf-8")) == conversing()
 
 
-def test_a_session_record_is_written_in_the_version_9_format() -> None:
+def test_a_version_10_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V10.read_text(encoding="utf-8")) == conversing()
+
+
+def test_a_session_record_is_written_in_the_version_10_format() -> None:
     written = json.loads(record_json(conversing()))
-    golden = json.loads(SESSION_V9.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V9.name)
+    golden = json.loads(SESSION_V10.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V10.name)
 
 
 def test_a_version_1_review_count_reads_as_its_count() -> None:

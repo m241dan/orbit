@@ -43,6 +43,7 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import HALTED, START, FakeHalt, FakeStore, Ticks
 from tests.keeper_fakes import EMPTY, TASK, WITH_TASK, Published, save
+from tests.session_builders import on_claude
 from tests.waiting import eventually
 
 SPENT = Usage(input_tokens=500, cost_usd=1.4, turns=3)
@@ -115,7 +116,7 @@ async def test_a_session_with_a_task_is_saved_as_it_is() -> None:
     reviews = LaneSnapshot(planner=PlannerSnapshot())
     contents = Contents(
         role_settings={"planner": Settings(model="opus")},
-        conversations={"planner": "c1"},
+        conversations={"planner": on_claude("c1")},
         tasks=(TASK,),
         reviews=reviews,
         spent=SPENT,
@@ -125,7 +126,7 @@ async def test_a_session_with_a_task_is_saved_as_it_is() -> None:
     [record] = store.saved
     assert (record.id, record.name, record.created) == ("session-1", "Oct 17 14:30", START)
     assert record.role_settings == {"planner": Settings(model="opus")}
-    assert record.conversations == {"planner": "c1"}
+    assert record.conversations == {"planner": on_claude("c1")}
     assert record.tasks == (TASK,) and record.reviews == reviews and record.spent == SPENT
 
 

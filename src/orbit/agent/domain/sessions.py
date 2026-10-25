@@ -1,9 +1,9 @@
 """Saved sessions: stretches of work the user can come back to.
 
 A saved session keeps its task list, its review state, and each conversational role's
-conversation and the settings it ran with. It is unrelated to the backend's connection,
-:class:`WorkspaceHost`. The caller reads and writes the store and the clock; these rules only
-shape what's in them.
+conversation, with the runtime it ran on, and the settings it ran with. It is unrelated to the
+backend's connection, :class:`WorkspaceHost`. The caller reads and writes the store and the
+clock; these rules only shape what's in them.
 """
 
 from collections import Counter
@@ -18,6 +18,7 @@ from pydantic_core import from_json
 
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot
+from orbit.agent.domain.runtimes import CLAUDE
 from orbit.protocol import (
     BUSY,
     INVALID,
@@ -30,7 +31,7 @@ from orbit.protocol import (
     Usage,
 )
 
-FORMAT_VERSION = 9
+FORMAT_VERSION = 10
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
@@ -78,6 +79,17 @@ def _per_role(record: dict[str, Any]) -> dict[str, Any]:
     return fields | {"role_settings": role_settings, "conversations": conversations}
 
 
+def _on_claude(record: dict[str, Any]) -> dict[str, Any]:
+    """Version 9 ``record`` with each conversation's handle as one on Claude, the only runtime
+    version 9 ran conversations on. Conversations that aren't an object are left for the
+    record's validation to say why."""
+    conversations = record.get("conversations", {})
+    if not isinstance(conversations, dict):
+        return record
+    saved = {role: {"runtime": CLAUDE, "handle": handle} for role, handle in conversations.items()}
+    return record | {"conversations": saved}
+
+
 # By version N: what takes a record of version N and returns its fields in version N+1's shape.
 # The upgrade sets the version for it. Version 3 dropped the planner's rounds through a migration
 # rather than by having the snapshot ignore them, so that the format stays pinned by its fixtures
@@ -87,7 +99,9 @@ def _per_role(record: dict[str, Any]) -> dict[str, Any]:
 # the session's and its tasks' settings; their versions stop an older orbit, which forbids fields
 # it doesn't know, at a clear "written by a newer orbit" rather than a field it can't read.
 # Version 9 keeps the settings and conversation of each conversational role, not just the
-# planner's, so its migration moves them into place.
+# planner's, so its migration moves them into place. Version 10 keeps each conversation with the
+# runtime it ran on, as only that runtime's launcher understands its handle, so a handle can't
+# be misread; its migration puts version 9's bare handles on Claude.
 _MIGRATIONS: dict[int, Migration] = {
     1: _spent_by_tasks,
     2: _without_rounds,
@@ -97,6 +111,7 @@ _MIGRATIONS: dict[int, Migration] = {
     6: _unchanged,
     7: _unchanged,
     8: _per_role,
+    9: _on_claude,
 }
 
 EMPTY_NAME = "A session needs a name."
@@ -104,10 +119,20 @@ OPEN_UNDELETABLE = "Can't delete the open session."
 OPEN_UNRENAMABLE = "Can't rename the session as a saved one: it was opened meanwhile."
 
 
+class SavedConversation(BaseModel):
+    """A conversational role's conversation as a session saves it: the ``runtime`` it ran on, by
+    name, and the ``handle`` that runtime's launcher carries it on by."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    runtime: str = Field(min_length=1)
+    handle: str
+
+
 class SessionRecord(BaseModel):
     """A saved session ``id``, ``name``d by the user, with the settings each conversational role
-    uses, by role (``role_settings``), the planner's for new tasks too, each one's Claude
-    conversation (``conversations``), the ``planner_notes`` the planner is still to hear, its
+    uses, by role (``role_settings``), the planner's for new tasks too, each one's conversation
+    (``conversations``), the ``planner_notes`` the planner is still to hear, its
     ``tasks`` and, when reviews are on, its ``reviews``' state, and what its agents have
     ``spent`` in all, the planner and tasks since removed included."""
 
@@ -119,7 +144,7 @@ class SessionRecord(BaseModel):
     created: AwareDatetime
     last_active: AwareDatetime
     role_settings: dict[str, Settings] = Field(default={})
-    conversations: dict[str, str] = Field(default={})
+    conversations: dict[str, SavedConversation] = Field(default={})
     planner_notes: tuple[str, ...] = ()
     tasks: tuple[TaskState, ...] = ()
     reviews: LaneSnapshot | None = None
@@ -348,6 +373,21 @@ def resumed_notes(record: SessionRecord, interrupted: int) -> tuple[str, ...]:
     if interrupted == 1:
         return resumed, "1 task was interrupted and is cancelled."
     return resumed, f"{interrupted} tasks were interrupted and are cancelled."
+
+
+def runtime_changed(conversation: SavedConversation | None, runtime: str) -> bool:
+    """Whether a role's saved ``conversation``, if it has one, ran on another runtime than
+    ``runtime``, the one its role runs on now, so it can't be carried on."""
+    return conversation is not None and conversation.runtime != runtime
+
+
+def runtime_changed_message(role: str, saved: str, runtime: str) -> str:
+    """Why the conversational role ``role`` can't be messaged: its saved conversation is from the
+    runtime ``saved``, and it now runs on ``runtime``."""
+    return (
+        f"The {role}'s saved conversation is from {saved}, and it now runs on {runtime}; "
+        f"reset it (ctrl+n on its tab) to start one on {runtime}."
+    )
 
 
 def resumed_settings(saved: Settings, given: Settings, pinned: Collection[str]) -> Settings:

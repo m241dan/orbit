@@ -104,6 +104,11 @@ class PlannerChat:
         return self._desk.agents.launcher(self._role).conversation(self._agent.id)
 
     @property
+    def runtime(self) -> str:
+        """The runtime the planner's role runs on, and so its conversation."""
+        return self._desk.agents.roles[self._role].runtime
+
+    @property
     def started(self) -> bool:
         """Whether the planner has a conversation to end: one restored, or one its first turn
         opened."""

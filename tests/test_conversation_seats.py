@@ -14,8 +14,10 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.roles import Role
+from orbit.agent.domain.sessions import SavedConversation
 from orbit.protocol import (
     BUSY,
+    INVALID,
     NOT_CONFIGURED,
     PLANNER,
     UNKNOWN,
@@ -40,6 +42,7 @@ from orbit.protocol import (
 from tests.agent_fakes import (
     HELLO,
     ROLES,
+    FakeHost,
     FakeStore,
     ScriptedLauncher,
     Ticks,
@@ -56,7 +59,7 @@ from tests.agent_fakes import (
 )
 from tests.connection_helpers import say, taken
 from tests.plane_fakes import payloads
-from tests.session_builders import opened, saved
+from tests.session_builders import on_claude, opened, saved, store_with
 from tests.waiting import eventually
 
 ARCHITECT = "architect"
@@ -143,7 +146,10 @@ async def test_each_keeps_its_own_conversation_across_a_save_and_a_reload() -> N
     launcher.planner_turns = [chats, chats, chats, chats]
     await talk(session, PLANNER, "planner")
     await talk(session, ARCHITECT, DESIGN)
-    conversations = {PLANNER: "conversation-agent-1", ARCHITECT: "conversation-agent-2"}
+    conversations = {
+        PLANNER: on_claude("conversation-agent-1"),
+        ARCHITECT: on_claude("conversation-agent-2"),
+    }
     assert store.last.conversations == conversations
     await opened(session, NewSession())
     await opened(session, ActivateSession(session="session-1"))
@@ -161,7 +167,7 @@ async def test_resetting_the_architect_resets_only_its_conversation() -> None:
     await talk(session, ARCHITECT, DESIGN)
     await send(session, ResetConversation(agent=ARCHITECT))
     await events_until(session, lambda e: e == ConversationReset(agent=ARCHITECT))
-    assert store.last.conversations == {PLANNER: "conversation-agent-1"}
+    assert store.last.conversations == {PLANNER: on_claude("conversation-agent-1")}
     await talk(session, ARCHITECT, DESIGN)
     await talk(session, PLANNER, "planner")
     assert launcher.resumed[2:] == [None, "conversation-agent-1"]
@@ -348,14 +354,72 @@ async def test_the_conversations_of_roles_without_a_seat_are_saved_back() -> Non
     launcher.planner_turns = [chats]
     await talk(session, PLANNER, "planner")
     record = store.last.model_copy(
-        update={"id": "talks", "conversations": {PLANNER: "c1", ARCHITECT: "c2"}}
+        update={
+            "id": "talks",
+            "conversations": {PLANNER: on_claude("c1"), ARCHITECT: on_claude("c2")},
+        }
     )
     store.saved.append(record)
     await opened(session, ActivateSession(session="talks"))
     await send(session, UpdateSettings(settings=Settings(model="opus")))
     await events_until(session, of_type(SettingsChanged))
     assert store.last.id == "talks"
-    assert store.last.conversations == {PLANNER: "c1", ARCHITECT: "c2"}
+    assert store.last.conversations == {PLANNER: on_claude("c1"), ARCHITECT: on_claude("c2")}
+    await session.close()
+
+
+FAKE = "fake"
+"""A second runtime, which the architect moves to."""
+
+MOVED_ARCHITECT = (
+    "The architect's saved conversation is from claude, and it now runs on fake; "
+    "reset it (ctrl+n on its tab) to start one on fake."
+)
+"""What a message to the architect is refused with while its saved conversation is Claude's."""
+
+
+def moved(store: FakeStore) -> tuple[WorkspaceHost, ScriptedLauncher, ScriptedLauncher]:
+    """A session saved in ``store`` whose architect runs on :data:`FAKE`, with the launchers of
+    Claude and of :data:`FAKE`."""
+    host = FakeHost()
+    fake = ScriptedLauncher(host)
+    roles = {**TALKING, ARCHITECT: ARCHITECT_ROLE.model_copy(update={"runtime": FAKE})}
+    agents, claude = agents_for(roles=roles, host=host, launchers={FAKE: fake})
+    session = WorkspaceHost(agents=agents, store=store, clock=Ticks(), new_id=lambda: "session-1")
+    return session, claude, fake
+
+
+async def test_a_role_whose_runtime_changed_is_refused_until_its_conversation_is_reset() -> None:
+    claudes = {PLANNER: on_claude("c1"), ARCHITECT: on_claude("c2")}
+    store = store_with(saved("talks", conversations=claudes))
+    session, claude, fake = moved(store)
+    await opened(session, ActivateSession(session="talks"))
+    message = SendMessage(agent=ARCHITECT, text="Hello.")
+    assert await refusal_of(session, message) == refused(INVALID, MOVED_ARCHITECT)
+    claude.planner_turns = [chats]
+    await talk(session, PLANNER, "planner")
+    assert claude.resumed == ["c1"]
+    assert store.last.conversations == claudes
+    await send(session, ResetConversation(agent=ARCHITECT))
+    await events_until(session, lambda e: e == ConversationReset(agent=ARCHITECT))
+    assert store.last.conversations == {PLANNER: on_claude("c1")}
+    fake.planner_turns = [chats]
+    await talk(session, ARCHITECT, DESIGN)
+    assert (fake.resumed, claude.resumed) == ([None], ["c1"])
+    architects = SavedConversation(runtime=FAKE, handle="conversation-agent-2")
+    assert store.last.conversations == {PLANNER: on_claude("c1"), ARCHITECT: architects}
+    await session.close()
+
+
+async def test_a_session_opened_on_matching_runtimes_carries_each_conversation_on() -> None:
+    store = store_with(
+        saved("talks", conversations={ARCHITECT: SavedConversation(runtime=FAKE, handle="f1")})
+    )
+    session, _, fake = moved(store)
+    await opened(session, ActivateSession(session="talks"))
+    fake.planner_turns = [chats]
+    await talk(session, ARCHITECT, DESIGN)
+    assert fake.resumed == ["f1"]
     await session.close()
 
 

@@ -36,6 +36,7 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import FakeHalt, FakeStore, Ticks
 from tests.connection_helpers import emptied
+from tests.session_builders import on_claude
 
 EARLIER = datetime(2026, 10, 15, 9, 0, tzinfo=UTC)
 REVIEWS = LaneSnapshot(planner=PlannerSnapshot(paused=True))
@@ -301,7 +302,7 @@ async def test_contents_hold_the_board_and_settings() -> None:
 async def test_an_opened_sessions_conversations_and_settings_are_saved_back() -> None:
     store = FakeStore()
     architects = Settings(model="haiku")
-    conversations = {PLANNER: "c1", "architect": "c2"}
+    conversations = {PLANNER: on_claude("c1"), "architect": on_claude("c2")}
     store.saved = [saved(conversations=conversations, role_settings={"architect": architects})]
     switcher, _, _ = switcher_for(store, Held(Settings(model="opus")))
     await switcher.handle(ActivateSession(session="auth"))

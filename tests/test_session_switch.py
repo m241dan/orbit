@@ -75,6 +75,7 @@ from tests.session_builders import (
     failing_startup,
     last_of,
     messages,
+    on_claude,
     opened,
     saved,
     store_with,
@@ -221,7 +222,9 @@ async def test_opening_a_session_without_interruptions_only_notes_its_resumption
 
 
 async def test_an_opened_session_carries_on_its_planners_conversation() -> None:
-    session, launcher = switching(store_with(saved("auth", conversations={PLANNER: "talk-9"})))
+    session, launcher = switching(
+        store_with(saved("auth", conversations={PLANNER: on_claude("talk-9")}))
+    )
     await opened(session, ActivateSession(session="auth"))
     launcher.planner_turns = [chats]
     await send(session, SendMessage(agent=PLANNER, text="Where were we?"))
@@ -844,11 +847,11 @@ async def test_a_session_without_reviews_keeps_the_reviews_of_the_session_it_ope
 
 
 async def test_a_session_without_a_planner_keeps_the_conversation_of_the_session_it_opens() -> None:
-    record = saved("auth", state("1", "pending"), conversations={PLANNER: "conv-1"})
+    record = saved("auth", state("1", "pending"), conversations={PLANNER: on_claude("conv-1")})
     store = store_with(record)
     session = WorkspaceHost(store=store, clock=Ticks())
     await opened(session, ActivateSession(session="auth"))
-    assert store.last.id == "auth" and store.last.conversations == {PLANNER: "conv-1"}
+    assert store.last.id == "auth" and store.last.conversations == {PLANNER: on_claude("conv-1")}
     await opened(session, NewSession())
     await send(session, AddTask(task=TASK))
     await events_until(session, of_type(TasksChanged))

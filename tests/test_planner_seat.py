@@ -21,6 +21,7 @@ from orbit.agent.application.ports import PlannerRoleReader
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.refusals import Refused
+from orbit.agent.domain.sessions import SavedConversation, runtime_changed_message
 from orbit.protocol import (
     BUSY,
     INVALID,
@@ -37,6 +38,7 @@ from orbit.protocol import (
     TurnFinished,
 )
 from tests.agent_fakes import ROLES, ScriptedLauncher, agents_for, chats, hangs
+from tests.session_builders import on_claude
 from tests.waiting import eventually
 
 HALTED_MESSAGE = "The session is halted."
@@ -168,9 +170,9 @@ async def test_a_submit_whose_save_halts_the_session_is_refused_and_starts_no_tu
 
 async def test_the_conversation_is_known_once_a_turn_starts_it() -> None:
     seated_ = seated()
-    assert seated_.seat.conversation_id is None
+    assert seated_.seat.conversation is None
     await answered(seated_)
-    assert seated_.seat.conversation_id == "conversation-agent-1"
+    assert seated_.seat.conversation == on_claude("conversation-agent-1")
 
 
 async def test_a_turn_runs_until_cancelled() -> None:
@@ -200,7 +202,7 @@ async def test_a_replaced_planner_is_closed_only_once_the_retired_are() -> None:
     assert seated_.published() == []
     await seated_.seat.close_retired()
     assert seated_.published() == [EXITED]
-    assert seated_.seat.conversation_id is None
+    assert seated_.seat.conversation is None
 
 
 async def test_a_retired_planner_failing_to_close_leaves_none_of_the_others_open() -> None:
@@ -235,18 +237,53 @@ async def test_a_retired_planner_failing_to_close_leaves_none_retired_meanwhile_
 
 async def test_a_replacing_planner_carries_on_the_conversation_given() -> None:
     seated_ = seated()
-    seated_.seat.replace("conversation-x")
-    assert seated_.seat.conversation_id == "conversation-x"
+    seated_.seat.replace(on_claude("conversation-x"))
+    assert seated_.seat.conversation == on_claude("conversation-x")
     await answered(seated_)
     assert seated_.launcher.resumed == ["conversation-x"]
 
 
 async def test_without_a_planner_the_conversation_given_is_kept_to_save() -> None:
     seated_ = seated(roles=None)
-    seated_.seat.replace("conversation-x")
-    assert seated_.seat.conversation_id == "conversation-x"
+    seated_.seat.replace(on_claude("conversation-x"))
+    assert seated_.seat.conversation == on_claude("conversation-x")
     seated_.seat.replace(None)
-    assert seated_.seat.conversation_id is None
+    assert seated_.seat.conversation is None
+
+
+ON_KIRO = SavedConversation(runtime="kiro", handle="conversation-k")
+"""A conversation saved from another runtime than the planner's role runs on, Claude."""
+
+
+async def test_a_conversation_from_another_runtime_is_kept_to_save_but_not_carried_on() -> None:
+    seated_ = seated()
+    seated_.seat.replace(ON_KIRO)
+    assert seated_.seat.conversation == ON_KIRO
+    seated_.seat.replace(None)
+    assert seated_.seat.conversation is None
+
+
+async def test_a_conversation_from_another_runtime_refuses_turns_and_frees_the_prompt() -> None:
+    seated_ = seated()
+    seated_.seat.replace(ON_KIRO)
+    with pytest.raises(Refused) as refused:
+        await seated_.seat.submit("Plan.", Settings())
+    message = runtime_changed_message(PLANNER, "kiro", "claude")
+    assert (refused.value.code, str(refused.value)) == (INVALID, message)
+    assert seated_.published() == [BusyChanged(busy=False, lane="planner")]
+    assert (seated_.calls, seated_.launcher.launches, seated_.seat.turn) == ([], [], None)
+
+
+async def test_resetting_a_conversation_from_another_runtime_lets_the_next_turn_start_one() -> None:
+    seated_ = seated()
+    seated_.seat.replace(ON_KIRO)
+    await seated_.seat.reset()
+    assert seated_.published() == [ConversationReset(agent=PLANNER)]
+    assert seated_.calls == ["save"]
+    assert seated_.seat.conversation is None
+    await answered(seated_)
+    assert seated_.launcher.resumed == [None]
+    assert seated_.seat.conversation == on_claude("conversation-agent-1")
 
 
 async def test_a_reset_ends_the_conversation_and_saves() -> None:
@@ -256,7 +293,7 @@ async def test_a_reset_ends_the_conversation_and_saves() -> None:
     await seated_.seat.reset()
     assert seated_.published() == [EXITED, ConversationReset(agent=PLANNER)]
     assert seated_.calls == ["save"]
-    assert seated_.seat.conversation_id is None
+    assert seated_.seat.conversation is None
 
 
 async def test_a_reset_needs_a_planner() -> None:

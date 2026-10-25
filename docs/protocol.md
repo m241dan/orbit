@@ -587,11 +587,15 @@ answering.`), and the lane's `BusyChanged(busy=false)` comes once no turn in it 
 `unknown` for an agent that isn't conversational, naming those that are (`Agent 'coder' can't
 be messaged; the agents you can message are planner and architect.`), with `not_configured`
 for a disabled conversational role (`architect is disabled in this project's configuration.`),
-and, for the planner, without agents and a planner role (`Planning needs agents and a planner
-role.`).
+for the planner, without agents and a planner role (`Planning needs agents and a planner
+role.`), and with `invalid` for a role whose saved conversation is from another runtime than the
+one it now runs on, until it's reset (`The architect's saved conversation is from claude, and it
+now runs on kiro; reset it (ctrl+n on its tab) to start one on kiro.`).
 
 `ResetConversation(agent)` ends the conversation of the conversational agent `agent`, the
-planner or another, so its next message starts a fresh one, leaving the others' as they are.
+planner or another, so its next message starts a fresh one, leaving the others' as they are; a
+saved conversation from another runtime than the agent's is dropped, so its next message starts
+one on its runtime.
 Resetting the planner also re-reads its role from the project's config, keeping the role it
 has, with a `Notice` saying why, when the config is invalid. It publishes
 `ConversationReset(agent)` and saves the session; with no conversation yet, a `Notice` says

@@ -16,6 +16,7 @@ from orbit.agent.application.planner_seat import (
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.refusals import Refused, unknown
 from orbit.agent.domain.roles import conversational_roles, disabled_note
+from orbit.agent.domain.sessions import SavedConversation
 from orbit.protocol import NOT_CONFIGURED, PLANNER, BusyLane
 
 
@@ -26,7 +27,8 @@ class ConversationSeats:
     their work then, and then one for each other enabled role with ``conversation = true``, in
     the roles' order. A disabled planner's lane is the roles' only while another role answers
     there. The seats in a lane take turns: one answers there at a time. The conversations of
-    roles without a seat that a session was opened with are kept, to save back."""
+    roles without a seat that a session was opened with are kept, to save back, as are those
+    of roles that now run on another runtime than their conversation's, until they're reset."""
 
     def __init__(
         self, desk: AgentDesk | None, tasks: Tasks, events: EventSink, hooks: SeatHooks
@@ -36,7 +38,8 @@ class ConversationSeats:
         names = dict.fromkeys((PLANNER, *conversational_roles(roles)))
         parts = SeatParts(desk, tasks, events, hooks, SeatLanes(events.put_nowait))
         self._seats = {name: PlannerSeat(parts, name) for name in names}
-        self._kept: dict[str, str] = {}  # The conversations opened of roles without a seat.
+        # The conversations opened of roles without a seat.
+        self._kept: dict[str, SavedConversation] = {}
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -93,10 +96,10 @@ class ConversationSeats:
         return (seat for seat in self._seats.values() if seat.lane == lane)
 
     @property
-    def conversations(self) -> dict[str, str]:
-        """Each role's conversation, by role, to save: those of the roles with a seat that have
-        one, then those kept of roles without a seat."""
-        held = {name: seat.conversation_id for name, seat in self._seats.items()}
+    def conversations(self) -> dict[str, SavedConversation]:
+        """Each role's conversation, by role, with the runtime it ran on, to save: those of the
+        roles with a seat that have one, then those kept of roles without a seat."""
+        held = {name: seat.conversation for name, seat in self._seats.items()}
         return {name: c for name, c in held.items() if c is not None} | self._kept
 
     @property
@@ -108,7 +111,9 @@ class ConversationSeats:
         """Have the planner, if there is one, hear ``note`` ahead of its next prompt."""
         self.planner.tell(note)
 
-    def replace(self, conversations: Mapping[str, str], notes: tuple[str, ...] = ()) -> None:
+    def replace(
+        self, conversations: Mapping[str, SavedConversation], notes: tuple[str, ...] = ()
+    ) -> None:
         """Have each role carry on its conversation among ``conversations``, if it has one, the
         planner still to hear ``notes``, keeping those of roles without a seat; the old ones are
         closed by :meth:`close_retired`, once the switch is done."""

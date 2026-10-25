@@ -29,6 +29,7 @@ from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
 from orbit.agent.domain.sessions import (
     EMPTY_NAME,
+    SavedConversation,
     SessionRecord,
     resumed_notes,
     session_name,
@@ -278,7 +279,7 @@ class SessionSwitcher:
     def _hold(
         self,
         tasks: tuple[TaskState, ...],
-        conversations: Mapping[str, str],
+        conversations: Mapping[str, SavedConversation],
         reviews: LaneSnapshot | None,
         notes: tuple[str, ...] = (),
     ) -> None:

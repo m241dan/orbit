@@ -62,7 +62,7 @@ from tests.agent_fakes import (
     settle,
     suggests,
 )
-from tests.session_builders import opened, saved, store_with, switching
+from tests.session_builders import on_claude, opened, saved, store_with, switching
 from tests.telemetry_helpers import Traced
 from tests.waiting import eventually
 
@@ -441,7 +441,7 @@ async def test_a_planner_process_whose_turn_the_user_cancels_was_killed() -> Non
 
 async def test_a_planner_turn_that_cannot_resume_has_a_process_for_each_try_under_it() -> None:
     traced = Traced()
-    store = store_with(saved("auth", conversations={PLANNER: "saved-1"}))
+    store = store_with(saved("auth", conversations={PLANNER: on_claude("saved-1")}))
     session, launcher = switching(store, reviews=False, telemetry=traced.telemetry)
     await opened(session, ActivateSession(session="auth"))
     launcher.planner_turns = [resume_lost, chats]

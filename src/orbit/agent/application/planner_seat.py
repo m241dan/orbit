@@ -15,6 +15,11 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.roles import Role, disabled_note
+from orbit.agent.domain.sessions import (
+    SavedConversation,
+    runtime_changed,
+    runtime_changed_message,
+)
 from orbit.protocol import (
     BUSY,
     INVALID,
@@ -104,7 +109,8 @@ class PlannerSeat:
     planner role or while it's disabled), proposing into their tasks and publishing into their
     events. Given another conversational ``role``, it's that role's seat, its turns in that
     role's lane, as the planner's are in its role's, or in ``planner`` without one, one at a
-    time with those of the other seats in the lane."""
+    time with those of the other seats in the lane. A conversation opened from another runtime
+    than its role runs on isn't carried on: it refuses the planner's turns until a reset."""
 
     def __init__(self, parts: SeatParts, role: str = PLANNER) -> None:
         self._desk = parts.desk
@@ -114,8 +120,11 @@ class PlannerSeat:
         self._name = role
         self._planner = self._chat()
         self._retired: list[PlannerChat] = []  # Planners of sessions left or reset, still to close.
-        self._kept: str | None = None  # The conversation opened, kept to save without a planner.
-        self._kept_notes: tuple[str, ...] = ()  # Its notes, kept the same way.
+        # The conversation opened, kept to save without a planner, or while it's stale.
+        self._kept: SavedConversation | None = None
+        self._kept_notes: tuple[str, ...] = ()  # Its notes, kept to save without a planner.
+        # The conversation opened from another runtime than its role's, until a reset.
+        self._stale: SavedConversation | None = None
         found = self._role()
         self._lane: BusyLane = found.lane if found else PLANNER_LANE
         lanes = parts.lanes or SeatLanes(parts.events.put_nowait)
@@ -145,9 +154,15 @@ class PlannerSeat:
         return self._turn
 
     @property
-    def conversation_id(self) -> str | None:
-        """The planner's conversation, to save; without a planner, the one opened."""
-        return self._planner.conversation_id if self._planner else self._kept
+    def conversation(self) -> SavedConversation | None:
+        """The planner's conversation, to save, with the runtime it runs on; without a planner,
+        or while the one opened is from another runtime than its role's, the one opened."""
+        if self._planner is None or self._stale is not None:
+            return self._kept
+        handle = self._planner.conversation_id
+        if handle is None:
+            return None
+        return SavedConversation(runtime=self._planner.runtime, handle=handle)
 
     @property
     def notes(self) -> tuple[str, ...]:
@@ -178,19 +193,31 @@ class PlannerSeat:
     async def submit(self, text: str, settings: Settings) -> None:
         """Start a turn of the planner's conversation on ``text`` with ``settings``, in its
         own lane, traced as a child of the span current, the command's asking for it; refused
-        without a planner, while a role in its lane answers, naming that role, or once saving
-        the session halted it."""
+        without a planner, while the conversation opened is from another runtime than its
+        role's, while a role in its lane answers, naming that role, or once saving the session
+        halted it."""
         if self._planner is None:
-            # Frees the prompt of a frontend that marked the lane busy when it sent this,
-            # unless another seat's turn holds the lane.
-            if not self._turns.running:
-                await self._events.put(BusyChanged(busy=False, lane=self.lane))
+            await self._free_prompt()
             raise self._absent()
+        if self._stale is not None:
+            await self._free_prompt()
+            raise self._moved(self._stale, self._planner.runtime)
         self._hooks.use()
         await self._hooks.save()
         self._hooks.check()  # The save may have halted the session.
         work = self._answer(self._planner, text, settings, current_span())
         self._turn = await self._turns.start(work, self._refusal)
+
+    async def _free_prompt(self) -> None:
+        """Free the prompt of a frontend that marked the seat's lane busy as it sent a message
+        refused, unless another seat's turn holds the lane."""
+        if not self._turns.running:
+            await self._events.put(BusyChanged(busy=False, lane=self.lane))
+
+    def _moved(self, stale: SavedConversation, runtime: str) -> Refused:
+        """The refusal of the seat's turns while the conversation opened, ``stale``, is from
+        another runtime than ``runtime``, the one its role runs on."""
+        return Refused(INVALID, runtime_changed_message(self._name, stale.runtime, runtime))
 
     async def _answer(
         self, planner: PlannerChat, text: str, settings: Settings, parent: Span
@@ -209,19 +236,30 @@ class PlannerSeat:
         if self.running:
             self._turns.cancel()
 
-    def replace(self, conversation: str | None, notes: tuple[str, ...] = ()) -> None:
+    def replace(self, conversation: SavedConversation | None, notes: tuple[str, ...] = ()) -> None:
         """Have a new planner, carrying on ``conversation`` if there is one and still to hear
-        ``notes``; the old one is closed by :meth:`close_retired`, once the switch is done."""
+        ``notes``; the old one is closed by :meth:`close_retired`, once the switch is done. A
+        conversation from another runtime than its role's is kept, to save, but not carried
+        on."""
         if self._planner is not None:
             self._retired.append(self._planner)
         self._planner = self._chat()
         self._kept, self._kept_notes = conversation, notes
-        if self._planner is None:
-            return
-        if conversation is not None:
-            self._planner.restore(conversation)
+        self._stale = None
+        if self._planner is not None:
+            self._carry_on(self._planner, conversation, notes)
+
+    def _carry_on(
+        self, planner: PlannerChat, conversation: SavedConversation | None, notes: tuple[str, ...]
+    ) -> None:
+        """Have ``planner`` carry on ``conversation``, if there is one, unless it's from another
+        runtime than its role's, and hear ``notes``."""
+        if runtime_changed(conversation, planner.runtime):
+            self._stale = conversation
+        elif conversation is not None:
+            planner.restore(conversation.handle)
         for note in notes:
-            self._planner.tell(note)
+            planner.tell(note)
 
     async def close_retired(self) -> None:
         """Close the planners retired by leaving a session or by a reset, the last retired
@@ -234,13 +272,14 @@ class PlannerSeat:
             await close_all([*(planner.close for planner in reversed(retired)), self.close_retired])
 
     async def reset(self) -> None:
-        """End the planner's conversation, re-reading its role; refused while it answers, and
-        noted when it has no conversation yet. Another role's seat keeps its role."""
+        """End the planner's conversation, or drop the one opened from another runtime than its
+        role's, re-reading its role; refused while it answers, and noted when it has no
+        conversation yet. Another role's seat keeps its role."""
         if self._desk is None or self._planner is None:
             raise self._absent()
         if self.running:
             raise Refused(BUSY, busy_reset(self._name))
-        if not self._planner.started:
+        if not self._has_conversation(self._planner):
             await self._events.put(Notice(message=nothing_to_reset(self._name)))
         else:
             await self._reread_role(self._desk)
@@ -248,6 +287,11 @@ class PlannerSeat:
             await self.close_retired()
             await self._events.put(ConversationReset(agent=self._name))
             await self._hooks.save()
+
+    def _has_conversation(self, planner: PlannerChat) -> bool:
+        """Whether there's a conversation to reset: ``planner``'s, or one opened from another
+        runtime than its role's."""
+        return planner.started or self._stale is not None
 
     async def _reread_role(self, desk: AgentDesk) -> None:
         """Have the planner's role as the project's config says now, if it can be read again

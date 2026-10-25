@@ -53,6 +53,7 @@ from tests.agent_fakes import (
     suggests,
 )
 from tests.server_fakes import TASK
+from tests.session_builders import on_claude
 from tests.waiting import eventually
 
 
@@ -112,7 +113,7 @@ async def test_a_prompt_saves_the_session_then_its_planners_conversation() -> No
     assert [(r.tasks, r.conversations) for r in store.saved] == [((), {})]
 
     await events_until(session, idle("planner"))
-    assert store.last.conversations == {PLANNER: "conversation-agent-1"}
+    assert store.last.conversations == {PLANNER: on_claude("conversation-agent-1")}
     await session.close()
 
 

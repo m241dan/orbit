@@ -986,6 +986,15 @@ list, the planner tab keeps its history, and the conversation shows a dim `─�
 rule under the planner tab and All. The reset is refused while the planner answers (stop it with
 `ctrl+x` first), and before its first prompt there's nothing to reset.
 
+The session keeps the planner's conversation with the runtime it ran on (see `runtime` under
+[Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)), as another runtime couldn't carry
+it on. A session opened while the planner runs on another runtime than its saved conversation's
+opens as usual, its conversation kept but not carried on, and a prompt to the planner is refused:
+`The planner's saved conversation is from claude, and it now runs on kiro; reset it (ctrl+n on
+its tab) to start one on kiro.`. `ctrl+n` drops that conversation, and the next prompt starts one
+on the planner's runtime. Another conversational role's conversation works the same way, and each
+role's is its own: one whose runtime changed leaves the others carrying on theirs.
+
 ### Reviews
 
 Every commit from one of your tasks that merged into the base is reviewed in the background while
@@ -1096,7 +1105,8 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   under [Serving the control plane](#serving-the-control-plane)).
 - `conversation`: whether you talk to it, as you do the planner, rather than it taking tasks.
   Each enabled conversational role has a seat of its own: its own conversation, which the session
-  saves and carries on when you open it again, and which resetting it ends alone; its own model,
+  saves and carries on when you open it again, unless the role now runs on another runtime (see
+  [Planning with the planner](#planning-with-the-planner)), and which resetting it ends alone; its own model,
   tool access and effort, saved with the session; and its turns in its own lane, so it answers
   while the planner does. Conversational roles that share a lane take turns in it: a message to
   one while another there answers is refused, naming the one answering (`The planner is already
@@ -1157,7 +1167,10 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   for a runtime taking some, listing those), and `conversation = true` (`roles.planner asks for
   conversation = true, but its runtime lite doesn't support resume.`). A runtime that doesn't
   report usage is fine: its agents' turns report none, and the task list shows `usage unknown`
-  on their tasks' rows rather than what they spent.
+  on their tasks' rows rather than what they spent. A session saves each conversational role's
+  conversation with the runtime it ran on, as only that runtime can carry it on: once the role
+  runs on another runtime, the session still opens, but messages to the role are refused until
+  you reset its conversation (see [Planning with the planner](#planning-with-the-planner)).
 
 In the TUI, the task editor's **Role** field picks a task's role among the roles enabled in the
 session's workspace that aren't conversational, each shown with its lane (`Coder · work`) and a
