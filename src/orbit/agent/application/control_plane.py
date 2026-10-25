@@ -350,10 +350,12 @@ class ControlPlane:
     def _scope(envelope: CommandEnvelope, connection: SessionConnection) -> CommandScope:
         """Who sent the command in ``envelope``, from ``connection``, and what it's for: the
         client a ``Hello`` names, or else the one ``connection`` was welcomed as, and the
-        workspace and session ``envelope`` names, or else those ``connection`` is attached to
-        and views."""
+        workspace and session an ``Attach`` names, or else those ``envelope`` names, or else
+        those ``connection`` is attached to and views."""
         command = envelope.payload
         client = command.client if isinstance(command, Hello) else connection.handshake.client
+        if isinstance(command, Attach):
+            return CommandScope(client=client, workspace=command.workspace, session=command.session)
         return CommandScope(
             client=client,
             workspace=envelope.workspace or connection.workspace,

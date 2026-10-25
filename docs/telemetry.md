@@ -109,8 +109,8 @@ trace context.
 | Attribute | Type | Meaning |
 | --- | --- | --- |
 | `orbit.command.type` | string | The command's `type`, such as `add_task` or `hello`. |
-| `orbit.workspace.id` | string | The id of the workspace the command is for: the one its envelope names, else the one its connection is attached to; absent when it's for none, as before the connection attaches. |
-| `orbit.session.id` | string | The id of the session the command is for: the one its envelope names, else the one its connection views; absent when it's for none. |
+| `orbit.workspace.id` | string | The id of the workspace the command is for: for an `Attach`, the one it names, refused or not; else the one its envelope names, else the one its connection is attached to; absent when it's for none, as before the connection attaches. |
+| `orbit.session.id` | string | The id of the session the command is for: for an `Attach`, the one it names, refused or not, not the one its connection is leaving; else the one its envelope names, else the one its connection views; absent when it's for none. |
 | `orbit.client` | string | The name of the client that sent the command, as its connection's `Hello` (or a `Hello` itself) gives it; absent before one. |
 | `orbit.command.outcome` | string | How the command came out: `accepted`, as a `Hello` answered by `Welcome` is, or `refused`. |
 | `orbit.command.code` | string | A refused command's code, such as `busy` or `invalid`; absent when it was accepted. |

@@ -13,6 +13,7 @@ from orbit.protocol import (
     INVALID,
     UNKNOWN,
     AddTask,
+    Attach,
     CommandAccepted,
     CommandEnvelope,
     CommandRefused,
@@ -22,6 +23,7 @@ from orbit.protocol import (
     Welcome,
 )
 from tests.agent_fakes import (
+    ATTACH_ID,
     COMMAND_ID,
     HELLO,
     HELLO_ID,
@@ -35,6 +37,7 @@ from tests.agent_fakes import (
     send,
     session_for,
 )
+from tests.attach_fakes import EARLIER, OPEN, stored, workspace
 from tests.telemetry_helpers import Traced, traceparent_of
 
 TASK = TaskSpec(prompt="Add a flag.")
@@ -48,10 +51,21 @@ def _plane(traced: Traced) -> ControlPlane:
     return ControlPlane([host], telemetry=traced.telemetry)
 
 
+def _commands(traced: Traced, kind: str) -> list[ReadableSpan]:
+    """The command spans of the commands of type ``kind``, in the order they ended."""
+    return [span for span in traced.spans(COMMAND_SPAN) if _attributes(span)[_TYPE] == kind]
+
+
 def _command(traced: Traced, kind: str) -> ReadableSpan:
     """The one command span of a command of type ``kind``."""
-    [span] = [span for span in traced.spans(COMMAND_SPAN) if _attributes(span)[_TYPE] == kind]
+    [span] = _commands(traced, kind)
     return span
+
+
+def _where(span: ReadableSpan) -> tuple[AttributeValue, AttributeValue]:
+    """The ids of the workspace and session the command ``span`` traces is recorded as for."""
+    attributes = _attributes(span)
+    return attributes["orbit.workspace.id"], attributes["orbit.session.id"]
 
 
 def _attributes(span: ReadableSpan) -> dict[str, AttributeValue]:
@@ -140,6 +154,56 @@ async def test_a_command_records_the_workspace_and_session_its_envelope_names() 
     command = _attributes(_command(traced, "run_tasks"))
     assert (command["orbit.workspace.id"], command["orbit.session.id"]) == ("elsewhere", "other")
     assert command["orbit.command.code"] == UNKNOWN
+
+
+async def test_a_first_attach_records_the_workspace_and_session_it_names() -> None:
+    traced = Traced()
+    plane = _plane(traced)
+    await greeted(plane)
+    sent = queued_envelopes(plane)
+    session_id = host_of(plane).saved_session.id
+    await close(plane)
+
+    attach = _command(traced, "attach")
+    assert _attributes(attach) == {
+        _TYPE: "attach",
+        "orbit.workspace.id": WORKSPACE,
+        "orbit.session.id": session_id,
+        "orbit.client": "orbit-tests",
+        "orbit.command.outcome": "accepted",
+    }
+    assert _answer(sent, ATTACH_ID).traceparent == traceparent_of(attach)
+
+
+async def test_an_attach_to_another_session_records_that_session_not_the_one_viewed() -> None:
+    traced = Traced()
+    plane = ControlPlane([workspace(stored())], telemetry=traced.telemetry)
+    await greeted(plane)
+    switch = Attach(workspace=WORKSPACE, session=EARLIER)
+    await frontend(plane).send(CommandEnvelope(command_id=COMMAND_ID, payload=switch))
+    await close(plane)
+
+    attaches = _commands(traced, "attach")
+    assert [_where(attach) for attach in attaches] == [(WORKSPACE, OPEN), (WORKSPACE, EARLIER)]
+    assert _attributes(attaches[-1])["orbit.command.outcome"] == "accepted"
+
+
+async def test_a_refused_attach_records_the_workspace_and_session_it_names() -> None:
+    traced = Traced()
+    plane = _plane(traced)
+    await frontend(plane).send(CommandEnvelope(command_id=HELLO_ID, payload=HELLO))
+    nowhere = Attach(workspace="elsewhere", session="other")
+    await frontend(plane).send(CommandEnvelope(command_id=COMMAND_ID, payload=nowhere))
+    await close(plane)
+
+    assert _attributes(_command(traced, "attach")) == {
+        _TYPE: "attach",
+        "orbit.workspace.id": "elsewhere",
+        "orbit.session.id": "other",
+        "orbit.client": "orbit-tests",
+        "orbit.command.outcome": "refused",
+        "orbit.command.code": UNKNOWN,
+    }
 
 
 async def test_a_command_whose_handling_fails_has_the_error_status(
