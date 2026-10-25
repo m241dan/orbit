@@ -330,6 +330,7 @@ A task whose role runs in a lane other than `work` shows the lane as a dim tag a
 it to one lane: all tasks, then each lane its tasks run in, in the order the roles are listed,
 then all again. While narrowed, only that lane's tasks show, still numbered as on the whole list,
 and the title names the lane: `Task list · review`, or `Task list · held · review` while held.
+Opening a session shows the whole list again.
 
 With the list active, `f` on a task that failed, gave up or stopped opens a modal saying why in
 full, titled `Why task 3 failed` (or `stopped`, for a cancelled task): the reason on the row's

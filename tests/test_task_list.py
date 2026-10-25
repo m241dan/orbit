@@ -677,3 +677,18 @@ async def test_l_in_list_mode_cycles_the_lane_filter_through_the_lanes_present()
                 ["1. ⏳ security  security", "2. ⏳ reviewer  review", "+ new task"],
             ),
         ]
+
+
+async def test_opening_another_session_shows_its_tasks_unfiltered() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        await feed_events(session, pilot, LANED, in_roles(REVIEWER))
+        await open_task_list(pilot)
+        await pilot.press("L")
+        assert title(task_list) == "Task list · held · review"
+        snapshot = opened(SessionSummary(id="s", name="s"))
+        await feed_events(session, pilot, snapshot, in_roles(CODER, "security"))
+        assert title(task_list) == "Task list"
+        assert titles(task_list) == ["1. ⏳ coder", "2. ⏳ security  security", "+ new task"]

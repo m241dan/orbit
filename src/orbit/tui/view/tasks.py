@@ -370,9 +370,9 @@ class TaskBoard:
     It numbers the tasks and labels their rows at the view's width, the task about to run
     saying when it waits for a coder and each task its role's lane, and redraws as the tasks
     change and while any runs. Narrowed to a lane, it shows just that lane's tasks, numbered
-    as on the whole list. It totals what the session's turns cost. While following, it
-    scrolls to keep the active task (``active_task``) in view; held, it stays where it is,
-    until let go.
+    as on the whole list, until widened. It totals what the session's turns cost. While
+    following, it scrolls to keep the active task (``active_task``) in view; held, it stays
+    where it is, until let go.
     """
 
     def __init__(self, view: TaskBoardView, clock: Callable[[], float]) -> None:
@@ -417,6 +417,15 @@ class TaskBoard:
         """Narrow the list to the next of the lanes its tasks run in, all of them once more
         after the last, saying so in its title."""
         self.lane = next_lane(self.lane, lanes_present(self.tasks, self.lanes))
+        self._show_title()
+        self._narrow()
+
+    def widen(self) -> None:
+        """Show all the tasks again, the list no longer narrowed to a lane, saying so in its
+        title; nothing if not narrowed."""
+        if self.lane is None:
+            return
+        self.lane = None
         self._show_title()
         self._narrow()
 

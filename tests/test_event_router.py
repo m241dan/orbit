@@ -85,6 +85,7 @@ def test_a_snapshot_shows_its_tasks_before_its_transcript_and_its_usage_after() 
         "pager.follow",
         "transcript.show_session",
         "unfocus_task_list",
+        "task_list.widen",
         "task_list.let_go",
         "task_list.reset_usage",
         "navigation.view",

@@ -110,6 +110,8 @@ class TaskListPane(Protocol):
 
     def show_waiting(self, waiting: tuple[str, str] | None) -> None: ...
 
+    def widen(self) -> None: ...
+
     def let_go(self) -> None: ...
 
     def reset_usage(self, usage: Usage) -> None: ...
@@ -301,9 +303,11 @@ class EventRouter:
 
     def _open_session(self, session: SessionSummary) -> None:
         """Title the conversation with ``session``'s name, take the task list out of list
-        mode, let it follow again and start its total from what ``session`` spent."""
+        mode, show all its tasks again, let it follow again and start its total from what
+        ``session`` spent."""
         self._panes.transcript.show_session(session.name)
         self._hooks.unfocus_task_list()
+        self._panes.task_list.widen()
         self._panes.task_list.let_go()
         self._panes.task_list.reset_usage(session.usage)
 

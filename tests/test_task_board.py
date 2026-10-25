@@ -659,3 +659,26 @@ def test_lanes_changing_on_a_narrowed_list_narrow_it_afresh() -> None:
     tasks.show_lanes({**LANES, "security": "review"})
     assert view.keys == ["1", "2", None]
     assert view.rows[1] == "2. ⏳ security  review\n      default · restricted"
+
+
+def test_widening_a_narrowed_list_shows_all_its_tasks_under_its_title() -> None:
+    tasks, view = narrowed("coder", "reviewer", lanes=2)
+    assert view.title == "Task list · review"
+    tasks.widen()
+    assert (view.title, view.keys) == ("Task list", ["1", "2", None])
+    tasks.cycle_lane()
+    assert view.title == "Task list · work"  # The filter starts over from all.
+
+
+def test_widening_a_held_narrowed_list_keeps_it_held() -> None:
+    tasks, view = narrowed("coder", "reviewer", lanes=2)
+    tasks.hold()
+    tasks.widen()
+    assert (view.title, view.keys) == ("Task list · held", ["1", "2", None])
+
+
+def test_widening_a_whole_list_leaves_it_alone() -> None:
+    tasks, view = narrowed("coder", "reviewer", lanes=0)
+    redraws = view.redraws
+    tasks.widen()
+    assert view.redraws == redraws
