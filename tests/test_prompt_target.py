@@ -3,6 +3,8 @@ conversational role, whom the prompt sends to and how it's marked, and what ctrl
 ctrl+n and the settings pickers act on."""
 
 from orbit.protocol import (
+    BUSY,
+    NOT_CONFIGURED,
     PLANNER,
     AgentEntry,
     AgentStarted,
@@ -10,6 +12,7 @@ from orbit.protocol import (
     BusyChanged,
     CancelTurn,
     ConversationReset,
+    MessageSent,
     ResetConversation,
     SendMessage,
     Settings,
@@ -33,6 +36,15 @@ TALKING = CATALOG.model_copy(update={"agents": (PLANNER_ENTRY, CODER_ENTRY, ARCH
 
 BUILT_IN = CATALOG.model_copy(update={"agents": (PLANNER_ENTRY, CODER_ENTRY)})
 """A catalog listing the built-in roles' planner and coder alone."""
+
+CRITIC = "critic"
+CRITIC_ENTRY = AgentEntry(name=CRITIC, label="Critic", conversational=True, lane=DESIGN)
+"""Another conversational role, answering in the architect's lane."""
+BUSY_CRITIC = f"● {CRITIC}"
+"""The critic's tab while its lane is busy."""
+
+SHARING = TALKING.model_copy(update={"agents": (*TALKING.agents, CRITIC_ENTRY)})
+"""A catalog listing the planner, the coder, and the architect and the critic in one lane."""
 
 STRIP = ["All", "planner", "coder", "reviewer", "super-reviewer", "configurator"]
 
@@ -121,10 +133,104 @@ async def test_a_refused_prompt_frees_the_lane_it_was_sent_to() -> None:
     await shell.click_tab(ARCHITECT)
     await shell.submit("design it")
     await shell.click_tab("All")
-    await shell.refuse("busy", "The architect is already answering.")
+    await shell.refuse(NOT_CONFIGURED, "architect is disabled in this project's configuration.")
     await shell.click_tab(ARCHITECT)
     assert shell.marks.title == "Prompt · architect"
     assert shell.prompt.text == "design it"
+
+
+async def sharing() -> Shell:
+    """A frontend whose catalog lists the architect and the critic in one lane, the architect
+    answering a message another frontend sent it."""
+    shell = Shell()
+    await shell.feed(SHARING, BusyChanged(busy=True, lane=DESIGN))
+    await shell.feed(MessageSent(command_id="other", agent=ARCHITECT, text="design it"))
+    return shell
+
+
+async def test_a_prompt_while_another_role_in_its_lane_answers_names_the_one_answering() -> None:
+    shell = await sharing()
+    await shell.click_tab(BUSY_CRITIC)
+    await shell.submit("critique it")
+    assert shell.app.warnings == ["Architect is busy"]
+    assert shell.wire.changes == []
+    assert shell.prompt.text == "critique it"
+
+
+async def test_a_prompt_to_the_role_answering_names_that_role() -> None:
+    shell = Shell()
+    await shell.feed(SHARING, BusyChanged(busy=True, lane=DESIGN))
+    await shell.feed(MessageSent(command_id="other", agent=CRITIC, text="critique it"))
+    await shell.click_tab(BUSY_CRITIC)
+    await shell.submit("again")
+    await shell.click_tab(f"● {ARCHITECT}")
+    await shell.submit("design it")
+    assert shell.app.warnings == ["Critic is busy", "Critic is busy"]
+
+
+async def test_a_prompt_sent_here_names_its_role_once_the_backend_echoes_it() -> None:
+    shell = Shell()
+    await shell.feed(SHARING)
+    await shell.click_tab(ARCHITECT)
+    await shell.submit("design it")
+    await shell.feed(BusyChanged(busy=True, lane=DESIGN))
+    sent = shell.wire.sent[-1].command_id
+    await shell.feed(MessageSent(command_id=sent, agent=ARCHITECT, text="design it"))
+    await shell.click_tab(BUSY_CRITIC)
+    await shell.submit("critique it")
+    assert shell.app.warnings == ["Architect is busy"]
+    assert shell.tab_entries(ARCHITECT) == ["design it"]
+
+
+async def test_a_message_to_a_role_in_another_lane_leaves_the_one_answering_named() -> None:
+    shell = await sharing()
+    await shell.feed(BusyChanged(busy=True, lane="planner"))
+    await shell.feed(MessageSent(command_id="more", agent=PLANNER, text="plan"))
+    await shell.click_tab(BUSY_CRITIC)
+    await shell.submit("critique it")
+    await shell.click_tab("All")
+    await shell.submit("plan more")
+    assert shell.app.warnings == ["Architect is busy", "Planner is busy"]
+
+
+async def test_a_message_to_a_role_not_listed_names_no_one_answering() -> None:
+    shell = Shell()
+    await shell.feed(SHARING, BusyChanged(busy=True, lane=DESIGN))
+    await shell.feed(MessageSent(command_id="other", agent="muse", text="inspire"))
+    await shell.click_tab(BUSY_CRITIC)
+    await shell.submit("critique it")
+    assert shell.app.warnings == ["Critic is busy"]
+
+
+async def test_once_its_lane_is_free_the_role_answering_there_is_forgotten() -> None:
+    shell = await sharing()
+    await shell.feed(BusyChanged(busy=False, lane=DESIGN))
+    await shell.feed(BusyChanged(busy=True, lane=DESIGN))
+    await shell.click_tab(BUSY_CRITIC)
+    await shell.submit("critique it")
+    assert shell.app.warnings == ["Critic is busy"]
+
+
+async def test_a_snapshot_leaves_the_role_answering_in_a_busy_lane_unknown() -> None:
+    shell = await sharing()
+    await shell.feed(SNAPSHOT.model_copy(update={"busy": {DESIGN: True}}))
+    await shell.click_tab(BUSY_CRITIC)
+    await shell.submit("critique it")
+    assert shell.app.warnings == ["Critic is busy"]
+
+
+async def test_a_prompt_refused_as_busy_leaves_its_lane_busy_until_the_backend_frees_it() -> None:
+    shell = Shell()
+    await shell.feed(SHARING)
+    await shell.click_tab(CRITIC)
+    await shell.submit("critique it")
+    await shell.refuse(BUSY, "The architect is already answering.")
+    assert shell.marks.title == "Prompt · critic · busy"
+    assert shell.tab_strip[-2:] == ["● architect", "● critic"]
+    assert shell.prompt.text == "critique it"
+    await shell.feed(BusyChanged(busy=False, lane=DESIGN))
+    assert shell.marks.title == "Prompt · critic"
+    assert shell.tab_strip[-2:] == [ARCHITECT, CRITIC]
 
 
 async def test_ctrl_t_cycles_the_conversational_roles_tabs_then_goes_back() -> None:

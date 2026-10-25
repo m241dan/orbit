@@ -1,5 +1,5 @@
 """The conversational roles the prompt talks to, without the widgets: which one it talks to on
-the tab shown, and each one's lane and settings."""
+the tab shown, each one's lane and settings, and which one answers in each lane."""
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
@@ -47,8 +47,9 @@ class SeatsPrompt(Protocol):
 
 class Seats:
     """The conversational roles, shown on ``prompt``: those the latest catalog lists, each one's
-    settings as last reported, and the one the prompt talks to, that of the tab shown, or the
-    planner on any other tab; ``busy`` says whether a lane is busy."""
+    settings as last reported, the one answering in each busy lane, where known, and the one the
+    prompt talks to, that of the tab shown, or the planner on any other tab; ``busy`` says
+    whether a lane is busy."""
 
     def __init__(self, prompt: SeatsPrompt, busy: Callable[[BusyLane], bool]) -> None:
         self._prompt = prompt
@@ -56,6 +57,7 @@ class Seats:
         self.listed: tuple[Seat, ...] = (PLANNER_SEAT,)
         self._settings: dict[str, Settings] = {}
         self._shown: str | None = None  # The key of the tab shown.
+        self._answering: dict[BusyLane, str] = {}  # The role answering in each lane, by lane.
 
     @property
     def target(self) -> Seat:
@@ -72,6 +74,12 @@ class Seats:
     def settings(self) -> Settings | None:
         """The settings of the role the prompt talks to, as :meth:`settings_of` has them."""
         return self.settings_of(self.target.name)
+
+    def answering(self, lane: BusyLane) -> str | None:
+        """The label of the conversational role answering in ``lane``; none while that isn't
+        known, or the role is no longer listed."""
+        role = self._answering.get(lane)
+        return next((seat.label for seat in self.listed if seat.name == role), None)
 
     def settings_of(self, role: str) -> Settings | None:
         """The settings of the conversational ``role`` as last reported: the planner's until it
@@ -100,9 +108,22 @@ class Seats:
         self._settings[role] = settings
         self._show_settings()
 
+    def follow_message(self, role: str) -> None:
+        """Note the conversational ``role`` as answering in its lane, as a message to it was
+        accepted; a role not listed answers in no lane known."""
+        lane = self.lanes.get(role)
+        if lane is not None:
+            self._answering[lane] = role
+
+    def forget_answering(self) -> None:
+        """Forget which role answers in each lane, as a snapshot doesn't say."""
+        self._answering.clear()
+
     def follow_busy(self, lane: BusyLane, busy: bool) -> None:
         """Mark the prompt ``busy`` while ``lane`` is, if it's the lane of the role it talks
-        to."""
+        to; once ``lane`` is free, no role answers there."""
+        if not busy:
+            self._answering.pop(lane, None)
         if lane == self.target.lane:
             self._prompt.show_busy(busy)
 

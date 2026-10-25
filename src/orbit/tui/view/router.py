@@ -19,6 +19,7 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     HistoryPage,
+    MessageSent,
     OwnershipOffered,
     OwnershipTaken,
     ReviewStatus,
@@ -42,6 +43,7 @@ from orbit.tui.view.events import (
     OWNERSHIP_EVENTS,
     SESSION_EVENTS,
     STATE_EVENTS,
+    AnswerEvent,
     OwnershipEvent,
     ProgressEvent,
     SessionEvent,
@@ -228,7 +230,7 @@ class EventRouter:
         elif in_group(event, SESSION_EVENTS):
             self._render_session(event)
         elif in_group(event, ANSWER_EVENTS):
-            self._handlers.desk.answer(event)
+            self._render_answer(event)
         else:
             assert_never(event)
         self._follow_halt(event)
@@ -250,6 +252,13 @@ class EventRouter:
         self._panes.viewing.show(place.mark)
         self._panes.paused.show(place.paused)
         self._panes.task_list.show_waiting(place.coder_wait)
+
+    def _render_answer(self, event: AnswerEvent) -> None:
+        """Follow what the backend made of a command, noting the role a message it accepted went
+        to as answering in its lane."""
+        if isinstance(event, MessageSent):
+            self.seats.follow_message(event.agent)
+        self._handlers.desk.answer(event)
 
     def _render_ownership(self, event: OwnershipEvent) -> None:
         """Ask whether to take over the repository offered, or close the offer once it's
@@ -323,6 +332,7 @@ class EventRouter:
         panes, handlers = self._panes, self._handlers
         handlers.pickers.show_choices(snapshot.model_choices, snapshot.model_ids)
         self.seats.replace_settings({**snapshot.role_settings, PLANNER: snapshot.settings})
+        self.seats.forget_answering()
         for lane, busy in snapshot.busy.items():
             self.set_busy(lane, busy)
         self._show_tasks(snapshot.tasks)

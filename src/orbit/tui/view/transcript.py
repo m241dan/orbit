@@ -132,10 +132,11 @@ def _session_name(name: str) -> str:
     return name[: SESSION_NAME_WIDTH - 1] + "…"
 
 
-def busy_note(label: str) -> str:
+def busy_note(label: str, answering: str | None = None) -> str:
     """The note when the user sends a prompt to the conversational role labelled ``label``
-    while it's still answering: ``Planner is busy``."""
-    return f"{label} is busy"
+    while its lane is busy, naming the role labelled ``answering``, the one answering there, or
+    else that role, when it isn't known: ``Planner is busy``."""
+    return f"{answering or label} is busy"
 
 
 def prompt_placeholder(label: str) -> str:

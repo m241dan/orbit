@@ -1129,7 +1129,9 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   tool access and effort, saved with the session; and its turns in its own lane, so it answers
   while the planner does. Conversational roles that share a lane take turns in it: a message to
   one while another there answers is refused, naming the one answering (`The planner is already
-  answering.`), and the lane shows busy until no turn in it runs. It's listed as conversational
+  answering.`), and the lane shows busy until no turn in it runs; on its tab, `enter` then says
+  the one answering is busy (`Architect is busy`), or the role shown is, when the TUI doesn't
+  know who answers, as when it opens a session mid-turn. It's listed as conversational
   in the Catalog, and its lane in the Catalog's lanes and the Snapshot's `busy`. Each has a pinned tab after the built-in roles':
   `ctrl+t`, which with the built-in roles alone toggles the planner's tab, goes to the planner's
   tab, then each other conversational role's in turn, then back to the tab you were on. On a

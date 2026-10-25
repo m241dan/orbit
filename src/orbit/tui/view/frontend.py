@@ -8,6 +8,7 @@ from typing import Protocol
 
 from orbit import __version__
 from orbit.protocol import (
+    BUSY,
     CONFIGURE_CHECKS,
     INTERNAL,
     PROTOCOL_VERSION,
@@ -324,9 +325,10 @@ class Frontend:
         text = text.strip()
         if not text:
             return
-        seat = self.router.seats.target
+        seats = self.router.seats
+        seat = seats.target
         if self.router.busy(seat.lane):
-            self._app.warn(busy_note(seat.label))
+            self._app.warn(busy_note(seat.label, seats.answering(seat.lane)))
             return
         self._parts.prompt.normal_mode()
         # Busy from now, not from TurnStarted, so a second prompt can't race the turn.
@@ -334,7 +336,7 @@ class Frontend:
         # A newer prompt supersedes an earlier one: only its outcome frees the role.
         outcome = Awaited(
             accepted=lambda: self._sent(text),
-            refused=partial(self._unsend, seat.lane),
+            code=partial(self._unsend, seat.lane),
             supersedes=True,
         )
         with action("submit_prompt"):
@@ -362,10 +364,13 @@ class Frontend:
         if prompt.text.strip() == text:
             prompt.clear()
 
-    def _unsend(self, lane: BusyLane) -> None:
-        """Undo sending a prompt to a conversational role answering in ``lane``, refused or not
-        sent: the lane is freed, the prompt's text still in the prompt."""
-        self.router.set_busy(lane, False)
+    def _unsend(self, lane: BusyLane, code: str) -> None:
+        """Undo sending a prompt to a conversational role answering in ``lane``, refused for the
+        reason ``code`` names or not sent: the lane is freed, unless it was refused as busy, the
+        prompt's text still in the prompt."""
+        # Another turn holds the lane, whose end the backend reports with BusyChanged.
+        if code != BUSY:
+            self.router.set_busy(lane, False)
 
     async def decide(self, proposal: ChecksProposed, decision: DecideProposal) -> None:
         """Note the user's ``decision`` on ``proposal`` in the conversation and send it; refused
