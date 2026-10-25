@@ -14,7 +14,7 @@ from orbit.agent.application.planner_trace import PlannerTracing
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.refusals import Refused
-from orbit.agent.domain.roles import Role, disabled_note
+from orbit.agent.domain.roles import Role, check_model, disabled_note
 from orbit.agent.domain.runtimes import not_running
 from orbit.agent.domain.sessions import (
     SavedConversation,
@@ -296,17 +296,17 @@ class PlannerSeat:
 
     async def _reread_role(self, desk: AgentDesk) -> None:
         """Have the planner's role as the project's config says now, if it can be read again
-        and this is its seat; an invalid config, or a role on a runtime with no launcher in this
-        session, keeps the role it has, saying why."""
+        and this is its seat; an invalid config, a role on a runtime with no launcher in this
+        session, or one whose model the models agents launch with don't resolve, keeps the role
+        it has, saying why."""
         read = desk.agents.planner_role
         if read is None or self._name != PLANNER:
             return
         role = read()
         if isinstance(role, ConfigError):
             await self._events.put(ErrorOccurred(code=INVALID, message=f"{ROLE_KEPT}: {role}"))
-        elif role.runtime not in desk.agents.launchers:
-            message = f"{ROLE_KEPT}: {not_running(role.runtime)}"
-            await self._events.put(ErrorOccurred(code=INVALID, message=message))
+        elif (problem := _unusable(desk, role)) is not None:
+            await self._events.put(ErrorOccurred(code=INVALID, message=f"{ROLE_KEPT}: {problem}"))
         else:
             desk.use_role(PLANNER, role)
 
@@ -319,3 +319,15 @@ class PlannerSeat:
         """End the current planner's conversation, at the session's end."""
         if self._planner is not None:
             await self._planner.close()
+
+
+def _unusable(desk: AgentDesk, role: Role) -> str | None:
+    """Why the planner can't take ``role`` in this session: its runtime has no launcher, or the
+    models agents launch with, read at startup, don't resolve its model; none if it can."""
+    if role.runtime not in desk.agents.launchers:
+        return not_running(role.runtime)
+    try:
+        check_model(PLANNER, role.model, desk.agents.models.get(role.runtime))
+    except Refused as refusal:
+        return refusal.message
+    return None

@@ -2,6 +2,7 @@
 role is read again from the project's config."""
 
 import asyncio
+from dataclasses import replace
 
 from orbit.agent import ConfigError, Role, WorkspaceHost
 from orbit.agent.application.planner_seat import (
@@ -10,6 +11,7 @@ from orbit.agent.application.planner_seat import (
     PLANNER_BUSY_RESET,
     ROLE_KEPT,
 )
+from orbit.agent.domain.runtimes import CLAUDE
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
     BUSY,
@@ -32,6 +34,7 @@ from orbit.protocol import (
     TaskSpec,
 )
 from tests.agent_fakes import (
+    CLAUDE_MODELS,
     ROLES,
     FakeStore,
     ScriptedLauncher,
@@ -206,4 +209,41 @@ async def test_only_the_planners_conversation_can_be_reset() -> None:
         assert not any(isinstance(e, ConversationReset | AgentExited) for e in events)
     await asyncio.sleep(0.01)  # Saving takes a while.
     assert store.last.conversations == {PLANNER: on_claude("conversation-agent-1")}
+    await session.close()
+
+
+FAST = replace(CLAUDE_MODELS, aliases={**CLAUDE_MODELS.aliases, "fast": "claude-haiku-5-5"})
+"""Claude Code's models, with the alias ``fast`` a user config adds."""
+
+ON_FAST = ROLES["planner"].model_copy(update={"model": "fast"})
+"""The planner's role on the model ``fast``."""
+
+
+async def test_a_reread_role_on_an_alias_added_since_startup_is_kept_out() -> None:
+    models = {CLAUDE: CLAUDE_MODELS}
+    session, _, launcher = session_for(planner_role=lambda: ON_FAST, models=models)
+    launcher.planner_turns = [chats, chats]
+    await plan(session, "Plan.")
+    events = await reset(session)
+    aliases = 'fable, opus, sonnet, haiku or a full id starting with "claude-"'
+    message = f"{ROLE_KEPT}: planner's model \"fast\" doesn't resolve: the runtime claude takes"
+    assert ErrorOccurred(code=INVALID, message=f"{message} the aliases {aliases}.") in events
+    await plan(session, "Plan again.")
+    assert launcher.launches[-1].settings.model == ROLES["planner"].model
+    await session.close()
+
+
+async def test_a_reread_role_on_an_alias_the_startup_table_has_launches_with_its_id() -> None:
+    session, _, launcher = session_for(planner_role=lambda: ON_FAST, models={CLAUDE: FAST})
+    await planned_twice(launcher, session)
+    assert launcher.launches[-1].settings.model == "claude-haiku-5-5"
+    await session.close()
+
+
+async def test_a_role_kept_on_an_alias_removed_since_startup_still_launches() -> None:
+    roles = {**ROLES, "planner": ON_FAST}
+    old_role = lambda: ROLES["planner"]  # noqa: E731
+    session, _, launcher = session_for(planner_role=old_role, roles=roles, models={CLAUDE: FAST})
+    await planned_twice(launcher, session)
+    assert [launch.settings.model for launch in launcher.launches] == ["claude-haiku-5-5", None]
     await session.close()

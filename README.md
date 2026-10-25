@@ -1006,7 +1006,9 @@ verification steps again, and saves the session without it. It reads `[roles.pla
 to the planner's instructions, tools, tool access, model or effort takes effect; other roles and
 settings stay as they were. If either file is invalid, the planner keeps its role and orbit shows
 the problem, but still resets the conversation; so it does, too, if the role names a runtime no
-role ran on when orbit started, which takes restarting orbit. Draft tasks stay on the task
+role ran on when orbit started, or a model the aliases orbit started with don't resolve
+(see [Models and their aliases](#models-and-their-aliases)), both of which take restarting
+orbit. Draft tasks stay on the task
 list, the planner tab keeps its history, and the conversation shows a dim `── planner reset ──`
 rule under the planner tab and All. The reset is refused while the planner answers (stop it with
 `ctrl+x` first), and before its first prompt there's nothing to reset.
@@ -1362,6 +1364,11 @@ resolves to, so with the table above a task on `fast` runs Claude Code with `--m
 claude-haiku-5-5`. A model that no longer resolves, such as a task's saved with an alias you've
 since taken out of your `config.toml`, or one `--model` gives, fails the agent's run as it starts,
 saying why. `--model` takes an alias or a full id, and its help lists Claude's aliases.
+
+orbit reads the alias tables once, as it opens the workspace, and keeps them until it restarts:
+resetting the planner rereads its role but not `[runtimes.<name>.models]`, so the planner's
+reread model is held to the tables orbit opened with, and one they don't resolve, such as an
+alias you've added since, keeps the planner's role, naming the model and the aliases.
 
 #### Your personal roles
 
