@@ -28,8 +28,8 @@ them."""
 
 class MetricsFromSpans(SpanProcessor):
     """Records orbit's metrics with ``meter`` as the spans they come from end: tasks, the
-    durations of verification steps and agent processes, tokens, cost and review
-    suggestions."""
+    durations of verification steps and agent processes, tokens, cost in dollars and credits,
+    and review suggestions."""
 
     def __init__(self, meter: Meter) -> None:
         self._tasks = meter.create_counter(
@@ -49,6 +49,11 @@ class MetricsFromSpans(SpanProcessor):
         )
         self._cost = meter.create_counter(
             "orbit.cost", unit="USD", description="What tasks, planner turns and reviews cost."
+        )
+        self._credits = meter.create_counter(
+            "orbit.credits",
+            unit="{credit}",
+            description="What tasks, planner turns and reviews cost in credits.",
         )
         self._suggestions = meter.create_counter(
             "orbit.review.suggestions",
@@ -95,15 +100,17 @@ class MetricsFromSpans(SpanProcessor):
                 self._suggestions.add(count, {**role, "orbit.review.outcome": outcome})
 
     def _usage(self, attributes: Attributes) -> None:
-        """Record the tokens and cost ``attributes`` count, each kind of token apart."""
+        """Record the tokens and cost ``attributes`` count, each kind of token apart, and
+        dollars apart from credits."""
         model = _picked(attributes, ("gen_ai.request.model", "orbit.role"))
         for kind, key in TOKENS:
             count = _amount(attributes, key)
             if count > 0:
                 self._tokens.record(count, {**model, "gen_ai.token.type": kind})
-        cost = _amount(attributes, "orbit.cost.usd")
-        if cost > 0:
-            self._cost.add(cost, model)
+        for counter, key in ((self._cost, "orbit.cost.usd"), (self._credits, "orbit.cost.credits")):
+            cost = _amount(attributes, key)
+            if cost > 0:
+                counter.add(cost, model)
 
 
 def _record_duration(histogram: Histogram, span: ReadableSpan, keys: Sequence[str]) -> None:

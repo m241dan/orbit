@@ -285,8 +285,29 @@ async def test_a_version_8_database_upgrades_to_9_with_no_record_moved(
     store = await SqliteStore.open(state)
     await store.close()
     with database(state) as connection:
-        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (9,)
+        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (
+            len(MIGRATIONS),
+        )
         assert connection.execute("SELECT count(*) FROM record_moves").fetchone() == (0,)
+
+
+async def test_a_version_9_database_upgrades_to_10_with_no_credits_spent_by_its_turns(
+    monkeypatch: pytest.MonkeyPatch, state: Path, workspace: Path
+) -> None:
+    with monkeypatch.context() as patched:
+        patched.setattr(sqlite_schema, "MIGRATIONS", MIGRATIONS[:9])
+        connection = sqlite_schema.open_database(state / "orbit.db")
+        workspace_id = register(connection, workspace.resolve(), None).workspace_id
+        connection.execute(
+            "INSERT INTO usage VALUES (?, 's', 'coder', NULL, 1, 2, 3, 4, 0.5, 'then')",
+            (workspace_id,),
+        )
+        connection.close()
+    store = await SqliteStore.open(state)
+    await store.close()
+    with database(state) as connection:
+        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (10,)
+        assert connection.execute("SELECT cost_usd, credits FROM usage").fetchall() == [(0.5, 0)]
 
 
 # Transactions

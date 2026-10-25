@@ -18,7 +18,7 @@ from orbit.protocol import (
     WorkspaceEntry,
 )
 from orbit.tui.view.sessions import ACTIVE_NOTE, paused_note, waiting_words
-from orbit.tui.view.tasks import coder_wait
+from orbit.tui.view.tasks import NO_COST, coder_wait, cost_text
 
 
 class _Report(BaseModel):
@@ -65,10 +65,12 @@ class AgentStatus(_Report):
 
 
 class Spend(_Report):
-    """What turns cost: their ``tokens``, of every kind, and dollars, ``cost_usd``."""
+    """What turns cost: their ``tokens``, of every kind, dollars, ``cost_usd``, and
+    ``credits``."""
 
     tokens: int
     cost_usd: float
+    credits: float
 
 
 class UsageStatus(_Report):
@@ -147,7 +149,7 @@ def _agent_order(agent: AgentStatus) -> tuple[str, str, str]:
 
 def _spend(usage: Usage) -> Spend:
     """The tokens and cost of ``usage``."""
-    return Spend(tokens=usage.tokens, cost_usd=usage.cost_usd)
+    return Spend(tokens=usage.tokens, cost_usd=usage.cost_usd, credits=usage.credits)
 
 
 def status_json(report: StatusReport) -> str:
@@ -205,5 +207,7 @@ def _usage_lines(usage: UsageStatus) -> list[str]:
 
 
 def _spend_text(spend: Spend) -> str:
-    """``spend``'s tokens and cost: ``1,200 tokens · $0.25``."""
-    return f"{spend.tokens:,} tokens · ${spend.cost_usd:.2f}"
+    """``spend``'s tokens and cost: ``1,200 tokens · $0.25``, or with credits, ``1,200 tokens ·
+    $0.25 · 0.62 credits``."""
+    cost = cost_text(Usage(cost_usd=spend.cost_usd, credits=spend.credits))
+    return f"{spend.tokens:,} tokens · {cost or NO_COST}"

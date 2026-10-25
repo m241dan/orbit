@@ -37,6 +37,7 @@ async def test_a_recorded_turn_is_a_row_with_its_time_in_utc(
         cache_creation_input_tokens=3,
         cache_read_input_tokens=4,
         cost_usd=0.5,
+        credits=0.25,
     )
     await view.ledger.record(UsageRow(view.workspace_id, "abc", "planner", None, usage, TODAY))
     with database(state) as connection:
@@ -52,6 +53,7 @@ async def test_a_recorded_turn_is_a_row_with_its_time_in_utc(
                 4,
                 0.5,
                 "2026-10-21T22:00:00.000000+00:00",
+                0.25,
             ),
         ]
 
@@ -65,10 +67,11 @@ async def test_today_counts_the_rows_from_its_start_and_lifetime_every_row(
     await view.ledger.record(
         row(view, Usage(output_tokens=5, cost_usd=0.25), TODAY + timedelta(hours=3))
     )
+    await view.ledger.record(row(view, Usage(credits=0.5), TODAY + timedelta(hours=4)))
     totals = await view.ledger.totals(TODAY)
     expected = SpendTotals(
-        Usage(input_tokens=10, output_tokens=5, cost_usd=0.25),
-        Usage(input_tokens=11, output_tokens=5, cost_usd=0.25),
+        Usage(input_tokens=10, output_tokens=5, cost_usd=0.25, credits=0.5),
+        Usage(input_tokens=11, output_tokens=5, cost_usd=0.25, credits=0.5),
     )
     assert totals.workspaces == {view.workspace_id: expected}
     assert totals.total == expected

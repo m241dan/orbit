@@ -394,6 +394,13 @@ def test_usage_adds_up_and_counts_every_kind_of_token() -> None:
     assert Usage().tokens == 0
 
 
+def test_usage_adds_credits_apart_from_dollars() -> None:
+    assert Usage(cost_usd=1.2) + Usage(credits=0.62) == Usage(cost_usd=1.2, credits=0.62)
+    assert Usage().credits == 0
+    with pytest.raises(ValidationError):
+        Usage(credits=-0.5)
+
+
 def test_turns_and_tasks_carry_usage_when_known() -> None:
     assert TurnFinished(turn_id="t", reason="completed").usage is None
     assert TaskState(id="1", task=TaskSpec(prompt="x")).usage == Usage()

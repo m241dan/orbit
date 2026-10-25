@@ -50,8 +50,9 @@ one row per workspace, or anything from `.orbit/config.toml`, which is read at s
   version 6 the titles the review planner has suggested, version 7 the notes the planner is
   still to hear, version 8 the effort in the session's and its tasks' settings, which a
   record of an older version reads as unset, version 9 the conversation and settings of each
-  conversational role, which an older record reads as the planner's, and version 10 the runtime
-  each conversation ran on, which an older record reads as `claude`); a newer one, or a record
+  conversational role, which an older record reads as the planner's, version 10 the runtime
+  each conversation ran on, which an older record reads as `claude`, and version 11 the credits
+  in what the session and its tasks spent, which an older record reads as none); a newer one, or a record
   that isn't
   valid JSON or doesn't fit the record, is unreadable. Records are kept as raw JSON text in their `sessions`
   row, so an unreadable one stays as it was: it is listed with the reason, can be deleted, and is

@@ -68,6 +68,14 @@ def test_a_session_row_shows_name_last_activity_task_counts_and_cost() -> None:
     assert label.style == ""
 
 
+def test_a_session_row_shows_credits_beside_dollars() -> None:
+    usage = Usage(input_tokens=1_200_000, cost_usd=0.84, credits=0.62)
+    summary = SessionSummary(id="s", name="kiro", last_active=ACTIVE, usage=usage)
+    assert session_label(summary, UTC).plain == (
+        "  kiro · Oct 16 18:02 · 1.2M tok · $0.84 · 0.62 credits"
+    )
+
+
 def test_the_session_viewed_is_marked() -> None:
     summary = SessionSummary(id="s", name="auth rework", last_active=ACTIVE, current=True)
     assert session_label(summary, UTC).plain == "  auth rework · Oct 16 18:02"

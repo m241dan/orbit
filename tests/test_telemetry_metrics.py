@@ -107,6 +107,22 @@ def test_a_task_span_counts_the_task_its_tokens_and_cost(recorded: Recorded) -> 
         ({**usage, "gen_ai.token.type": "output"}, 20),
     ]
     assert recorded.points("orbit.cost") == [(usage, 0.5)]
+    assert recorded.points("orbit.credits") == []
+
+
+def test_a_span_counting_credits_records_them_apart_from_dollars(recorded: Recorded) -> None:
+    attributes: dict[str, AttributeValue] = {
+        "orbit.role": "coder",
+        "gen_ai.request.model": "auto",
+        "orbit.cost.credits": 0.62,
+    }
+
+    recorded.end("orbit.task", attributes)
+    recorded.end("orbit.planner.turn", {"orbit.cost.usd": 0.5, "orbit.cost.credits": 0.25})
+
+    usage = {"gen_ai.request.model": "auto", "orbit.role": "coder"}
+    assert recorded.points("orbit.credits") == [(usage, 0.62), ({}, 0.25)]
+    assert recorded.points("orbit.cost") == [({}, 0.5)]
 
 
 def test_each_verify_step_span_records_its_duration_with_its_name_and_result(
@@ -215,6 +231,7 @@ def test_zero_counts_are_not_recorded(recorded: Recorded) -> None:
             "gen_ai.usage.input_tokens": 0,
             "gen_ai.usage.output_tokens": 0,
             "orbit.cost.usd": 0.0,
+            "orbit.cost.credits": 0.0,
         },
     )
 
@@ -247,7 +264,7 @@ def test_a_span_without_its_times_records_no_duration(recorded: Recorded, name: 
 
 def _every_metric(recorded: Recorded) -> None:
     """End spans recording each metric once."""
-    usage = {"gen_ai.usage.input_tokens": 10, "orbit.cost.usd": 0.1}
+    usage = {"gen_ai.usage.input_tokens": 10, "orbit.cost.usd": 0.1, "orbit.cost.credits": 0.2}
     recorded.end("orbit.task", usage)
     recorded.end("orbit.verify.step")
     recorded.end("orbit.agent.process")
@@ -262,6 +279,7 @@ def _every_metric(recorded: Recorded) -> None:
         ("orbit.agent.duration", Histogram, "s"),
         ("gen_ai.client.token.usage", Histogram, "{token}"),
         ("orbit.cost", Sum, "USD"),
+        ("orbit.credits", Sum, "{credit}"),
         ("orbit.review.suggestions", Sum, "{suggestion}"),
     ],
 )

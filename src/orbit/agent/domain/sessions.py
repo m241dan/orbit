@@ -31,7 +31,7 @@ from orbit.protocol import (
     Usage,
 )
 
-FORMAT_VERSION = 10
+FORMAT_VERSION = 11
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
@@ -64,7 +64,7 @@ def _without_rounds(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def _unchanged(record: dict[str, Any]) -> dict[str, Any]:
-    """Version 3, 4, 5, 6 or 7 ``record`` as it is: the next version only added fields that
+    """Version 3, 4, 5, 6, 7 or 10 ``record`` as it is: the next version only added fields that
     have defaults."""
     return record
 
@@ -101,7 +101,8 @@ def _on_claude(record: dict[str, Any]) -> dict[str, Any]:
 # Version 9 keeps the settings and conversation of each conversational role, not just the
 # planner's, so its migration moves them into place. Version 10 keeps each conversation with the
 # runtime it ran on, as only that runtime's launcher understands its handle, so a handle can't
-# be misread; its migration puts version 9's bare handles on Claude.
+# be misread; its migration puts version 9's bare handles on Claude. Version 11 added the credits
+# in what the session and its tasks spent, which an older record spent none of.
 _MIGRATIONS: dict[int, Migration] = {
     1: _spent_by_tasks,
     2: _without_rounds,
@@ -112,6 +113,7 @@ _MIGRATIONS: dict[int, Migration] = {
     7: _unchanged,
     8: _per_role,
     9: _on_claude,
+    10: _unchanged,
 }
 
 EMPTY_NAME = "A session needs a name."

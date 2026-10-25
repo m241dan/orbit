@@ -2323,6 +2323,7 @@
             "cache_creation_input_tokens": 0,
             "cache_read_input_tokens": 0,
             "cost_usd": 0.0,
+            "credits": 0.0,
             "duration_ms": 0,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -2877,6 +2878,7 @@
             "cache_creation_input_tokens": 0,
             "cache_read_input_tokens": 0,
             "cost_usd": 0.0,
+            "credits": 0.0,
             "duration_ms": 0,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -3148,7 +3150,7 @@
       "type": "object"
     },
     "Usage": {
-      "description": "What turns cost: tokens of each kind, dollars, model round trips and time taken.\n\nUsages add up, so a task's total is the sum of its turns'.",
+      "description": "What turns cost: tokens of each kind, dollars, credits, model round trips and time taken.\n\nA runtime that charges in credits, as Kiro does, reports them apart from dollars, rather than\nat a rate. Usages add up, so a task's total is the sum of its turns'.",
       "properties": {
         "cache_creation_input_tokens": {
           "default": 0,
@@ -3166,6 +3168,12 @@
           "default": 0.0,
           "minimum": 0,
           "title": "Cost Usd",
+          "type": "number"
+        },
+        "credits": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Credits",
           "type": "number"
         },
         "duration_ms": {

@@ -20,6 +20,7 @@ from orbit.tui.view.tasks import (
     TASK_TITLE_TITLE,
     acceptable,
     active_task,
+    cost_text,
     edit_refusal,
     follow_top,
     in_lane,
@@ -321,6 +322,31 @@ def test_session_usage_subtitle_shows_what_was_spent() -> None:
 
 def test_session_usage_subtitle_shows_a_cost_without_tokens() -> None:
     assert session_usage_subtitle(Usage(cost_usd=2.5)) == "session: 0 tok · $2.50"
+
+
+def test_a_cost_in_dollars_only_reads_as_dollars() -> None:
+    assert cost_text(Usage(cost_usd=1.2)) == "$1.20"
+
+
+def test_a_cost_in_credits_only_reads_as_credits() -> None:
+    assert cost_text(Usage(credits=0.62)) == "0.62 credits"
+
+
+def test_a_cost_in_dollars_and_credits_reads_as_both() -> None:
+    assert cost_text(Usage(cost_usd=1.2) + Usage(credits=0.62)) == "$1.20 · 0.62 credits"
+
+
+def test_a_usage_that_cost_nothing_has_no_cost_to_read() -> None:
+    assert cost_text(Usage(input_tokens=500, turns=2)) == ""
+
+
+def test_session_usage_subtitle_shows_credits_beside_dollars() -> None:
+    usage = Usage(input_tokens=1_500, cost_usd=0.3, credits=0.62)
+    assert session_usage_subtitle(usage) == "session: 1.5k tok · $0.30 · 0.62 credits"
+
+
+def test_usage_spent_only_in_credits_reads_as_tokens_and_credits() -> None:
+    assert usage_label(Usage(credits=0.62)) == "0 tok · 0.62 credits"
 
 
 def test_only_a_draft_can_be_accepted() -> None:

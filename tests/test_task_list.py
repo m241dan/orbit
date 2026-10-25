@@ -94,6 +94,14 @@ def test_label_shows_what_a_task_spent_once_it_spent_anything() -> None:
     )
 
 
+def test_label_shows_what_a_task_spent_in_credits() -> None:
+    usage = Usage(credits=0.62, turns=1)
+    state = TaskState(id="1", task=TaskSpec(prompt="go"), status="completed", usage=usage)
+    assert str(task_label(state, "1", "◠ ")) == (
+        "1. ✅ go\n      default · restricted · 0 tok · 0.62 credits"
+    )
+
+
 def test_fix_tasks_are_indented_under_their_task() -> None:
     fix = TaskState(id="2", task=TaskSpec(prompt="Fix it"), fixes="1")
     assert str(task_label(fix, "1.1", "◠ ")) == "   1.1 ⏳ Fix it\n          default · restricted"

@@ -27,7 +27,7 @@ class UsageRow:
 
 @dataclass(frozen=True)
 class SpendTotals:
-    """Tokens of each kind and cost, ``today``'s and over the ``lifetime``."""
+    """Tokens of each kind, dollars and credits, ``today``'s and over the ``lifetime``."""
 
     today: Usage = field(default_factory=Usage)
     lifetime: Usage = field(default_factory=Usage)
@@ -42,13 +42,14 @@ class UsageTotalsData:
 
 
 def counted(usage: Usage) -> Usage:
-    """``usage``'s tokens of each kind and cost, all that a turn's row keeps."""
+    """``usage``'s tokens of each kind, dollars and credits, all that a turn's row keeps."""
     return Usage(
         input_tokens=usage.input_tokens,
         output_tokens=usage.output_tokens,
         cache_creation_input_tokens=usage.cache_creation_input_tokens,
         cache_read_input_tokens=usage.cache_read_input_tokens,
         cost_usd=usage.cost_usd,
+        credits=usage.credits,
     )
 
 

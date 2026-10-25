@@ -114,6 +114,7 @@ USAGE = Usage(
     cache_creation_input_tokens=30,
     cache_read_input_tokens=40,
     cost_usd=0.25,
+    credits=0.5,
     turns=2,
     duration_ms=1500,
 )

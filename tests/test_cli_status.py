@@ -139,7 +139,7 @@ async def test_status_json_parses_with_the_same_values() -> None:
     assert (session["id"], session["active"], session["state"]) == ("a-1", True, "running")
     (agent,) = parsed["agents"]
     assert (agent["workspace"], agent["role"], agent["task_id"]) == ("a", "coder", busy.task_id)
-    assert parsed["usage"]["today"] == {"tokens": 1200, "cost_usd": 0.25}
+    assert parsed["usage"]["today"] == {"tokens": 1200, "cost_usd": 0.25, "credits": 0.0}
 
 
 @pytest.mark.usefixtures("token_file")

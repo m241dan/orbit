@@ -14,7 +14,7 @@ from orbit.agent.domain.usage_totals import SessionKey, UsageRow, UsageTotalsDat
 from orbit.protocol import Usage
 
 _SUMS = """sum(input_tokens), sum(output_tokens), sum(cache_creation_input_tokens),
-    sum(cache_read_input_tokens), sum(cost_usd)"""
+    sum(cache_read_input_tokens), sum(cost_usd), sum(credits)"""
 
 
 def stored_time(when: datetime) -> str:
@@ -27,8 +27,8 @@ def record(connection: sqlite3.Connection, row: UsageRow) -> None:
     usage = row.usage
     connection.execute(
         """INSERT INTO usage (workspace_id, session_id, role, model, input_tokens, output_tokens,
-            cache_creation_input_tokens, cache_read_input_tokens, cost_usd, at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            cache_creation_input_tokens, cache_read_input_tokens, cost_usd, credits, at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             row.workspace_id,
             row.session_id,
@@ -39,20 +39,22 @@ def record(connection: sqlite3.Connection, row: UsageRow) -> None:
             usage.cache_creation_input_tokens,
             usage.cache_read_input_tokens,
             usage.cost_usd,
+            usage.credits,
             stored_time(row.at),
         ),
     )
 
 
 def _usage(sums: Sequence[Any]) -> Usage:
-    """The usage whose tokens of each kind and cost are ``sums``, in the table's order."""
-    inputs, outputs, cache_creation, cache_read, cost = sums
+    """The usage whose tokens of each kind, dollars and credits are ``sums``, in that order."""
+    inputs, outputs, cache_creation, cache_read, cost, credits = sums
     return Usage(
         input_tokens=int(inputs),
         output_tokens=int(outputs),
         cache_creation_input_tokens=int(cache_creation),
         cache_read_input_tokens=int(cache_read),
         cost_usd=float(cost),
+        credits=float(credits),
     )
 
 

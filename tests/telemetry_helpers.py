@@ -6,6 +6,7 @@ from opentelemetry.sdk.metrics.export import (
     Metric,
     MetricsData,
     NumberDataPoint,
+    Sum,
 )
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan
@@ -15,7 +16,7 @@ from orbit.agent.application.command_trace import COMMAND_SPAN
 from orbit.telemetry.otel import OtelTelemetry, otel_telemetry
 
 GaugePoint = tuple[dict[str, object], float]
-"""A gauge's point: its attributes and its value."""
+"""A gauge's or a counter's point: its attributes and its value."""
 
 
 class Traced:
@@ -42,6 +43,15 @@ class Traced:
         none."""
         gauges = _gauges(_metrics(self.metrics.get_metrics_data()), name)
         return [_point(point) for gauge in gauges for point in gauge.data_points]
+
+    def counter(self, name: str) -> list[GaugePoint]:
+        """The points of the counter called ``name``, as metrics are collected now; none if it
+        has none."""
+        metrics = _metrics(self.metrics.get_metrics_data())
+        sums = [metric.data for metric in metrics if metric.name == name]
+        return [
+            _point(point) for each in sums if isinstance(each, Sum) for point in each.data_points
+        ]
 
     def task(self) -> ReadableSpan:
         """The one task's span."""

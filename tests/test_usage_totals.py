@@ -12,6 +12,7 @@ def test_a_rows_usage_keeps_only_tokens_and_cost() -> None:
         cache_creation_input_tokens=3,
         cache_read_input_tokens=4,
         cost_usd=0.5,
+        credits=0.25,
         turns=6,
         duration_ms=7,
     )
@@ -21,13 +22,14 @@ def test_a_rows_usage_keeps_only_tokens_and_cost() -> None:
         cache_creation_input_tokens=3,
         cache_read_input_tokens=4,
         cost_usd=0.5,
+        credits=0.25,
     )
 
 
 def test_earlier_spend_is_what_the_record_spent_beyond_the_rows() -> None:
-    spent = Usage(input_tokens=300, output_tokens=50, cost_usd=2.0, turns=5)
-    recorded = Usage(input_tokens=100, output_tokens=80, cost_usd=0.5)
-    assert earlier_spend(spent, recorded) == Usage(input_tokens=200, cost_usd=1.5)
+    spent = Usage(input_tokens=300, output_tokens=50, cost_usd=2.0, credits=1.5, turns=5)
+    recorded = Usage(input_tokens=100, output_tokens=80, cost_usd=0.5, credits=0.5)
+    assert earlier_spend(spent, recorded) == Usage(input_tokens=200, cost_usd=1.5, credits=1.0)
 
 
 def test_totals_count_today_the_rows_given_and_lifetime_every_row_and_earlier_spend() -> None:

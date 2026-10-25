@@ -39,6 +39,7 @@ verification fails has its own.
 | `gen_ai.usage.cache_creation.input_tokens` | int | Input tokens written to the cache over those turns. |
 | `gen_ai.usage.cache_read.input_tokens` | int | Input tokens read from the cache over those turns. |
 | `orbit.cost.usd` | double | What those turns cost, in US dollars. |
+| `orbit.cost.credits` | double | What those turns cost in credits, for a runtime that charges in them, such as Kiro; absent when they cost none. |
 | `orbit.verify.result` | string | How the task's last verification came out: `passed`, `failed` or `skipped`; absent when it wasn't verified. |
 | `orbit.verify.failed_step` | string | The step that last failed verification, if one did, even if a later verification passed. |
 | `orbit.merge.result` | string | What came of merging the task's work: `merged`, `rebased`, `conflict`, `blocked` or `detached`; absent when it wasn't merged. |
@@ -165,6 +166,7 @@ no turn and has none.
 | `gen_ai.usage.cache_creation.input_tokens` | int | Input tokens the turn wrote to the cache. |
 | `gen_ai.usage.cache_read.input_tokens` | int | Input tokens the turn read from the cache. |
 | `orbit.cost.usd` | double | What the turn cost, in US dollars. |
+| `orbit.cost.credits` | double | What the turn cost in credits, for a runtime that charges in them, such as Kiro; absent when it cost none. |
 | `orbit.planner.drafts` | int | How many draft tasks the planner proposed in the turn. |
 | `orbit.planner.end_reason` | string | How the turn ended: `completed`, `cancelled`, `max_steps` or `error`. |
 
@@ -202,6 +204,7 @@ to run its suggestions. Each starts its own trace: it's a root span, linked to w
 | `gen_ai.usage.cache_creation.input_tokens` | int | Input tokens written to the cache over those turns. |
 | `gen_ai.usage.cache_read.input_tokens` | int | Input tokens read from the cache over those turns. |
 | `orbit.cost.usd` | double | What those turns cost, in US dollars. |
+| `orbit.cost.credits` | double | What those turns cost in credits, for a runtime that charges in them, such as Kiro; absent when they cost none. |
 
 A review the user queued, rather than orbit, reviews no particular commits: it has no
 `orbit.review.commits`, `orbit.review.round`, `orbit.review.batch` or `orbit.review.cap`. The
@@ -342,6 +345,7 @@ or none, isn't recorded. Metrics carry no exemplars.
 | `orbit.agent.duration` | histogram | `s` | `orbit.role`, `orbit.runtime` | The duration of each `orbit.agent.process` span. |
 | `gen_ai.client.token.usage` | histogram | `{token}` | `gen_ai.request.model`, `gen_ai.token.type`, `orbit.role` | One record for each kind of token an `orbit.task`, `orbit.planner.turn` or `orbit.review` span counts, `gen_ai.token.type` naming it: `input` (`gen_ai.usage.input_tokens`), `output` (`gen_ai.usage.output_tokens`), `cache_creation` (`gen_ai.usage.cache_creation.input_tokens`) or `cache_read` (`gen_ai.usage.cache_read.input_tokens`). |
 | `orbit.cost` | counter | `USD` | `gen_ai.request.model`, `orbit.role` | The `orbit.cost.usd` of those spans. |
+| `orbit.credits` | counter | `{credit}` | `gen_ai.request.model`, `orbit.role` | The `orbit.cost.credits` of those spans. |
 | `orbit.review.suggestions` | counter | `{suggestion}` | `orbit.review.outcome`, `orbit.role` | The `orbit.review.suggestions` of each `orbit.review` span, with `orbit.review.outcome` `made`, and its `orbit.review.refused`, with `refused`. |
 
 `gen_ai.client.token.usage` has the buckets the GenAI conventions give it, 1, 4, 16 and so on, each

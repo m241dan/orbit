@@ -25,8 +25,8 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit these for a format change: they're what orbits at versions 1 to 10 wrote, and
-# they still need to read. A new version gets its own fixture (session-v11.json) and a
+# Never edit these for a format change: they're what orbits at versions 1 to 11 wrote, and
+# they still need to read. A new version gets its own fixture (session-v12.json) and a
 # migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
 SESSION_V2 = FIXTURES / "session-v2.json"
@@ -38,6 +38,7 @@ SESSION_V7 = FIXTURES / "session-v7.json"
 SESSION_V8 = FIXTURES / "session-v8.json"
 SESSION_V9 = FIXTURES / "session-v9.json"
 SESSION_V10 = FIXTURES / "session-v10.json"
+SESSION_V11 = FIXTURES / "session-v11.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -151,7 +152,7 @@ def expected(
     lane: LaneSnapshot | None = None,
 ) -> SessionRecord:
     return SessionRecord(
-        version=10,
+        version=11,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
@@ -265,14 +266,28 @@ def test_a_version_9_session_file_migrates_to_conversations_on_claude() -> None:
     assert parse_record(SESSION_V9.read_text(encoding="utf-8")) == conversing()
 
 
-def test_a_version_10_session_file_reads_as_its_record() -> None:
+def test_a_version_10_session_file_migrates_to_spending_no_credits() -> None:
     assert parse_record(SESSION_V10.read_text(encoding="utf-8")) == conversing()
 
 
-def test_a_session_record_is_written_in_the_version_10_format() -> None:
-    written = json.loads(record_json(conversing()))
-    golden = json.loads(SESSION_V10.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V10.name)
+def crediting() -> SessionRecord:
+    """The golden record as version 11 keeps it, with credits in what its first task and the
+    session spent."""
+    record = conversing()
+    first, *others = record.tasks
+    credited = first.model_copy(update={"usage": first.usage + Usage(credits=0.5)})
+    spent = record.spent + Usage(credits=0.75)
+    return record.model_copy(update={"tasks": (credited, *others), "spent": spent})
+
+
+def test_a_version_11_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V11.read_text(encoding="utf-8")) == crediting()
+
+
+def test_a_session_record_is_written_in_the_version_11_format() -> None:
+    written = json.loads(record_json(crediting()))
+    golden = json.loads(SESSION_V11.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V11.name)
 
 
 def test_a_version_1_review_count_reads_as_its_count() -> None:

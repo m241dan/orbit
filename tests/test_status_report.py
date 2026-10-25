@@ -176,6 +176,21 @@ def test_the_json_is_one_object_with_the_same_values() -> None:
         "task_id": "t1",
     }
     assert parsed["usage"] == {
-        "today": {"tokens": 1200, "cost_usd": 0.25},
-        "lifetime": {"tokens": 6000, "cost_usd": 1.5},
+        "today": {"tokens": 1200, "cost_usd": 0.25, "credits": 0.0},
+        "lifetime": {"tokens": 6000, "cost_usd": 1.5, "credits": 0.0},
+    }
+
+
+def test_credits_are_reported_beside_dollars() -> None:
+    lifetime = LIFETIME + Usage(credits=0.62)
+    totals = UsageTotals(workspaces=(), total=UsageTotal(today=Usage(credits=2), lifetime=lifetime))
+    report = status_report(WELCOME, NOTHING, NO_AGENTS, totals, URL)
+    assert status_text(report).endswith(
+        "Usage\n"
+        "  today     0 tokens · 2.00 credits\n"
+        "  lifetime  6,000 tokens · $1.50 · 0.62 credits"
+    )
+    assert json.loads(status_json(report))["usage"] == {
+        "today": {"tokens": 0, "cost_usd": 0.0, "credits": 2.0},
+        "lifetime": {"tokens": 6000, "cost_usd": 1.5, "credits": 0.62},
     }

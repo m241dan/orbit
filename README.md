@@ -220,7 +220,7 @@ lane of its own, a review or a planner turn), or `waiting for a coder: 2nd in li
 limit on claude; starts again at 18:01` while its run waits to start again (see **Usage limits** under
 [Tasks](#tasks)), `viewed by N` when N other frontends view it, how many of its
 tasks stand at each status, by the task list's icons (`3 ✅ 2 ⏳ 1 📝`), and what they cost
-(`1.2M tok · $0.84`); `●` marks the session this chat views. The marks follow the sessions live while
+(`1.2M tok · $0.84`, with credits as in the task list); `●` marks the session this chat views. The marks follow the sessions live while
 the picker is open, as do sessions another frontend starts, renames or deletes. `j`/`k` (or the arrow keys) move and `enter` picks the highlighted session. On
 `New session`, `enter` asks for a name: `enter` starts the session, named for the date and time if
 you leave the name empty, and `esc` goes back to the list. `esc` on the list quits orbit. Any draft
@@ -537,8 +537,10 @@ failed`), cut to the list's width. Once a task has spent anything, its row ends 
 spent (`1.2M tok · $0.84`), or `usage unknown` when its role runs on a runtime that doesn't
 report what its agents spend (see `runtime` in
 [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)), and the task list's subtitle shows the open session's total
-(`session: 1.2M tok · $0.84`): everything the session's agents have spent, the planner's turns and
-tasks since removed included. It's saved with the session, so a session opened again (or listed
+(`session: 1.2M tok · $0.84`). A runtime that charges in credits, such as Kiro, has them shown
+apart from dollars rather than converted: `1.2M tok · 0.62 credits` for credits alone, and
+`1.2M tok · $0.84 · 0.62 credits` for a total holding both. The total is everything the
+session's agents have spent, the planner's turns and tasks since removed included. It's saved with the session, so a session opened again (or listed
 with `ctrl+p`) shows the same total; a new session starts with none, and shows no total. Token
 counts are rounded as in a turn's rule (see above). While the session's run waits for a coder
 (see [Taking turns](#serving-the-control-plane)), the task about to run says so after its settings,
@@ -2159,7 +2161,8 @@ server's URL and version; each workspace it serves, by label and path, with its 
 active one marked `active`, each `running` or `idle`, or `waiting for a coder: 2nd in line`
 while its run waits for a coder's slot, and `run paused: usage limit on claude; starts again at
 18:01` while its run is paused; the agents running, by workspace, role and task; and what turns have
-cost in all, today and over the lifetime, in tokens and dollars:
+cost in all, today and over the lifetime, in tokens and dollars, with credits beside them once any
+were spent (`15,301,112 tokens · $12.10 · 0.62 credits`):
 
 ```
 orbit serve 0.1.0 at ws://127.0.0.1:7433/
@@ -2187,7 +2190,7 @@ one JSON object instead: `url`, `server_version`, `workspaces` (each with `id`, 
 and `sessions`, each with `id`, `name`, `active`, `state`, `waiting_for_coder`,
 `coder_position`, `paused_until`, `paused_for` and `paused_runtime`), `agents` (each with `workspace`,
 `workspace_label`, `session`, `agent_id`, `role` and `task_id`) and `usage` (`today` and
-`lifetime`, each with `tokens` and `cost_usd`). It exits with status 0 once it has printed; 1
+`lifetime`, each with `tokens`, `cost_usd` and `credits`). It exits with status 0 once it has printed; 1
 when no `orbit serve` is running here, saying `No orbit serve is running for this account.`; and
 2 when the control plane can't be asked, saying why: a connection, TLS or credential error, with
 its message from **TLS and connection errors** above (a token refused says `The control plane
@@ -2476,8 +2479,8 @@ while the rest, such as a failure flagging a workspace served or not as orbit cl
 another, are noted like any warning.
 
 Each task the work lane runs is one span, `orbit.task`, starting its own trace: who the task is
-(workspace, session, id, title, role, model and who queued it), what its turns cost in tokens and
-dollars, how long it waited for a coder's slot, its fix attempts and the checks its agent ran,
+(workspace, session, id, title, role, model and who queued it), what its turns cost in tokens,
+dollars and credits, how long it waited for a coder's slot, its fix attempts and the checks its agent ran,
 how verification and merging came out, and its final status and reason, with each verification
 step, a give-up and a merge conflict as events, and its wait and run as child spans. Each command
 a frontend sends is one span, `orbit.command`: its type, the workspace and session it's for, the
@@ -2514,7 +2517,8 @@ Metrics come from the spans, recorded as each ends, for backends that can't deri
 tasks ran, by final status, role and workspace (`orbit.tasks`); how long verification steps
 (`orbit.verify.step.duration`, by step and result) and agent processes (`orbit.agent.duration`, by
 role and runtime) ran; the tokens tasks, planner turns and reviews used, by model, kind of token
-and role (`gen_ai.client.token.usage`), and what they cost (`orbit.cost`); and the suggestions
+and role (`gen_ai.client.token.usage`), and what they cost, in dollars (`orbit.cost`) and in
+credits (`orbit.credits`); and the suggestions
 reviews made and had refused (`orbit.review.suggestions`). They go where the spans go, every
 `metrics_interval_s` seconds, 60 unless set; a value that isn't a whole number of seconds, at
 least 1, stops orbit with status 2 naming the key. With `exporter = "none"`, orbit records none.

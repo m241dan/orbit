@@ -28,6 +28,7 @@ TASK_TITLE_PLACEHOLDER = "Press i to type"
 REASON_HINT = "j/k scroll · y copy · esc close"
 NEW_TASK_LABEL = "+ new task"
 USAGE_UNKNOWN = "usage unknown"
+NO_COST = "$0.00"  # What a usage that cost nothing shows for its cost beside its tokens.
 
 
 def task_numbers(tasks: Sequence[TaskState]) -> list[str]:
@@ -240,9 +241,17 @@ def _wait_note(busy: int | None) -> str:
     return f"⏳ {note}"
 
 
+def cost_text(usage: Usage) -> str:
+    """What ``usage`` cost, in what it has: dollars (``$1.20``), credits (``0.62 credits``) or
+    both (``$1.20 · 0.62 credits``); empty when it has neither."""
+    dollars = [f"${usage.cost_usd:.2f}"] if usage.cost_usd > 0 else []
+    credits = [f"{usage.credits:.2f} credits"] if usage.credits > 0 else []
+    return " · ".join(dollars + credits)
+
+
 def usage_label(usage: Usage) -> str:
-    """Tokens and cost, shortly: ``1.2M tok · $0.84``."""
-    return f"{token_text(usage.tokens)} tok · ${usage.cost_usd:.2f}"
+    """Tokens and cost, shortly: ``1.2M tok · $0.84``, or ``1.2M tok · 0.62 credits``."""
+    return f"{token_text(usage.tokens)} tok · {cost_text(usage) or NO_COST}"
 
 
 def session_usage_subtitle(usage: Usage) -> str:

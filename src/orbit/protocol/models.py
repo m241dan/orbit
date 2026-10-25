@@ -100,9 +100,10 @@ class TaskSpec(_Message):
 
 
 class Usage(_Message):
-    """What turns cost: tokens of each kind, dollars, model round trips and time taken.
+    """What turns cost: tokens of each kind, dollars, credits, model round trips and time taken.
 
-    Usages add up, so a task's total is the sum of its turns'.
+    A runtime that charges in credits, as Kiro does, reports them apart from dollars, rather than
+    at a rate. Usages add up, so a task's total is the sum of its turns'.
     """
 
     input_tokens: int = Field(default=0, ge=0)
@@ -110,6 +111,7 @@ class Usage(_Message):
     cache_creation_input_tokens: int = Field(default=0, ge=0)
     cache_read_input_tokens: int = Field(default=0, ge=0)
     cost_usd: float = Field(default=0.0, ge=0)
+    credits: float = Field(default=0.0, ge=0)
     turns: int = Field(default=0, ge=0)
     duration_ms: int = Field(default=0, ge=0)
 

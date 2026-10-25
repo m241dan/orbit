@@ -108,6 +108,11 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
             PRIMARY KEY (workspace_id, old_path)
         )""",
     ),
+    (
+        # What each finished turn cost in credits, apart from dollars; turns recorded before
+        # credits were counted cost none.
+        "ALTER TABLE usage ADD COLUMN credits REAL NOT NULL DEFAULT 0",
+    ),
 )
 
 

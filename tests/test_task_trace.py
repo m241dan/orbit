@@ -110,6 +110,10 @@ async def test_a_task_that_merges_is_one_root_span_with_its_run_as_child() -> No
     launcher.usages = [usages]
     await asyncio.wait_for(run(session), 5)
 
+    assert traced.counter("orbit.cost") == [
+        ({"gen_ai.request.model": "opus", "orbit.role": CODER}, 0.75)
+    ]
+    assert traced.counter("orbit.credits") == []
     task = traced.task()
     [run_span] = traced.spans("orbit.task.run")
     assert task.parent is None
@@ -141,6 +145,18 @@ async def test_a_task_that_merges_is_one_root_span_with_its_run_as_child() -> No
         "orbit.task.status": "completed",
     }
     assert task.status.status_code is StatusCode.UNSET
+
+
+async def test_a_task_that_spent_credits_records_them_on_its_span_and_as_a_metric() -> None:
+    traced = Traced()
+    session, _, launcher = session_for(claims_done, telemetry=traced.telemetry)
+    launcher.usages = [(Usage(credits=0.5), Usage(credits=0.25))]
+    await asyncio.wait_for(run(session), 5)
+
+    spent = {"gen_ai.request.model": "opus", "orbit.role": CODER}
+    assert traced.counter("orbit.credits") == [(spent, 0.75)]
+    assert traced.counter("orbit.cost") == []
+    assert attributes(traced.task())["orbit.cost.credits"] == 0.75
 
 
 async def test_a_task_that_waited_for_a_coder_has_its_wait_as_a_child() -> None:

@@ -384,9 +384,12 @@ sends nothing more.
   named it, the startup check and the planner included. It's sent whole again whenever an agent
   starts or exits in any workspace.
 - `UsageTotals(workspaces, total)`: what turns have cost, each a `today` and a `lifetime`
-  `Usage` with tokens of each kind and `cost_usd` (`turns` and `duration_ms` aren't counted):
-  `workspaces` has one `WorkspaceUsage(workspace, today, lifetime)` per workspace that recorded
-  any, and `total` adds them up. Today starts at midnight in the server's local time; the
+  `Usage` with tokens of each kind, `cost_usd` and `credits` (`turns` and `duration_ms` aren't
+  counted). A `Usage`'s `credits` are what a runtime that charges in credits, such as Kiro,
+  reports, kept apart from its dollars rather than converted; they were added to version 2,
+  defaulting to 0, as a Claude turn's always are. In the totals, `workspaces` has one
+  `WorkspaceUsage(workspace, today, lifetime)` per workspace that recorded any, and `total`
+  adds them up. Today starts at midnight in the server's local time; the
   lifetime counts every turn recorded, sessions since deleted included, and what sessions spent
   before turns were recorded. It's sent again after each turn finishes, once its usage is
   recorded, and after a `RemoveWorkspace` with `purge`, which deletes the workspace's turns and
