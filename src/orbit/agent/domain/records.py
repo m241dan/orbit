@@ -24,6 +24,15 @@ def named_records(texts: Iterable[str]) -> tuple[str, ...]:
     return tuple(match[0] for text in texts for match in _RECORD.finditer(text))
 
 
+def clashing_records(text: str, listings: Mapping[str, Collection[str]]) -> bool:
+    """Whether any record ``text`` names isn't written yet but another record in its directory
+    has its number, so :func:`moved_records` would move it. ``listings`` holds the file names
+    in each directory, by directory."""
+    return any(
+        _clashes(match, listings.get(_directory(match), ())) for match in _RECORD.finditer(text)
+    )
+
+
 def moved_records(
     text: str,
     listings: Mapping[str, Collection[str]],

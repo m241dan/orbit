@@ -4,6 +4,8 @@ orbit moves the record to the next free number in it and in the tasks still to c
 from collections.abc import Collection
 from typing import Any
 
+import pytest
+
 from orbit.agent.domain.records import moved_note, planner_note
 from orbit.protocol import PLANNER, AddTask, Event, Notice, RunTasks, TaskSpec, TurnEndReason
 from tests.agent_fakes import (
@@ -145,3 +147,15 @@ async def test_a_move_is_saved_with_the_note_for_the_planner_until_a_turn_delive
     assert store.moves == {OLD: NEW}
     await plan(session, "Revise the plan.")
     assert store.last.planner_notes == ()
+
+
+async def test_without_a_clash_the_other_tasks_prompts_are_not_scanned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def scanned(texts: object) -> tuple[str, ...]:
+        raise AssertionError("scanned the other tasks' prompts")
+
+    monkeypatch.setattr("orbit.agent.application.record_moves.named_records", scanned)
+    files = Files({"/work/coder/docs": ("00023-bugfix-pause.md",)})
+    agent, _ = await run(files, WRITE, tree=FakeTree())
+    assert OLD in agent.briefs[0]

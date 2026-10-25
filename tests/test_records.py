@@ -1,4 +1,5 @@
 from orbit.agent.domain.records import (
+    clashing_records,
     moved_records,
     named_records,
     planner_note,
@@ -169,3 +170,10 @@ def test_a_move_kept_wins_over_what_tasks_name_and_a_written_record_over_both() 
     assert moved_records(STALE, {"docs": listing}, named, LOGGED) == {
         "docs/00024-feature-metrics.md": "docs/00025-feature-metrics.md"
     }
+
+
+def test_a_record_clashes_only_while_unwritten_under_a_number_another_has() -> None:
+    assert clashing_records(CREATE, {"docs": DOCS})
+    assert not clashing_records(CREATE, {"docs": (*DOCS, "00024-feature-metrics.md")})
+    assert not clashing_records("Plan: docs/00022-feature-spans.md", {"docs": DOCS})
+    assert not clashing_records(CREATE, {})

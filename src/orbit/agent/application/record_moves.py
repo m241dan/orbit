@@ -12,6 +12,7 @@ from orbit.agent.application.ports import FileNames, Publish, SessionStore, Stor
 from orbit.agent.application.storage_halt import Halting, written
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.records import (
+    clashing_records,
     moved_note,
     moved_records,
     named_records,
@@ -85,6 +86,8 @@ class RecordMoves:
             directory: await asyncio.to_thread(names, str(PurePath(root, directory)))
             for directory in record_directories(prompt)
         }
+        if not clashing_records(prompt, listings):
+            return {}  # Scanning every other task's prompt for its records takes long.
         others = named_records(t.task.prompt for t in board.tasks if t.id != task_id)
         return moved_records(prompt, listings, others, await self._logged())
 
