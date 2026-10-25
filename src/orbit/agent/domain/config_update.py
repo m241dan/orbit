@@ -207,12 +207,25 @@ class _File:
         region = self._last_region(table)
         return None if region is None else region.end
 
-    def header(self, table: str) -> _Line | None:
-        """The header, set or commented out, that keys added to ``table`` go under: its last
-        region's; none if it has no region."""
-        region = self._last_region(table)
-        if region is None:
-            return None
+    def role_region(self, table: str) -> _Region | None:
+        """The region a role's line goes in for ``table``: its last under a set header if the
+        file sets the table, none if it sets it only inline or by dotted keys; otherwise its
+        last region, under a commented-out header, if it has one."""
+        regions = self._regions_of(table)
+        if _set_keys(self.data, table) is not None:
+            regions = list(filter(self._set_header, regions))
+        return regions[-1] if regions else None
+
+    def _regions_of(self, table: str) -> list[_Region]:
+        """``table``'s regions, in order."""
+        return [region for region in self.regions if region.table == table]
+
+    def _set_header(self, region: _Region) -> bool:
+        """Whether ``region``'s header is set rather than commented out."""
+        return not _commented_out(self.header_of(region))
+
+    def header_of(self, region: _Region) -> _Line:
+        """``region``'s header line."""
         lines = self.lines[region.start : region.end]
         return next(line for line in lines if line.kind is _Kind.HEADER)
 
@@ -619,13 +632,14 @@ def _instruction_lines(file: _File, roles: Sequence[str]) -> InstructionLines:
 
 def _placement(file: _File, table: str) -> _Placement:
     """Where a role whose table is ``table`` is given its line: appended with the table if
-    ``file`` lacks it; nowhere if the table has no header of its own; otherwise in it, under its
-    header, set or commented out."""
+    ``file`` lacks it; nowhere if the table is set without a set header of its own; otherwise in
+    its :meth:`_File.role_region`, under its header, set or commented out."""
     if not file.has(table):
         return _Placement.APPENDED
-    header = file.header(table)
-    if header is None:
+    region = file.role_region(table)
+    if region is None:
         return _Placement.INLINE
+    header = file.header_of(region)
     return _Placement.COMMENTED if _commented_out(header) else _Placement.ADDED
 
 
@@ -641,18 +655,18 @@ def _commented_out(line: _Line) -> bool:
 
 def _instruction_insertions(file: _File, roles: Sequence[str]) -> dict[str, _Insertion]:
     """The line pointing each of the ``roles`` at its copy of its instructions, after the end of
-    its table, by role; none for a role whose table has no region in ``file``."""
+    its table's :meth:`_File.role_region`, by role; none for a role whose table has none."""
     return {name: found for name in roles if (found := _instruction_insertion(file, name))}
 
 
 def _instruction_insertion(file: _File, name: str) -> _Insertion | None:
     """The line pointing role ``name`` at its copy of its instructions, after the end of its
-    table; none if the table has no region in ``file``."""
+    table's :meth:`_File.role_region`; none if it has none."""
     table = _role_table(name)
-    at = file.end(table)
-    if at is None:
+    region = file.role_region(table)
+    if region is None:
         return None
-    return _Insertion(at, f"[{table}]", ("instructions",), (_instructions_line(name),))
+    return _Insertion(region.end, f"[{table}]", ("instructions",), (_instructions_line(name),))
 
 
 def _role_sections(reference: Sequence[_Line], roles: Sequence[str]) -> list[list[str]]:

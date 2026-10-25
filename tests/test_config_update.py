@@ -563,3 +563,36 @@ def test_without_the_heading_keys_go_after_the_lines_below_the_table() -> None:
     text = f"[roles.coder]\nmodel = 'x'\n\n{HEADING}\n# runtime = 'claude'\n"
     roles = add_instructions(text, ROLES_REFERENCE, ("coder",), TODAY)
     assert roles.text == f"{text}{CODER_LINE}\n"
+
+
+def _following_the_advice(text: str, header: str | None) -> dict[str, object]:
+    """``text`` read as TOML with :data:`CODER_LINE` uncommented, and ``header`` with it."""
+    if header is not None:
+        text = text.replace(f"# {header}\n", f"{header}\n")
+    return tomllib.loads(text.replace(CODER_LINE, CODER_LINE.removeprefix("# ")))
+
+
+@pytest.mark.parametrize(
+    "text", ["[roles]\ncoder.model = 'opus'\n\n", "[roles]\ncoder = { model = 'opus' }\n\n"]
+)
+def test_a_role_set_inline_above_a_commented_header_gets_nothing(text: str) -> None:
+    update = with_instructions(text + CODER_TABLE)
+    assert update.lines == InstructionLines(appended=("reviewer",), inline=("coder",))
+    assert CODER_LINE not in update.text
+
+
+def test_a_set_header_followed_by_a_commented_duplicate_gets_the_line_in_the_set_one() -> None:
+    text = f"[roles.coder]\nmodel = 'opus'\n\n{CODER_TABLE}"
+    update = with_instructions(text)
+    assert update.lines == InstructionLines(added=("coder",), appended=("reviewer",))
+    assert update.text.startswith(f"[roles.coder]\nmodel = 'opus'\n{CODER_LINE}\n\n{CODER_TABLE}")
+    assert _following_the_advice(update.text, None)["roles"] == {
+        "coder": {"model": "opus", "instructions": "roles/coder.md"}
+    }
+
+
+def test_a_table_only_under_a_commented_header_follows_its_advice_to_a_valid_config() -> None:
+    update = with_instructions(CODER_TABLE)
+    assert update.lines.commented == ("coder",)
+    roles = _following_the_advice(update.text, "[roles.coder]")["roles"]
+    assert roles == {"coder": {"instructions": "roles/coder.md"}}
