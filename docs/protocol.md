@@ -101,7 +101,8 @@ control plane's own, `AddWorkspace`, `RemoveWorkspace` and `ListDirectory` (see
 [Workspaces](#workspaces)) and `Watch` (see [The control-plane stream](#the-control-plane-stream)), sent before then is refused
 with `invalid`. The first `Attach` is answered in this order:
 
-1. `Snapshot`: the session as it stands, with its settings, busy lanes, tasks,
+1. `Snapshot`: the session as it stands, with its settings, busy lanes (a flag for each lane, by
+   name: the work lane, the planner's and every other lane of the enabled task roles), tasks,
    verification steps, review status, checks proposals waiting for a decision, running
    agents and its `transcript`: the session's last 500 logged events, oldest first, in the
    envelopes they were sent in, their `seq`s included (none without a store), and, while the
@@ -404,14 +405,16 @@ the same way, under the same rule; the creating connection views it.
 Each session in a `Catalog` carries its state as it is when the Catalog is sent:
 
 - `active`: whether it's the workspace's open session, the one that runs work.
-- `state`: `running` while a task run, a review or a planner turn is in progress, otherwise
-  `idle`. The startup check runs on the base commit, not in a session, so it leaves the state
+- `state`: `running` while a task run, a task in a lane of its own, a review or a planner turn
+  is in progress, otherwise `idle`. The startup check runs on the base commit, not in a session, so it leaves the state
   `idle`.
 - `viewers`: how many welcomed connections view it: the open session's, and, for another
   session, those attached to it (see [Attaching](#attaching)).
 - `activity`: what's in progress in the open session, in this order, each an
   `Activity(kind, task_id, position, busy)`: a `task_run` of task `task_id`,
-  `waiting_for_coder` while that task waits for a coder, a `review` of task `task_id`, the task
+  `waiting_for_coder` while that task waits for a coder, a `task_run` of each task running in a
+  lane of its own (a lane other than the work lane whose tasks start by themselves, such as a
+  custom role's), a `review` of task `task_id`, the task
   whose work it reviews, a `planner` turn and the `startup_check`, whose `task_id` is null. A server runs at most
   `max_coders` tasks whose roles work in the worktree, such as the coder's and the configurator's,
   at once across its workspaces (see the README); a
@@ -514,13 +517,16 @@ version 2, defaulting to `null`, so an older peer's settings read as having none
 with the session and its tasks, and the tasks it queues in a role carry the role's, but it isn't
 passed to agents yet.
 
-`CancelTurn(lane)` stops the work in `lane`, `work` unless given: in the work lane, the task
-run, or its wait to start again, which holds the lane until the user asks for work again; in the
-`planner` lane, the planner's turn. Stopping a lane with nothing running is accepted and does
-nothing more. It's refused with `unknown` for a lane there's none of, naming those there are.
+`CancelTurn(lane)` stops the work in `lane`, `work` unless given: in the work lane (the lane
+whose roles merge their work, `work` for the built-in roles), the task run, or its wait to start
+again, which holds the lane until the user asks for work again; in the `planner` lane, the
+planner's turn; in any other lane of the roles' (such as `review`), whose tasks start by
+themselves, the task running there, and the lane goes on with its next. Stopping a lane with
+nothing running is accepted and does nothing more. It's refused with `unknown` for a lane there's
+none of, naming those there are.
 
-`CancelAgent(agent_id)` stops agent `agent_id`'s work: the startup check, or a reviewer's
-review, on its own; the planner's turn, as `CancelTurn` does for the `planner` lane; and any
+`CancelAgent(agent_id)` stops agent `agent_id`'s work: the startup check, or the task of an agent
+in a lane whose tasks start by themselves, such as a reviewer's review, on its own; the planner's turn, as `CancelTurn` does for the `planner` lane; and any
 other agent's, the task run it's in, as `CancelTurn` does for the `work` lane. It's refused with
 `unknown` for an agent that isn't running: `No running agent 'agent-9'.`
 

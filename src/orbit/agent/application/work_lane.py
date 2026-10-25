@@ -43,7 +43,6 @@ from orbit.agent.domain.usage_limits import (
 from orbit.agent.domain.verification import FallbackFixes, failure_reason, fix_prompt
 from orbit.protocol import (
     CHECKS_EXHAUSTED,
-    REVIEW_ROLES,
     ErrorOccurred,
     Notice,
     TaskSpec,
@@ -67,9 +66,9 @@ class Beside:
     """What runs beside the work lane: the review lane, if any, and the startup check, if any,
     whose panel each task takes over; the session's ``gate``, which stops a run halted before
     its next task; its seat at the ``coders``' slots, if any, which a task whose role works in
-    the worktree takes one of before it starts; the ``tracing`` of its tasks; and the
-    ``records`` moves, if any, which move a record a task names whose number another took
-    before the task runs."""
+    the worktree takes one of before it starts; the ``tracing`` of its tasks; the ``records``
+    moves, if any, which move a record a task names whose number another took before the task
+    runs; and the roles whose tasks run ``elsewhere``, in lanes that start by themselves."""
 
     review: ReviewLane | None = None
     startup: StartupCheck | None = None
@@ -77,12 +76,14 @@ class Beside:
     coders: CoderSeat | None = None
     tracing: TaskTracing = field(default_factory=TaskTracing)
     records: RecordMoves | None = None
+    elsewhere: frozenset[str] = frozenset()
 
 
 class WorkLane:
     """Runs ``tasks``' tasks through ``desk``'s agents, checked by ``verifier`` if any.
 
-    Reviews are left to ``beside``'s review lane, when there's one. :meth:`run` is meant to run as
+    Reviews are left to ``beside``'s review lane, when there's one, and the tasks of the roles it
+    says run elsewhere to their own lanes. :meth:`run` is meant to run as
     a task of its own: cancelling it cancels the task running, and the cancel goes on once that
     task has ended. The user's stop, :meth:`stopped_by_user`, cancels only the agent's run, and
     the run ends by itself: work the agent finished before the stop is still settled, and
@@ -111,6 +112,7 @@ class WorkLane:
         self._coders = beside.coders
         self._tracing = beside.tracing
         self._records = beside.records
+        self._elsewhere = beside.elsewhere
         self._seated = False  # The run holds a coder's slot, for the task about to run or running.
         # Task id -> the commit it merged into the base, until reported.
         self._landed: dict[str, str] = {}
@@ -175,9 +177,10 @@ class WorkLane:
         return coders.busy
 
     def next_work(self, tried: Collection[str] = ()) -> str | None:
-        """The next task for the work lane, the one a run stopped at first; reviews have their
-        own lane, if there is one."""
-        exclude = REVIEW_ROLES if self._review is not None else ()
+        """The next task for the work lane, the one a run stopped at first; the roles of the
+        review lane, if there is one, and of the lanes that start by themselves run there."""
+        reviews = self._review.roles if self._review is not None else frozenset()
+        exclude = self._elsewhere | reviews
         return self._board.next_runnable(skip=tried, exclude=exclude, first=self._resume)
 
     async def run(self) -> RunEnd:

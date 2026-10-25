@@ -20,6 +20,7 @@ from orbit.agent.domain.workspaces import RegisteredWorkspace
 from orbit.protocol import (
     INTERNAL,
     INVALID,
+    WORK_LANE,
     BusyChanged,
     Catalog,
     CommandRefused,
@@ -90,11 +91,12 @@ def agent_workspace(
     return host, launcher
 
 
-async def idle(connection: SessionConnection) -> None:
-    """Wait until the work lane of ``connection``'s workspace goes idle."""
+async def idle(connection: SessionConnection, lane: str = WORK_LANE) -> None:
+    """Wait until ``lane``, the work lane unless given, of ``connection``'s workspace goes
+    idle."""
     async for envelope in connection.events():
         event = envelope.payload
-        if isinstance(event, BusyChanged) and event.lane == "work" and not event.busy:
+        if isinstance(event, BusyChanged) and event.lane == lane and not event.busy:
             return
 
 

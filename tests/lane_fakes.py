@@ -1,5 +1,5 @@
-"""Fakes for the work and review lanes: a review lane that hears how tasks ended, hooks that
-wake nothing, and publishing that holds an event."""
+"""Fakes for the lanes: a role in a lane of its own, a review lane that hears how tasks ended,
+hooks that wake nothing, and publishing that holds an event."""
 
 import asyncio
 from collections.abc import Callable
@@ -9,7 +9,18 @@ from orbit.agent.application.lanes import OPEN_GATE
 from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.reviews import ReviewLimits, ReviewPlanner
-from orbit.protocol import Event, TaskState
+from orbit.agent.domain.roles import Role
+from orbit.protocol import Event, TaskSpec, TaskState
+from tests.agent_fakes import ROLES
+
+SECURITY = Role(instructions="Audit the code.", verify=False, lane="security", workspace="snapshot")
+WITH_SECURITY = {**ROLES, "security": SECURITY}
+"""The built-in roles, with ``security`` in a lane of its own."""
+
+
+def audit(prompt: str = "Audit it.") -> TaskSpec:
+    """A task for the ``security`` role."""
+    return TaskSpec(prompt=prompt, role="security")
 
 
 async def no_work() -> None:

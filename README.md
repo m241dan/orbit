@@ -203,8 +203,8 @@ session the control plane has active, which runs its work, and `enter` on it vie
 running its own control plane has no session to resume, so it has no `Resume`. The other saved
 sessions follow, the most recently active first, then `New session`; with none saved, the picker
 offers only `New session`. Each row shows the session's name, when it was last active (local time),
-`active` on the workspace's active session, `running` while it runs work (a task run, a review or a
-planner turn), or `waiting for a coder: 2nd in line` while its task run waits for a coder (see
+`active` on the workspace's active session, `running` while it runs work (a task run, a task in a
+lane of its own, a review or a planner turn), or `waiting for a coder: 2nd in line` while its task run waits for a coder (see
 [Taking turns](#serving-the-control-plane); `next in line` when it's next), `run paused: usage
 limit; starts again at 18:01` while its run waits to start again (see **Usage limits** under
 [Tasks](#tasks)), `viewed by N` when N other frontends view it, how many of its
@@ -224,7 +224,8 @@ keeps that session, as does picking it. Picking another session switches what ru
 active session is idle and no other frontend views it: the session you pick becomes the active one,
 and its conversation shows in place of the one you left. Otherwise, while the active session runs
 work or another frontend views it, picking a session shows it read-only, and what runs stays as it
-was. Switching is refused while tasks run, a review runs or the planner answers: the picker opens
+was. Switching is refused while tasks run, a task runs in a lane of its own, a review runs or the
+planner answers: the picker opens
 again, saying what to stop under the list, and nothing goes to the conversation; so does any other
 pick that's refused or can't be sent. Any other frontend that was viewing the session you
 left keeps it, read-only.
@@ -329,8 +330,9 @@ output if it failed and just its last line if it passed; note what it's doing wi
 The **agents pane** (bottom right) lists the agents running now: each one's role, its task, and
 whether it's working or waiting on orbit (say, `waiting on complete_task` while its work is
 verified). Its subtitle says whether review is active or paused. Activate it with `enter` and press
-`c` on an agent to cancel its work: for a reviewer, just that review (the next one starts); for the
-planner, just its turn; for the coder, the same as `ctrl+s`.
+`c` on an agent to cancel its work: for a reviewer, or any agent in a lane that starts by itself
+(see `lane` under [Roles](#roles-and-orbitconfigtoml)), just its task (the lane's next one
+starts); for the planner, just its turn; for the coder, the same as `ctrl+s`.
 
 The **Usage panel** sits in the right column, between the verification panel and the agents pane.
 It stays hidden until a usage report arrives (orbit fetches it with the token in
@@ -967,8 +969,10 @@ rather than to a session, so it carries on across sessions and restarts. A super
 due waits while review is paused, and while suggested tasks (or reviews) are pending or running; it
 comes with your next commit once none is.
 
-The reviews orbit queued can't be edited: remove one instead. Reviews need the worktree;
-`--no-review` turns them off.
+The reviews orbit queued can't be edited: remove one instead. Reviews run in the reviewer's lane,
+`review`, which starts its tasks by itself: a `reviewer` task you add starts there at once too.
+Reviews need the worktree, and a reviewer in a lane of its own; `--no-review` turns them off, and a
+`reviewer` task you add then runs in its lane on a read-only snapshot of the base commit.
 
 ### Roles and `.orbit/config.toml`
 
@@ -997,13 +1001,24 @@ none names changes nothing; one that's missing or can't be read is refused, nami
 the role.
 
 A role also says which lane runs it, where it works, whether you talk to it, whether its work
-merges, whether it's enabled and how hard its agents think. These fields are **accepted now; take
-effect in a later version**: orbit loads and checks them, but nothing acts on them yet, except
-that a role's `workspace` decides whether its tasks count toward `max_coders` (see
-Taking turns under [Serving the control plane](#serving-the-control-plane)).
+merges, whether it's enabled and how hard its agents think. Its `lane` takes effect, as does
+`merge` in choosing the lane that runs on `ctrl+r`, and its `workspace` decides whether its tasks
+count toward `max_coders` (see Taking turns under
+[Serving the control plane](#serving-the-control-plane)); the rest are **accepted now; take effect
+in a later version**: orbit loads and checks them, but nothing acts on them yet.
 
 - `lane`: the lane that runs the role's agents, a plain name of letters, digits, `-` and `_`. Each
-  lane runs one agent at a time, beside the others.
+  lane of the enabled roles that aren't conversational runs one task at a time, the next on the
+  task list whose role is in it, beside the others. The lane whose roles merge (`work` for the
+  built-in roles; `work` too if none does) runs its tasks when you press `ctrl+r`, and `ctrl+s`
+  holds it. Every other lane, such as `review`, starts a task as soon as one is queued for it
+  (added, accepted or edited), and `ctrl+r` runs what waits there too; stopping it, with `c` in
+  the agents pane or the protocol's `CancelTurn`, stops just its task, and the lane goes on with
+  the next. While the work lane waits out Claude's usage limit or an outage, no lane starts a
+  task; they start again with it, or once `ctrl+s` cancels its wait. Until a role's `workspace`
+  takes effect, a task in a lane other than the work lane runs in a read-only snapshot of the
+  base commit, as reviews do (in place outside a git repository). Each lane shows in the
+  Snapshot's `busy`, by name.
 - `workspace`: where its agent works: `worktree` (the coder's separate worktree, the only one whose
   work can merge), `snapshot` (a read-only snapshot of the base commit), `checkout` (your checkout,
   read in place) or `none` (an empty temporary directory).
@@ -2278,7 +2293,10 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `orbit.agent.request` child of it with `AgentTracing` (in `agent_trace`);
     `Verifier` (in `verifier`) runs the steps, each run for an agent's call timed as an
     `orbit.verify.step` child of the call's span; `Lander` (in `landing`) commits and merges
-    verified work; `ReviewLane` (in `review_lane`) runs reviews beside the work, each traced as
+    verified work; every lane of the roles' but the one whose roles merge runs on a `LaneRunner`
+    (in `lane_runner`), which starts its tasks by itself, one at a time, unless a pause or a halt
+    stops it, and `Lanes` (also there) holds the lanes by name; `ReviewLane` (in `review_lane`)
+    queues reviews and runs them on its lane's runner, beside the work, each traced as
     an `orbit.review` span by `ReviewTracing` (in `review_trace`); `StartupCheck`
     (in `startup_check`) runs the steps once on the base commit as orbit starts, each run traced
     as an `orbit.startup_check` span by `StartupTracing` (in `startup_trace`); `UsageMonitor`

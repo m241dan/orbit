@@ -491,7 +491,7 @@
       "type": "object"
     },
     "CancelTurn": {
-      "description": "Stop the work in ``lane``: the planner's turn, or the task run.",
+      "description": "Stop the work in ``lane``: the planner's turn, the task run, or the task running in a lane\nthat starts by itself.",
       "properties": {
         "lane": {
           "default": "work",

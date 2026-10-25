@@ -9,9 +9,11 @@ from orbit.agent.domain.roles import (
     Role,
     built_in_roles,
     load_built_in_roles,
+    merging_lane,
     out_of_time,
     role_task,
     suggested_task,
+    task_lanes,
     task_suggestion,
     timeout_ending,
     tool_rules,
@@ -21,6 +23,7 @@ from orbit.protocol import (
     AGENT_FAILED,
     BUILT_IN_ROLE_NAMES,
     TIMED_OUT,
+    WORK_LANE,
     Settings,
     TaskSpec,
     ToolAccess,
@@ -335,3 +338,36 @@ def test_restricted_tool_rules_add_reading_and_searching_and_deny_writing() -> N
 def test_tool_rules_for_every_orbit_tool_deny_none_unless_restricted() -> None:
     assert tool_rules("full", ORBIT_TOOLS).denied == ()
     assert tool_rules("restricted", ORBIT_TOOLS).denied == ("Edit", "Write", "NotebookEdit")
+
+
+def test_the_built_in_task_roles_run_in_the_work_and_review_lanes() -> None:
+    assert task_lanes(BUILT_IN_ROLES) == {
+        "work": frozenset({"coder", "configurator"}),
+        "review": frozenset({"reviewer", "super-reviewer"}),
+    }
+
+
+def test_a_task_role_in_a_lane_of_its_own_adds_that_lane() -> None:
+    security = Role(instructions="Audit.", verify=False, lane="security", workspace="snapshot")
+    lanes = task_lanes({**BUILT_IN_ROLES, "security": security})
+    assert lanes["security"] == frozenset({"security"})
+
+
+def test_a_disabled_role_adds_no_lane() -> None:
+    security = Role(
+        instructions="Audit.", verify=False, lane="security", workspace="snapshot", enabled=False
+    )
+    assert "security" not in task_lanes({**BUILT_IN_ROLES, "security": security})
+
+
+def test_the_merging_lane_is_the_lane_of_the_roles_that_merge() -> None:
+    coder = BUILT_IN_ROLES["coder"].model_copy(update={"lane": "build"})
+    configurator = BUILT_IN_ROLES["configurator"].model_copy(update={"lane": "build"})
+    roles = {**BUILT_IN_ROLES, "coder": coder, "configurator": configurator}
+    assert merging_lane(BUILT_IN_ROLES) == WORK_LANE
+    assert merging_lane(roles) == "build"
+
+
+def test_without_an_enabled_merging_role_the_merging_lane_is_the_work_lane() -> None:
+    coder = BUILT_IN_ROLES["coder"].model_copy(update={"lane": "build", "enabled": False})
+    assert merging_lane({**BUILT_IN_ROLES, "coder": coder}) == WORK_LANE

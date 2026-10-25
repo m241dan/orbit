@@ -3,6 +3,7 @@
 import pytest
 
 from orbit.agent.domain.activity import (
+    LANE_TASK_RUNNING,
     PLANNER_ANSWERING,
     REVIEW_RUNNING,
     TASKS_RUNNING,
@@ -20,6 +21,7 @@ from orbit.protocol import Activity as Reported
     ("activity", "refusal"),
     [
         (Activity(tasks=True), TASKS_RUNNING),
+        (Activity(lane_tasks=("4",)), LANE_TASK_RUNNING),
         (Activity(review=True), REVIEW_RUNNING),
         (Activity(planner=True), PLANNER_ANSWERING),
     ],
@@ -36,6 +38,8 @@ def test_each_activity_alone_refuses_a_switch_saying_so_and_is_running(
         (Activity(tasks=True, review=True, planner=True), TASKS_RUNNING),
         (Activity(review=True, planner=True), REVIEW_RUNNING),
         (Activity(tasks=True, planner=True), TASKS_RUNNING),
+        (Activity(tasks=True, lane_tasks=("4",)), TASKS_RUNNING),
+        (Activity(lane_tasks=("4",), review=True), LANE_TASK_RUNNING),
     ],
 )
 def test_several_at_once_refuse_with_the_first_in_order(activity: Activity, refusal: str) -> None:
@@ -51,6 +55,7 @@ def test_several_at_once_refuse_with_the_first_in_order(activity: Activity, refu
         (Activity(tasks=True, review=True, planner=True), Running.TASKS),
         (Activity(tasks=True, planner=True), Running.TASKS),
         (Activity(review=True, planner=True), Running.REVIEW),
+        (Activity(lane_tasks=("4",), planner=True), Running.LANES),
         (Activity(startup_check=True), None),
     ],
 )
@@ -68,6 +73,7 @@ def test_the_first_running_kind_is_in_order_and_ignores_the_startup_check(
         (Activity(planner=True), "the planner is answering"),
         (Activity(tasks=True, review=True, planner=True), "tasks are running"),
         (Activity(review=True, planner=True), "a review is running"),
+        (Activity(lane_tasks=("4",)), "a task is running in its own lane"),
         (Activity(startup_check=True), None),
     ],
 )
@@ -97,11 +103,13 @@ def test_everything_in_progress_is_reported_in_order_with_its_task() -> None:
         reviewing=("t2",),
         waiting_for_coder=2,
         coders_busy=3,
+        lane_tasks=("t4",),
     )
 
     assert reported(activity) == (
         Reported(kind="task_run", task_id="t1"),
         Reported(kind="waiting_for_coder", position=2, busy=3),
+        Reported(kind="task_run", task_id="t4"),
         Reported(kind="review", task_id="t2"),
         Reported(kind="planner"),
         Reported(kind="startup_check"),
@@ -116,6 +124,13 @@ def test_only_what_is_in_progress_is_reported() -> None:
 
 def test_nothing_in_progress_reports_nothing() -> None:
     assert reported(Activity()) == ()
+
+
+def test_the_tasks_running_in_their_own_lanes_are_each_reported_as_a_task_run() -> None:
+    assert reported(Activity(lane_tasks=("4", "6"))) == (
+        Reported(kind="task_run", task_id="4"),
+        Reported(kind="task_run", task_id="6"),
+    )
 
 
 def test_a_task_run_or_review_whose_task_is_not_known_yet_is_not_reported() -> None:

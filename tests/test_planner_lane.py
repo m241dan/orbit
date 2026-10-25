@@ -179,7 +179,7 @@ async def test_cancelling_an_unknown_lane_stops_neither_lane() -> None:
     await events_until(session, lambda e: isinstance(e, TurnStarted) and e.turn_id != e.agent_id)
     await send(session, CancelTurn(lane="x"))
     events = await events_until(session, lambda e: isinstance(e, CommandRefused))
-    assert events[-1] == refused(UNKNOWN, "No lane 'x'; the lanes are work and planner.")
+    assert events[-1] == refused(UNKNOWN, "No lane 'x'; the lanes are work, planner and review.")
     assert errors(events) == []
 
     planner_gate.set()

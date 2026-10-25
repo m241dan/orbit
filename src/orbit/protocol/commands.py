@@ -35,7 +35,8 @@ class SendMessage(_Message):
 
 
 class CancelTurn(_Message):
-    """Stop the work in ``lane``: the planner's turn, or the task run."""
+    """Stop the work in ``lane``: the planner's turn, the task run, or the task running in a lane
+    that starts by itself."""
 
     type: Literal["cancel_turn"] = "cancel_turn"
     lane: BusyLane = WORK_LANE

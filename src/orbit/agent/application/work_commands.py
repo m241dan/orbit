@@ -1,11 +1,12 @@
 """The work commands: prompts to the planner, tasks and the board, and the agents' work."""
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import assert_never
 
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.failures import command_failure
+from orbit.agent.application.lane_runner import Lanes
 from orbit.agent.application.lanes import OPEN_GATE, SessionGate
 from orbit.agent.application.outbox import EventSink
 from orbit.agent.application.planner_seat import PlannerSeat
@@ -18,17 +19,15 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.work_turns import WorkTurns
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.catalog import CONVERSATIONAL_ROLES, LANES, TRIGGER_NAMES
+from orbit.agent.domain.catalog import CONVERSATIONAL_ROLES, TRIGGER_NAMES
 from orbit.agent.domain.refusals import Refused, unknown
 from orbit.protocol import (
     CONFIGURE_CHECKS,
     INVALID,
     NOT_CONFIGURED,
     PLANNER,
-    REVIEW_ROLES,
     SUPER_REVIEW,
     UNKNOWN,
-    WORK_LANE,
     AcceptTask,
     AddTask,
     CancelAgent,
@@ -74,7 +73,8 @@ class CommandParts:
     into, its ``tasks``, its planner ``seat``, the work lane's ``turns``, its review ``lane``,
     if any, the ``proposals`` waiting for the user, the ``desk`` running its agents and the
     ``startup`` check, if any; ``save`` saves the session and ``reviews_changed`` saves its
-    review state; the session's ``gate`` says whether another orbit owns the repository."""
+    review state; the session's ``gate`` says whether another orbit owns the repository; and
+    its ``lanes`` are the lanes work runs in, by name."""
 
     settings: SessionSettings
     events: EventSink
@@ -88,13 +88,14 @@ class CommandParts:
     save: Callable[[], Awaitable[None]]
     reviews_changed: Callable[[], Awaitable[None]]
     gate: SessionGate = OPEN_GATE
+    lanes: Lanes = field(default_factory=Lanes)
 
 
 class WorkCommands:
     """Handles the work commands on the session held in ``parts``; while it's read-only, or
     taking ownership, those that start work are queued, in order, rather than run, each later
     run in the span current as it was queued, its own command's, so what it starts links
-    there."""
+    there. A task added, accepted or edited starts at once if its lane starts by itself."""
 
     def __init__(self, parts: CommandParts) -> None:
         self._parts = parts
@@ -214,6 +215,7 @@ class WorkCommands:
         match command:
             case AddTask(task=task):
                 await self._parts.tasks.change(lambda board: board.add(task))
+                self._parts.lanes.kick_for(task.role)
             case RunTasks():
                 await self._parts.turns.run_tasks()
             case _:
@@ -224,15 +226,25 @@ class WorkCommands:
             case EditTask(task_id=task_id, task=task):
                 await self._edit(task_id, task)
             case AcceptTask(task_id=task_id):
-                await self._parts.tasks.change(lambda board: board.accept(task_id))
+                await self._accept(task_id)
             case RemoveTask(task_id=task_id):
                 await self._remove(task_id)
             case _:
                 assert_never(command)
 
+    async def _accept(self, task_id: str) -> None:
+        """Accept a draft, if it is one, and start it if its lane starts by itself."""
+
+        def accept(board: TaskBoard) -> TaskState:
+            board.accept(task_id)
+            return board.get(task_id)
+
+        state = await self._parts.tasks.change(accept)
+        self._parts.lanes.kick_for(state.task.role)
+
     async def _edit(self, task_id: str, task: TaskSpec) -> None:
-        """Edit a task, if the board allows it. An edited task in a review batch has to finish
-        again before the batch does."""
+        """Edit a task, if the board allows it, and start it if its lane starts by itself. An
+        edited task in a review batch has to finish again before the batch does."""
         lane = self._parts.lane
 
         def edit(board: TaskBoard) -> TaskState:
@@ -241,6 +253,7 @@ class WorkCommands:
 
         # The edited task is taken from the change: it may be removed while the save is awaited.
         state = await self._parts.tasks.change(edit)
+        self._parts.lanes.kick_for(state.task.role)
         if lane is not None:
             lane.edited(state)
             await self._parts.reviews_changed()
@@ -254,11 +267,17 @@ class WorkCommands:
             await self._parts.lane.removed(task_id, state)
 
     async def _cancel_turn(self, lane: str) -> None:
-        """Stop the work in ``lane``, or say there's no such lane."""
-        if lane not in LANES:
-            raise unknown(f"No lane {lane!r}", "the lanes are", LANES)
-        if lane == WORK_LANE:
+        """Stop the work in ``lane``: the work lane's run, holding it; the task running in a lane
+        that starts by itself, which carries on; or the planner's turn. Refused for a lane
+        there's none of."""
+        lanes = self._parts.lanes
+        if lane not in lanes.names:
+            raise unknown(f"No lane {lane!r}", "the lanes are", lanes.names)
+        runner = lanes.runner(lane)
+        if lane == lanes.work:
             self._parts.turns.hold()
+        elif runner is not None:
+            runner.cancel()
         else:
             self._parts.seat.cancel()
 
@@ -322,8 +341,8 @@ class WorkCommands:
         await self._parts.events.put(decided)
 
     async def _cancel_agent(self, agent_id: str) -> None:
-        """Stop the startup check, or a reviewer's review, on its own; any other agent's work,
-        like ctrl+s."""
+        """Stop the startup check, or the task of an agent in a lane that starts by itself, on its
+        own; any other agent's work, like ctrl+s."""
         if self._cancel_startup(agent_id):
             return
         desk = self._parts.desk
@@ -333,9 +352,11 @@ class WorkCommands:
         self._cancel_work_of(agent)
 
     def _cancel_work_of(self, agent: Agent) -> None:
-        """Stop a reviewer's review, or the planner's turn, on its own; else the work lane's."""
-        if agent.role in REVIEW_ROLES and self._parts.lane is not None:
-            self._parts.lane.cancel(agent.task_id)
+        """Stop the task of an agent in a lane that starts by itself, such as a reviewer's review,
+        or the planner's turn, on its own; else the work lane's."""
+        runner = self._parts.lanes.of_role(agent.role)
+        if runner is not None:
+            runner.cancel(agent.task_id)
         elif agent.role == PLANNER:
             self._parts.seat.cancel()
         else:

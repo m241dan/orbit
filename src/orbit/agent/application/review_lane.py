@@ -1,11 +1,11 @@
 """The review lane: reviews of landed work, run one at a time beside the work lane.
 
-Each review runs in a read-only snapshot of the commit it reviews. Its suggestions become tasks
-at the end of the queue, which the work lane then runs; :class:`ReviewPlanner` decides when a
-review is due and stops reviews generating work forever.
+Each review runs in a read-only snapshot of the commit it reviews, on the :class:`LaneRunner` of
+the reviewer's lane, which runs the tasks of every role in it. Its suggestions become tasks at the
+end of the queue, which the work lane then runs; :class:`ReviewPlanner` decides when a review is
+due and stops reviews generating work forever.
 """
 
-import asyncio
 from collections.abc import Awaitable, Callable, Collection, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -13,7 +13,14 @@ from functools import partial
 
 from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.desk import AgentDesk
-from orbit.agent.application.lanes import Background, SessionGate
+from orbit.agent.application.lane_runner import (
+    LaneParts,
+    LaneRunner,
+    LaneWork,
+    unpaused,
+    unposted,
+)
+from orbit.agent.application.lanes import SessionGate
 from orbit.agent.application.outcomes import Outcome, UserStop, cancelling, run_task_to_end
 from orbit.agent.application.ports import CoderTree, Reply, TreeFailed
 from orbit.agent.application.review_trace import Queued, ReviewTally, ReviewTracing
@@ -29,12 +36,13 @@ from orbit.agent.domain.reviews import (
     pending_titles,
     review_prompt,
 )
-from orbit.agent.domain.roles import role_task, suggested_task
+from orbit.agent.domain.roles import role_task, suggested_task, task_lanes
 from orbit.protocol import (
     CODER,
     GIT_FAILED,
-    REVIEW_ROLES,
+    REVIEWER,
     ErrorOccurred,
+    Event,
     Notice,
     ReviewStatus,
     TaskState,
@@ -49,13 +57,17 @@ class ReviewHooks:
     ``wake_work`` asks the work lane to run the suggestions a review queued, while the
     review's span is current, ``changed`` is called after the lane's state may have changed,
     the session's ``gate`` tells whether another orbit owns the repository or the session is
-    halted, when no review starts, and ``tracing`` traces the reviews.
+    halted, and ``paused`` whether the work lane waits out a pause, when no review starts,
+    ``tracing`` traces the reviews and ``post`` publishes, without blocking, whether the lane is
+    busy.
     """
 
     wake_work: Callable[[], Awaitable[None]]
     changed: Changed
     gate: SessionGate
     tracing: ReviewTracing = field(default_factory=ReviewTracing)
+    paused: Callable[[], bool] = unpaused
+    post: Callable[[Event], None] = unposted
 
 
 class ReviewLane:
@@ -83,11 +95,18 @@ class ReviewLane:
         # until it ends.
         self._causes: dict[str, Span] = {}
         self._tallies: dict[str, ReviewTally] = {}  # Review task id -> its suggestions, as it runs.
-        self._background = Background("review", desk.publish)
-        self._current: tuple[str, asyncio.Task[Outcome]] | None = None  # The review running.
-        self._reviewing: str | None = None  # The review task running, until it's followed up.
+        self.runner = self._runner(hooks)
         self._paused_noted = False
         self._status: ReviewStatus | None = None
+
+    def _runner(self, hooks: ReviewHooks) -> LaneRunner:
+        """The runner of the reviewer's lane, running the reviews and the tasks of the other
+        roles in it, reaching the rest of the session through ``hooks``."""
+        roles = self._desk.agents.roles
+        lane = roles[REVIEWER].lane
+        work = LaneWork(self._next_review, self._review, self._spent)
+        parts = LaneParts(self._desk, self._tasks, hooks.gate, hooks.paused, hooks.post)
+        return LaneRunner(lane, task_lanes(roles).get(lane, frozenset()), parts, work)
 
     def snapshot(self) -> LaneSnapshot:
         """The lane's state for this session, to :meth:`load` later."""
@@ -98,14 +117,19 @@ class ReviewLane:
     @property
     def running(self) -> bool:
         """Whether reviews are being run."""
-        return self._background.running
+        return self.runner.running
+
+    @property
+    def roles(self) -> frozenset[str]:
+        """The roles whose tasks the lane runs: those in the reviewer's lane."""
+        return self.runner.roles
 
     @property
     def reviewing(self) -> tuple[str, ...] | None:
         """The tasks whose work the review running or, before the lane picks one, the one it
         will pick reviews, in task order; none when there's no review, and no tasks for a
         review of no particular task."""
-        review = self._reviewing or self._next_review(self._spent())
+        review = self.runner.current
         if review is None:
             return None
         job = self._jobs.get(review)
@@ -113,7 +137,7 @@ class ReviewLane:
 
     def on_stopped(self, stopped: Callable[[], None]) -> None:
         """Have ``stopped`` called whenever the reviews stop running."""
-        self._background.ended = stopped
+        self.runner.on_stopped(stopped)
 
     def load(self, snapshot: LaneSnapshot) -> None:
         """Replace the lane's state with ``snapshot``'s; :meth:`end_interrupted` follows."""
@@ -217,24 +241,21 @@ class ReviewLane:
 
     def cancel(self, task_id: str) -> None:
         """Stop review task ``task_id`` if it's the one running; the lane carries on."""
-        if self._current is not None and self._current[0] == task_id:
-            self._current[1].cancel()
+        self.runner.cancel(task_id)
 
     def kick(self) -> None:
         """Run the reviews waiting, if they aren't being run already, unless this orbit is
-        read-only or the session is halted; those queued meanwhile wait on the board."""
-        gate = self._hooks.gate
-        if gate.read_only() or gate.halted() or self._background.running:
-            return
-        self._background.start(self._run_reviews())
+        read-only, the session is halted or the work lane waits out a pause; those queued
+        meanwhile wait on the board."""
+        self.runner.kick()
 
     async def stop(self) -> None:
         """Stop the reviews running, and wait for them to; they run again once kicked."""
-        await self._background.stop()
+        await self.runner.stop()
 
     async def close(self) -> None:
         """Stop the reviews running for good: a kick from now on runs none."""
-        await self._background.close()
+        await self.runner.close()
 
     async def _queue(self, job: ReviewJob | None) -> None:
         """Queue ``job``'s review, if there is one, and run it."""
@@ -302,22 +323,10 @@ class ReviewLane:
             await self._publish(Notice(message=pause_notice(self.planner.limits.rounds)))
         self._paused_noted = self.planner.paused
 
-    async def _run_reviews(self) -> None:
-        """Run the reviews waiting, one at a time, until none are left or the session halts."""
-        tried = self._spent()
-        while (task_id := self._next_review(tried)) is not None:
-            if self._hooks.gate.halted():  # It may have halted as the last review ended.
-                return
-            tried.add(task_id)
-            self._reviewing = task_id
-            try:
-                await self._review(task_id)
-            finally:
-                self._reviewing = None
-
     def _next_review(self, tried: Collection[str]) -> str | None:
-        """The next review to run, skipping those ``tried``."""
-        return self._board.next_runnable(skip=tried, roles=REVIEW_ROLES)
+        """The next review, or other task of the lane's roles, to run, skipping those
+        ``tried``."""
+        return self._board.next_runnable(skip=tried, roles=self.runner.roles)
 
     def _spent(self) -> set[str]:
         """Reviews that ended, however they did: their batch is over or no longer filling, so
@@ -364,17 +373,11 @@ class ReviewLane:
             await self._after(self._batches.get(task_id))
 
     async def _reviewed(self, task_id: str) -> Outcome:
-        """How started review ``task_id`` ended, after which it's no longer the current one;
-        anything unexpected escapes."""
+        """How started review ``task_id`` ended, run as a task of its own that the user's stop
+        cancels; anything unexpected escapes."""
         job = self._jobs.get(task_id)
-        reviewer = asyncio.create_task(
-            self._run_reviewer(task_id, job.commits[-1] if job else None)
-        )
-        self._current = (task_id, reviewer)
-        try:
-            return await reviewer
-        finally:
-            self._current = None
+        commit = job.commits[-1] if job else None
+        return await self.runner.alone(task_id, partial(self._run_reviewer, task_id, commit))
 
     async def _run_reviewer(self, task_id: str, commit: str | None) -> Outcome:
         """Run the reviewer in a snapshot of ``commit``; a review the user queued works in place."""

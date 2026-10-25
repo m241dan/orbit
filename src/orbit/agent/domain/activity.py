@@ -9,15 +9,17 @@ from orbit.protocol import Activity as Reported
 
 class Running(Enum):
     """What may run in a session that keeps it from being idle, in the order it's told: a task
-    run, a review and a planner turn."""
+    run, a task in a lane of its own, a review and a planner turn."""
 
     TASKS = auto()
+    LANES = auto()
     REVIEW = auto()
     PLANNER = auto()
 
 
 _DOING = {
     Running.TASKS: "tasks are running",
+    Running.LANES: "a task is running in its own lane",
     Running.REVIEW: "a review is running",
     Running.PLANNER: "the planner is answering",
 }
@@ -25,6 +27,7 @@ _DOING = {
 
 _TO_STOP = {
     Running.TASKS: "Press ctrl+s to stop them.",
+    Running.LANES: "Press c on it in the agents pane to stop it.",
     Running.REVIEW: "Press c on it in the agents pane to stop it.",
     Running.PLANNER: "Press ctrl+x to stop it.",
 }
@@ -33,6 +36,7 @@ _TO_STOP = {
 _SWITCH_REFUSALS = {kind: f"Can't switch: {_DOING[kind]}. {_TO_STOP[kind]}" for kind in Running}
 
 TASKS_RUNNING = _SWITCH_REFUSALS[Running.TASKS]
+LANE_TASK_RUNNING = _SWITCH_REFUSALS[Running.LANES]
 REVIEW_RUNNING = _SWITCH_REFUSALS[Running.REVIEW]
 PLANNER_ANSWERING = _SWITCH_REFUSALS[Running.PLANNER]
 
@@ -45,7 +49,8 @@ class Activity:
     particular task, such as a super review, reviews no tasks. The startup check runs on the
     base commit rather than in a session, so it leaves the session idle. A task run waiting in
     line for a coder's slot waits at position ``waiting_for_coder``, 1 next, while
-    ``coders_busy`` coders hold the slots, and both are none otherwise."""
+    ``coders_busy`` coders hold the slots, and both are none otherwise. ``lane_tasks`` are the
+    tasks running in lanes that start by themselves, reviews aside."""
 
     tasks: bool = False
     review: bool = False
@@ -55,6 +60,7 @@ class Activity:
     reviewing: tuple[str, ...] | None = None
     waiting_for_coder: int | None = None
     coders_busy: int | None = None
+    lane_tasks: tuple[str, ...] = ()
 
     @property
     def running(self) -> bool:
@@ -64,10 +70,11 @@ class Activity:
 
 
 def first_running(activity: Activity) -> Running | None:
-    """What runs first of a task run, a review and a planner turn in ``activity``; none when
-    nothing does."""
+    """What runs first of a task run, a task in a lane of its own, a review and a planner turn in
+    ``activity``; none when nothing does."""
     kinds = (
         (activity.tasks, Running.TASKS),
+        (bool(activity.lane_tasks), Running.LANES),
         (activity.review, Running.REVIEW),
         (activity.planner, Running.PLANNER),
     )
@@ -75,7 +82,7 @@ def first_running(activity: Activity) -> Running | None:
 
 
 def doing(activity: Activity) -> str | None:
-    """What runs first of a task run, a review and a planner turn in ``activity``, as it's
+    """What runs first of what :func:`first_running` orders in ``activity``, as it's
     called when it keeps the session busy, such as "tasks are running"; none when nothing
     runs."""
     kind = first_running(activity)
@@ -83,23 +90,25 @@ def doing(activity: Activity) -> str | None:
 
 
 def switch_refusal(activity: Activity) -> str | None:
-    """Why a switch is refused while ``activity`` is in progress, saying what runs first of a
-    task run, a review and a planner turn; none when nothing runs."""
+    """Why a switch is refused while ``activity`` is in progress, saying what runs first of what
+    :func:`first_running` orders; none when nothing runs."""
     kind = first_running(activity)
     return None if kind is None else _SWITCH_REFUSALS[kind]
 
 
 def reported(activity: Activity) -> tuple[Reported, ...]:
     """What's in progress in ``activity`` as connections are told it: a task run, its wait for
-    a coder, a review, a planner turn and the startup check, in that order; a task run or a
-    review once its tasks are known. A review is told once per task it reviews, in order, or
-    once without a task if it reviews no particular one."""
+    a coder, the tasks running in lanes of their own, each as a task run, a review, a planner
+    turn and the startup check, in that order; a task run or a review once its tasks are known.
+    A review is told once per task it reviews, in order, or once without a task if it reviews no
+    particular one."""
     task_run = activity.tasks and activity.task_id is not None
     position, busy = activity.waiting_for_coder, activity.coders_busy
     waiting = Reported(kind="waiting_for_coder", position=position, busy=busy)
     entries = (
         (task_run, (Reported(kind="task_run", task_id=activity.task_id),)),
         (position is not None, (waiting,)),
+        (True, tuple(Reported(kind="task_run", task_id=task) for task in activity.lane_tasks)),
         (activity.review, _reviews(activity.reviewing)),
         (activity.planner, (Reported(kind="planner"),)),
         (activity.startup_check, (Reported(kind="startup_check"),)),

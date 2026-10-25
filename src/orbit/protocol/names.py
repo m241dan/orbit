@@ -30,7 +30,8 @@ REVIEW_ROLES = frozenset({REVIEWER, SUPER_REVIEWER})
 
 
 BusyLane = str
-"""Where work runs, by name: task runs in ``work``; the planner's turns in ``planner``."""
+"""Where work runs, by name: the planner's turns in ``planner``, and tasks in their roles' lanes,
+such as ``work``, where task runs start on the user's asking, and ``review``."""
 
 
 TaskOrigin = str

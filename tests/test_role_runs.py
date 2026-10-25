@@ -2,17 +2,39 @@
 
 import asyncio
 
+from orbit.agent import WorkspaceHost
 from orbit.agent.domain.agent_task import NO_STEPS
 from orbit.protocol import (
     NOT_CONFIGURED,
     TIMED_OUT,
+    AddTask,
     AgentExited,
     ErrorOccurred,
+    Event,
     Settings,
     TaskSpec,
     TurnEndReason,
 )
-from tests.agent_fakes import ROLES, Call, Steps, board, run, session_for, statuses, verified
+from tests.agent_fakes import (
+    ROLES,
+    Call,
+    Steps,
+    board,
+    events_until,
+    idle,
+    run,
+    send,
+    session_for,
+    statuses,
+    verified,
+)
+
+
+async def review(session: WorkspaceHost) -> list[Event]:
+    """Queue a reviewer's task, which starts by itself in the review lane, and return the events
+    until that lane goes idle."""
+    await send(session, AddTask(task=TaskSpec(prompt="Review", role="reviewer")))
+    return await events_until(session, idle("review"))
 
 
 async def test_an_agent_is_launched_with_its_roles_instructions_and_tools() -> None:
@@ -50,7 +72,7 @@ async def test_an_unverified_agent_is_told_no_checks() -> None:
         return "completed"
 
     session, _, _ = session_for(verification=verified(Steps()), reviewers=(reviews,))
-    await asyncio.wait_for(run(session, TaskSpec(prompt="Review", role="reviewer")), 5)
+    await asyncio.wait_for(review(session), 5)
     assert "Unit tests" not in briefs[0] and "run_check" not in briefs[0]
 
 
@@ -88,7 +110,7 @@ async def test_tools_outside_the_role_are_refused_and_unverified_roles_finish_on
 
     steps = Steps()
     session, _, _ = session_for(verification=verified(steps), reviewers=(reviews,))
-    events = await asyncio.wait_for(run(session, TaskSpec(prompt="Review", role="reviewer")), 5)
+    events = await asyncio.wait_for(review(session), 5)
     assert steps.runs == []
     assert statuses(events) == ["completed"]
 
@@ -132,5 +154,5 @@ async def test_without_reviews_suggestions_are_refused() -> None:
         return "completed"
 
     session, _, _ = session_for(reviewers=(suggests,))
-    events = await asyncio.wait_for(run(session, TaskSpec(prompt="Review", role="reviewer")), 5)
+    events = await asyncio.wait_for(review(session), 5)
     assert statuses(events) == ["completed"]

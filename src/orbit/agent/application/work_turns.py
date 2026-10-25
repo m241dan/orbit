@@ -1,8 +1,9 @@
 """When the work lane runs: on the user's asking, after a review queues work unless the user
 held it or the session halted, first for a configurator, and again by itself once Claude's
 usage limit that stopped it resets, or, if Claude's API not answering stopped it, after a backoff
-that grows with each outage in a row, saying meanwhile until when and why it's paused. A run
-remembers what started it, which its tasks' spans link to."""
+that grows with each outage in a row, saying meanwhile until when and why it's paused. The lanes
+that start by themselves start no task meanwhile, and resume with it. A run remembers what
+started it, which its tasks' spans link to."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
@@ -10,9 +11,9 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from orbit.agent.application.desk import AgentDesk, Agents
+from orbit.agent.application.lane_runner import Kickable
 from orbit.agent.application.lanes import Background, SessionGate, TurnSlot
 from orbit.agent.application.limit_pause import LimitPause
-from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Verifier
 from orbit.agent.application.work_lane import WorkLane
@@ -36,6 +37,7 @@ from orbit.protocol import (
     PAUSED_FOR_API_UNAVAILABLE,
     PAUSED_FOR_USAGE_LIMIT,
     WORK_LANE,
+    BusyLane,
     Event,
     Notice,
     TaskSpec,
@@ -51,14 +53,15 @@ TASKS_RUNNING_MESSAGE = "Tasks are already running."
 
 @dataclass(frozen=True)
 class WorkParts:
-    """What decides when the work lane runs: the ``work`` lane and review ``lane``, if any, the
-    ``tasks`` they run, the ``verifier`` and agents' ``desk``, if any, ``post``, which
-    publishes events without blocking, the session's ``gate``, which tells whether it's
-    halted, ``usage``, the usage limits fetched last, if any, and ``paused_changed``, called
-    whenever :attr:`WorkTurns.paused` changes."""
+    """What decides when the work lane runs: the ``work`` lane and the ``lanes`` that start by
+    themselves, if any, the ``tasks`` they run, the ``verifier`` and agents' ``desk``, if any,
+    ``post``, which publishes events without blocking, the session's ``gate``, which tells
+    whether it's halted, ``usage``, the usage limits fetched last, if any, ``paused_changed``,
+    called whenever :attr:`WorkTurns.paused` changes, and the work lane's ``name``, the lane
+    whose roles merge."""
 
     work: WorkLane | None
-    lane: ReviewLane | None
+    lanes: Kickable | None
     tasks: Tasks
     verifier: Verifier | None
     desk: AgentDesk | None
@@ -66,6 +69,7 @@ class WorkParts:
     gate: SessionGate
     usage: Callable[[], UsageChanged | None] = lambda: None
     paused_changed: Callable[[], None] = lambda: None
+    name: BusyLane = WORK_LANE
 
 
 @dataclass(frozen=True)
@@ -88,8 +92,9 @@ class WorkTurns:
     work, sets up checks or holds it first, or :meth:`forget_wait` is called as the session is
     left; a halt's :meth:`stop_turn` keeps the wait, and one ending while halted starts the run
     once :meth:`lifted` is called. Until the run starts again or its wait is cancelled or
-    dropped, :attr:`paused` says when it starts again and why. Once :meth:`close` is called,
-    nothing starts.
+    dropped, :attr:`paused` says when it starts again and why. The lanes that start by
+    themselves are kicked as the run starts again by itself or the user cancels its wait, and
+    with every run the user asks for. Once :meth:`close` is called, nothing starts.
 
     A run is started by the span current as it's asked for: the command's asking for it, or the
     review's whose suggestions it runs. The run keeps that span when it starts again by itself,
@@ -101,9 +106,9 @@ class WorkTurns:
         self._board = parts.tasks.board
         self._held = False  # The user cancelled: don't start work by itself.
         self._closed = False  # The host is going away: start nothing.
-        self._turns = TurnSlot(WORK_LANE, TASKS_RUNNING_MESSAGE, parts.post)
+        self._turns = TurnSlot(parts.name, TASKS_RUNNING_MESSAGE, parts.post)
         # A run the usage limit or an outage stopped waits here to start again.
-        self._wait = Background(WORK_LANE, _posting(parts.post))
+        self._wait = Background(parts.name, _posting(parts.post))
         self._waiting = False  # The wait hasn't ended yet.
         # How the run whose wait ended while the session was halted starts again, if one did.
         self._due: _Restart | None = None
@@ -154,11 +159,12 @@ class WorkTurns:
             raise Refused(NOT_CONFIGURED, NO_VERIFY_MESSAGE)
 
     def hold(self) -> None:
-        """Cancel the run, or its wait to start again, and hold the lane until the user asks
-        for work again."""
+        """Cancel the run, or its wait to start again, which lets the other lanes start their
+        tasks again, and hold the lane until the user asks for work again."""
         self._held = True
         if self.forget_wait():
             self._parts.post(Notice(message=WAIT_CANCELLED_NOTE))
+            self._kick_lanes()
         if self._turns.running:
             assert self._parts.work is not None  # Only the work lane takes work turns.
             if not self._parts.work.stopped_by_user():
@@ -209,11 +215,16 @@ class WorkTurns:
     async def _start_asked(self) -> None:
         """Start a run the user asked for, started by the span current, the command's: drop the
         wait to start again of a run the usage limit or an outage stopped, which this run
-        replaces, run the reviews waiting, and start the work lane's turn, lifting a hold."""
+        replaces, run the tasks waiting in the lanes that start by themselves, and start the work
+        lane's turn, lifting a hold."""
         self.forget_wait()
-        if self._parts.lane is not None:
-            self._parts.lane.kick()
+        self._kick_lanes()
         await self._start(current_span(), asked=True)
+
+    def _kick_lanes(self) -> None:
+        """Run the tasks waiting in the lanes that start by themselves, if there are any."""
+        if self._parts.lanes is not None:
+            self._parts.lanes.kick()
 
     async def _start(self, cause: Span, *, asked: bool) -> None:
         """Start the work lane's turn, started by ``cause``, if there is work, unless closed.
@@ -304,9 +315,10 @@ class WorkTurns:
 
     async def _start_now(self, restart: _Restart) -> None:
         """Start the run the usage limit or an outage stopped again, as ``restart`` says, if
-        nothing keeps it waiting and work is left, and say so; either way it's paused no
-        longer."""
+        nothing keeps it waiting and work is left, and say so; either way it's paused no longer,
+        so the other lanes start their tasks again."""
         self._pause_as(None)
+        self._kick_lanes()
         work = self._startable(asked=False)
         if work is None:
             return

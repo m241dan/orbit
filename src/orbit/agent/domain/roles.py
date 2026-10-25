@@ -9,8 +9,9 @@ claims of being done are verified, and how long it may take. Its model and tool 
 defaults for tasks orbit queues in that role, as is its effort, which is stored with them but not
 yet passed to agents; a task the user queues keeps its own settings. It also says which lane runs
 it, where it works, whether you talk to it, whether its work merges and whether it's enabled,
-which are checked here; of these, only where it works is acted on yet, deciding whether its
-tasks take a coder's slot.
+which are checked here. The enabled task roles' lanes are the session's lanes, the one whose
+roles merge running on the user's asking; where a role works decides whether its tasks take a
+coder's slot.
 """
 
 import re
@@ -34,6 +35,7 @@ from orbit.protocol import (
     BUILT_IN_ROLE_NAMES,
     CODER,
     TIMED_OUT,
+    WORK_LANE,
     Effort,
     Settings,
     TaskSpec,
@@ -232,6 +234,23 @@ def worktree_lane_clashes(roles: Mapping[str, Role]) -> list[str]:
         return []
     named = " and ".join(f"lane {lane!r} has {names}" for lane, names in lanes.items())
     return [f'the enabled roles with workspace = "worktree" must share one lane, but {named}']
+
+
+def task_lanes(roles: Mapping[str, Role]) -> dict[str, frozenset[str]]:
+    """The lanes the enabled task roles among ``roles`` run in, in order, each with the names of
+    those roles: the roles that aren't conversational."""
+    lanes: dict[str, set[str]] = {}
+    for name, role in roles.items():
+        if role.enabled and not role.conversation:
+            lanes.setdefault(role.lane, set()).add(name)
+    return {lane: frozenset(names) for lane, names in lanes.items()}
+
+
+def merging_lane(roles: Mapping[str, Role]) -> str:
+    """The lane of the enabled roles among ``roles`` whose work merges, which runs only on the
+    user's asking: there's one at most, as only roles in the worktree merge and they share a
+    lane. It's the work lane if none merges."""
+    return next((role.lane for role in roles.values() if role.enabled and role.merge), WORK_LANE)
 
 
 def _task_roles_in(roles: Mapping[str, Role], lane: str) -> list[str]:
