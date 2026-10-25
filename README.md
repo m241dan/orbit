@@ -989,7 +989,12 @@ The built-in roles are data shipped with the package in
 [`src/orbit/agent/external/instructions/`](src/orbit/agent/external/instructions/) and read when
 orbit starts: `roles.toml` has a `[roles.<name>]` table for each, with the fields above, and its
 `instructions` name the Markdown file beside it that the role is told (for example `coder.md`). A
-project can still replace a role's instructions with `instructions` in `.orbit/config.toml`.
+project can still replace a role's instructions with `instructions` in `.orbit/config.toml`: one
+line ending in `.md` is the path of a Markdown file under `.orbit/` whose text the role is told
+(`instructions = "roles/coder.md"` reads `.orbit/roles/coder.md`), and anything else is the text
+itself. Only a file a role's `instructions` names is read, so a `.orbit/roles/reviewer.md` that
+none names changes nothing; one that's missing or can't be read is refused, naming the file and
+the role.
 
 An agent calling a tool its role doesn't have gets an error reply (the CLI only allows its role's
 tools, too, and orbit's others are disallowed so the agent doesn't see them); an agent still
@@ -1017,6 +1022,7 @@ super_review_suggestions = 10  # tasks one super review may suggest
 [roles.coder]
 model = "sonnet"
 timeout_minutes = 45
+instructions = "roles/coder.md"  # the text of .orbit/roles/coder.md
 
 [roles.docs-writer]
 instructions = "You write and update the project's documentation."
@@ -2181,8 +2187,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     MCP server; `GitCoderTree` is the coder's worktree and its snapshots; `repository` finds the
     git repository a workspace is in, fingerprints it, and places orbit's directory in it
     (`orbit_dir`: `.git/orbit`, or `.orbit` outside git); `config_file` reads
-    `.orbit/config.toml`; `built_in_roles` reads the built-in roles from
-    `instructions/roles.toml` and their instructions from the Markdown files it names; `checks`
+    `.orbit/config.toml` and the instructions files its roles name (`resolve_instructions`);
+    `built_in_roles` reads the built-in roles from `instructions/roles.toml` and their
+    instructions from the Markdown files it names; `checks`
     runs a verification step as a process (`run_step`); `processes` runs a program to completion
     without leaving it behind; `workspace`
     fingerprints the git working tree; `usage_api` fetches the Claude subscription's usage

@@ -13,7 +13,12 @@ from orbit.agent.domain.config import OrbitConfig
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
-from orbit.agent.external.config_file import CONFIG_PATH, read_config, write_checks
+from orbit.agent.external.config_file import (
+    CONFIG_PATH,
+    read_config,
+    resolve_instructions,
+    write_checks,
+)
 
 BUILT_IN_ROLES = read_built_in_roles()
 
@@ -116,6 +121,112 @@ def test_an_invalid_step_names_the_file(tmp_path: Path) -> None:
         read_config(str(tmp_path))
     assert str(path) in str(raised.value)
     assert "step 1 has no command" in str(raised.value)
+
+
+def write_instructions(root: Path, name: str, text: str) -> Path:
+    path = root / ".orbit" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_a_role_is_told_the_text_of_the_markdown_file_its_instructions_name(
+    tmp_path: Path,
+) -> None:
+    write(tmp_path, '[roles.coder]\ninstructions = "roles/coder.md"\n')
+    write_instructions(tmp_path, "roles/coder.md", "Write the code with care.\n")
+    coder = read_config(str(tmp_path)).roles["coder"]
+    assert coder.instructions == "Write the code with care."
+    built_in = BUILT_IN_ROLES["coder"]
+    assert coder == built_in.model_copy(update={"instructions": coder.instructions})
+
+
+def test_inline_instructions_are_the_text_itself(tmp_path: Path) -> None:
+    write(tmp_path, '[roles.reviewer]\ninstructions = "Review for security."\n')
+    assert read_config(str(tmp_path)).roles["reviewer"].instructions == "Review for security."
+
+
+def test_a_new_role_can_name_its_instructions_file(tmp_path: Path) -> None:
+    write(tmp_path, '[roles.docs-writer]\ninstructions = "docs-writer.md"\n')
+    write_instructions(tmp_path, "docs-writer.md", "You write the docs.\n")
+    role = read_config(str(tmp_path)).roles["docs-writer"]
+    assert role.instructions == "You write the docs."
+
+
+def test_a_missing_instructions_file_names_the_file_and_the_role(tmp_path: Path) -> None:
+    write(tmp_path, '[roles.coder]\ninstructions = "roles/missing.md"\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path))
+    assert ".orbit/roles/missing.md" in str(raised.value)
+    assert "roles.coder.instructions" in str(raised.value)
+
+
+def test_an_empty_instructions_file_is_refused(tmp_path: Path) -> None:
+    write(tmp_path, '[roles.coder]\ninstructions = "roles/coder.md"\n')
+    write_instructions(tmp_path, "roles/coder.md", "\n")
+    with pytest.raises(ConfigError, match=re.escape("roles.coder.instructions")):
+        read_config(str(tmp_path))
+
+
+def test_an_instructions_file_no_role_names_changes_nothing(tmp_path: Path) -> None:
+    write(tmp_path, "fix_attempts = 2\n")
+    write_instructions(tmp_path, "roles/reviewer.md", "Approve everything.\n")
+    assert read_config(str(tmp_path)).roles == BUILT_IN_ROLES
+
+
+def test_an_instructions_file_is_ignored_without_a_config_file(tmp_path: Path) -> None:
+    write_instructions(tmp_path, "roles/coder.md", "Write no tests.\n")
+    assert read_config(str(tmp_path)) == OrbitConfig(roles=BUILT_IN_ROLES)
+
+
+@pytest.mark.parametrize(
+    ("text", "problem"),
+    [
+        ("[roles]\ncoder = 3\n", "roles.coder"),
+        ("[roles.coder]\ninstructions = 3\n", "roles.coder.instructions"),
+        ("roles = 3\n", "roles"),
+    ],
+)
+def test_roles_that_are_not_tables_of_text_are_left_for_validation_to_refuse(
+    tmp_path: Path, text: str, problem: str
+) -> None:
+    write(tmp_path, text)
+    with pytest.raises(ConfigError, match=re.escape(problem)):
+        read_config(str(tmp_path))
+
+
+def test_resolving_a_markdown_path_reads_it_from_the_base_as_utf8(tmp_path: Path) -> None:
+    (tmp_path / "coder.md").write_text("\nZoë writes ✓ code.\n\n", encoding="utf-8")
+    assert resolve_instructions("coder.md", tmp_path) == "Zoë writes ✓ code."
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["Review for security.", "Read the notes in\nREADME.md", "Follow coder.md closely."],
+)
+def test_resolving_anything_but_one_line_ending_in_md_gives_the_text(
+    tmp_path: Path, value: str
+) -> None:
+    assert resolve_instructions(value, tmp_path) == value
+
+
+def test_resolving_a_missing_file_raises_config_error_naming_it(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match=re.escape(str(tmp_path / "roles" / "missing.md"))):
+        resolve_instructions("roles/missing.md", tmp_path)
+
+
+def test_resolving_a_non_utf8_file_raises_config_error_naming_it(tmp_path: Path) -> None:
+    path = tmp_path / "coder.md"
+    path.write_bytes(b"Write \xff code.\n")
+    with pytest.raises(ConfigError, match=re.escape(str(path))):
+        resolve_instructions("coder.md", tmp_path)
+
+
+def test_resolving_a_directory_raises_config_error_naming_it(tmp_path: Path) -> None:
+    path = tmp_path / "roles.md"
+    path.mkdir()
+    with pytest.raises(ConfigError, match=re.escape(str(path))):
+        resolve_instructions("roles.md", tmp_path)
 
 
 ORBITS_OWN_STEPS = [
