@@ -22,6 +22,7 @@ from orbit.protocol import (
     Hello,
     SessionRef,
 )
+from orbit.tracing import NoSpan, Span
 
 QUEUE_LIMIT = 10_000
 """How many events a connection's stream holds unread before it's closed as too far behind."""
@@ -258,6 +259,9 @@ class SessionConnection:
     stream, with the live events held while it's being caught up, holds at most
     :data:`QUEUE_LIMIT` events unread; one more closes the connection as
     :data:`TOO_FAR_BEHIND`, and the session and its other connections carry on.
+
+    Its :attr:`trace` is the span of its WebSocket, if it has one, that what the frontend says
+    and does over it is recorded on.
     """
 
     def __init__(self, parts: ConnectionParts) -> None:
@@ -270,6 +274,7 @@ class SessionConnection:
         self.attached: SessionRef | None = None  # None while it views the open session.
         self.workspace: str | None = None  # The id of the workspace attached to, once it is.
         self.streams: frozenset[str] = frozenset()  # The optional streams it watches.
+        self.trace: Span = NoSpan("connection")
         self._place.connections.add(self)
 
     def move(self, place: Place) -> None:

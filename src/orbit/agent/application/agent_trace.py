@@ -109,13 +109,13 @@ class AgentTracing:
             yield span
 
 
-def traced_steps(telemetry: Telemetry, request: Span, run_step: StepRunner) -> StepRunner:
+def traced_steps(telemetry: Telemetry, parent: Span, run_step: StepRunner) -> StepRunner:
     """``run_step``, timing each step it runs as a span of ``telemetry``'s with how the step came
-    out, a child of ``request``, the span of the agent's call it runs for."""
+    out, a child of ``parent``, such as the span of the agent's call it runs for."""
 
     async def run(step: VerificationStep, root: str) -> tuple[bool, str]:
         attributes = {"orbit.verify.step.name": step.name}
-        with use_span(request), telemetry.span(STEP_SPAN, attributes) as span:
+        with use_span(parent), telemetry.span(STEP_SPAN, attributes) as span:
             passed, output = await run_step(step, root)
             span.set_attributes({"orbit.verify.step.result": "passed" if passed else "failed"})
             return passed, output

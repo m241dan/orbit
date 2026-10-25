@@ -148,7 +148,7 @@ class Verifier:
             return None
         await self._tasks.change(lambda board: board.set_status(task_id, "verifying"))
         failure = await self._tidily(self._verify(task_id, root, self._runner(request)))
-        _record_result(failure)
+        record_result(failure)
         return failure
 
     async def run_one(
@@ -233,7 +233,7 @@ def _record_step(name: str, result: StepStatus, started: float) -> None:
     current_span().event(VERIFY_STEP_EVENT, attributes)
 
 
-def _record_result(failure: Failure | None) -> None:
+def record_result(failure: Failure | None) -> None:
     """Record on the current span whether verification passed, or the step that failed."""
     if failure is None:
         current_span().set_attributes({VERIFY_RESULT: "passed"})

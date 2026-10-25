@@ -15,6 +15,10 @@ as the revoked fingerprints are read afresh for each frontend, is turned away wi
 ``GET /healthz`` and ``GET /readyz`` answer health checks without the token or a client
 certificate, in ``application/health+json``: the first passes while the server runs, the second
 says whether it's ready.
+
+Each WebSocket accepted is traced, with the control plane's telemetry, in an ``orbit.connection``
+span from then until it's closed, recording where it connected from and how it closed, as
+:mod:`~orbit.agent.application.connection_trace` says.
 """
 
 import asyncio
@@ -35,6 +39,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketDisconnected
 
 from orbit.agent.application.connection import ConnectionDropped, SessionConnection
+from orbit.agent.application.connection_trace import closed, connection_span
 from orbit.agent.domain.health import Readiness, readiness, ready_answer
 from orbit.agent.domain.server import ServerSettings, client_fingerprint, is_revoked
 from orbit.agent.external import tls_messages
@@ -66,6 +71,7 @@ from orbit.protocol import (
     encode,
 )
 from orbit.protocol.transport import netloc
+from orbit.tracing import Span, Telemetry
 
 UNAUTHORIZED_BODY = "Send the token in orbit's token file as Authorization: Bearer <token>."
 """The body of the HTTP 401 a frontend without the token gets."""
@@ -83,6 +89,8 @@ GRACE_SECONDS = 5
 """How long the server waits, as it shuts down, for the WebSockets to finish closing."""
 
 _REASON_BYTES = 123  # The most a close frame's reason may hold.
+_NO_STATUS = 1005  # The code of a close frame that held none, as RFC 6455 reserves it.
+_ABNORMAL = 1006  # The code of a WebSocket gone without a close frame, as RFC 6455 reserves it.
 
 Say = Callable[[str], None]
 """Tells the user, on one line, what happened."""
@@ -90,7 +98,7 @@ Say = Callable[[str], None]
 
 class Connectable(Protocol):
     """A control plane frontends connect to, saying whether it's read-only, as another orbit
-    owns the repository, and whether its storage is halted."""
+    owns the repository, and whether its storage is halted, and with the telemetry tracing it."""
 
     def connect(self) -> SessionConnection: ...
 
@@ -99,6 +107,9 @@ class Connectable(Protocol):
 
     @property
     def storage_halted(self) -> bool: ...
+
+    @property
+    def telemetry(self) -> Telemetry: ...
 
 
 class ListenFailed(Exception):
@@ -161,7 +172,8 @@ def _let_through(scope: Scope) -> bool:
 class _Conversation:
     """One frontend's WebSocket, ``websocket``, over its ``connection`` to the session; events
     over ``limit`` bytes aren't sent, and a stream that ends closes the WebSocket with the code
-    and reason ``farewell`` gives then."""
+    and reason ``farewell`` gives then. How the WebSocket closed, by either side, is recorded on
+    the connection's trace."""
 
     def __init__(
         self,
@@ -194,12 +206,17 @@ class _Conversation:
         if self._closed:
             return
         self._closed = True
+        reason = close_reason(reason)
+        closed(self._connection.trace, code, reason)
         await self._connection.close()
         with suppress(WebSocketDisconnect, WebSocketDisconnected):
-            await self._websocket.close(code, close_reason(reason))
+            await self._websocket.close(code, reason)
 
-    async def _gone(self) -> None:
-        """Note that the frontend has gone, closing the connection."""
+    async def _gone(self, code: int, reason: str) -> None:
+        """Note that the frontend has gone, with ``code`` and ``reason``, closing the connection;
+        unless the WebSocket was closed already, that's how it closed."""
+        if not self._closed:
+            closed(self._connection.trace, code, reason)
         self._closed = True
         await self._connection.close()
 
@@ -211,7 +228,7 @@ class _Conversation:
     async def _received(self, message: Message) -> bool:
         """Handle ``message`` from the frontend; returns whether more may follow."""
         if message["type"] == "websocket.disconnect":
-            await self._gone()
+            await self._gone(message.get("code", _NO_STATUS), message.get("reason") or "")
             return False
         try:
             envelope = _decoded(message)
@@ -247,8 +264,8 @@ class _Conversation:
             code = POLICY_VIOLATION if isinstance(error, ConnectionDropped) else MESSAGE_TOO_BIG
             await self.close(code, str(error))
             return
-        except WebSocketDisconnect, WebSocketDisconnected:
-            await self._gone()
+        except WebSocketDisconnect, WebSocketDisconnected:  # Sending failed: it's gone, unsaid.
+            await self._gone(_ABNORMAL, "")
             return
         await self.close(*self._farewell())
 
@@ -422,18 +439,31 @@ class ControlPlaneServer:
         return None
 
     async def _websocket(self, websocket: WebSocket) -> None:
-        """Serve the frontend at ``websocket``, if it's let in, until it's closed."""
+        """Serve the frontend at ``websocket``, if it's let in, until it's closed, tracing it
+        from when it's accepted."""
         refusal = self._refusal(websocket)
         if refusal is not None:
             await websocket.send_denial_response(refusal)
             return
         await websocket.accept()
+        span = connection_span(self._plane.telemetry, websocket.client)
+        try:
+            await self._serve(websocket, span)
+        finally:
+            span.end()
+
+    async def _serve(self, websocket: WebSocket, span: Span) -> None:
+        """Serve the frontend at ``websocket``, accepted, until it's closed, recording on
+        ``span``, its WebSocket's, what it says and does."""
         if self._stopping:  # Began stopping as it was accepted, so stop won't close it.
+            closed(span, GOING_AWAY, close_reason(SHUTTING_DOWN))
             await websocket.close(GOING_AWAY, close_reason(SHUTTING_DOWN))
             return
         peer = _peer(websocket)
+        connection = self._plane.connect()
+        connection.trace = span
         conversation = _Conversation(
-            websocket, self._plane.connect(), self._settings.max_message_bytes, self._farewell
+            websocket, connection, self._settings.max_message_bytes, self._farewell
         )
         conversation.greeted = lambda name: self._say(f"{name} connected from {peer}.")
         self._open.add(conversation)

@@ -3,7 +3,8 @@ broken setup shows up while the user types their first prompt rather than on the
 
 It runs in the background, in a read-only snapshot of the base commit like a review, so it never
 races with an agent in the coder's tree. It shows in the verification panel until a task's own
-verification takes the panel over, and in the agents pane as an agent that can be cancelled.
+verification takes the panel over, and in the agents pane as an agent that can be cancelled. Each
+run is traced in an ``orbit.startup_check`` span, as :class:`StartupTracing` says.
 """
 
 import asyncio
@@ -11,9 +12,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from orbit.agent.application.lanes import Background
-from orbit.agent.application.ports import CoderTree, Publish, TreeFailed
+from orbit.agent.application.ports import CoderTree, Publish, StepRunner, TreeFailed
 from orbit.agent.application.snapshots import snapshot_of
-from orbit.agent.application.verifier import Failure, Verification, first_failure
+from orbit.agent.application.startup_trace import StartupTracing, fix_added
+from orbit.agent.application.verifier import Failure, Verification, first_failure, record_result
 from orbit.agent.domain.checks import setup_step
 from orbit.agent.domain.verification import StepProgress, VerificationStep, trim_output
 from orbit.protocol import (
@@ -29,6 +31,7 @@ from orbit.protocol import (
     StepStatus,
     VerificationChanged,
 )
+from orbit.tracing import current_span
 
 AGENT_ID = "startup-check"
 ROLE = "checker"
@@ -52,7 +55,7 @@ class CheckSite:
 class StartupCheck:
     """Runs ``verification``'s steps once at ``site``, in a snapshot set up with its tree's
     setup when it has a tree, publishing progress and the result. A failure goes to
-    ``add_fix``."""
+    ``add_fix``. Each run, its steps and its result are traced with :attr:`tracing`."""
 
     def __init__(
         self,
@@ -71,6 +74,7 @@ class StartupCheck:
         self._started = False
         self._announced = False  # Whether its start is published and its exit isn't.
         self._background = Background("startup check", publish)
+        self.tracing = StartupTracing()
 
     def start(self) -> None:
         self._started = True
@@ -120,15 +124,16 @@ class StartupCheck:
         await self._background.close()
 
     async def _run(self) -> None:
-        await self._publish(AgentStarted(agent_id=AGENT_ID, role=ROLE, task_id=STARTUP_TASK))
-        self._announced = True
-        await self._show()
-        reason: AgentExitReason = "killed"
-        try:
-            reason = await self._check()
-        finally:
-            self._announced = False
-            await self._publish(AgentExited(agent_id=AGENT_ID, reason=reason))
+        with self.tracing.run():
+            await self._publish(AgentStarted(agent_id=AGENT_ID, role=ROLE, task_id=STARTUP_TASK))
+            self._announced = True
+            await self._show()
+            reason: AgentExitReason = "killed"
+            try:
+                reason = await self._check()
+            finally:
+                self._announced = False
+                await self._publish(AgentExited(agent_id=AGENT_ID, reason=reason))
 
     async def _check(self) -> AgentExitReason:
         try:
@@ -139,6 +144,7 @@ class StartupCheck:
             raise
         except TreeFailed as exc:  # Git couldn't make the snapshot.
             message = f"The startup check couldn't run: {exc}"
+            current_span().error(message, exc)
             await self._publish(ErrorOccurred(code=GIT_FAILED, message=message))
             return "crashed"
         await self._report(failure)
@@ -155,22 +161,27 @@ class StartupCheck:
         failure = await self._set_up(root)
         if failure is not None:
             return failure
-        verification = self._verification
-        return await first_failure(verification.steps, verification.run_step, root, self._set)
+        return await first_failure(self._verification.steps, self._runner(), root, self._set)
 
     async def _set_up(self, root: str) -> Failure | None:
         """Run the tree's setup at ``root``, if it has one; returns its failure."""
         setup = self._tree.setup if self._tree else None
         if setup is None:
             return None
-        return await first_failure((setup_step(setup),), self._verification.run_step, root)
+        return await first_failure((setup_step(setup),), self._runner(), root)
+
+    def _runner(self) -> StepRunner:
+        """What runs a step: timing it as a child of the run's span."""
+        return self.tracing.steps(self._verification.run_step)
 
     async def _report(self, failure: Failure | None) -> None:
+        record_result(failure)
         if failure is None:
             await self._publish(StartupChecked(passed=True))
             return
         step, output = failure
         await self._add_fix(step, output)
+        fix_added()
         await self._publish(
             StartupChecked(passed=False, step=step.name, output=trim_output(output))
         )

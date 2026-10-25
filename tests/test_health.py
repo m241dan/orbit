@@ -13,6 +13,7 @@ from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.domain.health import Readiness, readiness, ready_answer
 from orbit.agent.external.control_plane import ControlPlaneServer
+from orbit.tracing import NoTelemetry
 from tests.server_fakes import LOOPBACK, TOKEN, quiet, serving_plane
 
 HEALTH_JSON = "application/health+json"
@@ -25,6 +26,7 @@ class Standing:
         self.session = ControlPlane([WorkspaceHost()])
         self.read_only = False
         self.storage_halted = False
+        self.telemetry = NoTelemetry()
 
     def connect(self) -> SessionConnection:
         return self.session.connect()

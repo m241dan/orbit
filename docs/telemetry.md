@@ -118,6 +118,32 @@ A command refused because handling it failed (`internal`) has the span's error s
 refusal's message, and an `exception` event; other refusals aren't errors, as they're the
 command's doing.
 
+## Connections
+
+### `orbit.connection`
+
+One span for each WebSocket `orbit serve` accepts from a frontend, from when it's accepted until
+it's closed, by either side: one that never says `Hello`, or that arrives as the server stops,
+has one too. Each starts its own trace, and is never current: the commands sent over the
+connection have `orbit.command` spans of their own, which aren't its children.
+
+| Attribute | Type | Meaning |
+| --- | --- | --- |
+| `network.peer.address` | string | The address the frontend connected from; absent when the server can't tell. |
+| `network.peer.port` | int | The port it connected from; absent when the server can't tell. |
+| `orbit.client` | string | The client's name, as the frontend's first `Hello` gives it; absent before one. |
+| `orbit.protocol_version` | int | The protocol version that `Hello` speaks, even one this orbit doesn't, which ends the connection. |
+
+Events:
+
+| Event | Attributes | Meaning |
+| --- | --- | --- |
+| `hello` | | The frontend sent its first `Hello`; a second, which is refused, isn't one. |
+| `reconnect` | `since` (int), `gap` (int) | That `Hello` gave `since`, the last `seq` the frontend saw, to catch up from; `gap` is how many `seq` had been stamped after it as the `Hello` arrived, negative when the frontend's is ahead of this orbit's, which sends it a snapshot instead. |
+| `attach` | `orbit.workspace.id` (string), `orbit.session.id` (string) | An `Attach` was accepted: the frontend views that session of that workspace. |
+| `detach` | | The frontend left the workspace it was attached to, as it attached to another or the workspace stopped being served. |
+| `close` | `code` (int), `reason` (string) | The WebSocket closed with that code and reason: the frontend's, if it closed it, else the server's, such as `1001` as the server shuts down or `1008` for a frame it couldn't read; `1006` when the frontend went without a close frame. |
+
 ## The planner
 
 ### `orbit.planner.turn`
@@ -236,13 +262,35 @@ for the reply.
 One span for each verification step run for an agent's call, a child of that call's
 `orbit.agent.request` span: each step verifying a `complete_task` claim, and the step a
 `run_check` runs. Its duration is the step's own. The steps verifying a task are still events of
-its `orbit.task` span too; steps run with no call to answer, as for an agent that exited without
-claiming its task done or for checks a configurator proposes, have no span.
+its `orbit.task` span too; the startup check's steps are children of its `orbit.startup_check`
+span (see **The startup check**); other steps run with no call to answer, as for an agent that
+exited without claiming its task done or for checks a configurator proposes, have no span.
 
 | Attribute | Type | Meaning |
 | --- | --- | --- |
 | `orbit.verify.step.name` | string | The step's name, such as `Unit tests`. |
 | `orbit.verify.step.result` | string | How it came out: `passed` or `failed`; absent when it was cut short. |
+
+## The startup check
+
+### `orbit.startup_check`
+
+One span for each run of the startup check, which runs the verification steps once on the base
+commit as a workspace's background work starts, from its start until it ends. Each starts its own
+trace: it's a root span, though what starts the check, such as the first frontend's `Attach`, may
+be a command's. The span is current while the check runs, so the events it publishes carry its
+trace context, and each step it runs, the tree's setup (`setup`) first if there is one, is an
+`orbit.verify.step` child, timed and with its result as for an agent's call.
+
+| Attribute | Type | Meaning |
+| --- | --- | --- |
+| `orbit.workspace.id` | string | The workspace's id (`unregistered` for one no store registers). |
+| `orbit.verify.result` | string | How the check came out: `passed`, `failed`, or `cancelled`, as when the user cancels its agent or orbit closes meanwhile; absent when it couldn't run. |
+| `orbit.verify.failed_step` | string | The step that failed, `setup` for the tree's setup; absent unless one did. |
+| `orbit.startup_check.fix_added` | boolean | Whether it added a draft task to fix the step that failed. |
+
+A check that couldn't run, as when git couldn't make its snapshot of the base, or that breaks on
+a bug, has the span's error status with the error's message, and an `exception` event.
 
 ## Links
 

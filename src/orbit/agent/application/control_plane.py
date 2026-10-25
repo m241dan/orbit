@@ -17,6 +17,7 @@ from orbit.agent.application.connection import (
     Publish,
     SessionConnection,
 )
+from orbit.agent.application.connection_trace import attached, detached, heard
 from orbit.agent.application.control_stream import ControlStream
 from orbit.agent.application.failures import command_failure
 from orbit.agent.application.handshake import HandshakeParts
@@ -166,7 +167,9 @@ class ControlPlane:
 
     Every command is handled in an ``orbit.command`` span of the ``telemetry`` given, recording
     nothing by default, as :func:`command_span` says, and the control plane's own events carry
-    the trace context of the span current as they're stamped.
+    the trace context of the span current as they're stamped. A connection's first ``Hello``,
+    each ``Attach`` accepted and its detaching from a workspace are recorded on its
+    :attr:`~SessionConnection.trace`.
     """
 
     def __init__(
@@ -350,6 +353,7 @@ class ControlPlane:
         command = envelope.payload
         try:
             if isinstance(command, Hello):
+                self._heard(command, connection)
                 await connection.handshake.hello(command, command_id)
             else:
                 connection.handshake.admit()
@@ -360,6 +364,12 @@ class ControlPlane:
             return CommandRefused(command_id=command_id, code=code, message=message)
         accepted(span)
         return None if isinstance(command, Hello) else CommandAccepted(command_id=command_id)
+
+    def _heard(self, hello: Hello, connection: SessionConnection) -> None:
+        """Record ``hello`` on ``connection``'s trace, unless a ``Hello`` was welcomed there
+        already."""
+        if not connection.handshake.welcomed:
+            heard(connection.trace, hello, self._seqs.last)
 
     async def _route(self, envelope: CommandEnvelope, connection: SessionConnection) -> None:
         """Handle the command in ``envelope``, from ``connection`` once it's welcomed: the
@@ -448,6 +458,7 @@ class ControlPlane:
         connection.move(self._place)
         connection.workspace = None
         connection.handshake.leave()
+        detached(connection.trace)
 
     def _addressed(
         self, workspace: str | None, session: str | None, connection: SessionConnection
@@ -463,7 +474,8 @@ class ControlPlane:
     async def _attach(self, attach: Attach, command_id: str, connection: SessionConnection) -> None:
         """Have ``connection`` view the session ``attach`` names, sent as ``command_id``: in the
         workspace it's attached to, as the host does, or else greeting it there, having it
-        leave the workspace it's attached to, if any; refused for a workspace not served."""
+        leave the workspace it's attached to, if any; refused for a workspace not served. Once
+        it views the session, that's recorded on ``connection``'s trace."""
         workspace = served_workspace(attach.workspace, self._served)
         left = connection.workspace
         if left is not None and left != workspace:
@@ -471,9 +483,10 @@ class ControlPlane:
             self._hosts[left].check_state()  # Its sessions' viewers count one fewer.
         if connection.workspace is None:
             await self._join(self._hosts[workspace], attach.session, connection)
-            return
-        host = self._addressed(workspace, None, connection)
-        await host.handle(attach, command_id, connection)
+        else:
+            host = self._addressed(workspace, None, connection)
+            await host.handle(attach, command_id, connection)
+        attached(connection.trace, workspace, attach.session)
 
     async def _join(self, host: WorkspaceHost, session: str, connection: SessionConnection) -> None:
         """Attach ``connection`` to ``host``'s workspace, viewing the session ``session`` there,

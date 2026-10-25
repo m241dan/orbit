@@ -1787,8 +1787,16 @@ review's links to the task whose landing made it due, or, for a super review, to
 role, how it exited, its turns and the tools it called, as sorted names with their counts; each
 call it makes to orbit's tools is a child span, `orbit.agent.request`, with the tool and whether
 the reply was an error, and each verification step a call runs, verifying a `complete_task` claim
-or for `run_check`, is a child of that call, `orbit.verify.step`, with its name and result. Spans
-hold no prompts, agent messages, tool arguments or replies, diffs or check output. [docs/telemetry.md](docs/telemetry.md) lists every span, attribute, event
+or for `run_check`, is a child of that call, `orbit.verify.step`, with its name and result. Each
+run of the startup check is one span, `orbit.startup_check`, starting its own trace: the
+workspace, how it came out (`passed`, `failed` or `cancelled`), the step that failed and whether
+it added a draft task to fix it, with each step it ran a child `orbit.verify.step`. Each
+frontend's WebSocket to `orbit serve` is one span, `orbit.connection`, starting its own trace,
+from when it's accepted until it's closed: where it connected from, the client and protocol
+version its `Hello` gave, and, as events, that `hello`, a `reconnect` with the `seq` it catches up
+from and how many were stamped since, each `attach` (with the workspace and session) and
+`detach`, and the `close`, with its code and reason. Spans hold no prompts, agent messages, tool
+arguments or replies, diffs or check output. [docs/telemetry.md](docs/telemetry.md) lists every span, attribute, event
 and link.
 
 The TUI traces what the user does: each action that sends commands, such as pressing ctrl+r or
@@ -1803,6 +1811,19 @@ own control plane traces its TUI with the control plane's telemetry. A chat join
 `[telemetry]` in the user config where it runs, the frontend user's, as the control plane's
 collector may be out of its reach, and flushes and stops it as it closes; without one, its
 commands carry no trace context, and their `orbit.command` spans start traces of their own.
+
+Traces connect from the key the user pressed onwards. An `orbit.tui.action` span is the parent
+of the `orbit.command` spans of the commands it sent. A `SendMessage` command's span is the
+parent of the `orbit.planner.turn` it asked for, which is the parent of the planner's
+`orbit.agent.process`. Each task of the run a `RunTasks` command started is a trace of its own,
+its `orbit.task` span linking to that command's; the task's run is the parent of the coder's
+`orbit.agent.process`, which is the parent of the agent's `orbit.agent.request`s to orbit, each
+the parent of the `orbit.verify.step`s it ran. A review a task's landing made due is a trace of its
+own too, its `orbit.review` span linking to that task's and the parent of the reviewer's process;
+the tasks running its suggestions link to the review in turn. So a task can be followed back to
+the command that started its run, and that command to what the user did in the TUI. The startup
+check and each connection are traces of their own, linked to nothing, as no command asks for
+either.
 
 ## Development
 
@@ -1878,7 +1899,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `ControlPlaneServer` (in `control_plane`) is the server adapter: it serves `ControlPlane`
     over a WebSocket (starlette on uvicorn, through `embedded_server`'s `EmbeddedServer`, which
     leaves signals to the program), one `SessionConnection` per frontend that shows the token,
-    turning frames into commands and events into frames; `TokenFile` (in `token_file`) is the
+    turning frames into commands and events into frames, and traces each WebSocket it accepts
+    in an `orbit.connection` span until it closes; `TokenFile` (in `token_file`) is the
     token it checks, read afresh for each frontend, and rotates it, `tls_warnings` (in `tls`) checks
     the server's TLS settings, key and certificate before it listens, with the messages in
     `tls_messages`, `RunFile` (in `run_file`) says where it listens, both written through
@@ -1889,7 +1911,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `seq`, the session it belongs to and the trace context of the span current, every stream's
     `Handshake` and the `UsageMonitor`; it routes every command to the `WorkspaceHost` of the
     workspace it's for, handling each in an `orbit.command` span (`command_span`, in
-    `command_trace`), and passes each host's events to the connections; frontends add and
+    `command_trace`) and recording a connection's `Hello`, attaching and detaching on its
+    `orbit.connection` span (in `connection_trace`), and passes each host's events to the
+    connections; frontends add and
     remove workspaces through its
     `WorkspaceSource` port, which `orbit serve` fills and a local orbit doesn't. `WorkspaceHost` (in `workspace_host`) is one workspace's
     backend: its open session, lanes, agents and workspace lock; it takes the commands routed
@@ -1913,7 +1937,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `orbit.verify.step` child of the call's span; `Lander` (in `landing`) commits and merges
     verified work; `ReviewLane` (in `review_lane`) runs reviews beside the work, each traced as
     an `orbit.review` span by `ReviewTracing` (in `review_trace`); `StartupCheck`
-    (in `startup_check`) runs the steps once on the base commit as orbit starts; `UsageMonitor`
+    (in `startup_check`) runs the steps once on the base commit as orbit starts, each run traced
+    as an `orbit.startup_check` span by `StartupTracing` (in `startup_trace`); `UsageMonitor`
     (in `usage_monitor`) fetches the usage limits on a schedule and after an agent's turn; these
     three run their work through `Background` (in `lanes`), which reports a crash rather than
     losing it, and the work lane's and the planner's turns run through a `TurnSlot` each (also in

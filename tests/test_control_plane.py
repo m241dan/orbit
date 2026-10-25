@@ -15,6 +15,7 @@ from websockets.exceptions import ConnectionClosed, InvalidStatus
 from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.agent.application import connection as connection_module
 from orbit.agent.application.connection import SessionConnection
+from orbit.agent.application.connection_trace import CONNECTION_SPAN
 from orbit.agent.application.ports import HostFailed
 from orbit.agent.domain.server import ServerSettings
 from orbit.agent.external import control_plane as control_plane_module
@@ -56,8 +57,10 @@ from orbit.protocol import (
     decode_event,
     encode,
 )
+from orbit.tracing import NoTelemetry, Telemetry
 from tests.agent_fakes import board_of, claims_done, control_plane, session_for
 from tests.server_fakes import LOOPBACK, TASK, TOKEN, Lines, serving_plane
+from tests.telemetry_helpers import Traced
 from tests.waiting import eventually
 
 
@@ -452,9 +455,11 @@ class VanishedWebSocket:
 
 
 async def test_a_frontend_gone_as_an_event_is_sent_ends_its_connection_unclosed() -> None:
+    traced = Traced()
     session = ControlPlane([WorkspaceHost()])
     vanished = VanishedWebSocket()
     connection = session.connect()
+    connection.trace = span = traced.telemetry.start(CONNECTION_SPAN)
     conversation = _Conversation(cast(WebSocket, vanished), connection, 1024, normally)
     running = asyncio.create_task(conversation.run())
     hello = Hello(client="tests", protocol_version=PROTOCOL_VERSION)
@@ -464,6 +469,12 @@ async def test_a_frontend_gone_as_an_event_is_sent_ends_its_connection_unclosed(
 
     assert not connection.listening and vanished.closes == 0
     await session.close()
+    span.end()
+    # Gone without a close frame; the disconnect read after it is no second close.
+    [ended] = traced.spans(CONNECTION_SPAN)
+    assert [(event.name, dict(event.attributes or {})) for event in ended.events][1:] == [
+        ("close", {"code": 1006, "reason": ""})
+    ]
 
 
 class Upgrade:
@@ -483,13 +494,14 @@ class Upgrade:
 
 
 class Counted:
-    """A session that counts the connections made to it."""
+    """A session that counts the connections made to it, traced by ``telemetry``."""
 
-    def __init__(self) -> None:
+    def __init__(self, telemetry: Telemetry | None = None) -> None:
         self.session = ControlPlane([WorkspaceHost()])
         self.connections = 0
         self.read_only = False
         self.storage_halted = False
+        self.telemetry = telemetry or NoTelemetry()
 
     def connect(self) -> SessionConnection:
         self.connections += 1
@@ -545,7 +557,8 @@ class Accepting:
 
 
 async def test_a_websocket_accepted_as_the_server_stops_is_closed_unconnected() -> None:
-    counted = Counted()
+    traced = Traced()
+    counted = Counted(traced.telemetry)
     server = ControlPlaneServer(counted, lambda: TOKEN, LOOPBACK, Lines())
     await server.start()
     closing, release = asyncio.Event(), asyncio.Event()
@@ -568,3 +581,10 @@ async def test_a_websocket_accepted_as_the_server_stops_is_closed_unconnected() 
     assert accepting.closed == [(GOING_AWAY, close_reason(SHUTTING_DOWN))]
     assert counted.connections == 0
     await counted.session.close()
+    # Its WebSocket, from an address it can't tell, was accepted, so it's traced till closed.
+    [span] = traced.spans(CONNECTION_SPAN)
+    assert not span.attributes
+    close = {"code": GOING_AWAY, "reason": close_reason(SHUTTING_DOWN)}
+    assert [(event.name, dict(event.attributes or {})) for event in span.events] == [
+        ("close", close)
+    ]

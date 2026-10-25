@@ -47,6 +47,7 @@ from orbit.agent.application.review_trace import ReviewTracing
 from orbit.agent.application.session_state import SessionStates, StateParts
 from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.startup_check import CheckSite, StartupCheck
+from orbit.agent.application.startup_trace import StartupTracing
 from orbit.agent.application.storage_halt import HaltHooks, StorageHalt
 from orbit.agent.application.storage_resume import ResumeParts, StorageResume
 from orbit.agent.application.switcher import (
@@ -493,14 +494,16 @@ class WorkspaceHost:
     def _startup_check(
         self, verification: Verification | None, wanted: bool
     ) -> StartupCheck | None:
-        """The check to run at startup, if ``wanted``; none without steps to run, nor without
-        agents or a workspace to say where to run them."""
+        """The check to run at startup, if ``wanted``, traced with this host's telemetry; none
+        without steps to run, nor without agents or a workspace to say where to run them."""
         if not wanted or verification is None or not verification.steps:
             return None
         site = self._check_site()
         if site is None:
             return None
-        return StartupCheck(verification, site, self._events.put, self._add_startup_fix)
+        check = StartupCheck(verification, site, self._events.put, self._add_startup_fix)
+        check.tracing = StartupTracing(self.telemetry, self._workspace_id)
+        return check
 
     def _check_site(self) -> CheckSite | None:
         """Where the startup check runs: where the agents work, else in the workspace given."""
