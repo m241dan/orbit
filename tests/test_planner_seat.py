@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from orbit.agent import Agents, ConfigError, Role
+from orbit.agent import ConfigError, Role
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.planner_seat import (
     NO_PLANNER_MESSAGE,
@@ -35,7 +35,7 @@ from orbit.protocol import (
     Settings,
     TurnFinished,
 )
-from tests.agent_fakes import ROLES, FakeHost, ScriptedLauncher, chats, hangs
+from tests.agent_fakes import ROLES, ScriptedLauncher, agents_for, chats, hangs
 from tests.waiting import eventually
 
 HALTED_MESSAGE = "The session is halted."
@@ -76,12 +76,7 @@ def seated(
     ``planner_role``, whose session halts as it's saved if ``halts``, and whose first
     ``failed_exits`` agents' exits fail to be published."""
     events: asyncio.Queue[Event] = asyncio.Queue()
-    host = FakeHost()
-    launcher = ScriptedLauncher(host)
-    tokens = iter(f"token-{n}" for n in range(1, 100))
-    agents = Agents(
-        host, launcher, lambda: next(tokens), roles or {}, planner_role=planner_role, root="."
-    )
+    agents, launcher = agents_for(roles=roles or {}, planner_role=planner_role)
 
     async def publish(event: Event) -> None:
         nonlocal failed_exits

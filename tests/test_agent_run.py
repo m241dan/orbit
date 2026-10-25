@@ -10,7 +10,7 @@ import pytest
 
 from orbit.agent import Verification, VerificationStep
 from orbit.agent.application.agent_run import AgentRun
-from orbit.agent.application.desk import NOTE_LIMIT, AgentDesk, Agents, progress_note
+from orbit.agent.application.desk import NOTE_LIMIT, AgentDesk, progress_note
 from orbit.agent.application.outcomes import Outcome, cancelling, see_to_end, tree_failed
 from orbit.agent.application.ports import (
     CallHandler,
@@ -61,10 +61,10 @@ from tests.agent_fakes import (
     FakeHost,
     FakeWorkspace,
     GatedHost,
-    ScriptedLauncher,
     Steps,
     board,
     chats,
+    desk_for,
     ended_unverified,
     gives_up,
     keeps_claiming,
@@ -616,21 +616,13 @@ async def started(
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
 
-    host = FakeHost()
     roles = {**ROLES, role: ROLES[role].model_copy(update={"timeout_minutes": timeout_minutes})}
-    agents = Agents(
-        host,
-        ScriptedLauncher(host, works),
-        lambda: "token-1",
-        roles,
-        proposal_review=Undecided(),
-        root=".",
-    )
+    desk = desk_for(publish, works, roles=roles, proposal_review=Undecided())
     tasks = TaskBoard()
     task_id = tasks.add(TaskSpec(prompt="a", role=role))
     board = Tasks(tasks, publish)
     verifier = Verifier(verification or verified(Steps()), board, publish)
-    agent_run = AgentRun(task_id, board, verifier, AgentDesk(agents, publish))
+    agent_run = AgentRun(task_id, board, verifier, desk)
     running = asyncio.create_task(agent_run.run(None, "."))
     await asyncio.wait_for(fetched.wait(), 5)
     return agent_run, running
@@ -798,7 +790,6 @@ class Target:
 
 
 async def test_a_call_whose_run_closes_while_it_is_published_is_refused() -> None:
-    host = FakeHost()
     events: list[Event] = []
 
     async def publish(event: Event) -> None:
@@ -806,8 +797,7 @@ async def test_a_call_whose_run_closes_while_it_is_published_is_refused() -> Non
         if isinstance(event, AgentRequest):
             desk.close(agent)  # The run ends while the request is published.
 
-    agents = Agents(host, ScriptedLauncher(host), lambda: "token-1", ROLES, root=".")
-    desk = AgentDesk(agents, publish)
+    desk = desk_for(publish)
     agent = desk.open(Target(), "coder", "1")
     reply = await desk.handle("token-1", "get_task", {})
     assert reply == Reply("Unknown or expired agent token.", is_error=True)
@@ -833,8 +823,7 @@ async def test_a_cancelled_call_is_answered_with_an_error_reply() -> None:
     async def publish(event: Event) -> None:
         events.append(event)
 
-    agents = Agents(FakeHost(), ScriptedLauncher(FakeHost()), lambda: "token-1", ROLES, root=".")
-    desk = AgentDesk(agents, publish)
+    desk = desk_for(publish)
     target = HangingTarget()
     agent = desk.open(target, "coder", "1")
     await desk.publish(AgentStarted(agent_id=agent.id, role="coder", task_id="1"))
@@ -855,15 +844,9 @@ async def test_a_cancelled_call_is_answered_with_an_error_reply() -> None:
     assert running.open_requests == ()
 
 
-def desk_on(host: FakeHost, publish: Publish = ignore) -> AgentDesk:
-    """A desk whose agents reach orbit through ``host``, publishing to ``publish``."""
-    agents = Agents(host, ScriptedLauncher(host), lambda: "token-1", ROLES, root=".")
-    return AgentDesk(agents, publish)
-
-
 async def test_concurrent_callers_start_the_host_once_and_share_its_url() -> None:
     host = GatedHost()
-    desk = desk_on(host)
+    desk = desk_for(ignore, host=host)
     urls = asyncio.gather(desk.url(), desk.url())
     await asyncio.wait_for(host.entered.wait(), 5)
     host.gate.set()
@@ -888,7 +871,7 @@ class SpanSeeingHost(FakeHost):
 
 async def test_the_host_started_inside_a_span_runs_with_no_span_current() -> None:
     host = SpanSeeingHost()
-    desk = desk_on(host)
+    desk = desk_for(ignore, host=host)
     none = current_span()
     with use_span(NoSpan("task")):
         assert await desk.url() == URL
@@ -897,7 +880,7 @@ async def test_the_host_started_inside_a_span_runs_with_no_span_current() -> Non
 
 async def test_a_host_that_failed_to_start_is_started_again_next_time() -> None:
     host = FailingHost()
-    desk = desk_on(host)
+    desk = desk_for(ignore, host=host)
     with pytest.raises(HostFailed, match="failed to start"):
         await desk.url()
     await asyncio.sleep(0)  # The failed start is forgotten.
@@ -907,7 +890,7 @@ async def test_a_host_that_failed_to_start_is_started_again_next_time() -> None:
 
 async def test_stopping_after_a_failed_start_stops_nothing() -> None:
     host = FailingHost()
-    desk = desk_on(host)
+    desk = desk_for(ignore, host=host)
     with pytest.raises(HostFailed):
         await desk.url()
     await desk.stop()
@@ -930,7 +913,7 @@ class StoppedAsItFailsHost(FailingHost):
 
 async def test_stopping_as_a_start_fails_stops_nothing() -> None:
     host = StoppedAsItFailsHost()
-    desk = host.desk = desk_on(host)
+    desk = host.desk = desk_for(ignore, host=host)
     with pytest.raises(HostFailed, match="failed to start"):
         await desk.url()
     [stopping] = host.stopping
@@ -940,7 +923,7 @@ async def test_stopping_as_a_start_fails_stops_nothing() -> None:
 
 async def test_stopping_while_the_host_starts_cancels_the_start_and_stops_the_host() -> None:
     host = GatedHost()
-    desk = desk_on(host)
+    desk = desk_for(ignore, host=host)
     url = asyncio.ensure_future(desk.url())
     await asyncio.wait_for(host.entered.wait(), 5)
     await asyncio.wait_for(desk.stop(), 5)
@@ -955,7 +938,7 @@ def run_on(host: FakeHost, events: list[Event]) -> tuple[AgentDesk, asyncio.Task
     async def publish(event: Event) -> None:
         events.append(event)
 
-    desk = desk_on(host, publish)
+    desk = desk_for(publish, host=host)
     tasks = TaskBoard()
     task_id = tasks.add(TaskSpec(prompt="a"))
     return desk, asyncio.create_task(

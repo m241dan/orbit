@@ -3,10 +3,9 @@ the workspaces served and the usage totals, as they start watching and as those 
 others are told neither."""
 
 import asyncio
-import itertools
 from datetime import UTC, datetime
 
-from orbit.agent import Agents, ControlPlane, WorkspaceHost
+from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.application.ports import ReadFailed
 from orbit.agent.domain.purging import Purged
@@ -35,17 +34,14 @@ from orbit.protocol import (
     WorkspaceUsage,
 )
 from tests.agent_fakes import (
-    ROLES,
-    FakeHost,
     FakeLedger,
-    ScriptedLauncher,
     board_of,
     claims_done,
     publish,
     settled,
 )
 from tests.connection_helpers import joined, say, taken
-from tests.plane_fakes import FakeSource, idle, payloads, welcomed
+from tests.plane_fakes import FakeSource, agent_workspace, idle, payloads, welcomed
 
 NOW = datetime(2026, 10, 22, 15, 0, tzinfo=UTC)
 """The time the control plane's clock tells."""
@@ -90,20 +86,10 @@ class TotalingLedger(FakeLedger):
 def workspace(name: str, ledger: FakeLedger | None = None, *usages: Usage) -> WorkspaceHost:
     """The host of the workspace ``name``, whose tasks' agents claim them done, each turn
     costing the next of ``usages``, recorded in ``ledger``."""
-    agent_host = FakeHost()
-    launcher = ScriptedLauncher(agent_host, *(claims_done for _ in range(3)))
+    claims = (claims_done for _ in range(3))
+    host, launcher = agent_workspace(name, *claims, ledger=ledger, root=".")
     launcher.usages = [(usage,) for usage in usages]
-    tokens = (f"{name}-token-{n}" for n in itertools.count())
-    agents = Agents(
-        agent_host, launcher, lambda: next(tokens), roles=ROLES, exit_grace=0.5, root="."
-    )
-    return WorkspaceHost(
-        agents=agents,
-        workspace=f"/src/{name}",
-        workspace_id=name,
-        new_id=lambda: f"{name}-1",
-        ledger=ledger,
-    )
+    return host
 
 
 def plane_of(*hosts: WorkspaceHost, ledger: FakeLedger | None = None) -> ControlPlane:

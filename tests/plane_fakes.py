@@ -3,9 +3,9 @@
 import asyncio
 from collections.abc import Callable, Sequence
 from pathlib import PurePath
+from typing import Any
 
 from orbit.agent import (
-    Agents,
     CloneFailed,
     ControlPlane,
     PathKind,
@@ -14,7 +14,7 @@ from orbit.agent import (
     WorkspaceUnavailable,
 )
 from orbit.agent.application.connection import SessionConnection
-from orbit.agent.application.ports import RepositoryLock
+from orbit.agent.application.ports import RepositoryLock, UsageLedger
 from orbit.agent.domain.purging import Purged
 from orbit.agent.domain.workspaces import RegisteredWorkspace
 from orbit.protocol import (
@@ -28,7 +28,7 @@ from orbit.protocol import (
     TurnEndReason,
     WorkspaceCloning,
 )
-from tests.agent_fakes import HELLO, LOCK_RETRY, ROLES, Call, FakeHost, ScriptedLauncher
+from tests.agent_fakes import HELLO, LOCK_RETRY, Call, Script, ScriptedLauncher, agents_for
 from tests.connection_helpers import say, taken
 
 
@@ -61,19 +61,32 @@ def working(name: str, gate: asyncio.Event, started: list[str]) -> WorkspaceHost
         await call("give_up", reason="Done waiting.")
         return "completed"
 
-    agent_host = FakeHost()
-    launcher = ScriptedLauncher(agent_host, waits)
-    agents = Agents(
-        agent_host,
-        launcher,
-        lambda: f"{name}-token",
-        roles=ROLES,
-        exit_grace=0.5,
-        root=f"/src/{name}",
+    host, _ = agent_workspace(name, waits)
+    return host
+
+
+def agent_workspace(
+    name: str,
+    *scripts: Script,
+    reviewers: Sequence[Script] = (),
+    ledger: UsageLedger | None = None,
+    **options: Any,
+) -> tuple[WorkspaceHost, ScriptedLauncher]:
+    """The host of the workspace ``name``, at ``/src/<name>``, its id ``name``, whose tasks run
+    through agents playing ``scripts`` and reviews through ``reviewers``, one per launch, with
+    the launcher that plays them; its turns' usage is recorded in ``ledger``, if given.
+    ``options`` go to :func:`agents_for`, the agents working in the workspace unless they name
+    another ``root``."""
+    options = {"root": f"/src/{name}", **options}
+    agents, launcher = agents_for(*scripts, reviewers=reviewers, tokens=f"{name}-token", **options)
+    host = WorkspaceHost(
+        agents=agents,
+        workspace=f"/src/{name}",
+        workspace_id=name,
+        new_id=lambda: f"{name}-1",
+        ledger=ledger,
     )
-    return WorkspaceHost(
-        agents=agents, workspace=f"/src/{name}", workspace_id=name, new_id=lambda: f"{name}-1"
-    )
+    return host, launcher
 
 
 async def idle(connection: SessionConnection) -> None:

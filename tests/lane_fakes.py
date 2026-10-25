@@ -1,12 +1,15 @@
-"""Fakes for the work and review lanes: a review lane that hears how tasks ended, and hooks
-that wake nothing."""
+"""Fakes for the work and review lanes: a review lane that hears how tasks ended, hooks that
+wake nothing, and publishing that holds an event."""
+
+import asyncio
+from collections.abc import Callable
 
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import OPEN_GATE
 from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.reviews import ReviewLimits, ReviewPlanner
-from orbit.protocol import TaskState
+from orbit.protocol import Event, TaskState
 
 
 async def no_work() -> None:
@@ -28,3 +31,20 @@ class Hearing(ReviewLane):
 
     async def ended(self, state: TaskState) -> None:
         self.heard.append(("ended", state.id, state.status))
+
+
+class Gate:
+    """Publishing that holds, once, the first event ``holds`` picks, until :attr:`released` is
+    set; :attr:`reached` is set as it holds, and :attr:`events` keeps every event published."""
+
+    def __init__(self, holds: Callable[[Event], bool]) -> None:
+        self.holds = holds
+        self.reached = asyncio.Event()
+        self.released = asyncio.Event()
+        self.events: list[Event] = []
+
+    async def __call__(self, event: Event) -> None:
+        self.events.append(event)
+        if not self.reached.is_set() and self.holds(event):
+            self.reached.set()
+            await self.released.wait()

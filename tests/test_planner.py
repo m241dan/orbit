@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from orbit.agent import Agents, WorkspaceHost
+from orbit.agent import WorkspaceHost
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.planner import RESUME_FAILED_NOTE, PlannerChat
 from orbit.agent.application.ports import Reply, ResumeFailed
@@ -44,8 +44,8 @@ from orbit.protocol import (
 from tests.agent_fakes import (
     ROLES,
     Call,
-    FakeHost,
     ScriptedLauncher,
+    agents_for,
     board,
     chats,
     events_until,
@@ -219,15 +219,14 @@ async def test_closing_ends_the_planners_access() -> None:
 
 async def planner_model(role_model: str | None, picked: str | None) -> str | None:
     """The model the planner launches on, with ``role_model`` in its role and ``picked`` chosen."""
-    host = FakeHost()
-    launcher = ScriptedLauncher(host)
-    launcher.planner_turns = [chats]
     roles = {**ROLES, "planner": ROLES["planner"].model_copy(update={"model": role_model})}
+    agents, launcher = agents_for(roles=roles)
+    launcher.planner_turns = [chats]
 
     async def publish(event: Event) -> None:
         pass
 
-    desk = AgentDesk(Agents(host, launcher, lambda: "token-1", roles, root="."), publish)
+    desk = AgentDesk(agents, publish)
     chat = PlannerChat(desk, Tasks(TaskBoard(), publish), lambda: ())
     async for _ in chat.run_turn("turn", "Plan.", Settings(model=picked)):
         pass

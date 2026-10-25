@@ -6,8 +6,6 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from orbit.agent import Agents
-from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import OPEN_GATE, SessionGate
 from orbit.agent.application.outbox import EventSink
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
@@ -46,10 +44,8 @@ from orbit.protocol import (
     UpdateSettings,
 )
 from tests.agent_fakes import (
-    ROLES,
-    FakeHost,
     FakeTree,
-    ScriptedLauncher,
+    desk_for,
     logged_with_traceback,
 )
 
@@ -95,12 +91,9 @@ async def quiet(event: Event) -> None:
 def review_lane_for(tasks: Tasks) -> ReviewLane:
     """A review lane on ``tasks``, in a tree, that publishes nothing and, read-only, runs no
     review."""
-    host = FakeHost()
-    agents = Agents(
-        host, ScriptedLauncher(host), lambda: "token-1", ROLES, tree=FakeTree(), root="."
-    )
     hooks = ReviewHooks(nothing, nothing, SessionGate(read_only=lambda: True))
-    return ReviewLane(AgentDesk(agents, quiet), tasks, ReviewPlanner(ReviewLimits()), hooks)
+    desk = desk_for(quiet, tree=FakeTree())
+    return ReviewLane(desk, tasks, ReviewPlanner(ReviewLimits()), hooks)
 
 
 class ScriptedTurns(WorkTurns):

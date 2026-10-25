@@ -4,9 +4,8 @@ starting a new one; refused while anything runs."""
 import asyncio
 from typing import Any
 
-from orbit.agent import Agents, WorkspaceHost
+from orbit.agent import WorkspaceHost
 from orbit.agent.domain.activity import PLANNER_ANSWERING, REVIEW_RUNNING, TASKS_RUNNING
-from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
@@ -45,7 +44,6 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import (
     ROLES,
-    FakeHost,
     FakeStore,
     FakeTree,
     Script,
@@ -54,6 +52,7 @@ from tests.agent_fakes import (
     Stop,
     Ticks,
     agent_exited,
+    agents_for,
     all_of,
     board,
     chats,
@@ -140,11 +139,7 @@ LEFTOVER = "2 commits on orbit/coder not yet merged into main."
 def starting(**session: Any) -> WorkspaceHost:
     """A session started without the list of sessions, whose coder's tree has a leftover;
     ``session`` goes to :class:`WorkspaceHost`."""
-    host = FakeHost()
-    tree = FakeTree(leftovers=(LEFTOVER,))
-    agents = Agents(
-        host, ScriptedLauncher(host), lambda: "token", ROLES, Limits(), tree=tree, root="."
-    )
+    agents, _ = agents_for(tree=FakeTree(leftovers=(LEFTOVER,)))
     return WorkspaceHost(agents=agents, store=FakeStore(), clock=Ticks(), **session)
 
 

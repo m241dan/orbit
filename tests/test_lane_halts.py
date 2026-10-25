@@ -4,7 +4,6 @@ while its divert is still held open, starts no other."""
 import asyncio
 from collections.abc import Sequence
 
-from orbit.agent import Agents
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import SessionGate
 from orbit.agent.application.ports import StoreFailed
@@ -23,7 +22,7 @@ from orbit.protocol import (
     TaskSpec,
     TurnEndReason,
 )
-from tests.agent_fakes import ROLES, Call, FakeHost, FakeTree, Script, ScriptedLauncher, gives_up
+from tests.agent_fakes import Call, FakeTree, Script, ScriptedLauncher, agents_for, gives_up
 
 WAITING = ("pending", "running")
 """The statuses of a task that hasn't ended."""
@@ -63,10 +62,13 @@ class Halting:
     def _first_ended(self, event: TasksChanged) -> bool:
         return any(t.id == self.first and t.status not in WAITING for t in event.tasks)
 
-    def desk(self, launcher: ScriptedLauncher, tree: FakeTree) -> AgentDesk:
-        """A desk launching through ``launcher`` in ``tree``, publishing into the session."""
-        agents = Agents(launcher.host, launcher, lambda: "token-1", ROLES, tree=tree, root=".")
-        return AgentDesk(agents, self.publish)
+    def desk(
+        self, tree: FakeTree, *scripts: Script, reviewers: Sequence[Script] = ()
+    ) -> tuple[AgentDesk, ScriptedLauncher]:
+        """A desk in ``tree`` whose tasks run through agents playing ``scripts`` and reviews
+        through ``reviewers``, publishing into the session, with the launcher that plays them."""
+        agents, launcher = agents_for(*scripts, reviewers=reviewers, tree=tree)
+        return AgentDesk(agents, self.publish), launcher
 
     def add(self, role: str | None = None) -> str:
         """Add a task, as ``role`` if given; returns its id."""
@@ -74,16 +76,13 @@ class Halting:
         return self.tasks.board.add(spec)
 
 
-def launcher_of(*scripts: Script, reviewers: Sequence[Script] = ()) -> ScriptedLauncher:
-    return ScriptedLauncher(FakeHost(), *scripts, reviewers=reviewers)
-
-
 async def test_a_halt_as_a_task_ends_starts_no_other_task() -> None:
     session = Halting()
     session.first = session.add()
     second = session.add()
-    launcher, tree = launcher_of(gives_up, gives_up), FakeTree()
-    lane = WorkLane(session.desk(launcher, tree), session.tasks, None, Beside(gate=session.gate))
+    tree = FakeTree()
+    desk, launcher = session.desk(tree, gives_up, gives_up)
+    lane = WorkLane(desk, session.tasks, None, Beside(gate=session.gate))
 
     assert await lane.run() == "cancelled"
 
@@ -99,13 +98,12 @@ async def test_a_halt_as_a_review_ends_starts_no_other_review() -> None:
     session = Halting()
     session.first = session.add(REVIEWER)
     second = session.add(REVIEWER)
-    launcher, tree = launcher_of(reviewers=[reviews, reviews]), FakeTree()
 
     async def nothing() -> None:
         pass
 
     hooks = ReviewHooks(nothing, nothing, session.gate)
-    desk = session.desk(launcher, tree)
+    desk, launcher = session.desk(FakeTree(), reviewers=[reviews, reviews])
     lane = ReviewLane(desk, session.tasks, ReviewPlanner(ReviewLimits()), hooks)
     stopped = asyncio.Event()
     lane.on_stopped(stopped.set)

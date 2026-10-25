@@ -5,7 +5,6 @@ from collections.abc import Awaitable, Callable
 
 import pytest
 
-from orbit.agent import Agents
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import OPEN_GATE, SessionGate
 from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
@@ -24,39 +23,13 @@ from orbit.protocol import (
     TaskStarted,
     VerificationChanged,
 )
-from tests.agent_fakes import ROLES, FakeHost, FakeTree, ScriptedLauncher, Steps, verified
-from tests.lane_fakes import Hearing, no_work
-
-
-class Gate:
-    """Publishing that holds, once, the first event ``holds`` picks, until :attr:`released` is
-    set."""
-
-    def __init__(self, holds: Callable[[Event], bool]) -> None:
-        self.holds = holds
-        self.reached = asyncio.Event()
-        self.released = asyncio.Event()
-        self.events: list[Event] = []
-
-    async def __call__(self, event: Event) -> None:
-        self.events.append(event)
-        if not self.reached.is_set() and self.holds(event):
-            self.reached.set()
-            await self.released.wait()
+from tests.agent_fakes import FakeTree, Steps, desk_for, verified
+from tests.lane_fakes import Gate, Hearing, no_work
 
 
 def running(event: Event) -> bool:
     """Whether ``event`` publishes a board with a task running."""
     return isinstance(event, TasksChanged) and any(t.status == "running" for t in event.tasks)
-
-
-def desk_for(publish: Gate) -> AgentDesk:
-    """A desk with no agents to run, in a tree, publishing through ``publish``."""
-    host = FakeHost()
-    agents = Agents(
-        host, ScriptedLauncher(host), lambda: "token-1", ROLES, tree=FakeTree(), root="."
-    )
-    return AgentDesk(agents, publish)
 
 
 def hooks(read_only: bool = False, halted: Callable[[], bool] = lambda: False) -> ReviewHooks:
@@ -81,7 +54,12 @@ async def cancel_work(
     returns its tasks and the task it ran."""
     tasks = review.tasks if review is not None else Tasks(TaskBoard(), gate)
     task_id = tasks.board.add(TaskSpec(prompt="a"))
-    lane = WorkLane(desk_for(gate), tasks, Verifier(verified(Steps()), tasks, gate), Beside(review))
+    lane = WorkLane(
+        desk_for(gate, tree=FakeTree()),
+        tasks,
+        Verifier(verified(Steps()), tasks, gate),
+        Beside(review),
+    )
     run = asyncio.create_task(lane.run())
     await gate.reached.wait()
     if stopped:
@@ -116,7 +94,9 @@ async def test_a_review_lane_cancelled_while_starting_a_review_cancels_it() -> N
     gate = Gate(running)
     tasks = Tasks(TaskBoard(), gate)
     task_id = tasks.board.add(TaskSpec(prompt="Review it.", role=REVIEWER))
-    lane = ReviewLane(desk_for(gate), tasks, ReviewPlanner(ReviewLimits()), hooks())
+    lane = ReviewLane(
+        desk_for(gate, tree=FakeTree()), tasks, ReviewPlanner(ReviewLimits()), hooks()
+    )
     lane.kick()
     await gate.reached.wait()
     await lane.close()
@@ -127,7 +107,7 @@ def review_lane_for(gate: Gate, built: ReviewHooks) -> ReviewLane:
     """A review lane with ``built``'s hooks and a review waiting, publishing through ``gate``."""
     tasks = Tasks(TaskBoard(), gate)
     tasks.board.add(TaskSpec(prompt="Review it.", role=REVIEWER))
-    return ReviewLane(desk_for(gate), tasks, ReviewPlanner(ReviewLimits()), built)
+    return ReviewLane(desk_for(gate, tree=FakeTree()), tasks, ReviewPlanner(ReviewLimits()), built)
 
 
 @pytest.mark.parametrize("built", [hooks(read_only=True), hooks(halted=lambda: True)])
@@ -155,7 +135,9 @@ async def test_a_work_lane_cancelled_again_as_it_cancels_a_task_just_cancels_it(
     gate = Gate(running)
     tasks = Tasks(TaskBoard(), gate)
     task_id = tasks.board.add(TaskSpec(prompt="a"))
-    lane = WorkLane(desk_for(gate), tasks, Verifier(verified(Steps()), tasks, gate), Beside())
+    lane = WorkLane(
+        desk_for(gate, tree=FakeTree()), tasks, Verifier(verified(Steps()), tasks, gate), Beside()
+    )
     run = asyncio.create_task(lane.run())
     await gate.reached.wait()
     gate.reached.clear()  # Hold again as the verification is marked cancelled.
@@ -169,7 +151,7 @@ async def test_a_work_lane_cancelled_again_as_it_cancels_a_task_just_cancels_it(
 
 def hearing(gate: Gate) -> Hearing:
     """A review lane hearing of the tasks on a new board publishing through ``gate``."""
-    return Hearing(desk_for(gate), Tasks(TaskBoard(), gate))
+    return Hearing(desk_for(gate, tree=FakeTree()), Tasks(TaskBoard(), gate))
 
 
 async def test_a_work_lane_closed_while_running_a_task_tells_the_review_lane_nothing() -> None:
@@ -193,7 +175,7 @@ async def test_a_work_lane_the_user_stops_as_it_closes_still_just_closes() -> No
     review = hearing(gate)
     task_id = review.tasks.board.add(TaskSpec(prompt="a"))
     verifier = Verifier(verified(Steps()), review.tasks, gate)
-    lane = WorkLane(desk_for(gate), review.tasks, verifier, Beside(review))
+    lane = WorkLane(desk_for(gate, tree=FakeTree()), review.tasks, verifier, Beside(review))
     run = asyncio.create_task(lane.run())
     await gate.reached.wait()
     gate.reached.clear()  # Hold again as the verification is marked cancelled.
@@ -230,7 +212,7 @@ async def stop_turns_mid_run(stop: Callable[[WorkTurns], Awaitable[None]]) -> No
     review = hearing(gate)
     tasks = review.tasks
     task_id = tasks.board.add(TaskSpec(prompt="a"))
-    desk, verifier = desk_for(gate), Verifier(verified(Steps()), tasks, gate)
+    desk, verifier = desk_for(gate, tree=FakeTree()), Verifier(verified(Steps()), tasks, gate)
     work = Watched(desk, tasks, verifier, review)
     turns = WorkTurns(WorkParts(work, review, tasks, verifier, desk, lambda _: None, OPEN_GATE))
     await turns.run_tasks()

@@ -7,8 +7,6 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from orbit.agent import Agents
-from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import OPEN_GATE, SessionGate
 from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.application.tasks import Tasks
@@ -40,7 +38,7 @@ from orbit.protocol import (
     Settings,
     TaskSpec,
 )
-from tests.agent_fakes import ROLES, START, FakeHost, ScriptedLauncher, Steps, hangs, verified
+from tests.agent_fakes import START, Steps, desk_for, hangs, settled, verified
 
 TASK = TaskSpec(prompt="Add a flag.", settings=Settings(model="opus"))
 
@@ -127,10 +125,7 @@ def lane_parts(
     async def publish(event: Event) -> None:
         posted.append(event)
 
-    host = FakeHost()
-    launcher = ScriptedLauncher(host, *[hangs] * 5)
-    agents = Agents(host, launcher, lambda: "token-1", ROLES, pause=pause or LimitPause(), root=".")
-    desk = AgentDesk(agents, publish)
+    desk = desk_for(publish, *[hangs] * 5, pause=pause or LimitPause())
     verifier = Verifier(verified(Steps()), tasks, publish) if verifying else None
     work = StopsCounted(desk, tasks, verifier, Beside())
     halted = halt or Halt()
@@ -389,12 +384,6 @@ async def test_a_run_for_the_user_once_closed_starts_no_work(lane: Lane) -> None
     await lane.turns.run_tasks()
     assert not lane.turns.running
     assert BusyChanged(busy=True, lane=WORK_LANE) not in lane.posted
-
-
-async def settled() -> None:
-    """Yield to the loop a while, so background work gets as far as it can."""
-    for _ in range(20):
-        await asyncio.sleep(0)
 
 
 async def limited(lane: Lane) -> None:

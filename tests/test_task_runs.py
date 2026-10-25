@@ -15,7 +15,7 @@ from orbit.agent import (
     run_step,
 )
 from orbit.agent.application.agent_run import AgentRun
-from orbit.agent.application.desk import AgentDesk, Agents
+from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.ports import TreeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.agent_task import Limits
@@ -59,15 +59,13 @@ from tests.agent_fakes import (
     ACCEPTED,
     ATTACH_ID,
     COMMAND_ID,
-    ROLES,
     STEP,
     Call,
-    FakeHost,
     FakeStore,
     FakeTree,
     FakeWorkspace,
-    ScriptedLauncher,
     Steps,
+    agents_for,
     board,
     board_of,
     chats,
@@ -512,17 +510,14 @@ async def test_usage_arriving_after_the_task_was_removed_is_skipped() -> None:
         tasks.remove(task_id)
         return reason
 
-    host = FakeHost()
-    launcher = ScriptedLauncher(host, claims_done_then_removed)
+    agents, launcher = agents_for(claims_done_then_removed)
     launcher.usages = [(Usage(input_tokens=10),)]
     events: list[Event] = []
 
     async def publish(event: Event) -> None:
         events.append(event)
 
-    desk = AgentDesk(
-        Agents(host, launcher, lambda: "token-1", ROLES, exit_grace=0.5, root="."), publish
-    )
+    desk = AgentDesk(agents, publish)
     outcome = await asyncio.wait_for(
         AgentRun(task_id, Tasks(tasks, publish), None, desk).run(None, "."), 5
     )
@@ -557,8 +552,7 @@ async def test_usage_arriving_after_the_task_was_removed_is_saved_in_what_the_se
 async def test_a_failure_saving_usage_is_reported_not_taken_for_a_removed_task() -> None:
     tasks = TaskBoard()
     task_id = tasks.add(TaskSpec(prompt="a"))
-    host = FakeHost()
-    launcher = ScriptedLauncher(host, claims_done)
+    agents, launcher = agents_for(claims_done)
     launcher.usages = [(Usage(input_tokens=10),)]
 
     events: list[Event] = []
@@ -570,9 +564,7 @@ async def test_a_failure_saving_usage_is_reported_not_taken_for_a_removed_task()
         if tasks.get(task_id).usage != Usage():
             raise ValueError("saving tripped")
 
-    desk = AgentDesk(
-        Agents(host, launcher, lambda: "token-1", ROLES, exit_grace=0.5, root="."), publish
-    )
+    desk = AgentDesk(agents, publish)
     run = AgentRun(task_id, Tasks(tasks, publish, changed), None, desk)
     await asyncio.wait_for(run.run(None, "."), 5)
     assert tasks.get(task_id).usage == Usage(input_tokens=10)

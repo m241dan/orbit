@@ -5,8 +5,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from orbit.agent import Agents, Verification, VerificationStep, WorkspaceHost
-from orbit.agent.domain.agent_task import Limits
+from orbit.agent import Verification, VerificationStep, WorkspaceHost
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
     ActivateSession,
@@ -18,14 +17,13 @@ from orbit.protocol import (
     TaskState,
 )
 from tests.agent_fakes import (
-    ROLES,
-    FakeHost,
     FakeStore,
     FakeTree,
     Script,
     ScriptedLauncher,
     Steps,
     Ticks,
+    agents_for,
     send,
     until_marked,
 )
@@ -56,13 +54,8 @@ def switching(
     """A session saved in ``store``, as ``session-1`` then ``session-2`` and so on, whose tasks
     run through agents playing ``scripts``, reviewing them if ``reviews``; ``session`` goes to
     :class:`WorkspaceHost`."""
-    host = FakeHost()
-    launcher = ScriptedLauncher(host, *scripts)
-    tokens = iter(f"token-{n}" for n in range(1, 100))
     tree = FakeTree() if reviews else None
-    agents = Agents(
-        host, launcher, lambda: next(tokens), ROLES, Limits(), tree=tree, review=reviews, root="."
-    )
+    agents, launcher = agents_for(*scripts, tree=tree, review=reviews)
     ids = iter(f"session-{n}" for n in range(1, 100))
     built = WorkspaceHost(
         agents=agents, store=store, clock=Ticks(), new_id=lambda: next(ids), **session

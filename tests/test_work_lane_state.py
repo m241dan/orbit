@@ -2,14 +2,11 @@
 nothing a task leaves behind outlives it or its session."""
 
 import asyncio
-import itertools
 from collections.abc import Awaitable, Callable
 
 import pytest
 
-from orbit.agent import Agents
 from orbit.agent.application.coder_slots import CoderSeat, CoderSlots
-from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import SessionGate
 from orbit.agent.application.ports import Merge
 from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
@@ -29,35 +26,11 @@ from orbit.protocol import (
     TaskSpec,
     TurnEndReason,
 )
-from tests.agent_fakes import (
-    ROLES,
-    Call,
-    FakeHost,
-    FakeTree,
-    Script,
-    ScriptedLauncher,
-    chats,
-    claims_done,
-    gives_up,
-)
-from tests.lane_fakes import Hearing, no_work
+from tests.agent_fakes import Call, FakeTree, Script, chats, claims_done, desk_for, gives_up
+from tests.lane_fakes import Gate, Hearing, no_work
 from tests.waiting import eventually
 
 OTHERS_SLOT = ("other", "s")  # Another workspace's session, which holds the only coder's slot.
-
-
-class Held:
-    """Publishing that holds, once, the board with a task completed, until :attr:`released`
-    is set."""
-
-    def __init__(self) -> None:
-        self.reached = asyncio.Event()
-        self.released = asyncio.Event()
-
-    async def __call__(self, event: Event) -> None:
-        if not self.reached.is_set() and completed(event):
-            self.reached.set()
-            await self.released.wait()
 
 
 def completed(event: Event) -> bool:
@@ -69,24 +42,6 @@ async def quiet(event: Event) -> None:
     """Publishes nothing."""
 
 
-def desk_for(
-    publish: Callable[[Event], Awaitable[None]], *scripts: Script, tree: FakeTree | None = None
-) -> AgentDesk:
-    """A desk in ``tree``, or one that merges, whose agents play ``scripts``, publishing with
-    ``publish``."""
-    host = FakeHost()
-    tokens = itertools.count(1)
-    agents = Agents(
-        host,
-        ScriptedLauncher(host, *scripts),
-        lambda: f"token-{next(tokens)}",
-        ROLES,
-        tree=tree or FakeTree(),
-        root=".",
-    )
-    return AgentDesk(agents, publish)
-
-
 def lane_for(
     publish: Callable[[Event], Awaitable[None]],
     tasks: Tasks,
@@ -95,7 +50,7 @@ def lane_for(
 ) -> tuple[WorkLane, Hearing]:
     """A work lane on ``tasks`` in ``tree``, or one that merges, whose agents play ``scripts``,
     publishing with ``publish``, beside a review lane that hears."""
-    desk = desk_for(publish, *scripts, tree=tree)
+    desk = desk_for(publish, *scripts, tree=tree or FakeTree())
     review = Hearing(desk, tasks)
     return WorkLane(desk, tasks, None, Beside(review)), review
 
@@ -106,7 +61,7 @@ def queueing_lane_for(
     """A work lane on ``tasks`` in ``tree``, or one that merges, whose agents play ``scripts``,
     publishing nothing, beside a review lane that queues the reviews due but, read-only, runs
     none."""
-    desk = desk_for(quiet, *scripts, tree=tree)
+    desk = desk_for(quiet, *scripts, tree=tree or FakeTree())
     hooks = ReviewHooks(no_work, no_work, SessionGate(read_only=lambda: True))
     review = ReviewLane(desk, tasks, ReviewPlanner(ReviewLimits()), hooks)
     return WorkLane(desk, tasks, None, Beside(review)), review
@@ -134,7 +89,7 @@ async def run_reused(lane: WorkLane, tasks: Tasks, task_id: str) -> None:
 
 
 async def test_a_lane_cancelled_right_after_a_task_lands_still_reports_the_landing() -> None:
-    held = Held()
+    held = Gate(completed)
     tasks = Tasks(TaskBoard(), held)
     task_id = tasks.board.add(TaskSpec(prompt="a"))
     lane, review = lane_for(held, tasks, claims_done)
@@ -149,7 +104,7 @@ async def test_a_lane_cancelled_right_after_a_task_lands_still_reports_the_landi
 
 
 async def test_a_reused_id_after_a_cancelled_landing_reports_it_ended_not_the_old_commit() -> None:
-    held = Held()
+    held = Gate(completed)
     tasks = Tasks(TaskBoard(), held)
     task_id = tasks.board.add(TaskSpec(prompt="a"))
     lane, review = lane_for(held, tasks, claims_done, gives_up)
@@ -417,7 +372,8 @@ async def waiting_lane_for(
     slots = CoderSlots(1)
     await slots.acquire(*OTHERS_SLOT)
     coders = CoderSeat(lambda: slots, "ws", lambda: "s1")
-    lane = WorkLane(desk_for(publish, *scripts), tasks, None, Beside(coders=coders))
+    desk = desk_for(publish, *scripts, tree=FakeTree())
+    lane = WorkLane(desk, tasks, None, Beside(coders=coders))
     return lane, slots
 
 

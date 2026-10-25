@@ -4,7 +4,7 @@ import asyncio
 from typing import Any
 
 from orbit.agent import Verification, VerificationStep, WorkspaceHost
-from orbit.agent.application.desk import AgentDesk, Agents
+from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.ports import Reply
 from orbit.agent.application.startup_check import AGENT_ID as STARTUP_AGENT
 from orbit.agent.application.startup_check import ROLE as STARTUP_ROLE
@@ -37,13 +37,11 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import (
     LIMITS,
-    ROLES,
     STEP,
-    FakeHost,
     FakeTree,
-    ScriptedLauncher,
     Source,
     Steps,
+    desk_for,
     events_until,
     fetch_usage_unseen,
     greet,
@@ -237,9 +235,7 @@ class Answers:
 
 def watched_desk() -> tuple[AgentDesk, Seen]:
     seen = Seen()
-    host = FakeHost()
-    agents = Agents(host, ScriptedLauncher(host), lambda: "token-1", ROLES, root=".")
-    seen.desk = AgentDesk(agents, seen.publish)
+    seen.desk = desk_for(seen.publish)
     return seen.desk, seen
 
 

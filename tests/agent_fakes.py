@@ -2,6 +2,7 @@
 CLI, and a step runner and workspace for verification."""
 
 import asyncio
+import itertools
 import logging
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Mapping, Sequence
@@ -23,6 +24,7 @@ from orbit.agent.application.ports import (
     HostFailed,
     LockLeft,
     Merge,
+    Publish,
     ReadFailed,
     Reply,
     RepositoryLock,
@@ -690,6 +692,36 @@ async def nothing_parked() -> Sequence[str]:
     return ()
 
 
+def agents_for(
+    *scripts: Script,
+    reviewers: Sequence[Script] = (),
+    host: FakeHost | None = None,
+    tokens: str = "token",
+    **options: Any,
+) -> tuple[Agents, ScriptedLauncher]:
+    """Agents whose tasks run through agents playing ``scripts`` and whose reviews run through
+    agents playing ``reviewers``, one per launch, with the launcher that plays them. They reach
+    orbit through ``host``, or a new :class:`FakeHost`, with the tokens ``<tokens>-1``,
+    ``<tokens>-2`` and so on.
+
+    ``options`` go to :class:`Agents`, such as ``limits``, ``tree`` or ``roles`` (:data:`ROLES`
+    unless given); agents work in ``root``, ``.`` unless given, and have ``exit_grace``, half a
+    second unless given, to exit.
+    """
+    host = host or FakeHost()
+    launcher = ScriptedLauncher(host, *scripts, reviewers=reviewers)
+    numbers = itertools.count(1)
+    options = {"limits": Limits(), "exit_grace": 0.5, "roles": ROLES, "root": ".", **options}
+    return Agents(host, launcher, lambda: f"{tokens}-{next(numbers)}", **options), launcher
+
+
+def desk_for(publish: Publish, *scripts: Script, **options: Any) -> AgentDesk:
+    """A desk publishing with ``publish``, whose agents play ``scripts``, one per launch;
+    ``options`` go to :func:`agents_for`."""
+    agents, _ = agents_for(*scripts, **options)
+    return AgentDesk(agents, publish)
+
+
 def session_for(
     *scripts: Script,
     verification: Verification | None = None,
@@ -715,14 +747,10 @@ def session_for(
     again ``lock_declined_retry`` seconds after a decline. Its turns' usage is recorded in
     ``ledger``, if given, and its work traced with ``telemetry``, if given.
 
-    ``options`` go to :class:`Agents`, such as ``limits``, ``tree`` or ``roles`` (:data:`ROLES`
-    unless given).
+    ``options`` go to :func:`agents_for`, and so to :class:`Agents`, such as ``limits``,
+    ``tree`` or ``roles`` (:data:`ROLES` unless given).
     """
-    host = FakeHost()
-    launcher = ScriptedLauncher(host, *scripts, reviewers=reviewers)
-    tokens = iter(f"token-{n}" for n in range(1, 100))
-    options = {"limits": Limits(), "exit_grace": 0.5, "roles": ROLES, "root": ".", **options}
-    agents = Agents(host, launcher, lambda: next(tokens), **options)
+    agents, launcher = agents_for(*scripts, reviewers=reviewers, **options)
     session = WorkspaceHost(
         verification=verification,
         agents=agents,
@@ -741,7 +769,7 @@ def session_for(
     )
     if usage is not None:
         served(session, usage)
-    return session, host, launcher
+    return session, launcher.host, launcher
 
 
 COMMAND_ID = "command"
@@ -1274,15 +1302,14 @@ def steps_chat(
 ) -> tuple[PlannerChat, ScriptedLauncher, list[tuple[str, ...]]]:
     """A planner chat playing ``turns`` with ``roles``, whose steps are the last in the list it
     returns; what it publishes goes to ``published``."""
-    host = FakeHost()
-    launcher = ScriptedLauncher(host)
+    agents, launcher = agents_for(roles=roles)
     launcher.planner_turns = list(turns)
     sink = published if published is not None else []
 
     async def publish(event: Event) -> None:
         sink.append(event)
 
-    desk = AgentDesk(Agents(host, launcher, lambda: "token-1", roles, root="."), publish)
+    desk = AgentDesk(agents, publish)
     steps: list[tuple[str, ...]] = [("Ruff lint",)]
     return PlannerChat(desk, Tasks(TaskBoard(), publish), lambda: steps[-1]), launcher, steps
 
