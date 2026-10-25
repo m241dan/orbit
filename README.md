@@ -711,10 +711,14 @@ a restart. Agents can't change their checks any other way: orbit reads the file 
 
 ### Where tasks run, and how their work lands
 
-Inside a git repository, agents don't touch your checkout. They work in orbit's own worktree,
-`.git/orbit/coder` on the branch `orbit/coder` (inside `.git`, so your checkout never sees it), and
-the verification steps run there too. That worktree and the reviews' snapshot worktrees are all
-orbit keeps under `.git/orbit`; saved sessions live in the store. Before each task the worktree catches up with the branch you
+Inside a git repository, agents don't touch your checkout. The coder, and any role whose
+`workspace` is `worktree`, works in orbit's own worktree, `.git/orbit/coder` on the branch
+`orbit/coder` (inside `.git`, so your checkout never sees it), and the verification steps run there
+too. Other roles' agents work where their `workspace` says: in a snapshot of the base, in an empty
+temporary directory or in your checkout, read in place (see `workspace` under
+[Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)). That worktree and the snapshot
+worktrees reviews, the startup check and roles working on a `snapshot` run in are all orbit keeps
+under `.git/orbit`; saved sessions live in the store. Before each task the worktree catches up with the branch you
 had checked out when orbit started (the **base**), and the project's setup command runs in it: once
 when the worktree is first prepared, and again whenever a file it watches changes. Set it in
 `.orbit/config.toml` (without a `[setup]` table, nothing runs):
@@ -756,7 +760,8 @@ your checkout out of its way, it doesn't sandbox it.
 | Home | Where | What |
 |---|---|---|
 | The repository | your checkout | your code, which agents change only through commits orbit lands |
-| `.git/orbit` | the repository's git directory | the coder's worktree, review snapshots, what earlier runs left there and `workspace.lock`, which says which orbit owns the repository (`.orbit/workspace.lock` outside git; see [Owning the repository](#owning-the-repository)) |
+| `.git/orbit` | the repository's git directory | the coder's worktree, the snapshots reviews and roles working on a `snapshot` run in, what earlier runs left there and `workspace.lock`, which says which orbit owns the repository (`.orbit/workspace.lock` outside git; see [Owning the repository](#owning-the-repository)) |
+| Temporary directories | the system's temporary directory | `orbit-agent-…`, the empty directory each run of a role whose `workspace` is `none` works in, removed after it (see [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)) |
 | The store | the state directory | `orbit.db`, the saved sessions, their event logs, the super review count and the record moves of every repository, `locks/`, and `fallback/` for events a failed write left unsaved (see [Storage failures](#storage-failures)) |
 | Config files | `.orbit/config.toml` in the repository | the verification steps, setup, roles and limits, committed with your code |
 | User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]`, `[server]`, `[remotes]`, `[telemetry]`, and in `[roles]` your machine's model and effort for roles and your personal roles, with the instructions files they name |
@@ -1008,11 +1013,13 @@ comes with your next commit once none is.
 
 The reviews orbit queued can't be edited: remove one instead. Reviews run in the review roles'
 lane, `review`, which starts its tasks by itself: a `reviewer` task you add starts there at once
-too. A task of another role in that lane, such as an `auditor` with `lane = "review"`, runs there
-as in any other lane rather than as a review: in its role's `workspace`, shown as a task running
-in a lane of its own, and ending as `Stopped by you` if you stop it. Reviews need the worktree, and
-the review roles in a lane of their own; `--no-review` turns them off, and a `reviewer` task you
-add then runs in its lane on a read-only snapshot of the base commit.
+too, in its role's `workspace` (by default a fresh read-only snapshot of the base commit), as it
+has no commit to review. A task of another role in that lane, such as an `auditor` with
+`lane = "review"`, runs there as in any other lane rather than as a review: in its role's
+`workspace`, shown as a task running in a lane of its own, and ending as `Stopped by you` if you
+stop it. Reviews need the worktree, and the review roles in a lane of their own; `--no-review`
+turns them off, and a `reviewer` task you add then runs in its lane as any other role's task does,
+in its role's `workspace`.
 
 ### Roles and `.orbit/config.toml`
 
@@ -1059,16 +1066,24 @@ merges, whether it's enabled and how hard its agents think:
   refused, naming them and their lanes, if they're in different lanes, the merging lane included;
   a disabled one can be in any lane. With the `reviewer` disabled, reviews run in the
   `super-reviewer`'s lane.
-- `workspace`: where its agent works: `worktree` (the coder's separate worktree, the only one whose
-  work can merge), `snapshot` (a fresh read-only snapshot of the base commit, made for each run and
-  dropped after it), `checkout` (your checkout, read in place) or `none` (an empty temporary
-  directory, made for each run and removed after it, however the run ends). A conversational
-  role's run is its whole conversation: its snapshot or directory is made on its first turn and
-  kept for the turns after, as Claude Code resumes a conversation only from the directory it ran
-  in, until the conversation ends with the session or a reset. Outside a git
-  repository, or with `--no-worktree`, `worktree` and `snapshot` work in place. Tasks in
-  a role with `workspace = "worktree"` count toward `max_coders` (see Taking turns under
-  [Serving the control plane](#serving-the-control-plane)).
+- `workspace`: where its agent works, in whichever lane runs it: `worktree` (the coder's separate
+  worktree, readied for each task as
+  [Where tasks run, and how their work lands](#where-tasks-run-and-how-their-work-lands) says),
+  `snapshot` (a fresh read-only snapshot of the base commit under `.git/orbit`, made for each run
+  and dropped after it), `checkout` (your checkout, read in place) or `none` (a new, empty
+  temporary directory, `orbit-agent-…` in the system's temporary directory, made for each run and
+  removed after it, however the run ends). Only work done in the worktree can land: a task in
+  another workspace commits nothing, even in the work lane. A temporary directory that can't be
+  made ends the task in error before an agent starts (`Couldn't make a temporary directory: …`).
+  Orbit's own reviews of the commits that land still run in a snapshot of the last commit they
+  review, whatever the reviewers' `workspace`; a `reviewer` task you add works in its role's. A
+  conversational role's run, the planner's included, is its whole conversation: its snapshot or
+  directory is made on its first turn and kept for the turns after, as Claude Code resumes a
+  conversation only from the directory it ran in, until the conversation ends with the session or
+  a reset; a turn whose temporary directory can't be made ends in error, and the next tries
+  again. Outside a git repository, or with `--no-worktree`, `worktree` and `snapshot` work in
+  place. Tasks in a role with `workspace = "worktree"` count toward `max_coders` (see Taking turns
+  under [Serving the control plane](#serving-the-control-plane)).
 - `conversation`: whether you talk to it, as you do the planner, rather than it taking tasks.
   Each enabled conversational role has a seat of its own: its own conversation, which the session
   saves and carries on when you open it again, and which resetting it ends alone; its own model,
