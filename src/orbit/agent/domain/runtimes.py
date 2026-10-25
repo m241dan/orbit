@@ -53,6 +53,12 @@ def not_on_path(runtime: str, roles: Sequence[str], executable: str, install: st
     )
 
 
+def not_running(runtime: str) -> str:
+    """Why a role re-read on ``runtime`` isn't adopted: no agent runs on it in this session, so
+    orbit must be restarted to use it."""
+    return f"the runtime {runtime} isn't running in this session; restart orbit to use it"
+
+
 def asks_beyond(role: str, runtime: str, request: str, supported: str) -> str:
     """Why role ``role`` is refused: it asks for ``request``, but its ``runtime`` does only as
     ``supported`` says."""

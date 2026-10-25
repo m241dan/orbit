@@ -1005,7 +1005,8 @@ verification steps again, and saves the session without it. It reads `[roles.pla
 `.orbit/config.toml` again, with the model, effort and runtime your `config.toml` sets for it (and the run's `--runtime`), so a change
 to the planner's instructions, tools, tool access, model or effort takes effect; other roles and
 settings stay as they were. If either file is invalid, the planner keeps its role and orbit shows
-the problem, but still resets the conversation. Draft tasks stay on the task
+the problem, but still resets the conversation; so it does, too, if the role names a runtime no
+role ran on when orbit started, which takes restarting orbit. Draft tasks stay on the task
 list, the planner tab keeps its history, and the conversation shows a dim `── planner reset ──`
 rule under the planner tab and All. The reset is refused while the planner answers (stop it with
 `ctrl+x` first), and before its first prompt there's nothing to reset.

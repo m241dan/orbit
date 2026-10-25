@@ -21,6 +21,7 @@ from orbit.agent.application.ports import PlannerRoleReader
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.refusals import Refused
+from orbit.agent.domain.runtimes import not_running
 from orbit.agent.domain.sessions import SavedConversation, runtime_changed_message
 from orbit.protocol import (
     BUSY,
@@ -52,6 +53,7 @@ class Seated:
     seat: PlannerSeat
     events: asyncio.Queue[Event]
     launcher: ScriptedLauncher
+    desk: AgentDesk | None = None
     calls: list[str] = field(default_factory=list)
 
     def published(self) -> list[Event]:
@@ -123,7 +125,7 @@ def seated(
 
     hooks = SeatHooks(save, lambda: calls.append("use"), lambda: (), check)
     seat = PlannerSeat(SeatParts(desk, Tasks(TaskBoard(), events.put), events, hooks), role)
-    return Seated(seat, events, launcher, calls)
+    return Seated(seat, events, launcher, desk, calls)
 
 
 async def answered(seated: Seated) -> list[Event]:
@@ -331,6 +333,29 @@ async def test_a_reset_with_an_invalid_config_keeps_the_role_and_says_why() -> N
         EXITED,
         ConversationReset(agent=PLANNER),
     ]
+
+
+async def test_a_reset_onto_a_runtime_without_a_launcher_keeps_the_role() -> None:
+    on_kiro = ROLES[PLANNER].model_copy(update={"runtime": "kiro"})
+    seated_ = seated(planner_role=lambda: on_kiro)
+    await answered(seated_)
+    await seated_.seat.reset()
+    assert seated_.published() == [
+        ErrorOccurred(code=INVALID, message=f"{ROLE_KEPT}: {not_running('kiro')}"),
+        EXITED,
+        ConversationReset(agent=PLANNER),
+    ]
+    assert await answered(seated_)
+
+
+async def test_a_reset_onto_a_runtime_with_a_launcher_adopts_the_role() -> None:
+    renamed = ROLES[PLANNER].model_copy(update={"instructions": "Plan anew."})
+    seated_ = seated(planner_role=lambda: renamed)
+    await answered(seated_)
+    await seated_.seat.reset()
+    assert seated_.published() == [EXITED, ConversationReset(agent=PLANNER)]
+    assert seated_.desk is not None
+    assert seated_.desk.agents.roles[PLANNER] == renamed
 
 
 async def test_closing_ends_the_planners_conversation() -> None:
