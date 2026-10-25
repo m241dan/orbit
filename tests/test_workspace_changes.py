@@ -37,7 +37,14 @@ from orbit.protocol import (
     Welcome,
     WorkspaceEntry,
 )
-from tests.agent_fakes import HELLO, STEP, FakeStore, Steps, install_greeting
+from tests.agent_fakes import (
+    HELLO,
+    STEP,
+    FakeStore,
+    Steps,
+    install_greeting,
+    logged_with_traceback,
+)
 from tests.connection_helpers import joined, say, taken
 from tests.plane_fakes import (
     FakeSource,
@@ -586,7 +593,8 @@ async def test_an_add_whose_start_fails_refuses_with_its_own_failure_not_the_unf
     message = "Orbit failed to handle AddWorkspace: The store is gone."
     assert outcome == [refused("add", INTERNAL, message)]
     assert served == () and source.closed == ["c"] and source.hosts[0].closing
-    assert "Orbit failed to flag /src/c not served: The store failed." in caplog.messages
+    flag_failure = "Orbit failed to flag /src/c not served: The store failed."
+    assert logged_with_traceback(caplog.records, flag_failure, reported=False)
 
 
 async def test_an_add_cancelled_stays_cancelled_when_unflagging_fails(
@@ -608,7 +616,8 @@ async def test_an_add_cancelled_stays_cancelled_when_unflagging_fails(
 
     assert adding.cancelled() and outcome == []
     assert source.closed == ["c"] and source.hosts[0].closing
-    assert "Orbit failed to flag /src/c not served: The store failed." in caplog.messages
+    flag_failure = "Orbit failed to flag /src/c not served: The store failed."
+    assert logged_with_traceback(caplog.records, flag_failure, reported=False)
 
 
 async def test_a_remove_gone_busy_is_refused_as_busy_when_flagging_again_fails(
@@ -634,4 +643,5 @@ async def test_a_remove_gone_busy_is_refused_as_busy_when_flagging_again_fails(
     message = "Can't remove /src/c: another frontend views its session c-1."
     assert outcome == [refused("remove", BUSY, message)]
     assert served == ["c"] and source.flags == [("c", False)]
-    assert "Orbit failed to flag /src/c served: The store failed." in caplog.messages
+    flag_failure = "Orbit failed to flag /src/c served: The store failed."
+    assert logged_with_traceback(caplog.records, flag_failure, reported=False)

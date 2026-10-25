@@ -106,7 +106,8 @@ async def test_a_source_that_raises_is_logged_with_its_traceback(
         await watched.next()
     await watched.monitor.close()
 
-    assert logged_with_traceback(caplog.records, "Orbit failed to fetch the usage: boom")
+    message = "Orbit failed to fetch the usage: boom"
+    assert logged_with_traceback(caplog.records, message, reported=False)
 
 
 async def test_a_nudge_fetches_again_once_a_refresh_is_due() -> None:

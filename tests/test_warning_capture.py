@@ -6,7 +6,7 @@ import threading
 
 import pytest
 
-from orbit.agent.application.failures import unexpected
+from orbit.agent.application.failures import log_unexpected, unexpected
 from orbit.tui.warning_capture import WarningCapture
 
 
@@ -158,6 +158,39 @@ async def test_a_warning_after_an_unexpected_error_is_still_shown_once() -> None
 
     assert shown == [("orbit.a", "one")]
     assert len(capture.lines()) == 3
+
+
+async def test_an_unexpected_error_only_logged_is_shown_once_and_kept_with_its_traceback() -> None:
+    capture = WarningCapture()
+    shown: list[tuple[str, str]] = []
+    capture.attach(lambda name, message: shown.append((name, message)))
+
+    with capture.capturing():
+        log_unexpected("Orbit failed to flag X: a bug", raised())
+        log_unexpected("Orbit failed to flag X: a bug", raised())
+        await asyncio.sleep(0)
+
+    assert shown == [("orbit.agent.application.failures", "Orbit failed to flag X: a bug")]
+    first, second = capture.lines()
+    assert first.startswith("Orbit failed to flag X: a bug\nTraceback")
+    assert second.endswith("ValueError: a bug")
+
+
+async def test_unexpected_errors_only_logged_are_each_shown_after_a_reported_one() -> None:
+    capture = WarningCapture()
+    shown: list[tuple[str, str]] = []
+    capture.attach(lambda name, message: shown.append((name, message)))
+
+    with capture.capturing():
+        unexpected("Orbit failed to handle X: a bug", raised())
+        log_unexpected("Orbit failed to flag X: a bug", raised())
+        log_unexpected("Orbit failed to fetch the usage: a bug", raised())
+        await asyncio.sleep(0)
+
+    assert [message for _, message in shown] == [
+        "Orbit failed to flag X: a bug",
+        "Orbit failed to fetch the usage: a bug",
+    ]
 
 
 async def test_another_error_logged_with_its_traceback_is_still_shown() -> None:

@@ -19,9 +19,9 @@ class WarningCapture(logging.Handler):
     message template, once per run through what :meth:`attach` is given.
 
     A kind once shown isn't shown again that run (the telemetry plan's decision 12): libraries
-    rarely log recovery. Records marked ``reported``, the backend's unexpected errors, are kept
-    but never shown, as the backend already told the user of them through an event. Records may
-    come from any thread; they're shown on the loop that attached.
+    rarely log recovery. Records marked ``reported``, those of the backend's unexpected errors
+    it already told the user of through an event, are kept but never shown. Records may come
+    from any thread; they're shown on the loop that attached.
     """
 
     def __init__(self) -> None:

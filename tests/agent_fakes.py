@@ -1520,9 +1520,15 @@ class Source:
         return outcome
 
 
-def logged_with_traceback(records: Sequence[logging.LogRecord], message: str) -> bool:
-    """Whether ``message`` is among ``records`` logged as an error with its traceback."""
+def logged_with_traceback(
+    records: Sequence[logging.LogRecord], message: str, *, reported: bool = True
+) -> bool:
+    """Whether ``message`` is among ``records`` logged as an error with its traceback, marked
+    ``reported`` or, if not ``reported``, unmarked."""
     return any(
-        r.levelno == logging.ERROR and r.getMessage() == message and r.exc_info is not None
+        r.levelno == logging.ERROR
+        and r.getMessage() == message
+        and r.exc_info is not None
+        and getattr(r, "reported", False) is reported
         for r in records
     )

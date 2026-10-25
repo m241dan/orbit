@@ -12,11 +12,19 @@ logger = logging.getLogger(__name__)
 
 
 def unexpected(message: str, exc: BaseException) -> str:
-    """``message``, telling the user of ``exc``, which nothing expected; ``exc`` is logged with
-    its traceback, as the message alone loses its cause, in a record marked ``reported``, as the
-    caller tells the user the message itself."""
+    """``message``, telling the user of ``exc``, which nothing expected, for a caller that
+    publishes it in an event; ``exc`` is logged with its traceback, as the message alone loses
+    its cause, in a record marked ``reported``, as the event tells the user."""
     logger.error("%s", message, exc_info=exc, extra={"reported": True})
     return message
+
+
+def log_unexpected(message: str, exc: BaseException) -> None:
+    """Log ``message``, telling of ``exc``, which nothing expected, with its traceback, for a
+    caller that publishes no event saying so; the record isn't marked ``reported``, so the TUI
+    shows it as a warning."""
+    # The message is the record's template, so the TUI tells each failure apart as its own kind.
+    logger.error(message, exc_info=exc)
 
 
 def command_failure(command: object, exc: Exception) -> tuple[str, str]:

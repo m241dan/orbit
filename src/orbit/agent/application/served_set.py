@@ -12,7 +12,7 @@ from orbit.agent.application.browsing import Browsing
 from orbit.agent.application.clones import Clones
 from orbit.agent.application.coder_slots import CoderSlots
 from orbit.agent.application.connection import SessionConnection
-from orbit.agent.application.failures import unexpected
+from orbit.agent.application.failures import log_unexpected
 from orbit.agent.application.purge import purge
 from orbit.agent.application.workspace_host import WorkspaceHost
 from orbit.agent.application.workspace_source import WorkspaceSource, WorkspaceUnavailable
@@ -85,7 +85,7 @@ async def _flag_anyway(host: WorkspaceHost, workspaces: WorkspaceSource, *, serv
             await workspaces.set_served(host.workspace_id, False)
     except WorkspaceUnavailable as exc:
         flag = "served" if served else "not served"
-        unexpected(failed_to(f"flag {host.display_name} {flag}", exc), exc)
+        log_unexpected(failed_to(f"flag {host.display_name} {flag}", exc), exc)
 
 
 @dataclass(frozen=True)

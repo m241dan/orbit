@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from orbit.agent.application.failures import unexpected
+from orbit.agent.application.failures import log_unexpected
 from orbit.agent.application.ports import Cloner
 from orbit.agent.application.recovery import RecoveryFailed
 from orbit.agent.application.workspace_host import WorkspaceHost
@@ -456,4 +456,4 @@ async def _unflag_anyway(registry: WorkspaceRegistry, workspace_id: str, root: P
     try:
         await registry.set_served(workspace_id, False)
     except StoreError as exc:
-        unexpected(failed_to(f"flag {root} not served", exc), exc)
+        log_unexpected(failed_to(f"flag {root} not served", exc), exc)

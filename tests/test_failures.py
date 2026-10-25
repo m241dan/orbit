@@ -4,7 +4,13 @@ import logging
 
 import pytest
 
-from orbit.agent.application.failures import ReportedOnce, command_failure, outcome, unexpected
+from orbit.agent.application.failures import (
+    ReportedOnce,
+    command_failure,
+    log_unexpected,
+    outcome,
+    unexpected,
+)
 from orbit.agent.application.ports import ReadFailed, StoreFailed
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import BUSY, INTERNAL, SAVE_FAILED, ErrorOccurred, Event, RunTasks
@@ -109,6 +115,29 @@ def test_an_unexpected_error_is_logged_with_its_traceback(
     assert record.levelno == logging.ERROR
     assert record.getMessage() == "Orbit failed to handle X: 100% a bug"
     assert record.exc_info is not None and record.exc_info[1] is exc
+    assert "Traceback" in caplog.text
+
+
+def test_an_unexpected_error_is_marked_reported(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.ERROR):
+        unexpected("Orbit failed to handle X: a bug", raised())
+
+    [record] = caplog.records
+    assert getattr(record, "reported", False) is True
+
+
+def test_an_unexpected_error_only_logged_is_logged_with_its_traceback_unmarked(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    exc = raised()
+    with caplog.at_level(logging.ERROR):
+        log_unexpected("Orbit failed to flag X: 100% a bug", exc)
+
+    [record] = caplog.records
+    assert record.levelno == logging.ERROR
+    assert record.getMessage() == "Orbit failed to flag X: 100% a bug"
+    assert record.exc_info is not None and record.exc_info[1] is exc
+    assert not hasattr(record, "reported")
     assert "Traceback" in caplog.text
 
 

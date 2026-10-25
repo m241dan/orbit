@@ -674,7 +674,7 @@ def test_a_failure_unflagging_the_others_is_logged_and_the_flags_failure_reporte
     assert exited.value.exit_code == 2
     assert capsys.readouterr().err == "The store failed.\n"
     message = f"Orbit failed to flag {first} not served: The store failed again."
-    assert logged_with_traceback(caplog.records, message)
+    assert logged_with_traceback(caplog.records, message, reported=False)
     assert flagged(state) == [str(first)]
 
 
@@ -839,7 +839,7 @@ async def test_an_add_cancelled_as_it_flags_served_whose_unflagging_fails_is_sti
     with pytest.raises(asyncio.CancelledError):
         await opening
     message = f"Orbit failed to flag {root} not served: The store failed."
-    assert logged_with_traceback(caplog.records, message)
+    assert logged_with_traceback(caplog.records, message, reported=False)
     assert free(root) and source.locks == ()
 
 
@@ -962,7 +962,7 @@ async def test_a_lock_that_cant_name_the_url_whose_unflagging_fails_is_unavailab
         await opened_as_the_server_starts(source, root, gate, "ws://127.0.0.1:7433/")
     assert refused.value.code == INTERNAL
     message = f"Orbit failed to flag {root} not served: The store failed."
-    assert logged_with_traceback(caplog.records, message)
+    assert logged_with_traceback(caplog.records, message, reported=False)
     assert free(root) and source.locks == ()
 
 
