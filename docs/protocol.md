@@ -100,7 +100,9 @@ when the user can message it: the planner, and any other enabled role with `conv
 whose lane is listed too. Each agent role also carries its `lane` and the defaults of a task in
 it, its `model`, `tool_access` and `effort`, as a `Settings` holds them, from the first workspace
 served that has a role of that name; these were added to version 2, defaulting to the `work`
-lane, the backend's model, `restricted` and no effort. Each
+lane, the backend's model, `restricted` and no effort. It's `personal` when the user's own config
+defines it, rather than orbit or the project (a personal role), in that first workspace; this was
+added to version 2 too, defaulting to false. Each
 session carries its state (see [Session state](#session-state)).
 
 `Hello` attaches the connection to nothing, and nothing more reaches it until its first

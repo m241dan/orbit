@@ -1,6 +1,6 @@
 """The user's own orbit configuration, ``config.toml`` in the config directory."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +11,7 @@ from orbit.agent.domain.layers import Layer, UserRoles, load_user_roles
 from orbit.agent.domain.remotes import REMOTE_PATHS, RemoteSettings, load_remotes
 from orbit.agent.domain.server import SERVER_PATHS, ServerSettings, load_server
 from orbit.agent.domain.storage import StorageSettings, load_storage
+from orbit.agent.external.role_instructions import with_instructions
 from orbit.agent.external.toml_files import read_toml
 
 USER_CONFIG_FILE = "config.toml"
@@ -63,15 +64,22 @@ def read_remotes(config_dir: Path) -> dict[str, RemoteSettings]:
     return {name: _resolved(remote, REMOTE_PATHS, config_dir) for name, remote in remotes.items()}
 
 
-def read_user_roles(config_dir: Path) -> UserRoles:
-    """The role fields ``config_dir``'s file sets, those bound to the machine, as its layer;
-    none without a file.
+def read_user_roles(config_dir: Path, built_in: Collection[str]) -> UserRoles:
+    """The role fields ``config_dir``'s file sets, those bound to the machine, and the personal
+    roles it defines beside the ``built_in`` ones, as its layer; none without a file. A
+    personal role's instructions naming a Markdown file are that file's text, taken from
+    ``config_dir``.
 
-    Raises :class:`ConfigError`, naming the file, if it can't be read or is invalid, as it is
-    when it sets a role's field other than its model and effort.
+    Raises :class:`ConfigError`, naming the file, if it or a personal role's instructions file
+    can't be read or is invalid, as it is when it sets a built-in role's field other than its
+    model and effort.
     """
     layer = Layer("user", str(config_dir / USER_CONFIG_FILE))
-    return read_user_config(config_dir, lambda data: load_user_roles(data, layer), UserRoles(layer))
+
+    def load(data: dict[str, Any]) -> UserRoles:
+        return load_user_roles(with_instructions(data, config_dir, built_in), layer, built_in)
+
+    return read_user_config(config_dir, load, UserRoles(layer))
 
 
 def _resolved[M: BaseModel](settings: M, keys: tuple[str, ...], config_dir: Path) -> M:

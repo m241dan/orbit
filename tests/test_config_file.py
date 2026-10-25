@@ -13,12 +13,8 @@ from orbit.agent.domain.config import OrbitConfig
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
-from orbit.agent.external.config_file import (
-    CONFIG_PATH,
-    read_config,
-    resolve_instructions,
-    write_checks,
-)
+from orbit.agent.external.config_file import CONFIG_PATH, read_config, write_checks
+from orbit.agent.external.role_instructions import resolve_instructions
 from orbit.protocol import PLANNER
 
 BUILT_IN_ROLES = read_built_in_roles()
@@ -87,6 +83,86 @@ def test_a_role_field_the_user_config_cant_set_names_it_and_both_files(
     assert str(raised.value).startswith(
         f"{path}: roles.coder.verify: belongs in the project's .orbit/config.toml"
     )
+
+
+HELPER = """
+[roles.helper]
+instructions = "roles/helper.md"
+lane = "helper"
+workspace = "snapshot"
+merge = false
+verify = false
+"""
+"""A personal role whose instructions are in a file under the config directory."""
+
+
+def write_helper(config_dir: Path, text: str = HELPER) -> Path:
+    """The user config in ``config_dir`` defining the personal role ``helper`` as ``text``
+    says, with its instructions file."""
+    path = write_user_config(config_dir, text)
+    (config_dir / "roles").mkdir()
+    (config_dir / "roles" / "helper.md").write_text("You help.\n", encoding="utf-8")
+    return path
+
+
+def test_a_personal_role_is_read_into_every_workspace_marked_personal(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    write_helper(config_dir)
+    bare, configured = tmp_path / "bare", tmp_path / "configured"
+    bare.mkdir()
+    configured.mkdir()
+    write(configured, "fix_attempts = 2\n")
+    for root in (bare, configured):
+        config = read_config(str(root), config_dir)
+        helper = config.roles["helper"]
+        assert (helper.instructions, helper.lane, helper.workspace) == (
+            "You help.",
+            "helper",
+            "snapshot",
+        )
+        assert (helper.merge, helper.verify) == (False, False)
+        assert config.personal == {"helper"}
+        assert config.notices == ()
+
+
+def test_a_project_role_of_a_personal_roles_name_replaces_it_with_a_notice(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    write_helper(config_dir)
+    write(tmp_path, '[roles.helper]\ninstructions = "The project\'s helper."\n')
+    config = read_config(str(tmp_path), config_dir)
+    assert config.roles["helper"].instructions == "The project's helper."
+    assert config.roles["helper"].lane == "work"
+    assert config.personal == frozenset()
+    assert config.notices == (
+        "The project's role helper replaces your personal role of that name.",
+    )
+
+
+@pytest.mark.parametrize("project", [None, "fix_attempts = 2\n"])
+def test_a_personal_role_breaking_a_rule_across_the_roles_names_the_user_config(
+    tmp_path: Path, config_dir: Path, project: str | None
+) -> None:
+    path = write_helper(config_dir, HELPER.replace('"snapshot"', '"worktree"'))
+    if project is not None:
+        write(tmp_path, project)
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value).startswith(
+        f'{path}: roles: the enabled roles with workspace = "worktree" must share one lane'
+    )
+    assert "lane 'helper' has ['helper']" in str(raised.value)
+
+
+def test_the_projects_own_clash_beside_a_personal_role_names_the_project_file(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    write_helper(config_dir)
+    path = write(tmp_path, '[roles.auditor]\ninstructions = "Audit."\nlane = "audit"\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value).startswith(f"{path}: roles: the enabled roles")
 
 
 def test_invalid_toml_names_the_file(tmp_path: Path) -> None:

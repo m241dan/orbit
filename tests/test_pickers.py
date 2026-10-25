@@ -7,6 +7,9 @@ from tests.view_fakes import PickerScreens
 
 CODER = AgentEntry(name="coder", label="Coder", conversational=False, tool_access="full")
 SECURITY = AgentEntry(name="security", label="security", conversational=False, lane="security")
+HELPER = AgentEntry(
+    name="helper", label="helper", conversational=False, lane="helper", personal=True
+)
 
 
 class Screens(PickerScreens):
@@ -95,6 +98,12 @@ async def test_choosing_a_role_labels_the_roles_opens_on_the_role_and_passes_on_
     assert screens.roles == [["Coder · work", "security · security"]]
     await screens.pick(0)
     assert picked == [CODER]
+
+
+def test_the_role_picker_marks_a_personal_role() -> None:
+    screens = Screens()
+    screens.pickers.choose_role((CODER, HELPER), "coder", lambda role: None)
+    assert screens.roles == [["Coder · work", "helper · helper · personal"]]
 
 
 def test_the_role_picker_opens_on_nothing_for_a_role_not_offered() -> None:

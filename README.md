@@ -289,7 +289,9 @@ The task list queues prompts to run later. Each task has its own prompt, role, m
 and effort, set in the task editor's six fields: **Title**, the prompt's first line, which is what
 the task list shows; **Prompt**, the rest of it, in a box that scrolls; **Role**, the role whose
 agent takes the task, picked among the enabled roles that take tasks (those that aren't
-conversational), each shown with its lane (`Coder · work`), and `coder` for a new task; **Model**;
+conversational), each shown with its lane (`Coder · work`) and a personal role marked so
+(`helper · helper · personal`; see [Your personal roles](#your-personal-roles)), and `coder` for a
+new task; **Model**;
 **Tool access**; and **Effort**: unset, `low`, `medium`, `high`, `xhigh` or `max`, where unset
 leaves it to the role's (see `effort` under
 [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)). Picking a role sets the model, tool
@@ -745,7 +747,7 @@ your checkout out of its way, it doesn't sandbox it.
 | `.git/orbit` | the repository's git directory | the coder's worktree, review snapshots, what earlier runs left there and `workspace.lock`, which says which orbit owns the repository (`.orbit/workspace.lock` outside git; see [Owning the repository](#owning-the-repository)) |
 | The store | the state directory | `orbit.db`, the saved sessions, their event logs, the super review count and the record moves of every repository, `locks/`, and `fallback/` for events a failed write left unsaved (see [Storage failures](#storage-failures)) |
 | Config files | `.orbit/config.toml` in the repository | the verification steps, setup, roles and limits, committed with your code |
-| User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]`, `[server]`, `[remotes]`, `[telemetry]` and your machine's model and effort for roles in `[roles]` |
+| User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]`, `[server]`, `[remotes]`, `[telemetry]`, and in `[roles]` your machine's model and effort for roles and your personal roles, with the instructions files they name |
 | The token | `token` in the config directory | what frontends show `orbit serve` to connect (see [Serving the control plane](#serving-the-control-plane)) |
 | Certificates | `certs/` in the config directory | the CA, server and client certificates and keys `orbit certs` makes for TLS and mutual TLS (see [Serving the control plane](#serving-the-control-plane)) |
 | The run file | `run/server.json` in the state directory | where the `orbit serve` running on that state directory listens, beside `run/serve.lock`, which that serve holds |
@@ -1077,7 +1079,8 @@ merges, whether it's enabled and how hard its agents think:
   CLI's default.
 
 In the TUI, the task editor's **Role** field picks a task's role among the enabled roles that
-aren't conversational, each shown with its lane (`Coder · work`), and fills in the role's model,
+aren't conversational, each shown with its lane (`Coder · work`) and a personal role marked
+`personal` (`helper · helper · personal`), and fills in the role's model,
 tool access and effort; its **Effort** field sets the task's own effort, or leaves it unset for the
 role's (see [Tasks](#tasks)). `ctrl+y` picks the effort of the conversational role whose tab is
 shown, or the planner's elsewhere, as `ctrl+o` and `ctrl+l` pick its model and tool access.
@@ -1158,18 +1161,51 @@ roles shipped with orbit, then orbit's defaults. So above, every role runs on `h
 `super-reviewer`'s `opus` from the package included, unless the project sets a role's model; the
 planner runs on `opus` unless the project sets the planner's; and a project's
 `[roles.planner] model = "sonnet"` wins over both. Without a `[roles]` table, roles are just the
-project's over orbit's. A `[roles.<name>]` table for a role neither orbit nor the project has
-changes nothing.
+project's over orbit's. A `[roles.<name>]` table that sets only `model` and `effort` for a role
+neither orbit nor the project has changes nothing; one that sets any other field defines a
+personal role (see [Your personal roles](#your-personal-roles)).
 
-Only `model` and `effort` belong to your machine: any other field of a role, such as
-`[roles.coder] verify = false`, is refused, naming the file, the key and that it belongs in the
-project's `.orbit/config.toml`, so your machine can't turn off a project's verification. `effort`
-takes the levels a role's does, and any other value is refused, listing them. `orbit chat` reads
+Only `model` and `effort` of orbit's own roles belong to your machine: any other field of one,
+such as `[roles.coder] verify = false`, is refused, naming the file, the key and that it belongs
+in the project's `.orbit/config.toml`, so your machine can't turn off a project's verification;
+so is any other field in `[roles]` itself. `effort` takes the levels a role's does, and any other
+value is refused, listing them. `orbit chat` reads
 your `config.toml`'s roles as it opens its workspace, and `orbit serve`, with the config directory
 of the account it runs as, as it opens each workspace it serves; both read them again, with the
 project's, when the planner is reset. An invalid one is refused as an invalid
 `.orbit/config.toml` is: it stops `orbit chat` with status 2, and a workspace `orbit serve` can't
 open.
+
+#### Your personal roles
+
+Roles of your own go with you to every repository: a `[roles.<name>]` table in your
+`config.toml` naming a role orbit doesn't ship, and setting more than its `model` and `effort`,
+defines a **personal role**, available in every workspace orbit opens with that config directory.
+It may set every field a role in `.orbit/config.toml` may, and is held to the same rules: like a
+role a project adds, it must set `instructions` and gets the same defaults for the rest (the
+coder's lane `work`, `worktree` and so on), and your `[roles]` `model` and `effort` apply beneath
+its own. Its `instructions` naming a Markdown file are read from the config directory:
+
+```toml
+[roles.helper]
+instructions = "roles/helper.md"  # the text of roles/helper.md in the config directory
+lane = "helper"
+workspace = "snapshot"
+merge = false
+verify = false
+```
+
+A personal role is checked with the rest of the workspace's roles, too: one that breaks a rule
+across roles that the others keep, such as `workspace = "worktree"` in a lane of its own beside
+the coder's, or a task role in the planner's lane, is refused naming your `config.toml`, as an
+invalid one of its own is (a missing instructions file names both files and the role). The
+Catalog marks it `personal`, and the task editor's **Role** picker shows it as
+`<label> · <lane> · personal`.
+
+A project's `.orbit/config.toml` can always define a role of the same name: the project's
+replaces yours entirely, none of your role's fields carrying over (your `[roles]` `model` and
+`effort` still apply beneath it, as to any of the project's roles), and the workspace's startup
+notices say so: `The project's role helper replaces your personal role of that name.`
 
 ### How agents reach orbit
 
@@ -2326,7 +2362,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     MCP server; `GitCoderTree` is the coder's worktree and its snapshots; `repository` finds the
     git repository a workspace is in, fingerprints it, and places orbit's directory in it
     (`orbit_dir`: `.git/orbit`, or `.orbit` outside git); `config_file` reads
-    `.orbit/config.toml` and the instructions files its roles name (`resolve_instructions`);
+    `.orbit/config.toml` and `role_instructions` the instructions files its roles and your
+    personal roles name (`resolve_instructions`);
     `built_in_roles` reads the built-in roles from `instructions/roles.toml` and their
     instructions from the Markdown files it names; `checks`
     runs a verification step as a process (`run_step`); `processes` runs a program to completion
@@ -2349,7 +2386,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     token it checks, read afresh for each frontend, and rotates it, `tls_warnings` (in `tls`) checks
     the server's TLS settings, key and certificate before it listens, with the messages in
     `tls_messages`, `RunFile` (in `run_file`) says where it listens, both written through
-    `whole_files`, and `user_config` reads `[storage]`, `[server]` and `[remotes]`.
+    `whole_files`, and `user_config` reads `[storage]`, `[server]`, `[remotes]` and `[roles]`.
   - `application`: `ControlPlane` (in `control_plane`) is what frontends connect to: each
     `SessionConnection` (in `connection`) from its `connect()` implements `Session`. It owns
     what's shared: the connections, the `Outbox` (in `outbox`), which stamps each event with its

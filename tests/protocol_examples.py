@@ -344,6 +344,7 @@ EVENTS: tuple[EventEnvelope, ...] = (
                     lane="audit",
                     model="opus",
                     effort="high",
+                    personal=True,
                 ),
             ),
             triggers=(TriggerEntry(name="super-review", label="Super review", manual=True),),

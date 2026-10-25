@@ -889,6 +889,41 @@ def test_a_role_field_the_user_config_cant_set_stops_chat_naming_it_and_the_file
     assert launched == []
 
 
+def write_personal_helper(config_dir: Path) -> None:
+    """A user config in ``config_dir`` defining the personal role ``helper``, its instructions
+    in a file beside it."""
+    (config_dir / "roles").mkdir(parents=True)
+    (config_dir / "roles" / "helper.md").write_text("You help.\n")
+    (config_dir / "config.toml").write_text(
+        '[roles.helper]\ninstructions = "roles/helper.md"\nlane = "helper"\n'
+        'workspace = "snapshot"\nmerge = false\nverify = false\n'
+    )
+
+
+def test_chat_takes_the_user_configs_personal_roles(
+    launched: list[WorkspaceHost], config_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    write_personal_helper(config_dir)
+    monkeypatch.chdir(tmp_path)
+    assert runner.invoke(app, ["chat"]).exit_code == 0
+    [session] = launched
+    assert session.agents is not None
+    assert session.agents.roles["helper"].instructions == "You help."
+    assert session.personal == {"helper"}
+
+
+def test_chat_notes_a_project_role_replacing_a_personal_one_after_the_snapshot(
+    orders: list[Order], config_dir: Path, tmp_path: Path
+) -> None:
+    write_personal_helper(config_dir)
+    (tmp_path / ".orbit").mkdir()
+    (tmp_path / ".orbit" / "config.toml").write_text('[roles.helper]\ninstructions = "Ours."\n')
+    assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
+    [order] = orders
+    note = "The project's role helper replaces your personal role of that name."
+    assert order.notices[note] > order.snapshot
+
+
 def test_rereading_an_invalid_project_file_gives_its_problems(
     launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

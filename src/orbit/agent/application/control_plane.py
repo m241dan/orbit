@@ -33,6 +33,7 @@ from orbit.agent.application.workspace_source import WorkspaceSource, WorkspaceU
 from orbit.agent.domain.catalog import catalog
 from orbit.agent.domain.listings import LOCAL_BROWSING
 from orbit.agent.domain.refusals import Refused
+from orbit.agent.domain.roles import Role
 from orbit.agent.domain.workspaces import LOCAL_ONLY, addressed_workspace, served_workspace
 from orbit.protocol import (
     INVALID,
@@ -69,6 +70,12 @@ def _across[T](
 ) -> list[T]:
     """The ``items`` each of ``hosts`` has, in turn."""
     return [item for host in hosts for item in items(host)]
+
+
+def _listed_roles(host: WorkspaceHost) -> list[tuple[str, Role, bool]]:
+    """``host``'s enabled roles, each with its name and whether it's personal."""
+    personal = host.personal
+    return [(name, role, name in personal) for name, role in host.roles.items()]
 
 
 async def _untold(entry: WorkspaceEntry) -> None:
@@ -323,11 +330,12 @@ class ControlPlane:
     async def _catalog(self, changed: WorkspaceEntry | None = None) -> Catalog:
         """What exists: every workspace served, the one ``changed`` names with that entry, if
         given, and the others with their sessions as they are now, and their agents' enabled
-        roles, those any workspace converses with marked so, the triggers and the lanes, each
-        listed if any workspace has it."""
+        roles, those any workspace converses with marked so, and each personal as the first
+        workspace with a role of its name has it, the triggers and the lanes, each listed if any
+        workspace has it."""
         hosts = tuple(self._hosts.values())  # Workspaces may be added or removed meanwhile.
         entries = [await self._entry(host, changed) for host in hosts]
-        roles = _across(hosts, lambda host: host.roles.items())
+        roles = _across(hosts, _listed_roles)
         triggers = _across(hosts, lambda host: host.triggers)
         lanes = _across(hosts, lambda host: host.lanes)
         conversational = _across(hosts, lambda host: host.conversational)

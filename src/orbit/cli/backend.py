@@ -230,10 +230,10 @@ def _host_maker(
     *,
     pick_session: bool,
 ) -> Callable[[OpenedStore], WorkspaceHost]:
-    """What builds the host of the workspace at ``root``, configured as ``config`` says, over
-    its view of the store, as ``backend`` asks, keeping its sessions as the ``user`` config's
-    storage settings say and reading its planner's role again over it, listing the saved
-    sessions to pick from if ``pick_session``."""
+    """What builds the host of the workspace at ``root``, configured as ``config`` says, its
+    notices among its startup notes, over its view of the store, as ``backend`` asks, keeping
+    its sessions as the ``user`` config's storage settings say and reading its planner's role
+    again over it, listing the saved sessions to pick from if ``pick_session``."""
     verification = _verification(config) if backend.verify else None
     agents = _agents(config, root, backend, user.directory)
     settings, pinned = _settings(backend.model, backend.tools)
@@ -251,7 +251,7 @@ def _host_maker(
             pinned=pinned,
             pick_session=pick_session,
             name=backend.name,
-            startup_notes=opened.notes,
+            startup_notes=(*config.notices, *opened.notes),
             storage=user.storage,
             fallback=opened.fallback,
             recover=opened.recover,
@@ -323,6 +323,7 @@ def _agents(config: OrbitConfig, root: Path, backend: _Backend, config_dir: Path
         file_names=file_names,
         root=where,
         temp_dirs=SystemTempDirs(),
+        personal=config.personal,
     )
 
 

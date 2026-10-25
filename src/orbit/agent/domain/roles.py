@@ -244,6 +244,13 @@ def worktree_lane_clashes(roles: Mapping[str, Role]) -> list[str]:
     return [f'the enabled roles with workspace = "worktree" must share one lane, but {named}']
 
 
+def role_clashes(roles: Mapping[str, Role]) -> list[str]:
+    """How ``roles`` break the rules across roles: the conversational roles whose lanes task
+    roles share (see :func:`lane_clashes`), and the worktree's roles in more than one lane (see
+    :func:`worktree_lane_clashes`)."""
+    return lane_clashes(roles) + worktree_lane_clashes(roles)
+
+
 def task_lanes(roles: Mapping[str, Role]) -> dict[str, frozenset[str]]:
     """The lanes the enabled task roles among ``roles`` run in, in order, each with the names of
     those roles: the roles that aren't conversational."""

@@ -46,9 +46,10 @@ NO_WORKSPACE_LABEL = "default"
 """The workspace's label outside a repository."""
 
 
-def agent_entry(name: str, role: Role, conversational: bool) -> AgentEntry:
+def agent_entry(name: str, role: Role, conversational: bool, personal: bool) -> AgentEntry:
     """The catalog's entry for the agents of ``role``, named ``name``, ``conversational`` if the
-    user can message them, with its lane and the defaults of its tasks' settings."""
+    user can message them, ``personal`` if it's defined whole in the user config, with its lane
+    and the defaults of its tasks' settings."""
     return AgentEntry(
         name=name,
         label=ROLE_LABELS.get(name, name),
@@ -57,6 +58,7 @@ def agent_entry(name: str, role: Role, conversational: bool) -> AgentEntry:
         model=role.model,
         tool_access=role.tool_access,
         effort=role.effort,
+        personal=personal,
     )
 
 
@@ -97,22 +99,26 @@ def trigger_names(roles: Mapping[str, Role]) -> tuple[str, ...]:
 
 def catalog(
     workspaces: Sequence[WorkspaceEntry],
-    roles: Iterable[tuple[str, Role]],
+    roles: Iterable[tuple[str, Role, bool]],
     triggers: Iterable[str],
     lanes: Iterable[str],
     conversational: Iterable[str],
 ) -> Catalog:
-    """The catalog of the ``workspaces`` served, with agents in ``roles``, each named once, as
-    the first of that name is, those among them in ``conversational`` ones the user can message,
-    the built-in ``triggers`` named, in their order, and ``lanes``, each listed once."""
+    """The catalog of the ``workspaces`` served, with agents in ``roles``, each given with its
+    name and whether it's personal, and named once, as the first of that name is, those among
+    them in ``conversational`` ones the user can message, the built-in ``triggers`` named, in
+    their order, and ``lanes``, each listed once."""
     named = frozenset(triggers)
     talking = frozenset(conversational)
-    first: dict[str, Role] = {}
-    for name, role in roles:
-        first.setdefault(name, role)
+    first: dict[str, tuple[Role, bool]] = {}
+    for name, role, personal in roles:
+        first.setdefault(name, (role, personal))
     return Catalog(
         workspaces=tuple(workspaces),
-        agents=tuple(agent_entry(name, role, name in talking) for name, role in first.items()),
+        agents=tuple(
+            agent_entry(name, role, name in talking, personal)
+            for name, (role, personal) in first.items()
+        ),
         triggers=tuple(trigger for trigger in TRIGGERS if trigger.name in named),
         lanes=tuple(dict.fromkeys(lanes)),
     )

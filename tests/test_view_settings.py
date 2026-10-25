@@ -155,3 +155,10 @@ def test_picked_effort_changes_only_the_effort() -> None:
 def test_a_role_shows_its_label_and_lane() -> None:
     security = AgentEntry(name="security", label="Security", conversational=False, lane="audit")
     assert role_label(security) == "Security · audit"
+
+
+def test_a_personal_role_shows_its_label_and_lane_marked_personal() -> None:
+    helper = AgentEntry(
+        name="helper", label="helper", conversational=False, lane="helper", personal=True
+    )
+    assert role_label(helper) == "helper · helper · personal"

@@ -211,6 +211,39 @@ async def test_the_catalogs_agents_carry_the_lane_and_defaults_of_the_first_role
     )
 
 
+async def test_the_catalogs_agents_are_personal_as_the_first_role_named_is() -> None:
+    helper = ROLES[REVIEWER].model_copy(update={"lane": "helper"})
+    roles = {**ROLES, "helper": helper}
+    first, _ = agent_workspace("a", roles=roles, personal=frozenset({"helper"}))
+    second, _ = agent_workspace("b", roles=roles)
+    bare = workspace("c")
+    plane = ControlPlane([first, second, bare])
+    connection = plane.connect()
+    await say(connection, "hello", HELLO)
+    _, catalog = payloads(taken(connection))
+    await plane.close()
+
+    assert isinstance(catalog, Catalog)
+    assert [agent.name for agent in catalog.agents if agent.personal] == ["helper"]
+    assert (second.personal, bare.personal) == (frozenset(), frozenset())
+
+
+async def test_a_role_personal_only_in_a_later_workspace_isnt_listed_personal() -> None:
+    helper = ROLES[REVIEWER].model_copy(update={"lane": "helper"})
+    roles = {**ROLES, "helper": helper}
+    first, _ = agent_workspace("a", roles=roles)
+    second, _ = agent_workspace("b", roles=roles, personal=frozenset({"helper"}))
+    plane = ControlPlane([first, second])
+    connection = plane.connect()
+    await say(connection, "hello", HELLO)
+    _, catalog = payloads(taken(connection))
+    await plane.close()
+
+    assert isinstance(catalog, Catalog)
+    assert [agent.name for agent in catalog.agents if agent.personal] == []
+    assert second.personal == {"helper"}
+
+
 def read_only_in(envelopes: list[EventEnvelope]) -> list[dict[str, bool]]:
     """Which workspaces are read-only in each Catalog among ``envelopes``."""
     catalogs = [e for e in payloads(envelopes) if isinstance(e, Catalog)]

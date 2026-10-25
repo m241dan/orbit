@@ -1,5 +1,5 @@
 """Orbit's configuration: the limits, roles, verification steps and setup a project file sets
-over the user config's role fields and the built-in defaults."""
+over the user config's role fields and personal roles and the built-in defaults."""
 
 from collections.abc import Mapping
 from typing import Any
@@ -10,9 +10,16 @@ from pydantic_core import PydanticCustomError
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.checks import Setup, VerificationConfig
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
-from orbit.agent.domain.layers import NO_USER_ROLES, Layer, ProjectRoles, UserRoles, resolve_roles
+from orbit.agent.domain.layers import (
+    NO_USER_ROLES,
+    Layer,
+    ProjectRoles,
+    UserRoles,
+    replaced_note,
+    resolve_roles,
+)
 from orbit.agent.domain.reviews import ReviewLimits
-from orbit.agent.domain.roles import Role, lane_clashes, worktree_lane_clashes
+from orbit.agent.domain.roles import Role, role_clashes
 from orbit.agent.domain.verification import MAX_FALLBACK_FIXES
 
 
@@ -24,8 +31,8 @@ _LIMITS = Limits()
 _REVIEW_LIMITS = ReviewLimits()
 
 
-class OrbitConfig(_Config):
-    """Orbit's limits and roles.
+class _FileConfig(_Config):
+    """Orbit's limits and roles, as a project file sets them.
 
     ``fix_attempts``: in-session fixes, asked of the same agent before its task falls back.
     ``max_checks``: verification steps an agent may run itself before claiming done.
@@ -52,7 +59,7 @@ class OrbitConfig(_Config):
     @field_validator("roles")
     @classmethod
     def _lanes_apart(cls, roles: dict[str, Role]) -> dict[str, Role]:
-        clashes = lane_clashes(roles) + worktree_lane_clashes(roles)
+        clashes = role_clashes(roles)
         if clashes:
             raise PydanticCustomError("role_lanes", "; ".join(clashes))
         return roles
@@ -71,6 +78,15 @@ class OrbitConfig(_Config):
         )
 
 
+class OrbitConfig(_FileConfig):
+    """Orbit's configuration in effect: the limits and roles a project file sets, with the names
+    of the roles that are ``personal``, defined whole in the user config, and the ``notices``
+    the user is told as its workspace starts."""
+
+    personal: frozenset[str] = frozenset()
+    notices: tuple[str, ...] = ()
+
+
 def load_config(
     data: dict[str, Any],
     built_in: Mapping[str, Role],
@@ -78,18 +94,29 @@ def load_config(
     path: str | None = None,
 ) -> OrbitConfig:
     """The configuration ``data`` (the contents of the project file at ``path``, if known)
-    describes over the role fields ``user`` sets and the defaults, whose roles are ``built_in``.
+    describes over the role fields and personal roles ``user`` sets and the defaults, whose
+    roles are ``built_in``, with a notice for each personal role a project role replaces.
 
     A role it names that's built in keeps the fields it doesn't set; any other role is new. Each
     role's fields are resolved as :func:`resolve_roles` says. Raises :class:`ConfigError` if
-    it's invalid.
+    it's invalid, a :class:`PersonalRoleError` if the personal roles are at fault.
     """
-    data = dict(data)
     roles = data.get("roles", {})
-    if isinstance(roles, dict):
-        project = ProjectRoles(Layer("project", path), roles)
-        data["roles"] = resolve_roles(built_in, user, project).roles
+    if not isinstance(roles, dict):
+        return _validated(data)  # Refused: the roles aren't a table.
+    resolved = resolve_roles(built_in, user, ProjectRoles(Layer("project", path), roles))
+    notices = tuple(replaced_note(name) for name in resolved.replaced)
+    return _validated({**data, "roles": resolved.roles}, resolved.personal, notices)
+
+
+def _validated(
+    data: dict[str, Any], personal: frozenset[str] = frozenset(), notices: tuple[str, ...] = ()
+) -> OrbitConfig:
+    """The configuration ``data`` describes, its roles resolved, with the names of those that
+    are ``personal`` and the ``notices`` to tell the user. Raises :class:`ConfigError` if it's
+    invalid."""
     try:
-        return OrbitConfig.model_validate(data)
+        settings = _FileConfig.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(validation_problems(exc)) from None
+    return OrbitConfig(**dict(settings), personal=personal, notices=notices)

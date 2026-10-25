@@ -8,10 +8,12 @@ from orbit.agent.domain.layers import (
     NO_USER_ROLES,
     PACKAGE,
     Layer,
+    PersonalRoleError,
     ProjectRoles,
     RoleFields,
     UserRoles,
     load_user_roles,
+    replaced_note,
     resolve_roles,
 )
 from orbit.agent.domain.roles import Role, built_in_roles
@@ -23,11 +25,19 @@ PACKAGE_ROLES = built_in_roles(read_built_in_roles(), INSTRUCTIONS)
 USER = Layer("user", "/home/me/.config/orbit/config.toml")
 PROJECT = Layer("project", "/src/app/.orbit/config.toml")
 NO_PROJECT_ROLES = ProjectRoles(PROJECT)
+HELPER = {
+    "instructions": "You help.",
+    "lane": "helper",
+    "workspace": "snapshot",
+    "merge": False,
+    "verify": False,
+}
+"""A personal role's table: a helper in a lane of its own, on a snapshot."""
 
 
 def user(data: dict[str, object]) -> UserRoles:
-    """The user roles a user config holding ``data`` sets."""
-    return load_user_roles(data, USER)
+    """The user roles a user config holding ``data`` sets, beside the package's roles."""
+    return load_user_roles(data, USER, PACKAGE_ROLES)
 
 
 def project(roles: dict[str, object]) -> ProjectRoles:
@@ -96,6 +106,42 @@ def test_an_effort_claude_doesnt_offer_is_refused_listing_those_it_does(
 def test_a_roles_value_that_isnt_a_table_is_refused() -> None:
     with pytest.raises(ConfigError, match=r"^roles: "):
         user({"roles": "everyone"})
+
+
+def test_a_table_setting_more_than_model_and_effort_for_a_new_role_is_a_personal_role() -> None:
+    roles = user({"roles": {"model": "haiku", "helper": HELPER}})
+    assert roles.personal == {"helper": Role.model_validate(HELPER)}
+    assert (roles.named, roles.every) == ({}, RoleFields(model="haiku"))
+
+
+def test_a_table_setting_only_model_and_effort_for_a_new_role_isnt_a_personal_role() -> None:
+    roles = user({"roles": {"docs-writer": {"model": "opus", "effort": "low"}}})
+    assert roles.named == {"docs-writer": RoleFields(model="opus", effort="low")}
+    assert roles.personal == {}
+
+
+@pytest.mark.parametrize(
+    ("helper", "problem"),
+    [
+        ({"lane": "helper"}, "roles.helper.instructions: Field required"),
+        ({**HELPER, "colour": "red"}, "roles.helper.colour: Extra inputs are not permitted"),
+        (
+            {"instructions": "You help.", "workspace": "snapshot"},
+            "roles.helper: verify = true needs merge = true",
+        ),
+        (
+            {"instructions": "You help.", "verify": "sometimes"},
+            "roles.helper.verify: Input should be a valid boolean",
+        ),
+    ],
+)
+def test_a_personal_role_is_held_to_a_roles_rules_naming_the_key(
+    helper: dict[str, object], problem: str
+) -> None:
+    with pytest.raises(ConfigError) as raised:
+        user({"roles": {"helper": helper}})
+    assert str(raised.value).startswith(problem)
+    assert len(str(raised.value).splitlines()) == 1
 
 
 def test_every_problem_with_the_user_configs_roles_is_named_on_a_line_of_its_own() -> None:
@@ -177,6 +223,77 @@ def test_a_role_the_project_adds_takes_the_users_fields_after_the_packages_roles
     )
     layers = resolved.layers["docs-writer"]
     assert (layers["instructions"], layers["effort"], layers["tools"]) == (PROJECT, USER, DEFAULT)
+
+
+def test_a_personal_role_comes_after_the_packages_roles_and_before_the_projects() -> None:
+    writer = {"instructions": "Write docs.", "verify": False}
+    resolved = resolve_roles(
+        PACKAGE_ROLES, user({"roles": {"helper": HELPER}}), project({"docs-writer": writer})
+    )
+    assert list(resolved.roles) == [*PACKAGE_ROLES, "helper", "docs-writer"]
+    assert resolved.roles["helper"] == Role.model_validate(HELPER)
+    layers = resolved.layers["helper"]
+    assert (layers["instructions"], layers["lane"], layers["tools"]) == (USER, USER, DEFAULT)
+    assert resolved.personal == {"helper"}
+    assert resolved.replaced == ()
+
+
+def test_a_personal_role_takes_the_users_fields_for_every_role_beneath_its_own() -> None:
+    roles = {"model": "haiku", "effort": "low", "helper": {**HELPER, "effort": "max"}}
+    resolved = resolve_roles(PACKAGE_ROLES, user({"roles": roles}), NO_PROJECT_ROLES)
+    helper = resolved.roles["helper"]
+    assert (helper.model, helper.effort) == ("haiku", "max")
+    assert resolved.layers["helper"]["model"] == USER
+
+
+def test_a_project_role_of_a_personal_roles_name_replaces_it_entirely() -> None:
+    roles = {"effort": "low", "helper": {**HELPER, "model": "opus"}}
+    resolved = resolve_roles(
+        PACKAGE_ROLES, user({"roles": roles}), project({"helper": {"instructions": "Ours."}})
+    )
+    assert resolved.roles["helper"] == Role(instructions="Ours.", effort="low")
+    assert resolved.layers["helper"]["instructions"] == PROJECT
+    assert list(resolved.roles) == [*PACKAGE_ROLES, "helper"]
+    assert (resolved.personal, resolved.replaced) == (frozenset(), ("helper",))
+
+
+def test_the_notice_of_a_replaced_personal_role_names_it() -> None:
+    assert replaced_note("helper") == (
+        "The project's role helper replaces your personal role of that name."
+    )
+
+
+@pytest.mark.parametrize(
+    ("helper", "problem"),
+    [
+        (
+            {"instructions": "You help.", "lane": "helper"},
+            'roles: the enabled roles with workspace = "worktree" must share one lane, but lane'
+            " 'work' has ['coder', 'configurator'] and lane 'helper' has ['helper']",
+        ),
+        (
+            {**HELPER, "lane": "planner"},
+            "roles: the conversational role 'planner' can't share its lane 'planner' with the task"
+            " roles ['helper']",
+        ),
+    ],
+)
+def test_a_personal_role_breaking_a_rule_across_the_roles_is_a_personal_role_error(
+    helper: dict[str, object], problem: str
+) -> None:
+    with pytest.raises(PersonalRoleError) as raised:
+        resolve_roles(PACKAGE_ROLES, user({"roles": {"helper": helper}}), NO_PROJECT_ROLES)
+    assert str(raised.value) == problem
+
+
+def test_the_projects_own_clash_isnt_blamed_on_a_personal_role() -> None:
+    clashing = {"instructions": "Audit.", "lane": "audit"}
+    resolved = resolve_roles(
+        PACKAGE_ROLES,
+        user({"roles": {"helper": {"instructions": "You help.", "lane": "helper"}}}),
+        project({"auditor": clashing}),
+    )
+    assert resolved.personal == {"helper"}
 
 
 def test_a_role_only_the_user_config_names_isnt_a_role() -> None:

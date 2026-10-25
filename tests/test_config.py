@@ -4,6 +4,7 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.checks import Setup
 from orbit.agent.domain.config import OrbitConfig, load_config
 from orbit.agent.domain.config_errors import ConfigError
+from orbit.agent.domain.layers import Layer, PersonalRoleError, UserRoles, load_user_roles
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import Role, built_in_roles
 from orbit.agent.domain.verification import VerificationStep
@@ -321,3 +322,55 @@ def test_an_effort_claude_doesnt_offer_is_refused_listing_those_it_does(effort: 
     with pytest.raises(ConfigError, match=r"^roles\.reviewer\.effort: ") as raised:
         load_config({"roles": {"reviewer": {"effort": effort}}}, BUILT_IN_ROLES)
     assert "'low', 'medium', 'high', 'xhigh' or 'max'" in str(raised.value)
+
+
+# Personal roles
+
+USER = Layer("user", "/home/me/.config/orbit/config.toml")
+HELPER = {
+    "instructions": "You help.",
+    "lane": "helper",
+    "workspace": "snapshot",
+    "merge": False,
+    "verify": False,
+}
+"""A personal role's table: a helper in a lane of its own, on a snapshot."""
+
+
+def personal(**roles: object) -> UserRoles:
+    """The user roles of a user config defining ``roles`` whole."""
+    return load_user_roles({"roles": roles}, USER, BUILT_IN_ROLES)
+
+
+def test_a_personal_role_is_a_role_marked_personal() -> None:
+    config = load_config({}, BUILT_IN_ROLES, personal(helper=HELPER))
+    assert config.roles["helper"] == Role.model_validate(HELPER)
+    assert config.personal == {"helper"}
+    assert config.notices == ()
+
+
+def test_a_project_role_replacing_a_personal_one_is_noted() -> None:
+    config = load_config(custom(), BUILT_IN_ROLES, personal(x=HELPER))
+    assert config.roles["x"].lane == "work"
+    assert config.personal == frozenset()
+    assert config.notices == ("The project's role x replaces your personal role of that name.",)
+
+
+def test_a_personal_role_breaking_a_rule_across_the_roles_is_a_personal_role_error() -> None:
+    helper = {"instructions": "You help.", "lane": "helper"}
+    with pytest.raises(PersonalRoleError, match=r"^roles: the enabled roles"):
+        load_config({}, BUILT_IN_ROLES, personal(helper=helper))
+
+
+def test_the_projects_own_clash_beside_a_personal_role_is_the_projects() -> None:
+    helper = {"instructions": "You help.", "lane": "helper"}
+    with pytest.raises(ConfigError) as raised:
+        load_config(custom(lane="b"), BUILT_IN_ROLES, personal(helper=helper))
+    assert not isinstance(raised.value, PersonalRoleError)
+    assert "lane 'b' has ['x']" in str(raised.value)
+
+
+@pytest.mark.parametrize("key", ["personal", "notices"])
+def test_a_project_file_cant_mark_roles_personal_or_add_notices(key: str) -> None:
+    with pytest.raises(ConfigError, match=f"^{key}: Extra inputs are not permitted"):
+        load_config({key: ["coder"]}, BUILT_IN_ROLES)

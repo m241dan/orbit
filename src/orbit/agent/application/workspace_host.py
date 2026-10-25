@@ -687,6 +687,12 @@ class WorkspaceHost:
         return {name: role for name, role in roles.items() if name not in disabled}
 
     @property
+    def personal(self) -> frozenset[str]:
+        """The names of this workspace's roles defined whole in the user config, its personal
+        roles; none without agents."""
+        return self._desk.agents.personal if self._desk else frozenset()
+
+    @property
     def triggers(self) -> tuple[str, ...]:
         """The names of the built-in triggers that can be fired here: those whose role isn't
         disabled."""

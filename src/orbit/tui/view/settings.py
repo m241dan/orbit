@@ -95,8 +95,9 @@ def effort_labels() -> list[str]:
 
 def role_label(role: AgentEntry) -> str:
     """How ``role`` shows among the roles a task can take: ``Coder · work``, its label and its
-    lane."""
-    return f"{role.label} · {role.lane}"
+    lane, then ``personal`` for a personal role."""
+    label = f"{role.label} · {role.lane}"
+    return f"{label} · personal" if role.personal else label
 
 
 def settings_fields(settings: Settings) -> tuple[str, str]:
