@@ -1,8 +1,11 @@
 """The settings, without Textual: how they show under the prompt, and what the model and tool
 access pickers open on and send, as the settings and model choices change under them."""
 
+from rich.text import Text
+
 from orbit.protocol import Settings, SettingsChanged, UpdateSettings
 from tests.frontend_fakes import Shell
+from tests.tui_fakes import SNAPSHOT
 
 CHOICES = ("opus", "sonnet")
 
@@ -62,6 +65,26 @@ async def test_the_model_picker_offers_the_choices_and_opens_on_the_model() -> N
     shell.frontend.pick_model()
     assert shell.pickers.labels == [["default", "opus", "sonnet"]]
     assert opened(shell) == [("model", 1)]
+
+
+FAST = Text.assemble("fast", ("  claude-haiku-5-5", "dim"))
+"""How the model picker shows the alias ``fast``, resolving to ``claude-haiku-5-5``."""
+
+
+async def test_the_model_picker_shows_each_choice_with_the_id_settings_say_it_resolves_to() -> None:
+    shell = Shell()
+    ids = {"opus": "opus", "fast": "claude-haiku-5-5"}
+    await shell.feed(
+        SettingsChanged(settings=Settings(), model_choices=("opus", "fast"), model_ids=ids)
+    )
+    assert shell.pickers.labels == [["default", "opus", FAST]]
+
+
+async def test_the_model_picker_shows_each_choice_with_the_id_a_snapshot_says() -> None:
+    shell = Shell()
+    ids = {"opus": "opus", "fast": "claude-haiku-5-5"}
+    await shell.feed(SNAPSHOT.model_copy(update={"model_choices": ("fast",), "model_ids": ids}))
+    assert shell.pickers.labels == [["default", FAST]]
 
 
 async def test_picking_a_model_requests_it_keeping_the_tool_access() -> None:

@@ -215,6 +215,13 @@ COMMANDS: tuple[CommandEnvelope, ...] = (
 
 EVENTS: tuple[EventEnvelope, ...] = (
     event(SettingsChanged(settings=SETTINGS, model_choices=("opus", "sonnet"))),
+    event(
+        SettingsChanged(
+            settings=SETTINGS,
+            model_choices=("opus", "fast"),
+            model_ids={"opus": "opus", "fast": "claude-haiku-5-5"},
+        )
+    ),
     event(SettingsChanged(role="architect", settings=SETTINGS)),
     event(TurnStarted(turn_id="turn-1", agent_id="agent-1")),
     event(AssistantMessage(turn_id="turn-1", agent_id="agent-1", text="Done")),
@@ -297,6 +304,7 @@ EVENTS: tuple[EventEnvelope, ...] = (
             session=SUMMARY,
             settings=SETTINGS,
             model_choices=("opus",),
+            model_ids={"opus": "opus"},
             busy={"work": True, PLANNER_LANE: False},
             role_settings={PLANNER: SETTINGS, "architect": Settings(effort="max")},
             tasks=(TASK,),

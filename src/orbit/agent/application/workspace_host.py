@@ -91,6 +91,7 @@ from orbit.agent.domain.roles import (
     role_task,
     task_lanes,
 )
+from orbit.agent.domain.runtimes import ModelAliases
 from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
@@ -261,7 +262,6 @@ class WorkspaceHost:
     def __init__(
         self,
         settings: Settings | None = None,
-        model_choices: Sequence[str] = (),
         verification: Verification | None = None,
         agents: Agents | None = None,
         workspace: str | None = None,
@@ -286,6 +286,8 @@ class WorkspaceHost:
         ledger: UsageLedger | None = None,
         telemetry: Telemetry = _NO_TELEMETRY,
     ) -> None:
+        # #lizard forgives(parameter_count): a host is built from its workspace's collaborators,
+        # each with a default, so a caller gives only those it has.
         # What its work will be traced with.
         self.telemetry = telemetry
         self.owned: Callable[[], None] = lambda: None
@@ -301,7 +303,7 @@ class WorkspaceHost:
             lambda event: self._events.put(event),
             RetryTimes(lock_retry, lock_declined_retry),
         )
-        self._settings = SessionSettings(settings or Settings(), pinned, model_choices)
+        self._settings = SessionSettings(settings or Settings(), pinned, self._model_aliases)
         self._storage = storage
         self._halt = self._storage_halt()
         self._gate = SessionGate(
@@ -623,9 +625,10 @@ class WorkspaceHost:
         """The settings, by field name, that a session opened keeps as given here."""
         return self._settings.pinned
 
-    @property
-    def model_choices(self) -> tuple[str, ...]:
-        return self._settings.model_choices
+    def _model_aliases(self, role: str) -> ModelAliases | None:
+        """The models role ``role``'s agents may be given, those its runtime takes; none
+        without agents, or if they aren't known."""
+        return self._desk.agents.model_aliases(role) if self._desk else None
 
     @property
     def agents(self) -> Agents | None:

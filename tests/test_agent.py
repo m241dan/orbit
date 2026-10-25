@@ -164,11 +164,11 @@ async def test_cancel_without_a_turn_is_a_noop() -> None:
 
 async def test_session_snapshots_its_initial_settings() -> None:
     settings = Settings(model="opus", tool_access="off")
-    session = WorkspaceHost(settings, model_choices=("opus", "sonnet"))
+    session = WorkspaceHost(settings)
     assert session.settings == settings
     snapshot = await anext(payloads(session))
     assert isinstance(snapshot, Snapshot)
-    assert (snapshot.settings, snapshot.model_choices) == (settings, ("opus", "sonnet"))
+    assert (snapshot.settings, snapshot.model_choices, snapshot.model_ids) == (settings, (), {})
     assert only_state_queued(session)
 
 

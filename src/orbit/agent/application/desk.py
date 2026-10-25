@@ -34,6 +34,7 @@ from orbit.agent.domain.agents import Agent, AgentRegistry
 from orbit.agent.domain.refusals import failed_to
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import ORBIT_TOOLS, Role
+from orbit.agent.domain.runtimes import ModelAliases, resolve_model
 from orbit.protocol import (
     INTERNAL,
     AgentExited,
@@ -119,7 +120,8 @@ class Agents:
     records keep the numbers tasks give them. ``root`` is the workspace's directory, the user's
     checkout, where agents work without a tree; ``temp_dirs`` makes the empty directories
     agents whose role works in none work in. ``pause`` times a run that Claude's usage limit
-    stopped, until it starts again.
+    stopped, until it starts again. ``models`` are the models each runtime takes, by its name,
+    which agents' models resolve through; a runtime without them is given models as they are.
     """
 
     host: AgentHost
@@ -139,6 +141,7 @@ class Agents:
     temp_dirs: TempDirs = field(kw_only=True)
     pause: LimitPause = field(default_factory=LimitPause)
     personal: frozenset[str] = field(default=frozenset(), kw_only=True)
+    models: Mapping[str, ModelAliases] = field(default_factory=dict, kw_only=True)
 
     def runtime(self, role: str) -> str | None:
         """The runtime role ``role``'s agents run on; none for a role they don't have."""
@@ -149,6 +152,24 @@ class Agents:
         """What starts role ``role``'s agents: the launcher of the runtime it runs on. It must
         be one of the roles, on a runtime there's a launcher for."""
         return self.launchers[self.roles[role].runtime]
+
+    def model_aliases(self, role: str) -> ModelAliases | None:
+        """The models role ``role``'s agents may be given, those its runtime takes; none for a
+        role they don't have, or a runtime without them."""
+        runtime = self.runtime(role)
+        return None if runtime is None else self.models.get(runtime)
+
+    def launch_model(self, role: str, model: str | None) -> str | None:
+        """The id role ``role``'s agents are given for ``model``: the one it resolves to among
+        the models their runtime takes, or ``model`` as it is if there are none; none for none.
+
+        Raises :class:`~orbit.agent.domain.runtimes.UnknownModel`, listing the aliases, if they
+        don't resolve it.
+        """
+        models = self.model_aliases(role)
+        if model is None or models is None:
+            return model
+        return resolve_model(models, model)
 
     @property
     def usage_unknown(self) -> frozenset[str]:
@@ -238,10 +259,16 @@ class AgentDesk:
 
     async def launch(self, agent: Agent, prompt: str, settings: Settings, cwd: str) -> AgentLaunch:
         """How to start ``agent`` in its role: told ``prompt``, with ``settings`` (or its role's
-        effort, if they set none), in ``cwd``."""
+        effort, if they set none), their model resolved to the id its runtime is given, in
+        ``cwd``.
+
+        Raises :class:`~orbit.agent.domain.runtimes.UnknownModel` if their model doesn't
+        resolve, as one saved before its alias was taken out of the user config doesn't.
+        """
         role = self.agents.roles[agent.role]
+        model = self.agents.launch_model(agent.role, settings.model)
         url = await self.url()
-        own = role.launch_settings(settings)
+        own = role.launch_settings(settings).model_copy(update={"model": model})
         launch = AgentLaunch(
             agent, url, prompt, own, cwd, role.instructions, role.tools, self._workspace_id
         )

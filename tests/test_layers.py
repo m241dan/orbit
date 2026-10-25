@@ -22,7 +22,7 @@ from orbit.agent.domain.layers import (
 from orbit.agent.domain.roles import Role, built_in_roles
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.protocol import BUILT_IN_ROLE_NAMES, PLANNER
-from tests.agent_fakes import KNOWN_CAPABILITIES
+from tests.agent_fakes import KNOWN_RULES
 
 INSTRUCTIONS = {name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES}
 PACKAGE_ROLES = built_in_roles(read_built_in_roles(), INSTRUCTIONS)
@@ -251,7 +251,7 @@ def test_a_project_role_on_a_runtime_this_version_doesnt_know_is_refused() -> No
 
 
 def test_the_packages_roles_resolve_unchanged_against_claudes_capabilities() -> None:
-    resolved = resolve_roles(PACKAGE_ROLES, NO_USER_ROLES, NO_PROJECT_ROLES, KNOWN_CAPABILITIES)
+    resolved = resolve_roles(PACKAGE_ROLES, NO_USER_ROLES, NO_PROJECT_ROLES, KNOWN_RULES)
     assert resolved.roles == PACKAGE_ROLES
 
 
@@ -260,7 +260,7 @@ def test_a_resolved_role_asking_for_what_its_runtime_cant_do_is_refused() -> Non
     every = user({"roles": {"effort": "high"}})
     on_lite = project({"reviewer": {"runtime": "lite"}})
     with pytest.raises(ConfigError) as raised:
-        resolve_roles(PACKAGE_ROLES, every, on_lite, KNOWN_CAPABILITIES)
+        resolve_roles(PACKAGE_ROLES, every, on_lite, KNOWN_RULES)
     assert str(raised.value) == (
         'roles.reviewer asks for effort "high", but its runtime lite accepts no effort setting.'
     )

@@ -227,10 +227,12 @@ class SessionViews:
     def snapshot(self, **session: Unpack[SessionParts]) -> Snapshot:
         """The snapshot of a session made of its own parts, ``session``, and the workspace's as
         they stand: the storage halt, whether it's read-only and the repository offered, its
-        open session and the model choices."""
+        open session and the planner's model choices, with the id each resolves to."""
         parts = self._parts
+        choices, ids = parts.settings.choices()
         return Snapshot(
-            model_choices=parts.settings.model_choices,
+            model_choices=choices,
+            model_ids=ids,
             storage_halt=parts.halt.message,
             read_only=parts.takeover.read_only,
             ownership_offered=parts.takeover.offered,

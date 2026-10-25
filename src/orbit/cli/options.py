@@ -5,7 +5,7 @@ from typing import Annotated
 
 import typer
 
-from orbit.agent import MODEL_ALIASES, TlsMode, known_runtimes
+from orbit.agent import CLAUDE, TlsMode, known_runtimes, read_package_models
 from orbit.protocol import ToolAccess
 
 # Options declared apart, so chat stays short.
@@ -66,10 +66,14 @@ ConfigDirOption = Annotated[
 ]
 
 
+CLAUDE_ALIASES = ", ".join(read_package_models()[CLAUDE])
+"""The aliases of Claude's models orbit ships, as ``--model`` lists them."""
+
 ModelOption = Annotated[
     str | None,
     typer.Option(
-        help=f"The planner's model: an alias ({', '.join(MODEL_ALIASES)}) or full model name."
+        help=f"The planner's model: an alias ({CLAUDE_ALIASES}, or one your config.toml's"
+        " [runtimes.claude.models] adds) or full model name."
     ),
 ]
 ToolsOption = Annotated[

@@ -17,7 +17,6 @@ from typer.testing import CliRunner
 
 from orbit import __version__
 from orbit.agent import (
-    MODEL_ALIASES,
     ClaudeCliRunner,
     ConfigError,
     ControlPlane,
@@ -59,7 +58,7 @@ from orbit.protocol import (
     decode_event,
 )
 from orbit.tracing import Gauges, NoGauges, NoTelemetry, Telemetry
-from tests.agent_fakes import greeted, queued, send, sole, startup_of, store_of
+from tests.agent_fakes import CLAUDE_MODELS, greeted, queued, send, sole, startup_of, store_of
 from tests.cli_fakes import LocalApp
 from tests.conftest import OFFLINE
 from tests.store_views import (
@@ -632,7 +631,35 @@ def test_chat_runs_tui_against_claude_cli(launched: list[WorkspaceHost]) -> None
     assert list(session.agents.launchers) == ["claude"]
     assert session.settings == Settings()
     assert session.pinned == ()
-    assert session.model_choices == MODEL_ALIASES
+    claude = session.agents.models["claude"]
+    assert claude == CLAUDE_MODELS
+
+
+def test_chat_gives_its_agents_the_aliases_the_user_config_adds(
+    launched: list[WorkspaceHost], config_dir: Path
+) -> None:
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text('[runtimes.claude.models]\nfast = "claude-haiku-5-5"\n')
+    assert runner.invoke(app, ["chat"]).exit_code == 0
+
+    [session] = launched
+    assert session.agents is not None
+    assert session.agents.launch_model(PLANNER, "fast") == "claude-haiku-5-5"
+
+
+def test_aliases_for_a_runtime_this_version_doesnt_know_stop_chat_naming_the_file(
+    launched: list[WorkspaceHost], config_dir: Path
+) -> None:
+    config_dir.mkdir()
+    path = config_dir / "config.toml"
+    path.write_text('[runtimes.nope.models]\nfast = "nope-1"\n')
+    result = runner.invoke(app, ["chat"])
+
+    assert result.exit_code == 2
+    assert f"{path}: runtimes.nope: this version of orbit knows the runtimes claude." in (
+        result.stderr
+    )
+    assert launched == []
 
 
 def test_chat_has_the_user_pick_a_session_at_startup(

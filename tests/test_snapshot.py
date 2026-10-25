@@ -1,6 +1,7 @@
 """The snapshot of the open session, sent after Welcome and after every switch."""
 
 import asyncio
+from dataclasses import replace
 from typing import Any
 
 from orbit.agent import Verification, VerificationStep, WorkspaceHost
@@ -10,6 +11,7 @@ from orbit.agent.application.startup_check import AGENT_ID as STARTUP_AGENT
 from orbit.agent.application.startup_check import ROLE as STARTUP_ROLE
 from orbit.agent.application.startup_check import TITLE as STARTUP_TITLE
 from orbit.agent.application.startup_check import CheckSite, StartupCheck
+from orbit.agent.domain.runtimes import CLAUDE
 from orbit.agent.domain.usage import UsageReport
 from orbit.protocol import (
     CONFIGURATOR,
@@ -36,6 +38,7 @@ from orbit.protocol import (
     Welcome,
 )
 from tests.agent_fakes import (
+    CLAUDE_MODELS,
     LIMITS,
     STEP,
     FakeTree,
@@ -89,16 +92,28 @@ async def test_welcome_is_followed_by_a_snapshot_of_the_open_session() -> None:
 
 
 async def test_a_session_without_verification_or_agents_snapshots_none() -> None:
-    session = WorkspaceHost(settings=Settings(model="opus"), model_choices=("opus", "sonnet"))
+    session = WorkspaceHost(settings=Settings(model="opus"))
     *_, snapshot = await opening(session, 3)
     await session.close()
 
     assert isinstance(snapshot, Snapshot)
     assert (snapshot.steps, snapshot.agents) == ((), ())
-    assert (snapshot.settings, snapshot.model_choices) == (
+    assert (snapshot.settings, snapshot.model_choices, snapshot.model_ids) == (
         Settings(model="opus"),
-        ("opus", "sonnet"),
+        (),
+        {},
     )
+
+
+async def test_the_snapshot_offers_the_planners_runtimes_models_with_their_ids() -> None:
+    models = replace(CLAUDE_MODELS, aliases={**CLAUDE_MODELS.aliases, "fast": "claude-haiku-5-5"})
+    session, _, _ = session_for(models={CLAUDE: models})
+    *_, snapshot = await opening(session, 3)
+    await session.close()
+
+    assert isinstance(snapshot, Snapshot)
+    assert snapshot.model_choices == ("fable", "opus", "sonnet", "haiku", "fast")
+    assert snapshot.model_ids == {**CLAUDE_MODELS.aliases, "fast": "claude-haiku-5-5"}
 
 
 async def test_with_reviews_on_the_snapshot_has_the_review_status() -> None:

@@ -22,7 +22,7 @@ from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.catalog import trigger_names
 from orbit.agent.domain.refusals import Refused, unknown
-from orbit.agent.domain.roles import Role, check_enabled
+from orbit.agent.domain.roles import Role, check_enabled, check_model
 from orbit.protocol import (
     CONFIGURE_CHECKS,
     INVALID,
@@ -99,7 +99,8 @@ class WorkCommands:
     run in the span current as it was queued, its own command's, so what it starts links
     there. A task added, accepted or edited starts at once if its lane starts by itself; one
     added, accepted or edited into a disabled role is refused, as is a trigger whose role is
-    disabled."""
+    disabled, and one added or edited with a model its role's runtime doesn't take, as are a
+    conversational role's settings."""
 
     def __init__(self, parts: CommandParts) -> None:
         self._parts = parts
@@ -203,9 +204,10 @@ class WorkCommands:
 
     async def _update_settings(self, settings: Settings, role: str) -> None:
         """Have the conversational role ``role`` use ``settings``, publishing them, then save;
-        refused for a role without a seat."""
+        refused for a role without a seat, or with a model its runtime doesn't take."""
         problem = f"Role {role!r} has no settings of its own"
         self._parts.seats.seat(role, problem, "the roles with them are")
+        self._check_model(role, settings)
         self._parts.settings.update(settings, role)
         await self._parts.events.put(self._parts.settings.changed(role))
         await self._parts.save()
@@ -226,10 +228,18 @@ class WorkCommands:
         desk = self._parts.desk
         return desk.agents.roles if desk else {}
 
+    def _check_model(self, role: str, settings: Settings) -> None:
+        """Refuse ``settings`` for role ``role`` unless its runtime takes their model, as
+        :func:`~orbit.agent.domain.roles.check_model` says; nothing is refused without
+        agents."""
+        desk = self._parts.desk
+        check_model(role, settings.model, desk.agents.model_aliases(role) if desk else None)
+
     async def _handle_tasks(self, command: AddTask | RunTasks) -> None:
         match command:
             case AddTask(task=task):
                 check_enabled(self._roles(), task.role)
+                self._check_model(task.role, task.settings)
                 await self._parts.tasks.change(lambda board: board.add(task))
                 self._parts.lanes.kick_for(task.role)
             case RunTasks():
@@ -263,10 +273,11 @@ class WorkCommands:
         self._parts.lanes.kick_for(state.task.role)
 
     async def _edit(self, task_id: str, task: TaskSpec) -> None:
-        """Edit a task, if the board allows it and its new role isn't disabled, and start it if
-        its lane starts by itself. An edited task in a review batch has to finish again before
-        the batch does."""
+        """Edit a task, if the board allows it, its new role isn't disabled and that role's
+        runtime takes its model, and start it if its lane starts by itself. An edited task in a
+        review batch has to finish again before the batch does."""
         check_enabled(self._roles(), task.role)
+        self._check_model(task.role, task.settings)
         lane = self._parts.lane
 
         def edit(board: TaskBoard) -> TaskState:

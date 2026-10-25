@@ -3,6 +3,7 @@ editor, and the task editor's role picker."""
 
 from collections.abc import Sequence
 
+from rich.text import Text
 from textual.app import App
 
 from orbit.tui.view.settings import (
@@ -37,7 +38,7 @@ class SettingsPickers:
         app.install_screen(self.effort_picker, "pick-effort")
         app.install_screen(self.role_picker, "pick-role")
 
-    def label_models(self, labels: Sequence[str]) -> None:
+    def label_models(self, labels: Sequence[str | Text]) -> None:
         self.model_picker.set_labels(labels)
 
     def pick_model(self, current: int | None, chosen: Chosen) -> None:

@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.layers import Layer, UserRoles, load_user_roles
 from orbit.agent.domain.remotes import REMOTE_PATHS, RemoteSettings, load_remotes
+from orbit.agent.domain.runtimes import load_model_tables
 from orbit.agent.domain.server import SERVER_PATHS, ServerSettings, load_server
 from orbit.agent.domain.storage import StorageSettings, load_storage
 from orbit.agent.external.role_instructions import with_instructions
@@ -80,6 +81,17 @@ def read_user_roles(config_dir: Path, built_in: Collection[str]) -> UserRoles:
         return load_user_roles(with_instructions(data, config_dir, built_in), layer, built_in)
 
     return read_user_config(config_dir, load, UserRoles(layer))
+
+
+def read_user_models(config_dir: Path) -> dict[str, dict[str, str]]:
+    """The aliases ``config_dir``'s file gives each runtime's models in its
+    ``[runtimes.<name>.models]`` tables, by runtime, each with the id it resolves to; none
+    without a file.
+
+    Raises :class:`ConfigError`, naming the file, if it can't be read or is invalid, as it is
+    when it names a runtime this version of orbit doesn't know.
+    """
+    return read_user_config(config_dir, load_model_tables, {})
 
 
 def user_layer(config_dir: Path) -> Layer:

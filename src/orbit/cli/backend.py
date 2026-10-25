@@ -12,7 +12,6 @@ from typing import Protocol
 import typer
 
 from orbit.agent import (
-    MODEL_ALIASES,
     Agents,
     ConfigError,
     Configuring,
@@ -246,7 +245,6 @@ def _host_maker(
     def make(opened: OpenedStore) -> WorkspaceHost:
         return WorkspaceHost(
             settings,
-            model_choices=MODEL_ALIASES,
             verification=verification,
             agents=agents,
             workspace=str(root),
@@ -307,7 +305,8 @@ def _settings(model: str | None, tools: ToolAccess | None) -> tuple[Settings, li
 
 def _agents(config: OrbitConfig, root: Path, backend: _Backend, config_dir: Path) -> Agents:
     """The agents that run tasks as ``config`` says in the workspace at ``root``, on the
-    runtimes its enabled roles run on, in the coder tree if ``backend`` asks for a worktree and
+    runtimes its enabled roles run on, given the models those runtimes take as it says, in the
+    coder tree if ``backend`` asks for a worktree and
     the workspace is a git work tree, reviewing landed work if it asks to, sending their own
     telemetry to its collector, and reading the planner's role again over the user config in
     ``config_dir``, with its runtime.
@@ -333,6 +332,7 @@ def _agents(config: OrbitConfig, root: Path, backend: _Backend, config_dir: Path
         root=where,
         temp_dirs=SystemTempDirs(),
         personal=config.personal,
+        models=config.models,
     )
 
 

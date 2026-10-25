@@ -22,7 +22,7 @@ from orbit.agent.domain.layers import (
 )
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import Role, RoleName, check_runtimes, role_clashes
-from orbit.agent.domain.runtimes import UNCHECKED, Capabilities
+from orbit.agent.domain.runtimes import UNCHECKED, ModelAliases, RuntimeRules
 from orbit.agent.domain.verification import MAX_FALLBACK_FIXES
 
 
@@ -123,11 +123,13 @@ LIMIT_KEYS = tuple(
 
 class OrbitConfig(_FileConfig):
     """Orbit's configuration in effect: the limits and roles a project file sets, with the names
-    of the roles that are ``personal``, defined whole in the user config, and the ``notices``
-    the user is told as its workspace starts."""
+    of the roles that are ``personal``, defined whole in the user config, the ``notices`` the
+    user is told as its workspace starts, and the ``models`` each runtime takes, by name, which
+    its roles' models were held to."""
 
     personal: frozenset[str] = frozenset()
     notices: tuple[str, ...] = ()
+    models: dict[str, ModelAliases] = {}
 
 
 def load_config(
@@ -135,21 +137,23 @@ def load_config(
     built_in: Mapping[str, Role],
     user: UserRoles = NO_USER_ROLES,
     path: str | None = None,
-    capabilities: Mapping[str, Capabilities] = UNCHECKED,
+    rules: RuntimeRules = UNCHECKED,
 ) -> OrbitConfig:
     """The configuration ``data`` (the contents of the project file at ``path``, if known)
     describes over the role fields and personal roles ``user`` sets and the defaults, whose
-    roles are ``built_in``, with a notice for each personal role a project role replaces.
+    roles are ``built_in``, with a notice for each personal role a project role replaces, and
+    the models each runtime takes, as ``rules`` say.
 
     A role it names that's built in keeps the fields it doesn't set; any other role is new. Each
-    role's fields are resolved as :func:`~orbit.agent.domain.layers.resolve_roles` says, and
-    each enabled role is held to what its runtime can do, as ``capabilities`` say by runtime.
-    Raises :class:`ConfigError` naming each problem if it's invalid, as it is when a role's
-    runtime is one this version of orbit doesn't know or can't do what the role asks (see
+    role's fields are resolved as :func:`~orbit.agent.domain.layers.resolve_roles` says; each
+    role's model is held to the models its runtime takes, and each enabled role to what its
+    runtime can do, as ``rules`` say by runtime. Raises :class:`ConfigError` naming each problem
+    if it's invalid, as it is when a role's runtime is one this version of orbit doesn't know,
+    doesn't take its model or can't do what the role asks (see
     :func:`~orbit.agent.domain.roles.runtime_problems`), a :class:`PersonalRoleError` if the
     personal roles are at fault.
     """
-    return load_layered(data, built_in, user, path, capabilities).config
+    return load_layered(data, built_in, user, path, rules).config
 
 
 @dataclass(frozen=True)
@@ -166,10 +170,10 @@ def load_layered(
     built_in: Mapping[str, Role],
     user: UserRoles = NO_USER_ROLES,
     path: str | None = None,
-    capabilities: Mapping[str, Capabilities] = UNCHECKED,
+    rules: RuntimeRules = UNCHECKED,
 ) -> LayeredConfig:
     """The configuration :func:`load_config` loads from ``data``, ``built_in``, ``user``,
-    ``path`` and ``capabilities``, with the layer each of its roles' fields came from.
+    ``path`` and ``rules``, with the layer each of its roles' fields came from.
 
     Raises :class:`ConfigError` as :func:`load_config` does, naming the first setting of a later
     version of orbit ``data`` sets, if any, ahead of anything else.
@@ -181,8 +185,8 @@ def load_layered(
     merged = merge_roles(built_in, user, ProjectRoles(Layer("project", path), roles))
     check_personal(merged)
     notices = tuple(replaced_note(name) for name in merged.replaced)
-    config = _validated({**data, "roles": merged.tables}, merged.personal, notices)
-    check_runtimes(config.roles, capabilities)
+    config = _validated({**data, "roles": merged.tables}, merged.personal, notices, rules.models)
+    check_runtimes(config.roles, rules)
     return LayeredConfig(config, merged.layers)
 
 
@@ -229,13 +233,16 @@ def _later_role_settings(name: str, fields: object) -> Iterator[str]:
 
 
 def _validated(
-    data: dict[str, Any], personal: frozenset[str] = frozenset(), notices: tuple[str, ...] = ()
+    data: dict[str, Any],
+    personal: frozenset[str] = frozenset(),
+    notices: tuple[str, ...] = (),
+    models: Mapping[str, ModelAliases] = UNCHECKED.models,
 ) -> OrbitConfig:
     """The configuration ``data`` describes, its roles resolved, with the names of those that
-    are ``personal`` and the ``notices`` to tell the user. Raises :class:`ConfigError` if it's
-    invalid."""
+    are ``personal``, the ``notices`` to tell the user and the ``models`` each runtime takes.
+    Raises :class:`ConfigError` if it's invalid."""
     try:
         settings = _FileConfig.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(validation_problems(exc)) from None
-    return OrbitConfig(**dict(settings), personal=personal, notices=notices)
+    return OrbitConfig(**dict(settings), personal=personal, notices=notices, models=dict(models))

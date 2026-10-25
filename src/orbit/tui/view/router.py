@@ -152,9 +152,10 @@ class Proposals(Protocol):
 
 
 class ModelChoices(Protocol):
-    """The settings pickers, as the router offers model choices in them."""
+    """The settings pickers, as the router offers model choices in them, with the id each
+    resolves to."""
 
-    def show_choices(self, choices: tuple[str, ...]) -> None: ...
+    def show_choices(self, choices: tuple[str, ...], ids: Mapping[str, str]) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -320,7 +321,7 @@ class EventRouter:
         the agents pane follows it as it follows every event, and the working row once its
         roles are known."""
         panes, handlers = self._panes, self._handlers
-        handlers.pickers.show_choices(snapshot.model_choices)
+        handlers.pickers.show_choices(snapshot.model_choices, snapshot.model_ids)
         self.seats.replace_settings({**snapshot.role_settings, PLANNER: snapshot.settings})
         for lane, busy in snapshot.busy.items():
             self.set_busy(lane, busy)
@@ -361,9 +362,9 @@ class EventRouter:
                 self._show_progress(event)
 
     def _follow_settings(self, event: SettingsChanged) -> None:
-        """Offer the model choices ``event`` reports, and note its role's settings, shown under
-        the prompt while it talks to that role."""
-        self._handlers.pickers.show_choices(event.model_choices)
+        """Offer the model choices ``event`` reports, with the id each resolves to, and note its
+        role's settings, shown under the prompt while it talks to that role."""
+        self._handlers.pickers.show_choices(event.model_choices, event.model_ids)
         self.seats.follow_settings(event.role, event.settings)
 
     def _follow_stream(self, event: AgentsChanged | UsageTotals | DirectoryListing) -> None:

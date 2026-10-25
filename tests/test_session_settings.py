@@ -1,17 +1,46 @@
 """Tests for the settings of the session open, by conversational role."""
 
 from orbit.agent.application.settings import SessionSettings
+from orbit.agent.domain.runtimes import CLAUDE, ModelAliases
 from orbit.protocol import PLANNER, Settings, SettingsChanged
 
 GIVEN = Settings(model="opus", tool_access="restricted")
 SAVED = Settings(model="sonnet", tool_access="full")
 ARCHITECTS = Settings(model="haiku", tool_access="off", effort="max")
 
+PLANNERS_MODELS = ModelAliases(CLAUDE, {"opus": "opus", "fast": "claude-haiku-5-5"}, "claude-")
+"""The models the planner's runtime takes."""
+
+ARCHITECTS_MODELS = ModelAliases("kiro", {"auto": "kiro-auto"}, "kiro-")
+"""The models the architect's runtime takes, another runtime's."""
+
+
+def models_of(role: str) -> ModelAliases | None:
+    """The models ``role``'s runtime takes: the planner's and the architect's differ, and no
+    other role's are known."""
+    return {PLANNER: PLANNERS_MODELS, "architect": ARCHITECTS_MODELS}.get(role)
+
 
 def test_the_current_settings_start_as_given() -> None:
-    settings = SessionSettings(GIVEN, ("model",), ("opus", "sonnet"))
+    settings = SessionSettings(GIVEN, ("model",), models_of)
     assert (settings.current, settings.given) == (GIVEN, GIVEN)
-    assert (settings.pinned, settings.model_choices) == (("model",), ("opus", "sonnet"))
+    assert settings.pinned == ("model",)
+
+
+def test_the_choices_are_the_aliases_of_the_planners_runtime_with_their_ids() -> None:
+    settings = SessionSettings(GIVEN, models=models_of)
+    ids = {"opus": "opus", "fast": "claude-haiku-5-5"}
+    assert settings.choices() == (("opus", "fast"), ids)
+
+
+def test_each_roles_choices_are_its_runtimes_aliases() -> None:
+    settings = SessionSettings(GIVEN, models=models_of)
+    assert settings.choices("architect") == (("auto",), {"auto": "kiro-auto"})
+
+
+def test_a_role_whose_runtimes_models_arent_known_has_no_choices() -> None:
+    assert SessionSettings(GIVEN, models=models_of).choices("helper") == ((), {})
+    assert SessionSettings(GIVEN).choices() == ((), {})
 
 
 def test_the_planners_settings_are_the_current_ones_and_saved_from_the_start() -> None:
@@ -77,14 +106,23 @@ def test_the_settings_saved_are_a_copy() -> None:
     assert saved == {PLANNER: GIVEN}
 
 
-def test_changed_carries_the_current_settings_and_the_model_choices() -> None:
-    settings = SessionSettings(GIVEN, model_choices=("opus", "sonnet"))
+def test_changed_carries_the_current_settings_and_the_model_choices_with_their_ids() -> None:
+    settings = SessionSettings(GIVEN, models=models_of)
     settings.update(SAVED)
-    assert settings.changed() == SettingsChanged(settings=SAVED, model_choices=("opus", "sonnet"))
+    assert settings.changed() == SettingsChanged(
+        settings=SAVED,
+        model_choices=("opus", "fast"),
+        model_ids={"opus": "opus", "fast": "claude-haiku-5-5"},
+    )
 
 
-def test_changed_for_a_role_carries_its_settings() -> None:
-    settings = SessionSettings(GIVEN, model_choices=("opus",))
+def test_changed_for_a_role_carries_its_settings_and_its_runtimes_choices() -> None:
+    settings = SessionSettings(GIVEN, models=models_of)
     settings.update(ARCHITECTS, "architect")
-    changed = SettingsChanged(role="architect", settings=ARCHITECTS, model_choices=("opus",))
+    changed = SettingsChanged(
+        role="architect",
+        settings=ARCHITECTS,
+        model_choices=("auto",),
+        model_ids={"auto": "kiro-auto"},
+    )
     assert settings.changed("architect") == changed

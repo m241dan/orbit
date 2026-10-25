@@ -222,11 +222,11 @@ class PickerScreens:
     turn, and each picker opened, with the option it opened on and what takes the pick."""
 
     def __init__(self) -> None:
-        self.labels: list[list[str]] = []
+        self.labels: list[list[str | Text]] = []
         self.roles: list[list[str]] = []
         self.opened: list[tuple[str, int | None, Chosen]] = []
 
-    def label_models(self, labels: Sequence[str]) -> None:
+    def label_models(self, labels: Sequence[str | Text]) -> None:
         self.labels.append(list(labels))
 
     def pick_model(self, current: int | None, chosen: Chosen) -> None:

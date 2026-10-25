@@ -47,12 +47,14 @@ TurnEndReason = Literal["completed", "cancelled", "max_steps", "error"]
 
 class SettingsChanged(_Message):
     """The current settings of the conversational role ``role``, the planner unless given, sent
-    after every change to them."""
+    after every change to them, with the ``model_choices`` they may choose from, its runtime's
+    aliases, and the id each resolves to, ``model_ids``, by alias."""
 
     type: Literal["settings_changed"] = "settings_changed"
     settings: Settings
     model_choices: tuple[str, ...] = ()
     role: str = PLANNER
+    model_ids: dict[str, str] = Field(default_factory=dict)
 
 
 # Turn events carry ``agent_id`` when an agent runs the turn, and none when orbit ends it itself.
@@ -391,9 +393,10 @@ class Snapshot(_Message):
     switch; its envelope's ``seq`` is the point it's current to.
 
     It holds the ``session``'s summary, its ``settings`` (the planner's), each conversational role's
-    settings by role (``role_settings``, the planner's among them) and the ``model_choices``,
-    whether each lane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title``
-    they show under, the ``review`` status (none when reviews are off), the checks ``proposals``
+    settings by role (``role_settings``, the planner's among them) and the planner's
+    ``model_choices``, with the id each resolves to (``model_ids``, by alias), whether each lane
+    is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they show
+    under, the ``review`` status (none when reviews are off), the checks ``proposals``
     waiting for a decision, the ``agents`` running, the ``transcript``: the session's last logged
     events, at most 500, oldest first, in the envelopes they were sent in, and, while the session is
     halted because storage failed, ``storage_halt``: why, and how to resume; ``read_only`` says
@@ -409,6 +412,7 @@ class Snapshot(_Message):
     session: SessionSummary
     settings: Settings
     model_choices: tuple[str, ...]
+    model_ids: dict[str, str] = Field(default_factory=dict)
     busy: dict[BusyLane, bool]
     role_settings: dict[str, Settings] = Field(default_factory=dict)
     tasks: tuple[TaskState, ...]

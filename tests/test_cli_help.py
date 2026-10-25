@@ -77,3 +77,9 @@ def test_serve_help_leaves_out_the_flags_only_chat_takes() -> None:
 
     for name in _CHAT:
         assert name not in result.output
+
+
+def test_the_model_option_lists_claudes_aliases_from_the_packages_table() -> None:
+    result = runner.invoke(app, ["chat", "--help"], env={"COLUMNS": "200"})
+
+    assert "fable, opus, sonnet, haiku" in " ".join(result.output.split())

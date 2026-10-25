@@ -415,7 +415,7 @@ class PickerScreen(ListScreen[int | None]):
         Binding("escape", "close", "Close"),
     ]
 
-    def __init__(self, title_text: str, labels: Sequence[str]) -> None:
+    def __init__(self, title_text: str, labels: Sequence[str | Text]) -> None:
         super().__init__()
         self.title_text = title_text
         self._labels = list(labels)
@@ -427,7 +427,7 @@ class PickerScreen(ListScreen[int | None]):
         options.border_title = self.title_text
         yield options
 
-    def set_labels(self, labels: Sequence[str]) -> None:
+    def set_labels(self, labels: Sequence[str | Text]) -> None:
         self._labels = list(labels)
         if self.is_mounted:
             options = self.query_one(OptionList)

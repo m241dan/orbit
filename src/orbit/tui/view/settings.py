@@ -1,7 +1,10 @@
 """The session's settings and the pickers that change them."""
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from types import MappingProxyType
 from typing import Protocol, get_args
+
+from rich.text import Text
 
 from orbit.protocol import PLANNER, AgentEntry, Effort, Settings, ToolAccess
 from orbit.tui.view.common import model_label
@@ -26,9 +29,29 @@ TOOL_ACCESS_DESCRIPTIONS: dict[ToolAccess, str] = {
 }
 
 
-def model_options(choices: Sequence[str]) -> tuple[tuple[str | None, ...], list[str]]:
-    """The models a picker offers, the default (None) first, and their labels."""
-    return (None, *choices), ["default", *choices]
+NO_MODEL_IDS: Mapping[str, str] = MappingProxyType({})
+"""No model choice's id."""
+
+MODEL_ID_STYLE = "dim"
+"""How the id a model choice resolves to shows beside it."""
+
+
+def model_options(
+    choices: Sequence[str], ids: Mapping[str, str] = NO_MODEL_IDS
+) -> tuple[tuple[str | None, ...], list[str | Text]]:
+    """The models a picker offers, the default (None) first, and their labels, each of
+    ``choices`` with the id ``ids`` say it resolves to (see :func:`model_choice_label`)."""
+    labels = [model_choice_label(choice, ids.get(choice)) for choice in choices]
+    return (None, *choices), ["default", *labels]
+
+
+def model_choice_label(alias: str, model_id: str | None) -> str | Text:
+    """How the model picker shows ``alias``: with ``model_id``, the id it resolves to, muted
+    beside it, as in ``fast  claude-haiku-5-5``; just the alias if that's the id, or the id
+    isn't known."""
+    if model_id is None or model_id == alias:
+        return alias
+    return Text.assemble(alias, (f"  {model_id}", MODEL_ID_STYLE))
 
 
 def model_choices(choices: Sequence[str], settings: Settings) -> tuple[list[Settings], int | None]:
@@ -130,7 +153,7 @@ class PickersView(Protocol):
     """Where :class:`Pickers` show: a model picker, a tool access picker, an effort picker and a
     role picker."""
 
-    def label_models(self, labels: Sequence[str]) -> None:
+    def label_models(self, labels: Sequence[str | Text]) -> None:
         """Label the model picker's options ``labels``."""
 
     def pick_model(self, current: int | None, chosen: Chosen) -> None:
@@ -152,7 +175,7 @@ class PickersView(Protocol):
 
 class Pickers:
     """The model, tool access, effort and role pickers, shown in ``view``, and the model choices
-    the model picker offers, its labels following them.
+    the model picker offers, with the id each resolves to, its labels following them.
 
     The settings may change while a picker is open, so a pick changes only its own setting of
     the settings as they are when picked.
@@ -161,12 +184,14 @@ class Pickers:
     def __init__(self, view: PickersView) -> None:
         self._view = view
         self.model_choices: tuple[str, ...] = ()
+        self.model_ids: Mapping[str, str] = NO_MODEL_IDS
 
-    def show_choices(self, choices: tuple[str, ...]) -> None:
-        """Offer the models ``choices``, relabelling the model picker if they changed."""
-        if choices != self.model_choices:
-            self._view.label_models(model_options(choices)[1])
-        self.model_choices = choices
+    def show_choices(self, choices: tuple[str, ...], ids: Mapping[str, str] = NO_MODEL_IDS) -> None:
+        """Offer the models ``choices``, each resolving to the id ``ids`` give it, relabelling
+        the model picker if they changed."""
+        if (choices, ids) != (self.model_choices, self.model_ids):
+            self._view.label_models(model_options(choices, ids)[1])
+        self.model_choices, self.model_ids = choices, ids
 
     def choose_model(self, settings: Callable[[], Settings], then: Picked) -> None:
         """Open the model picker on the model of ``settings``, the settings now, and call

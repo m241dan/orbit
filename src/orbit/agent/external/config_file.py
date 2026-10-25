@@ -12,7 +12,7 @@ from orbit.agent.domain.config_update import reference_with_checks, with_checks
 from orbit.agent.domain.layers import Layer, PersonalRoleError, with_runtime
 from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
 from orbit.agent.external.role_instructions import with_instructions
-from orbit.agent.external.runtimes import RUNTIME_CAPABILITIES
+from orbit.agent.external.runtimes import read_runtime_rules
 from orbit.agent.external.toml_files import read_toml
 from orbit.agent.external.user_config import read_user_config, read_user_roles, user_layer
 from orbit.agent.external.whole_files import write_whole
@@ -31,13 +31,15 @@ def read_config(root: str, config_dir: Path, runtime: str | None = None) -> Orbi
     instructions naming a Markdown file are that file's text (see
     :func:`~orbit.agent.external.role_instructions.resolve_instructions`), taken from the file's
     directory. A run's ``runtime``, if given, is the runtime of every role that doesn't name
-    its own (see :func:`~orbit.agent.domain.layers.with_runtime`). Each enabled role is held to
-    what its runtime can do, as :data:`~orbit.agent.external.runtimes.RUNTIME_CAPABILITIES` say.
+    its own (see :func:`~orbit.agent.domain.layers.with_runtime`). Each role's model is held to
+    the models its runtime takes, and each enabled role to what its runtime can do, as
+    :func:`~orbit.agent.external.runtimes.read_runtime_rules` reads them, and the configuration
+    has those models.
 
     Raises :class:`ConfigError`, naming the file, if it, the user config or a role's
-    instructions file can't be read or is invalid, as it is when a role asks for what its
-    runtime can't do; it names the user config if the personal roles break a rule across the
-    roles that the others keep.
+    instructions file can't be read or is invalid, as it is when a role's runtime doesn't take
+    its model or a role asks for what its runtime can't do; it names the user config if the
+    personal roles break a rule across the roles that the others keep.
     """
     return _read_layered(root, config_dir, runtime).config
 
@@ -70,12 +72,13 @@ def _read_layered(root: str, config_dir: Path, runtime: str | None = None) -> La
     """
     built_in = read_built_in_roles()
     user = with_runtime(read_user_roles(config_dir, built_in), runtime)
+    rules = read_runtime_rules(config_dir)
     path = Path(root) / CONFIG_PATH
     exists = path.exists()
     data = read_toml(path, lambda table: with_instructions(table, path.parent)) if exists else {}
     try:
         named = str(path) if exists else None
-        return load_layered(data, built_in, user, named, RUNTIME_CAPABILITIES)
+        return load_layered(data, built_in, user, named, rules)
     except PersonalRoleError as exc:
         raise ConfigError(f"{user.layer.path}: {exc}") from None
     except ConfigError as exc:  # Without a file, only the personal roles can be at fault.

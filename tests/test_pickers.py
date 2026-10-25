@@ -71,6 +71,18 @@ def test_the_model_picker_is_relabelled_only_when_the_choices_change() -> None:
     assert screens.pickers.model_choices == ("opus",)
 
 
+def test_the_model_picker_is_relabelled_when_what_a_choice_resolves_to_changes() -> None:
+    screens = Screens()
+    screens.pickers.show_choices(("fast",), {"fast": "claude-haiku-5-5"})
+    screens.pickers.show_choices(("fast",), {"fast": "claude-haiku-5-5"})
+    screens.pickers.show_choices(("fast",), {"fast": "claude-sonnet-5-5"})
+    assert [str(labels[1]) for labels in screens.labels] == [
+        "fast  claude-haiku-5-5",
+        "fast  claude-sonnet-5-5",
+    ]
+    assert screens.pickers.model_ids == {"fast": "claude-sonnet-5-5"}
+
+
 async def test_choosing_an_effort_opens_on_the_effort_and_passes_on_the_one_picked() -> None:
     screens = Screens()
     picked: list[Settings] = []

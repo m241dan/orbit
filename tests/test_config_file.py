@@ -32,11 +32,25 @@ from orbit.agent.external.config_file import (
     write_checks,
 )
 from orbit.agent.external.role_instructions import resolve_instructions
-from orbit.agent.external.runtimes import RUNTIME_CAPABILITIES
+from orbit.agent.external.runtimes import (
+    MODEL_ID_PREFIXES,
+    RUNTIME_CAPABILITIES,
+    read_package_models,
+    read_runtime_rules,
+)
 from orbit.protocol import BUILT_IN_ROLE_NAMES, PLANNER
-from tests.agent_fakes import LIMITED_RUNTIME
+from tests.agent_fakes import CLAUDE_MODELS, LIMITED_RUNTIME
 
 BUILT_IN_ROLES = read_built_in_roles()
+
+DEFAULTS = OrbitConfig(roles=BUILT_IN_ROLES, models={CLAUDE: CLAUDE_MODELS})
+"""The configuration in effect without a project file or a user config."""
+
+CLAUDES_ALIASES = (
+    "the runtime claude takes the aliases fable, opus, sonnet, haiku or a full id starting with"
+    ' "claude-"'
+)
+"""What says which models Claude Code takes, as orbit ships its aliases."""
 
 
 def write(root: Path, text: str) -> Path:
@@ -47,7 +61,7 @@ def write(root: Path, text: str) -> Path:
 
 
 def test_without_a_file_the_defaults_apply(tmp_path: Path) -> None:
-    assert read_config(str(tmp_path), tmp_path / "config") == OrbitConfig(roles=BUILT_IN_ROLES)
+    assert read_config(str(tmp_path), tmp_path / "config") == DEFAULTS
 
 
 def test_the_file_is_read_over_the_defaults(tmp_path: Path) -> None:
@@ -97,12 +111,74 @@ def test_a_runs_runtime_is_every_roles_but_those_naming_their_own(
 
 
 def test_without_a_runs_runtime_the_roles_keep_theirs(tmp_path: Path, config_dir: Path) -> None:
-    assert read_config(str(tmp_path), config_dir, runtime=None) == OrbitConfig(roles=BUILT_IN_ROLES)
+    assert read_config(str(tmp_path), config_dir, runtime=None) == DEFAULTS
 
 
 def test_roles_are_held_to_what_each_runtime_this_version_knows_says_it_can_do() -> None:
     assert tuple(RUNTIME_CAPABILITIES) == RUNTIME_NAMES
     assert RUNTIME_CAPABILITIES[CLAUDE] is ClaudeCliRunner.capabilities
+
+
+def test_the_package_passes_claudes_aliases_through_to_claude_code() -> None:
+    aliases = {"fable": "fable", "opus": "opus", "sonnet": "sonnet", "haiku": "haiku"}
+    assert read_package_models() == {CLAUDE: aliases}
+    assert list(read_package_models()[CLAUDE]) == ["fable", "opus", "sonnet", "haiku"]
+
+
+def test_each_runtime_this_version_knows_says_what_its_full_model_ids_start_with() -> None:
+    assert tuple(MODEL_ID_PREFIXES) == RUNTIME_NAMES
+    assert MODEL_ID_PREFIXES[CLAUDE] == ClaudeCliRunner.model_id_prefix == "claude-"
+
+
+def test_without_a_user_config_each_runtime_takes_the_packages_aliases(config_dir: Path) -> None:
+    rules = read_runtime_rules(config_dir)
+    assert rules.models == {CLAUDE: CLAUDE_MODELS}
+    assert rules.capabilities == RUNTIME_CAPABILITIES
+
+
+def test_the_user_configs_aliases_are_added_to_the_packages_or_take_their_place(
+    config_dir: Path,
+) -> None:
+    write_user_config(
+        config_dir,
+        '[runtimes.claude.models]\nfast = "claude-haiku-5-5"\nopus = "claude-opus-5-5"\n',
+    )
+    claude = read_runtime_rules(config_dir).models[CLAUDE]
+    assert claude.aliases == {
+        **CLAUDE_MODELS.aliases,
+        "opus": "claude-opus-5-5",
+        "fast": "claude-haiku-5-5",
+    }
+
+
+def test_user_aliases_for_a_runtime_this_version_doesnt_know_are_refused_naming_the_file(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    path = write_user_config(config_dir, '[runtimes.nope.models]\nfast = "nope-1"\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value) == (
+        f"{path}: runtimes.nope: this version of orbit knows the runtimes claude."
+    )
+
+
+def test_a_roles_model_may_be_an_alias_the_user_config_adds(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    write_user_config(config_dir, '[runtimes.claude.models]\nfast = "claude-haiku-5-5"\n')
+    write(tmp_path, '[roles.reviewer]\nmodel = "fast"\n')
+    config = read_config(str(tmp_path), config_dir)
+    assert config.roles["reviewer"].model == "fast"
+    assert config.models[CLAUDE].aliases["fast"] == "claude-haiku-5-5"
+
+
+def test_a_roles_model_its_runtime_doesnt_take_is_refused_naming_the_file(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    path = write(tmp_path, '[roles.reviewer]\nmodel = "sonet"\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value) == f'{path}: roles.reviewer.model = "sonet": {CLAUDES_ALIASES}.'
 
 
 @pytest.mark.usefixtures("limited_runtime")
@@ -128,7 +204,7 @@ def test_a_user_config_without_roles_leaves_them_as_they_are(
     tmp_path: Path, config_dir: Path
 ) -> None:
     write_user_config(config_dir, "[storage]\ntool_output_kb = 1\n")
-    assert read_config(str(tmp_path), config_dir) == OrbitConfig(roles=BUILT_IN_ROLES)
+    assert read_config(str(tmp_path), config_dir) == DEFAULTS
 
 
 def test_a_role_field_the_user_config_cant_set_names_it_and_both_files(
@@ -272,7 +348,7 @@ def test_without_files_the_sources_hold_nothing_as_written(
     sources = read_config_sources(str(tmp_path), config_dir)
     assert sources.project == Written(Layer("project", str(tmp_path / CONFIG_PATH)), {})
     assert sources.user == Written(Layer("user", str(config_dir / "config.toml")), {})
-    assert sources.config == OrbitConfig(roles=BUILT_IN_ROLES)
+    assert sources.config == DEFAULTS
 
 
 def test_reading_the_sources_of_an_invalid_file_names_it(tmp_path: Path, config_dir: Path) -> None:
@@ -318,7 +394,7 @@ def test_the_file_is_orbit_config_toml(tmp_path: Path) -> None:
 def test_the_old_roles_toml_is_ignored(tmp_path: Path) -> None:
     (tmp_path / ".orbit").mkdir()
     (tmp_path / ".orbit" / "roles.toml").write_text("fix_attempts = 2\n")
-    assert read_config(str(tmp_path), tmp_path / "config") == OrbitConfig(roles=BUILT_IN_ROLES)
+    assert read_config(str(tmp_path), tmp_path / "config") == DEFAULTS
 
 
 def test_the_file_lists_verification_steps(tmp_path: Path) -> None:
@@ -409,7 +485,7 @@ def test_an_instructions_file_no_role_names_changes_nothing(tmp_path: Path) -> N
 
 def test_an_instructions_file_is_ignored_without_a_config_file(tmp_path: Path) -> None:
     write_instructions(tmp_path, "roles/coder.md", "Write no tests.\n")
-    assert read_config(str(tmp_path), tmp_path / "config") == OrbitConfig(roles=BUILT_IN_ROLES)
+    assert read_config(str(tmp_path), tmp_path / "config") == DEFAULTS
 
 
 @pytest.mark.parametrize(

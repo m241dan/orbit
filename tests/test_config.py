@@ -17,11 +17,11 @@ from orbit.agent.domain.layers import (
 )
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import Role, built_in_roles
-from orbit.agent.domain.runtimes import CLAUDE
+from orbit.agent.domain.runtimes import CLAUDE, RuntimeRules
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.protocol import BUILT_IN_ROLE_NAMES
-from tests.agent_fakes import EVERYTHING, KNOWN_CAPABILITIES, LIMITED_RUNTIME
+from tests.agent_fakes import CLAUDE_MODELS, EVERYTHING, KNOWN_RULES, LIMITED_RUNTIME
 
 INSTRUCTIONS = {name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES}
 BUILT_IN_ROLES = built_in_roles(read_built_in_roles(), INSTRUCTIONS)
@@ -589,9 +589,9 @@ def on_lite(name: str, **fields: object) -> dict[str, object]:
 
 def refusal(data: dict[str, object], user: UserRoles = NO_USER_ROLES) -> str:
     """Why the project file ``data`` is refused over the roles ``user`` sets, its roles held to
-    what :data:`KNOWN_CAPABILITIES` say their runtimes can do."""
+    what :data:`KNOWN_RULES` say their runtimes can do."""
     with pytest.raises(ConfigError) as raised:
-        load_config(data, BUILT_IN_ROLES, user, capabilities=KNOWN_CAPABILITIES)
+        load_config(data, BUILT_IN_ROLES, user, rules=KNOWN_RULES)
     return str(raised.value)
 
 
@@ -638,14 +638,14 @@ def test_each_role_asking_beyond_its_runtime_is_named_on_a_line_of_its_own() -> 
 
 @pytest.mark.usefixtures("limited_runtime")
 def test_a_role_on_a_runtime_without_usage_loads() -> None:
-    config = load_config(on_lite("reviewer"), BUILT_IN_ROLES, capabilities=KNOWN_CAPABILITIES)
+    config = load_config(on_lite("reviewer"), BUILT_IN_ROLES, rules=KNOWN_RULES)
     assert config.roles["reviewer"].runtime == LIMITED_RUNTIME
 
 
 @pytest.mark.usefixtures("limited_runtime")
 def test_a_disabled_role_asking_beyond_its_runtime_loads() -> None:
     data = on_lite("coder", effort="max", enabled=False)
-    config = load_config(data, BUILT_IN_ROLES, capabilities=KNOWN_CAPABILITIES)
+    config = load_config(data, BUILT_IN_ROLES, rules=KNOWN_RULES)
     assert not config.roles["coder"].enabled
 
 
@@ -657,11 +657,46 @@ def test_on_claude_every_valid_configuration_loads_as_it_did() -> None:
             "reviewer": {"effort": "xhigh", "tool_access": "full", "workspace": "snapshot"},
         }
     }
-    claude = {CLAUDE: EVERYTHING}
-    assert load_config(data, BUILT_IN_ROLES, capabilities=claude) == load_config(
-        data, BUILT_IN_ROLES
+    claude = RuntimeRules({CLAUDE: EVERYTHING}, {CLAUDE: CLAUDE_MODELS})
+    assert (
+        load_config(data, BUILT_IN_ROLES, rules=claude).roles
+        == load_config(data, BUILT_IN_ROLES).roles
     )
-    assert load_config({}, BUILT_IN_ROLES, capabilities=claude).roles == BUILT_IN_ROLES
+    assert load_config({}, BUILT_IN_ROLES, rules=claude).roles == BUILT_IN_ROLES
+
+
+# The models a role's runtime takes
+
+CLAUDES_ALIASES = (
+    "the runtime claude takes the aliases fable, opus, sonnet, haiku or a full id starting with"
+    ' "claude-"'
+)
+"""What says which models Claude Code takes, as orbit ships its aliases."""
+
+
+def test_a_roles_model_its_runtime_doesnt_take_is_refused_listing_the_aliases() -> None:
+    data: dict[str, object] = {"roles": {"reviewer": {"model": "sonet"}}}
+    assert refusal(data) == f'roles.reviewer.model = "sonet": {CLAUDES_ALIASES}.'
+
+
+def test_a_roles_full_model_id_loads_as_it_is() -> None:
+    data = {"roles": {"reviewer": {"model": "claude-sonnet-5-5"}}}
+    config = load_config(data, BUILT_IN_ROLES, rules=KNOWN_RULES)
+    assert config.roles["reviewer"].model == "claude-sonnet-5-5"
+
+
+def test_the_user_configs_model_for_every_role_is_held_to_each_roles_runtime() -> None:
+    every = load_user_roles({"roles": {"model": "sonet"}}, USER, BUILT_IN_ROLES)
+    assert refusal({"roles": {"coder": {"model": "opus"}}}, every).splitlines() == [
+        f'roles.{name}.model = "sonet": {CLAUDES_ALIASES}.'
+        for name in BUILT_IN_ROLE_NAMES
+        if name != "coder"
+    ]
+
+
+def test_a_config_has_the_models_each_runtime_takes() -> None:
+    assert load_config({}, BUILT_IN_ROLES, rules=KNOWN_RULES).models == {CLAUDE: CLAUDE_MODELS}
+    assert load_config({}, BUILT_IN_ROLES).models == {}
 
 
 # Settings of a later version of orbit

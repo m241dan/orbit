@@ -2368,7 +2368,7 @@
       "type": "object"
     },
     "SettingsChanged": {
-      "description": "The current settings of the conversational role ``role``, the planner unless given, sent\nafter every change to them.",
+      "description": "The current settings of the conversational role ``role``, the planner unless given, sent\nafter every change to them, with the ``model_choices`` they may choose from, its runtime's\naliases, and the id each resolves to, ``model_ids``, by alias.",
       "properties": {
         "model_choices": {
           "default": [],
@@ -2377,6 +2377,13 @@
           },
           "title": "Model Choices",
           "type": "array"
+        },
+        "model_ids": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Model Ids",
+          "type": "object"
         },
         "role": {
           "default": "planner",
@@ -2401,7 +2408,7 @@
       "type": "object"
     },
     "Snapshot": {
-      "description": "The session a connection views as it stands, sent in answer to ``Attach`` and after every\nswitch; its envelope's ``seq`` is the point it's current to.\n\nIt holds the ``session``'s summary, its ``settings`` (the planner's), each conversational role's\nsettings by role (``role_settings``, the planner's among them) and the ``model_choices``,\nwhether each lane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title``\nthey show under, the ``review`` status (none when reviews are off), the checks ``proposals``\nwaiting for a decision, the ``agents`` running, the ``transcript``: the session's last logged\nevents, at most 500, oldest first, in the envelopes they were sent in, and, while the session is\nhalted because storage failed, ``storage_halt``: why, and how to resume; ``read_only`` says\nanother orbit owns the repository, so the work this one is asked to run waits, and\n``ownership_offered`` that the repository is offered, as ``OwnershipOffered`` said, until the\noffer is settled. ``active`` says whether the session is the workspace's open one, which runs\nwork; one that isn't is a read-only view, from its saved record and its last logged events.\n``open_session`` names the workspace's open session, and ``viewers`` counts the connections\nviewing this one.",
+      "description": "The session a connection views as it stands, sent in answer to ``Attach`` and after every\nswitch; its envelope's ``seq`` is the point it's current to.\n\nIt holds the ``session``'s summary, its ``settings`` (the planner's), each conversational role's\nsettings by role (``role_settings``, the planner's among them) and the planner's\n``model_choices``, with the id each resolves to (``model_ids``, by alias), whether each lane\nis ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they show\nunder, the ``review`` status (none when reviews are off), the checks ``proposals``\nwaiting for a decision, the ``agents`` running, the ``transcript``: the session's last logged\nevents, at most 500, oldest first, in the envelopes they were sent in, and, while the session is\nhalted because storage failed, ``storage_halt``: why, and how to resume; ``read_only`` says\nanother orbit owns the repository, so the work this one is asked to run waits, and\n``ownership_offered`` that the repository is offered, as ``OwnershipOffered`` said, until the\noffer is settled. ``active`` says whether the session is the workspace's open one, which runs\nwork; one that isn't is a read-only view, from its saved record and its last logged events.\n``open_session`` names the workspace's open session, and ``viewers`` counts the connections\nviewing this one.",
       "properties": {
         "active": {
           "default": true,
@@ -2428,6 +2435,13 @@
           },
           "title": "Model Choices",
           "type": "array"
+        },
+        "model_ids": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Model Ids",
+          "type": "object"
         },
         "open_session": {
           "anyOf": [

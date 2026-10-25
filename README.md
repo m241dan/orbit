@@ -99,7 +99,7 @@ In the app:
 | `ctrl+r` | Run the tasks that haven't completed yet |
 | `ctrl+g` | Ask for a super review of the whole codebase now (works while tasks run; hidden while the `super-reviewer` is disabled) |
 | `ctrl+e` | Set up (or redo) the verification steps: after you confirm (`y` to go ahead, `n`/`esc` to cancel), queue a configurator task first and run it (see [Setting up verification](#setting-up-verification); hidden while the `configurator` is disabled) |
-| `ctrl+o` | Pick the model of the conversational role whose tab is shown, or the planner's on any other tab (default, fable, opus, sonnet, haiku; new tasks opened there default to it too) |
+| `ctrl+o` | Pick the model of the conversational role whose tab is shown, or the planner's on any other tab (default, then its runtime's aliases: fable, opus, sonnet, haiku and those your `config.toml` adds, each with the id it resolves to muted beside it when that's another; see [Models and their aliases](#models-and-their-aliases); new tasks opened there default to it too) |
 | `ctrl+l` | Pick the tool access level new tasks start with in the task editor (off, restricted, full), kept with the conversational role whose tab is shown, or the planner's on any other tab |
 | `ctrl+y` | Pick the effort of the conversational role whose tab is shown, or the planner's on any other tab (unset, low, medium, high, xhigh, max; it's that role's own, so new tasks still start with effort unset); not while typing, where it's the prompt's redo |
 | `ctrl+p` | Session picker: view or switch to a saved session, or start a new one (see [Sessions](#sessions)) |
@@ -301,7 +301,8 @@ the task list shows; **Prompt**, the rest of it, in a box that scrolls; **Role**
 agent takes the task, picked among the roles enabled in the session's workspace that take tasks
 (those that aren't conversational), each shown with its lane (`Coder · work`) and a personal role marked so
 (`helper · helper · personal`; see [Your personal roles](#your-personal-roles)), and `coder` for a
-new task; **Model**;
+new task; **Model**, picked as `ctrl+o` picks one (see
+[Models and their aliases](#models-and-their-aliases));
 **Tool access**; and **Effort**: unset, `low`, `medium`, `high`, `xhigh` or `max`, where unset
 leaves it to the role's (see `effort` under
 [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)). A new task starts with the model
@@ -312,8 +313,10 @@ you've already picked in this edit. `j`/`k`
 pick a field, `J`/`K` scroll the prompt box one line at a time (whichever field is selected), `i`
 types in the title or prompt (`esc` stops; `enter` stops in the title and adds a line in the
 prompt), `enter` on role, model, tools or effort opens a picker, `ctrl+s` saves (from anywhere,
-even while typing) and `esc` discards. A task needs a title; the prompt may be empty. `enter` on a
-running or verifying task, or on a review orbit queued, only shows why it can't be edited.
+even while typing) and `esc` discards. A task needs a title; the prompt may be empty, and its
+model must be one its role's runtime takes, or saving it is refused, naming the runtime's
+aliases. `enter` on a running or verifying task, or on a review orbit queued, only shows why it
+can't be edited.
 
 The task list belongs to the open session, which orbit saves as you go (see [Sessions](#sessions)).
 It keeps the topmost running or verifying task in view, scrolling just enough to show it with the
@@ -771,7 +774,7 @@ your checkout out of its way, it doesn't sandbox it.
 | Temporary directories | the system's temporary directory | `orbit-agent-…`, the empty directory each run of a role whose `workspace` is `none` works in, removed after it (see [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)) |
 | The store | the state directory | `orbit.db`, the saved sessions, their event logs, the super review count and the record moves of every repository, `locks/`, and `fallback/` for events a failed write left unsaved (see [Storage failures](#storage-failures)) |
 | Config files | `.orbit/config.toml` in the repository | the verification steps, setup, roles and limits, committed with your code |
-| User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]`, `[server]`, `[remotes]`, `[telemetry]`, and in `[roles]` your machine's model, effort and runtime for roles and your personal roles, with the instructions files they name |
+| User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]`, `[server]`, `[remotes]`, `[telemetry]`, and in `[roles]` your machine's model, effort and runtime for roles and your personal roles, with the instructions files they name, and in `[runtimes]` the aliases of each runtime's models |
 | The token | `token` in the config directory | what frontends show `orbit serve` to connect (see [Serving the control plane](#serving-the-control-plane)) |
 | Certificates | `certs/` in the config directory | the CA, server and client certificates and keys `orbit certs` makes for TLS and mutual TLS (see [Serving the control plane](#serving-the-control-plane)) |
 | The run file | `run/server.json` in the state directory | where the `orbit serve` running on that state directory listens, beside `run/serve.lock`, which that serve holds |
@@ -1143,6 +1146,7 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   role's `runtime`, and telemetry's `orbit.runtime` is it. Each runtime says what it can do:
   carry a conversation on (resume), report what its agents' turns cost (usage), and which
   levels of `tool_access` and `effort` it takes; Claude Code can do all of it, at every level.
+  Each runtime also takes its own models (see [Models and their aliases](#models-and-their-aliases)).
   An enabled role asking for more than its runtime can do is refused as the configuration
   loads, before anything runs, naming the role, the runtime, what it asks for and what the
   runtime takes. For a runtime `lite` that took only restricted tool access, no effort and
@@ -1269,6 +1273,43 @@ of the account it runs as, as it opens each workspace it serves; both read them 
 project's, when the planner is reset. An invalid one is refused as an invalid
 `.orbit/config.toml` is: it stops `orbit chat` with status 2, and a workspace `orbit serve` can't
 open.
+
+#### Models and their aliases
+
+A model is an alias or a full id, and which names are which is up to the role's runtime. Each
+runtime has a table of aliases, each resolving to the id its agents are given: orbit ships
+Claude's in `runtimes.toml`, beside the built-in roles' `roles.toml`, passing `fable`, `opus`,
+`sonnet` and `haiku` through as they are, for Claude Code to resolve to the latest model of each
+family. Your `config.toml` adds aliases, or changes what one resolves to, in a
+`[runtimes.<name>.models]` table for a runtime this version of orbit knows:
+
+```toml
+[runtimes.claude.models]
+fast = "claude-haiku-5-5"  # a new alias
+opus = "claude-opus-5-5"   # opus pinned to one model
+```
+
+Any other name is a full id if its runtime says it looks like one: on Claude, one starting with
+`claude-`, such as `claude-sonnet-5-5`, is given to Claude Code as it is. A role's `model`, the
+project's or the one your `[roles]` or `[roles.<name>]` sets, must be an alias or a full id its
+runtime takes, or the configuration is refused as it loads, naming the role, the model and the
+aliases: `roles.reviewer.model = "sonet": the runtime claude takes the aliases fable, opus,
+sonnet, haiku or a full id starting with "claude-".`. A `[runtimes.<name>]` table for a runtime
+this version of orbit doesn't know is refused, naming it (`runtimes.nope: this version of orbit
+knows the runtimes claude.`), as is one setting anything but `models`. `[runtimes]` is yours
+alone: a project's `.orbit/config.toml` setting it is refused (`runtimes: Extra inputs are not
+permitted`).
+
+The model pickers, `ctrl+o` and the task editor's **Model**, offer `default`, then the aliases of
+the runtime's models, in order, each with the id it resolves to muted beside it when that's
+another, as in `fast  claude-haiku-5-5`. A task you add or edit, or a conversational role's
+settings, with a model its role's runtime doesn't take is refused, naming the aliases
+(`coder's model "sonet" doesn't resolve: the runtime claude takes the aliases fable, opus, sonnet,
+haiku or a full id starting with "claude-".`). An agent is launched with the id its model
+resolves to, so with the table above a task on `fast` runs Claude Code with `--model
+claude-haiku-5-5`. A model that no longer resolves, such as a task's saved with an alias you've
+since taken out of your `config.toml`, or one `--model` gives, fails the agent's run as it starts,
+saying why. `--model` takes an alias or a full id, and its help lists Claude's aliases.
 
 #### Your personal roles
 

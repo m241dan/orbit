@@ -41,8 +41,8 @@ from orbit.protocol import (
 )
 
 STREAM_ARGS = ("-p", "--output-format", "stream-json", "--verbose")
-# Aliases the CLI resolves to the latest model of each family.
-MODEL_ALIASES = ("fable", "opus", "sonnet", "haiku")
+# What a full model id starts with, such as claude-sonnet-5-5; the aliases are the package's.
+MODEL_ID_PREFIX = "claude-"
 TOOL_ACCESS_ARGS: dict[ToolAccess, tuple[str, ...]] = {
     "off": ("--tools", ""),
     "restricted": (),
@@ -294,9 +294,11 @@ def _crash(status: int, stderr: str) -> _Crashed:
 
 class ClaudeCliRunner:
     """Runs agents as Claude CLI sessions connected to orbit, run as ``command``, which send
-    their telemetry to the OTLP collector at ``endpoint`` over ``protocol``, if given."""
+    their telemetry to the OTLP collector at ``endpoint`` over ``protocol``, if given. Its full
+    model ids start with ``model_id_prefix``."""
 
     capabilities = CAPABILITIES
+    model_id_prefix = MODEL_ID_PREFIX
 
     def __init__(
         self,

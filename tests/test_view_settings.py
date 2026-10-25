@@ -1,4 +1,5 @@
 import pytest
+from rich.text import Text
 
 from orbit.protocol import (
     AgentEntry,
@@ -13,6 +14,7 @@ from orbit.tui.view.settings import (
     effort_choices,
     effort_label,
     effort_labels,
+    model_choice_label,
     model_choices,
     model_options,
     picked_effort,
@@ -51,6 +53,19 @@ def test_model_options_put_the_default_before_the_choices() -> None:
         (None, "opus", "sonnet"),
         ["default", "opus", "sonnet"],
     )
+
+
+def test_model_options_show_each_alias_with_the_id_it_resolves_to_muted() -> None:
+    ids = {"opus": "opus", "fast": "claude-haiku-5-5"}
+    assert model_options(("opus", "fast"), ids) == (
+        (None, "opus", "fast"),
+        ["default", "opus", Text.assemble("fast", ("  claude-haiku-5-5", "dim"))],
+    )
+
+
+def test_an_alias_shows_alone_when_it_is_its_own_id_or_its_id_isnt_known() -> None:
+    assert model_choice_label("opus", "opus") == "opus"
+    assert model_choice_label("opus", None) == "opus"
 
 
 def test_tool_access_labels_describe_each_option_in_order() -> None:

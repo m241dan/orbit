@@ -78,7 +78,7 @@ from orbit.agent.external.certificates import (
     write_bundle,
 )
 from orbit.agent.external.checks import run_step
-from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner
+from orbit.agent.external.claude_cli import ClaudeCliRunner
 from orbit.agent.external.cloner import Cloner
 from orbit.agent.external.config_file import read_config, read_config_sources, write_checks
 from orbit.agent.external.config_init import (
@@ -105,6 +105,7 @@ from orbit.agent.external.repository import (
     orbit_dir,
 )
 from orbit.agent.external.run_file import RunFile, ServeLock, running_server
+from orbit.agent.external.runtimes import read_package_models
 from orbit.agent.external.served_workspaces import (
     Configuring,
     HostMaker,
@@ -141,7 +142,6 @@ __all__ = [
     "CLAUDE",
     "INVALID_CONFIG",
     "LIMIT_KEYS",
-    "MODEL_ALIASES",
     "NO_STEPS_NOTE",
     "REMOTE_FILE",
     "USER_CONFIG_FILE",
@@ -257,6 +257,7 @@ __all__ = [
     "read_certificate",
     "read_config",
     "read_config_sources",
+    "read_package_models",
     "read_remotes",
     "read_server",
     "read_storage",

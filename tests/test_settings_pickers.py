@@ -1,6 +1,7 @@
 """The SettingsPickers showing their model as picker screens; what the pickers decide is checked
 in test_pickers."""
 
+from rich.text import Text
 from textual.app import App
 from textual.widgets import OptionList
 
@@ -47,6 +48,21 @@ async def test_choosing_a_model_offers_the_choices_and_passes_on_the_model_picke
         assert app.screen is app.get_screen("pick-model")
         await pilot.press("down", "enter")
         assert app.picked == [Settings(model="sonnet", tool_access="off")]
+
+
+async def test_the_model_picker_mutes_the_id_each_choice_resolves_to() -> None:
+    app = PickersApp(Settings())
+    async with app.run_test() as pilot:
+        app.pickers.model.show_choices(("opus", "fast"), {"fast": "claude-haiku-5-5"})
+        app.pickers.model.choose_model(app.current, app.pick)
+        await pilot.pause()
+        assert shown(app)[1] == ["default", "opus", "fast  claude-haiku-5-5"]
+        options = app.screen.query_one(OptionList)
+        prompt = options.get_option_at_index(2).prompt
+        assert isinstance(prompt, Text)
+        assert [(span.start, span.style) for span in prompt.spans] == [(4, "dim")]
+        await pilot.press("end", "enter")
+        assert app.picked == [Settings(model="fast")]
 
 
 async def test_choosing_tools_passes_on_the_tool_access_picked() -> None:

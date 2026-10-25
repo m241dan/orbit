@@ -1,0 +1,9 @@
+# The models each runtime takes by alias, each resolving to the id the runtime is given. Your own
+# config.toml's [runtimes.<name>.models] adds aliases, or changes what one resolves to.
+
+[runtimes.claude.models]
+# Claude Code resolves these to the latest model of each family itself.
+fable = "fable"
+opus = "opus"
+sonnet = "sonnet"
+haiku = "haiku"

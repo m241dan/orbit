@@ -120,7 +120,8 @@ with `invalid`. The first `Attach` is answered in this order:
 
 1. `Snapshot`: the session as it stands, with its settings (the planner's), each conversational
    role's settings by role in `role_settings` (the planner's among them; added to version 2, so
-   an older peer's Snapshot has none), busy lanes (a flag for each lane the Catalog lists, by
+   an older peer's Snapshot has none), the planner's `model_choices` with their `model_ids` (see
+   `UpdateSettings` under [Tasks, settings and stopping work](#tasks-settings-and-stopping-work)), busy lanes (a flag for each lane the Catalog lists, by
    name: the work lane, the conversational roles', a disabled planner's only while an enabled
    conversational role shares it, and every other lane of the enabled task roles), tasks,
    verification steps, review status, checks proposals waiting for a decision, running
@@ -516,11 +517,15 @@ is refused with `unknown`: `No task with id 't9'.`
 
 - `AddTask(task)` appends `task`, a `TaskSpec` with its `prompt`, `settings` and `role`, to the
   list as a pending task, with the next id. It's refused with `not_configured` for a disabled
-  role: `coder is disabled in this project's configuration.`
+  role: `coder is disabled in this project's configuration.`, and with `invalid` for a model its
+  role's runtime doesn't take, naming the runtime's aliases: `coder's model "sonet" doesn't
+  resolve: the runtime claude takes the aliases fable, opus, sonnet, haiku or a full id starting
+  with "claude-".`
 - `EditTask(task_id, task)` replaces task `task_id`'s `TaskSpec` with `task` and makes it pending
   again, its attempts and the reason it last ended cleared; an edited task in a review batch has
   to finish again before the batch does. It's refused with `not_configured` for a disabled role,
-  as `AddTask` is, and with `busy` while the task runs or is
+  and with `invalid` for a model its role's runtime doesn't take, as `AddTask` is, and with
+  `busy` while the task runs or is
   verified (`Task 't3' can't be edited while it runs.`), and with `invalid` for a review orbit
   queued itself, whose batch is spent: `Reviews can't be edited; remove it instead.`
 - `AcceptTask(task_id)` makes the draft task `task_id`, one the planner proposed, a pending
@@ -533,13 +538,22 @@ is refused with `unknown`: `No task with id 't9'.`
 
 `UpdateSettings(settings, role)` replaces the session's settings for the conversational role
 `role`, which apply from its next turn: it publishes `SettingsChanged(settings, model_choices,
-role)` and saves the session. The session keeps settings for each conversational role (see
+role, model_ids)` and saves the session. The session keeps settings for each conversational role (see
 `SendMessage` below), and a role's turns run with its own; the planner's are the ones the
 `Snapshot`'s `settings` hold, and every role's are in its `role_settings`. `role` was added to
 version 2 of both, defaulting to `planner`, so an older peer's settings are the planner's. It's refused with `unknown` for a role that isn't
 conversational here (`Role 'coder' has no settings of its own; the roles with them are planner.`)
 and with `not_configured` for a disabled one, as `SendMessage` to it is, but the planner: its
-settings can still be set while it's disabled, as new tasks start with them.
+settings can still be set while it's disabled, as new tasks start with them. It's refused with
+`invalid` for a model the role's runtime doesn't take, as `AddTask` is.
+
+A `SettingsChanged`'s `model_choices` are the aliases of the models its role's runtime takes, in
+order (`fable`, `opus`, `sonnet` and `haiku` for Claude, and those the user's `config.toml` adds
+in `[runtimes.claude.models]`), and its `model_ids` give the id each resolves to, by alias, as
+`{"fast": "claude-haiku-5-5"}`; a `Snapshot`'s are the planner's. A model may also be a full id
+its runtime takes, such as `claude-sonnet-5-5` on Claude, which isn't among the choices. The
+agent is launched with the id its model resolves to. `model_ids` was added to version 2 of both,
+defaulting to none, so an older peer's choices show without their ids.
 
 A `Settings`, the session's or a task's, holds the `model` (`null` for the backend's default), the
 `tool_access` (`off`, `restricted` or `full`) and the `effort` (`low`, `medium`, `high`, `xhigh`
@@ -779,7 +793,7 @@ Refusals, in `CommandRefused`:
 | `not_configured` | What the command needs isn't set up, such as agents or verification. |
 | `unknown` | The command names something there's none of, such as a task, a lane, a workspace or a stream. |
 | `busy` | What the command acts on is running, so it can't be done now, such as a URL `AddWorkspace` is cloning already. |
-| `invalid` | The command can't be done as given, such as a command before `Hello`, a command for a workspace before the connection is attached, a relative path to `AddWorkspace` or `ListDirectory`, a path outside the server's `browse_root`, a directory the server can't read, or both or neither of its `path` and `url`, or a `url` that's neither a URL it clones nor an absolute path, adding, removing or browsing on a local orbit, input to a trigger that takes none or `TakeOwnership` with no offer open. |
+| `invalid` | The command can't be done as given, such as a command before `Hello`, a task's or a role's settings with a model its runtime doesn't take, a command for a workspace before the connection is attached, a relative path to `AddWorkspace` or `ListDirectory`, a path outside the server's `browse_root`, a directory the server can't read, or both or neither of its `path` and `url`, or a `url` that's neither a URL it clones nor an absolute path, adding, removing or browsing on a local orbit, input to a trigger that takes none or `TakeOwnership` with no offer open. |
 | `locked` | Another orbit holds what the command acts on, such as a session. |
 | `wrong_session` | The command is for a session other than the one its connection views, or a workspace other than the one it's attached to. |
 | `not_active` | The connection views a session that isn't the workspace's open one, and the command would change or run something there (see [Read-only views](#read-only-views)). |
