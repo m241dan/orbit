@@ -1,7 +1,8 @@
 """Purging a workspace registered in the store, as :func:`purge` orders it: finding it, holding
-its workspace lock, checking what deleting its clone would lose and deleting its session locks,
-fallback files and, for a clone orbit made, its directory, then its records; and forgetting one,
-as ``orbit db forget`` does, refusing one a running server serves or another orbit holds."""
+its workspace lock, checking what deleting its clone would lose and deleting its fallback files,
+session locks and, for a clone orbit made, its directory, then its records and registration last,
+so a purge that fails partway can be run again; and forgetting one, as ``orbit db forget`` does,
+refusing one a running server serves or another orbit holds."""
 
 import asyncio
 import shutil
@@ -96,9 +97,10 @@ async def forget_workspace(store: SqliteStore, key: str) -> Purged:
 
 async def purge_workspace(store: SqliteStore, workspace_id: str) -> Purged:
     """Delete what orbit keeps of the workspace ``workspace_id`` in ``store``, as :func:`erase`
-    orders it, for a :func:`purge` that has held it and checked what that would lose. Raises
-    :class:`PurgeRefused`, deleting nothing, if it isn't registered; :class:`StoreError` if the
-    store fails, and ``OSError`` if a file can't be deleted."""
+    orders it, its registration last, for a :func:`purge` that has held it and checked what
+    that would lose. Raises :class:`PurgeRefused`, deleting nothing, if it isn't registered;
+    :class:`StoreError` if the store fails, and ``OSError`` if a file can't be deleted, leaving
+    it registered to be purged again."""
     workspace = await WorkspaceRegistry(store).workspace(workspace_id)
     if workspace is None:
         raise PurgeRefused(f"No workspace {workspace_id} is registered.")

@@ -159,3 +159,25 @@ def test_a_clone_is_checked_for_work_it_would_lose_once(
     result = runner.invoke(app, ["db", "forget", str(clone)])
 
     assert result.exit_code == 0 and checked == [clone]
+
+
+def test_a_clone_that_cant_be_deleted_is_forgotten_by_forgetting_it_again(
+    state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clone = cloned(tmp_path)
+    workspace_id = used(state, clone, managed=True)
+
+    def refused(path: Path) -> None:
+        raise PermissionError(f"Permission denied: {path}")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(workspace_purge, "_remove_clone", refused)
+        failed = runner.invoke(app, ["db", "forget", str(clone)])
+    assert (failed.exit_code, failed.stderr) == (2, f"Permission denied: {clone}\n")
+    assert registered(state) == [workspace_id] and clone.is_dir()
+
+    result = runner.invoke(app, ["db", "forget", str(clone)])
+
+    message = f"Forgot {clone}: deleted 1 session, 0 fallback files and its clone {clone}.\n"
+    assert result.exit_code == 0 and result.stdout == message
+    assert registered(state) == [] and not clone.exists()

@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from orbit.agent.application.purge import purge
-from orbit.agent.domain.purging import PurgeRefused
+from orbit.agent.domain.purging import Purged, PurgeRefused
 from orbit.agent.domain.workspaces import RegisteredWorkspace
 from orbit.agent.external import workspace_purge
 from orbit.agent.external.fallback_files import FallbackFiles
@@ -106,7 +106,9 @@ async def test_purging_a_clean_managed_clone_deletes_its_directory(
 
     purged = await purge_workspace(store, workspace_id)
 
-    assert purged.clone == str(clone)
+    assert purged == Purged(
+        RegisteredWorkspace(workspace_id, str(clone), False, True), 1, 2, str(clone)
+    )
     assert not clone.exists()
     assert rows(state, workspace_id)["workspaces"] == 0
 
@@ -197,11 +199,36 @@ async def test_a_clone_that_cant_be_deleted_stays_registered_with_its_records_fo
         with pytest.raises(PermissionError):
             await purge(StorePurging(store), str(clone))
     assert rows(state, workspace_id) == dict.fromkeys(rows(state, workspace_id), 1)
+    assert clone.is_dir()
 
     purged = await purge(StorePurging(store), str(clone))
 
-    assert purged.clone == str(clone) and not clone.exists()
+    # The first attempt deleted the fallback files before it came to the clone.
+    assert (purged.sessions, purged.fallback_files, purged.clone) == (1, 0, str(clone))
+    assert not clone.exists()
     assert rows(state, workspace_id) == dict.fromkeys(rows(state, workspace_id), 0)
+
+
+async def test_fallback_files_that_cant_be_deleted_leave_it_registered_for_a_retry(
+    store: SqliteStore, state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace_id = await used(store, tmp_path / "project")
+
+    def refused(directories: Sequence[Path], workspace_id: str) -> int:
+        raise PermissionError("Can't delete a fallback file")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(workspace_purge, "remove_fallback_files", refused)
+        with pytest.raises(PermissionError):
+            await forget_workspace(store, str(tmp_path / "project"))
+    assert rows(state, workspace_id) == dict.fromkeys(rows(state, workspace_id), 1)
+    assert len(leftovers(state, tmp_path / "project", workspace_id)) == 3
+
+    purged = await forget_workspace(store, str(tmp_path / "project"))
+
+    assert (purged.sessions, purged.fallback_files, purged.clone) == (1, 2, None)
+    assert rows(state, workspace_id) == dict.fromkeys(rows(state, workspace_id), 0)
+    assert leftovers(state, tmp_path / "project", workspace_id) == []
 
 
 async def test_a_workspace_is_found_by_a_directory_in_its_repository(
