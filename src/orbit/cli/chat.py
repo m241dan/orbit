@@ -220,7 +220,7 @@ def _connect_url(url: str) -> str:
     Exits with status 2 if it isn't a ws:// or wss:// URL.
     """
     if not url.startswith(("ws://", "wss://")):
-        typer.echo(f"orbit chat --connect takes a wss:// or ws:// URL, not {url}.", err=True)
+        typer.echo(f"--connect takes a wss:// or ws:// URL, not {url}.", err=True)
         raise typer.Exit(2)
     return url
 
@@ -490,13 +490,23 @@ def _connected_app(url: str, joining: _Joining, telemetry: Telemetry) -> OrbitAp
     Exits with status 2 if ``url`` is a ws:// one beyond loopback, or the token, the CA or the
     client certificate can't be read.
     """
+    client = _joined_client(url, joining)
+    opening = Opening(joining.opening, joining.opening is None, joining.repository)
+    return OrbitApp(client, client, opening, telemetry=telemetry)
+
+
+def _joined_client(url: str, joining: _Joining) -> WebSocketSession:
+    """The session with the control plane at ``url``, shown the token or client certificate
+    ``joining`` gives, verified by the CA it gives, if any.
+
+    Exits with status 2 if ``url`` is a ws:// one beyond loopback, or the token, the CA or the
+    client certificate can't be read.
+    """
     with _exit_on(TokenUnreadable, CaUnreadable, ClientCertUnusable, PlaintextRefused):
         if joining.token_file is not None:
             read_token(joining.token_file)  # The session reads it again for each connection.
         context = _ssl_context(url, joining)
-        client = WebSocketSession(url, joining.token_file, ssl_context=context)
-    opening = Opening(joining.opening, joining.opening is None, joining.repository)
-    return OrbitApp(client, client, opening, telemetry=telemetry)
+        return WebSocketSession(url, joining.token_file, ssl_context=context)
 
 
 def _ssl_context(url: str, joining: _Joining) -> ssl.SSLContext | None:

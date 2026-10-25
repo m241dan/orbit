@@ -9,6 +9,8 @@ runner = CliRunner()
 
 _CHAT = ("--workspace", "--new", "--name", "--connect", "--token-file", "--local")
 
+_CONNECTION = ("--connect", "--remote", "--token-file", "--ca", "--cert", "--key")
+
 _BACKEND = (
     "--model",
     "--tools",
@@ -25,12 +27,13 @@ _BACKEND = (
 @pytest.mark.parametrize(
     ("args", "listed"),
     [
-        ([], ("chat", "serve", "version", "db", "token")),
+        ([], ("chat", "serve", "status", "version", "db", "token")),
         (
             ["chat"],
             (*_BACKEND, *_CHAT),
         ),
         (["serve"], (*_BACKEND, "--add", "--host", "--port")),
+        (["status"], (*_CONNECTION, "--json", "--state-dir", "--config-dir")),
         (["db"], ("backup",)),
         (["db", "backup"], ("PATH", "--force", "--state-dir")),
         (["token"], ("rotate",)),

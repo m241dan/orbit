@@ -169,6 +169,19 @@ LocalOption = Annotated[
     ),
 ]
 
+StatusConnectOption = Annotated[
+    str | None,
+    typer.Option(
+        "--connect",
+        metavar="URL",
+        help="Ask the control plane orbit serve runs at this wss:// URL (or ws:// on loopback)"
+        " rather than the one running here.",
+    ),
+]
+JsonOption = Annotated[
+    bool, typer.Option("--json", help="Print the status as one JSON object rather than text.")
+]
+
 # The chat flags that configure the control plane, which a connected chat doesn't run.
 _SERVE_FLAGS = ("model", "tools", "verify", "worktree", "review", "usage", "profile")
 

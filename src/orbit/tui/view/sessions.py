@@ -14,6 +14,7 @@ from orbit.protocol import (
     ActivityKind,
     Attach,
     NewSession,
+    PauseReason,
     SessionSummary,
     TaskStatus,
     Usage,
@@ -326,10 +327,14 @@ def paused_words(summary: SessionSummary, zone: tzinfo | None = None) -> str | N
     14:20``, ``run paused: usage limit; starts again at 18:01``, or ``run paused; starts again at
     14:20`` for a reason not known; none while it isn't paused."""
     until = summary.paused_until
-    if until is None:
-        return None
-    reason = PAUSED_REASONS.get(summary.paused_for or "", PAUSED_UNKNOWN)
-    return f"{PAUSED_PREFIX}{reason} {until.astimezone(zone):%H:%M}"
+    return None if until is None else paused_note(until, summary.paused_for, zone)
+
+
+def paused_note(until: datetime, reason: PauseReason | None, zone: tzinfo | None = None) -> str:
+    """What a run paused for ``reason`` says of itself, starting again at ``until``, a time in
+    ``zone`` (the local one by default), as :func:`paused_words` words it."""
+    words = PAUSED_REASONS.get(reason or "", PAUSED_UNKNOWN)
+    return f"{PAUSED_PREFIX}{words} {until.astimezone(zone):%H:%M}"
 
 
 def local_time(when: datetime, zone: tzinfo | None = None) -> str:

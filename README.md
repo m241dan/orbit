@@ -52,6 +52,8 @@ uv run orbit chat --connect ws://127.0.0.1:7433/  # join the orbit serve running
 uv run orbit chat --connect wss://orbit.example.lan:7433/ --ca ca.pem  # over TLS
 uv run orbit chat --remote work                # connect to the control plane [remotes.work] names
 uv run orbit chat --local                      # run in-process even with orbit serve running
+uv run orbit status                            # what the orbit serve running here is doing
+uv run orbit status --remote work --json       # the same of another, as one JSON object
 uv run orbit token rotate                      # replace the token frontends show orbit serve
 uv run orbit version                           # show the installed version
 ```
@@ -1536,6 +1538,46 @@ without `key` or the reverse, or `cert` and `key` with `token_file`, each naming
 key. `--remote` can't go with `--connect`, and the backend flags belong on `orbit serve`, and
 `--state-dir` stops it, as they do with `--connect`.
 
+**Checking on it.** `orbit status` prints what a running control plane is doing, then exits: the
+server's URL and version; each workspace it serves, by label and path, with its sessions, the
+active one marked `active`, each `running` or `idle`, or `waiting for a coder: 2nd in line`
+while its run waits for a coder's slot, and `run paused: usage limit; starts again at 18:01`
+while its run is paused; the agents running, by workspace, role and task; and what turns have
+cost in all, today and over the lifetime, in tokens and dollars:
+
+```
+orbit serve 0.1.0 at ws://127.0.0.1:7433/
+
+Workspaces
+  orbit  /home/me/code/orbit
+    Oct 25 09:12 · active · running
+    docs · idle · run paused: usage limit; starts again at 18:01
+
+Agents
+  orbit · coder · task 3
+
+Usage
+  today     1,204,880 tokens · $0.84
+  lifetime  15,301,112 tokens · $12.10
+```
+
+It asks the `orbit serve` running here, found as `orbit chat` finds it (see **Finding the
+server** above), or the one `--connect <url>` or `--remote <name>` names, showing it the token or
+client certificate `orbit chat` would, with the same `--token-file`, `--ca`, `--cert`, `--key`,
+`--state-dir` and `--config-dir` (`--state-dir` can't go with `--connect` or `--remote`). It
+connects as a frontend, says `Hello` as `orbit-status`, watches the control-plane stream (see
+**Watching what runs** above), prints what it's told and disconnects. `--json` prints the same as
+one JSON object instead: `url`, `server_version`, `workspaces` (each with `id`, `label`, `path`
+and `sessions`, each with `id`, `name`, `active`, `state`, `waiting_for_coder`,
+`coder_position`, `paused_until` and `paused_for`), `agents` (each with `workspace`,
+`workspace_label`, `session`, `agent_id`, `role` and `task_id`) and `usage` (`today` and
+`lifetime`, each with `tokens` and `cost_usd`). It exits with status 0 once it has printed; 1
+when no `orbit serve` is running here, saying `No orbit serve is running for this account.`; and
+2 when the control plane can't be asked, saying why: a connection, TLS or credential error, with
+its message from **TLS and connection errors** above (a token refused says `The control plane
+refused the token.`), a server that can't be reached, is shutting down, closes the connection or
+refuses its `Hello`, or no answer within 10 seconds.
+
 **Two machines.** To run the control plane on a server, `orbit.example.lan` (192.168.1.20), and
 chat from a laptop: on the server, make the CA and the server's certificate as in **TLS** above,
 in `~/.config/orbit/tls`, and serve with
@@ -2095,8 +2137,11 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   backend: it hands the TUI an `orbit.client.WebSocketSession`, which runs on the TUI's own event
   loop, and telemetry of its own; neither does a chat that `discover_control_plane` finds a
   running `orbit serve` for.
-  It's a module per command (`chat`, `serve`, and `maintenance` for `version`, `db` and
-  `token`), with `backend` wiring the adapters for both chat and serve, `options` the options
-  they share and `errors` how they exit; its `__init__` registers the commands on the app.
+  It's a module per command (`chat`, `serve`, `status`, and `maintenance` for `version`, `db`
+  and `token`), with `backend` wiring the adapters for both chat and serve, `status_report` what
+  `orbit status` reports and how it prints it, `options` the options they share and `errors` how
+  they exit; its `__init__` registers the commands on the app. `orbit status` joins a control
+  plane as `orbit chat --connect` does, through an `orbit.client.WebSocketSession`, on an event
+  loop of its own.
 
 These rules are enforced by `lint-imports` (see `[tool.importlinter]` in `pyproject.toml`).
