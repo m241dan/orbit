@@ -1124,8 +1124,11 @@ A project can change these, orbit's limits, its verification steps (see
 name adds a role, which must set `instructions` and otherwise gets `get_task`, `complete_task`,
 `report_progress` and `give_up` as its tools, `restricted` tool access, the default model, its
 claims verified, no time limit, the coder's lane `work`, `worktree`, no conversation and
-enabled, and no effort. It merges, being verified and in a worktree; one in another workspace must
-set `verify = false`, and one with `verify = false` doesn't merge, and can't be made to. Every other field is optional.
+enabled, and no effort. A role that doesn't set `merge` merges if it can, being verified and in a
+worktree, and a built-in role whose `verify` or `workspace` the file changes without setting
+`merge` follows the same rule, so `[roles.coder] verify = false` alone stops the coder merging. One
+in another workspace must set `verify = false`, and one with `verify = false` doesn't merge, and
+can't be made to. Every other field is optional.
 
 Every setting a project can change, with its default and what it does, is in orbit's reference
 config, [`reference/config.toml`](src/orbit/agent/external/reference/config.toml), shipped with

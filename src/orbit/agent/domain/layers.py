@@ -59,6 +59,9 @@ class RoleFields(BaseModel):
 MACHINE_FIELDS = frozenset(RoleFields.model_fields)
 """The role fields bound to the machine, which the user config sets for any role."""
 
+MERGING_NEEDS = frozenset({"verify", "workspace"})
+"""The role fields whether a role can merge depends on."""
+
 
 @dataclass(frozen=True)
 class UserRoles:
@@ -196,8 +199,10 @@ def resolve_roles(
     """The ``package``'s roles, then the ``user``'s personal roles, then those ``project`` adds,
     each field resolved most specific first: the ``project``'s value, the ``user``'s value for
     the role (a personal role's own), the ``user``'s value for every role, the ``package``'s
-    value, then the default. A project role replaces a personal role of its name entirely; a
-    role the ``user`` only sets a model or effort for, and no other layer has, isn't a role.
+    value, then the default. A role's ``merge`` is the default, which merges if it can, when
+    the ``project`` changes its ``verify`` or ``workspace`` but not its ``merge``. A project role
+    replaces a personal role of its name entirely; a role the ``user`` only sets a model or
+    effort for, and no other layer has, isn't a role.
 
     Raises :class:`ConfigError` naming the role and field if a role is invalid, and
     :class:`PersonalRoleError` if the personal roles break a rule across the roles that the
@@ -256,7 +261,8 @@ def _resolved(
     name: str, built_in: Role | None, user: UserRoles, project: ProjectRoles
 ) -> tuple[Any, dict[str, Layer]]:
     """The fields of role ``name``, the ``built_in`` one if any, with those the layers set over
-    them, and the layer each came from; the project's value as it is if it isn't a table."""
+    them and its merging worked out as :func:`_merging_worked_out` says, and the layer each came
+    from; the project's value as it is if it isn't a table."""
     given = project.roles.get(name, {})
     if not isinstance(given, dict):
         return given, {}
@@ -265,7 +271,19 @@ def _resolved(
     for layer, values in _layered(name, built_in, user, project.layer, given):
         fields |= values
         layers |= dict.fromkeys(values, layer)
-    return fields, layers
+    return _merging_worked_out(fields, layers, given)
+
+
+def _merging_worked_out(
+    fields: dict[str, Any], layers: dict[str, Layer], given: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Layer]]:
+    """A role's resolved ``fields`` and their ``layers``, with its ``merge`` left to the
+    default if the project's table of fields ``given`` for it changes what merging depends on
+    but not ``merge``: a built-in role then merges if it can, as a role leaving it out does."""
+    if "merge" in given or given.keys().isdisjoint(MERGING_NEEDS):
+        return fields, layers
+    worked_out = {key: value for key, value in fields.items() if key != "merge"}
+    return worked_out, layers | {"merge": DEFAULT}
 
 
 def _layered(

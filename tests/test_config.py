@@ -7,6 +7,7 @@ from orbit.agent.domain.checks import Setup
 from orbit.agent.domain.config import OrbitConfig, load_config, load_layered
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.layers import (
+    DEFAULT,
     PACKAGE,
     Layer,
     PersonalRoleError,
@@ -209,6 +210,43 @@ def test_a_file_overrides_a_built_in_roles_lane_and_enabling() -> None:
     reviewer = load_config({"roles": roles}, BUILT_IN_ROLES).roles["reviewer"]
     assert (reviewer.lane, reviewer.enabled) == ("audit", False)
     assert reviewer.workspace == BUILT_IN_ROLES["reviewer"].workspace  # Untouched fields kept.
+
+
+def test_a_built_in_role_turned_unverified_without_setting_merge_stops_merging() -> None:
+    coder = load_config({"roles": {"coder": {"verify": False}}}, BUILT_IN_ROLES).roles["coder"]
+    assert (coder.merge, coder.verify) == (False, False)
+
+
+def test_a_built_in_role_moved_off_the_worktree_without_setting_merge_stops_merging() -> None:
+    roles = {"coder": {"workspace": "snapshot", "verify": False}}
+    assert load_config({"roles": roles}, BUILT_IN_ROLES).roles["coder"].merge is False
+
+
+def test_a_verified_built_in_role_moved_off_the_worktree_is_refused_as_it_cant_merge() -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_config({"roles": {"coder": {"workspace": "snapshot"}}}, BUILT_IN_ROLES)
+    assert str(raised.value) == "roles.coder: verify = true needs merge = true"
+
+
+def test_a_built_in_role_set_to_merge_unverified_is_refused() -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_config({"roles": {"coder": {"verify": False, "merge": True}}}, BUILT_IN_ROLES)
+    assert str(raised.value) == "roles.coder: merge = true needs verify = true"
+
+
+@pytest.mark.parametrize(("name", "merges"), [("coder", True), ("configurator", False)])
+def test_a_built_in_role_whose_verify_and_workspace_are_left_alone_keeps_its_merge(
+    name: str, merges: bool
+) -> None:
+    layered = load_layered({"roles": {name: {"model": "sonnet"}}}, BUILT_IN_ROLES)
+    assert layered.config.roles[name].merge is merges
+    assert layered.role_layers[name]["merge"] == PACKAGE
+
+
+def test_a_built_in_roles_merge_worked_out_afresh_is_the_defaults() -> None:
+    layered = load_layered({"roles": {"coder": {"verify": False}}}, BUILT_IN_ROLES)
+    assert layered.role_layers["coder"]["merge"] == DEFAULT
+    assert layered.role_layers["coder"]["verify"] == Layer("project")
 
 
 def test_a_conversational_custom_role_loads_in_a_lane_of_its_own() -> None:
