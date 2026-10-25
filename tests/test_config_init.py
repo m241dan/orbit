@@ -1,6 +1,7 @@
 """Starting a project's ``.orbit/config.toml`` from the reference config: written where there's
 none, refused over one, and with ``force`` replacing it after keeping it as a numbered backup;
-and bringing one up to date with it, adding what it doesn't mention."""
+bringing one up to date with it, adding what it doesn't mention; and copying the built-in roles'
+instructions beside it, with a commented-out line pointing each role at its copy."""
 
 from datetime import date
 from pathlib import Path
@@ -9,14 +10,21 @@ import pytest
 
 from orbit.agent.domain.config import LIMIT_KEYS
 from orbit.agent.domain.config_errors import ConfigError
-from orbit.agent.domain.config_update import Additions
+from orbit.agent.domain.config_update import Additions, InstructionLines, add_instructions
 from orbit.agent.domain.roles import Role
-from orbit.agent.external.config_file import CONFIG_PATH
+from orbit.agent.external.built_in_roles import (
+    ROLE_DIRECTORY,
+    read_built_in_roles,
+    read_instruction_files,
+)
+from orbit.agent.external.config_file import CONFIG_PATH, read_config
 from orbit.agent.external.config_init import (
     REFERENCE,
     ConfigExists,
     InitResult,
+    RolesResult,
     UpdateResult,
+    add_roles,
     init_config,
     update_config,
 )
@@ -238,3 +246,116 @@ def test_update_raises_when_it_cant_read_the_file(tmp_path: Path) -> None:
     (tmp_path / ".orbit").write_text("")
     with pytest.raises(OSError):
         update(tmp_path)
+
+
+BUILT_IN = read_instruction_files()
+"""The Markdown file each built-in role's instructions are in, by role."""
+
+NAMES = tuple(BUILT_IN)
+
+
+def add(root: Path) -> RolesResult:
+    """The built-in roles' instructions added to the workspace at ``root`` on :data:`TODAY`."""
+    return add_roles(root, today=lambda: TODAY)
+
+
+def copies(root: Path, *but: str) -> dict[str, Path]:
+    """Where each built-in role's instructions are copied in the workspace at ``root``, by role,
+    but those of the roles ``but`` names."""
+    return {name: root / ".orbit" / "roles" / f"{name}.md" for name in NAMES if name not in but}
+
+
+def test_roles_without_a_file_write_the_reference_with_a_line_in_each_roles_table(
+    tmp_path: Path,
+) -> None:
+    result = add(tmp_path)
+    path = tmp_path / CONFIG_PATH
+    assert result == RolesResult(
+        path, copies(tmp_path), {}, InstructionLines(added=NAMES), wrote=True
+    )
+    reference = reference_config()
+    expected = add_instructions(reference, reference, NAMES, TODAY).text
+    assert path.read_text(encoding="utf-8") == expected
+
+
+def test_roles_copy_each_built_in_roles_instructions_as_orbit_ships_them(tmp_path: Path) -> None:
+    add(tmp_path)
+    for name, path in copies(tmp_path).items():
+        built_in = (ROLE_DIRECTORY / BUILT_IN[name]).read_text(encoding="utf-8")
+        assert path.read_text(encoding="utf-8") == built_in
+
+
+def test_roles_keep_a_copy_already_there_and_name_it(tmp_path: Path) -> None:
+    write(tmp_path, "fix_attempts = 3\n")
+    mine = tmp_path / ".orbit" / "roles" / "coder.md"
+    mine.parent.mkdir()
+    mine.write_text("My coder.\n")
+    result = add(tmp_path)
+    assert (result.copied, result.kept) == (copies(tmp_path, "coder"), {"coder": mine})
+    assert mine.read_text() == "My coder.\n"
+
+
+def test_roles_append_each_role_table_a_file_lacks_and_roles_load_unchanged(
+    tmp_path: Path,
+) -> None:
+    path = write(tmp_path, "fix_attempts = 3\n")
+    result = add(tmp_path)
+    assert result == RolesResult(path, copies(tmp_path), {}, InstructionLines(appended=NAMES))
+    text = path.read_text(encoding="utf-8")
+    assert [f"# [roles.{name}]" in text for name in NAMES] == [True] * len(NAMES)
+    assert text.count('\n# instructions = "roles/') == len(NAMES)
+    config = read_config(str(tmp_path), tmp_path / "config")
+    assert config.roles == read_built_in_roles()
+    assert config.fix_attempts == 3
+
+
+def test_roles_keep_every_line_of_the_file_unchanged_and_in_order(tmp_path: Path) -> None:
+    path = write(tmp_path, OWN)
+    result = add(tmp_path)
+    assert result.lines == InstructionLines(
+        added=("coder",), appended=tuple(name for name in NAMES if name != "coder")
+    )
+    lines = iter(path.read_text(encoding="utf-8").splitlines())
+    assert all(line in lines for line in OWN.splitlines())
+
+
+def test_roles_add_no_line_to_a_role_setting_its_instructions(tmp_path: Path) -> None:
+    path = write(tmp_path, '[roles.coder]\ninstructions = "x.md"\n')
+    result = add(tmp_path)
+    assert "coder" not in result.lines.added + result.lines.appended
+    assert path.read_text(encoding="utf-8").startswith('[roles.coder]\ninstructions = "x.md"\n\n')
+    assert '# instructions = "roles/coder.md"' not in path.read_text(encoding="utf-8")
+
+
+def test_roles_again_copy_and_add_nothing_and_leave_the_file_alone(tmp_path: Path) -> None:
+    add(tmp_path)
+    path = tmp_path / CONFIG_PATH
+    text = path.read_text(encoding="utf-8")
+    inode = path.stat().st_ino
+    assert add(tmp_path) == RolesResult(path, {}, copies(tmp_path), InstructionLines())
+    assert path.read_text(encoding="utf-8") == text
+    assert path.stat().st_ino == inode
+
+
+def test_roles_refuse_a_file_that_isnt_toml_naming_it_and_copy_nothing(tmp_path: Path) -> None:
+    path = write(tmp_path, "[roles.coder\n")
+    with pytest.raises(ConfigError) as raised:
+        add(tmp_path)
+    assert str(raised.value).startswith(f"{path}: ")
+    assert path.read_text() == "[roles.coder\n"
+    assert not (tmp_path / ".orbit" / "roles").exists()
+
+
+def test_roles_refuse_a_file_that_isnt_utf8_naming_it(tmp_path: Path) -> None:
+    path = write(tmp_path, "")
+    path.write_bytes(b"\xff\n")
+    with pytest.raises(ConfigError) as raised:
+        add(tmp_path)
+    assert str(raised.value).startswith(f"{path}: ")
+    assert path.read_bytes() == b"\xff\n"
+
+
+def test_roles_raise_when_they_cant_read_the_file(tmp_path: Path) -> None:
+    (tmp_path / ".orbit").write_text("")
+    with pytest.raises(OSError):
+        add(tmp_path)

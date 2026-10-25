@@ -1,6 +1,7 @@
 """What ``orbit init --update`` adds to a project's ``.orbit/config.toml`` from the reference
-config: each setting the reference has that the file doesn't mention, set or commented out,
-without changing, moving or removing any of the file's lines."""
+config: each setting the reference has that the file doesn't mention, set or commented out; and
+what ``orbit init --roles`` adds: a commented-out line pointing each built-in role at its copy of
+its instructions. Neither changes, moves or removes any of the file's lines."""
 
 import re
 from collections.abc import Sequence
@@ -20,6 +21,7 @@ ADDED_NOTE = "# Added by orbit init --update on {date}: settings this file didn'
 
 _HEADER = re.compile(r"\s*(?:#\s*)?(\[\[?)\s*([\w\-.\"' ]+?)\s*\]\]?\s*(?:#.*)?")
 _COMMENTED_KEY = re.compile(r"\s*#\s*([\w-]+)\s*[=:]")
+_COMMENTED_VALUE = re.compile(r"\s*#\s*[\w-]+\s*=")
 _QUOTES = ('"""', "'''")
 
 
@@ -38,6 +40,24 @@ class ConfigUpdate:
 
     text: str
     additions: Additions
+
+
+@dataclass(frozen=True)
+class InstructionLines:
+    """The built-in roles, by name, that ``orbit init --roles`` gave the line pointing at their
+    copies of their instructions: in their tables (``added``), or with their tables appended
+    whole (``appended``)."""
+
+    added: tuple[str, ...] = ()
+    appended: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class InstructionsUpdate:
+    """A file's ``text`` once ``orbit init --roles`` added to it, and the ``lines`` it added."""
+
+    text: str
+    lines: InstructionLines
 
 
 class _Kind(Enum):
@@ -98,6 +118,16 @@ class _File:
         """Whether the file has ``table``, set or under a commented header."""
         return _set_keys(self.data, table) is not None or self.end(table) is not None
 
+    def gives(self, table: str, key: str) -> bool:
+        """Whether the file sets ``key`` in ``table`` or has it commented out under its header
+        with a value, as ``# key = …``, rather than a note such as ``# key: unset``."""
+        if key in (_set_keys(self.data, table) or set()):
+            return True
+        return any(
+            line.kind is _Kind.KEY and line.name == key and _COMMENTED_VALUE.match(line.text)
+            for line in self._lines_of(table)
+        )
+
     def mentions(self, table: str) -> set[str]:
         """The keys of ``table`` the file sets or has commented out under its header."""
         commented = {line.name for line in self._lines_of(table) if line.kind is _Kind.KEY}
@@ -138,8 +168,47 @@ def update_text(text: str, reference: str, today: date) -> ConfigUpdate:
     appended = [region for region in regions if not file.has(region.table)]
     if not insertions and not appended:
         return ConfigUpdate(text, Additions())
-    updated = _appended(_inserted(file.lines, insertions), lines, appended, today)
+    sections = [_section(lines, region) for region in appended]
+    updated = _appended(_inserted(file.lines, insertions), sections, today)
     return ConfigUpdate("\n".join(updated) + "\n", _additions(insertions, appended))
+
+
+def instructions_copy(name: str) -> str:
+    """Where ``orbit init --roles`` copies built-in role ``name``'s instructions, relative to the
+    project file's directory."""
+    return f"roles/{name}.md"
+
+
+def instructions_setting(name: str) -> str:
+    """The setting pointing built-in role ``name`` at its copy of its instructions (see
+    :func:`instructions_copy`), as ``orbit init --roles`` adds it commented out."""
+    return f'instructions = "{instructions_copy(name)}"'
+
+
+def add_instructions(
+    text: str, reference: str, roles: Sequence[str], today: date
+) -> InstructionsUpdate:
+    """``text``, a project file, with :func:`instructions_setting` commented out for each of the
+    built-in ``roles`` whose table neither sets its instructions nor has them commented out with
+    a value, as ``orbit init --roles`` adds it on ``today``.
+
+    A table counts as there if it's set or its header is commented out, as for
+    :func:`update_text`; the line follows its last line. Each role whose table isn't there gets
+    the table appended at the end, as ``reference`` has it with the line after its last, all
+    under one :data:`ADDED_NOTE`. Every line of ``text`` stays as it was, in order.
+
+    Raises :class:`ConfigError` if ``text`` isn't valid TOML.
+    """
+    file = _read(text)
+    lacking = _lacking_instructions(file, roles)
+    insertions = _instruction_insertions(file, lacking)
+    appended = tuple(name for name in lacking if not file.has(_role_table(name)))
+    if not insertions and not appended:
+        return InstructionsUpdate(text, InstructionLines())
+    sections = _role_sections(_scanned(reference), appended)
+    updated = _appended(_inserted(file.lines, list(insertions.values())), sections, today)
+    lines = InstructionLines(tuple(insertions), appended)
+    return InstructionsUpdate("\n".join(updated) + "\n", lines)
 
 
 def _read(text: str) -> _File:
@@ -294,21 +363,20 @@ def _inserted(lines: Sequence[_Line], insertions: Sequence[_Insertion]) -> list[
     return [*text, *blocks.get(len(lines), ())]
 
 
-def _appended(
-    text: list[str], reference: Sequence[_Line], regions: Sequence[_Region], today: date
-) -> list[str]:
-    """``text`` followed by the ``regions`` of the ``reference``, if there are any, under
+def _section(lines: Sequence[_Line], region: _Region) -> list[str]:
+    """The text of ``region`` of ``lines``."""
+    return [line.text for line in lines[region.start : region.end]]
+
+
+def _appended(text: list[str], sections: Sequence[Sequence[str]], today: date) -> list[str]:
+    """``text`` followed by the lines of the ``sections``, if there are any, under
     :data:`ADDED_NOTE` for ``today``, apart from ``text`` and from each other by a blank
     line."""
-    if not regions:
+    if not sections:
         return text
     note = ADDED_NOTE.format(date=today.isoformat())
-    sections = [
-        line.text
-        for region in regions
-        for line in (_Line("", _Kind.BLANK), *reference[region.start : region.end])
-    ]
-    return [*text, *_apart(text), note, *sections]
+    lines = chain.from_iterable(["", *section] for section in sections)
+    return [*text, *_apart(text), note, *lines]
 
 
 def _apart(text: Sequence[str]) -> list[str]:
@@ -323,3 +391,45 @@ def _additions(insertions: Sequence[_Insertion], appended: Sequence[_Region]) ->
         {insertion.header: insertion.keys for insertion in insertions},
         tuple(region.header for region in appended),
     )
+
+
+def _role_table(name: str) -> str:
+    """Role ``name``'s table's dotted name."""
+    return f"roles.{name}"
+
+
+def _lacking_instructions(file: _File, roles: Sequence[str]) -> list[str]:
+    """The ``roles`` whose tables in ``file`` neither set their instructions nor have them
+    commented out with a value."""
+    return [name for name in roles if not file.gives(_role_table(name), "instructions")]
+
+
+def _instruction_insertions(file: _File, roles: Sequence[str]) -> dict[str, _Insertion]:
+    """The line pointing each of the ``roles`` at its copy of its instructions, after the end of
+    its table, by role; none for a role whose table has no region in ``file``."""
+    return {name: found for name in roles if (found := _instruction_insertion(file, name))}
+
+
+def _instruction_insertion(file: _File, name: str) -> _Insertion | None:
+    """The line pointing role ``name`` at its copy of its instructions, after the end of its
+    table; none if the table has no region in ``file``."""
+    table = _role_table(name)
+    at = file.end(table)
+    if at is None:
+        return None
+    return _Insertion(at, f"[{table}]", ("instructions",), (_instructions_line(name),))
+
+
+def _role_sections(reference: Sequence[_Line], roles: Sequence[str]) -> list[list[str]]:
+    """Each of the ``roles``' tables as the ``reference`` has it, which has one for each, with
+    the line pointing it at its copy of its instructions after its last line."""
+    regions = {region.table: region for region in _regions(reference)}
+    return [
+        [*_section(reference, regions[_role_table(name)]), _instructions_line(name)]
+        for name in roles
+    ]
+
+
+def _instructions_line(name: str) -> str:
+    """The line pointing role ``name`` at its copy of its instructions, commented out."""
+    return f"# {instructions_setting(name)}"

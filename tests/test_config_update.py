@@ -1,13 +1,22 @@
 """What ``orbit init --update`` adds to a project file from the reference config: the keys a
 table it has doesn't mention, after the table's last line, and the tables it lacks, at the end
-under a dated line, never changing, moving or removing a line it had."""
+under a dated line, never changing, moving or removing a line it had; and the lines ``orbit init
+--roles`` adds, pointing each built-in role at its copy of its instructions."""
 
 from datetime import date
 
 import pytest
 
 from orbit.agent.domain.config_errors import ConfigError
-from orbit.agent.domain.config_update import Additions, ConfigUpdate, update_text
+from orbit.agent.domain.config_update import (
+    Additions,
+    ConfigUpdate,
+    InstructionLines,
+    InstructionsUpdate,
+    add_instructions,
+    instructions_setting,
+    update_text,
+)
 
 TODAY = date(2026, 10, 25)
 
@@ -203,3 +212,117 @@ def test_a_file_that_isnt_toml_is_refused() -> None:
 def test_updating_again_adds_nothing(text: str) -> None:
     once = updated(text).text
     assert updated(once) == ConfigUpdate(once, Additions())
+
+
+ROLES = ("coder", "reviewer")
+
+ROLES_REFERENCE = """\
+# The roles, by name.
+
+# [roles.coder]
+# Its instructions.
+# instructions: orbit's own coder.md
+# Whether it merges.
+# merge = true
+
+# [roles.reviewer]
+# Its instructions.
+# instructions: orbit's own reviewer.md
+
+# A role of your own. For example:
+# [roles.helper]
+# instructions = "roles/helper.md"
+"""
+
+CODER_LINE = '# instructions = "roles/coder.md"'
+REVIEWER_LINE = '# instructions = "roles/reviewer.md"'
+CODER_TABLE = (
+    "# [roles.coder]\n# Its instructions.\n# instructions: orbit's own coder.md\n"
+    "# Whether it merges.\n# merge = true\n"
+)
+REVIEWER_TABLE = (
+    "# [roles.reviewer]\n# Its instructions.\n# instructions: orbit's own reviewer.md\n"
+)
+SET_TABLES = "[roles.coder]\nmodel = 'opus'\n\n[roles.reviewer]\nmerge = false\n"
+
+
+def with_instructions(text: str) -> InstructionsUpdate:
+    """``text`` with the lines ``orbit init --roles`` adds for :data:`ROLES` on :data:`TODAY`."""
+    return add_instructions(text, ROLES_REFERENCE, ROLES, TODAY)
+
+
+def test_the_setting_names_the_roles_copy_under_the_roles_directory() -> None:
+    assert instructions_setting("super-reviewer") == 'instructions = "roles/super-reviewer.md"'
+
+
+def test_a_set_table_without_instructions_gets_the_line_after_its_last_line() -> None:
+    expected = (
+        f"[roles.coder]\nmodel = 'opus'\n{CODER_LINE}\n\n"
+        f"[roles.reviewer]\nmerge = false\n{REVIEWER_LINE}\n"
+    )
+    assert with_instructions(SET_TABLES) == InstructionsUpdate(
+        expected, InstructionLines(added=ROLES)
+    )
+
+
+def test_the_references_note_of_orbits_own_instructions_isnt_an_instructions_line() -> None:
+    expected = ROLES_REFERENCE.replace(
+        "# merge = true\n", f"# merge = true\n{CODER_LINE}\n"
+    ).replace("reviewer.md\n", f"reviewer.md\n{REVIEWER_LINE}\n")
+    assert with_instructions(ROLES_REFERENCE) == InstructionsUpdate(
+        expected, InstructionLines(added=ROLES)
+    )
+
+
+def test_a_table_setting_its_instructions_gets_no_line() -> None:
+    text = "[roles.coder]\ninstructions = 'x.md'\n\n[roles.reviewer]\nmerge = false\n"
+    assert with_instructions(text) == InstructionsUpdate(
+        f"{text}{REVIEWER_LINE}\n", InstructionLines(added=("reviewer",))
+    )
+
+
+def test_a_table_with_its_instructions_commented_out_gets_no_line() -> None:
+    text = "# [roles.coder]\n#instructions='x.md'\n\n[roles.reviewer]\nmerge = false\n"
+    assert with_instructions(text).lines == InstructionLines(added=("reviewer",))
+
+
+def test_tables_a_file_lacks_are_appended_with_the_line_under_one_dated_line() -> None:
+    expected = (
+        f"{LIMITS}\n{ADDED}\n\n{CODER_TABLE}{CODER_LINE}\n\n{REVIEWER_TABLE}{REVIEWER_LINE}\n"
+    )
+    assert with_instructions(LIMITS) == InstructionsUpdate(
+        expected, InstructionLines(appended=ROLES)
+    )
+
+
+def test_a_line_and_a_table_can_be_added_at_once() -> None:
+    text = "[roles.reviewer]\nmerge = false\n# The setup.\n[setup]\ncommand = ['make']\n"
+    expected = (
+        f"[roles.reviewer]\nmerge = false\n{REVIEWER_LINE}\n\n# The setup.\n"
+        f"[setup]\ncommand = ['make']\n\n{ADDED}\n\n{CODER_TABLE}{CODER_LINE}\n"
+    )
+    assert with_instructions(text) == InstructionsUpdate(
+        expected, InstructionLines(added=("reviewer",), appended=("coder",))
+    )
+
+
+def test_a_role_set_inline_gets_nothing_as_its_table_has_no_lines_of_its_own() -> None:
+    text = "[roles]\ncoder = { model = 'x' }\n\n[roles.reviewer]\ninstructions = 'r.md'\n"
+    assert with_instructions(text) == InstructionsUpdate(text, InstructionLines())
+
+
+def test_only_the_roles_named_get_lines() -> None:
+    update = add_instructions(SET_TABLES, ROLES_REFERENCE, ("reviewer",), TODAY)
+    assert update.lines == InstructionLines(added=("reviewer",))
+    assert CODER_LINE not in update.text
+
+
+def test_adding_instructions_to_a_file_that_isnt_toml_is_refused() -> None:
+    with pytest.raises(ConfigError):
+        with_instructions("[roles.coder\n")
+
+
+@pytest.mark.parametrize("text", ["", LIMITS, SET_TABLES, ROLES_REFERENCE])
+def test_adding_instructions_again_adds_nothing(text: str) -> None:
+    once = with_instructions(text).text
+    assert with_instructions(once) == InstructionsUpdate(once, InstructionLines())

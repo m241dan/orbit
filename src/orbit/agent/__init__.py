@@ -47,6 +47,7 @@ from orbit.agent.domain.config_report import (
     config_report,
     subtree,
 )
+from orbit.agent.domain.config_update import InstructionLines, instructions_setting
 from orbit.agent.domain.layers import Layer
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.purging import Purged, PurgeRefused
@@ -80,7 +81,9 @@ from orbit.agent.external.config_file import read_config, read_config_sources, w
 from orbit.agent.external.config_init import (
     ConfigExists,
     InitResult,
+    RolesResult,
     UpdateResult,
+    add_roles,
     init_config,
     update_config,
 )
@@ -159,6 +162,7 @@ __all__ = [
     "HostMaker",
     "ImportBlocked",
     "InitResult",
+    "InstructionLines",
     "Instructions",
     "KeyType",
     "Layer",
@@ -181,6 +185,7 @@ __all__ = [
     "RemoteSettings",
     "RepositoryUnreadable",
     "Role",
+    "RolesResult",
     "RunFile",
     "RunningServer",
     "ServeLock",
@@ -215,6 +220,7 @@ __all__ = [
     "WorkspaceSource",
     "WorkspaceStore",
     "WorkspaceUnavailable",
+    "add_roles",
     "bundle_directory",
     "bundle_url",
     "certificate_lines",
@@ -228,6 +234,7 @@ __all__ = [
     "has_git_identity",
     "in_git_work_tree",
     "init_config",
+    "instructions_setting",
     "issue_client",
     "issue_server",
     "key_pem",

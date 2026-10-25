@@ -60,6 +60,7 @@ uv run orbit status --remote work --json       # the same of another, as one JSO
 uv run orbit init                              # start .orbit/config.toml from the reference config
 uv run orbit init --update                     # add the settings it doesn't mention, commented out
 uv run orbit init --force                      # replace it, keeping the old one as a backup
+uv run orbit init --roles                      # copy the built-in roles' instructions to edit
 uv run orbit config show                       # every setting in effect here, and where it's from
 uv run orbit config show roles.reviewer --full # one role's, with its instructions whole
 uv run orbit token rotate                      # replace the token frontends show orbit serve
@@ -1031,7 +1032,8 @@ line ending in `.md` is the path of a Markdown file under `.orbit/` whose text t
 (`instructions = "roles/coder.md"` reads `.orbit/roles/coder.md`), and anything else is the text
 itself. Only a file a role's `instructions` names is read, so a `.orbit/roles/reviewer.md` that
 none names changes nothing; one that's missing or can't be read is refused, naming the file and
-the role.
+the role. `orbit init --roles` copies the built-in instructions there for you to start from (see
+[Starting from the reference config](#starting-from-the-reference-config)).
 
 A role also says which lane runs it, where it works, whether you talk to it, whether its work
 merges, whether it's enabled and how hard its agents think:
@@ -1244,7 +1246,20 @@ stops with status 2.
 `--force` replaces the file with the reference after keeping it beside it as the next free
 `config.toml.bak.N`, counting from `config.toml.bak.1`, so each `--force` keeps one more backup
 and none is overwritten; it prints where the old file was kept and where the new one is. It
-can't go with `--update`.
+can't go with `--update` or `--roles`.
+
+`--roles` copies each built-in role's instructions to `.orbit/roles/<name>.md` for you to edit,
+leaving a file already there as it is and saying so (`Kept your .orbit/roles/coder.md.`), and
+adds to the file, commented out, the line that switches each role to its copy:
+`# instructions = "roles/<name>.md"`, after the last line of the role's table (set, or with its
+header commented out) unless the table already sets `instructions` or has it commented out with
+a value (the reference's `# instructions: orbit's own coder.md` is a note, so it doesn't count).
+A role whose table the file lacks gets it appended at the end, as the reference has it with that
+line after its last, under the same dated line `--update` uses. Like `--update`, it never
+changes, moves or removes a line, and it works on an existing file by itself; without a file it
+writes the reference first. It prints the files it copied or kept and the lines it added. Each
+role keeps orbit's own instructions until you uncomment its line. With `--update` too, the file
+is brought up to date first, so the role tables it appends get their lines.
 
 ### Seeing the configuration in effect
 
@@ -2449,7 +2464,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     it to `reference/config.toml`, the copy shipped with orbit, which a test keeps in step;
     `config_init` writes that copy to a project's `.orbit/config.toml` for `orbit init`
     (`init_config`), keeping a file it replaces as the next free numbered backup, and for
-    `orbit init --update` adds to the file what it doesn't mention (`update_config`); `checks`
+    `orbit init --update` adds to the file what it doesn't mention (`update_config`), and for
+    `orbit init --roles` copies the built-in roles' instructions beside it and adds the
+    commented-out lines that switch the roles to their copies (`add_roles`); `checks`
     runs a verification step as a process (`run_step`); `processes` runs a program to completion
     without leaving it behind; `workspace`
     fingerprints the git working tree; `usage_api` fetches the Claude subscription's usage
@@ -2554,7 +2571,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `agents`: agent ids and tokens), `roles` (built-in roles, loaded from their `roles.toml` and
     given their instructions, which of a role's fields go together, and the tasks orbit queues in
     them), `config` (`OrbitConfig`: the
-    limits, roles, verification steps and setup a project file sets over the built-in defaults), `layers` (the layers a setting comes from, the user config's role fields and personal roles, and each role resolved across them field by field), `config_report` (what `orbit config show` reports: each setting in effect by its dotted key with the layer it came from, and a key's settings), `config_update` (what `orbit init --update` adds to a project file from the reference config: the keys a table it has doesn't mention, after the table's last line, and the tables it lacks, at the end, never changing a line of it) and `config_errors` (`ConfigError`,
+    limits, roles, verification steps and setup a project file sets over the built-in defaults), `layers` (the layers a setting comes from, the user config's role fields and personal roles, and each role resolved across them field by field), `config_report` (what `orbit config show` reports: each setting in effect by its dotted key with the layer it came from, and a key's settings), `config_update` (what `orbit init --update` adds to a project file from the reference config: the keys a table it has doesn't mention, after the table's last line, and the tables it lacks, at the end, never changing a line of it; and the lines `orbit init --roles` adds, pointing each built-in role at its copy of its instructions) and `config_errors` (`ConfigError`,
     and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]` with its `TlsSettings`, which files each TLS mode needs, where now falls in a certificate's validity, and which hosts are loopback), `certificate_list` (what `orbit certs list` shows of each certificate: its expiry, days left, fingerprint and marks), `client_bundle` (what `orbit certs client --bundle` puts in a client's bundle: the CA, its certificate and key, and the `[remotes.<name>]` lines naming them where it's unpacked), `remotes` (`RemoteSettings`, a `[remotes.<name>]` table, and which credentials go together), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
     setup step that makes a fresh worktree ready, and the checks a configurator proposes), the
     `Catalog` (in `catalog`: the workspace and its sessions, the agents' roles, the triggers and

@@ -1,6 +1,7 @@
 """``orbit init``: the reference config written to a workspace's ``.orbit/config.toml``, an
-existing one refused, ``--update`` adding to it what it doesn't mention, and ``--force``
-replacing it after keeping numbered backups."""
+existing one refused, ``--update`` adding to it what it doesn't mention, ``--force`` replacing it
+after keeping numbered backups, and ``--roles`` copying the built-in roles' instructions beside
+it with a commented-out line pointing each role at its copy."""
 
 import re
 from pathlib import Path
@@ -10,6 +11,7 @@ from typer.testing import CliRunner, Result
 
 from orbit.agent.domain.config import LIMIT_KEYS
 from orbit.agent.domain.roles import Role
+from orbit.agent.external.built_in_roles import read_instruction_files
 from orbit.agent.external.reference_config import reference_config
 from orbit.cli import app
 from tests.git_repo import init_repo
@@ -19,6 +21,10 @@ runner = CliRunner()
 REFERENCE = reference_config()
 
 WRITTEN = "Every setting is commented out at its default; uncomment what you change."
+
+NAMES = tuple(read_instruction_files())
+
+SWITCHES = "Uncommenting a role's instructions line switches that role to its copy."
 
 
 @pytest.fixture
@@ -177,3 +183,128 @@ def test_update_of_a_file_that_cant_be_read_exits_with_status_2(project: Path) -
     assert result.exit_code == 2
     assert result.stderr.startswith("Couldn't update the config from orbit's reference config: ")
     assert result.stdout == ""
+
+
+def copied(*names: str) -> list[str]:
+    """What ``--roles`` says of copying the instructions of the roles ``names`` names."""
+    return [f"Copied the {name}'s instructions to .orbit/roles/{name}.md." for name in names]
+
+
+def written_config(project: Path, text: str) -> Path:
+    """The project file of the workspace at ``project``, holding ``text``."""
+    path = project / ".orbit" / "config.toml"
+    path.parent.mkdir()
+    path.write_text(text)
+    return path
+
+
+def test_roles_copy_the_instructions_and_append_each_role_table_a_file_lacks(
+    project: Path,
+) -> None:
+    path = written_config(project, "fix_attempts = 3\n")
+    result = init(project, "--roles")
+    assert result.exit_code == 0, result.output
+    assert result.stdout.splitlines() == [
+        *copied(*NAMES),
+        f"Added to {path}, commented out:",
+        *(f'  at the end: [roles.{name}], with instructions = "roles/{name}.md"' for name in NAMES),
+        SWITCHES,
+    ]
+    assert sorted(p.name for p in (project / ".orbit" / "roles").iterdir()) == sorted(
+        f"{name}.md" for name in NAMES
+    )
+    assert path.read_text(encoding="utf-8").startswith("fix_attempts = 3\n\n# Added by orbit")
+
+
+def test_roles_keep_a_copy_already_there_and_say_so(project: Path) -> None:
+    path = written_config(project, '[roles.coder]\nmodel = "opus"\n')
+    mine = project / ".orbit" / "roles" / "coder.md"
+    mine.parent.mkdir()
+    mine.write_text("My coder.\n")
+    result = init(project, "--roles")
+    assert result.exit_code == 0, result.output
+    others = [name for name in NAMES if name != "coder"]
+    assert result.stdout.splitlines()[: len(NAMES) + 2] == [
+        *copied(*others),
+        "Kept your .orbit/roles/coder.md.",
+        f"Added to {path}, commented out:",
+        '  in [roles.coder]: instructions = "roles/coder.md"',
+    ]
+    assert mine.read_text() == "My coder.\n"
+
+
+def test_roles_without_a_file_write_the_reference_first(project: Path) -> None:
+    result = init(project, "--roles")
+    assert result.exit_code == 0, result.output
+    path = project / ".orbit" / "config.toml"
+    assert result.stdout.splitlines() == [
+        f"Wrote orbit's reference config to {path}.",
+        WRITTEN,
+        *copied(*NAMES),
+        f"Added to {path}, commented out:",
+        *(f'  in [roles.{name}]: instructions = "roles/{name}.md"' for name in NAMES),
+        SWITCHES,
+    ]
+
+
+def test_roles_again_keep_every_copy_and_add_nothing(project: Path) -> None:
+    init(project, "--roles")
+    path = project / ".orbit" / "config.toml"
+    text = path.read_text(encoding="utf-8")
+    result = init(project, "--roles")
+    assert result.exit_code == 0, result.output
+    assert result.stdout.splitlines() == [
+        *(f"Kept your .orbit/roles/{name}.md." for name in NAMES),
+        "Each role's table already has an instructions line.",
+    ]
+    assert path.read_text(encoding="utf-8") == text
+
+
+def test_roles_with_update_do_both(project: Path) -> None:
+    path = written_config(project, "fix_attempts = 3\n")
+    result = init(project, "--update", "--roles")
+    assert result.exit_code == 0, result.output
+    said = result.stdout.splitlines()
+    assert said[0] == f"Added to {path}, commented out:"
+    assert said[-len(NAMES) - 1 :] == [
+        *(f'  in [roles.{name}]: instructions = "roles/{name}.md"' for name in NAMES),
+        SWITCHES,
+    ]
+    text = path.read_text(encoding="utf-8")
+    assert text.count("# Added by orbit init --update on ") == 1
+    assert "# [setup]" in text
+
+
+def test_roles_with_force_are_refused(project: Path) -> None:
+    result = init(project, "--roles", "--force")
+    assert result.exit_code == 2
+    assert result.stderr.splitlines() == [
+        "--roles keeps the file and --force replaces it, so they can't go together."
+    ]
+    assert not (project / ".orbit").exists()
+
+
+def test_roles_with_a_file_that_isnt_toml_exit_with_status_2(project: Path) -> None:
+    path = written_config(project, "[roles.coder\n")
+    result = init(project, "--roles")
+    assert result.exit_code == 2
+    assert result.stderr.startswith(f"Invalid orbit configuration: {path}: ")
+    assert not (project / ".orbit" / "roles").exists()
+
+
+def test_roles_that_cant_be_copied_exit_with_status_2(project: Path) -> None:
+    written_config(project, "fix_attempts = 3\n")
+    (project / ".orbit" / "roles").write_text("")
+    result = init(project, "--roles")
+    assert result.exit_code == 2
+    assert result.stderr.startswith("Couldn't copy the built-in roles' instructions: ")
+    assert result.stdout == ""
+
+
+def test_roles_after_an_update_say_what_the_update_did(project: Path) -> None:
+    written_config(project, "fix_attempts = 3\n")
+    (project / ".orbit" / "roles").write_text("")
+    result = init(project, "--update", "--roles")
+    assert result.exit_code == 2
+    assert result.stdout.startswith(f"Added to {project / '.orbit' / 'config.toml'}")
+    assert result.stderr.startswith("Couldn't copy the built-in roles' instructions: ")

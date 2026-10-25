@@ -1,6 +1,7 @@
-"""orbit init: a workspace's .orbit/config.toml started from orbit's reference config, or brought
-up to date with it."""
+"""orbit init: a workspace's .orbit/config.toml started from orbit's reference config, brought
+up to date with it, or given copies of the built-in roles' instructions to edit."""
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 
@@ -11,8 +12,12 @@ from orbit.agent import (
     ConfigError,
     ConfigExists,
     InitResult,
+    InstructionLines,
+    RolesResult,
     UpdateResult,
+    add_roles,
     init_config,
+    instructions_setting,
     update_config,
 )
 from orbit.cli.backend import _workspace
@@ -24,7 +29,7 @@ CONFIG_EXISTS = (
     " --force to replace it (the old file is kept as a backup)."
 )
 
-UPDATE_WITH_FORCE = "--update keeps the file and --force replaces it, so they can't go together."
+WITH_FORCE = "{option} keeps the file and --force replaces it, so they can't go together."
 
 WRITTEN = "Every setting is commented out at its default; uncomment what you change."
 
@@ -33,6 +38,12 @@ NOTHING_TO_ADD = "Nothing to add."
 WRITE_FAILED = "Couldn't write orbit's reference config: "
 
 UPDATE_FAILED = "Couldn't update the config from orbit's reference config: "
+
+ROLES_FAILED = "Couldn't copy the built-in roles' instructions: "
+
+SWITCHES = "Uncommenting a role's instructions line switches that role to its copy."
+
+NO_LINES = "Each role's table already has an instructions line."
 
 InitUpdateOption = Annotated[
     bool,
@@ -53,10 +64,21 @@ InitForceOption = Annotated[
 ]
 
 
+InitRolesOption = Annotated[
+    bool,
+    typer.Option(
+        "--roles",
+        help="Copy each built-in role's instructions to .orbit/roles/<name>.md to edit, and add"
+        " a commented-out line to its table that switches it to its copy once uncommented.",
+    ),
+]
+
+
 def init(
     workspace: WorkspaceOption = Path("."),
     update: InitUpdateOption = False,
     force: InitForceOption = False,
+    roles: InitRolesOption = False,
 ) -> None:
     """Write orbit's reference config to the workspace's .orbit/config.toml: every setting a
     project can change, commented out at its default under what it does.
@@ -65,18 +87,40 @@ def init(
     it doesn't mention, commented out, each key in its table and each missing table at the end,
     or --force replaces it, after keeping it as config.toml.bak.1, or .bak.2 and so on if that's
     taken.
+
+    --roles, by itself or after --update, copies each built-in role's instructions to
+    .orbit/roles/<name>.md, keeping a file already there, and adds to each role's table without
+    an instructions line a commented-out one naming the copy, writing the reference first if
+    there's no file; the role keeps orbit's own instructions until the line is uncommented.
     """
-    if update and force:
-        typer.echo(UPDATE_WITH_FORCE, err=True)
-        raise typer.Exit(2)
+    _refuse_with_force(force, update=update, roles=roles)
     root = _workspace(workspace)
-    failed = UPDATE_FAILED if update else WRITE_FAILED
     with (
         _exit_on(ConfigExists, message=lambda exc: CONFIG_EXISTS.format(path=exc.path)),
         _exit_on(ConfigError, message=lambda exc: f"{INVALID_CONFIG}{exc}"),
-        _exit_on(OSError, message=lambda exc: f"{failed}{exc}"),
     ):
-        said = _updated(update_config(root)) if update else _written(init_config(root, force))
+        if update:
+            _say(UPDATE_FAILED, lambda: _updated(update_config(root)))
+        if roles:
+            _say(ROLES_FAILED, lambda: _copied(add_roles(root), root))
+        if not update and not roles:
+            _say(WRITE_FAILED, lambda: _written(init_config(root, force)))
+
+
+def _refuse_with_force(force: bool, update: bool, roles: bool) -> None:
+    """Exit with status 2 if ``force`` is given with ``update`` or ``roles``, which keep the
+    file it replaces."""
+    for given, option in ((update, "--update"), (roles, "--roles")):
+        if force and given:
+            typer.echo(WITH_FORCE.format(option=option), err=True)
+            raise typer.Exit(2)
+
+
+def _say(failed: str, step: Callable[[], str]) -> None:
+    """Say what ``step`` says once done, exiting with status 2 after ``failed`` and the error if
+    it raises ``OSError``."""
+    with _exit_on(OSError, message=lambda exc: f"{failed}{exc}"):
+        said = step()
     typer.echo(said)
 
 
@@ -107,3 +151,30 @@ def _added(keys: dict[str, tuple[str, ...]], tables: tuple[str, ...]) -> list[st
         f"in {header or 'the top level'}: {', '.join(added)}" for header, added in keys.items()
     ]
     return [*lines, f"at the end: {', '.join(tables)}"] if tables else lines
+
+
+def _copied(result: RolesResult, root: Path) -> str:
+    """What's said once ``result`` is done in the workspace at ``root``: that the reference was
+    written, if it was; each role's instructions copied or file kept; and the lines added to
+    the file, and what uncommenting one does, or that there were none to add."""
+    said = [_written(InitResult(result.path))] if result.wrote else []
+    said += [
+        f"Copied the {name}'s instructions to {path.relative_to(root)}."
+        for name, path in result.copied.items()
+    ]
+    said += [f"Kept your {path.relative_to(root)}." for path in result.kept.values()]
+    return "\n".join([*said, *_lines_added(result.path, result.lines)])
+
+
+def _lines_added(path: Path, lines: InstructionLines) -> list[str]:
+    """A line per role whose table at ``path`` was given ``lines``' instructions line, then one
+    per role whose table was appended with it, under where and over what uncommenting one does;
+    that there were none, if there weren't."""
+    if not lines.added and not lines.appended:
+        return [NO_LINES]
+    added = [f"  in [roles.{name}]: {instructions_setting(name)}" for name in lines.added]
+    appended = [
+        f"  at the end: [roles.{name}], with {instructions_setting(name)}"
+        for name in lines.appended
+    ]
+    return [f"Added to {path}, commented out:", *added, *appended, SWITCHES]
