@@ -2,9 +2,9 @@
 
 After each task that completes, the verification steps run until one fails; a failure adds a
 task to fix it right after the failed one. Work that passes lands, and the review lane, if any,
-hears how each task ended. A run stops at a task its agent couldn't do for Claude's usage limit
-or for Claude's API not answering, at a fix that ends in error, which must run before anything
-puts its work aside, and once the session halts.
+hears how each task ended. A run stops at a task its agent couldn't do for the usage limit or
+for the API not answering, as the launcher tells its error, at a fix that ends in error, which
+must run before anything puts its work aside, and once the session halts.
 """
 
 import asyncio
@@ -35,13 +35,8 @@ from orbit.agent.domain.endings import (
     gave_up,
 )
 from orbit.agent.domain.roles import Workspace
-from orbit.agent.domain.usage_limits import (
-    FIX_ERROR_NOTE,
-    Outage,
-    api_unavailable,
-    limit_hit,
-    outage_after,
-)
+from orbit.agent.domain.runtimes import FailureKind
+from orbit.agent.domain.usage_limits import FIX_ERROR_NOTE, Outage, outage_after
 from orbit.agent.domain.verification import FallbackFixes, failure_reason, fix_prompt
 from orbit.protocol import (
     CHECKS_EXHAUSTED,
@@ -323,11 +318,12 @@ class WorkLane:
 
     async def _stop_at(self, error: Outcome, fixing: bool) -> RunEnd | None:
         """Why the run stops at a task that ended in ``error``: its agent hit the usage limit or
-        found Claude's API not answering, noted as an :attr:`outage`, or it was ``fixing``
-        another, said so; none if the run goes on."""
-        if limit_hit(error.detail):
+        found the API not answering, as the launcher tells, the latter noted as an
+        :attr:`outage`, or it was ``fixing`` another, said so; none if the run goes on."""
+        failure = self._failure(error)
+        if failure == "usage_limit":
             return "limited"
-        if api_unavailable(error.detail):
+        if failure == "api_unavailable":
             self._outage = outage_after(self._outage, error.detail)
             return "api_unavailable"
         if not fixing:
@@ -434,10 +430,18 @@ class WorkLane:
 
     def _heard_from_claude(self, outcome: Outcome) -> None:
         """Forget the :attr:`outage`, once an agent finished its run in ``outcome`` without
-        Claude's API not answering, however its task ended. The user's stop doesn't reach this,
-        as it cancels the agent's run, so it leaves the outage as it is."""
-        if outcome.status != "error" or not api_unavailable(outcome.detail):
+        the API not answering, as the launcher tells, however its task ended. The user's stop
+        doesn't reach this, as it cancels the agent's run, so it leaves the outage as it is."""
+        if self._failure(outcome) != "api_unavailable":
             self._outage = None
+
+    def _failure(self, outcome: Outcome) -> FailureKind | None:
+        """The kind of failure the launcher tells in the error a task ended in, ``outcome``;
+        none if it ended otherwise, or the launcher tells none."""
+        if outcome.status != "error":
+            return None
+        failure = self._desk.agents.launcher.failure(outcome.detail)
+        return None if failure is None else failure.kind
 
     async def _settle(self, task_id: str, outcome: Outcome, root: str) -> Outcome:
         """What task ``task_id``'s run ending in ``outcome`` at ``root`` comes to: the checks

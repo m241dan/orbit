@@ -3,10 +3,12 @@ starts again."""
 
 from datetime import UTC, datetime, timedelta
 
+from orbit.agent.domain.runtimes import Failure
 from orbit.agent.domain.usage_limits import (
     LimitWaits,
     Outage,
     api_unavailable,
+    claude_failure,
     limit_hit,
     outage_after,
     outage_delay,
@@ -103,6 +105,16 @@ def test_client_errors_limits_and_other_failures_are_not_outages() -> None:
     assert not api_unavailable("You've hit your session limit")
     assert not api_unavailable("agent-1 exited without calling get_task.")
     assert not api_unavailable("")
+
+
+def test_claude_codes_limits_and_outages_are_failures_of_their_kind_with_no_reset_time() -> None:
+    assert claude_failure("Claude AI usage limit reached|1792540800") == Failure("usage_limit")
+    assert claude_failure("API Error (Connection error.)") == Failure("api_unavailable")
+
+
+def test_claude_codes_other_errors_are_no_failure() -> None:
+    assert claude_failure("API Error: 403 Forbidden") is None
+    assert claude_failure("agent-1 exited without calling get_task.") is None
 
 
 def test_the_backoff_grows_to_half_an_hour_and_stays_there() -> None:

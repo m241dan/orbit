@@ -16,17 +16,20 @@ import contextlib
 import json
 import os
 from collections.abc import AsyncIterator, Mapping, Sequence
-from typing import Any
+from typing import Any, get_args
 from urllib.parse import quote
 
 from orbit.agent.application.ports import AgentLaunch, ResumeFailed
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.roles import tool_rules
+from orbit.agent.domain.runtimes import Capabilities, Failure
+from orbit.agent.domain.usage_limits import claude_failure
 from orbit.agent.external.processes import spawned, start_failure
 from orbit.protocol import (
     AGENT_FAILED,
     PLAN_TASK,
     AssistantMessage,
+    Effort,
     ErrorOccurred,
     Event,
     ToolAccess,
@@ -45,6 +48,14 @@ TOOL_ACCESS_ARGS: dict[ToolAccess, tuple[str, ...]] = {
     "restricted": (),
     "full": ("--permission-mode", "bypassPermissions"),
 }
+# The CLI resumes sessions, reports usage, caps turns, and takes every tool access and effort.
+CAPABILITIES = Capabilities(
+    resume=True,
+    usage=True,
+    max_turns=True,
+    tool_access=frozenset(get_args(ToolAccess)),
+    effort=frozenset(get_args(Effort)),
+)
 # What a ``result`` message reports about the turn's cost: token counts under ``usage``, and
 # totals named differently from Usage's fields.
 TOKEN_KINDS = (
@@ -285,6 +296,8 @@ class ClaudeCliRunner:
     """Runs agents as Claude CLI sessions connected to orbit, run as ``command``, which send
     their telemetry to the OTLP collector at ``endpoint`` over ``protocol``, if given."""
 
+    capabilities = CAPABILITIES
+
     def __init__(
         self,
         command: Sequence[str] = ("claude",),
@@ -328,13 +341,17 @@ class ClaudeCliRunner:
         """The id of the Claude session agent ``agent_id``'s turns resume."""
         return self._conversations.get(agent_id)
 
-    def set_conversation(self, agent_id: str, conversation_id: str | None) -> None:
-        """Have agent ``agent_id``'s next turn resume the Claude session ``conversation_id``, or
-        start a new one when it's ``None``."""
-        if conversation_id is None:
+    def set_conversation(self, agent_id: str, handle: str | None) -> None:
+        """Have agent ``agent_id``'s next turn resume the Claude session ``handle``, or start a
+        new one when it's ``None``."""
+        if handle is None:
             self._conversations.pop(agent_id, None)
         else:
-            self._conversations[agent_id] = conversation_id
+            self._conversations[agent_id] = handle
+
+    def failure(self, message: str) -> Failure | None:
+        """The failure Claude Code's error ``message`` tells, as :func:`claude_failure` says."""
+        return claude_failure(message)
 
     def _turn(self, launch: AgentLaunch, resume: str | None) -> _Turn:
         """A turn of ``launch``'s agent, resuming the Claude session ``resume`` if given."""

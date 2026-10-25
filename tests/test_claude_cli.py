@@ -3,7 +3,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 
@@ -11,6 +11,7 @@ from orbit.agent import ClaudeCliRunner
 from orbit.agent.application.ports import AgentLaunch, ResumeFailed
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.roles import ORBIT_TOOLS
+from orbit.agent.domain.runtimes import Failure
 from orbit.agent.domain.usage_limits import limit_hit
 from orbit.agent.external.claude_cli import (
     AGENT_RULES,
@@ -905,3 +906,25 @@ async def test_without_a_collector_an_agent_sends_no_telemetry_and_keeps_its_env
     env = calls(scenario)[0]["env"]
     assert not set(TELEMETRY_VARIABLES) & set(env)
     assert env["OTEL_EXPORTER_OTLP_HEADERS"] == "x-key=yours"
+
+
+def test_the_cli_can_do_everything_orbit_asks_of_a_runtime_at_every_level() -> None:
+    capabilities = ClaudeCliRunner().capabilities
+
+    assert (capabilities.resume, capabilities.usage, capabilities.max_turns) == (True, True, True)
+    assert capabilities.tool_access == frozenset(get_args(ToolAccess))
+    assert capabilities.effort == frozenset(get_args(Effort))
+
+
+def test_the_cli_tells_its_usage_limits_and_api_outages_with_no_reset_time() -> None:
+    runner = ClaudeCliRunner()
+    overloaded = 'API Error: 529 {"type":"error","error":{"type":"overloaded_error"}}'
+
+    assert runner.failure("You've hit your session limit") == Failure("usage_limit")
+    assert runner.failure(overloaded) == Failure("api_unavailable")
+
+
+def test_the_cli_tells_no_failure_in_any_other_error() -> None:
+    bad_request = 'API Error: 400 {"error":{"type":"invalid_request_error"}}'
+
+    assert ClaudeCliRunner().failure(bad_request) is None

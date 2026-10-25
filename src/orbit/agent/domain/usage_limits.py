@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from orbit.agent.domain.endings import first_line
+from orbit.agent.domain.runtimes import Failure
 from orbit.protocol import PLANNER, PauseReason, UsageChanged
 
 _LIMIT_HIT = re.compile(r"\bhit your\b.*\blimit\b|\busage limit reached\b", re.IGNORECASE)
@@ -116,6 +117,17 @@ def api_unavailable(message: str) -> bool:
     says: a server error (``API Error: 500``, ``502``, ``503``, ``504`` or ``529``), an
     ``overloaded_error``, ``API Error (Connection error.)`` or ``Request timed out``."""
     return _API_UNAVAILABLE.search(message) is not None
+
+
+def claude_failure(message: str) -> Failure | None:
+    """The failure an agent's error ``message`` tells, as Claude Code words it: a
+    ``usage_limit`` when :func:`limit_hit` says so, an ``api_unavailable`` when
+    :func:`api_unavailable` does, with no reset time; none for any other error."""
+    if limit_hit(message):
+        return Failure("usage_limit")
+    if api_unavailable(message):
+        return Failure("api_unavailable")
+    return None
 
 
 def outage_after(last: Outage | None, error: str) -> Outage:

@@ -11,6 +11,7 @@ from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.application.ports import StoreFailed, UsageSource
 from orbit.agent.application.storage_halt import Failure
 from orbit.agent.domain.agent_task import Limits
+from orbit.agent.domain.runtimes import Failure as RuntimeFailure
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.agent.domain.usage import UsageReport
 from orbit.agent.domain.usage_limits import (
@@ -116,6 +117,19 @@ async def test_a_usage_limit_stops_the_run_and_says_when_it_starts_again() -> No
     assert board(events)[0].reason_detail == LIMIT
     assert notes(events)[-1] == paused_note(START + timedelta(minutes=15))
     await session.close()
+
+
+async def test_a_usage_limit_the_launcher_tells_in_its_own_words_stops_the_run_alike() -> None:
+    waits = Waits()
+    session, _, launcher = session_for(errs, claims_done, pause=waits.pause)
+    launcher.turn_errors.append("Quota spent")
+    launcher.failures["Quota spent"] = RuntimeFailure("usage_limit")
+    events = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
+    await session.close()
+
+    assert [launch.agent.task_id for launch in launcher.launches] == ["1"]
+    assert statuses(events) == ["error", "pending"]
+    assert notes(events)[-1] == paused_note(START + timedelta(minutes=15))
 
 
 async def test_the_run_starts_again_by_itself_at_the_reset_the_usage_shows() -> None:

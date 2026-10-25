@@ -7,6 +7,7 @@ from datetime import timedelta
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.domain.agent_task import Limits
+from orbit.agent.domain.runtimes import Failure
 from orbit.agent.domain.usage_limits import (
     FIX_ERROR_NOTE,
     OUTAGE_RESUMING_NOTE,
@@ -158,6 +159,21 @@ async def test_outages_in_a_row_wait_longer_until_an_agent_finishes_its_run() ->
     assert notes(second)[-1] == outage_paused_note(START + timedelta(minutes=7), OVERLOADED)
     assert notes(third)[-1] == outage_paused_note(START + timedelta(minutes=9), OVERLOADED)
     assert task_ids(launcher) == ["1", "1", "1", "2"]
+
+
+async def test_outages_the_launcher_tells_in_its_own_words_wait_longer_in_a_row_alike() -> None:
+    clock = Clock()
+    session, _, launcher = session_for(pause=clock.pause)
+    launcher.failures["Gateway down"] = Failure("api_unavailable")
+    launcher.scripts.extend([fails(launcher, "Gateway down"), fails(launcher, "Gateway down")])
+    first = await asyncio.wait_for(run(session, TaskSpec(prompt="a")), 5)
+    await resumed(session, clock)
+    await settled()  # The second wait gets as far as its sleep.
+    await session.close()
+
+    assert clock.waited == [timedelta(minutes=2), timedelta(minutes=5)]
+    assert notes(first)[-1] == outage_paused_note(START + timedelta(minutes=2), "Gateway down")
+    assert task_ids(launcher) == ["1", "1"]
 
 
 async def test_an_agent_failing_another_way_starts_the_backoff_over_too() -> None:

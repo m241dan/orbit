@@ -16,6 +16,7 @@ from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.purging import Purged
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.roles import Role
+from orbit.agent.domain.runtimes import Capabilities, Failure
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.storage_halt import StorageErrorKind
 from orbit.agent.domain.usage import UsageFetch
@@ -213,12 +214,18 @@ class AgentLaunch:
 
 
 class ResumeFailed(RuntimeError):
-    """A turn resuming a conversation failed before the CLI reported the conversation it ran
-    in, as when that conversation is gone."""
+    """The launcher couldn't carry a conversation on from its handle, as when the conversation
+    the handle names is gone."""
 
 
 class AgentLauncher(Protocol):
-    """Starts agents as processes."""
+    """Starts agents as processes of a runtime, which can do what its :attr:`capabilities`
+    say."""
+
+    @property
+    def capabilities(self) -> Capabilities:
+        """What the launcher's runtime can do."""
+        ...
 
     def run_agent(self, launch: AgentLaunch) -> AsyncIterator[Event]:
         """Start the agent as ``launch`` says, and yield what it does until its process
@@ -232,18 +239,23 @@ class AgentLauncher(Protocol):
     def converse(self, turn_id: str, launch: AgentLaunch) -> AsyncIterator[Event]:
         """Run one turn, ``turn_id``, of the agent's ongoing conversation, ``launch.prompt``
         being what it's told: the first turn starts it, and later ones carry it on. Yields and
-        stops like :meth:`run_agent`; a turn carrying it on whose CLI exits before it's known
-        to have done so raises :class:`ResumeFailed`."""
+        stops like :meth:`run_agent`; a turn that can't carry it on from its handle raises
+        :class:`ResumeFailed`."""
         ...
 
     def conversation(self, agent_id: str) -> str | None:
-        """The id of the Claude conversation agent ``agent_id``'s turns carry on; ``None``
-        before one has started it."""
+        """The handle of the conversation agent ``agent_id``'s turns carry on, which only the
+        launcher understands; ``None`` before one has started it."""
         ...
 
-    def set_conversation(self, agent_id: str, conversation_id: str | None) -> None:
-        """Have agent ``agent_id``'s next turn carry on the conversation ``conversation_id``, or
-        start a new one when it's ``None``."""
+    def set_conversation(self, agent_id: str, handle: str | None) -> None:
+        """Have agent ``agent_id``'s next turn carry on the conversation ``handle``, one this
+        launcher's :meth:`conversation` gave, or start a new one when it's ``None``."""
+        ...
+
+    def failure(self, message: str) -> Failure | None:
+        """The failure an agent's error ``message`` tells, as the launcher's runtime words it:
+        its usage limit or its API not answering; ``None`` for any other error."""
         ...
 
 

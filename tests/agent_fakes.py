@@ -8,7 +8,7 @@ import sys
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, get_args
 from weakref import WeakKeyDictionary
 
 from orbit.agent import Agents, ControlPlane, Verification, VerificationStep, WorkspaceHost
@@ -53,9 +53,11 @@ from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.roles import Role, built_in_roles
+from orbit.agent.domain.runtimes import Capabilities, Failure
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.agent.domain.usage import UsageFetch, UsageUnavailable
+from orbit.agent.domain.usage_limits import claude_failure
 from orbit.agent.domain.usage_totals import UsageRow, UsageTotalsData, usage_totals
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.protocol import (
@@ -77,6 +79,7 @@ from orbit.protocol import (
     CommandAccepted,
     CommandEnvelope,
     CommandRefused,
+    Effort,
     ErrorOccurred,
     Event,
     EventEnvelope,
@@ -96,6 +99,7 @@ from orbit.protocol import (
     TasksChanged,
     TaskSpec,
     TaskState,
+    ToolAccess,
     ToolCallStarted,
     TurnEndReason,
     TurnFinished,
@@ -170,11 +174,25 @@ class FailingHost(FakeHost):
         return await super().start(handler)
 
 
+EVERYTHING = Capabilities(
+    resume=True,
+    usage=True,
+    max_turns=True,
+    tool_access=frozenset(get_args(ToolAccess)),
+    effort=frozenset(get_args(Effort)),
+)
+"""What a runtime that can do everything orbit asks, at every level, can do."""
+
+
 class ScriptedLauncher:
-    """Each launch plays the next script as the agent, calling orbit through the host."""
+    """Each launch plays the next script as the agent, calling orbit through the host. It can
+    do what ``capabilities`` say, everything at first, and tells the failure each error message
+    in ``failures`` is, and any other as Claude Code's."""
 
     def __init__(self, host: FakeHost, *scripts: Script, reviewers: Sequence[Script] = ()) -> None:
         self.host = host
+        self.capabilities = EVERYTHING
+        self.failures: dict[str, Failure] = {}
         self.scripts = list(scripts)
         self.reviewers = list(reviewers)
         self.launches: list[AgentLaunch] = []
@@ -237,11 +255,14 @@ class ScriptedLauncher:
     def conversation(self, agent_id: str) -> str | None:
         return self.conversations.get(agent_id)
 
-    def set_conversation(self, agent_id: str, conversation_id: str | None) -> None:
-        if conversation_id is None:
+    def set_conversation(self, agent_id: str, handle: str | None) -> None:
+        if handle is None:
             self.conversations.pop(agent_id, None)
         else:
-            self.conversations[agent_id] = conversation_id
+            self.conversations[agent_id] = handle
+
+    def failure(self, message: str) -> Failure | None:
+        return self.failures.get(message, claude_failure(message))
 
     async def converse(self, turn_id: str, launch: AgentLaunch) -> AsyncIterator[Event]:
         """A turn of the next planner script, which starts the conversation
