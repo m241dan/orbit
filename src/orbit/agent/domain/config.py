@@ -108,6 +108,9 @@ class _FileConfig(_Config):
 LATER_TABLES = ("triggers", "mcp", "models")
 """The top-level tables of a later version of orbit's settings."""
 
+LATER_KEYS = ("runtime",)
+"""The top-level keys of a later version of orbit's settings outside its tables."""
+
 LATER_VERSION = (
     "isn't supported by this version of orbit yet; it's in the reference config for a later"
     " version. Leave it commented out."
@@ -189,14 +192,23 @@ def _refuse_later_settings(data: dict[str, Any]) -> None:
 
 def _later_settings(data: dict[str, Any]) -> Iterator[str]:
     """The settings of a later version of orbit ``data`` sets, in order, each named as the
-    reference config names it: its :data:`LATER_TABLES`, and its roles' ``runtime`` keys and
-    ``tools`` tables."""
+    reference config names it: its :data:`LATER_TABLES`, its :data:`LATER_KEYS`, such as a
+    ``runtime`` uncommented on its own, and its roles' ``runtime`` keys and ``tools`` tables."""
     for key, value in data.items():
         if key in LATER_TABLES:
             yield _table_name(key, value)
-        elif key == "roles" and isinstance(value, dict):
-            for name, fields in value.items():
-                yield from _later_role_settings(name, fields)
+        elif key in LATER_KEYS:
+            yield key
+        elif key == "roles":
+            yield from _later_roles_settings(value)
+
+
+def _later_roles_settings(roles: object) -> Iterator[str]:
+    """The settings of a later version of orbit the ``roles`` table sets, role by role."""
+    if not isinstance(roles, dict):
+        return
+    for name, fields in roles.items():
+        yield from _later_role_settings(name, fields)
 
 
 def _table_name(key: str, value: object) -> str:

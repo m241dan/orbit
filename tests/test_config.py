@@ -555,6 +555,7 @@ LATER_VERSION = (
         ("[triggers]", "[triggers]"),
         ("[mcp]\nshared = true\n\n[mcp.github]\nshared = false", "[mcp.github]"),
         ('models = "local"', "[models]"),
+        ('runtime = "claude"', "runtime"),
     ],
 )
 def test_a_later_versions_setting_is_refused_naming_it(toml: str, setting: str) -> None:
@@ -566,6 +567,12 @@ def test_a_later_versions_setting_is_refused_naming_it(toml: str, setting: str) 
 def test_the_first_later_versions_setting_in_the_file_is_the_one_named() -> None:
     toml = '[roles.coder]\nruntime = "harness"\n\n[mcp.github]\nurl = "http://127.0.0.1:3010/mcp"'
     with pytest.raises(ConfigError, match=r"^roles\.coder\.runtime isn't supported"):
+        load_config(tomllib.loads(toml), BUILT_IN_ROLES)
+
+
+def test_a_top_level_runtime_ahead_of_a_later_table_is_the_one_named() -> None:
+    toml = 'runtime = "claude"\n\n[mcp.github]\nurl = "http://127.0.0.1:3010/mcp"'
+    with pytest.raises(ConfigError, match=r"^runtime isn't supported"):
         load_config(tomllib.loads(toml), BUILT_IN_ROLES)
 
 
@@ -585,7 +592,7 @@ def test_a_roles_list_of_orbit_tools_still_loads() -> None:
     [
         ({"roles": {"coder": {"colour": "red"}}}, "roles.coder.colour: Extra inputs"),
         ({"roles": {"coder": "harness"}}, "roles.coder: Input should be a valid dictionary"),
-        ({"runtime": "harness"}, "runtime: Extra inputs are not permitted"),
+        ({"colour": "red"}, "colour: Extra inputs are not permitted"),
     ],
 )
 def test_other_unknown_settings_keep_their_errors(data: dict[str, object], message: str) -> None:

@@ -1187,8 +1187,8 @@ adds a workspace; each refuses an invalid one, naming each problem (for example
 `roles.coder.tool_access: Input should be 'off', 'restricted' or 'full'`). The settings of a later
 version of orbit, which the reference config shows commented out, are refused while uncommented,
 naming the first: a `[triggers.<name>]`, `[mcp.<name>]` or `[models.<name>]` table, a role's
-`runtime` or a `[roles.<name>.tools]` table (`tools` as a list of orbit's tools is still a role's
-`tools`), as in `roles.coder.runtime isn't supported by this version of orbit yet; it's in the
+`runtime` (or a `runtime` uncommented on its own, outside any role) or a `[roles.<name>.tools]`
+table (`tools` as a list of orbit's tools is still a role's `tools`), as in `roles.coder.runtime isn't supported by this version of orbit yet; it's in the
 reference config for a later version. Leave it commented out.`
 
 #### Your machine's model and effort
