@@ -1,8 +1,9 @@
 """The lanes that start by themselves: every lane among the enabled task roles' but the one whose
 roles merge, which runs on the user's asking. Each runs the board's next runnable task whose role
 is in it, one at a time, through a new agent, once a task for it is queued, unless this orbit is
-read-only, the session is halted or the work lane waits out a pause. Reviews run so too, with the
-rules :class:`ReviewLane` keeps."""
+read-only or the session is halted; while the work lane waits out a runtime's pause, it skips the
+tasks whose role runs on that runtime, and runs them once the pause ends. Reviews run so too, with
+the rules :class:`ReviewLane` keeps."""
 
 import asyncio
 from collections.abc import Awaitable, Callable, Collection, Coroutine, Iterable
@@ -20,9 +21,9 @@ from orbit.agent.domain.endings import STOPPED_BY_YOU
 from orbit.protocol import PLANNER_LANE, WORK_LANE, BusyChanged, BusyLane, Event
 
 
-def unpaused() -> bool:
-    """Says the work lane waits out no pause."""
-    return False
+def unpaused() -> str | None:
+    """Says the work lane waits out no runtime's pause."""
+    return None
 
 
 def planners_lane() -> tuple[BusyLane, ...]:
@@ -42,13 +43,14 @@ def _unwatched() -> None:
 class LaneParts:
     """What a lane that starts by itself runs with: ``desk``'s agents and the session's
     ``tasks``; its ``gate``, which says whether another orbit owns the repository or the session
-    is halted, and ``paused``, whether the work lane waits out a pause, when no task starts; and
-    ``post``, which publishes, without blocking, whether the lane is busy."""
+    is halted, when no task starts, and ``paused``, the runtime whose pause the work lane waits
+    out, if any, on which no task starts; and ``post``, which publishes, without blocking,
+    whether the lane is busy."""
 
     desk: AgentDesk
     tasks: Tasks
     gate: SessionGate
-    paused: Callable[[], bool] = unpaused
+    paused: Callable[[], str | None] = unpaused
     post: Callable[[Event], None] = unposted
 
 
@@ -67,8 +69,9 @@ class LaneRunner:
     background with ``parts``.
 
     Each task's agent works in its role's workspace, unless ``work`` says what to run and how.
-    The lane shows busy from when its run picks a task until the run ends; the user's
-    :meth:`cancel` stops the task running, and the lane carries on with the next."""
+    A task whose role runs on the runtime whose pause the work lane waits out is skipped until
+    the pause ends. The lane shows busy from when its run picks a task until the run ends; the
+    user's :meth:`cancel` stops the task running, and the lane carries on with the next."""
 
     def __init__(
         self, lane: BusyLane, roles: Collection[str], parts: LaneParts, work: LaneWork | None = None
@@ -101,7 +104,7 @@ class LaneRunner:
     def current(self) -> str | None:
         """The task running or, before the lane picks one, the one it will pick; none when
         there's none."""
-        return self._running or self._work.next_task(self._work.spent())
+        return self._running or self._next_task(self._work.spent())
 
     def on_stopped(self, stopped: Callable[[], None]) -> None:
         """Have ``stopped`` called whenever the lane's tasks stop running."""
@@ -147,10 +150,22 @@ class LaneRunner:
         await run_task_to_end(self._tasks, task_id, run, stop, self._desk.publish)
 
     def _blocked(self) -> bool:
-        """Whether no task may start: this orbit is read-only, the session is halted or the work
-        lane waits out a pause."""
+        """Whether no task may start: this orbit is read-only or the session is halted."""
         gate = self._parts.gate
-        return gate.read_only() or gate.halted() or self._parts.paused()
+        return gate.read_only() or gate.halted()
+
+    def _next_task(self, tried: Collection[str]) -> str | None:
+        """The task to run next, skipping those ``tried`` and those on a paused runtime."""
+        return self._work.next_task({*tried, *self._on_paused_runtime()})
+
+    def _on_paused_runtime(self) -> set[str]:
+        """The board's tasks whose role runs on the runtime whose pause the work lane waits
+        out; none while it waits out none."""
+        paused = self._parts.paused()
+        if paused is None:
+            return set()
+        agents = self._desk.agents
+        return {t.id for t in self._tasks.board.tasks if agents.runtime(t.task.role) == paused}
 
     def _show_busy(self, busy: bool) -> None:
         """Show the lane ``busy`` or not, unless it's shown so already."""
@@ -166,11 +181,11 @@ class LaneRunner:
         self._stopped()
 
     async def _run_tasks(self) -> None:
-        """Run the lane's tasks waiting, one at a time, until none are left or no task may
-        start, showing the lane busy once it picks one."""
+        """Run the lane's tasks waiting, one at a time, until none are left but those on a paused
+        runtime or no task may start, showing the lane busy once it picks one."""
         tried = self._work.spent()
-        while (task_id := self._work.next_task(tried)) is not None:
-            if self._blocked():  # It may have halted, or paused, as the last task ended.
+        while (task_id := self._next_task(tried)) is not None:
+            if self._blocked():  # It may have halted as the last task ended.
                 return
             self._show_busy(True)
             tried.add(task_id)

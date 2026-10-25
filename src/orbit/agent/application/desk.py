@@ -119,9 +119,10 @@ class Agents:
     directory, for moving a record a task names whose number another record took; without it,
     records keep the numbers tasks give them. ``root`` is the workspace's directory, the user's
     checkout, where agents work without a tree; ``temp_dirs`` makes the empty directories
-    agents whose role works in none work in. ``pause`` times a run that Claude's usage limit
-    stopped, until it starts again. ``models`` are the models each runtime takes, by its name,
-    which agents' models resolve through; a runtime without them is given models as they are.
+    agents whose role works in none work in. ``pause`` times a run that a runtime's usage limit
+    or outage stopped, until it starts again. ``models`` are the models each runtime takes, by
+    its name, which agents' models resolve through; a runtime without them is given models as
+    they are.
     """
 
     host: AgentHost

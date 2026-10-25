@@ -16,9 +16,13 @@ from tests.tui_fakes import feed_events, opened
 UNTIL = datetime(2026, 10, 23, 14, 20).astimezone()
 """When the paused run starts again: 14:20, local time."""
 
-PAUSED_WORDS = "run paused: Claude's API isn't answering; trying again at 14:20"
+PAUSED_WORDS = "run paused: claude's API isn't answering; trying again at 14:20"
 
-PAUSE = {"paused_until": UNTIL, "paused_for": PAUSED_FOR_API_UNAVAILABLE}
+PAUSE = {
+    "paused_until": UNTIL,
+    "paused_for": PAUSED_FOR_API_UNAVAILABLE,
+    "paused_runtime": "claude",
+}
 
 PAUSED = RUNNING.model_copy(update={"state": "idle", **PAUSE})
 """The active session idle, its run paused as Claude's API isn't answering."""

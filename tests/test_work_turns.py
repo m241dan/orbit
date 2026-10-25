@@ -23,7 +23,8 @@ from orbit.agent.application.work_turns import (
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.endings import STOPPED_BY_YOU
 from orbit.agent.domain.refusals import Refused
-from orbit.agent.domain.usage_limits import RESUMING_NOTE, Paused, paused_note
+from orbit.agent.domain.runtimes import CLAUDE, Failure
+from orbit.agent.domain.usage_limits import RESUMING_NOTE, Paused, RuntimeStop, paused_note
 from orbit.protocol import (
     BUSY,
     CONFIGURATOR,
@@ -46,7 +47,7 @@ TASK = TaskSpec(prompt="Add a flag.", settings=Settings(model="opus"))
 
 class StopsCounted(WorkLane):
     """A work lane that counts the times it was told the user stopped its run, and whose runs
-    end at once as ``ends`` says, if set."""
+    end at once as ``ends`` says, if set, those it says were limited by Claude's usage limit."""
 
     stops = 0
     ends: RunEnd | None = None
@@ -54,6 +55,12 @@ class StopsCounted(WorkLane):
     def stopped_by_user(self) -> bool:
         self.stops += 1
         return super().stopped_by_user()
+
+    @property
+    def runtime_stop(self) -> RuntimeStop | None:
+        if self.ends == "limited":
+            return RuntimeStop(CLAUDE, Failure("usage_limit"))
+        return super().runtime_stop
 
     async def run(self) -> RunEnd:
         if self.ends is not None:
@@ -495,11 +502,11 @@ async def test_a_configurator_run_limited_again_starts_again_at_the_new_reset(
     await turn_ended(lane)
     await settled()
     reset = START + timedelta(minutes=20)
-    assert notes(lane)[-1] == paused_note(reset)
+    assert notes(lane)[-1] == paused_note(reset, CLAUDE)
     assert lane.sleeps.until == [START + timedelta(minutes=15), reset]
 
 
-LIMIT_PAUSE = Paused(START + timedelta(minutes=15), PAUSED_FOR_USAGE_LIMIT)
+LIMIT_PAUSE = Paused(START + timedelta(minutes=15), PAUSED_FOR_USAGE_LIMIT, CLAUDE)
 """The pause of a run the usage limit stopped at :data:`START`, with no reset known."""
 
 

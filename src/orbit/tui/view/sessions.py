@@ -51,12 +51,16 @@ ACTIVATE_CHOICE = "Make this the active session"
 JUST_LOOK_CHOICE = "Just look"
 PAUSED_PREFIX = "run paused"
 
-# What a paused run says of why it's paused, by reason, before the time it starts again.
+# What a paused run says of why it's paused, by reason, with the runtime it's paused on, before
+# the time it starts again.
 PAUSED_REASONS = {
-    PAUSED_FOR_API_UNAVAILABLE: ": Claude's API isn't answering; trying again at",
-    PAUSED_FOR_USAGE_LIMIT: ": usage limit; starts again at",
+    PAUSED_FOR_API_UNAVAILABLE: ": {runtime}'s API isn't answering; trying again at",
+    PAUSED_FOR_USAGE_LIMIT: ": usage limit on {runtime}; starts again at",
 }
 PAUSED_UNKNOWN = "; starts again at"
+# The runtime a pause is on when the backend doesn't say: one from before runtimes ran only
+# Claude.
+PAUSED_RUNTIME = "claude"
 
 # The order a session's task counts are shown in: finished work first, then what's still to do.
 COUNT_ORDER: tuple[TaskStatus, ...] = (
@@ -323,18 +327,24 @@ def state_notes(
 
 def paused_words(summary: SessionSummary, zone: tzinfo | None = None) -> str | None:
     """What ``summary``'s session says of its run while it's paused, until a time in ``zone``
-    (the local one by default): ``run paused: Claude's API isn't answering; trying again at
-    14:20``, ``run paused: usage limit; starts again at 18:01``, or ``run paused; starts again at
-    14:20`` for a reason not known; none while it isn't paused."""
+    (the local one by default): ``run paused: claude's API isn't answering; trying again at
+    14:20``, ``run paused: usage limit on claude; starts again at 18:01``, or ``run paused;
+    starts again at 14:20`` for a reason not known; none while it isn't paused."""
     until = summary.paused_until
-    return None if until is None else paused_note(until, summary.paused_for, zone)
+    if until is None:
+        return None
+    return paused_note(until, summary.paused_for, summary.paused_runtime, zone)
 
 
-def paused_note(until: datetime, reason: PauseReason | None, zone: tzinfo | None = None) -> str:
-    """What a run paused for ``reason`` says of itself, starting again at ``until``, a time in
-    ``zone`` (the local one by default), as :func:`paused_words` words it."""
+def paused_note(
+    until: datetime, reason: PauseReason | None, runtime: str | None, zone: tzinfo | None = None
+) -> str:
+    """What a run paused for ``reason`` on ``runtime``, Claude if none is given, says of
+    itself, starting again at ``until``, a time in ``zone`` (the local one by default), as
+    :func:`paused_words` words it."""
     words = PAUSED_REASONS.get(reason or "", PAUSED_UNKNOWN)
-    return f"{PAUSED_PREFIX}{words} {until.astimezone(zone):%H:%M}"
+    named = words.format(runtime=runtime or PAUSED_RUNTIME)
+    return f"{PAUSED_PREFIX}{named} {until.astimezone(zone):%H:%M}"
 
 
 def local_time(when: datetime, zone: tzinfo | None = None) -> str:

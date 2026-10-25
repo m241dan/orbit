@@ -7,13 +7,13 @@ from datetime import timedelta
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.domain.agent_task import Limits
-from orbit.agent.domain.runtimes import Failure
+from orbit.agent.domain.runtimes import CLAUDE, Failure
 from orbit.agent.domain.usage_limits import (
     FIX_ERROR_NOTE,
-    OUTAGE_RESUMING_NOTE,
     RESUMING_NOTE,
     WAIT_CANCELLED_NOTE,
     outage_paused_note,
+    outage_resuming_note,
 )
 from orbit.protocol import (
     CancelTurn,
@@ -125,7 +125,7 @@ async def test_an_outage_stops_the_run_at_its_task_and_says_when_it_starts_again
     assert task_ids(launcher) == ["1", "2"]
     assert statuses(events) == ["completed", "error", "pending"]
     assert board(events)[1].reason_detail == OVERLOADED
-    assert notes(events)[-1] == outage_paused_note(START + timedelta(minutes=2), OVERLOADED)
+    assert notes(events)[-1] == outage_paused_note(START + timedelta(minutes=2), OVERLOADED, CLAUDE)
 
 
 async def test_the_run_starts_again_with_the_task_at_the_outage_once_the_wait_ends() -> None:
@@ -136,7 +136,7 @@ async def test_the_run_starts_again_with_the_task_at_the_outage_once_the_wait_en
     await session.close()
 
     assert clock.waited == [timedelta(minutes=2)]
-    assert OUTAGE_RESUMING_NOTE in notes(events)
+    assert outage_resuming_note(CLAUDE) in notes(events)
     assert RESUMING_NOTE not in notes(events)
     assert task_ids(launcher) == ["1", "2", "2", "3"]
     assert statuses(events) == ["completed", "completed", "completed"]
@@ -155,9 +155,9 @@ async def test_outages_in_a_row_wait_longer_until_an_agent_finishes_its_run() ->
     await session.close()
 
     assert clock.waited == [timedelta(minutes=2), timedelta(minutes=5), timedelta(minutes=2)]
-    assert notes(first)[-1] == outage_paused_note(START + timedelta(minutes=2), OVERLOADED)
-    assert notes(second)[-1] == outage_paused_note(START + timedelta(minutes=7), OVERLOADED)
-    assert notes(third)[-1] == outage_paused_note(START + timedelta(minutes=9), OVERLOADED)
+    assert notes(first)[-1] == outage_paused_note(START + timedelta(minutes=2), OVERLOADED, CLAUDE)
+    assert notes(second)[-1] == outage_paused_note(START + timedelta(minutes=7), OVERLOADED, CLAUDE)
+    assert notes(third)[-1] == outage_paused_note(START + timedelta(minutes=9), OVERLOADED, CLAUDE)
     assert task_ids(launcher) == ["1", "1", "1", "2"]
 
 
@@ -172,7 +172,9 @@ async def test_outages_the_launcher_tells_in_its_own_words_wait_longer_in_a_row_
     await session.close()
 
     assert clock.waited == [timedelta(minutes=2), timedelta(minutes=5)]
-    assert notes(first)[-1] == outage_paused_note(START + timedelta(minutes=2), "Gateway down")
+    assert notes(first)[-1] == outage_paused_note(
+        START + timedelta(minutes=2), "Gateway down", CLAUDE
+    )
     assert task_ids(launcher) == ["1", "1"]
 
 
@@ -218,7 +220,7 @@ async def test_stopping_an_agent_before_claude_answers_keeps_the_backoff_going()
 
     assert statuses(stopped) == ["cancelled"]
     assert clock.waited == [timedelta(minutes=2), timedelta(minutes=5)]
-    assert notes(events)[-1] == outage_paused_note(START + timedelta(minutes=5), OVERLOADED)
+    assert notes(events)[-1] == outage_paused_note(START + timedelta(minutes=5), OVERLOADED, CLAUDE)
 
 
 async def test_stopping_a_run_waiting_out_an_outage_cancels_its_restart() -> None:
@@ -232,7 +234,7 @@ async def test_stopping_a_run_waiting_out_an_outage_cancels_its_restart() -> Non
     await session.close()
 
     assert WAIT_CANCELLED_NOTE in notes(events)
-    assert OUTAGE_RESUMING_NOTE not in notes(events)
+    assert outage_resuming_note(CLAUDE) not in notes(events)
     assert len(launcher.launches) == 1
 
 
@@ -248,7 +250,7 @@ async def test_running_while_waiting_out_an_outage_starts_at_once_and_drops_the_
     await session.close()
 
     assert statuses(events) == ["completed"]
-    assert OUTAGE_RESUMING_NOTE not in notes(events)
+    assert outage_resuming_note(CLAUDE) not in notes(events)
     assert len(launcher.launches) == 2
 
 
@@ -261,14 +263,14 @@ async def test_an_outage_wait_ending_while_halted_starts_the_run_once_the_halt_l
     await publish(session, Notice(message="n"))
     clock.release()
     halted = await quiet(payloads(session))
-    assert OUTAGE_RESUMING_NOTE not in notes(halted)
+    assert outage_resuming_note(CLAUDE) not in notes(halted)
 
     store.append_failure = None
     await send(session, ResumeStorage())
     events = await asyncio.wait_for(events_until(session, idle()), 5)
     await session.close()
 
-    assert OUTAGE_RESUMING_NOTE in notes(events)
+    assert outage_resuming_note(CLAUDE) in notes(events)
     assert statuses(events) == ["completed"]
     assert len(launcher.launches) == 2
 
@@ -288,7 +290,7 @@ async def test_a_fix_at_an_outage_starts_again_on_the_tree_holding_its_work() ->
     assert (a.status, fix.status, b.status) == ("unverified", "error", "pending")
     assert fix.fixes == a.id
     assert FIX_ERROR_NOTE not in notes(events)
-    assert notes(events)[-1] == outage_paused_note(START + timedelta(minutes=2), OVERLOADED)
+    assert notes(events)[-1] == outage_paused_note(START + timedelta(minutes=2), OVERLOADED, CLAUDE)
 
     await resumed(session, clock)
     await session.close()

@@ -340,7 +340,8 @@ UsageStatus = Literal["ok", "rate_limited", "unavailable"]
 
 
 class UsageChanged(_Message):
-    """The subscription's usage limits, sent after every fetch.
+    """The usage limits of the subscription to the runtime ``runtime``, such as ``claude``,
+    sent after every fetch.
 
     Unless the ``status`` is ``ok``, ``limits`` are the last good ones; ``detail`` says why
     usage is unavailable, and ``retry_at`` when a rate-limited fetch is tried again.
@@ -351,6 +352,7 @@ class UsageChanged(_Message):
     status: UsageStatus = "ok"
     detail: str = ""
     retry_at: AwareDatetime | None = None
+    runtime: str = "claude"
 
 
 class MessageSent(_Message):
@@ -530,8 +532,8 @@ class SessionStateChanged(_Message):
     """Session ``session`` is now ``active`` (the workspace's open session) or not, in
     ``state``, with ``viewers`` connections viewing it, ``activity`` in progress in it, and,
     while its run waits to start again by itself, starting again at ``paused_until``, stopped
-    for ``paused_for``; sent to every connection whenever one of them changes, and never
-    logged."""
+    for ``paused_for`` on the runtime ``paused_runtime``; sent to every connection whenever one
+    of them changes, and never logged."""
 
     type: Literal["session_state_changed"] = "session_state_changed"
     session: str
@@ -541,6 +543,7 @@ class SessionStateChanged(_Message):
     activity: tuple[Activity, ...] = ()
     paused_until: AwareDatetime | None = None
     paused_for: PauseReason | None = None
+    paused_runtime: str | None = None
 
 
 def with_state(summary: SessionSummary, changed: SessionStateChanged) -> SessionSummary:
@@ -555,6 +558,7 @@ def with_state(summary: SessionSummary, changed: SessionStateChanged) -> Session
         "activity": changed.activity,
         "paused_until": changed.paused_until,
         "paused_for": changed.paused_for,
+        "paused_runtime": changed.paused_runtime,
     }
     return summary.model_copy(update=update)
 

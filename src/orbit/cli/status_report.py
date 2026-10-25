@@ -28,8 +28,8 @@ class _Report(BaseModel):
 class SessionStatus(_Report):
     """The session ``name``d, by its ``id``: whether it's its workspace's ``active`` one, its
     ``state``, whether its run is ``waiting_for_coder``, at ``coder_position`` in line if that's
-    known, and, while its run is paused, when it starts again, ``paused_until``, and why,
-    ``paused_for``."""
+    known, and, while its run is paused, when it starts again, ``paused_until``, why,
+    ``paused_for``, and on which runtime, ``paused_runtime``."""
 
     id: str
     name: str
@@ -39,6 +39,7 @@ class SessionStatus(_Report):
     coder_position: int | None
     paused_until: AwareDatetime | None
     paused_for: PauseReason | None
+    paused_runtime: str | None
 
 
 class WorkspaceStatus(_Report):
@@ -122,6 +123,7 @@ def _session(summary: SessionSummary) -> SessionStatus:
         coder_position=None if wait is None else wait.position,
         paused_until=summary.paused_until,
         paused_for=summary.paused_for,
+        paused_runtime=summary.paused_runtime,
     )
 
 
@@ -187,7 +189,8 @@ def _session_line(session: SessionStatus, zone: tzinfo | None) -> str:
         waiting_words(session.coder_position) if session.waiting_for_coder else session.state
     )
     if session.paused_until is not None:
-        notes.append(paused_note(session.paused_until, session.paused_for, zone))
+        paused = paused_note(session.paused_until, session.paused_for, session.paused_runtime, zone)
+        notes.append(paused)
     return " · ".join(notes)
 
 

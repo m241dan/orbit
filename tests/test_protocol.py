@@ -417,6 +417,14 @@ def test_usage_changed_round_trips_with_its_times() -> None:
         UsageLimit(label="Week", percent=101)
 
 
+def test_usage_changed_names_its_runtime_and_without_one_is_claudes() -> None:
+    event = UsageChanged(runtime="kiro")
+    assert event_adapter.validate_json(event.model_dump_json()) == event
+    assert event_adapter.validate_json('{"type": "usage_changed"}') == UsageChanged(
+        runtime="claude"
+    )
+
+
 def test_usage_limit_rejects_a_naive_reset_time() -> None:
     with pytest.raises(ValidationError):
         UsageLimit(label="Week", percent=1, resets_at=datetime(2026, 10, 16))
@@ -480,14 +488,20 @@ def test_a_state_change_sets_its_sessions_pause_and_clears_it() -> None:
         viewers=1,
         paused_until=until,
         paused_for=PAUSED_FOR_API_UNAVAILABLE,
+        paused_runtime="claude",
     )
-    resumed = paused.model_copy(update={"paused_until": None, "paused_for": None})
+    cleared_pause = {"paused_until": None, "paused_for": None, "paused_runtime": None}
+    resumed = paused.model_copy(update=cleared_pause)
 
     shown = with_state(summary, paused)
     cleared = with_state(shown, resumed)
 
-    assert (shown.paused_until, shown.paused_for) == (until, "api_unavailable")
-    assert (cleared.paused_until, cleared.paused_for) == (None, None)
+    assert (shown.paused_until, shown.paused_for, shown.paused_runtime) == (
+        until,
+        "api_unavailable",
+        "claude",
+    )
+    assert (cleared.paused_until, cleared.paused_for, cleared.paused_runtime) == (None, None, None)
 
 
 def test_a_state_change_leaves_other_sessions_alone() -> None:

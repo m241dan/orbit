@@ -1,6 +1,6 @@
 """Each session's state as connections see it: whether it's the open one, whether it's running
-and what's in progress in it, until when and why its run is paused, and how many connections
-view it, published whenever any of these changes."""
+and what's in progress in it, until when, why and on which runtime its run is paused, and how
+many connections view it, published whenever any of these changes."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -42,6 +42,7 @@ def _open(
         activity=reported(activity),
         paused_until=paused.until if paused else None,
         paused_for=paused.reason if paused else None,
+        paused_runtime=paused.runtime if paused else None,
     )
 
 

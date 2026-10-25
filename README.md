@@ -217,7 +217,7 @@ offers only `New session`. Each row shows the session's name, when it was last a
 `active` on the workspace's active session, `running` while it runs work (a task run, a task in a
 lane of its own, a review or a planner turn), or `waiting for a coder: 2nd in line` while its task run waits for a coder (see
 [Taking turns](#serving-the-control-plane); `next in line` when it's next), `run paused: usage
-limit; starts again at 18:01` while its run waits to start again (see **Usage limits** under
+limit on claude; starts again at 18:01` while its run waits to start again (see **Usage limits** under
 [Tasks](#tasks)), `viewed by N` when N other frontends view it, how many of its
 tasks stand at each status, by the task list's icons (`3 ✅ 2 ⏳ 1 📝`), and what they cost
 (`1.2M tok · $0.84`); `●` marks the session this chat views. The marks follow the sessions live while
@@ -545,8 +545,8 @@ counts are rounded as in a turn's rule (see above). While the session's run wait
 with how many coders hold the slots: `⏳ waiting: 3 coders busy`, or `⏳ waiting for a coder` if
 that isn't known; it goes once the task gets a coder. A failed task doesn't stop the rest, but for
 two: a fix task that ends in error stops the run, so the work it fixes stays in the coder's tree
-until the fix runs again, and so does a task whose agent hit Claude's usage limit or found
-Claude's API not answering (see below);
+until the fix runs again, and so does a task whose agent hit its runtime's usage limit or found
+its runtime's API not answering (see below);
 the next run starts with the task it stopped at, ahead of any that failed before it, and any
 run, even after switching sessions or reopening orbit, starts with a fix that ended in error or
 was cancelled;
@@ -555,11 +555,14 @@ its agent) and skips the remaining ones. Running again skips tasks that complete
 verification or were given up on, and editing a task makes it pending again. Tasks added while a
 run is going join it; the running task can't be edited.
 
-**Usage limits.** When an agent's error says it hit Claude's session or weekly limit (`You've hit
-your session limit · resets 6pm (UTC)`), the run stops there rather than failing every task after
-it, and starts again by itself: a minute after the reset time the usage monitor last fetched for
-the limits used up, or, without one (as with `--no-usage`, or before the usage caught up), 15
-minutes later, when a limit still reached stops it again at once. The conversation says when
+**Usage limits.** When an agent's error says it hit its runtime's usage limit, as that runtime
+tells it (for Claude, its session or weekly limit: `You've hit your session limit · resets 6pm
+(UTC)`), the run stops there rather than failing every task after it, and starts again by itself:
+when the error says the limit resets, if it says and that's still ahead; else, for a runtime that
+reports usage, a minute after the reset time the usage monitor last fetched for that runtime's
+limits used up (Claude's usage, for Claude's limit, never another runtime's); or, without one (as
+with `--no-usage`, before the usage caught up, or on a runtime that reports none), 15 minutes
+later, when a limit still reached stops it again at once. The conversation says when
 (`Claude's usage limit is reached, so the run stopped. It starts again by itself at Wed 21 Oct
 18:01 UTC; ctrl+r starts it now and ctrl+s cancels that.`) and again as it starts. The task that
 hit the limit runs again first, afresh, as any rerun does. While the run waits, `ctrl+r` starts it
@@ -571,8 +574,10 @@ records the requirements.
 `502`, `503`, `504` or `529`, `overloaded_error`, `API Error (Connection error.)` or `Request timed
 out`; not a client error such as `400` or `401`), the run stops there in the same way, and starts
 again by itself after a backoff: 2 minutes, then 5, 10, 20, and every 30 minutes from then on, with
-no limit. The backoff starts over at 2 minutes as soon as any task's agent finishes its run without
-such an error, however its task ends. The conversation says when (`Claude's API isn't answering
+no limit, unless the error says when the API answers again. Each runtime's backoff is its own: an
+outage on another runtime than the last starts over at 2 minutes, and the backoff starts over as
+soon as an agent on that runtime finishes its run without such an error, however its task ends;
+an agent on another runtime finishing doesn't. The conversation says when (`Claude's API isn't answering
 (API Error: 529 Overloaded), so the run stopped. It starts again by itself at Fri 23 Oct 14:20 UTC;
 ctrl+r starts it now and ctrl+s cancels that.`) and again as it starts (`Starting the run again now
 Claude's API may be answering.`). The task it stopped at runs first, and a fix carries on from the
@@ -583,11 +588,23 @@ send your message again later.`), and nothing is sent again by itself.
 [docs/00023-bugfix-pause-runs-when-claude-is-down.md](docs/00023-bugfix-pause-runs-when-claude-is-down.md)
 records the requirements.
 
+**Pauses per runtime.** A pause belongs to the runtime whose agent hit the limit or the outage,
+the runtime of the task's role (see `runtime` under
+[Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)), and one runtime's pause never
+stops another's work but where order matters. The work lane keeps its order, so it waits out the
+pause, starting with the task it stopped at, even if a later task's role runs on another runtime.
+Every other lane, such as `review`, skips the tasks whose role runs on the paused runtime and runs
+its next task on a runtime that isn't paused, then the tasks it skipped once the pause ends or
+`ctrl+s` cancels it. With every role on Claude, the work lane and every lane's tasks wait out
+Claude's pause. [docs/00031-feature-runtime-port.md](docs/00031-feature-runtime-port.md) records
+the requirements.
+
 While a run waits to start again, after a usage limit or an outage, a line by the prompt says so,
-with the time it starts again in local time: `run paused: Claude's API isn't answering; trying
-again at 14:20` for an outage, or `run paused: usage limit; starts again at 18:01` for the usage
-limit (`run paused; starts again at 14:20` for a reason this orbit doesn't know, from a newer
-server). The session's row in the picker says the same. The line goes once the run starts again,
+with the runtime it's paused on and the time it starts again in local time: `run paused: claude's
+API isn't answering; trying again at 14:20` for an outage, or `run paused: usage limit on claude;
+starts again at 18:01` for the usage limit (`run paused; starts again at 14:20` for a reason this
+orbit doesn't know, from a newer server; a pause from a server that doesn't name its runtime is
+Claude's). The session's row in the picker says the same. The line goes once the run starts again,
 `ctrl+s` cancels the wait, switching sessions drops it, or a run you start replaces it.
 
 Edge cases:
@@ -1077,8 +1094,10 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   holds it. Every other lane, such as `review`, starts a task as soon as one is queued for it
   (added, accepted or edited), and `ctrl+r` runs what waits there too; stopping it, with `c` in
   the agents pane or the protocol's `CancelTurn`, stops just its task, and the lane goes on with
-  the next. While the work lane waits out Claude's usage limit or an outage, no lane starts a
-  task; they start again with it, or once `ctrl+s` cancels its wait. Each lane shows in the
+  the next. While the work lane waits out a runtime's usage limit or outage, no lane starts a
+  task whose role runs on that runtime; each runs its tasks on other runtimes meanwhile, and the
+  ones it skipped once the pause ends or `ctrl+s` cancels its wait (see **Pauses per runtime**
+  under [Tasks](#tasks)). Each lane shows in the
   Snapshot's `busy`, by name. On the task list, a task in a lane other than `work` is tagged with
   its lane, and `L` narrows the list to each lane in turn (see [Tasks](#tasks)). Orbit's reviews
   run in one lane, the one the enabled `reviewer` and `super-reviewer` share, so the config is
@@ -1167,7 +1186,9 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   for a runtime taking some, listing those), and `conversation = true` (`roles.planner asks for
   conversation = true, but its runtime lite doesn't support resume.`). A runtime that doesn't
   report usage is fine: its agents' turns report none, and the task list shows `usage unknown`
-  on their tasks' rows rather than what they spent. A session saves each conversational role's
+  on their tasks' rows rather than what they spent. A runtime's usage limit or API outage pauses
+  only its own tasks, and the work lane, which keeps its order (see **Pauses per runtime** under
+  [Tasks](#tasks)). A session saves each conversational role's
   conversation with the runtime it ran on, as only that runtime can carry it on: once the role
   runs on another runtime, the session still opens, but messages to the role are refused until
   you reset its conversation (see [Planning with the planner](#planning-with-the-planner)).
@@ -2134,8 +2155,8 @@ key. `--remote` can't go with `--connect`, and the backend flags belong on `orbi
 **Checking on it.** `orbit status` prints what a running control plane is doing, then exits: the
 server's URL and version; each workspace it serves, by label and path, with its sessions, the
 active one marked `active`, each `running` or `idle`, or `waiting for a coder: 2nd in line`
-while its run waits for a coder's slot, and `run paused: usage limit; starts again at 18:01`
-while its run is paused; the agents running, by workspace, role and task; and what turns have
+while its run waits for a coder's slot, and `run paused: usage limit on claude; starts again at
+18:01` while its run is paused; the agents running, by workspace, role and task; and what turns have
 cost in all, today and over the lifetime, in tokens and dollars:
 
 ```
@@ -2144,7 +2165,7 @@ orbit serve 0.1.0 at ws://127.0.0.1:7433/
 Workspaces
   orbit  /home/me/code/orbit
     Oct 25 09:12 · active · running
-    docs · idle · run paused: usage limit; starts again at 18:01
+    docs · idle · run paused: usage limit on claude; starts again at 18:01
 
 Agents
   orbit · coder · task 3
@@ -2162,7 +2183,7 @@ connects as a frontend, says `Hello` as `orbit-status`, watches the control-plan
 **Watching what runs** above), prints what it's told and disconnects. `--json` prints the same as
 one JSON object instead: `url`, `server_version`, `workspaces` (each with `id`, `label`, `path`
 and `sessions`, each with `id`, `name`, `active`, `state`, `waiting_for_coder`,
-`coder_position`, `paused_until` and `paused_for`), `agents` (each with `workspace`,
+`coder_position`, `paused_until`, `paused_for` and `paused_runtime`), `agents` (each with `workspace`,
 `workspace_label`, `session`, `agent_id`, `role` and `task_id`) and `usage` (`today` and
 `lifetime`, each with `tokens` and `cost_usd`). It exits with status 0 once it has printed; 1
 when no `orbit serve` is running here, saying `No orbit serve is running for this account.`; and
@@ -2660,7 +2681,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     and lands work that passes, and `WorkTurns` (in `work_turns`) decides when it runs: when the
     user asks (`ctrl+r`), when a review queues work unless the user held it, first for a
     configurator, and again by itself once the usage limit that stopped it resets, timed by a
-    `LimitPause` (in `limit_pause`), saying meanwhile until when and why it's paused, which
+    `LimitPause` (in `limit_pause`), saying meanwhile until when, why and on which runtime it's
+    paused, which
     `SessionStates` (in `session_state`) publishes with the session's state; each coder's task takes one of the control plane's
     `CoderSlots` (in `coder_slots`) first, and each is traced as an `orbit.task` span by
     `TaskTracing` (in `task_trace`), current while it runs so what runs it records on it, and
@@ -2673,8 +2695,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `Verifier` (in `verifier`) runs the steps, each run for an agent's call timed as an
     `orbit.verify.step` child of the call's span; `Lander` (in `landing`) commits and merges
     verified work; every lane of the roles' but the one whose roles merge runs on a `LaneRunner`
-    (in `lane_runner`), which starts its tasks by itself, one at a time, unless a pause or a halt
-    stops it, and `Lanes` (also there) holds the lanes by name; `ReviewLane` (in `review_lane`)
+    (in `lane_runner`), which starts its tasks by itself, one at a time, unless a halt stops it,
+    skipping those on the runtime whose pause the work lane waits out, and `Lanes` (also there)
+    holds the lanes by name; `ReviewLane` (in `review_lane`)
     queues reviews and runs them on its lane's runner, beside the work, each traced as
     an `orbit.review` span by `ReviewTracing` (in `review_trace`), and the lane's tasks of other
     roles as the runner runs any lane's; `StartupCheck`
@@ -2718,7 +2741,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     command the rules won't carry out, and why), `verification` (`StepProgress`, each
     verification step's status, kept by the `Verifier` and the startup check; when a task needs
     verifying, how many fixes to try per step, and the fix prompt), `usage_limits` (whether an
-    agent's error says it hit Claude's usage limit, and when a run it stopped starts again),
+    agent's error says it hit Claude's usage limit, and when a run a runtime's limit or outage
+    stopped starts again),
     `AgentTask` (in `agent_task`:
     what orbit replies to an agent, and when its work is verified), the `AgentRegistry` (in
     `agents`: agent ids and tokens), `roles` (built-in roles, loaded from their `roles.toml` and

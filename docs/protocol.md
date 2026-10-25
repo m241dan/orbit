@@ -134,7 +134,9 @@ with `invalid`. The first `Attach` is answered in this order:
    session after a `Hello` whose `since` orbit can catch up from gets the open session's events
    after it here instead, in their original envelopes (see
    [Sequencing and reconnecting](#sequencing-and-reconnecting)).
-2. The latest `UsageChanged`, if usage was fetched yet.
+2. The latest `UsageChanged`, if usage was fetched yet. It carries the `runtime` whose
+   subscription's usage limits it reports, `claude` for Claude's; this was added to version 2,
+   defaulting to `claude`.
 3. One-off notices, such as the workspace note, a missing verification setup, leftover work or
    notes on a resumed session.
 4. The Attach's `CommandAccepted`.
@@ -445,18 +447,23 @@ Each session in a `Catalog` carries its state as it is when the Catalog is sent:
   A review of several tasks' work, such as a batch's, is one `review` per task, in task order;
   a super review reviews no particular task, so it's one `review` whose `task_id` is null. It's
   empty for any other session. The startup check shows here though it leaves the state `idle`.
-- `paused_until` and `paused_for`: while the open session's task run waits to start again by
-  itself, because Claude's usage limit or Claude's API not answering stopped it, when it starts
-  again (timezone-aware) and why: `usage_limit` or `api_unavailable`. `paused_for` is an open
+- `paused_until`, `paused_for` and `paused_runtime`: while the open session's task run waits to
+  start again by itself, because a runtime's usage limit or its API not answering stopped it,
+  when it starts again (timezone-aware), why: `usage_limit` or `api_unavailable`, and on which
+  runtime, such as `claude`: the runtime of the role whose agent hit it. `paused_for` is an open
   string, so later versions may add reasons; a frontend shows one it doesn't know as a pause
-  without a reason. Both are set as the run stops and cleared once it starts again, once its
-  wait is cancelled (`CancelTurn`), dropped (a switch to another session, or the server
-  closing), or replaced by a run the user starts (`RunTasks`, or `FireTrigger` for
-  `configure-checks`); a wait that ends while storage is halted keeps them until the halt lifts.
-  Both are null for any other session.
+  without a reason. `paused_runtime` was added to version 2; a frontend takes a pause without
+  one as Claude's, the only runtime before it. All three are set as the run stops and cleared
+  once it starts again, once its wait is cancelled (`CancelTurn`), dropped (a switch to another
+  session, or the server closing), or replaced by a run the user starts (`RunTasks`, or
+  `FireTrigger` for `configure-checks`); a wait that ends while storage is halted keeps them
+  until the halt lifts. All three are null for any other session. Meanwhile the work lane waits,
+  keeping its order, and the lanes whose tasks start by themselves start none whose role runs on
+  the paused runtime, running their tasks on other runtimes.
 
 Whenever one of them changes for a session, every welcomed connection gets
-`SessionStateChanged(session, active, state, viewers, activity, paused_until, paused_for)` with
+`SessionStateChanged(session, active, state, viewers, activity, paused_until, paused_for,
+paused_runtime)` with
 the new values: a task run, review, planner turn or the startup check starting or ending, a run
 moving on to its next task, its place in line for a coder changing, joining the line or leaving
 it as it gets one, a run pausing or its pause ending, a connection joining, closing or attaching

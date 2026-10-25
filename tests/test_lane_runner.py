@@ -1,6 +1,7 @@
 """A lane that starts by itself: once kicked, it runs its roles' tasks one at a time, each in a
-snapshot of the base commit, shows busy while it does, starts none while blocked, and stops its
-task on the user's asking; and the session's lanes, by name."""
+snapshot of the base commit, shows busy while it does, starts none while blocked and skips those
+on a paused runtime, and stops its task on the user's asking; and the session's lanes, by
+name."""
 
 import asyncio
 from collections.abc import Collection
@@ -14,6 +15,8 @@ from orbit.agent.application.ports import TreeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.endings import CANCELLED, STOPPED_BY_YOU
+from orbit.agent.domain.roles import Role
+from orbit.agent.domain.runtimes import CLAUDE
 from orbit.protocol import (
     GIT_FAILED,
     BusyChanged,
@@ -23,23 +26,39 @@ from orbit.protocol import (
     TaskStatus,
     TurnEndReason,
 )
-from tests.agent_fakes import Call, FakeTree, Script, claims_done, desk_for
+from tests.agent_fakes import (
+    Call,
+    FakeHost,
+    FakeTree,
+    Script,
+    ScriptedLauncher,
+    claims_done,
+    desk_for,
+)
 from tests.lane_fakes import WITH_SECURITY, audit
 from tests.waiting import eventually
 
 BUSY = BusyChanged(busy=True, lane="security")
 IDLE = BusyChanged(busy=False, lane="security")
 
+FAKE = "fake"
+"""A runtime other than Claude."""
+
+PENTEST = Role(instructions="Probe it.", verify=False, lane="security", runtime=FAKE)
+"""A role in the lane ``security``, on the fake runtime."""
+
 
 class Lane:
     """A board, what's published and what's posted, for runners of the lane ``security``,
-    blocked as :attr:`read_only`, :attr:`halted` and :attr:`paused` say."""
+    blocked as :attr:`read_only` and :attr:`halted` say, skipping the tasks on the runtime
+    :attr:`paused` names, if any."""
 
     def __init__(self) -> None:
         self.events: list[Event] = []
         self.posted: list[Event] = []
         self.tasks = Tasks(TaskBoard(), self.publish)
-        self.read_only = self.halted = self.paused = False
+        self.read_only = self.halted = False
+        self.paused: str | None = None
         self.stopped = asyncio.Event()
 
     async def publish(self, event: Event) -> None:
@@ -108,7 +127,7 @@ async def test_a_kicked_runner_with_nothing_to_run_shows_no_busy() -> None:
     assert lane.posted == []
 
 
-@pytest.mark.parametrize("blocked", ["read_only", "halted", "paused"])
+@pytest.mark.parametrize("blocked", ["read_only", "halted"])
 async def test_a_blocked_runner_starts_nothing(blocked: str) -> None:
     lane = Lane()
     setattr(lane, blocked, True)
@@ -118,11 +137,36 @@ async def test_a_blocked_runner_starts_nothing(blocked: str) -> None:
     assert not runner.running
 
 
+async def test_a_runner_skips_its_tasks_on_the_paused_runtime_showing_no_busy() -> None:
+    lane = Lane()
+    lane.paused = CLAUDE
+    lane.add(audit())
+    runner = lane.runner()
+    await lane.ran(runner)
+    assert lane.statuses == ["pending"]
+    assert lane.posted == []
+    assert runner.current is None
+
+
+async def test_a_runner_runs_its_tasks_on_another_runtime_than_the_paused_one() -> None:
+    lane, host = Lane(), FakeHost()
+    fake = ScriptedLauncher(host, claims_done)
+    roles = {**WITH_SECURITY, "pentest": PENTEST}
+    desk = desk_for(lane.publish, host=host, roles=roles, launchers={FAKE: fake})
+    runner = LaneRunner("security", {"security", "pentest"}, lane.parts(desk))
+    runner.on_stopped(lane.stopped.set)
+    lane.paused = CLAUDE
+    lane.add(audit(), TaskSpec(prompt="Probe it.", role="pentest"))
+    await lane.ran(runner)
+    assert lane.statuses == ["pending", "completed"]
+    assert [launch.agent.role for launch in fake.launches] == ["pentest"]
+
+
 async def test_a_pause_as_a_task_ends_starts_no_other_until_kicked_again() -> None:
     lane = Lane()
 
     async def pauses(call: Call) -> TurnEndReason:
-        lane.paused = True
+        lane.paused = CLAUDE
         return await claims_done(call)
 
     lane.add(audit("a"), audit("b"))
@@ -130,7 +174,7 @@ async def test_a_pause_as_a_task_ends_starts_no_other_until_kicked_again() -> No
     await lane.ran(runner)
     assert lane.statuses == ["completed", "pending"]
 
-    lane.paused = False
+    lane.paused = None
     await lane.ran(runner)
     assert lane.statuses == ["completed", "completed"]
     assert lane.posted == [BUSY, IDLE, BUSY, IDLE]

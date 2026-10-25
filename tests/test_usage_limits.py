@@ -3,16 +3,20 @@ starts again."""
 
 from datetime import UTC, datetime, timedelta
 
-from orbit.agent.domain.runtimes import Failure
+from orbit.agent.domain.runtimes import CLAUDE, Failure, FailureKind
 from orbit.agent.domain.usage_limits import (
     LimitWaits,
     Outage,
+    RuntimeStop,
     api_unavailable,
     claude_failure,
     limit_hit,
+    limit_resume_time,
     outage_after,
     outage_delay,
     outage_paused_note,
+    outage_resume_time,
+    outage_resuming_note,
     paused_note,
     resume_time,
 )
@@ -20,6 +24,8 @@ from orbit.protocol import UsageChanged, UsageLimit
 
 NOW = datetime(2026, 10, 21, 15, 30, tzinfo=UTC)
 WAITS = LimitWaits(retry=timedelta(minutes=15), grace=timedelta(minutes=1))
+FAKE = "fake"
+"""A runtime other than Claude."""
 
 
 def used(*limits: tuple[float, datetime | None]) -> UsageChanged:
@@ -75,12 +81,63 @@ def test_the_waits_default_to_fifteen_minutes_and_one_of_grace() -> None:
     assert LimitWaits() == WAITS
 
 
+def stop(
+    kind: FailureKind, runtime: str = CLAUDE, resets_at: datetime | None = None
+) -> RuntimeStop:
+    """A run stopped by a failure of ``kind`` on ``runtime``, resetting at ``resets_at`` if
+    given."""
+    return RuntimeStop(runtime, Failure(kind, resets_at))
+
+
+def test_a_limit_whose_failure_states_its_reset_starts_the_run_again_then() -> None:
+    stated, shown = NOW + timedelta(hours=3), NOW + timedelta(hours=2)
+    limit = stop("usage_limit", resets_at=stated)
+    assert limit_resume_time(limit, used((100, shown)), NOW, WAITS) == stated
+
+
+def test_a_limit_without_a_stated_reset_starts_again_as_its_runtimes_usage_says() -> None:
+    shown = NOW + timedelta(hours=2)
+    assert limit_resume_time(stop("usage_limit"), used((100, shown)), NOW, WAITS) == (
+        shown + WAITS.grace
+    )
+    assert limit_resume_time(stop("usage_limit"), None, NOW, WAITS) == NOW + WAITS.retry
+
+
+def test_a_stated_reset_already_past_is_left_for_the_usage() -> None:
+    shown = NOW + timedelta(hours=2)
+    limit = stop("usage_limit", resets_at=NOW - timedelta(minutes=1))
+    assert limit_resume_time(limit, used((100, shown)), NOW, WAITS) == shown + WAITS.grace
+
+
+def test_another_runtimes_usage_doesnt_time_a_limit_so_it_retries() -> None:
+    claudes = used((100, NOW + timedelta(hours=2)))
+    assert limit_resume_time(stop("usage_limit", FAKE), claudes, NOW, WAITS) == NOW + WAITS.retry
+
+
+def test_an_outage_whose_failure_states_its_reset_starts_the_run_again_then() -> None:
+    stated = NOW + timedelta(hours=1)
+    outage = Outage(CLAUDE, "API Error: 529", level=3)
+    assert outage_resume_time(stop("api_unavailable", resets_at=stated), outage, NOW) == stated
+
+
+def test_an_outage_without_a_stated_reset_ahead_waits_out_the_backoff() -> None:
+    outage = Outage(CLAUDE, "API Error: 529", level=1)
+    past = stop("api_unavailable", resets_at=NOW)
+    assert outage_resume_time(stop("api_unavailable"), outage, NOW) == NOW + outage_delay(1)
+    assert outage_resume_time(past, outage, NOW) == NOW + outage_delay(1)
+
+
 def test_the_pause_note_names_the_time_in_utc() -> None:
     at = datetime(2026, 10, 21, 14, 1, tzinfo=UTC) + timedelta(hours=4)
-    assert paused_note(at) == (
+    assert paused_note(at, CLAUDE) == (
         "Claude's usage limit is reached, so the run stopped. It starts again by itself at "
         "Wed 21 Oct 18:01 UTC; ctrl+r starts it now and ctrl+s cancels that."
     )
+
+
+def test_the_pause_note_names_another_runtime_by_its_name() -> None:
+    at = datetime(2026, 10, 21, 18, 1, tzinfo=UTC)
+    assert paused_note(at, FAKE).startswith("fake's usage limit is reached, so the run stopped.")
 
 
 def test_claude_code_api_errors_for_an_unavailable_api_say_so() -> None:
@@ -123,15 +180,33 @@ def test_the_backoff_grows_to_half_an_hour_and_stays_there() -> None:
 
 
 def test_a_first_outage_starts_the_backoff_and_each_after_it_goes_a_level_up() -> None:
-    first = outage_after(None, "API Error: 529")
-    assert first == Outage("API Error: 529", level=0)
-    assert outage_after(first, "Request timed out") == Outage("Request timed out", level=1)
+    first = outage_after(None, CLAUDE, "API Error: 529")
+    assert first == Outage(CLAUDE, "API Error: 529", level=0)
+    assert outage_after(first, CLAUDE, "Request timed out") == Outage(
+        CLAUDE, "Request timed out", level=1
+    )
+
+
+def test_an_outage_on_another_runtime_starts_its_own_backoff() -> None:
+    claudes = Outage(CLAUDE, "API Error: 529", level=2)
+    assert outage_after(claudes, FAKE, "Gateway down") == Outage(FAKE, "Gateway down", level=0)
 
 
 def test_the_outage_note_names_the_error_s_first_line_and_the_time_in_utc() -> None:
     at = datetime(2026, 10, 23, 14, 20, tzinfo=UTC)
     error = "\nAPI Error: 529 Overloaded\n  retrying later"
-    assert outage_paused_note(at, error) == (
+    assert outage_paused_note(at, error, CLAUDE) == (
         "Claude's API isn't answering (API Error: 529 Overloaded), so the run stopped. It starts "
         "again by itself at Fri 23 Oct 14:20 UTC; ctrl+r starts it now and ctrl+s cancels that."
+    )
+
+
+def test_the_outage_notes_name_another_runtime_by_its_name() -> None:
+    at = datetime(2026, 10, 23, 14, 20, tzinfo=UTC)
+    assert outage_paused_note(at, "Gateway down", FAKE).startswith(
+        "fake's API isn't answering (Gateway down), so the run stopped."
+    )
+    assert outage_resuming_note(FAKE) == "Starting the run again now fake's API may be answering."
+    assert outage_resuming_note(CLAUDE) == (
+        "Starting the run again now Claude's API may be answering."
     )

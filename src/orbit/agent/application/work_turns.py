@@ -1,9 +1,10 @@
 """When the work lane runs: on the user's asking, after a review queues work unless the user
-held it or the session halted, first for a configurator, and again by itself once Claude's
-usage limit that stopped it resets, or, if Claude's API not answering stopped it, after a backoff
-that grows with each outage in a row, saying meanwhile until when and why it's paused. The lanes
-that start by themselves start no task meanwhile, and resume with it. A run remembers what
-started it, which its tasks' spans link to."""
+held it or the session halted, first for a configurator, and again by itself once the usage limit
+of the runtime that stopped it resets, or, if that runtime's API not answering stopped it, after a
+backoff that grows with each outage in a row, saying meanwhile until when, why and on which
+runtime it's paused. The lane keeps its order, so it waits; the lanes that start by themselves
+start no task on that runtime meanwhile, and run those with it. A run remembers what started it,
+which its tasks' spans link to."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
@@ -21,15 +22,16 @@ from orbit.agent.domain.checks import configure_prompt
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.roles import disabled_note, role_task
 from orbit.agent.domain.usage_limits import (
-    OUTAGE_RESUMING_NOTE,
     RESUMING_NOTE,
     WAIT_CANCELLED_NOTE,
     Outage,
     Paused,
-    outage_delay,
+    RuntimeStop,
+    limit_resume_time,
     outage_paused_note,
+    outage_resume_time,
+    outage_resuming_note,
     paused_note,
-    resume_time,
 )
 from orbit.protocol import (
     CONFIGURATOR,
@@ -86,15 +88,15 @@ class WorkTurns:
 
     The user's :meth:`run_tasks` starts a run, refused while one runs; :meth:`hold` cancels it
     and keeps :meth:`wake`, a review's request, from starting another until the user asks
-    again. While the session is halted, :meth:`wake` starts nothing either. A run Claude's
-    usage limit stopped starts again by itself once the limit resets, and one Claude's API not
-    answering stopped after a backoff, longer for each outage in a row, unless the user runs the
-    work, sets up checks or holds it first, or :meth:`forget_wait` is called as the session is
-    left; a halt's :meth:`stop_turn` keeps the wait, and one ending while halted starts the run
-    once :meth:`lifted` is called. Until the run starts again or its wait is cancelled or
-    dropped, :attr:`paused` says when it starts again and why. The lanes that start by
-    themselves are kicked as the run starts again by itself or the user cancels its wait, and
-    with every run the user asks for. Once :meth:`close` is called, nothing starts.
+    again. While the session is halted, :meth:`wake` starts nothing either. A run a runtime's
+    usage limit stopped starts again by itself once the limit resets, and one a runtime's API
+    not answering stopped after a backoff, longer for each outage in a row, unless the user runs
+    the work, sets up checks or holds it first, or :meth:`forget_wait` is called as the session
+    is left; a halt's :meth:`stop_turn` keeps the wait, and one ending while halted starts the
+    run once :meth:`lifted` is called. Until the run starts again or its wait is cancelled or
+    dropped, :attr:`paused` says when it starts again, why and on which runtime. The lanes that
+    start by themselves are kicked as the run starts again by itself or the user cancels its
+    wait, and with every run the user asks for. Once :meth:`close` is called, nothing starts.
 
     A run is started by the span current as it's asked for: the command's asking for it, or the
     review's whose suggestions it runs. The run keeps that span when it starts again by itself,
@@ -120,8 +122,9 @@ class WorkTurns:
 
     @property
     def paused(self) -> Paused | None:
-        """When the run the usage limit or an outage stopped starts again, and why, until it
-        does or its wait is cancelled or dropped; none while no run waits to."""
+        """When the run the usage limit or an outage stopped starts again, why and on which
+        runtime, until it does or its wait is cancelled or dropped; none while no run waits
+        to."""
         return self._paused
 
     async def run_tasks(self) -> None:
@@ -256,30 +259,32 @@ class WorkTurns:
 
     async def _run(self, work: WorkLane, cause: Span) -> None:
         """Run ``work``'s tasks, their spans linked to ``cause``, what started the run, then, if
-        the usage limit or Claude's API not answering stopped them, wait to start again."""
+        a runtime's usage limit or API not answering stopped them, wait to start again."""
         with use_span(cause):
             end = await work.run()
         if end == "limited":
-            self._wait_for_reset(cause)
+            assert work.runtime_stop is not None  # The usage limit stopped the run.
+            self._wait_for_reset(work.runtime_stop, cause)
         elif end == "api_unavailable":
-            assert work.outage is not None  # The outage stopped the run.
-            self._wait_out(work.outage, cause)
+            assert work.runtime_stop is not None and work.outage is not None  # So did this.
+            self._wait_out(work.runtime_stop, work.outage, cause)
 
-    def _wait_for_reset(self, cause: Span) -> None:
-        """Say when the run the usage limit stopped, started by ``cause``, starts again, and
-        start it then."""
+    def _wait_for_reset(self, stop: RuntimeStop, cause: Span) -> None:
+        """Say when the run the usage limit ``stop`` tells stopped, started by ``cause``, starts
+        again, and start it then."""
         pause = self._pause
-        at = resume_time(self._parts.usage(), pause.now(), pause.waits)
-        paused = Paused(at, PAUSED_FOR_USAGE_LIMIT)
-        self._pause_until(paused, paused_note(at), _Restart(cause, RESUMING_NOTE))
+        at = limit_resume_time(stop, self._parts.usage(), pause.now(), pause.waits)
+        paused = Paused(at, PAUSED_FOR_USAGE_LIMIT, stop.runtime)
+        self._pause_until(paused, paused_note(at, stop.runtime), _Restart(cause, RESUMING_NOTE))
 
-    def _wait_out(self, outage: Outage, cause: Span) -> None:
-        """Say when the run ``outage`` stopped, started by ``cause``, starts again, after the
-        backoff at its level, and start it then."""
-        at = self._pause.now() + outage_delay(outage.level)
-        note = outage_paused_note(at, outage.error)
-        paused = Paused(at, PAUSED_FOR_API_UNAVAILABLE)
-        self._pause_until(paused, note, _Restart(cause, OUTAGE_RESUMING_NOTE))
+    def _wait_out(self, stop: RuntimeStop, outage: Outage, cause: Span) -> None:
+        """Say when the run ``outage``, as ``stop`` tells it, stopped, started by ``cause``,
+        starts again, after the backoff at its level unless the failure says when, and start it
+        then."""
+        at = outage_resume_time(stop, outage, self._pause.now())
+        note = outage_paused_note(at, outage.error, stop.runtime)
+        paused = Paused(at, PAUSED_FOR_API_UNAVAILABLE, stop.runtime)
+        self._pause_until(paused, note, _Restart(cause, outage_resuming_note(stop.runtime)))
 
     def _pause_until(self, paused: Paused, note: str, restart: _Restart) -> None:
         """Say ``note`` about the run that just stopped, and start it again as ``restart`` says

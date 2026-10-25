@@ -146,6 +146,7 @@ SUMMARY = SessionSummary(
     activity=(Activity(kind="task_run", task_id="t1"), Activity(kind="startup_check")),
     paused_until=WHEN,
     paused_for=PAUSED_FOR_USAGE_LIMIT,
+    paused_runtime="claude",
 )
 STEP = StepState(name="Unit tests", status="failed")
 REVIEW = ReviewStatus(paused=True, open_batches=2)
@@ -275,6 +276,7 @@ EVENTS: tuple[EventEnvelope, ...] = (
             status="rate_limited",
             detail="Too many requests",
             retry_at=WHEN,
+            runtime="claude",
         )
     ),
     event(MessageSent(command_id="c1", agent=PLANNER, text="hello")),
@@ -297,6 +299,7 @@ EVENTS: tuple[EventEnvelope, ...] = (
             ),
             paused_until=WHEN,
             paused_for=PAUSED_FOR_API_UNAVAILABLE,
+            paused_runtime="claude",
         )
     ),
     event(

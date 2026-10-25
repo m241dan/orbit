@@ -1,4 +1,4 @@
-"""How a run that Claude's usage limit or an API outage stopped waits to start again."""
+"""How a run that a runtime's usage limit or API outage stopped waits to start again."""
 
 import asyncio
 from collections.abc import Awaitable, Callable

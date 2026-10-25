@@ -11,6 +11,7 @@ from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.application.ports import StoreFailed, UsageSource
 from orbit.agent.application.storage_halt import Failure
 from orbit.agent.domain.agent_task import Limits
+from orbit.agent.domain.runtimes import CLAUDE
 from orbit.agent.domain.runtimes import Failure as RuntimeFailure
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.agent.domain.usage import UsageReport
@@ -118,7 +119,7 @@ async def test_a_usage_limit_stops_the_run_and_says_when_it_starts_again() -> No
     assert [launch.agent.task_id for launch in launcher.launches] == ["1"]
     assert statuses(events) == ["error", "pending"]
     assert board(events)[0].reason_detail == LIMIT
-    assert notes(events)[-1] == paused_note(START + timedelta(minutes=15))
+    assert notes(events)[-1] == paused_note(START + timedelta(minutes=15), CLAUDE)
     await session.close()
 
 
@@ -132,7 +133,7 @@ async def test_a_usage_limit_the_launcher_tells_in_its_own_words_stops_the_run_a
 
     assert [launch.agent.task_id for launch in launcher.launches] == ["1"]
     assert statuses(events) == ["error", "pending"]
-    assert notes(events)[-1] == paused_note(START + timedelta(minutes=15))
+    assert notes(events)[-1] == paused_note(START + timedelta(minutes=15), CLAUDE)
 
 
 def coder_on_fake(fake: ScriptedLauncher) -> tuple[WorkspaceHost, ScriptedLauncher]:
@@ -175,7 +176,7 @@ async def test_the_run_starts_again_by_itself_at_the_reset_the_usage_shows() -> 
     used_up = UsageReport((UsageLimit(label="Session", percent=100, resets_at=resets),))
     session, launcher = limited(claims_done, claims_done, waits=waits, usage=Source(used_up))
     first = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
-    assert notes(first)[-1] == paused_note(resets + timedelta(minutes=1))
+    assert notes(first)[-1] == paused_note(resets + timedelta(minutes=1), CLAUDE)
 
     second = await asyncio.wait_for(resumed(session, waits), 5)
     await session.close()
@@ -531,7 +532,7 @@ async def test_a_fix_at_the_limit_runs_before_an_earlier_task_in_error_on_starti
     first = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
     a, b, fix = board(first)
     assert (a.status, b.status, fix.status) == ("error", "unverified", "error")
-    assert notes(first)[-1] == paused_note(START + timedelta(minutes=15))
+    assert notes(first)[-1] == paused_note(START + timedelta(minutes=15), CLAUDE)
 
     forgets_where_it_stopped(session)
     await send(session, RunTasks())

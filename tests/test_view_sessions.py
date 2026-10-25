@@ -126,21 +126,47 @@ TWO_AHEAD = timezone(timedelta(hours=2))
 """A local zone two hours ahead of UTC."""
 
 
-def paused(reason: str | None, until: datetime) -> SessionSummary:
-    """The active session, its run paused for ``reason`` until ``until``."""
-    return SessionSummary(id="s", name="today", active=True, paused_until=until, paused_for=reason)
+def paused(reason: str | None, until: datetime, runtime: str | None = "claude") -> SessionSummary:
+    """The active session, its run paused for ``reason`` on ``runtime`` until ``until``."""
+    return SessionSummary(
+        id="s",
+        name="today",
+        active=True,
+        paused_until=until,
+        paused_for=reason,
+        paused_runtime=runtime,
+    )
 
 
 def test_a_run_an_outage_paused_says_when_it_tries_again_in_local_time() -> None:
     summary = paused(PAUSED_FOR_API_UNAVAILABLE, datetime(2026, 10, 23, 12, 20, tzinfo=UTC))
     assert paused_words(summary, TWO_AHEAD) == (
-        "run paused: Claude's API isn't answering; trying again at 14:20"
+        "run paused: claude's API isn't answering; trying again at 14:20"
     )
 
 
 def test_a_run_the_usage_limit_paused_says_when_it_starts_again() -> None:
     summary = paused(PAUSED_FOR_USAGE_LIMIT, datetime(2026, 10, 23, 16, 1, tzinfo=UTC))
-    assert paused_words(summary, TWO_AHEAD) == "run paused: usage limit; starts again at 18:01"
+    assert paused_words(summary, TWO_AHEAD) == (
+        "run paused: usage limit on claude; starts again at 18:01"
+    )
+
+
+def test_a_run_paused_on_another_runtime_names_it() -> None:
+    until = datetime(2026, 10, 23, 16, 1, tzinfo=UTC)
+    limited = paused(PAUSED_FOR_USAGE_LIMIT, until, "kiro")
+    down = paused(PAUSED_FOR_API_UNAVAILABLE, until, "kiro")
+    assert [paused_words(summary, TWO_AHEAD) for summary in (limited, down)] == [
+        "run paused: usage limit on kiro; starts again at 18:01",
+        "run paused: kiro's API isn't answering; trying again at 18:01",
+    ]
+
+
+def test_a_pause_whose_runtime_isnt_given_is_claudes_as_older_backends_ran_only_claude() -> None:
+    summary = paused(PAUSED_FOR_USAGE_LIMIT, datetime(2026, 10, 23, 16, 1, tzinfo=UTC), None)
+    assert paused_words(summary, TWO_AHEAD) == (
+        "run paused: usage limit on claude; starts again at 18:01"
+    )
 
 
 def test_a_run_paused_for_a_reason_not_known_says_only_when_it_starts_again() -> None:
@@ -155,7 +181,7 @@ def test_a_run_not_paused_has_no_words_for_it() -> None:
 
 def test_a_paused_sessions_row_and_state_notes_say_its_run_is_paused() -> None:
     summary = paused(PAUSED_FOR_USAGE_LIMIT, datetime(2026, 10, 23, 16, 1, tzinfo=UTC))
-    words = "run paused: usage limit; starts again at 18:01"
+    words = "run paused: usage limit on claude; starts again at 18:01"
     assert state_notes(summary, zone=TWO_AHEAD) == ["active", words]
     assert session_label(summary, TWO_AHEAD).plain == f"  today · active · {words}"
 

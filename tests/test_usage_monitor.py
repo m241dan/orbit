@@ -11,6 +11,7 @@ import pytest
 from orbit.agent import WorkspaceHost
 from orbit.agent.application import usage_monitor
 from orbit.agent.application.usage_monitor import UsageMonitor
+from orbit.agent.domain.runtimes import CLAUDE
 from orbit.agent.domain.usage import UsageFetch, UsageRateLimited, UsageReport, UsageUnavailable
 from orbit.protocol import Event, TurnFinished, UsageChanged, UsageLimit
 from tests.agent_fakes import (
@@ -268,6 +269,13 @@ async def test_a_session_with_a_usage_source_publishes_its_usage() -> None:
     session = served(WorkspaceHost(), Source(UsageReport(LIMITS)))
     assert await usage_events(payloads(session), 1) == [UsageChanged(limits=LIMITS)]
     await session.close()
+
+
+async def test_the_usage_claudes_monitor_publishes_is_claudes() -> None:
+    session = served(WorkspaceHost(), Source(UsageReport(LIMITS)))
+    [usage] = await usage_events(payloads(session), 1)
+    await session.close()
+    assert usage.runtime == CLAUDE
 
 
 @pytest.mark.usefixtures("always_due")

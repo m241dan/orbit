@@ -32,7 +32,13 @@ WAITING = SessionSummary(
         Activity(kind="waiting_for_coder", position=2, busy=4),
     ),
 )
-PAUSED = SessionSummary(id="s3", name="old", paused_until=UNTIL, paused_for=PAUSED_FOR_USAGE_LIMIT)
+PAUSED = SessionSummary(
+    id="s3",
+    name="old",
+    paused_until=UNTIL,
+    paused_for=PAUSED_FOR_USAGE_LIMIT,
+    paused_runtime="claude",
+)
 
 CATALOG = Catalog(
     workspaces=(
@@ -64,7 +70,7 @@ Workspaces
   orbit  /src/orbit
     main · active · running
     docs · waiting for a coder: 2nd in line
-    old · idle · run paused: usage limit; starts again at 18:01
+    old · idle · run paused: usage limit on claude; starts again at 18:01
   scratch
     no sessions
 
@@ -86,14 +92,18 @@ def test_a_session_waiting_for_a_coder_is_reported_with_its_place_in_line() -> N
     (workspace, _) = status_report(WELCOME, CATALOG, AGENTS, TOTALS, URL).workspaces
     docs = workspace.sessions[1]
     assert (docs.state, docs.waiting_for_coder, docs.coder_position) == ("running", True, 2)
-    assert (docs.paused_until, docs.paused_for) == (None, None)
+    assert (docs.paused_until, docs.paused_for, docs.paused_runtime) == (None, None, None)
 
 
-def test_a_paused_session_is_reported_with_when_and_why() -> None:
+def test_a_paused_session_is_reported_with_when_why_and_on_which_runtime() -> None:
     (workspace, _) = status_report(WELCOME, CATALOG, AGENTS, TOTALS, URL).workspaces
     old = workspace.sessions[2]
     assert (old.state, old.waiting_for_coder, old.coder_position) == ("idle", False, None)
-    assert (old.paused_until, old.paused_for) == (UNTIL, PAUSED_FOR_USAGE_LIMIT)
+    assert (old.paused_until, old.paused_for, old.paused_runtime) == (
+        UNTIL,
+        PAUSED_FOR_USAGE_LIMIT,
+        "claude",
+    )
 
 
 def test_a_wait_for_a_coder_with_no_place_in_line_says_just_that() -> None:
@@ -151,10 +161,12 @@ def test_the_json_is_one_object_with_the_same_values() -> None:
         "coder_position": None,
         "paused_until": None,
         "paused_for": None,
+        "paused_runtime": None,
     }
     assert orbit["sessions"][1]["coder_position"] == 2
     assert orbit["sessions"][2]["paused_until"] == "2026-10-25T18:01:00Z"
     assert orbit["sessions"][2]["paused_for"] == "usage_limit"
+    assert orbit["sessions"][2]["paused_runtime"] == "claude"
     assert parsed["agents"][0] == {
         "workspace": "w1",
         "workspace_label": "orbit",

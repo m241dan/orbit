@@ -214,7 +214,8 @@ class SessionSummary(_Message):
     session can't be opened, if it can't. In a ``Catalog``, ``active`` marks the workspace's
     open session, ``state`` says whether it's running, ``viewers`` counts the connections
     viewing it, ``activity`` says what's in progress in it, and, while its run waits to start
-    again by itself, ``paused_until`` says when it does and ``paused_for`` why."""
+    again by itself, ``paused_until`` says when it does, ``paused_for`` why and
+    ``paused_runtime`` on which runtime."""
 
     id: str
     name: str
@@ -230,6 +231,7 @@ class SessionSummary(_Message):
     activity: tuple[Activity, ...] = ()
     paused_until: AwareDatetime | None = None
     paused_for: PauseReason | None = None
+    paused_runtime: str | None = None
 
 
 class SessionRef(_Message):

@@ -64,16 +64,16 @@ class ReviewHooks:
     ``wake_work`` asks the work lane to run the suggestions a review queued, while the
     review's span is current, ``changed`` is called after the lane's state may have changed,
     the session's ``gate`` tells whether another orbit owns the repository or the session is
-    halted, and ``paused`` whether the work lane waits out a pause, when no review starts,
-    ``tracing`` traces the reviews and ``post`` publishes, without blocking, whether the lane is
-    busy.
+    halted, when no review starts, ``paused`` the runtime whose pause the work lane waits out,
+    if any, on which no review starts, ``tracing`` traces the reviews and ``post`` publishes,
+    without blocking, whether the lane is busy.
     """
 
     wake_work: Callable[[], Awaitable[None]]
     changed: Changed
     gate: SessionGate
     tracing: ReviewTracing = field(default_factory=ReviewTracing)
-    paused: Callable[[], bool] = unpaused
+    paused: Callable[[], str | None] = unpaused
     post: Callable[[Event], None] = unposted
 
 
@@ -261,8 +261,8 @@ class ReviewLane:
 
     def kick(self) -> None:
         """Run the reviews waiting, if they aren't being run already, unless this orbit is
-        read-only, the session is halted or the work lane waits out a pause; those queued
-        meanwhile wait on the board."""
+        read-only or the session is halted, skipping those on the runtime whose pause the work
+        lane waits out; those queued meanwhile wait on the board."""
         self.runner.kick()
 
     async def stop(self) -> None:

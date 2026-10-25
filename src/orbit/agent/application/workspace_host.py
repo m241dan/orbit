@@ -900,9 +900,11 @@ class WorkspaceHost:
         runners = (*review, *self._runners)
         return Lanes(merging_lane(self._roles()), runners, lambda: self._seats.lanes)
 
-    def _paused(self) -> bool:
-        """Whether the work lane waits out a pause, when no other lane starts a task."""
-        return self._turns.paused is not None
+    def _paused(self) -> str | None:
+        """The runtime whose pause the work lane waits out, on which no other lane starts a
+        task; none while it waits out none."""
+        paused = self._turns.paused
+        return None if paused is None else paused.runtime
 
     async def _reviews_changed(self) -> None:
         """Save the review state, which may have changed, and the repository's super review

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.limit_pause import LimitPause
+from orbit.agent.domain.runtimes import CLAUDE
 from orbit.protocol import (
     PAUSED_FOR_API_UNAVAILABLE,
     PAUSED_FOR_USAGE_LIMIT,
@@ -79,9 +80,11 @@ def running_now(event: Event) -> bool:
     return isinstance(event, SessionStateChanged) and event.state == "running"
 
 
-def pause_of(state: SessionStateChanged | SessionSummary) -> tuple[datetime | None, str | None]:
-    """Until when and why ``state`` says its session's run is paused."""
-    return state.paused_until, state.paused_for
+def pause_of(
+    state: SessionStateChanged | SessionSummary,
+) -> tuple[datetime | None, str | None, str | None]:
+    """Until when, why and on which runtime ``state`` says its session's run is paused."""
+    return state.paused_until, state.paused_for, state.paused_runtime
 
 
 async def stopped(session: WorkspaceHost) -> SessionStateChanged:
@@ -105,8 +108,8 @@ async def test_an_outage_publishes_the_pause_until_the_run_starts_again() -> Non
     events = await until(session, running_now)
     await session.close()
 
-    assert pause_of(paused) == (START + timedelta(minutes=2), PAUSED_FOR_API_UNAVAILABLE)
-    assert pause_of(changes(events)[0]) == (None, None)
+    assert pause_of(paused) == (START + timedelta(minutes=2), PAUSED_FOR_API_UNAVAILABLE, CLAUDE)
+    assert pause_of(changes(events)[0]) == (None, None, None)
 
 
 async def test_a_usage_limit_publishes_the_pause_for_the_limit() -> None:
@@ -114,7 +117,7 @@ async def test_a_usage_limit_publishes_the_pause_for_the_limit() -> None:
     paused = await stopped(session)
     await session.close()
 
-    assert pause_of(paused) == (START + timedelta(minutes=15), PAUSED_FOR_USAGE_LIMIT)
+    assert pause_of(paused) == (START + timedelta(minutes=15), PAUSED_FOR_USAGE_LIMIT, CLAUDE)
 
 
 async def test_cancelling_the_wait_clears_the_pause() -> None:
@@ -124,7 +127,7 @@ async def test_cancelling_the_wait_clears_the_pause() -> None:
     cleared = await next_change(session)
     await session.close()
 
-    assert pause_of(cleared) == (None, None)
+    assert pause_of(cleared) == (None, None, None)
 
 
 async def test_a_run_the_user_starts_during_the_wait_clears_the_pause() -> None:
@@ -134,7 +137,7 @@ async def test_a_run_the_user_starts_during_the_wait_clears_the_pause() -> None:
     cleared = await next_change(session)
     await session.close()
 
-    assert pause_of(cleared) == (None, None)
+    assert pause_of(cleared) == (None, None, None)
 
 
 async def test_a_wait_ending_with_no_work_left_clears_the_pause() -> None:
@@ -146,7 +149,7 @@ async def test_a_wait_ending_with_no_work_left_clears_the_pause() -> None:
     cleared = await next_change(session)
     await session.close()
 
-    assert pause_of(cleared) == (None, None)
+    assert pause_of(cleared) == (None, None, None)
 
 
 async def test_switching_sessions_clears_the_pause() -> None:
@@ -157,7 +160,7 @@ async def test_switching_sessions_clears_the_pause() -> None:
     await session.close()
 
     assert changes(events)
-    assert all(pause_of(change) == (None, None) for change in changes(events))
+    assert all(pause_of(change) == (None, None, None) for change in changes(events))
 
 
 async def test_a_joining_connections_catalog_carries_the_pause() -> None:
@@ -169,4 +172,4 @@ async def test_a_joining_connections_catalog_carries_the_pause() -> None:
 
     [workspace] = catalog.workspaces
     [summary] = workspace.sessions
-    assert pause_of(summary) == (START + timedelta(minutes=2), PAUSED_FOR_API_UNAVAILABLE)
+    assert pause_of(summary) == (START + timedelta(minutes=2), PAUSED_FOR_API_UNAVAILABLE, CLAUDE)
