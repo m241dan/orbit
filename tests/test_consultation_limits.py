@@ -233,3 +233,81 @@ async def test_one_held_with_no_frontend_connected_expires_denied_after_an_hour(
     assert ApprovalDecided(consultation=2, decision="deny") in taken
     answer = sole([e for e in taken if answering(2)(e)], ConsultationAnswered)
     assert answer.interrupted == "it expired waiting for approval"
+
+
+def asking(heard: list[Reply], consultant: str, *messages: str) -> Script:
+    """A turn consulting ``consultant`` with each of ``messages``, noting what it hears in
+    ``heard``."""
+
+    async def turn(call: Call) -> TurnEndReason:
+        for message in messages:
+            heard.append(await call("consult", role=consultant, message=message))
+        return "completed"
+
+    return turn
+
+
+MUTUAL = {
+    **LIMITED,
+    EXPERIMENTER: EXPERIMENTER_ROLE.model_copy(
+        update={"consults": (PLANNER,), "consult_limit_per_hour": 1}
+    ),
+}
+"""A planner and an experimenter each consulting the other, once an hour."""
+
+
+def of_kind(events: list[Event], kind: type[ApprovalDecided]) -> list[ApprovalDecided]:
+    """The ``events`` of type ``kind``."""
+    return [e for e in events if isinstance(e, kind)]
+
+
+def by(asker: str, asked: list[ApprovalRequested]) -> list[int]:
+    """The consultations in ``asked`` from the role ``asker``."""
+    return [request.consultation for request in asked if request.asker == asker]
+
+
+async def holding_from_both() -> tuple[WorkspaceHost, list[ApprovalRequested]]:
+    """A session holding two consultations from the planner and one from the experimenter,
+    and what the user was asked about them."""
+    heard: list[Reply] = []
+    session, _, launcher = session_for(roles=MUTUAL)
+    launcher.planner_turns = [
+        asking(heard, EXPERIMENTER, "Check X", "Check Y", "Check Z"),
+        asking(heard, PLANNER, "Ask A", "Ask B"),
+        *[chats] * 8,
+    ]
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    asked: list[ApprovalRequested] = []
+
+    def third(event: Event) -> bool:
+        if isinstance(event, ApprovalRequested):
+            asked.append(event)
+        return len(asked) == 3
+
+    await events_until(session, third)
+    return session, asked
+
+
+async def test_allowing_for_the_hour_starts_the_askers_other_held_consultations() -> None:
+    session, asked = await holding_from_both()
+    planners = by(PLANNER, asked)
+    await send(session, DecideApproval(consultation=planners[0], decision="allow_hour"))
+    events = await events_until(session, answering(planners[1]))
+    snapshot = await snapshot_of(session)
+    await session.close()
+
+    decided = of_kind(events, ApprovalDecided)
+    assert decided == [ApprovalDecided(consultation=n, decision="allow_hour") for n in planners]
+    assert by(EXPERIMENTER, list(snapshot.approvals)) == by(EXPERIMENTER, asked)
+    assert len(snapshot.approvals) == 1
+
+
+async def test_allowing_once_leaves_the_askers_other_held_consultations_held() -> None:
+    session, asked = await holding_from_both()
+    planners = by(PLANNER, asked)
+    await send(session, DecideApproval(consultation=planners[0], decision="allow"))
+    await events_until(session, of_type(ApprovalDecided))
+    snapshot = await snapshot_of(session)
+    await session.close()
+
+    assert by(PLANNER, list(snapshot.approvals)) == planners[1:]

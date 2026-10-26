@@ -250,7 +250,16 @@ class Consultations:
             self._drop(asked, DECLINED)
         else:
             self._start(asked, held.work)
+        if command.decision == "allow_hour":
+            self._free(asked.asker)
         await self._save()
+
+    def _free(self, asker: str) -> None:
+        """Start each other consultation held from the role ``asker``, now free of its limit,
+        publishing that each was allowed for the hour."""
+        for held in self.approvals.take_from(asker):
+            self._post(_decided(held.request.consultation, "allow_hour"))
+            self._start(self._pending[held.request.consultation], held.work)
 
     async def _expired(self, held: Held[PlannerSeat]) -> None:
         """Answer the consultation ``held`` as expired, denied, and publish that."""

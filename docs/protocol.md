@@ -661,7 +661,8 @@ limit) over a rolling hour. One asked past it is held, rather than queued: `cons
 approval; …`, and the backend publishes `ApprovalRequested(consultation, asker, consultant,
 title, asked)`, `asked` counting the consultations the asker asked in the past hour. A frontend
 asks the user about it, and answers with `DecideApproval(consultation, decision)`: `allow` queues
-it; `allow_hour` queues it and lets its asker consult freely for an hour from then; `deny`
+it; `allow_hour` queues it, and every other consultation held from the same asker, each with
+its own `ApprovalDecided`, and lets its asker consult freely for an hour from then; `deny`
 answers it as interrupted, `you declined it`. The first decision applies: the backend publishes
 `ApprovalDecided(consultation, decision)`, at which every frontend still asking about it stops,
 and refuses any later one with `unknown`. A consultation held for an hour with no frontend

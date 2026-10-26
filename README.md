@@ -1306,7 +1306,8 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   0 means no limit, and a negative number is refused. Past it, a consultation is held and every
   frontend viewing the session asks: `The planner wants to ask the experimenter: '<first line>'.
   It has asked 6 times this hour.`, with **a** Allow, **h** Allow for the rest of the hour (the
-  role then consults freely for an hour from your approval) and **d** Deny. The first answer from
+  role then consults freely for an hour from your approval, and its other consultations held
+  start too, closing their questions) and **d** Deny. The first answer from
   any frontend applies and closes the others'. A denied consultation reaches the asker as
   interrupted (`you declined it`); one held for an hour with no frontend connected expires the
   same way (`it expired waiting for approval`).

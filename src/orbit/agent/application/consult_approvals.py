@@ -58,6 +58,15 @@ class Approvals[T]:
         self._arm()
         return held
 
+    def take_from(self, asker: str) -> list[Held[T]]:
+        """Stop holding the consultations from the role ``asker``, returning them in the order
+        they were held."""
+        taken = [held for held in self._held.values() if held.request.asker == asker]
+        for held in taken:
+            del self._held[held.request.consultation]
+        self._arm()
+        return taken
+
     def viewers(self, count: int) -> None:
         """Note that ``count`` frontends are connected now."""
         if count:
