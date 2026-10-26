@@ -55,9 +55,16 @@ def state(
     active: bool = True,
     activity: tuple[Activity, ...] = (),
 ) -> SessionStateChanged:
-    """The open session's state change to ``state`` with ``viewers``, doing ``activity``."""
+    """The state change of ``session`` to ``state`` with ``viewers``, doing ``activity``, with
+    an empty spend by role if ``active`` and an unknown one otherwise."""
     return SessionStateChanged(
-        session=session, active=active, state=state, viewers=viewers, activity=activity
+        session=session,
+        active=active,
+        state=state,
+        viewers=viewers,
+        activity=activity,
+        role_spent={} if active else None,
+        caused_spent={} if active else None,
     )
 
 

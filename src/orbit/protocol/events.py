@@ -590,8 +590,8 @@ class SessionStateChanged(_Message):
     while its run waits to start again by itself, starting again at ``paused_until``, stopped
     for ``paused_for`` on the runtime ``paused_runtime``, and what it spent by role
     (``role_spent``) and what each role caused its consultants to spend, by asker then consultant
-    (``caused_spent``), as its turns end; sent to every connection whenever one of them changes,
-    and never logged."""
+    (``caused_spent``), as its turns end, or none for a session that isn't open; sent to every
+    connection whenever one of them changes, and never logged."""
 
     type: Literal["session_state_changed"] = "session_state_changed"
     session: str
@@ -602,8 +602,8 @@ class SessionStateChanged(_Message):
     paused_until: AwareDatetime | None = None
     paused_for: PauseReason | None = None
     paused_runtime: str | None = None
-    role_spent: dict[str, Usage] = Field(default_factory=dict)
-    caused_spent: dict[str, dict[str, Usage]] = Field(default_factory=dict)
+    role_spent: dict[str, Usage] | None = None
+    caused_spent: dict[str, dict[str, Usage]] | None = None
 
 
 def with_state(summary: SessionSummary, changed: SessionStateChanged) -> SessionSummary:

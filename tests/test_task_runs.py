@@ -153,7 +153,9 @@ async def test_running_does_nothing_when_nothing_is_runnable() -> None:
     await anext(stream)  # The snapshot.
     await send(session, RunTasks())
     await asyncio.sleep(0.01)
-    counted = SessionStateChanged(session="session-1", active=True, state="idle", viewers=1)
+    counted = SessionStateChanged(
+        session="session-1", active=True, state="idle", viewers=1, role_spent={}, caused_spent={}
+    )
     assert queued(session) == [CommandAccepted(command_id=ATTACH_ID), counted, ACCEPTED]
     assert launcher.launches == []
 

@@ -114,7 +114,9 @@ async def test_attaching_after_hello_gets_the_snapshot_the_workspace_note_and_a_
     assert [step.name for step in events[2].steps] == [STEP.name]
     assert events[3] == Notice(message="Workspace: /work")
     assert events[4] == CommandAccepted(command_id=ATTACH_ID)
-    assert events[5] == SessionStateChanged(session="s1", active=True, state="idle", viewers=1)
+    assert events[5] == SessionStateChanged(
+        session="s1", active=True, state="idle", viewers=1, role_spent={}, caused_spent={}
+    )
     assert nothing_queued(session)
 
 

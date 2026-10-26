@@ -28,7 +28,8 @@ class StateParts:
 
 
 def _unviewed(session_id: str) -> SessionStateChanged:
-    """The state of the session ``session_id`` that isn't open and no connection views."""
+    """The state of the session ``session_id`` that isn't open and no connection views, with
+    its spend by role unknown here."""
     return SessionStateChanged(session=session_id, active=False, state="idle", viewers=0)
 
 

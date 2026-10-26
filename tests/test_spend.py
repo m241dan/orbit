@@ -87,6 +87,8 @@ def test_the_corner_follows_the_viewed_sessions_spend_by_role() -> None:
     )
     corner.track(other)
     assert view.text == "$0.42"
+    corner.track(other.model_copy(update={"session": "s1", "role_spent": None}))
+    assert view.text == "$0.42"
     changed = other.model_copy(
         update={"session": "s1", "role_spent": ROLE_SPENT, "caused_spent": CAUSED_ONE}
     )

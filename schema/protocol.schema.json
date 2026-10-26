@@ -2483,7 +2483,7 @@
       "type": "object"
     },
     "SessionStateChanged": {
-      "description": "Session ``session`` is now ``active`` (the workspace's open session) or not, in\n``state``, with ``viewers`` connections viewing it, ``activity`` in progress in it, and,\nwhile its run waits to start again by itself, starting again at ``paused_until``, stopped\nfor ``paused_for`` on the runtime ``paused_runtime``, and what it spent by role\n(``role_spent``) and what each role caused its consultants to spend, by asker then consultant\n(``caused_spent``), as its turns end; sent to every connection whenever one of them changes,\nand never logged.",
+      "description": "Session ``session`` is now ``active`` (the workspace's open session) or not, in\n``state``, with ``viewers`` connections viewing it, ``activity`` in progress in it, and,\nwhile its run waits to start again by itself, starting again at ``paused_until``, stopped\nfor ``paused_for`` on the runtime ``paused_runtime``, and what it spent by role\n(``role_spent``) and what each role caused its consultants to spend, by asker then consultant\n(``caused_spent``), as its turns end, or none for a session that isn't open; sent to every\nconnection whenever one of them changes, and never logged.",
       "properties": {
         "active": {
           "title": "Active",
@@ -2498,14 +2498,22 @@
           "type": "array"
         },
         "caused_spent": {
-          "additionalProperties": {
-            "additionalProperties": {
-              "$ref": "#/$defs/Usage"
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "additionalProperties": {
+                  "$ref": "#/$defs/Usage"
+                },
+                "type": "object"
+              },
+              "type": "object"
             },
-            "type": "object"
-          },
-          "title": "Caused Spent",
-          "type": "object"
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caused Spent"
         },
         "paused_for": {
           "anyOf": [
@@ -2545,11 +2553,19 @@
           "title": "Paused Until"
         },
         "role_spent": {
-          "additionalProperties": {
-            "$ref": "#/$defs/Usage"
-          },
-          "title": "Role Spent",
-          "type": "object"
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/Usage"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Spent"
         },
         "session": {
           "title": "Session",

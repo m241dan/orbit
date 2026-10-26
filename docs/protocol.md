@@ -468,8 +468,8 @@ Each session in a `Catalog` carries its state as it is when the Catalog is sent:
   keeping its order, and the lanes whose tasks start by themselves start none whose role runs on
   the paused runtime, running their tasks on other runtimes.
 - `role_spent` and `caused_spent`, in `SessionStateChanged` only, not the Catalog: what the
-  open session spent, as its `Snapshot` has them, updated as its turns end; empty for any other
-  session.
+  open session spent, as its `Snapshot` has them, updated as its turns end; null for any other
+  session, whose spend a frontend keeps as that session's `Snapshot` said.
 
 Whenever one of them changes for a session, every welcomed connection gets
 `SessionStateChanged(session, active, state, viewers, activity, paused_until, paused_for,

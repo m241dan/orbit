@@ -111,7 +111,10 @@ class UsageCorner:
             self._session = event.session.id
             self._spent(event.role_spent, event.caused_spent)
         elif isinstance(event, SessionStateChanged) and event.session == self._session:
-            self._spent(event.role_spent, event.caused_spent)
+            self._spent(
+                event.role_spent if event.role_spent is not None else self.role_spent,
+                event.caused_spent if event.caused_spent is not None else self.caused_spent,
+            )
         self.show()
 
     def _spent(self, role_spent: RoleSpent, caused_spent: CausedSpent) -> None:

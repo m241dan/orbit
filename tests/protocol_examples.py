@@ -345,6 +345,7 @@ EVENTS: tuple[EventEnvelope, ...] = (
             caused_spent={PLANNER: {"experimenter": USAGE}},
         )
     ),
+    event(SessionStateChanged(session="s2", active=False, state="idle", viewers=1)),
     event(
         Snapshot(
             session=SUMMARY,
