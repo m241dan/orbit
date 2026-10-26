@@ -39,6 +39,7 @@ class Approvals[T]:
         self._alone_since: float | None = float("-inf")  # None while a frontend is connected.
         self._timer: asyncio.Task[None] | None = None
         self._timing = 0  # Bumped by each stop, ending any expiry in flight.
+        self._paused = False
 
     @property
     def waiting(self) -> tuple[ApprovalRequested, ...]:
@@ -87,9 +88,22 @@ class Approvals[T]:
             self._timer.cancel()
             self._timer = None
 
-    def _arm(self) -> None:
-        """Time the next consultation held to expire, if any will."""
+    def pause(self) -> None:
+        """Stop timing the consultations held, holding or deciding on them meanwhile timing
+        none, until :meth:`unpause`."""
+        self._paused = True
         self.stop()
+
+    def unpause(self) -> None:
+        """Time the consultations held to expire again, after :meth:`pause`."""
+        self._paused = False
+        self._arm()
+
+    def _arm(self) -> None:
+        """Time the next consultation held to expire, if any will, unless paused."""
+        self.stop()
+        if self._paused:
+            return
         due = [expires_at(held.held, self._alone_since) for held in self._held.values()]
         times = [time for time in due if time is not None]
         if times:

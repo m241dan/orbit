@@ -10,12 +10,13 @@ from orbit.agent.application.consultations import held_note
 from orbit.agent.application.conversation_seats import ConversationSeats
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.planner_seat import SeatHooks, Timer
-from orbit.agent.application.ports import Reply
+from orbit.agent.application.ports import Reply, StoreFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.consult_limits import HOUR
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.sessions import SessionRecord
+from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import (
     PLANNER,
     UNKNOWN,
@@ -43,8 +44,10 @@ from tests.agent_fakes import (
     agents_for,
     chats,
     events_until,
+    halt_of,
     of_type,
     refused,
+    resume_storage,
     send,
     session_for,
     snapshot_of,
@@ -242,6 +245,35 @@ async def test_one_held_with_no_frontend_connected_expires_denied_after_an_hour(
     assert answer.interrupted == "it expired waiting for approval"
 
 
+async def test_one_held_as_storage_halts_expires_only_once_the_halt_lifts() -> None:
+    clock = Clock()
+    agents, launcher = agents_for(roles=LIMITED)
+    events: asyncio.Queue[Event] = asyncio.Queue()
+    hooks = SeatHooks(nothing, lambda: None, tuple, timer=Timer(clock, clock.sleep))
+    seats = ConversationSeats(
+        AgentDesk(agents, events.put), Tasks(TaskBoard(), events.put), events, hooks
+    )
+    launcher.planner_turns = [consulting([], asyncio.Event()), chats, chats, chats]
+    seats.viewers(1)  # Kept from expiring until the frontend leaves, as the session halts.
+    await seats.planner.submit("Plan.", Settings())
+    await eventually(lambda: seats.approvals != ())
+    await seats.stop_turns(final=False)
+    seats.viewers(0)
+    for _ in range(10):
+        await asyncio.sleep(0)
+    halted = drained(events)
+    seats.restart_expiry()
+    told = "The experimenter's consultation 'Check Y' was interrupted: it expired waiting for"
+    await eventually(lambda: any(told in launch.prompt for launch in launcher.launches))
+    taken = drained(events)
+    await seats.stop_turns(final=True)
+    await seats.close()
+
+    assert not any(isinstance(e, ApprovalDecided) for e in halted)
+    assert ApprovalDecided(consultation=2, decision="deny") in taken
+    assert clock.now == HOUR
+
+
 def asking(heard: list[Reply], consultant: str, *messages: str) -> Script:
     """A turn consulting ``consultant`` with each of ``messages``, noting what it hears in
     ``heard``."""
@@ -368,6 +400,24 @@ async def test_switching_away_settles_the_one_held_as_denied() -> None:
     assert ApprovalDecided(consultation=2, decision="deny") in events
     assert snapshot.approvals == ()
     assert [(c.number, c.why) for c in last_of(store, "session-1").consultations] == [(2, SWITCHED)]
+
+
+async def test_one_held_as_storage_halts_stays_held_to_decide_once_resumed() -> None:
+    store = FakeStore()
+    session, _ = await holding_in(store)
+    halt = halt_of(session)
+    halt.fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))
+    await eventually(lambda: not halt._halting)  # The turns stopped.
+    await resume_storage(session)
+    snapshot = await snapshot_of(session)
+    pending = [c.number for c in store.last.consultations]
+    await send(session, DecideApproval(consultation=2, decision="allow"))
+    answer = sole(await events_until(session, of_type(ConsultationAnswered)), ConsultationAnswered)
+    await session.close()
+
+    assert snapshot.approvals == (requested(2, "Check Y"),)
+    assert pending == [2]
+    assert (answer.consultation, answer.interrupted) == (2, None)
 
 
 async def reopened(why: str, launcher: ScriptedLauncher) -> None:

@@ -177,8 +177,13 @@ class Consultations:
         await self._save()
 
     def stop_expiry(self) -> None:
-        """Stop timing the consultations held for approval, as the session's turns stop."""
-        self.approvals.stop()
+        """Stop timing the consultations held for approval, as the session's turns stop, until
+        :meth:`restart_expiry`."""
+        self.approvals.pause()
+
+    def restart_expiry(self) -> None:
+        """Time the consultations held for approval to expire again, as a halt lifts."""
+        self.approvals.unpause()
 
     def leave(self) -> None:
         """Have the consultations pending saved as interrupted by a switch of session, telling

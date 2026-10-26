@@ -218,7 +218,8 @@ class ConversationSeats:
         """Cancel each role's turn, if it runs, and wait for them to end, starting none of the
         turns waiting meanwhile, which are forgotten. If ``final``, as orbit stops, the
         consultations they answered stay pending, to answer as the session opens again; else
-        they're answered as cancelled."""
+        they're answered as cancelled, but for those held for approval, which stay held. Either
+        way the held ones stop expiring, until :meth:`restart_expiry`."""
         self._consultations.hold()
         self._consultations.stop_expiry()
         for seat in self._seats.values():
@@ -231,6 +232,10 @@ class ConversationSeats:
             self._consultations.release()
         if not final:
             await self._consultations.cancel()
+
+    def restart_expiry(self) -> None:
+        """Time the consultations held for approval to expire again, as a halt lifts."""
+        self._consultations.restart_expiry()
 
     async def close(self) -> None:
         """End each role's current conversation, at the session's end."""

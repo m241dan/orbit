@@ -939,12 +939,14 @@ class WorkspaceHost:
 
     def _restart_background(self) -> None:
         """Start the tasks waiting in the lanes that start by themselves, the reviews among them,
-        and the startup check the halt kept from starting, as the halt lifts. A startup check
+        and the startup check the halt kept from starting, and times the consultations held
+        for approval to expire again, as the halt lifts. A startup check
         the halt cancelled stays cancelled, as one the user cancelled does: it runs once as orbit
         starts, the conversation has said it was cancelled, and the first task's verification
         runs the same steps."""
         self._lanes.kick()
         self._start_startup_check()
+        self._seats.restart_expiry()
 
     def _agent_on(self, task_id: str) -> str:
         """The agent working on task ``task_id``; only asked while one is."""
