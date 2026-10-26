@@ -989,7 +989,11 @@ kept to one line). Its drafts' tools come with `propose_task`: `list_drafts()` g
 drafts.` with none), and `read_draft(task_id)` gives one's id and title, a blank line and the rest
 of its prompt. It's refused a task that isn't there (`No task with id '99'.`), one it didn't
 propose (`Task 2 isn't one of your drafts.`), and one of its own you accepted or edited (`Task 4
-isn't a draft any more; the user accepted or edited it.`). A role's `tools` naming a draft tool
+isn't a draft any more; the user accepted or edited it.`). `edit_draft(task_id, title, prompt)`
+replaces one's title and prompt, keeping it a draft in its place (`Edited draft task 5.`; a blank
+title is refused with `A task needs a title.`), and its row's details then end with
+` · edited by <role>` until you accept or edit it; `remove_draft(task_id)` withdraws one
+(`Removed draft task 5.`). Both are refused as `read_draft` is. A role's `tools` naming a draft tool
 is refused (`read_draft comes with propose_task; list that instead.`). Every plan's first task writes the plan's record: a numbered requirements
 document in `docs/` (or wherever the project keeps such records), named like
 `docs/00001-feature-dark-mode.md`, with the decisions you confirmed and the tasks that carry them

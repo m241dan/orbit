@@ -548,6 +548,8 @@ is refused with `unknown`: `No task with id 't9'.`
 - A `TaskState`'s `proposed_by` names the conversational role that proposed a draft, such as
   `planner` or `architect`, and is `null` for every other task, a draft orbit added itself
   included. It was added to version 2; a task without it reads as `null`.
+- A `TaskState`'s `edited` says that role edited the draft since proposing it; accepting or
+  editing the task clears it. It was added to version 2; a task without it reads as `false`.
 - `AcceptTask(task_id)` makes the draft task `task_id`, one the planner proposed, a pending
   task, to be run. It's refused with `not_configured` for a draft in a disabled role, as `AddTask`
   and `EditTask` are, leaving it a draft, and with `invalid` for a task that isn't a draft: `Task

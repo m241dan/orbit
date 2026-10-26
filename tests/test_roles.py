@@ -519,12 +519,21 @@ def test_orbit_tools_are_the_twelve_in_order() -> None:
         "read_report",
         "list_drafts",
         "read_draft",
+        "edit_draft",
+        "remove_draft",
     )
 
 
 def test_a_role_that_consults_and_proposes_is_granted_draft_tools_then_consult() -> None:
     planner = BUILT_IN_ROLES["planner"]
-    assert planner.granted_tools == (*planner.tools, "list_drafts", "read_draft", "consult")
+    assert planner.granted_tools == (
+        *planner.tools,
+        "list_drafts",
+        "read_draft",
+        "edit_draft",
+        "remove_draft",
+        "consult",
+    )
 
 
 def test_a_role_without_propose_task_is_granted_no_draft_tools() -> None:
@@ -590,6 +599,8 @@ def test_unrestricted_tool_rules_allow_the_roles_orbit_tools_and_deny_its_others
         "mcp__orbit__read_report",
         "mcp__orbit__list_drafts",
         "mcp__orbit__read_draft",
+        "mcp__orbit__edit_draft",
+        "mcp__orbit__remove_draft",
     )
 
 
@@ -616,6 +627,8 @@ def test_restricted_tool_rules_add_reading_and_searching_and_deny_writing() -> N
         "mcp__orbit__read_report",
         "mcp__orbit__list_drafts",
         "mcp__orbit__read_draft",
+        "mcp__orbit__edit_draft",
+        "mcp__orbit__remove_draft",
         "Edit",
         "Write",
         "NotebookEdit",

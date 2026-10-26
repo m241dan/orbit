@@ -120,6 +120,8 @@ async def test_passes_calls_with_the_token_to_the_handler_and_returns_its_text()
         ("read_report", {"id": 2}),
         ("list_drafts", {}),
         ("read_draft", {"task_id": "5"}),
+        ("edit_draft", {"task_id": "5", "title": "New title", "prompt": "Body"}),
+        ("remove_draft", {"task_id": "5"}),
         (
             "propose_checks",
             {

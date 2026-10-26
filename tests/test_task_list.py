@@ -719,3 +719,12 @@ async def test_opening_another_session_shows_its_tasks_unfiltered() -> None:
         await feed_events(session, pilot, snapshot, in_roles(CODER, "security"))
         assert title(task_list) == "Task list"
         assert titles(task_list) == ["1. ⏳ coder", "2. ⏳ security  security", "+ new task"]
+
+
+def test_a_draft_a_role_edited_ends_its_details_with_who_edited_it() -> None:
+    draft = TaskState(id="5", task=TaskSpec(prompt="x"), status="draft", proposed_by="planner")
+    edited = draft.model_copy(update={"edited": True})
+    assert str(task_label(edited, "5", "◠ ")).endswith("default · restricted · edited by planner")
+    assert str(task_label(draft, "5", "◠ ")).endswith("default · restricted")
+    accepted = edited.model_copy(update={"status": "pending"})
+    assert "edited" not in str(task_label(accepted, "5", "◠ "))

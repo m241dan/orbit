@@ -25,14 +25,16 @@ from orbit.agent.application.role_copies import RoleCopies
 from orbit.agent.application.role_workspace import workspace_for
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.agents import Agent
-from orbit.agent.domain.board import draft_line, draft_text
+from orbit.agent.domain.board import TaskBoard, draft_line, draft_text
 from orbit.agent.domain.consultations import CANCELLED, failed
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.roles import (
     CONSULT,
+    EDIT_DRAFT,
     LIST_DRAFTS,
     PROPOSE_TASK,
     READ_DRAFT,
+    REMOVE_DRAFT,
     REPORT_PROGRESS,
     suggested_task,
     suggestion_refusal,
@@ -116,6 +118,8 @@ class PlannerChat:
             CONSULT: self._consult,
             LIST_DRAFTS: self._list_drafts,
             READ_DRAFT: self._read_draft,
+            EDIT_DRAFT: self._edit_draft,
+            REMOVE_DRAFT: self._remove_draft,
         }
 
     @property
@@ -397,6 +401,28 @@ class PlannerChat:
             return Reply(exc.message, is_error=True)
         return Reply(draft_text(state))
 
+    async def _edit_draft(self, arguments: dict[str, Any]) -> Reply:
+        task_id = str(arguments.get("task_id", ""))
+        suggestion = task_suggestion(arguments)
+        if isinstance(suggestion, str):
+            return Reply(suggestion, is_error=True)
+        task = suggested_task(self._desk.agents.roles[CODER], *suggestion)
+
+        def edit(board: TaskBoard) -> Reply:
+            board.edit_draft(task_id, task, self._role)
+            return Reply(f"Edited draft task {task_id}.")
+
+        return await self._tasks.change(edit, _refusal)
+
+    async def _remove_draft(self, arguments: dict[str, Any]) -> Reply:
+        task_id = str(arguments.get("task_id", ""))
+
+        def remove(board: TaskBoard) -> Reply:
+            board.remove_draft(task_id, self._role)
+            return Reply(f"Removed draft task {task_id}.")
+
+        return await self._tasks.change(remove, _refusal)
+
     async def _consult(self, arguments: dict[str, Any]) -> Reply:
         role, message = str(arguments.get("role", "")), str(arguments.get("message", ""))
         return await self.consult(self._role, role, message, self._span)
@@ -412,3 +438,8 @@ class PlannerChat:
         if failure is None or failure.kind != "api_unavailable":
             return error
         return error.model_copy(update={"message": outage_note(self._role)})
+
+
+async def _refusal(exc: Refused) -> Reply:
+    """The error reply for a role's draft tool the board refused with ``exc``."""
+    return Reply(exc.message, is_error=True)

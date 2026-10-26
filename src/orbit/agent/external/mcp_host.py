@@ -7,6 +7,7 @@ token, which decides who is asking.
 
 import asyncio
 import socket
+from collections.abc import Awaitable, Callable
 from typing import Any, NotRequired, TypedDict
 
 import uvicorn
@@ -17,6 +18,7 @@ from orbit.agent.application.ports import CallHandler
 from orbit.agent.domain.roles import (
     COMPLETE_TASK,
     CONSULT,
+    EDIT_DRAFT,
     GET_TASK,
     GIVE_UP,
     LIST_DRAFTS,
@@ -25,6 +27,7 @@ from orbit.agent.domain.roles import (
     PROPOSE_TASK,
     READ_DRAFT,
     READ_REPORT,
+    REMOVE_DRAFT,
     REPORT_PROGRESS,
     RUN_CHECK,
     SAVE_REPORT,
@@ -51,6 +54,10 @@ PROPOSE_TASK_DESCRIPTION = (
     "Propose a task for the plan: a short title, and a prompt. It's added as a draft the user"
     f" accepts or drops. {PROMPT_RECIPE}"
 )
+EDIT_DRAFT_DESCRIPTION = (
+    "Replace the title and prompt of one of your drafts; it stays a draft in its place."
+    f" {PROMPT_RECIPE}"
+)
 
 
 class ProposedStep(TypedDict):
@@ -65,6 +72,10 @@ class ProposedSetup(TypedDict):
 
     command: list[str]
     watch: NotRequired[list[str]]
+
+
+ToolCall = Callable[[Context, str, dict[str, Any]], Awaitable[str]]
+"""How a tool passes a call on: with its context, the tool's name and its arguments."""
 
 
 def build_server(handler: CallHandler) -> MCPServer:
@@ -154,6 +165,13 @@ def build_server(handler: CallHandler) -> MCPServer:
         """Read a saved report, by its id from list_reports: its title and body."""
         return await call(ctx, READ_REPORT, {"id": id})
 
+    _add_draft_tools(server, call)
+    return server
+
+
+def _add_draft_tools(server: MCPServer, call: ToolCall) -> None:
+    """Give ``server`` the tools a role uses on its drafts, each passed to ``call``."""
+
     @server.tool(structured_output=False)
     async def list_drafts(ctx: Context) -> str:
         """List your drafts the user hasn't accepted yet: each one's id and title, in list
@@ -165,7 +183,14 @@ def build_server(handler: CallHandler) -> MCPServer:
         """Read one of your drafts as it stands now: its title and full prompt."""
         return await call(ctx, READ_DRAFT, {"task_id": task_id})
 
-    return server
+    @server.tool(structured_output=False, description=EDIT_DRAFT_DESCRIPTION)
+    async def edit_draft(task_id: str, title: str, prompt: str, ctx: Context) -> str:
+        return await call(ctx, EDIT_DRAFT, {"task_id": task_id, "title": title, "prompt": prompt})
+
+    @server.tool(structured_output=False)
+    async def remove_draft(task_id: str, ctx: Context) -> str:
+        """Withdraw one of your drafts from the task list."""
+        return await call(ctx, REMOVE_DRAFT, {"task_id": task_id})
 
 
 class McpHost:

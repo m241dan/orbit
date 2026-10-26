@@ -170,7 +170,8 @@ class TaskState(_Message):
     ``usage`` adds up what every turn run for the task cost. A task that ended badly says why
     in ``reason``, one line such as ``Unit tests failed``, with the full text in
     ``reason_detail``; both are empty otherwise. ``proposed_by`` is the conversational role
-    that proposed a draft, such as ``planner``; none for every other task.
+    that proposed a draft, such as ``planner``; none for every other task. ``edited`` says
+    that role edited the draft since proposing it.
     """
 
     id: str
@@ -186,6 +187,7 @@ class TaskState(_Message):
     reason: str = ""
     reason_detail: str = ""
     proposed_by: str | None = None
+    edited: bool = False
 
 
 SessionState = Literal["running", "idle"]

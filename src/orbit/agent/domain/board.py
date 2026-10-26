@@ -113,7 +113,14 @@ class TaskBoard:
         refusal = edit_refusal(current)
         if refusal is not None:
             raise Refused(refusal.code, refusal.message)
-        fresh = {"task": task, "status": "pending", "attempt": 0, "max_attempts": 0} | _NO_REASON
+        fresh = {
+            "task": task,
+            "status": "pending",
+            "attempt": 0,
+            "max_attempts": 0,
+            "edited": False,
+        }
+        fresh |= _NO_REASON
         self._tasks[self.position(task_id)] = current.model_copy(update=fresh)
 
     def move_records(self, moves: Mapping[str, str]) -> None:
@@ -236,11 +243,27 @@ class TaskBoard:
             )
         return state
 
+    def edit_draft(self, task_id: str, task: TaskSpec, role: str) -> None:
+        """Replace draft ``task_id``, which ``role`` proposed, with ``task``, keeping it a draft
+        in its place, and mark it edited. Raises ``Refused`` as :meth:`draft_of` does."""
+        state = self.draft_of(task_id, role)
+        edited = state.model_copy(update={"task": task, "edited": True})
+        self._tasks[self.position(task_id)] = edited
+
+    def remove_draft(self, task_id: str, role: str) -> None:
+        """Take draft ``task_id``, which ``role`` proposed, off the list. Raises ``Refused`` as
+        :meth:`draft_of` does."""
+        self.draft_of(task_id, role)
+        del self._tasks[self.position(task_id)]
+
     def accept(self, task_id: str) -> None:
-        """Make draft ``task_id`` pending. Raises ``Refused`` if it isn't a draft."""
+        """Make draft ``task_id`` pending, no longer marked edited. Raises ``Refused`` if it
+        isn't a draft."""
         if self.get(task_id).status != "draft":
             raise Refused(INVALID, f"Task {task_id!r} isn't a draft.")
         self.set_status(task_id, "pending")
+        index = self.position(task_id)
+        self._tasks[index] = self._tasks[index].model_copy(update={"edited": False})
 
     def remove(self, task_id: str) -> None:
         """Take ``task_id`` off the list. Raises ``Refused`` if it can't be.

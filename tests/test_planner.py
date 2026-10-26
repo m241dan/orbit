@@ -147,6 +147,34 @@ async def test_the_planner_lists_and_reads_its_drafts() -> None:
     assert "list_drafts" in tools and "read_draft" in tools
 
 
+async def test_the_planner_edits_and_removes_its_drafts() -> None:
+    replies: list[Reply] = []
+
+    async def fixes_drafts(call: Call) -> TurnEndReason:
+        await call("propose_task", title="Add the flag", prompt="Add --fast.")
+        await call("propose_task", title="Document it", prompt="Mention --fast.")
+        replies.append(await call("edit_draft", task_id="1", title=" ", prompt="Body"))
+        replies.append(await call("edit_draft", task_id="1", title="New title", prompt="Body"))
+        replies.append(await call("remove_draft", task_id="2"))
+        replies.append(await call("remove_draft", task_id="99"))
+        replies.append(await call("edit_draft", task_id="99", title="T", prompt=""))
+        return "completed"
+
+    session, _, launcher = session_for()
+    launcher.planner_turns = [fixes_drafts]
+    events = await plan(session, "Plan it.")
+    assert replies == [
+        Reply("A task needs a title.", is_error=True),
+        Reply("Edited draft task 1."),
+        Reply("Removed draft task 2."),
+        Reply("No task with id '99'.", is_error=True),
+        Reply("No task with id '99'.", is_error=True),
+    ]
+    assert [(t.id, t.status, t.edited, t.task.prompt) for t in board(events)] == [
+        ("1", "draft", True, "New title\n\nBody")
+    ]
+
+
 async def test_a_role_without_propose_task_cant_list_drafts() -> None:
     replies: list[Reply] = []
 

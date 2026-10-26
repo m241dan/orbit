@@ -130,7 +130,7 @@ async def test_a_reset_rereads_the_planners_role() -> None:
     fresh = launcher.launches[-1]
     assert (fresh.instructions, fresh.tools) == (
         "Plan small.",
-        ("propose_task", "list_drafts", "read_draft", "consult"),
+        ("propose_task", "list_drafts", "read_draft", "edit_draft", "remove_draft", "consult"),
     )
     agents = session.agents
     assert agents is not None and agents.roles["coder"] == ROLES["coder"]

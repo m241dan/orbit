@@ -147,13 +147,15 @@ def next_lane(lane: str | None, present: Sequence[str]) -> str | None:
 def _details(state: TaskState, notes: RowNotes) -> str:
     """What a row says under its title: the settings, the fix it's on, what it spent, or that
     that's unknown if ``notes`` say so, and that it's waiting for a coder, if pending and they
-    say so."""
+    say so, and that a role edited it, if it's a draft it did."""
     details = " · ".join(settings_fields(state.task.settings))
     if state.attempt:
         details += f" · fix {state.attempt}/{state.max_attempts}"
     details += _spent(state.usage, notes.usage_unknown)
     if notes.waiting is not None and state.status == "pending":
         details += f" · {notes.waiting}"
+    if state.edited and state.status == "draft":
+        details += f" · edited by {state.proposed_by}"
     return details
 
 
