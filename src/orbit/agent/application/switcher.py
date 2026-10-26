@@ -193,6 +193,7 @@ class SessionSwitcher:
             planner_notes=self._parts.seats.notes,
             copies=self._parts.seats.copies,
             consultations=self._parts.seats.consultations,
+            last_consultation=self._parts.seats.last_consultation,
             spend=self.spend,
         )
 
@@ -307,6 +308,7 @@ class SessionSwitcher:
                 record.planner_notes,
                 record.copies,
                 record.consultations,
+                record.last_consultation,
             )
         reviews = record.reviews if record else None
         if parts.lane is not None:

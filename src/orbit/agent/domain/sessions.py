@@ -32,7 +32,7 @@ from orbit.protocol import (
     Usage,
 )
 
-FORMAT_VERSION = 16
+FORMAT_VERSION = 17
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
@@ -65,8 +65,8 @@ def _without_rounds(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def _unchanged(record: dict[str, Any]) -> dict[str, Any]:
-    """Version 3, 4, 5, 6, 7, 10, 11, 12, 13, 14 or 15 ``record`` as it is: the next version only
-    added fields that have defaults."""
+    """Version 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15 or 16 ``record`` as it is: the next
+    version only added fields that have defaults."""
     return record
 
 
@@ -108,7 +108,8 @@ def _on_claude(record: dict[str, Any]) -> dict[str, Any]:
 # version 13 the consultations pending, which an older record has none of. Version 14 added
 # what each role spent and caused its consultants to spend, which an older record has none of,
 # and version 15 the role that proposed each draft, which an older record's tasks read as none.
-# Version 16 added whether that role edited it, which an older record's drafts read as not.
+# Version 16 added whether that role edited it, which an older record's drafts read as not,
+# and version 17 the number of the last consultation asked, which an older record asked none of.
 _MIGRATIONS: dict[int, Migration] = {
     1: _spent_by_tasks,
     2: _without_rounds,
@@ -125,6 +126,7 @@ _MIGRATIONS: dict[int, Migration] = {
     13: _unchanged,
     14: _unchanged,
     15: _unchanged,
+    16: _unchanged,
 }
 
 EMPTY_NAME = "A session needs a name."
@@ -170,7 +172,8 @@ class SessionRecord(BaseModel):
     """A saved session ``id``, ``name``d by the user, with the settings each conversational role
     uses, by role (``role_settings``), the planner's for new tasks too, each one's conversation
     (``conversations``), the copies those working in one work in (``copies``), the consultations
-    pending (``consultations``), the ``planner_notes`` the planner is still to hear, its
+    pending (``consultations``) and the number of the last asked
+    (``last_consultation``), the ``planner_notes`` the planner is still to hear, its
     ``tasks`` and, when reviews are on, its ``reviews``' state, and what its agents have
     ``spent`` in all, the planner and tasks since removed included: by role (``role_spent``),
     and what each role caused its consultants to spend, by asker then consultant
@@ -187,6 +190,7 @@ class SessionRecord(BaseModel):
     conversations: dict[str, SavedConversation] = Field(default={})
     copies: dict[str, SavedCopy] = Field(default={})
     consultations: tuple[SavedConsultation, ...] = ()
+    last_consultation: int = Field(default=0, ge=0)
     planner_notes: tuple[str, ...] = ()
     tasks: tuple[TaskState, ...] = ()
     reviews: LaneSnapshot | None = None

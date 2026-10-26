@@ -503,6 +503,52 @@ async def test_a_consultation_saved_for_a_role_without_a_seat_is_still_answered(
     assert launcher.launches == []
 
 
+async def consult(
+    session: WorkspaceHost, launcher: ScriptedLauncher, *messages: str
+) -> list[Reply]:
+    """What the planner hears consulting the experimenter with each of ``messages``, once every
+    reply has reached it."""
+    heard: list[Reply] = []
+    launcher.planner_turns = [consults(*messages, heard=heard), *[chats] * (len(messages) + 2)]
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    await events_until(session, answered(len(messages)))
+    return heard
+
+
+async def settled(session: WorkspaceHost, launcher: ScriptedLauncher, launches: int) -> None:
+    """Once ``launches`` turns have been launched, and no role answers any more."""
+    await eventually(
+        lambda: len(launcher.launches) == launches and not session.activity.answering, poll=0
+    )
+
+
+async def test_a_reopened_session_numbers_its_next_consultation_after_its_last() -> None:
+    store = FakeStore()
+    session, launcher = consulting_host(store)
+    await consult(session, launcher, "Check X", "Check Y")
+    await session.close()
+    assert store.last.last_consultation == 2
+
+    session, launcher = consulting_host(store_with(store.last.model_copy(update={"id": "talks"})))
+    await opened(session, ActivateSession(session="talks"))
+    heard = await consult(session, launcher, "Check Z")
+    await session.close()
+    assert heard == [Reply(ASKED.format(3))]
+
+
+async def test_a_new_session_numbers_from_1_and_switching_back_carries_on() -> None:
+    session, launcher = consulting_host(FakeStore())
+    first = await consult(session, launcher, "Check X")
+    await settled(session, launcher, 3)  # Asking, consulted and reply turns.
+    await opened(session, NewSession())
+    second = await consult(session, launcher, "Check Y")
+    await settled(session, launcher, 6)
+    await opened(session, ActivateSession(session="session-1"))
+    third = await consult(session, launcher, "Check Z")
+    await session.close()
+    assert [first, second, third] == [[Reply(ASKED.format(n))] for n in (1, 1, 2)]
+
+
 PLANNER_SPENT = Usage(cost_usd=0.4)
 EXPERIMENTER_SPENT = Usage(cost_usd=1.1)
 CAUSED = {PLANNER: {EXPERIMENTER: EXPERIMENTER_SPENT}}

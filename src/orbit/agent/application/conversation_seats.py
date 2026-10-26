@@ -136,6 +136,11 @@ class ConversationSeats:
         """The consultations pending, to save."""
         return self._consultations.saved
 
+    @property
+    def last_consultation(self) -> int:
+        """The number of the last consultation asked in the session, to save."""
+        return self._consultations.last
+
     def asker(self, role: str) -> str | None:
         """The role whose consultation the role ``role``'s turn running answers; none while it
         answers none."""
@@ -178,15 +183,17 @@ class ConversationSeats:
         notes: tuple[str, ...] = (),
         copies: Mapping[str, SavedCopy] | None = None,
         consultations: tuple[SavedConsultation, ...] = (),
+        last_consultation: int = 0,
     ) -> None:
         """Have each role carry on its conversation among ``conversations``, if it has one, the
         planner still to hear ``notes``, keeping those of roles without a seat, and work in its
         copy among ``copies``; the old ones are closed by :meth:`close_retired`, once the switch
         is done, and the old copies kept where they are. The turns waiting are forgotten, and the
         consultations pending with them, saved with the session left; ``consultations``, those
-        of the session opened, are answered by :meth:`settle`."""
+        of the session opened, are answered by :meth:`settle`, and the next asked numbered after
+        ``last_consultation``."""
         self._hold_copies(copies or {})
-        self._consultations.replace(consultations)
+        self._consultations.replace(consultations, last_consultation)
         for name, seat in self._seats.items():
             seat.drop_waiting()
             seat.replace(conversations.get(name), notes if name == PLANNER else ())

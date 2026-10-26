@@ -147,6 +147,11 @@ class Consultations:
         then those asked since."""
         return (*self._owed, *(asked.saved for asked in self._pending.values()))
 
+    @property
+    def last(self) -> int:
+        """The number of the last consultation asked in the session, to save."""
+        return self._count
+
     def asker(self, consultant: str) -> str | None:
         """The role whose consultation the role ``consultant``'s turn running answers; none
         while it answers none."""
@@ -170,10 +175,12 @@ class Consultations:
         for asked in self._pending.values():
             asked.left = SWITCHED
 
-    def replace(self, saved: tuple[SavedConsultation, ...]) -> None:
+    def replace(self, saved: tuple[SavedConsultation, ...], last: int = 0) -> None:
         """Forget the consultations pending, saved with the session left, and hold ``saved``,
-        those of the session opened, to answer by :meth:`settle`."""
+        those of the session opened, to answer by :meth:`settle`, numbering the next after
+        ``last``."""
         self._pending, self._owed = {}, list(saved)
+        self._count = last
         self.approvals.clear()
 
     async def settle(self) -> None:

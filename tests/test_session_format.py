@@ -46,6 +46,7 @@ SESSION_V13 = FIXTURES / "session-v13.json"
 SESSION_V14 = FIXTURES / "session-v14.json"
 SESSION_V15 = FIXTURES / "session-v15.json"
 SESSION_V16 = FIXTURES / "session-v16.json"
+SESSION_V17 = FIXTURES / "session-v17.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -159,7 +160,7 @@ def expected(
     lane: LaneSnapshot | None = None,
 ) -> SessionRecord:
     return SessionRecord(
-        version=16,
+        version=17,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
@@ -351,14 +352,23 @@ def editing() -> SessionRecord:
     return proposing().model_copy(update={"tasks": states})
 
 
-def test_a_version_16_session_file_reads_as_its_record() -> None:
+def test_a_version_16_session_file_migrates_to_having_asked_no_consultations() -> None:
     assert parse_record(SESSION_V16.read_text(encoding="utf-8")) == editing()
 
 
-def test_a_session_record_is_written_in_the_version_16_format() -> None:
-    written = json.loads(record_json(editing()))
-    golden = json.loads(SESSION_V16.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V16.name)
+def numbering() -> SessionRecord:
+    """The golden record as version 17 keeps it, having asked its two consultations."""
+    return editing().model_copy(update={"last_consultation": 2})
+
+
+def test_a_version_17_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V17.read_text(encoding="utf-8")) == numbering()
+
+
+def test_a_session_record_is_written_in_the_version_17_format() -> None:
+    written = json.loads(record_json(numbering()))
+    golden = json.loads(SESSION_V17.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V17.name)
 
 
 def test_a_version_1_review_count_reads_as_its_count() -> None:
