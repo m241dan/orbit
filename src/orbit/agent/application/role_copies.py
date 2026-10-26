@@ -170,9 +170,9 @@ class RoleCopies:
 
     async def sweep(self, others: OtherCopies, ttls: Mapping[str, float]) -> None:
         """Remove the copies past their TTL in ``ttls``: this session's, and those recorded in
-        the ``others`` sessions that are still there, which keep their records until they next take
-        a turn; then
-        those left over that no session records, if every session's records were read."""
+        the ``others`` sessions that are still there, which keep their records until they next
+        take a turn; then those left over that no session records, if every session's records
+        were read."""
         await self.expire(ttls)
         leftovers = await self._leftovers()
         await self._expire_others(others.recorded, ttls, {*leftovers, *self._made})

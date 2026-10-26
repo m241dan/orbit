@@ -2,9 +2,10 @@
 and reused by the turns after it, across a switch of session and a restart; a reset removes it,
 and the startup check removes the copies past their role's TTL and those left over."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from orbit.agent import WorkspaceHost
+from orbit.agent.application.role_copies import RoleCopies
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.sessions import SavedCopy
 from orbit.protocol import (
@@ -14,10 +15,12 @@ from orbit.protocol import (
     NewSession,
     ResetConversation,
     SendMessage,
+    TurnEndReason,
 )
 from tests.agent_fakes import (
     ROLES,
     START,
+    Call,
     FakeCopies,
     FakeStore,
     ScriptedLauncher,
@@ -134,4 +137,38 @@ async def test_messaging_the_built_in_experimenter_starts_a_turn_in_a_copy() -> 
     await send(session, SendMessage(agent=EXPERIMENTER, text="Run it."))
     await events_until(session, idle(EXPERIMENTER))
     assert directories(launcher) == ["/copies/copy-1"]
+    await session.close()
+
+
+def role_copies(session: WorkspaceHost) -> RoleCopies:
+    """The copies ``session``'s conversational roles work in."""
+    copies = session._copies
+    assert copies is not None
+    return copies
+
+
+async def test_a_turns_end_stamps_its_copys_last_turn() -> None:
+    store, copies = FakeStore(), FakeCopies()
+    session, launcher = experimenting(store, copies)
+    entered: list[datetime] = []
+
+    async def noting(call: Call) -> TurnEndReason:
+        entered.append(role_copies(session).held[EXPERIMENTER].last_turn)
+        return await chats(call)
+
+    launcher.planner_turns = [noting]
+    await experiment(session)
+    assert store.last.copies[EXPERIMENTER].last_turn > entered[0]
+    await session.close()
+
+
+async def test_a_copy_expires_once_its_turn_has_ended() -> None:
+    store, copies = FakeStore(), FakeCopies()
+    session, _ = experimenting(store, copies)
+    await experiment(session)
+    ended = role_copies(session).held[EXPERIMENTER].last_turn
+    ttl = EXPERIMENTER_ROLE.copy_ttl_hours
+    role_copies(session)._clock = lambda: ended + timedelta(hours=ttl, minutes=1)
+    await role_copies(session).expire({EXPERIMENTER: ttl})
+    assert copies.removed == ["/copies/copy-1"]
     await session.close()
