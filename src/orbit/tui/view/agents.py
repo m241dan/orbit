@@ -69,9 +69,9 @@ def _shown(rows: tuple[AgentRow, ...], agent_id: str) -> bool:
 
 
 def _row(agent: RunningAgent) -> AgentRow:
-    """``agent`` as a row, with its open requests."""
+    """``agent`` as a row, with its open requests and what it has cost so far."""
     requests = tuple((r.request_id, r.tool) for r in agent.open_requests)
-    return AgentRow(agent.agent_id, agent.role, agent.task_id, requests)
+    return AgentRow(agent.agent_id, agent.role, agent.task_id, requests, agent.spent)
 
 
 def _track_requests(

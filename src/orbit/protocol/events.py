@@ -433,12 +433,13 @@ class OpenRequest(_Message):
 
 class RunningAgent(_Message):
     """Agent ``agent_id``, running in the ``role`` on task ``task_id``, with its
-    ``open_requests``, oldest first."""
+    ``open_requests``, oldest first, and what its finished turns cost so far (``spent``)."""
 
     agent_id: str
     role: str
     task_id: str
     open_requests: tuple[OpenRequest, ...] = ()
+    spent: Usage = Field(default_factory=Usage)
 
 
 class Snapshot(_Message):

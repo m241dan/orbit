@@ -48,6 +48,8 @@ from orbit.protocol import (
     ProgressNoted,
     RunningAgent,
     Settings,
+    TurnFinished,
+    Usage,
 )
 from orbit.tracing import NoTelemetry, Span, Telemetry, current_span, no_span
 
@@ -225,14 +227,19 @@ class AgentDesk:
         self._announced: set[str] = set()
         # The calls not yet answered, by request id, with the agent that made each.
         self._requests: dict[str, tuple[str, OpenRequest]] = {}
+        # What each running agent's finished turns cost, by agent id.
+        self._spent: dict[str, Usage] = {}
         self._starting: asyncio.Task[str] | None = None  # The host's start, shared by callers.
         # How each agent running was last launched, by its id.
         self._launches: dict[str, AgentLaunch] = {}
 
     async def publish(self, event: Event) -> None:
-        """Publish ``event``, noting the agents it announces as started or exited."""
+        """Publish ``event``, noting the agents it announces as started or exited and what the
+        turns it finishes cost."""
         if isinstance(event, AgentExited):
             self._announced.discard(event.agent_id)
+        if isinstance(event, TurnFinished) and event.agent_id and event.usage is not None:
+            self._spent[event.agent_id] = self._spent.get(event.agent_id, Usage()) + event.usage
         await self._publish(event)
         if isinstance(event, AgentStarted):
             self._announced.add(event.agent_id)
@@ -311,13 +318,14 @@ class AgentDesk:
     @property
     def running(self) -> tuple[RunningAgent, ...]:
         """The agents running whose start was published and exit wasn't, oldest first, each
-        with its calls not yet answered."""
+        with its calls not yet answered and what its finished turns cost."""
         return tuple(
             RunningAgent(
                 agent_id=agent.id,
                 role=agent.role,
                 task_id=agent.task_id,
                 open_requests=self._open_requests(agent.id),
+                spent=self._spent.get(agent.id, Usage()),
             )
             for agent in self.registry.live
             if agent.id in self._announced
@@ -336,6 +344,7 @@ class AgentDesk:
         self._runs.pop(agent.id, None)
         self._launches.pop(agent.id, None)
         self._announced.discard(agent.id)
+        self._spent.pop(agent.id, None)
 
     @contextmanager
     def traced(self, agent: Agent, parent: Span) -> Iterator[AgentProcess]:

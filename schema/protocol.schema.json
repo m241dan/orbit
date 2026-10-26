@@ -2404,7 +2404,7 @@
       "type": "object"
     },
     "RunningAgent": {
-      "description": "Agent ``agent_id``, running in the ``role`` on task ``task_id``, with its\n``open_requests``, oldest first.",
+      "description": "Agent ``agent_id``, running in the ``role`` on task ``task_id``, with its\n``open_requests``, oldest first, and what its finished turns cost so far (``spent``).",
       "properties": {
         "agent_id": {
           "title": "Agent Id",
@@ -2421,6 +2421,9 @@
         "role": {
           "title": "Role",
           "type": "string"
+        },
+        "spent": {
+          "$ref": "#/$defs/Usage"
         },
         "task_id": {
           "title": "Task Id",

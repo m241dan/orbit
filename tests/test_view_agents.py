@@ -10,6 +10,8 @@ from orbit.protocol import (
     SessionSummary,
     Settings,
     Snapshot,
+    TurnFinished,
+    Usage,
 )
 from orbit.tui.view.agents import NO_AGENTS_LABEL, AgentRow, agent_line, review_line, track_agents
 
@@ -107,3 +109,31 @@ def test_a_repeated_request_leaves_the_rows_unchanged() -> None:
     request = AgentRequest(agent_id="agent-1", request_id="r", tool="get_task", arguments={})
     rows = track_agents((AgentRow("agent-1", "coder", "1"),), request)
     assert track_agents(rows, request) == rows
+
+
+def test_a_snapshot_keeps_each_agents_cost_and_later_turns_add_to_it() -> None:
+    snapshot = Snapshot(
+        session=SessionSummary(id="s1", name="auth"),
+        settings=Settings(),
+        model_choices=(),
+        busy={},
+        tasks=(),
+        steps=(),
+        review=None,
+        proposals=(),
+        agents=(
+            RunningAgent(agent_id="agent-3", role="coder", task_id="1", spent=Usage(cost_usd=0.4)),
+        ),
+    )
+    rows = track_agents((), snapshot)
+    assert agent_line(rows[0], "1") == "agent-3 coder · task 1 · working · $0.40"
+    turn = TurnFinished(
+        turn_id="t", reason="completed", agent_id="agent-3", usage=Usage(cost_usd=0.2)
+    )
+    rows = track_agents(rows, turn)
+    assert agent_line(rows[0], "1") == "agent-3 coder · task 1 · working · $0.60"
+
+
+def test_a_running_agent_without_a_cost_parses_as_having_cost_nothing() -> None:
+    agent = RunningAgent.model_validate({"agent_id": "a", "role": "coder", "task_id": "1"})
+    assert agent.spent == Usage()

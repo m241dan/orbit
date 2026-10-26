@@ -49,6 +49,8 @@ from orbit.protocol import (
     TasksChanged,
     TaskSpec,
     TurnEndReason,
+    TurnFinished,
+    Usage,
     VerificationSkipped,
 )
 from orbit.tracing import NoSpan, Span, current_span, use_span
@@ -1174,3 +1176,27 @@ async def test_a_timeout_that_is_not_the_runs_own_ends_it_in_error(minutes: floa
     assert [e for e in events if isinstance(e, ErrorOccurred)] == [
         ErrorOccurred(agent_id="agent-1", code=AGENT_FAILED, message="pipe timed out")
     ]
+
+
+async def test_the_running_agents_report_what_their_finished_turns_cost() -> None:
+    desk = desk_for(ignore)
+    coder = desk.open(HangingTarget(), "coder", "1")
+    other = desk.open(HangingTarget(), "coder", "2")
+    for agent in (coder, other):
+        await desk.publish(AgentStarted(agent_id=agent.id, role="coder", task_id=agent.task_id))
+    for event in (
+        TurnFinished(
+            turn_id="t1", reason="completed", agent_id=coder.id, usage=Usage(cost_usd=0.25)
+        ),
+        TurnFinished(
+            turn_id="t2", reason="completed", agent_id=coder.id, usage=Usage(cost_usd=0.15)
+        ),
+        TurnFinished(turn_id="t3", reason="completed", agent_id=coder.id),
+        TurnFinished(turn_id="t4", reason="completed", usage=Usage(cost_usd=1.0)),
+    ):
+        await desk.publish(event)
+    assert [a.spent for a in desk.running] == [Usage(cost_usd=0.4), Usage()]
+    desk.close(coder)
+    reopened = desk.open(HangingTarget(), "coder", "1")
+    assert reopened.id != coder.id
+    assert [a.spent for a in desk.running] == [Usage()]
