@@ -802,12 +802,20 @@ def test_consults_on_a_task_role_is_refused() -> None:
         load_config({"roles": roles}, BUILT_IN_ROLES)
 
 
-@pytest.mark.parametrize("target", ["coder", "x", "nobody"])
+@pytest.mark.parametrize("target", ["coder", "nobody"])
 def test_consulting_anything_but_another_enabled_conversational_role_is_refused(
     target: str,
 ) -> None:
     with pytest.raises(ConfigError, match=f"'x'.*'{target}'"):
         load_config(talker(consults=[target]), BUILT_IN_ROLES)
+
+
+def test_a_role_consulting_itself_is_refused_once_without_a_cycle() -> None:
+    with pytest.raises(ConfigError) as error:
+        load_config(talker(consults=["x"]), BUILT_IN_ROLES)
+    assert str(error.value) == (
+        "roles: the role 'x' can't consult 'x', which isn't another enabled conversational role"
+    )
 
 
 def with_planner(data: dict[str, object], **fields: object) -> dict[str, object]:
@@ -825,4 +833,13 @@ def test_consulting_a_disabled_conversational_role_is_refused() -> None:
 def test_roles_consulting_each_other_are_refused_naming_the_cycle() -> None:
     data = with_planner(talker(consults=["planner"]), consults=["x"])
     with pytest.raises(ConfigError, match=r"consults cycle.*'planner' -> 'x' -> 'planner'"):
+        load_config(data, BUILT_IN_ROLES)
+
+
+def test_a_longer_consults_cycle_is_refused_naming_every_role() -> None:
+    data = talker(consults=["y"])
+    roles = cast(dict[str, dict[str, object]], data["roles"])
+    roles["y"] = {**roles["x"], "consults": ["z"]}
+    roles["z"] = {**roles["x"], "consults": ["x"]}
+    with pytest.raises(ConfigError, match=r"consults cycle: 'x' -> 'y' -> 'z' -> 'x'"):
         load_config(data, BUILT_IN_ROLES)

@@ -460,9 +460,11 @@ def _onward(roles: Mapping[str, Role], path: list[str], other: str) -> list[str]
 
 def _cycle_from(roles: Mapping[str, Role], path: list[str]) -> list[str]:
     """The ``path`` of consults carried on until it returns to its start, if it can; nothing
-    otherwise."""
+    otherwise. A role consulting itself is refused on its own, so isn't a cycle."""
     role = roles.get(path[-1])
     for other in role.consults if role else ():
+        if other == path[-1]:
+            continue
         cycle = [*path, other] if other == path[0] else _onward(roles, path, other)
         if cycle:
             return cycle
