@@ -1,12 +1,14 @@
 """Kiro's agent configs: what each agent runs with, and the files they're written to.
 
 Kiro finds an agent's config by name among the files in ``~/.kiro/agents``, so each agent's is
-written there, readable by its owner alone as it holds the agent's token, just before the agent
+written there under a name of its own run's, so no other run, workspace or project shares it,
+readable by its owner alone as it holds the agent's token, just before the agent
 starts, and removed once it ends. Configs a crash left behind are swept away a day later.
 """
 
 import contextlib
 import json
+import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -56,15 +58,16 @@ class KiroAgentFiles:
         self.agents_dir = agents_dir.expanduser()
 
     def write(self, agent_id: str, config: dict[str, Any]) -> str:
-        """Write ``config`` as agent ``agent_id``'s, owner-only, and return the name Kiro knows
-        it by. Raises ``OSError`` when it can't."""
-        name = f"{PREFIX}{agent_id}"
+        """Write ``config`` as agent ``agent_id``'s, owner-only, under a name no other run
+        shares, and return that name, which Kiro knows it by. Raises ``OSError`` when it can't."""
+        # Agent ids repeat across workspaces, and a guessable name lets a project shadow it.
+        name = f"{PREFIX}{agent_id}-{secrets.token_hex(8)}"
         write_private(self._path(name), json.dumps({"name": name, **config}, indent=2) + "\n")
         return name
 
-    def remove(self, agent_id: str) -> None:
-        """Remove agent ``agent_id``'s config, if it has one."""
-        self._path(f"{PREFIX}{agent_id}").unlink(missing_ok=True)
+    def remove(self, name: str) -> None:
+        """Remove the config written under ``name``, if there is one."""
+        self._path(name).unlink(missing_ok=True)
 
     def sweep(self, now: datetime) -> None:
         """Remove the configs of orbit's agents last written more than a day before ``now``."""

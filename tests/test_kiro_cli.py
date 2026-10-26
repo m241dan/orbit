@@ -5,6 +5,7 @@ fake ``kiro-cli`` replaying the captured fixtures."""
 import asyncio
 import json
 import os
+import re
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -71,6 +72,15 @@ def calls(scenario_path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in lines]
 
 
+def agent_name(call: dict[str, Any]) -> str:
+    """The name of the agent config the call ran with, checked to be one of orbit's for
+    agent-3."""
+    argv: list[str] = call["argv"]
+    name = argv[argv.index("--agent") + 1]
+    assert re.fullmatch(r"orbit-agent-3-[0-9a-f]{16}", name)
+    return name
+
+
 def configs(home: Path) -> list[Path]:
     """The configs of orbit's agents left in ``home``'s ``~/.kiro/agents``."""
     return sorted((home / ".kiro" / "agents").glob("orbit-*"))
@@ -134,7 +144,7 @@ async def test_a_coder_task_launches_with_the_engine_pinned_its_model_and_effort
     assert call["argv"] == [
         *CHAT,
         "--agent",
-        "orbit-agent-3",
+        agent_name(call),
         *PINS,
         *("--model", "claude-sonnet-4.5"),
         *("--effort", "high"),
@@ -171,7 +181,23 @@ async def test_the_agent_runs_with_its_own_config_removed_once_it_ends(
 
     [call] = calls(scenario)
     config = kiro_agent_config(AGENT_RULES, "Do the work.", URL, "s3cret", "restricted")
-    assert call["config"] == {"name": "orbit-agent-3", **config}
+    assert call["config"] == {"name": agent_name(call), **config}
+    assert configs(home) == []
+
+
+async def test_runs_of_the_same_agent_id_at_once_get_configs_of_their_own(
+    home: Path, tmp_path: Path
+) -> None:
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    first, first_scenario = make_runner(tmp_path / "a", fixture="plain.jsonl")
+    second, second_scenario = make_runner(tmp_path / "b", fixture="plain.jsonl")
+    await asyncio.gather(run_agent(first, launch_of(CODER)), run_agent(second, launch_of(CODER)))
+
+    [one], [other] = calls(first_scenario), calls(second_scenario)
+    assert agent_name(one) != agent_name(other)
+    assert one["config"]["name"] == agent_name(one)
+    assert other["config"]["name"] == agent_name(other)
     assert configs(home) == []
 
 
@@ -181,7 +207,7 @@ async def test_without_a_model_or_effort_kiro_picks_its_own(tmp_path: Path) -> N
     events = await run_agent(runner, launch_of(CODER))
 
     [call] = calls(scenario)
-    assert call["argv"] == [*CHAT, "--agent", "orbit-agent-3", *PINS, "--", "You are agent-3."]
+    assert call["argv"] == [*CHAT, "--agent", agent_name(call), *PINS, "--", "You are agent-3."]
     assert events == [
         TurnStarted(turn_id="agent-3", agent_id="agent-3"),
         AssistantMessage(turn_id="agent-3", agent_id="agent-3", text="ok"),
@@ -474,10 +500,9 @@ def test_kiros_failures_are_told_from_its_wording() -> None:
 def test_sweeping_removes_the_configs_crashed_runs_left_over_a_day(home: Path) -> None:
     now = datetime(2026, 10, 25, 12, tzinfo=UTC)
     files = KiroAgentFiles()
-    files.write("old", {})
-    files.write("new", {})
-    old = home / ".kiro" / "agents" / "orbit-old.json"
+    old = home / ".kiro" / "agents" / f"{files.write('old', {})}.json"
+    new = files.write("new", {})
     stale = (now - timedelta(days=2)).timestamp()
     os.utime(old, (stale, stale))
     KiroCliRunner().sweep(now)
-    assert [path.name for path in configs(home)] == ["orbit-new.json"]
+    assert [path.name for path in configs(home)] == [f"{new}.json"]

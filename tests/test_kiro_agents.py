@@ -3,6 +3,7 @@ written to under ``~/.kiro/agents``, removed after their run or, left over, a da
 
 import json
 import os
+import re
 import stat
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -63,8 +64,8 @@ def test_the_agents_live_in_kiros_home_directory() -> None:
 
 def test_a_config_is_written_owner_only_under_the_agents_name(tmp_path: Path) -> None:
     name = KiroAgentFiles(tmp_path).write("agent-7", config())
-    path = tmp_path / "orbit-agent-7.json"
-    assert name == "orbit-agent-7"
+    path = tmp_path / f"{name}.json"
+    assert re.fullmatch(r"orbit-agent-7-[0-9a-f]{16}", name)
     assert json.loads(path.read_text()) == {"name": name, **config()}
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
@@ -77,18 +78,26 @@ def test_writing_makes_the_agents_directory_owner_only(tmp_path: Path) -> None:
 
 def test_a_written_config_once_removed_leaves_no_file(tmp_path: Path) -> None:
     files = KiroAgentFiles(tmp_path)
-    files.write("agent-7", config())
-    files.remove("agent-7")
+    files.remove(files.write("agent-7", config()))
     assert list(tmp_path.iterdir()) == []
 
 
+def test_each_write_of_one_agents_config_gets_a_file_of_its_own(tmp_path: Path) -> None:
+    files = KiroAgentFiles(tmp_path)
+    first = files.write("agent-7", config())
+    second = files.write("agent-7", config())
+    assert first != second
+    files.remove(first)
+    assert [path.name for path in tmp_path.iterdir()] == [f"{second}.json"]
+
+
 def test_removing_a_config_never_written_does_nothing(tmp_path: Path) -> None:
-    KiroAgentFiles(tmp_path).remove("agent-7")
+    KiroAgentFiles(tmp_path).remove("orbit-agent-7-0123456789abcdef")
     assert list(tmp_path.iterdir()) == []
 
 
 def test_sweeping_removes_orbits_configs_older_than_a_day(tmp_path: Path) -> None:
-    aged(tmp_path / "orbit-old.json", timedelta(days=2))
+    aged(tmp_path / "orbit-agent-7-0123456789abcdef.json", timedelta(days=2))
     KiroAgentFiles(tmp_path).sweep(NOW)
     assert list(tmp_path.iterdir()) == []
 
@@ -105,7 +114,7 @@ def test_sweeping_keeps_recent_configs_and_others(tmp_path: Path) -> None:
 
 def test_sweeping_skips_a_config_gone_before_it_is_looked_at(tmp_path: Path) -> None:
     (tmp_path / "orbit-gone.json").symlink_to(tmp_path / "nowhere")
-    aged(tmp_path / "orbit-old.json", timedelta(days=2))
+    aged(tmp_path / "orbit-agent-7-0123456789abcdef.json", timedelta(days=2))
     KiroAgentFiles(tmp_path).sweep(NOW)
     assert [path.name for path in tmp_path.iterdir()] == ["orbit-gone.json"]
 

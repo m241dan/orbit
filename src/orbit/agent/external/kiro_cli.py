@@ -245,7 +245,7 @@ class _Turn:
             name = files.write(agent.id, config)
         except OSError as error:
             raise RuntimeError(f"Couldn't write the agent's Kiro config: {error}") from None
-        stack.callback(files.remove, agent.id)
+        stack.callback(files.remove, name)
         return name
 
     async def _follow(

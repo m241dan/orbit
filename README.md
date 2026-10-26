@@ -821,7 +821,7 @@ your checkout out of its way, it doesn't sandbox it.
 | Certificates | `certs/` in the config directory | the CA, server and client certificates and keys `orbit certs` makes for TLS and mutual TLS (see [Serving the control plane](#serving-the-control-plane)) |
 | The run file | `run/server.json` in the state directory | where the `orbit serve` running on that state directory listens, beside `run/serve.lock`, which that serve holds |
 | Runtime-owned | `~/.claude` | Claude Code's own: your login, read for usage limits, and the agents' conversations |
-| Kiro agent configs | `~/.kiro/agents` | `orbit-<agent id>.json`, the temporary config each Kiro agent runs with, readable by you alone as it holds the agent's token; written just before the agent starts and removed when it ends, while ones left behind for over a day are removed when orbit next starts its Kiro runtime |
+| Kiro agent configs | `~/.kiro/agents` | `orbit-<agent id>-<random hex>.json`, the temporary config each Kiro agent runs with, readable by you alone as it holds the agent's token; written just before the agent starts and removed when it ends, while ones left behind for over a day are removed when orbit next starts its Kiro runtime |
 
 The state directory is `--state-dir`, else `$ORBIT_STATE_DIR`, else `$XDG_STATE_HOME/orbit`, else
 `~/.local/state/orbit`. Orbit creates it readable by you alone, and `orbit.db` likewise. One
@@ -1635,7 +1635,7 @@ model = "sonnet"  # Kiro's claude-sonnet-4.5; left out, Kiro picks with auto
 Orbit looks for `kiro-cli` only when an enabled role runs on Kiro, and `orbit chat` stops with
 status 2 when it's missing (`Roles coder use the runtime kiro, but kiro-cli isn't on PATH. Install
 the Kiro CLI and log in, or set those roles' runtime to one you have.`). Each Kiro agent runs
-`kiro-cli chat --output-format stream-json --agent orbit-<agent id> --agent-engine v2
+`kiro-cli chat --output-format stream-json --agent orbit-<agent id>-<random hex> --agent-engine v2
 --require-mcp-startup` in its workspace, with `--model` and `--effort` when it has them,
 `--resume-id <session id>` on a conversation's later turns, so conversational roles such as the
 planner carry their conversations on, and the message telling it to fetch its task. Kiro's agent
@@ -1647,8 +1647,9 @@ without saying how it ended is a crash too, with what it printed on stderr. Kiro
 get orbit's OTLP headers, which may hold your collector's key.
 
 **Agent configs.** Kiro takes an agent's prompt, MCP servers and tools from its agent config, so
-orbit writes one for each agent, `~/.kiro/agents/orbit-<agent id>.json`, readable by you alone as
-it holds the agent's token, just before the agent starts, and removes it when the agent ends,
+orbit writes one for each agent's run, `~/.kiro/agents/orbit-<agent id>-<random hex>.json`, named
+for that run alone, so runs in other workspaces or projects never share or shadow it, readable by
+you alone as it holds the agent's token, just before the agent starts, and removes it when the agent ends,
 cancelled or crashed included; one a crash of orbit itself left behind is removed a day later, the
 next time orbit starts its Kiro runtime. The config's prompt is orbit's rules and then the role's
 instructions, as Claude's agents get them; its only MCP server is orbit's, by URL with the
