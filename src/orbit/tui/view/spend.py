@@ -5,6 +5,7 @@ from typing import Protocol
 
 from orbit.protocol import Event, SessionStateChanged, Snapshot, Usage
 from orbit.tui.view.common import counted
+from orbit.tui.view.tabs import ConversationTab
 from orbit.tui.view.tasks import NO_COST, cost_text
 
 NAMED_CONSULTANTS = 2
@@ -74,36 +75,41 @@ class CornerView(Protocol):
 
 
 class UsageCorner:
-    """The shown tab's usage, in ``view``: a conversational role's own and caused spend, a task
-    agent's task's usage (``task_usage``, by agent id) or, on All, the session's total
-    (``session_usage``). It keeps what the session viewed spent by role, as its snapshot and
-    state changes say."""
+    """The shown tab's usage, in ``view``: a conversational role's own and caused spend, a pinned
+    task role's own total, an unpinned agent's task's usage (``task_usage``, by agent id) or, on
+    All, the session's total (``session_usage``). It looks the shown tab up (``tab_of``, by key)
+    each time it shows, so it follows a catalog that changes the tab's lane. It keeps what the
+    session viewed spent by role, as its snapshot and state changes say."""
 
     def __init__(
         self,
         view: CornerView,
         session_usage: Callable[[], Usage],
         task_usage: Callable[[str], Usage | None],
+        tab_of: Callable[[str], ConversationTab | None],
     ) -> None:
         self._view = view
         self._session_usage = session_usage
         self._task_usage = task_usage
+        self._tab_of = tab_of
         self._session: str | None = None
         self.role_spent: RoleSpent = {}
         self.caused_spent: CausedSpent = {}
         self._key: str | None = None
-        self._conversational = False
 
-    def show_tab(self, key: str | None, conversational: bool) -> None:
-        """Show the usage of the tab keyed ``key``, a ``conversational`` role's or not."""
+    def show_tab(self, key: str | None) -> None:
+        """Show the usage of the tab keyed ``key``, or with none, the All tab's."""
         self._key = key
-        self._conversational = conversational
         self.show()
+
+    def _tab(self) -> ConversationTab | None:
+        return None if self._key is None else self._tab_of(self._key)
 
     @property
     def conversational(self) -> bool:
-        """Whether the tab shown is a conversational role's."""
-        return self._conversational
+        """Whether the tab shown is a conversational role's, as the tabs are now."""
+        tab = self._tab()
+        return tab is not None and tab.lane is not None
 
     def track(self, event: Event) -> None:
         """Follow what the session viewed spent through ``event``, and show the corner again."""
@@ -129,10 +135,16 @@ class UsageCorner:
         key = self._key
         if key is None:
             return session_corner(self._session_usage())
-        if self._conversational:
-            return role_corner(key, self.role_spent, self.caused_spent)
+        tab = self._tab_of(key)
+        if tab is not None and tab.pinned:
+            return self._role_text(key, tab)
         usage = self._task_usage(key)
         return "" if usage is None else cost_text(usage)
+
+    def _role_text(self, role: str, tab: ConversationTab) -> str:
+        if tab.lane is not None:
+            return role_corner(role, self.role_spent, self.caused_spent)
+        return cost_text(self.role_spent.get(role, Usage()))
 
     def breakdown(self) -> str:
         """The breakdown by role of what the session viewed spent."""

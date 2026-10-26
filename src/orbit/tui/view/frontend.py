@@ -77,6 +77,7 @@ from orbit.tui.view.settings import Picked, Pickers
 from orbit.tui.view.spend import UsageCorner
 from orbit.tui.view.storage import StorageHalt
 from orbit.tui.view.tab_strip import TabStrip
+from orbit.tui.view.tabs import ConversationTab
 from orbit.tui.view.takeover import TakeoverOffer
 from orbit.tui.view.task_editor import TaskChoices
 from orbit.tui.view.tasks import TaskBoard, edit_refusal
@@ -243,7 +244,7 @@ class Frontend:
         self.approvals = ApprovalQueue(parts.approvals, self.decide_approval)
         self.windows = Windows(parts.app)
         self.corner = UsageCorner(
-            parts.conversation, lambda: parts.tasks.session_usage, self._task_usage
+            parts.conversation, lambda: parts.tasks.session_usage, self._task_usage, self._tab_of
         )
         self.router = EventRouter(self._panes(), self._handlers(), self._hooks())
 
@@ -252,6 +253,10 @@ class Frontend:
         row = next((row for row in self._parts.agents.rows if row.agent_id == agent), None)
         state = None if row is None else self._parts.tasks.find(row.task_id)
         return None if state is None else state.usage
+
+    def _tab_of(self, key: str) -> ConversationTab | None:
+        """The tab keyed ``key``, if there is one."""
+        return next((tab for tab in self._parts.tabs.tabs if tab.key == key), None)
 
     def _label(self, role: str) -> str:
         """``role``'s label, as the workspace this frontend is on lists it."""
@@ -486,8 +491,7 @@ class Frontend:
         agent = tabs.agent_of(tab_id)
         tabs.mark_read(agent)
         self._parts.conversation.show_only(agent, label)
-        conversational = any(tab.key == agent and tab.lane is not None for tab in tabs.tabs)
-        self.corner.show_tab(agent, conversational)
+        self.corner.show_tab(agent)
         self.router.seats.show_tab(agent)
         self.leave_closed_detail()
 

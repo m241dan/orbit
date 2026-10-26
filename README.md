@@ -551,8 +551,9 @@ with `ctrl+p`) shows the same total; a new session starts with none, and shows n
 counts are rounded as in a turn's rule (see above).
 
 Every window shows its usage, in the same wording (dollars, credits, or both). The conversation's
-corner shows the shown tab's: on All, the session's total (`session $2.12`); on a task agent's
-own tab, its task's; on a conversational role's tab, what the role spent itself, then what its
+corner shows the shown tab's: on All, the session's total (`session $2.12`); on a task role's
+pinned tab (coder, reviewer, …), what that role spent in total; on a task agent's own tab, its
+task's; on a conversational role's tab, what the role spent itself, then what its
 consultations caused each consultant to spend, and the sum: `planner $0.42 · via experimenter
 $1.10 · $1.52`, naming up to two consultants (`via 3 consultants $1.70` beyond), or just its own
 figure when it caused nothing. A consultation's cost counts for the consultant, so the session's
