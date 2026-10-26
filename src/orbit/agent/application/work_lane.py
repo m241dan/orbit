@@ -4,11 +4,12 @@ After each task that completes, the verification steps run until one fails; a fa
 task to fix it right after the failed one. Work that passes lands, and the review lane, if any,
 hears how each task ended. A run stops at a task its agent couldn't do for the usage limit or
 for the API not answering, as the launcher of its role's runtime tells its error, at a fix that
-ends in error, which must run before anything puts its work aside, and once the session halts.
+ends in error, which must run before anything puts its work aside, once the session halts, and
+before a task its caller holds back.
 """
 
 import asyncio
-from collections.abc import Collection, Coroutine
+from collections.abc import Callable, Collection, Coroutine
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any, Literal
@@ -200,26 +201,29 @@ class WorkLane:
         task_id = self._board.next_runnable(roles=self._disabled)
         return None if task_id is None else self._board.get(task_id).task.role
 
-    async def run(self) -> RunEnd:
+    async def run(self, held: Callable[[str], bool] = lambda _: False) -> RunEnd:
         """Run the tasks waiting, in order but the one the last run stopped at first, until
-        none are left, the user stops one, the session halts, which ends it as cancelled, or one
+        none are left or the next is one ``held`` holds back by its id, left waiting, which ends
+        it as finished, the user stops one, the session halts, which ends it as cancelled, or one
         ends in error for its runtime's usage limit or API not answering, noted as the
         :attr:`runtime_stop`, or as a fix; returns which. Any other cancel goes on once the task
         running has ended. Each task's span links to the span current now."""
         self._running, self._stopped = True, False
         try:
-            return await self._run_tasks(current_span())
+            return await self._run_tasks(current_span(), held)
         finally:
             self._running = False
 
-    async def _run_tasks(self, cause: Span) -> RunEnd:
+    async def _run_tasks(self, cause: Span, held: Callable[[str], bool]) -> RunEnd:
         """Run the tasks waiting, as :meth:`run` does, their spans linked to ``cause``, what
-        started the run; returns why the run ended."""
+        started the run, up to one ``held`` holds back; returns why the run ended."""
         tried: set[str] = set()
         try:
             while (task_id := self.next_work(tried)) is not None:
                 if self._gate.halted():  # It may have halted as the last task ended.
                     return "cancelled"
+                if held(task_id):
+                    return "finished"
                 model = self._model(task_id)
                 with self._tracing.task(self._board, task_id, model, (cause,)):
                     end = await self._take(task_id, tried)

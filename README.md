@@ -620,7 +620,9 @@ the task is left pending to run again once the pause ends, `ctrl+s` cancels it o
 tasks. One pause shows at a time: while a runtime is paused, another runtime hitting its limit
 leaves the first pause in force, and its tasks are skipped too until that pause ends, when they
 run again (and pause their runtime then, if its limit still holds); the work lane hitting a limit
-of its own replaces a pause another lane started, as it must wait anyway. With every role on
+of its own replaces a pause another lane started, as it must wait anyway. During a pause another lane
+started, the work lane runs its queued tasks in order up to the first one whose role runs on the
+paused runtime, then waits for that pause to end and goes on from there. With every role on
 Claude, the work lane and every lane's tasks wait out Claude's pause. What Kiro's limits and outages look like is under
 [Running agents on Kiro](#running-agents-on-kiro).
 [docs/00031-feature-runtime-port.md](docs/00031-feature-runtime-port.md) records the requirements.

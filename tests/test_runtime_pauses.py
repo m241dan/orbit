@@ -415,6 +415,25 @@ async def test_a_wake_in_a_reviews_pause_with_claude_work_next_runs_it_once_it_e
     assert RESUMING_NOTE not in notes(events)
 
 
+async def test_a_wake_in_a_reviews_pause_runs_work_up_to_claude_work_and_the_rest_after() -> None:
+    waits = Waits()
+    fake = ScriptedLauncher(FakeHost(), claims_done)
+    session, claude = paused_by_a_review(waits, fake, claims_done)
+    await send(session, AddTask(task=TaskSpec(prompt="Draft it.", role="drafter")))
+    await wake_in_the_pause(session, TaskSpec(prompt="Code it."))
+    await events_until(session, idle())
+    assert roles_of(fake) == ["drafter"]
+    assert roles_of(claude) == [REVIEWER]
+    state = turns_of(session).paused
+    assert state is not None and state.runtime == CLAUDE
+
+    waits.release.set()
+    await events_until(session, idle())
+    await session.close()
+
+    assert CODER in roles_of(claude)
+
+
 async def test_a_hold_in_a_reviews_pause_keeps_the_work_from_starting_after() -> None:
     waits = Waits()
     session, claude = paused_by_a_review(waits, ScriptedLauncher(FakeHost()), claims_done)

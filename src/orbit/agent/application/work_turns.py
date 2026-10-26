@@ -8,7 +8,9 @@ which its tasks' spans link to.
 
 A task in a lane that starts by itself whose agent hits its runtime's usage limit or finds its API
 not answering pauses that runtime too, timed by the same rules, with a backoff of its own for each
-runtime; while one pause is in force, it stays, and the work lane's own stop takes its place."""
+runtime; while one pause is in force, it stays, and the work lane's own stop takes its place.
+Meanwhile the work lane runs its tasks in order up to the first on the paused runtime, then waits
+for the pause to end."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
@@ -104,7 +106,9 @@ class WorkTurns:
     run once :meth:`lifted` is called. Until the run starts again or its wait is cancelled or
     dropped, :attr:`paused` says when it starts again, why and on which runtime. The lanes that
     start by themselves are kicked as the run starts again by itself or the user cancels its
-    wait, and with every run the user asks for. Once :meth:`close` is called, nothing starts.
+    wait, and with every run the user asks for. During a pause a lane that starts by itself
+    started, a run stops before a task on the paused runtime, which runs once the pause ends.
+    Once :meth:`close` is called, nothing starts.
 
     A run is started by the span current as it's asked for: the command's asking for it, or the
     review's whose suggestions it runs. The run keeps that span when it starts again by itself,
@@ -310,7 +314,7 @@ class WorkTurns:
         """Run ``work``'s tasks, their spans linked to ``cause``, what started the run, then, if
         a runtime's usage limit or API not answering stopped them, wait to start again."""
         with use_span(cause):
-            end = await work.run()
+            end = await work.run(self._on_paused_runtime)
         if end in ("limited", "api_unavailable"):
             await self._wait.stop()  # The work lane's pause takes a lane's place.
         if end == "limited":

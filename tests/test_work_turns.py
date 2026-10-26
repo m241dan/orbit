@@ -1,7 +1,7 @@
 """When the work lane runs: the user's runs, a review's wake, a hold, and the configurator."""
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
@@ -62,10 +62,10 @@ class StopsCounted(WorkLane):
             return RuntimeStop(CLAUDE, Failure("usage_limit"))
         return super().runtime_stop
 
-    async def run(self) -> RunEnd:
+    async def run(self, held: Callable[[str], bool] = lambda _: False) -> RunEnd:
         if self.ends is not None:
             return self.ends
-        return await super().run()
+        return await super().run(held)
 
 
 class Sleeps:

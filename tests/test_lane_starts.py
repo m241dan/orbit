@@ -197,11 +197,11 @@ class Watched(WorkLane):
         super().__init__(desk, tasks, verifier, Beside(review))
         self.turns: list[asyncio.Task[object]] = []
 
-    async def run(self) -> RunEnd:
+    async def run(self, held: Callable[[str], bool] = lambda _: False) -> RunEnd:
         turn = asyncio.current_task()
         assert turn is not None
         self.turns.append(turn)
-        return await super().run()
+        return await super().run(held)
 
 
 async def stop_turns_mid_run(stop: Callable[[WorkTurns], Awaitable[None]]) -> None:
