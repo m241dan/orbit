@@ -27,6 +27,7 @@ from orbit.agent.domain.activity import Activity, switch_refusal
 from orbit.agent.domain.board import interrupted
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
+from orbit.agent.domain.role_spend import RoleSpend
 from orbit.agent.domain.sessions import (
     EMPTY_NAME,
     SessionRecord,
@@ -103,6 +104,7 @@ class SessionSwitcher:
         self._events = events
         self._picking = picking
         self.spent = Usage()  # What the session's agents have spent, the planner's included.
+        self.spend = RoleSpend()  # The same, by role and by the role consulting.
         # What the opened session saved that no review lane here holds, kept to save back.
         self._kept_reviews: LaneSnapshot | None = None
         # What orbit adds between switches waits for those under way, keeping new ones waiting,
@@ -191,6 +193,7 @@ class SessionSwitcher:
             planner_notes=self._parts.seats.notes,
             copies=self._parts.seats.copies,
             consultations=self._parts.seats.consultations,
+            spend=self.spend,
         )
 
     async def save(self) -> None:
@@ -270,6 +273,7 @@ class SessionSwitcher:
         self._leaving()
         tasks = interrupted(record.tasks)[0]
         self.spent = record.spent
+        self.spend = RoleSpend(record.role_spent, record.caused_spent)
         self._settings.resume(record.role_settings)
         self._hold(tasks, record)
 
@@ -279,6 +283,7 @@ class SessionSwitcher:
         self._may_switch()
         self._leaving()
         self.spent = Usage()
+        self.spend = RoleSpend()
         self._hold((), None)
 
     def _leaving(self) -> None:

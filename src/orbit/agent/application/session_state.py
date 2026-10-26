@@ -1,12 +1,13 @@
 """Each session's state as connections see it: whether it's the open one, whether it's running
-and what's in progress in it, until when, why and on which runtime its run is paused, and how
-many connections view it, published whenever any of these changes."""
+and what's in progress in it, until when, why and on which runtime its run is paused, what it
+spent by role, and how many connections view it, published whenever any of these changes."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from orbit.agent.application.connection import Connections
 from orbit.agent.domain.activity import Activity, reported
+from orbit.agent.domain.role_spend import RoleSpend
 from orbit.agent.domain.usage_limits import Paused
 from orbit.protocol import Event, SessionStateChanged
 
@@ -15,13 +16,15 @@ from orbit.protocol import Event, SessionStateChanged
 class StateParts:
     """What the state of the sessions is read from: the ``open_session``'s id, the ``activity``
     in progress there, the ``connections`` viewing the sessions, ``post``, which publishes an
-    event without blocking, and how its run is ``paused``, if it is."""
+    event without blocking, how its run is ``paused``, if it is, and what it spent by role
+    (``spend``)."""
 
     open_session: Callable[[], str]
     activity: Callable[[], Activity]
     connections: Connections
     post: Callable[[Event], None]
     paused: Callable[[], Paused | None]
+    spend: Callable[[], RoleSpend]
 
 
 def _unviewed(session_id: str) -> SessionStateChanged:
@@ -29,11 +32,10 @@ def _unviewed(session_id: str) -> SessionStateChanged:
     return SessionStateChanged(session=session_id, active=False, state="idle", viewers=0)
 
 
-def _open(
-    session_id: str, viewers: int, activity: Activity, paused: Paused | None
-) -> SessionStateChanged:
+def _open(session_id: str, viewers: int, parts: StateParts) -> SessionStateChanged:
     """The state of the open session ``session_id``, which ``viewers`` connections view, with
-    ``activity`` in progress, its run ``paused`` so, if it is."""
+    the activity in progress, the pause and the spend by role that ``parts`` say."""
+    activity, paused, spend = parts.activity(), parts.paused(), parts.spend()
     return SessionStateChanged(
         session=session_id,
         active=True,
@@ -43,14 +45,16 @@ def _open(
         paused_until=paused.until if paused else None,
         paused_for=paused.reason if paused else None,
         paused_runtime=paused.runtime if paused else None,
+        role_spent=spend.by_role,
+        caused_spent=spend.caused,
     )
 
 
 class SessionStates:
     """Publishes ``SessionStateChanged`` for a session in ``parts`` whenever whether it's the
-    open one, whether it's running, what's in progress in it, how its run is paused or how many
-    connections view it changes: the open session, and those connections view, and any that was
-    and no longer is either."""
+    open one, whether it's running, what's in progress in it, how its run is paused, what it
+    spent by role or how many connections view it changes: the open session, and those
+    connections view, and any that was and no longer is either."""
 
     def __init__(self, parts: StateParts) -> None:
         self._parts = parts
@@ -68,7 +72,7 @@ class SessionStates:
             for session_id, viewers in viewed.items()
             if session_id != open_id
         }
-        states[open_id] = _open(open_id, viewed[open_id], parts.activity(), parts.paused())
+        states[open_id] = _open(open_id, viewed[open_id], parts)
         return states
 
     def of(self, session_id: str) -> SessionStateChanged:

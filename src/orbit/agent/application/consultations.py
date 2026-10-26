@@ -105,6 +105,7 @@ class Consultations:
         self._count = 0
         self._pending: dict[int, Consultation] = {}  # Those asked and not yet answered.
         self._owed: list[SavedConsultation] = []  # Those the session opened was saved with.
+        self._answering: dict[str, str] = {}  # The asker of each consultant's turn running.
         self._held = False
 
     @property
@@ -112,6 +113,11 @@ class Consultations:
         """The consultations pending, to save: those the session opened with still to answer,
         then those asked since."""
         return (*self._owed, *(asked.saved for asked in self._pending.values()))
+
+    def asker(self, consultant: str) -> str | None:
+        """The role whose consultation the role ``consultant``'s turn running answers; none
+        while it answers none."""
+        return self._answering.get(consultant)
 
     def hold(self) -> None:
         """Leave the consultations whose turns end pending, as turns stop, until
@@ -183,11 +189,16 @@ class Consultations:
 
     @contextmanager
     def _opened(self, asked: Consultation) -> Iterator[Span]:
-        """The span of the turn answering ``asked``, current for the block."""
+        """The span of the turn answering ``asked``, current for the block, while which
+        :meth:`asker` names its asker."""
         waited = asyncio.get_running_loop().time() - asked.asked
         cause, asker, consultant = asked.cause, asked.asker, asked.consultant
         with self._tracing.consultation(cause, asker, consultant, round(waited * 1000)) as span:
-            yield span
+            self._answering[consultant] = asker
+            try:
+                yield span
+            finally:
+                del self._answering[consultant]
 
     def _place(self, asked: Consultation, position: int) -> None:
         """Publish ``asked``'s ``position`` in line, unless it was published already."""

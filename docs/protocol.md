@@ -130,7 +130,11 @@ with `invalid`. The first `Attach` is answered in this order:
    session is halted because a write to the store failed, its `storage_halt`: the explanation
    the halting `ErrorOccurred` carried (see `storage_failed` under [Codes](#codes)), and
    `read_only`, as the Catalog has it for the session's workspace, with `ownership_offered`, true while an offer of the
-   repository is open (see [Read-only orbits](#read-only-orbits)). Attaching to the open
+   repository is open (see [Read-only orbits](#read-only-orbits)), and what the session spent:
+   `role_spent`, each finished turn's usage by its agent's role (a task agent's under its
+   task's role), and `caused_spent`, a consulted turn's usage again under the role that asked
+   and its consultant (`caused_spent[asker][consultant]`), both saved with the session and
+   empty for an older peer. The session's total counts each turn once. Attaching to the open
    session after a `Hello` whose `since` orbit can catch up from gets the open session's events
    after it here instead, in their original envelopes (see
    [Sequencing and reconnecting](#sequencing-and-reconnecting)).
@@ -463,11 +467,14 @@ Each session in a `Catalog` carries its state as it is when the Catalog is sent:
   until the halt lifts. All three are null for any other session. Meanwhile the work lane waits,
   keeping its order, and the lanes whose tasks start by themselves start none whose role runs on
   the paused runtime, running their tasks on other runtimes.
+- `role_spent` and `caused_spent`, in `SessionStateChanged` only, not the Catalog: what the
+  open session spent, as its `Snapshot` has them, updated as its turns end; empty for any other
+  session.
 
 Whenever one of them changes for a session, every welcomed connection gets
 `SessionStateChanged(session, active, state, viewers, activity, paused_until, paused_for,
-paused_runtime)` with
-the new values: a task run, review, planner turn or the startup check starting or ending, a run
+paused_runtime, role_spent, caused_spent)` with
+the new values: a turn ending with usage, a task run, review, planner turn or the startup check starting or ending, a run
 moving on to its next task, its place in line for a coder changing, joining the line or leaving
 it as it gets one, a run pausing or its pause ending, a connection joining, closing or attaching
 to another session, which sends one for the session it left and one for the session it views, and

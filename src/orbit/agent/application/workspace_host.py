@@ -463,6 +463,7 @@ class WorkspaceHost:
             self._connections,
             self._events.put_nowait,
             lambda: self._turns.paused,
+            lambda: self._switcher.spend,
         )
         return SessionStates(parts)
 
@@ -1030,21 +1031,29 @@ class WorkspaceHost:
 
     async def _publish_agents(self, event: Event) -> None:
         """Publish ``event``, from the agents; one that ends a turn adds what the turn cost to
-        what the session spent, and records it in the background. Publishing never suspends,
+        what the session spent, in all and by role, and records it in the background, then
+        publishes the session's state, its spend by role changed. Publishing never suspends,
         so a turn is not cancelled between its TurnFinished and its own bookkeeping, which saves
         the session after it."""
         if isinstance(event, TurnFinished) and event.usage is not None:
             self._switcher.spent += event.usage
             self._record_usage(event.agent_id, event.usage)
         await self._events.put(event)
+        if isinstance(event, TurnFinished) and event.usage is not None:
+            self._states.check()
 
     def _record_usage(self, agent_id: str | None, usage: Usage) -> None:
-        """Record ``usage``, what a turn of agent ``agent_id`` cost, unless that agent wasn't
+        """Record ``usage``, what a turn of agent ``agent_id`` cost, under its role and, for a
+        turn answering a consultation, under what its asker caused, unless that agent wasn't
         launched."""
         assert self._desk is not None, "Only agents publish turns."
         launch = self._desk.launched(agent_id)
-        if launch is not None:
-            self._usage.record(self._workspace_id, self._keeper.id, launch, usage)
+        if launch is None:
+            return
+        self._usage.record(self._workspace_id, self._keeper.id, launch, usage)
+        role = launch.agent.role
+        switcher = self._switcher
+        switcher.spend = switcher.spend.charged(role, usage, self._seats.asker(role))
 
     def _step_names(self) -> tuple[str, ...]:
         """The names of the steps verifying tasks now; none without verification."""
@@ -1204,6 +1213,8 @@ class WorkspaceHost:
             agents=self._running_agents(),
             transcript=transcript.events,
             viewers=self._states.of(self._keeper.id).viewers,
+            role_spent=self._switcher.spend.by_role,
+            caused_spent=self._switcher.spend.caused,
         )
         return Shown(snapshot, transcript.error)
 

@@ -21,6 +21,7 @@ from orbit.agent.application.ports import (
 from orbit.agent.application.storage_halt import Halting, written
 from orbit.agent.domain.refusals import STOPPING, Refused, reason
 from orbit.agent.domain.reviews import LaneSnapshot
+from orbit.agent.domain.role_spend import RoleSpend
 from orbit.agent.domain.sessions import (
     OPEN_UNDELETABLE,
     OPEN_UNRENAMABLE,
@@ -175,7 +176,8 @@ class Contents:
     role (``role_settings``), the planner's for new tasks too, each one's conversation, with the
     runtime it ran on (``conversations``), its ``tasks``, its ``reviews``' state, if any, what
     its agents have ``spent`` in all, the ``planner_notes`` its planner is still to hear, the
-    ``copies`` its conversational roles work in, by role, and the ``consultations`` pending."""
+    ``copies`` its conversational roles work in, by role, the ``consultations`` pending, and
+    what its agents spent by role (``spend``)."""
 
     role_settings: Mapping[str, Settings]
     conversations: Mapping[str, SavedConversation]
@@ -185,6 +187,7 @@ class Contents:
     planner_notes: tuple[str, ...] = ()
     copies: Mapping[str, SavedCopy] = field(default_factory=dict)
     consultations: tuple[SavedConsultation, ...] = ()
+    spend: RoleSpend = field(default_factory=RoleSpend)
 
 
 class SessionKeeper:
@@ -336,6 +339,8 @@ class SessionKeeper:
             tasks=contents.tasks,
             reviews=contents.reviews,
             spent=contents.spent,
+            role_spent=contents.spend.by_role,
+            caused_spent=contents.spend.caused,
         )
         error = await outcome(store.save(record))
         if isinstance(error, StoreFailed):

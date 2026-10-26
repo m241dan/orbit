@@ -329,6 +329,8 @@ EVENTS: tuple[EventEnvelope, ...] = (
             paused_until=WHEN,
             paused_for=PAUSED_FOR_API_UNAVAILABLE,
             paused_runtime="claude",
+            role_spent={PLANNER: USAGE, "experimenter": USAGE},
+            caused_spent={PLANNER: {"experimenter": USAGE}},
         )
     ),
     event(
@@ -359,6 +361,8 @@ EVENTS: tuple[EventEnvelope, ...] = (
             active=False,
             open_session=SessionRef(id="s2", name="Today"),
             viewers=2,
+            role_spent={PLANNER: USAGE},
+            caused_spent={PLANNER: {"experimenter": USAGE}},
         )
     ),
     event(

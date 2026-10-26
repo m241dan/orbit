@@ -434,7 +434,8 @@ class Snapshot(_Message):
     offer is settled. ``active`` says whether the session is the workspace's open one, which runs
     work; one that isn't is a read-only view, from its saved record and its last logged events.
     ``open_session`` names the workspace's open session, and ``viewers`` counts the connections
-    viewing this one.
+    viewing this one. ``role_spent`` is what the session spent by role, and ``caused_spent`` what
+    each role caused its consultants to spend, by asker then consultant.
     """
 
     type: Literal["snapshot"] = "snapshot"
@@ -457,6 +458,8 @@ class Snapshot(_Message):
     active: bool = True
     open_session: SessionRef | None = None
     viewers: int = Field(default=0, ge=0)
+    role_spent: dict[str, Usage] = Field(default_factory=dict)
+    caused_spent: dict[str, dict[str, Usage]] = Field(default_factory=dict)
     _dropped_oldest: int | None = PrivateAttr(default=None)
 
     @field_validator("transcript", mode="before")
@@ -559,8 +562,10 @@ class SessionStateChanged(_Message):
     """Session ``session`` is now ``active`` (the workspace's open session) or not, in
     ``state``, with ``viewers`` connections viewing it, ``activity`` in progress in it, and,
     while its run waits to start again by itself, starting again at ``paused_until``, stopped
-    for ``paused_for`` on the runtime ``paused_runtime``; sent to every connection whenever one
-    of them changes, and never logged."""
+    for ``paused_for`` on the runtime ``paused_runtime``, and what it spent by role
+    (``role_spent``) and what each role caused its consultants to spend, by asker then consultant
+    (``caused_spent``), as its turns end; sent to every connection whenever one of them changes,
+    and never logged."""
 
     type: Literal["session_state_changed"] = "session_state_changed"
     session: str
@@ -571,6 +576,8 @@ class SessionStateChanged(_Message):
     paused_until: AwareDatetime | None = None
     paused_for: PauseReason | None = None
     paused_runtime: str | None = None
+    role_spent: dict[str, Usage] = Field(default_factory=dict)
+    caused_spent: dict[str, dict[str, Usage]] = Field(default_factory=dict)
 
 
 def with_state(summary: SessionSummary, changed: SessionStateChanged) -> SessionSummary:

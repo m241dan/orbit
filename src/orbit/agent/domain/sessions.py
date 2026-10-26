@@ -32,7 +32,7 @@ from orbit.protocol import (
     Usage,
 )
 
-FORMAT_VERSION = 13
+FORMAT_VERSION = 14
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
@@ -105,7 +105,8 @@ def _on_claude(record: dict[str, Any]) -> dict[str, Any]:
 # be misread; its migration puts version 9's bare handles on Claude. Version 11 added the credits
 # in what the session and its tasks spent, which an older record spent none of. Version 12
 # added the copies the conversational roles work in, which an older record has none of, and
-# version 13 the consultations pending, which an older record has none of.
+# version 13 the consultations pending, which an older record has none of. Version 14 added
+# what each role spent and caused its consultants to spend, which an older record has none of.
 _MIGRATIONS: dict[int, Migration] = {
     1: _spent_by_tasks,
     2: _without_rounds,
@@ -119,6 +120,7 @@ _MIGRATIONS: dict[int, Migration] = {
     10: _unchanged,
     11: _unchanged,
     12: _unchanged,
+    13: _unchanged,
 }
 
 EMPTY_NAME = "A session needs a name."
@@ -166,7 +168,9 @@ class SessionRecord(BaseModel):
     (``conversations``), the copies those working in one work in (``copies``), the consultations
     pending (``consultations``), the ``planner_notes`` the planner is still to hear, its
     ``tasks`` and, when reviews are on, its ``reviews``' state, and what its agents have
-    ``spent`` in all, the planner and tasks since removed included."""
+    ``spent`` in all, the planner and tasks since removed included: by role (``role_spent``),
+    and what each role caused its consultants to spend, by asker then consultant
+    (``caused_spent``)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -183,6 +187,8 @@ class SessionRecord(BaseModel):
     tasks: tuple[TaskState, ...] = ()
     reviews: LaneSnapshot | None = None
     spent: Usage = Usage()
+    role_spent: dict[str, Usage] = Field(default={})
+    caused_spent: dict[str, dict[str, Usage]] = Field(default={})
 
 
 class _ReviewCount(BaseModel):

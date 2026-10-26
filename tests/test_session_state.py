@@ -22,6 +22,7 @@ from orbit.protocol import (
     Snapshot,
     TaskSpec,
     TurnEndReason,
+    Usage,
 )
 from tests.agent_fakes import (
     Call,
@@ -29,6 +30,7 @@ from tests.agent_fakes import (
     FakeTree,
     Steps,
     Ticks,
+    chats,
     checked,
     claims_done,
     frontend,
@@ -297,3 +299,22 @@ async def test_state_changes_belong_to_no_session_and_are_never_logged() -> None
     assert envelopes[-1].session is None
     assert store.logged
     assert not any(isinstance(e.payload, SessionStateChanged) for e in store.logged)
+
+
+async def test_a_turn_ending_with_usage_publishes_what_the_session_spent_by_role() -> None:
+    session, _, launcher = session_for()
+    launcher.planner_turns = [chats]
+    launcher.planner_usages = [Usage(cost_usd=0.4)]
+    connection = await joined(session, "first")
+    await received(connection)
+    await say(connection, "plan", SendMessage(agent=PLANNER, text="Plan."))
+    events = await until(connection, spent)
+    await session.close()
+
+    [change] = [e for e in changes(events) if e.role_spent]
+    assert (change.role_spent, change.caused_spent) == ({PLANNER: Usage(cost_usd=0.4)}, {})
+
+
+def spent(event: Event) -> bool:
+    """Whether ``event`` says the open session spent anything by role."""
+    return isinstance(event, SessionStateChanged) and bool(event.role_spent)

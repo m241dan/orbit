@@ -130,6 +130,11 @@ class ConversationSeats:
         """The consultations pending, to save."""
         return self._consultations.saved
 
+    def asker(self, role: str) -> str | None:
+        """The role whose consultation the role ``role``'s turn running answers; none while it
+        answers none."""
+        return self._consultations.asker(role)
+
     def leave(self) -> None:
         """Have the consultations pending saved as interrupted by a switch of session."""
         self._consultations.leave()

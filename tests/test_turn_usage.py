@@ -72,6 +72,7 @@ async def test_a_coder_turn_and_a_planner_turn_are_recorded_as_rows() -> None:
         ),
     ]
     assert ledger.rows[0].at < ledger.rows[1].at
+    assert switcher_of(session).spend.by_role == {"coder": CODER_USAGE, PLANNER: PLANNER_USAGE}
     await session.close()
 
 

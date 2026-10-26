@@ -28,8 +28,10 @@ from orbit.protocol import (
     Event,
     NewSession,
     SendMessage,
+    Snapshot,
     TurnEndReason,
     TurnFinished,
+    Usage,
 )
 from tests.agent_fakes import (
     ROLES,
@@ -46,7 +48,9 @@ from tests.agent_fakes import (
     resume_storage,
     send,
     session_for,
+    snapshot_of,
     sole,
+    switcher_of,
 )
 from tests.session_builders import opened, saved, store_with
 from tests.telemetry_helpers import Traced, linked_to
@@ -446,3 +450,77 @@ async def test_a_consultation_saved_for_a_role_without_a_seat_is_still_answered(
 
     assert sole(events, ConsultationAnswered) == interrupted("orbit restarted", asker="ghost")
     assert launcher.launches == []
+
+
+PLANNER_SPENT = Usage(cost_usd=0.4)
+EXPERIMENTER_SPENT = Usage(cost_usd=1.1)
+CAUSED = {PLANNER: {EXPERIMENTER: EXPERIMENTER_SPENT}}
+
+
+async def consulted_spend(*errors: str, store: FakeStore | None = None) -> Snapshot:
+    """The snapshot, once the planner hears the consultation answered, of a session, saved in
+    ``store`` if given, whose planner's turn costing $0.40 consulted the experimenter, whose turn
+    costs $1.10; the turns end in ``errors``, in the order they end, and the session is closed."""
+    heard: list[Reply] = []
+    gate = asyncio.Event()
+    session, _, launcher = session_for(roles=CONSULTING, store=store)
+    launcher.planner_turns = [consults("Check X", heard=heard, gate=gate), chats, chats]
+    # The experimenter's turn ends while the planner's waits for the gate.
+    launcher.planner_usages = [EXPERIMENTER_SPENT, PLANNER_SPENT]
+    launcher.planner_errors = list(errors)
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    await events_until(session, finished("agent-2", 1))
+    gate.set()
+    await events_until(session, finished("agent-1", 2))
+    assert switcher_of(session).spent == EXPERIMENTER_SPENT + PLANNER_SPENT
+    snapshot = await snapshot_of(session)
+    await session.close()
+    return snapshot
+
+
+async def test_a_consulted_turn_counts_for_its_consultant_and_as_caused_by_its_asker() -> None:
+    snapshot = await consulted_spend()
+    by_role = {PLANNER: PLANNER_SPENT, EXPERIMENTER: EXPERIMENTER_SPENT}
+    assert (snapshot.role_spent, snapshot.caused_spent) == (by_role, CAUSED)
+
+
+async def test_an_interrupted_consulted_turn_still_counts_for_both() -> None:
+    snapshot = await consulted_spend("The experiment broke.")
+    assert snapshot.role_spent[EXPERIMENTER] == EXPERIMENTER_SPENT
+    assert snapshot.caused_spent == CAUSED
+
+
+async def test_the_spend_by_role_is_saved_and_read_back_as_the_session_opens() -> None:
+    store = FakeStore()
+    await consulted_spend(store=store)
+    by_role = {PLANNER: PLANNER_SPENT, EXPERIMENTER: EXPERIMENTER_SPENT}
+    assert (store.last.role_spent, store.last.caused_spent) == (by_role, CAUSED)
+    session, _ = consulting_host(store_with(store.last.model_copy(update={"id": "talks"})))
+    await opened(session, ActivateSession(session="talks"))
+    snapshot = await snapshot_of(session)
+    await opened(session, NewSession())
+    cleared = await snapshot_of(session)
+    await session.close()
+
+    assert (snapshot.role_spent, snapshot.caused_spent) == (by_role, CAUSED)
+    assert (cleared.role_spent, cleared.caused_spent) == ({}, {})
+
+
+async def test_an_older_session_opens_having_spent_nothing_by_role() -> None:
+    session, _ = consulting_host(store_with(saved("talks")))
+    await opened(session, ActivateSession(session="talks"))
+    snapshot = await snapshot_of(session)
+    await session.close()
+    assert (snapshot.role_spent, snapshot.caused_spent) == ({}, {})
+
+
+async def test_messaging_the_consultant_directly_counts_for_it_alone() -> None:
+    session, _, launcher = session_for(roles=CONSULTING)
+    launcher.planner_turns = [chats]
+    launcher.planner_usages = [EXPERIMENTER_SPENT]
+    await send(session, SendMessage(agent=EXPERIMENTER, text="Try it."))
+    await events_until(session, finished("agent-1", 1))
+    snapshot = await snapshot_of(session)
+    await session.close()
+
+    assert (snapshot.role_spent, snapshot.caused_spent) == ({EXPERIMENTER: EXPERIMENTER_SPENT}, {})

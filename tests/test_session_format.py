@@ -27,8 +27,8 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit these for a format change: they're what orbits at versions 1 to 13 wrote, and
-# they still need to read. A new version gets its own fixture (session-v14.json) and a
+# Never edit these for a format change: they're what orbits at versions 1 to 14 wrote, and
+# they still need to read. A new version gets its own fixture (session-v15.json) and a
 # migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
 SESSION_V2 = FIXTURES / "session-v2.json"
@@ -43,6 +43,7 @@ SESSION_V10 = FIXTURES / "session-v10.json"
 SESSION_V11 = FIXTURES / "session-v11.json"
 SESSION_V12 = FIXTURES / "session-v12.json"
 SESSION_V13 = FIXTURES / "session-v13.json"
+SESSION_V14 = FIXTURES / "session-v14.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -156,7 +157,7 @@ def expected(
     lane: LaneSnapshot | None = None,
 ) -> SessionRecord:
     return SessionRecord(
-        version=13,
+        version=14,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
@@ -306,14 +307,30 @@ def consulting() -> SessionRecord:
     return copying().model_copy(update={"consultations": (pending, left)})
 
 
-def test_a_version_13_session_file_reads_as_its_record() -> None:
+def test_a_version_13_session_file_migrates_to_having_spent_nothing_by_role() -> None:
     assert parse_record(SESSION_V13.read_text(encoding="utf-8")) == consulting()
 
 
-def test_a_session_record_is_written_in_the_version_13_format() -> None:
-    written = json.loads(record_json(consulting()))
-    golden = json.loads(SESSION_V13.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V13.name)
+def charging() -> SessionRecord:
+    """The golden record as version 14 keeps it, with what the planner and the experimenter
+    spent, the experimenter's consulted by the planner."""
+    planner, experimenter = Usage(cost_usd=0.4), Usage(cost_usd=1.1, credits=0.5)
+    return consulting().model_copy(
+        update={
+            "role_spent": {"planner": planner, "experimenter": experimenter},
+            "caused_spent": {"planner": {"experimenter": experimenter}},
+        }
+    )
+
+
+def test_a_version_14_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V14.read_text(encoding="utf-8")) == charging()
+
+
+def test_a_session_record_is_written_in_the_version_14_format() -> None:
+    written = json.loads(record_json(charging()))
+    golden = json.loads(SESSION_V14.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V14.name)
 
 
 def test_a_version_1_review_count_reads_as_its_count() -> None:

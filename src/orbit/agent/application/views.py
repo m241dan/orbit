@@ -50,6 +50,7 @@ from orbit.protocol import (
     Snapshot,
     StepState,
     TaskState,
+    Usage,
 )
 
 VIEW_COMMANDS = (
@@ -87,6 +88,8 @@ class SessionParts(TypedDict):
     transcript: tuple[EventEnvelope, ...]
     active: NotRequired[bool]
     viewers: int
+    role_spent: NotRequired[dict[str, Usage]]
+    caused_spent: NotRequired[dict[str, dict[str, Usage]]]
 
 
 @dataclass(frozen=True)
@@ -265,6 +268,8 @@ class SessionViews:
             transcript=transcript.events,
             active=False,
             viewers=parts.states.of(record.id).viewers,
+            role_spent=record.role_spent,
+            caused_spent=record.caused_spent,
         )
         return Shown(view, transcript.error)
 

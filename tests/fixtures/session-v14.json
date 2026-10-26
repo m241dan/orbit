@@ -1,0 +1,279 @@
+{
+  "version": 14,
+  "id": "s-golden",
+  "name": "Golden session",
+  "created": "2026-10-07T09:05:00Z",
+  "last_active": "2026-10-17T14:30:00+02:00",
+  "role_settings": {
+    "planner": {
+      "model": "opus",
+      "tool_access": "full",
+      "effort": "high"
+    },
+    "architect": {
+      "model": "sonnet",
+      "tool_access": "restricted",
+      "effort": "max"
+    }
+  },
+  "conversations": {
+    "planner": {
+      "runtime": "claude",
+      "handle": "conversation-1"
+    },
+    "architect": {
+      "runtime": "claude",
+      "handle": "conversation-2"
+    }
+  },
+  "copies": {
+    "architect": {
+      "path": "/repo/.git/orbit/copies/copy-1",
+      "last_turn": "2026-10-17T14:25:00+02:00"
+    }
+  },
+  "consultations": [
+    {
+      "number": 1,
+      "asker": "planner",
+      "consultant": "architect",
+      "title": "Check X",
+      "why": "orbit restarted"
+    },
+    {
+      "number": 2,
+      "asker": "planner",
+      "consultant": "architect",
+      "title": "Check X",
+      "why": "the session was switched"
+    }
+  ],
+  "planner_notes": [
+    "Another record took the number of `docs/00024-a.md`, so orbit renamed it `docs/00025-a.md` in the tasks still to come. Name it `docs/00025-a.md` from now on."
+  ],
+  "tasks": [
+    {
+      "id": "1",
+      "task": {
+        "prompt": "Add the parser",
+        "settings": {
+          "model": "sonnet",
+          "tool_access": "off",
+          "effort": "low"
+        },
+        "role": "writer"
+      },
+      "status": "completed",
+      "fixes": null,
+      "origin": "planner",
+      "attempt": 2,
+      "max_attempts": 3,
+      "batch": null,
+      "round": 0,
+      "usage": {
+        "input_tokens": 100,
+        "output_tokens": 20,
+        "cache_creation_input_tokens": 30,
+        "cache_read_input_tokens": 40,
+        "cost_usd": 1.25,
+        "credits": 0.5,
+        "turns": 6,
+        "duration_ms": 7000
+      },
+      "reason": "",
+      "reason_detail": ""
+    },
+    {
+      "id": "2",
+      "task": {
+        "prompt": "Fix the parser",
+        "settings": {
+          "model": null,
+          "tool_access": "restricted",
+          "effort": null
+        },
+        "role": "coder"
+      },
+      "status": "gave_up",
+      "fixes": "1",
+      "origin": "review",
+      "attempt": 1,
+      "max_attempts": 2,
+      "batch": "b1",
+      "round": 2,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cost_usd": 0.0,
+        "credits": 0.0,
+        "turns": 0,
+        "duration_ms": 0
+      },
+      "reason": "Gave up",
+      "reason_detail": "The task contradicts itself."
+    },
+    {
+      "id": "3",
+      "task": {
+        "prompt": "Review the whole codebase",
+        "settings": {
+          "model": null,
+          "tool_access": "restricted",
+          "effort": null
+        },
+        "role": "reviewer"
+      },
+      "status": "unverified",
+      "fixes": null,
+      "origin": "super_review",
+      "attempt": 0,
+      "max_attempts": 0,
+      "batch": null,
+      "round": 0,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cost_usd": 0.0,
+        "credits": 0.0,
+        "turns": 0,
+        "duration_ms": 0
+      },
+      "reason": "Unit tests failed",
+      "reason_detail": "1 failed, 4 passed"
+    },
+    {
+      "id": "4",
+      "task": {
+        "prompt": "Document the parser",
+        "settings": {
+          "model": null,
+          "tool_access": "restricted",
+          "effort": null
+        },
+        "role": "coder"
+      },
+      "status": "draft",
+      "fixes": null,
+      "origin": "manual",
+      "attempt": 0,
+      "max_attempts": 0,
+      "batch": null,
+      "round": 0,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cost_usd": 0.0,
+        "credits": 0.0,
+        "turns": 0,
+        "duration_ms": 0
+      },
+      "reason": "",
+      "reason_detail": ""
+    }
+  ],
+  "reviews": {
+    "planner": {
+      "paused": true,
+      "next_batch": 3,
+      "batches": {
+        "b2": {
+          "round": 2,
+          "cap": 4,
+          "tasks": [
+            "2",
+            "5"
+          ],
+          "finished": [
+            "2"
+          ],
+          "commits": [
+            "c3"
+          ],
+          "missing": [
+            "2"
+          ],
+          "landed": [
+            "5"
+          ],
+          "filling": false
+        }
+      },
+      "suggested": [
+        "fix the parser"
+      ]
+    },
+    "jobs": {
+      "3": {
+        "commits": [
+          "c1",
+          "c2"
+        ],
+        "round": 1,
+        "batch": "b1",
+        "missing": [
+          "6"
+        ],
+        "whole": true,
+        "reviewed": [
+          "1",
+          "2"
+        ]
+      }
+    },
+    "batches": {
+      "3": "b2"
+    }
+  },
+  "spent": {
+    "input_tokens": 300,
+    "output_tokens": 50,
+    "cache_creation_input_tokens": 60,
+    "cache_read_input_tokens": 80,
+    "cost_usd": 2.5,
+    "credits": 0.75,
+    "turns": 9,
+    "duration_ms": 12000
+  },
+  "role_spent": {
+    "planner": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cost_usd": 0.4,
+      "credits": 0.0,
+      "turns": 0,
+      "duration_ms": 0
+    },
+    "experimenter": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cost_usd": 1.1,
+      "credits": 0.5,
+      "turns": 0,
+      "duration_ms": 0
+    }
+  },
+  "caused_spent": {
+    "planner": {
+      "experimenter": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cost_usd": 1.1,
+        "credits": 0.5,
+        "turns": 0,
+        "duration_ms": 0
+      }
+    }
+  }
+}
