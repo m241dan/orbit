@@ -120,6 +120,7 @@ class RoleCopies:
         self._publish = publish
         self._held: dict[str, SavedCopy] = {}
         self._made: set[str] = set()  # The copies made in this run, which aren't leftovers.
+        self._turns: dict[str, str] = {}  # The copies of the roles taking a turn, by role.
         self.changed: Callable[[], Awaitable[None]] = _nothing_changed
 
     @property
@@ -134,11 +135,21 @@ class RoleCopies:
 
     async def enter(self, role: str) -> str:
         """The copy role ``role``'s conversation takes a turn in now: the one it has, unless it
-        was removed meanwhile, else a new one; raises :class:`TreeFailed` as making one does."""
+        was removed meanwhile, else a new one, kept from expiring until :meth:`leave`; raises
+        :class:`TreeFailed` as making one does."""
         saved = self._held.get(role)
         path = saved.path if saved and await self._exists(saved.path) else await self._make()
         self._held[role] = SavedCopy(path=path, last_turn=self._clock())
+        self._turns[role] = path
         return path
+
+    def leave(self, role: str) -> None:
+        """End role ``role``'s turn, timing its copy's TTL from now, if it still holds the copy
+        the turn was taken in."""
+        path = self._turns.pop(role, None)
+        saved = self._held.get(role)
+        if saved is not None and saved.path == path:
+            self._held[role] = SavedCopy(path=path, last_turn=self._clock())
 
     async def drop(self, role: str) -> None:
         """Remove role ``role``'s copy, if it has one, with its conversation."""
@@ -148,8 +159,10 @@ class RoleCopies:
 
     async def expire(self, ttls: Mapping[str, float]) -> None:
         """Remove the copies whose role's TTL in ``ttls``, in hours, has passed since their
-        conversation's last turn, saving the session if any were."""
-        roles = expired_roles(self._held, ttls, self._clock())
+        conversation's last turn, but those of roles taking a turn, saving the session if any
+        were."""
+        idle = {role: saved for role, saved in self._held.items() if role not in self._turns}
+        roles = expired_roles(idle, ttls, self._clock())
         for role in roles:
             await self._remove(self._held.pop(role).path)
         if roles:

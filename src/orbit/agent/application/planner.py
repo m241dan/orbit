@@ -323,6 +323,18 @@ class PlannerChat:
         directory, its process traced under the span current, the turn's."""
         assert self._agent is not None
         root = await self._conversation_root()
+        try:
+            async for event in self._converse_in(turn_id, prompt, settings, root):
+                yield event
+        finally:
+            if self.copies is not None:
+                self.copies.leave(self._role)
+
+    async def _converse_in(
+        self, turn_id: str, prompt: str, settings: Settings, root: str
+    ) -> AsyncIterator[Event]:
+        """Turn ``turn_id`` of the planner's conversation, on ``prompt``, in ``root``."""
+        assert self._agent is not None
         role = self._desk.agents.roles[self._role]
         own = Settings(
             model=self.model(settings), tool_access=role.tool_access, effort=settings.effort

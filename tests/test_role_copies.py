@@ -118,14 +118,48 @@ async def test_a_copy_that_cant_be_removed_is_left_over_saying_why() -> None:
 async def test_copies_past_their_roles_ttl_are_removed_and_the_session_saved() -> None:
     ledger = Ledger()
     old = await ledger.copies.enter("experimenter")
+    ledger.copies.leave("experimenter")
     ledger.clock.move(2)
     young = await ledger.copies.enter("architect")
+    ledger.copies.leave("architect")
     ledger.clock.move(1)
     await ledger.copies.expire({"experimenter": 2, "architect": 2})
     assert ledger.made.removed == [old]
     assert list(ledger.copies.held) == ["architect"]
     assert ledger.saves == 1
     assert young not in ledger.made.removed
+
+
+async def test_a_copy_isnt_expired_while_its_role_takes_a_turn() -> None:
+    ledger = Ledger()
+    path = await ledger.copies.enter("experimenter")
+    ledger.clock.move(3)
+    await ledger.copies.expire({"experimenter": 2})
+    assert ledger.made.removed == []
+    assert ledger.copies.held == {"experimenter": saved(path)}
+
+
+async def test_a_copys_ttl_counts_from_the_end_of_its_roles_last_turn() -> None:
+    ledger = Ledger()
+    path = await ledger.copies.enter("experimenter")
+    ledger.clock.move(3)
+    ledger.copies.leave("experimenter")
+    ended = START + timedelta(hours=3)
+    assert ledger.copies.held == {"experimenter": saved(path, ended)}
+    ledger.clock.move(1)
+    await ledger.copies.expire({"experimenter": 2})
+    assert (ledger.made.removed, ledger.saves) == ([], 0)
+    ledger.clock.move(2)
+    await ledger.copies.expire({"experimenter": 2})
+    assert ledger.made.removed == [path]
+
+
+async def test_leaving_a_turn_whose_copy_was_dropped_records_nothing() -> None:
+    ledger = Ledger()
+    await ledger.copies.enter("experimenter")
+    await ledger.copies.drop("experimenter")
+    ledger.copies.leave("experimenter")
+    assert ledger.copies.held == {}
 
 
 async def test_no_copy_past_its_ttl_saves_nothing() -> None:
@@ -177,6 +211,7 @@ async def test_a_sweep_says_why_an_expired_recorded_copy_cant_be_removed() -> No
 async def test_keeping_sweeps_at_once_then_expires_the_sessions_copies_every_period() -> None:
     ledger = Ledger("/stray")
     path = await ledger.copies.enter("experimenter")
+    ledger.copies.leave("experimenter")
     swept = asyncio.Event()
 
     async def others() -> OtherCopies:
