@@ -31,6 +31,7 @@ from orbit.protocol import (
     Event,
     Notice,
     RemoveTask,
+    ResumeStorage,
     RunTasks,
     SessionStateChanged,
     TaskSpec,
@@ -43,6 +44,7 @@ from tests.agent_fakes import (
     START,
     Call,
     FakeHost,
+    FakeStore,
     FakeTree,
     Script,
     ScriptedLauncher,
@@ -53,6 +55,8 @@ from tests.agent_fakes import (
     claims_done,
     events_until,
     idle,
+    payloads,
+    publish,
     run,
     send,
     session_for,
@@ -61,7 +65,7 @@ from tests.agent_fakes import (
     suggests,
     turns_of,
 )
-from tests.connection_helpers import until
+from tests.connection_helpers import quiet, until
 
 FAKE = "fake"
 """A runtime other than Claude, played by a launcher of its own."""
@@ -364,11 +368,12 @@ async def test_a_second_runtime_hitting_its_limit_keeps_the_first_pause_and_wait
 
 
 def paused_by_a_review(
-    waits: Waits, fake: ScriptedLauncher, *scripts: Script
+    waits: Waits, fake: ScriptedLauncher, *scripts: Script, **more: Any
 ) -> tuple[WorkspaceHost, ScriptedLauncher]:
     """A session whose drafter runs through ``fake`` and whose coder plays ``scripts`` on
-    Claude, its first review hitting Claude's usage limit, timed by ``waits``."""
-    every: dict[str, Any] = {"tree": FakeTree(), "review": True, "pause": waits.pause}
+    Claude, its first review hitting Claude's usage limit, timed by ``waits``; ``more`` go to
+    :func:`session_for`."""
+    every: dict[str, Any] = {"tree": FakeTree(), "review": True, "pause": waits.pause, **more}
     roles = {**ROLES, "drafter": DRAFTER}
     options: dict[str, Any] = {"host": fake.host, "launchers": {FAKE: fake}, "roles": roles}
     reviewers = (errs, claims_done, claims_done, claims_done)
@@ -434,16 +439,47 @@ async def test_a_wake_in_a_reviews_pause_runs_work_up_to_claude_work_and_the_res
     assert CODER in roles_of(claude)
 
 
-async def test_a_hold_in_a_reviews_pause_keeps_the_work_from_starting_after() -> None:
+async def test_a_hold_in_a_reviews_pause_cancels_the_pause_and_keeps_the_work_held() -> None:
     waits = Waits()
     session, claude = paused_by_a_review(waits, ScriptedLauncher(FakeHost()), claims_done)
     await wake_in_the_pause(session, TaskSpec(prompt="Code it."))
     turns_of(session).hold()
-    await events_until(session, idle("review"))
+    held = await events_until(session, idle("review"))
+    cleared = turns_of(session).paused
     await settled()
+    assert CODER not in roles_of(claude)
+
+    await send(session, RunTasks())
+    await events_until(session, idle())
     await session.close()
 
+    assert WAIT_CANCELLED_NOTE in notes(held)
+    assert cleared is None
+    assert CODER in roles_of(claude)
+
+
+async def test_a_lanes_pause_ending_while_halted_starts_the_work_once_the_halt_lifts() -> None:
+    waits, store = Waits(), FakeStore()
+    session, claude = paused_by_a_review(
+        waits, ScriptedLauncher(FakeHost()), claims_done, store=store
+    )
+    await wake_in_the_pause(session, TaskSpec(prompt="Code it."))
+    store.append_failure = "disk full"
+    await publish(session, Notice(message="n"))
+    await quiet(payloads(session))
+    waits.release.set()
+    halted = await quiet(payloads(session))
     assert CODER not in roles_of(claude)
+
+    store.append_failure = None
+    await send(session, ResumeStorage())
+    events = await events_until(session, idle())
+    await session.close()
+
+    assert tasks_resuming_note(CLAUDE) not in notes(halted)
+    assert notes(events).count(tasks_resuming_note(CLAUDE)) == 1
+    assert RESUMING_NOTE not in notes(events)
+    assert CODER in roles_of(claude)
 
 
 def paused_on(runtime: str) -> Stop:
