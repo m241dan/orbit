@@ -6,6 +6,7 @@ import json
 import re
 import secrets
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
@@ -17,6 +18,15 @@ FIXTURES = sorted(KIRO.glob("*.jsonl"))
 # A home other than the placeholder's, or a token: after ``Bearer`` anything but the placeholder,
 # or anything as long as the capture's tokens.
 LEAKS = re.compile(r"/home/(?!user\b)|Bearer (?!TOKEN\b)|[\w-]{43,}")
+
+
+def capture_script() -> ModuleType:
+    """The capture script, loaded as a module."""
+    spec = importlib.util.spec_from_file_location("capture_kiro_fixtures", CAPTURE_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    return script
 
 
 def events(fixture: Path) -> list[dict[str, Any]]:
@@ -78,10 +88,7 @@ def test_each_captured_run_has_its_exit_code() -> None:
 
 
 def test_the_capture_script_runs_exactly_the_captured_fixtures() -> None:
-    spec = importlib.util.spec_from_file_location("capture_kiro_fixtures", CAPTURE_SCRIPT)
-    assert spec is not None and spec.loader is not None
-    script = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(script)
+    script = capture_script()
     assert {f"{run.name}.jsonl" for run in script.RUNS} == {fixture.name for fixture in FIXTURES}
 
 
@@ -89,3 +96,36 @@ def test_a_bad_model_ends_in_a_run_error_naming_it() -> None:
     last = events(KIRO / "bad-model.jsonl")[-1]
     assert last["type"] == "runError"
     assert "no-such-model" in last["data"]["message"]
+
+
+def anonymised(output: str) -> str:
+    """``output`` as the capture script anonymises it, with token ``secret`` and home
+    ``/home/kiro``."""
+    result: str = capture_script().anonymised(output, "secret", "/home/kiro")
+    return result
+
+
+def test_anonymising_keeps_lines_that_are_not_json() -> None:
+    output = '{"type": "a"}\nWarning: slow\n\n{"type": "b"}\n'
+    assert anonymised(output) == output
+
+
+def test_anonymising_replaces_the_home_and_token_on_every_line() -> None:
+    output = '{"path": "/home/kiro/x", "auth": "Bearer secret"}\nWarning: /home/kiro secret\n'
+    assert anonymised(output) == (
+        '{"path": "/home/user/x", "auth": "Bearer TOKEN"}\nWarning: /home/user TOKEN\n'
+    )
+
+
+def test_anonymising_numbers_session_ids_in_order_of_first_appearance() -> None:
+    output = '{"sessionId": "s-one"}\n{"data": {"sessionId": "s-two"}}\n{"sessionId": "s-one"}\n'
+    assert anonymised(output) == (
+        '{"sessionId": "00000000-0000-0000-0000-000000000001"}\n'
+        '{"data": {"sessionId": "00000000-0000-0000-0000-000000000002"}}\n'
+        '{"sessionId": "00000000-0000-0000-0000-000000000001"}\n'
+    )
+
+
+def test_anonymising_replaces_request_ids() -> None:
+    output = '{"requestId": "12345678-abcd-4def-8abc-1234567890ab"}\n'
+    assert anonymised(output) == '{"requestId": "REQUEST"}\n'
