@@ -613,7 +613,7 @@ class SessionStore(EventLog, Protocol):
         ...
 
     async def save_report(self, report: NewReport) -> int:
-        """Save ``report``, numbered after the highest report kept; returns its id. Raises
+        """Save ``report``, numbered after the highest id ever given; returns its id. Raises
         :class:`StoreFailed`, a :class:`StorageFailed` when the database failed, when it can't
         be saved."""
         ...

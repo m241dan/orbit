@@ -60,7 +60,7 @@ def rows(state: Path, workspace_id: str) -> dict[str, int]:
     """How many rows each table keyed by workspace has for ``workspace_id``."""
     tables = {"events": "workspace_id", "logs": "workspace_id", "sessions": "workspace_id"}
     tables |= {"reviews": "workspace_id", "record_moves": "workspace_id", "workspaces": "id"}
-    tables |= {"reports": "workspace_id"}
+    tables |= {"reports": "workspace_id", "report_counters": "workspace_id"}
     with database(state) as connection:
         return {
             table: connection.execute(
@@ -105,6 +105,14 @@ async def test_purging_deletes_every_record_leaving_other_workspaces(
     again = await WorkspaceRegistry(store).find_or_register(str(tmp_path / "b"))
     assert again.workspace_id != second
     assert await store.sessions(again.workspace_id) == []
+
+
+async def test_a_workspace_purged_and_added_again_numbers_its_reports_from_1(
+    store: SqliteStore, tmp_path: Path
+) -> None:
+    await purge_workspace(store, await used(store, tmp_path / "a"))
+    workspace_id = await used(store, tmp_path / "a")
+    assert [report.id for report in await store.reports(workspace_id)] == [1]
 
 
 async def test_purging_a_clean_managed_clone_deletes_its_directory(

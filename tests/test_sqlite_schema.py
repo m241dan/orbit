@@ -312,7 +312,7 @@ async def test_a_version_9_database_upgrades_to_10_with_no_credits_spent_by_its_
         assert connection.execute("SELECT cost_usd, credits FROM usage").fetchall() == [(0.5, 0)]
 
 
-async def test_a_version_10_database_upgrades_to_11_with_no_reports(
+async def test_a_version_10_database_upgrades_with_no_reports(
     monkeypatch: pytest.MonkeyPatch, state: Path, workspace: Path
 ) -> None:
     with monkeypatch.context() as patched:
@@ -323,7 +323,9 @@ async def test_a_version_10_database_upgrades_to_11_with_no_reports(
     store = await SqliteStore.open(state)
     await store.close()
     with database(state) as connection:
-        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (11,)
+        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (
+            len(MIGRATIONS),
+        )
         assert connection.execute("SELECT count(*) FROM reports").fetchone() == (0,)
 
 

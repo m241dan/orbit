@@ -1,7 +1,8 @@
 """The ``reports`` table in the SQLite database: each workspace's reports, saved, listed, read
 and deleted, as functions over a connection, run by :mod:`sqlite_store` on its thread.
 
-A report's ``id`` counts from 1 in each workspace, and its ``at`` is an ISO time in UTC.
+A report's ``id`` counts from 1 in each workspace, from a counter in ``report_counters`` that
+only goes up, so a deleted report's id isn't given again; its its ``at`` is an ISO time in UTC.
 """
 
 import sqlite3
@@ -15,12 +16,17 @@ from orbit.protocol import ReportShown, ReportSummary
 
 def save(connection: sqlite3.Connection, workspace: str, report: NewReport) -> int:
     """Add ``report`` to the workspace ``workspace``'s reports in ``connection``, numbered after
-    the highest there; returns its id."""
+    the highest it ever gave; returns its id."""
     with transaction(connection):
-        (highest,) = connection.execute(
-            "SELECT max(id) FROM reports WHERE workspace_id = ?", (workspace,)
+        connection.execute(
+            """INSERT INTO report_counters (workspace_id, last_id) VALUES (?, 1)
+            ON CONFLICT (workspace_id) DO UPDATE SET last_id = last_id + 1""",
+            (workspace,),
+        )
+        (last,) = connection.execute(
+            "SELECT last_id FROM report_counters WHERE workspace_id = ?", (workspace,)
         ).fetchone()
-        report_id = int(highest or 0) + 1
+        report_id = int(last)
         connection.execute(
             """INSERT INTO reports (workspace_id, id, title, body, author, session_id, at)
             VALUES (?, ?, ?, ?, ?, ?, ?)""",

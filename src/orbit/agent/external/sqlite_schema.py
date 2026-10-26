@@ -127,6 +127,16 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
             PRIMARY KEY (workspace_id, id)
         )""",
     ),
+    (
+        # The highest report id each workspace ever gave, so a deleted report's id isn't given
+        # again; it starts from the highest report already kept.
+        """CREATE TABLE report_counters (
+            workspace_id TEXT PRIMARY KEY REFERENCES workspaces (id),
+            last_id INTEGER NOT NULL
+        )""",
+        """INSERT INTO report_counters (workspace_id, last_id)
+        SELECT workspace_id, max(id) FROM reports GROUP BY workspace_id""",
+    ),
 )
 
 

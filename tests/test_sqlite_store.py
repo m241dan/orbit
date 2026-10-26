@@ -20,7 +20,7 @@ from orbit.agent.application.ports import (
 from orbit.agent.domain.reports import NewReport
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.storage_halt import StorageErrorKind
-from orbit.agent.external import sqlite_store
+from orbit.agent.external import sqlite_schema, sqlite_store
 from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import NewRows, SqliteStore
 from orbit.protocol import EventEnvelope, Notice, ReportShown
@@ -131,6 +131,43 @@ async def test_a_report_deleted_is_gone_and_an_unknown_one_is_none(
     assert not await store.delete_report(1)
     assert await store.report(1) is None
     assert await store.reports() == []
+
+
+async def test_a_deleted_reports_id_is_never_given_again(
+    open_store: Opener, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.save_report(new_report("Timings"))
+    await store.save_report(new_report("Memory"))
+    assert await store.delete_report(2)
+    assert await store.save_report(new_report("Disk")) == 3
+    assert await store.report(2) is None
+
+
+async def test_deleting_every_report_doesnt_restart_the_numbering(
+    open_store: Opener, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.save_report(new_report("Timings"))
+    assert await store.delete_report(1)
+    assert await store.save_report(new_report("Memory")) == 2
+
+
+async def test_a_database_with_reports_from_before_the_counter_numbers_after_the_highest(
+    monkeypatch: pytest.MonkeyPatch, open_store: Opener, state: Path, workspace: Path
+) -> None:
+    with monkeypatch.context() as patched:
+        patched.setattr(sqlite_schema, "MIGRATIONS", sqlite_schema.MIGRATIONS[:-1])
+        await (await open_store(workspace)).close()
+    with database(state) as connection:
+        for report_id in (1, 4):
+            connection.execute(
+                "INSERT INTO reports VALUES"
+                " ((SELECT id FROM workspaces), ?, 't', 'b', 'a', 's', ?)",
+                (report_id, WHEN.isoformat()),
+            )
+    store = await open_store(workspace)
+    assert await store.save_report(new_report("Disk")) == 5
 
 
 async def test_a_workspace_is_registered_once_by_path_and_its_fingerprint_kept_current(

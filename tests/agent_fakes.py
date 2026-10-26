@@ -468,7 +468,8 @@ class FakeStore:
 
     The record moves kept are ``moves``; ``moves_failure``, while set, is the error saving them
     raises, and ``moves_load_failure`` the error reading them raises, as :class:`ReadFailed`.
-    The reports kept are ``reports_kept``, by id.
+    The reports kept are ``reports_kept``, by id, and the highest id ever given
+    ``last_report_id``.
     """
 
     def __init__(self, count: int = 0) -> None:
@@ -513,6 +514,7 @@ class FakeStore:
         self.moves_failure: str | None = None
         self.moves_load_failure: str | None = None
         self.reports_kept: dict[int, NewReport] = {}
+        self.last_report_id = 0
 
     @property
     def last(self) -> SessionRecord:
@@ -678,7 +680,8 @@ class FakeStore:
 
     async def save_report(self, report: NewReport) -> int:
         await asyncio.sleep(0)  # Saving takes a while, as writing a file does.
-        report_id = max(self.reports_kept, default=0) + 1
+        self.last_report_id += 1
+        report_id = self.last_report_id
         self.reports_kept[report_id] = report
         return report_id
 
