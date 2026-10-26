@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from orbit.protocol import ReportShown, ReportSummary
+from orbit.protocol import LARGEST_REPORT_ID, ReportShown, ReportSummary
 
 REPORT_LIMIT = 200 * 1024
 """The most bytes a report's body may hold, in UTF-8."""
@@ -15,8 +15,6 @@ TOO_LARGE = "That report is over 200 KB; summarise it and keep only the essentia
 NO_TITLE = "A report needs a title."
 NO_REPORTS = "There are no reports yet."
 NO_ID = "Name the report by the id list_reports gives it."
-LARGEST_ID = 2**63 - 1
-"""The largest report id the store can hold, SQLite's largest INTEGER."""
 
 
 @dataclass(frozen=True)
@@ -53,14 +51,22 @@ def unknown_report(report_id: int) -> str:
 
 def report_id(arguments: dict[str, Any]) -> int | None:
     """The report id ``arguments`` name as ``id``: a whole number, or its digits; none
-    otherwise, or when it's over :data:`LARGEST_ID`, so the agent is told :data:`NO_ID`."""
+    otherwise, or when it's over :data:`LARGEST_REPORT_ID`, so the agent is told :data:`NO_ID`."""
     value = arguments.get("id")
     if isinstance(value, bool):
         return None
-    if isinstance(value, str) and value.strip().isdigit():
-        value = int(value)
-    if isinstance(value, int) and value <= LARGEST_ID:
+    if isinstance(value, str):
+        value = _digits(value.strip())
+    if isinstance(value, int) and value <= LARGEST_REPORT_ID:
         return value
+    return None
+
+
+def _digits(text: str) -> int | None:
+    """The whole number ``text`` spells in ASCII digits; none if it doesn't, or has more digits
+    than :data:`LARGEST_REPORT_ID`, so a long string isn't converted."""
+    if text.isascii() and text.isdigit() and len(text) <= len(str(LARGEST_REPORT_ID)):
+        return int(text)
     return None
 
 

@@ -61,6 +61,9 @@ def test_an_unknown_report_is_named() -> None:
         ({"id": 2**63 - 1}, 2**63 - 1),
         ({"id": 2**63}, None),
         ({"id": "99999999999999999999"}, None),
+        ({"id": "9" * 5000}, None),
+        ({"id": "²"}, None),
+        ({"id": "①"}, None),
     ],
 )
 def test_a_report_id_is_a_whole_number_or_its_digits(

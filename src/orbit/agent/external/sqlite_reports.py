@@ -2,7 +2,7 @@
 and deleted, as functions over a connection, run by :mod:`sqlite_store` on its thread.
 
 A report's ``id`` counts from 1 in each workspace, from a counter in ``report_counters`` that
-only goes up, so a deleted report's id isn't given again; its its ``at`` is an ISO time in UTC.
+only goes up, so a deleted report's id isn't given again; its ``at`` is an ISO time in UTC.
 """
 
 import sqlite3

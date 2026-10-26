@@ -165,7 +165,7 @@ async def test_reading_without_an_id_is_refused() -> None:
     assert await tools["read_report"]({}) == Reply(NO_ID, is_error=True)
 
 
-@pytest.mark.parametrize("wanted", [2**64, "99999999999999999999"])
+@pytest.mark.parametrize("wanted", [2**64, "99999999999999999999", "9" * 5000, "²"])
 async def test_reading_an_id_too_large_for_the_store_is_refused(wanted: int | str) -> None:
     heard: list[Reply] = []
     session, _, launcher = session_for(roles=REPORTING, store=FakeStore())

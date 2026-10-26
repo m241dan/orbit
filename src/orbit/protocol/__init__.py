@@ -25,6 +25,7 @@ from orbit.protocol.codes import (
     WRONG_SESSION,
 )
 from orbit.protocol.commands import (
+    LARGEST_REPORT_ID,
     AcceptTask,
     ActivateSession,
     AddTask,
@@ -240,6 +241,7 @@ __all__ = [
     "INCOMPATIBLE",
     "INTERNAL",
     "INVALID",
+    "LARGEST_REPORT_ID",
     "LOCKED",
     "MANUAL_ORIGIN",
     "MESSAGE_TOO_BIG",
