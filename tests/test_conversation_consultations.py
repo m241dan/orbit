@@ -117,9 +117,10 @@ def test_a_consultation_answered_live_stays_answered_after_paging_back() -> None
     session.feed.prepend([asked(2)])
     session.window.settle()
     before = texts(session, PLANNER)
-    session.events(asked(1, number=2))
-    assert texts(session, PLANNER)[:2] == before
-    assert len(texts(session, PLANNER)) == 3
+    session.events(asked(1))
+    after = texts(session, PLANNER)
+    assert after[:2] == before
+    assert len(after) == 3
 
 
 def test_a_consultation_shown_live_and_earlier_updates_the_live_entry() -> None:

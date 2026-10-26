@@ -247,7 +247,8 @@ class ConversationFeed:
     def prepend(self, events: Iterable[Event]) -> None:
         """Show ``events``, which came before every event shown, above them, as they were
         shown when they happened, leaving the tabs, the running turns and the usage counted
-        as they are, and updating the entries of consultations still pending there."""
+        as they are, and letting later events update the entries of consultations still pending
+        there."""
         live, self._turns = self._turns, Turns()
         asked, self._asked = self._asked, {}
         self._earlier = self._replaying = True
