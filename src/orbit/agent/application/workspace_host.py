@@ -647,7 +647,7 @@ class WorkspaceHost:
         if self._desk is not None:
             task = role_task(CODER, self._desk.agents.roles[CODER], prompt)
         await self._switcher.between_switches(
-            lambda: self._tasks.change(lambda board: board.add_draft(task))
+            lambda: self._tasks.change(lambda board: board.add_draft(task, None))
         )
 
     @property

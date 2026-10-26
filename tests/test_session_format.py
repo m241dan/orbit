@@ -27,8 +27,8 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit these for a format change: they're what orbits at versions 1 to 14 wrote, and
-# they still need to read. A new version gets its own fixture (session-v15.json) and a
+# Never edit these for a format change: they're what orbits at versions 1 to 15 wrote, and
+# they still need to read. A new version gets its own fixture (session-v16.json) and a
 # migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
 SESSION_V2 = FIXTURES / "session-v2.json"
@@ -44,6 +44,7 @@ SESSION_V11 = FIXTURES / "session-v11.json"
 SESSION_V12 = FIXTURES / "session-v12.json"
 SESSION_V13 = FIXTURES / "session-v13.json"
 SESSION_V14 = FIXTURES / "session-v14.json"
+SESSION_V15 = FIXTURES / "session-v15.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -157,7 +158,7 @@ def expected(
     lane: LaneSnapshot | None = None,
 ) -> SessionRecord:
     return SessionRecord(
-        version=14,
+        version=15,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
@@ -323,14 +324,27 @@ def charging() -> SessionRecord:
     )
 
 
-def test_a_version_14_session_file_reads_as_its_record() -> None:
+def test_a_version_14_session_file_migrates_to_drafts_proposed_by_no_one() -> None:
     assert parse_record(SESSION_V14.read_text(encoding="utf-8")) == charging()
 
 
-def test_a_session_record_is_written_in_the_version_14_format() -> None:
-    written = json.loads(record_json(charging()))
-    golden = json.loads(SESSION_V14.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V14.name)
+def proposing() -> SessionRecord:
+    """The golden record as version 15 keeps it, its draft proposed by the planner."""
+    states = tuple(
+        state.model_copy(update={"proposed_by": "planner"}) if state.status == "draft" else state
+        for state in charging().tasks
+    )
+    return charging().model_copy(update={"tasks": states})
+
+
+def test_a_version_15_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V15.read_text(encoding="utf-8")) == proposing()
+
+
+def test_a_session_record_is_written_in_the_version_15_format() -> None:
+    written = json.loads(record_json(proposing()))
+    golden = json.loads(SESSION_V15.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V15.name)
 
 
 def test_a_version_1_review_count_reads_as_its_count() -> None:

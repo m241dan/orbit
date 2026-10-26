@@ -90,6 +90,7 @@ async def test_prompts_to_the_planner_go_to_it_and_proposals_become_drafts() -> 
         ("draft", "planner", "Add the flag\n\nAdd --fast to the CLI."),
         ("draft", "planner", "Document it\n\nMention --fast in the README."),
     ]
+    assert [t.proposed_by for t in drafts] == ["planner", "planner"]
     assert drafts[0].task.settings.tool_access == "full"  # The coder role's default.
     assert any(isinstance(e, TurnStarted) and e.agent_id == "agent-1" for e in events)
 
@@ -780,3 +781,11 @@ async def test_another_conversational_role_is_named_when_its_turn_runs_out_of_ti
     assert await chat.answer("Design.", Settings()) == "error"
     message = "The architect ran out of time (0.0001 minutes)."
     assert [e.message for e in errors(published)] == [message]
+
+
+async def test_another_conversational_roles_proposal_records_that_role() -> None:
+    published: list[Event] = []
+    chat, _, _ = steps_chat(proposes_two, published=published, roles=architects(), role=ARCHITECT)
+    assert await chat.answer("Design.", Settings()) == "completed"
+    drafts = board(published)
+    assert [(t.origin, t.proposed_by) for t in drafts] == [("planner", ARCHITECT)] * 2

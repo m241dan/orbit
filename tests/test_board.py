@@ -48,7 +48,7 @@ def test_add_appends_pending_tasks_with_distinct_ids() -> None:
 def test_pending_counts_the_tasks_waiting_to_run_alone() -> None:
     board = TaskBoard()
     running, _, done = board.add(ONE), board.add(TWO), board.add(FIX)
-    board.add_draft(ONE)
+    board.add_draft(ONE, "planner")
     board.set_status(running, "running")
     board.set_status(done, "completed")
 
@@ -351,7 +351,7 @@ def test_editing_a_suggestion_keeps_where_it_came_from() -> None:
 
 def test_drafts_wait_until_accepted() -> None:
     board = TaskBoard()
-    draft = board.add_draft(TaskSpec(prompt="plan step"))
+    draft = board.add_draft(TaskSpec(prompt="plan step"), "planner")
     assert (board.get(draft).status, board.get(draft).origin) == ("draft", PLANNER_ORIGIN)
     assert board.next_runnable() is None
     board.accept(draft)
@@ -533,7 +533,7 @@ def test_a_pending_or_running_task_in_a_role_is_waiting(status: TaskStatus) -> N
 def test_a_finished_task_or_a_draft_is_not_waiting() -> None:
     board = TaskBoard()
     board.finish(board.add(TaskSpec(prompt="done", role="configurator")), "completed")
-    board.add_draft(TaskSpec(prompt="draft", role="configurator"))
+    board.add_draft(TaskSpec(prompt="draft", role="configurator"), "planner")
     assert not board.has_waiting("configurator")
 
 
@@ -541,3 +541,31 @@ def test_a_waiting_task_in_another_role_does_not_count() -> None:
     board = TaskBoard()
     board.add(ONE)
     assert not board.has_waiting("configurator")
+
+
+def test_a_draft_records_the_role_that_proposed_it() -> None:
+    board = TaskBoard()
+    draft = board.add_draft(ONE, "architect")
+    board.accept(draft)
+    board.edit(draft, TWO)
+    assert board.get(draft).proposed_by == "architect"
+
+
+def test_tasks_added_otherwise_record_no_proposer() -> None:
+    board = TaskBoard()
+    added = board.add(ONE)
+    board.add_first(TWO)
+    board.add_suggestion(FIX, "b1", 1)
+    board.add(FIX, fixes=added)
+    assert [t.proposed_by for t in board.tasks] == [None] * 4
+
+
+def test_a_restored_task_keeps_its_proposer_or_none() -> None:
+    board = TaskBoard()
+    board.restore(
+        (
+            TaskState.model_validate({"id": "1", "task": ONE.model_dump()}),
+            TaskState(id="2", task=TWO, proposed_by="planner"),
+        )
+    )
+    assert [t.proposed_by for t in board.tasks] == [None, "planner"]

@@ -139,6 +139,7 @@ TASK = TaskState(
     usage=USAGE,
     reason="Unit tests failed",
     reason_detail="1 failed",
+    proposed_by="planner",
 )
 SUMMARY = SessionSummary(
     id="s1",

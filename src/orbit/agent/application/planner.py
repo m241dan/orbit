@@ -375,7 +375,7 @@ class PlannerChat:
             return Reply(refusal, is_error=True)
         title, prompt = suggestion
         task = suggested_task(roles[CODER], title, prompt)
-        task_id = await self._tasks.change(lambda board: board.add_draft(task))
+        task_id = await self._tasks.change(lambda board: board.add_draft(task, self._role))
         self._drafts += 1
         return Reply(f"Added draft task {task_id}; the user will accept or drop it.")
 

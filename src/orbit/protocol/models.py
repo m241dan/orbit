@@ -169,7 +169,8 @@ class TaskState(_Message):
     suggested belongs to that review's ``batch``, at review ``round`` (0 otherwise).
     ``usage`` adds up what every turn run for the task cost. A task that ended badly says why
     in ``reason``, one line such as ``Unit tests failed``, with the full text in
-    ``reason_detail``; both are empty otherwise.
+    ``reason_detail``; both are empty otherwise. ``proposed_by`` is the conversational role
+    that proposed a draft, such as ``planner``; none for every other task.
     """
 
     id: str
@@ -184,6 +185,7 @@ class TaskState(_Message):
     usage: Usage = Usage()
     reason: str = ""
     reason_detail: str = ""
+    proposed_by: str | None = None
 
 
 SessionState = Literal["running", "idle"]

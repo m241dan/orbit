@@ -311,7 +311,7 @@ async def test_a_task_in_a_lane_of_its_own_keeps_the_session_running_and_unswitc
 
 async def test_accepting_a_draft_in_a_lane_of_its_own_starts_it() -> None:
     session, _, launcher = session_for(claims_done, roles=WITH_SECURITY)
-    board_of(session).add_draft(audit())
+    board_of(session).add_draft(audit(), "planner")
     await send(session, AcceptTask(task_id="1"))
     await events_until(session, idle("security"))
     assert roles_of(launcher) == ["security"]

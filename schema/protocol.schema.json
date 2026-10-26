@@ -3105,7 +3105,7 @@
       "type": "object"
     },
     "TaskState": {
-      "description": "One entry of the task list. ``id`` stays the same while the list changes around it.\n\n``fixes`` is the id of the task this one was added to fix, if any; it comes right\nafter that task. ``attempt`` counts the fixes asked of the agent working on it, out\nof ``max_attempts``; both are 0 until verification first fails. A task a review\nsuggested belongs to that review's ``batch``, at review ``round`` (0 otherwise).\n``usage`` adds up what every turn run for the task cost. A task that ended badly says why\nin ``reason``, one line such as ``Unit tests failed``, with the full text in\n``reason_detail``; both are empty otherwise.",
+      "description": "One entry of the task list. ``id`` stays the same while the list changes around it.\n\n``fixes`` is the id of the task this one was added to fix, if any; it comes right\nafter that task. ``attempt`` counts the fixes asked of the agent working on it, out\nof ``max_attempts``; both are 0 until verification first fails. A task a review\nsuggested belongs to that review's ``batch``, at review ``round`` (0 otherwise).\n``usage`` adds up what every turn run for the task cost. A task that ended badly says why\nin ``reason``, one line such as ``Unit tests failed``, with the full text in\n``reason_detail``; both are empty otherwise. ``proposed_by`` is the conversational role\nthat proposed a draft, such as ``planner``; none for every other task.",
       "properties": {
         "attempt": {
           "default": 0,
@@ -3151,6 +3151,18 @@
           "default": "manual",
           "title": "Origin",
           "type": "string"
+        },
+        "proposed_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Proposed By"
         },
         "reason": {
           "default": "",

@@ -288,7 +288,7 @@ async def test_editing_a_task_into_a_disabled_role_is_refused_naming_it() -> Non
 
 async def test_accepting_a_draft_in_a_disabled_role_is_refused_leaving_it_a_draft() -> None:
     session, _, _ = session_for(roles=disabling(CODER))
-    board_of(session).add_draft(CODE)
+    board_of(session).add_draft(CODE, "planner")
     events = await refusal_of(session, AcceptTask(task_id="1"))
     await session.close()
     assert events[-1] == disabled(CODER)
@@ -312,7 +312,7 @@ async def test_accepting_a_missing_task_with_a_role_disabled_is_refused_as_unkno
 
 async def test_with_every_role_enabled_accepting_a_coder_draft_makes_it_pending() -> None:
     session, _, _ = session_for()
-    board_of(session).add_draft(CODE)
+    board_of(session).add_draft(CODE, "planner")
     await send(session, AcceptTask(task_id="1"))
     events = await events_until(session, of_type(CommandAccepted))
     await session.close()
