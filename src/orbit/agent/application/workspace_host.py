@@ -1102,13 +1102,13 @@ class WorkspaceHost:
         """Cancel the work lane's and the conversational roles' turns, and wait for them to end;
         the work lane's turns stop for good."""
         await self._turns.close()
-        await self._seats.stop_turns()
+        await self._seats.stop_turns(final=True)
 
     async def _halt_turns(self) -> None:
         """Cancel the work lane's and the conversational roles' turns as the session halts, and
         wait for them to end; a run the usage limit stopped still starts again."""
         await self._turns.stop_turn()
-        await self._seats.stop_turns()
+        await self._seats.stop_turns(final=False)
 
     async def _stop_work(self) -> None:
         """Cancel the reviews, the other lanes that start by themselves and the startup check,

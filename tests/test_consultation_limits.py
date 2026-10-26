@@ -225,7 +225,7 @@ async def test_one_held_with_no_frontend_connected_expires_denied_after_an_hour(
     await eventually(lambda: any(told in launch.prompt for launch in launcher.launches))
     taken = drained(events)
     gate.set()
-    await seats.stop_turns()
+    await seats.stop_turns(final=True)
     await seats.close()
 
     assert heard == [Reply(ASKED.format(1)), held(2)]

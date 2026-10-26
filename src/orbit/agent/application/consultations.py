@@ -18,6 +18,7 @@ from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks, Waiting
 from orbit.agent.application.ports import Reply
 from orbit.agent.domain.consult_limits import ConsultCount
 from orbit.agent.domain.consultations import (
+    CANCELLED,
     DECLINED,
     EXPIRED,
     RESTARTED,
@@ -166,6 +167,15 @@ class Consultations:
         """Answer the consultations whose turns end again."""
         self._held = False
 
+    async def cancel(self) -> None:
+        """Answer each consultation pending, but those held for approval, as cancelled, its turn
+        having been cancelled or forgotten as turns stopped, saving the session after."""
+        held = {request.consultation for request in self.approvals.waiting}
+        cancelled = [asked for asked in self._pending.values() if asked.number not in held]
+        for asked in cancelled:
+            self._drop(asked, CANCELLED)
+        await self._save()
+
     def stop_expiry(self) -> None:
         """Stop timing the consultations held for approval, as the session's turns stop."""
         self.approvals.stop()
@@ -243,7 +253,7 @@ class Consultations:
         await self._save()
 
     def _drop(self, asked: Consultation, why: str) -> None:
-        """Answer ``asked``, held, as interrupted for ``why``."""
+        """Answer ``asked``, whose turn isn't running, as interrupted for ``why``."""
         del self._pending[asked.number]
         self._interrupted(asked.saved, why)
 

@@ -209,10 +209,11 @@ class ConversationSeats:
         :func:`close_all` does."""
         await close_all(self._each(PlannerSeat.close_retired))
 
-    async def stop_turns(self) -> None:
+    async def stop_turns(self, *, final: bool) -> None:
         """Cancel each role's turn, if it runs, and wait for them to end, starting none of the
-        turns waiting meanwhile, which are forgotten; the consultations they answered stay
-        pending, to answer as the session opens again."""
+        turns waiting meanwhile, which are forgotten. If ``final``, as orbit stops, the
+        consultations they answered stay pending, to answer as the session opens again; else
+        they're answered as cancelled."""
         self._consultations.hold()
         self._consultations.stop_expiry()
         for seat in self._seats.values():
@@ -223,6 +224,8 @@ class ConversationSeats:
             for seat in self._seats.values():
                 seat.drop_waiting()
             self._consultations.release()
+        if not final:
+            await self._consultations.cancel()
 
     async def close(self) -> None:
         """End each role's current conversation, at the session's end."""

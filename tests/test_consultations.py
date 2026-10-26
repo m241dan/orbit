@@ -51,7 +51,6 @@ from tests.agent_fakes import (
     chats,
     events_until,
     halt_of,
-    idle,
     resume_storage,
     send,
     session_for,
@@ -466,17 +465,65 @@ async def test_a_session_saved_with_a_consultation_tells_the_asker_orbit_restart
     assert store.last.consultations == ()
 
 
+async def halted_while_asking(
+    store: FakeStore, *messages: str
+) -> tuple[WorkspaceHost, ScriptedLauncher, list[Event]]:
+    """A session saved in ``store`` whose planner consulted the experimenter with each of
+    ``messages``, halted by storage as the first runs, then resumed; with the events of both."""
+    session, launcher = consulting_host(store)
+    launcher.planner_turns = [consults(*messages, heard=[]), gated(asyncio.Event()), chats]
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    await eventually(lambda: len(launcher.launches) == 2, poll=0)
+    halt_of(session).fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))  # Stops the turns.
+    events = await events_until(session, answered(len(messages)))
+    await resume_storage(session)
+    events += await events_until(session, finished("agent-1", 1))
+    return session, launcher, events
+
+
+async def test_a_storage_halt_answers_the_consultation_running_as_cancelled() -> None:
+    store = FakeStore()
+    session, launcher, events = await halted_while_asking(store, "Check X")
+    await session.close()
+
+    assert sole(events, ConsultationAnswered) == interrupted("it was cancelled")
+    assert prompts(launcher)[-1][1].endswith(told("it was cancelled"))
+    assert store.last.consultations == ()
+
+
+async def test_a_storage_halt_answers_the_consultations_waiting_as_cancelled() -> None:
+    store = FakeStore()
+    session, launcher, events = await halted_while_asking(store, "Check X", "Check Y")
+    await session.close()
+
+    answers = [e for e in events if isinstance(e, ConsultationAnswered)]
+    assert [(a.consultation, a.interrupted) for a in answers] == [
+        (1, "it was cancelled"),
+        (2, "it was cancelled"),
+    ]
+    told_y = "The experimenter's consultation 'Check Y' was interrupted: it was cancelled."
+    assert told_y in prompts(launcher)[-1][1]
+    assert store.last.consultations == ()
+
+
 async def test_a_switch_saves_the_consultations_left_pending_as_switched_away_from() -> None:
     store = FakeStore()
-    session, _ = await asking(store, asyncio.Event())
-    halt_of(session).fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))  # Stops the turns.
-    await events_until(session, idle(EXPERIMENTER))
-    await resume_storage(session)
+    roles = {
+        **CONSULTING,
+        PLANNER: CONSULTING_PLANNER.model_copy(update={"consult_limit_per_hour": 1}),
+    }
+    agents, launcher = agents_for(roles=roles)
+    ids = iter(f"session-{n}" for n in range(1, 100))
+    session = WorkspaceHost(agents=agents, store=store, clock=Ticks(), new_id=lambda: next(ids))
+    launcher.planner_turns = [consults("Check W", "Check X", heard=[]), chats, chats]
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    await events_until(session, finished("agent-1", 2))  # The reply to "Check W" heard.
     await opened(session, NewSession())
     await session.close()
 
     *_, left = [record for record in store.saved if record.id == "session-1"]
-    assert left.consultations == (PENDING.model_copy(update={"why": "the session was switched"}),)
+    switched = PENDING.model_copy(update={"number": 2, "why": "the session was switched"})
+    assert left.consultations == (switched,)
 
 
 async def test_a_session_left_with_a_consultation_tells_the_asker_it_was_switched() -> None:
