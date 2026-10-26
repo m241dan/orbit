@@ -47,6 +47,8 @@ from tests.agent_fakes import (
     Script,
     ScriptedLauncher,
     Source,
+    Stop,
+    board,
     board_of,
     claims_done,
     events_until,
@@ -54,7 +56,9 @@ from tests.agent_fakes import (
     run,
     send,
     session_for,
+    settle,
     settled,
+    suggests,
     turns_of,
 )
 from tests.connection_helpers import until
@@ -421,3 +425,88 @@ async def test_a_hold_in_a_reviews_pause_keeps_the_work_from_starting_after() ->
     await session.close()
 
     assert CODER not in roles_of(claude)
+
+
+def paused_on(runtime: str) -> Stop:
+    """Stops when a state change says ``runtime`` is paused."""
+    return Stop(
+        f"paused_on({runtime!r})",
+        lambda e: paused(e) and isinstance(e, SessionStateChanged) and e.paused_runtime == runtime,
+    )
+
+
+async def test_the_work_lanes_own_limit_replaces_a_reviews_pause_and_restarts_the_work() -> None:
+    waits = Waits()
+    fake = ScriptedLauncher(FakeHost(), errs, claims_done)
+    fake.turn_errors.append(QUOTA)
+    fake.failures[QUOTA] = Failure("usage_limit")
+    session, _ = paused_by_a_review(waits, fake)
+    await review(session, REVIEWER)
+    await until(session, paused)
+    await events_until(session, idle("review"))
+    await send(session, AddTask(task=TaskSpec(prompt="Draft it.", role="drafter")))
+    await turns_of(session).wake()
+    replaced = await until(session, paused_on(FAKE))
+
+    waits.release.set()
+    resumed = await events_until(session, lambda e: RESUMING_NOTE in notes([e]))
+    resumed += await events_until(session, idle())
+    resumed += await events_until(session, idle("review"))
+    await session.close()
+
+    assert notes(replaced)[-1] == paused_note(START + timedelta(minutes=15), FAKE)
+    assert tasks_resuming_note(CLAUDE) not in notes(replaced + resumed)
+    assert roles_of(fake) == ["drafter", "drafter"]
+
+
+async def review_through(session: WorkspaceHost, claude: ScriptedLauncher, *errors: str) -> None:
+    """Queue a review whose agents find ``errors`` in turn on Claude, and wait until one ends
+    its run without any."""
+    claude.turn_errors.extend(errors)
+    await review(session, REVIEWER)
+    await events_until(session, lambda e: not claude.turn_errors and idle("review")(e))
+
+
+async def test_a_lanes_outage_backoff_grows_and_starts_over_once_claude_answers() -> None:
+    waits = Waits()
+    waits.release.set()
+    session, claude = reviewing(waits, errs, errs, claims_done, errs, errs, errs, claims_done)
+    await review_through(session, claude, OVERLOADED, OVERLOADED)
+    await review_through(session, claude, OVERLOADED, LIMIT, OVERLOADED)
+    await session.close()
+
+    assert statuses_of(session) == ["completed", "completed"]
+    assert waits.slept[:3] == [120.0, 300.0, 120.0]  # Claude answered between the two.
+    assert waits.slept[4:] == [120.0]  # The usage limit started the backoff over too.
+
+
+async def test_an_orbit_queued_review_hitting_claudes_limit_suggests_into_its_batch_after() -> None:
+    waits = Waits()
+    errors: list[str] = []
+
+    async def hits_the_limit(call: Call) -> TurnEndReason:
+        errors.append(LIMIT)
+        return "error"
+
+    reviewers = (hits_the_limit, suggests("Add tests"), suggests())
+    every: dict[str, Any] = {"tree": FakeTree(), "review": True, "pause": waits.pause}
+    session, _, claude = session_for(claims_done, claims_done, reviewers=reviewers, **every)
+    claude.turn_errors = errors
+    await send(session, AddTask(task=TaskSpec(prompt="Code it.")))
+    await send(session, RunTasks())
+    await until(session, paused)
+    await events_until(session, idle("review"))
+    assert statuses_of(session) == ["completed", "pending"]
+
+    waits.release.set()
+    events = await settle(session)
+    await session.close()
+
+    shown = [(t.task.role, t.status, t.batch) for t in board(events)]
+    assert shown == [
+        (CODER, "completed", None),
+        (REVIEWER, "completed", None),
+        (CODER, "completed", "batch-1"),
+        (REVIEWER, "completed", None),
+    ]
+    assert board(events)[-1].task.prompt.startswith("Review the 1 commit")
