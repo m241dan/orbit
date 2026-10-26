@@ -1,6 +1,9 @@
 """The prompt talking to the conversational role whose tab is shown, without Textual: a tab per
 conversational role, whom the prompt sends to and how it's marked, and what ctrl+t, ctrl+x,
-ctrl+n and the settings pickers act on."""
+ctrl+n and the settings pickers act on; and, in the app, the tabs and lanes following a move
+between workspaces."""
+
+from textual.pilot import Pilot
 
 from orbit.protocol import (
     BUSY,
@@ -22,10 +25,12 @@ from orbit.protocol import (
     UpdateSettings,
     WorkspaceEntry,
 )
+from orbit.tui import OrbitApp
+from orbit.tui.tasks import TaskList
 from orbit.tui.view.seats import PLANNER_SEAT
 from tests.frontend_fakes import Shell
 from tests.session_apps import CURRENT, with_agents
-from tests.tui_fakes import SNAPSHOT, task
+from tests.tui_fakes import SNAPSHOT, FakeSession, feed_events, tab_strip, task
 
 ARCHITECT = "architect"
 DESIGN = "design"
@@ -444,3 +449,33 @@ async def test_a_task_rows_usage_is_unknown_as_the_workspace_it_is_on_runs_its_r
     assert await shell.frontend.navigation.place.join("A")
     shell.frontend.router.show_viewing()
     assert "usage unknown" in shell.task_view.rows[0]
+
+
+async def joined_a(session: FakeSession, pilot: Pilot[None], app: OrbitApp) -> bool:
+    """Have ``session`` serve :func:`two_workspaces`, the app opening on B, then join A."""
+    await feed_events(session, pilot, two_workspaces())
+    joined = await app._frontend.navigation.place.join("A")
+    await pilot.pause()
+    return joined
+
+
+async def test_joining_another_workspace_pins_its_tabs_and_tags_its_lanes() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        assert await joined_a(session, pilot, app)
+        assert tab_strip(app)[-1] == ARCHITECT
+        assert app.query_one(TaskList).board.lanes["auditor"] == "security"
+
+
+async def test_a_join_failing_to_attach_keeps_the_tabs_and_lanes_of_the_workspace_it_was_on() -> (
+    None
+):
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        session.send_error = ConnectionError("gone")
+        assert not await joined_a(session, pilot, app)
+        assert app._frontend.navigation.place.workspace == "B"
+        assert ARCHITECT not in tab_strip(app)
+        assert app.query_one(TaskList).board.lanes == {PLANNER: "planner", "auditor": "audit"}
