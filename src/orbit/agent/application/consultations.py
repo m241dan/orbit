@@ -209,7 +209,7 @@ class Consultations:
         the session once they're answered."""
         owed, self._owed = self._owed, []
         for saved in owed:
-            self._interrupted(saved, saved.why)
+            self._interrupted(saved, saved.why, None)
         await self._save()
 
     async def ask(self, asker: str, consultant: str, message: str, cause: Span) -> Reply:
@@ -275,7 +275,7 @@ class Consultations:
     def _drop(self, asked: Consultation, why: str) -> None:
         """Answer ``asked``, whose turn isn't running, as interrupted for ``why``."""
         del self._pending[asked.number]
-        self._interrupted(asked.saved, why)
+        self._interrupted(asked.saved, why, asked.cause)
 
     def _consultant(self, asker: str, consultant: str, message: str) -> PlannerSeat | str:
         """The seat of ``consultant``, which ``asker`` asks ``message``; or why it can't."""
@@ -340,30 +340,34 @@ class Consultations:
         if self._held:
             return
         del self._pending[asked.number]
-        current_span().set_attributes({OUTCOME: reason})
+        span = current_span()
+        span.set_attributes({OUTCOME: reason})
         if why is None:
-            self._replied(asked.saved, reply)
+            self._replied(asked.saved, reply, span)
         else:
-            self._interrupted(asked.saved, why)
+            self._interrupted(asked.saved, why, span)
         await self._save()
 
-    def _replied(self, asked: SavedConsultation, reply: str) -> None:
-        """Publish the consultant's ``reply`` to ``asked`` and deliver it to its asker."""
+    def _replied(self, asked: SavedConsultation, reply: str, cause: Span) -> None:
+        """Publish the consultant's ``reply`` to ``asked`` and deliver it to its asker, linked
+        to ``cause``."""
         self._post(_answered(asked, reply))
         message = reply_message(asked.consultant, asked.title, asked.number, reply)
-        self._deliver(asked.asker, message)
+        self._deliver(asked.asker, message, cause)
 
-    def _interrupted(self, asked: SavedConsultation, why: str) -> None:
-        """Publish that ``asked`` was interrupted for ``why``, and tell its asker so."""
+    def _interrupted(self, asked: SavedConsultation, why: str, cause: Span | None) -> None:
+        """Publish that ``asked`` was interrupted for ``why``, and tell its asker so, linked to
+        ``cause``, if given: the consultation's span, or the asking turn's if it never ran."""
         self._post(_answered(asked, "", why))
-        self._deliver(asked.asker, interrupted_message(asked.consultant, asked.title, why))
+        message = interrupted_message(asked.consultant, asked.title, why)
+        self._deliver(asked.asker, message, cause)
 
-    def _deliver(self, asker: str, message: str) -> None:
-        """Deliver ``message`` to the role ``asker``, if it still has a seat, linked to the
-        consultation's span, the current one."""
+    def _deliver(self, asker: str, message: str, cause: Span | None) -> None:
+        """Deliver ``message`` to the role ``asker``, if it still has a seat, linked to
+        ``cause``, if given."""
         seat = self._seats(asker)
         if seat is not None:
-            seat.deliver(message, current_span())
+            seat.deliver(message, cause)
 
 
 def _answered(asked: SavedConsultation, reply: str, why: str | None = None) -> ConsultationAnswered:

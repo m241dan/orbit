@@ -43,12 +43,14 @@ class PlannerTracing:
     session: Callable[[], str] = _no_session
 
     @contextmanager
-    def turn(self, parent: Span, model: str | None, links: tuple[Span, ...] = ()) -> Iterator[Span]:
+    def turn(
+        self, parent: Span, model: str | None, links: tuple[Span, ...] = (), *, root: bool = False
+    ) -> Iterator[Span]:
         """The span of a planner turn on ``model``, if known, current for the block and ended on
-        leaving it: a child of ``parent``, the span current as the turn was asked for; or, with
-        ``links``, the spans whose work it hears, starting its own trace linked to each. An
-        error escaping the block is recorded on it."""
-        with no_span() if links else use_span(parent):
+        leaving it: a child of ``parent``, the span current as the turn was asked for; or, when
+        ``root``, starting its own trace linked to each of ``links``, the spans whose work it
+        hears. An error escaping the block is recorded on it."""
+        with no_span() if root else use_span(parent):
             span = self.telemetry.start(TURN_SPAN, self._identity(model), links)
         with span_block(span):
             yield span

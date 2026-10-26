@@ -34,6 +34,7 @@ from orbit.protocol import (
     CancelTurn,
     ConsultationAnswered,
     ConsultationAsked,
+    DecideApproval,
     Event,
     NewSession,
     ResetConversation,
@@ -371,6 +372,36 @@ async def test_a_turn_hearing_two_replies_links_to_both_consultations() -> None:
     reply, consultations = await traced_replies("Check X", "Check Y", busy=True)
     assert len(consultations) == 2
     assert links_to_all(reply, consultations)
+
+
+async def test_a_denied_consultations_reply_turn_links_to_the_asking_turn() -> None:
+    traced = Traced()
+    planner = CONSULTING_PLANNER.model_copy(update={"consult_limit_per_hour": 1})
+    roles = {**CONSULTING, PLANNER: planner}
+    session, _, launcher = session_for(roles=roles, telemetry=traced.telemetry)
+    launcher.planner_turns = [consults("Check X", "Check Y", heard=[]), chats, chats, chats]
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    await events_until(session, finished("agent-1", 2))
+    await send(session, DecideApproval(consultation=2, decision="deny"))
+    await events_until(session, finished("agent-1", 1))
+    await session.close()
+
+    turns = sorted(traced.spans(TURN_SPAN), key=lambda span: span.start_time or 0)
+    assert turns[-1].parent is None
+    assert links_to_all(turns[-1], [turns[0]])
+
+
+async def test_a_reopened_sessions_interrupted_consultation_turn_is_unlinked() -> None:
+    traced = Traced()
+    store = store_with(saved("talks", consultations=(PENDING,)))
+    session, _, launcher = session_for(roles=CONSULTING, store=store, telemetry=traced.telemetry)
+    launcher.planner_turns = [chats]
+    await opened(session, ActivateSession(session="talks"))
+    await events_until(session, finished("agent-1", 1))
+    await session.close()
+
+    [turn] = traced.spans(TURN_SPAN)
+    assert (turn.parent, turn.links) == (None, ())
 
 
 def test_a_consultations_title_is_its_messages_first_line() -> None:
