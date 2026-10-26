@@ -185,6 +185,12 @@ class Consultations:
         for asked in self._pending.values():
             asked.left = SWITCHED
 
+    def stay(self) -> None:
+        """Have the consultations pending saved as interrupted by a restart again, as their
+        session stays open."""
+        for asked in self._pending.values():
+            asked.left = RESTARTED
+
     def replace(self, saved: tuple[SavedConsultation, ...], last: int = 0) -> None:
         """Forget the consultations pending, saved with the session left, and hold ``saved``,
         those of the session opened, to answer by :meth:`settle`, numbering the next after

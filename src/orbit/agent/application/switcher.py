@@ -235,9 +235,10 @@ class SessionSwitcher:
         if session_id == self._keeper.id:
             return ALREADY_OPEN
         self._may_switch()
-        await self._leave_consultations()
-        opened = await self._keeper.open(session_id, self._load)
+        async with self._leaving_consultations():
+            opened = await self._keeper.open(session_id, self._load)
         if not isinstance(opened, Opened):
+            await self._stay_consultations()
             return opened
         record = opened.record
         tasks, count = interrupted(record.tasks)
@@ -251,15 +252,28 @@ class SessionSwitcher:
         left if its lock was held, then let go of or deleted, or none, as :meth:`activate`
         does. Refused while anything runs."""
         self._may_switch()
-        await self._leave_consultations()
-        left = await self._keeper.renew(name, self._clear)
+        async with self._leaving_consultations():
+            left = await self._keeper.renew(name, self._clear)
         await self._switched(left, (), None)
         return left.id
 
-    async def _leave_consultations(self) -> None:
+    @asynccontextmanager
+    async def _leaving_consultations(self) -> AsyncIterator[None]:
         """Save the session with its consultations pending as interrupted by a switch, to
-        answer as it opens again; a switch refused after leaves them to run on, answered."""
+        answer as it opens again, while the switch is made; a switch refused or failing then
+        leaves them to run on, answered, and saved as interrupted by a restart again."""
         self._parts.seats.leave()
+        await self.save()
+        try:
+            yield
+        except Exception:
+            await self._stay_consultations()
+            raise
+
+    async def _stay_consultations(self) -> None:
+        """Save the session with its consultations pending as interrupted by a restart, as the
+        switch that left them didn't happen."""
+        self._parts.seats.stay()
         await self.save()
 
     def _may_switch(self) -> None:

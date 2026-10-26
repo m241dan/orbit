@@ -164,6 +164,11 @@ class ConversationSeats:
         """Have the consultations pending saved as interrupted by a switch of session."""
         self._consultations.leave()
 
+    def stay(self) -> None:
+        """Have the consultations pending saved as interrupted by a restart, staying in this
+        session after all."""
+        self._consultations.stay()
+
     async def settle(self) -> None:
         """Answer each consultation the session opened was saved with, as interrupted."""
         await self._consultations.settle()

@@ -4,7 +4,7 @@ at once if it's idle, after its turn and any message of the user's waiting other
 together. A consulted turn runs in an ``orbit.consultation`` span linked to the asking turn."""
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from opentelemetry.sdk.trace import ReadableSpan
 
@@ -17,15 +17,18 @@ from orbit.agent.application.ports import Reply, StoreFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.consultations import failed
+from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.runtimes import CLAUDE, Failure
 from orbit.agent.domain.sessions import (
     SavedConsultation,
     SavedConversation,
+    SessionRecord,
     runtime_changed_message,
 )
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import (
+    BUSY,
     PLANNER,
     ActivateSession,
     CancelTurn,
@@ -524,6 +527,51 @@ async def test_a_switch_saves_the_consultations_left_pending_as_switched_away_fr
     *_, left = [record for record in store.saved if record.id == "session-1"]
     switched = PENDING.model_copy(update={"number": 2, "why": "the session was switched"})
     assert left.consultations == (switched,)
+
+
+async def pending_while(
+    switch: Callable[[WorkspaceHost, FakeStore], Awaitable[None]],
+) -> SessionRecord:
+    """The record last saved of the session open, consulting with a consultation pending as
+    ``switch`` tries to switch away from it."""
+    store = store_with(saved("other"))
+    roles = {
+        **CONSULTING,
+        PLANNER: CONSULTING_PLANNER.model_copy(update={"consult_limit_per_hour": 1}),
+    }
+    agents, launcher = agents_for(roles=roles)
+    ids = iter(f"session-{n}" for n in range(1, 100))
+    session = WorkspaceHost(agents=agents, store=store, clock=Ticks(), new_id=lambda: next(ids))
+    launcher.planner_turns = [consults("Check W", "Check X", heard=[]), chats, chats]
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    await events_until(session, finished("agent-1", 2))
+    await switch(session, store)
+    record = [r for r in store.saved if r.id == "session-1"][-1]
+    await session.close()
+    return record
+
+
+async def test_a_switch_to_a_session_unopened_saves_consultations_as_restarted() -> None:
+    async def unopenable(session: WorkspaceHost, store: FakeStore) -> None:
+        store.elsewhere.add("other")
+        await opened(session, ActivateSession(session="other"))
+
+    record = await pending_while(unopenable)
+
+    assert [c.why for c in record.consultations] == ["orbit restarted"]
+
+
+async def test_a_switch_refused_after_leaving_saves_consultations_as_restarted() -> None:
+    async def refused(session: WorkspaceHost, store: FakeStore) -> None:
+        async def busy() -> None:
+            raise Refused(BUSY, "busy")
+
+        store.on_acquire = busy
+        await opened(session, ActivateSession(session="other"))
+
+    record = await pending_while(refused)
+
+    assert [c.why for c in record.consultations] == ["orbit restarted"]
 
 
 async def test_a_session_left_with_a_consultation_tells_the_asker_it_was_switched() -> None:
