@@ -15,9 +15,11 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.consult_limits import HOUR
 from orbit.agent.domain.roles import Role
+from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
     PLANNER,
     UNKNOWN,
+    ActivateSession,
     ApprovalDecided,
     ApprovalDecision,
     ApprovalRequested,
@@ -25,15 +27,19 @@ from orbit.protocol import (
     ConsultationAnswered,
     DecideApproval,
     Event,
+    NewSession,
     SendMessage,
     Settings,
     TurnEndReason,
+    TurnFinished,
 )
 from tests.agent_fakes import (
     ROLES,
     Call,
+    FakeStore,
     Script,
     ScriptedLauncher,
+    Ticks,
     agents_for,
     chats,
     events_until,
@@ -44,6 +50,7 @@ from tests.agent_fakes import (
     snapshot_of,
     sole,
 )
+from tests.session_builders import opened, saved, store_with
 from tests.waiting import eventually
 
 EXPERIMENTER = "experimenter"
@@ -311,3 +318,101 @@ async def test_allowing_once_leaves_the_askers_other_held_consultations_held() -
     await session.close()
 
     assert by(PLANNER, list(snapshot.approvals)) == planners[1:]
+
+
+def holding_host(store: FakeStore) -> tuple[WorkspaceHost, ScriptedLauncher]:
+    """A session saved in ``store``, as ``session-1`` and so on, whose planner may consult the
+    experimenter once an hour."""
+    agents, launcher = agents_for(roles=LIMITED)
+    ids = iter(f"session-{n}" for n in range(1, 100))
+    host = WorkspaceHost(agents=agents, store=store, clock=Ticks(), new_id=lambda: next(ids))
+    return host, launcher
+
+
+def second_turn_ends() -> Callable[[Event], bool]:
+    """Stops at the planner's second TurnFinished."""
+    ended: list[Event] = []
+
+    def done(event: Event) -> bool:
+        if isinstance(event, TurnFinished) and event.agent_id == "agent-1":
+            ended.append(event)
+        return len(ended) == 2
+
+    return done
+
+
+async def holding_in(store: FakeStore) -> tuple[WorkspaceHost, ScriptedLauncher]:
+    """A session saved in ``store`` whose planner's consultation 2 is held, its turns over."""
+    session, launcher = holding_host(store)
+    launcher.planner_turns = [consulting([], asyncio.Event()), chats, chats, chats]
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    await events_until(session, second_turn_ends())
+    return session, launcher
+
+
+def last_of(store: FakeStore, session_id: str) -> SessionRecord:
+    """The record of ``session_id`` last saved in ``store``."""
+    return [record for record in store.saved if record.id == session_id][-1]
+
+
+SWITCHED = "the session was switched"
+
+
+async def test_switching_away_settles_the_one_held_as_denied() -> None:
+    store = FakeStore()
+    session, _ = await holding_in(store)
+    events = await opened(session, NewSession())
+    snapshot = await snapshot_of(session)
+    await session.close()
+
+    assert ApprovalDecided(consultation=2, decision="deny") in events
+    assert snapshot.approvals == ()
+    assert [(c.number, c.why) for c in last_of(store, "session-1").consultations] == [(2, SWITCHED)]
+
+
+async def reopened(why: str, launcher: ScriptedLauncher) -> None:
+    """Checks the planner is told its consultation 2 was interrupted for ``why``."""
+    told = f"The experimenter's consultation 'Check Y' was interrupted: {why}."
+    await eventually(lambda: any(told in launch.prompt for launch in launcher.launches))
+
+
+async def test_reopening_a_session_left_holding_one_says_it_was_switched() -> None:
+    store = FakeStore()
+    session, launcher = await holding_in(store)
+    await opened(session, NewSession())
+    await send(session, ActivateSession(session="session-1"))
+    answer = sole(await events_until(session, answering(2)), ConsultationAnswered)
+    await reopened(SWITCHED, launcher)
+    await session.close()
+
+    assert answer.interrupted == SWITCHED
+
+
+async def test_one_held_as_orbit_stops_is_answered_as_the_session_reopens() -> None:
+    store = FakeStore()
+    session, _ = await holding_in(store)
+    await session.close()
+    store = store_with(saved("talks", consultations=last_of(store, "session-1").consultations))
+    session, launcher = holding_host(store)
+    launcher.planner_turns = [chats]
+    await send(session, ActivateSession(session="talks"))
+    answer = (await events_until(session, answering(2)))[-1]
+    assert isinstance(answer, ConsultationAnswered)
+    await reopened("orbit restarted", launcher)
+    await session.close()
+
+    assert answer.interrupted == "orbit restarted"
+
+
+async def test_a_switch_that_fails_asks_about_the_one_held_again() -> None:
+    store = FakeStore()
+    store.saved.append(saved("other"))
+    session, _ = await holding_in(store)
+    store.elsewhere.add("other")
+    events = await opened(session, ActivateSession(session="other"))
+    snapshot = await snapshot_of(session)
+    await session.close()
+
+    deny = events.index(ApprovalDecided(consultation=2, decision="deny"))
+    assert requested(2, "Check Y") in events[deny:]
+    assert snapshot.approvals == (requested(2, "Check Y"),)

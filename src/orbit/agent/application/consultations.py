@@ -181,15 +181,20 @@ class Consultations:
         self.approvals.stop()
 
     def leave(self) -> None:
-        """Have the consultations pending saved as interrupted by a switch of session."""
+        """Have the consultations pending saved as interrupted by a switch of session, telling
+        the frontends asking about those held that they're settled as ``deny``."""
         for asked in self._pending.values():
             asked.left = SWITCHED
+        for request in self.approvals.waiting:
+            self._post(_decided(request.consultation, "deny"))
 
     def stay(self) -> None:
         """Have the consultations pending saved as interrupted by a restart again, as their
         session stays open."""
         for asked in self._pending.values():
             asked.left = RESTARTED
+        for request in self.approvals.waiting:
+            self._post(request)
 
     def replace(self, saved: tuple[SavedConsultation, ...], last: int = 0) -> None:
         """Forget the consultations pending, saved with the session left, and hold ``saved``,

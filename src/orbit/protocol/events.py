@@ -416,8 +416,9 @@ class ApprovalRequested(_Message):
 
 class ApprovalDecided(_Message):
     """Consultation ``consultation``, held for approval, was settled with ``decision``: by a
-    ``DecideApproval``, or ``deny`` as it expired or the session left it; a frontend still
-    asking about it stops."""
+    ``DecideApproval``, or ``deny`` as it expired or the session holding it was left (it's
+    answered as interrupted as that session opens again); a frontend still asking about it
+    stops."""
 
     type: Literal["approval_decided"] = "approval_decided"
     consultation: int

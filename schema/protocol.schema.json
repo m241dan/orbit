@@ -442,7 +442,7 @@
       "type": "object"
     },
     "ApprovalDecided": {
-      "description": "Consultation ``consultation``, held for approval, was settled with ``decision``: by a\n``DecideApproval``, or ``deny`` as it expired or the session left it; a frontend still\nasking about it stops.",
+      "description": "Consultation ``consultation``, held for approval, was settled with ``decision``: by a\n``DecideApproval``, or ``deny`` as it expired or the session holding it was left (it's\nanswered as interrupted as that session opens again); a frontend still asking about it\nstops.",
       "properties": {
         "consultation": {
           "title": "Consultation",

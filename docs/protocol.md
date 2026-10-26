@@ -668,7 +668,12 @@ answers it as interrupted, `you declined it`. The first decision applies: the ba
 and refuses any later one with `unknown`. A consultation held for an hour with no frontend
 viewing the session expires: it's answered as interrupted, `it expired waiting for approval`,
 and `ApprovalDecided` says `deny`. The consultations held are in the `Snapshot`'s `approvals`;
-they're saved with the session like any pending, and answered so as it opens again.
+they're saved with the session like any pending, and answered so as it opens again. As the
+session is switched away from, the backend publishes `ApprovalDecided(consultation, deny)` for
+each consultation held, so every frontend still viewing it stops asking; each is saved as pending,
+interrupted by the switch, and its asker is told `the session was switched` as the session opens
+again. The session switched to starts with no `approvals`. If the switch fails and the session
+stays open, each consultation held is asked about again with its `ApprovalRequested`.
 
 ## Reports
 
