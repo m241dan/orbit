@@ -174,6 +174,22 @@ def test_a_tool_output_without_text_is_given_as_json() -> None:
     assert events == [ToolCallFinished(turn_id="t", call_id="c", output=json.dumps(raw_output))]
 
 
+@pytest.mark.parametrize(
+    "value", [["a", "b"], "x", {"content": "body"}], ids=["list", "string", "string content"]
+)
+def test_a_json_item_that_is_not_an_mcp_result_is_given_as_json(value: object) -> None:
+    raw_output = {"items": [{"Json": value}]}
+    events = translated(finished(status="completed", rawOutput=raw_output))
+    assert events == [ToolCallFinished(turn_id="t", call_id="c", output=json.dumps(raw_output))]
+
+
+def test_malformed_content_parts_are_skipped_beside_valid_text_parts() -> None:
+    content = [1, "x", {"type": "text", "text": 2}, {"type": "text", "text": "ok"}]
+    raw_output = {"items": [{"Json": {"content": content}}]}
+    events = translated(finished(status="completed", rawOutput=raw_output))
+    assert events == [ToolCallFinished(turn_id="t", call_id="c", output="ok")]
+
+
 def test_a_completed_mcp_result_marked_as_an_error_finishes_in_error() -> None:
     result = {"content": [{"type": "text", "text": "Refused."}], "isError": True}
     events = translated(finished(status="completed", rawOutput={"items": [{"Json": result}]}))

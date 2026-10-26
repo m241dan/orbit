@@ -234,11 +234,22 @@ def _item_texts(item: dict[str, Any]) -> list[str]:
     parts."""
     if "Text" in item:
         return [item["Text"]]
-    content = (item.get("Json") or {}).get("content") or []
-    return [part["text"] for part in content if part.get("type") == "text"]
+    value = item.get("Json")
+    content = value.get("content") if isinstance(value, dict) else None
+    if not isinstance(content, list):
+        return []
+    return [part["text"] for part in content if _is_text_part(part)]
+
+
+def _is_text_part(part: object) -> bool:
+    """Whether ``part`` of an MCP result's content is a text part with string text."""
+    return (
+        isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str)
+    )
 
 
 def _reports_error(raw: dict[str, Any] | None) -> bool:
     """Whether any MCP result in the tool's ``raw`` output is marked as an error."""
     items = (raw or {}).get("items", [])
-    return any((item.get("Json") or {}).get("isError") is True for item in items)
+    values = [item.get("Json") for item in items]
+    return any(isinstance(value, dict) and value.get("isError") is True for value in values)
