@@ -6,6 +6,8 @@ together. A consulted turn runs in an ``orbit.consultation`` span linked to the 
 import asyncio
 from collections.abc import Callable
 
+from opentelemetry.sdk.trace import ReadableSpan
+
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.consultations import title_of
 from orbit.agent.application.desk import AgentDesk
@@ -308,6 +310,50 @@ async def test_the_consulted_turns_span_starts_a_trace_linked_to_the_asking_turn
     assert attributes["orbit.consultation.consultant"] == EXPERIMENTER
     assert attributes["orbit.consultation.outcome"] == "completed"
     assert isinstance(attributes["orbit.consultation.wait_ms"], int)
+
+
+def links_to_all(span: ReadableSpan, targets: list[ReadableSpan]) -> bool:
+    """Whether ``span`` links to each of ``targets``, in order, and to nothing else."""
+    return [link.context.span_id for link in span.links] == [
+        target.context.span_id for target in targets if target.context is not None
+    ]
+
+
+async def traced_replies(*messages: str, busy: bool) -> tuple[ReadableSpan, list[ReadableSpan]]:
+    """The planner's turn hearing the replies to its consultations with ``messages``, and the
+    consultations' spans; while ``busy``, its asking turn runs until every reply is given."""
+    traced = Traced()
+    heard: list[Reply] = []
+    gate = asyncio.Event()
+    session, _, launcher = session_for(roles=CONSULTING, telemetry=traced.telemetry)
+    asking = consults(*messages, heard=heard, gate=gate if busy else None)
+    launcher.planner_turns = [asking, *[chats] * len(messages), chats]
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    if busy:
+        await events_until(session, answered(len(messages)))
+        gate.set()
+    await events_until(session, finished("agent-1", 2))
+    await session.close()
+    turns = sorted(traced.spans(TURN_SPAN), key=lambda span: span.start_time or 0)
+    return turns[-1], list(traced.spans(CONSULTATION_SPAN))
+
+
+async def test_an_idle_askers_reply_turn_starts_a_trace_linked_to_the_consultation() -> None:
+    reply, consultations = await traced_replies("Check X", busy=False)
+    assert reply.parent is None
+    assert links_to_all(reply, consultations)
+
+
+async def test_a_reply_turn_after_the_askers_turn_starts_a_trace_linked_to_it() -> None:
+    reply, consultations = await traced_replies("Check X", busy=True)
+    assert reply.parent is None
+    assert links_to_all(reply, consultations)
+
+
+async def test_a_turn_hearing_two_replies_links_to_both_consultations() -> None:
+    reply, consultations = await traced_replies("Check X", "Check Y", busy=True)
+    assert len(consultations) == 2
+    assert links_to_all(reply, consultations)
 
 
 def test_a_consultations_title_is_its_messages_first_line() -> None:

@@ -322,10 +322,11 @@ class Consultations:
         self._deliver(asked.asker, interrupted_message(asked.consultant, asked.title, why))
 
     def _deliver(self, asker: str, message: str) -> None:
-        """Deliver ``message`` to the role ``asker``, if it still has a seat."""
+        """Deliver ``message`` to the role ``asker``, if it still has a seat, linked to the
+        consultation's span, the current one."""
         seat = self._seats(asker)
         if seat is not None:
-            seat.deliver(message)
+            seat.deliver(message, current_span())
 
 
 def _answered(asked: SavedConsultation, reply: str, why: str | None = None) -> ConsultationAnswered:

@@ -152,8 +152,10 @@ Events:
 
 One span for each turn of the planner's conversation, from when the turn starts in the planner's
 lane until it ends, its duration the span's own. It's a child of the `orbit.command` span of the
-`SendMessage` asking for it, and current while the turn runs; the planner's `orbit.agent.process`
-span for the turn is its child. A message refused, as one sent while the planner answers, starts
+`SendMessage` asking for it, and current while the turn runs; the planner's
+`orbit.agent.process` span for the turn is its child. A turn hearing the replies delivered from
+consultations instead starts its own trace: it's a root span, linked to the
+`orbit.consultation` span of each consultation whose reply it hears (see **Links**). A message refused, as one sent while the planner answers, starts
 no turn and has none.
 
 | Attribute | Type | Meaning |
@@ -341,6 +343,9 @@ so no trace stays open for hours while each can still be followed back to its ca
 
 - Each `orbit.consultation` span links to the `orbit.planner.turn` span of the turn that asked
   for the consultation.
+
+- Each `orbit.planner.turn` span of a turn hearing delivered replies links to the
+  `orbit.consultation` span of each consultation whose reply it hears.
 
 ## Trace context
 

@@ -2697,7 +2697,8 @@ events it publishes carry its own. Each planner turn is one span, `orbit.planner
 the `SendMessage` command's: the workspace, session and model, what the turn cost, the drafts it
 proposed and how it ended. Each consulted turn runs in an `orbit.consultation` span, starting its
 own trace linked to the asking turn's: who asked whom, how long it waited in line and how it
-ended. Each review, a reviewer's or a super reviewer's, is one span,
+ended. The asker's turn hearing the replies starts its own trace too, linked to each
+consultation's span. Each review, a reviewer's or a super reviewer's, is one span,
 `orbit.review`, starting its own trace: the commits, round and batch it reviewed, its cap, the
 suggestions it made and had refused, and what it cost. Work that runs on in the background links
 to what started it rather than nesting under it: each task's span links to the `RunTasks` (or,

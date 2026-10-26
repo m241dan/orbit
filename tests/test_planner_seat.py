@@ -38,6 +38,7 @@ from orbit.protocol import (
     Settings,
     TurnFinished,
 )
+from orbit.tracing import current_span
 from tests.agent_fakes import ROLES, ScriptedLauncher, agents_for, chats, hangs
 from tests.session_builders import on_claude
 from tests.waiting import eventually
@@ -417,7 +418,7 @@ async def test_a_disabled_roles_seat_refuses_its_work_naming_it() -> None:
 async def test_a_message_delivered_to_an_idle_seat_starts_a_turn_on_its_roles_settings() -> None:
     seated_ = seated()
     seated_.launcher.planner_turns = [chats]
-    seated_.seat.deliver("The reply.")
+    seated_.seat.deliver("The reply.", current_span())
     await seated_.turn_ended()
     [launch] = seated_.launcher.launches
     assert launch.prompt.endswith("The reply.")

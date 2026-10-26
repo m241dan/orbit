@@ -88,13 +88,14 @@ class WaitingTurn:
     """A turn waiting in a seat's line: on ``text`` with ``settings``, run under the span
     ``opened`` makes current, telling ``answered`` how it ended, its reply and why it gave none,
     if it didn't, under that span still, and ``placed`` its place in line: 1 once it runs next,
-    or runs."""
+    or runs. With ``links``, the turn's span starts its own trace instead, linked to each."""
 
     text: str
     settings: Settings
     opened: Callable[[], AbstractContextManager[Span]]
     answered: Callable[[TurnEndReason, str, str | None], Awaitable[None]] = _unanswered
     placed: Callable[[int], None] = _unplaced
+    links: tuple[Span, ...] = ()
 
 
 def loop_time() -> float:
@@ -188,7 +189,8 @@ class PlannerSeat:
         self._consult = parts.consult
         self._name = role
         self._line: list[WaitingTurn] = []  # The turns waiting to run, in order.
-        self._delivered: list[str] = []  # The messages waiting to be heard, in one turn.
+        # The messages waiting to be heard, in one turn, each with the span that caused it.
+        self._delivered: list[tuple[str, Span]] = []
         self._waited = False  # Whether the turn running, or the last, waited in the line.
         self._held = False  # Whether waiting turns are kept from starting, as turns stop.
         self._planner = self._chat()
@@ -285,7 +287,8 @@ class PlannerSeat:
         if self._waiting():
             self.wait(WaitingTurn(text, settings, _under(current_span())))
             return
-        work = self._answer(self._planner, text, settings, current_span())
+        parent = current_span()
+        work = self._answer(self._planner, WaitingTurn(text, settings, _under(parent)), parent)
         self._turn = await self._turns.start(work, self._refusal)
         self._waited = False
 
@@ -306,10 +309,11 @@ class PlannerSeat:
         self.advance()
         self._place()
 
-    def deliver(self, message: str) -> None:
+    def deliver(self, message: str, cause: Span) -> None:
         """Have the seat's role hear ``message`` in a turn after those in its line, with every
-        other message delivered meanwhile, starting it at once if the seat's lane is free."""
-        self._delivered.append(message)
+        other message delivered meanwhile, starting it at once if the seat's lane is free; the
+        turn's span starts its own trace, linked to ``cause`` and the others' causes."""
+        self._delivered.append((message, cause))
         self.advance()
 
     def advance(self) -> None:
@@ -343,8 +347,10 @@ class PlannerSeat:
             return self._line.pop(0)
         if not self._delivered:
             return None
-        text, self._delivered = "\n\n".join(self._delivered), []
-        return WaitingTurn(text, self.settings, _under(current_span()))
+        delivered, self._delivered = self._delivered, []
+        text = "\n\n".join(message for message, _ in delivered)
+        causes = tuple(cause for _, cause in delivered)
+        return WaitingTurn(text, self.settings, _under(current_span()), links=causes)
 
     def _place(self) -> None:
         """Tell each turn in the line its place: after the turn running, if one is."""
@@ -356,7 +362,7 @@ class PlannerSeat:
         """``planner``'s ``turn`` that waited in the line, under its span, telling it how it
         ended, what it answered and why it didn't, if it didn't."""
         with turn.opened() as parent:
-            reason = await self._answer(planner, turn.text, turn.settings, parent)
+            reason = await self._answer(planner, turn, parent)
             await turn.answered(reason, planner.reply, planner.interruption(reason))
         return reason
 
@@ -371,15 +377,14 @@ class PlannerSeat:
         another runtime than ``runtime``, the one its role runs on."""
         return Refused(INVALID, runtime_changed_message(self._name, stale.runtime, runtime))
 
-    async def _answer(
-        self, planner: PlannerChat, text: str, settings: Settings, parent: Span
-    ) -> TurnEndReason:
-        """``planner``'s turn on ``text``, in its span, a child of ``parent``, saving the
-        session after it, as its conversation may have changed."""
+    async def _answer(self, planner: PlannerChat, turn: WaitingTurn, parent: Span) -> TurnEndReason:
+        """``planner``'s ``turn``, in its span, a child of ``parent``, or, with the turn's
+        links, starting its own trace linked to each, saving the session after it, as its
+        conversation may have changed."""
         # The span starts as the turn does, not as it's asked for, so a turn refused, or
         # cancelled before it runs, leaves no span unended.
-        with self._hooks.tracing.turn(parent, planner.model(settings)):
-            reason = await planner.answer(text, settings)
+        with self._hooks.tracing.turn(parent, planner.model(turn.settings), turn.links):
+            reason = await planner.answer(turn.text, turn.settings)
         await self._hooks.save()
         return reason
 

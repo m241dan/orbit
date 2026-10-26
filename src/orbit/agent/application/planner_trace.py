@@ -1,7 +1,8 @@
 """Tracing the planner: the ``orbit.planner.turn`` span of each of its turns, a child of the
 ``SendMessage`` command that asked for it (the remaining spans plan's decisions 1 and 8), and
 the ``orbit.consultation`` span of each turn answering a consultation, starting its own trace and
-linked to the asking turn's span (the consultants plan's decision 14).
+linked to the asking turn's span (the consultants plan's decision 14); a turn hearing delivered
+replies starts its own trace too, linked to the span of each consultation it hears from.
 
 The turn's span is the current one while the turn runs, so the planner records on it, through
 :func:`current_span`, what the turn cost, the drafts it proposed, how it ended and the errors it
@@ -42,12 +43,13 @@ class PlannerTracing:
     session: Callable[[], str] = _no_session
 
     @contextmanager
-    def turn(self, parent: Span, model: str | None) -> Iterator[Span]:
+    def turn(self, parent: Span, model: str | None, links: tuple[Span, ...] = ()) -> Iterator[Span]:
         """The span of a planner turn on ``model``, if known, current for the block and ended on
-        leaving it: a child of ``parent``, the span current as the turn was asked for. An error
-        escaping the block is recorded on it."""
-        with use_span(parent):
-            span = self.telemetry.start(TURN_SPAN, self._identity(model))
+        leaving it: a child of ``parent``, the span current as the turn was asked for; or, with
+        ``links``, the spans whose work it hears, starting its own trace linked to each. An
+        error escaping the block is recorded on it."""
+        with no_span() if links else use_span(parent):
+            span = self.telemetry.start(TURN_SPAN, self._identity(model), links)
         with span_block(span):
             yield span
 
