@@ -442,7 +442,8 @@ class PlannerSeat:
 
     async def reset(self) -> None:
         """End the planner's conversation, or drop the one opened from another runtime than its
-        role's, re-reading its role, and remove its copy, if it has one; refused while it
+        role's, re-reading its role, and remove its copy, if it has one, then start the turns
+        waiting; refused while it
         answers, and noted when it has no conversation yet. Another role's seat keeps its
         role."""
         if self._desk is None or self._planner is None:
@@ -459,6 +460,7 @@ class PlannerSeat:
                 await self._copies.drop(self._name)
             await self._events.put(ConversationReset(agent=self._name))
             await self._hooks.save()
+            self.advance()  # Messages delivered while the conversation was stale.
 
     def _has_conversation(self, planner: PlannerChat) -> bool:
         """Whether there's a conversation to reset: ``planner``'s, or one opened from another

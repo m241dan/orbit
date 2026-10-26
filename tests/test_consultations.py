@@ -790,3 +790,18 @@ async def test_a_role_reset_from_another_runtimes_conversation_is_consulted() ->
     await session.close()
 
     assert heard == [Reply(ASKED.format(1))]
+
+
+async def test_a_stale_askers_interruption_is_heard_once_it_is_reset() -> None:
+    conversations = {PLANNER: ON_KIRO}
+    store = store_with(saved("talks", conversations=conversations, consultations=(PENDING,)))
+    session, launcher = consulting_host(store)
+    launcher.planner_turns = [chats]
+    await opened(session, ActivateSession(session="talks"))
+    assert prompts(launcher) == []
+    await send(session, ResetConversation(agent=PLANNER))
+    await events_until(session, finished("agent-1", 1))
+    await session.close()
+
+    [(role, prompt)] = prompts(launcher)
+    assert (role, prompt.endswith(told("orbit restarted"))) == (PLANNER, True)
