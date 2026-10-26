@@ -269,6 +269,67 @@ def test_a_role_asking_for_what_its_runtime_cant_do_is_refused_naming_the_file(
     )
 
 
+KIROS_OPUS = (
+    'roles.super-reviewer.model = "opus": the runtime kiro takes the aliases auto, sonnet,'
+    " haiku or a full id of lowercase letters, digits, dots and dashes, with at least one dash."
+)
+
+
+def test_a_users_runtime_refusing_a_package_model_names_the_user_config(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    path = write_user_config(config_dir, '[roles]\nruntime = "kiro"\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value).startswith(f"{path}: {KIROS_OPUS}")
+    assert str(CONFIG_PATH) not in str(raised.value)
+
+
+def test_a_projects_runtime_refusing_a_package_model_names_the_project_file(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    path = write(tmp_path, '[roles.super-reviewer]\nruntime = "kiro"\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value) == f"{path}: {KIROS_OPUS}"
+
+
+def test_a_runs_runtime_refusing_a_package_model_names_the_user_config_and_the_runtime(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir, "kiro")
+    assert str(raised.value).startswith(
+        f"{config_dir / 'config.toml'} with --runtime kiro: {KIROS_OPUS}"
+    )
+    assert str(CONFIG_PATH) not in str(raised.value)
+
+
+@pytest.mark.usefixtures("limited_runtime")
+def test_a_users_runtime_refusing_what_a_role_asks_names_the_user_config(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    path = write_user_config(config_dir, '[roles.coder]\nruntime = "lite"\n')
+    write(tmp_path, "")
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value) == (
+        f'{path}: roles.coder asks for tool_access "full", but its runtime lite accepts only'
+        ' tool_access "restricted".'
+    )
+
+
+@pytest.mark.usefixtures("limited_runtime")
+def test_a_users_runtime_refusing_what_the_project_asks_names_the_project_file(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    write_user_config(config_dir, '[roles.coder]\nruntime = "lite"\n')
+    path = write(tmp_path, '[roles.coder]\ntool_access = "full"\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value).startswith(f"{path}: roles.coder asks for")
+
+
 @pytest.mark.usefixtures("limited_runtime")
 def test_a_role_on_a_runtime_without_usage_is_read(tmp_path: Path, config_dir: Path) -> None:
     write(tmp_path, '[roles.reviewer]\nruntime = "lite"\n')

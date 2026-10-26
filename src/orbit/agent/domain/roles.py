@@ -526,20 +526,20 @@ def _role_problems(name: str, role: Role, rules: RuntimeRules) -> list[str]:
     says."""
     if not knows_runtime(role.runtime):
         return [unknown_runtime(f"roles.{name}.runtime", role.runtime)]
-    problems = model_problems(name, role, rules.models.get(role.runtime))
+    problems = model_problems(f"roles.{name}.model", role, rules.models.get(role.runtime))
     can = rules.capabilities.get(role.runtime)
     if role.enabled and can is not None:
         problems += capability_problems(name, role, can)
     return problems
 
 
-def model_problems(name: str, role: Role, models: ModelAliases | None) -> list[str]:
-    """Why role ``name``, ``role``, is refused for its model, naming it, the model and the
-    aliases, if its runtime's ``models`` don't resolve it; nothing for no model, or no
+def model_problems(key: str, role: Role, models: ModelAliases | None) -> list[str]:
+    """Why ``role`` is refused for its model, set under ``key``, naming the key, the model and
+    the aliases, if its runtime's ``models`` don't resolve it; nothing for no model, or no
     ``models`` to resolve it with."""
     if role.model is None or models is None or resolves(models, role.model):
         return []
-    return [unknown_model(f"roles.{name}.model", role.model, models)]
+    return [unknown_model(key, role.model, models)]
 
 
 def capability_problems(name: str, role: Role, capabilities: Capabilities) -> list[str]:

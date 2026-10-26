@@ -80,9 +80,15 @@ def _read_layered(root: str, config_dir: Path, runtime: str | None = None) -> La
         named = str(path) if exists else None
         return load_layered(data, built_in, user, named, rules)
     except UserConfigError as exc:
-        raise ConfigError(f"{user.layer.path}: {exc}") from None
+        raise ConfigError(f"{user.layer.path}{_with_runtime(runtime)}: {exc}") from None
     except ConfigError as exc:  # Errors the user config is at fault for are raised as above.
         raise ConfigError(f"{path}: {exc}") from None
+
+
+def _with_runtime(runtime: str | None) -> str:
+    """What names the run's ``runtime``, if given, after the user config's path, as it stands in
+    for the user config's runtime for every role; nothing otherwise."""
+    return "" if runtime is None else f" with --runtime {runtime}"
 
 
 def write_checks(root: str, checks: ChecksProposal) -> None:
