@@ -856,3 +856,25 @@ async def test_another_conversational_roles_proposal_records_that_role() -> None
     assert await chat.answer("Design.", Settings()) == "completed"
     drafts = board(published)
     assert [(t.origin, t.proposed_by) for t in drafts] == [("planner", ARCHITECT)] * 2
+
+
+async def test_the_planner_moves_its_drafts() -> None:
+    replies: list[Reply] = []
+
+    async def moves_drafts(call: Call) -> TurnEndReason:
+        for title in ("One", "Two", "Three"):
+            await call("propose_task", title=title, prompt="Do it.")
+        replies.append(await call("move_draft", task_id="3", before="1"))
+        replies.append(await call("move_draft", task_id="1"))
+        replies.append(await call("move_draft", task_id="2", before="2"))
+        return "completed"
+
+    session, _, launcher = session_for()
+    launcher.planner_turns = [moves_drafts]
+    events = await plan(session, "Plan it.")
+    assert replies == [
+        Reply("Moved draft task 3 before 1."),
+        Reply("Moved draft task 1 to the end."),
+        Reply("A draft can't move before itself.", is_error=True),
+    ]
+    assert [t.id for t in board(events)] == ["3", "2", "1"]

@@ -32,6 +32,7 @@ from orbit.agent.domain.roles import (
     CONSULT,
     EDIT_DRAFT,
     LIST_DRAFTS,
+    MOVE_DRAFT,
     PROPOSE_TASK,
     READ_DRAFT,
     REMOVE_DRAFT,
@@ -120,6 +121,7 @@ class PlannerChat:
             READ_DRAFT: self._read_draft,
             EDIT_DRAFT: self._edit_draft,
             REMOVE_DRAFT: self._remove_draft,
+            MOVE_DRAFT: self._move_draft,
         }
 
     @property
@@ -422,6 +424,19 @@ class PlannerChat:
             return Reply(f"Removed draft task {task_id}.")
 
         return await self._tasks.change(remove, _refusal)
+
+    async def _move_draft(self, arguments: dict[str, Any]) -> Reply:
+        task_id = str(arguments.get("task_id", ""))
+        given = arguments.get("before")
+        before = None if given is None else str(given)
+
+        def move(board: TaskBoard) -> Reply:
+            board.move_draft(task_id, before, self._role)
+            if before is None:
+                return Reply(f"Moved draft task {task_id} to the end.")
+            return Reply(f"Moved draft task {task_id} before {before}.")
+
+        return await self._tasks.change(move, _refusal)
 
     async def _consult(self, arguments: dict[str, Any]) -> Reply:
         role, message = str(arguments.get("role", "")), str(arguments.get("message", ""))

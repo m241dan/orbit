@@ -672,3 +672,47 @@ def test_editing_or_removing_a_task_that_isnt_the_roles_draft_is_refused(
     with pytest.raises(Refused, match=re.escape(message)):
         board.remove_draft(task_id, "planner")
     assert board.tasks == before
+
+
+@pytest.mark.parametrize(
+    ("task_id", "before", "order"),
+    [
+        ("3", "1", ["3", "1", "2", "4", "5"]),
+        ("1", "3", ["2", "1", "3", "4", "5"]),
+        ("1", None, ["2", "3", "4", "5", "1"]),
+    ],
+)
+def test_moving_a_draft_puts_it_before_another_or_at_the_end(
+    task_id: str, before: str | None, order: list[str]
+) -> None:
+    board = proposals()
+    board.edit_draft("1", TWO, "planner")
+    board.move_draft(task_id, before, "planner")
+    assert [t.id for t in board.tasks] == order
+    assert [(t.status, t.edited) for t in (board.get("1"), board.get("3"))] == [
+        ("draft", True),
+        ("draft", False),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("task_id", "before", "message"),
+    [
+        ("99", "1", "No task with id '99'."),
+        ("4", "1", "Task 4 isn't one of your drafts."),
+        ("2", "1", "Task 2 isn't a draft any more; the user accepted or edited it."),
+        ("3", "3", "A draft can't move before itself."),
+        ("3", "99", "No task with id '99'."),
+        ("3", "4", "Task 4 isn't one of your drafts."),
+        ("3", "5", "Task 5 isn't one of your drafts."),
+        ("3", "2", "Task 2 isn't a draft any more; the user accepted or edited it."),
+    ],
+)
+def test_moving_a_draft_is_refused_unless_both_are_the_roles_drafts(
+    task_id: str, before: str, message: str
+) -> None:
+    board = proposals()
+    tasks = board.tasks
+    with pytest.raises(Refused, match=re.escape(message)):
+        board.move_draft(task_id, before, "planner")
+    assert board.tasks == tasks

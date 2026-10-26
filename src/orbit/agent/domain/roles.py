@@ -82,8 +82,9 @@ LIST_DRAFTS = "list_drafts"
 READ_DRAFT = "read_draft"
 EDIT_DRAFT = "edit_draft"
 REMOVE_DRAFT = "remove_draft"
+MOVE_DRAFT = "move_draft"
 
-DRAFT_TOOLS = (LIST_DRAFTS, READ_DRAFT, EDIT_DRAFT, REMOVE_DRAFT)
+DRAFT_TOOLS = (LIST_DRAFTS, READ_DRAFT, EDIT_DRAFT, REMOVE_DRAFT, MOVE_DRAFT)
 """The tools a role that proposes tasks is granted for its drafts."""
 
 ORBIT_TOOLS = (

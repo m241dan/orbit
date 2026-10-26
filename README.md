@@ -993,7 +993,7 @@ isn't a draft any more; the user accepted or edited it.`). `edit_draft(task_id, 
 replaces one's title and prompt, keeping it a draft in its place (`Edited draft task 5.`; a blank
 title is refused with `A task needs a title.`), and its row's details then end with
 ` · edited by <role>` until you accept or edit it; `remove_draft(task_id)` withdraws one
-(`Removed draft task 5.`). Both are refused as `read_draft` is. A role's `tools` naming a draft tool
+(`Removed draft task 5.`), and `move_draft(task_id, before)` puts one right before `before`, another of its drafts, or at the end of the list without `before` (`Moved draft task 5 before 3.`, `Moved draft task 5 to the end.`), leaving it as it was otherwise. All three are refused as `read_draft` is, for `before` too, and a move before itself is refused (`A draft can't move before itself.`). A role's `tools` naming a draft tool
 is refused (`read_draft comes with propose_task; list that instead.`). Every plan's first task writes the plan's record: a numbered requirements
 document in `docs/` (or wherever the project keeps such records), named like
 `docs/00001-feature-dark-mode.md`, with the decisions you confirmed and the tasks that carry them

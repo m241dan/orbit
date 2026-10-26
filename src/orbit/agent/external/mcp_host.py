@@ -23,6 +23,7 @@ from orbit.agent.domain.roles import (
     GIVE_UP,
     LIST_DRAFTS,
     LIST_REPORTS,
+    MOVE_DRAFT,
     PROPOSE_CHECKS,
     PROPOSE_TASK,
     READ_DRAFT,
@@ -191,6 +192,12 @@ def _add_draft_tools(server: MCPServer, call: ToolCall) -> None:
     async def remove_draft(task_id: str, ctx: Context) -> str:
         """Withdraw one of your drafts from the task list."""
         return await call(ctx, REMOVE_DRAFT, {"task_id": task_id})
+
+    @server.tool(structured_output=False)
+    async def move_draft(task_id: str, ctx: Context, before: str | None = None) -> str:
+        """Move one of your drafts right before another of your drafts, or to the end of the
+        task list when before is left out."""
+        return await call(ctx, MOVE_DRAFT, {"task_id": task_id, "before": before})
 
 
 class McpHost:

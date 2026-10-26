@@ -256,6 +256,19 @@ class TaskBoard:
         self.draft_of(task_id, role)
         del self._tasks[self.position(task_id)]
 
+    def move_draft(self, task_id: str, before: str | None, role: str) -> None:
+        """Move draft ``task_id``, which ``role`` proposed, right before ``before``, another of
+        its drafts, or to the end without one. Raises ``Refused`` as :meth:`draft_of` does for
+        either, or if ``before`` is ``task_id``."""
+        state = self.draft_of(task_id, role)
+        if before == task_id:
+            raise Refused(INVALID, "A draft can't move before itself.")
+        if before is not None:
+            self.draft_of(before, role)
+        del self._tasks[self.position(task_id)]
+        index = len(self._tasks) if before is None else self.position(before)
+        self._tasks.insert(index, state)
+
     def accept(self, task_id: str) -> None:
         """Make draft ``task_id`` pending, no longer marked edited. Raises ``Refused`` if it
         isn't a draft."""
