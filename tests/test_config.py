@@ -818,7 +818,7 @@ def test_consults_on_a_task_role_is_refused() -> None:
 
 
 @pytest.mark.parametrize("target", ["coder", "nobody"])
-def test_consulting_anything_but_another_enabled_conversational_role_is_refused(
+def test_consulting_anything_but_another_conversational_role_is_refused(
     target: str,
 ) -> None:
     with pytest.raises(ConfigError, match=f"'x'.*'{target}'"):
@@ -829,7 +829,7 @@ def test_a_role_consulting_itself_is_refused_once_without_a_cycle() -> None:
     with pytest.raises(ConfigError) as error:
         load_config(talker(consults=["x"]), BUILT_IN_ROLES)
     assert str(error.value) == (
-        "roles: the role 'x' can't consult 'x', which isn't another enabled conversational role"
+        "roles: the role 'x' can't consult 'x', which isn't another conversational role"
     )
 
 
@@ -884,3 +884,21 @@ def test_a_longer_consults_cycle_is_refused_naming_every_role() -> None:
     roles["z"] = {**roles["x"], "consults": ["x"]}
     with pytest.raises(ConfigError, match=r"consults cycle: 'x' -> 'y' -> 'z' -> 'x'"):
         load_config(data, BUILT_IN_ROLES)
+
+
+def test_a_personal_role_consulting_no_role_is_a_personal_role_error() -> None:
+    table = cast(dict[str, object], talker(consults=["nobody"])["roles"])["x"]
+    with pytest.raises(PersonalRoleError, match=r"'x'.*'nobody'"):
+        load_config({}, BUILT_IN_ROLES, personal(x=table))
+
+
+def test_a_project_role_consulting_no_role_isnt_blamed_on_the_user_config() -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_config(talker(consults=["nobody"]), BUILT_IN_ROLES)
+    assert not isinstance(raised.value, PersonalRoleError)
+
+
+def test_the_consults_clash_doesnt_ask_for_an_enabled_role() -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_config(talker(consults=["nobody"]), BUILT_IN_ROLES)
+    assert "enabled" not in str(raised.value)

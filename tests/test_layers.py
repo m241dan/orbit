@@ -497,3 +497,25 @@ def test_the_personal_roles_check_leaves_an_invalid_role_to_be_reported_with_the
         project({"coder": {"tools": ["launch_rockets"]}}),
     )
     check_personal(merged)
+
+
+TALKER: dict[str, object] = {
+    "instructions": "Talk.",
+    "conversation": True,
+    "tools": ["propose_task"],
+    "verify": False,
+    "workspace": "checkout",
+    "lane": "talk",
+}
+
+
+def test_resolving_a_role_consulting_no_role_is_refused() -> None:
+    roles = {"talker": {**TALKER, "consults": ["nobody"]}}
+    with pytest.raises(PersonalRoleError, match=r"'talker'.*'nobody'"):
+        resolve_roles(PACKAGE_ROLES, user({"roles": roles}), NO_PROJECT_ROLES)
+
+
+def test_resolving_leaves_a_disabled_consulted_role_out() -> None:
+    roles = {"talker": {**TALKER, "consults": ["planner"]}, "planner": {"enabled": False}}
+    resolved = resolve_roles(PACKAGE_ROLES, NO_USER_ROLES, project(roles))
+    assert resolved.roles["talker"].consults == ()

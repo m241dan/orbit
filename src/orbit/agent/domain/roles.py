@@ -440,8 +440,7 @@ def consult_clashes(roles: Mapping[str, Role]) -> list[str]:
     be another conversational role, and none may consult round in a cycle. A disabled role named
     is left out of the consults (see :func:`with_enabled_consults`), not refused."""
     clashes = [
-        f"the role {name!r} can't consult {other!r}, which isn't another enabled"
-        " conversational role"
+        f"the role {name!r} can't consult {other!r}, which isn't another conversational role"
         for name, role in roles.items()
         if role.enabled
         for other in role.consults
@@ -456,13 +455,14 @@ def _consultable(roles: Mapping[str, Role], name: str, other: str) -> bool:
 
 
 def with_enabled_consults(roles: Mapping[str, Role]) -> dict[str, Role]:
-    """The ``roles``, each consulting only the enabled roles among those it names."""
+    """The ``roles``, each consulting none of the disabled roles among those it names."""
     return {name: _consulting_enabled(roles, role) for name, role in roles.items()}
 
 
 def _consulting_enabled(roles: Mapping[str, Role], role: Role) -> Role:
-    """The ``role``, consulting only the enabled roles among ``roles`` it names."""
-    consults = tuple(other for other in role.consults if other in roles and roles[other].enabled)
+    """The ``role``, consulting none of the disabled roles among ``roles`` it names. A name that
+    isn't a role is kept, for :func:`consult_clashes` to refuse."""
+    consults = tuple(other for other in role.consults if other not in roles or roles[other].enabled)
     if consults == role.consults:
         return role
     return role.model_copy(update={"consults": consults})
