@@ -1,7 +1,7 @@
 """Orbit's configuration: the limits, roles, verification steps and setup a project file sets
 over the user config's role fields and personal roles and the built-in defaults."""
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,11 +17,13 @@ from orbit.agent.domain.layers import (
     MergedRoles,
     ProjectRoles,
     RoleFields,
+    SharedRuntimeError,
     UserConfigError,
     UserRoles,
     check_personal,
     merge_roles,
     replaced_note,
+    runs_on_shared_runtime,
 )
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import (
@@ -209,7 +211,10 @@ def load_layered(
         name: _projects_part(name, role, users, asks) for name, role in config.roles.items()
     }
     _check_projects_roles(config.roles, project_set, asks, rules)
-    _check_users_roles(config.roles, users, asks, rules)
+    shared = {
+        name for name, layers in merged.layers.items() if runs_on_shared_runtime(name, user, layers)
+    }
+    _check_users_roles(config.roles, users, asks, rules, shared)
     return LayeredConfig(config, merged.layers)
 
 
@@ -296,25 +301,40 @@ def _check_users_roles(
     users: Mapping[str, str],
     asks: Mapping[str, tuple[str, ...]],
     rules: RuntimeRules,
+    shared: Collection[str] = (),
 ) -> None:
     """Raise :class:`UserConfigError` naming each model the user config answers for, under its
     key in ``users``, that the runtime of its role among ``roles`` doesn't take, and what each
     role in ``asks`` asks for in its fields there that its runtime can't do, as ``rules`` say,
-    once each, on a line of its own, if any."""
-    problems = dict.fromkeys(
-        [
-            problem
-            for name, key in users.items()
-            for problem in _model_problem(key, roles[name], rules)
-        ]
-        + [
-            problem
-            for name in sorted(asks)
-            for problem in _ask_problems(name, roles[name], rules, asks[name])
-        ]
-    )
-    if problems:
-        raise UserConfigError("\n".join(problems))
+    once each, on a line of its own, if any: a :class:`SharedRuntimeError` if any of those roles
+    is among ``shared``, those running on the user config's runtime for every role."""
+    by_role = _users_problems(roles, users, asks, rules)
+    problems = dict.fromkeys(problem for _, found in by_role for problem in found)
+    if not problems:
+        return
+    raise _users_error(by_role, shared)("\n".join(problems))
+
+
+def _users_error(
+    by_role: list[tuple[str, list[str]]], shared: Collection[str]
+) -> type[UserConfigError]:
+    """The error for the roles ``by_role`` refuses: :class:`SharedRuntimeError` if any of them
+    is among ``shared``, and :class:`UserConfigError` otherwise."""
+    on_shared = any(found and name in shared for name, found in by_role)
+    return SharedRuntimeError if on_shared else UserConfigError
+
+
+def _users_problems(
+    roles: Mapping[str, Role],
+    users: Mapping[str, str],
+    asks: Mapping[str, tuple[str, ...]],
+    rules: RuntimeRules,
+) -> list[tuple[str, list[str]]]:
+    """Each role :func:`_check_users_roles` checks, with why it's refused, if it is."""
+    by_role = [(name, _model_problem(key, roles[name], rules)) for name, key in users.items()]
+    return by_role + [
+        (name, _ask_problems(name, roles[name], rules, asks[name])) for name in sorted(asks)
+    ]
 
 
 def _model_problem(key: str, role: Role, rules: RuntimeRules) -> list[str]:

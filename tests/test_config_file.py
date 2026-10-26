@@ -305,6 +305,24 @@ def test_a_runs_runtime_refusing_a_package_model_names_the_user_config_and_the_r
     assert str(CONFIG_PATH) not in str(raised.value)
 
 
+def test_a_refused_model_of_a_role_naming_its_own_runtime_leaves_the_runs_runtime_out(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    path = write_user_config(config_dir, '[roles.coder]\nruntime = "claude"\nmodel = "sonet"\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir, "claude")
+    assert str(raised.value).startswith(f'{path}: roles.coder.model = "sonet"')
+
+
+def test_a_personal_role_breaking_a_rule_leaves_the_runs_runtime_out(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    path = write_helper(config_dir, HELPER.replace('"snapshot"', '"worktree"'))
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir, "claude")
+    assert str(raised.value).startswith(f"{path}: roles: the enabled roles")
+
+
 @pytest.mark.usefixtures("limited_runtime")
 def test_a_users_runtime_refusing_what_a_role_asks_names_the_user_config(
     tmp_path: Path, config_dir: Path

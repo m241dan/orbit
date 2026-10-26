@@ -125,6 +125,11 @@ class UserConfigError(ConfigError):
     """The user config is at fault; the message says how, and the caller names the file."""
 
 
+class SharedRuntimeError(UserConfigError):
+    """The user config is at fault for a role running on its runtime for every role, which a
+    run's runtime stands in for; the message says how, and the caller names the file."""
+
+
 class PersonalRoleError(UserConfigError):
     """The personal roles break a rule across the roles that the others keep, so the user
     config is at fault; the message says which rule."""
@@ -187,6 +192,12 @@ def with_runtime(user: UserRoles, runtime: str | None) -> UserRoles:
     if runtime is None:
         return user
     return replace(user, every=user.every.model_copy(update={"runtime": runtime}))
+
+
+def runs_on_shared_runtime(name: str, user: UserRoles, layers: Mapping[str, Layer]) -> bool:
+    """Whether role ``name`` runs on the ``user`` config's runtime for every role, as ``layers``
+    say by field: its runtime came from the user config, which doesn't set one for it alone."""
+    return layers.get("runtime") == user.layer and "runtime" not in _users_own(name, user)
 
 
 def _sorted(table: dict[str, Any], built_in: Collection[str]) -> dict[str, dict[str, Any]]:

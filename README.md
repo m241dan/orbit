@@ -1454,7 +1454,8 @@ sonnet, haiku or a full id starting with "claude-".`, after the path of the file
 when your `config.toml` sets the role's runtime and the project doesn't set its model, your
 `config.toml` is named, as it is when a role asks for what a runtime it sets can't do in a field
 the project doesn't set (the project file is named for the fields it sets); a run's `--runtime` stands in for your `[roles] runtime`, so
-its refusals name your `config.toml` followed by ` with --runtime <name>`;
+refusals of roles running on it name your `config.toml` followed by ` with --runtime <name>`, and
+your `config.toml`'s other errors name it alone;
 your all-roles `[roles] model` is named once, as `roles.model`. A `[runtimes.<name>]` table for a runtime
 this version of orbit doesn't know is refused, naming it (`runtimes.nope: this version of orbit
 knows the runtimes claude, kiro.`), as is one setting anything but `models`. `[runtimes]` is yours

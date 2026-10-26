@@ -9,7 +9,7 @@ from orbit.agent.domain.config import LayeredConfig, OrbitConfig, load_layered
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.config_report import ConfigSources, Written
 from orbit.agent.domain.config_update import reference_with_checks, with_checks
-from orbit.agent.domain.layers import Layer, UserConfigError, with_runtime
+from orbit.agent.domain.layers import Layer, SharedRuntimeError, UserConfigError, with_runtime
 from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
 from orbit.agent.external.role_instructions import with_instructions
 from orbit.agent.external.runtimes import read_runtime_rules
@@ -79,15 +79,17 @@ def _read_layered(root: str, config_dir: Path, runtime: str | None = None) -> La
     try:
         named = str(path) if exists else None
         return load_layered(data, built_in, user, named, rules)
-    except UserConfigError as exc:
+    except SharedRuntimeError as exc:
         raise ConfigError(f"{user.layer.path}{_with_runtime(runtime)}: {exc}") from None
+    except UserConfigError as exc:
+        raise ConfigError(f"{user.layer.path}: {exc}") from None
     except ConfigError as exc:  # Errors the user config is at fault for are raised as above.
         raise ConfigError(f"{path}: {exc}") from None
 
 
 def _with_runtime(runtime: str | None) -> str:
     """What names the run's ``runtime``, if given, after the user config's path, as it stands in
-    for the user config's runtime for every role; nothing otherwise."""
+    for the user config's runtime for every role the refused roles run on; nothing otherwise."""
     return "" if runtime is None else f" with --runtime {runtime}"
 
 
