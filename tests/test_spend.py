@@ -138,3 +138,18 @@ def test_the_corner_follows_a_lane_given_to_the_shown_tab_after_it_was_shown() -
     corner.track(SNAPSHOT.model_copy(update={"role_spent": {"coder": Usage(cost_usd=0.80)}}))
     assert corner.conversational
     assert view.text == "$0.80"
+
+
+def test_the_corner_keeps_known_spend_on_a_null_update_and_clears_it_on_empty() -> None:
+    corner, view = corner_over()
+    corner.show_tab("planner")
+    corner.track(SNAPSHOT.model_copy(update={"role_spent": ROLE_SPENT, "caused_spent": CAUSED_ONE}))
+    unknown = SessionStateChanged(
+        session="s1", active=False, state="idle", viewers=0, role_spent=None, caused_spent=None
+    )
+    corner.track(unknown)
+    assert view.text == "planner $0.42 · via experimenter $1.10 · $1.52"
+    assert corner.breakdown() == spending_text(ROLE_SPENT, CAUSED_ONE)
+    corner.track(unknown.model_copy(update={"role_spent": {}, "caused_spent": {}}))
+    assert view.text == ""
+    assert corner.breakdown() == spending_text({}, {})
