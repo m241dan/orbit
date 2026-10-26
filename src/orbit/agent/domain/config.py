@@ -25,12 +25,13 @@ from orbit.agent.domain.layers import (
 )
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import (
+    ASKS,
     Role,
     RoleName,
     capability_problems,
-    check_runtimes,
     model_problems,
     role_clashes,
+    runtime_problems,
     with_enabled_consults,
 )
 from orbit.agent.domain.runtimes import (
@@ -207,22 +208,44 @@ def load_layered(
     project_set = {
         name: _projects_part(name, role, users, asks) for name, role in config.roles.items()
     }
-    check_runtimes(project_set, rules)
+    _check_projects_roles(config.roles, project_set, asks, rules)
     _check_users_roles(config.roles, users, asks, rules)
     return LayeredConfig(config, merged.layers)
 
 
-def _projects_part(name: str, role: Role, users: Mapping[str, str], asks: frozenset[str]) -> Role:
+def _projects_part(
+    name: str, role: Role, users: Mapping[str, str], asks: Mapping[str, tuple[str, ...]]
+) -> Role:
     """Role ``name``, ``role``, as the project answers for it: without the model if the user
-    config answers for it, among ``users``, and disabled if the user config answers for what it
-    asks of its runtime, among ``asks``."""
-    # Only the runtime check sees this copy, where being disabled skips what the role asks for.
+    config answers for it, among ``users``, and disabled if the user config answers for any of
+    what it asks of its runtime, among ``asks``."""
+    # Only the runtime check sees this copy, where being disabled skips what the role asks for;
+    # the project's part of what such a role asks is checked on its own.
     update: dict[str, Any] = {"model": None} if name in users else {}
     return role.model_copy(update={**update, "enabled": False} if name in asks else update)
 
 
-_ASKS = ("tool_access", "effort", "conversation")
-"""The role fields that ask for what a runtime may not be able to do."""
+def _check_projects_roles(
+    roles: Mapping[str, Role],
+    project_set: Mapping[str, Role],
+    asks: Mapping[str, tuple[str, ...]],
+    rules: RuntimeRules,
+) -> None:
+    """Raise :class:`ConfigError` naming each of the ``project_set`` roles refused for its
+    runtime, as ``rules`` say, then what each role in ``asks`` asks for among ``roles`` in the
+    fields the project answers for that its runtime can't do, on a line of its own, if any."""
+    problems = runtime_problems(project_set, rules) + [
+        problem
+        for name, fields in asks.items()
+        for problem in _ask_problems(name, roles[name], rules, _others(fields))
+    ]
+    if problems:
+        raise ConfigError("\n".join(problems))
+
+
+def _others(fields: tuple[str, ...]) -> tuple[str, ...]:
+    """The fields asking for what a runtime may not do that aren't among ``fields``."""
+    return tuple(field for field in ASKS if field not in fields)
 
 
 def _users_models(merged: MergedRoles, user: UserRoles) -> dict[str, str]:
@@ -240,14 +263,21 @@ def _users_models(merged: MergedRoles, user: UserRoles) -> dict[str, str]:
     }
 
 
-def _users_asks(merged: MergedRoles, user: UserRoles) -> frozenset[str]:
-    """The ``merged`` roles whose runtime the ``user`` config sets, where the project sets none
-    of what they ask of it."""
-    return frozenset(
-        name
+def _users_asks(merged: MergedRoles, user: UserRoles) -> dict[str, tuple[str, ...]]:
+    """The ``merged`` roles whose runtime the ``user`` config sets, each with the fields asking
+    for what it may not do that the project doesn't set, for those with any."""
+    owned = {
+        name: _unset_asks(layers)
         for name, layers in merged.layers.items()
-        if layers.get("runtime") == user.layer and not _project_sets(layers, _ASKS)
-    )
+        if layers.get("runtime") == user.layer
+    }
+    return {name: fields for name, fields in owned.items() if fields}
+
+
+def _unset_asks(layers: Mapping[str, Layer]) -> tuple[str, ...]:
+    """The fields asking for what a runtime may not do that the project doesn't set, as
+    ``layers`` say by field."""
+    return tuple(field for field in ASKS if not _project_sets(layers, (field,)))
 
 
 def _project_sets(layers: Mapping[str, Layer], fields: tuple[str, ...]) -> bool:
@@ -262,19 +292,26 @@ def _users_model_key(name: str, user: UserRoles) -> str:
 
 
 def _check_users_roles(
-    roles: Mapping[str, Role], users: Mapping[str, str], asks: frozenset[str], rules: RuntimeRules
+    roles: Mapping[str, Role],
+    users: Mapping[str, str],
+    asks: Mapping[str, tuple[str, ...]],
+    rules: RuntimeRules,
 ) -> None:
     """Raise :class:`UserConfigError` naming each model the user config answers for, under its
     key in ``users``, that the runtime of its role among ``roles`` doesn't take, and what each
-    role in ``asks`` asks for that its runtime can't do, as ``rules`` say, once each, on a line
-    of its own, if any."""
+    role in ``asks`` asks for in its fields there that its runtime can't do, as ``rules`` say,
+    once each, on a line of its own, if any."""
     problems = dict.fromkeys(
         [
             problem
             for name, key in users.items()
             for problem in _model_problem(key, roles[name], rules)
         ]
-        + [problem for name in sorted(asks) for problem in _ask_problems(name, roles[name], rules)]
+        + [
+            problem
+            for name in sorted(asks)
+            for problem in _ask_problems(name, roles[name], rules, asks[name])
+        ]
     )
     if problems:
         raise UserConfigError("\n".join(problems))
@@ -287,14 +324,14 @@ def _model_problem(key: str, role: Role, rules: RuntimeRules) -> list[str]:
     return model_problems(key, role, rules.models.get(role.runtime))
 
 
-def _ask_problems(name: str, role: Role, rules: RuntimeRules) -> list[str]:
-    """What role ``name``, ``role``, asks for that its runtime can't do, as
+def _ask_problems(name: str, role: Role, rules: RuntimeRules, fields: tuple[str, ...]) -> list[str]:
+    """What role ``name``, ``role``, asks for in its ``fields`` that its runtime can't do, as
     :func:`~orbit.agent.domain.roles.capability_problems` says, if it's enabled and ``rules``
     say what its runtime can do; nothing otherwise."""
     can = rules.capabilities.get(role.runtime)
     if not role.enabled or can is None:
         return []
-    return capability_problems(name, role, can)
+    return capability_problems(name, role, can, fields)
 
 
 def _refuse_later_settings(data: dict[str, Any]) -> None:

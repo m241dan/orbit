@@ -1452,8 +1452,8 @@ runtime takes, or the configuration is refused as it loads, naming the role, the
 aliases: `roles.reviewer.model = "sonet": the runtime claude takes the aliases fable, opus,
 sonnet, haiku or a full id starting with "claude-".`, after the path of the file that sets it;
 when your `config.toml` sets the role's runtime and the project doesn't set its model, your
-`config.toml` is named, as it is when a role asks for what a runtime it sets can't do and the
-project sets none of what it asks; a run's `--runtime` stands in for your `[roles] runtime`, so
+`config.toml` is named, as it is when a role asks for what a runtime it sets can't do in a field
+the project doesn't set (the project file is named for the fields it sets); a run's `--runtime` stands in for your `[roles] runtime`, so
 its refusals name your `config.toml` followed by ` with --runtime <name>`;
 your all-roles `[roles] model` is named once, as `roles.model`. A `[runtimes.<name>]` table for a runtime
 this version of orbit doesn't know is refused, naming it (`runtimes.nope: this version of orbit

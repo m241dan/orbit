@@ -564,15 +564,34 @@ def model_problems(key: str, role: Role, models: ModelAliases | None) -> list[st
     return [unknown_model(key, role.model, models)]
 
 
-def capability_problems(name: str, role: Role, capabilities: Capabilities) -> list[str]:
-    """What role ``name``, ``role``, asks for that its runtime can't do, as its ``capabilities``
-    say, in order, each naming the role, the runtime, the request and what the runtime does: a
-    level of tool access or effort it doesn't accept, and a conversation it can't carry on."""
-    asks = _level_ask("tool_access", role.tool_access, capabilities.tool_access, TOOL_ACCESSES)
-    asks += _level_ask("effort", role.effort, capabilities.effort, EFFORTS)
-    if role.conversation and not capabilities.resume:
-        asks.append(("conversation = true", "doesn't support resume"))
+ASKS = ("tool_access", "effort", "conversation")
+"""The role fields that ask for what a runtime may not be able to do."""
+
+
+def capability_problems(
+    name: str, role: Role, capabilities: Capabilities, fields: Sequence[str] = ASKS
+) -> list[str]:
+    """What role ``name``, ``role``, asks for in its ``fields`` that its runtime can't do, as
+    its ``capabilities`` say, in order, each naming the role, the runtime, the request and what
+    the runtime does: a level of tool access or effort it doesn't accept, and a conversation it
+    can't carry on."""
+    found = {
+        "tool_access": _level_ask(
+            "tool_access", role.tool_access, capabilities.tool_access, TOOL_ACCESSES
+        ),
+        "effort": _level_ask("effort", role.effort, capabilities.effort, EFFORTS),
+        "conversation": _conversation_ask(role.conversation, capabilities.resume),
+    }
+    asks = [ask for field in ASKS if field in fields for ask in found[field]]
     return [asks_beyond(name, role.runtime, request, supported) for request, supported in asks]
+
+
+def _conversation_ask(conversation: bool, resume: bool) -> list[tuple[str, str]]:
+    """A ``conversation``, if it's asked for of a runtime without ``resume``, with what says it
+    doesn't support it; nothing otherwise."""
+    return (
+        [("conversation = true", "doesn't support resume")] if conversation and not resume else []
+    )
 
 
 def _level_ask(

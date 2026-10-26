@@ -988,3 +988,39 @@ def test_a_utf8_file_is_read_under_an_ascii_locale(tmp_path: Path) -> None:
     env = {**os.environ, **ascii_locale}
     config_dir = str(tmp_path / "config")
     subprocess.run([sys.executable, "-c", script, str(tmp_path), config_dir], check=True, env=env)
+
+
+@pytest.mark.usefixtures("limited_runtime")
+def test_a_users_runtime_refusing_a_package_ask_names_the_user_config_beside_a_project_field(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    path = write_user_config(config_dir, '[roles.coder]\nruntime = "lite"\n')
+    write(tmp_path, "[roles.coder]\nconversation = false\n")
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value) == (
+        f'{path}: roles.coder asks for tool_access "full", but its runtime lite accepts only'
+        ' tool_access "restricted".'
+    )
+
+
+@pytest.mark.usefixtures("limited_runtime")
+def test_a_users_runtime_refusing_a_project_ask_and_a_package_ask_names_the_project_first(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    write_user_config(config_dir, '[roles.coder]\nruntime = "lite"\n')
+    path = write(tmp_path, '[roles.coder]\neffort = "high"\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value).startswith(f'{path}: roles.coder asks for effort "high"')
+    assert "tool_access" not in str(raised.value)
+
+
+def test_a_users_runtime_refusing_a_project_model_names_the_project_file(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    write_user_config(config_dir, '[roles.coder]\nruntime = "kiro"\n')
+    path = write(tmp_path, '[roles.coder]\nmodel = "opus"\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value).startswith(f'{path}: roles.coder.model = "opus"')
