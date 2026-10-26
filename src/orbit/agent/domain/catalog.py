@@ -8,6 +8,7 @@ from orbit.protocol import (
     CODER,
     CONFIGURATOR,
     CONFIGURE_CHECKS,
+    EXPERIMENTER,
     PLANNER,
     REVIEWER,
     SUPER_REVIEW,
@@ -23,6 +24,7 @@ from orbit.protocol import (
 
 ROLE_LABELS = {
     PLANNER: "Planner",
+    EXPERIMENTER: "Experimenter",
     CODER: "Coder",
     REVIEWER: "Reviewer",
     SUPER_REVIEWER: "Super reviewer",

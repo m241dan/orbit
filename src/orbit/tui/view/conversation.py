@@ -152,6 +152,11 @@ class Conversation[P: LogPane]:
         for log in self._entry_logs:
             log.drop(entry)
 
+    def swap_entry(self, entry: Entry, new: Entry) -> None:
+        """Put ``new`` in place of ``entry`` in every log holding it."""
+        for log in self._entry_logs:
+            log.swap(entry, new)
+
     def clear(self) -> None:
         """Drop every entry, under All and every tab, closing the detail pane."""
         self.close_detail()

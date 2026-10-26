@@ -172,7 +172,7 @@ def test_the_streams_agents_and_listings_reach_the_navigation_and_its_totals_not
     assert routed(totals) == TRACKED
 
 
-def test_consultations_reach_nothing_but_the_tracked_agents() -> None:
+def test_consultations_reach_the_feed() -> None:
     asked = ConsultationAsked(
         consultation=1, asker="planner", consultant="experimenter", title="Check X", position=1
     )
@@ -180,8 +180,8 @@ def test_consultations_reach_nothing_but_the_tracked_agents() -> None:
         consultation=1, asker="planner", consultant="experimenter", title="Check X", reply="3"
     )
 
-    assert routed(asked) == TRACKED
-    assert routed(answered) == TRACKED
+    assert routed(asked) == [*TRACKED, "feed.render"]
+    assert routed(answered) == [*TRACKED, "feed.render"]
 
 
 def test_reports_reach_the_reports_list() -> None:

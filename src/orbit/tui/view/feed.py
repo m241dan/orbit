@@ -1,7 +1,7 @@
 """Turns backend events into the conversation's entries."""
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Protocol, assert_never, get_args
 
 from orbit.protocol import (
@@ -11,6 +11,8 @@ from orbit.protocol import (
     AgentStarted,
     AssistantMessage,
     CommandRefused,
+    ConsultationAnswered,
+    ConsultationAsked,
     ConversationReset,
     ErrorOccurred,
     Event,
@@ -28,8 +30,10 @@ from orbit.protocol import (
 from orbit.tui.view.common import EntryKind
 from orbit.tui.view.events import (
     ACTIVITY_EVENTS,
+    CONSULTATION_EVENTS,
     TASK_PROGRESS_EVENTS,
     ActivityEvent,
+    ConsultationEvent,
     FeedEvent,
     TurnEvent,
     in_group,
@@ -41,9 +45,12 @@ from orbit.tui.view.rules import exit_rule, reset_entry, turn_rule_entry
 from orbit.tui.view.tabs import stopped_callers
 from orbit.tui.view.transcript import (
     activity_entry,
+    answered_entry,
+    asked_entry,
     error_agent,
     error_entry,
     output_entry,
+    reply_call,
     speaker,
 )
 from orbit.tui.view.turns import (
@@ -88,6 +95,10 @@ class Entries(Protocol):
 
     def replace_rule(self, text: str, kind: EntryKind, key: str | None, agent: str) -> None:
         """Make ``agent``'s latest rule read ``text`` as a ``kind`` entry."""
+        ...
+
+    def swap_entry(self, entry: Entry, new: Entry) -> None:
+        """Put ``new`` in place of ``entry``, wherever it's kept."""
         ...
 
     def add_tool_call(
@@ -175,13 +186,14 @@ class Steps(Protocol):
 @dataclass(eq=False)
 class ConversationFeed:
     """Shows events as entries in ``transcript``, under ``tabs``' tabs, timing turns and agents'
-    runs by ``clock``."""
+    runs by ``clock`` and naming roles by their ``labels``."""
 
     transcript: Entries
     tabs: Tabs
     task_list: Tasks
     verification: Steps
     clock: Callable[[], float]
+    labels: Callable[[str], str]
     # The running turns and agents, timed by ``clock``.
     _turns: Turns = field(default_factory=Turns, init=False)
     # Whether the events shown came before those shown already.
@@ -190,6 +202,8 @@ class ConversationFeed:
     _replaying: bool = field(default=False, init=False)
     # The notes shown, which aren't in the session's log, to show again when it replaces them.
     _notes: list[tuple[str, EntryKind]] = field(default_factory=list, init=False)
+    # The entries of the consultations asked and not yet answered, by number.
+    _asked: dict[int, Entry] = field(default_factory=dict, init=False)
 
     def render(self, event: ShownEvent) -> None:
         """Show ``event`` in the conversation."""
@@ -201,6 +215,8 @@ class ConversationFeed:
             self._render_activity(event)
         elif in_group(event, _USER_EVENTS):
             self._render_user(event)
+        elif in_group(event, CONSULTATION_EVENTS):
+            self._render_consultation(event)
         else:
             assert_never(event)
 
@@ -212,7 +228,7 @@ class ConversationFeed:
         ended, show as having no result. The notes shown so far follow them."""
         self.transcript.clear()
         self.tabs.reset(running)
-        self._turns = Turns()
+        self._turns, self._asked = Turns(), {}
         logged = tuple(events)
         self._replaying = True
         for event in logged:
@@ -231,9 +247,11 @@ class ConversationFeed:
         shown when they happened, leaving the tabs, the running turns and the usage counted
         as they are."""
         live, self._turns = self._turns, Turns()
+        asked, self._asked = self._asked, {}
         self._earlier = self._replaying = True
         self.transcript.prepend(lambda: self._show_earlier(events))
         self._turns, self._earlier, self._replaying = live, False, False
+        self._asked = asked
 
     def _show_earlier(self, events: Iterable[Event]) -> None:
         """Show ``events``, earlier ones, placing their agents in the pinned roles' tabs."""
@@ -291,6 +309,38 @@ class ConversationFeed:
         if not self._replaying:
             self.tabs.mark_unread(key)
         self.transcript.add_entry(Entry(text, kind), key)
+
+    def _render_consultation(self, event: ConsultationEvent) -> None:
+        """Show a consultation under its asker's tab, and All, marking that tab unread when it
+        isn't being shown, unless it was logged before: once asked, an entry its place in line
+        updates; once answered, its reply, or why it was interrupted."""
+        if isinstance(event, ConsultationAsked):
+            self._asked_entry(event)
+        else:
+            self._answered_entry(event)
+        if not self._replaying:
+            self.tabs.mark_unread(event.asker)
+
+    def _asked_entry(self, event: ConsultationAsked) -> None:
+        """Add the entry of the consultation ``event`` asks, or update its place in line."""
+        text, kind = asked_entry(self.labels(event.consultant), event.title, event.position)
+        shown = self._asked.get(event.consultation)
+        if shown is None:
+            entry = Entry(text, kind)
+            self.transcript.add_entry(entry, event.asker)
+        else:
+            entry = replace(shown, text=text)
+            self.transcript.swap_entry(shown, entry)
+        self._asked[event.consultation] = entry
+
+    def _answered_entry(self, event: ConsultationAnswered) -> None:
+        """Add the entry of the answer ``event`` brings: its reply, whose whole text the detail
+        pane shows, or why it was interrupted."""
+        self._asked.pop(event.consultation, None)
+        text, kind = answered_entry(event, self.labels(event.consultant))
+        header = text.partition("\n")[0]
+        call = None if event.interrupted is not None else reply_call(event, header)
+        self.transcript.add_entry(Entry(text, kind, call=call), event.asker)
 
     def _render_activity(self, event: ActivityEvent) -> None:
         """Show an agent's activity, a notice or the startup check's result; an agent's start

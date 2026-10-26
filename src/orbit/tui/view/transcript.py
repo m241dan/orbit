@@ -1,14 +1,16 @@
 """Transcript entries: what each piece of a conversation reads as."""
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import assert_never
 
 from orbit.protocol import (
     PLANNER,
+    AgentEntry,
     AgentReply,
     AgentStarted,
     AssistantMessage,
     CommandRefused,
+    ConsultationAnswered,
     ErrorOccurred,
     LogGap,
     Notice,
@@ -18,7 +20,7 @@ from orbit.protocol import (
     TaskMerged,
     ToolCallFinished,
 )
-from orbit.tui.view.common import EntryKind, counted, spinner_frame, text_lines
+from orbit.tui.view.common import EntryKind, counted, ordinal, spinner_frame, text_lines
 from orbit.tui.view.tool_calls import ToolCall, orbit_request_line, tool_call_line
 
 COLLAPSED_KINDS: frozenset[EntryKind] = frozenset({"tool"})
@@ -324,3 +326,38 @@ def agent_labelled(entry: tuple[str, EntryKind], agent: str | None) -> tuple[str
     apart; unchanged when there's no agent."""
     text, kind = entry
     return entry if agent is None else (f"{agent}: {text}", kind)
+
+
+REPLY_LINES_SHOWN = 3
+"""The most lines of a consultant's reply its entry shows; the detail pane shows them all."""
+
+
+def asked_entry(consultant: str, title: str, position: int) -> tuple[str, EntryKind]:
+    """A consultation asked of the role labelled ``consultant``, titled ``title``, as its
+    asker's entry: with its place in line while it's ``position`` 2 or later."""
+    waiting = f" ({ordinal(position)} in line)" if position > 1 else ""
+    return f"→ Asked {consultant}: {title}{waiting}", "agent"
+
+
+def answered_entry(event: ConsultationAnswered, consultant: str) -> tuple[str, EntryKind]:
+    """``event``'s answer from the role labelled ``consultant`` as its asker's entry: a header
+    counting the reply's lines, then its first :data:`REPLY_LINES_SHOWN`; or, interrupted, a
+    line saying why."""
+    who = consultant[:1].upper() + consultant[1:]
+    if event.interrupted is not None:
+        why = event.interrupted
+        return f"↩ {who}'s consultation '{event.title}' was interrupted: {why}", "agent"
+    lines = text_lines(event.reply)
+    header = f"↩ {who}'s reply to '{event.title}' · {counted(len(lines), 'line')}"
+    return "\n".join([header, *lines[:REPLY_LINES_SHOWN]]), "agent"
+
+
+def reply_call(event: ConsultationAnswered, header: str) -> ToolCall:
+    """``event``'s reply as the detail pane shows it, summarized by its entry's ``header``."""
+    call_id = f"consultation-{event.consultation}"
+    return ToolCall(call_id, "consultation", header, {}, status="passed", output=event.reply)
+
+
+def role_label(role: str, agents: Iterable[AgentEntry]) -> str:
+    """The label of ``role`` among the ``agents`` listed, or its name if it isn't listed."""
+    return next((agent.label for agent in agents if agent.name == role), role)

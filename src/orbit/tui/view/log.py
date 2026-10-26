@@ -303,6 +303,15 @@ class EntryLog:
         self._calls = {i - (i > index): call for i, call in self._calls.items()}
         self._show_rows_holding(None if cursor is None else cursor - (cursor > index))
 
+    def swap(self, entry: Entry, new: Entry) -> None:
+        """Put ``new`` in place of ``entry``, this very one rather than an equal one, redrawn
+        where it is; a log without it is left as it is. Neither may be thinking, which hides."""
+        index = next((i for i, held in enumerate(self._entries) if held is entry), None)
+        if index is None:
+            return
+        self._entries[index] = new
+        self._redraw(self._rows.index(index))
+
     def _show_after(self, index: int) -> None:
         """Add the entry at ``index``, which comes after every entry shown, as the last option,
         the view pinned to it unless the log is active or holds a cursor."""

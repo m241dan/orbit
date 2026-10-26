@@ -1270,7 +1270,13 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   switched` or `orbit restarted`. Consultations pending are saved with the session, and those
   a switch or orbit stopping interrupted are answered so when the session opens again. A
   message you send to a role busy with a consultation or a reply, or with one waiting, waits its
-  turn too, rather than being refused.
+  turn too, rather than being refused. The asking role's tab (and All) shows each consultation:
+  `→ Asked Experimenter: <first line>` once asked, ending in ` (2nd in line)` while it waits
+  behind others, updated in place as it moves up; then, once answered, `↩ Experimenter's reply
+  to '<first line>' · N lines` with the reply's first three lines, where enter opens the whole
+  reply in the detail pane, or, for one interrupted, the line `↩ Experimenter's consultation
+  '<first line>' was interrupted: <why>`. The consulted role's own tab shows its turn like any
+  other.
 - `consult_limit_per_hour`: how many consultations it may start in an hour, 6 by default; 0 means
   no limit, and a negative number is refused.
 - `copy_ttl_hours`: how long, in hours, a conversational role working in a `copy` keeps its copy

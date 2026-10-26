@@ -76,7 +76,7 @@ from orbit.tui.view.tab_strip import TabStrip
 from orbit.tui.view.takeover import TakeoverOffer
 from orbit.tui.view.task_editor import TaskChoices
 from orbit.tui.view.tasks import TaskBoard, edit_refusal
-from orbit.tui.view.transcript import busy_note, warning_entry
+from orbit.tui.view.transcript import busy_note, role_label, warning_entry
 from orbit.tui.view.windows import SIDEBAR_WINDOWS, Windows
 from orbit.tui.view.workspace_list import WorkspaceListView
 
@@ -224,12 +224,17 @@ class Frontend:
         )
         self.desk = CommandDesk(send, self.render, lambda e: self.feed.render(e))
         self.feed = ConversationFeed(
-            parts.conversation, parts.tabs, parts.tasks, parts.steps, parts.clock
+            parts.conversation, parts.tabs, parts.tasks, parts.steps, parts.clock, self._label
         )
         self.pager = HistoryPager(parts.paging, self.feed, self.send)
         self.proposals = ProposalQueue(parts.proposals, self.decide)
         self.windows = Windows(parts.app)
         self.router = EventRouter(self._panes(), self._handlers(), self._hooks())
+
+    def _label(self, role: str) -> str:
+        """``role``'s label, as the workspace this frontend is on lists it."""
+        navigation = self.navigation
+        return role_label(role, navigation.catalog.agents(navigation.place.workspace))
 
     def _panes(self) -> Panes:
         parts = self._parts

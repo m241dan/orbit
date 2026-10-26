@@ -16,8 +16,6 @@ from orbit.protocol import (
     Catalog,
     ChecksProposed,
     CommandRefused,
-    ConsultationAnswered,
-    ConsultationAsked,
     DirectoryListing,
     ErrorOccurred,
     Event,
@@ -49,7 +47,6 @@ from orbit.tui.view.events import (
     SESSION_EVENTS,
     STATE_EVENTS,
     AnswerEvent,
-    ConsultationEvent,
     OwnershipEvent,
     ProgressEvent,
     ReportEvent,
@@ -393,8 +390,6 @@ class EventRouter:
                 AgentsChanged()
                 | UsageTotals()
                 | DirectoryListing()
-                | ConsultationAsked()
-                | ConsultationAnswered()
                 | ReportsListed()
                 | ReportShown()
             ):
@@ -410,11 +405,11 @@ class EventRouter:
 
     def _follow_stream(
         self,
-        event: AgentsChanged | UsageTotals | DirectoryListing | ConsultationEvent | ReportEvent,
+        event: AgentsChanged | UsageTotals | DirectoryListing | ReportEvent,
     ) -> None:
         """Show the agents running across workspaces in the workspace picker, the server's
         directories in its explorer, and the reports asked for in their list; nothing shows
-        what turns cost across them, nor consultations, which the asker's turns show."""
+        what turns cost across them."""
         if isinstance(event, AgentsChanged):
             self._handlers.navigation.follow_agents(event)
         elif isinstance(event, DirectoryListing):

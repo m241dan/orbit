@@ -285,12 +285,23 @@ class Session:
     """A conversation in a :class:`Window`, fed events as the app routes them: the tabs follow
     each event, then the working row, then the feed shows it."""
 
-    def __init__(self, height: int = 30, tasks: Tasks | None = None) -> None:
+    def __init__(
+        self,
+        height: int = 30,
+        tasks: Tasks | None = None,
+        labels: Mapping[str, str] | None = None,
+    ) -> None:
         self.window = Window(height)
         self.tabs = Tabs()
         self.tasks = Tasks() if tasks is None else tasks
+        named = {} if labels is None else labels
         self.feed = ConversationFeed(
-            self.window.conversation, self.tabs, self.tasks, Steps(), self.window.clock
+            self.window.conversation,
+            self.tabs,
+            self.tasks,
+            Steps(),
+            self.window.clock,
+            lambda role: named.get(role, role),
         )
 
     @property

@@ -75,16 +75,9 @@ ReportEvent = ReportsListed | ReportShown
 """The workspace's reports, or one of them, which the reports list asked for."""
 
 StateEvent = (
-    SettingsChanged
-    | BusyChanged
-    | TasksChanged
-    | ProgressEvent
-    | StreamEvent
-    | ConsultationEvent
-    | ReportEvent
+    SettingsChanged | BusyChanged | TasksChanged | ProgressEvent | StreamEvent | ReportEvent
 )
-"""Snapshots of backend state, or a decision it waits for, consultations' progress, and the
-reports asked for."""
+"""Snapshots of backend state, or a decision it waits for, and the reports asked for."""
 
 TurnEvent = (
     TurnStarted
@@ -99,7 +92,7 @@ TurnEvent = (
 ActivityEvent = AgentNote | AgentRequest | AgentExited
 """Agents' activity, notices, the startup check's result and events lost when storage failed."""
 
-FeedEvent = TurnEvent | TaskProgress | ActivityEvent
+FeedEvent = TurnEvent | TaskProgress | ActivityEvent | ConsultationEvent
 """Events the conversation shows as they come."""
 
 OwnershipEvent = OwnershipOffered | OwnershipTaken | OwnershipDeclined
@@ -115,6 +108,7 @@ AnswerEvent = CommandAccepted | CommandRefused | Welcome | MessageSent | Proposa
 STATE_EVENTS: tuple[type[StateEvent], ...] = get_args(StateEvent)
 TASK_PROGRESS_EVENTS: tuple[type[TaskProgress], ...] = get_args(TaskProgress)
 ACTIVITY_EVENTS: tuple[type[ActivityEvent], ...] = get_args(ActivityEvent)
+CONSULTATION_EVENTS: tuple[type[ConsultationEvent], ...] = get_args(ConsultationEvent)
 FEED_EVENTS: tuple[type[FeedEvent], ...] = get_args(FeedEvent)
 OWNERSHIP_EVENTS: tuple[type[OwnershipEvent], ...] = get_args(OwnershipEvent)
 SESSION_EVENTS: tuple[type[SessionEvent], ...] = get_args(SessionEvent)
