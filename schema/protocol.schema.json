@@ -1168,6 +1168,7 @@
       "description": "Delete the workspace's report ``id``; reports are deleted only so, by the user. Refused\nwith ``unknown`` for a report there's none of.",
       "properties": {
         "id": {
+          "maximum": 9223372036854775807,
           "minimum": 1,
           "title": "Id",
           "type": "integer"
@@ -2829,6 +2830,7 @@
       "description": "Ask for the workspace's report ``id``, answered to this connection alone with\n``ReportShown``. Refused with ``unknown`` for a report there's none of.",
       "properties": {
         "id": {
+          "maximum": 9223372036854775807,
           "minimum": 1,
           "title": "Id",
           "type": "integer"

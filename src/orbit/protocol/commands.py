@@ -301,12 +301,16 @@ class ListReports(_Message):
     type: Literal["list_reports"] = "list_reports"
 
 
+LARGEST_REPORT_ID = 2**63 - 1
+"""The largest report id there can be, SQLite's largest INTEGER."""
+
+
 class ShowReport(_Message):
     """Ask for the workspace's report ``id``, answered to this connection alone with
     ``ReportShown``. Refused with ``unknown`` for a report there's none of."""
 
     type: Literal["show_report"] = "show_report"
-    id: int = Field(ge=1)
+    id: int = Field(ge=1, le=LARGEST_REPORT_ID)
 
 
 class DeleteReport(_Message):
@@ -314,7 +318,7 @@ class DeleteReport(_Message):
     with ``unknown`` for a report there's none of."""
 
     type: Literal["delete_report"] = "delete_report"
-    id: int = Field(ge=1)
+    id: int = Field(ge=1, le=LARGEST_REPORT_ID)
 
 
 Command = Annotated[

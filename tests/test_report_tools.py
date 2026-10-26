@@ -3,10 +3,20 @@
 from collections.abc import Callable
 from typing import Any
 
+import pytest
+
 from orbit.agent.application.ports import Reply
 from orbit.agent.application.reports import Reports
 from orbit.agent.domain.reports import NO_ID, TOO_LARGE
-from orbit.protocol import CODER, PLANNER, Event, SendMessage, TurnEndReason, TurnFinished
+from orbit.protocol import (
+    CODER,
+    PLANNER,
+    ErrorOccurred,
+    Event,
+    SendMessage,
+    TurnEndReason,
+    TurnFinished,
+)
 from tests.agent_fakes import (
     ROLES,
     START,
@@ -153,3 +163,15 @@ async def test_listing_no_reports_says_so() -> None:
 async def test_reading_without_an_id_is_refused() -> None:
     tools = Reports(FakeStore(), lambda: "s0", Ticks()).tools(PLANNER)
     assert await tools["read_report"]({}) == Reply(NO_ID, is_error=True)
+
+
+@pytest.mark.parametrize("wanted", [2**64, "99999999999999999999"])
+async def test_reading_an_id_too_large_for_the_store_is_refused(wanted: int | str) -> None:
+    heard: list[Reply] = []
+    session, _, launcher = session_for(roles=REPORTING, store=FakeStore())
+    launcher.planner_turns = [calls(heard, ("read_report", {"id": wanted}))]
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    events = await events_until(session, finished("agent-1"))
+    await session.close()
+    assert heard == [Reply(NO_ID, is_error=True)]
+    assert not [event for event in events if isinstance(event, ErrorOccurred)]

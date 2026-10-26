@@ -52,7 +52,16 @@ def test_an_unknown_report_is_named() -> None:
 
 @pytest.mark.parametrize(
     ("arguments", "expected"),
-    [({"id": 2}, 2), ({"id": " 12 "}, 12), ({"id": "two"}, None), ({"id": True}, None), ({}, None)],
+    [
+        ({"id": 2}, 2),
+        ({"id": " 12 "}, 12),
+        ({"id": "two"}, None),
+        ({"id": True}, None),
+        ({}, None),
+        ({"id": 2**63 - 1}, 2**63 - 1),
+        ({"id": 2**63}, None),
+        ({"id": "99999999999999999999"}, None),
+    ],
 )
 def test_a_report_id_is_a_whole_number_or_its_digits(
     arguments: dict[str, Any], expected: int | None

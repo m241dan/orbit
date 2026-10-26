@@ -75,6 +75,7 @@ from orbit.protocol import (
     event_adapter,
     with_state,
 )
+from orbit.protocol.commands import LARGEST_REPORT_ID, DeleteReport, ShowReport
 
 
 def test_event_json_round_trip() -> None:
@@ -516,3 +517,12 @@ def test_a_state_change_leaves_other_sessions_alone() -> None:
     changed = SessionStateChanged(session="s2", active=False, state="running", viewers=2)
 
     assert with_state(summary, changed) == summary
+
+
+@pytest.mark.parametrize("command", [ShowReport, DeleteReport])
+def test_report_ids_are_bounded_by_sqlites_integers(
+    command: type[ShowReport] | type[DeleteReport],
+) -> None:
+    assert command(id=LARGEST_REPORT_ID).id == LARGEST_REPORT_ID
+    with pytest.raises(ValidationError):
+        command(id=LARGEST_REPORT_ID + 1)
