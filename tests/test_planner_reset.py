@@ -254,7 +254,7 @@ async def test_a_reread_role_on_an_alias_the_startup_table_has_launches_with_its
     await session.close()
 
 
-async def test_a_role_kept_on_an_alias_removed_since_startup_still_launches() -> None:
+async def test_a_reread_role_leaving_a_startup_alias_launches_without_a_model() -> None:
     roles = {**ROLES, "planner": ON_FAST}
     old_role = lambda: ROLES["planner"]  # noqa: E731
     session, _, launcher = session_for(planner_role=old_role, roles=roles, models={CLAUDE: FAST})

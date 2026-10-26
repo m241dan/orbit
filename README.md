@@ -1033,7 +1033,7 @@ conversation, and its access to orbit, so the next prompt starts a fresh one, to
 verification steps again, and saves the session without it. It reads `[roles.planner]` from
 `.orbit/config.toml` again, with the model, effort and runtime your `config.toml` sets for it (and the run's `--runtime`), so a change
 to the planner's instructions, tools, tool access, model or effort takes effect; other roles and
-settings stay as they were. If either file is invalid, the planner keeps its role and orbit shows
+settings stay as they were. If either file is invalid as it is now, aliases included, the planner keeps its role and orbit shows
 the problem, but still resets the conversation; so it does, too, if the role names a runtime no
 role ran on when orbit started, or a model the aliases orbit started with don't resolve
 (see [Models and their aliases](#models-and-their-aliases)), both of which take restarting
@@ -1463,9 +1463,10 @@ since taken out of your `config.toml`, or one `--model` gives, fails the agent's
 saying why. `--model` takes an alias or a full id, and its help lists Claude's aliases.
 
 orbit reads the alias tables once, as it opens the workspace, and keeps them until it restarts:
-resetting the planner rereads its role but not `[runtimes.<name>.models]`, so the planner's
-reread model is held to the tables orbit opened with, and one they don't resolve, such as an
-alias you've added since, keeps the planner's role, naming the model and the aliases.
+resetting the planner rereads your `config.toml`, aliases included, and refuses a model the tables
+as they are now don't resolve, such as an alias you've taken out since; and the reread model must
+also be one the tables orbit opened with resolve, so one they don't, such as an alias you've added
+since, keeps the planner's role too, naming the model and the aliases.
 
 #### Your personal roles
 
