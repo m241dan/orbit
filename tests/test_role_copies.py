@@ -3,13 +3,14 @@ conversational role's own, made at its first turn, kept across turns, switches a
 removed on a reset, or by age at startup and every hour."""
 
 import asyncio
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from orbit.agent.application.ports import ReadFailed, TreeFailed
 from orbit.agent.application.role_copies import (
+    OtherCopies,
     Recorded,
     RoleCopies,
     TreeCopies,
@@ -138,7 +139,9 @@ async def test_a_sweep_removes_expired_recorded_copies_and_unrecorded_leftovers(
     ledger = Ledger("/mine", "/theirs-old", "/theirs-new", "/stray")
     old = START - timedelta(hours=30)
     ledger.copies.replace({"experimenter": saved("/mine")})
-    others = [{"experimenter": saved("/theirs-old", old)}, {"architect": saved("/theirs-new")}]
+    others = OtherCopies(
+        ({"experimenter": saved("/theirs-old", old)}, {"architect": saved("/theirs-new")})
+    )
     await ledger.copies.sweep(others, {})
     assert ledger.made.removed == ["/theirs-old", "/stray"]
     assert ledger.copies.held == {"experimenter": saved("/mine")}
@@ -149,9 +152,9 @@ async def test_keeping_sweeps_at_once_then_expires_the_sessions_copies_every_per
     path = await ledger.copies.enter("experimenter")
     swept = asyncio.Event()
 
-    async def others() -> Sequence[Recorded]:
+    async def others() -> OtherCopies:
         swept.set()
-        return []
+        return OtherCopies()
 
     ttls: Mapping[str, float] = {"experimenter": 1}
     keeping = asyncio.create_task(ledger.copies.keep(others, lambda: ttls, every=0.01))
@@ -204,11 +207,38 @@ async def test_the_other_saved_sessions_copies_are_read_from_the_store() -> None
     store = FakeStore()
     store.saved += [record("s-1", mine), record("s-2", theirs)]
     store.broken["s-3"] = "broken"
-    assert await saved_copies(store, "s-1") == [theirs]
+    assert await saved_copies(store, "s-1") == OtherCopies((theirs,), complete=False)
 
 
-async def test_no_store_or_an_unlistable_one_records_no_copies() -> None:
-    assert await saved_copies(None, "s-1") == []
+async def test_the_copies_of_readable_sessions_are_all_known() -> None:
+    store = FakeStore()
+    store.saved += [record("s-1", {}), record("s-2", {"experimenter": saved("/theirs")})]
+    assert await saved_copies(store, "s-1") == OtherCopies(({"experimenter": saved("/theirs")},))
+
+
+async def test_no_store_records_no_copies_completely() -> None:
+    assert await saved_copies(None, "s-1") == OtherCopies()
+
+
+async def test_an_unlistable_store_records_no_copies_incompletely() -> None:
     failing = FakeStore()
     failing.list_failure = ReadFailed("locked database")
-    assert await saved_copies(failing, "s-1") == []
+    assert await saved_copies(failing, "s-1") == OtherCopies(complete=False)
+
+
+async def test_a_sweep_keeps_leftovers_when_a_store_cant_be_listed() -> None:
+    ledger = Ledger("/theirs")
+    failing = FakeStore()
+    failing.list_failure = ReadFailed("locked database")
+    await ledger.copies.sweep(await saved_copies(failing, "s-1"), {})
+    assert ledger.made.removed == []
+
+
+async def test_a_sweep_keeps_leftovers_but_expires_readable_copies_past_an_unreadable() -> None:
+    ledger = Ledger("/unreadables", "/theirs-old")
+    store = FakeStore()
+    old = START - timedelta(hours=30)
+    store.saved.append(record("s-2", {"experimenter": saved("/theirs-old", old)}))
+    store.broken["s-3"] = "broken"
+    await ledger.copies.sweep(await saved_copies(store, "s-1"), {"experimenter": 24})
+    assert ledger.made.removed == ["/theirs-old"]

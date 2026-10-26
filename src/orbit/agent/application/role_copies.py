@@ -6,6 +6,7 @@ TTL has passed since the conversation's last turn."""
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime
 
 from orbit.agent.application.ports import (
@@ -18,7 +19,7 @@ from orbit.agent.application.ports import (
 )
 from orbit.agent.domain.copies import expired_roles, unrecorded
 from orbit.agent.domain.roles import Role
-from orbit.agent.domain.sessions import SavedCopy, SessionRecord
+from orbit.agent.domain.sessions import SavedCopy, SessionRecord, Unreadable
 from orbit.protocol import GIT_FAILED, ErrorOccurred
 
 CHECK_EVERY = 3600.0
@@ -47,20 +48,32 @@ class TreeCopies:
         return await self._tree.copies()
 
 
-async def saved_copies(store: SessionStore | None, open_id: str) -> list[Recorded]:
-    """The copies recorded in the sessions saved in ``store`` but the open one, ``open_id``;
-    none without a store, or when the sessions can't be listed, as nothing is known of them."""
+@dataclass(frozen=True)
+class OtherCopies:
+    """The copies recorded in the other saved sessions that could be read, and whether every
+    session could be, so that no copy unaccounted for is recorded in one."""
+
+    recorded: tuple[Recorded, ...] = ()
+    complete: bool = True
+
+
+async def saved_copies(store: SessionStore | None, open_id: str) -> OtherCopies:
+    """The copies recorded in the sessions saved in ``store`` but the open one, ``open_id``:
+    none, completely, without a store, as there are no others; none, incompletely, when the
+    sessions can't be listed; and those of the readable ones, incompletely if any can't be."""
     if store is None:
-        return []
+        return OtherCopies()
     try:
         stored = await store.sessions()
     except ReadFailed:
-        return []
-    return [
-        saved.record.copies
-        for saved in stored
-        if saved.id != open_id and isinstance(saved.record, SessionRecord)
-    ]
+        return OtherCopies(complete=False)
+    return _copies_of([saved.record for saved in stored if saved.id != open_id])
+
+
+def _copies_of(others: Sequence[SessionRecord | Unreadable]) -> OtherCopies:
+    """The copies recorded in ``others``, complete if every one of them could be read."""
+    records = [record for record in others if isinstance(record, SessionRecord)]
+    return OtherCopies(tuple(record.copies for record in records), len(records) == len(others))
 
 
 def copy_ttls(roles: Mapping[str, Role]) -> dict[str, float]:
@@ -142,21 +155,23 @@ class RoleCopies:
         if roles:
             await self.changed()
 
-    async def sweep(self, others: Sequence[Recorded], ttls: Mapping[str, float]) -> None:
+    async def sweep(self, others: OtherCopies, ttls: Mapping[str, float]) -> None:
         """Remove the copies past their TTL in ``ttls``: this session's, and those recorded in
         the ``others`` sessions, which keep their records until they next take a turn; then
-        those left over that no session records."""
+        those left over that no session records, if every session's records were read."""
         await self.expire(ttls)
         now = self._clock()
-        for recorded in others:
+        for recorded in others.recorded:
             for role in expired_roles(recorded, ttls, now):
                 await self._remove(recorded[role].path)
-        for path in unrecorded(await self._leftovers(), [self._held, *others]):
+        if not others.complete:
+            return
+        for path in unrecorded(await self._leftovers(), [self._held, *others.recorded]):
             await self._remove(path)
 
     async def keep(
         self,
-        others: Callable[[], Awaitable[Sequence[Recorded]]],
+        others: Callable[[], Awaitable[OtherCopies]],
         ttls: Callable[[], Mapping[str, float]],
         every: float = CHECK_EVERY,
     ) -> None:
