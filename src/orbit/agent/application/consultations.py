@@ -250,7 +250,7 @@ class Consultations:
         seat = self._seats(consultant)
         if seat is None or seat.disabled:
             return f"The {consultant} can't be consulted now."
-        return seat
+        return seat.moved or seat
 
     def _turn(self, asked: Consultation, seat: PlannerSeat) -> WaitingTurn:
         """The consultant's turn answering ``asked``, in ``seat``'s line."""

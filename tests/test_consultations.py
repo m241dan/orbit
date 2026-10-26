@@ -19,7 +19,11 @@ from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.consultations import failed
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.runtimes import CLAUDE, Failure
-from orbit.agent.domain.sessions import SavedConsultation
+from orbit.agent.domain.sessions import (
+    SavedConsultation,
+    SavedConversation,
+    runtime_changed_message,
+)
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import (
     PLANNER,
@@ -29,6 +33,7 @@ from orbit.protocol import (
     ConsultationAsked,
     Event,
     NewSession,
+    ResetConversation,
     SendMessage,
     Snapshot,
     TurnEndReason,
@@ -570,3 +575,36 @@ async def test_messaging_the_consultant_directly_counts_for_it_alone() -> None:
     await session.close()
 
     assert (snapshot.role_spent, snapshot.caused_spent) == ({EXPERIMENTER: EXPERIMENTER_SPENT}, {})
+
+
+ON_KIRO = SavedConversation(runtime="kiro", handle="conversation-k")
+"""A conversation saved from another runtime than the experimenter's role runs on, Claude."""
+
+
+async def test_a_role_whose_conversation_is_from_another_runtime_isnt_consulted() -> None:
+    heard: list[Reply] = []
+    store = store_with(saved("talks", conversations={EXPERIMENTER: ON_KIRO}))
+    session, launcher = consulting_host(store)
+    launcher.planner_turns = [consults("Check X", heard=heard)]
+    await opened(session, ActivateSession(session="talks"))
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    await events_until(session, finished("agent-1", 1))
+    await session.close()
+
+    message = runtime_changed_message(EXPERIMENTER, "kiro", CLAUDE)
+    assert heard == [Reply(message, is_error=True)]
+    assert [role for role, _ in prompts(launcher)] == [PLANNER]
+
+
+async def test_a_role_reset_from_another_runtimes_conversation_is_consulted() -> None:
+    heard: list[Reply] = []
+    store = store_with(saved("talks", conversations={EXPERIMENTER: ON_KIRO}))
+    session, launcher = consulting_host(store)
+    launcher.planner_turns = [consults("Check X", heard=heard), chats, chats]
+    await opened(session, ActivateSession(session="talks"))
+    await send(session, ResetConversation(agent=EXPERIMENTER))
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    await events_until(session, answered(1))
+    await session.close()
+
+    assert heard == [Reply(ASKED.format(1))]

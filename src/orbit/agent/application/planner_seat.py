@@ -219,6 +219,14 @@ class PlannerSeat:
         return role is not None and not role.enabled
 
     @property
+    def moved(self) -> str | None:
+        """Why the seat can't take turns until a reset: its conversation opened is from another
+        runtime than its role's; none otherwise."""
+        if self._stale is None or self._planner is None:
+            return None
+        return self._moved(self._stale, self._planner.runtime).message
+
+    @property
     def running(self) -> bool:
         """Whether the planner is answering."""
         return self._turn is not None and not self._turn.done()
@@ -319,7 +327,7 @@ class PlannerSeat:
     def advance(self) -> None:
         """Start the seat's next waiting turn, if it has one and its lane is free: the first in
         its line, else one hearing every message delivered."""
-        if self._held or self._planner is None or self._turns.running:
+        if self._held or self._planner is None or self._stale or self._turns.running:
             return
         turn = self._next()
         if turn is None:
