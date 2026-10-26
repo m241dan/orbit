@@ -122,6 +122,21 @@ class DecideProposal(_Message):
     feedback: str = ""
 
 
+ApprovalDecision = Literal["allow", "allow_hour", "deny"]
+"""What the user made of a consultation held past its asker's hourly limit: let it run, let its
+asker consult freely for an hour, or deny it."""
+
+
+class DecideApproval(_Message):
+    """The user's ``decision`` on consultation ``consultation``, held for approval as
+    ``ApprovalRequested`` said. The first decision applies; refused with ``unknown`` once it's
+    decided, or for a consultation that isn't held."""
+
+    type: Literal["decide_approval"] = "decide_approval"
+    consultation: int = Field(ge=1)
+    decision: ApprovalDecision
+
+
 class Attach(_Message):
     """View the session ``session`` of the workspace ``workspace``: the connection gets its
     ``Snapshot``, then its events from then on, in place of those of the session it viewed. A
@@ -315,6 +330,7 @@ Command = Annotated[
     | RemoveTask
     | CancelAgent
     | DecideProposal
+    | DecideApproval
     | Attach
     | ActivateSession
     | NewSession

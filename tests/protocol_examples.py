@@ -22,6 +22,8 @@ from orbit.protocol import (
     AgentRequest,
     AgentsChanged,
     AgentStarted,
+    ApprovalDecided,
+    ApprovalRequested,
     AssistantMessage,
     Attach,
     BusyChanged,
@@ -36,6 +38,7 @@ from orbit.protocol import (
     ConsultationAnswered,
     ConsultationAsked,
     ConversationReset,
+    DecideApproval,
     DecideProposal,
     DeleteReport,
     DeleteSession,
@@ -209,6 +212,7 @@ COMMANDS: tuple[CommandEnvelope, ...] = (
     command(RemoveTask(task_id="t1")),
     command(CancelAgent(agent_id="agent-1")),
     command(DecideProposal(task_id="t1", action="revise", feedback="Add mypy")),
+    command(DecideApproval(consultation=7, decision="allow_hour")),
     command(Attach(workspace="w1", session="s1")),
     command(ActivateSession(session="s1")),
     command(NewSession(name="Evening")),
@@ -312,6 +316,12 @@ EVENTS: tuple[EventEnvelope, ...] = (
             interrupted="it was cancelled",
         )
     ),
+    event(
+        ApprovalRequested(
+            consultation=7, asker=PLANNER, consultant="experimenter", title="Check X", asked=6
+        )
+    ),
+    event(ApprovalDecided(consultation=7, decision="deny")),
     event(LogGap(first_seq=1204, last_seq=1210)),
     event(OwnershipOffered()),
     event(OwnershipTaken()),

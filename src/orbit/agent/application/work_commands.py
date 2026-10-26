@@ -33,6 +33,7 @@ from orbit.protocol import (
     AddTask,
     CancelAgent,
     CancelTurn,
+    DecideApproval,
     DecideProposal,
     EditTask,
     ErrorOccurred,
@@ -63,6 +64,7 @@ WorkCommand = (
     | FireTrigger
     | CancelAgent
     | DecideProposal
+    | DecideApproval
 )
 
 QueuedWork = RunTasks | FireTrigger
@@ -178,7 +180,7 @@ class WorkCommands:
 
     async def _dispatch(self, command: WorkCommand, command_id: str) -> None:
         match command:
-            case SendMessage() | CancelTurn() | UpdateSettings():
+            case SendMessage() | CancelTurn() | UpdateSettings() | DecideApproval():
                 await self._handle_prompts(command, command_id)
             case AddTask() | RunTasks():
                 await self._handle_tasks(command)
@@ -190,9 +192,13 @@ class WorkCommands:
                 assert_never(command)
 
     async def _handle_prompts(
-        self, command: SendMessage | CancelTurn | UpdateSettings, command_id: str
+        self,
+        command: SendMessage | CancelTurn | UpdateSettings | DecideApproval,
+        command_id: str,
     ) -> None:
         match command:
+            case DecideApproval():
+                await self._parts.seats.decide(command)
             case SendMessage():
                 await self._send_message(command, command_id)
             case CancelTurn(lane=lane):

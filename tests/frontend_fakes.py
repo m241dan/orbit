@@ -35,6 +35,7 @@ from tests.navigation_fakes import Modals, WorkspaceViews
 from tests.transcript_fakes import Window
 from tests.view_fakes import (
     AgentsView,
+    ApprovalModal,
     HaltView,
     OfferView,
     PickerScreens,
@@ -282,6 +283,7 @@ class Shell:
         self.usage, self.paging = Usage(), Paging()
         self.modals = Modals(self.send)
         self.proposals, self.pickers = ProposalModal(), PickerScreens()
+        self.approvals = ApprovalModal()
         self.halt_view, self.offer_view = HaltView(), OfferView()
         self.reports_view = ReportsView()
         self._posted: list[Message] = []
@@ -313,6 +315,7 @@ class Shell:
             place=self.modals,
             workspaces=WorkspaceViews(self.modals),
             proposals=self.proposals,
+            approvals=self.approvals,
             pickers=Pickers(self.pickers),
             halt=StorageHalt(self.halt_view, self.send),
             takeover=TakeoverOffer(self.offer_view, self.send),

@@ -5,20 +5,39 @@ A consultation waits in the consulted role's line, in order with the user's own 
 and runs as one of its turns, in its own trace linked to the asking turn. That turn's last message
 is the reply, delivered to the asking role as a message of its own turn, with any others waiting.
 A consultation that can't produce a reply is answered, the same way, saying why it was
-interrupted. Those pending are saved with the session, and answered as it opens again.
+interrupted. Those pending are saved with the session, and answered as it opens again. A role
+asking past its hourly limit has its consultation held until the user decides on it.
 """
 
-import asyncio
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
+from orbit.agent.application.consult_approvals import Approvals, Held
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks, WaitingTurn
 from orbit.agent.application.ports import Reply
-from orbit.agent.domain.consultations import RESTARTED, SWITCHED, interrupted_message
+from orbit.agent.domain.consult_limits import ConsultCount
+from orbit.agent.domain.consultations import (
+    DECLINED,
+    EXPIRED,
+    RESTARTED,
+    SWITCHED,
+    interrupted_message,
+)
+from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.sessions import SavedConsultation
-from orbit.protocol import ConsultationAnswered, ConsultationAsked, Event, TurnEndReason
+from orbit.protocol import (
+    UNKNOWN,
+    ApprovalDecided,
+    ApprovalDecision,
+    ApprovalRequested,
+    ConsultationAnswered,
+    ConsultationAsked,
+    DecideApproval,
+    Event,
+    TurnEndReason,
+)
 from orbit.tracing import Span, current_span
 
 OUTCOME = "orbit.consultation.outcome"
@@ -37,6 +56,15 @@ def label(role: str) -> str:
 def asked_note(consultant: str, number: int) -> str:
     """What the asking agent is told as consultation ``number`` of ``consultant`` is asked."""
     return f"Asked the {consultant} (consultation {number}); its reply will arrive as a message."
+
+
+def held_note(consultant: str, number: int) -> str:
+    """What the asking agent is told as consultation ``number`` of ``consultant`` is held for the
+    user's approval."""
+    return (
+        f"Asked the {consultant} (consultation {number}), past your hourly limit, so it waits for"
+        " the user's approval; its reply, or why it was interrupted, will arrive as a message."
+    )
 
 
 def reply_message(consultant: str, title: str, number: int, reply: str) -> str:
@@ -88,7 +116,9 @@ class Consultations:
     """The session's consultations, numbered from 1: each waits in its consultant's seat among
     those ``seats`` finds, by role, publishing through ``post``, traced by the ``hooks``' tracing,
     saving the session with theirs as those pending change. While held, as turns stop, a consulted
-    turn ending leaves its consultation pending, to answer as its session opens again."""
+    turn ending leaves its consultation pending, to answer as its session opens again. Each
+    role's consultations are counted against its hourly limit, timed by the ``hooks``' timer;
+    one past it is held for approval."""
 
     def __init__(
         self,
@@ -107,6 +137,9 @@ class Consultations:
         self._owed: list[SavedConsultation] = []  # Those the session opened was saved with.
         self._answering: dict[str, str] = {}  # The asker of each consultant's turn running.
         self._held = False
+        self._clock = hooks.timer.clock
+        self._counts: dict[str, ConsultCount] = {}  # Each asking role's, by role.
+        self.approvals = Approvals[PlannerSeat](post, self._expired, hooks.timer)
 
     @property
     def saved(self) -> tuple[SavedConsultation, ...]:
@@ -128,6 +161,10 @@ class Consultations:
         """Answer the consultations whose turns end again."""
         self._held = False
 
+    def stop_expiry(self) -> None:
+        """Stop timing the consultations held for approval, as the session's turns stop."""
+        self.approvals.stop()
+
     def leave(self) -> None:
         """Have the consultations pending saved as interrupted by a switch of session."""
         for asked in self._pending.values():
@@ -137,6 +174,7 @@ class Consultations:
         """Forget the consultations pending, saved with the session left, and hold ``saved``,
         those of the session opened, to answer by :meth:`settle`."""
         self._pending, self._owed = {}, list(saved)
+        self.approvals.clear()
 
     async def settle(self) -> None:
         """Answer each consultation the session opened was saved with, as interrupted, saving
@@ -154,12 +192,53 @@ class Consultations:
         if isinstance(seat, str):
             return Reply(seat, is_error=True)
         self._count += 1
-        loop = asyncio.get_running_loop()
-        asked = Consultation(self._count, asker, consultant, message, cause, loop.time())
+        now = self._clock()
+        asked = Consultation(self._count, asker, consultant, message, cause, now)
         self._pending[asked.number] = asked
-        seat.wait(self._turn(asked, seat))
+        count = self._counts.get(asker, ConsultCount())
+        if count.needs_approval(self._roles()[asker].consult_limit_per_hour, now):
+            self.approvals.hold(_request(asked, count.recent(now)), seat)
+            await self._save()
+            return Reply(held_note(consultant, asked.number))
+        self._start(asked, seat)
         await self._save()
         return Reply(asked_note(consultant, asked.number))
+
+    def _start(self, asked: Consultation, seat: PlannerSeat) -> None:
+        """Count ``asked`` against its asker's limit and have it wait in ``seat``'s line."""
+        count = self._counts.get(asked.asker, ConsultCount())
+        self._counts[asked.asker] = count.counted(self._clock())
+        seat.wait(self._turn(asked, seat))
+
+    async def decide(self, command: DecideApproval) -> None:
+        """Settle the consultation held that ``command`` decides on: start it, freeing its asker
+        of the limit for an hour if so decided, or answer it as declined; publish the decision.
+        Refused for one that isn't held."""
+        held = self.approvals.take(command.consultation)
+        if held is None:
+            message = f"No consultation {command.consultation} is waiting for approval."
+            raise Refused(UNKNOWN, message)
+        asked = self._pending[command.consultation]
+        if command.decision == "allow_hour":
+            count = self._counts.get(asked.asker, ConsultCount())
+            self._counts[asked.asker] = count.freed(self._clock())
+        self._post(_decided(asked.number, command.decision))
+        if command.decision == "deny":
+            self._drop(asked, DECLINED)
+        else:
+            self._start(asked, held.work)
+        await self._save()
+
+    async def _expired(self, held: Held[PlannerSeat]) -> None:
+        """Answer the consultation ``held`` as expired, denied, and publish that."""
+        self._post(_decided(held.request.consultation, "deny"))
+        self._drop(self._pending[held.request.consultation], EXPIRED)
+        await self._save()
+
+    def _drop(self, asked: Consultation, why: str) -> None:
+        """Answer ``asked``, held, as interrupted for ``why``."""
+        del self._pending[asked.number]
+        self._interrupted(asked.saved, why)
 
     def _consultant(self, asker: str, consultant: str, message: str) -> PlannerSeat | str:
         """The seat of ``consultant``, which ``asker`` asks ``message``; or why it can't."""
@@ -191,7 +270,7 @@ class Consultations:
     def _opened(self, asked: Consultation) -> Iterator[Span]:
         """The span of the turn answering ``asked``, current for the block, while which
         :meth:`asker` names its asker."""
-        waited = asyncio.get_running_loop().time() - asked.asked
+        waited = self._clock() - asked.asked
         cause, asker, consultant = asked.cause, asked.asker, asked.consultant
         with self._tracing.consultation(cause, asker, consultant, round(waited * 1000)) as span:
             self._answering[consultant] = asker
@@ -259,3 +338,19 @@ def _answered(asked: SavedConsultation, reply: str, why: str | None = None) -> C
         reply=reply,
         interrupted=why,
     )
+
+
+def _request(asked: Consultation, recent: int) -> ApprovalRequested:
+    """What the user is asked about ``asked``, its asker having asked ``recent`` this hour."""
+    return ApprovalRequested(
+        consultation=asked.number,
+        asker=asked.asker,
+        consultant=asked.consultant,
+        title=asked.title,
+        asked=recent,
+    )
+
+
+def _decided(consultation: int, decision: ApprovalDecision) -> ApprovalDecided:
+    """The event saying consultation ``consultation``, held, was settled with ``decision``."""
+    return ApprovalDecided(consultation=consultation, decision=decision)

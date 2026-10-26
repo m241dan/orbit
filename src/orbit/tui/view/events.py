@@ -8,6 +8,8 @@ from orbit.protocol import (
     AgentExited,
     AgentRequest,
     AgentsChanged,
+    ApprovalDecided,
+    ApprovalRequested,
     AssistantMessage,
     BusyChanged,
     Catalog,
@@ -74,8 +76,17 @@ message."""
 ReportEvent = ReportsListed | ReportShown
 """The workspace's reports, or one of them, which the reports list asked for."""
 
+ApprovalEvent = ApprovalRequested | ApprovalDecided
+"""A consultation held for the user's approval, and its settling."""
+
 StateEvent = (
-    SettingsChanged | BusyChanged | TasksChanged | ProgressEvent | StreamEvent | ReportEvent
+    SettingsChanged
+    | BusyChanged
+    | TasksChanged
+    | ProgressEvent
+    | StreamEvent
+    | ReportEvent
+    | ApprovalEvent
 )
 """Snapshots of backend state, or a decision it waits for, and the reports asked for."""
 

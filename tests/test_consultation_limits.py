@@ -1,0 +1,235 @@
+"""A role consulting past its hourly limit: the consultation is held and every frontend asked;
+allowed, it runs; allowed for the hour, the role consults freely meanwhile; denied, or expired
+after an hour with no frontend connected, the asker hears it was interrupted."""
+
+import asyncio
+from collections.abc import Callable
+
+from orbit.agent import WorkspaceHost
+from orbit.agent.application.consultations import held_note
+from orbit.agent.application.conversation_seats import ConversationSeats
+from orbit.agent.application.desk import AgentDesk
+from orbit.agent.application.planner_seat import SeatHooks, Timer
+from orbit.agent.application.ports import Reply
+from orbit.agent.application.tasks import Tasks
+from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.consult_limits import HOUR
+from orbit.agent.domain.roles import Role
+from orbit.protocol import (
+    PLANNER,
+    UNKNOWN,
+    ApprovalDecided,
+    ApprovalDecision,
+    ApprovalRequested,
+    CommandRefused,
+    ConsultationAnswered,
+    DecideApproval,
+    Event,
+    SendMessage,
+    Settings,
+    TurnEndReason,
+)
+from tests.agent_fakes import (
+    ROLES,
+    Call,
+    Script,
+    ScriptedLauncher,
+    agents_for,
+    chats,
+    events_until,
+    of_type,
+    refused,
+    send,
+    session_for,
+    snapshot_of,
+    sole,
+)
+from tests.waiting import eventually
+
+EXPERIMENTER = "experimenter"
+EXPERIMENTER_ROLE = ROLES[PLANNER].model_copy(
+    update={"instructions": "You experiment.", "lane": EXPERIMENTER}
+)
+CONSULTING_PLANNER = ROLES[PLANNER].model_copy(update={"consults": (EXPERIMENTER,)})
+CONSULTING = {**ROLES, PLANNER: CONSULTING_PLANNER, EXPERIMENTER: EXPERIMENTER_ROLE}
+"""The built-in roles, with a planner consulting an experimenter in its own lane."""
+
+ASKED = "Asked the experimenter (consultation {}); its reply will arrive as a message."
+
+
+def limited(limit: int) -> dict[str, Role]:
+    """The roles of a planner that may consult the experimenter ``limit`` times an hour."""
+    planner = CONSULTING_PLANNER.model_copy(update={"consult_limit_per_hour": limit})
+    return {**CONSULTING, PLANNER: planner}
+
+
+LIMITED = limited(1)
+
+
+def requested(number: int, title: str, asked: int = 1) -> ApprovalRequested:
+    return ApprovalRequested(
+        consultation=number, asker=PLANNER, consultant=EXPERIMENTER, title=title, asked=asked
+    )
+
+
+def held(number: int) -> Reply:
+    return Reply(held_note(EXPERIMENTER, number))
+
+
+def consulting(heard: list[Reply], gate: asyncio.Event, *after: str) -> Script:
+    """A turn consulting with "Check X" and "Check Y", then, once ``gate`` is set, with each of
+    ``after``, noting what it hears in ``heard``."""
+
+    async def turn(call: Call) -> TurnEndReason:
+        for message in ("Check X", "Check Y", *after):
+            if message in after:
+                await gate.wait()
+            heard.append(await call("consult", role=EXPERIMENTER, message=message))
+        return "completed"
+
+    return turn
+
+
+def answering(number: int) -> Callable[[Event], bool]:
+    """Stops at consultation ``number``'s ConsultationAnswered."""
+    return lambda e: isinstance(e, ConsultationAnswered) and e.consultation == number
+
+
+async def holding(
+    *after: str, roles: dict[str, Role] = LIMITED
+) -> tuple[WorkspaceHost, ScriptedLauncher, list[Reply], asyncio.Event]:
+    """A session whose planner consulted twice, the second past its limit, so it's held; its
+    turn consults with each of ``after`` once the gate returned is set."""
+    heard: list[Reply] = []
+    gate = asyncio.Event()
+    session, _, launcher = session_for(roles=roles)
+    launcher.planner_turns = [consulting(heard, gate, *after), chats, chats, chats, chats]
+    launcher.planner_replies = ["Asking.", "X is 3", "Y is 4", "Z is 5", "Thanks."]
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    await events_until(session, of_type(ApprovalRequested))
+    return session, launcher, heard, gate
+
+
+async def test_consultations_under_the_limit_run_and_one_past_it_is_held() -> None:
+    session, launcher, heard, _ = await holding()
+    snapshot = await snapshot_of(session)
+    await eventually(lambda: len(launcher.launches) >= 2)
+    await session.close()
+
+    assert heard == [Reply(ASKED.format(1)), held(2)]
+    assert snapshot.approvals == (requested(2, "Check Y"),)
+    consulted = launcher.launches[1]
+    assert (consulted.agent.role, consulted.prompt.endswith("Check X")) == (EXPERIMENTER, True)
+
+
+async def test_a_limit_of_0_holds_none() -> None:
+    heard: list[Reply] = []
+    gate = asyncio.Event()
+    gate.set()
+    session, _, launcher = session_for(roles=limited(0))
+    launcher.planner_turns = [consulting(heard, gate, "Check Z"), chats, chats, chats, chats]
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    await eventually(lambda: len(heard) == 3)
+    await session.close()
+
+    assert heard == [Reply(ASKED.format(number)) for number in (1, 2, 3)]
+
+
+async def decided(decision: ApprovalDecision, *after: str) -> tuple[list[Event], list[Reply]]:
+    """The events from the user's ``decision`` on the held consultation 2 up to its answer,
+    and what the planner heard, consulting with ``after`` once it's decided."""
+    session, _, heard, gate = await holding(*after)
+    await send(session, DecideApproval(consultation=2, decision=decision))
+    events = await events_until(session, answering(2))
+    gate.set()
+    await eventually(lambda: len(heard) == 2 + len(after))
+    await session.close()
+    return events, heard
+
+
+async def test_allowing_runs_the_consultation() -> None:
+    events, _ = await decided("allow")
+    assert ApprovalDecided(consultation=2, decision="allow") in events
+    assert sole([e for e in events if answering(2)(e)], ConsultationAnswered).interrupted is None
+
+
+async def test_allowing_once_holds_the_next_past_the_limit() -> None:
+    _, heard = await decided("allow", "Check Z")
+    assert heard[-1] == held(3)
+
+
+async def test_allowing_for_the_hour_lets_the_role_consult_freely() -> None:
+    events, heard = await decided("allow_hour", "Check Z")
+    assert ApprovalDecided(consultation=2, decision="allow_hour") in events
+    assert heard[-1] == Reply(ASKED.format(3))
+
+
+async def test_denying_answers_it_as_declined() -> None:
+    events, _ = await decided("deny")
+    assert ApprovalDecided(consultation=2, decision="deny") in events
+    answer = sole([e for e in events if answering(2)(e)], ConsultationAnswered)
+    assert (answer.reply, answer.interrupted) == ("", "you declined it")
+
+
+async def test_the_first_decision_applies_and_a_later_one_is_refused() -> None:
+    session, _, _, _ = await holding()
+    await send(session, DecideApproval(consultation=2, decision="deny"))
+    await send(session, DecideApproval(consultation=2, decision="allow"))
+    events = await events_until(session, of_type(CommandRefused))
+    snapshot = await snapshot_of(session)
+    await session.close()
+
+    assert events[-1] == refused(UNKNOWN, "No consultation 2 is waiting for approval.")
+    assert [e.decision for e in events if isinstance(e, ApprovalDecided)] == ["deny"]
+    assert snapshot.approvals == ()
+
+
+class Clock:
+    """A clock that sleeping moves on, at once."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    async def sleep(self, seconds: float) -> None:
+        self.now += seconds
+        await asyncio.sleep(0)
+
+
+async def nothing() -> None:
+    return None
+
+
+def drained(events: asyncio.Queue[Event]) -> list[Event]:
+    taken: list[Event] = []
+    while not events.empty():
+        taken.append(events.get_nowait())
+    return taken
+
+
+async def test_one_held_with_no_frontend_connected_expires_denied_after_an_hour() -> None:
+    clock = Clock()
+    agents, launcher = agents_for(roles=LIMITED)
+    events: asyncio.Queue[Event] = asyncio.Queue()
+    hooks = SeatHooks(nothing, lambda: None, tuple, timer=Timer(clock, clock.sleep))
+    seats = ConversationSeats(
+        AgentDesk(agents, events.put), Tasks(TaskBoard(), events.put), events, hooks
+    )
+    heard: list[Reply] = []
+    gate = asyncio.Event()
+    launcher.planner_turns = [consulting(heard, gate), chats, chats, chats]
+    await seats.planner.submit("Plan.", Settings())
+    told = "The experimenter's consultation 'Check Y' was interrupted: it expired waiting for"
+    await eventually(lambda: any(told in launch.prompt for launch in launcher.launches))
+    taken = drained(events)
+    gate.set()
+    await seats.stop_turns()
+    await seats.close()
+
+    assert heard == [Reply(ASKED.format(1)), held(2)]
+    assert clock.now == HOUR
+    assert ApprovalDecided(consultation=2, decision="deny") in taken
+    answer = sole([e for e in taken if answering(2)(e)], ConsultationAnswered)
+    assert answer.interrupted == "it expired waiting for approval"

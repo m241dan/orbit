@@ -340,7 +340,7 @@ class WorkspaceHost:
             lambda: self._halt.halted, lambda: self._takeover.read_only, self._halt.check
         )
         overflow = Overflow(fallback, self._halt.log_failed)
-        self._connections = Connections(lambda: self._states.check(), lambda: self._keeper.id)
+        self._connections = Connections(self._connections_changed, lambda: self._keeper.id)
         self._workspace_id = workspace_id
         self._store = store
         self._events = Outbox(lambda: self._keeper.id, store, storage, overflow)
@@ -394,6 +394,12 @@ class WorkspaceHost:
         self._states = self._session_states()
         self._views = self._session_views()
         self._watch_background()
+
+    def _connections_changed(self) -> None:
+        """Publish the sessions' states, and tell the seats how many frontends view the open
+        session, as connections come, go or move."""
+        self._states.check()
+        self._seats.viewers(self._connections.viewed()[self._keeper.id])
 
     def _conversation_seats(self) -> ConversationSeats:
         """The conversational roles' seats in this session, their turns traced with
@@ -1211,6 +1217,7 @@ class WorkspaceHost:
             review=self._lane.status if self._lane else None,
             proposals=self._proposals.waiting,
             agents=self._running_agents(),
+            approvals=self._seats.approvals,
             transcript=transcript.events,
             viewers=self._states.of(self._keeper.id).viewers,
             role_spent=self._switcher.spend.by_role,

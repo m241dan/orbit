@@ -15,6 +15,7 @@ from textual.widgets import Tabs
 from orbit.protocol import Command, Connected, Link, LinkState, Session, TaskSpec
 from orbit.tracing import NoTelemetry, Telemetry
 from orbit.tui.agents import AgentsPane
+from orbit.tui.approvals import ApprovalHost
 from orbit.tui.detail import DetailPane
 from orbit.tui.event_stream import event_batches
 from orbit.tui.footer import KeyFooter
@@ -124,6 +125,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._opening = opening
         self._telemetry = telemetry
         self._proposals = ProposalHost(self.push_screen)
+        self._approvals = ApprovalHost(self.push_screen)
         self._sessions = SessionsHost(
             self.push_screen, self._send, lambda: self._frontend.router.show_viewing()
         )
@@ -207,6 +209,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             place=self._sessions,
             workspaces=self._workspaces,
             proposals=self._proposals,
+            approvals=self._approvals,
             pickers=self._pickers.model,
             halt=self._halt,
             takeover=self._takeover,

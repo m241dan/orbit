@@ -97,13 +97,27 @@ class WaitingTurn:
     placed: Callable[[int], None] = _unplaced
 
 
+def loop_time() -> float:
+    """The running loop's clock."""
+    return asyncio.get_running_loop().time()
+
+
+@dataclass(frozen=True)
+class Timer:
+    """A ``clock``, in seconds, and what ``sleep``s for so many of them."""
+
+    clock: Callable[[], float] = loop_time
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+
+
 @dataclass(frozen=True)
 class SeatHooks:
     """What the seat asks of its session: to ``save`` it, to mark it ``use``d, the
     ``step_names`` verifying tasks now, to ``check`` it, refusing a turn by raising
     :class:`Refused` while it's halted, the ``tracing`` its turns are traced by, its
-    ``copies``, which a role working in a copy takes its turns in, and the ``settings`` of each
-    role, which the turns it didn't ask for run with."""
+    ``copies``, which a role working in a copy takes its turns in, the ``settings`` of each
+    role, which the turns it didn't ask for run with, and the ``timer`` its consultations held
+    for approval are timed by."""
 
     save: Callable[[], Awaitable[None]]
     use: Callable[[], None]
@@ -112,6 +126,7 @@ class SeatHooks:
     tracing: PlannerTracing = _UNTRACED
     copies: RoleCopies | None = None
     settings: Callable[[str], Settings] = _default_settings
+    timer: Timer = field(default_factory=Timer)
 
 
 def _unwatched(lane: BusyLane) -> None:

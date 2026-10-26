@@ -17,7 +17,7 @@ from pydantic import (
     model_validator,
 )
 
-from orbit.protocol.commands import ProposalAction
+from orbit.protocol.commands import ApprovalDecision, ProposalAction
 from orbit.protocol.models import (
     Activity,
     Effort,
@@ -400,6 +400,30 @@ class ConsultationAnswered(_Message):
     interrupted: str | None = None
 
 
+class ApprovalRequested(_Message):
+    """The conversational role ``asker`` asked the role ``consultant`` consultation
+    ``consultation``, whose message's first line is ``title``, past its hourly limit, having
+    asked ``asked`` in the past hour: it's held until the user answers with ``DecideApproval``,
+    or expires, denied, after an hour with no frontend connected."""
+
+    type: Literal["approval_requested"] = "approval_requested"
+    consultation: int
+    asker: str
+    consultant: str
+    title: str
+    asked: int = Field(ge=0)
+
+
+class ApprovalDecided(_Message):
+    """Consultation ``consultation``, held for approval, was settled with ``decision``: by a
+    ``DecideApproval``, or ``deny`` as it expired or the session left it; a frontend still
+    asking about it stops."""
+
+    type: Literal["approval_decided"] = "approval_decided"
+    consultation: int
+    decision: ApprovalDecision
+
+
 class OpenRequest(_Message):
     """A call ``request_id`` to orbit's ``tool`` that an agent made and orbit hasn't answered."""
 
@@ -426,7 +450,8 @@ class Snapshot(_Message):
     ``model_choices``, with the id each resolves to (``model_ids``, by alias), whether each lane
     is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they show
     under, the ``review`` status (none when reviews are off), the checks ``proposals``
-    waiting for a decision, the ``agents`` running, the ``transcript``: the session's last logged
+    waiting for a decision, the ``agents`` running, the consultations held for ``approvals``, the
+    ``transcript``: the session's last logged
     events, at most 500, oldest first, in the envelopes they were sent in, and, while the session is
     halted because storage failed, ``storage_halt``: why, and how to resume; ``read_only`` says
     another orbit owns the repository, so the work this one is asked to run waits, and
@@ -451,6 +476,7 @@ class Snapshot(_Message):
     review: ReviewStatus | None
     proposals: tuple[ChecksProposed, ...]
     agents: tuple[RunningAgent, ...]
+    approvals: tuple[ApprovalRequested, ...] = ()
     transcript: tuple[EventEnvelope, ...] = ()
     storage_halt: str | None = None
     read_only: bool = False
@@ -803,6 +829,8 @@ Event = Annotated[
     | ConversationReset
     | ConsultationAsked
     | ConsultationAnswered
+    | ApprovalRequested
+    | ApprovalDecided
     | LogGap
     | OwnershipOffered
     | OwnershipTaken

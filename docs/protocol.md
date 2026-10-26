@@ -125,7 +125,7 @@ with `invalid`. The first `Attach` is answered in this order:
    name: the work lane, the conversational roles', a disabled planner's only while an enabled
    conversational role shares it, and every other lane of the enabled task roles), tasks,
    verification steps, review status, checks proposals waiting for a decision, running
-   agents and its `transcript`: the session's last 500 logged events, oldest first, in the
+   agents, the consultations held for approval (`approvals`) and its `transcript`: the session's last 500 logged events, oldest first, in the
    envelopes they were sent in, their `seq`s included (none without a store), and, while the
    session is halted because a write to the store failed, its `storage_halt`: the explanation
    the halting `ErrorOccurred` carried (see `storage_failed` under [Codes](#codes)), and
@@ -654,6 +654,20 @@ consulted role's lane), `it failed: <error>`, `Claude's usage limit was reached`
 API wasn't answering` (naming the runtime), `the session was switched` or `orbit restarted`.
 Consultations pending are saved in the session record; those still pending as the session is
 switched away from or orbit stops are answered so as the session opens again.
+
+Each role's consultations count against its `consult_limit_per_hour` (6 by default; 0 means no
+limit) over a rolling hour. One asked past it is held, rather than queued: `consult` returns
+`Asked the experimenter (consultation 7), past your hourly limit, so it waits for the user's
+approval; …`, and the backend publishes `ApprovalRequested(consultation, asker, consultant,
+title, asked)`, `asked` counting the consultations the asker asked in the past hour. A frontend
+asks the user about it, and answers with `DecideApproval(consultation, decision)`: `allow` queues
+it; `allow_hour` queues it and lets its asker consult freely for an hour from then; `deny`
+answers it as interrupted, `you declined it`. The first decision applies: the backend publishes
+`ApprovalDecided(consultation, decision)`, at which every frontend still asking about it stops,
+and refuses any later one with `unknown`. A consultation held for an hour with no frontend
+viewing the session expires: it's answered as interrupted, `it expired waiting for approval`,
+and `ApprovalDecided` says `deny`. The consultations held are in the `Snapshot`'s `approvals`;
+they're saved with the session like any pending, and answered so as it opens again.
 
 ## Reports
 

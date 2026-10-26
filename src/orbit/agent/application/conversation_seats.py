@@ -18,7 +18,13 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.refusals import Refused, unknown
 from orbit.agent.domain.roles import Role, conversational_roles, disabled_note
 from orbit.agent.domain.sessions import SavedConsultation, SavedConversation, SavedCopy
-from orbit.protocol import NOT_CONFIGURED, PLANNER, BusyLane
+from orbit.protocol import (
+    NOT_CONFIGURED,
+    PLANNER,
+    ApprovalRequested,
+    BusyLane,
+    DecideApproval,
+)
 
 
 class ConversationSeats:
@@ -135,6 +141,20 @@ class ConversationSeats:
         answers none."""
         return self._consultations.asker(role)
 
+    @property
+    def approvals(self) -> tuple[ApprovalRequested, ...]:
+        """What the user is asked about the consultations held for approval."""
+        return self._consultations.approvals.waiting
+
+    def viewers(self, count: int) -> None:
+        """Note that ``count`` frontends view the session, as held consultations expire only
+        with none."""
+        self._consultations.approvals.viewers(count)
+
+    async def decide(self, command: DecideApproval) -> None:
+        """Settle the consultation held that ``command`` decides on; refused for one not held."""
+        await self._consultations.decide(command)
+
     def leave(self) -> None:
         """Have the consultations pending saved as interrupted by a switch of session."""
         self._consultations.leave()
@@ -187,6 +207,7 @@ class ConversationSeats:
         turns waiting meanwhile, which are forgotten; the consultations they answered stay
         pending, to answer as the session opens again."""
         self._consultations.hold()
+        self._consultations.stop_expiry()
         for seat in self._seats.values():
             seat.hold()
         try:

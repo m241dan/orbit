@@ -1297,8 +1297,14 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   reply in the detail pane, or, for one interrupted, the line `↩ Experimenter's consultation
   '<first line>' was interrupted: <why>`. The consulted role's own tab shows its turn like any
   other.
-- `consult_limit_per_hour`: how many consultations it may start in an hour, 6 by default; 0 means
-  no limit, and a negative number is refused.
+- `consult_limit_per_hour`: how many consultations it may start in a rolling hour, 6 by default;
+  0 means no limit, and a negative number is refused. Past it, a consultation is held and every
+  frontend viewing the session asks: `The planner wants to ask the experimenter: '<first line>'.
+  It has asked 6 times this hour.`, with **a** Allow, **h** Allow for the rest of the hour (the
+  role then consults freely for an hour from your approval) and **d** Deny. The first answer from
+  any frontend applies and closes the others'. A denied consultation reaches the asker as
+  interrupted (`you declined it`); one held for an hour with no frontend connected expires the
+  same way (`it expired waiting for approval`).
 - `copy_ttl_hours`: how long, in hours, a conversational role working in a `copy` keeps its copy
   after its conversation's last turn, 24 by default; it must be more than 0.
 

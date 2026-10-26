@@ -29,6 +29,7 @@ from orbit.protocol import (
     UNKNOWN,
     WORK_LANE,
     ActivateSession,
+    ApprovalRequested,
     Attach,
     BusyLane,
     ChecksProposed,
@@ -85,6 +86,7 @@ class SessionParts(TypedDict):
     review: ReviewStatus | None
     proposals: tuple[ChecksProposed, ...]
     agents: tuple[RunningAgent, ...]
+    approvals: NotRequired[tuple[ApprovalRequested, ...]]
     transcript: tuple[EventEnvelope, ...]
     active: NotRequired[bool]
     viewers: int

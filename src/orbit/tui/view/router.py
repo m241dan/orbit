@@ -11,6 +11,8 @@ from orbit.protocol import (
     WORK_LANE,
     AgentEntry,
     AgentsChanged,
+    ApprovalDecided,
+    ApprovalRequested,
     BusyChanged,
     BusyLane,
     Catalog,
@@ -47,6 +49,7 @@ from orbit.tui.view.events import (
     SESSION_EVENTS,
     STATE_EVENTS,
     AnswerEvent,
+    ApprovalEvent,
     OwnershipEvent,
     ProgressEvent,
     ReportEvent,
@@ -159,6 +162,16 @@ class Proposals(Protocol):
     def withdraw(self, event: Event) -> None: ...
 
 
+class Approvals(Protocol):
+    """The consultations held for the user's approval, as the router follows them."""
+
+    def show(self, request: ApprovalRequested) -> None: ...
+
+    def settle(self, event: ApprovalDecided) -> None: ...
+
+    def follow(self, requests: tuple[ApprovalRequested, ...]) -> None: ...
+
+
 class ModelChoices(Protocol):
     """The settings pickers, as the router offers model choices in them, with the id each
     resolves to."""
@@ -191,6 +204,7 @@ class Handlers:
     pager: HistoryPager
     desk: CommandDesk
     proposals: Proposals
+    approvals: Approvals
     pickers: ModelChoices
     navigation: Navigation
     halt: StorageHalt
@@ -363,6 +377,7 @@ class EventRouter:
         panes.verification.show(snapshot.steps, snapshot.steps_title)
         panes.agents.show_review(snapshot.review)
         handlers.proposals.follow(snapshot.proposals)
+        handlers.approvals.follow(snapshot.approvals)
         # Its tasks shown first, as the transcript's notes on them read them, and its usage
         # set after, as the transcript's turns count theirs.
         handlers.feed.replace(
@@ -396,10 +411,19 @@ class EventRouter:
                 | DirectoryListing()
                 | ReportsListed()
                 | ReportShown()
+                | ApprovalRequested()
+                | ApprovalDecided()
             ):
                 self._follow_stream(event)
             case _:
                 self._show_progress(event)
+
+    def _follow_approval(self, event: ApprovalRequested | ApprovalDecided) -> None:
+        """Ask about a consultation held for approval, or stop asking once it's settled."""
+        if isinstance(event, ApprovalRequested):
+            self._handlers.approvals.show(event)
+        else:
+            self._handlers.approvals.settle(event)
 
     def _follow_settings(self, event: SettingsChanged) -> None:
         """Offer the model choices ``event`` reports, with the id each resolves to, and note its
@@ -409,17 +433,19 @@ class EventRouter:
 
     def _follow_stream(
         self,
-        event: AgentsChanged | UsageTotals | DirectoryListing | ReportEvent,
+        event: AgentsChanged | UsageTotals | DirectoryListing | ReportEvent | ApprovalEvent,
     ) -> None:
         """Show the agents running across workspaces in the workspace picker, the server's
-        directories in its explorer, and the reports asked for in their list; nothing shows
-        what turns cost across them."""
+        directories in its explorer, the reports asked for in their list, and the consultations
+        held for approval in their modal; nothing shows what turns cost across them."""
         if isinstance(event, AgentsChanged):
             self._handlers.navigation.follow_agents(event)
         elif isinstance(event, DirectoryListing):
             self._handlers.navigation.follow_listing(event)
         elif isinstance(event, ReportsListed | ReportShown):
             self._handlers.reports.follow(event)
+        elif isinstance(event, ApprovalRequested | ApprovalDecided):
+            self._follow_approval(event)
 
     def _follow_agents(self, event: Event) -> None:
         panes = self._panes

@@ -91,7 +91,7 @@ its commands carry none.
 
 | Attribute | Type | Meaning |
 | --- | --- | --- |
-| `orbit.action` | string | What the user did, by the TUI's own name for it: `run_tasks`, `cancel_turn`, `stop_planner`, `reset_planner`, `super_review`, `configure_checks`, `pick_model`, `pick_tool_access`, `cancel_agent`, `submit_prompt`, `add_task`, `edit_task`, `accept_task`, `remove_task`, `decide_proposal`, `pick_session`, `rename_session`, `delete_session`, `activate_session`, `pick_workspace`, `add_workspace`, `remove_workspace`, `browse`, `page_history`, `resume_storage` or `take_ownership`. |
+| `orbit.action` | string | What the user did, by the TUI's own name for it: `run_tasks`, `cancel_turn`, `stop_planner`, `reset_planner`, `super_review`, `configure_checks`, `pick_model`, `pick_tool_access`, `cancel_agent`, `submit_prompt`, `add_task`, `edit_task`, `accept_task`, `remove_task`, `decide_proposal`, `decide_approval`, `pick_session`, `rename_session`, `delete_session`, `activate_session`, `pick_workspace`, `add_workspace`, `remove_workspace`, `browse`, `page_history`, `resume_storage` or `take_ownership`. |
 
 An error escaping an action, a bug, gives its span the error status with the error's message, and
 an `exception` event.

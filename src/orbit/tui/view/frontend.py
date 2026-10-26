@@ -22,6 +22,7 @@ from orbit.protocol import (
     CancelTurn,
     ChecksProposed,
     Command,
+    DecideApproval,
     DecideProposal,
     EditTask,
     ErrorOccurred,
@@ -40,6 +41,7 @@ from orbit.protocol import (
 )
 from orbit.tui.view.actions import ActionName, action
 from orbit.tui.view.agents import AgentsList
+from orbit.tui.view.approvals import ApprovalQueue, ApprovalsView
 from orbit.tui.view.commands import CommandDesk, Send
 from orbit.tui.view.common import EntryKind
 from orbit.tui.view.confirm import (
@@ -195,8 +197,9 @@ class Parts:
     ``paging`` above it and the ``tabs`` over it; the ``prompt``, its ``marks`` and the
     ``viewing`` and ``paused`` lines by it; the sidebar's ``tasks``, ``steps``, ``usage`` and
     ``agents``; where the pickers of a session (``place``) and a workspace (``workspaces``),
-    ``proposals`` and the settings ``pickers`` show; the storage ``halt`` and the ``takeover``
-    offer; the ``reports`` list; and the ``clock`` turns are timed by."""
+    ``proposals``, consultations held for ``approvals`` and the settings ``pickers`` show; the
+    storage ``halt`` and the ``takeover`` offer; the ``reports`` list; and the ``clock`` turns are
+    timed by."""
 
     app: AppView
     conversation: ConversationPane
@@ -213,6 +216,7 @@ class Parts:
     place: PlaceView
     workspaces: WorkspaceListView
     proposals: ProposalsView
+    approvals: ApprovalsView
     pickers: Pickers
     halt: StorageHalt
     takeover: TakeoverOffer
@@ -236,6 +240,7 @@ class Frontend:
         )
         self.pager = HistoryPager(parts.paging, self.feed, self.send)
         self.proposals = ProposalQueue(parts.proposals, self.decide)
+        self.approvals = ApprovalQueue(parts.approvals, self.decide_approval)
         self.windows = Windows(parts.app)
         self.corner = UsageCorner(
             parts.conversation, lambda: parts.tasks.session_usage, self._task_usage
@@ -274,6 +279,7 @@ class Frontend:
             self.pager,
             self.desk,
             self.proposals,
+            self.approvals,
             parts.pickers,
             self.navigation,
             parts.halt,
@@ -410,6 +416,10 @@ class Frontend:
 
         with action("decide_proposal"):
             await self._show_and_send(shown, proposal.agent_id, decision, Awaited(code=undecide))
+
+    async def decide_approval(self, decision: DecideApproval) -> None:
+        """Send the user's ``decision`` on a consultation held for approval."""
+        await self._act("decide_approval", decision)
 
     # Moving between windows, which only applies with nothing focused.
 
