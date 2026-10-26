@@ -204,6 +204,8 @@ class ConversationFeed:
     _notes: list[tuple[str, EntryKind]] = field(default_factory=list, init=False)
     # The entries of the consultations asked and not yet answered, by number.
     _asked: dict[int, Entry] = field(default_factory=dict, init=False)
+    # The numbers of the consultations answered, so earlier pages don't show them pending.
+    _answered: set[int] = field(default_factory=set, init=False)
 
     def render(self, event: ShownEvent) -> None:
         """Show ``event`` in the conversation."""
@@ -228,7 +230,7 @@ class ConversationFeed:
         ended, show as having no result. The notes shown so far follow them."""
         self.transcript.clear()
         self.tabs.reset(running)
-        self._turns, self._asked = Turns(), {}
+        self._turns, self._asked, self._answered = Turns(), {}, set()
         logged = tuple(events)
         self._replaying = True
         for event in logged:
@@ -245,13 +247,14 @@ class ConversationFeed:
     def prepend(self, events: Iterable[Event]) -> None:
         """Show ``events``, which came before every event shown, above them, as they were
         shown when they happened, leaving the tabs, the running turns and the usage counted
-        as they are."""
+        as they are, and updating the entries of consultations still pending there."""
         live, self._turns = self._turns, Turns()
         asked, self._asked = self._asked, {}
         self._earlier = self._replaying = True
         self.transcript.prepend(lambda: self._show_earlier(events))
         self._turns, self._earlier, self._replaying = live, False, False
-        self._asked = asked
+        pending = {n: e for n, e in self._asked.items() if n not in self._answered}
+        self._asked = pending | asked
 
     def _show_earlier(self, events: Iterable[Event]) -> None:
         """Show ``events``, earlier ones, placing their agents in the pinned roles' tabs."""
@@ -337,6 +340,7 @@ class ConversationFeed:
         """Add the entry of the answer ``event`` brings: its reply, whose whole text the detail
         pane shows, or why it was interrupted."""
         self._asked.pop(event.consultation, None)
+        self._answered.add(event.consultation)
         text, kind = answered_entry(event, self.labels(event.consultant))
         header = text.partition("\n")[0]
         call = None if event.interrupted is not None else reply_call(event, header)

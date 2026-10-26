@@ -103,6 +103,37 @@ def test_earlier_consultations_update_their_own_entries_not_later_ones() -> None
     assert len(texts(session, PLANNER)) == 2
 
 
+def test_a_consultation_pending_on_an_earlier_page_updates_its_entry() -> None:
+    session = Session(labels=LABELS)
+    session.feed.prepend([asked(2)])
+    session.window.settle()
+    session.events(asked(1))
+    assert texts(session, PLANNER) == ["→ Asked Experimenter: Check X"]
+
+
+def test_a_consultation_answered_live_stays_answered_after_paging_back() -> None:
+    session = Session(labels=LABELS)
+    session.events(answered("3"))
+    session.feed.prepend([asked(2)])
+    session.window.settle()
+    before = texts(session, PLANNER)
+    session.events(asked(1, number=2))
+    assert texts(session, PLANNER)[:2] == before
+    assert len(texts(session, PLANNER)) == 3
+
+
+def test_a_consultation_shown_live_and_earlier_updates_the_live_entry() -> None:
+    session = Session(labels=LABELS)
+    session.events(asked(2))
+    session.feed.prepend([asked(3)])
+    session.window.settle()
+    session.events(asked(1))
+    assert texts(session, PLANNER) == [
+        "→ Asked Experimenter: Check X (3rd in line)",
+        "→ Asked Experimenter: Check X",
+    ]
+
+
 async def test_the_frontend_labels_consultants_as_the_catalog_lists_them() -> None:
     shell = Shell()
     catalog = with_agents(
