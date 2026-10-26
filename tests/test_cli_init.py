@@ -4,6 +4,7 @@ after keeping numbered backups, and ``--roles`` copying the built-in roles' inst
 it with a commented-out line pointing each role at its copy."""
 
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -317,11 +318,38 @@ def test_roles_name_a_role_set_inline_as_needing_its_line_added_by_hand(project:
     assert result.exit_code == 0, result.output
     assert result.stdout.splitlines() == [
         *copied(*NAMES),
-        "[roles.coder] is set inline or by dotted keys, so it has no table for a line: put"
-        ' instructions = "roles/coder.md" inside its inline table, or set'
-        ' coder.instructions = "roles/coder.md" under [roles].',
+        "[roles.coder] is set inline or by dotted keys, so it has no table for a line: if it's"
+        ' an inline table, put instructions = "roles/coder.md" inside it; if it\'s set by dotted'
+        ' keys, add coder.instructions = "roles/coder.md" beside them'
+        " (roles.coder.instructions at the top level).",
     ]
     assert path.read_text(encoding="utf-8") == text
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        (
+            '[roles]\ncoder = { model = "opus" }\n',
+            '[roles]\ncoder = { model = "opus", instructions = "roles/coder.md" }\n',
+        ),
+        (
+            '[roles]\ncoder.model = "opus"\n',
+            '[roles]\ncoder.model = "opus"\ncoder.instructions = "roles/coder.md"\n',
+        ),
+        (
+            'roles.coder.model = "opus"\n',
+            'roles.coder.model = "opus"\nroles.coder.instructions = "roles/coder.md"\n',
+        ),
+    ],
+)
+def test_following_the_inline_advice_for_its_form_gives_a_valid_config(
+    project: Path, before: str, after: str
+) -> None:
+    written_config(project, before)
+    result = init(project, "--roles")
+    assert "[roles.coder] is set inline or by dotted keys" in result.stdout
+    assert tomllib.loads(after)["roles"]["coder"]["instructions"] == "roles/coder.md"
 
 
 def test_roles_again_keep_every_copy_and_add_nothing(project: Path) -> None:

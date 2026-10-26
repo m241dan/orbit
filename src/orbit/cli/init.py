@@ -49,8 +49,9 @@ HEADERS_TOO = (
 )
 
 INLINE = (
-    "{header} is set inline or by dotted keys, so it has no table for a line: put {setting}"
-    " inside its inline table, or set {name}.{setting} under [roles]."
+    "{header} is set inline or by dotted keys, so it has no table for a line: if it's an inline"
+    " table, put {setting} inside it; if it's set by dotted keys, add {name}.{setting} beside"
+    " them (roles.{name}.instructions at the top level)."
 )
 
 NO_LINES = "Each role's table already has an instructions line."

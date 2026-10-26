@@ -1531,9 +1531,9 @@ A role whose table the file lacks gets it appended at the end, as the reference 
 line after its last, under the same dated line `--update` uses. A role set only inline or by
 dotted keys (`coder = { model = "opus" }` under `[roles]`) has no lines of its own to add one
 after, so it gets none, and is named for you to set it in its inline table or dotted keys
-(`[roles.coder] is set inline or by dotted keys, so it has no table for a line: put instructions =
-"roles/coder.md" inside its inline table, or set coder.instructions = "roles/coder.md" under
-[roles].`). Like
+(`[roles.coder] is set inline or by dotted keys, so it has no table for a line: if it's an inline
+table, put instructions = "roles/coder.md" inside it; if it's set by dotted keys, add
+coder.instructions = "roles/coder.md" beside them (roles.coder.instructions at the top level).`). Like
 `--update`, it never changes, moves or removes a line, and it works on an existing file by
 itself; without a file it writes the reference first. It prints the files it copied or kept, the
 lines it added and what uncommenting them does. Each role keeps orbit's own instructions until
