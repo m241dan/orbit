@@ -1,4 +1,5 @@
 import tomllib
+from datetime import UTC, datetime
 from typing import cast
 
 import pytest
@@ -7,6 +8,7 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.checks import Setup
 from orbit.agent.domain.config import OrbitConfig, load_config, load_layered
 from orbit.agent.domain.config_errors import ConfigError
+from orbit.agent.domain.copies import expired
 from orbit.agent.domain.layers import (
     DEFAULT,
     NO_USER_ROLES,
@@ -17,8 +19,9 @@ from orbit.agent.domain.layers import (
     load_user_roles,
 )
 from orbit.agent.domain.reviews import ReviewLimits
-from orbit.agent.domain.roles import Role, built_in_roles
+from orbit.agent.domain.roles import MAX_COPY_TTL_HOURS, Role, built_in_roles
 from orbit.agent.domain.runtimes import CLAUDE, RuntimeRules
+from orbit.agent.domain.sessions import SavedCopy
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.protocol import BUILT_IN_ROLE_NAMES
@@ -784,6 +787,18 @@ def test_a_negative_consult_limit_or_a_zero_copy_ttl_is_refused(data: dict[str, 
 def test_a_non_finite_copy_ttl_is_refused(hours: float) -> None:
     with pytest.raises(ConfigError, match=r"^roles\.x\."):
         load_config(custom(copy_ttl_hours=hours), BUILT_IN_ROLES)
+
+
+def test_a_copy_ttl_too_large_for_a_timedelta_is_refused() -> None:
+    with pytest.raises(ConfigError, match=r"^roles\.x\."):
+        load_config(custom(copy_ttl_hours=1e11), BUILT_IN_ROLES)
+
+
+def test_the_largest_copy_ttl_loads_and_expires_without_raising() -> None:
+    role = load_config(custom(copy_ttl_hours=MAX_COPY_TTL_HOURS), BUILT_IN_ROLES).roles["x"]
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    copy = SavedCopy(path="/tmp/copy", last_turn=now)
+    assert not expired(copy, role.copy_ttl_hours, now)
 
 
 def test_a_fractional_copy_ttl_loads() -> None:

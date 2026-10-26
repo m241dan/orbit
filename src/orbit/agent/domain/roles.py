@@ -20,6 +20,7 @@ asked of a disabled role is refused.
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Annotated, Any, Literal, Self, get_args
 
 from pydantic import (
@@ -120,6 +121,9 @@ or a writable copy of the base commit, set up, which never merges."""
 DEFAULT_COPY_TTL_HOURS = 24.0
 """How long a role's copy is kept since its conversation's last turn, in hours, unless the role
 says otherwise."""
+
+MAX_COPY_TTL_HOURS = float(timedelta.max // timedelta(hours=1))
+"""The longest copy TTL a role may set, in hours: the whole hours a timedelta can hold."""
 
 TOOL_ACCESSES: tuple[ToolAccess, ...] = get_args(ToolAccess)
 """Every level of tool access, in order."""
@@ -241,6 +245,7 @@ class Role(_Config):
     copy_ttl_hours: float = Field(
         default=DEFAULT_COPY_TTL_HOURS,
         gt=0,
+        le=MAX_COPY_TTL_HOURS,
         allow_inf_nan=False,
         description="How long its copy is kept after its conversation's last turn, in hours.",
     )

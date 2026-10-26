@@ -1312,7 +1312,8 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   interrupted (`you declined it`); one held for an hour with no frontend connected expires the
   same way (`it expired waiting for approval`).
 - `copy_ttl_hours`: how long, in hours, a conversational role working in a `copy` keeps its copy
-  after its conversation's last turn, 24 by default; it must be a finite number more than 0.
+  after its conversation's last turn, 24 by default; it must be a number more than 0
+  and at most 23,999,999,999 (the hours a timedelta holds).
 
 In the TUI, the task editor's **Role** field picks a task's role among the roles enabled in the
 session's workspace that aren't conversational, each shown with its lane (`Coder · work`) and a
