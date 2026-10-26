@@ -31,6 +31,7 @@ from orbit.agent.domain.roles import (
     check_runtimes,
     model_problems,
     role_clashes,
+    with_enabled_consults,
 )
 from orbit.agent.domain.runtimes import (
     UNCHECKED,
@@ -104,7 +105,7 @@ class _FileConfig(_Config):
         clashes = role_clashes(roles)
         if clashes:
             raise PydanticCustomError("role_lanes", "; ".join(clashes))
-        return roles
+        return with_enabled_consults(roles)
 
     @property
     def limits(self) -> Limits:

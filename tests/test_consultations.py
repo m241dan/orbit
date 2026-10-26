@@ -18,7 +18,7 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.consultations import failed
 from orbit.agent.domain.refusals import Refused
-from orbit.agent.domain.roles import Role
+from orbit.agent.domain.roles import Role, with_enabled_consults
 from orbit.agent.domain.runtimes import CLAUDE, Failure
 from orbit.agent.domain.sessions import (
     SavedConsultation,
@@ -273,6 +273,16 @@ async def test_consulting_a_disabled_role_is_refused() -> None:
     disabled = EXPERIMENTER_ROLE.model_copy(update={"enabled": False})
     refused = await refusal({**CONSULTING, EXPERIMENTER: disabled}, "Check X")
     assert refused == Reply("The experimenter can't be consulted now.", is_error=True)
+
+
+async def test_consulting_a_disabled_role_named_among_enabled_ones_is_refused() -> None:
+    architect = ROLES[PLANNER].model_copy(update={"lane": "design", "consults": ()})
+    planner = CONSULTING_PLANNER.model_copy(update={"consults": (EXPERIMENTER, "architect")})
+    disabled = EXPERIMENTER_ROLE.model_copy(update={"enabled": False})
+    roles = {**CONSULTING, PLANNER: planner, EXPERIMENTER: disabled, "architect": architect}
+    refused = await refusal(with_enabled_consults(roles), "Check X")
+    message = "The planner can't consult 'experimenter'; it consults architect."
+    assert refused == Reply(message, is_error=True)
 
 
 async def test_consulting_a_disabled_planner_is_refused() -> None:

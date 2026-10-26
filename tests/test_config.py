@@ -824,10 +824,36 @@ def with_planner(data: dict[str, object], **fields: object) -> dict[str, object]
     return {"roles": {**roles, "planner": fields}}
 
 
-def test_consulting_a_disabled_conversational_role_is_refused() -> None:
-    data = with_planner(talker(consults=["planner"]), enabled=False)
-    with pytest.raises(ConfigError, match="'planner'"):
-        load_config(data, BUILT_IN_ROLES)
+def test_disabling_the_experimenter_takes_it_out_of_the_planners_consults() -> None:
+    config = load_config({"roles": {"experimenter": {"enabled": False}}}, BUILT_IN_ROLES)
+    planner = config.roles["planner"]
+    assert planner.enabled and planner.consults == ()
+    assert "propose_task" in planner.granted_tools
+    assert "consult" not in planner.granted_tools
+
+
+def test_disabling_the_planner_and_experimenter_loads() -> None:
+    disabled = {"enabled": False}
+    data = {"roles": {"planner": disabled, "experimenter": disabled}}
+    config = load_config(data, BUILT_IN_ROLES)
+    assert not config.roles["planner"].enabled
+    assert not config.roles["experimenter"].enabled
+
+
+def test_a_role_consults_only_the_enabled_roles_it_names() -> None:
+    data = with_planner(talker(consults=["planner", "experimenter"]), enabled=False)
+    config = load_config(data, BUILT_IN_ROLES)
+    assert config.roles["x"].consults == ("experimenter",)
+
+
+def test_a_disabled_roles_consults_are_not_checked() -> None:
+    data = talker(consults=["nobody"], enabled=False)
+    assert not load_config(data, BUILT_IN_ROLES).roles["x"].enabled
+
+
+def test_layered_roles_leave_a_disabled_role_out_of_consults() -> None:
+    layered = load_layered({"roles": {"experimenter": {"enabled": False}}}, BUILT_IN_ROLES)
+    assert layered.config.roles["planner"].consults == ()
 
 
 def test_roles_consulting_each_other_are_refused_naming_the_cycle() -> None:

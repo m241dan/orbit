@@ -1207,7 +1207,7 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   answering.`), and the lane shows busy until no turn in it runs; on its tab, `enter` then says
   the one answering is busy (`Architect is busy`), or the role shown is, when the TUI doesn't
   know who answers, as when it opens a session mid-turn. It's listed as conversational
-  in the Catalog, and its lane in the Catalog's lanes and the Snapshot's `busy`. Each other has a pinned tab after the built-in roles':
+  in the Catalog, and its lane in the Catalog's lanes and the Snapshot's `busy`. Each other conversational role has a pinned tab after the built-in roles':
   `ctrl+t` goes to the planner's
   tab, then each other conversational role's in turn, then back to the tab you were on. On a
   conversational role's tab, the prompt talks to that role, `ctrl+x` stops
@@ -1274,8 +1274,10 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   runs on another runtime, the session still opens, but messages to the role are refused until
   you reset its conversation (see [Planning with the planner](#planning-with-the-planner)).
 - `consults`: the other enabled conversational roles a conversational role may consult, by name;
-  none by default, but the built-in `planner` consults the `experimenter`. It's refused on a role that isn't conversational, naming a role that isn't
-  another enabled conversational role, and in a cycle (`architect` consulting the `planner` while
+  none by default, but the built-in `planner` consults the `experimenter`. A disabled role is left out of others' consults
+  (so disabling the `experimenter` alone just takes it out), and a disabled role's own consults
+  aren't checked. It's refused on a role that isn't conversational, naming a role that isn't
+  another conversational role, and in a cycle (`architect` consulting the `planner` while
   the `planner` consults `architect`), naming the roles. A role with `consults` gets the orbit
   tool `consult(role, message)`, which returns at once (`Asked the experimenter (consultation
   1); its reply will arrive as a message.`); the consultation waits in the consulted role's line,

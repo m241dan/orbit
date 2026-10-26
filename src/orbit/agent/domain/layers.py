@@ -12,11 +12,17 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 from pydantic_core import ErrorDetails
 
 from orbit.agent.domain.config_errors import ConfigError, dotted, validation_problems
-from orbit.agent.domain.roles import Role, RoleName, check_runtimes, role_clashes
+from orbit.agent.domain.roles import (
+    Role,
+    RoleName,
+    check_runtimes,
+    role_clashes,
+    with_enabled_consults,
+)
 from orbit.agent.domain.runtimes import UNCHECKED, RuntimeRules, knows_runtime, unknown_runtime
 from orbit.protocol import Effort
 
@@ -237,6 +243,11 @@ class _Roles(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     roles: dict[RoleName, Role]
+
+    @field_validator("roles")
+    @classmethod
+    def _consulting_enabled(cls, roles: dict[str, Role]) -> dict[str, Role]:
+        return with_enabled_consults(roles)
 
 
 def resolve_roles(
