@@ -113,6 +113,7 @@ async def test_a_failing_step_adds_a_draft_task_to_fix_it() -> None:
     assert "ruff check" in draft.task.prompt and "1 test failed" in draft.task.prompt
     assert draft.task.settings == coder.settings
     assert draft.task.role == CODER
+    assert draft.proposed_by is None
     assert AgentExited(agent_id="startup-check", reason="finished") in events
     await session.close()
 
