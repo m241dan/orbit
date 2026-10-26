@@ -138,6 +138,7 @@ class Consultations:
         self._owed: list[SavedConsultation] = []  # Those the session opened was saved with.
         self._answering: dict[str, str] = {}  # The asker of each consultant's turn running.
         self._held = False
+        self._leaving = False  # Those held are settled as deny until the switch ends.
         self._clock = hooks.timer.clock
         self._counts: dict[str, ConsultCount] = {}  # Each asking role's, by role.
         self.approvals = Approvals[PlannerSeat](post, self._expired, hooks.timer)
@@ -187,7 +188,9 @@ class Consultations:
 
     def leave(self) -> None:
         """Have the consultations pending saved as interrupted by a switch of session, telling
-        the frontends asking about those held that they're settled as ``deny``."""
+        the frontends asking about those held that they're settled as ``deny``, refusing
+        decisions on them until the session stays or is replaced."""
+        self._leaving = True
         for asked in self._pending.values():
             asked.left = SWITCHED
         for request in self.approvals.waiting:
@@ -196,6 +199,7 @@ class Consultations:
     def stay(self) -> None:
         """Have the consultations pending saved as interrupted by a restart again, as their
         session stays open."""
+        self._leaving = False
         for asked in self._pending.values():
             asked.left = RESTARTED
         for request in self.approvals.waiting:
@@ -207,6 +211,7 @@ class Consultations:
         ``last``."""
         self._pending, self._owed = {}, list(saved)
         self._count = last
+        self._leaving = False
         self.approvals.clear()
 
     async def settle(self) -> None:
@@ -247,7 +252,7 @@ class Consultations:
         """Settle the consultation held that ``command`` decides on: start it, freeing its asker
         of the limit for an hour if so decided, or answer it as declined; publish the decision.
         Refused for one that isn't held."""
-        held = self.approvals.take(command.consultation)
+        held = None if self._leaving else self.approvals.take(command.consultation)
         if held is None:
             message = f"No consultation {command.consultation} is waiting for approval."
             raise Refused(UNKNOWN, message)

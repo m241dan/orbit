@@ -466,3 +466,42 @@ async def test_a_switch_that_fails_asks_about_the_one_held_again() -> None:
     deny = events.index(ApprovalDecided(consultation=2, decision="deny"))
     assert requested(2, "Check Y") in events[deny:]
     assert snapshot.approvals == (requested(2, "Check Y"),)
+
+
+async def test_a_decision_after_leaving_is_refused_and_leaves_it_held() -> None:
+    store = FakeStore()
+    session, _ = await holding_in(store)
+    session._seats.leave()
+    await send(session, DecideApproval(consultation=2, decision="allow"))
+    events = await events_until(session, of_type(CommandRefused))
+    snapshot = await snapshot_of(session)
+    await session.close()
+
+    assert events[-1] == refused(UNKNOWN, "No consultation 2 is waiting for approval.")
+    assert [e.decision for e in events if isinstance(e, ApprovalDecided)] == ["deny"]
+    assert snapshot.approvals == (requested(2, "Check Y"),)
+    assert [c.number for c in store.last.consultations] == [2]
+
+
+async def test_a_decision_after_leaving_then_staying_starts_it() -> None:
+    store = FakeStore()
+    session, _ = await holding_in(store)
+    session._seats.leave()
+    session._seats.stay()
+    await send(session, DecideApproval(consultation=2, decision="allow"))
+    answer = sole(await events_until(session, of_type(ConsultationAnswered)), ConsultationAnswered)
+    await session.close()
+
+    assert (answer.consultation, answer.interrupted) == (2, None)
+
+
+async def test_a_decision_on_one_held_by_the_session_left_is_refused() -> None:
+    store = FakeStore()
+    session, _ = await holding_in(store)
+    await opened(session, NewSession())
+    await send(session, DecideApproval(consultation=2, decision="allow"))
+    events = await events_until(session, of_type(CommandRefused))
+    await session.close()
+
+    assert events[-1] == refused(UNKNOWN, "No consultation 2 is waiting for approval.")
+    assert not any(isinstance(e, ApprovalDecided) for e in events)

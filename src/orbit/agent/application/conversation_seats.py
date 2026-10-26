@@ -161,7 +161,8 @@ class ConversationSeats:
         await self._consultations.decide(command)
 
     def leave(self) -> None:
-        """Have the consultations pending saved as interrupted by a switch of session."""
+        """Have the consultations pending saved as interrupted by a switch of session,
+        telling the frontends those held are settled as ``deny``."""
         self._consultations.leave()
 
     def stay(self) -> None:
