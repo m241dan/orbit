@@ -241,6 +241,7 @@ class Role(_Config):
     copy_ttl_hours: float = Field(
         default=DEFAULT_COPY_TTL_HOURS,
         gt=0,
+        allow_inf_nan=False,
         description="How long its copy is kept after its conversation's last turn, in hours.",
     )
 

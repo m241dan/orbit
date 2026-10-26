@@ -780,6 +780,17 @@ def test_a_negative_consult_limit_or_a_zero_copy_ttl_is_refused(data: dict[str, 
         load_config(data, BUILT_IN_ROLES)
 
 
+@pytest.mark.parametrize("hours", [float("inf"), float("nan")])
+def test_a_non_finite_copy_ttl_is_refused(hours: float) -> None:
+    with pytest.raises(ConfigError, match=r"^roles\.x\."):
+        load_config(custom(copy_ttl_hours=hours), BUILT_IN_ROLES)
+
+
+def test_a_fractional_copy_ttl_loads() -> None:
+    role = load_config(custom(copy_ttl_hours=0.5), BUILT_IN_ROLES).roles["x"]
+    assert role.copy_ttl_hours == 0.5
+
+
 def test_a_conversational_role_may_consult_the_planner() -> None:
     role = load_config(talker(consults=["planner"]), BUILT_IN_ROLES).roles["x"]
     assert role.consults == ("planner",)
