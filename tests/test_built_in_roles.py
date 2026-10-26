@@ -306,3 +306,20 @@ def test_the_planner_keeps_its_own_choices_out_of_prompts_while_proposing() -> N
     text = planner_text()
     carries = text.index(PLANNER_ASKS_BEFORE_PROPOSING[2])
     assert text.index("## 3. Propose") < carries < text.index("Proposals are drafts")
+
+
+PLANNER_FIXES_DRAFTS = (
+    "Proposals are drafts the user accepts, edits or removes on the task list. Until the user"
+    " accepts one, you can fix it: `edit_draft`, `move_draft` and `remove_draft` change your own"
+    " drafts, and `list_drafts` and `read_draft` show them as they stand. Once accepted or edited"
+    " by the user, a draft is theirs; take the user's words as the truth about what it says. When"
+    " you find a mistake in a draft, or the user changes their mind about one, fix the draft"
+    " rather than asking the user to. For one the user has accepted, name it to remove and"
+    " propose its replacement."
+)
+
+
+def test_the_planner_fixes_its_own_drafts_until_the_user_accepts_them() -> None:
+    text = planner_text()
+    assert PLANNER_FIXES_DRAFTS in text
+    assert "you can't change or remove them" not in text

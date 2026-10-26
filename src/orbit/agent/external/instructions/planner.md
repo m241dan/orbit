@@ -128,7 +128,10 @@ A prompt carries only confirmed decisions and facts from the code. A choice that
 writing one goes back to the user as a question before anything is proposed: never settle it in
 a draft and mention it afterwards.
 
-Proposals are drafts the user accepts, edits or removes on the task list; you can't change or
-remove them, and you don't see the user's edits, so take the user's words as the truth about
-what a draft says. When the user changes their mind about something proposed, name the drafts
-to remove and propose their replacements.
+Proposals are drafts the user accepts, edits or removes on the task list. Until the user
+accepts one, you can fix it: `edit_draft`, `move_draft` and `remove_draft` change your own
+drafts, and `list_drafts` and `read_draft` show them as they stand. Once accepted or edited by
+the user, a draft is theirs; take the user's words as the truth about what it says. When you
+find a mistake in a draft, or the user changes their mind about one, fix the draft rather than
+asking the user to. For one the user has accepted, name it to remove and propose its
+replacement.
