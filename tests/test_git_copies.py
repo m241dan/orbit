@@ -1,6 +1,7 @@
 """The coder tree's copies, against real throwaway git repositories: writable detached trees of a
 commit under ``.git/orbit/copies``, set up as the tree is, removed when dropped."""
 
+import shutil
 import sys
 from pathlib import Path
 
@@ -40,6 +41,14 @@ async def test_a_dropped_copy_is_gone_with_what_was_written_in_it(repo: Path) ->
     (path / "notes.txt").write_text("found\n")
     await tree.drop_copy(str(path))
     assert not path.exists()
+    assert str(path) not in git(repo, "worktree", "list")
+
+
+async def test_dropping_a_copy_deleted_by_hand_unregisters_it(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.copy("HEAD"))
+    shutil.rmtree(path)
+    await tree.drop_copy(str(path))
     assert str(path) not in git(repo, "worktree", "list")
 
 

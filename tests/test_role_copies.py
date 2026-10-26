@@ -147,6 +147,33 @@ async def test_a_sweep_removes_expired_recorded_copies_and_unrecorded_leftovers(
     assert ledger.copies.held == {"experimenter": saved("/mine")}
 
 
+async def test_a_sweep_skips_expired_recorded_copies_already_gone() -> None:
+    ledger = Ledger()
+    others = OtherCopies(({"experimenter": saved("/gone", START - timedelta(hours=30))},))
+    await ledger.copies.sweep(others, {})
+    await ledger.copies.sweep(others, {})
+    assert (ledger.made.removed, ledger.events) == ([], [])
+
+
+async def test_a_sweep_removes_an_expired_copy_made_this_run_for_a_session_left() -> None:
+    ledger = Ledger()
+    path = await ledger.copies.enter("experimenter")
+    left = ledger.copies.held
+    ledger.copies.replace({})
+    ledger.clock.move(30)
+    await ledger.copies.sweep(OtherCopies((left,)), {})
+    assert ledger.made.removed == [path]
+
+
+async def test_a_sweep_says_why_an_expired_recorded_copy_cant_be_removed() -> None:
+    ledger = Ledger("/theirs")
+    ledger.made.failures["remove"] = TreeFailed("busy")
+    others = OtherCopies(({"experimenter": saved("/theirs", START - timedelta(hours=30))},))
+    await ledger.copies.sweep(others, {})
+    message = "The copy at /theirs couldn't be removed and is left over: busy"
+    assert ledger.events == [ErrorOccurred(code=GIT_FAILED, message=message)]
+
+
 async def test_keeping_sweeps_at_once_then_expires_the_sessions_copies_every_period() -> None:
     ledger = Ledger("/stray")
     path = await ledger.copies.enter("experimenter")

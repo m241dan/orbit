@@ -157,17 +157,27 @@ class RoleCopies:
 
     async def sweep(self, others: OtherCopies, ttls: Mapping[str, float]) -> None:
         """Remove the copies past their TTL in ``ttls``: this session's, and those recorded in
-        the ``others`` sessions, which keep their records until they next take a turn; then
+        the ``others`` sessions that are still there, which keep their records until they next take
+        a turn; then
         those left over that no session records, if every session's records were read."""
         await self.expire(ttls)
-        now = self._clock()
-        for recorded in others.recorded:
-            for role in expired_roles(recorded, ttls, now):
-                await self._remove(recorded[role].path)
+        leftovers = await self._leftovers()
+        await self._expire_others(others.recorded, ttls, {*leftovers, *self._made})
         if not others.complete:
             return
-        for path in unrecorded(await self._leftovers(), [self._held, *others.recorded]):
+        for path in unrecorded(leftovers, [self._held, *others.recorded]):
             await self._remove(path)
+
+    async def _expire_others(
+        self, others: Sequence[Recorded], ttls: Mapping[str, float], present: set[str]
+    ) -> None:
+        """Remove the copies recorded in ``others`` past their TTL in ``ttls`` that are still
+        ``present``: one already removed, as an earlier sweep does, is left alone."""
+        now = self._clock()
+        for recorded in others:
+            for role in expired_roles(recorded, ttls, now):
+                if recorded[role].path in present:
+                    await self._remove(recorded[role].path)
 
     async def keep(
         self,
