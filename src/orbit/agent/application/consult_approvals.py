@@ -38,6 +38,7 @@ class Approvals[T]:
         self._held: dict[int, Held[T]] = {}  # By consultation.
         self._alone_since: float | None = float("-inf")  # None while a frontend is connected.
         self._timer: asyncio.Task[None] | None = None
+        self._timing = 0  # Bumped by each stop, ending any expiry in flight.
 
     @property
     def waiting(self) -> tuple[ApprovalRequested, ...]:
@@ -72,6 +73,7 @@ class Approvals[T]:
 
     def stop(self) -> None:
         """Stop timing the consultations held, until one is next held or frontends come or go."""
+        self._timing += 1
         if self._timer is not None:
             self._timer.cancel()
             self._timer = None
@@ -85,17 +87,23 @@ class Approvals[T]:
             self._timer = asyncio.get_running_loop().create_task(self._expiring(min(times)))
 
     async def _expiring(self, due: float) -> None:
-        """Expire the consultations due by ``due``, once it comes, then time the next."""
+        """Expire the consultations due by ``due``, once it comes, one at a time, then time the
+        next; a stop while one expires ends it there, leaving the rest held."""
         await self._sleep(max(0.0, due - self._clock()))
         self._timer = None
-        for held in self._due(self._clock()):
-            await self._expire(held)
-        self._arm()
+        timing = self._timing
+        try:
+            while timing == self._timing and (held := self._next_due(self._clock())):
+                await self._expire(held)
+        finally:
+            if timing == self._timing:
+                self._arm()
 
-    def _due(self, now: float) -> list[Held[T]]:
-        """Stop holding the consultations that expire by ``now``, returning them."""
+    def _next_due(self, now: float) -> Held[T] | None:
+        """Stop holding the first consultation that expires by ``now``, returning it; none if
+        none does."""
         due = [number for number, held in self._held.items() if self._expires(held, now)]
-        return [self._held.pop(number) for number in due]
+        return self._held.pop(due[0]) if due else None
 
     def _expires(self, held: Held[T], now: float) -> bool:
         """Whether ``held`` expires by ``now``."""

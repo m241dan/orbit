@@ -131,3 +131,80 @@ async def test_clearing_forgets_those_held_and_stops_their_hour() -> None:
     held.approvals.clear()
     await asyncio.sleep(0)
     assert (held.approvals.waiting, held.expired) == ((), [])
+
+
+class Gated(Holding):
+    """Holding whose first expiry waits on ``gate`` once it has ``started``."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.gate = asyncio.Event()
+
+    async def _expire(self, held: Held[str]) -> None:
+        self.expired.append(held)
+        self.started.set()
+        await self.gate.wait()
+
+
+class Failing(Holding):
+    """Holding whose first expiry fails."""
+
+    async def _expire(self, held: Held[str]) -> None:
+        self.expired.append(held)
+        if len(self.expired) == 1:
+            raise RuntimeError("save failed")
+
+
+def two_due_together(held: Holding) -> None:
+    held.approvals.viewers(1)
+    held.approvals.hold(request(1), "first")
+    held.approvals.hold(request(2), "second")
+    held.approvals.viewers(0)
+
+
+async def test_stopping_mid_expiry_expires_no_more_and_arms_nothing() -> None:
+    held = Gated()
+    two_due_together(held)
+    await held.started.wait()
+    held.approvals.stop()
+    held.gate.set()
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert [h.work for h in held.expired] == ["first"]
+    assert held.approvals.waiting == (request(2),)
+    assert held.clock.slept == [HOUR]
+
+
+async def test_clearing_mid_expiry_expires_no_more() -> None:
+    held = Gated()
+    two_due_together(held)
+    await held.started.wait()
+    held.approvals.clear()
+    held.gate.set()
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert [h.work for h in held.expired] == ["first"]
+    assert (held.approvals.waiting, held.clock.slept) == ((), [HOUR])
+
+
+async def test_those_due_together_expire_and_the_next_is_timed() -> None:
+    held = Holding()
+    two_due_together(held)
+    held.clock.now = 600
+    held.approvals.hold(request(3), "third")
+    held.clock.now = 0
+    await eventually(lambda: len(held.expired) == 3, poll=0)
+    assert [h.work for h in held.expired] == ["first", "second", "third"]
+    assert held.clock.slept == [HOUR, 600]
+
+
+async def test_a_failed_expiry_leaves_the_rest_held_and_timed() -> None:
+    held = Failing()
+    loop = asyncio.get_running_loop()
+    errors: list[object] = []
+    loop.set_exception_handler(lambda _, context: errors.append(context))
+    two_due_together(held)
+    await eventually(lambda: len(held.expired) == 2, poll=0)
+    assert [h.work for h in held.expired] == ["first", "second"]
+    assert held.approvals.waiting == ()
