@@ -544,7 +544,7 @@ spent (`1.2M tok · $0.84`), or `usage unknown` when its role runs on a runtime 
 report what its agents spend (see `runtime` in
 [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)), and the task list's subtitle shows the open session's total
 (`session: 1.2M tok · $0.84`). A runtime that charges in credits, such as Kiro, has them shown
-apart from dollars rather than converted: `1.2M tok · 0.62 credits` for credits alone, and
+apart from dollars rather than converted: `0.62 credits` alone, with no token count, for credits alone (such a runtime doesn't report tokens), and
 `1.2M tok · $0.84 · 0.62 credits` for a total holding both. The total is everything the
 session's agents have spent, the planner's turns and tasks since removed included. It's saved with the session, so a session opened again (or listed
 with `ctrl+p`) shows the same total; a new session starts with none, and shows no total. Token
@@ -2346,7 +2346,7 @@ active one marked `active`, each `running` or `idle`, or `waiting for a coder: 2
 while its run waits for a coder's slot, and `run paused: usage limit on claude; starts again at
 18:01` while its run is paused; the agents running, by workspace, role and task; and what turns have
 cost in all, today and over the lifetime, in tokens and dollars, with credits beside them once any
-were spent (`15,301,112 tokens · $12.10 · 0.62 credits`):
+were spent (`15,301,112 tokens · $12.10 · 0.62 credits`), and credits alone, without a token count, when no tokens were (`2.00 credits`):
 
 ```
 orbit serve 0.1.0 at ws://127.0.0.1:7433/

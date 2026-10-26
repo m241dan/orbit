@@ -250,7 +250,10 @@ def cost_text(usage: Usage) -> str:
 
 
 def usage_label(usage: Usage) -> str:
-    """Tokens and cost, shortly: ``1.2M tok · $0.84``, or ``1.2M tok · 0.62 credits``."""
+    """Tokens and cost, shortly: ``1.2M tok · $0.84``, or just ``0.62 credits`` for credits
+    with no tokens, since a runtime that charges credits may not count tokens."""
+    if usage.credits and not usage.tokens:
+        return cost_text(usage)
     return f"{token_text(usage.tokens)} tok · {cost_text(usage) or NO_COST}"
 
 

@@ -208,6 +208,8 @@ def _usage_lines(usage: UsageStatus) -> list[str]:
 
 def _spend_text(spend: Spend) -> str:
     """``spend``'s tokens and cost: ``1,200 tokens · $0.25``, or with credits, ``1,200 tokens ·
-    $0.25 · 0.62 credits``."""
+    $0.25 · 0.62 credits``, or just ``2.00 credits`` for credits with no tokens."""
     cost = cost_text(Usage(cost_usd=spend.cost_usd, credits=spend.credits))
+    if spend.credits and not spend.tokens:
+        return cost
     return f"{spend.tokens:,} tokens · {cost or NO_COST}"

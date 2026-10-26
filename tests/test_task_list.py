@@ -98,7 +98,7 @@ def test_label_shows_what_a_task_spent_in_credits() -> None:
     usage = Usage(credits=0.62, turns=1)
     state = TaskState(id="1", task=TaskSpec(prompt="go"), status="completed", usage=usage)
     assert str(task_label(state, "1", "◠ ")) == (
-        "1. ✅ go\n      default · restricted · 0 tok · 0.62 credits"
+        "1. ✅ go\n      default · restricted · 0.62 credits"
     )
 
 

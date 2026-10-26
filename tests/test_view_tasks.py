@@ -345,8 +345,12 @@ def test_session_usage_subtitle_shows_credits_beside_dollars() -> None:
     assert session_usage_subtitle(usage) == "session: 1.5k tok · $0.30 · 0.62 credits"
 
 
-def test_usage_spent_only_in_credits_reads_as_tokens_and_credits() -> None:
-    assert usage_label(Usage(credits=0.62)) == "0 tok · 0.62 credits"
+def test_usage_spent_only_in_credits_reads_as_credits_alone() -> None:
+    assert usage_label(Usage(credits=0.62)) == "0.62 credits"
+
+
+def test_usage_with_no_tokens_or_credits_still_reads_as_tokens_and_cost() -> None:
+    assert usage_label(Usage(turns=1)) == "0 tok · $0.00"
 
 
 def test_only_a_draft_can_be_accepted() -> None:

@@ -186,9 +186,7 @@ def test_credits_are_reported_beside_dollars() -> None:
     totals = UsageTotals(workspaces=(), total=UsageTotal(today=Usage(credits=2), lifetime=lifetime))
     report = status_report(WELCOME, NOTHING, NO_AGENTS, totals, URL)
     assert status_text(report).endswith(
-        "Usage\n"
-        "  today     0 tokens · 2.00 credits\n"
-        "  lifetime  6,000 tokens · $1.50 · 0.62 credits"
+        "Usage\n  today     2.00 credits\n  lifetime  6,000 tokens · $1.50 · 0.62 credits"
     )
     assert json.loads(status_json(report))["usage"] == {
         "today": {"tokens": 0, "cost_usd": 0.0, "credits": 2.0},
