@@ -9,6 +9,8 @@ from orbit.protocol import (
     AgentStarted,
     Notice,
     ReviewStatus,
+    TurnFinished,
+    Usage,
 )
 from orbit.tui.view.agents import AgentsList
 from tests.view_fakes import AgentsView
@@ -119,3 +121,19 @@ def test_no_review_shows_no_review_line() -> None:
     assert view.review == "review: paused"
     agents.show_review(None)
     assert view.review == ""
+
+
+def test_a_row_ends_with_its_agents_cost_once_its_first_turn_ends() -> None:
+    agents, view = listed(CODER, REVIEWER)
+    assert view.listings[-1][0] == "agent-1 coder · task 7 · working"
+    agents.track(TurnFinished(turn_id="t", agent_id="agent-1", reason="completed"))
+    for _ in range(2):
+        agents.track(
+            TurnFinished(
+                turn_id="t", agent_id="agent-1", reason="completed", usage=Usage(cost_usd=0.2)
+            )
+        )
+    assert view.listings[-1] == [
+        "agent-1 coder · task 7 · working · $0.40",
+        "agent-2 reviewer · task 8 · working",
+    ]

@@ -60,6 +60,7 @@ from orbit.tui.view.navigation import Navigation
 from orbit.tui.view.reports import ReportShelf
 from orbit.tui.view.rules import reset_entry
 from orbit.tui.view.seats import Seats
+from orbit.tui.view.spend import UsageCorner
 from orbit.tui.view.storage import StorageHalt
 from orbit.tui.view.takeover import TakeoverOffer
 from orbit.tui.view.tasks import role_lanes, usage_unknown_roles
@@ -195,6 +196,7 @@ class Handlers:
     halt: StorageHalt
     takeover: TakeoverOffer
     reports: ReportShelf
+    corner: UsageCorner
 
 
 @dataclass(frozen=True)
@@ -242,6 +244,8 @@ class EventRouter:
         else:
             assert_never(event)
         self._follow_halt(event)
+        # Last, once the turn it ends is counted in the session's total.
+        self._handlers.corner.track(event)
         if isinstance(event, ErrorOccurred):
             self._handlers.navigation.follow_error(event)
 

@@ -57,6 +57,10 @@ class ConversationView[P: LogPane](Protocol):
         """Title the window ``title``."""
         ...
 
+    def show_corner(self, text: str) -> None:
+        """Show ``text`` in the window's corner."""
+        ...
+
     def cover(self, covering: bool) -> None:
         """Have the open detail pane cover the whole window if ``covering``, or not."""
         ...
@@ -268,6 +272,10 @@ class Conversation[P: LogPane]:
         """Title the shown tab by its new ``label``, leaving what's shown as it is."""
         self._label = label
         self.retitle()
+
+    def show_corner(self, text: str) -> None:
+        """Show ``text``, the shown tab's usage, in the window's corner."""
+        self._view.show_corner(text)
 
     def show_session(self, name: str | None) -> None:
         """End the title with the open session's ``name``, or with none."""

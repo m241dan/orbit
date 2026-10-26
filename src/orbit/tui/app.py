@@ -37,10 +37,11 @@ from orbit.tui.view.frontend import Frontend, Parts, Saved
 from orbit.tui.view.opening import Opening
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.seats import PLANNER_SEAT
+from orbit.tui.view.spend import SPENDING_HINT, SPENDING_TITLE
 from orbit.tui.view.task_editor import TaskChoices
 from orbit.tui.view.transcript import prompt_placeholder
 from orbit.tui.warning_capture import WarningCapture
-from orbit.tui.widgets import ChatPrompt, StatusLine, confirm, mark_selected
+from orbit.tui.widgets import ChatPrompt, StatusLine, TextScreen, confirm, mark_selected
 from orbit.tui.workspaces import WorkspacesHost
 
 _PLAIN_OPENING = Opening()
@@ -96,6 +97,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         # check_action keeps it to a control plane in another process, which serves several.
         Binding("ctrl+w", "list_workspaces", "Workspaces"),
         Binding("ctrl+k", "list_reports", "Reports"),
+        # check_action keeps it to normal mode; the frontend to a conversational role's tab.
+        Binding("u", "show_spending", show=False),
         # check_action keeps it from the prompt while typing, which may want ctrl+b itself.
         Binding("ctrl+b", "toggle_sidebar", "Sidebar"),
     ]
@@ -237,6 +240,9 @@ class OrbitApp(App[None], inherit_bindings=False):
     def edit_task(self, task: TaskSpec | None, choices: TaskChoices, saved: Saved) -> None:
         self.push_screen(TaskEditorScreen(task, choices, self._pickers.model), saved)
 
+    def show_spending(self, text: str) -> None:
+        self.push_screen(TextScreen(SPENDING_TITLE, SPENDING_HINT, text))
+
     def label_triggers(self, labels: dict[str, str | None]) -> None:
         """Label each trigger's key in the footer with its label in ``labels``, hiding those
         with none."""
@@ -286,6 +292,7 @@ class OrbitApp(App[None], inherit_bindings=False):
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         conditions: dict[str, Callable[[], bool]] = {
             "cycle_tab": self._normal_mode,
+            "show_spending": self._normal_mode,
             "release_cursor": self._normal_mode,
             "toggle_thinking": lambda: self._normal_mode() or self._in_transcript(),
             "configure_checks": self._on_main_screen,
@@ -323,6 +330,10 @@ class OrbitApp(App[None], inherit_bindings=False):
         if side.display:  # Hidden, the task list had no width to cut its reasons to.
             self.call_after_refresh(self._task_list.fit)
         self._frontend.sidebar_toggled(side.display)
+
+    def action_show_spending(self) -> None:
+        """Show what each role spent itself and caused its consultants to spend."""
+        self._frontend.show_spending()
 
     def action_cycle_tab(self, step: int) -> None:
         self._frontend.cycle_tab(step)

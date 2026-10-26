@@ -1,7 +1,7 @@
 """The agents pane."""
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Protocol
 
 from orbit.protocol import (
@@ -15,7 +15,10 @@ from orbit.protocol import (
     ReviewStatus,
     RunningAgent,
     Snapshot,
+    TurnFinished,
+    Usage,
 )
+from orbit.tui.view.tasks import cost_text
 
 NO_AGENTS_LABEL = "No agents running"
 
@@ -23,12 +26,13 @@ NO_AGENTS_LABEL = "No agents running"
 @dataclass(frozen=True)
 class AgentRow:
     """A running agent: which, in what role, on which task, and its unanswered orbit calls
-    as ``(request_id, tool)`` pairs, oldest first."""
+    as ``(request_id, tool)`` pairs, oldest first, and what its finished turns cost (``spent``)."""
 
     agent_id: str
     role: str
     task_id: str
     open_requests: tuple[tuple[str, str], ...] = ()
+    spent: Usage = field(default_factory=Usage)
 
 
 def track_agents(rows: tuple[AgentRow, ...], event: Event) -> tuple[AgentRow, ...]:
@@ -37,7 +41,16 @@ def track_agents(rows: tuple[AgentRow, ...], event: Event) -> tuple[AgentRow, ..
         return tuple(_row(agent) for agent in event.agents)
     if isinstance(event, AgentRequest | AgentReply):
         return _track_requests(rows, event)
+    if isinstance(event, TurnFinished):
+        return tuple(_count(row, event) for row in rows)
     return _track_starts(rows, event)
+
+
+def _count(row: AgentRow, event: TurnFinished) -> AgentRow:
+    """``row`` with what ``event``'s turn cost added, if it's ``row``'s agent's."""
+    if row.agent_id != event.agent_id or event.usage is None:
+        return row
+    return replace(row, spent=row.spent + event.usage)
 
 
 def _track_starts(rows: tuple[AgentRow, ...], event: Event) -> tuple[AgentRow, ...]:
@@ -88,7 +101,8 @@ def _open(row: AgentRow, event: AgentRequest) -> AgentRow:
 
 
 def agent_line(row: AgentRow, number: str | None) -> str:
-    """``row`` as a line; ``number`` is its task's number in the list, if it has one there."""
+    """``row`` as a line, ending with what its agent has cost so far once it has; ``number`` is
+    its task's number in the list, if it has one there."""
     if number is not None:
         task = f"task {number}"
     elif row.task_id == STARTUP_TASK:
@@ -98,7 +112,8 @@ def agent_line(row: AgentRow, number: str | None) -> str:
     else:
         task = f"task {row.task_id}"
     doing = f"waiting on {row.open_requests[0][1]}" if row.open_requests else "working"
-    return f"{row.agent_id} {row.role} · {task} · {doing}"
+    cost = cost_text(row.spent)
+    return " · ".join([f"{row.agent_id} {row.role}", task, doing, *([cost] if cost else [])])
 
 
 def review_line(status: ReviewStatus | None) -> str:

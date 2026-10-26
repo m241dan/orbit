@@ -35,9 +35,10 @@ TRACKED = ["agents.track", "tabs.track", "transcript.track", "proposals.withdraw
 
 def routed(event: Event) -> list[str]:
     """The names of the methods ``event`` calls on the router's widgets, hosts and hooks, in
-    the order it calls them."""
+    the order it calls them, but the usage corner, which every event reaches."""
     calls = calls_of(event).mock_calls
-    return [str(name) for name, _, _ in calls if name != "navigation.catalog.agents"]
+    skipped = {"navigation.catalog.agents", "corner.track"}
+    return [str(name) for name, _, _ in calls if name not in skipped]
 
 
 def calls_of(event: Event) -> Mock:
@@ -65,10 +66,20 @@ def calls_of(event: Event) -> Mock:
         calls.halt,
         calls.takeover,
         calls.reports,
+        calls.corner,
     )
     hooks = AppHooks(calls.label_triggers, calls.leave_closed_detail, calls.unfocus_task_list)
     EventRouter(panes, handlers, hooks).render(event)
     return calls
+
+
+def test_the_usage_corner_follows_an_event_once_the_feed_has_counted_it() -> None:
+    event = ErrorOccurred(code="x", message="boom")
+    calls = calls_of(event)
+    names = [str(name) for name, _, _ in calls.mock_calls]
+
+    assert names.index("feed.render") < names.index("corner.track")
+    calls.corner.track.assert_called_once_with(event)
 
 
 def test_a_snapshot_shows_its_tasks_before_its_transcript_and_its_usage_after() -> None:

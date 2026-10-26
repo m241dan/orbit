@@ -93,10 +93,10 @@ class Prompt:
 
 
 class AppShell:
-    """What the app itself does for the frontend, as a test sees it: the warnings, questions
-    and task editors it showed, the trigger keys' labels, the window marked selected, the
-    windows entered and how often it took the focus away. Nothing has the focus but the
-    prompt while the user types in it, or another window a test says has it."""
+    """What the app itself does for the frontend, as a test sees it: the warnings, questions,
+    task editors and usage breakdowns it showed, the trigger keys' labels, the window marked
+    selected, the windows entered and how often it took the focus away. Nothing has the focus
+    but the prompt while the user types in it, or another window a test says has it."""
 
     def __init__(self, prompt: Prompt, window: Window) -> None:
         self._prompt = prompt
@@ -106,6 +106,7 @@ class AppShell:
         self.warnings: list[str] = []
         self.questions: list[tuple[str, str, str, Callable[[], Awaitable[object]]]] = []
         self.editors: list[tuple[TaskSpec | None, TaskChoices, Saved]] = []
+        self.spendings: list[str] = []
         self.labels: dict[str, str | None] = {}
         self.selected: set[str] = set()
         self.entered: list[str] = []
@@ -130,6 +131,9 @@ class AppShell:
 
     def edit_task(self, task: TaskSpec | None, choices: TaskChoices, saved: Saved) -> None:
         self.editors.append((task, choices, saved))
+
+    def show_spending(self, text: str) -> None:
+        self.spendings.append(text)
 
     def label_triggers(self, labels: dict[str, str | None]) -> None:
         self.labels = labels

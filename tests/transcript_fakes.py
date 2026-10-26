@@ -167,6 +167,7 @@ class Window:
         self.now = 0.0
         self.content_height = height
         self.title = ""
+        self.corner = ""
         self.covering = False
         self.ticking = False
         self.copies: list[tuple[str, str]] = []
@@ -191,6 +192,9 @@ class Window:
 
     def show_title(self, title: str) -> None:
         self.title = title
+
+    def show_corner(self, text: str) -> None:
+        self.corner = text
 
     def cover(self, covering: bool) -> None:
         self.covering = covering

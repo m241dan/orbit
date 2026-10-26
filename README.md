@@ -105,6 +105,7 @@ In the app:
 | `ctrl+p` | Session picker: view or switch to a saved session, or start a new one (see [Sessions](#sessions)) |
 | `ctrl+w` | Workspace picker, connected to an `orbit serve`: move to another workspace it serves, add one or remove one (see [Workspaces](#workspaces)); not while typing |
 | `ctrl+k` | Reports: the workspace's saved reports, newest first; `enter` shows one, `y` copies it there, `x` deletes the highlighted one after you confirm (see [Reports](#reports)) |
+| `u` | On a conversational role's tab: the usage breakdown by role, each role's own spend and what it caused each consultant to spend (`esc` closes; see [Tasks](#tasks)) |
 | `esc` | Stop typing, close the conversation's detail pane, leave a list or close a picker; with the conversation selected and nothing active, let go of its held entry, closing the detail pane, and follow the latest output again; with the detail pane selected, close it; with the Task list selected and nothing active, let go of the held list and follow the active task again |
 | `ctrl+s` | Stop the task run (on any tab) |
 | `ctrl+x` | Stop the turn of the conversational role whose tab is shown, or the planner's on any other tab, leaving the task run going |
@@ -367,7 +368,8 @@ whether it's working or waiting on orbit (say, `waiting on complete_task` while 
 verified). Its subtitle says whether review is active or paused. Activate it with `enter` and press
 `c` on an agent to cancel its work: for a reviewer, or any agent in a lane that starts by itself
 (see `lane` under [Roles](#roles-and-orbitconfigtoml)), just its task (the lane's next one
-starts); for the planner, just its turn; for the coder, the same as `ctrl+s`.
+starts); for the planner, just its turn; for the coder, the same as `ctrl+s`. Once an agent's first
+turn ends, its row ends with what it has cost so far (`agent-3 coder · task 1 · working · $0.40`).
 
 The **Usage panel** sits in the right column, between the verification panel and the agents pane.
 It stays hidden until a usage report arrives (orbit fetches it with the token in
@@ -546,7 +548,15 @@ apart from dollars rather than converted: `1.2M tok · 0.62 credits` for credits
 `1.2M tok · $0.84 · 0.62 credits` for a total holding both. The total is everything the
 session's agents have spent, the planner's turns and tasks since removed included. It's saved with the session, so a session opened again (or listed
 with `ctrl+p`) shows the same total; a new session starts with none, and shows no total. Token
-counts are rounded as in a turn's rule (see above). While the session's run waits for a coder
+counts are rounded as in a turn's rule (see above).
+
+Every window shows its usage, in the same wording (dollars, credits, or both). The conversation's
+corner shows the shown tab's: on All, the session's total (`session $2.12`); on a task agent's
+own tab, its task's; on a conversational role's tab, what the role spent itself, then what its
+consultations caused each consultant to spend, and the sum: `planner $0.42 · via experimenter
+$1.10 · $1.52`, naming up to two consultants (`via 3 consultants $1.70` beyond), or just its own
+figure when it caused nothing. A consultation's cost counts for the consultant, so the session's
+total counts it once. **u** on a conversational role's tab opens the breakdown by role. While the session's run waits for a coder
 (see [Taking turns](#serving-the-control-plane)), the task about to run says so after its settings,
 with how many coders hold the slots: `⏳ waiting: 3 coders busy`, or `⏳ waiting for a coder` if
 that isn't known; it goes once the task gets a coder. A failed task doesn't stop the rest, but for

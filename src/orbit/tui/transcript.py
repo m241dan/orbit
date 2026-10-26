@@ -183,6 +183,9 @@ class Transcript(Vertical):
     def show_title(self, title: str) -> None:
         self.border_title = title
 
+    def show_corner(self, text: str) -> None:
+        self.border_subtitle = text
+
     def cover(self, covering: bool) -> None:
         self.set_class(covering, "-covered")
         self._detail.covering = covering

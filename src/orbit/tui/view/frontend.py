@@ -36,8 +36,10 @@ from orbit.protocol import (
     TaskSpec,
     TaskState,
     UpdateSettings,
+    Usage,
 )
 from orbit.tui.view.actions import ActionName, action
+from orbit.tui.view.agents import AgentsList
 from orbit.tui.view.commands import CommandDesk, Send
 from orbit.tui.view.common import EntryKind
 from orbit.tui.view.confirm import (
@@ -61,7 +63,6 @@ from orbit.tui.view.prompt import PromptMarks
 from orbit.tui.view.proposals import ProposalQueue, ProposalsView, decision_entry
 from orbit.tui.view.reports import ReportShelf
 from orbit.tui.view.router import (
-    AgentsPane,
     AppHooks,
     EventRouter,
     Handlers,
@@ -71,6 +72,7 @@ from orbit.tui.view.router import (
     UsagePane,
 )
 from orbit.tui.view.settings import Picked, Pickers
+from orbit.tui.view.spend import UsageCorner
 from orbit.tui.view.storage import StorageHalt
 from orbit.tui.view.tab_strip import TabStrip
 from orbit.tui.view.takeover import TakeoverOffer
@@ -131,6 +133,9 @@ class AppView(Protocol):
     def unfocus(self) -> None:
         """Take the focus from whatever has it."""
 
+    def show_spending(self, text: str) -> None:
+        """Show ``text``, the breakdown of usage by role, in a modal."""
+
     def unfocus_task_list(self) -> None:
         """Take the focus from the task list, if it has it."""
 
@@ -161,6 +166,9 @@ class ConversationPane(Entries, TranscriptPane, Protocol):
 
     def close_detail(self) -> None:
         """Close the detail pane."""
+
+    def show_corner(self, text: str) -> None:
+        """Show ``text``, the shown tab's usage, in the corner."""
 
 
 class PromptBox(Protocol):
@@ -201,7 +209,7 @@ class Parts:
     tasks: TaskBoard
     steps: VerificationSteps
     usage: UsagePane
-    agents: AgentsPane
+    agents: AgentsList
     place: PlaceView
     workspaces: WorkspaceListView
     proposals: ProposalsView
@@ -229,7 +237,16 @@ class Frontend:
         self.pager = HistoryPager(parts.paging, self.feed, self.send)
         self.proposals = ProposalQueue(parts.proposals, self.decide)
         self.windows = Windows(parts.app)
+        self.corner = UsageCorner(
+            parts.conversation, lambda: parts.tasks.session_usage, self._task_usage
+        )
         self.router = EventRouter(self._panes(), self._handlers(), self._hooks())
+
+    def _task_usage(self, agent: str) -> Usage | None:
+        """What agent ``agent``'s task has cost, if it runs one on the task list."""
+        row = next((row for row in self._parts.agents.rows if row.agent_id == agent), None)
+        state = None if row is None else self._parts.tasks.find(row.task_id)
+        return None if state is None else state.usage
 
     def _label(self, role: str) -> str:
         """``role``'s label, as the workspace this frontend is on lists it."""
@@ -262,6 +279,7 @@ class Frontend:
             parts.halt,
             parts.takeover,
             parts.reports,
+            self.corner,
         )
 
     def _hooks(self) -> AppHooks:
@@ -458,6 +476,8 @@ class Frontend:
         agent = tabs.agent_of(tab_id)
         tabs.mark_read(agent)
         self._parts.conversation.show_only(agent, label)
+        conversational = any(tab.key == agent and tab.lane is not None for tab in tabs.tabs)
+        self.corner.show_tab(agent, conversational)
         self.router.seats.show_tab(agent)
         self.leave_closed_detail()
 
@@ -472,6 +492,11 @@ class Frontend:
         """Show the planner tab, from there each other conversational role's, and from the
         last, the tab shown before."""
         self._parts.tabs.cycle_conversations()
+
+    def show_spending(self) -> None:
+        """Show the breakdown of usage by role, while a conversational role's tab is shown."""
+        if self.corner.conversational:
+            self._app.show_spending(self.corner.breakdown())
 
     def cycle_tab(self, step: int) -> None:
         """Show the next tab, or with a negative ``step``, the one before."""
