@@ -450,8 +450,11 @@ def consult_clashes(roles: Mapping[str, Role]) -> list[str]:
 
 
 def _consultable(roles: Mapping[str, Role], name: str, other: str) -> bool:
-    """Whether the role ``name`` may name ``other`` among ``roles`` in its consults."""
-    return other != name and other in roles and roles[other].conversation
+    """Whether the role ``name`` may name ``other`` among ``roles`` in its consults: a disabled
+    role is left out of the consults rather than refused, whether or not it converses."""
+    if other == name or other not in roles:
+        return False
+    return roles[other].conversation or not roles[other].enabled
 
 
 def with_enabled_consults(roles: Mapping[str, Role]) -> dict[str, Role]:

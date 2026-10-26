@@ -866,6 +866,19 @@ def test_a_disabled_roles_consults_are_not_checked() -> None:
     assert not load_config(data, BUILT_IN_ROLES).roles["x"].enabled
 
 
+def test_a_role_consulting_a_disabled_task_role_loads_without_it() -> None:
+    data = talker(consults=["coder", "planner"])
+    roles = cast(dict[str, object], data["roles"])
+    roles["coder"] = {"enabled": False}
+    assert load_config(data, BUILT_IN_ROLES).roles["x"].consults == ("planner",)
+
+
+def test_a_personal_role_consulting_a_disabled_task_role_loads() -> None:
+    table = cast(dict[str, object], talker(consults=["coder"])["roles"])["x"]
+    data = {"roles": {"coder": {"enabled": False}}}
+    assert load_config(data, BUILT_IN_ROLES, personal(x=table)).roles["x"].consults == ()
+
+
 def test_layered_roles_leave_a_disabled_role_out_of_consults() -> None:
     layered = load_layered({"roles": {"experimenter": {"enabled": False}}}, BUILT_IN_ROLES)
     assert layered.config.roles["planner"].consults == ()

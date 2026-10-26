@@ -13,6 +13,7 @@ from orbit.agent.domain.roles import (
     built_in_roles,
     check_enabled,
     check_model,
+    consult_clashes,
     conversational_roles,
     disabled_roles,
     load_built_in_roles,
@@ -763,3 +764,21 @@ def test_a_planners_tool_rules_allow_its_draft_tools_and_deny_none_of_them() -> 
     rules = tool_rules("restricted", BUILT_IN_ROLES["planner"].granted_tools)
     drafts = {"mcp__orbit__list_drafts", "mcp__orbit__read_draft"}
     assert drafts <= set(rules.allowed) and not drafts & set(rules.denied)
+
+
+def consulting_roles(target: str, **coder: object) -> dict[str, Role]:
+    """The built-in roles, the planner consulting ``target`` and the coder updated by ``coder``."""
+    planner = BUILT_IN_ROLES["planner"].model_copy(update={"consults": (target,)})
+    updated = BUILT_IN_ROLES["coder"].model_copy(update=coder)
+    return {**BUILT_IN_ROLES, "planner": planner, "coder": updated}
+
+
+def test_consulting_a_disabled_task_role_is_no_clash() -> None:
+    assert consult_clashes(consulting_roles("coder", enabled=False)) == []
+
+
+@pytest.mark.parametrize("target", ["coder", "nobody"])
+def test_consulting_an_enabled_task_role_or_no_role_is_a_clash(target: str) -> None:
+    assert consult_clashes(consulting_roles(target)) == [
+        f"the role 'planner' can't consult {target!r}, which isn't another conversational role"
+    ]

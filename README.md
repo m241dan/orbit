@@ -1276,7 +1276,7 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   conversation with the runtime it ran on, as only that runtime can carry it on: once the role
   runs on another runtime, the session still opens, but messages to the role are refused until
   you reset its conversation (see [Planning with the planner](#planning-with-the-planner)).
-- `consults`: the other enabled conversational roles a conversational role may consult, by name;
+- `consults`: the other conversational roles a conversational role may consult, by name;
   none by default, but the built-in `planner` consults the `experimenter`. A disabled role is left out of others' consults
   (so disabling the `experimenter` alone just takes it out), and a disabled role's own consults
   aren't checked. It's refused on a role that isn't conversational, naming a role that isn't

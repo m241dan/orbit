@@ -519,3 +519,9 @@ def test_resolving_leaves_a_disabled_consulted_role_out() -> None:
     roles = {"talker": {**TALKER, "consults": ["planner"]}, "planner": {"enabled": False}}
     resolved = resolve_roles(PACKAGE_ROLES, NO_USER_ROLES, project(roles))
     assert resolved.roles["talker"].consults == ()
+
+
+def test_resolving_leaves_a_disabled_consulted_task_role_out() -> None:
+    roles = {"talker": {**TALKER, "consults": ["coder"]}, "coder": {"enabled": False}}
+    resolved = resolve_roles(PACKAGE_ROLES, NO_USER_ROLES, project(roles))
+    assert resolved.roles["talker"].consults == ()
