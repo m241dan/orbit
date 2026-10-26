@@ -265,6 +265,10 @@ def test_kiros_connection_failures_server_errors_and_overloads_are_outages(messa
         "You have exceeded your QUOTA",
         "Out of Credits",
         "Rate LIMIT exceeded (HTTP 429)",
+        "Quota exceeded",
+        "You have run out of credits",
+        "Usage limits reached",
+        "Request rate-limited",
     ],
 )
 def test_kiros_limits_quotas_and_credits_are_usage_limits_retried_hourly(message: str) -> None:
@@ -279,6 +283,9 @@ def test_kiros_limits_quotas_and_credits_are_usage_limits_retried_hourly(message
         "Kiro couldn't connect to orbit's MCP server at http://127.0.0.1:500/mcp",
         "HTTP 404 Not Found",
         "status 5000",
+        "Invalid delimiter in tool input",
+        "unlimited context",
+        "Accredited source",
         "",
     ],
 )

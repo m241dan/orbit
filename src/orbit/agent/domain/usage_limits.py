@@ -25,8 +25,9 @@ _KIRO_UNAVAILABLE = re.compile(
     re.IGNORECASE,
 )
 
-# Kiro's words for a usage limit, which no captured run shows: any mention of one.
-_KIRO_LIMIT = re.compile(r"limit|quota|credit", re.IGNORECASE)
+# Kiro's words for a usage limit, which no captured run shows: any mention of one, as whole words
+# so "delimiter" or "unlimited" don't count. "Limited" and "rate-limited" do, being rate limits.
+_KIRO_LIMIT = re.compile(r"\b(?:limit(?:s|ed)?|quotas?|credits?)\b", re.IGNORECASE)
 
 KIRO_LIMIT_RETRY = timedelta(hours=1)
 """How long a run Kiro's usage limit stopped waits before trying again: its limits reset monthly,
