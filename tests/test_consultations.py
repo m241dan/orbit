@@ -550,6 +550,38 @@ async def test_a_storage_halt_answers_the_consultations_waiting_as_cancelled() -
     assert store.last.consultations == ()
 
 
+async def traced_halt(*messages: str) -> tuple[ReadableSpan, list[ReadableSpan], ReadableSpan]:
+    """The planner's last turn, hearing its consultations with ``messages`` answered as cancelled by
+    a storage halt as the first runs, the consultations' spans, and the asking turn's span."""
+    traced = Traced()
+    session, _, launcher = session_for(
+        roles=CONSULTING, store=FakeStore(), telemetry=traced.telemetry
+    )
+    launcher.planner_turns = [consults(*messages, heard=[]), gated(asyncio.Event()), chats]
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    await eventually(lambda: len(launcher.launches) == 2, poll=0)
+    halt_of(session).fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))  # Stops the turns.
+    await events_until(session, answered(len(messages)))
+    await resume_storage(session)
+    await events_until(session, finished("agent-1", 1))
+    await session.close()
+    turns = sorted(traced.spans(TURN_SPAN), key=lambda span: span.start_time or 0)
+    return turns[-1], list(traced.spans(CONSULTATION_SPAN)), turns[0]
+
+
+async def test_a_consultation_cancelled_mid_turn_links_its_reply_turn_to_its_span() -> None:
+    reply, consultations, _ = await traced_halt("Check X")
+    assert reply.parent is None
+    assert len(consultations) == 1
+    assert links_to_all(reply, consultations)
+
+
+async def test_a_consultation_cancelled_in_line_links_its_reply_turn_to_the_asking_turn() -> None:
+    reply, _, asking_turn = await traced_halt("Check X", "Check Y")
+    assert reply.parent is None
+    assert links_to_all(reply, [asking_turn])
+
+
 async def test_a_switch_saves_the_consultations_left_pending_as_switched_away_from() -> None:
     store = FakeStore()
     roles = {

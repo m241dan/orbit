@@ -10,6 +10,7 @@ from orbit.agent.application.consultations import held_note
 from orbit.agent.application.conversation_seats import ConversationSeats
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.planner_seat import SeatHooks, Timer
+from orbit.agent.application.planner_trace import TURN_SPAN, PlannerTracing
 from orbit.agent.application.ports import Reply, StoreFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
@@ -54,6 +55,7 @@ from tests.agent_fakes import (
     sole,
 )
 from tests.session_builders import opened, saved, store_with
+from tests.telemetry_helpers import Traced
 from tests.waiting import eventually
 
 EXPERIMENTER = "experimenter"
@@ -243,6 +245,28 @@ async def test_one_held_with_no_frontend_connected_expires_denied_after_an_hour(
     assert ApprovalDecided(consultation=2, decision="deny") in taken
     answer = sole([e for e in taken if answering(2)(e)], ConsultationAnswered)
     assert answer.interrupted == "it expired waiting for approval"
+
+
+async def test_one_expired_links_its_reply_turn_to_the_asking_turn() -> None:
+    clock, traced = Clock(), Traced()
+    agents, launcher = agents_for(roles=LIMITED)
+    events: asyncio.Queue[Event] = asyncio.Queue()
+    tracing = PlannerTracing(traced.telemetry)
+    timer = Timer(clock, clock.sleep)
+    hooks = SeatHooks(nothing, lambda: None, tuple, tracing=tracing, timer=timer)
+    seats = ConversationSeats(
+        AgentDesk(agents, events.put), Tasks(TaskBoard(), events.put), events, hooks
+    )
+    launcher.planner_turns = [consulting([], asyncio.Event()), chats, chats, chats]
+    await seats.planner.submit("Plan.", Settings())
+    told = "The experimenter's consultation 'Check Y' was interrupted: it expired waiting for"
+    await eventually(lambda: any(told in launch.prompt for launch in launcher.launches))
+    await seats.stop_turns(final=True)
+    await seats.close()
+
+    asking, *_, expired = sorted(traced.spans(TURN_SPAN), key=lambda span: span.start_time or 0)
+    assert expired.parent is None and asking.context is not None
+    assert [link.context.span_id for link in expired.links] == [asking.context.span_id]
 
 
 async def test_one_held_as_storage_halts_expires_only_once_the_halt_lifts() -> None:

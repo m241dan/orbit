@@ -85,8 +85,8 @@ def refusal(asker: str, role: Role, consultant: str) -> str | None:
 class Consultation:
     """Consultation ``number``: the role ``asker`` asking ``consultant`` ``message``, from the
     turn whose span is ``cause``, asked at ``asked`` on the loop's clock; ``position`` is its
-    place in line last published, and ``left`` why it's interrupted as its session, saved,
-    opens again."""
+    place in line last published, ``left`` why it's interrupted as its session, saved,
+    opens again, and ``span`` its consultation's span, once its turn has run."""
 
     number: int
     asker: str
@@ -96,6 +96,7 @@ class Consultation:
     asked: float
     position: int = field(default=0)
     left: str = field(default=RESTARTED)
+    span: Span | None = field(default=None)
 
     @property
     def title(self) -> str:
@@ -283,9 +284,10 @@ class Consultations:
         await self._save()
 
     def _drop(self, asked: Consultation, why: str) -> None:
-        """Answer ``asked``, whose turn isn't running, as interrupted for ``why``."""
+        """Answer ``asked``, whose turn isn't running, as interrupted for ``why``, linked to its
+        consultation's span if its turn ran, else to the asking turn's."""
         del self._pending[asked.number]
-        self._interrupted(asked.saved, why, asked.cause)
+        self._interrupted(asked.saved, why, asked.span or asked.cause)
 
     def _consultant(self, asker: str, consultant: str, message: str) -> PlannerSeat | str:
         """The seat of ``consultant``, which ``asker`` asks ``message``; or why it can't."""
@@ -320,6 +322,7 @@ class Consultations:
         waited = self._clock() - asked.asked
         cause, asker, consultant = asked.cause, asked.asker, asked.consultant
         with self._tracing.consultation(cause, asker, consultant, round(waited * 1000)) as span:
+            asked.span = span
             self._answering[consultant] = asker
             try:
                 yield span
