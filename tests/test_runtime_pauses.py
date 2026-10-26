@@ -15,6 +15,7 @@ from orbit.agent.domain.roles import Role
 from orbit.agent.domain.runtimes import CLAUDE, Failure
 from orbit.agent.domain.usage import UsageReport
 from orbit.agent.domain.usage_limits import (
+    RESUMING_NOTE,
     WAIT_CANCELLED_NOTE,
     outage_paused_note,
     paused_note,
@@ -356,3 +357,67 @@ async def test_a_second_runtime_hitting_its_limit_keeps_the_first_pause_and_wait
     assert last_pause(events).paused_runtime == CLAUDE
     assert waits.slept == [waits.slept[0]]  # Only Claude's pause was waited out.
     assert statuses_of(session) == ["completed"] * 3
+
+
+def paused_by_a_review(
+    waits: Waits, fake: ScriptedLauncher, *scripts: Script
+) -> tuple[WorkspaceHost, ScriptedLauncher]:
+    """A session whose drafter runs through ``fake`` and whose coder plays ``scripts`` on
+    Claude, its first review hitting Claude's usage limit, timed by ``waits``."""
+    every: dict[str, Any] = {"tree": FakeTree(), "review": True, "pause": waits.pause}
+    roles = {**ROLES, "drafter": DRAFTER}
+    options: dict[str, Any] = {"host": fake.host, "launchers": {FAKE: fake}, "roles": roles}
+    reviewers = (errs, claims_done, claims_done, claims_done)
+    session, _, claude = session_for(*scripts, reviewers=reviewers, **every, **options)
+    claude.turn_errors.append(LIMIT)
+    return session, claude
+
+
+async def wake_in_the_pause(session: WorkspaceHost, task: TaskSpec) -> None:
+    """Pause Claude with a review, then queue ``task`` and wake the work lane meanwhile."""
+    await review(session, REVIEWER)
+    await until(session, paused)
+    await events_until(session, idle("review"))
+    await send(session, AddTask(task=task))
+    await turns_of(session).wake()
+    await settled()
+
+
+async def test_a_wake_in_a_reviews_pause_runs_work_on_another_runtime() -> None:
+    waits = Waits()
+    fake = ScriptedLauncher(FakeHost(), claims_done)
+    session, _ = paused_by_a_review(waits, fake)
+    await wake_in_the_pause(session, TaskSpec(prompt="Draft it.", role="drafter"))
+    await events_until(session, idle())
+    assert turns_of(session).paused is not None
+    await session.close()
+
+    assert roles_of(fake) == ["drafter"]
+
+
+async def test_a_wake_in_a_reviews_pause_with_claude_work_next_runs_it_once_it_ends() -> None:
+    waits = Waits()
+    fake = ScriptedLauncher(FakeHost())
+    session, claude = paused_by_a_review(waits, fake, claims_done)
+    await wake_in_the_pause(session, TaskSpec(prompt="Code it."))
+    assert roles_of(claude) == [REVIEWER]
+
+    waits.release.set()
+    events = await events_until(session, idle())
+    await session.close()
+
+    assert CODER in roles_of(claude)
+    assert tasks_resuming_note(CLAUDE) in notes(events)
+    assert RESUMING_NOTE not in notes(events)
+
+
+async def test_a_hold_in_a_reviews_pause_keeps_the_work_from_starting_after() -> None:
+    waits = Waits()
+    session, claude = paused_by_a_review(waits, ScriptedLauncher(FakeHost()), claims_done)
+    await wake_in_the_pause(session, TaskSpec(prompt="Code it."))
+    turns_of(session).hold()
+    await events_until(session, idle("review"))
+    await settled()
+    await session.close()
+
+    assert CODER not in roles_of(claude)

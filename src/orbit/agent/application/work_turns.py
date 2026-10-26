@@ -120,6 +120,7 @@ class WorkTurns:
         # A run the usage limit or an outage stopped waits here to start again.
         self._wait = Background(parts.name, _posting(parts.post))
         self._waiting = False  # The wait hasn't ended yet.
+        self._lane_wait = False  # A lane that starts by itself started the wait.
         # How the run whose wait ended while the session was halted starts again, if one did.
         self._due: _Restart | None = None
         self._paused: Paused | None = None  # Until the waiting run starts again, and why.
@@ -253,9 +254,10 @@ class WorkTurns:
 
     @property
     def _waits(self) -> bool:
-        """Whether work not asked for waits: held, already running, waiting to start again or
-        halted."""
-        return self._held or self.running or self._waiting or self._parts.gate.halted()
+        """Whether work not asked for waits: held, already running, waiting to start again
+        itself or halted."""
+        waiting = self._waiting and not self._lane_wait
+        return self._held or self.running or waiting or self._parts.gate.halted()
 
     async def _start_asked(self) -> None:
         """Start a run the user asked for, started by the span current, the command's: drop the
@@ -292,7 +294,17 @@ class WorkTurns:
             self._held = False
         elif self._waits:
             return None
-        return work if work.next_work() is not None else None
+        next_work = work.next_work()
+        if next_work is None or self._on_paused_runtime(next_work):
+            return None
+        return work
+
+    def _on_paused_runtime(self, task_id: str) -> bool:
+        """Whether task ``task_id``'s role runs on the runtime paused now, if any."""
+        if self._paused is None:
+            return False
+        role = self._board.get(task_id).task.role
+        return self._agents.runtime(role) == self._paused.runtime
 
     async def _run(self, work: WorkLane, cause: Span) -> None:
         """Run ``work``'s tasks, their spans linked to ``cause``, what started the run, then, if
@@ -346,7 +358,7 @@ class WorkTurns:
         """Say ``note``, and start again as ``restart`` says once it's ``paused`` no longer and
         the ``stopped`` turn, if any, has ended."""
         self._parts.post(Notice(message=note))
-        self._waiting = True
+        self._waiting, self._lane_wait = True, not restart.work
         self._pause_as(paused)
         self._wait.start(self._start_again(stopped, paused.until, restart))
 
@@ -384,9 +396,11 @@ class WorkTurns:
         so the other lanes start their tasks again."""
         self._pause_as(None)
         self._kick_lanes()
-        work = self._startable(asked=False) if restart.work else None
-        if not restart.work:
+        if not restart.work:  # A lane's pause: run what a wake meanwhile was kept from.
             self._parts.post(Notice(message=restart.note))
+            await self._start(restart.cause, asked=False)
+            return
+        work = self._startable(asked=False)
         if work is None:
             return
         self._parts.post(Notice(message=restart.note))
@@ -394,9 +408,13 @@ class WorkTurns:
 
     @property
     def _pause(self) -> LimitPause:
+        return self._agents.pause
+
+    @property
+    def _agents(self) -> Agents:
         desk = self._parts.desk
         assert desk is not None  # The work lane runs agents.
-        return desk.agents.pause
+        return desk.agents
 
 
 def _posting(post: Callable[[Event], None]) -> Callable[[Event], Awaitable[None]]:
