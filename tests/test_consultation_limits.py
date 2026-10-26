@@ -444,6 +444,42 @@ async def test_one_held_as_storage_halts_stays_held_to_decide_once_resumed() -> 
     assert (answer.consultation, answer.interrupted) == (2, None)
 
 
+def expiry_armed(session: WorkspaceHost) -> bool:
+    """Whether the session times its consultations held for approval to expire."""
+    return session._seats._consultations.approvals._timer is not None
+
+
+async def halted_holding(store: FakeStore) -> WorkspaceHost:
+    """A session saved in ``store`` holding consultation 2, its storage halted, no frontend
+    connected."""
+    session, _ = await holding_in(store)
+    halt = halt_of(session)
+    halt.fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))
+    await eventually(lambda: not halt._halting)  # The turns stopped.
+    session._seats.viewers(0)  # The frontend left as the session halted.
+    return session
+
+
+async def test_resuming_storage_times_the_one_held_to_expire_again() -> None:
+    session = await halted_holding(FakeStore())
+    halted = expiry_armed(session)
+    await resume_storage(session)
+    resumed = expiry_armed(session)
+    await session.close()
+
+    assert (halted, resumed) == (False, True)
+
+
+async def test_resuming_storage_as_the_session_closes_leaves_expiry_paused() -> None:
+    session = await halted_holding(FakeStore())
+    session._closing = True
+    await resume_storage(session)
+    resumed = expiry_armed(session)
+    await session.close()
+
+    assert not resumed
+
+
 async def reopened(why: str, launcher: ScriptedLauncher) -> None:
     """Checks the planner is told its consultation 2 was interrupted for ``why``."""
     told = f"The experimenter's consultation 'Check Y' was interrupted: {why}."
