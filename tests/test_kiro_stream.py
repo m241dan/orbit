@@ -160,12 +160,31 @@ def test_orbits_tools_are_called_through_its_mcp_server() -> None:
     assert [call.arguments for call in calls] == [{}, {"note": "capturing"}, {"summary": "done"}]
 
 
-def test_a_tool_output_without_text_items_is_given_as_json() -> None:
+def test_orbits_tool_results_are_given_as_their_text() -> None:
     events = list(fixture("orbit-tools.jsonl"))
-    outputs = [event.output for event in events if isinstance(event, ToolCallFinished)]
-    assert json.loads(outputs[1]) == {
-        "items": [{"Json": {"content": [{"type": "text", "text": "Noted."}], "isError": False}}]
-    }
+    finishes = [event for event in events if isinstance(event, ToolCallFinished)]
+    assert [event.output for event in finishes][1:] == ["Noted.", "Verified: the work is done."]
+    assert finishes[0].output.startswith("Capture this run for orbit's fixtures")
+    assert not any(event.is_error for event in finishes)
+
+
+def test_a_tool_output_without_text_is_given_as_json() -> None:
+    raw_output = {"items": [{"Json": {"isError": False}}, {"Json": {}}]}
+    events = translated(finished(status="completed", rawOutput=raw_output))
+    assert events == [ToolCallFinished(turn_id="t", call_id="c", output=json.dumps(raw_output))]
+
+
+def test_a_completed_mcp_result_marked_as_an_error_finishes_in_error() -> None:
+    result = {"content": [{"type": "text", "text": "Refused."}], "isError": True}
+    events = translated(finished(status="completed", rawOutput={"items": [{"Json": result}]}))
+    assert events == [ToolCallFinished(turn_id="t", call_id="c", output="Refused.", is_error=True)]
+
+
+def test_text_items_and_mcp_result_texts_are_joined_in_order() -> None:
+    content = [{"type": "text", "text": "b"}, {"type": "image"}, {"type": "text", "text": "c"}]
+    raw_output = {"items": [{"Text": "a"}, {"Json": {"content": content}}, {"Text": "d"}]}
+    events = translated(finished(status="completed", rawOutput=raw_output))
+    assert events == [ToolCallFinished(turn_id="t", call_id="c", output="a\nb\nc\nd")]
 
 
 def test_a_bad_model_fails_the_turn_with_kiros_message() -> None:

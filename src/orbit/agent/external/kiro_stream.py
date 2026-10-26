@@ -215,15 +215,30 @@ def _call_ended(turn_id: str, update: dict[str, Any]) -> list[Event]:
             turn_id=turn_id,
             call_id=update["toolCallId"],
             output=_tool_output(update.get("rawOutput")),
-            is_error=status == FAILED_STATUS,
+            is_error=status == FAILED_STATUS or _reports_error(update.get("rawOutput")),
         )
     ]
 
 
 def _tool_output(raw: dict[str, Any] | None) -> str:
-    """A tool's ``raw`` output as text: its ``Text`` items, a line each, or else its JSON; none
-    when there is none."""
+    """A tool's ``raw`` output as text: its ``Text`` items and the text parts of its MCP results,
+    a line each in order, or else its JSON; none when there is none."""
     if raw is None:
         return ""
-    texts = [item["Text"] for item in raw.get("items", []) if "Text" in item]
+    texts = [text for item in raw.get("items", []) for text in _item_texts(item)]
     return "\n".join(texts) if texts else json.dumps(raw)
+
+
+def _item_texts(item: dict[str, Any]) -> list[str]:
+    """The texts of the output ``item``: a ``Text`` item's text, or a ``Json`` MCP result's text
+    parts."""
+    if "Text" in item:
+        return [item["Text"]]
+    content = (item.get("Json") or {}).get("content") or []
+    return [part["text"] for part in content if part.get("type") == "text"]
+
+
+def _reports_error(raw: dict[str, Any] | None) -> bool:
+    """Whether any MCP result in the tool's ``raw`` output is marked as an error."""
+    items = (raw or {}).get("items", [])
+    return any((item.get("Json") or {}).get("isError") is True for item in items)
