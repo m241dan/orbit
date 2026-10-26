@@ -1325,7 +1325,8 @@ work that doesn't merge would vanish once put aside; `workspace = "checkout"` ca
 `tool_access = "full"`, as the agent could edit your tree; `conversation = true` needs
 `get_task` left out of its tools, `merge = false`, `verify = false` and a
 workspace other than `worktree`; and no role that isn't conversational may share a conversational
-role's lane. There's one worktree, so every enabled role with `workspace = "worktree"` must share
+role's lane; a role that isn't conversational needs `get_task` in its tools to fetch its task.
+There's one worktree, so every enabled role with `workspace = "worktree"` must share
 one lane, or the config is refused, naming the roles and their lanes.
 
 An agent calling a tool its role doesn't have gets an error reply (the CLI only allows its role's

@@ -186,16 +186,17 @@ def test_a_role_problem_and_another_problem_are_refused_together_each_on_its_own
     assert [line.split(":", 1)[0] for line in lines] == ["fix_attempts", where]
 
 
-def test_a_new_role_must_be_able_to_fetch_its_task() -> None:
-    with pytest.raises(ConfigError, match="get_task"):
-        roles = {"new": {"instructions": "x", "tools": ["complete_task"]}}
+@pytest.mark.parametrize("tools", [["complete_task"], ["propose_task"]])
+def test_a_task_role_without_get_task_is_refused(tools: list[str]) -> None:
+    roles = {"new": {"instructions": "x", "tools": tools}}
+    with pytest.raises(ConfigError, match=r"new.*a task role needs get_task in its tools"):
         load_config({"roles": roles}, BUILT_IN_ROLES)
 
 
-def test_a_conversational_role_plans_instead_of_fetching_a_task() -> None:
-    roles = {"architect": {"instructions": "x", "tools": ["propose_task"]}}
+def test_a_task_role_with_get_task_loads() -> None:
+    roles = {"new": {"instructions": "x", "tools": ["get_task"]}}
     config = load_config({"roles": roles}, BUILT_IN_ROLES)
-    assert config.roles["architect"].tools == ("propose_task",)
+    assert config.roles["new"].tools == ("get_task",)
 
 
 def custom(**fields: object) -> dict[str, object]:

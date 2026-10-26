@@ -358,14 +358,13 @@ def _conversation_problems(role: Role) -> list[str]:
 
 
 def _task_problems(role: Role) -> list[str]:
-    """What a task ``role`` breaks: it needs a way to its work, and consults no one."""
+    """What a task ``role`` breaks: it needs get_task to fetch its work, and consults no one."""
     if role.conversation:
         return []
-    fetches = GET_TASK in role.tools or PROPOSE_TASK in role.tools
     problems = (
         []
-        if fetches
-        else ["an agent needs get_task to fetch its task, or propose_task to plan in conversation"]
+        if GET_TASK in role.tools
+        else ["a task role needs get_task in its tools to fetch its task"]
     )
     if role.consults:
         problems.append("consults needs conversation = true")
