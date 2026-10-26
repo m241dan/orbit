@@ -517,11 +517,25 @@ def test_orbit_tools_are_the_twelve_in_order() -> None:
         "save_report",
         "list_reports",
         "read_report",
+        "list_drafts",
+        "read_draft",
     )
 
 
-def test_a_role_that_consults_is_granted_consult_after_its_tools() -> None:
-    assert BUILT_IN_ROLES["planner"].granted_tools == (*BUILT_IN_ROLES["planner"].tools, "consult")
+def test_a_role_that_consults_and_proposes_is_granted_draft_tools_then_consult() -> None:
+    planner = BUILT_IN_ROLES["planner"]
+    assert planner.granted_tools == (*planner.tools, "list_drafts", "read_draft", "consult")
+
+
+def test_a_role_without_propose_task_is_granted_no_draft_tools() -> None:
+    reviewer = BUILT_IN_ROLES["reviewer"]
+    assert reviewer.granted_tools == reviewer.tools
+
+
+def test_a_draft_tool_among_a_roles_tools_is_refused() -> None:
+    message = "read_draft comes with propose_task; list that instead."
+    with pytest.raises(ValidationError, match=message):
+        Role(instructions="Plan.", tools=("propose_task", "read_draft"))
 
 
 def test_a_role_that_consults_no_one_is_granted_its_tools_alone() -> None:
@@ -574,6 +588,8 @@ def test_unrestricted_tool_rules_allow_the_roles_orbit_tools_and_deny_its_others
         "mcp__orbit__save_report",
         "mcp__orbit__list_reports",
         "mcp__orbit__read_report",
+        "mcp__orbit__list_drafts",
+        "mcp__orbit__read_draft",
     )
 
 
@@ -598,6 +614,8 @@ def test_restricted_tool_rules_add_reading_and_searching_and_deny_writing() -> N
         "mcp__orbit__save_report",
         "mcp__orbit__list_reports",
         "mcp__orbit__read_report",
+        "mcp__orbit__list_drafts",
+        "mcp__orbit__read_draft",
         "Edit",
         "Write",
         "NotebookEdit",
@@ -722,3 +740,9 @@ def test_instructions_name_a_file_when_they_are_one_line_ending_in_md(
     instructions: str, names: bool
 ) -> None:
     assert names_file(instructions) is names
+
+
+def test_a_planners_tool_rules_allow_its_draft_tools_and_deny_none_of_them() -> None:
+    rules = tool_rules("restricted", BUILT_IN_ROLES["planner"].granted_tools)
+    drafts = {"mcp__orbit__list_drafts", "mcp__orbit__read_draft"}
+    assert drafts <= set(rules.allowed) and not drafts & set(rules.denied)

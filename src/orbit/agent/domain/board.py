@@ -218,6 +218,24 @@ class TaskBoard:
         self._tasks.append(state)
         return state.id
 
+    def drafts_of(self, role: str) -> tuple[TaskState, ...]:
+        """The drafts ``role`` proposed, in list order."""
+        return tuple(
+            state for state in self._tasks if state.status == "draft" and state.proposed_by == role
+        )
+
+    def draft_of(self, task_id: str, role: str) -> TaskState:
+        """Task ``task_id``, a draft ``role`` proposed. Raises ``Refused`` if there's no such
+        task, ``role`` didn't propose it, or it isn't a draft any more."""
+        state = self.get(task_id)
+        if state.proposed_by != role:
+            raise Refused(INVALID, f"Task {task_id} isn't one of your drafts.")
+        if state.status != "draft":
+            raise Refused(
+                INVALID, f"Task {task_id} isn't a draft any more; the user accepted or edited it."
+            )
+        return state
+
     def accept(self, task_id: str) -> None:
         """Make draft ``task_id`` pending. Raises ``Refused`` if it isn't a draft."""
         if self.get(task_id).status != "draft":
@@ -260,3 +278,15 @@ class TaskBoard:
     def _new(self, task: TaskSpec, **fields: Any) -> TaskState:
         """A new task state for ``task``, with the next id."""
         return TaskState(id=str(next(self._ids)), task=task, **fields)
+
+
+def draft_line(state: TaskState) -> str:
+    """``state``'s id and title, the first line of its prompt."""
+    return f"{state.id} · {state.task.prompt.partition('\n')[0]}"
+
+
+def draft_text(state: TaskState) -> str:
+    """``state``'s id and title, then the rest of its prompt after a blank line, if there's
+    more."""
+    rest = state.task.prompt.partition("\n")[2].strip("\n")
+    return f"{draft_line(state)}\n\n{rest}" if rest else draft_line(state)

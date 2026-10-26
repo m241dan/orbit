@@ -1,6 +1,13 @@
 import pytest
 
-from orbit.agent.domain.board import SETTLED, WAITING, TaskBoard, interrupted
+from orbit.agent.domain.board import (
+    SETTLED,
+    WAITING,
+    TaskBoard,
+    draft_line,
+    draft_text,
+    interrupted,
+)
 from orbit.agent.domain.endings import INTERRUPTED
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import (
@@ -569,3 +576,45 @@ def test_a_restored_task_keeps_its_proposer_or_none() -> None:
         )
     )
     assert [t.proposed_by for t in board.tasks] == [None, "planner"]
+
+
+def proposals() -> TaskBoard:
+    """A board with the planner's drafts 1 and 3, its accepted 2, the user's 4 and the
+    architect's draft 5."""
+    board = TaskBoard()
+    board.add_draft(TaskSpec(prompt="Add it\n\nAdd the flag."), "planner")
+    board.accept(board.add_draft(ONE, "planner"))
+    board.add_draft(TaskSpec(prompt="Doc it"), "planner")
+    board.add(TWO)
+    board.add_draft(FIX, "architect")
+    return board
+
+
+def test_a_roles_drafts_are_those_it_proposed_still_drafts_in_list_order() -> None:
+    assert [t.id for t in proposals().drafts_of("planner")] == ["1", "3"]
+
+
+def test_a_roles_own_draft_is_found() -> None:
+    assert proposals().draft_of("3", "planner").task.prompt == "Doc it"
+
+
+@pytest.mark.parametrize(
+    ("task_id", "code", "message"),
+    [
+        ("99", UNKNOWN, "No task with id '99'."),
+        ("4", INVALID, "Task 4 isn't one of your drafts."),
+        ("5", INVALID, "Task 5 isn't one of your drafts."),
+        ("2", INVALID, "Task 2 isn't a draft any more; the user accepted or edited it."),
+    ],
+)
+def test_a_task_that_isnt_the_roles_draft_is_refused(task_id: str, code: str, message: str) -> None:
+    with pytest.raises(Refused) as caught:
+        proposals().draft_of(task_id, "planner")
+    assert (caught.value.code, caught.value.message) == (code, message)
+
+
+def test_a_draft_reads_as_its_id_title_and_the_rest_of_its_prompt() -> None:
+    board = proposals()
+    assert draft_line(board.get("1")) == "1 · Add it"
+    assert draft_text(board.get("1")) == "1 · Add it\n\nAdd the flag."
+    assert draft_text(board.get("3")) == "3 · Doc it"

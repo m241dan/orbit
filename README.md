@@ -984,7 +984,13 @@ and pressed again goes on to any other conversational role's tab, then back to t
 on). Tell it what you want to build; it asks
 what's unclear in rounds of a few questions, each offering options with a recommendation, and
 breaks the goal into small tasks, proposing each with `propose_task` (a title is required, and
-kept to one line). Every plan's first task writes the plan's record: a numbered requirements
+kept to one line). Its drafts' tools come with `propose_task`: `list_drafts()` gives one
+`<id> · <title>` line for each of its drafts you haven't accepted, in list order (`You have no
+drafts.` with none), and `read_draft(task_id)` gives one's id and title, a blank line and the rest
+of its prompt. It's refused a task that isn't there (`No task with id '99'.`), one it didn't
+propose (`Task 2 isn't one of your drafts.`), and one of its own you accepted or edited (`Task 4
+isn't a draft any more; the user accepted or edited it.`). A role's `tools` naming a draft tool
+is refused (`read_draft comes with propose_task; list that instead.`). Every plan's first task writes the plan's record: a numbered requirements
 document in `docs/` (or wherever the project keeps such records), named like
 `docs/00001-feature-dark-mode.md`, with the decisions you confirmed and the tasks that carry them
 out. Every other task's prompt opens with `Plan: <path>` pointing at it, so coders and reviewers

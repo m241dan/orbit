@@ -25,10 +25,14 @@ from orbit.agent.application.role_copies import RoleCopies
 from orbit.agent.application.role_workspace import workspace_for
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.agents import Agent
+from orbit.agent.domain.board import draft_line, draft_text
 from orbit.agent.domain.consultations import CANCELLED, failed
+from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.roles import (
     CONSULT,
+    LIST_DRAFTS,
     PROPOSE_TASK,
+    READ_DRAFT,
     REPORT_PROGRESS,
     suggested_task,
     suggestion_refusal,
@@ -110,6 +114,8 @@ class PlannerChat:
             PROPOSE_TASK: self._propose_task,
             REPORT_PROGRESS: self._report_progress,
             CONSULT: self._consult,
+            LIST_DRAFTS: self._list_drafts,
+            READ_DRAFT: self._read_draft,
         }
 
     @property
@@ -378,6 +384,18 @@ class PlannerChat:
         task_id = await self._tasks.change(lambda board: board.add_draft(task, self._role))
         self._drafts += 1
         return Reply(f"Added draft task {task_id}; the user will accept or drop it.")
+
+    async def _list_drafts(self, arguments: dict[str, Any]) -> Reply:
+        drafts = self._tasks.board.drafts_of(self._role)
+        return Reply("\n".join(draft_line(state) for state in drafts) or "You have no drafts.")
+
+    async def _read_draft(self, arguments: dict[str, Any]) -> Reply:
+        task_id = str(arguments.get("task_id", ""))
+        try:
+            state = self._tasks.board.draft_of(task_id, self._role)
+        except Refused as exc:
+            return Reply(exc.message, is_error=True)
+        return Reply(draft_text(state))
 
     async def _consult(self, arguments: dict[str, Any]) -> Reply:
         role, message = str(arguments.get("role", "")), str(arguments.get("message", ""))

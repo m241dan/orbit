@@ -122,6 +122,45 @@ async def test_a_proposal_without_a_title_is_refused_and_adds_no_draft() -> None
     assert not any(isinstance(e, TasksChanged) for e in events)
 
 
+async def test_the_planner_lists_and_reads_its_drafts() -> None:
+    replies: list[Reply] = []
+
+    async def reads_drafts(call: Call) -> TurnEndReason:
+        replies.append(await call("list_drafts"))
+        await call("propose_task", title="Add the flag", prompt="Add --fast to the CLI.")
+        await call("propose_task", title="Document it", prompt="Mention --fast.")
+        replies.append(await call("list_drafts"))
+        replies.append(await call("read_draft", task_id="2"))
+        replies.append(await call("read_draft", task_id="99"))
+        return "completed"
+
+    session, _, launcher = session_for()
+    launcher.planner_turns = [reads_drafts]
+    await plan(session, "Plan it.")
+    assert replies == [
+        Reply("You have no drafts."),
+        Reply("1 · Add the flag\n2 · Document it"),
+        Reply("2 · Document it\n\nMention --fast."),
+        Reply("No task with id '99'.", is_error=True),
+    ]
+    tools = launcher.launches[0].tools
+    assert "list_drafts" in tools and "read_draft" in tools
+
+
+async def test_a_role_without_propose_task_cant_list_drafts() -> None:
+    replies: list[Reply] = []
+
+    async def lists(call: Call) -> TurnEndReason:
+        replies.append(await call("list_drafts"))
+        return "completed"
+
+    roles = {**ROLES, PLANNER: ROLES[PLANNER].model_copy(update={"tools": ("report_progress",)})}
+    session, _, launcher = session_for(roles=roles)
+    launcher.planner_turns = [lists]
+    await plan(session, "Plan it.")
+    assert replies == [Reply("Your role (planner) can't use list_drafts.", is_error=True)]
+
+
 async def test_the_first_turn_says_which_agent_is_the_planner() -> None:
     # So the frontend can put the planner's output on the Planner tab.
     session, _, launcher = session_for()

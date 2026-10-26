@@ -78,6 +78,11 @@ CONSULT = "consult"
 SAVE_REPORT = "save_report"
 LIST_REPORTS = "list_reports"
 READ_REPORT = "read_report"
+LIST_DRAFTS = "list_drafts"
+READ_DRAFT = "read_draft"
+
+DRAFT_TOOLS = (LIST_DRAFTS, READ_DRAFT)
+"""The tools a role that proposes tasks is granted for its drafts."""
 
 ORBIT_TOOLS = (
     GET_TASK,
@@ -92,6 +97,7 @@ ORBIT_TOOLS = (
     SAVE_REPORT,
     LIST_REPORTS,
     READ_REPORT,
+    *DRAFT_TOOLS,
 )
 """Every tool orbit's MCP server offers agents."""
 
@@ -146,6 +152,15 @@ def _can_merge(fields: dict[str, Any]) -> bool:
     loads; a verified one that can't is refused, as its checked work would vanish."""
     verify: bool = fields["verify"]
     return verify and fields["workspace"] == "worktree"
+
+
+def _refuse_granted(tools: tuple[str, ...]) -> None:
+    """Raises ``ValueError`` if ``tools`` names a tool orbit grants through another one."""
+    if CONSULT in tools:
+        raise ValueError(f"{CONSULT} comes with consults, not tools")
+    drafts = [tool for tool in tools if tool in DRAFT_TOOLS]
+    if drafts:
+        raise ValueError(f"{drafts[0]} comes with {PROPOSE_TASK}; list that instead.")
 
 
 class Role(_Config):
@@ -232,8 +247,7 @@ class Role(_Config):
         unknown = [tool for tool in tools if tool not in ORBIT_TOOLS]
         if unknown:
             raise ValueError(f"unknown tools {unknown}; orbit's tools are {list(ORBIT_TOOLS)}")
-        if CONSULT in tools:
-            raise ValueError(f"{CONSULT} comes with consults, not tools")
+        _refuse_granted(tools)
         return tools
 
     @field_validator("lane")
@@ -264,9 +278,11 @@ class Role(_Config):
 
     @property
     def granted_tools(self) -> tuple[str, ...]:
-        """The orbit tools its agents may call: its tools, and ``consult`` when it consults
-        anyone."""
-        return (*self.tools, CONSULT) if self.consults else self.tools
+        """The orbit tools its agents may call: its tools, the draft tools when it proposes
+        tasks, and ``consult`` when it consults anyone."""
+        drafts = DRAFT_TOOLS if PROPOSE_TASK in self.tools else ()
+        consult = (CONSULT,) if self.consults else ()
+        return (*self.tools, *drafts, *consult)
 
     @property
     def runs_checks(self) -> bool:

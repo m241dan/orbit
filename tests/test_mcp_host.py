@@ -118,6 +118,8 @@ async def test_passes_calls_with_the_token_to_the_handler_and_returns_its_text()
         ("save_report", {"title": "Timings", "body": "It took 3s."}),
         ("list_reports", {}),
         ("read_report", {"id": 2}),
+        ("list_drafts", {}),
+        ("read_draft", {"task_id": "5"}),
         (
             "propose_checks",
             {

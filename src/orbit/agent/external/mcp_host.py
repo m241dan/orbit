@@ -19,9 +19,11 @@ from orbit.agent.domain.roles import (
     CONSULT,
     GET_TASK,
     GIVE_UP,
+    LIST_DRAFTS,
     LIST_REPORTS,
     PROPOSE_CHECKS,
     PROPOSE_TASK,
+    READ_DRAFT,
     READ_REPORT,
     REPORT_PROGRESS,
     RUN_CHECK,
@@ -151,6 +153,17 @@ def build_server(handler: CallHandler) -> MCPServer:
     async def read_report(id: int, ctx: Context) -> str:
         """Read a saved report, by its id from list_reports: its title and body."""
         return await call(ctx, READ_REPORT, {"id": id})
+
+    @server.tool(structured_output=False)
+    async def list_drafts(ctx: Context) -> str:
+        """List your drafts the user hasn't accepted yet: each one's id and title, in list
+        order."""
+        return await call(ctx, LIST_DRAFTS, {})
+
+    @server.tool(structured_output=False)
+    async def read_draft(task_id: str, ctx: Context) -> str:
+        """Read one of your drafts as it stands now: its title and full prompt."""
+        return await call(ctx, READ_DRAFT, {"task_id": task_id})
 
     return server
 

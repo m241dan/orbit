@@ -128,7 +128,10 @@ async def test_a_reset_rereads_the_planners_role() -> None:
     session, _, launcher = session_for(planner_role=lambda: NEW_ROLE)
     await planned_twice(launcher, session)
     fresh = launcher.launches[-1]
-    assert (fresh.instructions, fresh.tools) == ("Plan small.", ("propose_task", "consult"))
+    assert (fresh.instructions, fresh.tools) == (
+        "Plan small.",
+        ("propose_task", "list_drafts", "read_draft", "consult"),
+    )
     agents = session.agents
     assert agents is not None and agents.roles["coder"] == ROLES["coder"]
     await session.close()
