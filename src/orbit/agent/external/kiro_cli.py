@@ -17,22 +17,28 @@ import os
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from functools import partial
 from typing import get_args
 
 from orbit.agent.application.ports import AgentLaunch, ResumeFailed
 from orbit.agent.domain.runtimes import Capabilities, Failure, FullIdRule
 from orbit.agent.domain.usage_limits import kiro_failure
-from orbit.agent.external.claude_cli import LINE_LIMIT, OTLP_HEADER_VARIABLES
+from orbit.agent.external.cli_turns import (
+    OTLP_HEADER_VARIABLES,
+    CliCommand,
+    Conversations,
+    crashed,
+    followed,
+    started,
+)
 from orbit.agent.external.kiro_agents import KiroAgentFiles, kiro_agent_config
 from orbit.agent.external.kiro_stream import KiroTranslation
-from orbit.agent.external.processes import spawned, start_failure
 from orbit.protocol import (
     Effort,
     ErrorOccurred,
     Event,
     Notice,
     ToolAccess,
-    TurnFinished,
     TurnStarted,
 )
 
@@ -94,14 +100,6 @@ def kiro_env() -> dict[str, str]:
     return {name: value for name, value in os.environ.items() if name not in OTLP_HEADER_VARIABLES}
 
 
-def _pipes(
-    process: asyncio.subprocess.Process,
-) -> tuple[asyncio.StreamReader, asyncio.StreamReader]:
-    """The process's stdout and stderr; it was started with both piped."""
-    assert process.stdout and process.stderr
-    return process.stdout, process.stderr
-
-
 class _EffortNotes:
     """Notes, once per role in each session, that Kiro's model ignores the effort an agent of
     the role was given."""
@@ -130,7 +128,7 @@ class _Kiro:
     effort: _EffortNotes
 
 
-class KiroCliRunner:
+class KiroCliRunner(Conversations):
     """Runs agents as Kiro sessions connected to orbit, run as ``command``, each agent with its
     config among ``files``, ``~/.kiro/agents``' by default. Its full model ids are those
     ``full_model_ids`` takes."""
@@ -141,8 +139,8 @@ class KiroCliRunner:
     def __init__(
         self, command: Sequence[str] = ("kiro-cli",), *, files: KiroAgentFiles | None = None
     ) -> None:
+        super().__init__()
         self._kiro = _Kiro(tuple(command), files or KiroAgentFiles(), _EffortNotes())
-        self._conversations: dict[str, str] = {}  # Agent id -> its Kiro session's id.
 
     async def run_agent(self, launch: AgentLaunch) -> AsyncIterator[Event]:
         """Run the agent as a new Kiro session connected to orbit, as ``launch`` says."""
@@ -154,29 +152,12 @@ class KiroCliRunner:
         resume it, each agent's apart from the others'. A resuming turn that fails to start
         before reporting its session raises ResumeFailed."""
         agent_id = launch.agent.id
-        turn = self._turn(launch, self._conversations.get(agent_id))
+        turn = self._turn(launch, self.conversation(agent_id))
         try:
             async for event in turn.run(turn_id):
                 yield event
         finally:
-            self._remember(agent_id, turn)
-
-    def _remember(self, agent_id: str, turn: _Turn) -> None:
-        """Note the Kiro session ``turn`` ran in as agent ``agent_id``'s, if it reported one."""
-        if turn.session_id:
-            self._conversations[agent_id] = turn.session_id
-
-    def conversation(self, agent_id: str) -> str | None:
-        """The id of the Kiro session agent ``agent_id``'s turns resume."""
-        return self._conversations.get(agent_id)
-
-    def set_conversation(self, agent_id: str, handle: str | None) -> None:
-        """Have agent ``agent_id``'s next turn resume the Kiro session ``handle``, or start a new
-        one when it's ``None``."""
-        if handle is None:
-            self._conversations.pop(agent_id, None)
-        else:
-            self._conversations[agent_id] = handle
+            self.remember(agent_id, turn.session_id)
 
     def failure(self, message: str) -> Failure | None:
         """The failure Kiro's error ``message`` tells, as :func:`kiro_failure` says."""
@@ -200,7 +181,6 @@ class _Turn:
         self._kiro = kiro
         self._launch = launch
         self._resume = resume
-        self._finished = False  # The stream reported the run's end.
         self.session_id: str | None = None
 
     async def run(self, turn_id: str) -> AsyncIterator[Event]:
@@ -209,28 +189,16 @@ class _Turn:
         # removes its config.
         async with contextlib.AsyncExitStack() as stack:
             process = await self._start(stack)
-            async for event in self._follow(KiroTranslation(turn_id), process):
+            events = partial(self._events, KiroTranslation(turn_id))
+            async for event in followed(process, events, self._crash):
                 yield event
 
     async def _start(self, stack: contextlib.AsyncExitStack) -> asyncio.subprocess.Process:
         """The running CLI, stopped when ``stack`` closes, its config removed after it."""
         name = self._configure(stack)
         args = kiro_args(self._kiro.command, name, self._launch, self._resume)
-        cwd = self._launch.cwd
-        try:
-            return await stack.enter_async_context(
-                spawned(
-                    args,
-                    env=kiro_env(),
-                    cwd=cwd,
-                    stdin=asyncio.subprocess.DEVNULL,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    limit=LINE_LIMIT,
-                )
-            )
-        except OSError as error:
-            raise RuntimeError(start_failure(args, cwd, error, missing_hint=MISSING_HINT)) from None
+        command = CliCommand(tuple(args), kiro_env(), self._launch.cwd, MISSING_HINT)
+        return await started(stack, command, asyncio.subprocess.DEVNULL)
 
     def _configure(self, stack: contextlib.AsyncExitStack) -> str:
         """Write the agent's config, removed when ``stack`` closes; returns the name Kiro knows
@@ -243,26 +211,6 @@ class _Turn:
             raise RuntimeError(f"Couldn't write the agent's Kiro config: {error}") from None
         stack.callback(files.remove, name)
         return name
-
-    async def _follow(
-        self, translation: KiroTranslation, process: asyncio.subprocess.Process
-    ) -> AsyncIterator[Event]:
-        """Translate the CLI's output with ``translation`` until it exits.
-
-        Raises if it exits without reporting the run's end: with orbit's MCP server unreachable,
-        saying so, or else with its stderr as the message.
-        """
-        stdout, stderr_pipe = _pipes(process)
-        stderr = asyncio.create_task(stderr_pipe.read())
-        try:
-            async for event in self._events(translation, stdout):
-                yield event
-            # Let the CLI exit on its own once it's done, so it can save its session.
-            status = await process.wait()
-            if not self._finished:
-                raise self._crash(status, (await stderr).decode(errors="replace").strip())
-        finally:
-            stderr.cancel()
 
     async def _events(
         self, translation: KiroTranslation, stdout: asyncio.StreamReader
@@ -282,17 +230,14 @@ class _Turn:
         """
         events = [self._own(e) for e in translation.feed(line) if not isinstance(e, TurnStarted)]
         for event in events:
-            self._note(translation, event)
+            self._check_resumed(translation, event)
         self.session_id = translation.session_id
         return [*events, *self._effort_notes(translation)]
 
-    def _note(self, translation: KiroTranslation, event: Event) -> None:
-        """Note whether ``event`` reports the run's end; raise ResumeFailed, with its message, if
-        it's the error of a run that resumed a session and failed to start before it reported
-        a session, as ``translation`` shows."""
-        if isinstance(event, TurnFinished):
-            self._finished = True
-        elif isinstance(event, ErrorOccurred) and self._unresumed(translation):
+    def _check_resumed(self, translation: KiroTranslation, event: Event) -> None:
+        """Raise ResumeFailed, with its message, if ``event`` is the error of a run that resumed
+        a session and failed to start before it reported a session, as ``translation`` shows."""
+        if isinstance(event, ErrorOccurred) and self._unresumed(translation):
             raise ResumeFailed(event.message)
 
     def _unresumed(self, translation: KiroTranslation) -> bool:
@@ -319,4 +264,4 @@ class _Turn:
             return RuntimeError(
                 f"Kiro couldn't connect to orbit's MCP server at {self._launch.url}"
             )
-        return RuntimeError(stderr or f"kiro-cli exited with status {status}")
+        return crashed("kiro-cli", status, stderr)

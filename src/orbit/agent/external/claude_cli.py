@@ -17,6 +17,7 @@ import json
 import os
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, get_args
 from urllib.parse import quote
 
@@ -25,7 +26,15 @@ from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.roles import orbit_tool_grant
 from orbit.agent.domain.runtimes import Capabilities, Failure, starting_with
 from orbit.agent.domain.usage_limits import claude_failure
-from orbit.agent.external.processes import spawned, start_failure
+from orbit.agent.external.cli_turns import (
+    OTLP_HEADER_VARIABLES,
+    CliCommand,
+    Conversations,
+    Crashed,
+    crashed,
+    followed,
+    started,
+)
 from orbit.protocol import (
     AGENT_FAILED,
     PLAN_TASK,
@@ -72,8 +81,7 @@ TOKEN_KINDS = (
     "cache_read_input_tokens",
 )
 USAGE_TOTALS = {"total_cost_usd": "cost_usd", "num_turns": "turns", "duration_ms": "duration_ms"}
-# Tool results (e.g. whole files) arrive as single JSON lines; allow large ones.
-LINE_LIMIT = 64 * 1024 * 1024
+MISSING_HINT = "Is the Claude CLI installed and on PATH?"
 
 # How agents reach orbit, and what they're told about it.
 TOKEN_VARIABLE = "ORBIT_AGENT_TOKEN"
@@ -84,14 +92,6 @@ LIVE_MCP_STATUSES = ("connected", "pending")
 # The variable setting the CLI's effort, which would otherwise override orbit's setting, or the
 # CLI's default when orbit has none.
 EFFORT_VARIABLE = "CLAUDE_CODE_EFFORT_LEVEL"
-# The variables that send headers with OTLP, which may hold the key to orbit's collector; an
-# agent, which can run any command, could leak it.
-OTLP_HEADER_VARIABLES = (
-    "OTEL_EXPORTER_OTLP_HEADERS",
-    "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
-    "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
-    "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
-)
 # How agents are told to work is in the replies to their calls, which know their role.
 AGENT_RULES = (
     "You are an agent working for orbit, which hands out tasks and verifies the work. Talk to"
@@ -297,12 +297,10 @@ def _known(values: dict[str, Any], names: Mapping[str, str] | tuple[str, ...]) -
     return {field: values[key] for key, field in fields.items() if values.get(key) is not None}
 
 
-def _pipes(
-    process: asyncio.subprocess.Process,
-) -> tuple[asyncio.StreamWriter, asyncio.StreamReader, asyncio.StreamReader]:
-    """The process's stdin, stdout and stderr; it was started with all three piped."""
-    assert process.stdin and process.stdout and process.stderr
-    return process.stdin, process.stdout, process.stderr
+def _stdin(process: asyncio.subprocess.Process) -> asyncio.StreamWriter:
+    """The process's stdin; it was started with it piped."""
+    assert process.stdin
+    return process.stdin
 
 
 async def _send(stdin: asyncio.StreamWriter, prompt: str) -> None:
@@ -315,16 +313,7 @@ async def _send(stdin: asyncio.StreamWriter, prompt: str) -> None:
     stdin.close()
 
 
-class _Crashed(RuntimeError):
-    """The CLI ran but exited without finishing the turn."""
-
-
-def _crash(status: int, stderr: str) -> _Crashed:
-    """The error for a CLI that exited without finishing the turn."""
-    return _Crashed(stderr or f"claude exited with status {status}")
-
-
-class ClaudeCliRunner:
+class ClaudeCliRunner(Conversations):
     """Runs agents as Claude CLI sessions connected to orbit, run as ``command``, which send
     their telemetry to the OTLP collector at ``endpoint`` over ``protocol``, if given. Its full
     model ids are those ``full_model_ids`` takes, starting with ``MODEL_ID_PREFIX``."""
@@ -339,14 +328,14 @@ class ClaudeCliRunner:
         endpoint: str | None = None,
         protocol: str = "http/protobuf",
     ) -> None:
+        super().__init__()
         self._command = tuple(command)
         self._endpoint = endpoint
         self._protocol = protocol
-        self._conversations: dict[str, str] = {}  # Agent id -> its Claude session's id.
 
     async def run_agent(self, launch: AgentLaunch) -> AsyncIterator[Event]:
         """Run the agent as a new Claude session connected to orbit, as ``launch`` says."""
-        async for event in self._turn(launch, None).run(launch.agent.id, launch.prompt):
+        async for event in self._turn(launch, None).run(launch.agent.id):
             yield event
 
     async def converse(self, turn_id: str, launch: AgentLaunch) -> AsyncIterator[Event]:
@@ -354,34 +343,17 @@ class ClaudeCliRunner:
         resume it, each agent's apart from the others'. A resuming turn whose CLI exits before
         reporting its session raises ResumeFailed."""
         agent_id = launch.agent.id
-        resume = self._conversations.get(agent_id)
+        resume = self.conversation(agent_id)
         turn = self._turn(launch, resume)
         try:
-            async for event in turn.run(turn_id, launch.prompt):
+            async for event in turn.run(turn_id):
                 yield event
-        except _Crashed as exc:
+        except Crashed as exc:
             if resume and not turn.session_id:
                 raise ResumeFailed(str(exc)) from exc
             raise
         finally:
-            self._remember(agent_id, turn)
-
-    def _remember(self, agent_id: str, turn: _Turn) -> None:
-        """Note the Claude session ``turn`` ran in as agent ``agent_id``'s, if it reported one."""
-        if turn.session_id:
-            self._conversations[agent_id] = turn.session_id
-
-    def conversation(self, agent_id: str) -> str | None:
-        """The id of the Claude session agent ``agent_id``'s turns resume."""
-        return self._conversations.get(agent_id)
-
-    def set_conversation(self, agent_id: str, handle: str | None) -> None:
-        """Have agent ``agent_id``'s next turn resume the Claude session ``handle``, or start a
-        new one when it's ``None``."""
-        if handle is None:
-            self._conversations.pop(agent_id, None)
-        else:
-            self._conversations[agent_id] = handle
+            self.remember(agent_id, turn.session_id)
 
     def failure(self, message: str) -> Failure | None:
         """The failure Claude Code's error ``message`` tells, as :func:`claude_failure` says."""
@@ -398,7 +370,8 @@ class ClaudeCliRunner:
         if resume:
             args += ["--resume", resume]
         args += agent_args(launch)
-        return _Turn(args, self.env(launch), launch.cwd, launch.agent.id)
+        command = CliCommand(tuple(args), self.env(launch), launch.cwd, MISSING_HINT)
+        return _Turn(command, launch.prompt, launch.agent.id)
 
     def env(self, launch: AgentLaunch) -> dict[str, str]:
         """The environment ``launch``'s agent runs in."""
@@ -407,69 +380,35 @@ class ClaudeCliRunner:
 
 
 class _Turn:
-    """One run of the CLI: sends a prompt and translates what it says, noting the id of the
-    Claude session it ran in."""
+    """One run of the CLI as ``command``: sends it ``prompt`` and translates what it says,
+    noting the id of the Claude session it ran in."""
 
-    def __init__(self, args: Sequence[str], env: Mapping[str, str], cwd: str, agent_id: str):
-        self._args = args
-        self._env = env
-        self._cwd = cwd
+    def __init__(self, command: CliCommand, prompt: str, agent_id: str):
+        self._command = command
+        self._prompt = prompt
         self._agent_id = agent_id
         self.session_id: str | None = None
 
-    async def run(self, turn_id: str, prompt: str) -> AsyncIterator[Event]:
-        async for event in self._run(turn_id, prompt):
+    async def run(self, turn_id: str) -> AsyncIterator[Event]:
+        async for event in self._run(turn_id):
             yield event.model_copy(update={"agent_id": self._agent_id})
 
-    async def _run(self, turn_id: str, prompt: str) -> AsyncIterator[Event]:
+    async def _run(self, turn_id: str) -> AsyncIterator[Event]:
         yield TurnStarted(turn_id=turn_id)
         # Cancelled, or the CLI failed: leaving the stack stops it and whatever it started.
         async with contextlib.AsyncExitStack() as stack:
-            process = await self._start(stack)
-            async for event in self._converse(turn_id, process, prompt):
+            process = await started(stack, self._command, asyncio.subprocess.PIPE)
+            converse = partial(self._converse, turn_id, _stdin(process))
+            async for event in followed(process, converse, partial(crashed, "claude")):
                 yield event
-
-    async def _start(self, stack: contextlib.AsyncExitStack) -> asyncio.subprocess.Process:
-        """The running CLI, stopped when ``stack`` closes."""
-        try:
-            return await stack.enter_async_context(
-                spawned(
-                    self._args,
-                    env=self._env,
-                    cwd=self._cwd,
-                    stdin=asyncio.subprocess.PIPE,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    limit=LINE_LIMIT,
-                )
-            )
-        except OSError as error:
-            hint = "Is the Claude CLI installed and on PATH?"
-            raise RuntimeError(
-                start_failure(self._args, self._cwd, error, missing_hint=hint)
-            ) from None
 
     async def _converse(
-        self, turn_id: str, process: asyncio.subprocess.Process, prompt: str
+        self, turn_id: str, stdin: asyncio.StreamWriter, stdout: asyncio.StreamReader
     ) -> AsyncIterator[Event]:
-        """Send ``prompt``, then translate the CLI's output until it exits.
-
-        Raises if it exits without reporting the turn's end, with its stderr as the message.
-        """
-        stdin, stdout, stderr_pipe = _pipes(process)
-        stderr = asyncio.create_task(stderr_pipe.read())
-        try:
-            await _send(stdin, prompt)
-            finished = False
-            async for event in self._read_events(turn_id, stdout):
-                finished = finished or isinstance(event, TurnFinished)
-                yield event
-            # Let the CLI exit on its own once it's done, so it can save its session.
-            status = await process.wait()
-            if not finished:
-                raise _crash(status, (await stderr).decode(errors="replace").strip())
-        finally:
-            stderr.cancel()
+        """Send the prompt on ``stdin``, then translate what the CLI prints on ``stdout``."""
+        await _send(stdin, self._prompt)
+        async for event in self._read_events(turn_id, stdout):
+            yield event
 
     async def _read_events(
         self, turn_id: str, stdout: asyncio.StreamReader
