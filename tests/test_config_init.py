@@ -4,6 +4,7 @@ bringing one up to date with it, adding what it doesn't mention; copying the bui
 instructions beside it, with a commented-out line pointing each role at its copy; and copying
 orbit's skills into the project's ``.orbit/skills/``."""
 
+import re
 from datetime import date
 from pathlib import Path
 
@@ -33,8 +34,12 @@ from orbit.agent.external.config_init import (
 )
 from orbit.agent.external.reference_config import LATER_HEADING, reference_config
 from orbit.agent.external.skill_files import SKILL_DIRECTORY, read_skill_library
+from orbit.protocol import BUILT_IN_ROLE_NAMES
 
 TODAY = date(2026, 10, 25)
+
+SKILLS_DESCRIPTION = Role.model_fields["skills"].description or ""
+"""The line describing a role's skills, uncommented."""
 
 ADDED = "# Added by orbit init --update on 2026-10-25: settings this file didn't mention."
 
@@ -229,6 +234,18 @@ def test_update_doesnt_add_a_key_its_table_has_commented_out(tmp_path: Path) -> 
     assert result.additions is not None
     assert "merge" not in result.additions.keys["[roles.coder]"]
     assert path.read_text(encoding="utf-8").count("# merge = true") == 1
+
+
+def test_update_adds_each_roles_skills_line_under_its_description(tmp_path: Path) -> None:
+    reference = reference_config()
+    skills = re.compile(rf"# {re.escape(SKILLS_DESCRIPTION)}\n# skills[ :].*\n")
+    path = write(tmp_path, skills.sub("", reference))
+    result = update(tmp_path)
+    assert result.additions == Additions(
+        keys={f"[roles.{name}]": ("skills",) for name in BUILT_IN_ROLE_NAMES}
+    )
+    assert path.read_text(encoding="utf-8") == reference
+    assert len(skills.findall(reference)) == len(BUILT_IN_ROLE_NAMES)
 
 
 LATER = f"# {LATER_HEADING}"

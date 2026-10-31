@@ -26,6 +26,9 @@ REFERENCE_PATH = Path("src/orbit/agent/external/reference/config.toml")
 """Where the reference is written, relative to the current directory: the copy shipped with
 orbit."""
 
+REFERENCE_WIDTH = 100
+"""The most columns a line of the reference takes."""
+
 HEADER = (
     "orbit's project configuration, every setting commented out at its default.",
     "Uncomment the settings you change; the others keep their defaults.",
@@ -106,9 +109,9 @@ explaining it."""
 def reference_config() -> str:
     """The reference config: a short header; the limits at their defaults; examples of a
     verification step and a setup; each built-in role's table with every field at its shipped
-    value; an example of a role of a project's own; an example of skills by path; and the
-    settings of a later version of orbit under :data:`LATER_HEADING`. Everything is commented
-    out, each key under its description.
+    value, a list too long for a line in short; an example of a role of a project's own; an
+    example of skills by path; and the settings of a later version of orbit under
+    :data:`LATER_HEADING`. Everything is commented out, each key under its description.
     """
     roles = read_built_in_roles()
     files = read_instruction_files()
@@ -188,19 +191,30 @@ def _built_in(name: str, role: Role, file: str) -> list[str]:
     descriptions = _descriptions(Role)
     lines = [f"# [roles.{name}]"]
     for key, value in role.model_dump(mode="json").items():
-        lines += [f"# {descriptions[key]}", _role_field(key, value, file)]
+        lines += [f"# {descriptions[key]}", _role_field(name, key, value, file)]
     return lines
 
 
-def _role_field(key: str, value: Any, file: str) -> str:
-    """The commented-out line of a built-in role's field ``key``, at its ``value``: its
-    instructions as orbit's own ``file``, and a field it leaves unset as unset, as TOML has no
-    value for that."""
+def _role_field(name: str, key: str, value: Any, file: str) -> str:
+    """The commented-out line of built-in role ``name``'s field ``key``, at its ``value``: its
+    instructions as orbit's own ``file``, a field it leaves unset as unset, as TOML has no value
+    for that, and a list too long for a line in short (see :func:`_fitted`)."""
     if key == "instructions":
         return f"# instructions: orbit's own {file}"
     if value is None:
         return f"# {key}: unset"
-    return _key(key, value)
+    return _fitted(name, key, value)
+
+
+def _fitted(name: str, key: str, value: Any) -> str:
+    """The commented-out line giving built-in role ``name``'s field ``key`` its ``value``, if it
+    fits in :data:`REFERENCE_WIDTH` columns or isn't a list; otherwise how many the list holds,
+    and the command that lists them."""
+    line = _key(key, value)
+    if len(line) <= REFERENCE_WIDTH or not isinstance(value, list):
+        return line
+    show = f"orbit config show roles.{name}.{key}"
+    return f"# {key}: {len(value)} of orbit's own; {show} lists them"
 
 
 if __name__ == "__main__":

@@ -663,6 +663,98 @@ def test_the_projects_own_clash_beside_a_personal_role_names_the_project_file(
     assert str(raised.value).startswith(f"{path}: roles: the enabled roles")
 
 
+# Skills by role
+
+UNKNOWN_FOR_CODER = (
+    "roles.coder.skills names pyton, which isn't a skill; the skills are"
+    f" {', '.join(sorted(SHIPPED_SKILLS))}."
+)
+"""Why the coder naming the skill ``pyton`` is refused, listing orbit's skills."""
+
+
+def house_rules(root: Path) -> None:
+    """The project's own skill ``house-rules`` in the workspace at ``root``."""
+    folder = root / ".orbit" / "skills" / "house-rules"
+    folder.mkdir(parents=True)
+    rules = "---\nname: house-rules\ndescription: Our rules.\n---\n\n# Rules\n"
+    (folder / "SKILL.md").write_text(rules)
+
+
+def test_the_built_in_roles_skills_come_from_the_package(tmp_path: Path, config_dir: Path) -> None:
+    sources = read_config_sources(str(tmp_path), config_dir)
+    assert sources.config.roles["planner"].skills == ("code-style",)
+    assert sources.role_layers["reviewer"]["skills"] == PACKAGE
+
+
+def test_a_projects_skills_replace_a_built_in_roles_whole(tmp_path: Path, config_dir: Path) -> None:
+    path = write(tmp_path, '[roles.coder]\nskills = ["code-style"]\n')
+    sources = read_config_sources(str(tmp_path), config_dir)
+    assert sources.config.roles["coder"].skills == ("code-style",)
+    assert sources.role_layers["coder"]["skills"] == Layer("project", str(path))
+
+
+def test_a_role_naming_a_skill_that_isnt_one_names_the_project_file_and_lists_the_skills(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    path = write(tmp_path, '[roles.coder]\nskills = ["code-style", "pyton"]\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value) == f"{path}: {UNKNOWN_FOR_CODER}"
+
+
+def test_a_role_can_name_a_project_skill_by_its_folders_name(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    write(tmp_path, '[roles.coder]\nskills = ["house-rules"]\n')
+    house_rules(tmp_path)
+    assert read_config(str(tmp_path), config_dir).roles["coder"].skills == ("house-rules",)
+
+
+def test_a_disabled_role_naming_a_skill_that_isnt_one_is_refused(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    path = write(tmp_path, '[roles.coder]\nenabled = false\nskills = ["pyton"]\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value) == f"{path}: {UNKNOWN_FOR_CODER}"
+
+
+def test_a_project_role_naming_a_skill_that_isnt_one_names_the_project_file(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    path = write(tmp_path, '[roles.auditor]\ninstructions = "Audit."\nskills = ["pyton"]\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value).startswith(f"{path}: roles.auditor.skills names pyton, ")
+
+
+def test_a_personal_roles_skills_are_read(tmp_path: Path, config_dir: Path) -> None:
+    write_helper(config_dir, f'{HELPER}skills = ["code-style", "house-rules"]\n')
+    house_rules(tmp_path)
+    helper = read_config(str(tmp_path), config_dir).roles["helper"]
+    assert helper.skills == ("code-style", "house-rules")
+
+
+def test_a_personal_role_naming_a_skill_that_isnt_one_names_the_user_config(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    path = write_helper(config_dir, f'{HELPER}skills = ["pyton"]\n')
+    write(tmp_path, "fix_attempts = 2\n")
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value).startswith(f"{path}: roles.helper.skills names pyton, ")
+
+
+def test_the_roles_skills_are_checked_before_the_skills_by_path(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    path = write_skills(tmp_path, (["src"], ["pyton"]))
+    path.write_text(f'[roles.coder]\nskills = ["pyton"]\n\n{path.read_text()}')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value) == f"{path}: {UNKNOWN_FOR_CODER}"
+
+
 # What orbit config show reads
 
 

@@ -827,6 +827,15 @@ def test_consultation_fields_default_to_none_six_and_a_day() -> None:
     assert (role.consults, role.consult_limit_per_hour, role.copy_ttl_hours) == ((), 6, 24)
 
 
+def test_a_roles_skills_default_to_none() -> None:
+    assert load_config(custom(), BUILT_IN_ROLES).roles["x"].skills == ()
+
+
+def test_a_roles_skills_are_taken_in_order() -> None:
+    role = load_config(custom(skills=["security", "code-style"]), BUILT_IN_ROLES).roles["x"]
+    assert role.skills == ("security", "code-style")
+
+
 @pytest.mark.parametrize("data", [custom(consult_limit_per_hour=-1), custom(copy_ttl_hours=0)])
 def test_a_negative_consult_limit_or_a_zero_copy_ttl_is_refused(data: dict[str, object]) -> None:
     with pytest.raises(ConfigError, match=r"^roles\.x\."):

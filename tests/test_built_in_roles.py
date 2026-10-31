@@ -11,6 +11,7 @@ import pytest
 
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
+from orbit.agent.external.skill_files import skill_names
 from orbit.protocol import BUILT_IN_ROLE_NAMES
 
 FOLDER = files("orbit.agent.external") / "instructions"
@@ -18,6 +19,16 @@ README = Path(__file__).parent.parent / "README.md"
 ROLES_TOML = (FOLDER / "roles.toml").read_text(encoding="utf-8")
 
 REVIEW_TOOLS = ("get_task", "complete_task", "report_progress", "give_up", "suggest_task")
+REVIEWER_SKILLS = (
+    "code-style",
+    "security",
+    "review-fit",
+    "review-bugs",
+    "review-tests",
+    "review-logic",
+    "review-security",
+    "review-performance",
+)
 BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
     "coder": {
         "model": None,
@@ -35,6 +46,7 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "consults": (),
         "consult_limit_per_hour": 6,
         "copy_ttl_hours": 24,
+        "skills": ("code-style", "security"),
     },
     "reviewer": {
         "model": None,
@@ -52,6 +64,7 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "consults": (),
         "consult_limit_per_hour": 6,
         "copy_ttl_hours": 24,
+        "skills": REVIEWER_SKILLS,
     },
     "super-reviewer": {
         "model": "opus",
@@ -69,6 +82,7 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "consults": (),
         "consult_limit_per_hour": 6,
         "copy_ttl_hours": 24,
+        "skills": ("code-style", "review-style", "review-drift", "review-scaling"),
     },
     "planner": {
         "model": None,
@@ -86,6 +100,7 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "consults": ("experimenter",),
         "consult_limit_per_hour": 6,
         "copy_ttl_hours": 24,
+        "skills": ("code-style",),
     },
     "experimenter": {
         "model": "sonnet",
@@ -103,6 +118,7 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "consults": (),
         "consult_limit_per_hour": 6,
         "copy_ttl_hours": 24,
+        "skills": (),
     },
     "configurator": {
         "model": None,
@@ -120,10 +136,12 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "consults": (),
         "consult_limit_per_hour": 6,
         "copy_ttl_hours": 24,
+        "skills": (),
     },
 }
 """Each built-in role's fields but its instructions: those orbit has always had, where it
-works, which lane runs it, whether you talk to it, whether its work merges, and no effort."""
+works, which lane runs it, whether you talk to it, whether its work merges, no effort, and the
+skills its agents get."""
 
 
 def role_directory(tmp_path: Path, roles_toml: str, leave_out: Collection[str] = ()) -> Path:
@@ -137,14 +155,15 @@ def role_directory(tmp_path: Path, roles_toml: str, leave_out: Collection[str] =
     return tmp_path
 
 
-def readme_tools(name: str) -> tuple[str, ...]:
-    """The tools README.md's built-in roles table lists for the role ``name``."""
+def readme_column(name: str, column: int) -> tuple[str, ...]:
+    """The names in backticks README.md's built-in roles table lists for the role ``name`` in its
+    ``column``, counting the role's own as 1."""
     row = next(
         line
         for line in README.read_text(encoding="utf-8").splitlines()
         if line.startswith(f"| `{name}` |")
     )
-    return tuple(re.findall(r"`([^`]+)`", row.split("|")[2]))
+    return tuple(re.findall(r"`([^`]+)`", row.split("|")[column]))
 
 
 def test_there_is_one_markdown_file_per_built_in_role() -> None:
@@ -238,7 +257,18 @@ def test_the_configurator_looks_for_the_projects_own_checks() -> None:
 
 def test_the_readme_lists_each_built_in_roles_tools() -> None:
     for name, role in read_built_in_roles().items():
-        assert readme_tools(name) == role.tools, name
+        assert readme_column(name, 2) == role.tools, name
+
+
+def test_the_readme_lists_each_built_in_roles_skills() -> None:
+    for name, role in read_built_in_roles().items():
+        assert readme_column(name, 5) == role.skills, name
+
+
+def test_each_built_in_roles_skills_are_skills_orbit_ships() -> None:
+    shipped = set(skill_names())
+    for name, role in read_built_in_roles().items():
+        assert set(role.skills) <= shipped, name
 
 
 PLANNER_ASKS_BEFORE_PROPOSING = (

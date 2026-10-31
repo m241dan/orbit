@@ -12,7 +12,12 @@ from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.config_report import ConfigSources, Written
 from orbit.agent.domain.config_update import reference_with_checks, with_checks
 from orbit.agent.domain.layers import Layer, SharedRuntimeError, UserConfigError, with_runtime
-from orbit.agent.domain.skills import SkillMapping, check_skill_mappings, inside_project
+from orbit.agent.domain.skills import (
+    SkillMapping,
+    check_role_skills,
+    check_skill_mappings,
+    inside_project,
+)
 from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
 from orbit.agent.external.role_instructions import with_instructions
 from orbit.agent.external.runtimes import read_runtime_rules
@@ -43,11 +48,12 @@ def read_config(root: str, config_dir: Path, runtime: str | None = None) -> Orbi
 
     Raises :class:`ConfigError`, naming the file, if it, the user config or a role's
     instructions file can't be read or is invalid, as it is when a role's runtime doesn't take
-    its model or a role asks for what its runtime can't do, or a ``[[skills]]`` entry names a
-    path that isn't a file or folder in ``root`` or a skill that isn't in effect (see
+    its model or a role asks for what its runtime can't do, a role names a skill that isn't in
+    effect (see :func:`~orbit.agent.domain.skills.check_role_skills`), or a ``[[skills]]`` entry
+    names a path that isn't a file or folder in ``root`` or a skill that isn't in effect (see
     :func:`~orbit.agent.domain.skills.check_skill_mappings`); it names the user config if the
-    personal roles break a rule across the roles that the others keep, and the skill's file or
-    folder if a skill is invalid.
+    personal roles break a rule across the roles that the others keep or it set the skills a
+    role names, and the skill's file or folder if a skill is invalid.
     """
     return _read_layered(root, config_dir, runtime).config
 
@@ -80,9 +86,25 @@ def _read_layered(root: str, config_dir: Path, runtime: str | None = None) -> La
     """
     layered = _read_files(root, config_dir, runtime)
     skills = read_skill_library(root)
-    config = layered.config.model_copy(update={"skill_library": skills})
-    _check_skill_mappings(root, config)
-    return replace(layered, config=config)
+    layered = replace(layered, config=layered.config.model_copy(update={"skill_library": skills}))
+    _check_role_skills(root, layered)
+    _check_skill_mappings(root, layered.config)
+    return layered
+
+
+def _check_role_skills(root: str, layered: LayeredConfig) -> None:
+    """Raise :class:`ConfigError` if a role among ``layered``'s, built-in, personal or the
+    project's, enabled or not, names a skill that isn't among its skills, role by role in order
+    (see :func:`~orbit.agent.domain.skills.check_role_skills`), naming the file that set the
+    role's skills: the user config or ``root``'s file, which stands in for the package and the
+    defaults, as they have none."""
+    config = layered.config
+    for name, role in config.roles.items():
+        try:
+            check_role_skills(name, role.skills, config.skill_library)
+        except ConfigError as exc:
+            path = layered.role_layers[name]["skills"].path or Path(root) / CONFIG_PATH
+            raise ConfigError(f"{path}: {exc}") from None
 
 
 def _check_skill_mappings(root: str, config: OrbitConfig) -> None:

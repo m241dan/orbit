@@ -123,7 +123,12 @@ delivers the skills.
     (followed by ` For example:`, as the reference's other examples are), with `paths = ["src"]`
     described `Files or folders in the project, relative to its root; each must exist.` and
     `use = ["application", "python"]` described `The skills that apply there, by name.`; over no
-    example (`[[skills]]` would go undocumented).
+    example (`[[skills]]` would go undocumented). A built-in role's list whose line would pass 100
+    columns, as the reviewer's skills do, is written in the short form the reference already uses
+    for instructions and unset fields, `# skills: 8 of orbit's own; orbit config show
+    roles.reviewer.skills lists them`; over continuation lines (`orbit init --update`'s scanner,
+    the reference test and orbit's own config would all need multi-line values) and exempting the
+    line from the 100-column test (it weakens a check).
 19. The README describes skills, their layers and overrides, `skills` and `[[skills]]`, what
     `config show` lists and `init --skill`, each with the task that brings it.
 
@@ -138,7 +143,8 @@ delivers the skills.
 3. Let a project override and add skills: `.orbit/skills/` read over the package, whole file by
    whole file, each `SkillFile` with its `layer` (`PACKAGE`, or the project layer with the file's
    own path).
-4. Give roles skills: `Role.skills`, the defaults, unknown names refused, the reference line.
+4. Give roles skills: `Role.skills`, the defaults, unknown names refused, the reference line,
+   with long lists in the short form.
 5. Map paths to skills: `[[skills]]` as `OrbitConfig.skills: tuple[SkillMapping, ...]` with
    `paths` and `use`, names and paths checked, the reference example.
 6. List skills in `orbit config show`: `skills.N.paths`, `skills.N.use` and

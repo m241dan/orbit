@@ -5,6 +5,7 @@
 instructions = "planner.md"
 tool_access = "restricted"
 tools = ["propose_task", "report_progress", "save_report", "list_reports", "read_report"]
+skills = ["code-style"]
 consults = ["experimenter"]
 verify = false
 lane = "planner"
@@ -32,6 +33,7 @@ runtime = "claude"
 instructions = "coder.md"
 tool_access = "full"
 tools = ["get_task", "complete_task", "run_check", "report_progress", "give_up"]
+skills = ["code-style", "security"]
 verify = true
 lane = "work"
 workspace = "worktree"
@@ -44,6 +46,16 @@ runtime = "claude"
 instructions = "reviewer.md"
 tool_access = "restricted"
 tools = ["get_task", "complete_task", "report_progress", "give_up", "suggest_task"]
+skills = [
+    "code-style",
+    "security",
+    "review-fit",
+    "review-bugs",
+    "review-tests",
+    "review-logic",
+    "review-security",
+    "review-performance",
+]
 verify = false
 lane = "review"
 workspace = "snapshot"
@@ -57,6 +69,7 @@ instructions = "super-reviewer.md"
 model = "opus"
 tool_access = "restricted"
 tools = ["get_task", "complete_task", "report_progress", "give_up", "suggest_task"]
+skills = ["code-style", "review-style", "review-drift", "review-scaling"]
 verify = false
 lane = "review"
 workspace = "snapshot"

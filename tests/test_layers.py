@@ -79,7 +79,12 @@ def test_a_user_configs_role_table_sets_that_roles_model_and_effort() -> None:
 
 @pytest.mark.parametrize(
     ("roles", "key"),
-    [({"coder": {"verify": False}}, "roles.coder.verify"), ({"verify": False}, "roles.verify")],
+    [
+        ({"coder": {"verify": False}}, "roles.coder.verify"),
+        ({"verify": False}, "roles.verify"),
+        ({"coder": {"skills": ["code-style"]}}, "roles.coder.skills"),
+        ({"skills": ["code-style"]}, "roles.skills"),
+    ],
 )
 def test_any_other_role_field_belongs_in_the_project_file(
     roles: dict[str, object], key: str
@@ -147,6 +152,11 @@ def test_a_table_setting_more_than_model_and_effort_for_a_new_role_is_a_personal
     roles = user({"roles": {"model": "haiku", "helper": HELPER}})
     assert roles.personal == {"helper": Role.model_validate(HELPER)}
     assert (roles.named, roles.every) == ({}, RoleFields(model="haiku"))
+
+
+def test_a_personal_role_may_name_its_skills() -> None:
+    roles = user({"roles": {"helper": {**HELPER, "skills": ["code-style", "house-rules"]}}})
+    assert roles.personal["helper"].skills == ("code-style", "house-rules")
 
 
 def test_a_table_setting_only_model_and_effort_for_a_new_role_isnt_a_personal_role() -> None:
@@ -218,6 +228,14 @@ def test_a_field_the_package_sets_comes_from_it_and_any_other_from_the_defaults(
     assert layers["super-reviewer"]["model"] == PACKAGE
     assert (layers["coder"]["model"], layers["coder"]["effort"]) == (DEFAULT, DEFAULT)
     assert layers["coder"]["tools"] == PACKAGE
+
+
+def test_a_projects_skills_replace_a_built_in_roles_whole() -> None:
+    resolved = resolve_roles(
+        PACKAGE_ROLES, NO_USER_ROLES, project({"reviewer": {"skills": ["code-style"]}})
+    )
+    assert resolved.roles["reviewer"].skills == ("code-style",)
+    assert resolved.layers["reviewer"]["skills"] == PROJECT
 
 
 def test_the_packages_roles_run_on_claude() -> None:

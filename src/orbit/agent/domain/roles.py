@@ -4,8 +4,9 @@ queues in them.
 The built-in roles aren't kept here: whoever builds them passes in the contents of their
 ``roles.toml`` and the instructions it names.
 
-A role says what an agent is told about its job, which of orbit's tools it may call, whether its
-claims of being done are verified, how long it may take and the runtime it runs on. Its model,
+A role says what an agent is told about its job, the skills it gets, which of orbit's tools it
+may call, whether its claims of being done are verified, how long it may take and the runtime it
+runs on; whether the skills it names exist is checked once they're read. Its model,
 tool access and effort are the defaults for tasks orbit queues in that role; a task the user
 queues keeps its own settings, but one without an effort runs with its role's. It also says
 which lane runs it, where it works, whether you talk to it, whether its work merges and whether
@@ -240,6 +241,12 @@ class Role(_Config):
         le=MAX_COPY_TTL_HOURS,
         allow_inf_nan=False,
         description="How long its copy is kept after its conversation's last turn, in hours.",
+    )
+    skills: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/."
+        ),
     )
 
     @field_validator("tools")

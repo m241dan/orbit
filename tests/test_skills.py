@@ -15,6 +15,7 @@ from orbit.agent.domain.skills import (
     SkillFolder,
     SkillLibrary,
     SkillMapping,
+    check_role_skills,
     check_skill_mappings,
     load_skill,
     load_skill_library,
@@ -469,3 +470,20 @@ def test_an_entry_is_checked_whole_before_the_next() -> None:
     first = "skills.1.use names pyton, which isn't a skill; the skills are python."
     with pytest.raises(ConfigError, match=whole(first)):
         check(mapping("src", use=("python", "pyton")), mapping("/etc"))
+
+
+# Skills by role
+
+
+def test_a_roles_skills_in_the_library_pass() -> None:
+    check_role_skills("coder", ("python", "cpp"), library("python", "cpp"))
+
+
+def test_a_role_naming_no_skills_passes() -> None:
+    check_role_skills("coder", (), library())
+
+
+def test_a_roles_first_unknown_skill_is_refused_naming_the_role_and_listing_the_skills() -> None:
+    problem = "roles.coder.skills names pyton, which isn't a skill; the skills are cpp, go, python."
+    with pytest.raises(ConfigError, match=whole(problem)):
+        check_role_skills("coder", ("python", "pyton", "rust"), library("python", "go", "cpp"))

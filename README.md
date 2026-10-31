@@ -1124,18 +1124,19 @@ in its role's `workspace`.
 ### Roles and `.orbit/config.toml`
 
 Every task names a **role**, the kind of agent that takes it (`coder` unless it says otherwise).
-A role sets what the agent is told about its job, which of orbit's tools it may call, whether its
-claims of being done are verified, and an optional time limit. Its model and tool access are the
-defaults for tasks orbit queues in that role; a task you queue keeps its own settings. Built in:
+A role sets what the agent is told about its job, the skills it gets (see [Skills](#skills)),
+which of orbit's tools it may call, whether its claims of being done are verified, and an optional
+time limit. Its model and tool access are the defaults for tasks orbit queues in that role; a task
+you queue keeps its own settings. Built in:
 
-| Role | Tools | Verified | Default model / access |
-|---|---|---|---|
-| `coder` | `get_task`, `complete_task`, `run_check`, `report_progress`, `give_up` | yes | default / `full` |
-| `reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `suggest_task` | no | default / `restricted` |
-| `super-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `suggest_task` | no | `opus` / `restricted` |
-| `planner` | `propose_task`, `report_progress`, `save_report`, `list_reports`, `read_report` | no | default / `restricted` |
-| `experimenter` | `report_progress`, `save_report`, `list_reports`, `read_report` | no | `sonnet` / `full` |
-| `configurator` | `get_task`, `propose_checks`, `report_progress`, `give_up` | no | default / `restricted` |
+| Role | Tools | Verified | Default model / access | Skills |
+|---|---|---|---|---|
+| `coder` | `get_task`, `complete_task`, `run_check`, `report_progress`, `give_up` | yes | default / `full` | `code-style`, `security` |
+| `reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `suggest_task` | no | default / `restricted` | `code-style`, `security`, `review-fit`, `review-bugs`, `review-tests`, `review-logic`, `review-security`, `review-performance` |
+| `super-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `suggest_task` | no | `opus` / `restricted` | `code-style`, `review-style`, `review-drift`, `review-scaling` |
+| `planner` | `propose_task`, `report_progress`, `save_report`, `list_reports`, `read_report` | no | default / `restricted` | `code-style` |
+| `experimenter` | `report_progress`, `save_report`, `list_reports`, `read_report` | no | `sonnet` / `full` | none |
+| `configurator` | `get_task`, `propose_checks`, `report_progress`, `give_up` | no | default / `restricted` | none |
 
 The `experimenter` is a conversational role the planner consults (see `consults` below) and you
 can talk to on its own tab: it runs what it's asked to learn, such as how a library behaves, in a
@@ -1319,6 +1320,15 @@ merges, whether it's enabled, how hard its agents think and what they run on:
 - `copy_ttl_hours`: how long, in hours, a conversational role working in a `copy` keeps its copy
   after its conversation's last turn, 24 by default; it must be a number more than 0
   and at most 23,999,999,999 (the hours a timedelta holds).
+- `skills`: the skills its agents get, by name, orbit's own or the project's in `.orbit/skills/`
+  (see [Skills](#skills)); none by default, but the built-in roles get those in the table above.
+  A project's list replaces a built-in role's whole, so `[roles.reviewer] skills = ["code-style"]`
+  gives the reviewer just `code-style`, and `skills = []` none. Every skill a role names must be
+  one, whether the role is built in, yours or the project's, enabled or not: a name that isn't
+  stops the workspace from opening with a configuration error naming the file that set the list,
+  the project's `.orbit/config.toml` or your user config, the role and the name, and listing the
+  skills (`roles.coder.skills names pyton, which isn't a skill; the skills are application,
+  code-style, …`).
 
 In the TUI, the task editor's **Role** field picks a task's role among the roles enabled in the
 session's workspace that aren't conversational, each shown with its lane (`Coder · work`) and a
@@ -1354,7 +1364,7 @@ A project can change these, orbit's limits, its verification steps (see
 name adds a role, which must set `instructions` and otherwise gets `get_task`, `complete_task`,
 `report_progress` and `give_up` as its tools, `restricted` tool access, the default model, its
 claims verified, no time limit, the coder's lane `work`, `worktree`, no conversation and
-enabled, no effort and the runtime `claude`. A role that doesn't set `merge` merges if it can, being verified and in a
+enabled, no effort, the runtime `claude` and no skills. A role that doesn't set `merge` merges if it can, being verified and in a
 worktree, and a built-in role whose `verify` or `workspace` the file changes without setting
 `merge` follows the same rule, so `[roles.coder] verify = false` alone stops the coder merging. One
 in another workspace must set `verify = false`, and one with `verify = false` doesn't merge, and
@@ -1550,6 +1560,17 @@ languages `python` and `cpp`, the kinds of project `application`, `pure-library`
 `review-bugs`, `review-tests`, `review-logic`, `review-security`, `review-performance`,
 `review-style`, `review-drift` and `review-scaling`. They're read with the configuration as a
 workspace opens; agents get them from a later version of orbit.
+
+Each role names the skills its agents get in its `skills` (see
+[Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)): the `planner` gets `code-style`,
+the `coder` `code-style` and `security`, the `reviewer` those and the review lenses `review-fit`,
+`review-bugs`, `review-tests`, `review-logic`, `review-security` and `review-performance`, the
+`super-reviewer` `code-style`, `review-style`, `review-drift` and `review-scaling`, and the
+`experimenter` and `configurator` none. A project's `skills` for a role replaces orbit's list
+whole, so it can drop a default as well as add a skill, orbit's or its own. The reference config
+shows each built-in role's list, or, for one too long for its line, how many it holds and the
+command that lists them (`# skills: 8 of orbit's own; orbit config show roles.reviewer.skills
+lists them`).
 
 A project overrides and adds to them in `.orbit/skills/`, a folder for each skill. A file at the
 same path as a shipped one, under the folder of the skill's name, replaces it whole: the skill
@@ -2986,7 +3007,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     MCP server; `GitCoderTree` is the coder's worktree and its snapshots; `repository` finds the
     git repository a workspace is in, fingerprints it, and places orbit's directory in it
     (`orbit_dir`: `.git/orbit`, or `.orbit` outside git); `config_file` reads
-    `.orbit/config.toml`, checking its `[[skills]]` paths are in the workspace, and for
+    `.orbit/config.toml`, checking the skills its roles name, naming the file that named them,
+    and that its `[[skills]]` paths are in the workspace, and for
     `orbit config show` what the configuration is resolved from
     (`read_config_sources`), and writes the configurator's checks into it (`write_checks`),
     starting a missing file from the reference config, and `role_instructions` the instructions files its roles and your
@@ -3119,7 +3141,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `agents`: agent ids and tokens), `roles` (built-in roles, loaded from their `roles.toml` and
     given their instructions, which of a role's fields go together, and the tasks orbit queues in
     them), `config` (`OrbitConfig`: the
-    limits, roles, verification steps, setup and skills by path a project file sets over the built-in defaults, and the skills in effect), `skills` (`Skill`, `SkillFile` and `SkillLibrary`, a skill built from its folder's files with its `SKILL.md`'s front matter, `parse_front_matter`, checked as Claude Code checks skills, and the library of the package's skill folders with the project's laid over them file by file, `load_skill_library`; and `SkillMapping`, a `[[skills]]` entry, whose paths and skills `check_skill_mappings` checks against the paths in the project and the library), `layers` (the layers a setting comes from, the user config's role fields and personal roles, and each role resolved across them field by field), `config_report` (what `orbit config show` reports: each setting in effect by its dotted key with the layer it came from, and a key's settings), `config_update` (what `orbit init --update` adds to a project file from the reference config: the keys a table it has doesn't mention, after the table's last line, and the tables it lacks, at the end, never changing a line of it; and the lines `orbit init --roles` adds, pointing each built-in role at its copy of its instructions; and the checks the configurator writes, in place of a file's steps and setup without changing its other lines, or of the reference config's examples of them) and `config_errors` (`ConfigError`,
+    limits, roles, verification steps, setup and skills by path a project file sets over the built-in defaults, and the skills in effect), `skills` (`Skill`, `SkillFile` and `SkillLibrary`, a skill built from its folder's files with its `SKILL.md`'s front matter, `parse_front_matter`, checked as Claude Code checks skills, and the library of the package's skill folders with the project's laid over them file by file, `load_skill_library`; `check_role_skills`, which checks the skills a role names against the library; and `SkillMapping`, a `[[skills]]` entry, whose paths and skills `check_skill_mappings` checks against the paths in the project and the library), `layers` (the layers a setting comes from, the user config's role fields and personal roles, and each role resolved across them field by field), `config_report` (what `orbit config show` reports: each setting in effect by its dotted key with the layer it came from, and a key's settings), `config_update` (what `orbit init --update` adds to a project file from the reference config: the keys a table it has doesn't mention, after the table's last line, and the tables it lacks, at the end, never changing a line of it; and the lines `orbit init --roles` adds, pointing each built-in role at its copy of its instructions; and the checks the configurator writes, in place of a file's steps and setup without changing its other lines, or of the reference config's examples of them) and `config_errors` (`ConfigError`,
     and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]` with its `TlsSettings`, which files each TLS mode needs, where now falls in a certificate's validity, and which hosts are loopback), `certificate_list` (what `orbit certs list` shows of each certificate: its expiry, days left, fingerprint and marks), `client_bundle` (what `orbit certs client --bundle` puts in a client's bundle: the CA, its certificate and key, and the `[remotes.<name>]` lines naming them where it's unpacked, which connect to a `wss://` URL alone), `remotes` (`RemoteSettings`, a `[remotes.<name>]` table, and which credentials go together), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
     setup step that makes a fresh worktree ready, and the checks a configurator proposes), the
     `Catalog` (in `catalog`: the workspace and its sessions, the agents' roles, the triggers and

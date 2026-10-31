@@ -1,8 +1,8 @@
 """Skills: folders of Markdown, and any other files they need, that teach agents how the user
 builds software. Each opens with a ``SKILL.md`` whose front matter names and describes it, held
 to the rules Claude Code holds skills to. They come from two layers, the package's skills and the
-project's, whose files replace and add to the package's file by file. A project also maps paths
-in it to the skills for the code there."""
+project's, whose files replace and add to the package's file by file. Roles name the skills
+their agents get, and a project also maps paths in it to the skills for the code there."""
 
 import posixpath
 import re
@@ -265,6 +265,15 @@ def unknown_skill(key: str, name: str, library: SkillLibrary) -> str:
     """Why the skill ``name`` the setting ``key`` names is refused: it isn't one of the
     ``library``'s, which it lists."""
     return f"{key} names {name}, which isn't a skill; the skills are {', '.join(library.skills)}."
+
+
+def check_role_skills(name: str, skills: Sequence[str], library: SkillLibrary) -> None:
+    """Raise :class:`ConfigError` naming the first of the ``skills`` role ``name`` names that
+    isn't in the ``library``, if any, as :func:`unknown_skill` does, under the key
+    ``roles.<name>.skills``."""
+    unknown = [skill for skill in skills if skill not in library.skills]
+    if unknown:
+        raise ConfigError(unknown_skill(f"roles.{name}.skills", unknown[0], library))
 
 
 def check_skill_mappings(

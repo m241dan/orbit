@@ -18,7 +18,7 @@ from orbit.agent.domain.roles import Role
 from orbit.agent.domain.skills import SkillMapping
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
-from orbit.agent.external.reference_config import reference_config
+from orbit.agent.external.reference_config import REFERENCE_WIDTH, reference_config
 from orbit.protocol import BUILT_IN_ROLE_NAMES
 
 MODULE = "orbit.agent.external.reference_config"
@@ -113,7 +113,8 @@ def test_everything_is_commented_out() -> None:
 
 
 def test_lines_fit_in_100_columns() -> None:
-    assert max(map(len, lines())) <= 100
+    assert REFERENCE_WIDTH == 100
+    assert max(map(len, lines())) <= REFERENCE_WIDTH
 
 
 def test_sections_are_in_order() -> None:
@@ -224,6 +225,27 @@ def test_built_in_tables_show_shipped_values() -> None:
     assert '# runtime = "claude"' in coder
     assert '# model = "opus"' in table("super-reviewer")
     assert '# workspace = "checkout"' in table("planner")
+
+
+def test_a_built_in_roles_skills_show_as_shipped() -> None:
+    assert '# skills = ["code-style"]' in table("planner")
+    assert '# skills = ["code-style", "security"]' in table("coder")
+    assert "# skills = []" in table("experimenter")
+
+
+def test_the_skills_field_says_whose_skills_a_role_names() -> None:
+    assert described("skills", table("coder")) == (
+        "# The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/."
+    )
+
+
+def test_a_list_too_long_for_a_line_says_how_many_and_where_to_see_them() -> None:
+    reviewer = table("reviewer")
+
+    assert "# skills: 8 of orbit's own; orbit config show roles.reviewer.skills lists them" in (
+        reviewer
+    )
+    assert described("skills", reviewer) == f"# {Role.model_fields['skills'].description}"
 
 
 def test_unset_fields_say_so() -> None:

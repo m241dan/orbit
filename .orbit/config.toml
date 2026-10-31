@@ -85,6 +85,8 @@ watch = ["uv.lock"]
 # consult_limit_per_hour = 6
 # How long its copy is kept after its conversation's last turn, in hours.
 # copy_ttl_hours = 24.0
+# The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
+# skills = ["code-style"]
 
 # [roles.experimenter]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -119,6 +121,8 @@ watch = ["uv.lock"]
 # consult_limit_per_hour = 6
 # How long its copy is kept after its conversation's last turn, in hours.
 # copy_ttl_hours = 24.0
+# The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
+# skills = []
 
 # [roles.coder]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -153,6 +157,8 @@ watch = ["uv.lock"]
 # consult_limit_per_hour = 6
 # How long its copy is kept after its conversation's last turn, in hours.
 # copy_ttl_hours = 24.0
+# The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
+# skills = ["code-style", "security"]
 
 # [roles.reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -187,6 +193,8 @@ watch = ["uv.lock"]
 # consult_limit_per_hour = 6
 # How long its copy is kept after its conversation's last turn, in hours.
 # copy_ttl_hours = 24.0
+# The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
+# skills: 8 of orbit's own; orbit config show roles.reviewer.skills lists them
 
 # [roles.super-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -221,6 +229,8 @@ watch = ["uv.lock"]
 # consult_limit_per_hour = 6
 # How long its copy is kept after its conversation's last turn, in hours.
 # copy_ttl_hours = 24.0
+# The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
+# skills = ["code-style", "review-style", "review-drift", "review-scaling"]
 
 # [roles.configurator]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -255,6 +265,8 @@ watch = ["uv.lock"]
 # consult_limit_per_hour = 6
 # How long its copy is kept after its conversation's last turn, in hours.
 # copy_ttl_hours = 24.0
+# The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
+# skills = []
 
 # A role of your own, which must set its instructions. For example:
 # [roles.security-reviewer]

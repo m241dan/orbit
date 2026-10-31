@@ -158,6 +158,16 @@ def test_a_roles_runtime_shows_with_its_layer(project: Path) -> None:
     assert 'roles.coder.runtime = "claude"   package' in result.stdout.splitlines()
 
 
+def test_a_roles_skills_show_in_the_package_layer(project: Path) -> None:
+    result = show(project, "roles.reviewer.skills")
+    assert result.exit_code == 0, result.output
+    skills = (
+        '["code-style", "security", "review-fit", "review-bugs", "review-tests", "review-logic",'
+        ' "review-security", "review-performance"]'
+    )
+    assert result.stdout == f"roles.reviewer.skills = {skills}   package\n"
+
+
 def test_the_user_configs_runtime_for_every_role_is_the_users(
     project: Path, config_dir: Path
 ) -> None:
