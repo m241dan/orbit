@@ -93,6 +93,97 @@ def test_front_matter_may_end_its_lines_with_carriage_returns() -> None:
     assert parse_front_matter(text) == FrontMatter(name="a", description="b", body="Body\r\n")
 
 
+def test_a_byte_order_mark_before_the_front_matter_is_left_out() -> None:
+    text = "\ufeff---\nname: a\ndescription: b\n---\nBody"
+    assert parse_front_matter(text) == FrontMatter(name="a", description="b", body="Body")
+
+
+@pytest.mark.parametrize(
+    ("written", "value"),
+    [
+        ('"python"', "python"),
+        ("'python'", "python"),
+        ('"Use when: writing Python"', "Use when: writing Python"),
+        ("'Use when: writing Python'", "Use when: writing Python"),
+        ("  ' Spaced '  ", " Spaced "),
+        ("\"'Single'\"", "'Single'"),
+        ("'\"Double\"'", '"Double"'),
+        ('">"', ">"),
+    ],
+)
+def test_a_value_in_matching_quotes_loses_them(written: str, value: str) -> None:
+    front = parse_front_matter(f"---\nname: {written}\ndescription: {written}\n---\n")
+    assert (front.name, front.description) == (value, value)
+
+
+@pytest.mark.parametrize(
+    ("written", "value"),
+    [
+        ("'It''s Python'", "It's Python"),
+        ("''''", "'"),
+        ("'C:\\temp'", "C:\\temp"),
+        ('"Say \\"hi\\""', 'Say "hi"'),
+        ('"C:\\\\temp"', "C:\\temp"),
+        ('"\\\\\\""', '\\"'),
+        ("\"It''s\"", "It''s"),
+    ],
+)
+def test_single_quotes_double_a_quote_and_double_quotes_escape_quotes_and_backslashes(
+    written: str, value: str
+) -> None:
+    assert parse_front_matter(f"---\nname: a\ndescription: {written}\n---\n").description == value
+
+
+@pytest.mark.parametrize(
+    "written", ['"Python', "Python'", "'Python", 'Python"', "\"Python'", "'Python\"", '"', "'"]
+)
+def test_a_value_with_one_quote_or_mismatched_quotes_is_kept_as_written(written: str) -> None:
+    assert parse_front_matter(f"---\nname: a\ndescription: {written}\n---\n").description == (
+        written
+    )
+
+
+@pytest.mark.parametrize(
+    ("indicator", "description"),
+    [
+        (">", "Python conventions. Use when: writing Python."),
+        (">-", "Python conventions. Use when: writing Python."),
+        (">+", "Python conventions. Use when: writing Python."),
+        ("|", "Python conventions.\nUse when: writing Python."),
+        ("|-", "Python conventions.\nUse when: writing Python."),
+        ("|+", "Python conventions.\nUse when: writing Python."),
+    ],
+)
+def test_a_block_scalar_is_its_indented_lines_folded_by_a_chevron_or_kept_by_a_bar(
+    indicator: str, description: str
+) -> None:
+    text = (
+        f"---\ndescription: {indicator}\n  Python conventions.\n  Use when: writing Python.\n"
+        "name: a\n---\nBody"
+    )
+    assert parse_front_matter(text) == FrontMatter("a", description, "Body")
+
+
+def test_a_block_scalars_lines_may_end_with_carriage_returns() -> None:
+    text = "---\r\nname: a\r\ndescription: |\r\n  b\r\n  c\r\n---\r\nBody"
+    assert parse_front_matter(text).description == "b\nc"
+
+
+def test_a_block_scalars_lines_that_look_like_keys_are_its_text() -> None:
+    text = "---\nname: a\ndescription: >\n  name: b\n---\nBody"
+    assert parse_front_matter(text) == FrontMatter("a", "name: b", "Body")
+
+
+def test_a_block_scalar_without_indented_lines_is_empty() -> None:
+    assert parse_front_matter("---\nname: a\ndescription: >\n---\nBody").description == ""
+
+
+@pytest.mark.parametrize("written", ["> Python", "| Python", ">>", "|>"])
+def test_a_value_that_only_starts_like_a_block_scalar_is_kept_as_written(written: str) -> None:
+    text = f"---\nname: a\ndescription: {written}\n  Indented.\n---\nBody"
+    assert parse_front_matter(text).description == written
+
+
 @pytest.mark.parametrize(
     "text",
     [
@@ -160,6 +251,18 @@ def test_a_description_claude_code_doesnt_take_is_refused(description: str) -> N
     problem = "a skill's description is 1 to 1,024 characters."
     with pytest.raises(ConfigError, match=refused(problem)):
         load(skill_md(description=description))
+
+
+def test_a_block_scalar_description_without_indented_lines_is_refused() -> None:
+    problem = "a skill's description is 1 to 1,024 characters."
+    with pytest.raises(ConfigError, match=refused(problem)):
+        load(skill_md(description=">"))
+
+
+@pytest.mark.parametrize("name", ['"python"', "'python'"])
+def test_a_quoted_name_matching_the_folder_is_taken(name: str) -> None:
+    skill = load(skill_md(name=name, description='"Use when: writing Python"'))
+    assert (skill.name, skill.description) == ("python", "Use when: writing Python")
 
 
 def test_a_name_of_64_characters_and_a_description_of_1024_are_taken() -> None:

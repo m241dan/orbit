@@ -1536,6 +1536,10 @@ description: Python conventions and tools. Use when writing or reviewing Python 
 # Python
 ```
 
+As in Claude Code's YAML, a value may be in quotes, as one holding `: ` needs to be, or a `>` or
+`|` block scalar, the indented lines below its key, folded into one line or kept as they are; other
+keys are ignored.
+
 Orbit ships 18 skills, in
 [`src/orbit/agent/external/skills/`](src/orbit/agent/external/skills/): `code-style`, the
 languages `python` and `cpp`, the kinds of project `application`, `pure-library`, `io-library`,

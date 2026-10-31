@@ -8,6 +8,7 @@ import posixpath
 import re
 from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from itertools import takewhile
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -31,6 +32,21 @@ MAX_DESCRIPTION = 1024
 
 OUTSIDE_PROJECT = "paths are relative to the project root and stay inside it."
 """Why a ``[[skills]]`` entry's path that's absolute or leaves the project is refused."""
+
+_BYTE_ORDER_MARK = "\ufeff"
+"""What some editors write before a UTF-8 file's text."""
+
+_BLOCK_SCALAR = re.compile(r"[>|][-+]?")
+"""A value that opens a YAML block scalar, its text the indented lines below its key."""
+
+_BLOCK_JOINERS = {">": " ", "|": "\n"}
+"""What joins a block scalar's lines, by its first character: ``>`` folds them, ``|`` keeps them."""
+
+_QUOTED = re.compile(r"\"(?P<double>.*)\"|'(?P<single>.*)'")
+"""A value in double or single quotes."""
+
+_ESCAPED = re.compile(r'\\(["\\])')
+"""A backslash and the quote or backslash it escapes in a double-quoted value."""
 
 
 class _Skills(BaseModel):
@@ -99,15 +115,16 @@ class FrontMatter:
 
 
 def parse_front_matter(text: str) -> FrontMatter:
-    """The front matter ``text``, a ``SKILL.md``'s, opens with: a first line ``---``, then
-    ``key: value`` lines up to the next ``---``, of which ``name`` and ``description`` are kept;
-    the body is the text below, from its first line that isn't blank. Lines that aren't keys, and
-    indented ones, which belong to the key above, are ignored.
+    """The front matter ``text``, a ``SKILL.md``'s, opens with, after any byte-order mark: a first
+    line ``---``, then ``key: value`` lines up to the next ``---``, of which ``name`` and
+    ``description`` are kept, read as Claude Code's YAML reads them (see :func:`_keys`); the body
+    is the text below, from its first line that isn't blank. Lines that aren't keys, and indented
+    ones, which belong to the key above, are ignored.
 
     Raises :class:`ConfigError` saying so if there's no front matter or it lacks a name or a
     description.
     """
-    lines = text.splitlines(keepends=True)
+    lines = text.removeprefix(_BYTE_ORDER_MARK).splitlines(keepends=True)
     end = _closing_line(lines)
     keys = _keys(lines[1:end])
     if "name" not in keys or "description" not in keys:
@@ -131,9 +148,43 @@ def _closing_line(lines: list[str]) -> int:
 
 def _keys(lines: list[str]) -> dict[str, str]:
     """The value of each key the front matter's ``lines`` give, by key: each unindented
-    ``key: value`` line's, with the spaces around both left out."""
-    pairs = (line.partition(":") for line in lines if not line[:1].isspace())
-    return {key.strip(): value.strip() for key, colon, value in pairs if colon}
+    ``key: value`` line's, with the spaces around both left out, then read as :func:`_value`
+    reads it."""
+    keys: dict[str, str] = {}
+    for index, line in enumerate(lines):
+        key, colon, value = line.partition(":")
+        if colon and not line[:1].isspace():
+            keys[key.strip()] = _value(value.strip(), lines[index + 1 :])
+    return keys
+
+
+def _value(written: str, below: list[str]) -> str:
+    """The value ``written`` after a key gives, the front matter's lines ``below`` that key
+    following: a block scalar's text if it opens one (see :func:`_block_scalar`), and otherwise
+    what it says without its quotes (see :func:`_unquoted`)."""
+    if _BLOCK_SCALAR.fullmatch(written):
+        return _block_scalar(_BLOCK_JOINERS[written[0]], below)
+    return _unquoted(written)
+
+
+def _block_scalar(joiner: str, below: list[str]) -> str:
+    """The text of a block scalar the lines ``below`` its key hold: the indented lines at their
+    top, each without its indentation, joined by ``joiner`` (a space where ``>`` folds them, a
+    newline where ``|`` keeps them), with the spaces around the whole left out."""
+    block = takewhile(lambda line: line[:1].isspace(), below)
+    return joiner.join(line.strip() for line in block).strip()
+
+
+def _unquoted(written: str) -> str:
+    """The value ``written``, without one pair of matching quotes around it if it has them:
+    inside single quotes ``''`` stands for ``'``, and inside double quotes ``\\"`` for ``"`` and
+    ``\\\\`` for ``\\``."""
+    quoted = _QUOTED.fullmatch(written)
+    if quoted is None:
+        return written
+    if quoted["single"] is not None:
+        return quoted["single"].replace("''", "'")
+    return _ESCAPED.sub(r"\1", quoted["double"])
 
 
 def load_skill(folder: str, location: str, files: Mapping[str, SkillFile]) -> Skill:
