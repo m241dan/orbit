@@ -15,6 +15,7 @@ import pytest
 from orbit.agent.domain.checks import Setup
 from orbit.agent.domain.config import LIMIT_KEYS, OrbitConfig, load_config
 from orbit.agent.domain.roles import Role
+from orbit.agent.domain.skills import SkillMapping
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.agent.external.reference_config import reference_config
@@ -25,7 +26,7 @@ COMMITTED = files("orbit.agent.external") / "reference" / "config.toml"
 LATER = "# Coming in a later version of orbit; leave commented out until then."
 KEY_LINE = re.compile(r"# (\[|[a-z_]+ = )")
 NAMED_KEY = re.compile(r"# ([a-z_]+)(?: = |: )")
-EXAMPLE_HEADERS = {"# [[verification.steps]]", "# [setup]"}
+EXAMPLE_HEADERS = {"# [[verification.steps]]", "# [setup]", "# [[skills]]"}
 EXAMPLE_ROLE = "security-reviewer"
 BUILT_IN = read_built_in_roles()
 REFERENCE = reference_config()
@@ -54,7 +55,7 @@ def later() -> str:
 
 def limits_and_roles() -> str:
     """The reference's blocks of limits and roles: those before the later-version heading but
-    the examples of verification steps and setup."""
+    the examples of verification steps, setup and skills by path."""
     return "\n\n".join(
         block for block in blocks(current()) if not EXAMPLE_HEADERS & set(block.splitlines())
     )
@@ -122,6 +123,7 @@ def test_sections_are_in_order() -> None:
         "# [setup]",
         *(f"# [roles.{name}]" for name in BUILT_IN),
         f"# [roles.{EXAMPLE_ROLE}]",
+        "# [[skills]]",
         LATER,
     ]
     first = [next(i for i, line in enumerate(lines()) if line.startswith(m)) for m in markers]
@@ -169,6 +171,26 @@ def test_uncommented_examples_set_a_step_and_a_setup() -> None:
 
     assert config.verification.steps == (VerificationStep("Tests", ("uv", "run", "pytest")),)
     assert config.setup == Setup(command=("uv", "sync"), watch=("uv.lock",))
+
+
+def test_uncommented_skills_example_maps_src_to_two_skills() -> None:
+    config = load_config(loaded(current()), BUILT_IN)
+
+    assert config.skills == (SkillMapping(paths=("src",), use=("application", "python")),)
+
+
+def test_skills_example_sets_each_key_under_its_description() -> None:
+    example = next(block for block in blocks(REFERENCE) if "# [[skills]]" in block.splitlines())
+
+    assert example.splitlines() == [
+        "# Skills for the code under some paths, given to every agent along with its role's."
+        " For example:",
+        "# [[skills]]",
+        "# Files or folders in the project, relative to its root; each must exist.",
+        '# paths = ["src"]',
+        "# The skills that apply there, by name.",
+        '# use = ["application", "python"]',
+    ]
 
 
 def test_limits_come_in_order_each_under_its_description() -> None:

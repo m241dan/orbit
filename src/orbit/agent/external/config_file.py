@@ -1,5 +1,6 @@
 """Orbit's project configuration file, ``.orbit/config.toml``."""
 
+from collections.abc import Iterable
 from dataclasses import replace
 from importlib.resources import files
 from pathlib import Path
@@ -11,6 +12,7 @@ from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.config_report import ConfigSources, Written
 from orbit.agent.domain.config_update import reference_with_checks, with_checks
 from orbit.agent.domain.layers import Layer, SharedRuntimeError, UserConfigError, with_runtime
+from orbit.agent.domain.skills import SkillMapping, check_skill_mappings, inside_project
 from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
 from orbit.agent.external.role_instructions import with_instructions
 from orbit.agent.external.runtimes import read_runtime_rules
@@ -41,7 +43,9 @@ def read_config(root: str, config_dir: Path, runtime: str | None = None) -> Orbi
 
     Raises :class:`ConfigError`, naming the file, if it, the user config or a role's
     instructions file can't be read or is invalid, as it is when a role's runtime doesn't take
-    its model or a role asks for what its runtime can't do; it names the user config if the
+    its model or a role asks for what its runtime can't do, or a ``[[skills]]`` entry names a
+    path that isn't a file or folder in ``root`` or a skill that isn't in effect (see
+    :func:`~orbit.agent.domain.skills.check_skill_mappings`); it names the user config if the
     personal roles break a rule across the roles that the others keep, and the skill's file or
     folder if a skill is invalid.
     """
@@ -76,7 +80,32 @@ def _read_layered(root: str, config_dir: Path, runtime: str | None = None) -> La
     """
     layered = _read_files(root, config_dir, runtime)
     skills = read_skill_library(root)
-    return replace(layered, config=layered.config.model_copy(update={"skill_library": skills}))
+    config = layered.config.model_copy(update={"skill_library": skills})
+    _check_skill_mappings(root, config)
+    return replace(layered, config=config)
+
+
+def _check_skill_mappings(root: str, config: OrbitConfig) -> None:
+    """Raise :class:`ConfigError`, naming ``root``'s file, if ``config``'s ``[[skills]]`` entries
+    name a path that isn't relative, leaves the project or isn't a file or folder in ``root``,
+    or a skill that isn't among its skills (see
+    :func:`~orbit.agent.domain.skills.check_skill_mappings`)."""
+    try:
+        check_skill_mappings(config.skills, config.skill_library, _present(root, config.skills))
+    except ConfigError as exc:
+        raise ConfigError(f"{Path(root) / CONFIG_PATH}: {exc}") from None
+
+
+def _present(root: str, mappings: Iterable[SkillMapping]) -> set[str]:
+    """The paths the ``mappings`` name that are files or folders in ``root``, as written; those
+    that aren't relative or leave the project aren't looked for."""
+    paths = {path for mapping in mappings for path in mapping.paths if inside_project(path)}
+    return {path for path in paths if _in_project(Path(root) / path)}
+
+
+def _in_project(path: Path) -> bool:
+    """Whether ``path`` is a file or folder."""
+    return path.is_file() or path.is_dir()
 
 
 def _read_files(root: str, config_dir: Path, runtime: str | None) -> LayeredConfig:

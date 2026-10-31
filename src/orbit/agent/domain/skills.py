@@ -1,13 +1,15 @@
 """Skills: folders of Markdown, and any other files they need, that teach agents how the user
 builds software. Each opens with a ``SKILL.md`` whose front matter names and describes it, held
 to the rules Claude Code holds skills to. They come from two layers, the package's skills and the
-project's, whose files replace and add to the package's file by file."""
+project's, whose files replace and add to the package's file by file. A project also maps paths
+in it to the skills for the code there."""
 
+import posixpath
 import re
-from collections.abc import Mapping
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.layers import Layer
@@ -26,6 +28,9 @@ SKILL_NAME = re.compile(r"[a-z0-9-]{1,64}")
 
 MAX_DESCRIPTION = 1024
 """The most characters Claude Code takes in a skill's description."""
+
+OUTSIDE_PROJECT = "paths are relative to the project root and stay inside it."
+"""Why a ``[[skills]]`` entry's path that's absolute or leaves the project is refused."""
 
 
 class _Skills(BaseModel):
@@ -61,6 +66,17 @@ class SkillLibrary(_Skills):
     @classmethod
     def _in_name_order(cls, skills: dict[str, Skill]) -> dict[str, Skill]:
         return dict(sorted(skills.items()))
+
+
+class SkillMapping(_Skills):
+    """Skills for the code under some paths: the ``paths``, files or folders in the project,
+    relative to its root, and the skills that apply there, ``use``, by name."""
+
+    paths: tuple[str, ...] = Field(
+        min_length=1,
+        description="Files or folders in the project, relative to its root; each must exist.",
+    )
+    use: tuple[str, ...] = Field(min_length=1, description="The skills that apply there, by name.")
 
 
 @dataclass(frozen=True)
@@ -183,3 +199,49 @@ def _laid_over(shipped: SkillFolder, folder: SkillFolder) -> SkillFolder:
     """The ``shipped`` folder with the files of the project's ``folder`` laid over its own, each
     replacing the one at its path, if any."""
     return SkillFolder(shipped.location, {**shipped.files, **folder.files})
+
+
+def inside_project(path: str) -> bool:
+    """Whether ``path`` is relative and, its ``..`` worked out, stays inside the project."""
+    normal = posixpath.normpath(path)
+    return not posixpath.isabs(normal) and normal != ".." and not normal.startswith("../")
+
+
+def unknown_skill(key: str, name: str, library: SkillLibrary) -> str:
+    """Why the skill ``name`` the setting ``key`` names is refused: it isn't one of the
+    ``library``'s, which it lists."""
+    return f"{key} names {name}, which isn't a skill; the skills are {', '.join(library.skills)}."
+
+
+def check_skill_mappings(
+    mappings: Sequence[SkillMapping], library: SkillLibrary, present: Collection[str]
+) -> None:
+    """Raise :class:`ConfigError` naming the first problem with the ``mappings``, entry by entry,
+    each numbered from 1, and in each its paths in order, then its skills: a path that isn't
+    relative or leaves the project, one that isn't ``present``, among the paths in the project,
+    or a skill that isn't in the ``library``."""
+    problem = next(_mapping_problems(mappings, library, present), None)
+    if problem is not None:
+        raise ConfigError(problem)
+
+
+def _mapping_problems(
+    mappings: Sequence[SkillMapping], library: SkillLibrary, present: Collection[str]
+) -> Iterator[str]:
+    """The problems :func:`check_skill_mappings` finds with the ``mappings``, in order."""
+    for number, mapping in enumerate(mappings, start=1):
+        yield from _path_problems(f"skills.{number}.paths", mapping.paths, present)
+        key = f"skills.{number}.use"
+        yield from (
+            unknown_skill(key, name, library) for name in mapping.use if name not in library.skills
+        )
+
+
+def _path_problems(key: str, paths: Sequence[str], present: Collection[str]) -> Iterator[str]:
+    """The problems with the ``paths`` set under ``key``, in order: each that isn't relative or
+    leaves the project, and each that isn't ``present``, among the paths in the project."""
+    for path in paths:
+        if not inside_project(path):
+            yield f"{key}: {OUTSIDE_PROJECT}"
+        elif path not in present:
+            yield f"{key} names {path}, which isn't in the project."

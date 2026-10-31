@@ -4,6 +4,7 @@ it, checked as Claude Code checks them."""
 import re
 
 import pytest
+from pydantic import ValidationError
 
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.layers import PACKAGE, Layer
@@ -13,6 +14,8 @@ from orbit.agent.domain.skills import (
     SkillFile,
     SkillFolder,
     SkillLibrary,
+    SkillMapping,
+    check_skill_mappings,
     load_skill,
     load_skill_library,
     parse_front_matter,
@@ -239,3 +242,89 @@ def test_a_project_folder_of_a_new_name_without_a_skill_md_is_refused_naming_it(
     problem = refused("a skill needs a SKILL.md.", f"{PROJECT}/house-rules")
     with pytest.raises(ConfigError, match=problem):
         load_skill_library(shipped(), projects("house-rules", {"notes.md": notes}))
+
+
+# Skills by path
+
+OUTSIDE = "skills.1.paths: paths are relative to the project root and stay inside it."
+
+
+def library(*names: str) -> SkillLibrary:
+    """The library of a skill of each of ``names``."""
+    return SkillLibrary(skills={name: load(skill_md(name=name), folder=name) for name in names})
+
+
+def check(*mappings: SkillMapping, present: tuple[str, ...] = ("src",)) -> None:
+    """Check ``mappings`` against the python skill's library, ``present`` being the paths in the
+    project."""
+    check_skill_mappings(mappings, library("python"), present)
+
+
+def mapping(*paths: str, use: tuple[str, ...] = ("python",)) -> SkillMapping:
+    """The mapping of ``paths`` to the skills ``use`` names."""
+    return SkillMapping(paths=paths, use=use)
+
+
+def whole(message: str) -> str:
+    """The pattern matching ``message`` whole."""
+    return f"^{re.escape(message)}$"
+
+
+def test_a_mapping_takes_its_paths_and_skills_as_tuples() -> None:
+    taken = SkillMapping.model_validate({"paths": ["src", "noxfile.py"], "use": ["python"]})
+    assert taken == SkillMapping(paths=("src", "noxfile.py"), use=("python",))
+
+
+@pytest.mark.parametrize("data", [{"paths": [], "use": ["python"]}, {"paths": ["src"], "use": []}])
+def test_a_mapping_without_paths_or_skills_is_refused(data: dict[str, list[str]]) -> None:
+    with pytest.raises(ValidationError, match="at least 1 item"):
+        SkillMapping.model_validate(data)
+
+
+def test_a_mapping_with_an_unknown_key_is_refused() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        SkillMapping.model_validate({"paths": ["src"], "use": ["python"], "path": "src"})
+
+
+def test_mappings_to_paths_in_the_project_and_skills_in_the_library_pass() -> None:
+    check(mapping("src"), mapping("src", "noxfile.py"), present=("src", "noxfile.py"))
+
+
+def test_no_mappings_pass() -> None:
+    check()
+
+
+@pytest.mark.parametrize("path", ["/etc", "../other", "..", "src/../../other"])
+def test_a_path_that_isnt_relative_or_leaves_the_project_is_refused(path: str) -> None:
+    with pytest.raises(ConfigError, match=whole(OUTSIDE)):
+        check(mapping(path), present=(path,))
+
+
+def test_a_path_through_dot_dot_that_stays_inside_the_project_passes() -> None:
+    check(mapping("src/../src"), present=("src/../src",))
+
+
+def test_a_path_not_in_the_project_is_refused_naming_its_entry_and_the_path() -> None:
+    problem = "skills.2.paths names src/orbt, which isn't in the project."
+    with pytest.raises(ConfigError, match=whole(problem)):
+        check(mapping("src"), mapping("src", "src/orbt"))
+
+
+def test_a_skill_not_in_the_library_is_refused_listing_the_skills_in_name_order() -> None:
+    problem = "skills.1.use names pyton, which isn't a skill; the skills are cpp, go, python."
+    with pytest.raises(ConfigError, match=whole(problem)):
+        check_skill_mappings(
+            [mapping("src", use=("pyton",))], library("python", "go", "cpp"), ["src"]
+        )
+
+
+def test_an_entrys_paths_are_checked_in_order_before_its_skills() -> None:
+    first = "skills.1.paths names lib, which isn't in the project."
+    with pytest.raises(ConfigError, match=whole(first)):
+        check(mapping("src", "lib", "/etc", use=("pyton",)))
+
+
+def test_an_entry_is_checked_whole_before_the_next() -> None:
+    first = "skills.1.use names pyton, which isn't a skill; the skills are python."
+    with pytest.raises(ConfigError, match=whole(first)):
+        check(mapping("src", use=("python", "pyton")), mapping("/etc"))

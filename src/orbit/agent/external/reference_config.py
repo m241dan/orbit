@@ -18,6 +18,7 @@ from orbit.agent.domain.checks import Setup, VerificationConfig
 from orbit.agent.domain.config import LIMIT_KEYS, OrbitConfig, load_config
 from orbit.agent.domain.config_update import FOR_EXAMPLE
 from orbit.agent.domain.roles import Role
+from orbit.agent.domain.skills import SkillMapping
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
 
@@ -41,6 +42,8 @@ EXAMPLE_ROLE_FIELDS = Role(
     merge=False,
 )
 """The example of a role of a project's own: just the fields it sets."""
+EXAMPLE_SKILLS = SkillMapping(paths=("src",), use=("application", "python"))
+"""The example of skills for the code under some paths."""
 
 LATER_HEADING = "Coming in a later version of orbit; leave commented out until then."
 
@@ -103,8 +106,9 @@ explaining it."""
 def reference_config() -> str:
     """The reference config: a short header; the limits at their defaults; examples of a
     verification step and a setup; each built-in role's table with every field at its shipped
-    value; an example of a role of a project's own; and the settings of a later version of orbit
-    under :data:`LATER_HEADING`. Everything is commented out, each key under its description.
+    value; an example of a role of a project's own; an example of skills by path; and the
+    settings of a later version of orbit under :data:`LATER_HEADING`. Everything is commented
+    out, each key under its description.
     """
     roles = read_built_in_roles()
     files = read_instruction_files()
@@ -123,6 +127,7 @@ def reference_config() -> str:
             f"[roles.{EXAMPLE_ROLE}]",
             EXAMPLE_ROLE_FIELDS,
         ),
+        _example(config["skills"], "[[skills]]", EXAMPLE_SKILLS),
         _comments([LATER_HEADING]),
         *map(_comments, LATER),
     ]

@@ -22,6 +22,7 @@ from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import MAX_COPY_TTL_HOURS, Role, built_in_roles
 from orbit.agent.domain.runtimes import CLAUDE, RuntimeRules
 from orbit.agent.domain.sessions import SavedCopy
+from orbit.agent.domain.skills import SkillMapping
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.protocol import BUILT_IN_ROLE_NAMES
@@ -122,6 +123,26 @@ def test_setup_lists_the_files_it_watches() -> None:
     assert config.setup == Setup(command=("uv", "sync"), watch=("uv.lock", "a/b.txt"))
 
 
+def test_without_skills_tables_no_paths_are_mapped_to_skills() -> None:
+    assert load_config({}, BUILT_IN_ROLES).skills == ()
+
+
+def test_a_file_maps_paths_to_skills_entry_by_entry() -> None:
+    config = load_config(
+        {
+            "skills": [
+                {"paths": ["src", "noxfile.py"], "use": ["python"]},
+                {"paths": ["docs"], "use": ["application", "code-style"]},
+            ]
+        },
+        BUILT_IN_ROLES,
+    )
+    assert config.skills == (
+        SkillMapping(paths=("src", "noxfile.py"), use=("python",)),
+        SkillMapping(paths=("docs",), use=("application", "code-style")),
+    )
+
+
 @pytest.mark.parametrize(
     ("data", "message"),
     [
@@ -163,6 +184,10 @@ def test_setup_lists_the_files_it_watches() -> None:
         ({"setup": {"command": ["uv"], "watch": ["../uv.lock"]}}, "relative"),
         ({"setup": {"command": ["uv"], "watch": [""]}}, "relative"),
         ({"setup": {"command": ["uv"], "surprise": 1}}, "setup.surprise"),
+        ({"skills": [{"paths": [], "use": ["python"]}]}, "skills.0.paths"),
+        ({"skills": [{"paths": ["src"], "use": []}]}, "skills.0.use"),
+        ({"skills": [{"paths": ["src"], "use": ["python"], "path": "src"}]}, "skills.0.path"),
+        ({"skills": {"paths": ["src"], "use": ["python"]}}, "skills"),
     ],
 )
 def test_mistakes_are_reported_readably(data: dict[str, object], message: str) -> None:

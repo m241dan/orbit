@@ -155,12 +155,16 @@ def load_user_roles(data: dict[str, Any], layer: Layer, built_in: Collection[str
     """The role fields ``data``, the contents of the user config in ``layer``, sets: ``[roles]``'s
     ``model``, ``effort`` and ``runtime`` for every role, and its ``[roles.<name>]`` tables' for
     each; and the personal roles it defines, each a table that names a role that isn't
-    ``built_in`` and sets more than those. Its tables but ``[roles]`` are ignored.
+    ``built_in`` and sets more than those. Its tables but ``[roles]`` and ``[[skills]]`` are
+    ignored.
 
-    Raises :class:`ConfigError` naming each key that's invalid, as one setting a role's field
-    other than its model, effort and runtime is, one that breaks a personal role's rules, or one
-    giving a runtime this version of orbit doesn't know.
+    Raises :class:`ConfigError` naming ``skills`` if it sets ``[[skills]]``, which belong in the
+    project file, and otherwise each key that's invalid, as one setting a role's field other than
+    its model, effort and runtime is, one that breaks a personal role's rules, or one giving a
+    runtime this version of orbit doesn't know.
     """
+    if "skills" in data:
+        raise ConfigError(f"skills: {BELONGS_IN_PROJECT}")
     try:
         table = _UserConfig.model_validate(data).roles
         roles = _UserRoles.model_validate(_sorted(table, built_in))

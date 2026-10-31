@@ -1424,7 +1424,8 @@ and any other value is refused, listing them; `runtime` takes the runtimes this 
 knows, and any other is refused, naming the key (`roles.runtime = "nope": this version of orbit
 knows the runtimes claude, kiro.`). A `[roles.<name>]` table names its role as a project's does, with
 a plain name of letters, digits, `-` and `_`, and one that doesn't is refused, naming the file and
-the key. `orbit chat` reads
+the key. `[[skills]]` belongs in the project's `.orbit/config.toml` too, and is refused as a role's
+field is (see [Skills](#skills)). `orbit chat` reads
 your `config.toml`'s roles as it opens its workspace, and `orbit serve`, with the config directory
 of the account it runs as, as it opens each workspace it serves; both read them again, with the
 project's, when the planner is reset. An invalid one is refused as an invalid
@@ -1561,6 +1562,31 @@ can keep notes there. A file that isn't UTF-8 text, a folder without a `SKILL.md
 whose front matter is missing or wrong stops the workspace from opening with a configuration error
 naming the file or folder, such as
 `…/.orbit/skills/python/SKILL.md: its name is pyton but its folder is python.`
+
+A project maps paths in it to the skills for the code there with `[[skills]]` entries in its
+`.orbit/config.toml`, and only there: your user config refuses them, as mappings would differ by
+machine. Each entry's `paths` are files or folders in the project, relative to its root, and its
+`use` the skills that apply there, by name, orbit's or the project's own; each needs at least one.
+Every agent gets every entry's skills along with its role's, once a later version of orbit gives
+agents their skills:
+
+```toml
+[[skills]]
+paths = ["src", "noxfile.py"]
+use = ["application", "python"]
+
+[[skills]]
+paths = ["native"]
+use = ["cpp"]
+```
+
+The entries are checked as the workspace opens, entry by entry and path by path, and the first
+problem stops it from opening with a configuration error naming `.orbit/config.toml` and the
+entry, counted from 1: a path that's absolute or leaves the project through `..`
+(`skills.1.paths: paths are relative to the project root and stay inside it.`; `src/../src` is
+fine), one that isn't a file or folder in the project
+(`skills.2.paths names src/orbt, which isn't in the project.`), or a skill that isn't one
+(`skills.1.use names pyton, which isn't a skill; the skills are application, code-style, …`).
 
 ### Starting from the reference config
 
@@ -2906,7 +2932,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     MCP server; `GitCoderTree` is the coder's worktree and its snapshots; `repository` finds the
     git repository a workspace is in, fingerprints it, and places orbit's directory in it
     (`orbit_dir`: `.git/orbit`, or `.orbit` outside git); `config_file` reads
-    `.orbit/config.toml`, and for `orbit config show` what the configuration is resolved from
+    `.orbit/config.toml`, checking its `[[skills]]` paths are in the workspace, and for
+    `orbit config show` what the configuration is resolved from
     (`read_config_sources`), and writes the configurator's checks into it (`write_checks`),
     starting a missing file from the reference config, and `role_instructions` the instructions files its roles and your
     personal roles name (`resolve_instructions`);
@@ -3031,7 +3058,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `agents`: agent ids and tokens), `roles` (built-in roles, loaded from their `roles.toml` and
     given their instructions, which of a role's fields go together, and the tasks orbit queues in
     them), `config` (`OrbitConfig`: the
-    limits, roles, verification steps and setup a project file sets over the built-in defaults, and the skills in effect), `skills` (`Skill`, `SkillFile` and `SkillLibrary`, a skill built from its folder's files with its `SKILL.md`'s front matter, `parse_front_matter`, checked as Claude Code checks skills, and the library of the package's skill folders with the project's laid over them file by file, `load_skill_library`), `layers` (the layers a setting comes from, the user config's role fields and personal roles, and each role resolved across them field by field), `config_report` (what `orbit config show` reports: each setting in effect by its dotted key with the layer it came from, and a key's settings), `config_update` (what `orbit init --update` adds to a project file from the reference config: the keys a table it has doesn't mention, after the table's last line, and the tables it lacks, at the end, never changing a line of it; and the lines `orbit init --roles` adds, pointing each built-in role at its copy of its instructions; and the checks the configurator writes, in place of a file's steps and setup without changing its other lines, or of the reference config's examples of them) and `config_errors` (`ConfigError`,
+    limits, roles, verification steps, setup and skills by path a project file sets over the built-in defaults, and the skills in effect), `skills` (`Skill`, `SkillFile` and `SkillLibrary`, a skill built from its folder's files with its `SKILL.md`'s front matter, `parse_front_matter`, checked as Claude Code checks skills, and the library of the package's skill folders with the project's laid over them file by file, `load_skill_library`; and `SkillMapping`, a `[[skills]]` entry, whose paths and skills `check_skill_mappings` checks against the paths in the project and the library), `layers` (the layers a setting comes from, the user config's role fields and personal roles, and each role resolved across them field by field), `config_report` (what `orbit config show` reports: each setting in effect by its dotted key with the layer it came from, and a key's settings), `config_update` (what `orbit init --update` adds to a project file from the reference config: the keys a table it has doesn't mention, after the table's last line, and the tables it lacks, at the end, never changing a line of it; and the lines `orbit init --roles` adds, pointing each built-in role at its copy of its instructions; and the checks the configurator writes, in place of a file's steps and setup without changing its other lines, or of the reference config's examples of them) and `config_errors` (`ConfigError`,
     and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]` with its `TlsSettings`, which files each TLS mode needs, where now falls in a certificate's validity, and which hosts are loopback), `certificate_list` (what `orbit certs list` shows of each certificate: its expiry, days left, fingerprint and marks), `client_bundle` (what `orbit certs client --bundle` puts in a client's bundle: the CA, its certificate and key, and the `[remotes.<name>]` lines naming them where it's unpacked, which connect to a `wss://` URL alone), `remotes` (`RemoteSettings`, a `[remotes.<name>]` table, and which credentials go together), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
     setup step that makes a fresh worktree ready, and the checks a configurator proposes), the
     `Catalog` (in `catalog`: the workspace and its sessions, the agents' roles, the triggers and

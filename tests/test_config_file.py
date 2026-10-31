@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import stat
@@ -21,6 +22,7 @@ from orbit.agent.domain.config_update import (
 )
 from orbit.agent.domain.layers import PACKAGE, Layer
 from orbit.agent.domain.runtimes import CLAUDE, KIRO, RUNTIME_NAMES, resolve_model
+from orbit.agent.domain.skills import SkillMapping
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.agent.external.claude_cli import ClaudeCliRunner
@@ -126,6 +128,70 @@ def test_a_project_file_cant_set_the_skills(tmp_path: Path) -> None:
     unknown = f"^{re.escape(str(path))}: skill_library: Extra inputs are not permitted"
     with pytest.raises(ConfigError, match=unknown):
         read_config(str(tmp_path), tmp_path / "config")
+
+
+def write_skills(root: Path, *entries: tuple[list[str], list[str]]) -> Path:
+    """The project file in ``root`` with a ``[[skills]]`` entry of each of ``entries``, its
+    paths and skills, with ``src`` a folder and ``noxfile.py`` a file in the project."""
+    (root / "src").mkdir()
+    (root / "noxfile.py").write_text("")
+    tables = (
+        f"[[skills]]\npaths = {json.dumps(paths)}\nuse = {json.dumps(use)}\n"
+        for paths, use in entries
+    )
+    return write(root, "\n".join(tables))
+
+
+def mapping_refused(root: Path, path: Path, problem: str) -> None:
+    """Assert reading the configuration in ``root`` raises ``problem``, naming the project file
+    at ``path``."""
+    with pytest.raises(ConfigError, match=f"^{re.escape(f'{path}: {problem}')}$"):
+        read_config(str(root), root / "config")
+
+
+def test_skills_for_a_folder_and_a_file_in_the_project_are_read(tmp_path: Path) -> None:
+    write_skills(tmp_path, (["src", "noxfile.py"], ["python"]))
+    skills = read_config(str(tmp_path), tmp_path / "config").skills
+    assert skills == (SkillMapping(paths=("src", "noxfile.py"), use=("python",)),)
+
+
+def test_a_path_through_dot_dot_inside_the_project_is_read(tmp_path: Path) -> None:
+    write_skills(tmp_path, (["src/../src"], ["python"]))
+    skills = read_config(str(tmp_path), tmp_path / "config").skills
+    assert skills == (SkillMapping(paths=("src/../src",), use=("python",)),)
+
+
+@pytest.mark.parametrize("given", ["/etc", "../other"])
+def test_a_path_that_isnt_relative_or_leaves_the_project_names_the_file(
+    tmp_path: Path, given: str
+) -> None:
+    path = write_skills(tmp_path, ([given], ["python"]))
+    problem = "skills.1.paths: paths are relative to the project root and stay inside it."
+    mapping_refused(tmp_path, path, problem)
+
+
+def test_a_path_not_in_the_project_names_the_file_the_entry_and_the_path(
+    tmp_path: Path,
+) -> None:
+    path = write_skills(tmp_path, (["src"], ["python"]), (["noxfile.py", "src/orbt"], ["python"]))
+    mapping_refused(tmp_path, path, "skills.2.paths names src/orbt, which isn't in the project.")
+
+
+def test_a_skill_that_isnt_one_names_the_file_and_lists_the_skills(tmp_path: Path) -> None:
+    path = write_skills(tmp_path, (["src"], ["pyton"]))
+    names = ", ".join(sorted(SHIPPED_SKILLS))
+    problem = f"skills.1.use names pyton, which isn't a skill; the skills are {names}."
+    mapping_refused(tmp_path, path, problem)
+
+
+def test_a_project_skill_can_be_mapped_by_its_folders_name(tmp_path: Path) -> None:
+    write_skills(tmp_path, (["src"], ["house-rules"]))
+    folder = tmp_path / ".orbit" / "skills" / "house-rules"
+    folder.mkdir(parents=True)
+    rules = "---\nname: house-rules\ndescription: Our rules.\n---\n\n# Rules\n"
+    (folder / "SKILL.md").write_text(rules)
+    skills = read_config(str(tmp_path), tmp_path / "config").skills
+    assert skills == (SkillMapping(paths=("src",), use=("house-rules",)),)
 
 
 def test_the_file_is_read_over_the_defaults(tmp_path: Path) -> None:

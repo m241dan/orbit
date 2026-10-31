@@ -269,6 +269,13 @@ watch = ["uv.lock"]
 # Whether its finished work is committed and merged.
 # merge = false
 
+# Skills for the code under some paths, given to every agent along with its role's. For example:
+# [[skills]]
+# Files or folders in the project, relative to its root; each must exist.
+# paths = ["src"]
+# The skills that apply there, by name.
+# use = ["application", "python"]
+
 # Coming in a later version of orbit; leave commented out until then.
 
 # A trigger, which turns an event into a task for a role.

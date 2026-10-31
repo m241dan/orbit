@@ -1,5 +1,6 @@
-"""Orbit's configuration: the limits, roles, verification steps and setup a project file sets
-over the user config's role fields and personal roles and the built-in defaults."""
+"""Orbit's configuration: the limits, roles, verification steps, setup and skills by path a
+project file sets over the user config's role fields and personal roles and the built-in
+defaults."""
 
 from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
@@ -41,7 +42,7 @@ from orbit.agent.domain.runtimes import (
     ModelAliases,
     RuntimeRules,
 )
-from orbit.agent.domain.skills import SkillLibrary
+from orbit.agent.domain.skills import SkillLibrary, SkillMapping
 from orbit.agent.domain.verification import MAX_FALLBACK_FIXES
 
 
@@ -54,7 +55,7 @@ _REVIEW_LIMITS = ReviewLimits()
 
 
 class _FileConfig(_Config):
-    """Orbit's limits and roles, as a project file sets them, each field with its description.
+    """Orbit's settings, as a project file sets them, each field with its description.
 
     A super review that's due after ``super_review_every`` commits waits while suggested tasks
     are pending.
@@ -102,6 +103,12 @@ class _FileConfig(_Config):
     setup: Setup | None = Field(
         default=None, description="How the coder's worktree is set up; with none, nothing is."
     )
+    skills: tuple[SkillMapping, ...] = Field(
+        default=(),
+        description=(
+            "Skills for the code under some paths, given to every agent along with its role's."
+        ),
+    )
 
     @field_validator("roles")
     @classmethod
@@ -135,13 +142,15 @@ LATER_VERSION = (
 """Why a setting of a later version of orbit is refused, after the setting's name."""
 
 LIMIT_KEYS = tuple(
-    key for key in _FileConfig.model_fields if key not in {"roles", "verification", "setup"}
+    key
+    for key in _FileConfig.model_fields
+    if key not in {"roles", "verification", "setup", "skills"}
 )
 """The keys of the limits a project file sets, in order."""
 
 
 class OrbitConfig(_FileConfig):
-    """Orbit's configuration in effect: the limits and roles a project file sets, with the names
+    """Orbit's configuration in effect: the settings a project file sets, with the names
     of the roles that are ``personal``, defined whole in the user config, the ``notices`` the
     user is told as its workspace starts, the ``models`` each runtime takes, by name, which its
     roles' models were held to, and the ``skill_library``, the skills its agents can be given,

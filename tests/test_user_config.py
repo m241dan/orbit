@@ -121,3 +121,14 @@ def test_a_built_in_roles_instructions_in_the_user_config_belong_in_the_project_
     assert str(raised.value).startswith(
         f"{path}: roles.coder.instructions: belongs in the project's .orbit/config.toml"
     )
+
+
+def test_skills_by_path_in_the_user_config_belong_in_the_project(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text('[[skills]]\npaths = ["src"]\nuse = ["python"]\n')
+    with pytest.raises(ConfigError) as raised:
+        read_user_roles(tmp_path, BUILT_IN_ROLES)
+    assert str(raised.value) == (
+        f"{path}: skills: belongs in the project's .orbit/config.toml; the user config sets only"
+        " a role's model, effort and runtime"
+    )
