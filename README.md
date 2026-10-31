@@ -1538,6 +1538,30 @@ languages `python` and `cpp`, the kinds of project `application`, `pure-library`
 `review-style`, `review-drift` and `review-scaling`. They're read with the configuration as a
 workspace opens; agents get them from a later version of orbit.
 
+A project overrides and adds to them in `.orbit/skills/`, a folder for each skill. A file at the
+same path as a shipped one, under the folder of the skill's name, replaces it whole: the skill
+gets your file in its place, the rest of its files staying orbit's, and your file stops getting
+orbit's updates to it. A file at a new path is added to the skill, and a folder of a new name is
+a skill of your own, which needs a `SKILL.md` of its own. A `SKILL.md` you put in a shipped skill's
+folder is checked as the skill's, its `name` still the folder's; without one, the shipped one
+stays.
+
+```
+.orbit/skills/
+  python/
+    tests.md        replaces orbit's python/tests.md
+    extra.md        added to the python skill
+  house-rules/
+    SKILL.md        a skill of your own
+```
+
+Hidden files and folders, whose names start with a dot, are left out, in the package and in
+`.orbit/skills/` alike, and so are files directly in `.orbit/skills/`, outside any folder, so you
+can keep notes there. A file that isn't UTF-8 text, a folder without a `SKILL.md`, or a `SKILL.md`
+whose front matter is missing or wrong stops the workspace from opening with a configuration error
+naming the file or folder, such as
+`…/.orbit/skills/python/SKILL.md: its name is pyton but its folder is python.`
+
 ### Starting from the reference config
 
 `orbit init` writes orbit's reference config to the workspace's `.orbit/config.toml` (the current
@@ -2888,8 +2912,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     personal roles name (`resolve_instructions`);
     `built_in_roles` reads the built-in roles from `instructions/roles.toml` and their
     instructions from the Markdown files it names (`read_instruction_files` names them);
-    `skill_files` reads the skills shipped in `skills/`, a folder each, file by file
-    (`read_skill_library`);
+    `skill_files` reads the skills shipped in `skills/` and the project's in `.orbit/skills/`,
+    a folder each, file by file (`read_skill_library`);
     `reference_config` generates the reference config from the models and the built-in roles,
     every setting a project can change commented out at its default under what it does
     (`reference_config()`), and `uv run python -m orbit.agent.external.reference_config` writes
@@ -3007,7 +3031,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `agents`: agent ids and tokens), `roles` (built-in roles, loaded from their `roles.toml` and
     given their instructions, which of a role's fields go together, and the tasks orbit queues in
     them), `config` (`OrbitConfig`: the
-    limits, roles, verification steps and setup a project file sets over the built-in defaults, and the skills in effect), `skills` (`Skill`, `SkillFile` and `SkillLibrary`, a skill built from its folder's files with its `SKILL.md`'s front matter, `parse_front_matter`, checked as Claude Code checks skills), `layers` (the layers a setting comes from, the user config's role fields and personal roles, and each role resolved across them field by field), `config_report` (what `orbit config show` reports: each setting in effect by its dotted key with the layer it came from, and a key's settings), `config_update` (what `orbit init --update` adds to a project file from the reference config: the keys a table it has doesn't mention, after the table's last line, and the tables it lacks, at the end, never changing a line of it; and the lines `orbit init --roles` adds, pointing each built-in role at its copy of its instructions; and the checks the configurator writes, in place of a file's steps and setup without changing its other lines, or of the reference config's examples of them) and `config_errors` (`ConfigError`,
+    limits, roles, verification steps and setup a project file sets over the built-in defaults, and the skills in effect), `skills` (`Skill`, `SkillFile` and `SkillLibrary`, a skill built from its folder's files with its `SKILL.md`'s front matter, `parse_front_matter`, checked as Claude Code checks skills, and the library of the package's skill folders with the project's laid over them file by file, `load_skill_library`), `layers` (the layers a setting comes from, the user config's role fields and personal roles, and each role resolved across them field by field), `config_report` (what `orbit config show` reports: each setting in effect by its dotted key with the layer it came from, and a key's settings), `config_update` (what `orbit init --update` adds to a project file from the reference config: the keys a table it has doesn't mention, after the table's last line, and the tables it lacks, at the end, never changing a line of it; and the lines `orbit init --roles` adds, pointing each built-in role at its copy of its instructions; and the checks the configurator writes, in place of a file's steps and setup without changing its other lines, or of the reference config's examples of them) and `config_errors` (`ConfigError`,
     and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]` with its `TlsSettings`, which files each TLS mode needs, where now falls in a certificate's validity, and which hosts are loopback), `certificate_list` (what `orbit certs list` shows of each certificate: its expiry, days left, fingerprint and marks), `client_bundle` (what `orbit certs client --bundle` puts in a client's bundle: the CA, its certificate and key, and the `[remotes.<name>]` lines naming them where it's unpacked, which connect to a `wss://` URL alone), `remotes` (`RemoteSettings`, a `[remotes.<name>]` table, and which credentials go together), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
     setup step that makes a fresh worktree ready, and the checks a configurator proposes), the
     `Catalog` (in `catalog`: the workspace and its sessions, the agents' roles, the triggers and

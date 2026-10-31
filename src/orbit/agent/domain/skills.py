@@ -1,6 +1,7 @@
 """Skills: folders of Markdown, and any other files they need, that teach agents how the user
 builds software. Each opens with a ``SKILL.md`` whose front matter names and describes it, held
-to the rules Claude Code holds skills to."""
+to the rules Claude Code holds skills to. They come from two layers, the package's skills and the
+project's, whose files replace and add to the package's file by file."""
 
 import re
 from collections.abc import Mapping
@@ -60,6 +61,15 @@ class SkillLibrary(_Skills):
     @classmethod
     def _in_name_order(cls, skills: dict[str, Skill]) -> dict[str, Skill]:
         return dict(sorted(skills.items()))
+
+
+@dataclass(frozen=True)
+class SkillFolder:
+    """A skill's folder in one layer as read: its ``location``, the path errors name it by, and
+    its ``files``, by their paths relative to it."""
+
+    location: str
+    files: Mapping[str, SkillFile]
 
 
 @dataclass(frozen=True)
@@ -148,3 +158,28 @@ def _front_matter_problem(front: FrontMatter, folder: str) -> str | None:
     if not 1 <= len(front.description) <= MAX_DESCRIPTION:
         return "a skill's description is 1 to 1,024 characters."
     return None
+
+
+def load_skill_library(
+    package: Mapping[str, SkillFolder], project: Mapping[str, SkillFolder]
+) -> SkillLibrary:
+    """The skills of the ``package``'s folders and the ``project``'s, each by its folder's name:
+    a skill's files are the package's with the project's laid over them, a project file
+    replacing the package's at its path whole and one at a new path added, and a project folder
+    whose name the package has no folder of is a skill of its own.
+
+    Raises :class:`ConfigError` as :func:`load_skill` does, naming a skill's folder by the
+    package's location if it has one there.
+    """
+    folders = dict(package)
+    for name, folder in project.items():
+        shipped = package.get(name)
+        folders[name] = folder if shipped is None else _laid_over(shipped, folder)
+    skills = (load_skill(name, folder.location, folder.files) for name, folder in folders.items())
+    return SkillLibrary(skills={skill.name: skill for skill in skills})
+
+
+def _laid_over(shipped: SkillFolder, folder: SkillFolder) -> SkillFolder:
+    """The ``shipped`` folder with the files of the project's ``folder`` laid over its own, each
+    replacing the one at its path, if any."""
+    return SkillFolder(shipped.location, {**shipped.files, **folder.files})

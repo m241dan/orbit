@@ -6,17 +6,20 @@ import re
 import pytest
 
 from orbit.agent.domain.config_errors import ConfigError
-from orbit.agent.domain.layers import PACKAGE
+from orbit.agent.domain.layers import PACKAGE, Layer
 from orbit.agent.domain.skills import (
     FrontMatter,
     Skill,
     SkillFile,
+    SkillFolder,
     SkillLibrary,
     load_skill,
+    load_skill_library,
     parse_front_matter,
 )
 
 FOLDER = "/orbit/skills/python"
+PROJECT = "/src/app/.orbit/skills"
 SKILL_MD = f"{FOLDER}/SKILL.md"
 NEEDS_FRONT_MATTER = "needs front matter between --- lines, with name and description."
 
@@ -29,6 +32,23 @@ def skill_md(name: str = "python", description: str = "Python conventions.") -> 
 def skill_file(text: str, path: str = "SKILL.md") -> SkillFile:
     """The package's file at ``path`` in the python skill's folder, holding ``text``."""
     return SkillFile(text=text, layer=PACKAGE, location=f"{FOLDER}/{path}")
+
+
+def project_file(text: str, path: str, folder: str = "python") -> SkillFile:
+    """The project's file at ``path`` in its folder for the skill ``folder``, holding ``text``."""
+    location = f"{PROJECT}/{folder}/{path}"
+    return SkillFile(text=text, layer=Layer("project", location), location=location)
+
+
+def shipped(*paths: str) -> dict[str, SkillFolder]:
+    """The package's python skill, its SKILL.md and a file at each of ``paths``."""
+    files = {path: skill_file(f"Shipped {path}.\n", path) for path in paths}
+    return {"python": SkillFolder(FOLDER, {"SKILL.md": skill_file(skill_md()), **files})}
+
+
+def projects(folder: str, files: dict[str, SkillFile]) -> dict[str, SkillFolder]:
+    """The project's folder for the skill ``folder``, holding ``files``."""
+    return {folder: SkillFolder(f"{PROJECT}/{folder}", files)}
 
 
 def load(text: str, folder: str = "python") -> Skill:
@@ -155,3 +175,67 @@ def test_the_library_is_empty_by_default() -> None:
 def test_the_librarys_skills_are_in_name_order() -> None:
     skills = {name: load(skill_md(name=name), folder=name) for name in ("python", "cpp", "go")}
     assert list(SkillLibrary(skills=skills).skills) == ["cpp", "go", "python"]
+
+
+# The layers
+
+
+def test_without_the_projects_folders_the_library_is_the_packages() -> None:
+    library = load_skill_library(shipped("tests.md"), {})
+    assert list(library.skills) == ["python"]
+    assert library.skills["python"].files == dict(shipped("tests.md")["python"].files)
+
+
+def test_a_project_file_replaces_the_packages_at_its_path_whole() -> None:
+    tests = project_file("Our tests.\n", "tests.md")
+    library = load_skill_library(
+        shipped("tests.md", "docs.md"), projects("python", {"tests.md": tests})
+    )
+    files = library.skills["python"].files
+    assert files["tests.md"] == tests
+    assert files["docs.md"] == skill_file("Shipped docs.md.\n", "docs.md")
+    assert list(files) == ["SKILL.md", "docs.md", "tests.md"]
+
+
+def test_a_project_folder_without_a_skill_md_keeps_the_packages() -> None:
+    tests = project_file("Our tests.\n", "tests.md")
+    skill = load_skill_library(shipped(), projects("python", {"tests.md": tests})).skills["python"]
+    assert skill.files["SKILL.md"] == skill_file(skill_md())
+    assert skill.description == "Python conventions."
+
+
+def test_a_project_file_at_a_new_path_is_added_to_the_packages() -> None:
+    extra = project_file("Extra.\n", "extra.md")
+    library = load_skill_library(shipped("tests.md"), projects("python", {"extra.md": extra}))
+    files = library.skills["python"].files
+    assert list(files) == ["SKILL.md", "extra.md", "tests.md"]
+    assert files["extra.md"] == extra
+
+
+def test_a_project_skill_md_gives_the_skill_its_front_matter_and_body() -> None:
+    ours = project_file(skill_md(description="Our Python."), "SKILL.md")
+    library = load_skill_library(shipped(), projects("python", {"SKILL.md": ours}))
+    skill = library.skills["python"]
+    assert (skill.description, skill.body) == ("Our Python.", "# Python\n")
+    assert skill.files["SKILL.md"] == ours
+
+
+def test_a_project_skill_md_is_validated_naming_it() -> None:
+    ours = project_file(skill_md(name="pyton"), "SKILL.md")
+    problem = "its name is pyton but its folder is python."
+    with pytest.raises(ConfigError, match=refused(problem, ours.location)):
+        load_skill_library(shipped(), projects("python", {"SKILL.md": ours}))
+
+
+def test_a_project_folder_of_a_new_name_is_a_skill_of_its_own() -> None:
+    rules = project_file(skill_md(name="house-rules"), "SKILL.md", folder="house-rules")
+    library = load_skill_library(shipped(), projects("house-rules", {"SKILL.md": rules}))
+    assert list(library.skills) == ["house-rules", "python"]
+    assert library.skills["house-rules"].files == {"SKILL.md": rules}
+
+
+def test_a_project_folder_of_a_new_name_without_a_skill_md_is_refused_naming_it() -> None:
+    notes = project_file("Notes.\n", "notes.md", folder="house-rules")
+    problem = refused("a skill needs a SKILL.md.", f"{PROJECT}/house-rules")
+    with pytest.raises(ConfigError, match=problem):
+        load_skill_library(shipped(), projects("house-rules", {"notes.md": notes}))
