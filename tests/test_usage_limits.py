@@ -10,6 +10,7 @@ from orbit.agent.domain.usage_limits import (
     KIRO_LIMIT_RETRY,
     LimitWaits,
     Outage,
+    Outages,
     RuntimeStop,
     api_unavailable,
     claude_failure,
@@ -205,6 +206,47 @@ def test_a_first_outage_starts_the_backoff_and_each_after_it_goes_a_level_up() -
 def test_an_outage_on_another_runtime_starts_its_own_backoff() -> None:
     claudes = Outage(CLAUDE, "API Error: 529", level=2)
     assert outage_after(claudes, FAKE, "Gateway down") == Outage(FAKE, "Gateway down", level=0)
+
+
+def test_a_runtimes_outages_in_a_row_go_a_level_up_each() -> None:
+    outages = Outages()
+    assert outages.stopped(stop("api_unavailable"), "API Error: 529") == Outage(
+        CLAUDE, "API Error: 529"
+    )
+    assert outages.stopped(stop("api_unavailable"), "Request timed out") == Outage(
+        CLAUDE, "Request timed out", level=1
+    )
+    assert outages.of(CLAUDE) == Outage(CLAUDE, "Request timed out", level=1)
+
+
+def test_each_runtimes_outages_count_on_their_own() -> None:
+    outages = Outages()
+    outages.stopped(stop("api_unavailable"), "API Error: 529")
+    assert outages.stopped(stop("api_unavailable", FAKE), "Gateway down") == Outage(
+        FAKE, "Gateway down"
+    )
+    assert outages.stopped(stop("api_unavailable"), "API Error: 529") == Outage(
+        CLAUDE, "API Error: 529", level=1
+    )
+
+
+def test_a_runtime_heard_from_has_no_outage_and_leaves_the_others_theirs() -> None:
+    outages = Outages()
+    outages.stopped(stop("api_unavailable"), "API Error: 529")
+    outages.stopped(stop("api_unavailable", FAKE), "Gateway down")
+    outages.heard_from(CLAUDE)
+    assert (outages.of(CLAUDE), outages.of(FAKE)) == (None, Outage(FAKE, "Gateway down"))
+
+
+def test_a_usage_limit_forgets_its_runtimes_outage() -> None:
+    outages = Outages()
+    outages.stopped(stop("api_unavailable"), "API Error: 529")
+    assert outages.stopped(stop("usage_limit"), "limit") is None
+    assert outages.of(CLAUDE) is None
+
+
+def test_no_runtime_has_an_outage_at_first() -> None:
+    assert Outages().of(CLAUDE) is None
 
 
 def test_the_outage_note_names_the_error_s_first_line_and_the_time_in_utc() -> None:

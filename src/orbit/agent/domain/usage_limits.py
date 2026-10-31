@@ -211,6 +211,33 @@ def outage_after(last: Outage | None, runtime: str, error: str) -> Outage:
     return Outage(runtime, error, level)
 
 
+class Outages:
+    """Each runtime's API not answering, as it last stopped a run or a lane's task, with the
+    stops it made in a row in any lane, until an agent on that runtime ends its run without it
+    or hits its usage limit."""
+
+    def __init__(self) -> None:
+        self._outages: dict[str, Outage] = {}
+
+    def of(self, runtime: str) -> Outage | None:
+        """``runtime``'s outage; none since an agent on it last ended its run without one."""
+        return self._outages.get(runtime)
+
+    def stopped(self, stop: RuntimeStop, error: str) -> Outage | None:
+        """Note ``stop``, with ``error``: its runtime's outage, a level up from the last in a
+        row, or, at its usage limit, which its API answered, none; returns which."""
+        runtime = stop.runtime
+        if stop.failure.kind == "usage_limit":
+            self.heard_from(runtime)
+            return None
+        outage = self._outages[runtime] = outage_after(self.of(runtime), runtime, error)
+        return outage
+
+    def heard_from(self, runtime: str) -> None:
+        """Forget ``runtime``'s outage, now an agent on it ended its run without one."""
+        self._outages.pop(runtime, None)
+
+
 def outage_delay(level: int) -> timedelta:
     """How long a run an outage stopped waits to start again at the backoff's ``level``: 2
     minutes at first, then 5, 10, 20, and 30 from then on."""

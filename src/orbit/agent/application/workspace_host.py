@@ -95,7 +95,7 @@ from orbit.agent.domain.roles import (
 )
 from orbit.agent.domain.runtimes import ModelAliases
 from orbit.agent.domain.storage import StorageSettings
-from orbit.agent.domain.usage_limits import RuntimeStop
+from orbit.agent.domain.usage_limits import Outages, RuntimeStop
 from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     CODER,
@@ -383,6 +383,7 @@ class WorkspaceHost:
         self._startup = self._startup_check(
             verification, check_at_startup and not self._takeover.read_only
         )
+        self._outages = Outages()  # One backoff per runtime, which every lane counts on.
         self._work = self._work_lane()
         self._turns = self._work_turns()
         self._switcher = self._session_switcher(pick_session)
@@ -588,6 +589,7 @@ class WorkspaceHost:
             lambda: self.latest_usage(),
             lambda: self._states.check(),
             self._lanes.work,
+            self._outages,
         )
         return WorkTurns(parts)
 
@@ -617,6 +619,7 @@ class WorkspaceHost:
             self._record_moves,
             self._lanes.elsewhere,
             disabled_roles(self._roles()),
+            self._outages,
         )
         return WorkLane(self._desk, self._tasks, self._verifier, beside)
 

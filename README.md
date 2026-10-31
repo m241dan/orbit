@@ -593,10 +593,12 @@ records the requirements.
 `502`, `503`, `504` or `529`, `overloaded_error`, `API Error (Connection error.)` or `Request timed
 out`; not a client error such as `400` or `401`), the run stops there in the same way, and starts
 again by itself after a backoff: 2 minutes, then 5, 10, 20, and every 30 minutes from then on, with
-no limit, unless the error says when the API answers again. Each runtime's backoff is its own: an
-outage on another runtime than the last starts over at 2 minutes, and the backoff starts over as
-soon as an agent on that runtime finishes its run without such an error, however its task ends;
-an agent on another runtime finishing doesn't. The conversation says when (`Claude's API isn't answering
+no limit, unless the error says when the API answers again. Each runtime has one backoff, which
+every lane shares: an outage in the work lane after one in a review on the same runtime waits
+longer, and the other way round, while an outage on another runtime counts on that runtime's own
+backoff, from 2 minutes. The backoff starts over as soon as an agent on that runtime, in any lane,
+finishes its run without such an error, however its task ends, or hits its usage limit; an agent
+on another runtime finishing doesn't. The conversation says when (`Claude's API isn't answering
 (API Error: 529 Overloaded), so the run stopped. It starts again by itself at Fri 23 Oct 14:20 UTC;
 ctrl+r starts it now and ctrl+s cancels that.`) and again as it starts (`Starting the run again now
 Claude's API may be answering.`). The task it stopped at runs first, and a fix carries on from the
@@ -616,9 +618,9 @@ Every other lane, such as `review`, skips the tasks whose role runs on the pause
 its next task on a runtime that isn't paused, then the tasks it skipped once the pause ends or
 `ctrl+s` cancels it. A task in any lane can start a pause: when a review, or any task in a lane
 other than `work`, has its agent hit its runtime's usage limit or find its API down, that runtime
-pauses just as it would for the work lane, timed by the same rules and shown by the same line, and
-the task is left pending to run again once the pause ends, `ctrl+s` cancels it or you run the
-tasks. One pause shows at a time: while a runtime is paused, another runtime hitting its limit
+pauses just as it would for the work lane, timed by the same rules, on the same backoff, and shown
+by the same line, and the task is left pending to run again once the pause ends, `ctrl+s` cancels
+it or you run the tasks. One pause shows at a time: while a runtime is paused, another runtime hitting its limit
 leaves the first pause in force, and its tasks are skipped too until that pause ends, when they
 run again (and pause their runtime then, if its limit still holds); the work lane hitting a limit
 of its own replaces a pause another lane started, as it must wait anyway. During a pause another lane

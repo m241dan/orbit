@@ -7,14 +7,16 @@ start no task on that runtime meanwhile, and run those with it. A run remembers 
 which its tasks' spans link to.
 
 A task in a lane that starts by itself whose agent hits its runtime's usage limit or finds its API
-not answering pauses that runtime too, timed by the same rules, with a backoff of its own for each
-runtime; while one pause is in force, it stays, and the work lane's own stop takes its place.
+not answering pauses that runtime too, timed by the same rules: each runtime has one backoff, which
+outages in every lane count on in a row, and which an agent on it ending its run in any lane
+without one, or hitting its usage limit, starts over. While one pause is in force, it stays, and
+the work lane's own stop takes its place.
 Meanwhile the work lane runs its tasks in order up to the first on the paused runtime, then waits
 for the pause to end."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from orbit.agent.application.desk import AgentDesk, Agents
@@ -31,10 +33,10 @@ from orbit.agent.domain.usage_limits import (
     RESUMING_NOTE,
     WAIT_CANCELLED_NOTE,
     Outage,
+    Outages,
     Paused,
     RuntimeStop,
     limit_resume_time,
-    outage_after,
     outage_paused_note,
     outage_resume_time,
     outage_resuming_note,
@@ -67,8 +69,9 @@ class WorkParts:
     themselves, if any, the ``tasks`` they run, the ``verifier`` and agents' ``desk``, if any,
     ``post``, which publishes events without blocking, the session's ``gate``, which tells
     whether it's halted, ``usage``, the usage limits fetched last, if any, ``paused_changed``,
-    called whenever :attr:`WorkTurns.paused` changes, and the work lane's ``name``, the lane
-    whose roles merge."""
+    called whenever :attr:`WorkTurns.paused` changes, the work lane's ``name``, the lane whose
+    roles merge, and each runtime's ``outages``, the ones the ``work`` lane notes its runs'
+    stops and its agents' runs in, which time every lane's pauses for an outage."""
 
     work: WorkLane | None
     lanes: Kickable | None
@@ -80,6 +83,7 @@ class WorkParts:
     usage: Callable[[], UsageChanged | None] = lambda: None
     paused_changed: Callable[[], None] = lambda: None
     name: BusyLane = WORK_LANE
+    outages: Outages = field(default_factory=Outages)
 
 
 @dataclass(frozen=True)
@@ -100,15 +104,15 @@ class WorkTurns:
     and keeps :meth:`wake`, a review's request, from starting another until the user asks
     again. While the session is halted, :meth:`wake` starts nothing either. A run a runtime's
     usage limit stopped starts again by itself once the limit resets, and one a runtime's API
-    not answering stopped after a backoff, longer for each outage in a row, unless the user runs
-    the work, sets up checks or holds it first, or :meth:`forget_wait` is called as the session
-    is left; a halt's :meth:`stop_turn` keeps the wait, and one ending while halted starts the
-    run once :meth:`lifted` is called. Until the run starts again or its wait is cancelled or
-    dropped, :attr:`paused` says when it starts again, why and on which runtime. The lanes that
-    start by themselves are kicked as the run starts again by itself or the user cancels its
-    wait, and with every run the user asks for. During a pause a lane that starts by itself
-    started, a run stops before a task on the paused runtime, which runs once the pause ends.
-    Once :meth:`close` is called, nothing starts.
+    not answering stopped after a backoff, longer for each outage on that runtime in a row in any
+    lane, unless the user runs the work, sets up checks or holds it first, or
+    :meth:`forget_wait` is called as the session is left; a halt's :meth:`stop_turn` keeps the
+    wait, and one ending while halted starts the run once :meth:`lifted` is called. Until the
+    run starts again or its wait is cancelled or dropped, :attr:`paused` says when it starts
+    again, why and on which runtime. The lanes that start by themselves are kicked as the run
+    starts again by itself or the user cancels its wait, and with every run the user asks for.
+    During a pause a lane that starts by itself started, a run stops before a task on the paused
+    runtime, which runs once the pause ends. Once :meth:`close` is called, nothing starts.
 
     A run is started by the span current as it's asked for: the command's asking for it, or the
     review's whose suggestions it runs. The run keeps that span when it starts again by itself,
@@ -128,8 +132,7 @@ class WorkTurns:
         # How the run whose wait ended while the session was halted starts again, if one did.
         self._due: _Restart | None = None
         self._paused: Paused | None = None  # Until the waiting run starts again, and why.
-        # Each runtime's outage, as it last paused the lanes that start by themselves.
-        self._outages: dict[str, Outage] = {}
+        self._outages = parts.outages
 
     @property
     def running(self) -> bool:
@@ -220,19 +223,19 @@ class WorkTurns:
         return True
 
     def heard_from(self, runtime: str) -> None:
-        """Forget ``runtime``'s outage, as it paused the lanes that start by themselves, now an
-        agent on it ended its run without it."""
-        self._outages.pop(runtime, None)
+        """Forget ``runtime``'s outage, in every lane, now an agent on it in a lane that starts
+        by itself ended its run without it."""
+        self._outages.heard_from(runtime)
 
     def _lane_pause(self, stop: RuntimeStop, error: str) -> tuple[Paused, str, str]:
         """How long ``stop`` pauses its runtime, what's said of it, and what's said as it ends,
-        counting an outage, with ``error``, among those in a row of its runtime."""
-        runtime = stop.runtime
-        if stop.failure.kind == "usage_limit":
-            self._outages.pop(runtime, None)
-            return (*self._limit_pause(stop), tasks_resuming_note(runtime))
-        outage = self._outages[runtime] = outage_after(self._outages.get(runtime), runtime, error)
-        return (*self._outage_pause(stop, outage), tasks_resuming_note(runtime))
+        noting it among the outages: an outage, with ``error``, counts among those in a row of
+        its runtime, and a usage limit starts its backoff over."""
+        outage = self._outages.stopped(stop, error)
+        resuming = tasks_resuming_note(stop.runtime)
+        if outage is None:
+            return (*self._limit_pause(stop), resuming)
+        return (*self._outage_pause(stop, outage), resuming)
 
     async def stop_turn(self) -> None:
         """Cancel the run, if any, as the session halts, and wait for it to end, keeping its
@@ -312,17 +315,22 @@ class WorkTurns:
 
     async def _run(self, work: WorkLane, cause: Span) -> None:
         """Run ``work``'s tasks, their spans linked to ``cause``, what started the run, then, if
-        a runtime's usage limit or API not answering stopped them, wait to start again."""
+        a runtime's usage limit or API not answering stopped them, wait to start again, after
+        the backoff of the outage the work lane noted, for the latter."""
         with use_span(cause):
             end = await work.run(self._on_paused_runtime)
-        if end in ("limited", "api_unavailable"):
-            await self._wait.stop()  # The work lane's pause takes a lane's place.
+        if end not in ("limited", "api_unavailable"):
+            return
+        stop = work.runtime_stop
+        assert stop is not None  # A runtime stopped the run.
+        # Read now: a lane's agent on that runtime may end its run without it across the await.
+        outage = self._outages.of(stop.runtime)
+        await self._wait.stop()  # The work lane's pause takes a lane's place.
         if end == "limited":
-            assert work.runtime_stop is not None  # The usage limit stopped the run.
-            self._wait_for_reset(work.runtime_stop, cause)
-        elif end == "api_unavailable":
-            assert work.runtime_stop is not None and work.outage is not None  # So did this.
-            self._wait_out(work.runtime_stop, work.outage, cause)
+            self._wait_for_reset(stop, cause)
+        else:
+            assert outage is not None  # The work lane noted it as the run stopped.
+            self._wait_out(stop, outage, cause)
 
     def _limit_pause(self, stop: RuntimeStop) -> tuple[Paused, str]:
         """How long the usage limit ``stop`` tells pauses its runtime, and what's said of it."""

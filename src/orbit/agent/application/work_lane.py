@@ -37,7 +37,7 @@ from orbit.agent.domain.endings import (
     gave_up,
 )
 from orbit.agent.domain.roles import Workspace
-from orbit.agent.domain.usage_limits import FIX_ERROR_NOTE, Outage, RuntimeStop, outage_after
+from orbit.agent.domain.usage_limits import FIX_ERROR_NOTE, Outages, RuntimeStop
 from orbit.agent.domain.verification import FallbackFixes, failure_reason, fix_prompt
 from orbit.protocol import (
     CHECKS_EXHAUSTED,
@@ -66,8 +66,10 @@ class Beside:
     its next task; its seat at the ``coders``' slots, if any, which a task whose role works in
     the worktree takes one of before it starts; the ``tracing`` of its tasks; the ``records``
     moves, if any, which move a record a task names whose number another took before the task
-    runs; the roles whose tasks run ``elsewhere``, in lanes that start by themselves; and the
-    ``disabled`` roles, whose tasks run nowhere."""
+    runs; the roles whose tasks run ``elsewhere``, in lanes that start by themselves; the
+    ``disabled`` roles, whose tasks run nowhere; and each runtime's ``outages``, shared with the
+    lanes that start by themselves, in which a run notes the runtime that stopped it and the
+    runtimes whose agents ended their runs without an outage."""
 
     review: ReviewLane | None = None
     startup: StartupCheck | None = None
@@ -77,6 +79,7 @@ class Beside:
     records: RecordMoves | None = None
     elsewhere: frozenset[str] = frozenset()
     disabled: frozenset[str] = frozenset()
+    outages: Outages = field(default_factory=Outages)
 
 
 class WorkLane:
@@ -115,6 +118,7 @@ class WorkLane:
         self._records = beside.records
         self._elsewhere = beside.elsewhere
         self._disabled = beside.disabled
+        self._outages = beside.outages
         self._seated = False  # The run holds a coder's slot, for the task about to run or running.
         # Task id -> the commit it merged into the base, until reported.
         self._landed: dict[str, str] = {}
@@ -129,9 +133,6 @@ class WorkLane:
         # The task a run stopped at, which the next one runs first: a fix must run before
         # another task puts its work aside.
         self._resume: str | None = None
-        # A runtime's API not answering, as it last stopped a run, until an agent on that
-        # runtime finishes its run without it.
-        self._outage: Outage | None = None
         self._runtime_stop: RuntimeStop | None = None  # The failure that last stopped a run.
 
     def reset(self) -> None:
@@ -159,13 +160,6 @@ class WorkLane:
         """The task the run is on or, before it picks one, the one it will pick; none when
         there's none."""
         return self._current or self.next_work()
-
-    @property
-    def outage(self) -> Outage | None:
-        """A runtime's API not answering, as it last stopped a run, with the runs it stopped in
-        a row; none once an agent on that runtime finished its run without it, or before it
-        stopped one."""
-        return self._outage
 
     @property
     def runtime_stop(self) -> RuntimeStop | None:
@@ -342,13 +336,11 @@ class WorkLane:
         return "fix_failed"
 
     def _stop_for(self, stop: RuntimeStop, error: str) -> RunEnd:
-        """Why the run stops for ``stop``, noted as the :attr:`runtime_stop`, with ``error``:
-        the usage limit, or the API not answering, noted as an :attr:`outage`."""
+        """Why the run stops for ``stop``, noted as the :attr:`runtime_stop` and, with
+        ``error``, among the outages: the usage limit, or the API not answering."""
         self._runtime_stop = stop
-        if stop.failure.kind == "usage_limit":
-            return "limited"
-        self._outage = outage_after(self._outage, stop.runtime, error)
-        return "api_unavailable"
+        self._outages.stopped(stop, error)
+        return "limited" if stop.failure.kind == "usage_limit" else "api_unavailable"
 
     async def _run_task(self, task_id: str) -> Outcome:
         """Run one task through a new agent, as the :attr:`current` one; returns how it
@@ -448,16 +440,14 @@ class WorkLane:
             return await self._settle(task_id, outcome, root)
 
     def _heard_from(self, role: str, outcome: Outcome) -> None:
-        """Forget the :attr:`outage`, once an agent in ``role``, on the outage's runtime,
-        finished its run in ``outcome`` without the API not answering, as its launcher tells,
-        however its task ended. The user's stop doesn't reach this, as it cancels the agent's
-        run, so it leaves the outage as it is."""
-        outage = self._outage
-        if outage is None or self._desk.agents.runtime(role) != outage.runtime:
-            return
+        """Forget the outage of ``role``'s runtime, if the session has that role, once an agent
+        in it finished its run in ``outcome`` without the API not answering, as its launcher
+        tells, however its task ended. The user's stop doesn't reach this, as it cancels the
+        agent's run, so it leaves the outage as it is."""
+        runtime = self._desk.agents.runtime(role)
         stop = self._failure(role, outcome)
-        if stop is None or stop.failure.kind != "api_unavailable":
-            self._outage = None
+        if runtime is not None and (stop is None or stop.failure.kind != "api_unavailable"):
+            self._outages.heard_from(runtime)
 
     def _failure(self, role: str, outcome: Outcome) -> RuntimeStop | None:
         """The failure the launcher of ``role``'s runtime tells in the error a task in it ended
