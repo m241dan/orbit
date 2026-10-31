@@ -6,15 +6,22 @@ from itertools import groupby
 from pathlib import Path
 from typing import Any
 
-from orbit.agent import LIMIT_KEYS, ConfigReport, Instructions, Layer, Setting
+from orbit.agent import LIMIT_KEYS, ConfigReport, Instructions, Layer, Setting, SkillFileText
+
+type Text = Instructions | SkillFileText
+"""A value shown by its length, or with ``full`` as its text."""
+
+GROUPED = frozenset({"roles", "skill_files"})
+"""The sections listed in a group for each of their tables: each role, and each skill."""
 
 
 def config_text(report: ConfigReport, *, full: bool, root: Path, home: Path) -> str:
     """``report`` as text: a line per setting, ``<key> = <value>   <layer>``, the limits, each
-    role and each other section in a group of their own, apart from the next by a blank line;
-    each value as JSON but roles' instructions, which show as the file they're in and their
-    length, or with ``full`` their text. A layer's file shows relative to the workspace at
-    ``root`` inside it, and from ``~`` inside ``home``."""
+    role, each skill's files and each other section in a group of their own, apart from the next
+    by a blank line; each value as JSON but roles' instructions, which show as the file they're
+    in and their length, and skill files, which show their length, or either with ``full`` their
+    text. A layer's file shows relative to the workspace at ``root`` inside it, and from ``~``
+    inside ``home``."""
     groups = groupby(report.items(), key=lambda item: _group(item[0]))
     return "\n\n".join(
         "\n".join(_line(key, setting, full, root, home) for key, setting in settings)
@@ -23,12 +30,13 @@ def config_text(report: ConfigReport, *, full: bool, root: Path, home: Path) -> 
 
 
 def config_json(report: ConfigReport, *, full: bool) -> str:
-    """``report`` as one JSON object, nested by the parts of each key, each setting an object of
-    its ``value``, as the text gives it but for being JSON, its ``layer``'s name and that
-    layer's ``file``, ``null`` if it has none."""
+    """``report`` as one JSON object, nested by the parts of each key but a skill file's, nested
+    by its skill only with its path whole, each setting an object of its ``value``, as the text
+    gives it but for being JSON, its ``layer``'s name and that layer's ``file``, ``null`` if it
+    has none."""
     tree: dict[str, Any] = {}
     for key, setting in report.items():
-        *parents, name = key.split(".")
+        *parents, name = _parts(key)
         node = tree
         for part in parents:
             node = node.setdefault(part, {})
@@ -36,13 +44,21 @@ def config_json(report: ConfigReport, *, full: bool) -> str:
     return json.dumps(tree, indent=2, ensure_ascii=False)
 
 
+def _parts(key: str) -> list[str]:
+    """The parts of ``key`` :func:`config_json` nests a setting by: those between its dots, but a
+    skill file's section, skill and path, which may have dots of its own."""
+    if key.startswith("skill_files."):
+        return key.split(".", 2)
+    return key.split(".")
+
+
 def _group(key: str) -> str:
-    """The group the setting at ``key`` is listed in: the limits', its role's, or its
-    section's."""
+    """The group the setting at ``key`` is listed in: the limits', its role's, its skill's, or
+    its section's."""
     if key in LIMIT_KEYS:
         return ""
     section, *rest = key.split(".")
-    return f"{section}.{rest[0]}" if section == "roles" else section
+    return f"{section}.{rest[0]}" if section in GROUPED else section
 
 
 def _line(key: str, setting: Setting, full: bool, root: Path, home: Path) -> str:
@@ -51,25 +67,31 @@ def _line(key: str, setting: Setting, full: bool, root: Path, home: Path) -> str
 
 
 def _value(value: Any, full: bool) -> str:
-    """``value`` as text: as JSON, but instructions as :func:`_summary` gives them, or with
-    ``full`` their text, on lines of their own between triple quotes."""
-    if not isinstance(value, Instructions):
+    """``value`` as text: as JSON, but instructions and skill files as :func:`_summary` gives
+    them, or with ``full`` their text, on lines of their own between triple quotes, a skill
+    file's without the line break it ends with."""
+    if not isinstance(value, Instructions | SkillFileText):
         return json.dumps(value, ensure_ascii=False)
-    return f'"""\n{value.text}\n"""' if full else _summary(value)
+    if not full:
+        return _summary(value)
+    text = value.text if isinstance(value, Instructions) else value.text.removesuffix("\n")
+    return f'"""\n{text}\n"""'
 
 
 def _json(setting: Setting, full: bool) -> dict[str, Any]:
     """``setting`` as a JSON object, as :func:`config_json` gives it."""
     value = setting.value
-    if isinstance(value, Instructions):
+    if isinstance(value, Instructions | SkillFileText):
         value = value.text if full else _summary(value)
     return {"value": value, "layer": setting.layer.name, "file": setting.layer.path}
 
 
-def _summary(instructions: Instructions) -> str:
-    """``instructions`` as the file they're in, or ``inline``, and how many lines they have."""
-    lines = instructions.lines
-    return f"({instructions.file or 'inline'}, {lines} line{'' if lines == 1 else 's'})"
+def _summary(text: Text) -> str:
+    """``text`` as how many lines it has, after the file instructions are in, or ``inline``."""
+    lines = f"{text.lines} line{'' if text.lines == 1 else 's'}"
+    if isinstance(text, SkillFileText):
+        return f"({lines})"
+    return f"({text.file or 'inline'}, {lines})"
 
 
 def _layer(layer: Layer, root: Path, home: Path) -> str:

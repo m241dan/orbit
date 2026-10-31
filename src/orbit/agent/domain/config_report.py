@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from orbit.agent.domain.config import LIMIT_KEYS, OrbitConfig
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
 from orbit.agent.domain.roles import Role, names_file
+from orbit.agent.domain.skills import SkillLibrary, SkillMapping
 from orbit.agent.domain.verification import VerificationStep
 
 
@@ -50,6 +51,18 @@ class Instructions:
 
 
 @dataclass(frozen=True)
+class SkillFileText:
+    """A skill file in effect: its ``text``."""
+
+    text: str
+
+    @property
+    def lines(self) -> int:
+        """How many lines the text has."""
+        return len(self.text.splitlines())
+
+
+@dataclass(frozen=True)
 class Setting:
     """A setting in effect: its ``value``, and the ``layer`` it came from."""
 
@@ -67,11 +80,13 @@ class UnknownKey(LookupError):
 
 def config_report(sources: ConfigSources, tables: Mapping[str, BaseModel]) -> ConfigReport:
     """The settings in effect that ``sources`` give, each with the layer it came from: the
-    limits, each role field by field, the verification steps and the setup, then each of the
-    user config's ``tables``, by name, as read, field by field."""
+    limits, each role field by field, the verification steps, the setup, the skills by path and
+    every skill file, then each of the user config's ``tables``, by name, as read, field by
+    field."""
     config, project = sources.config, sources.project
     report = _limits(config, project) | _roles(sources)
     report |= _steps(config.verification.steps, project) | _setup(config, project)
+    report |= _skills(config.skills, project) | _skill_files(config.skill_library)
     for name, table in tables.items():
         report |= _table(name, table, sources.user)
     return report
@@ -144,6 +159,30 @@ def _setup(config: OrbitConfig, project: Written) -> ConfigReport:
     if config.setup is None:
         return {"setup": Setting(None, DEFAULT)}
     return _table("setup", config.setup, project)
+
+
+def _skills(mappings: tuple[SkillMapping, ...], project: Written) -> ConfigReport:
+    """The skills by path, ``mappings``, numbered from 1, field by field, each from the
+    ``project`` file if it gives them; no mappings as one setting."""
+    layer = _layer("skills" in project.data, project)
+    if not mappings:
+        return {"skills": Setting(mappings, layer)}
+    report: ConfigReport = {}
+    for number, mapping in enumerate(mappings, start=1):
+        report[f"skills.{number}.paths"] = Setting(mapping.paths, layer)
+        report[f"skills.{number}.use"] = Setting(mapping.use, layer)
+    return report
+
+
+def _skill_files(library: SkillLibrary) -> ConfigReport:
+    """Every file of the ``library``'s skills, skill by skill and file by file in order of their
+    names and paths, by ``skill_files``, the skill's name and the file's path, each from its own
+    layer."""
+    return {
+        f"skill_files.{name}.{path}": Setting(SkillFileText(file.text), file.layer)
+        for name, skill in library.skills.items()
+        for path, file in sorted(skill.files.items())
+    }
 
 
 def _table(name: str, table: BaseModel, written: Written) -> ConfigReport:

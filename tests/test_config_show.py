@@ -8,10 +8,11 @@ import pytest
 from typer.testing import CliRunner, Result
 
 from orbit.agent import INVALID_CONFIG
-from orbit.agent.domain.config_report import Instructions, Setting
-from orbit.agent.domain.layers import DEFAULT, Layer
+from orbit.agent.domain.config_report import Instructions, Setting, SkillFileText
+from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
 from orbit.agent.domain.roles import Role
 from orbit.agent.external.built_in_roles import ROLE_DIRECTORY
+from orbit.agent.external.skill_files import SKILL_DIRECTORY
 from orbit.cli import app
 from orbit.cli.config_text import config_json, config_text
 from orbit.protocol import BUILT_IN_ROLE_NAMES
@@ -22,6 +23,26 @@ REVIEWER = (ROLE_DIRECTORY / "reviewer.md").read_text(encoding="utf-8").strip()
 """The text of the built-in reviewer's instructions."""
 
 REVIEWER_LINES = len(REVIEWER.splitlines())
+
+SHIPPED = Path(str(SKILL_DIRECTORY))
+"""The folder of the skills shipped with orbit, a folder each."""
+
+SKILL_NAMES = sorted(folder.name for folder in SHIPPED.iterdir() if folder.is_dir())
+"""The names of the skills shipped with orbit, in order."""
+
+TESTS = "".join(f"Line {number}.\n" for number in range(1, 43))
+"""A skill file of 42 lines."""
+
+MAPPINGS = """
+[[skills]]
+paths = ["src", "noxfile.py"]
+use = ["python"]
+
+[[skills]]
+paths = ["native"]
+use = ["cpp"]
+"""
+"""Two ``[[skills]]`` entries, for paths :func:`mapped_paths` makes."""
 
 
 @pytest.fixture(autouse=True)
@@ -54,6 +75,47 @@ def user_file(config_dir: Path, text: str) -> Path:
     path.parent.mkdir(parents=True)
     path.write_text(text)
     return path
+
+
+def shipped_files(name: str) -> dict[str, str]:
+    """The text of each file of the skill ``name`` orbit ships, by its path in the folder, in
+    order."""
+    folder = SHIPPED / name
+    paths = (path for path in folder.rglob("*") if path.is_file() and not path.name.startswith("."))
+    texts = {
+        path.relative_to(folder).as_posix(): path.read_text(encoding="utf-8") for path in paths
+    }
+    return dict(sorted(texts.items()))
+
+
+def counted(text: str) -> str:
+    """How many lines ``text`` has, as ``orbit config show`` gives a skill file's value."""
+    lines = len(text.splitlines())
+    return f"({lines} line{'' if lines == 1 else 's'})"
+
+
+def listed(name: str) -> str:
+    """The lines ``orbit config show`` lists the files of the shipped skill ``name`` in."""
+    return "\n".join(
+        f"skill_files.{name}.{path} = {counted(text)}   package"
+        for path, text in shipped_files(name).items()
+    )
+
+
+def project_skill(root: Path, path: str, text: str) -> Path:
+    """The project's skill file at ``path`` in its ``.orbit/skills/`` in the workspace at
+    ``root``, holding ``text``."""
+    file = root / ".orbit" / "skills" / path
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(text, encoding="utf-8")
+    return file
+
+
+def mapped_paths(root: Path) -> None:
+    """The paths :data:`MAPPINGS` maps, made in the workspace at ``root``."""
+    (root / "src").mkdir()
+    (root / "native").mkdir()
+    (root / "noxfile.py").write_text("")
 
 
 def show(project: Path, *args: str) -> Result:
@@ -119,6 +181,8 @@ def test_without_a_key_every_section_is_listed_in_groups_in_order(project: Path)
         *(f"roles.{name}.instructions" for name in BUILT_IN_ROLE_NAMES),
         "verification.steps",
         "setup",
+        "skills",
+        *(f"skill_files.{name}.SKILL.md" for name in SKILL_NAMES),
         "storage.tool_output_kb",
         "server.tls",
         "telemetry.exporter",
@@ -158,6 +222,76 @@ def test_instructions_given_as_text_show_as_inline(project: Path) -> None:
     assert result.stdout == (
         "roles.coder.instructions = (inline, 2 lines)   project .orbit/config.toml\n"
     )
+
+
+def test_without_mappings_or_project_skills_there_are_none_and_every_shipped_file(
+    project: Path,
+) -> None:
+    assert show(project, "skills").stdout == "skills = []   default\n"
+    result = show(project, "skill_files")
+    assert result.exit_code == 0, result.output
+    assert result.stdout == "\n\n".join(map(listed, SKILL_NAMES)) + "\n"
+
+
+def test_each_skills_files_are_a_group_of_their_own(project: Path) -> None:
+    groups = show(project, "skill_files").stdout.rstrip("\n").split("\n\n")
+    skills = [{line.split(".")[1] for line in group.splitlines()} for group in groups]
+    assert skills == [{name} for name in SKILL_NAMES]
+
+
+def test_a_project_skill_file_shows_its_lines_and_its_path(project: Path) -> None:
+    project_skill(project, "python/tests.md", TESTS)
+    result = show(project, "skill_files.python.tests.md")
+    assert result.exit_code == 0, result.output
+    assert result.stdout == (
+        "skill_files.python.tests.md = (42 lines)   project .orbit/skills/python/tests.md\n"
+    )
+
+
+def test_full_prints_a_skill_files_text(project: Path) -> None:
+    project_skill(project, "python/tests.md", TESTS)
+    result = show(project, "skill_files.python.tests.md", "--full")
+    assert result.stdout == (
+        f'skill_files.python.tests.md = """\n{TESTS}"""   project .orbit/skills/python/tests.md\n'
+    )
+
+
+def test_a_skills_key_shows_only_its_files(project: Path) -> None:
+    result = show(project, "skill_files.python")
+    assert result.exit_code == 0, result.output
+    keys = [line.split(" = ")[0] for line in result.stdout.splitlines()]
+    assert keys == [f"skill_files.python.{path}" for path in shipped_files("python")]
+
+
+def test_each_mapping_is_listed_field_by_field_from_the_project_file(project: Path) -> None:
+    mapped_paths(project)
+    project_file(project, MAPPINGS)
+    result = show(project, "skills")
+    assert result.exit_code == 0, result.output
+    assert result.stdout == (
+        'skills.1.paths = ["src", "noxfile.py"]   project .orbit/config.toml\n'
+        'skills.1.use = ["python"]   project .orbit/config.toml\n'
+        'skills.2.paths = ["native"]   project .orbit/config.toml\n'
+        'skills.2.use = ["cpp"]   project .orbit/config.toml\n'
+    )
+
+
+def test_json_nests_skill_files_by_skill_keeping_each_path_whole(project: Path) -> None:
+    path = project_skill(project, "python/tests.md", TESTS)
+    result = show(project, "skill_files", "--json")
+    assert result.exit_code == 0, result.output
+    python = json.loads(result.stdout)["skill_files"]["python"]
+    assert python["tests.md"] == {"value": "(42 lines)", "layer": "project", "file": str(path)}
+    skill_md = counted(shipped_files("python")["SKILL.md"])
+    assert python["SKILL.md"] == {"value": skill_md, "layer": "package", "file": None}
+    assert list(python) == list(shipped_files("python"))
+
+
+def test_json_with_full_gives_a_skill_files_text(project: Path) -> None:
+    path = project_skill(project, "python/tests.md", TESTS)
+    result = show(project, "skill_files.python.tests.md", "--json", "--full")
+    tests = json.loads(result.stdout)["skill_files"]["python"]["tests.md"]
+    assert tests == {"value": TESTS, "layer": "project", "file": str(path)}
 
 
 def test_json_gives_the_same_values_and_layers(project: Path, config_dir: Path) -> None:
@@ -288,3 +422,29 @@ def test_json_of_inline_instructions_says_so() -> None:
     report = {"roles.x.instructions": Setting(Instructions("Do it.", None), DEFAULT)}
     instructions = json.loads(config_json(report, full=False))["roles"]["x"]["instructions"]
     assert instructions["value"] == "(inline, 1 line)"
+
+
+def test_a_skill_file_of_one_line_says_so() -> None:
+    report = {"skill_files.x.SKILL.md": Setting(SkillFileText("One.\n"), PACKAGE)}
+    text = config_text(report, full=False, root=Path("/"), home=Path("/home"))
+    assert text == "skill_files.x.SKILL.md = (1 line)   package"
+
+
+def test_full_prints_a_skill_file_without_a_last_line_break_as_it_is() -> None:
+    report = {"skill_files.x.SKILL.md": Setting(SkillFileText("One.\nTwo."), PACKAGE)}
+    text = config_text(report, full=True, root=Path("/"), home=Path("/home"))
+    assert text == 'skill_files.x.SKILL.md = """\nOne.\nTwo.\n"""   package'
+
+
+def test_json_keeps_a_skill_files_path_in_folders_whole() -> None:
+    report = {
+        "skill_files.cpp.scripts/run.sh": Setting(SkillFileText("run\n"), PACKAGE),
+        "skills.1.use": Setting(("cpp",), DEFAULT),
+    }
+    tree = json.loads(config_json(report, full=False))
+    assert tree == {
+        "skill_files": {
+            "cpp": {"scripts/run.sh": {"value": "(1 line)", "layer": "package", "file": None}}
+        },
+        "skills": {"1": {"use": {"value": ["cpp"], "layer": "default", "file": None}}},
+    }

@@ -1556,6 +1556,9 @@ stays.
     SKILL.md        a skill of your own
 ```
 
+`orbit config show skill_files` lists every skill's files with the layer each came from, orbit's
+or yours (see [Seeing the configuration in effect](#seeing-the-configuration-in-effect)).
+
 Hidden files and folders, whose names start with a dot, are left out, in the package and in
 `.orbit/skills/` alike, and so are files directly in `.orbit/skills/`, outside any folder, so you
 can keep notes there. A file that isn't UTF-8 text, a folder without a `SKILL.md`, or a `SKILL.md`
@@ -1642,10 +1645,11 @@ tables it appends get their lines.
 `orbit config show` prints the configuration orbit resolves for a workspace (the current
 directory's, or the one `-C PATH` names, picked as `orbit chat` picks it) from this machine's
 files, each value with the layer it came from: the limits, each role field by field, the
-verification steps, the setup, and your `config.toml`'s `[storage]`, `[server]` and
-`[telemetry]` (the config directory is `--config-dir`, as for `orbit chat`). It needs no running
-`orbit serve`, and writes nothing. Each value is a line, `<key> = <value>   <layer>`, the value as
-JSON, with the limits, each role and each other section in groups of their own:
+verification steps, the setup, the `[[skills]]` entries, every skill file, and your
+`config.toml`'s `[storage]`, `[server]` and `[telemetry]` (the config directory is
+`--config-dir`, as for `orbit chat`). It needs no running `orbit serve`, and writes nothing. Each
+value is a line, `<key> = <value>   <layer>`, the value as JSON, with the limits, each role, each
+skill's files and each other section in groups of their own:
 
 ```
 $ orbit config show roles.reviewer
@@ -1660,20 +1664,37 @@ roles.reviewer.runtime = "claude"   package
 The layers, least specific first:
 
 - `default`: orbit's own default, in no file.
-- `package`: the roles shipped with orbit (see [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)).
+- `package`: the roles and skills shipped with orbit (see [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml) and [Skills](#skills)).
 - `user <path>`: your `config.toml` in the config directory.
-- `project <path>`: the workspace's `.orbit/config.toml`.
+- `project <path>`: the workspace's `.orbit/config.toml`, or a skill file of its `.orbit/skills/`.
 
 A file inside the workspace shows relative to it, and one in your home directory from `~`. A
 role's instructions show as the file they're in and their length, `(reviewer.md, 64 lines)`, or
 `(inline, 3 lines)` for text the file gives itself; `--full` prints their text instead, between
-lines of `"""`. A `KEY`, dotted as in the TOML it comes from, shows only the settings at or under
-it: `roles` every role's, `roles.reviewer` one role's, `server.port` one value and
-`verification.steps.1` the first step's. `--json` prints the same as one JSON object, nested by
-the parts of each key, each value an object `{"value": …, "layer": …, "file": …}` of its value,
-its layer's name (`default`, `package`, `user` or `project`) and that layer's file, its whole
-path, or `null` for `default` and `package`. A `KEY` that names no setting stops it with status 2
-naming the key, and an invalid configuration with status 2 and the message `orbit chat` gives.
+lines of `"""`.
+
+The `[[skills]]` entries are numbered from 1, as the verification steps are, `skills.1.paths`
+and `skills.1.use` from `.orbit/config.toml`, or `skills = []   default` without any. Then every
+skill file is listed, skill by skill in name order and file by file in path order, as
+`skill_files.<skill>.<path>`, each skill's files a group of their own. A file's value is its
+number of lines, `(1 line)` for one, or with `--full` its text between lines of `"""`, and its
+layer is `package` for orbit's own, or `project` with the path of yours in `.orbit/skills/`:
+
+```
+skill_files.python.SKILL.md = (84 lines)   package
+skill_files.python.tests.md = (42 lines)   project .orbit/skills/python/tests.md
+```
+
+A `KEY`, dotted as in the TOML it comes from, shows only the settings at or under it: `roles`
+every role's, `roles.reviewer` one role's, `server.port` one value, `verification.steps.1` the
+first step's, `skills` the `[[skills]]` entries and `skill_files.python` the python skill's
+files. `--json` prints the same as one JSON object, nested by the parts of each key, each value
+an object `{"value": …, "layer": …, "file": …}` of its value, its layer's name (`default`,
+`package`, `user` or `project`) and that layer's file, its whole path, or `null` for `default`
+and `package`. Skill files nest by skill only, each keyed by its whole path,
+`{"skill_files": {"python": {"tests.md": {…}, "SKILL.md": {…}}}}`. A `KEY` that names no setting
+stops it with status 2 naming the key, and an invalid configuration with status 2 and the
+message `orbit chat` gives.
 
 ### How agents reach orbit
 

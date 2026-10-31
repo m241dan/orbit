@@ -1,6 +1,7 @@
 """What ``orbit config show`` reports: each setting in effect, with the layer it came from."""
 
 import re
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -11,6 +12,7 @@ from orbit.agent.domain.config_report import (
     ConfigSources,
     Instructions,
     Setting,
+    SkillFileText,
     UnknownKey,
     Written,
     config_report,
@@ -19,6 +21,7 @@ from orbit.agent.domain.config_report import (
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer, load_user_roles
 from orbit.agent.domain.roles import Role, built_in_roles
 from orbit.agent.domain.server import ServerSettings
+from orbit.agent.domain.skills import Skill, SkillFile, SkillLibrary
 from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.protocol import BUILT_IN_ROLE_NAMES
@@ -38,6 +41,8 @@ HELPER = {
     "verify": False,
 }
 """A personal role's table: a helper in a lane of its own, on a snapshot."""
+SKILL_PATH = "/src/app/.orbit/skills/python/tests.md"
+PROJECT_SKILL = Layer("project", SKILL_PATH)
 
 
 def sources(
@@ -65,6 +70,39 @@ def report(project: Data | None = None, user: Data | None = None) -> ConfigRepor
     """What's reported of the configuration a project file holding ``project`` and a user
     config holding ``user`` make, with no table of the user config's own."""
     return config_report(sources(project, user), {})
+
+
+def skill(name: str, files: dict[str, SkillFile]) -> Skill:
+    """The skill ``name`` of ``files``, by their paths."""
+    return Skill(name=name, description=f"The {name} skill.", body="", files=files)
+
+
+def skill_file(text: str, layer: Layer = PACKAGE) -> SkillFile:
+    """A skill file from ``layer`` holding ``text``."""
+    return SkillFile(text=text, layer=layer, location=layer.path or "package")
+
+
+LIBRARY = SkillLibrary(
+    skills={
+        "python": skill(
+            "python",
+            {
+                "tests.md": skill_file("Test.\nWell.\n", PROJECT_SKILL),
+                "SKILL.md": skill_file("# Python\n"),
+            },
+        ),
+        "cpp": skill("cpp", {"scripts/run.sh": skill_file("run\n"), "SKILL.md": skill_file("")}),
+    }
+)
+"""Two skills, given out of order, the python one with a file of the project's."""
+
+
+def with_skills(project: Data | None = None) -> ConfigReport:
+    """What's reported of the configuration a project file holding ``project`` makes with the
+    skills of :data:`LIBRARY`."""
+    given = sources(project)
+    config = given.config.model_copy(update={"skill_library": LIBRARY})
+    return config_report(replace(given, config=config), {})
 
 
 # The limits
@@ -184,8 +222,55 @@ def test_the_setup_the_project_file_gives_is_listed_field_by_field() -> None:
 
 
 def test_the_project_files_sections_come_in_order() -> None:
-    sections = [key.split(".")[0] for key in report() if "." in key or key == "setup"]
-    assert sorted(set(sections), key=sections.index) == ["roles", "verification", "setup"]
+    sections = [key.split(".")[0] for key in with_skills() if key not in LIMIT_KEYS]
+    assert sorted(set(sections), key=sections.index) == [
+        "roles",
+        "verification",
+        "setup",
+        "skills",
+        "skill_files",
+    ]
+
+
+# The skills
+
+
+def test_without_skill_mappings_there_are_none_by_default() -> None:
+    assert report()["skills"] == Setting((), DEFAULT)
+
+
+def test_no_skill_mappings_the_project_file_gives_are_the_projects() -> None:
+    assert report({"skills": []})["skills"] == Setting((), PROJECT)
+
+
+def test_each_skill_mapping_the_project_file_gives_is_listed_field_by_field() -> None:
+    mappings = [
+        {"paths": ["src", "noxfile.py"], "use": ["python"]},
+        {"paths": ["native"], "use": ["cpp", "security"]},
+    ]
+    settings = report({"skills": mappings})
+    assert {key: value for key, value in settings.items() if key.startswith("skills")} == {
+        "skills.1.paths": Setting(("src", "noxfile.py"), PROJECT),
+        "skills.1.use": Setting(("python",), PROJECT),
+        "skills.2.paths": Setting(("native",), PROJECT),
+        "skills.2.use": Setting(("cpp", "security"), PROJECT),
+    }
+
+
+def test_each_skill_file_is_listed_by_skill_and_path_in_order_from_its_own_layer() -> None:
+    assert {key: value for key, value in with_skills().items() if key.startswith("skill_")} == {
+        "skill_files.cpp.SKILL.md": Setting(SkillFileText(""), PACKAGE),
+        "skill_files.cpp.scripts/run.sh": Setting(SkillFileText("run\n"), PACKAGE),
+        "skill_files.python.SKILL.md": Setting(SkillFileText("# Python\n"), PACKAGE),
+        "skill_files.python.tests.md": Setting(SkillFileText("Test.\nWell.\n"), PROJECT_SKILL),
+    }
+    keys = [key for key in with_skills() if key.startswith("skill_")]
+    assert keys == sorted(keys)
+
+
+@pytest.mark.parametrize(("text", "lines"), [("", 0), ("One.\n", 1), ("One.\n\nThree.", 3)])
+def test_a_skill_files_text_counts_its_lines(text: str, lines: int) -> None:
+    assert SkillFileText(text).lines == lines
 
 
 # The user config's tables
@@ -216,6 +301,21 @@ def test_a_key_gives_the_settings_under_it() -> None:
     settings = report()
     assert list(subtree(settings, "roles.reviewer")) == [
         f"roles.reviewer.{field}" for field in Role.model_fields
+    ]
+
+
+def test_a_skills_key_gives_its_files_alone() -> None:
+    assert list(subtree(with_skills(), "skill_files.python")) == [
+        "skill_files.python.SKILL.md",
+        "skill_files.python.tests.md",
+    ]
+
+
+def test_the_skills_key_gives_the_mappings_alone() -> None:
+    mappings = [{"paths": ["src"], "use": ["python"]}]
+    assert list(subtree(with_skills({"skills": mappings}), "skills")) == [
+        "skills.1.paths",
+        "skills.1.use",
     ]
 
 
