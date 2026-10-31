@@ -163,6 +163,21 @@ def transaction(
         raise
 
 
+def workspace_tables(connection: sqlite3.Connection) -> list[str]:
+    """The tables in ``connection``'s database that hold each workspace's records, those with a
+    ``workspace_id`` column, by name.
+
+    Found from the schema itself, so a table a migration adds is among them without being listed
+    anywhere else.
+    """
+    found = connection.execute(
+        """SELECT master.name FROM sqlite_master AS master
+        JOIN pragma_table_info(master.name) AS info ON info.name = 'workspace_id'
+        WHERE master.type = 'table' ORDER BY master.name"""
+    )
+    return [str(name) for (name,) in found.fetchall()]
+
+
 def _create_files(database: Path) -> None:
     """Create ``database``'s directory (owner-only) and the empty file (owner read-write) if
     they aren't there."""

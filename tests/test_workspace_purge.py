@@ -5,6 +5,7 @@ lock, and refuses one a running server serves or another orbit holds."""
 
 import os
 import shutil
+import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -14,11 +15,11 @@ from orbit.agent.application.purge import purge
 from orbit.agent.domain.purging import Purged, PurgeRefused
 from orbit.agent.domain.reports import NewReport
 from orbit.agent.domain.workspaces import RegisteredWorkspace
-from orbit.agent.external import workspace_purge
+from orbit.agent.external import sqlite_schema, workspace_purge
 from orbit.agent.external.fallback_files import FallbackFiles
 from orbit.agent.external.repository import orbit_dir
 from orbit.agent.external.run_file import RunFile
-from orbit.agent.external.sqlite_schema import StoreError
+from orbit.agent.external.sqlite_schema import MIGRATIONS, StoreError
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.agent.external.workspace_lock import WorkspaceLock
 from orbit.agent.external.workspace_purge import StorePurging, forget_workspace, purge_workspace
@@ -113,6 +114,104 @@ async def test_a_workspace_purged_and_added_again_numbers_its_reports_from_1(
     await purge_workspace(store, await used(store, tmp_path / "a"))
     workspace_id = await used(store, tmp_path / "a")
     assert [report.id for report in await store.reports(workspace_id)] == [1]
+
+
+KEYED = {
+    "events",
+    "logs",
+    "sessions",
+    "reviews",
+    "record_moves",
+    "reports",
+    "report_counters",
+    "usage",
+}
+"""The tables keyed by workspace in the latest schema."""
+
+FILLER: dict[str, str | int | float] = {"TEXT": "x", "INTEGER": 1, "REAL": 1.5}
+"""A value of each column type the schema declares."""
+
+
+def columns(connection: sqlite3.Connection, table: str) -> dict[str, str]:
+    """The declared type of each of ``table``'s columns in ``connection``'s database."""
+    info = connection.execute(f"PRAGMA table_info({table})").fetchall()
+    return {str(name): str(kind) for _, name, kind, *_ in info}
+
+
+def keyed_tables(connection: sqlite3.Connection) -> list[str]:
+    """The tables in ``connection``'s database with a ``workspace_id`` column, by name."""
+    found = connection.execute("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+    return [name for (name,) in found.fetchall() if "workspace_id" in columns(connection, name)]
+
+
+def fill(connection: sqlite3.Connection, table: str, workspace_id: str) -> None:
+    """Add a row of the workspace ``workspace_id`` to ``table``, with a value of its type in
+    each other column."""
+    row = {name: FILLER.get(kind, "x") for name, kind in columns(connection, table).items()}
+    row["workspace_id"] = workspace_id
+    places = ", ".join("?" * len(row))
+    connection.execute(f"INSERT INTO {table} ({', '.join(row)}) VALUES ({places})", [*row.values()])
+
+
+def counts(connection: sqlite3.Connection, workspace_id: str) -> dict[str, int]:
+    """How many rows of the workspace ``workspace_id`` each table keyed by workspace has."""
+    return {
+        table: connection.execute(
+            f"SELECT count(*) FROM {table} WHERE workspace_id = ?", (workspace_id,)
+        ).fetchone()[0]
+        for table in keyed_tables(connection)
+    }
+
+
+async def used_bare(registry: WorkspaceRegistry, path: Path) -> str:
+    """The id of the workspace at ``path``, registered in ``registry`` with no records."""
+    path.mkdir()
+    return (await registry.find_or_register(str(path))).workspace_id
+
+
+async def purge_one_of_two(
+    store: SqliteStore, state: Path, tmp_path: Path
+) -> tuple[int, dict[str, int], dict[str, int]]:
+    """Two workspaces with a row in each table keyed by workspace, and the second purged: how
+    many sessions the purge says it had, and the rows each table has left of the purged one and
+    of the other."""
+    registry = WorkspaceRegistry(store)
+    kept, gone = [await used_bare(registry, tmp_path / name) for name in ("kept", "gone")]
+    with database(state) as connection:
+        for table in keyed_tables(connection):
+            fill(connection, table, kept)
+            fill(connection, table, gone)
+    sessions = await registry.purge(gone)
+    with database(state) as connection:
+        return sessions, counts(connection, gone), counts(connection, kept)
+
+
+async def test_purging_empties_every_table_keyed_by_workspace_leaving_other_workspaces(
+    store: SqliteStore, state: Path, tmp_path: Path
+) -> None:
+    sessions, gone, kept = await purge_one_of_two(store, state, tmp_path)
+
+    assert sessions == 1
+    assert gone.keys() >= KEYED
+    assert gone == dict.fromkeys(gone, 0)
+    assert kept == dict.fromkeys(gone, 1)
+    with database(state) as connection:
+        paths = connection.execute("SELECT path FROM workspaces").fetchall()
+    assert paths == [(str(tmp_path / "kept"),)]
+
+
+async def test_a_table_keyed_by_workspace_that_a_later_migration_adds_is_purged_too(
+    monkeypatch: pytest.MonkeyPatch, state: Path, tmp_path: Path
+) -> None:
+    notes = "CREATE TABLE notes (workspace_id TEXT NOT NULL REFERENCES workspaces (id), body)"
+    monkeypatch.setattr(sqlite_schema, "MIGRATIONS", (*MIGRATIONS, (notes,)))
+    store = await SqliteStore.open(state)
+    try:
+        _, gone, kept = await purge_one_of_two(store, state, tmp_path)
+    finally:
+        await store.close()
+
+    assert (gone["notes"], kept["notes"]) == (0, 1)
 
 
 async def test_purging_a_clean_managed_clone_deletes_its_directory(

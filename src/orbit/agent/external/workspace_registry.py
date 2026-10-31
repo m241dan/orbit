@@ -12,7 +12,7 @@ from pathlib import Path
 from orbit.agent.domain.fingerprints import fingerprints_match, lookalikes_note, reattached_note
 from orbit.agent.domain.workspaces import RegisteredWorkspace
 from orbit.agent.external.repository import git_top_level, workspace_fingerprint
-from orbit.agent.external.sqlite_schema import transaction
+from orbit.agent.external.sqlite_schema import transaction, workspace_tables
 from orbit.agent.external.sqlite_store import SqliteStore
 
 
@@ -135,29 +135,17 @@ def _found(connection: sqlite3.Connection, query: str, key: str) -> RegisteredWo
     return RegisteredWorkspace(str(workspace_id), str(path), bool(served), bool(managed))
 
 
-_PURGES = (
-    "DELETE FROM events WHERE workspace_id = ?",
-    "DELETE FROM logs WHERE workspace_id = ?",
-    "DELETE FROM sessions WHERE workspace_id = ?",
-    "DELETE FROM reviews WHERE workspace_id = ?",
-    "DELETE FROM record_moves WHERE workspace_id = ?",
-    "DELETE FROM reports WHERE workspace_id = ?",
-    "DELETE FROM report_counters WHERE workspace_id = ?",
-    "DELETE FROM usage WHERE workspace_id = ?",
-    "DELETE FROM workspaces WHERE id = ?",
-)
-"""What deletes a workspace's records, its row, with its ``forgotten_seq``, last."""
-
-
 def _purge(connection: sqlite3.Connection, workspace_id: str) -> int:
-    """Delete the records of the workspace ``workspace_id`` in ``connection``, in one
-    transaction; returns how many sessions it had."""
+    """Delete the records of the workspace ``workspace_id`` in ``connection``, from every table
+    keyed by workspace and then its row, with its ``forgotten_seq``, in one transaction; returns
+    how many sessions it had."""
     with transaction(connection):
         (sessions,) = connection.execute(
             "SELECT count(*) FROM sessions WHERE workspace_id = ?", (workspace_id,)
         ).fetchone()
-        for statement in _PURGES:
-            connection.execute(statement, (workspace_id,))
+        for table in workspace_tables(connection):
+            connection.execute(f"DELETE FROM {table} WHERE workspace_id = ?", (workspace_id,))
+        connection.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
     return int(sessions)
 
 
@@ -249,8 +237,8 @@ class WorkspaceRegistry:
         return await self._store.run(message, lambda connection: _found(connection, _BY_PATH, path))
 
     async def purge(self, workspace_id: str) -> int:
-        """Delete the records of the workspace ``workspace_id``, its sessions, their events and
-        logs, its review count and its registration, in one transaction; returns how many
-        sessions it had."""
+        """Delete the records of the workspace ``workspace_id``, in every table keyed by
+        workspace, such as its sessions, their events and logs, and then its registration, in one
+        transaction; returns how many sessions it had."""
         message = f"Couldn't delete the workspace {workspace_id} from"
         return await self._store.run(message, lambda connection: _purge(connection, workspace_id))
