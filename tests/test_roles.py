@@ -17,6 +17,7 @@ from orbit.agent.domain.roles import (
     consult_clashes,
     conversational_roles,
     disabled_roles,
+    enabled_roles,
     load_built_in_roles,
     merging_lane,
     names_file,
@@ -686,6 +687,13 @@ def test_the_disabled_roles_are_those_with_enabled_false() -> None:
     reviewer = BUILT_IN_ROLES["reviewer"].model_copy(update={"enabled": False})
     assert disabled_roles(BUILT_IN_ROLES) == frozenset()
     assert disabled_roles({**BUILT_IN_ROLES, "reviewer": reviewer}) == frozenset({"reviewer"})
+
+
+def test_the_enabled_roles_are_the_others_by_name_in_their_order() -> None:
+    reviewer = BUILT_IN_ROLES["reviewer"].model_copy(update={"enabled": False})
+    enabled = enabled_roles({**BUILT_IN_ROLES, "reviewer": reviewer})
+    assert enabled == {name: r for name, r in BUILT_IN_ROLES.items() if name != "reviewer"}
+    assert list(enabled) == [name for name in BUILT_IN_ROLES if name != "reviewer"]
 
 
 def test_work_in_a_disabled_role_is_refused_as_not_configured_naming_it() -> None:

@@ -3031,7 +3031,10 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     remove workspaces through its
     `WorkspaceSource` port, which `orbit serve` fills and a local orbit doesn't. `WorkspaceHost` (in `workspace_host`) is one workspace's
     backend: its open session, lanes, agents and workspace lock; it takes the commands routed
-    to it, asks the domain what follows, drives the ports and publishes its events. `Tasks` (in
+    to it, asks the domain what follows, drives the ports and publishes its events.
+    `SessionActivity`, `SessionSnapshots` and `CatalogEntries` (in `host_views`) assemble what
+    the frontends see of it: what's in progress in its open session, the session's snapshot and
+    the workspace's entry in the catalog. `Tasks` (in
     `tasks`) holds the `TaskBoard`, marks tasks running and finished, and is the one place that
     publishes the board, whole, once its callers have changed it. `WorkLane` (in `work_lane`) is
     the work lane: it runs the board's tasks one at a time, queues a fix after each failed step
@@ -3075,7 +3078,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     through the store, each under its lock; `SessionSwitcher` (in `switcher`) switches the
     session between saved ones: it lists, opens, renames and deletes them through the keeper,
     opens another or a new one in place of the one open, and holds what the session's agents have
-    spent; `WorkCommands` (in `work_commands`) handles the other commands, the prompts, tasks,
+    spent, which `UsageAccounting` (in `usage_accounting`) adds each of their turns' cost to, by
+    role and under the role consulting, and records; `WorkCommands` (in `work_commands`) handles the other commands, the prompts, tasks,
     board and agents' work, refusing those that name no such agent, lane or trigger, and
     queueing those that start work while the session is read-only; `Takeover` (in `takeover`)
     keeps whether the session is read-only, which the other parts read through it, tries a

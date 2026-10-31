@@ -9,7 +9,6 @@ from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import datetime
-from pathlib import PurePath
 
 from orbit.agent.application.closing import close_all
 from orbit.agent.application.coder_slots import CoderSeat, CoderSlots
@@ -19,6 +18,14 @@ from orbit.agent.application.desk import AgentDesk, Agents
 from orbit.agent.application.handover import Handover, HandoverParts
 from orbit.agent.application.handshake import HostGreeting
 from orbit.agent.application.history import SessionHistory
+from orbit.agent.application.host_views import (
+    ActivityParts,
+    CatalogEntries,
+    EntryParts,
+    SessionActivity,
+    SessionSnapshots,
+    SnapshotParts,
+)
 from orbit.agent.application.keeper import (
     AlreadyOpen,
     Clock,
@@ -68,6 +75,7 @@ from orbit.agent.application.takeover import (
 )
 from orbit.agent.application.task_trace import TaskTracing
 from orbit.agent.application.tasks import Tasks
+from orbit.agent.application.usage_accounting import AccountParts, UsageAccounting
 from orbit.agent.application.usage_recorder import UsageRecorder
 from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.application.views import SessionViews, ViewParts
@@ -81,13 +89,14 @@ from orbit.agent.application.work_lane import Beside, WorkLane
 from orbit.agent.application.work_turns import WorkParts, WorkTurns
 from orbit.agent.domain.activity import Activity
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.catalog import agent_entries, trigger_names, workspace_entry
+from orbit.agent.domain.catalog import trigger_names
 from orbit.agent.domain.ownership import WorkspaceOwner, queued_dropped_note, read_only_note
 from orbit.agent.domain.refusals import STOPPING, Refused
 from orbit.agent.domain.reviews import ReviewPlanner
 from orbit.agent.domain.roles import (
     Role,
     disabled_roles,
+    enabled_roles,
     merging_lane,
     review_lane,
     role_task,
@@ -112,15 +121,10 @@ from orbit.protocol import (
     Notice,
     RenameSession,
     ResumeStorage,
-    RunningAgent,
-    SessionSummary,
     Settings,
     ShowReport,
-    StepState,
     TakeOwnership,
     TaskSpec,
-    TurnFinished,
-    Usage,
     UsageChanged,
     WorkspaceEntry,
 )
@@ -167,18 +171,13 @@ def _desk(
     return desk
 
 
-def _workspace_label(workspace: str | None) -> str | None:
-    """The name of the directory of the repository at ``workspace``; none without one."""
-    return PurePath(workspace).name if workspace else None
-
-
 _DEFAULT_STORAGE = StorageSettings()
 _NO_TELEMETRY = NoTelemetry()
 
 UNREGISTERED_WORKSPACE = "unregistered"
+"""The id of a host's workspace when it's given none, as one with no store isn't registered."""
 
 NO_REPORTS_KEPT = "This orbit has no store to keep reports in."
-"""The id of a host's workspace when it's given none, as one with no store isn't registered."""
 
 
 async def _unannounced(entry: WorkspaceEntry) -> None:
@@ -217,7 +216,9 @@ class WorkspaceHost:
     ``WorkTurns`` decides when it runs; ``ReviewLane`` queues the reviews and runs them on the
     runner of the review roles' lane, if that isn't the work lane; ``SessionSwitcher`` switches
     between saved sessions; ``WorkCommands`` handles the other commands; ``SessionHistory``
-    answers ``History``. Its ``Outbox`` stamps its
+    answers ``History``; ``SessionActivity``, ``SessionSnapshots`` and ``CatalogEntries``
+    assemble what the frontends see of it, and ``UsageAccounting`` charges what its agents'
+    turns cost. Its ``Outbox`` stamps its
     events, in envelopes naming the workspace by ``workspace_id``, and its ``Connections`` route
     them among the connections the control plane makes, whose ``Handshake`` greets each with
     the :attr:`greeting` as it first attaches here. Commands from every connection are handled
@@ -386,6 +387,7 @@ class WorkspaceHost:
         self._outages = Outages()  # One backoff per runtime, which every lane counts on.
         self._work = self._work_lane()
         self._turns = self._work_turns()
+        self._activity = self._session_activity()
         self._switcher = self._session_switcher(pick_session)
         self._resume = self._storage_resume()
         self._commands = self._work_commands()
@@ -394,6 +396,9 @@ class WorkspaceHost:
         self._history = SessionHistory(self._keeper, self._events)
         self._states = self._session_states()
         self._views = self._session_views()
+        self._snapshots = self._session_snapshots()
+        self._entries = self._catalog_entries()
+        self._accounting = self._usage_accounting()
         self._watch_background()
 
     def _connections_changed(self) -> None:
@@ -466,7 +471,7 @@ class WorkspaceHost:
         lane's turns say."""
         parts = StateParts(
             lambda: self._keeper.id,
-            self._activity,
+            self._activity.now,
             self._connections,
             self._events.put_nowait,
             lambda: self._turns.paused,
@@ -488,6 +493,62 @@ class WorkspaceHost:
         )
         return SessionViews(parts)
 
+    def _session_activity(self) -> SessionActivity:
+        """What reads what's in progress in the open session."""
+        parts = ActivityParts(
+            self._turns, self._work, self._lane, self._runners, self._seats, self._startup
+        )
+        return SessionActivity(parts)
+
+    def _session_snapshots(self) -> SessionSnapshots:
+        """What makes the open session's snapshot."""
+        parts = SnapshotParts(
+            lambda: self._keeper.id,
+            self._events.transcript,
+            self._switcher,
+            self._settings,
+            self._seats,
+            self._board,
+            self._proposals,
+            self._turns,
+            self._lanes,
+            self._lane,
+            self._startup,
+            self._verifier,
+            self._desk,
+            self._states,
+            self._views,
+        )
+        return SessionSnapshots(parts)
+
+    def _catalog_entries(self) -> CatalogEntries:
+        """What makes this workspace's entry in the catalog."""
+        parts = EntryParts(
+            self._workspace_id,
+            self._workspace,
+            self._managed,
+            lambda: self._takeover.read_only,
+            self._states,
+            lambda: self.agents,
+            self._seats,
+        )
+        return CatalogEntries(parts)
+
+    def _usage_accounting(self) -> UsageAccounting:
+        """What publishes the agents' events, charging what their turns cost to the open session
+        and publishing its state as that changes."""
+        parts = AccountParts(
+            self._switcher,
+            self._desk,
+            self._seats.asker,
+            self._usage,
+            self._workspace_id,
+            lambda: self._keeper.id,
+            self._events.put,
+            self._states.check,
+        )
+        return UsageAccounting(parts)
+
     def _watch_background(self) -> None:
         """Have the open session's state checked whenever the reviews, the other lanes that start
         by themselves or the startup check stop, as nothing is published then: the lanes make it
@@ -504,9 +565,9 @@ class WorkspaceHost:
             self._seats,
             self._lane,
             self._work,
-            self._activity,
+            self._activity.now,
             self._snapshot,
-            self._entry,
+            lambda sessions: self._entries.entry(sessions),
             lambda entry: self.catalog_changed(entry),
             self._switching,
         )
@@ -683,7 +744,7 @@ class WorkspaceHost:
     @property
     def activity(self) -> Activity:
         """What's in progress in the open session now."""
-        return self._activity()
+        return self._activity.now()
 
     @property
     def settings(self) -> Settings:
@@ -771,9 +832,7 @@ class WorkspaceHost:
     @property
     def roles(self) -> dict[str, Role]:
         """The enabled roles of this workspace's agents, by name; none without agents."""
-        roles = self._roles()
-        disabled = disabled_roles(roles)
-        return {name: role for name, role in roles.items() if name not in disabled}
+        return enabled_roles(self._roles())
 
     @property
     def personal(self) -> frozenset[str]:
@@ -1041,30 +1100,9 @@ class WorkspaceHost:
         await self._switcher.save()
 
     async def _publish_agents(self, event: Event) -> None:
-        """Publish ``event``, from the agents; one that ends a turn adds what the turn cost to
-        what the session spent, in all and by role, and records it in the background, then
-        publishes the session's state, its spend by role changed. Publishing never suspends,
-        so a turn is not cancelled between its TurnFinished and its own bookkeeping, which saves
-        the session after it."""
-        if isinstance(event, TurnFinished) and event.usage is not None:
-            self._switcher.spent += event.usage
-            self._record_usage(event.agent_id, event.usage)
-        await self._events.put(event)
-        if isinstance(event, TurnFinished) and event.usage is not None:
-            self._states.check()
-
-    def _record_usage(self, agent_id: str | None, usage: Usage) -> None:
-        """Record ``usage``, what a turn of agent ``agent_id`` cost, under its role and, for a
-        turn answering a consultation, under what its asker caused, unless that agent wasn't
-        launched."""
-        assert self._desk is not None, "Only agents publish turns."
-        launch = self._desk.launched(agent_id)
-        if launch is None:
-            return
-        self._usage.record(self._workspace_id, self._keeper.id, launch, usage)
-        role = launch.agent.role
-        switcher = self._switcher
-        switcher.spend = switcher.spend.charged(role, usage, self._seats.asker(role))
+        """Publish ``event``, from the agents, charging what a turn that ends cost to the open
+        session, as :class:`UsageAccounting` does."""
+        await self._accounting.publish(event)
 
     def _step_names(self) -> tuple[str, ...]:
         """The names of the steps verifying tasks now; none without verification."""
@@ -1140,39 +1178,6 @@ class WorkspaceHost:
         """Publish the open session's state, if that changed."""
         self._states.check()
 
-    def _activity(self) -> Activity:
-        """What's in progress now: a task run, a review, the conversational roles answering, the
-        startup check and the tasks running in the other lanes that start by themselves, with
-        the tasks the run and the review are on, and where the run waits for a coder, behind how
-        many busy."""
-        task_id, waiting, busy = self._work_activity()
-        return Activity(
-            tasks=self._turns.running,
-            review=self._lane is not None and self._lane.running,
-            answering=self._seats.answering,
-            startup_check=self._startup is not None and self._startup.running,
-            task_id=task_id,
-            reviewing=self._lane.reviewing if self._lane else None,
-            waiting_for_coder=waiting,
-            coders_busy=busy,
-            lane_tasks=self._lane_tasks(),
-        )
-
-    def _lane_tasks(self) -> tuple[str, ...]:
-        """The tasks running in the lanes that start by themselves, reviews aside: the review
-        lane's task of another role, then the other lanes'."""
-        review = self._lane.task if self._lane else None
-        running = (runner.current for runner in self._runners if runner.running)
-        return tuple(task for task in (review, *running) if task is not None)
-
-    def _work_activity(self) -> tuple[str | None, int | None, int | None]:
-        """The task the run is on, where it waits for a coder and behind how many busy; none
-        of them without a work lane."""
-        work = self._work
-        if work is None:
-            return None, None, None
-        return work.current, work.waiting_for_coder, work.coders_busy
-
     def start_background(self) -> None:
         """Start loading the super review count, the startup check, if there is one and the
         session isn't halted, the tries of the repository's lock, and the keeping of the
@@ -1208,59 +1213,4 @@ class WorkspaceHost:
     async def _snapshot(self, last_active: datetime | None = None) -> Shown:
         """The session open here, last active at ``last_active``, as it stands now, with its
         latest events, and why it shows none if they can't be read."""
-        transcript = await self._events.transcript(self._keeper.id)
-        # Read after the transcript, so the state is as it stands once that's read.
-        steps, title = self._steps_shown()
-        snapshot = self._views.snapshot(
-            session=self._switcher.summary(last_active),
-            settings=self._settings.current,
-            role_settings={role: self._settings.of(role) for role in self._seats.names},
-            busy=self._busy(),
-            tasks=self._board.tasks,
-            steps=steps,
-            steps_title=title,
-            review=self._lane.status if self._lane else None,
-            proposals=self._proposals.waiting,
-            agents=self._running_agents(),
-            approvals=self._seats.approvals,
-            transcript=transcript.events,
-            viewers=self._states.of(self._keeper.id).viewers,
-            role_spent=self._switcher.spend.by_role,
-            caused_spent=self._switcher.spend.caused,
-        )
-        return Shown(snapshot, transcript.error)
-
-    def _busy(self) -> dict[str, bool]:
-        """Whether each lane is busy, by name: the work lane, the conversational roles' and those
-        that start by themselves."""
-        work = {self._lanes.work: self._turns.running}
-        return work | self._seats.busy() | self._lanes.busy()
-
-    def _entry(self, sessions: tuple[SessionSummary, ...]) -> WorkspaceEntry:
-        """This workspace's entry in the catalog, holding ``sessions``, the open one's state as
-        a connection joining would see it, and its agents' enabled roles."""
-        live = self._states.current(joining=True).values()
-        workspace = (self._workspace_id, _workspace_label(self._workspace), self._workspace)
-        entry = workspace_entry(
-            workspace,
-            sessions,
-            read_only=self._takeover.read_only,
-            managed=self._managed,
-            live=live,
-        )
-        agents = agent_entries(self.roles, self.conversational, self.personal, self.usage_unknown)
-        return entry.model_copy(update={"agents": agents})
-
-    def _steps_shown(self) -> tuple[tuple[StepState, ...], str]:
-        """The verification steps the panel shows, and their title: the startup check's while
-        it has the panel, else those verifying tasks; none without verification."""
-        startup = self._startup.panel if self._startup else None
-        if startup is not None:
-            return startup.steps, startup.title
-        return (self._verifier.progress.steps if self._verifier else ()), ""
-
-    def _running_agents(self) -> tuple[RunningAgent, ...]:
-        """The agents running, the startup check first while it runs."""
-        startup = self._startup.agent if self._startup else None
-        agents = self._desk.running if self._desk else ()
-        return agents if startup is None else (startup, *agents)
+        return await self._snapshots.snapshot(last_active)

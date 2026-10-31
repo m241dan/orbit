@@ -618,6 +618,12 @@ def disabled_roles(roles: Mapping[str, Role]) -> frozenset[str]:
     return frozenset(name for name, role in roles.items() if not role.enabled)
 
 
+def enabled_roles(roles: Mapping[str, Role]) -> dict[str, Role]:
+    """The roles among ``roles`` that aren't disabled, by name, in their order."""
+    disabled = disabled_roles(roles)
+    return {name: role for name, role in roles.items() if name not in disabled}
+
+
 def disabled_note(name: str) -> str:
     """Why the work asked of role ``name`` is refused: it's disabled."""
     return f"{name} is disabled in this project's configuration."
