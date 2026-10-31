@@ -19,6 +19,7 @@ from orbit.agent.domain.usage_limits import (
     limit_resume_time,
     outage_after,
     outage_delay,
+    outage_note,
     outage_paused_note,
     outage_resume_time,
     outage_resuming_note,
@@ -267,6 +268,21 @@ def test_the_outage_notes_name_another_runtime_by_its_name() -> None:
     assert outage_resuming_note(CLAUDE) == (
         "Starting the run again now Claude's API may be answering."
     )
+
+
+def test_a_conversational_roles_outage_note_names_claude_and_the_role() -> None:
+    assert outage_note("planner", CLAUDE) == (
+        "Claude's API isn't answering, so the planner couldn't reply; "
+        "send your message again later."
+    )
+
+
+def test_a_conversational_roles_outage_note_names_its_runtime() -> None:
+    assert outage_note("architect", KIRO) == (
+        "Kiro's API isn't answering, so the architect couldn't reply; "
+        "send your message again later."
+    )
+    assert outage_note("planner", FAKE).startswith("fake's API isn't answering, so the planner")
 
 
 KIRO_OUTAGE = (

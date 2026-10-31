@@ -459,12 +459,12 @@ class PlannerChat:
         return await report_progress(self._desk.publish, self._agent.id, PLAN_TASK, arguments)
 
     def _heard(self, error: ErrorOccurred) -> ErrorOccurred:
-        """``error`` as the user hears it: saying its role couldn't reply in place of its text
-        when its launcher tells that says the API isn't answering."""
+        """``error`` as the user hears it: saying its role couldn't reply, naming its runtime, in
+        place of its text when its launcher tells that says the API isn't answering."""
         failure = self._desk.agents.launcher(self._role).failure(error.message)
         if failure is None or failure.kind != "api_unavailable":
             return error
-        return error.model_copy(update={"message": outage_note(self._role)})
+        return error.model_copy(update={"message": outage_note(self._role, self.runtime)})
 
 
 async def _refusal(exc: Refused) -> Reply:

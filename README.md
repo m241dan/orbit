@@ -603,9 +603,10 @@ on another runtime finishing doesn't. The conversation says when (`Claude's API 
 ctrl+r starts it now and ctrl+s cancels that.`) and again as it starts (`Starting the run again now
 Claude's API may be answering.`). The task it stopped at runs first, and a fix carries on from the
 coder's tree, as at the usage limit; `ctrl+r`, `ctrl+s`, switching sessions and quitting work on the
-wait as they do there. Reviews and planner turns don't pause: a planner turn ends in error saying
-so in place of the API's own text (`Claude's API isn't answering, so the planner couldn't reply;
-send your message again later.`), and nothing is sent again by itself.
+wait as they do there. Reviews and planner turns don't pause: a planner turn, or any conversational
+role's, ends in error saying so, with its role and its role's runtime, in place of the API's own
+text (`Claude's API isn't answering, so the planner couldn't reply; send your message again
+later.`), and nothing is sent again by itself.
 [docs/00023-bugfix-pause-runs-when-claude-is-down.md](docs/00023-bugfix-pause-runs-when-claude-is-down.md)
 records the requirements.
 
@@ -1819,12 +1820,14 @@ ignores effort; coder runs without it.`), and again after orbit restarts or you 
 **Usage limits and errors.** An agent's error is Kiro's API not answering when it names a
 connection failure (`dispatch failure`, as Kiro says when it can't reach its service), an HTTP
 server error (`HTTP 503`, `status code: 500`) or an overload, which pauses the run as an outage
-does; otherwise it's Kiro's usage limit when it mentions a limit, a quota or credits (`Monthly
-credit limit reached`), which pauses the run too. Kiro's limits reset monthly and its errors give
-no reset time, so a run its limit stopped tries again every hour (see **Usage limits** under
-[Tasks](#tasks)). Any other error fails the task with Kiro's own message. Kiro's wordings for its
-limits and outages are mostly guessed, so if one of them fails a task rather than pausing the run,
-or an error that's neither pauses it, please report its message.
+does, and ends a conversational role's turn in error (`Kiro's API isn't answering, so the planner
+couldn't reply; send your message again later.`); otherwise it's Kiro's usage limit when it
+mentions a limit, a quota or credits (`Monthly credit limit reached`), which pauses the run too.
+Kiro's limits reset monthly and its errors give no reset time, so a run its limit stopped tries
+again every hour (see **Usage limits** under [Tasks](#tasks)). Any other error fails the task with
+Kiro's own message. Kiro's wordings for its limits and outages are mostly guessed, so if one of
+them fails a task rather than pausing the run, or an error that's neither pauses it, please report
+its message.
 [docs/00032-feature-kiro-runtime.md](docs/00032-feature-kiro-runtime.md) records the
 requirements.
 

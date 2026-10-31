@@ -15,8 +15,8 @@ from orbit.agent.application.ports import Reply, ResumeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.roles import Role
-from orbit.agent.domain.runtimes import Failure
-from orbit.agent.domain.usage_limits import PLANNER_OUTAGE_NOTE
+from orbit.agent.domain.runtimes import CLAUDE, KIRO, Failure
+from orbit.agent.domain.usage_limits import outage_note
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
     AGENT_FAILED,
@@ -702,16 +702,22 @@ def errors(events: list[Event]) -> list[ErrorOccurred]:
     return [e for e in events if isinstance(e, ErrorOccurred)]
 
 
+PLANNER_DOWN = outage_note(PLANNER, CLAUDE)
+"""Said when Claude's API not answering fails a planner turn."""
+
+
 async def test_a_turn_claudes_api_fails_says_the_planner_couldnt_reply_and_the_next_runs() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [chats, chats]
     launcher.planner_errors = [OVERLOADED]
     failed = await plan(session, "Plan.")
     turn_id = turn_id_of(failed)
+    note = (
+        "Claude's API isn't answering, so the planner couldn't reply; "
+        "send your message again later."
+    )
     assert errors(failed) == [
-        ErrorOccurred(
-            turn_id=turn_id, agent_id="agent-1", code=AGENT_FAILED, message=PLANNER_OUTAGE_NOTE
-        )
+        ErrorOccurred(turn_id=turn_id, agent_id="agent-1", code=AGENT_FAILED, message=note)
     ]
     assert finished_turns(failed) == [
         TurnFinished(turn_id=turn_id, agent_id="agent-1", reason="error")
@@ -734,9 +740,7 @@ async def test_a_turn_raising_as_claudes_api_fails_says_the_planner_couldnt_repl
     assert await chat.answer("Plan.", Settings()) == "error"
     turn_id = turn_id_of(published)
     assert published[-2:] == [
-        ErrorOccurred(
-            turn_id=turn_id, agent_id="agent-1", code=AGENT_FAILED, message=PLANNER_OUTAGE_NOTE
-        ),
+        ErrorOccurred(turn_id=turn_id, agent_id="agent-1", code=AGENT_FAILED, message=PLANNER_DOWN),
         TurnFinished(turn_id=turn_id, agent_id="agent-1", reason="error"),
     ]
 
@@ -757,7 +761,7 @@ async def test_an_outage_the_cli_reports_is_on_the_turns_span_in_its_own_words()
     turn = await traced_turn(chat)
     assert turn.status.status_code is StatusCode.ERROR
     assert turn.status.description == OVERLOADED
-    assert [e.message for e in errors(published)] == [PLANNER_OUTAGE_NOTE]
+    assert [e.message for e in errors(published)] == [PLANNER_DOWN]
 
 
 async def test_an_outage_a_turn_raises_is_on_its_span_in_its_own_words() -> None:
@@ -766,7 +770,7 @@ async def test_an_outage_a_turn_raises_is_on_its_span_in_its_own_words() -> None
     turn = await traced_turn(chat)
     assert turn.status.status_code is StatusCode.ERROR
     assert turn.status.description == "API Error (Connection error.)"
-    assert [e.message for e in errors(published)] == [PLANNER_OUTAGE_NOTE]
+    assert [e.message for e in errors(published)] == [PLANNER_DOWN]
 
 
 async def test_a_turn_failing_with_another_api_error_shows_its_own_text() -> None:
@@ -787,7 +791,21 @@ async def test_a_turn_its_launcher_tells_the_api_is_down_in_says_the_planner_can
     launcher.planner_errors = ["Gateway down"]
     launcher.failures["Gateway down"] = Failure("api_unavailable")
     assert await chat.answer("Plan.", Settings()) == "error"
-    assert [e.message for e in errors(published)] == [PLANNER_OUTAGE_NOTE]
+    assert [e.message for e in errors(published)] == [PLANNER_DOWN]
+
+
+async def test_a_turn_kiros_api_fails_says_kiros_api_isnt_answering() -> None:
+    kiro = ScriptedLauncher(FakeHost())
+    kiro.planner_turns = [chats]
+    kiro.planner_errors = ["dispatch failure"]
+    kiro.failures["dispatch failure"] = Failure("api_unavailable")
+    roles = {**ROLES, PLANNER: ROLES[PLANNER].model_copy(update={"runtime": KIRO})}
+    session, _, _ = session_for(host=kiro.host, roles=roles, launchers={KIRO: kiro})
+    failed = await plan(session, "Plan.")
+    note = (
+        "Kiro's API isn't answering, so the planner couldn't reply; send your message again later."
+    )
+    assert [e.message for e in errors(failed)] == [note]
 
 
 @pytest.mark.parametrize("failure", [Failure("usage_limit"), None])
