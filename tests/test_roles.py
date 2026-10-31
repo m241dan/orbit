@@ -9,6 +9,7 @@ from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.roles import (
     ORBIT_TOOLS,
     PROPOSE_TASK,
+    OrbitToolGrant,
     Role,
     built_in_roles,
     check_enabled,
@@ -19,6 +20,7 @@ from orbit.agent.domain.roles import (
     load_built_in_roles,
     merging_lane,
     names_file,
+    orbit_tool_grant,
     out_of_time,
     review_lane,
     role_task,
@@ -29,7 +31,6 @@ from orbit.agent.domain.roles import (
     task_lanes,
     task_suggestion,
     timeout_ending,
-    tool_rules,
 )
 from orbit.agent.domain.runtimes import CLAUDE, RuntimeRules
 from orbit.agent.external.built_in_roles import read_built_in_roles
@@ -583,66 +584,34 @@ def test_each_built_in_roles_capabilities_follow_its_tools(name: str) -> None:
     assert role.proposes_checks is ("propose_checks" in role.tools)
 
 
-@pytest.mark.parametrize("access", ["off", "full"])
-def test_unrestricted_tool_rules_allow_the_roles_orbit_tools_and_deny_its_others(
-    access: ToolAccess,
-) -> None:
-    rules = tool_rules(access, ("get_task", "complete_task"))
-    assert rules.allowed == ("mcp__orbit__get_task", "mcp__orbit__complete_task")
-    assert rules.denied == (
-        "mcp__orbit__run_check",
-        "mcp__orbit__report_progress",
-        "mcp__orbit__give_up",
-        "mcp__orbit__suggest_task",
-        "mcp__orbit__propose_task",
-        "mcp__orbit__propose_checks",
-        "mcp__orbit__consult",
-        "mcp__orbit__save_report",
-        "mcp__orbit__list_reports",
-        "mcp__orbit__read_report",
-        "mcp__orbit__list_drafts",
-        "mcp__orbit__read_draft",
-        "mcp__orbit__edit_draft",
-        "mcp__orbit__remove_draft",
-        "mcp__orbit__move_draft",
+def test_an_orbit_tool_grant_gives_the_roles_tools_and_withholds_orbits_others() -> None:
+    grant = orbit_tool_grant(("complete_task", "get_task"))
+    assert grant.granted == ("complete_task", "get_task")
+    assert grant.withheld == (
+        "run_check",
+        "report_progress",
+        "give_up",
+        "suggest_task",
+        "propose_task",
+        "propose_checks",
+        "consult",
+        "save_report",
+        "list_reports",
+        "read_report",
+        "list_drafts",
+        "read_draft",
+        "edit_draft",
+        "remove_draft",
+        "move_draft",
     )
 
 
-def test_restricted_tool_rules_add_reading_and_searching_and_deny_writing() -> None:
-    rules = tool_rules("restricted", ("propose_task", "report_progress"))
-    assert rules.allowed == (
-        "mcp__orbit__propose_task",
-        "mcp__orbit__report_progress",
-        "Read",
-        "Glob",
-        "Grep",
-        "WebSearch",
-    )
-    assert rules.denied == (
-        "mcp__orbit__get_task",
-        "mcp__orbit__complete_task",
-        "mcp__orbit__run_check",
-        "mcp__orbit__give_up",
-        "mcp__orbit__suggest_task",
-        "mcp__orbit__propose_checks",
-        "mcp__orbit__consult",
-        "mcp__orbit__save_report",
-        "mcp__orbit__list_reports",
-        "mcp__orbit__read_report",
-        "mcp__orbit__list_drafts",
-        "mcp__orbit__read_draft",
-        "mcp__orbit__edit_draft",
-        "mcp__orbit__remove_draft",
-        "mcp__orbit__move_draft",
-        "Edit",
-        "Write",
-        "NotebookEdit",
-    )
+def test_an_orbit_tool_grant_of_every_tool_withholds_none() -> None:
+    assert orbit_tool_grant(ORBIT_TOOLS) == OrbitToolGrant(ORBIT_TOOLS, ())
 
 
-def test_tool_rules_for_every_orbit_tool_deny_none_unless_restricted() -> None:
-    assert tool_rules("full", ORBIT_TOOLS).denied == ()
-    assert tool_rules("restricted", ORBIT_TOOLS).denied == ("Edit", "Write", "NotebookEdit")
+def test_an_orbit_tool_grant_of_no_tools_withholds_every_one() -> None:
+    assert orbit_tool_grant(()) == OrbitToolGrant((), ORBIT_TOOLS)
 
 
 def test_the_built_in_task_roles_run_in_the_work_and_review_lanes() -> None:
@@ -760,10 +729,10 @@ def test_instructions_name_a_file_when_they_are_one_line_ending_in_md(
     assert names_file(instructions) is names
 
 
-def test_a_planners_tool_rules_allow_its_draft_tools_and_deny_none_of_them() -> None:
-    rules = tool_rules("restricted", BUILT_IN_ROLES["planner"].granted_tools)
-    drafts = {"mcp__orbit__list_drafts", "mcp__orbit__read_draft"}
-    assert drafts <= set(rules.allowed) and not drafts & set(rules.denied)
+def test_a_planners_orbit_tool_grant_gives_its_draft_tools_and_withholds_none_of_them() -> None:
+    grant = orbit_tool_grant(BUILT_IN_ROLES["planner"].granted_tools)
+    drafts = {"list_drafts", "read_draft"}
+    assert drafts <= set(grant.granted) and not drafts & set(grant.withheld)
 
 
 def consulting_roles(target: str, **coder: object) -> dict[str, Role]:

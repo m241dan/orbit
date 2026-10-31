@@ -13,6 +13,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from orbit.agent.application.ports import AgentLaunch
+from orbit.agent.domain.roles import orbit_tool_grant
 from orbit.agent.external.whole_files import write_private
 from orbit.protocol import ToolAccess
 
@@ -34,17 +36,24 @@ BUILTINS: dict[ToolAccess, tuple[str, ...]] = {
 }
 
 
-def kiro_agent_config(
-    rules: str, instructions: str, mcp_url: str, token: str, tool_access: ToolAccess
-) -> dict[str, Any]:
-    """The config of a Kiro agent told orbit's ``rules`` and then its role's ``instructions``,
-    connected to orbit's MCP server at ``mcp_url`` with ``token``, and to no other, allowed
-    orbit's tools and the built-ins ``tool_access`` gives, all trusted up front."""
-    tools = [f"@{SERVER}", *BUILTINS[tool_access]]
-    headers = {"Authorization": f"Bearer {token}"}
+def kiro_tool_name(tool: str) -> str:
+    """The name a config gives orbit's ``tool`` by."""
+    # One MCP server's tool is @<server>/<tool>, from
+    # https://kiro.dev/docs/custom-agents/configuration-reference/.
+    return f"@{SERVER}/{tool}"
+
+
+def kiro_agent_config(rules: str, launch: AgentLaunch) -> dict[str, Any]:
+    """The config of ``launch``'s Kiro agent, told orbit's ``rules`` and then its role's
+    instructions, connected to orbit's MCP server at the launch's URL with its agent's token, and
+    to no other, allowed the orbit tools its role is granted and the built-ins its tool access
+    gives, all trusted up front."""
+    orbit = [kiro_tool_name(tool) for tool in orbit_tool_grant(launch.tools).granted]
+    tools = [*orbit, *BUILTINS[launch.settings.tool_access]]
+    headers = {"Authorization": f"Bearer {launch.agent.token}"}
     return {
-        "prompt": f"{rules}\n\n{instructions}",
-        "mcpServers": {SERVER: {"url": mcp_url, "headers": headers}},
+        "prompt": f"{rules}\n\n{launch.instructions}",
+        "mcpServers": {SERVER: {"url": launch.url, "headers": headers}},
         "includeMcpJson": False,
         "tools": tools,
         "allowedTools": tools,

@@ -3,9 +3,9 @@
 Each turn runs ``kiro-cli chat --output-format stream-json`` as a Kiro agent of its own, whose
 config, written just before it starts and removed once it ends however it ends, connects it to
 orbit's MCP server alone, tells it orbit's rules and its role's instructions, and gives it the
-tools its tool access allows. Its first message, the prompt, tells it to fetch its task. The
-stream it prints is translated into protocol events, and later turns of a conversation pass
-``--resume-id <session id>`` so Kiro carries it on.
+orbit tools its role is granted and the built-ins its tool access allows. Its first message, the
+prompt, tells it to fetch its task. The stream it prints is translated into protocol events, and
+later turns of a conversation pass ``--resume-id <session id>`` so Kiro carries it on.
 
 Kiro reports when its model takes no effort; a notice says so of an agent given one anyway, once
 per role in each session.
@@ -235,14 +235,10 @@ class _Turn:
     def _configure(self, stack: contextlib.AsyncExitStack) -> str:
         """Write the agent's config, removed when ``stack`` closes; returns the name Kiro knows
         it by."""
-        launch = self._launch
-        agent = launch.agent
-        config = kiro_agent_config(
-            AGENT_RULES, launch.instructions, launch.url, agent.token, launch.settings.tool_access
-        )
+        config = kiro_agent_config(AGENT_RULES, self._launch)
         files = self._kiro.files
         try:
-            name = files.write(agent.id, config)
+            name = files.write(self._launch.agent.id, config)
         except OSError as error:
             raise RuntimeError(f"Couldn't write the agent's Kiro config: {error}") from None
         stack.callback(files.remove, name)

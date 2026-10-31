@@ -17,6 +17,7 @@ from orbit.agent.external.claude_cli import (
     AGENT_RULES,
     TOOL_TIMEOUT_MS,
     agent_telemetry_env,
+    tool_rules,
     translate,
 )
 from orbit.protocol import (
@@ -690,6 +691,68 @@ async def test_only_restricted_agents_get_the_read_only_flags(
     assert "Read" not in argv[argv.index("--allowedTools") + 1]
     assert "WebSearch" not in argv[argv.index("--allowedTools") + 1]
     assert "Edit" not in argv[argv.index("--disallowedTools") + 1]
+
+
+@pytest.mark.parametrize("access", ["off", "full"])
+def test_unrestricted_tool_rules_allow_the_roles_orbit_tools_and_deny_its_others(
+    access: ToolAccess,
+) -> None:
+    rules = tool_rules(access, ("get_task", "complete_task"))
+    assert rules.allowed == ("mcp__orbit__get_task", "mcp__orbit__complete_task")
+    assert rules.denied == (
+        "mcp__orbit__run_check",
+        "mcp__orbit__report_progress",
+        "mcp__orbit__give_up",
+        "mcp__orbit__suggest_task",
+        "mcp__orbit__propose_task",
+        "mcp__orbit__propose_checks",
+        "mcp__orbit__consult",
+        "mcp__orbit__save_report",
+        "mcp__orbit__list_reports",
+        "mcp__orbit__read_report",
+        "mcp__orbit__list_drafts",
+        "mcp__orbit__read_draft",
+        "mcp__orbit__edit_draft",
+        "mcp__orbit__remove_draft",
+        "mcp__orbit__move_draft",
+    )
+
+
+def test_restricted_tool_rules_add_reading_and_searching_and_deny_writing() -> None:
+    rules = tool_rules("restricted", ("propose_task", "report_progress"))
+    assert rules.allowed == (
+        "mcp__orbit__propose_task",
+        "mcp__orbit__report_progress",
+        "Read",
+        "Glob",
+        "Grep",
+        "WebSearch",
+    )
+    assert rules.denied == (
+        "mcp__orbit__get_task",
+        "mcp__orbit__complete_task",
+        "mcp__orbit__run_check",
+        "mcp__orbit__give_up",
+        "mcp__orbit__suggest_task",
+        "mcp__orbit__propose_checks",
+        "mcp__orbit__consult",
+        "mcp__orbit__save_report",
+        "mcp__orbit__list_reports",
+        "mcp__orbit__read_report",
+        "mcp__orbit__list_drafts",
+        "mcp__orbit__read_draft",
+        "mcp__orbit__edit_draft",
+        "mcp__orbit__remove_draft",
+        "mcp__orbit__move_draft",
+        "Edit",
+        "Write",
+        "NotebookEdit",
+    )
+
+
+def test_tool_rules_for_every_orbit_tool_deny_none_unless_restricted() -> None:
+    assert tool_rules("full", ORBIT_TOOLS).denied == ()
+    assert tool_rules("restricted", ORBIT_TOOLS).denied == ("Edit", "Write", "NotebookEdit")
 
 
 async def test_orbit_tools_the_role_lacks_are_hidden_from_the_agent(tmp_path: Path) -> None:

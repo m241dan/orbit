@@ -177,11 +177,13 @@ async def test_the_agent_runs_with_its_own_config_removed_once_it_ends(
     home: Path, tmp_path: Path
 ) -> None:
     runner, scenario = make_runner(tmp_path, fixture="orbit-tools.jsonl")
-    await run_agent(runner, launch_of(CODER, Settings(tool_access="restricted")))
+    launch = launch_of(CODER, Settings(tool_access="restricted"))
+    await run_agent(runner, launch)
 
     [call] = calls(scenario)
-    config = kiro_agent_config(AGENT_RULES, "Do the work.", URL, "s3cret", "restricted")
-    assert call["config"] == {"name": agent_name(call), **config}
+    assert call["config"] == {"name": agent_name(call), **kiro_agent_config(AGENT_RULES, launch)}
+    orbit = ["@orbit/get_task", "@orbit/complete_task", "@orbit/report_progress"]
+    assert call["config"]["tools"] == [*orbit, "read", "glob", "grep"]
     assert configs(home) == []
 
 

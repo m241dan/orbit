@@ -1787,13 +1787,15 @@ cancelled or crashed included; one a crash of orbit itself left behind is remove
 next time orbit starts its Kiro runtime. The config's prompt is orbit's rules and then the role's
 instructions, as Claude's agents get them; its only MCP server is orbit's, by URL with the
 agent's token (`includeMcpJson` is off, so no `mcp.json` of yours or the workspace's adds
-others); and its tools are those the role's `tool_access` allows, all trusted up front:
+others); and its tools are the orbit tools the role is granted, each named `@orbit/<tool>` (such
+as `@orbit/get_task`), so, as on Claude, the agent isn't offered orbit's others, and the built-ins
+the role's `tool_access` allows, all trusted up front:
 
-- `off`: orbit's tools alone (`@orbit`).
-- `restricted`: orbit's tools and Kiro's read-only built-ins, `read`, `glob` and `grep`, which read
-  and search files but neither write them nor run commands.
-- `full`: orbit's tools and every built-in (`@builtin`), which edit files and run commands without
-  asking.
+- `off`: the role's orbit tools alone.
+- `restricted`: the role's orbit tools and Kiro's read-only built-ins, `read`, `glob` and `grep`,
+  which read and search files but neither write them nor run commands.
+- `full`: the role's orbit tools and every built-in (`@builtin`), which edit files and run
+  commands without asking.
 
 **Credits.** Kiro charges in credits, not tokens or dollars: a Kiro turn's cost is the credits it
 reports, counted apart from dollars and never converted, so a task row shows `0.62 credits` and a

@@ -7,21 +7,33 @@ import re
 import stat
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
+import pytest
+
+from orbit.agent.application.ports import AgentLaunch
+from orbit.agent.domain.agents import Agent
 from orbit.agent.external.kiro_agents import (
     READ_ONLY_BUILTINS,
     KiroAgentFiles,
     kiro_agent_config,
 )
-from orbit.protocol import ToolAccess
+from orbit.protocol import Settings, ToolAccess
 
 URL = "http://127.0.0.1:4321/mcp"
 NOW = datetime(2026, 10, 25, 12, tzinfo=UTC)
+AGENT = Agent(id="agent-7", role="coder", task_id="7", token="secret")
+GRANTED = ("get_task", "report_progress", "complete_task")
+ORBIT = ["@orbit/get_task", "@orbit/report_progress", "@orbit/complete_task"]
+"""The ``GRANTED`` tools, as a Kiro config names them."""
 
 
-def config(tool_access: ToolAccess = "off") -> dict[str, Any]:
-    return kiro_agent_config("The rules.", "The role's instructions.", URL, "secret", tool_access)
+def config(tool_access: ToolAccess = "off", tools: tuple[str, ...] = GRANTED) -> dict[str, Any]:
+    """The config of a Kiro agent with ``tool_access`` whose role is granted orbit's ``tools``."""
+    settings = Settings(tool_access=tool_access)
+    instructions = "The role's instructions."
+    launch = AgentLaunch(AGENT, URL, "Go.", settings, ".", instructions, tools, "workspace-1")
+    return kiro_agent_config("The rules.", launch)
 
 
 def aged(path: Path, age: timedelta) -> Path:
@@ -32,19 +44,28 @@ def aged(path: Path, age: timedelta) -> Path:
     return path
 
 
-def test_a_config_gives_only_orbits_tools_with_tool_access_off() -> None:
+def test_a_config_gives_only_the_roles_orbit_tools_with_tool_access_off() -> None:
     assert config("off") == {
         "prompt": "The rules.\n\nThe role's instructions.",
         "mcpServers": {"orbit": {"url": URL, "headers": {"Authorization": "Bearer secret"}}},
         "includeMcpJson": False,
-        "tools": ["@orbit"],
-        "allowedTools": ["@orbit"],
+        "tools": ORBIT,
+        "allowedTools": ORBIT,
     }
+
+
+@pytest.mark.parametrize("access", get_args(ToolAccess))
+def test_a_config_lists_exactly_the_orbit_tools_its_role_is_granted(access: ToolAccess) -> None:
+    tools = config(access, ("complete_task", "get_task"))["tools"]
+    assert [tool for tool in tools if tool.startswith("@orbit")] == [
+        "@orbit/complete_task",
+        "@orbit/get_task",
+    ]
 
 
 def test_restricted_access_adds_the_read_only_built_ins_pre_trusted() -> None:
     restricted = config("restricted")
-    assert restricted["tools"] == ["@orbit", *READ_ONLY_BUILTINS]
+    assert restricted["tools"] == [*ORBIT, *READ_ONLY_BUILTINS]
     assert restricted["allowedTools"] == restricted["tools"]
 
 
@@ -54,7 +75,7 @@ def test_the_read_only_built_ins_neither_write_nor_run_commands() -> None:
 
 def test_full_access_adds_every_built_in_pre_trusted() -> None:
     full = config("full")
-    assert full["tools"] == ["@orbit", "@builtin"]
+    assert full["tools"] == [*ORBIT, "@builtin"]
     assert full["allowedTools"] == full["tools"]
 
 

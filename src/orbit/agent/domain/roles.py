@@ -105,14 +105,6 @@ ORBIT_TOOLS = (
 )
 """Every tool orbit's MCP server offers agents."""
 
-READ_ONLY_TOOLS = ("Read", "Glob", "Grep", "WebSearch")
-"""What a restricted agent may use besides orbit's tools: reading and searching its tree and the
-web, never running code or writing files. WebFetch is read-only too, but restricting the CLI
-disables it unless the built-in tool set is replaced to name it."""
-
-WRITE_TOOLS = ("Edit", "Write", "NotebookEdit")
-"""The tools a restricted agent is denied, which write files."""
-
 Workspace = Literal["worktree", "snapshot", "checkout", "none", "copy"]
 """Where an agent in a role works: the coder's separate worktree, which can merge; a read-only
 snapshot of the base commit; the user's checkout, read in place; an empty temporary directory;
@@ -674,27 +666,18 @@ def _task_roles_in(roles: Mapping[str, Role], lane: str) -> list[str]:
 
 
 @dataclass(frozen=True)
-class ToolRules:
-    """The tools an agent may use, and those it's denied, by the names agents see them by."""
+class OrbitToolGrant:
+    """Orbit's tools an agent may call, and its others, which it may not, by orbit's names for
+    them; each runtime names them its own way."""
 
-    allowed: tuple[str, ...]
-    denied: tuple[str, ...]
-
-
-def orbit_tool_name(tool: str) -> str:
-    """The name an agent sees orbit's ``tool`` by."""
-    return f"mcp__orbit__{tool}"
+    granted: tuple[str, ...]
+    withheld: tuple[str, ...]
 
 
-def tool_rules(tool_access: ToolAccess, tools: Sequence[str]) -> ToolRules:
-    """The tools an agent with ``tool_access`` may use: orbit's ``tools``, and with restricted
-    access the read-only ones; and those it's denied: orbit's others, and with restricted access
-    the ones that write files."""
-    allowed = tuple(orbit_tool_name(tool) for tool in tools)
-    denied = tuple(orbit_tool_name(tool) for tool in ORBIT_TOOLS if tool not in tools)
-    if tool_access == "restricted":
-        return ToolRules(allowed + READ_ONLY_TOOLS, denied + WRITE_TOOLS)
-    return ToolRules(allowed, denied)
+def orbit_tool_grant(tools: Sequence[str]) -> OrbitToolGrant:
+    """Which of orbit's tools an agent granted ``tools`` may call: those, in their order, and
+    none of orbit's others, in orbit's."""
+    return OrbitToolGrant(tuple(tools), tuple(tool for tool in ORBIT_TOOLS if tool not in tools))
 
 
 def out_of_time(who: str, minutes: float) -> str:
