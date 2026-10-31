@@ -19,7 +19,7 @@ from orbit.agent.domain.config_update import (
     reference_with_checks,
     update_text,
 )
-from orbit.agent.domain.layers import Layer
+from orbit.agent.domain.layers import PACKAGE, Layer
 from orbit.agent.domain.runtimes import CLAUDE, KIRO, RUNTIME_NAMES, resolve_model
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
@@ -39,6 +39,7 @@ from orbit.agent.external.runtimes import (
     read_package_models,
     read_runtime_rules,
 )
+from orbit.agent.external.skill_files import SKILL_DIRECTORY, read_skill_library
 from orbit.protocol import BUILT_IN_ROLE_NAMES, PLANNER
 from tests.agent_fakes import CLAUDE_MODELS, KIRO_MODELS, LIMITED_RUNTIME
 
@@ -47,8 +48,33 @@ BUILT_IN_ROLES = read_built_in_roles()
 MODELS = {CLAUDE: CLAUDE_MODELS, KIRO: KIRO_MODELS}
 """The models each runtime takes without a user config."""
 
-DEFAULTS = OrbitConfig(roles=BUILT_IN_ROLES, models=MODELS)
+SKILLS = read_skill_library(str(Path(__file__).parent))
+"""The skills in effect in a workspace without skills of its own: the package's."""
+
+DEFAULTS = OrbitConfig(roles=BUILT_IN_ROLES, models=MODELS, skill_library=SKILLS)
 """The configuration in effect without a project file or a user config."""
+
+SHIPPED_SKILLS = {
+    "code-style",
+    "python",
+    "cpp",
+    "application",
+    "pure-library",
+    "io-library",
+    "execution-library",
+    "library-api",
+    "security",
+    "review-fit",
+    "review-bugs",
+    "review-tests",
+    "review-logic",
+    "review-security",
+    "review-performance",
+    "review-style",
+    "review-drift",
+    "review-scaling",
+}
+"""The skills orbit ships."""
 
 CLAUDES_ALIASES = (
     "the runtime claude takes the aliases fable, opus, sonnet, haiku or a full id starting with"
@@ -66,6 +92,40 @@ def write(root: Path, text: str) -> Path:
 
 def test_without_a_file_the_defaults_apply(tmp_path: Path) -> None:
     assert read_config(str(tmp_path), tmp_path / "config") == DEFAULTS
+
+
+def test_without_a_file_the_skills_are_the_18_orbit_ships(tmp_path: Path) -> None:
+    skills = read_config(str(tmp_path), tmp_path / "config").skill_library.skills
+    assert set(skills) == SHIPPED_SKILLS
+    layers = {file.layer for skill in skills.values() for file in skill.files.values()}
+    assert layers == {PACKAGE}
+
+
+def test_a_shipped_skill_has_its_front_matter_its_body_and_its_files(tmp_path: Path) -> None:
+    code_style = read_config(str(tmp_path), tmp_path / "config").skill_library.skills["code-style"]
+    skill_md = (SKILL_DIRECTORY / "code-style" / "SKILL.md").read_text(encoding="utf-8")
+    assert f"\ndescription: {code_style.description}\n" in skill_md
+    assert code_style.body.startswith("# Code style\n")
+    assert set(code_style.files) == {
+        "SKILL.md",
+        "dependencies.md",
+        "functional.md",
+        "naming.md",
+        "performance.md",
+        "state.md",
+        "telemetry.md",
+        "testing.md",
+        "types.md",
+        "writing.md",
+    }
+    assert code_style.files["SKILL.md"].text == skill_md
+
+
+def test_a_project_file_cant_set_the_skills(tmp_path: Path) -> None:
+    path = write(tmp_path, "[skill_library]\nskills = {}\n")
+    unknown = f"^{re.escape(str(path))}: skill_library: Extra inputs are not permitted"
+    with pytest.raises(ConfigError, match=unknown):
+        read_config(str(tmp_path), tmp_path / "config")
 
 
 def test_the_file_is_read_over_the_defaults(tmp_path: Path) -> None:

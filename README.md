@@ -1514,6 +1514,30 @@ replaces yours entirely, none of your role's fields carrying over (your `[roles]
 `effort` and `runtime` still apply beneath it, as to any of the project's roles), and the workspace's startup
 notices say so: `The project's role helper replaces your personal role of that name.`
 
+### Skills
+
+A **skill** teaches agents how you build software: a folder holding a `SKILL.md` and any resource
+files it reads, Markdown or otherwise, in subfolders too. `SKILL.md` opens with front matter
+between `---` lines giving the skill's `name`, the folder's own, and its `description`, as Claude
+Code's skills do:
+
+```markdown
+---
+name: python
+description: Python conventions and tools. Use when writing or reviewing Python code.
+---
+
+# Python
+```
+
+Orbit ships 18 skills, in
+[`src/orbit/agent/external/skills/`](src/orbit/agent/external/skills/): `code-style`, the
+languages `python` and `cpp`, the kinds of project `application`, `pure-library`, `io-library`,
+`execution-library` and `library-api`, `security`, and the review lenses `review-fit`,
+`review-bugs`, `review-tests`, `review-logic`, `review-security`, `review-performance`,
+`review-style`, `review-drift` and `review-scaling`. They're read with the configuration as a
+workspace opens; agents get them from a later version of orbit.
+
 ### Starting from the reference config
 
 `orbit init` writes orbit's reference config to the workspace's `.orbit/config.toml` (the current
@@ -2864,6 +2888,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     personal roles name (`resolve_instructions`);
     `built_in_roles` reads the built-in roles from `instructions/roles.toml` and their
     instructions from the Markdown files it names (`read_instruction_files` names them);
+    `skill_files` reads the skills shipped in `skills/`, a folder each, file by file
+    (`read_skill_library`);
     `reference_config` generates the reference config from the models and the built-in roles,
     every setting a project can change commented out at its default under what it does
     (`reference_config()`), and `uv run python -m orbit.agent.external.reference_config` writes
@@ -2981,7 +3007,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `agents`: agent ids and tokens), `roles` (built-in roles, loaded from their `roles.toml` and
     given their instructions, which of a role's fields go together, and the tasks orbit queues in
     them), `config` (`OrbitConfig`: the
-    limits, roles, verification steps and setup a project file sets over the built-in defaults), `layers` (the layers a setting comes from, the user config's role fields and personal roles, and each role resolved across them field by field), `config_report` (what `orbit config show` reports: each setting in effect by its dotted key with the layer it came from, and a key's settings), `config_update` (what `orbit init --update` adds to a project file from the reference config: the keys a table it has doesn't mention, after the table's last line, and the tables it lacks, at the end, never changing a line of it; and the lines `orbit init --roles` adds, pointing each built-in role at its copy of its instructions; and the checks the configurator writes, in place of a file's steps and setup without changing its other lines, or of the reference config's examples of them) and `config_errors` (`ConfigError`,
+    limits, roles, verification steps and setup a project file sets over the built-in defaults, and the skills in effect), `skills` (`Skill`, `SkillFile` and `SkillLibrary`, a skill built from its folder's files with its `SKILL.md`'s front matter, `parse_front_matter`, checked as Claude Code checks skills), `layers` (the layers a setting comes from, the user config's role fields and personal roles, and each role resolved across them field by field), `config_report` (what `orbit config show` reports: each setting in effect by its dotted key with the layer it came from, and a key's settings), `config_update` (what `orbit init --update` adds to a project file from the reference config: the keys a table it has doesn't mention, after the table's last line, and the tables it lacks, at the end, never changing a line of it; and the lines `orbit init --roles` adds, pointing each built-in role at its copy of its instructions; and the checks the configurator writes, in place of a file's steps and setup without changing its other lines, or of the reference config's examples of them) and `config_errors` (`ConfigError`,
     and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]` with its `TlsSettings`, which files each TLS mode needs, where now falls in a certificate's validity, and which hosts are loopback), `certificate_list` (what `orbit certs list` shows of each certificate: its expiry, days left, fingerprint and marks), `client_bundle` (what `orbit certs client --bundle` puts in a client's bundle: the CA, its certificate and key, and the `[remotes.<name>]` lines naming them where it's unpacked, which connect to a `wss://` URL alone), `remotes` (`RemoteSettings`, a `[remotes.<name>]` table, and which credentials go together), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
     setup step that makes a fresh worktree ready, and the checks a configurator proposes), the
     `Catalog` (in `catalog`: the workspace and its sessions, the agents' roles, the triggers and

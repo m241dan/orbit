@@ -1,5 +1,6 @@
 """Orbit's project configuration file, ``.orbit/config.toml``."""
 
+from dataclasses import replace
 from importlib.resources import files
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from orbit.agent.domain.layers import Layer, SharedRuntimeError, UserConfigError
 from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
 from orbit.agent.external.role_instructions import with_instructions
 from orbit.agent.external.runtimes import read_runtime_rules
+from orbit.agent.external.skill_files import read_skill_library
 from orbit.agent.external.toml_files import read_toml
 from orbit.agent.external.user_config import read_user_config, read_user_roles, user_layer
 from orbit.agent.external.whole_files import write_whole
@@ -34,12 +36,14 @@ def read_config(root: str, config_dir: Path, runtime: str | None = None) -> Orbi
     its own (see :func:`~orbit.agent.domain.layers.with_runtime`). Each role's model is held to
     the models its runtime takes, and each enabled role to what its runtime can do, as
     :func:`~orbit.agent.external.runtimes.read_runtime_rules` reads them, and the configuration
-    has those models.
+    has those models, and the skills in effect in ``root`` (see
+    :func:`~orbit.agent.external.skill_files.read_skill_library`).
 
     Raises :class:`ConfigError`, naming the file, if it, the user config or a role's
     instructions file can't be read or is invalid, as it is when a role's runtime doesn't take
     its model or a role asks for what its runtime can't do; it names the user config if the
-    personal roles break a rule across the roles that the others keep.
+    personal roles break a rule across the roles that the others keep, and the skill's file or
+    folder if a skill is invalid.
     """
     return _read_layered(root, config_dir, runtime).config
 
@@ -69,6 +73,16 @@ def _read_layered(root: str, config_dir: Path, runtime: str | None = None) -> La
     the layer each of its roles' fields came from.
 
     Raises :class:`ConfigError` as :func:`read_config` does.
+    """
+    layered = _read_files(root, config_dir, runtime)
+    skills = read_skill_library(root)
+    return replace(layered, config=layered.config.model_copy(update={"skill_library": skills}))
+
+
+def _read_files(root: str, config_dir: Path, runtime: str | None) -> LayeredConfig:
+    """The configuration :func:`_read_layered` reads but its skills, which no file sets.
+
+    Raises :class:`ConfigError` as :func:`read_config` does for the files.
     """
     built_in = read_built_in_roles()
     user = with_runtime(read_user_roles(config_dir, built_in), runtime)

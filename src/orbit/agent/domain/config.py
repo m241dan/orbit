@@ -41,6 +41,7 @@ from orbit.agent.domain.runtimes import (
     ModelAliases,
     RuntimeRules,
 )
+from orbit.agent.domain.skills import SkillLibrary
 from orbit.agent.domain.verification import MAX_FALLBACK_FIXES
 
 
@@ -142,12 +143,14 @@ LIMIT_KEYS = tuple(
 class OrbitConfig(_FileConfig):
     """Orbit's configuration in effect: the limits and roles a project file sets, with the names
     of the roles that are ``personal``, defined whole in the user config, the ``notices`` the
-    user is told as its workspace starts, and the ``models`` each runtime takes, by name, which
-    its roles' models were held to."""
+    user is told as its workspace starts, the ``models`` each runtime takes, by name, which its
+    roles' models were held to, and the ``skill_library``, the skills its agents can be given,
+    which the loader reads."""
 
     personal: frozenset[str] = frozenset()
     notices: tuple[str, ...] = ()
     models: dict[str, ModelAliases] = {}
+    skill_library: SkillLibrary = SkillLibrary()
 
 
 def load_config(
