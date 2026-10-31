@@ -261,12 +261,13 @@ class SessionSwitcher:
     async def _leaving_consultations(self) -> AsyncIterator[None]:
         """Save the session with its consultations pending as interrupted by a switch, to
         answer as it opens again, while the switch is made; a switch refused or failing then
-        leaves them to run on, answered, and saved as interrupted by a restart again."""
+        leaves them to run on, answered, and saved as interrupted by a restart again, as does
+        one cancelled."""
         self._parts.seats.leave()
-        await self.save()
         try:
+            await self.save()
             yield
-        except Exception:
+        except BaseException:  # Cancellation too, or every decision on them stays refused.
             await self._stay_consultations()
             raise
 

@@ -285,22 +285,32 @@ class PlannerSeat:
         without a planner, while the conversation opened is from another runtime than its
         role's, while a role in its lane answers, naming that role, or once saving the session
         halted it."""
-        if self._planner is None:
-            await self._free_prompt()
-            raise self._absent()
-        if self._stale is not None:
-            await self._free_prompt()
-            raise self._moved(self._stale, self._planner.runtime)
+        await self._ready()
         self._hooks.use()
         await self._hooks.save()
         self._hooks.check()  # The save may have halted the session.
+        # A switch from another connection may have replaced the planner during the save.
+        planner = await self._ready()
         if self._waiting():
             self.wait(WaitingTurn(text, settings, _under(current_span())))
             return
         parent = current_span()
-        work = self._answer(self._planner, WaitingTurn(text, settings, _under(parent)), parent)
+        work = self._answer(planner, WaitingTurn(text, settings, _under(parent)), parent)
         self._turn = await self._turns.start(work, self._refusal)
         self._waited = False
+
+    async def _ready(self) -> PlannerChat:
+        """The planner, to take a turn; refused, freeing the prompt, without one, or while the
+        conversation opened is from another runtime than its role's."""
+        planner = self._planner
+        if planner is None:
+            refusal = self._absent()
+        elif self._stale is not None:
+            refusal = self._moved(self._stale, planner.runtime)
+        else:
+            return planner
+        await self._free_prompt()
+        raise refusal
 
     @property
     def settings(self) -> Settings:

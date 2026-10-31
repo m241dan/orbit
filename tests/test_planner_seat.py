@@ -1,7 +1,7 @@
 """The planner's seat: its turns, its conversation across switches and resets, and its close."""
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 import pytest
@@ -21,6 +21,7 @@ from orbit.agent.application.ports import PlannerRoleReader
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.refusals import Refused
+from orbit.agent.domain.roles import disabled_note
 from orbit.agent.domain.runtimes import not_running
 from orbit.agent.domain.sessions import SavedConversation, runtime_changed_message
 from orbit.protocol import (
@@ -49,13 +50,15 @@ EXITED = AgentExited(agent_id="agent-1", reason="finished")
 
 @dataclass
 class Seated:
-    """A seat, the events it publishes, and what it asked of its session."""
+    """A seat, the events it publishes, and what it asked of its session; each save in turn
+    first does the first of ``saving`` left, as a switch from another connection may."""
 
     seat: PlannerSeat
     events: asyncio.Queue[Event]
     launcher: ScriptedLauncher
     desk: AgentDesk | None = None
     calls: list[str] = field(default_factory=list)
+    saving: list[Callable[[], None]] = field(default_factory=list)
 
     def published(self) -> list[Event]:
         """The events published since last asked."""
@@ -112,12 +115,15 @@ def seated(
 
     desk = AgentDesk(agents, publish) if roles is not None else None
     calls: list[str] = []
+    saving: list[Callable[[], None]] = []
 
     halted = False
 
     async def save() -> None:
         nonlocal halted
         calls.append("save")
+        if saving:
+            saving.pop(0)()
         halted = halts
 
     def check() -> None:
@@ -126,7 +132,7 @@ def seated(
 
     hooks = SeatHooks(save, lambda: calls.append("use"), lambda: (), check)
     seat = PlannerSeat(SeatParts(desk, Tasks(TaskBoard(), events.put), events, hooks), role)
-    return Seated(seat, events, launcher, desk, calls)
+    return Seated(seat, events, launcher, desk, calls, saving)
 
 
 async def answered(seated: Seated) -> list[Event]:
@@ -275,6 +281,36 @@ async def test_a_conversation_from_another_runtime_refuses_turns_and_frees_the_p
     assert (refused.value.code, str(refused.value)) == (INVALID, message)
     assert seated_.published() == [BusyChanged(busy=False, lane="planner")]
     assert (seated_.calls, seated_.launcher.launches, seated_.seat.turn) == ([], [], None)
+
+
+async def test_a_planner_disabled_as_a_submit_saves_refuses_it() -> None:
+    seated_ = seated()
+    desk = seated_.desk
+    assert desk is not None
+
+    def disable() -> None:
+        desk.use_role(PLANNER, ROLES[PLANNER].model_copy(update={"enabled": False}))
+        seated_.seat.replace(None)
+
+    seated_.saving.append(disable)
+    seated_.launcher.planner_turns = [chats]
+    with pytest.raises(Refused) as refused:
+        await seated_.seat.submit("Plan.", Settings())
+    assert (refused.value.code, str(refused.value)) == (NOT_CONFIGURED, disabled_note(PLANNER))
+    assert seated_.published() == [BusyChanged(busy=False, lane="planner")]
+    assert (seated_.launcher.launches, seated_.seat.turn) == ([], None)
+
+
+async def test_a_conversation_from_another_runtime_opened_as_a_submit_saves_refuses_it() -> None:
+    seated_ = seated()
+    seated_.saving.append(lambda: seated_.seat.replace(ON_KIRO))
+    seated_.launcher.planner_turns = [chats]
+    with pytest.raises(Refused) as refused:
+        await seated_.seat.submit("Plan.", Settings())
+    message = runtime_changed_message(PLANNER, "kiro", "claude")
+    assert (refused.value.code, str(refused.value)) == (INVALID, message)
+    assert seated_.published() == [BusyChanged(busy=False, lane="planner")]
+    assert (seated_.launcher.launches, seated_.seat.turn) == ([], None)
 
 
 async def test_resetting_a_conversation_from_another_runtime_lets_the_next_turn_start_one() -> None:

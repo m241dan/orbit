@@ -5,6 +5,8 @@ after an hour with no frontend connected, the asker hears it was interrupted."""
 import asyncio
 from collections.abc import Callable
 
+import pytest
+
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.consultations import held_note
 from orbit.agent.application.conversation_seats import ConversationSeats
@@ -526,6 +528,38 @@ async def test_a_switch_that_fails_asks_about_the_one_held_again() -> None:
     deny = events.index(ApprovalDecided(consultation=2, decision="deny"))
     assert requested(2, "Check Y") in events[deny:]
     assert snapshot.approvals == (requested(2, "Check Y"),)
+
+
+async def cancelled_opening(session: WorkspaceHost, store: FakeStore) -> None:
+    """Cancel the session's switch to "other" as it takes that session's lock, checking the
+    switch is cancelled."""
+    claiming = asyncio.Event()
+
+    async def hang() -> None:
+        claiming.set()
+        await asyncio.Event().wait()
+
+    store.on_acquire = hang
+    switch = asyncio.create_task(session._switcher.activate(ActivateSession(session="other")))
+    await claiming.wait()
+    switch.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await switch
+    store.on_acquire = None
+
+
+async def test_a_switch_cancelled_as_it_opens_leaves_the_one_held_to_decide() -> None:
+    store = FakeStore()
+    store.saved.append(saved("other"))
+    session, _ = await holding_in(store)
+    await cancelled_opening(session, store)
+    left = [(c.number, c.why) for c in last_of(store, "session-1").consultations]
+    await send(session, DecideApproval(consultation=2, decision="allow"))
+    answer = sole(await events_until(session, of_type(ConsultationAnswered)), ConsultationAnswered)
+    await session.close()
+
+    assert left == [(2, "orbit restarted")]
+    assert (answer.consultation, answer.interrupted) == (2, None)
 
 
 async def test_a_decision_after_leaving_is_refused_and_leaves_it_held() -> None:
