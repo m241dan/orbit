@@ -17,19 +17,12 @@ from orbit.agent.domain.endings import CANCELLED, STOPPED_BY_YOU
 from orbit.agent.domain.reviews import ReviewLimits, ReviewPlanner
 from orbit.protocol import (
     REVIEWER,
-    Event,
-    TasksChanged,
     TaskSpec,
     TaskStarted,
     VerificationChanged,
 )
 from tests.agent_fakes import FakeTree, Steps, desk_for, verified
-from tests.lane_fakes import Gate, Hearing, no_work
-
-
-def running(event: Event) -> bool:
-    """Whether ``event`` publishes a board with a task running."""
-    return isinstance(event, TasksChanged) and any(t.status == "running" for t in event.tasks)
+from tests.lane_fakes import Gate, Hearing, no_work, running
 
 
 def hooks(read_only: bool = False, halted: Callable[[], bool] = lambda: False) -> ReviewHooks:

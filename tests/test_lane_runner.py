@@ -1,6 +1,7 @@
 """A lane that starts by itself: once kicked, it runs its roles' tasks one at a time, each in a
 snapshot of the base commit, shows busy while it does, starts none while blocked and skips those
-on a paused runtime, and stops its task on the user's asking; and the session's lanes, by
+on a paused runtime, stops its task on the user's asking, even as it starts, and fails a task,
+or a review, whose role the session lacks without an agent; and the session's lanes, by
 name."""
 
 import asyncio
@@ -10,16 +11,21 @@ import pytest
 
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lane_runner import LaneParts, LaneRunner, Lanes, LaneWork
-from orbit.agent.application.lanes import SessionGate
+from orbit.agent.application.lanes import OPEN_GATE, SessionGate
 from orbit.agent.application.outcomes import ended
 from orbit.agent.application.ports import TreeFailed
+from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.endings import CANCELLED, STOPPED_BY_YOU
+from orbit.agent.domain.reviews import ReviewLimits, ReviewPlanner
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.runtimes import CLAUDE
 from orbit.protocol import (
     GIT_FAILED,
+    NOT_CONFIGURED,
+    REVIEWER,
+    AgentStarted,
     BusyChanged,
     ErrorOccurred,
     Event,
@@ -36,7 +42,7 @@ from tests.agent_fakes import (
     claims_done,
     desk_for,
 )
-from tests.lane_fakes import WITH_SECURITY, audit
+from tests.lane_fakes import WITH_SECURITY, Gate, audit, no_work, running
 from tests.waiting import eventually
 
 BUSY = BusyChanged(busy=True, lane="security")
@@ -221,6 +227,84 @@ async def test_cancelling_with_nothing_running_does_nothing() -> None:
     lane = Lane()
     lane.runner().cancel()
     assert lane.events == []
+
+
+def starting_through(lane: Lane) -> Gate:
+    """Have ``lane``'s board published through a gate holding the first board with a task
+    running, as the lane starts it; returns the gate."""
+    gate = Gate(running)
+    lane.tasks = Tasks(TaskBoard(), gate)
+    return gate
+
+
+def agents_started(lane: Lane) -> list[str]:
+    """The tasks whose agents ``lane`` started, in order."""
+    return [e.task_id for e in lane.events if isinstance(e, AgentStarted)]
+
+
+@pytest.mark.parametrize("named", [None, "1"])
+async def test_cancelling_a_task_as_it_starts_stops_it_before_its_agent_runs(
+    named: str | None,
+) -> None:
+    lane = Lane()
+    gate = starting_through(lane)
+    lane.add(audit("a"), audit("b"))
+    runner = lane.runner(claims_done)
+    runner.kick()
+    await asyncio.wait_for(gate.reached.wait(), 5)
+    runner.cancel(named)
+    gate.released.set()
+    await asyncio.wait_for(lane.stopped.wait(), 5)
+    first = lane.tasks.board.get("1")
+    assert (first.status, first.reason) == ("cancelled", STOPPED_BY_YOU)
+    assert lane.statuses == ["cancelled", "completed"]
+    assert agents_started(lane) == ["2"]
+
+
+async def test_cancelling_another_task_as_one_starts_leaves_it_running() -> None:
+    lane = Lane()
+    gate = starting_through(lane)
+    lane.add(audit("a"), audit("b"))
+    runner = lane.runner(claims_done, claims_done)
+    runner.kick()
+    await asyncio.wait_for(gate.reached.wait(), 5)
+    runner.cancel("2")
+    gate.released.set()
+    await asyncio.wait_for(lane.stopped.wait(), 5)
+    assert lane.statuses == ["completed", "completed"]
+    assert agents_started(lane) == ["1", "2"]
+
+
+def failed_for_want_of(lane: Lane, role: str) -> None:
+    """Assert ``lane``'s one task failed without an agent, as the session has no role
+    ``role``, saying so."""
+    message = f"No role named {role!r}."
+    [task] = lane.tasks.board.tasks
+    assert (task.status, task.reason, task.reason_detail) == ("error", f"Error: {message}", message)
+    assert ErrorOccurred(code=NOT_CONFIGURED, message=message) in lane.events
+    assert agents_started(lane) == []
+
+
+async def test_a_task_whose_role_the_session_lacks_fails_without_an_agent() -> None:
+    lane = Lane()
+    desk = desk_for(lane.publish, tree=FakeTree(), roles=WITH_SECURITY)
+    runner = LaneRunner("security", {"security", "ghost"}, lane.parts(desk))
+    runner.on_stopped(lane.stopped.set)
+    lane.add(TaskSpec(prompt="Boo", role="ghost"))
+    await lane.ran(runner)
+    failed_for_want_of(lane, "ghost")
+
+
+async def test_a_review_whose_role_the_session_lacks_fails_without_an_agent() -> None:
+    lane, roles = Lane(), dict(WITH_SECURITY)
+    desk = desk_for(lane.publish, tree=FakeTree(), roles=roles)
+    hooks = ReviewHooks(no_work, no_work, OPEN_GATE)
+    review = ReviewLane(desk, lane.tasks, ReviewPlanner(ReviewLimits()), hooks)
+    review.on_stopped(lane.stopped.set)
+    del roles[REVIEWER]  # Gone once its lane was made.
+    lane.add(TaskSpec(prompt="Review it.", role=REVIEWER))
+    await lane.ran(review.runner)
+    failed_for_want_of(lane, REVIEWER)
 
 
 async def test_a_task_whose_snapshot_cant_be_made_ends_in_error() -> None:

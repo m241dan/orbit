@@ -20,6 +20,7 @@ from orbit.agent.application.outcomes import Outcome, UserStop, run_task_to_end
 from orbit.agent.application.role_workspace import workspace_for
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.endings import STOPPED_BY_YOU
+from orbit.agent.domain.roles import Workspace
 from orbit.agent.domain.usage_limits import RuntimeStop
 from orbit.protocol import PLANNER_LANE, WORK_LANE, BusyChanged, BusyLane, Event
 
@@ -78,6 +79,18 @@ def runtime_stop(agents: Agents, role: str, outcome: Outcome) -> RuntimeStop | N
     return None if failure is None else RuntimeStop(runtime, failure)
 
 
+async def run_in_role_workspace(task_id: str, tasks: Tasks, desk: AgentDesk) -> Outcome:
+    """How task ``task_id`` of ``tasks``' run through a new agent of ``desk``'s ended, in its
+    role's workspace; anything unexpected escapes. A task in a role the session doesn't have
+    fails without an agent, so it readies no workspace: the coder's tree, where the work lane
+    runs such a task, isn't a lane's that runs beside it."""
+    role = desk.agents.roles.get(tasks.board.get(task_id).task.role)
+    where: Workspace = "checkout" if role is None else role.workspace
+    run = AgentRun(task_id, tasks, None, desk).run
+    async with workspace_for(where, desk) as root:
+        return await run(None, root)
+
+
 @dataclass(frozen=True)
 class LaneParts:
     """What a lane that starts by itself runs with: ``desk``'s agents and the session's
@@ -114,7 +127,7 @@ class LaneRunner:
     again, and pauses that runtime; while another runtime is paused already, that pause stays,
     and this runtime's tasks are skipped too until it ends, then run again. The lane shows busy
     from when its run picks a task until the run ends; the user's :meth:`cancel` stops the task
-    running, and the lane carries on with the next."""
+    running, even before its agent's run begins, and the lane carries on with the next."""
 
     def __init__(
         self, lane: BusyLane, roles: Collection[str], parts: LaneParts, work: LaneWork | None = None
@@ -129,9 +142,10 @@ class LaneRunner:
         self._background.ended = self._ended
         self._stopped: Callable[[], None] = _unwatched
         self._running: str | None = None  # The task running.
+        self._stopping: str | None = None  # The task running, once the user stopped it.
         self._busy = False  # The lane was last shown busy.
         # The agent's run of the task running, which the user's stop cancels.
-        self._agent: tuple[str, asyncio.Task[Outcome]] | None = None
+        self._agent: asyncio.Task[Outcome] | None = None
         # Runtimes whose agents hit a limit that paused nothing, each with the runtime paused
         # then, if any, skipped while it stays so, or for the rest of the run; and the tasks
         # they left to run again.
@@ -165,11 +179,14 @@ class LaneRunner:
             self._background.start(self._run_tasks())
 
     def cancel(self, task_id: str | None = None) -> None:
-        """Stop the task running if it's ``task_id``, or whichever it is if none is named; the
-        lane carries on."""
-        agent = self._agent
-        if agent is not None and task_id in (None, agent[0]):
-            agent[1].cancel()
+        """Stop the task running if it's ``task_id``, or whichever it is if none is named, even
+        as it starts, before its agent's run begins; the lane carries on."""
+        running = self._running
+        if running is None or task_id not in (None, running):
+            return
+        self._stopping = running
+        if self._agent is not None:
+            self._agent.cancel()
 
     async def stop(self) -> None:
         """Stop the lane's tasks running, and wait for them to; they run again once kicked."""
@@ -184,16 +201,19 @@ class LaneRunner:
         that :meth:`cancel` cancels, leaving the lane's run going; anything unexpected
         escapes."""
         agent = asyncio.create_task(run())
-        self._agent = (task_id, agent)
+        if self._stopping == task_id:  # The user stopped the task as it started.
+            agent.cancel()
+        self._agent = agent
         try:
             return await agent
         finally:
             self._agent = None
 
     async def run_in_workspace(self, task_id: str) -> None:
-        """Run task ``task_id`` to its end through a new agent, as :meth:`_run_agent` does; the
-        user's stop ends it as stopped by them."""
-        run = partial(self.alone, task_id, partial(self._run_agent, task_id))
+        """Run task ``task_id`` to its end through a new agent, as :func:`run_in_role_workspace`
+        does; the user's stop ends it as stopped by them."""
+        agent = partial(run_in_role_workspace, task_id, self._tasks, self._desk)
+        run = partial(self.alone, task_id, agent)
         stop = UserStop(STOPPED_BY_YOU)
         outcome = await run_task_to_end(self._tasks, task_id, run, stop, self._desk.publish)
         await self.ran(task_id, outcome)
@@ -267,20 +287,13 @@ class LaneRunner:
             try:
                 await self._work.run(task_id)
             finally:
-                self._running = None
+                self._running = self._stopping = None
             tried -= self._again  # Those left to run again run once their runtime may.
             self._again.clear()
 
     def _next_in_lane(self, tried: Collection[str]) -> str | None:
         """The board's next task in one of the lane's roles, skipping those ``tried``."""
         return self._tasks.board.next_runnable(skip=tried, roles=self.roles)
-
-    async def _run_agent(self, task_id: str) -> Outcome:
-        """How task ``task_id``'s run through a new agent ended, in its role's workspace."""
-        run = AgentRun(task_id, self._tasks, None, self._desk).run
-        role = self._desk.agents.roles[self._tasks.board.get(task_id).task.role]
-        async with workspace_for(role.workspace, self._desk) as root:
-            return await run(None, root)
 
 
 class Kickable(Protocol):
