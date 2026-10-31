@@ -1,5 +1,6 @@
 """orbit init: a workspace's .orbit/config.toml started from orbit's reference config, brought
-up to date with it, or given copies of the built-in roles' instructions to edit."""
+up to date with it, or given copies of the built-in roles' instructions to edit; and the
+workspace given copies of orbit's skills to edit."""
 
 from collections.abc import Callable
 from pathlib import Path
@@ -14,8 +15,11 @@ from orbit.agent import (
     InitResult,
     InstructionLines,
     RolesResult,
+    SkillCopy,
+    UnknownSkill,
     UpdateResult,
     add_roles,
+    add_skills,
     init_config,
     instructions_setting,
     update_config,
@@ -40,6 +44,8 @@ WRITE_FAILED = "Couldn't write orbit's reference config: "
 UPDATE_FAILED = "Couldn't update the config from orbit's reference config: "
 
 ROLES_FAILED = "Couldn't copy the built-in roles' instructions: "
+
+SKILLS_FAILED = "Couldn't copy orbit's skills: "
 
 SWITCHES = "Uncommenting a role's instructions line switches that role to its copy: {headers}."
 
@@ -86,11 +92,24 @@ InitRolesOption = Annotated[
 ]
 
 
+InitSkillOption = Annotated[
+    list[str] | None,
+    typer.Option(
+        "--skill",
+        metavar="NAME",
+        help="Copy the named skill's files from orbit's own to .orbit/skills/<name>/ to edit,"
+        " keeping files already there (repeatable); a copied file no longer gets orbit's"
+        " updates.",
+    ),
+]
+
+
 def init(
     workspace: WorkspaceOption = Path("."),
     update: InitUpdateOption = False,
     force: InitForceOption = False,
     roles: InitRolesOption = False,
+    skill: InitSkillOption = None,
 ) -> None:
     """Write orbit's reference config to the workspace's .orbit/config.toml: every setting a
     project can change, commented out at its default under what it does.
@@ -106,25 +125,34 @@ def init(
     there's no file; the role keeps orbit's own instructions until the line is uncommented,
     with the table's header if that's commented out too. A role set only inline or by dotted
     keys gets no line, and is named for its line to be added by hand.
+
+    --skill, by itself or after --update and --roles, copies each named skill's files from
+    orbit's own to .orbit/skills/<name>/, keeping a file already there, without touching the
+    config; a copied file replaces orbit's and no longer gets its updates. A name that isn't one
+    of orbit's skills exits with status 2, copying nothing.
     """
-    _refuse_with_force(force, update=update, roles=roles)
+    skills = tuple(skill or ())
+    _refuse_with_force(force, update=update, roles=roles, skills=bool(skills))
     root = _workspace(workspace)
     with (
         _exit_on(ConfigExists, message=lambda exc: CONFIG_EXISTS.format(path=exc.path)),
         _exit_on(ConfigError, message=lambda exc: f"{INVALID_CONFIG}{exc}"),
+        _exit_on(UnknownSkill),
     ):
         if update:
             _say(UPDATE_FAILED, lambda: _updated(update_config(root)))
         if roles:
             _say(ROLES_FAILED, lambda: _copied(add_roles(root), root))
-        if not update and not roles:
+        if skills:
+            _say(SKILLS_FAILED, lambda: _skills_copied(add_skills(root, skills), root))
+        if not any((update, roles, skills)):
             _say(WRITE_FAILED, lambda: _written(init_config(root, force)))
 
 
-def _refuse_with_force(force: bool, update: bool, roles: bool) -> None:
-    """Exit with status 2 if ``force`` is given with ``update`` or ``roles``, which keep the
-    file it replaces."""
-    for given, option in ((update, "--update"), (roles, "--roles")):
+def _refuse_with_force(force: bool, update: bool, roles: bool, skills: bool) -> None:
+    """Exit with status 2 if ``force`` is given with ``update``, ``roles`` or ``skills``, which
+    keep the file it replaces."""
+    for given, option in ((update, "--update"), (roles, "--roles"), (skills, "--skill")):
         if force and given:
             typer.echo(WITH_FORCE.format(option=option), err=True)
             raise typer.Exit(2)
@@ -179,6 +207,17 @@ def _copied(result: RolesResult, root: Path) -> str:
     ]
     said += [f"Kept your {path.relative_to(root)}." for path in result.kept.values()]
     return "\n".join([*said, *_lines_added(result.path, result.lines)])
+
+
+def _skills_copied(result: dict[str, SkillCopy], root: Path) -> str:
+    """What's said once ``result`` is done in the workspace at ``root``: for each skill in
+    turn, that its files were copied, if any were, then each file kept."""
+    said: list[str] = []
+    for name, copy in result.items():
+        folder = copy.folder.relative_to(root)
+        said += [f"Copied {name}'s files to {folder}/."] if copy.copied else []
+        said += [f"Kept your {path.relative_to(root)}." for path in copy.kept]
+    return "\n".join(said)
 
 
 def _lines_added(path: Path, lines: InstructionLines) -> list[str]:

@@ -1,7 +1,8 @@
 """Starting a project's ``.orbit/config.toml`` from the reference config: written where there's
 none, refused over one, and with ``force`` replacing it after keeping it as a numbered backup;
-bringing one up to date with it, adding what it doesn't mention; and copying the built-in roles'
-instructions beside it, with a commented-out line pointing each role at its copy."""
+bringing one up to date with it, adding what it doesn't mention; copying the built-in roles'
+instructions beside it, with a commented-out line pointing each role at its copy; and copying
+orbit's skills into the project's ``.orbit/skills/``."""
 
 from datetime import date
 from pathlib import Path
@@ -22,12 +23,16 @@ from orbit.agent.external.config_init import (
     ConfigExists,
     InitResult,
     RolesResult,
+    SkillCopy,
+    UnknownSkill,
     UpdateResult,
     add_roles,
+    add_skills,
     init_config,
     update_config,
 )
 from orbit.agent.external.reference_config import LATER_HEADING, reference_config
+from orbit.agent.external.skill_files import SKILL_DIRECTORY, read_skill_library
 
 TODAY = date(2026, 10, 25)
 
@@ -408,3 +413,130 @@ def test_roles_raise_when_they_cant_read_the_file(tmp_path: Path) -> None:
     (tmp_path / ".orbit").write_text("")
     with pytest.raises(OSError):
         add(tmp_path)
+
+
+# Copying orbit's skills
+
+SKILLS = ".orbit/skills"
+
+
+def shipped_files(name: str) -> dict[str, str]:
+    """The text of each file of the skill ``name`` orbit ships, by its path in the folder."""
+    folder = SKILL_DIRECTORY / name
+    return {entry.name: entry.read_bytes().decode("utf-8") for entry in folder.iterdir()}
+
+
+def copied_files(folder: Path) -> dict[str, str]:
+    """The text of each file under ``folder``, at any depth, by its path relative to it."""
+    files = (path for path in folder.rglob("*") if path.is_file())
+    return {path.relative_to(folder).as_posix(): path.read_text(encoding="utf-8") for path in files}
+
+
+def skill_file(directory: Path, path: str, text: str) -> Path:
+    """The file at ``path`` under ``directory``, made with its folders, holding ``text``."""
+    file = directory / path
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(text, encoding="utf-8")
+    return file
+
+
+def test_a_skill_is_copied_whole_with_the_shipped_text(tmp_path: Path) -> None:
+    result = add_skills(tmp_path, ["python"])
+    folder = tmp_path / SKILLS / "python"
+    assert result == {"python": SkillCopy(folder, copied=True, kept=())}
+    assert copied_files(folder) == shipped_files("python")
+
+
+def test_skills_are_copied_without_writing_the_project_file(tmp_path: Path) -> None:
+    add_skills(tmp_path, ["python"])
+    assert [path.name for path in (tmp_path / ".orbit").iterdir()] == ["skills"]
+
+
+def test_skills_leave_the_project_file_as_it_was(tmp_path: Path) -> None:
+    path = write(tmp_path, "[roles.coder\n")
+    add_skills(tmp_path, ["python"])
+    assert path.read_text() == "[roles.coder\n"
+
+
+def test_a_skill_file_already_there_is_kept_and_named(tmp_path: Path) -> None:
+    mine = skill_file(tmp_path / SKILLS, "python/tests.md", "# Our tests\n")
+    result = add_skills(tmp_path, ["python"])
+    assert result == {"python": SkillCopy(mine.parent, copied=True, kept=(mine,))}
+    assert mine.read_text(encoding="utf-8") == "# Our tests\n"
+    others = copied_files(mine.parent)
+    del others["tests.md"]
+    texts = shipped_files("python")
+    del texts["tests.md"]
+    assert others == texts
+
+
+def test_a_skill_copied_again_copies_nothing_and_keeps_every_file_in_path_order(
+    tmp_path: Path,
+) -> None:
+    add_skills(tmp_path, ["python"])
+    folder = tmp_path / SKILLS / "python"
+    kept = tuple(folder / path for path in sorted(shipped_files("python")))
+    assert add_skills(tmp_path, ["python"]) == {"python": SkillCopy(folder, False, kept)}
+
+
+def test_skills_are_copied_in_the_order_named(tmp_path: Path) -> None:
+    result = add_skills(tmp_path, ["python", "cpp"])
+    assert list(result) == ["python", "cpp"]
+    assert copied_files(tmp_path / SKILLS / "cpp") == shipped_files("cpp")
+
+
+def test_a_skill_named_twice_is_copied_once(tmp_path: Path) -> None:
+    result = add_skills(tmp_path, ["python", "python"])
+    assert result == {"python": SkillCopy(tmp_path / SKILLS / "python", copied=True, kept=())}
+
+
+def test_an_unknown_skill_is_refused_naming_every_skill_before_copying_any(
+    tmp_path: Path,
+) -> None:
+    names = ", ".join(sorted(read_skill_library(".").skills))
+    with pytest.raises(UnknownSkill) as raised:
+        add_skills(tmp_path, ["python", "pyton"])
+    assert str(raised.value) == f"No skill named pyton; orbit's skills are {names}."
+    assert names.startswith("application, code-style, ")
+    assert not (tmp_path / ".orbit").exists()
+
+
+def test_a_skills_files_in_subfolders_are_copied_and_hidden_ones_left_out(
+    tmp_path: Path,
+) -> None:
+    shipped = tmp_path / "shipped"
+    skill_file(shipped, "python/SKILL.md", "# Python\n")
+    skill_file(shipped, "python/scripts/lint/run.sh", "#!/bin/sh\n")
+    skill_file(shipped, "python/.notes.md", "Notes.\n")
+    skill_file(shipped, "python/scripts/.cache/run.sh", "Cached.\n")
+    root = tmp_path / "project"
+    add_skills(root, ["python"], shipped)
+    assert copied_files(root / SKILLS / "python") == {
+        "SKILL.md": "# Python\n",
+        "scripts/lint/run.sh": "#!/bin/sh\n",
+    }
+
+
+def test_a_skill_is_copied_as_written(tmp_path: Path) -> None:
+    shipped = tmp_path / "shipped"
+    skill_file(shipped, "python/run.bat", "").write_bytes("echo café\r\n".encode())
+    root = tmp_path / "project"
+    add_skills(root, ["python"], shipped)
+    assert (root / SKILLS / "python" / "run.bat").read_bytes() == "echo café\r\n".encode()
+
+
+@pytest.mark.parametrize("name", [".drafts", "README.md"])
+def test_hidden_folders_and_files_beside_the_skills_arent_skills(tmp_path: Path, name: str) -> None:
+    shipped = tmp_path / "shipped"
+    skill_file(shipped, "python/SKILL.md", "# Python\n")
+    skill_file(shipped, ".drafts/SKILL.md", "Not a skill.\n")
+    skill_file(shipped, "README.md", "The skills.\n")
+    with pytest.raises(UnknownSkill) as raised:
+        add_skills(tmp_path / "project", [name], shipped)
+    assert str(raised.value) == f"No skill named {name}; orbit's skills are python."
+
+
+def test_skills_raise_when_they_cant_be_copied(tmp_path: Path) -> None:
+    (tmp_path / ".orbit").write_text("")
+    with pytest.raises(OSError):
+        add_skills(tmp_path, ["python"])

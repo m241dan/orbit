@@ -62,6 +62,7 @@ uv run orbit init                              # start .orbit/config.toml from t
 uv run orbit init --update                     # add the settings it doesn't mention, commented out
 uv run orbit init --force                      # replace it, keeping the old one as a backup
 uv run orbit init --roles                      # copy the built-in roles' instructions to edit
+uv run orbit init --skill python               # copy orbit's python skill to .orbit/skills/ to edit
 uv run orbit config show                       # every setting in effect here, and where it's from
 uv run orbit config show roles.reviewer --full # one role's, with its instructions whole
 uv run orbit token rotate                      # replace the token frontends show orbit serve
@@ -1556,6 +1557,8 @@ stays.
     SKILL.md        a skill of your own
 ```
 
+`orbit init --skill python` copies a shipped skill's files into `.orbit/skills/python/` for you
+to start from (see [Starting from the reference config](#starting-from-the-reference-config)).
 `orbit config show skill_files` lists every skill's files with the layer each came from, orbit's
 or yours (see [Seeing the configuration in effect](#seeing-the-configuration-in-effect)).
 
@@ -1616,7 +1619,7 @@ reference as `orbit init` does. A file that isn't valid TOML is left as it is, a
 `--force` replaces the file with the reference after keeping it beside it as the next free
 `config.toml.bak.N`, counting from `config.toml.bak.1`, so each `--force` keeps one more backup
 and none is overwritten; it prints where the old file was kept and where the new one is. It
-can't go with `--update` or `--roles`.
+can't go with `--update`, `--roles` or `--skill`.
 
 `--roles` copies each built-in role's instructions to `.orbit/roles/<name>.md` for you to edit,
 leaving a file already there as it is and saying so (`Kept your .orbit/roles/coder.md.`), and
@@ -1639,6 +1642,18 @@ the reference and every table it appends), the header too: the line alone would 
 whatever table is set above it. The roles that need their header uncommented are named apart
 from those that don't. With `--update` too, the file is brought up to date first, so the role
 tables it appends get their lines.
+
+`--skill <name>` copies the files of one of orbit's skills (see [Skills](#skills)) to
+`.orbit/skills/<name>/` for you to edit, every file at any depth but hidden ones, making the
+folders it needs and leaving a file already there as it is. Repeat it for more skills
+(`--skill python --skill cpp`); it prints, skill by skill in the order given, that it copied the
+skill's files, if it copied any (`Copied python's files to .orbit/skills/python/.`), then each
+file it kept (`Kept your .orbit/skills/python/tests.md.`). A copied file replaces orbit's, so it
+no longer gets orbit's updates to it; delete the copies you don't change to keep getting them. A
+name that isn't one of orbit's skills stops it with status 2 before it copies anything, naming
+them all (`No skill named pyton; orbit's skills are application, code-style, …`). It doesn't
+touch `.orbit/config.toml`, and writes no reference config by itself; with `--update` or
+`--roles`, those run first.
 
 ### Seeing the configuration in effect
 
@@ -2961,7 +2976,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `built_in_roles` reads the built-in roles from `instructions/roles.toml` and their
     instructions from the Markdown files it names (`read_instruction_files` names them);
     `skill_files` reads the skills shipped in `skills/` and the project's in `.orbit/skills/`,
-    a folder each, file by file (`read_skill_library`);
+    a folder each, file by file (`read_skill_library`), with the shipped skills' names
+    (`skill_names`) and each file of a skill's folder (`skill_paths`);
     `reference_config` generates the reference config from the models and the built-in roles,
     every setting a project can change commented out at its default under what it does
     (`reference_config()`), and `uv run python -m orbit.agent.external.reference_config` writes
@@ -2970,7 +2986,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     (`init_config`), keeping a file it replaces as the next free numbered backup, and for
     `orbit init --update` adds to the file what it doesn't mention (`update_config`), and for
     `orbit init --roles` copies the built-in roles' instructions beside it and adds the
-    commented-out lines that switch the roles to their copies (`add_roles`); `checks`
+    commented-out lines that switch the roles to their copies (`add_roles`), and for
+    `orbit init --skill` copies orbit's skills into the project's `.orbit/skills/`
+    (`add_skills`); `checks`
     runs a verification step as a process (`run_step`); `processes` runs a program to completion
     without leaving it behind; `workspace`
     fingerprints the git working tree; `usage_api` fetches the Claude subscription's usage

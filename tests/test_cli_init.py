@@ -1,7 +1,8 @@
 """``orbit init``: the reference config written to a workspace's ``.orbit/config.toml``, an
 existing one refused, ``--update`` adding to it what it doesn't mention, ``--force`` replacing it
-after keeping numbered backups, and ``--roles`` copying the built-in roles' instructions beside
-it with a commented-out line pointing each role at its copy."""
+after keeping numbered backups, ``--roles`` copying the built-in roles' instructions beside it
+with a commented-out line pointing each role at its copy, and ``--skill`` copying orbit's skills
+into ``.orbit/skills/``."""
 
 import re
 import tomllib
@@ -15,6 +16,7 @@ from orbit.agent.domain.roles import Role
 from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
 from orbit.agent.external.config_file import read_config
 from orbit.agent.external.reference_config import reference_config
+from orbit.agent.external.skill_files import SKILL_DIRECTORY, read_skill_library
 from orbit.cli import app
 from tests.git_repo import init_repo
 
@@ -413,3 +415,110 @@ def test_roles_after_an_update_say_what_the_update_did(project: Path) -> None:
     assert result.exit_code == 2
     assert result.stdout.startswith(f"Added to {project / '.orbit' / 'config.toml'}")
     assert result.stderr.startswith("Couldn't copy the built-in roles' instructions: ")
+
+
+def shipped_skill(name: str) -> dict[str, str]:
+    """The text of each file of the skill ``name`` orbit ships, by its path in the folder."""
+    folder = SKILL_DIRECTORY / name
+    return {entry.name: entry.read_bytes().decode("utf-8") for entry in folder.iterdir()}
+
+
+def skill_copy(project: Path, name: str) -> dict[str, str]:
+    """The text of each file of the workspace at ``project``'s copy of the skill ``name``, by
+    its path in the folder."""
+    folder = project / ".orbit" / "skills" / name
+    return {path.name: path.read_text(encoding="utf-8") for path in folder.iterdir()}
+
+
+def test_skill_copies_the_skills_files_and_writes_no_config(project: Path) -> None:
+    result = init(project, "--skill", "python")
+    assert result.exit_code == 0, result.output
+    assert result.stdout.splitlines() == ["Copied python's files to .orbit/skills/python/."]
+    assert skill_copy(project, "python") == shipped_skill("python")
+    assert not (project / ".orbit" / "config.toml").exists()
+
+
+def test_skill_keeps_a_file_already_there_and_says_so(project: Path) -> None:
+    mine = project / ".orbit" / "skills" / "python" / "tests.md"
+    mine.parent.mkdir(parents=True)
+    mine.write_text("# Our tests\n")
+    result = init(project, "--skill", "python")
+    assert result.exit_code == 0, result.output
+    assert result.stdout.splitlines() == [
+        "Copied python's files to .orbit/skills/python/.",
+        "Kept your .orbit/skills/python/tests.md.",
+    ]
+    assert mine.read_text() == "# Our tests\n"
+
+
+def test_skill_again_says_only_which_files_it_kept(project: Path) -> None:
+    init(project, "--skill", "python")
+    result = init(project, "--skill", "python")
+    assert result.exit_code == 0, result.output
+    assert result.stdout.splitlines() == [
+        f"Kept your .orbit/skills/python/{path}." for path in sorted(shipped_skill("python"))
+    ]
+
+
+def test_skills_named_twice_are_copied_in_that_order(project: Path) -> None:
+    mine = project / ".orbit" / "skills" / "python" / "tests.md"
+    mine.parent.mkdir(parents=True)
+    mine.write_text("# Our tests\n")
+    result = init(project, "--skill", "python", "--skill", "cpp")
+    assert result.exit_code == 0, result.output
+    assert result.stdout.splitlines() == [
+        "Copied python's files to .orbit/skills/python/.",
+        "Kept your .orbit/skills/python/tests.md.",
+        "Copied cpp's files to .orbit/skills/cpp/.",
+    ]
+    assert skill_copy(project, "cpp") == shipped_skill("cpp")
+
+
+def test_an_unknown_skill_exits_with_status_2_naming_every_skill_and_copies_none(
+    project: Path,
+) -> None:
+    result = init(project, "--skill", "pyton", "--skill", "python")
+    assert result.exit_code == 2
+    names = ", ".join(sorted(read_skill_library(".").skills))
+    assert len(names.split(", ")) == 18
+    assert result.stderr.splitlines() == [f"No skill named pyton; orbit's skills are {names}."]
+    assert result.stdout == ""
+    assert not (project / ".orbit").exists()
+
+
+def test_skill_with_force_is_refused(project: Path) -> None:
+    result = init(project, "--skill", "python", "--force")
+    assert result.exit_code == 2
+    assert result.stderr.splitlines() == [
+        "--skill keeps the file and --force replaces it, so they can't go together."
+    ]
+    assert not (project / ".orbit").exists()
+
+
+def test_skill_after_an_update_does_both(project: Path) -> None:
+    path = written_config(project, "fix_attempts = 3\n")
+    result = init(project, "--update", "--skill", "python")
+    assert result.exit_code == 0, result.output
+    said = result.stdout.splitlines()
+    assert said[0] == f"Added to {path}, commented out:"
+    assert said[-1] == "Copied python's files to .orbit/skills/python/."
+    assert "# Added by orbit init --update on " in path.read_text(encoding="utf-8")
+    assert skill_copy(project, "python") == shipped_skill("python")
+
+
+def test_skill_after_roles_does_both(project: Path) -> None:
+    written_config(project, "fix_attempts = 3\n")
+    result = init(project, "--roles", "--skill", "python")
+    assert result.exit_code == 0, result.output
+    said = result.stdout.splitlines()
+    assert said[0] == copied(NAMES[0])[0]
+    assert said[-1] == "Copied python's files to .orbit/skills/python/."
+
+
+def test_skills_that_cant_be_copied_exit_with_status_2(project: Path) -> None:
+    (project / ".orbit").mkdir()
+    (project / ".orbit" / "skills").write_text("")
+    result = init(project, "--skill", "python")
+    assert result.exit_code == 2
+    assert result.stderr.startswith("Couldn't copy orbit's skills: ")
+    assert result.stdout == ""

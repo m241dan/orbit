@@ -1,11 +1,13 @@
 """A project's ``.orbit/config.toml`` started from the reference config shipped with orbit,
-brought up to date with it, and given copies of the built-in roles' instructions to edit."""
+brought up to date with it, and given copies of the built-in roles' instructions to edit; and the
+project given copies of orbit's skills to edit."""
 
 import os
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
+from importlib.resources.abc import Traversable
 from pathlib import Path
 
 from orbit.agent.domain.config_errors import ConfigError
@@ -19,6 +21,12 @@ from orbit.agent.domain.config_update import (
 from orbit.agent.external.built_in_roles import ROLE_DIRECTORY, read_instruction_files
 from orbit.agent.external.config_file import CONFIG_PATH, REFERENCE
 from orbit.agent.external.reference_config import LATER_HEADING
+from orbit.agent.external.skill_files import (
+    PROJECT_SKILLS,
+    SKILL_DIRECTORY,
+    skill_names,
+    skill_paths,
+)
 from orbit.agent.external.whole_files import create_whole, write_whole
 
 
@@ -28,6 +36,15 @@ class ConfigExists(Exception):
     def __init__(self, path: Path) -> None:
         super().__init__(f"{path} already exists.")
         self.path = path
+
+
+class UnknownSkill(Exception):
+    """``name`` names none of orbit's ``skills``."""
+
+    def __init__(self, name: str, skills: tuple[str, ...]) -> None:
+        super().__init__(f"No skill named {name}; orbit's skills are {', '.join(skills)}.")
+        self.name = name
+        self.skills = skills
 
 
 @dataclass(frozen=True)
@@ -60,6 +77,16 @@ class RolesResult:
     kept: dict[str, Path]
     lines: InstructionLines
     wrote: bool = False
+
+
+@dataclass(frozen=True)
+class SkillCopy:
+    """What :func:`add_skills` did with one of orbit's skills: copied its files to ``folder``,
+    if it ``copied`` any, and ``kept`` the files already there, in path order."""
+
+    folder: Path
+    copied: bool
+    kept: tuple[Path, ...]
 
 
 def init_config(root: Path, force: bool) -> InitResult:
@@ -136,6 +163,25 @@ def add_roles(root: Path, today: Callable[[], date] = date.today) -> RolesResult
     return RolesResult(path, copied, kept, update.lines, wrote)
 
 
+def add_skills(
+    root: Path, names: Iterable[str], directory: Traversable = SKILL_DIRECTORY
+) -> dict[str, SkillCopy]:
+    """Copy each file of each of orbit's skills ``names`` names, the folders in ``directory``,
+    at any depth but hidden ones, to its path under the skill's folder in the ``.orbit/skills/``
+    of the workspace at ``root``, making folders as needed and keeping a file already there;
+    what was done with each skill, by name, in the order named, a skill named twice once.
+
+    Raises :class:`UnknownSkill` for the first name that isn't one of orbit's skills, copying
+    nothing, and ``OSError`` when it can't read orbit's files or write the workspace's.
+    """
+    named = tuple(dict.fromkeys(names))
+    known = skill_names(directory)
+    for name in named:
+        if name not in known:
+            raise UnknownSkill(name, known)
+    return {name: _copy_skill(directory / name, root / PROJECT_SKILLS / name) for name in named}
+
+
 def _read_project(path: Path) -> str | None:
     """The text of the project file at ``path``; none if there's no file.
 
@@ -180,6 +226,27 @@ def _copy_instructions(
         else:
             copied[name] = target
     return copied, kept
+
+
+def _copy_skill(source: Traversable, folder: Path) -> SkillCopy:
+    """Copy each file of the skill in ``source``, its text as written, to its path under
+    ``folder``, in path order, keeping a file already there; what was done.
+
+    Raises ``OSError`` when it can't read a file or write its copy.
+    """
+    files = dict(skill_paths(source))
+    copied = False
+    kept: list[Path] = []
+    for path in sorted(files):
+        target = folder / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            create_whole(target, files[path].read_bytes().decode("utf-8"))
+        except FileExistsError:
+            kept.append(target)
+        else:
+            copied = True
+    return SkillCopy(folder, copied, tuple(kept))
 
 
 def _back_up(path: Path) -> Path | None:
