@@ -276,11 +276,12 @@ PLANNER_ASKS_BEFORE_PROPOSING = (
     " as its coder would: the states it passes through, what happens before and after it, what"
     " fails and what a test would pin down. Any behaviour a prompt would have to state that no"
     " answer settles is still open: ask it in a last round.",
-    "Mark a line as following only when it follows from an answer, an earlier record or the"
-    " code; a choice of your own is a question.",
-    "A prompt carries only confirmed decisions and facts from the code. A choice that turns up"
-    " while writing one goes back to the user as a question before anything is proposed: never"
-    " settle it in a draft and mention it afterwards.",
+    "Mark a requirement as following only when it follows from an answer, an earlier record or"
+    " the code.",
+    "A prompt carries only confirmed decisions, including those under Decided for you, and facts"
+    " from the code. An implementation detail that turns up while writing one is yours: settle"
+    " it, and name it in the line that closes your proposals. Something users would see or rely"
+    " on that turns up goes back to the user as a question before anything is proposed.",
     "Check that no prompt's Keep forbids what its Done requires.",
     "A task that would change most of a layer's files at once is too big: split it into steps"
     " that each leave the checks passing.",
@@ -296,6 +297,49 @@ def test_the_planner_asks_every_open_choice_before_proposing() -> None:
     text = planner_text()
     for passage in PLANNER_ASKS_BEFORE_PROPOSING:
         assert passage in text, passage
+
+
+PLANNER_DECIDES_IMPLEMENTATION = (
+    "Facts are your job, behaviour is the user's to decide, and the implementation is yours. Look"
+    " up anything the code or the web can answer. Put to the user what users see or rely on:"
+    " behaviour, edge cases, what happens on failure, interactions with existing features, stored"
+    " data, and scope, including any new dependency; ask, too, about implementation that is hard"
+    " to undo: a stored format or migration, a wire or protocol change, a public API. Decide the"
+    " rest yourself, following the project's guidance and skills: where code goes, its structure"
+    " and names, how the work splits into tasks, and user-visible wording.",
+    "- **Wording**: user-visible names, keys, flags and messages, which you choose.",
+    "Once a behaviour is settled, put its edge cases and their outcomes in a round of their own: a"
+    " numbered table of `Given … → outcome` rows, each with the outcome you propose, which the"
+    " user accepts whole or overrides by row number. An edge case with two plausible outcomes and"
+    " no obvious one is a full question instead.",
+    "An implementation detail that no answer settles is yours to decide.",
+    "A fully specified goal has an empty frontier: say so. Once the frontier is empty, post in one"
+    " message the requirements, a numbered list of one-line decisions, each ending with the"
+    ' options rejected and why in a clause ("over B: <trade-off>"); **Decided for you**, the'
+    " choices you made yourself, numbered on from the requirements and in the same form; and the"
+    " outline. Mark a requirement as following only when it follows from an answer, an earlier"
+    " record or the code. Wait for the user to confirm; when they change something, post the"
+    " revised whole.",
+    "When the user asks for changes, post the whole revised message. Propose once the user agrees.",
+)
+PLANNER_RETIRED_PHRASES = (
+    "put every choice to the user",
+    "a choice of your own is a question",
+    "never settle it in a draft",
+    "post the whole revised outline",
+)
+
+
+def test_the_planner_asks_about_behaviour_and_decides_the_implementation() -> None:
+    text = planner_text()
+    for passage in PLANNER_DECIDES_IMPLEMENTATION:
+        assert passage in text, passage
+
+
+def test_the_planner_no_longer_puts_every_choice_to_the_user() -> None:
+    text = planner_text()
+    for phrase in PLANNER_RETIRED_PHRASES:
+        assert phrase not in text, phrase
 
 
 PLANNER_CONSULTS = (

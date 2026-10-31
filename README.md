@@ -982,23 +982,24 @@ is reported as an error and left for the next start.
 ### Planning with the planner
 
 On any tab but another conversational role's, the prompt talks to the planner (its title reads
-`Prompt · planner`). It wraps what you type and
-grows with it up to 8 lines, then scrolls, and shrinks again once sent; `enter` sends, and pasted
-text keeps its newlines. Orbit is for planning, tasks and reviews, with no free-form chat besides.
-The **planner** tab, always second in the strip, shows just the planner conversation: your
-prompts, and the planner's messages, tool calls and exchanges with orbit (`ctrl+t` jumps there,
-and pressed again goes on to any other conversational role's tab, then back to the tab you were
-on). Tell it what you want to build; it asks
-what's unclear in rounds of a few questions, each offering options with a recommendation, and
-breaks the goal into small tasks, proposing each with `propose_task` (a title is required, and
-kept to one line). Its drafts' tools come with `propose_task`: `list_drafts()` gives one
-`<id> · <title>` line for each of its drafts you haven't accepted, in list order (`You have no
-drafts.` with none), and `read_draft(task_id)` gives one's id and title, a blank line and the rest
-of its prompt. It's refused a task that isn't there (`No task with id '99'.`), one it didn't
-propose (`Task 2 isn't one of your drafts.`), and one of its own you accepted or edited (`Task 4
-isn't a draft any more; the user accepted or edited it.`). `edit_draft(task_id, title, prompt)`
-replaces one's title and prompt, keeping it a draft in its place (`Edited draft task 5.`; a blank
-title is refused with `A task needs a title.`), and its row's details then end with
+`Prompt · planner`). It wraps what you type and grows with it up to 8 lines, then scrolls, and
+shrinks again once sent; `enter` sends, and pasted text keeps its newlines. Orbit is for planning,
+tasks and reviews, with no free-form chat besides. The **planner** tab, always second in the
+strip, shows just the planner conversation: your prompts, and the planner's messages, tool calls
+and exchanges with orbit (`ctrl+t` jumps there, and pressed again goes on to any other
+conversational role's tab, then back to the tab you were on). Tell it what you want to build; it
+asks about behaviour, edge cases and outcomes in rounds of a few questions, each offering options
+with a recommendation, with clear-cut edge cases in a table you accept or override by row; decides
+the implementation itself, listing what it decided for you beside the requirements and the outline
+for one confirm; and breaks the goal into small tasks, proposing each with `propose_task` (a title
+is required, and kept to one line). Its drafts' tools come with `propose_task`: `list_drafts()`
+gives one `<id> · <title>` line for each of its drafts you haven't accepted, in list order (`You
+have no drafts.` with none), and `read_draft(task_id)` gives one's id and title, a blank line and
+the rest of its prompt. It's refused a task that isn't there (`No task with id '99'.`), one it
+didn't propose (`Task 2 isn't one of your drafts.`), and one of its own you accepted or edited
+(`Task 4 isn't a draft any more; the user accepted or edited it.`). `edit_draft(task_id, title,
+prompt)` replaces one's title and prompt, keeping it a draft in its place (`Edited draft task 5.`;
+a blank title is refused with `A task needs a title.`), and its row's details then end with
 ` · edited by <role>` until you accept or edit it; `remove_draft(task_id)` withdraws one
 (`Removed draft task 5.`), and `move_draft(task_id, before)` puts one right before `before`, another of its drafts, or at the end of the list without `before` (`Moved draft task 5 before 3.`, `Moved draft task 5 to the end.`), leaving it as it was otherwise. All three are refused as `read_draft` is, for `before` too, and a move before itself is refused (`A draft can't move before itself.`). A role's `tools` naming a draft tool
 is refused (`read_draft comes with propose_task; list that instead.`). Every plan's first task writes the plan's record: a numbered requirements
