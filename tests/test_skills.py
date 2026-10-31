@@ -357,10 +357,12 @@ def library(*names: str) -> SkillLibrary:
     return SkillLibrary(skills={name: load(skill_md(name=name), folder=name) for name in names})
 
 
-def check(*mappings: SkillMapping, present: tuple[str, ...] = ("src",)) -> None:
+def check(
+    *mappings: SkillMapping, present: tuple[str, ...] = ("src",), escaping: tuple[str, ...] = ()
+) -> None:
     """Check ``mappings`` against the python skill's library, ``present`` being the paths in the
-    project."""
-    check_skill_mappings(mappings, library("python"), present)
+    project and ``escaping`` those whose links lead out of it."""
+    check_skill_mappings(mappings, library("python"), present, escaping)
 
 
 def mapping(*paths: str, use: tuple[str, ...] = ("python",)) -> SkillMapping:
@@ -397,14 +399,44 @@ def test_no_mappings_pass() -> None:
     check()
 
 
-@pytest.mark.parametrize("path", ["/etc", "../other", "..", "src/../../other"])
+@pytest.mark.parametrize("path", ["/etc", "../other", "..", "src/../../other", ""])
 def test_a_path_that_isnt_relative_or_leaves_the_project_is_refused(path: str) -> None:
     with pytest.raises(ConfigError, match=whole(OUTSIDE)):
         check(mapping(path), present=(path,))
 
 
+def test_an_empty_path_is_refused_naming_its_entry() -> None:
+    problem = "skills.2.paths: paths are relative to the project root and stay inside it."
+    with pytest.raises(ConfigError, match=whole(problem)):
+        check(mapping("src"), mapping(""), present=("src", ""))
+
+
+def test_the_project_root_named_as_a_dot_passes() -> None:
+    check(mapping("."), present=(".",))
+
+
 def test_a_path_through_dot_dot_that_stays_inside_the_project_passes() -> None:
     check(mapping("src/../src"), present=("src/../src",))
+
+
+def test_a_path_whose_links_lead_out_of_the_project_is_refused_naming_its_entry() -> None:
+    problem = "skills.2.paths: paths are relative to the project root and stay inside it."
+    with pytest.raises(ConfigError, match=whole(problem)):
+        check(mapping("src"), mapping("out"), present=("src", "out"), escaping=("out",))
+
+
+@pytest.mark.parametrize(
+    ("paths", "first"),
+    [
+        (("lib", "out"), "skills.1.paths names lib, which isn't in the project."),
+        (("out", "lib"), OUTSIDE),
+    ],
+)
+def test_a_path_leading_out_and_a_missing_one_are_refused_in_order(
+    paths: tuple[str, ...], first: str
+) -> None:
+    with pytest.raises(ConfigError, match=whole(first)):
+        check(mapping(*paths), present=("out",), escaping=("out",))
 
 
 def test_a_path_not_in_the_project_is_refused_naming_its_entry_and_the_path() -> None:
@@ -417,7 +449,7 @@ def test_a_skill_not_in_the_library_is_refused_listing_the_skills_in_name_order(
     problem = "skills.1.use names pyton, which isn't a skill; the skills are cpp, go, python."
     with pytest.raises(ConfigError, match=whole(problem)):
         check_skill_mappings(
-            [mapping("src", use=("pyton",))], library("python", "go", "cpp"), ["src"]
+            [mapping("src", use=("pyton",))], library("python", "go", "cpp"), ["src"], []
         )
 
 

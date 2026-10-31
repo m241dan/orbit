@@ -130,6 +130,9 @@ def test_a_project_file_cant_set_the_skills(tmp_path: Path) -> None:
         read_config(str(tmp_path), tmp_path / "config")
 
 
+OUTSIDE = "skills.1.paths: paths are relative to the project root and stay inside it."
+
+
 def write_skills(root: Path, *entries: tuple[list[str], list[str]]) -> Path:
     """The project file in ``root`` with a ``[[skills]]`` entry of each of ``entries``, its
     paths and skills, with ``src`` a folder and ``noxfile.py`` a file in the project."""
@@ -161,13 +164,62 @@ def test_a_path_through_dot_dot_inside_the_project_is_read(tmp_path: Path) -> No
     assert skills == (SkillMapping(paths=("src/../src",), use=("python",)),)
 
 
-@pytest.mark.parametrize("given", ["/etc", "../other"])
+@pytest.mark.parametrize("given", ["/etc", "../other", ""])
 def test_a_path_that_isnt_relative_or_leaves_the_project_names_the_file(
     tmp_path: Path, given: str
 ) -> None:
     path = write_skills(tmp_path, ([given], ["python"]))
-    problem = "skills.1.paths: paths are relative to the project root and stay inside it."
-    mapping_refused(tmp_path, path, problem)
+    mapping_refused(tmp_path, path, OUTSIDE)
+
+
+def project_linking_out(tmp_path: Path) -> Path:
+    """A project in ``tmp_path`` whose ``out`` links to a folder outside it, holding ``sub``."""
+    root = tmp_path / "project"
+    outside = tmp_path / "elsewhere"
+    (outside / "sub").mkdir(parents=True)
+    root.mkdir()
+    (root / "out").symlink_to(outside, target_is_directory=True)
+    return root
+
+
+@pytest.mark.parametrize("given", ["out", "out/sub"])
+def test_a_path_through_a_link_out_of_the_project_names_the_file(
+    tmp_path: Path, given: str
+) -> None:
+    root = project_linking_out(tmp_path)
+    path = write_skills(root, ([given], ["python"]))
+    mapping_refused(root, path, OUTSIDE)
+
+
+@pytest.mark.parametrize(
+    ("paths", "first"),
+    [
+        (["lib", "out"], "skills.1.paths names lib, which isn't in the project."),
+        (["out", "lib"], OUTSIDE),
+    ],
+)
+def test_a_link_out_and_a_missing_path_are_refused_in_order(
+    tmp_path: Path, paths: list[str], first: str
+) -> None:
+    root = project_linking_out(tmp_path)
+    path = write_skills(root, (paths, ["python"]))
+    mapping_refused(root, path, first)
+
+
+def test_a_link_to_a_folder_inside_the_project_is_read(tmp_path: Path) -> None:
+    write_skills(tmp_path, (["lib"], ["python"]))
+    (tmp_path / "lib").symlink_to("src", target_is_directory=True)
+    skills = read_config(str(tmp_path), tmp_path / "config").skills
+    assert skills == (SkillMapping(paths=("lib",), use=("python",)),)
+
+
+def test_a_project_reached_through_a_link_has_its_paths_read(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    write_skills(root, (["src"], ["python"]))
+    (tmp_path / "link").symlink_to(root, target_is_directory=True)
+    skills = read_config(str(tmp_path / "link"), tmp_path / "config").skills
+    assert skills == (SkillMapping(paths=("src",), use=("python",)),)
 
 
 def test_a_path_not_in_the_project_names_the_file_the_entry_and_the_path(

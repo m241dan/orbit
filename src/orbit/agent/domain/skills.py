@@ -31,7 +31,7 @@ MAX_DESCRIPTION = 1024
 """The most characters Claude Code takes in a skill's description."""
 
 OUTSIDE_PROJECT = "paths are relative to the project root and stay inside it."
-"""Why a ``[[skills]]`` entry's path that's absolute or leaves the project is refused."""
+"""Why a ``[[skills]]`` entry's path that's empty, absolute or leaves the project is refused."""
 
 _BYTE_ORDER_MARK = "\ufeff"
 """What some editors write before a UTF-8 file's text."""
@@ -253,9 +253,11 @@ def _laid_over(shipped: SkillFolder, folder: SkillFolder) -> SkillFolder:
 
 
 def inside_project(path: str) -> bool:
-    """Whether ``path`` is relative and, its ``..`` worked out, stays inside the project."""
+    """Whether ``path`` isn't empty, is relative and, its ``..`` worked out, stays inside the
+    project."""
     normal = posixpath.normpath(path)
-    return not posixpath.isabs(normal) and normal != ".." and not normal.startswith("../")
+    outside = posixpath.isabs(normal) or normal == ".." or normal.startswith("../")
+    return path != "" and not outside
 
 
 def unknown_skill(key: str, name: str, library: SkillLibrary) -> str:
@@ -265,34 +267,44 @@ def unknown_skill(key: str, name: str, library: SkillLibrary) -> str:
 
 
 def check_skill_mappings(
-    mappings: Sequence[SkillMapping], library: SkillLibrary, present: Collection[str]
+    mappings: Sequence[SkillMapping],
+    library: SkillLibrary,
+    present: Collection[str],
+    escaping: Collection[str],
 ) -> None:
     """Raise :class:`ConfigError` naming the first problem with the ``mappings``, entry by entry,
-    each numbered from 1, and in each its paths in order, then its skills: a path that isn't
-    relative or leaves the project, one that isn't ``present``, among the paths in the project,
-    or a skill that isn't in the ``library``."""
-    problem = next(_mapping_problems(mappings, library, present), None)
+    each numbered from 1, and in each its paths in order, then its skills: a path that's empty,
+    isn't relative or leaves the project, by its ``..`` or as one of the paths ``escaping``,
+    whose links lead out of it, one that isn't ``present``, among the paths in the project, or a
+    skill that isn't in the ``library``."""
+    problem = next(_mapping_problems(mappings, library, present, escaping), None)
     if problem is not None:
         raise ConfigError(problem)
 
 
 def _mapping_problems(
-    mappings: Sequence[SkillMapping], library: SkillLibrary, present: Collection[str]
+    mappings: Sequence[SkillMapping],
+    library: SkillLibrary,
+    present: Collection[str],
+    escaping: Collection[str],
 ) -> Iterator[str]:
     """The problems :func:`check_skill_mappings` finds with the ``mappings``, in order."""
     for number, mapping in enumerate(mappings, start=1):
-        yield from _path_problems(f"skills.{number}.paths", mapping.paths, present)
+        yield from _path_problems(f"skills.{number}.paths", mapping.paths, present, escaping)
         key = f"skills.{number}.use"
         yield from (
             unknown_skill(key, name, library) for name in mapping.use if name not in library.skills
         )
 
 
-def _path_problems(key: str, paths: Sequence[str], present: Collection[str]) -> Iterator[str]:
-    """The problems with the ``paths`` set under ``key``, in order: each that isn't relative or
-    leaves the project, and each that isn't ``present``, among the paths in the project."""
+def _path_problems(
+    key: str, paths: Sequence[str], present: Collection[str], escaping: Collection[str]
+) -> Iterator[str]:
+    """The problems with the ``paths`` set under ``key``, in order: each that's empty, isn't
+    relative or leaves the project, by its ``..`` or as one of the paths ``escaping``, and each
+    that isn't ``present``, among the paths in the project."""
     for path in paths:
-        if not inside_project(path):
+        if not inside_project(path) or path in escaping:
             yield f"{key}: {OUTSIDE_PROJECT}"
         elif path not in present:
             yield f"{key} names {path}, which isn't in the project."
