@@ -172,7 +172,8 @@ def add_skills(
     what was done with each skill, by name, in the order named, a skill named twice once.
 
     Raises :class:`UnknownSkill` for the first name that isn't one of orbit's skills, copying
-    nothing, and ``OSError`` when it can't read orbit's files or write the workspace's.
+    nothing, :class:`ConfigError`, naming the folder, when one of orbit's can't be listed, and
+    ``OSError`` when it can't read orbit's files or write the workspace's.
     """
     named = tuple(dict.fromkeys(names))
     known = skill_names(directory)
@@ -232,7 +233,8 @@ def _copy_skill(source: Traversable, folder: Path) -> SkillCopy:
     """Copy each file of the skill in ``source``, its text as written, to its path under
     ``folder``, in path order, keeping a file already there; what was done.
 
-    Raises ``OSError`` when it can't read a file or write its copy.
+    Raises :class:`ConfigError`, naming the folder, when one can't be listed, and ``OSError``
+    when it can't read a file or write its copy.
     """
     files = dict(skill_paths(source))
     copied = False

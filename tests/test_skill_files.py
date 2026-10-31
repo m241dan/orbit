@@ -1,6 +1,8 @@
 """The skills in effect in a workspace: those shipped with orbit, read from the folders in the
 package's skills/, with the project's own in .orbit/skills/ over them."""
 
+import errno
+import os
 import re
 from pathlib import Path
 
@@ -52,9 +54,9 @@ def read(directory: Path) -> dict[str, dict[str, SkillFile]]:
     return {name: dict(skill.files) for name, skill in library.skills.items()}
 
 
-def test_the_package_holds_a_folder_for_each_skill() -> None:
+def test_the_package_holds_a_folder_for_each_skill(tmp_path: Path) -> None:
     folders = [entry for entry in SKILL_DIRECTORY.iterdir() if entry.is_dir()]
-    assert {folder.name for folder in folders} == set(read_skill_library(".").skills)
+    assert {folder.name for folder in folders} == set(read_skill_library(str(tmp_path)).skills)
 
 
 def test_each_skill_folder_given_is_a_skill_of_its_files(tmp_path: Path) -> None:
@@ -199,3 +201,36 @@ def test_a_project_file_that_isnt_utf8_is_refused_naming_it(tmp_path: Path) -> N
     tests.write_bytes(b"# Tests \xff\n")
     with pytest.raises(ConfigError, match=f"^{re.escape(str(tests))}: isn't UTF-8 text\\.$"):
         read_skill_library(str(tmp_path))
+
+
+def test_a_dangling_symlink_in_a_project_folder_is_refused_naming_it(tmp_path: Path) -> None:
+    tests = project_skills(tmp_path) / "python" / "tests.md"
+    tests.parent.mkdir(parents=True)
+    tests.symlink_to(tmp_path / "missing.md")
+    problem = re.escape(f"{tests}: couldn't be read: {os.strerror(errno.ENOENT)}.")
+    with pytest.raises(ConfigError, match=f"^{problem}$"):
+        read_skill_library(str(tmp_path))
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads any file")
+def test_a_project_file_that_cant_be_read_is_refused_naming_it(tmp_path: Path) -> None:
+    tests = write(project_skills(tmp_path) / "python" / "tests.md", "# Tests\n")
+    tests.chmod(0o000)
+    problem = re.escape(f"{tests}: couldn't be read: {os.strerror(errno.EACCES)}.")
+    try:
+        with pytest.raises(ConfigError, match=f"^{problem}$"):
+            read_skill_library(str(tmp_path))
+    finally:
+        tests.chmod(0o644)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root lists any folder")
+def test_a_project_folder_that_cant_be_listed_is_refused_naming_it(tmp_path: Path) -> None:
+    folder = write(project_skills(tmp_path) / "python" / "tests.md", "# Tests\n").parent
+    folder.chmod(0o000)
+    problem = re.escape(f"{folder}: couldn't be listed: {os.strerror(errno.EACCES)}.")
+    try:
+        with pytest.raises(ConfigError, match=f"^{problem}$"):
+            read_skill_library(str(tmp_path))
+    finally:
+        folder.chmod(0o755)

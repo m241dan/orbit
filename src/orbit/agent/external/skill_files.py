@@ -29,8 +29,9 @@ def read_skill_library(root: str, directory: Traversable = SKILL_DIRECTORY) -> S
     package's layer, or from the project's with the file's own path. Files beside the folders are
     left out.
 
-    Raises :class:`ConfigError`, naming the file or folder, if a file isn't UTF-8 text or a skill
-    is invalid (see :func:`~orbit.agent.domain.skills.load_skill`).
+    Raises :class:`ConfigError`, naming the file or folder, if a file can't be read or isn't UTF-8
+    text, a folder can't be listed, or a skill is invalid (see
+    :func:`~orbit.agent.domain.skills.load_skill`).
     """
     project = Path(root) / PROJECT_SKILLS
     package_folders = _read_folders(directory, _packages)
@@ -50,13 +51,19 @@ def _projects(path: str) -> Layer:
 
 def skill_names(directory: Traversable = SKILL_DIRECTORY) -> tuple[str, ...]:
     """The names of the skills in ``directory``, the package's skills, a folder each but hidden
-    ones, sorted."""
+    ones, sorted.
+
+    Raises :class:`ConfigError`, naming the folder, if it can't be listed.
+    """
     return tuple(sorted(folder.name for folder in _folders(directory)))
 
 
 def skill_paths(folder: Traversable, prefix: str = "") -> Iterator[tuple[str, Traversable]]:
     """Each file in the skill's ``folder`` at any depth but hidden ones and those in hidden
-    folders, by its path relative to it after ``prefix``."""
+    folders, by its path relative to it after ``prefix``.
+
+    Raises :class:`ConfigError`, naming the folder, if it or one in it can't be listed.
+    """
     for entry in _visible(folder):
         path = f"{prefix}{entry.name}"
         if entry.is_dir():
@@ -69,13 +76,17 @@ def _read_folders(directory: Traversable, layer: LayerOf) -> dict[str, SkillFold
     """Each folder in ``directory`` but hidden ones, by name, its files from the ``layer`` each
     one's path gives.
 
-    Raises :class:`ConfigError`, naming the file, if one isn't UTF-8 text.
+    Raises :class:`ConfigError`, naming the file, if one can't be read or isn't UTF-8 text, or,
+    naming the folder, if one can't be listed.
     """
     return {folder.name: _read_folder(folder, layer) for folder in _folders(directory)}
 
 
 def _folders(directory: Traversable) -> Iterator[Traversable]:
-    """The folders in ``directory`` but hidden ones."""
+    """The folders in ``directory`` but hidden ones.
+
+    Raises :class:`ConfigError`, naming it, if it can't be listed.
+    """
     return (folder for folder in _visible(directory) if folder.is_dir())
 
 
@@ -89,17 +100,26 @@ def _read_folder(folder: Traversable, layer: LayerOf) -> SkillFolder:
 
 
 def _visible(folder: Traversable) -> Iterator[Traversable]:
-    """What's in ``folder`` but what's hidden, whose name starts with a dot."""
-    return (entry for entry in folder.iterdir() if not entry.name.startswith("."))
+    """What's in ``folder`` but what's hidden, whose name starts with a dot.
+
+    Raises :class:`ConfigError`, naming it, if it can't be listed.
+    """
+    try:
+        entries = tuple(folder.iterdir())
+    except OSError as error:
+        raise ConfigError(f"{folder}: couldn't be listed: {error.strerror}.") from None
+    return (entry for entry in entries if not entry.name.startswith("."))
 
 
 def _read_file(path: Traversable, layer: LayerOf) -> SkillFile:
     """The skill file at ``path``, its text as written, from the ``layer`` its path gives.
 
-    Raises :class:`ConfigError`, naming the file, if it isn't UTF-8 text.
+    Raises :class:`ConfigError`, naming the file, if it can't be read or isn't UTF-8 text.
     """
     try:
         text = path.read_bytes().decode("utf-8")
+    except OSError as error:
+        raise ConfigError(f"{path}: couldn't be read: {error.strerror}.") from None
     except UnicodeDecodeError:
         raise ConfigError(f"{path}: isn't UTF-8 text.") from None
     return SkillFile(text=text, layer=layer(str(path)), location=str(path))

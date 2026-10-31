@@ -1572,10 +1572,11 @@ or yours (see [Seeing the configuration in effect](#seeing-the-configuration-in-
 
 Hidden files and folders, whose names start with a dot, are left out, in the package and in
 `.orbit/skills/` alike, and so are files directly in `.orbit/skills/`, outside any folder, so you
-can keep notes there. A file that isn't UTF-8 text, a folder without a `SKILL.md`, or a `SKILL.md`
-whose front matter is missing or wrong stops the workspace from opening with a configuration error
-naming the file or folder, such as
-`…/.orbit/skills/python/SKILL.md: its name is pyton but its folder is python.`
+can keep notes there. A file that can't be read or isn't UTF-8 text, a folder that can't be listed
+or has no `SKILL.md`, or a `SKILL.md` whose front matter is missing or wrong stops the workspace
+from opening with a configuration error naming the file or folder, such as
+`…/.orbit/skills/python/SKILL.md: its name is pyton but its folder is python.` or
+`…/.orbit/skills/python/tests.md: couldn't be read: No such file or directory.`
 
 A project maps paths in it to the skills for the code there with `[[skills]]` entries in its
 `.orbit/config.toml`, and only there: your user config refuses them, as mappings would differ by
