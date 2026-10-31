@@ -1377,11 +1377,14 @@ own [`.orbit/config.toml`](.orbit/config.toml) is the worked example: the refere
 six verification steps and its setup filled in, under its own comments on why.
 
 `orbit chat` reads `.orbit/config.toml` at startup, and `orbit serve` at startup and as a frontend
-adds a workspace; each refuses an invalid one, naming each problem (for example
-`roles.coder.tool_access: Input should be 'off', 'restricted' or 'full'`). The settings of a later
-version of orbit, which the reference config shows commented out, are refused while uncommented,
-naming the first: a `[triggers.<name>]`, `[mcp.<name>]` or `[models.<name>]` table or a
-`[roles.<name>.tools]` table (`tools` as a list of orbit's tools is still a role's `tools`), as in
+adds a workspace; each refuses an invalid one, naming each problem by its key, with list entries
+counted from 1 as in `orbit config show` (for example
+`roles.coder.tool_access: Input should be 'off', 'restricted' or 'full'`, or
+`verification.steps.1.command: Field required` for a first step without a command). The
+settings of a later version of orbit, which the reference config shows commented out, are
+refused while uncommented, naming the first: a `[triggers.<name>]`, `[mcp.<name>]` or
+`[models.<name>]` table or a `[roles.<name>.tools]` table (`tools` as a list of orbit's tools is
+still a role's `tools`), as in
 `[mcp.github] isn't supported by this version of orbit yet; it's in the reference config for a
 later version. Leave it commented out.`
 

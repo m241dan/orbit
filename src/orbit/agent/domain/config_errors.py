@@ -27,7 +27,8 @@ def validation_problems(error: ValidationError) -> str:
 
 
 def dotted(loc: tuple[int | str, ...]) -> str:
-    """The dotted key of ``loc``, the location of a problem, such as ``roles.coder.model``; a
-    problem with a table's key is at that key."""
+    """The dotted key of ``loc``, the location of a problem, such as ``roles.coder.model`` or
+    ``skills.1.paths``, with list entries counted from 1; a problem with a table's key is at
+    that key."""
     parts = loc[:-1] if loc[-1:] == (KEY_PROBLEM,) else loc
-    return ".".join(str(part) for part in parts)
+    return ".".join(str(part + 1) if isinstance(part, int) else part for part in parts)

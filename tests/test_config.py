@@ -163,7 +163,7 @@ def test_a_file_maps_paths_to_skills_entry_by_entry() -> None:
             {"verification": {"steps": [{"name": "a", "command": ["  ", "x"]}]}},
             "step 1 has no program",
         ),
-        ({"verification": {"steps": [{"name": "a"}]}}, "verification.steps.0.command"),
+        ({"verification": {"steps": [{"name": "a"}]}}, "verification.steps.1.command"),
         (
             {
                 "verification": {
@@ -176,7 +176,7 @@ def test_a_file_maps_paths_to_skills_entry_by_entry() -> None:
             },
             "step 3 has the same name as step 1",
         ),
-        ({"verification": {"steps": [{"name": "a", "command": "x", "b": 1}]}}, "steps.0.b"),
+        ({"verification": {"steps": [{"name": "a", "command": "x", "b": 1}]}}, "steps.1.b"),
         ({"verification": {"surprise": 1}}, "verification.surprise"),
         ({"setup": {}}, "setup.command"),
         ({"setup": {"command": []}}, "setup.command"),
@@ -184,9 +184,9 @@ def test_a_file_maps_paths_to_skills_entry_by_entry() -> None:
         ({"setup": {"command": ["uv"], "watch": ["../uv.lock"]}}, "relative"),
         ({"setup": {"command": ["uv"], "watch": [""]}}, "relative"),
         ({"setup": {"command": ["uv"], "surprise": 1}}, "setup.surprise"),
-        ({"skills": [{"paths": [], "use": ["python"]}]}, "skills.0.paths"),
-        ({"skills": [{"paths": ["src"], "use": []}]}, "skills.0.use"),
-        ({"skills": [{"paths": ["src"], "use": ["python"], "path": "src"}]}, "skills.0.path"),
+        ({"skills": [{"paths": [], "use": ["python"]}]}, "skills.1.paths"),
+        ({"skills": [{"paths": ["src"], "use": []}]}, "skills.1.use"),
+        ({"skills": [{"paths": ["src"], "use": ["python"], "path": "src"}]}, "skills.1.path"),
         ({"skills": {"paths": ["src"], "use": ["python"]}}, "skills"),
     ],
 )
@@ -195,6 +195,31 @@ def test_mistakes_are_reported_readably(data: dict[str, object], message: str) -
         load_config(data, BUILT_IN_ROLES)
     assert message in str(raised.value)
     assert "\n" not in str(raised.value).split(":", 1)[0]
+
+
+@pytest.mark.parametrize(
+    ("data", "where"),
+    [
+        ({"setup": {"command": ["uv", 1]}}, "setup.command.2"),
+        (
+            {"verification": {"steps": [{"name": "a", "command": ["x", 1]}]}},
+            "verification.steps.1.command.2",
+        ),
+        (
+            {
+                "skills": [
+                    {"paths": ["src"], "use": ["python"]},
+                    {"paths": ["src"], "use": ["go", 3]},
+                ]
+            },
+            "skills.2.use.2",
+        ),
+    ],
+)
+def test_a_position_in_a_list_is_counted_from_1(data: dict[str, object], where: str) -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_config(data, BUILT_IN_ROLES)
+    assert str(raised.value) == f"{where}: Input should be a valid string"
 
 
 @pytest.mark.parametrize(
