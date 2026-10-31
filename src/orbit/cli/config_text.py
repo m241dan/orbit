@@ -6,7 +6,15 @@ from itertools import groupby
 from pathlib import Path
 from typing import Any
 
-from orbit.agent import LIMIT_KEYS, ConfigReport, Instructions, Layer, Setting, SkillFileText
+from orbit.agent import (
+    LIMIT_KEYS,
+    ConfigReport,
+    Instructions,
+    Layer,
+    Setting,
+    SkillFileText,
+    key_parts,
+)
 
 type Text = Instructions | SkillFileText
 """A value shown by its length, or with ``full`` as its text."""
@@ -36,20 +44,12 @@ def config_json(report: ConfigReport, *, full: bool) -> str:
     has none."""
     tree: dict[str, Any] = {}
     for key, setting in report.items():
-        *parents, name = _parts(key)
+        *parents, name = key_parts(key)
         node = tree
         for part in parents:
             node = node.setdefault(part, {})
         node[name] = _json(setting, full)
     return json.dumps(tree, indent=2, ensure_ascii=False)
-
-
-def _parts(key: str) -> list[str]:
-    """The parts of ``key`` :func:`config_json` nests a setting by: those between its dots, but a
-    skill file's section, skill and path, which may have dots of its own."""
-    if key.startswith("skill_files."):
-        return key.split(".", 2)
-    return key.split(".")
 
 
 def _group(key: str) -> str:

@@ -49,6 +49,7 @@ from orbit.agent.domain.config_report import (
     SkillFileText,
     UnknownKey,
     config_report,
+    key_parts,
     subtree,
 )
 from orbit.agent.domain.config_update import InstructionLines, instructions_setting
@@ -259,6 +260,7 @@ __all__ = [
     "is_bundle_url",
     "issue_client",
     "issue_server",
+    "key_parts",
     "key_pem",
     "known_runtimes",
     "knows_runtime",

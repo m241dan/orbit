@@ -16,6 +16,7 @@ from orbit.agent.domain.config_report import (
     UnknownKey,
     Written,
     config_report,
+    key_parts,
     subtree,
 )
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer, load_user_roles
@@ -97,11 +98,11 @@ LIBRARY = SkillLibrary(
 """Two skills, given out of order, the python one with a file of the project's."""
 
 
-def with_skills(project: Data | None = None) -> ConfigReport:
+def with_skills(project: Data | None = None, library: SkillLibrary = LIBRARY) -> ConfigReport:
     """What's reported of the configuration a project file holding ``project`` makes with the
-    skills of :data:`LIBRARY`."""
+    skills of ``library``."""
     given = sources(project)
-    config = given.config.model_copy(update={"skill_library": LIBRARY})
+    config = given.config.model_copy(update={"skill_library": library})
     return config_report(replace(given, config=config), {})
 
 
@@ -311,6 +312,28 @@ def test_a_skills_key_gives_its_files_alone() -> None:
     ]
 
 
+def test_a_skill_files_key_gives_that_file_alone() -> None:
+    assert list(subtree(with_skills(), "skill_files.cpp.scripts/run.sh")) == [
+        "skill_files.cpp.scripts/run.sh"
+    ]
+
+
+@pytest.mark.parametrize(
+    "key", ["skill_files.python.tests", "skill_files.python.tests.m", "skill_files.python.SKILL"]
+)
+def test_a_key_ending_partway_through_a_skill_files_path_is_unknown(key: str) -> None:
+    with pytest.raises(UnknownKey, match=f"^No setting {re.escape(key)} "):
+        subtree(with_skills(), key)
+
+
+def test_a_skill_files_key_gives_only_the_file_of_its_whole_path() -> None:
+    files = {"tests": skill_file("Test.\n"), "tests.md": skill_file("Test.\n")}
+    library = SkillLibrary(skills={"python": skill("python", files)})
+    assert list(subtree(with_skills(library=library), "skill_files.python.tests")) == [
+        "skill_files.python.tests"
+    ]
+
+
 def test_the_skills_key_gives_the_mappings_alone() -> None:
     mappings = [{"paths": ["src"], "use": ["python"]}]
     assert list(subtree(with_skills({"skills": mappings}), "skills")) == [
@@ -321,6 +344,23 @@ def test_the_skills_key_gives_the_mappings_alone() -> None:
 
 def test_a_settings_own_key_gives_it_alone() -> None:
     assert subtree(report(), "fix_attempts") == {"fix_attempts": Setting(5, DEFAULT)}
+
+
+@pytest.mark.parametrize(
+    ("key", "parts"),
+    [
+        ("roles.reviewer.model", ["roles", "reviewer", "model"]),
+        ("fix_attempts", ["fix_attempts"]),
+        ("skill_files", ["skill_files"]),
+        ("skill_files.python", ["skill_files", "python"]),
+        ("skill_files.python.tests.md", ["skill_files", "python", "tests.md"]),
+        ("skill_files.cpp.scripts/run.v1.sh", ["skill_files", "cpp", "scripts/run.v1.sh"]),
+    ],
+)
+def test_a_keys_parts_are_between_its_dots_but_a_skill_files_path_is_whole(
+    key: str, parts: list[str]
+) -> None:
+    assert key_parts(key) == parts
 
 
 @pytest.mark.parametrize("key", ["roles.nope", "roles.rev", "fix_attempts.more", ""])

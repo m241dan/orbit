@@ -1715,8 +1715,9 @@ skill_files.python.tests.md = (42 lines)   project .orbit/skills/python/tests.md
 
 A `KEY`, dotted as in the TOML it comes from, shows only the settings at or under it: `roles`
 every role's, `roles.reviewer` one role's, `server.port` one value, `verification.steps.1` the
-first step's, `skills` the `[[skills]]` entries and `skill_files.python` the python skill's
-files. `--json` prints the same as one JSON object, nested by the parts of each key, each value
+first step's, `skills` the `[[skills]]` entries, `skill_files.python` the python skill's
+files and `skill_files.python.tests.md` one file, which only its whole path names:
+`skill_files.python.tests` names no setting. `--json` prints the same as one JSON object, nested by the parts of each key, each value
 an object `{"value": …, "layer": …, "file": …}` of its value, its layer's name (`default`,
 `package`, `user` or `project`) and that layer's file, its whole path, or `null` for `default`
 and `package`. Skill files nest by skill only, each keyed by its whole path,

@@ -328,6 +328,16 @@ def test_an_unknown_key_exits_2_naming_it(project: Path) -> None:
     assert result.stdout == ""
 
 
+def test_a_key_ending_partway_through_a_skill_files_path_exits_2_naming_it(
+    project: Path,
+) -> None:
+    project_skill(project, "python/tests.md", TESTS)
+    result = show(project, "skill_files.python.tests")
+    assert result.exit_code == 2
+    assert "No setting skill_files.python.tests in orbit's configuration." in result.stderr
+    assert result.stdout == ""
+
+
 @pytest.mark.parametrize(
     ("project_text", "user_text", "problem"),
     [

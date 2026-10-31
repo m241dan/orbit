@@ -94,14 +94,26 @@ def config_report(sources: ConfigSources, tables: Mapping[str, BaseModel]) -> Co
 
 def subtree(report: ConfigReport, key: str) -> ConfigReport:
     """The settings of ``report`` at the dotted ``key`` or under it, such as those of
-    ``roles.reviewer``.
+    ``roles.reviewer``, as :func:`key_parts` splits each, so a skill file's key matches only by
+    its whole path.
 
     Raises :class:`UnknownKey` naming ``key`` if there are none.
     """
-    found = {name: value for name, value in report.items() if f"{name}.".startswith(f"{key}.")}
+    parts = key_parts(key)
+    found = {
+        name: value for name, value in report.items() if key_parts(name)[: len(parts)] == parts
+    }
     if not found:
         raise UnknownKey(f"No setting {key} in orbit's configuration.")
     return found
+
+
+def key_parts(key: str) -> list[str]:
+    """The parts of the dotted ``key``: those between its dots, but a skill file's section,
+    skill and path, which may have dots of its own."""
+    if key.startswith("skill_files."):
+        return key.split(".", 2)
+    return key.split(".")
 
 
 def _limits(config: OrbitConfig, project: Written) -> ConfigReport:
