@@ -48,6 +48,11 @@ LIMIT = "You've hit your session limit · resets 6pm (UTC)"
 DRAFTER = Role(instructions="Draft it.", verify=False, runtime=FAKE)
 """A role in the work lane, on the fake runtime."""
 
+SCANNER = Role(
+    instructions="Scan the code.", verify=False, lane="security", workspace="snapshot", runtime=FAKE
+)
+"""A role in the ``security`` lane, on the fake runtime."""
+
 
 class Waits:
     """A pause whose clock stands at :data:`START` and whose sleeps, noted in minutes, last until
@@ -83,10 +88,10 @@ def auditing(waits: Waits, **options: Any) -> tuple[WorkspaceHost, ScriptedLaunc
     return session, claude
 
 
-async def audited(session: WorkspaceHost) -> list[Event]:
-    """Queue an audit, which its lane starts by itself, and its events until the lane is idle,
-    with any pause it started waiting."""
-    await send(session, AddTask(task=audit()))
+async def audited(session: WorkspaceHost, task: TaskSpec | None = None) -> list[Event]:
+    """Queue ``task``, or an audit if none is given, which the ``security`` lane starts by
+    itself, and its events until the lane is idle, with any pause it started waiting."""
+    await send(session, AddTask(task=task or audit()))
     events = await events_until(session, idle("security"))
     await settled()  # A pause's wait gets as far as its sleep.
     return events
@@ -215,4 +220,58 @@ async def test_an_outage_on_another_runtime_leaves_claudes_backoff_going() -> No
 
     assert waits.minutes == [2, 2, 5]
     assert notes(drafted)[-1] == outage_note(2, FAKE)
+    assert notes(events)[-1] == outage_note(5)
+
+
+def scanning(waits: Waits) -> tuple[WorkspaceHost, ScriptedLauncher, ScriptedLauncher]:
+    """A session as :func:`auditing` gives, timed by ``waits``, with a ``scanner`` on the fake
+    runtime in the ``security`` lane, whose agent finds its API not answering, and Claude's and
+    the fake runtime's launchers."""
+    fake = ScriptedLauncher(FakeHost())
+    fake.scripts.append(fails(fake, OVERLOADED))
+    roles = {**WITH_SECURITY, "scanner": SCANNER}
+    session, claude = auditing(waits, host=fake.host, launchers={FAKE: fake}, roles=roles)
+    return session, claude, fake
+
+
+async def paused_by_a_scan(session: WorkspaceHost) -> None:
+    """Have the work lane's run stop at Claude's outage and its wait cancelled, then a scan,
+    on the fake runtime, pause that runtime from the ``security`` lane."""
+    await ran(session, TaskSpec(prompt="Code it."))
+    await send(session, CancelTurn())
+    await audited(session, TaskSpec(prompt="Scan it.", role="scanner"))
+
+
+async def test_a_lanes_usage_limit_during_another_pause_starts_its_runtimes_backoff_over() -> None:
+    waits = Waits()
+    session, claude, _ = scanning(waits)
+    claude.scripts.extend([fails(claude, OVERLOADED), fails(claude, LIMIT)])
+    claude.scripts.append(fails(claude, OVERLOADED))
+    await paused_by_a_scan(session)
+    await audited(session)
+    await send(session, RemoveTask(task_id="2"))
+    await send(session, RemoveTask(task_id="3"))
+    events = await ran(session)
+    await session.close()
+
+    assert waits.minutes == [2, 2, 2]
+    assert notes(events)[-1] == outage_note(2)
+
+
+async def test_a_lanes_outage_during_another_pause_pauses_nothing_and_counts_for_nothing() -> None:
+    waits = Waits()
+    session, claude, _ = scanning(waits)
+    claude.scripts.extend([fails(claude, OVERLOADED), fails(claude, OVERLOADED)])
+    claude.scripts.append(fails(claude, OVERLOADED))
+    await paused_by_a_scan(session)
+    audit_events = await audited(session)
+    minutes = list(waits.minutes)
+    await send(session, RemoveTask(task_id="2"))
+    await send(session, RemoveTask(task_id="3"))
+    events = await ran(session)
+    await session.close()
+
+    assert minutes == [2, 2]
+    assert outage_note(2) not in notes(audit_events)
+    assert waits.minutes == [2, 2, 5]
     assert notes(events)[-1] == outage_note(5)

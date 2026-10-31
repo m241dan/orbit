@@ -215,8 +215,10 @@ class WorkTurns:
         limit or, with ``error``, found its API not answering, timed as the work lane's pauses
         are, then run the lanes' tasks waiting; returns whether that runtime is paused now. A
         pause already in force stays, so another runtime isn't paused, and nothing is once
-        closed."""
+        closed; a usage limit still starts its runtime's backoff over then, while an outage,
+        which starts no wait, doesn't count."""
         if self._paused is not None or self._closed:
+            self._outages.passed_over(stop)
             return self._paused is not None and self._paused.runtime == stop.runtime
         paused, note, resuming = self._lane_pause(stop, error)
         self._wait_until(paused, note, _Restart(current_span(), resuming, work=False), None)

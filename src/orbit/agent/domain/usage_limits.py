@@ -230,6 +230,13 @@ class Outages:
         outage = self._outages[runtime] = outage_after(self.of(runtime), runtime, error)
         return outage
 
+    def passed_over(self, stop: RuntimeStop) -> None:
+        """Note ``stop``, which pauses nothing, as another pause is in force: at its usage limit,
+        which its API answered, its runtime's outage is forgotten; an outage, which starts no wait
+        of its own, doesn't count."""
+        if stop.failure.kind == "usage_limit":
+            self.heard_from(stop.runtime)
+
     def heard_from(self, runtime: str) -> None:
         """Forget ``runtime``'s outage, now an agent on it ended its run without one."""
         self._outages.pop(runtime, None)

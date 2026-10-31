@@ -246,6 +246,20 @@ def test_a_usage_limit_forgets_its_runtimes_outage() -> None:
     assert outages.of(CLAUDE) is None
 
 
+def test_a_usage_limit_passed_over_forgets_its_runtimes_outage() -> None:
+    outages = Outages()
+    outages.stopped(stop("api_unavailable"), "API Error: 529")
+    outages.passed_over(stop("usage_limit"))
+    assert outages.of(CLAUDE) is None
+
+
+def test_an_outage_passed_over_leaves_its_runtimes_backoff_as_it_is() -> None:
+    outages = Outages()
+    outages.stopped(stop("api_unavailable"), "API Error: 529")
+    outages.passed_over(stop("api_unavailable"))
+    assert outages.of(CLAUDE) == Outage(CLAUDE, "API Error: 529")
+
+
 def test_no_runtime_has_an_outage_at_first() -> None:
     assert Outages().of(CLAUDE) is None
 
