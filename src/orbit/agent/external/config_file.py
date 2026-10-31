@@ -87,9 +87,9 @@ def _read_layered(root: str, config_dir: Path, runtime: str | None = None) -> La
 
 def _check_skill_mappings(root: str, config: OrbitConfig) -> None:
     """Raise :class:`ConfigError`, naming ``root``'s file, if ``config``'s ``[[skills]]`` entries
-    name a path that's empty, isn't relative, leaves the project, by its ``..`` or its links, or
-    isn't a file or folder in ``root``, or a skill that isn't among its skills (see
-    :func:`~orbit.agent.domain.skills.check_skill_mappings`)."""
+    name a path that's empty, holds a NUL byte, isn't relative, leaves the project, by its ``..``
+    or its links, or isn't a file or folder in ``root``, or a skill that isn't among its skills
+    (see :func:`~orbit.agent.domain.skills.check_skill_mappings`)."""
     paths = _looked_for(config.skills)
     present, escaping = _present(root, paths), _escaping(root, paths)
     try:
@@ -99,8 +99,8 @@ def _check_skill_mappings(root: str, config: OrbitConfig) -> None:
 
 
 def _looked_for(mappings: Iterable[SkillMapping]) -> set[str]:
-    """The paths the ``mappings`` name, as written, but those that are empty, aren't relative or
-    leave the project by their ``..``, which aren't looked for."""
+    """The paths the ``mappings`` name, as written, but those that are empty, hold a NUL byte,
+    aren't relative or leave the project by their ``..``, which aren't looked for."""
     return {path for mapping in mappings for path in mapping.paths if inside_project(path)}
 
 

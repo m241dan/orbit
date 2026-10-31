@@ -1600,8 +1600,8 @@ use = ["cpp"]
 
 The entries are checked as the workspace opens, entry by entry and path by path, and the first
 problem stops it from opening with a configuration error naming `.orbit/config.toml` and the
-entry, counted from 1: a path that's empty, absolute or leaves the project through `..` or a
-link to somewhere outside it
+entry, counted from 1: a path that's empty, holds a NUL byte, is absolute or leaves the project
+through `..` or a link to somewhere outside it
 (`skills.1.paths: paths are relative to the project root and stay inside it.`; `src/../src`, `.`
 and a link to elsewhere in the project are fine), one that isn't a file or folder in the project
 (`skills.2.paths names src/orbt, which isn't in the project.`), or a skill that isn't one

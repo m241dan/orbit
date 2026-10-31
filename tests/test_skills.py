@@ -405,6 +405,12 @@ def test_a_path_that_isnt_relative_or_leaves_the_project_is_refused(path: str) -
         check(mapping(path), present=(path,))
 
 
+@pytest.mark.parametrize("path", ["src\x00", "src/\x00/lib", "\x00"])
+def test_a_path_holding_a_nul_byte_is_refused(path: str) -> None:
+    with pytest.raises(ConfigError, match=whole(OUTSIDE)):
+        check(mapping(path), present=(path,))
+
+
 def test_an_empty_path_is_refused_naming_its_entry() -> None:
     problem = "skills.2.paths: paths are relative to the project root and stay inside it."
     with pytest.raises(ConfigError, match=whole(problem)):

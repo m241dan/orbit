@@ -172,6 +172,17 @@ def test_a_path_that_isnt_relative_or_leaves_the_project_names_the_file(
     mapping_refused(tmp_path, path, OUTSIDE)
 
 
+def test_a_path_holding_a_nul_byte_names_the_file(tmp_path: Path) -> None:
+    path = write_skills(tmp_path, (["src\x00"], ["python"]))
+    mapping_refused(tmp_path, path, OUTSIDE)
+
+
+def test_a_later_path_holding_a_nul_byte_names_its_entry(tmp_path: Path) -> None:
+    path = write_skills(tmp_path, (["src"], ["python"]), (["noxfile.py", "src\x00"], ["python"]))
+    problem = "skills.2.paths: paths are relative to the project root and stay inside it."
+    mapping_refused(tmp_path, path, problem)
+
+
 def project_linking_out(tmp_path: Path) -> Path:
     """A project in ``tmp_path`` whose ``out`` links to a folder outside it, holding ``sub``."""
     root = tmp_path / "project"
