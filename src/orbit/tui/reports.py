@@ -24,6 +24,7 @@ from orbit.tui.view.reports import (
     REPORTS_TITLE,
     ReportShelf,
     delete_message,
+    report_keys,
     report_markdown,
     report_row,
     report_title,
@@ -74,30 +75,32 @@ class ReportsScreen(ListScreen[None]):
         with Vertical() as box:
             box.border_title = REPORTS_TITLE
             box.border_subtitle = REPORTS_HINT
-            yield OptionList(*_rows(self._shelf.reports))
+            yield OptionList(*self._rows(self._shelf.reports))
 
-    def show(self, reports: Sequence[ReportSummary]) -> None:
-        """List ``reports``, keeping the highlight where it was, as far as it can."""
+    def show(self, reports: Sequence[ReportSummary], highlight: int | None) -> None:
+        """List ``reports``, highlighting row ``highlight``, if any."""
         options = self.query_one(OptionList)
-        highlighted = options.highlighted or 0
         options.clear_options()
-        options.add_options(_rows(reports))
-        options.highlighted = min(highlighted, len(reports) - 1) if reports else None
+        options.add_options(self._rows(reports))
+        options.highlighted = highlight
 
-    @property
-    def chosen(self) -> ReportSummary | None:
-        """The report highlighted, if any."""
-        highlighted = self.highlighted
-        reports = self._shelf.reports
-        return None if highlighted is None or highlighted >= len(reports) else reports[highlighted]
+    @classmethod
+    def _rows(cls, reports: Sequence[ReportSummary]) -> list[Option]:
+        """The options listing ``reports``, each with the id for its report's key, or saying
+        there are none."""
+        if not reports:
+            return [Option(NO_REPORTS_ROW, disabled=True)]
+        return cls._options(report_keys(reports), [report_row(report) for report in reports])
 
     @on(OptionList.OptionSelected)
     async def _show(self, event: OptionList.OptionSelected) -> None:
-        # Only a report's row can be selected: the row saying there are none is disabled.
-        await self._shelf.show(self._shelf.reports[event.option_index].id)
+        # The row saying there are none is disabled, so only a report's row can be picked.
+        row = self._picked_row(event, self._shelf.keys)
+        if row is not None:
+            await self._shelf.choose(row)
 
     def action_delete(self) -> None:
-        chosen = self.chosen
+        chosen = self._shelf.highlighted
         if chosen is None:
             return
 
@@ -110,37 +113,46 @@ class ReportsScreen(ListScreen[None]):
         self.dismiss(None)
 
 
-def _rows(reports: Sequence[ReportSummary]) -> list[Option]:
-    """The options listing ``reports``, or saying there are none."""
-    if not reports:
-        return [Option(NO_REPORTS_ROW, disabled=True)]
-    return [Option(report_row(report)) for report in reports]
-
-
 class ReportsHost:
     """Shows the :class:`ReportShelf` it holds as ``shelf``, which asks for reports with
-    ``send``: its list, one at a time, and the reports opened over it, with ``push``."""
+    ``send``: its list and a report opened over it, one of each at a time, with ``push``."""
 
     def __init__(self, push: Push[ModalScreen[Any], Any], send: Send) -> None:
-        self._push = push
         self._slot = ModalSlot[ReportsScreen, None](push)
+        self._report = ModalSlot[ReportScreen, None](push)  # The report open over the list.
         self.shelf = ReportShelf(self, send)
 
     @property
     def list_open(self) -> bool:
         return self._slot.showing is not None
 
+    @property
+    def _mounted_list(self) -> ReportsScreen | None:
+        """The list open, once it's mounted."""
+        screen = self._slot.showing
+        return screen if screen is not None and screen.is_mounted else None
+
+    @property
+    def highlighted(self) -> int | None:
+        # Nothing is highlighted in a list not yet mounted: it highlights its first report then.
+        screen = self._mounted_list
+        return None if screen is None else screen.highlighted
+
+    @property
+    def report_open(self) -> bool:
+        return self._report.showing is not None
+
     def open_list(self) -> None:
         self._slot.open(ReportsScreen(self.shelf), _closed)
 
-    def show_list(self, reports: Sequence[ReportSummary]) -> None:
+    def show_list(self, reports: Sequence[ReportSummary], highlight: int | None) -> None:
         # A list not yet mounted lists the shelf's reports as it's composed.
-        screen = self._slot.showing
-        if screen is not None and screen.is_mounted:
-            screen.show(reports)
+        screen = self._mounted_list
+        if screen is not None:
+            screen.show(reports, highlight)
 
     def show_report(self, report: ReportShown) -> None:
-        self._push(ReportScreen(report), _closed)
+        self._report.open(ReportScreen(report), _closed)
 
 
 async def _closed(result: None) -> None:

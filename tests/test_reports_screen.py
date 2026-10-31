@@ -25,6 +25,7 @@ from tests.tui_fakes import FakeSession, accept_last, feed_events
 WHEN = datetime(2026, 10, 25, 12, 0, tzinfo=UTC)
 TIMINGS = ReportSummary(id=1, title="Timings", author="experimenter", time=WHEN)
 MEMORY = ReportSummary(id=2, title="Memory", author="planner", time=WHEN)
+LATEST = ReportSummary(id=3, title="Latest", author="planner", time=WHEN)
 LISTED = ReportsListed(reports=(MEMORY, TIMINGS))
 SHOWN = ReportShown(id=2, title="Memory", body="Peaked at 2 GB.", author="planner", time=WHEN)
 
@@ -33,6 +34,11 @@ def rows(app: OrbitApp) -> list[str]:
     """The rows of the reports list shown."""
     options = app.screen.query_one(OptionList)
     return [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+
+
+def highlighted(app: OrbitApp) -> int | None:
+    """The row highlighted in the reports list shown, if any."""
+    return app.screen.query_one(OptionList).highlighted
 
 
 async def test_ctrl_k_lists_the_reports_newest_first() -> None:
@@ -84,6 +90,79 @@ async def test_x_deletes_the_highlighted_report_once_confirmed() -> None:
         assert session.commands[-1] == DeleteReport(id=1)
         await accept_last(session, pilot)
         assert rows(app) == ["Memory · planner · 2026-10-25"]
+
+
+async def test_a_new_report_keeps_the_highlight_on_the_report_it_was_on() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("ctrl+k")
+        await feed_events(session, pilot, LISTED)
+        await pilot.press("j")
+        await feed_events(session, pilot, ReportsListed(reports=(LATEST, MEMORY, TIMINGS)))
+        assert highlighted(app) == 2
+        await pilot.press("enter")
+        assert session.commands[-1] == ShowReport(id=1)
+
+
+async def test_deleting_the_highlighted_report_highlights_the_one_after_it() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("ctrl+k")
+        await feed_events(session, pilot, ReportsListed(reports=(LATEST, MEMORY, TIMINGS)))
+        await pilot.press("j", "x", "y")
+        await pilot.pause()
+        assert session.commands[-1] == DeleteReport(id=2)
+        await accept_last(session, pilot)
+        assert rows(app) == [
+            "Latest · planner · 2026-10-25",
+            "Timings · experimenter · 2026-10-25",
+        ]
+        assert highlighted(app) == 1
+
+
+async def test_a_pick_of_reports_gone_since_neither_shows_another_nor_fails() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("ctrl+k")
+        await feed_events(session, pilot, LISTED)
+        options = app.screen.query_one(OptionList)
+        memory, timings = options.get_option_at_index(0), options.get_option_at_index(1)
+        await feed_events(session, pilot, ReportsListed(reports=(LATEST,)))
+        options.post_message(OptionList.OptionSelected(options, memory, 0))
+        options.post_message(OptionList.OptionSelected(options, timings, 1))
+        await pilot.pause()
+        assert session.commands == [ListReports()]
+        assert isinstance(app.screen, ReportsScreen)
+
+
+async def test_a_report_arriving_twice_shows_in_one_screen() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("ctrl+k")
+        await feed_events(session, pilot, LISTED)
+        await pilot.press("enter", "enter")
+        assert session.commands[-2:] == [ShowReport(id=2), ShowReport(id=2)]
+        await feed_events(session, pilot, SHOWN, SHOWN)
+        assert [type(screen) for screen in app.screen_stack].count(ReportScreen) == 1
+        await pilot.press("escape")
+        assert isinstance(app.screen, ReportsScreen)
+
+
+async def test_a_report_closed_shows_again_once_chosen_again() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("ctrl+k")
+        await feed_events(session, pilot, LISTED)
+        await pilot.press("enter")
+        await feed_events(session, pilot, SHOWN)
+        await pilot.press("escape", "enter")
+        await feed_events(session, pilot, SHOWN)
+        assert isinstance(app.screen, ReportScreen)
 
 
 async def test_x_declined_deletes_nothing() -> None:

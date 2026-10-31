@@ -24,6 +24,7 @@ from tests.view_fakes import ReportsView
 WHEN = datetime(2026, 10, 25, 12, 0, tzinfo=UTC)
 TIMINGS = ReportSummary(id=1, title="Timings", author="experimenter", time=WHEN)
 MEMORY = ReportSummary(id=2, title="Memory", author="planner", time=WHEN)
+LATEST = ReportSummary(id=3, title="Latest", author="planner", time=WHEN)
 SHOWN = ReportShown(id=1, title="Timings", body="It took 3s.", author="experimenter", time=WHEN)
 
 
@@ -67,11 +68,50 @@ def test_reports_arriving_while_the_list_is_closed_show_nowhere() -> None:
     assert (view.lists, view.reports) == ([], [])
 
 
-async def test_showing_asks_for_the_report_which_shows_over_the_list() -> None:
+async def test_the_list_filled_highlights_its_first_report() -> None:
+    reports, view, _ = shelf()
+    await reports.open()
+    reports.follow(ReportsListed(reports=(MEMORY, TIMINGS)))
+    assert view.highlighted == 0 and reports.highlighted == MEMORY
+
+
+async def test_an_empty_list_highlights_nothing() -> None:
+    reports, view, _ = shelf()
+    await reports.open()
+    reports.follow(ReportsListed(reports=()))
+    assert view.highlighted is None and reports.highlighted is None
+
+
+async def test_the_rows_are_keyed_by_their_reports_ids() -> None:
+    reports, _, _ = shelf()
+    await reports.open()
+    reports.follow(ReportsListed(reports=(MEMORY, TIMINGS)))
+    assert reports.keys == ("2", "1")
+
+
+async def test_a_new_report_keeps_the_highlight_on_the_report_it_was_on() -> None:
+    reports, view, _ = shelf()
+    await reports.open()
+    reports.follow(ReportsListed(reports=(MEMORY, TIMINGS)))
+    view.highlighted = 1
+    reports.follow(ReportsListed(reports=(LATEST, MEMORY, TIMINGS)))
+    assert view.highlighted == 2 and reports.highlighted == TIMINGS
+
+
+async def test_choosing_a_row_asks_for_its_report_which_shows_over_the_list() -> None:
     reports, view, backend = shelf()
     await reports.open()
-    await reports.show(1)
+    reports.follow(ReportsListed(reports=(MEMORY, TIMINGS)))
+    await reports.choose(1)
     assert backend.commands[-1] == ShowReport(id=1)
+    reports.follow(SHOWN)
+    assert view.reports == [SHOWN]
+
+
+async def test_a_report_arriving_while_one_is_shown_shows_nowhere() -> None:
+    reports, view, _ = shelf()
+    await reports.open()
+    reports.follow(SHOWN)
     reports.follow(SHOWN)
     assert view.reports == [SHOWN]
 
@@ -84,6 +124,35 @@ async def test_a_report_deleted_leaves_the_list_once_accepted() -> None:
     assert backend.commands[-1] == DeleteReport(id=1) and len(view.lists) == 1
     backend.accept()
     assert view.lists[-1] == (MEMORY,)
+
+
+async def test_deleting_the_highlighted_report_highlights_the_one_after_it() -> None:
+    reports, view, backend = shelf()
+    await reports.open()
+    reports.follow(ReportsListed(reports=(LATEST, MEMORY, TIMINGS)))
+    view.highlighted = 1
+    await reports.delete(2)
+    backend.accept()
+    assert view.lists[-1] == (LATEST, TIMINGS) and reports.highlighted == TIMINGS
+
+
+async def test_deleting_the_last_report_highlighted_highlights_the_one_before_it() -> None:
+    reports, view, backend = shelf()
+    await reports.open()
+    reports.follow(ReportsListed(reports=(MEMORY, TIMINGS)))
+    view.highlighted = 1
+    await reports.delete(1)
+    backend.accept()
+    assert view.lists[-1] == (MEMORY,) and reports.highlighted == MEMORY
+
+
+async def test_deleting_the_only_report_highlights_nothing() -> None:
+    reports, view, backend = shelf()
+    await reports.open()
+    reports.follow(ReportsListed(reports=(TIMINGS,)))
+    await reports.delete(1)
+    backend.accept()
+    assert view.lists[-1] == () and view.highlighted is None
 
 
 async def test_a_report_deleted_after_the_list_closed_shows_nowhere() -> None:

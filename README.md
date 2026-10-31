@@ -1072,8 +1072,9 @@ body, refusing an id there's none of. A workspace sees only its own reports.
 **ctrl+k** opens the list of reports, newest first, each row its title, author and date; `j`/`k`
 (or the arrow keys) move, `enter` shows the highlighted report in a scrollable view where `y`
 copies it, and `esc` goes back. `x` deletes the highlighted report after you confirm (`y` to
-delete, `n`/`esc` to keep it). Only you delete reports, never an agent; purging the workspace
-deletes them too.
+delete, `n`/`esc` to keep it). The highlight stays on its report as reports are saved and
+deleted, moving to the next one (or the one before the last) when its own is deleted. Only you
+delete reports, never an agent; purging the workspace deletes them too.
 
 ### Reviews
 

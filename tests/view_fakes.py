@@ -288,19 +288,24 @@ class PickerScreens:
 
 
 class ReportsView:
-    """What the shelf shows: whether the list is open, the lists shown in it, in turn, and the
-    reports shown over it."""
+    """What the shelf shows: whether the list is open, the lists shown in it, in turn, the row
+    highlighted, which the user may move, and the reports shown over it, the last of them open
+    until the user closes it."""
 
     def __init__(self) -> None:
         self.list_open = False
+        self.highlighted: int | None = None
         self.lists: list[tuple[ReportSummary, ...]] = []
         self.reports: list[ReportShown] = []
+        self.report_open = False
 
     def open_list(self) -> None:
         self.list_open = True
 
-    def show_list(self, reports: Sequence[ReportSummary]) -> None:
+    def show_list(self, reports: Sequence[ReportSummary], highlight: int | None) -> None:
         self.lists.append(tuple(reports))
+        self.highlighted = highlight
 
     def show_report(self, report: ReportShown) -> None:
         self.reports.append(report)
+        self.report_open = True
