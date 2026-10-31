@@ -174,7 +174,7 @@ def test_a_ca_file_that_cant_be_read_exits_naming_it(tmp_path: Path) -> None:
 def test_plaintext_beyond_loopback_exits_before_connecting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("orbit.cli.chat.WebSocketSession", WebSocketSession)
+    monkeypatch.setattr("orbit.cli.joining.WebSocketSession", WebSocketSession)
     url = "ws://example.com:7433"
     result = runner.invoke(app, ["chat", "--connect", url])
     assert result.exit_code == 2

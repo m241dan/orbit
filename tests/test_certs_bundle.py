@@ -274,7 +274,7 @@ async def test_an_unpacked_bundle_connects_its_remote_to_a_server_serving_mutual
     home = tmp_path / "laptop"
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv(CONFIG_DIR_VARIABLE, str(home / ".config" / "orbit"))
-    monkeypatch.setattr("orbit.cli.chat.WebSocketSession", WebSocketSession)
+    monkeypatch.setattr("orbit.cli.joining.WebSocketSession", WebSocketSession)
     assert _certs(config_dir, "init", "localhost").exit_code == 0
     certs = CertsDir(config_dir)
     settings = ServerSettings(

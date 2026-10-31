@@ -117,7 +117,7 @@ class FakeApp:
 def fake_tui(monkeypatch: pytest.MonkeyPatch) -> None:
     """Have chat build a :class:`FakeApp` over a :class:`FakeClient`, with none built yet."""
     monkeypatch.setattr("orbit.cli.chat.OrbitApp", FakeApp)
-    monkeypatch.setattr("orbit.cli.chat.WebSocketSession", FakeClient)
+    monkeypatch.setattr("orbit.cli.joining.WebSocketSession", FakeClient)
     FakeApp.built = []
 
 

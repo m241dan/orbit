@@ -10,18 +10,18 @@ from typing import Protocol
 import typer
 
 from orbit import __version__
-from orbit.agent import TokenFile, resolve_config_dir, resolve_state_dir
-from orbit.cli.chat import (
-    _LOCAL_ERRORS,
-    Discovered,
-    _ClientFiles,
-    _joined_client,
-    _joining,
-    _refuse_state_dir,
-    _target,
-    discover_control_plane,
-)
+from orbit.agent import resolve_config_dir, resolve_state_dir
 from orbit.cli.errors import _configured, _exit_on
+from orbit.cli.joining import (
+    LOCAL_ERRORS,
+    ClientFiles,
+    Discovered,
+    discover_control_plane,
+    joined_client,
+    joining_for,
+    named_target,
+    refuse_state_dir,
+)
 from orbit.cli.options import (
     CaOption,
     ClientCertOption,
@@ -97,20 +97,20 @@ def status(
     """
     # #lizard forgives(parameter_count): Typer takes each of the command's options as a parameter.
     user_config = resolve_config_dir(config_dir, os.environ)
-    given = _ClientFiles(token_file, ca, cert, key)
-    target = _target(connect, remote, user_config, given)
+    given = ClientFiles(token_file, ca, cert, key)
+    target = named_target(connect, remote, user_config, given)
     if target is None:
         found = _running(resolve_state_dir(state, os.environ), given, user_config)
     else:
-        _refuse_state_dir(ctx, target.flag)
+        refuse_state_dir(ctx, target.flag)
         found = Discovered(target.url, target.files)
-    client = _joined_client(found.url, _joining(ctx, found.files, user_config, None))
+    client = joined_client(found.url, joining_for(ctx, found.files, user_config, None))
     with _exit_on(_Unreachable):
         report = asyncio.run(_reported(client, found.url, STATUS_SECONDS))
     typer.echo(status_json(report) if as_json else status_text(report))
 
 
-def _running(state: Path, given: _ClientFiles, config_dir: Path) -> Discovered:
+def _running(state: Path, given: ClientFiles, config_dir: Path) -> Discovered:
     """The control plane running on the ``state`` directory, as :func:`discover_control_plane`
     finds it, shown the files ``given`` over those in the config directory ``config_dir``.
 
@@ -118,11 +118,10 @@ def _running(state: Path, given: _ClientFiles, config_dir: Path) -> Discovered:
     client certificate can't be used, the control plane turns the token away, or refuses the
     handshake.
     """
-    token_file = given.token_file or TokenFile(config_dir).path
-    refused = messages.TOKEN_REFUSED.format(path=token_file)
+    refused = messages.TOKEN_REFUSED.format(path=given.token_path(config_dir))
     with (
         _exit_on(TokenRejected, message=lambda _: refused),
-        _exit_on(HandshakeRefused, *_LOCAL_ERRORS),
+        _exit_on(HandshakeRefused, *LOCAL_ERRORS),
     ):
         found = _configured(lambda: discover_control_plane(state, given, config_dir))
     if found is None:

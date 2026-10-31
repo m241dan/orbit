@@ -49,7 +49,7 @@ from orbit.agent import (
 from orbit.agent.domain.server import client_fingerprint, is_revoked
 from orbit.agent.external.certificates import CertsDir, PrivateKey, issue_client
 from orbit.agent.external.repository import in_git_work_tree
-from orbit.cli import app, backend, chat, serve
+from orbit.cli import app, backend, joining, serve
 from orbit.protocol import (
     BUILT_IN_ROLE_NAMES,
     PROTOCOL_VERSION,
@@ -1037,10 +1037,10 @@ def test_serve_with_no_flags_serves_the_workspaces_added_before_resuming_their_s
 def test_a_chat_discovers_the_orbit_serve_running(
     project: Path, state: Path, config_dir: Path
 ) -> None:
-    found: list[chat.Discovered | None] = []
+    found: list[joining.Discovered | None] = []
 
     def discovers(websocket: Client) -> list[Event]:
-        found.append(chat.discover_control_plane(state, chat._ClientFiles(), config_dir))
+        found.append(joining.discover_control_plane(state, joining.ClientFiles(), config_dir))
         return []
 
     frontend = Frontend(state, config_dir, discovers)
@@ -1080,13 +1080,13 @@ def test_serve_over_tls_welcomes_a_frontend_trusting_its_ca_beyond_loopback(
 
 
 def _discovering(
-    state: Path, config_dir: Path, found: list[chat.Discovered | None]
+    state: Path, config_dir: Path, found: list[joining.Discovered | None]
 ) -> Callable[[Client], list[Event]]:
     """What has a chat discover the control plane running, noting what it found in
     ``found``."""
 
     def discovers(websocket: Client) -> list[Event]:
-        found.append(chat.discover_control_plane(state, chat._ClientFiles(), config_dir))
+        found.append(joining.discover_control_plane(state, joining.ClientFiles(), config_dir))
         return []
 
     return discovers
@@ -1099,7 +1099,7 @@ def test_a_chat_discovers_a_control_plane_serving_tls_trusting_the_ca_in_its_run
     files = make_server(ca, tmp_path)
     config_dir.mkdir()
     (config_dir / "config.toml").write_text(f'[server]\nca = "{ca.path}"\n')
-    found: list[chat.Discovered | None] = []
+    found: list[joining.Discovered | None] = []
     trust = ssl.create_default_context(cafile=ca.path)
     frontend = Frontend(state, config_dir, _discovering(state, config_dir, found), trust=trust)
     output = served(frontend, *_tls_flags(files), "--host", "0.0.0.0", "--port", "0")
@@ -1245,7 +1245,7 @@ def test_a_chat_discovers_a_control_plane_serving_mtls_showing_the_local_client_
     _mtls_config(config_dir, ca, files)
     with (config_dir / "config.toml").open("a") as config:
         config.write(f'local_client_cert = "{client.cert}"\nlocal_client_key = "{client.key}"\n')
-    found: list[chat.Discovered | None] = []
+    found: list[joining.Discovered | None] = []
     discovers = _discovering(state, config_dir, found)
     frontend = Frontend(state, config_dir, discovers, trust=_trusting(ca, client))
     served(frontend)

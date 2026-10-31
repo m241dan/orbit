@@ -73,7 +73,7 @@ def project(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Path]:
 @pytest.fixture
 def plane(monkeypatch: pytest.MonkeyPatch) -> Plane:
     fake = Plane()
-    monkeypatch.setattr("orbit.cli.chat.accepts", fake.accepts)
+    monkeypatch.setattr("orbit.cli.joining.accepts", fake.accepts)
     return fake
 
 
@@ -372,7 +372,7 @@ def contexts(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Path | None, ...]]:
         made.append((ca, cert, key))
         return ssl.create_default_context()
 
-    monkeypatch.setattr("orbit.cli.chat.client_ssl_context", record)
+    monkeypatch.setattr("orbit.cli.joining.client_ssl_context", record)
     return made
 
 

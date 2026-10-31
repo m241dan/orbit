@@ -200,7 +200,7 @@ def test_a_handshake_the_orbit_serve_found_refuses_exits_2_saying_why(
     async def refuses(*args: object) -> bool:
         raise HandshakeRefused("The server rejected the client certificate.")
 
-    monkeypatch.setattr("orbit.cli.chat.accepts", refuses)
+    monkeypatch.setattr("orbit.cli.joining.accepts", refuses)
     RunFile(state).write(URL, os.getpid())
 
     result = runner.invoke(app, ["status"])

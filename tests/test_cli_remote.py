@@ -180,7 +180,7 @@ def test_a_backend_flag_with_remote_exits_saying_it_belongs_on_serve(config: Pat
 async def test_a_remote_over_tls_is_joined_with_its_ca_and_token_file(
     config: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("orbit.cli.chat.WebSocketSession", WebSocketSession)
+    monkeypatch.setattr("orbit.cli.joining.WebSocketSession", WebSocketSession)
     ca = make_ca(config)
     files = make_server(ca, config)
     settings = ServerSettings(port=0, tls="tls", cert=str(files.cert), key=str(files.key))
