@@ -242,14 +242,25 @@ class MergeHolds:
         """Note that the set ``name`` passed on ``commit``, and lift its hold, if any, telling
         :attr:`released` once no hold is left."""
         self._passed[name] = commit
-        held = find_hold(self._holds, name)
-        if held is not None or self._read == "unread":  # The store may hold it unread.
-            self._lifted = note_lift(self._lifted, name)
-        if held is None:
+        if find_hold(self._holds, name) is None:
+            self._lift_unread(name)
             return
+        self._lifted = note_lift(self._lifted, name)
         await self._replace(lift_hold(self._holds, name))
         await self._parts.publish(Notice(message=resumed_note(name)))
         if not self._holds:
+            self.released()
+
+    def _lift_unread(self, name: str) -> None:
+        """Note that the set ``name``, with no hold on here, passed while the holds kept are
+        unread, as the store may hold one for it, telling :attr:`released` if that makes the
+        holds known with none on, as the work saved waiting may land then; nothing once they've
+        been read."""
+        if self._read == "read":
+            return
+        known = self.is_known
+        self._lifted = note_lift(self._lifted, name)
+        if not known and self.is_known and not self._holds:
             self.released()
 
     async def _decide(self, decision: HoldDecision, name: str) -> Hold | None:

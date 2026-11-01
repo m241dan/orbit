@@ -332,6 +332,23 @@ async def test_work_waiting_lands_on_a_halt_lifting_only_once_the_holds_kept_are
     assert seen.merged() == [("1", "c1"), ("2", "c2")]
 
 
+async def test_work_waiting_lands_as_its_set_passes_though_the_holds_kept_are_unread() -> None:
+    store, tree = FakeStore(), LandingTree()
+    await left_waiting(store, tree)
+    store.holds_load_failure = "disk gone"
+
+    session = await reopened(store, tree)
+    seen = Seen(session)
+    sets, holds = parts_of(session)
+    await eventually(lambda: any(isinstance(event, ErrorOccurred) for event in seen.events))
+    assert not holds.is_known
+    sets.run("stress", "nightly")
+    await eventually(lambda: len(seen.merged()) == 2)
+    seen.close()
+    await session.close()
+    assert seen.merged() == [("1", "c1"), ("2", "c2")] and store.holds == (KEPT,)
+
+
 async def test_work_waiting_lands_on_a_halt_lifting_with_the_holds_known_and_none_on() -> None:
     store, tree = FakeStore(), LandingTree()
     await left_waiting(store, tree)

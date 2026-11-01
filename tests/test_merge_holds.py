@@ -412,6 +412,37 @@ async def test_holds_released_by_hand_though_unread_are_known() -> None:
     assert holds.holds.is_known and holds.releases == 1
 
 
+async def test_the_last_holding_set_passing_unread_with_no_hold_on_releases_once() -> None:
+    store = FakeStore()
+    store.holds_load_failure = "disk gone"
+    holds = Holds(store, holding=(STRESS,))
+    await holds.holds.restore()
+    await passed(holds)
+    await passed(holds, "c6")
+    assert holds.holds.is_known and holds.releases == 1 and store.holds_saved == []
+
+
+async def test_one_of_two_holding_sets_passing_unread_releases_only_with_the_other() -> None:
+    store = FakeStore()
+    store.holds_load_failure = "disk gone"
+    holds = Holds(store)
+    await holds.holds.restore()
+    await passed(holds)
+    assert not holds.holds.is_known and holds.releases == 0
+    await passed(holds, check_set=SOAK)
+    assert holds.holds.is_known and holds.releases == 1 and store.holds_saved == []
+
+
+async def test_the_last_holding_set_lifting_its_hold_though_unread_releases_once() -> None:
+    store = FakeStore()
+    store.holds_load_failure = "disk gone"
+    holds = Holds(store, holding=(STRESS,))
+    await holds.holds.restore()
+    await failed(holds)
+    await passed(holds)
+    assert holds.holds.is_known and holds.releases == 1 and store.holds_saved == []
+
+
 async def test_holds_without_a_store_are_known() -> None:
     assert Holds().holds.is_known
 
