@@ -106,6 +106,12 @@ def test_a_trigger_for_a_disabled_role_is_valid() -> None:
     assert config.triggers["nightly"].role == "coder"
 
 
+def test_a_trigger_taking_a_disabled_roles_tasks_is_valid() -> None:
+    nightly = NIGHTLY | {"when": {"role": ["coder", "planner"]}}
+    config = loaded({"roles": {"coder": {"enabled": False}}, "triggers": {"nightly": nightly}})
+    assert config.triggers["nightly"].when == {"role": ("coder", "planner")}
+
+
 def test_a_trigger_for_a_projects_own_role_is_valid() -> None:
     tidier = {"instructions": "Tidy.", "lane": "tidy", "workspace": "snapshot", "verify": False}
     nightly = NIGHTLY | {"role": "tidier"}
@@ -138,6 +144,16 @@ def test_a_trigger_for_a_projects_own_role_is_valid() -> None:
             NIGHTLY | {"when": {"branch": "main"}},
             "triggers.nightly.when: branch isn't a field of task_finished; its fields are role,"
             " origin, status.",
+        ),
+        (
+            NIGHTLY | {"when": {"role": ["coder", "tidier"]}},
+            "triggers.nightly.when: tidier isn't a role; the roles are planner, experimenter,"
+            " coder, reviewer, super-reviewer, configurator.",
+        ),
+        (
+            NIGHTLY | {"on": "session_started", "when": {"verification": "missng"}},
+            "triggers.nightly.when: missng isn't a value of verification; its values are"
+            " configured, missing, off.",
         ),
         (
             NIGHTLY | {"prompt": "Tidy {diff}"},

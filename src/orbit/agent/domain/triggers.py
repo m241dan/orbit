@@ -68,6 +68,9 @@ VerificationState = Literal["configured", "missing", "off"]
 """What ``session_started``'s ``verification`` field says: verification on with at least one
 step, on with none, or off."""
 
+VERIFICATION_STATES: tuple[str, ...] = get_args(VerificationState)
+"""The values of ``session_started``'s ``verification`` field, in order."""
+
 REVIEW_ROUNDS = "review-rounds"
 """The guard that holds a trigger back unless today's review rounds and batches find a review
 due, whose job its task reviews."""
@@ -118,6 +121,15 @@ EVENTS: Mapping[str, Event] = {
 }
 """Each event, by name, with what it gives. A trigger fired by hand gives the variables of its
 event, as the super review does those of ``commits``."""
+
+ROLE_FIELD = "role"
+"""The ``when`` field naming the role of an event's task, whose values are the roles: a disabled
+one among them."""
+
+WHEN_VALUES: Mapping[str, tuple[str, ...]] = {"verification": VERIFICATION_STATES}
+"""The values the events give each ``when`` field orbit fixes them for, by its name. Besides
+these, :data:`ROLE_FIELD`'s are the roles, and ``origin``, ``status`` and ``step`` take any
+value: origins include trigger names, and steps are the project's own."""
 
 
 def _plain_trigger_name(name: str) -> str:
@@ -277,8 +289,10 @@ def check_triggers(triggers: Mapping[str, Trigger], roles: Collection[str]) -> N
     """Raise :class:`ConfigError` naming each problem of each of ``triggers``, on a line of its
     own, if any, each at ``triggers.<name>.<field>``: a role that isn't among ``roles`` (a
     disabled one is), neither a role nor ``checks``, or both, a role without a prompt or
-    ``checks`` with one, a ``when`` field or a template variable its event doesn't give,
-    ``every`` on another event than ``commits``, and ``manual`` without a ``label``."""
+    ``checks`` with one, a ``when`` field or a template variable its event doesn't give, a
+    ``when`` value its field never takes, a role not among ``roles`` or a value
+    :data:`WHEN_VALUES` doesn't give, ``every`` on another event than ``commits``, and
+    ``manual`` without a ``label``."""
     problems = [
         f"triggers.{name}.{field}: {why}"
         for name, trigger in triggers.items()
@@ -293,7 +307,7 @@ def _problems(trigger: Trigger, roles: Collection[str]) -> list[tuple[str, str]]
     return [
         *_target_problems(trigger, roles),
         *_prompt_problems(trigger),
-        *_when_problems(trigger),
+        *_when_problems(trigger, roles),
         *_every_problems(trigger),
         *_label_problems(trigger),
     ]
@@ -307,8 +321,13 @@ def _target_problems(trigger: Trigger, roles: Collection[str]) -> list[tuple[str
     if trigger.checks is not None:
         return [("checks", 'a trigger has a role or checks = "gate", not both.')]
     if trigger.role not in roles:
-        return [("role", f"{trigger.role} isn't a role; the roles are {', '.join(roles)}.")]
+        return [("role", _not_a_role(trigger.role, roles))]
     return []
+
+
+def _not_a_role(name: str, roles: Collection[str]) -> str:
+    """Why ``name``, given as a role, is refused: it isn't among ``roles``."""
+    return f"{name} isn't a role; the roles are {', '.join(roles)}."
 
 
 def _prompt_problems(trigger: Trigger) -> list[tuple[str, str]]:
@@ -333,14 +352,38 @@ def _variable_problems(on: str, prompt: str) -> list[tuple[str, str]]:
     ]
 
 
-def _when_problems(trigger: Trigger) -> list[tuple[str, str]]:
-    """The fields ``trigger``'s ``when`` matches that its event doesn't have."""
+def _when_problems(trigger: Trigger, roles: Collection[str]) -> list[tuple[str, str]]:
+    """What's wrong with ``trigger``'s ``when``, field by field: one its event doesn't have, or
+    each value it never takes, a role not among ``roles`` among them."""
     fields = EVENTS[trigger.on].fields
     theirs = f"its fields are {', '.join(fields)}" if fields else "it has none"
     return [
-        ("when", f"{field} isn't a field of {trigger.on}; {theirs}.")
-        for field in trigger.when
-        if field not in fields
+        ("when", why)
+        for field, wanted in trigger.when.items()
+        for why in (
+            _value_problems(field, _values(wanted), roles)
+            if field in fields
+            else [f"{field} isn't a field of {trigger.on}; {theirs}."]
+        )
+    ]
+
+
+def _value_problems(field: str, values: Sequence[str], roles: Collection[str]) -> list[str]:
+    """Why each of ``values``, a ``when`` field ``field``'s, is refused, if it is: a role not
+    among ``roles``, or a value of a field in :data:`WHEN_VALUES` not among its values."""
+    if field == ROLE_FIELD:
+        return [_not_a_role(value, roles) for value in values if value not in roles]
+    known = WHEN_VALUES.get(field)
+    return [] if known is None else _not_values(field, values, known)
+
+
+def _not_values(field: str, values: Sequence[str], known: Sequence[str]) -> list[str]:
+    """Why each of ``values``, a ``when`` field ``field``'s, is refused, if it is: it isn't among
+    the field's ``known`` values."""
+    return [
+        f"{value} isn't a value of {field}; its values are {', '.join(known)}."
+        for value in values
+        if value not in known
     ]
 
 

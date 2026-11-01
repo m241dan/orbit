@@ -11,6 +11,7 @@ from orbit.agent.domain.triggers import (
     EVENT_NAMES,
     EVENTS,
     GUARD_NAMES,
+    WHEN_VALUES,
     Trigger,
     check_triggers,
     load_built_in_triggers,
@@ -60,6 +61,10 @@ def test_the_events_are_the_records_with_their_when_fields() -> None:
         "startup_check_failed": ("step",),
         "manual": (),
     }
+
+
+def test_only_verification_has_values_fixed_by_orbit() -> None:
+    assert WHEN_VALUES == {"verification": ("configured", "missing", "off")}
 
 
 def test_every_event_gives_its_trigger_and_its_own_variables() -> None:
@@ -212,6 +217,68 @@ def test_a_when_field_of_an_event_without_fields_is_refused() -> None:
     assert problems(on="manual", checks="gate", manual=True, label="C", when={"role": "x"}) == (
         "triggers.x.when: role isn't a field of manual; it has none."
     )
+
+
+def test_an_unknown_verification_is_refused_naming_it_and_the_values() -> None:
+    assert problems(on="session_started", checks="gate", when={"verification": "missng"}) == (
+        "triggers.x.when: missng isn't a value of verification; its values are configured,"
+        " missing, off."
+    )
+
+
+@pytest.mark.parametrize("role", ["codr", ("coder", "codr")])
+def test_an_unknown_role_in_when_is_refused_naming_it_and_the_roles(
+    role: str | tuple[str, ...],
+) -> None:
+    assert problems(on="task_landed", checks="gate", when={"role": role}) == (
+        "triggers.x.when: codr isn't a role; the roles are coder, reviewer."
+    )
+
+
+@pytest.mark.parametrize(
+    "when",
+    [
+        {"verification": "configured"},
+        {"verification": "missing"},
+        {"verification": ("off", "missing")},
+    ],
+)
+def test_each_verification_state_is_taken(when: dict[str, Any]) -> None:
+    check_triggers({"x": Trigger(on="session_started", checks="gate", when=when)}, ROLES)
+
+
+def test_the_roles_are_taken_in_when() -> None:
+    when: dict[str, str | tuple[str, ...]] = {
+        "role": ("coder", "reviewer"),
+        "origin": "anyone",
+        "status": "whatever",
+    }
+    check_triggers({"x": Trigger(on="task_finished", checks="gate", when=when)}, ROLES)
+
+
+def test_a_step_in_when_is_the_projects_own_and_taken() -> None:
+    trigger = Trigger(on="startup_check_failed", role="coder", prompt="Fix", when={"step": "Lint"})
+    check_triggers({"x": trigger}, ROLES)
+
+
+def test_each_unknown_value_in_when_is_refused_after_the_other_problems() -> None:
+    trigger = Trigger(
+        on="task_landed",
+        role="nope",
+        prompt="{nope}",
+        when={"role": ("codr", "coder", "revewer"), "status": "done"},
+    )
+    with pytest.raises(ConfigError) as raised:
+        check_triggers({"x": trigger}, ROLES)
+    assert str(raised.value).splitlines() == [
+        "triggers.x.role: nope isn't a role; the roles are coder, reviewer.",
+        "triggers.x.prompt: {nope} isn't a variable of task_landed; its variables are {trigger},"
+        " {commit}, {task}, {title}, {diff}, {missing}, {cap}, {queued}, {landed_since},"
+        " {task_skills}.",
+        "triggers.x.when: codr isn't a role; the roles are coder, reviewer.",
+        "triggers.x.when: revewer isn't a role; the roles are coder, reviewer.",
+        "triggers.x.when: status isn't a field of task_landed; its fields are role, origin.",
+    ]
 
 
 def test_a_variable_its_event_doesnt_give_is_refused_naming_it_and_the_variables() -> None:

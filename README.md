@@ -1763,12 +1763,16 @@ the field and the value, for an unknown event, role, guard or `when` field
 variable its event doesn't give (`triggers.tidy-up.prompt: {diff} isn't a variable of
 task_finished; its variables are {trigger}.`), `every` without `on = "commits"`, `manual = true`
 without a `label`, neither a role nor `checks` or both, a role without a prompt, or `checks` with
-one. A trigger whose role is disabled loads, and never fires. When git can't show the diff of
-what landed, the triggers on the landing are skipped with an error (`Review skipped: …` when a
-review was due, `Triggers skipped: …` otherwise), and the run goes on. The reference config
-shows each shipped trigger's table commented out after the roles, every field under its
-description, and `orbit config show triggers.review` lists one trigger's fields with their layers
-(see [Seeing the configuration in effect](#seeing-the-configuration-in-effect)).
+one. So is a `when` value its field never takes, alone or in a list: a `role` that isn't one (a
+disabled one is), or a `verification` other than `configured`, `missing` or `off`
+(`triggers.tidy-up.when: missng isn't a value of verification; its values are configured,
+missing, off.`), while `origin`, `status` and `step` take any value. A trigger whose role is
+disabled loads, and never fires. When git can't show the diff of what landed, the triggers on the
+landing are skipped with an error (`Review skipped: …` when a review was due,
+`Triggers skipped: …` otherwise), and the run goes on. The reference config shows each shipped
+trigger's table commented out after the roles, every field under its description, and
+`orbit config show triggers.review` lists one trigger's fields with their layers (see
+[Seeing the configuration in effect](#seeing-the-configuration-in-effect)).
 
 `super_review_every` stays for this version as an alias for `[triggers.super-review] every`: set
 in `.orbit/config.toml`, it's the super review's `every` unless the trigger sets its own, which
