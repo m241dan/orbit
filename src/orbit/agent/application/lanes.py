@@ -11,8 +11,7 @@ from typing import Any
 from orbit.agent.application.failures import unexpected
 from orbit.agent.application.ports import Publish
 from orbit.agent.domain.refusals import Refused, stopped_on
-from orbit.execution import background
-from orbit.execution.cancelling import stop
+from orbit.execution import background, turns
 from orbit.protocol import BUSY, INTERNAL, BusyChanged, BusyLane, ErrorOccurred, Event
 from orbit.tracing import no_span
 
@@ -41,21 +40,10 @@ OPEN_GATE = SessionGate()
 """A gate that never keeps work from starting."""
 
 
-def crash_of(task: asyncio.Task[object]) -> BaseException | None:
-    """The exception a done ``task`` ended with; none if it finished or was cancelled."""
-    if task.cancelled():
-        return None
-    return task.exception()
-
-
 def crash_report(lane: str, exc: BaseException) -> ErrorOccurred:
     """The event telling the user that ``lane`` stopped on ``exc``, which nothing expected."""
     message = unexpected(stopped_on(f"The {lane} lane", exc), exc)
     return ErrorOccurred(code=INTERNAL, message=message)
-
-
-def _unwatched() -> None:
-    """Note an end no one watches."""
 
 
 def _detached[T](work: Coroutine[Any, Any, T]) -> asyncio.Task[T]:
@@ -77,72 +65,30 @@ class Background(background.Background):
         super().__init__(report, _detached)
 
 
-class TurnSlot:
-    """Runs one turn at a time in busy lane ``lane``, which the frontend shows as busy while a
-    turn runs. A second turn is refused, as busy, with ``refusal``, unless the turn running
-    has a refusal of its own. Events go out through ``post``, which must not block: a turn's
-    end is reported from its done-callback."""
+class TurnSlot(turns.TurnSlot):
+    """Runs one turn at a time in busy lane ``lane``, as the generic
+    :class:`orbit.execution.turns.TurnSlot` does, posting with ``post`` that the lane is busy
+    while a turn runs, which the frontend shows, and a turn's crash as the lane's. A second turn
+    is refused, as busy, with ``refusal``, unless the turn running has a refusal of its own; a
+    turn starts with no span current. ``post`` must not block: a turn's end is reported from its
+    done-callback."""
 
     def __init__(self, lane: BusyLane, refusal: str, post: Callable[[Event], None]) -> None:
-        self._lane: BusyLane = lane
-        self._refusal = refusal
-        self._busy = refusal  # What a turn is refused with while the current one runs.
-        self._post = post
-        self._turn: asyncio.Task[object] | None = None
-        # Called once the lane is free again, after its BusyChanged, to start what waits.
-        self.freed: Callable[[], None] = _unwatched
+        def show_busy(busy: bool) -> None:
+            post(BusyChanged(busy=busy, lane=lane))
 
-    @property
-    def running(self) -> bool:
-        return self._turn is not None and not self._turn.done()
+        def report(exc: BaseException) -> None:
+            post(crash_report(lane, exc))
 
-    @property
-    def turn(self) -> asyncio.Task[object] | None:
-        """The current or last turn; none before the first."""
-        return self._turn
-
-    async def start(
-        self, work: Coroutine[Any, Any, object], refusal: str | None = None
-    ) -> asyncio.Task[object]:
-        """Run ``work`` as the lane's turn and return it, as :meth:`begin` does."""
-        return self.begin(work, refusal)
+        super().__init__(refusal, show_busy, report, _detached)
 
     def begin(
         self, work: Coroutine[Any, Any, object], refusal: str | None = None
     ) -> asyncio.Task[object]:
-        """Run ``work`` as the lane's turn and return it, unless a turn still runs: then close
-        ``work`` and raise :class:`Refused`, with the running turn's refusal. While this turn
-        runs, another is refused with ``refusal``, if given, or else the slot's."""
-        if self.running:
-            work.close()
-            raise Refused(BUSY, self._busy)
-        self._busy = self._refusal if refusal is None else refusal
-        turn = self._turn = _detached(work)
-        # A callback, so it also runs if the work is cancelled before it starts.
-        turn.add_done_callback(self._ended)
-        # Posted once the turn is running, so what it reaches sees the lane busy.
-        self._post(BusyChanged(busy=True, lane=self._lane))
-        return turn
-
-    def cancel(self) -> bool:
-        """Cancel the turn if it still runs; returns whether it did."""
-        if self._turn is None or self._turn.done():
-            return False
-        self._turn.cancel()
-        return True
-
-    async def close(self) -> None:
-        """Cancel the turn, if it runs, and wait for it to end; cancelled meanwhile, this is
-        cancelled once it has."""
-        turn = self._turn
-        if turn is not None and not turn.done():
-            await stop(turn)
-
-    def _ended(self, turn: asyncio.Task[object]) -> None:
-        crash = crash_of(turn)
-        if crash is not None:  # A bug; nothing awaits the turn, so it's reported here.
-            self._post(crash_report(self._lane, crash))
-        # A turn started since then reports its own end; staying quiet keeps it shown busy.
-        if turn is self._turn:
-            self._post(BusyChanged(busy=False, lane=self._lane))
-            self.freed()
+        """Run ``work`` as the lane's turn and return it, as the generic slot does, unless a
+        turn still runs: then close ``work`` and raise :class:`Refused`, as busy, with the
+        running turn's refusal."""
+        try:
+            return super().begin(work, refusal)
+        except turns.SlotBusy as busy:
+            raise Refused(BUSY, busy.refusal) from None

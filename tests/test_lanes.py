@@ -1,8 +1,8 @@
-"""The helpers the lanes share: background work whose crash is reported as the lane's and that
-starts with no span current, and a busy lane's turns."""
+"""The helpers the lanes share: background work and a busy lane's turns, whose crashes are
+reported as the lane's and which start with no span current, a turn showing its lane busy and
+a second refused as busy."""
 
 import asyncio
-import inspect
 from contextlib import suppress
 
 import pytest
@@ -14,8 +14,6 @@ from orbit.protocol import INTERNAL, BusyChanged, ErrorOccurred, Event
 from orbit.tracing import NoSpan, Span, current_span, use_span
 from tests.agent_fakes import logged_with_traceback
 from tests.gated_work import GatedWork
-from tests.stopping import SlowToStop, cancelled_while_stopping
-from tests.waiting import eventually
 
 
 def background() -> tuple[Background, asyncio.Queue[Event]]:
@@ -101,58 +99,27 @@ async def test_a_turn_shows_the_lane_busy_until_it_ends() -> None:
 
     await turns.start(work("first"))
     await work.started.wait()
-    assert turns.running and posted == [BUSY]
+    assert posted == [BUSY]
 
     work.gate.set()
     await ended(turns.turn)
 
-    assert not turns.running and posted == [BUSY, IDLE]
+    assert posted == [BUSY, IDLE]
 
 
-async def test_the_lane_is_running_when_its_busy_is_posted() -> None:
-    seen: list[bool] = []
-    turns = TurnSlot("planner", "Busy already.", lambda _: seen.append(turns.running))
-    work = GatedWork()
-
-    await turns.start(work("first"))
-    work.gate.set()
-    await ended(turns.turn)
-
-    assert seen == [True, False]
-
-
-async def test_a_turn_while_one_runs_is_refused_and_closed() -> None:
+async def test_a_turn_while_one_runs_is_refused_as_busy_with_the_running_turns_refusal() -> None:
     turns, posted = slot()
     work = GatedWork()
-    await turns.start(work("first"))
-    await work.started.wait()
-    second = work("second")
+    await turns.start(work("first"), "The architect is already answering.")
 
     with pytest.raises(Refused) as refused:
-        await turns.start(second)
-
-    assert (refused.value.code, str(refused.value)) == (BUSY_CODE, "Busy already.")
-    assert posted == [BUSY]
-    assert inspect.getcoroutinestate(second) == "CORO_CLOSED"
+        turns.begin(work("second"))
     await turns.close()
 
-
-async def test_a_turn_with_a_refusal_of_its_own_refuses_the_next_with_it() -> None:
-    turns, _ = slot()
-    work = GatedWork()
-    turn = await turns.start(work("first"), "The architect is already answering.")
-    assert turn is turns.turn
-
-    with pytest.raises(Refused) as answering:
-        await turns.start(work("second"))
-    await turns.close()
-    await turns.start(work("third"))
-    with pytest.raises(Refused) as busy:
-        await turns.start(work("fourth"))
-    await turns.close()
-
-    assert str(answering.value) == "The architect is already answering."
-    assert str(busy.value) == "Busy already."
+    assert refused.value.code == BUSY_CODE
+    assert refused.value.message == "The architect is already answering."
+    await asyncio.sleep(0)
+    assert posted == [BUSY, IDLE]
 
 
 async def test_a_crash_is_reported_once_before_the_lane_frees(
@@ -170,69 +137,3 @@ async def test_a_crash_is_reported_once_before_the_lane_frees(
     message = "The planner lane stopped on an unexpected error: boom"
     assert posted == [BUSY, ErrorOccurred(code=INTERNAL, message=message), IDLE]
     assert logged_with_traceback(caplog.records, message)
-
-
-async def test_a_stale_turns_end_leaves_the_lane_busy() -> None:
-    turns, posted = slot()
-    work = GatedWork()
-    work.gate.set()
-    await turns.start(work("first"))
-    first = turns.turn
-    assert first is not None
-    await eventually(first.done, poll=0)
-
-    await turns.start(work("second"))  # Before the first's callback has run.
-    await ended(turns.turn)
-
-    assert posted == [BUSY, BUSY, IDLE]
-
-
-async def test_cancel_stops_the_turn_and_says_whether_it_ran() -> None:
-    turns, posted = slot()
-    work = GatedWork()
-    assert not turns.cancel()
-    await turns.start(work("first"))
-    await work.started.wait()
-
-    assert turns.cancel()
-    await ended(turns.turn)
-
-    assert not turns.cancel() and posted == [BUSY, IDLE]
-
-
-async def test_close_cancels_the_turn_and_waits_for_it() -> None:
-    turns, posted = slot()
-    work = GatedWork()
-    await turns.start(work("first"))
-    await work.started.wait()
-
-    await turns.close()
-
-    assert turns.turn is not None and turns.turn.cancelled()
-    await asyncio.sleep(0)
-    assert posted == [BUSY, IDLE]
-
-
-async def test_close_without_a_running_turn_does_nothing() -> None:
-    turns, posted = slot()
-
-    await turns.close()
-
-    assert turns.turn is None and posted == []
-
-
-async def test_close_cancelled_while_the_turn_stops_is_cancelled_once_it_has() -> None:
-    turns, posted = slot()
-    work = SlowToStop()
-    await turns.start(work())
-    await work.started.wait()
-    closing = asyncio.create_task(turns.close())
-    assert turns.turn is not None
-
-    await cancelled_while_stopping(closing, turns.turn, work.gate)
-
-    with pytest.raises(asyncio.CancelledError):
-        await closing
-    assert turns.turn.done()
-    await asyncio.sleep(0)
-    assert posted == [BUSY, IDLE]
