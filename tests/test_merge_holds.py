@@ -236,3 +236,20 @@ async def test_a_failing_save_halts_the_session_and_a_retry_saves_the_holds() ->
     store.holds_failure = None
     assert await holds.holds.retry() is None
     assert store.holds == (HELD,)
+
+
+async def test_releasing_by_hand_lifts_every_hold_with_a_notice_saved_and_told() -> None:
+    store = FakeStore()
+    holds = Holds(store)
+    await failed(holds)
+    await failed(holds, check_set=SOAK)
+    await holds.holds.release()
+    assert not holds.holds.held and holds.releases == 1
+    assert holds.notices()[-1] == "Merges resumed by hand; stress, soak haven't passed."
+    assert store.holds_saved[-1] == ()
+
+
+async def test_releasing_by_hand_with_no_hold_on_does_nothing() -> None:
+    holds = Holds()
+    await holds.holds.release()
+    assert holds.events == [] and holds.releases == 0 and holds.changes == 0

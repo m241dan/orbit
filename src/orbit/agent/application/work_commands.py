@@ -10,6 +10,7 @@ from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.failures import command_failure
 from orbit.agent.application.lane_runner import Lanes
 from orbit.agent.application.lanes import OPEN_GATE, SessionGate
+from orbit.agent.application.merge_holds import MergeHolds
 from orbit.agent.application.outbox import EventSink
 from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.review_lane import ReviewLane
@@ -22,6 +23,7 @@ from orbit.agent.application.work_turns import WorkTurns
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.catalog import trigger_names
+from orbit.agent.domain.merge_holds import NOT_HELD
 from orbit.agent.domain.refusals import Refused, unknown
 from orbit.agent.domain.role_runtimes import check_model, check_settings
 from orbit.agent.domain.roles import Role, check_enabled
@@ -43,6 +45,7 @@ from orbit.protocol import (
     FireTrigger,
     MessageSent,
     ProposalDecided,
+    ReleaseHold,
     RemoveTask,
     ResetConversation,
     RunTasks,
@@ -61,6 +64,7 @@ WorkCommand = (
     | ResetConversation
     | AddTask
     | RunTasks
+    | ReleaseHold
     | EditTask
     | AcceptTask
     | RemoveTask
@@ -70,7 +74,7 @@ WorkCommand = (
     | DecideApproval
 )
 
-QueuedWork = RunTasks | FireTrigger
+QueuedWork = RunTasks | FireTrigger | ReleaseHold
 """The work commands that start work, which a read-only orbit queues rather than runs."""
 
 
@@ -81,8 +85,9 @@ class CommandParts:
     review ``lane``, if any, the ``proposals`` waiting for the user, the ``desk`` running its
     agents and the ``startup`` check, if any; ``save`` saves the session and ``reviews_changed``
     saves its review state; the session's ``gate`` says whether another orbit owns the
-    repository; its ``lanes`` are the lanes work runs in, by name; and the named ``sets``' runs,
-    if any, are cancelled as agents are."""
+    repository; its ``lanes`` are the lanes work runs in, by name; the named ``sets``' runs,
+    if any, are cancelled as agents are; and the ``holds`` on merges, if any, are released by
+    hand."""
 
     settings: SessionSettings
     events: EventSink
@@ -98,6 +103,7 @@ class CommandParts:
     gate: SessionGate = OPEN_GATE
     lanes: Lanes = field(default_factory=Lanes)
     sets: SetRuns | None = None
+    holds: MergeHolds | None = None
 
 
 class WorkCommands:
@@ -181,6 +187,8 @@ class WorkCommands:
                 self._parts.turns.check_run_tasks()
             case FireTrigger():
                 self._check_trigger(command)
+            case ReleaseHold():
+                self._held()
             case _:
                 assert_never(command)
 
@@ -188,7 +196,7 @@ class WorkCommands:
         match command:
             case SendMessage() | CancelTurn() | UpdateSettings() | DecideApproval():
                 await self._handle_prompts(command, command_id)
-            case AddTask() | RunTasks():
+            case AddTask() | RunTasks() | ReleaseHold():
                 await self._handle_tasks(command)
             case EditTask() | AcceptTask() | RemoveTask():
                 await self._handle_board(command)
@@ -268,7 +276,7 @@ class WorkCommands:
         if desk is not None:
             check_task_skills(task.skills, desk.agents.skill_library)
 
-    async def _handle_tasks(self, command: AddTask | RunTasks) -> None:
+    async def _handle_tasks(self, command: AddTask | RunTasks | ReleaseHold) -> None:
         match command:
             case AddTask(task=task):
                 check_enabled(self._roles(), task.role)
@@ -278,8 +286,17 @@ class WorkCommands:
                 self._parts.lanes.kick_for(task.role)
             case RunTasks():
                 await self._parts.turns.run_tasks()
+            case ReleaseHold():
+                await self._held().release()
             case _:
                 assert_never(command)
+
+    def _held(self) -> MergeHolds:
+        """The holds on merges, refused while none is on."""
+        holds = self._parts.holds
+        if holds is None or not holds.held:
+            raise Refused(INVALID, NOT_HELD)
+        return holds
 
     async def _handle_board(self, command: EditTask | AcceptTask | RemoveTask) -> None:
         match command:

@@ -22,12 +22,14 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     HistoryPage,
+    MergeHold,
     MessageSent,
     OwnershipOffered,
     OwnershipTaken,
     ReportShown,
     ReportsListed,
     ReviewStatus,
+    SessionStateChanged,
     SessionSummary,
     Settings,
     SettingsChanged,
@@ -121,7 +123,12 @@ class TaskListPane(Protocol):
 
     def show_usage_unknown(self, roles: frozenset[str]) -> None: ...
 
+    @property
+    def merge_holds(self) -> tuple[MergeHold, ...]: ...
+
     def show_waiting(self, waiting: tuple[str, str] | None) -> None: ...
+
+    def show_merge_holds(self, holds: Sequence[MergeHold], waiting: Sequence[str]) -> None: ...
 
     def widen(self) -> None: ...
 
@@ -216,12 +223,14 @@ class Handlers:
 @dataclass(frozen=True)
 class AppHooks:
     """What the router asks of the app itself: to ``label_triggers``' keys, to
-    ``leave_closed_detail`` once the conversation's detail pane closed, and to
-    ``unfocus_task_list`` if it has the focus."""
+    ``leave_closed_detail`` once the conversation's detail pane closed, to
+    ``unfocus_task_list`` if it has the focus, and to ``refresh_keys`` shown, as the holds on
+    merges change."""
 
     label_triggers: Callable[[dict[str, str | None]], None]
     leave_closed_detail: Callable[[], None]
     unfocus_task_list: Callable[[], None]
+    refresh_keys: Callable[[], None]
 
 
 class EventRouter:
@@ -374,6 +383,7 @@ class EventRouter:
         for lane, busy in snapshot.busy.items():
             self.set_busy(lane, busy)
         self._show_tasks(snapshot.tasks)
+        self._show_merge_holds(snapshot.merge_holds, snapshot.waiting_to_merge)
         panes.verification.show(snapshot.steps, snapshot.steps_title)
         panes.agents.show_review(snapshot.review)
         handlers.proposals.follow(snapshot.proposals)
@@ -456,6 +466,24 @@ class EventRouter:
             panes.transcript.track(event, panes.tabs.roles)
         self._handlers.proposals.withdraw(event)
 
+    def _show_merge_holds(self, holds: Sequence[MergeHold], waiting: Sequence[str]) -> None:
+        """Show the ``holds`` on merges and the tasks whose work is ``waiting`` for them on the
+        task list, refreshing the keys shown once the holds change, as ctrl+f shows only while
+        merges are held."""
+        task_list = self._panes.task_list
+        changed = tuple(holds) != task_list.merge_holds
+        task_list.show_merge_holds(holds, waiting)
+        if changed:
+            self._hooks.refresh_keys()
+
+    def _follow_session_state(self, changed: SessionStateChanged) -> None:
+        """Note ``changed``'s session's state wherever it's shown, the holds on merges among it
+        if it's the session viewed."""
+        if changed.session == self._handlers.navigation.place.attached:
+            self._show_merge_holds(changed.merge_holds, changed.waiting_to_merge)
+        self._handlers.navigation.follow_state(changed)
+        self.show_viewing()
+
     def _show_tasks(self, tasks: tuple[TaskState, ...]) -> None:
         task_list = self._panes.task_list
         task_list.show(tasks)
@@ -475,5 +503,4 @@ class EventRouter:
         elif isinstance(event, WorkspaceCloning):
             self._handlers.navigation.follow_cloning(event)
         else:
-            self._handlers.navigation.follow_state(event)
-            self.show_viewing()
+            self._follow_session_state(event)

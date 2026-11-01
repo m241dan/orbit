@@ -178,6 +178,15 @@ def test_a_held_task_list_says_so_in_its_title() -> None:
     assert task_list_title(held=True) == "Task list · held"
 
 
+def test_a_task_list_names_the_sets_holding_merges_in_its_title() -> None:
+    assert task_list_title(held=False, merge_holds=("stress",)) == (
+        "Task list · merges held: stress failed"
+    )
+    assert task_list_title(held=True, lane="review", merge_holds=("stress", "soak")) == (
+        "Task list · merges held: stress, soak failed · held · review"
+    )
+
+
 def test_a_task_list_narrowed_to_a_lane_names_it_in_its_title() -> None:
     assert task_list_title(held=False, lane="review") == "Task list · review"
     assert task_list_title(held=True, lane="review") == "Task list · held · review"

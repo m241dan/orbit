@@ -21,6 +21,7 @@ type ActionName = Literal[
     "reset_planner",
     "super_review",
     "configure_checks",
+    "release_hold",
     "pick_model",
     "pick_tool_access",
     "pick_effort",

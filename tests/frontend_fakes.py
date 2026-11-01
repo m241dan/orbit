@@ -96,8 +96,9 @@ class Prompt:
 class AppShell:
     """What the app itself does for the frontend, as a test sees it: the warnings, questions,
     task editors and usage breakdowns it showed, the trigger keys' labels, the window marked
-    selected, the windows entered and how often it took the focus away. Nothing has the focus
-    but the prompt while the user types in it, or another window a test says has it."""
+    selected, the windows entered, how often it took the focus away and refreshed the keys
+    shown. Nothing has the focus but the prompt while the user types in it, or another window a
+    test says has it."""
 
     def __init__(self, prompt: Prompt, window: Window) -> None:
         self._prompt = prompt
@@ -114,6 +115,7 @@ class AppShell:
         self.entered: list[str] = []
         self.unfocused = 0
         self.task_list_unfocused = 0
+        self.keys_refreshed = 0
 
     @property
     def nothing_focused(self) -> bool:
@@ -164,6 +166,9 @@ class AppShell:
         self.task_list_unfocused += 1
         if self.focused == "task-list":
             self.focused = None
+
+    def refresh_keys(self) -> None:
+        self.keys_refreshed += 1
 
 
 class Strip:

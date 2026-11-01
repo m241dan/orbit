@@ -55,6 +55,22 @@ def resumed_note(name: str) -> str:
     return f"Merges resumed: {name} passed."
 
 
+NOT_HELD = "Merges aren't held."
+"""Why releasing the holds on merges by hand is refused while none is on."""
+
+
+def unpassed(names: Sequence[str]) -> str:
+    """That the sets ``names`` haven't passed: ``stress hasn't passed``, ``stress, soak haven't
+    passed``."""
+    verb = "hasn't" if len(names) == 1 else "haven't"
+    return f"{', '.join(names)} {verb} passed"
+
+
+def released_note(names: Sequence[str]) -> str:
+    """The notice that the user released the holds of the sets ``names`` by hand."""
+    return f"Merges resumed by hand; {unpassed(names)}."
+
+
 def step_in_note(name: str, fixes: int) -> str:
     """The notice that the set ``name`` still fails after ``fixes`` fixes, so the user must step
     in."""

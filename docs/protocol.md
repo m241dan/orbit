@@ -480,7 +480,8 @@ Each session in a `Catalog` carries its state as it is when the Catalog is sent:
   lift, in the order it lands. Holds are kept per repository, so they outlive a restart; the
   waiting tasks aren't a task status, so an older frontend reads the task list as before. Both
   are additive, empty for an older peer and for any session that isn't open; they change as a
-  hold starts, a hold's failure changes, a hold lifts, or work starts or stops waiting.
+  hold starts, a hold's failure changes, a hold lifts or is released (`ReleaseHold`), or work
+  starts or stops waiting.
 
 Whenever one of them changes for a session, every welcomed connection gets
 `SessionStateChanged(session, active, state, viewers, activity, paused_until, paused_for,
@@ -499,10 +500,11 @@ Catalog isn't re-sent for it.
 The first orbit to reach a repository, an `orbit serve` or an `orbit chat` running in-process,
 owns it, and runs its work. Any other orbit on it is read-only: the workspace's entry in its
 `Catalog`, and its `Snapshot`, have `read_only` true, and a `Notice` after the Snapshot names the owner. A read-only orbit accepts
-`RunTasks` and `FireTrigger` with `CommandAccepted` and queues them, in order, rather than running
-them, after refusing, as an owning orbit would, those that couldn't run here (an unknown trigger,
-input to one, a run with a task still to run whose role is disabled, refused with `not_configured`
-naming the role, or work without the agents, reviews or verification it needs), and starts no work by itself, such as reviews or the startup check; the planner, sessions,
+`RunTasks`, `FireTrigger` and `ReleaseHold` with `CommandAccepted` and queues them, in order,
+rather than running them, after refusing, as an owning orbit would, those that couldn't run here
+(an unknown trigger, input to one, a run with a task still to run whose role is disabled, refused
+with `not_configured` naming the role, a release with no hold on, or work without the agents,
+reviews or verification it needs), and starts no work by itself, such as reviews or the startup check; the planner, sessions,
 drafts and settings work as usual. The queue is dropped when the orbit exits.
 
 A read-only orbit tries the repository's lock every 5 seconds from its first `Welcome`. Once the
@@ -624,6 +626,15 @@ only while an enabled conversational role shares it.
 in a lane whose tasks start by themselves, such as a reviewer's review, on its own; a conversational role's turn, such as the planner's, as `CancelTurn` does for its lane; and any
 other agent's, the task run it's in, as `CancelTurn` does for the `work` lane. It's refused with
 `unknown` for an agent that isn't running: `No running agent 'agent-9'.`
+
+`ReleaseHold()` releases every hold on merges into the user's branch by hand, though the sets
+holding them haven't passed: the `merge_holds` in session state go empty, a `Notice` says which
+sets haven't passed (`Merges resumed by hand; stress hasn't passed.`, or `stress, soak haven't
+passed` for several), and the work waiting (`waiting_to_merge`) lands, in order, as when the last
+hold lifts by itself, a conflict handled as any merge's. A set that fails again afterwards starts
+a new hold, with its notice and a fix of its own. It's refused with `invalid` while no hold is
+on, as with no set that holds merges or under `--no-verify`: `Merges aren't held.` It was added
+to version 2; an older backend refuses it as a command it doesn't know.
 
 `SendMessage(agent, text)` starts a turn of the conversational agent `agent`: the planner, or
 any other enabled role with `conversation = true`. Each has a seat of its own: its own

@@ -86,6 +86,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("ctrl+r", "run_tasks", "Run tasks"),
         Binding("ctrl+g", "super_review", "Super review"),
         Binding("ctrl+e", "configure_checks", "Set up checks"),
+        # check_action shows it only while merges are held.
+        Binding("ctrl+f", "release_hold", "Release merges"),
         Binding("ctrl+t", "cycle_conversations", "Conversations"),
         Binding("ctrl+s", "cancel_turn", "Stop run"),
         Binding("ctrl+x", "stop_planner", "Stop turn"),
@@ -287,6 +289,9 @@ class OrbitApp(App[None], inherit_bindings=False):
         if self.focused is self._task_list:
             self.set_focus(None)
 
+    def refresh_keys(self) -> None:
+        self.refresh_bindings()
+
     # The keys and widgets' messages, as the frontend takes them.
 
     @on(ChatPrompt.Submitted, "#prompt")
@@ -305,6 +310,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             "release_cursor": self._normal_mode,
             "toggle_thinking": lambda: self._normal_mode() or self._in_transcript(),
             "configure_checks": self._on_main_screen,
+            "release_hold": self._release_offered,
             "reset_planner": self._on_main_screen,
             "list_sessions": self._on_main_screen,
             "list_workspaces": lambda: self._link is not None and self._on_main_screen(),
@@ -318,6 +324,10 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _on_main_screen(self) -> bool:
         """No modal screen is open."""
         return len(self.screen_stack) == 1
+
+    def _release_offered(self) -> bool:
+        """Merges are held and no modal screen is open, so ctrl+f can release them."""
+        return self._on_main_screen() and self._frontend.merges_held
 
     def _normal_mode(self) -> bool:
         """Nothing focused on the main screen: no typing, list mode or modal screen."""
@@ -407,6 +417,9 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def action_configure_checks(self) -> None:
         self._frontend.configure_checks()
+
+    def action_release_hold(self) -> None:
+        self._frontend.release_hold()
 
     def action_reset_planner(self) -> None:
         self._frontend.reset_planner()

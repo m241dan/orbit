@@ -1,10 +1,11 @@
 """The task list's board without the widget showing it: its rows and numbers, its spinners,
 following the active task, holding and letting go, the tasks the user picks, the session's
-total, the wait for a coder and the lanes, as tags and a filter."""
+total, the wait for a coder, the lanes, as tags and a filter, and the holds on merges with the
+work waiting for them."""
 
 from rich.cells import cell_len
 
-from orbit.protocol import TaskSpec, TaskState, TaskStatus, Usage
+from orbit.protocol import MergeHold, TaskSpec, TaskState, TaskStatus, Usage
 from orbit.tui.view.common import spinner_frame
 from orbit.tui.view.tasks import TaskBoard, task_label
 from tests.view_fakes import TaskView
@@ -518,6 +519,35 @@ def test_the_next_task_shows_the_wait_for_a_coder_until_it_stops_waiting() -> No
     assert view.redraws == redraws
     tasks.show_waiting(None)
     assert view.rows[0] == "1. ⏳ task 1\n      default · restricted"
+
+
+STRESS_HOLD = MergeHold(set="stress", commit="1a2b3c4", reason="Stress tests failed")
+
+
+def test_holds_on_merges_title_the_list_and_mark_the_work_waiting_until_they_lift() -> None:
+    tasks, view = started()
+    tasks.show(board("one", "two", status="completed"))
+    tasks.show_merge_holds((STRESS_HOLD,), ("1",))
+    assert view.title == "Task list · merges held: stress failed"
+    assert view.rows[:2] == [
+        "1. ✅ one\n      default · restricted · waiting to merge",
+        "2. ✅ two\n      default · restricted",
+    ]
+    assert tasks.held_sets == ("stress",)
+    redraws = view.redraws
+    tasks.show_merge_holds((STRESS_HOLD,), ("1",))
+    assert view.redraws == redraws
+    tasks.show_merge_holds((), ())
+    assert view.title == "Task list"
+    assert view.rows[0] == "1. ✅ one\n      default · restricted"
+
+
+def test_a_held_list_with_merges_held_says_both() -> None:
+    tasks, view = started()
+    soak = STRESS_HOLD.model_copy(update={"set": "soak"})
+    tasks.show_merge_holds((STRESS_HOLD, soak), ())
+    tasks.hold()
+    assert view.title == "Task list · merges held: stress, soak failed · held"
 
 
 def test_find_gives_the_task_with_an_id_on_the_list() -> None:

@@ -35,6 +35,7 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     FireTrigger,
+    ReleaseHold,
     RemoveTask,
     RunTasks,
     SendMessage,
@@ -265,6 +266,13 @@ async def test_deciding_on_no_waiting_proposal_is_refused() -> None:
     code, message = await refusal(commands, DecideProposal(task_id="7", action="accept"))
     assert (code, message) == (UNKNOWN, "No proposal is waiting for task '7'.")
     assert recorded.effects == []
+
+
+async def test_releasing_the_holds_while_read_only_and_none_is_on_is_refused_unqueued() -> None:
+    commands, _ = commands_for(Recorded(), [])
+    code, message = await refusal(commands, ReleaseHold())
+    assert (code, message) == (INVALID, "Merges aren't held.")
+    assert commands.queued == ()
 
 
 async def queued_runs(recorded: Recorded, outcomes: list[BaseException | None]) -> WorkCommands:

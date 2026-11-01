@@ -101,6 +101,7 @@ In the app:
 | `ctrl+r` | Run the tasks that haven't completed yet (refused until verification is set up, if it's on with no steps; see [Verification steps](#verification-steps)) |
 | `ctrl+g` | Ask for a super review of the whole codebase now (works while tasks run; hidden while the `super-reviewer` is disabled) |
 | `ctrl+e` | Set up (or redo) the verification steps: after you confirm (`y` to go ahead, `n`/`esc` to cancel), queue a configurator task first and run it (see [Setting up verification](#setting-up-verification); hidden while the `configurator` is disabled) |
+| `ctrl+f` | Release the merge hold by hand, though the sets holding it haven't passed: after you confirm (`y` to release, `n`/`esc` to cancel), the work waiting lands (see [Verification steps](#verification-steps); shown only while merges are held) |
 | `ctrl+o` | Pick the model of the conversational role whose tab is shown, or the planner's on any other tab (default, then its runtime's aliases: fable, opus, sonnet, haiku and those your `config.toml` adds, each with the id it resolves to muted beside it when that's another; see [Models and their aliases](#models-and-their-aliases); new tasks opened there default to it too) |
 | `ctrl+l` | Pick the tool access level new tasks start with in the task editor (off, restricted, full), kept with the conversational role whose tab is shown, or the planner's on any other tab |
 | `ctrl+y` | Pick the effort of the conversational role whose tab is shown, or the planner's on any other tab (unset, low, medium, high, xhigh, max; it's that role's own, so new tasks still start with effort unset); not while typing, where it's the prompt's redo |
@@ -728,7 +729,10 @@ seen it pass since it started) and the step's output. While any hold is on, code
 each task is verified as usual, but its work is committed in the coder's worktree and waits there
 instead of merging, in order, and isn't reviewed yet, as a commit is reviewed once it lands; a
 task's commit lands only once it does. Frontends see the holds and the waiting tasks in the
-session's state (`merge_holds` and `waiting_to_merge`; see [docs/protocol.md](docs/protocol.md)).
+session's state (`merge_holds` and `waiting_to_merge`; see [docs/protocol.md](docs/protocol.md)):
+the task list's title reads `Task list · merges held: mutation failed` (several sets joined with
+`, `, and `· held` after it while the list is held), and a waiting task's row ends its details
+line with ` · waiting to merge`.
 The fix lands despite the hold, together with the work stacked beneath it, the tasks that finished
 before it started; work that finishes after it keeps waiting. Once the fix lands, the set runs
 again on the new commit: passing lifts its hold (`Merges resumed: mutation passed.`), and once no
@@ -740,6 +744,14 @@ sets holding at once each get their own fix, and merges wait until both lift. Ho
 repository, beside the super review count, so a hold outlives restarting orbit; a set removed from
 the configuration, or that no longer holds merges, drops its hold as orbit opens. Task checks
 never hold merges, nor does a set that only reports, and with `--no-verify` nothing does.
+
+To release a hold by hand, say a set that's flaky, press `ctrl+f`, shown in the footer only while
+merges are held: it asks `Release the merge hold? mutation hasn't passed.`, `y` releases and
+`n`/`esc` cancels. Releasing lifts every hold, with the notice `Merges resumed by hand; mutation
+hasn't passed.`, and the waiting work lands, in order, as when a hold lifts by itself; the title
+goes back to `Task list`. The set isn't fixed by it: the next time it runs and fails, a new hold
+starts, with its notice and a fix of its own. Frontends send `ReleaseHold`, which is refused with
+`Merges aren't held.` while no hold is on.
 
 Orbit's own [`.orbit/config.toml`](.orbit/config.toml) lists six, quick ones first so a failure
 shows up in seconds:

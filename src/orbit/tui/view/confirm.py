@@ -1,5 +1,6 @@
 """The confirmations asked before a key's action."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from orbit.protocol import PLANNER
@@ -9,6 +10,9 @@ CONFIGURE_MESSAGE = "A configurator task will go to the front of the task list a
 CONFIGURE_YES = "set up"
 
 RESET_YES = "reset"
+
+RELEASE_TITLE = "Release the merge hold?"
+RELEASE_YES = "release"
 
 TAKE_OVER_TITLE = "The repository is free"
 TAKE_OVER_MESSAGE = (
@@ -32,6 +36,13 @@ def reset_message(role: str) -> str:
         f"The {role}'s conversation ends, and the next prompt starts a fresh one{reread}."
         " Draft tasks stay."
     )
+
+
+def release_message(sets: Sequence[str]) -> str:
+    """What releasing the hold on merges of the ``sets`` holding them leaves undone, as the
+    confirmation says: ``stress hasn't passed.``, several sets joined with commas."""
+    verb = "hasn't" if len(sets) == 1 else "haven't"
+    return f"{', '.join(sets)} {verb} passed."
 
 
 def confirm_hint(yes: str, no: str = "cancel") -> str:

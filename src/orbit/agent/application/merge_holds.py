@@ -1,7 +1,7 @@
 """The holds on merges into the user's branch: a run of a set that holds merges failing holds them,
 with a notice, and queues a coder's fix at the front of the queue; once the fix lands, the set runs
-again, and passing lifts its hold. Holds are kept per repository, beside the review count, so they
-outlive a restart.
+again, and passing lifts its hold, as the user releasing every hold by hand does. Holds are kept
+per repository, beside the review count, so they outlive a restart.
 
 While any hold is on, the work lane commits each task's verified work in the coder's tree and
 leaves it there, waiting, rather than merging it; a fix merges with the work stacked beneath it.
@@ -27,6 +27,7 @@ from orbit.agent.domain.merge_holds import (
     kept_holds,
     lift_hold,
     merge_holds,
+    released_note,
     resumed_note,
     set_fix_prompt,
 )
@@ -138,6 +139,17 @@ class MergeHolds:
         """A fix for the set ``name``, queued by the trigger named ``trigger``, landed: run the
         set again, on the new commit, to see whether its hold lifts."""
         self._parts.rerun(name, trigger)
+
+    async def release(self) -> None:
+        """Lift every hold, as the user asked by hand, telling them which sets haven't passed,
+        and :attr:`released`; nothing while none is on. A set that fails again starts a new
+        hold."""
+        names = tuple(hold.name for hold in self._holds)
+        if not names:
+            return
+        await self._replace(())
+        await self._parts.publish(Notice(message=released_note(names)))
+        self.released()
 
     async def retry(self) -> StoreFailed | None:
         """Save the holds, though the session is halted, as resuming does; returns the error

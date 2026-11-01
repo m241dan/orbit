@@ -79,6 +79,14 @@ class RunTasks(_Message):
     type: Literal["run_tasks"] = "run_tasks"
 
 
+class ReleaseHold(_Message):
+    """Release every hold on merges into the user's branch by hand, though the sets holding them
+    haven't passed: the work waiting lands, in order, as when the last hold lifts. Refused while
+    no hold is on."""
+
+    type: Literal["release_hold"] = "release_hold"
+
+
 class AcceptTask(_Message):
     """Make draft task ``task_id`` (one the planner proposed) a real task, to be run."""
 
@@ -329,6 +337,7 @@ Command = Annotated[
     | AddTask
     | EditTask
     | RunTasks
+    | ReleaseHold
     | FireTrigger
     | AcceptTask
     | RemoveTask

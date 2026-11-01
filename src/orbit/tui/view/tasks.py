@@ -8,7 +8,7 @@ from typing import Protocol
 from rich.cells import cell_len
 from rich.text import Text
 
-from orbit.protocol import ACTIVE_STATUSES, WORK_LANE, AgentEntry, TaskState, Usage
+from orbit.protocol import ACTIVE_STATUSES, WORK_LANE, AgentEntry, MergeHold, TaskState, Usage
 from orbit.protocol import edit_refusal as shared_edit_refusal
 from orbit.tui.view.common import STATUS_ICONS, spinner_frame
 from orbit.tui.view.detail_views import ERROR
@@ -18,6 +18,7 @@ from orbit.tui.view.usage import usage_label
 
 NEW_TASK_LABEL = "+ new task"
 USAGE_UNKNOWN = "usage unknown"
+WAITING_TO_MERGE = "waiting to merge"
 
 
 def task_numbers(tasks: Sequence[TaskState]) -> list[str]:
@@ -47,12 +48,14 @@ def task_numbers(tasks: Sequence[TaskState]) -> list[str]:
 @dataclass(frozen=True)
 class RowNotes:
     """What a task's row says that its task doesn't: that it's ``waiting`` for a coder, as
-    this note says, the ``lane`` its role runs in, if known, and whether what its role's agents
-    spend is unknown (``usage_unknown``), as their runtime doesn't report it."""
+    this note says, the ``lane`` its role runs in, if known, whether what its role's agents
+    spend is unknown (``usage_unknown``), as their runtime doesn't report it, and that its work
+    waits for the holds on merges to lift (``merging``), as this note says."""
 
     waiting: str | None = None
     lane: str | None = None
     usage_unknown: bool = False
+    merging: str | None = None
 
 
 NO_NOTES = RowNotes()
@@ -137,7 +140,8 @@ def next_lane(lane: str | None, present: Sequence[str]) -> str | None:
 def _details(state: TaskState, notes: RowNotes) -> str:
     """What a row says under its title: the settings, the fix it's on, what it spent, or that
     that's unknown if ``notes`` say so, that it's waiting for a coder, if pending and they say
-    so, that a role edited it, if it's a draft it did, and its skills, if it has any."""
+    so, that a role edited it, if it's a draft it did, its skills, if it has any, and that its
+    work waits to merge, if they say so."""
     details = " · ".join(settings_fields(state.task.settings))
     if state.attempt:
         details += f" · fix {state.attempt}/{state.max_attempts}"
@@ -146,7 +150,13 @@ def _details(state: TaskState, notes: RowNotes) -> str:
         details += f" · {notes.waiting}"
     if state.edited and state.status == "draft":
         details += f" · edited by {state.proposed_by}"
-    return details + _skills(state.task.skills)
+    return details + _skills(state.task.skills) + _merging(notes.merging)
+
+
+def _merging(note: str | None) -> str:
+    """What a row's details end with while its task's work waits to merge, as ``note`` says:
+    ``· waiting to merge``; nothing while it doesn't."""
+    return "" if note is None else f" · {note}"
 
 
 def _skills(skills: Sequence[str]) -> str:
@@ -203,11 +213,22 @@ def edit_refusal(state: TaskState) -> str | None:
     return None if refusal is None else refusal.message
 
 
-def task_list_title(*, held: bool, lane: str | None = None) -> str:
-    """The task list's border title, which says when the list is held from following, and the
-    ``lane`` it's narrowed to, if any."""
-    parts = ["Task list", *(["held"] if held else []), *([lane] if lane is not None else [])]
+def task_list_title(*, held: bool, lane: str | None = None, merge_holds: Sequence[str] = ()) -> str:
+    """The task list's border title, which says which sets, ``merge_holds``, hold merges, if
+    any, when the list is held from following, and the ``lane`` it's narrowed to, if any."""
+    parts = [
+        "Task list",
+        *([merges_held(merge_holds)] if merge_holds else []),
+        *(["held"] if held else []),
+        *([lane] if lane is not None else []),
+    ]
     return " · ".join(parts)
+
+
+def merges_held(sets: Sequence[str]) -> str:
+    """What the task list's title says while the ``sets`` hold merges: ``merges held: stress
+    failed``, several sets joined with commas."""
+    return f"merges held: {', '.join(sets)} failed"
 
 
 def follow_top(
@@ -315,7 +336,8 @@ class TaskBoard:
 
     It numbers the tasks and labels their rows at the view's width, the task about to run
     saying when it waits for a coder and each task its role's lane, and whether its role's
-    usage is unknown, and redraws as the tasks change and while any runs. Narrowed to a lane, it
+    usage is unknown, and redraws as the tasks change and while any runs. While sets hold merges,
+    its title names them, and the tasks whose work waits for them say so. Narrowed to a lane, it
     shows just that lane's tasks, numbered as on the whole list, until widened. It totals what
     the session's turns cost. While following, it scrolls to keep the active task
     (``active_task``) in view; held, it stays where it is, until let go.
@@ -333,6 +355,8 @@ class TaskBoard:
         self.lanes: dict[str, str] = {}  # Each role's lane, as the catalog lists them.
         self.usage_unknown: frozenset[str] = frozenset()  # Roles whose usage is unknown.
         self.lane: str | None = None  # The lane the list is narrowed to, if any.
+        self.merge_holds: tuple[MergeHold, ...] = ()  # The sets holding merges, if any.
+        self.waiting_to_merge: frozenset[str] = frozenset()  # Tasks whose work waits for them.
         self.following = True
         self._labels: dict[str, tuple[_LabelKey, Text]] = {}  # Each shown row's last label.
 
@@ -391,9 +415,26 @@ class TaskBoard:
         self.redraw()
         self.follow()
 
+    @property
+    def held_sets(self) -> tuple[str, ...]:
+        """The names of the sets holding merges, in the order their holds started."""
+        return tuple(hold.set for hold in self.merge_holds)
+
+    def show_merge_holds(self, holds: Sequence[MergeHold], waiting: Iterable[str]) -> None:
+        """Title the list with the sets whose ``holds`` hold merges, and have the tasks whose
+        work is ``waiting`` for them say so; nothing for the holds and waiting work shown."""
+        holds, waiting = tuple(holds), frozenset(waiting)
+        if (holds, waiting) == (self.merge_holds, self.waiting_to_merge):
+            return
+        self.merge_holds, self.waiting_to_merge = holds, waiting
+        self._show_title()
+        self.redraw()
+
     def _show_title(self) -> None:
-        """Title the list with whether it's held and the lane it's narrowed to."""
-        self._view.show_title(task_list_title(held=not self.following, lane=self.lane))
+        """Title the list with the sets holding merges, whether it's held and the lane it's
+        narrowed to."""
+        title = task_list_title(held=not self.following, lane=self.lane, merge_holds=self.held_sets)
+        self._view.show_title(title)
 
     def show_waiting(self, waiting: tuple[str, str] | None) -> None:
         """Have the task ``waiting`` names say it waits for a coder as it says, or none do."""
@@ -423,11 +464,13 @@ class TaskBoard:
 
     def _notes(self, state: TaskState) -> RowNotes:
         """What ``state``'s row says beyond its task: the wait for a coder, if it's the task
-        waiting, its role's lane, and whether its role's usage is unknown."""
+        waiting, its role's lane, whether its role's usage is unknown, and the wait to merge, if
+        its work waits for the holds on merges."""
         waiting_id, note = self.waiting or (None, None)
         role = state.task.role
         waiting = note if state.id == waiting_id else None
-        return RowNotes(waiting, self.lanes.get(role), role in self.usage_unknown)
+        merging = WAITING_TO_MERGE if state.id in self.waiting_to_merge else None
+        return RowNotes(waiting, self.lanes.get(role), role in self.usage_unknown, merging)
 
     def follow(self) -> None:
         """Scroll just enough to bring the active task shown into view, if following and the

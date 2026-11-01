@@ -69,7 +69,12 @@ def calls_of(event: Event) -> Mock:
         calls.reports,
         calls.corner,
     )
-    hooks = AppHooks(calls.label_triggers, calls.leave_closed_detail, calls.unfocus_task_list)
+    hooks = AppHooks(
+        calls.label_triggers,
+        calls.leave_closed_detail,
+        calls.unfocus_task_list,
+        calls.refresh_keys,
+    )
     EventRouter(panes, handlers, hooks).render(event)
     return calls
 
@@ -97,6 +102,8 @@ def test_a_snapshot_shows_its_tasks_before_its_transcript_and_its_usage_after() 
         "prompt.show_busy",
         "task_list.show",
         "agents.number_tasks",
+        "task_list.show_merge_holds",
+        "refresh_keys",
         "verification.show",
         "agents.show_review",
         "proposals.follow",

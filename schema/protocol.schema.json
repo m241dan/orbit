@@ -788,6 +788,7 @@
               "list_directory": "#/$defs/ListDirectory",
               "list_reports": "#/$defs/ListReports",
               "new_session": "#/$defs/NewSession",
+              "release_hold": "#/$defs/ReleaseHold",
               "remove_task": "#/$defs/RemoveTask",
               "remove_workspace": "#/$defs/RemoveWorkspace",
               "rename_session": "#/$defs/RenameSession",
@@ -823,6 +824,9 @@
             },
             {
               "$ref": "#/$defs/RunTasks"
+            },
+            {
+              "$ref": "#/$defs/ReleaseHold"
             },
             {
               "$ref": "#/$defs/FireTrigger"
@@ -2174,6 +2178,22 @@
         "command"
       ],
       "title": "ProposedStep",
+      "type": "object"
+    },
+    "ReleaseHold": {
+      "description": "Release every hold on merges into the user's branch by hand, though the sets holding them\nhaven't passed: the work waiting lands, in order, as when the last hold lifts. Refused while\nno hold is on.",
+      "properties": {
+        "type": {
+          "const": "release_hold",
+          "default": "release_hold",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "ReleaseHold",
       "type": "object"
     },
     "RemoveTask": {

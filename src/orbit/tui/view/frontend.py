@@ -29,6 +29,7 @@ from orbit.protocol import (
     Event,
     FireTrigger,
     Hello,
+    ReleaseHold,
     RemoveTask,
     ResetConversation,
     RunTasks,
@@ -48,7 +49,10 @@ from orbit.tui.view.confirm import (
     CONFIGURE_MESSAGE,
     CONFIGURE_TITLE,
     CONFIGURE_YES,
+    RELEASE_TITLE,
+    RELEASE_YES,
     RESET_YES,
+    release_message,
     reset_message,
     reset_title,
 )
@@ -148,6 +152,9 @@ class AppView(Protocol):
 
     def unfocus_task_list(self) -> None:
         """Take the focus from the task list, if it has it."""
+
+    def refresh_keys(self) -> None:
+        """Show again which keys work now in the footer."""
 
 
 class ConversationPane(Entries, TranscriptPane, Protocol):
@@ -302,7 +309,9 @@ class Frontend:
 
     def _hooks(self) -> AppHooks:
         app = self._app
-        return AppHooks(app.label_triggers, self.leave_closed_detail, app.unfocus_task_list)
+        return AppHooks(
+            app.label_triggers, self.leave_closed_detail, app.unfocus_task_list, app.refresh_keys
+        )
 
     @property
     def storage_halt(self) -> str | None:
@@ -547,6 +556,25 @@ class Frontend:
             CONFIGURE_MESSAGE,
             CONFIGURE_YES,
             lambda: self._act("configure_checks", command),
+        )
+
+    @property
+    def merges_held(self) -> bool:
+        """Whether sets hold merges in the session viewed, so ctrl+f can release them."""
+        return bool(self._parts.tasks.merge_holds)
+
+    def release_hold(self) -> None:
+        """Ask first, naming the sets that haven't passed, so a stray key doesn't land work
+        they hold; nothing while merges aren't held."""
+        # The backend refuses it if the holds lifted meanwhile.
+        sets = self._parts.tasks.held_sets
+        if not sets:
+            return
+        self._app.confirm(
+            RELEASE_TITLE,
+            release_message(sets),
+            RELEASE_YES,
+            lambda: self._act("release_hold", ReleaseHold()),
         )
 
     def reset_planner(self) -> None:

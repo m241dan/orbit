@@ -333,9 +333,10 @@ class WorkspaceHost:
 
     With an ``owner``, another orbit owns the repository and this one is read-only: its
     ``Catalog`` and ``Snapshot`` say so, a notice naming the owner comes first among the
-    startup notes, ``RunTasks`` and ``FireTrigger`` are accepted and queued rather than run, and
-    no work starts by itself: neither the startup check nor reviews run. It notes no leftovers,
-    since only the owner can tell its own running work from what earlier runs left. Given the
+    startup notes, ``RunTasks``, ``FireTrigger`` and ``ReleaseHold`` are accepted and queued
+    rather than run, and no work starts by itself: neither the startup check nor reviews run. It
+    notes no leftovers, since only the owner can tell its own running work from what earlier runs
+    left. Given the
     repository's ``lock``, ``Takeover`` offers it once it's free, trying it every ``lock_retry``
     seconds and after a decline waiting up to ``lock_declined_retry``, and ``Snapshot`` says
     while the offer is open; ``Handover`` answers ``TakeOwnership``, calling ``owned`` first.
@@ -660,6 +661,7 @@ class WorkspaceHost:
             self._gate,
             self._lanes,
             self._sets,
+            self._holds,
         )
         return WorkCommands(parts)
 
