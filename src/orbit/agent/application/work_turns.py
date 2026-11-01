@@ -1,10 +1,12 @@
 """When the work lane runs: on the user's asking, after a review queues work unless the user
-held it or the session halted, first for a configurator, and again by itself once the usage limit
+held it or the session halted, first for a configurator, which the configure-checks trigger
+queues, or which a trigger queued as the workspace opened, and again by itself once the usage limit
 of the runtime that stopped it resets, or, if that runtime's API not answering stopped it, after a
 backoff that grows with each outage in a row, saying meanwhile until when, why and on which
 runtime it's paused. The lane keeps its order, so it waits; the lanes that start by themselves
 start no task on that runtime meanwhile, and run those with it. A run remembers what started it,
-which its tasks' spans link to.
+which its tasks' spans link to. While verification is missing, the user's runs are refused, saying
+why, and the work lane runs only the configurator's tasks, as the session's gate says.
 
 A task in a lane that starts by itself whose agent hits its runtime's usage limit or finds its API
 not answering pauses that runtime too, timed by the same rules: each runtime has one backoff, which
@@ -15,7 +17,7 @@ Meanwhile the work lane runs its tasks in order up to the first on the paused ru
 for the pause to end."""
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -24,11 +26,12 @@ from orbit.agent.application.lane_runner import Kickable
 from orbit.agent.application.lanes import Background, SessionGate, TurnSlot
 from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.application.tasks import Tasks
+from orbit.agent.application.triggers import TriggerEngine
 from orbit.agent.application.verifier import Verifier
 from orbit.agent.application.work_lane import WorkLane
-from orbit.agent.domain.checks import configure_prompt
 from orbit.agent.domain.refusals import Refused
-from orbit.agent.domain.roles import disabled_note, role_task
+from orbit.agent.domain.roles import disabled_note
+from orbit.agent.domain.setup_first import setup_refusal
 from orbit.agent.domain.usage_limits import (
     RESUMING_NOTE,
     WAIT_CANCELLED_NOTE,
@@ -45,6 +48,7 @@ from orbit.agent.domain.usage_limits import (
 )
 from orbit.protocol import (
     CONFIGURATOR,
+    CONFIGURE_CHECKS,
     NOT_CONFIGURED,
     PAUSED_FOR_API_UNAVAILABLE,
     PAUSED_FOR_USAGE_LIMIT,
@@ -52,7 +56,6 @@ from orbit.protocol import (
     BusyLane,
     Event,
     Notice,
-    TaskSpec,
     UsageChanged,
 )
 from orbit.tracing import Span, current_span, use_span
@@ -68,10 +71,11 @@ class WorkParts:
     """What decides when the work lane runs: the ``work`` lane and the ``lanes`` that start by
     themselves, if any, the ``tasks`` they run, the ``verifier`` and agents' ``desk``, if any,
     ``post``, which publishes events without blocking, the session's ``gate``, which tells
-    whether it's halted, ``usage``, the usage limits fetched last, if any, ``paused_changed``,
-    called whenever :attr:`WorkTurns.paused` changes, the work lane's ``name``, the lane whose
-    roles merge, and each runtime's ``outages``, the ones the ``work`` lane notes its runs'
-    stops and its agents' runs in, which time every lane's pauses for an outage."""
+    whether it's halted and what verification is, ``usage``, the usage limits fetched last, if
+    any, ``paused_changed``, called whenever :attr:`WorkTurns.paused` changes, the work lane's
+    ``name``, the lane whose roles merge, each runtime's ``outages``, the ones the ``work`` lane
+    notes its runs' stops and its agents' runs in, which time every lane's pauses for an outage,
+    and the agents' ``triggers``, if any, which queue the configurator's task."""
 
     work: WorkLane | None
     lanes: Kickable | None
@@ -84,6 +88,7 @@ class WorkParts:
     paused_changed: Callable[[], None] = lambda: None
     name: BusyLane = WORK_LANE
     outages: Outages = field(default_factory=Outages)
+    triggers: TriggerEngine | None = None
 
 
 @dataclass(frozen=True)
@@ -100,9 +105,10 @@ class _Restart:
 class WorkTurns:
     """Runs the work lane's turns from ``parts``, one at a time.
 
-    The user's :meth:`run_tasks` starts a run, refused while one runs; :meth:`hold` cancels it
-    and keeps :meth:`wake`, a review's request, from starting another until the user asks
-    again. While the session is halted, :meth:`wake` starts nothing either. A run a runtime's
+    The user's :meth:`run_tasks` starts a run, refused while one runs or while verification is
+    missing; :meth:`hold` cancels it and keeps :meth:`wake`, a review's request, from starting
+    another until the user asks again. While the session is halted, :meth:`wake` starts nothing
+    either. A run a runtime's
     usage limit stopped starts again by itself once the limit resets, and one a runtime's API
     not answering stopped after a backoff, longer for each outage on that runtime in a row in any
     lane, unless the user runs the work, sets up checks or holds it first, or
@@ -146,40 +152,57 @@ class WorkTurns:
         return self._paused
 
     async def run_tasks(self) -> None:
-        """Start a run for the user, lifting a hold; refused without agents, with a task still
-        to run whose role is disabled, or while one runs."""
+        """Start a run for the user, lifting a hold; refused without agents, while verification
+        is missing, with a task still to run whose role is disabled, or while one runs."""
         self.check_run_tasks()
         await self._start_asked()
 
     async def configure_checks(self) -> None:
-        """Queue a configurator first and run it, in place of a wait to start again, unless work
-        is running already (then it goes next); refused without verification or while one is
-        queued or running."""
+        """Queue a configurator first, firing the configure-checks trigger by hand, and run it,
+        in place of a wait to start again, unless work is running already (then it goes next);
+        refused without verification. While one is queued or running already, none is queued,
+        which is said, and the one queued runs so; while the trigger is disabled, nothing is
+        queued and nothing starts."""
         self.check_configure_checks()
-        desk, verifier = self._parts.desk, self._parts.verifier
-        assert desk is not None and verifier is not None  # Checked just now.
         if self._board.has_waiting(CONFIGURATOR):
             self._parts.post(Notice(message=CONFIGURING_NOTE))
+        elif not await self._fire_configure():
             return
-        task = _configurator_task(desk.agents, verifier)
-        await self._parts.tasks.change(lambda board: board.add_first(task))
         if not self.running:
             await self._start_asked()
 
+    async def _fire_configure(self) -> tuple[str, ...]:
+        """Fire the configure-checks trigger by hand, its configurator told the steps configured
+        now; returns the ids of the tasks it queued."""
+        triggers, verifier = self._parts.triggers, self._parts.verifier
+        assert triggers is not None and verifier is not None  # Checked as it was asked for.
+        return await triggers.fire_by_hand(CONFIGURE_CHECKS, verifier.verification.steps)
+
+    async def set_up(self, task_ids: Collection[str]) -> None:
+        """Run the configurator's task among ``task_ids``, those triggers queued as the
+        workspace opened, if one is on the board, as ctrl+e would, started by the span current,
+        unless something runs or the session is halted."""
+        found = (self._board.find(task_id) for task_id in task_ids)
+        if any(state is not None and state.task.role == CONFIGURATOR for state in found):
+            await self._start(current_span(), asked=False)
+
     def check_run_tasks(self) -> None:
-        """Refuse :meth:`run_tasks` if it couldn't start a run at all, without agents, or if a
-        task still to run is in a disabled role, which no run runs, naming that role."""
+        """Refuse :meth:`run_tasks` if it couldn't start a run at all, without agents; while
+        verification is missing, saying whether the configurator is working on it; or if a task
+        still to run is in a disabled role, which no run runs, naming that role."""
         work = self._parts.work
         if work is None:
             raise Refused(NOT_CONFIGURED, NO_AGENTS_MESSAGE)
+        if self._parts.gate.verification() == "missing":
+            raise Refused(NOT_CONFIGURED, setup_refusal(self._board.tasks))
         disabled = work.disabled_waiting
         if disabled is not None:
             raise Refused(NOT_CONFIGURED, disabled_note(disabled))
 
     def check_configure_checks(self) -> None:
-        """Refuse :meth:`configure_checks` if it couldn't run at all: without agents or
-        verification."""
-        if self._parts.desk is None or self._parts.work is None:
+        """Refuse :meth:`configure_checks` if it couldn't run at all: without agents, whose
+        triggers queue the configurator, or verification."""
+        if self._parts.work is None or self._parts.triggers is None:
             raise Refused(NOT_CONFIGURED, NO_AGENTS_MESSAGE)
         if self._parts.verifier is None:
             raise Refused(NOT_CONFIGURED, NO_VERIFY_MESSAGE)
@@ -438,10 +461,3 @@ def _posting(post: Callable[[Event], None]) -> Callable[[Event], Awaitable[None]
         post(event)
 
     return publish
-
-
-def _configurator_task(agents: Agents, verifier: Verifier) -> TaskSpec:
-    """A configurator's task, told the steps and setup configured now."""
-    steps = verifier.verification.steps
-    prompt = configure_prompt(steps, agents.tree.setup if agents.tree else None)
-    return role_task(CONFIGURATOR, agents.roles[CONFIGURATOR], prompt)

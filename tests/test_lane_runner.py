@@ -1,6 +1,7 @@
 """A lane that starts by itself: once kicked, it runs its roles' tasks one at a time, each in a
 snapshot of the base commit, shows busy while it does, starts none while blocked and skips those
-on a paused runtime, stops its task on the user's asking, even as it starts, and fails a task,
+on a paused runtime, and while verification is missing all but the configurator's, stops its task
+on the user's asking, even as it starts, and fails a task,
 or a review, whose role the session lacks without an agent; and the session's lanes, by
 name."""
 
@@ -21,7 +22,9 @@ from orbit.agent.domain.endings import CANCELLED, STOPPED_BY_YOU
 from orbit.agent.domain.reviews import ReviewLimits, ReviewPlanner
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.runtimes import CLAUDE
+from orbit.agent.domain.triggers import VerificationState
 from orbit.protocol import (
+    CONFIGURATOR,
     GIT_FAILED,
     NOT_CONFIGURED,
     REVIEWER,
@@ -58,7 +61,7 @@ PENTEST = Role(instructions="Probe it.", verify=False, lane="security", runtime=
 class Lane:
     """A board, what's published and what's posted, for runners of the lane ``security``,
     blocked as :attr:`read_only` and :attr:`halted` say, skipping the tasks on the runtime
-    :attr:`paused` names, if any."""
+    :attr:`paused` names, if any, with verification as :attr:`verification` says."""
 
     def __init__(self) -> None:
         self.events: list[Event] = []
@@ -66,6 +69,7 @@ class Lane:
         self.tasks = Tasks(TaskBoard(), self.publish)
         self.read_only = self.halted = False
         self.paused: str | None = None
+        self.verification: VerificationState = "off"
         self.stopped = asyncio.Event()
 
     async def publish(self, event: Event) -> None:
@@ -73,7 +77,9 @@ class Lane:
 
     def parts(self, desk: AgentDesk) -> LaneParts:
         """What runners of the lane run with: ``desk``'s agents and :attr:`tasks`."""
-        gate = SessionGate(lambda: self.halted, lambda: self.read_only)
+        gate = SessionGate(
+            lambda: self.halted, lambda: self.read_only, verification=lambda: self.verification
+        )
         return LaneParts(desk, self.tasks, gate, lambda: self.paused, self.posted.append)
 
     def runner(
@@ -132,6 +138,34 @@ async def test_a_kicked_runner_with_nothing_to_run_shows_no_busy() -> None:
     assert runner.running
     await asyncio.wait_for(lane.stopped.wait(), 5)
     assert lane.posted == []
+
+
+async def test_while_verification_is_missing_a_runner_starts_none_till_it_is_set_up() -> None:
+    lane = Lane()
+    lane.verification = "missing"
+    lane.add(audit("a"))
+    runner = lane.runner(claims_done)
+    await lane.ran(runner)
+    assert lane.statuses == ["pending"]
+    assert lane.posted == []
+    lane.verification = "configured"
+    await lane.ran(runner)
+    assert lane.statuses == ["completed"]
+
+
+async def test_while_verification_is_missing_a_runner_runs_the_configurators_tasks() -> None:
+    lane = Lane()
+    lane.verification = "missing"
+    lane.add(audit("a"), TaskSpec(prompt="Set up checks.", role=CONFIGURATOR), audit("c"))
+    ran: list[str] = []
+
+    async def run(task_id: str) -> None:
+        ran.append(task_id)
+        lane.tasks.board.finish(task_id, "completed")
+
+    runner = lane.runner(work=LaneWork(lambda tried: lane.tasks.board.next_runnable(tried), run))
+    await lane.ran(runner)
+    assert ran == ["2"]
 
 
 @pytest.mark.parametrize("blocked", ["read_only", "halted"])

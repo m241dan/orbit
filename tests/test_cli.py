@@ -306,7 +306,8 @@ def test_chat_keeps_sessions_in_the_store_in_the_state_directory(
 def adds_tasks(*prompts: str, before_last: Callable[[], None] = lambda: None) -> list[str]:
     """Have each chat's session given a task for each of ``prompts``, calling ``before_last``
     before the last, once the tasks before it are logged; the ids of the sessions, as they're
-    given their tasks."""
+    given their tasks. Such a chat runs with ``--no-verify``, so the configurator a workspace
+    without steps starts as it opens doesn't join its tasks."""
     ids: list[str] = []
 
     async def add(session: WorkspaceHost) -> None:
@@ -371,7 +372,7 @@ def test_chat_parks_unsaved_events_in_the_state_directory(
     launched: list[WorkspaceHost], state: Path, tmp_path: Path
 ) -> None:
     ids = adds_tasks("Saved, so its events are kept.", "parked", before_last=unwritable_log(state))
-    assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
+    assert runner.invoke(app, ["chat", "--no-verify", "-C", str(tmp_path)]).exit_code == 0
 
     [session] = launched
     [session_id] = ids
@@ -399,7 +400,7 @@ def test_without_a_user_config_chat_keeps_long_text_whole_and_logs_untrimmed(
     launched: list[WorkspaceHost], tmp_path: Path
 ) -> None:
     ids = adds_tasks(LONG)
-    assert runner.invoke(app, ["chat"]).exit_code == 0
+    assert runner.invoke(app, ["chat", "--no-verify"]).exit_code == 0
 
     [session_id] = ids
     workspace = (tmp_path / "start").resolve()
@@ -412,7 +413,7 @@ def test_chat_cuts_long_text_as_the_storage_settings_in_the_config_directory_say
     config_dir.mkdir()
     (config_dir / "config.toml").write_text("[storage]\ntool_output_kb = 1\n\n[server]\n")
     ids = adds_tasks(LONG)
-    assert runner.invoke(app, ["chat"]).exit_code == 0
+    assert runner.invoke(app, ["chat", "--no-verify"]).exit_code == 0
 
     [session_id] = ids
     [prompt], _ = asyncio.run(log_of(state, (tmp_path / "start").resolve(), session_id))
@@ -427,7 +428,7 @@ def test_chat_trims_the_log_as_the_storage_settings_in_the_config_directory_say(
     (config_dir / "config.toml").write_text("[storage]\ntool_output_kb = 0\nsession_log_mb = 1\n")
     big = "x" * 400_000  # The second task list logs both, taking the log over 1 MB.
     ids = adds_tasks(big, big)
-    assert runner.invoke(app, ["chat"]).exit_code == 0
+    assert runner.invoke(app, ["chat", "--no-verify"]).exit_code == 0
 
     [session_id] = ids
     prompts, trimmed = asyncio.run(log_of(state, (tmp_path / "start").resolve(), session_id))
@@ -444,7 +445,9 @@ def test_the_config_directory_option_wins_over_the_environment(
     workspace.mkdir()
     ids = adds_tasks(LONG)
     # A relative directory is taken from where orbit started, not the workspace.
-    result = runner.invoke(app, ["chat", "--config-dir", "mine", "-C", str(workspace)])
+    result = runner.invoke(
+        app, ["chat", "--no-verify", "--config-dir", "mine", "-C", str(workspace)]
+    )
 
     assert result.exit_code == 0
     [session_id] = ids
@@ -477,7 +480,8 @@ def test_chat_imports_an_older_orbits_session_files(
     greetings: list[Greeted], repo: Path, state: Path
 ) -> None:
     legacy_sessions(repo / ".git" / "orbit")
-    assert runner.invoke(app, ["chat", "-C", str(repo)]).exit_code == 0
+    # Without verification, no configurator queued as it opens saves the new session too.
+    assert runner.invoke(app, ["chat", "--no-verify", "-C", str(repo)]).exit_code == 0
 
     assert asyncio.run(stored_ids(state, repo)) == ["abc"]
     assert (repo / ".git" / "orbit" / "sessions.imported" / "abc.json").exists()

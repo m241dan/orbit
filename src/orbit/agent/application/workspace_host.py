@@ -75,7 +75,7 @@ from orbit.agent.application.takeover import (
 )
 from orbit.agent.application.task_trace import TaskTracing
 from orbit.agent.application.tasks import Tasks
-from orbit.agent.application.triggers import TriggerEngine
+from orbit.agent.application.triggers import TriggerEngine, TriggerHooks
 from orbit.agent.application.usage_accounting import AccountParts, UsageAccounting
 from orbit.agent.application.usage_recorder import UsageRecorder
 from orbit.agent.application.verifier import Verification, Verifier
@@ -98,6 +98,7 @@ from orbit.agent.domain.role_lanes import merging_lane, review_lane, task_lanes
 from orbit.agent.domain.roles import Role, disabled_roles, enabled_roles
 from orbit.agent.domain.runtimes import ModelAliases
 from orbit.agent.domain.storage import StorageSettings
+from orbit.agent.domain.triggers import VerificationState, verification_state
 from orbit.agent.domain.usage_limits import Outages, RuntimeStop
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import (
@@ -263,7 +264,13 @@ class WorkspaceHost:
     ``checks = "gate"``, such as ``startup-check``, runs those steps once in the background, on
     the base commit, where the agents work, once the session isn't halted; the step that fails
     raises ``startup_check_failed``, whose ``startup-fix`` trigger adds a draft task to fix it,
-    unless the coder is disabled. A host without agents fires no triggers.
+    unless the coder is disabled. With verification on and no steps, ``set-up-verification``
+    queues the configurator's task first, which runs as ctrl+e's does. A host without agents
+    fires no triggers.
+
+    Until verification has a step, while it's on, the session's gate holds back every task but
+    the configurator's, and the user's runs are refused, saying why; accepted checks start the
+    tasks waiting in the lanes that start by themselves.
 
     A disabled role is left out of its catalog entries: its agents, the triggers that queue its
     tasks and its lane, unless an enabled role shares it; it queues no reviews, and the work
@@ -349,7 +356,10 @@ class WorkspaceHost:
         self._storage = parts.storage
         self._halt = self._storage_halt()
         self._gate = SessionGate(
-            lambda: self._halt.halted, lambda: self._takeover.read_only, self._halt.check
+            lambda: self._halt.halted,
+            lambda: self._takeover.read_only,
+            self._halt.check,
+            self._verification_state,
         )
         overflow = Overflow(parts.fallback, self._halt.log_failed)
         self._connections = Connections(self._connections_changed, lambda: self._keeper.id)
@@ -375,6 +385,8 @@ class WorkspaceHost:
         self._verifier = _verifier(
             parts.verification, self._tasks, self._events, agents, parts.telemetry
         )
+        if self._verifier is not None:  # Accepted checks let the tasks waiting for them run.
+            self._verifier.steps_changed = self._kick_lanes
         self._desk = _desk(
             agents,
             self._publish_agents,
@@ -682,6 +694,7 @@ class WorkspaceHost:
             lambda: self._states.check(),
             self._lanes.work,
             self._outages,
+            self._triggers,
         )
         return WorkTurns(parts)
 
@@ -731,8 +744,8 @@ class WorkspaceHost:
     async def _open_session(self) -> None:
         """Raise ``session_started`` in the session open once no switch is under way, as the
         workspace opens with it, verifying tasks with the steps configured now, none while
-        verification is off, and run the tasks its triggers queued; without agents, there are
-        no triggers to fire."""
+        verification is off, and run the tasks its triggers queued, a configurator's as ctrl+e
+        would; without agents, there are no triggers to fire."""
         engine = self._triggers
         if engine is None:
             return
@@ -740,6 +753,7 @@ class WorkspaceHost:
         steps = None if verification is None else verification.steps
         queued = await self._switcher.between_switches(lambda: engine.started(steps))
         engine.run(queued)
+        await self._turns.set_up(queued)
 
     async def _startup_failed(self, step: VerificationStep, output: str) -> bool:
         """Raise ``startup_check_failed`` for ``step``, which failed at startup with ``output``,
@@ -1052,9 +1066,8 @@ class WorkspaceHost:
         check for those with ``checks = "gate"``; none without agents."""
         if self._desk is None:
             return None
-        return TriggerEngine(
-            self._desk, self._tasks, lambda role: self._lanes.kick_for(role), self._run_check
-        )
+        hooks = TriggerHooks(lambda role: self._lanes.kick_for(role), self._run_check, self._gate)
+        return TriggerEngine(self._desk, self._tasks, hooks)
 
     def _review_lane(self) -> ReviewLane | None:
         """The review lane, if reviews are on and run beside the work: in a tree, with a review
@@ -1255,7 +1268,13 @@ class WorkspaceHost:
 
     def _no_steps(self) -> bool:
         """Whether verification is on with no steps to verify tasks."""
-        return self._verifier is not None and not self._verifier.step_names
+        return self._verification_state() == "missing"
+
+    def _verification_state(self) -> VerificationState:
+        """What verification is now, as ``session_started`` says it: configured with at least
+        one step, missing while it's on with none, until accepted checks set some, or off."""
+        verifier = self._verifier
+        return verification_state(None if verifier is None else verifier.verification.steps)
 
     async def _leftovers(self) -> list[str]:
         """Notes on the work earlier runs left in the coder's tree; none while read-only, as

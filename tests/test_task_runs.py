@@ -18,9 +18,12 @@ from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.ports import TreeFailed
 from orbit.agent.application.tasks import Tasks
+from orbit.agent.application.verifier import Verifier
+from orbit.agent.application.work_lane import Beside, WorkLane
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import WAITING, TaskBoard
 from orbit.agent.domain.endings import BUG, CANCELLED
+from orbit.agent.domain.setup_first import SET_UP_MESSAGE
 from orbit.protocol import (
     AGENT_FAILED,
     BUSY,
@@ -43,6 +46,7 @@ from orbit.protocol import (
     RunTasks,
     SessionStateChanged,
     Settings,
+    SkipReason,
     Snapshot,
     StepState,
     TasksChanged,
@@ -73,6 +77,7 @@ from tests.agent_fakes import (
     board_of,
     chats,
     claims_done,
+    desk_for,
     desk_of,
     keeps_claiming,
     payloads,
@@ -490,22 +495,48 @@ async def test_a_fix_that_changes_no_files_is_verified_before_its_task_completes
     assert statuses(events) == ["completed", "completed"]
 
 
-async def test_without_steps_tasks_skip_verification_and_say_so() -> None:
-    workspace = FakeWorkspace("a", "b")
-    session, _, _ = session_for(claims_done, verification=Verification((), Steps(), workspace))
-    events = await asyncio.wait_for(run(session), 5)
+async def test_without_steps_the_greeting_says_so_and_a_run_is_refused() -> None:
+    session, _, launcher = session_for(claims_done, verification=Verification((), Steps()))
+    await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
+    await send(session, RunTasks())
+    events = await asyncio.wait_for(until_refused(session), 5)
     assert isinstance(events[0], Snapshot)
     assert events[1] == Notice(message=NO_STEPS_NOTE)
-    assert [e for e in events if isinstance(e, Notice)] == [Notice(message=NO_STEPS_NOTE)]
-    assert VerificationSkipped(task_id="1", reason="no_steps") in events
-    assert statuses(events) == ["completed"]
+    assert events[-1] == refused(NOT_CONFIGURED, SET_UP_MESSAGE)
+    assert [t.status for t in board_of(session).tasks] == ["pending"]
+    assert launcher.launches == []
 
 
-async def test_without_steps_unchanged_tasks_skip_for_that_reason() -> None:
-    workspace = FakeWorkspace("a", "a")
-    session, _, _ = session_for(claims_done, verification=Verification((), Steps(), workspace))
-    events = await asyncio.wait_for(run(session), 5)
-    assert VerificationSkipped(task_id="1", reason="no_changes") in events
+async def until_refused(session: WorkspaceHost) -> list[Event]:
+    """The session's events up to and including the first refusal."""
+    events: list[Event] = []
+    async for event in payloads(session):
+        events.append(event)
+        if isinstance(event, CommandRefused):
+            return events
+    raise AssertionError("unreachable")
+
+
+@pytest.mark.parametrize(("after", "reason"), [("b", "no_steps"), ("a", "no_changes")])
+async def test_a_work_lane_without_steps_skips_verification_saying_why(
+    after: str, reason: SkipReason
+) -> None:
+    events: list[Event] = []
+
+    async def publish(event: Event) -> None:
+        events.append(event)
+
+    tasks = Tasks(TaskBoard(), publish)
+    task_id = tasks.board.add(TaskSpec(prompt="Add a flag."))
+    verification = Verification((), Steps(), FakeWorkspace("a", after))
+    desk = desk_for(publish, claims_done)
+    lane = WorkLane(desk, tasks, Verifier(verification, tasks, publish), Beside())
+    try:
+        assert await asyncio.wait_for(lane.run(), 5) == "finished"
+    finally:
+        await desk.stop()
+    assert VerificationSkipped(task_id=task_id, reason=reason) in events
+    assert tasks.board.get(task_id).status == "completed"
 
 
 async def test_with_verification_off_there_is_no_note() -> None:

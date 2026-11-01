@@ -11,6 +11,7 @@ from typing import Any
 from orbit.agent.application.failures import unexpected
 from orbit.agent.application.ports import Publish
 from orbit.agent.domain.refusals import Refused, stopped_on
+from orbit.agent.domain.triggers import VerificationState
 from orbit.execution import background, turns
 from orbit.protocol import BUSY, INTERNAL, BusyChanged, BusyLane, ErrorOccurred, Event
 from orbit.tracing import no_span
@@ -24,16 +25,24 @@ def _admit() -> None:
     """Refuse nothing."""
 
 
+def _verification_off() -> VerificationState:
+    """Says verification is off, so no task waits for it to be set up."""
+    return "off"
+
+
 @dataclass(frozen=True)
 class SessionGate:
     """What keeps work from starting: ``halted`` tells whether the session is halted, as a write
-    to the store failed, ``read_only`` whether another orbit owns the repository, and ``check``
-    refuses work the user asked for, raising :class:`Refused`, while the session is halted.
-    Asked afresh each time, as either may change across an ``await``."""
+    to the store failed, ``read_only`` whether another orbit owns the repository, ``check``
+    refuses work the user asked for, raising :class:`Refused`, while the session is halted, and
+    ``verification`` says what verification is, as ``session_started`` does: while it's missing,
+    every task but the configurator's waits for it to be set up. Asked afresh each time, as any
+    may change across an ``await``."""
 
     halted: Callable[[], bool] = _never
     read_only: Callable[[], bool] = _never
     check: Callable[[], None] = _admit
+    verification: Callable[[], VerificationState] = _verification_off
 
 
 OPEN_GATE = SessionGate()

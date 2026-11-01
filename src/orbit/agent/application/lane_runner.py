@@ -2,10 +2,11 @@
 roles merge, which runs on the user's asking. Each runs the board's next runnable task whose role
 is in it, one at a time, through a new agent, once a task for it is queued, unless this orbit is
 read-only or the session is halted; while a runtime is paused, it skips the tasks whose role runs
-on that runtime, and runs them once the pause ends. A task whose agent hits its runtime's usage
-limit or finds its API not answering, as its role's launcher tells, pauses that runtime, whichever
-lane it ran in, and is left to run again. Reviews run so too, with the rules :class:`ReviewLane`
-keeps."""
+on that runtime, and runs them once the pause ends, and while verification is missing, every task
+but the configurator's, which run once it's set up and the lane is kicked. A task whose agent hits
+its runtime's usage limit or finds its API not answering, as its role's launcher tells, pauses that
+runtime, whichever lane it ran in, and is left to run again. Reviews run so too, with the rules
+:class:`ReviewLane` keeps."""
 
 import asyncio
 from collections.abc import Awaitable, Callable, Collection, Coroutine, Iterable
@@ -21,6 +22,7 @@ from orbit.agent.application.role_workspace import workspace_for
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.endings import STOPPED_BY_YOU
 from orbit.agent.domain.roles import Workspace
+from orbit.agent.domain.setup_first import waiting_for_setup
 from orbit.agent.domain.usage_limits import RuntimeStop
 from orbit.protocol import PLANNER_LANE, WORK_LANE, BusyChanged, BusyLane, Event
 
@@ -247,8 +249,10 @@ class LaneRunner:
         return gate.read_only() or gate.halted()
 
     def _next_task(self, tried: Collection[str]) -> str | None:
-        """The task to run next, skipping those ``tried`` and those on a paused runtime."""
-        return self._work.next_task({*tried, *self._on_paused_runtime()})
+        """The task to run next, skipping those ``tried``, those on a paused runtime and, while
+        verification is missing, as the gate says, every one but the configurator's."""
+        waiting = waiting_for_setup(self._parts.gate.verification(), self._tasks.board.tasks)
+        return self._work.next_task({*tried, *self._on_paused_runtime(), *waiting})
 
     def _on_paused_runtime(self) -> set[str]:
         """The board's tasks whose role runs on the paused runtime, or on one held while the

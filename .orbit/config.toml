@@ -379,7 +379,7 @@ watch = ["uv.lock"]
 # Whether its task is added as a draft, for you to accept.
 # draft = false
 # Whether it fires at all.
-# enabled = false
+# enabled = true
 
 # [triggers.startup-check]
 # The event it fires on, such as "task_landed", "commits" or "manual".

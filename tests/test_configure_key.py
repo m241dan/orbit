@@ -1,4 +1,5 @@
-"""ctrl+e: queue a configurator task at the front of the list and run it straight away."""
+"""ctrl+e: fire the configure-checks trigger, queuing a configurator task at the front of the list,
+and run it straight away."""
 
 import asyncio
 
@@ -16,6 +17,7 @@ from orbit.protocol import (
     UNKNOWN,
     AddTask,
     CancelTurn,
+    CommandAccepted,
     CommandRefused,
     ErrorOccurred,
     Event,
@@ -33,11 +35,13 @@ from orbit.tui.view.confirm import CONFIGURE_MESSAGE, CONFIGURE_TITLE
 from orbit.tui.widgets import ConfirmScreen, PickerScreen
 from tests.agent_fakes import (
     STEP,
+    TRIGGERS,
     Call,
     Configurator,
     FakeTree,
     Steps,
     board,
+    board_of,
     claims_done,
     events_until,
     frontend,
@@ -46,6 +50,7 @@ from tests.agent_fakes import (
     refused,
     send,
     session_for,
+    settled,
     until_idle,
     verified,
 )
@@ -93,6 +98,7 @@ async def test_it_queues_a_configurator_first_and_runs_it_straight_away() -> Non
     assert [t.status for t in tasks] == ["unverified", "completed"]
     assert [launch.agent.role for launch in launcher.launches] == ["configurator", "coder"]
     assert tasks[0].task.prompt == configure_prompt((STEP,), SETUP)
+    assert tasks[0].origin == CONFIGURE_CHECKS  # Queued by its trigger.
     assert tasks[0].task.settings.tool_access == "restricted"
     assert "- Unit tests: pytest" in configurator.tasks[0]
     assert "Setup: uv sync" in configurator.tasks[0]
@@ -117,6 +123,21 @@ async def test_a_second_request_is_refused_while_one_is_queued_or_running() -> N
     assert [t.task.role for t in board(events)] == ["configurator"]
 
 
+async def test_with_the_configure_checks_trigger_disabled_it_queues_nothing() -> None:
+    off = TRIGGERS[CONFIGURE_CHECKS].model_copy(update={"enabled": False})
+    session, _, launcher = session_for(
+        Configurator(),
+        verification=verified(Steps()),
+        triggers={**TRIGGERS, CONFIGURE_CHECKS: off},
+    )
+    await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
+    await events_until(session, of_type(CommandAccepted))
+    await settled()
+    await session.close()
+    assert board_of(session).tasks == ()
+    assert launcher.launches == []
+
+
 async def test_it_can_be_asked_for_again_to_reconfigure() -> None:
     session, _, launcher = session_for(Configurator(), Configurator(), verification=no_steps())
     await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
@@ -137,7 +158,7 @@ async def test_while_tasks_run_it_goes_next() -> None:
 
     configurator = Configurator()
     session, _, launcher = session_for(
-        asks_to_configure, configurator, claims_done, verification=no_steps()
+        asks_to_configure, configurator, claims_done, verification=verified(Steps(True, True))
     )
     await send(session, AddTask(task=CODE))
     await send(session, AddTask(task=CODE))
@@ -159,7 +180,7 @@ async def test_after_ctrl_s_holds_the_work_it_still_runs_straight_away() -> None
 
     configurator = Configurator()
     session, _, launcher = session_for(
-        waits_forever, configurator, claims_done, verification=no_steps()
+        waits_forever, configurator, claims_done, verification=verified(Steps(True))
     )
     await send(session, AddTask(task=CODE))
     await send(session, RunTasks())

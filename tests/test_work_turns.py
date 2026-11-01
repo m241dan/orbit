@@ -1,4 +1,5 @@
-"""When the work lane runs: the user's runs, a review's wake, a hold, and the configurator."""
+"""When the work lane runs: the user's runs, a review's wake, a hold, and the configurator, the
+only task that runs while verification is missing."""
 
 import asyncio
 from collections.abc import AsyncIterator, Callable
@@ -10,7 +11,8 @@ import pytest
 from orbit.agent.application.lanes import OPEN_GATE, SessionGate
 from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.application.tasks import Tasks
-from orbit.agent.application.verifier import Verifier
+from orbit.agent.application.triggers import TriggerEngine, TriggerHooks
+from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.application.work_lane import Beside, RunEnd, WorkLane
 from orbit.agent.application.work_turns import (
     CONFIGURING_NOTE,
@@ -24,10 +26,13 @@ from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.endings import STOPPED_BY_YOU
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.runtimes import CLAUDE, Failure
+from orbit.agent.domain.setup_first import CONFIGURING_MESSAGE, SET_UP_MESSAGE
+from orbit.agent.domain.triggers import VerificationState, verification_state
 from orbit.agent.domain.usage_limits import RESUMING_NOTE, Paused, RuntimeStop, paused_note
 from orbit.protocol import (
     BUSY,
     CONFIGURATOR,
+    CONFIGURE_CHECKS,
     INTERNAL,
     NOT_CONFIGURED,
     PAUSED_FOR_USAGE_LIMIT,
@@ -107,8 +112,8 @@ class Halt:
 
 @dataclass
 class Lane:
-    """Work turns over a ``work`` lane and a board, with the events they posted, and what their
-    pause was each time they told it changed."""
+    """Work turns over a ``work`` lane and a board, with the events they posted, what their
+    pause was each time they told it changed, and their ``verifier``, if any."""
 
     turns: WorkTurns
     work: StopsCounted
@@ -117,53 +122,77 @@ class Lane:
     halt: Halt
     sleeps: Sleeps
     pauses: list[Paused | None] = field(default_factory=list)
+    verifier: Verifier | None = None
 
     def roles(self) -> list[str]:
         return [state.task.role for state in self.tasks.board.tasks]
 
 
+VERIFICATIONS: dict[VerificationState, Verification | None] = {
+    "configured": verified(Steps()),
+    "missing": Verification((), Steps()),
+    "off": None,
+}
+"""A session's verification, as ``session_started`` says it is."""
+
+
 def lane_parts(
     tasks: Tasks,
     posted: list[Event],
-    verifying: bool,
+    verification: VerificationState,
     halt: Halt | None = None,
     pause: LimitPause | None = None,
 ) -> WorkParts:
-    """The parts of work turns whose agents all hang, verified if ``verifying``, in a session
-    halted as ``halt`` says, timing a run the usage limit stopped with ``pause``."""
+    """The parts of work turns whose agents all hang, verified as ``verification`` says, which
+    their gate tells as the session's does, in a session halted as ``halt`` says, timing a run
+    the usage limit stopped with ``pause``, firing the shipped triggers."""
 
     async def publish(event: Event) -> None:
         posted.append(event)
 
     desk = desk_for(publish, *[hangs] * 5, pause=pause or LimitPause())
-    verifier = Verifier(verified(Steps()), tasks, publish) if verifying else None
-    work = StopsCounted(desk, tasks, verifier, Beside())
+    verifying = VERIFICATIONS[verification]
+    verifier = None if verifying is None else Verifier(verifying, tasks, publish)
     halted = halt or Halt()
-    return WorkParts(
-        work,
-        None,
-        tasks,
-        verifier,
-        desk,
-        posted.append,
-        SessionGate(lambda: halted.on, check=halted.check),
+    gate = SessionGate(
+        lambda: halted.on,
+        check=halted.check,
+        verification=lambda: verification_state(
+            None if verifier is None else verifier.verification.steps
+        ),
     )
+    work = StopsCounted(desk, tasks, verifier, Beside(gate=gate))
+    triggers = TriggerEngine(desk, tasks, TriggerHooks(gate=gate))
+    return WorkParts(work, None, tasks, verifier, desk, posted.append, gate, triggers=triggers)
 
 
-@pytest.fixture
-async def lane() -> AsyncIterator[Lane]:
+async def lane_verified(verification: VerificationState) -> AsyncIterator[Lane]:
+    """Work turns verified as ``verification`` says, closed once the test is done."""
     posted: list[Event] = []
     halt, sleeps = Halt(), Sleeps()
     tasks = Tasks(TaskBoard(), lambda _: asyncio.sleep(0))
     pauses: list[Paused | None] = []
-    parts = lane_parts(tasks, posted, True, halt, sleeps.pause)
+    parts = lane_parts(tasks, posted, verification, halt, sleeps.pause)
     parts = replace(parts, paused_changed=lambda: pauses.append(turns.paused))
     turns = WorkTurns(parts)
     assert isinstance(parts.work, StopsCounted)
-    yield Lane(turns, parts.work, tasks, posted, halt, sleeps, pauses)
+    yield Lane(turns, parts.work, tasks, posted, halt, sleeps, pauses, parts.verifier)
     await turns.close()
     assert parts.desk is not None
     await parts.desk.stop()
+
+
+@pytest.fixture
+async def lane() -> AsyncIterator[Lane]:
+    async for verified_lane in lane_verified("configured"):
+        yield verified_lane
+
+
+@pytest.fixture
+async def unset() -> AsyncIterator[Lane]:
+    """Work turns whose verification is on with no steps."""
+    async for missing in lane_verified("missing"):
+        yield missing
 
 
 async def add(lane: Lane) -> None:
@@ -247,7 +276,7 @@ async def test_configuring_whose_save_halts_the_session_is_refused_and_starts_no
         halt.on = True
 
     tasks = Tasks(TaskBoard(), lambda _: asyncio.sleep(0), halts)
-    parts = lane_parts(tasks, [], True, halt)
+    parts = lane_parts(tasks, [], "configured", halt)
     turns = WorkTurns(parts)
     assert parts.desk is not None
     try:
@@ -361,9 +390,25 @@ async def test_configuring_with_a_configurator_queued_gives_the_notice(lane: Lan
     assert lane.posted[-1] == Notice(message=CONFIGURING_NOTE)
 
 
+async def test_configuring_with_a_configurator_queued_and_nothing_running_runs_it(
+    lane: Lane,
+) -> None:
+    await lane.tasks.change(lambda board: board.add(CONFIGURE))
+    await lane.turns.configure_checks()
+    assert lane.roles() == [CONFIGURATOR]
+    assert lane.posted[-2] == Notice(message=CONFIGURING_NOTE)
+    assert lane.turns.running
+
+
+async def test_configuring_queues_the_configure_checks_triggers_task(lane: Lane) -> None:
+    await lane.turns.configure_checks()
+    [state] = lane.tasks.board.tasks
+    assert (state.task.role, state.origin) == (CONFIGURATOR, CONFIGURE_CHECKS)
+
+
 async def test_without_verification_configuring_is_refused() -> None:
     tasks = Tasks(TaskBoard(), lambda _: asyncio.sleep(0))
-    parts = lane_parts(tasks, [], verifying=False)
+    parts = lane_parts(tasks, [], "off")
     assert parts.desk is not None
     try:
         with pytest.raises(Refused) as refused:
@@ -380,6 +425,78 @@ async def test_without_agents_runs_and_configuring_are_refused() -> None:
         with pytest.raises(Refused) as refused:
             await attempt()
         assert (refused.value.code, str(refused.value)) == (NOT_CONFIGURED, NO_AGENTS_MESSAGE)
+
+
+CONFIGURE = TaskSpec(prompt="Set up checks.", role=CONFIGURATOR)
+
+
+def refusal_of_run(lane: Lane) -> tuple[str, str]:
+    """The code and message refusing a run the user asks for."""
+    with pytest.raises(Refused) as refused:
+        lane.turns.check_run_tasks()
+    return refused.value.code, str(refused.value)
+
+
+async def test_while_verification_is_missing_a_run_is_refused_saying_to_press_ctrl_e(
+    unset: Lane,
+) -> None:
+    await add(unset)
+    assert refusal_of_run(unset) == (NOT_CONFIGURED, SET_UP_MESSAGE)
+    with pytest.raises(Refused):
+        await unset.turns.run_tasks()
+    assert not unset.turns.running
+
+
+async def test_while_a_configurators_task_waits_a_run_is_refused_as_it_works_on_it(
+    unset: Lane,
+) -> None:
+    await add(unset)
+    await unset.tasks.change(lambda board: board.add(CONFIGURE))
+    assert refusal_of_run(unset) == (NOT_CONFIGURED, CONFIGURING_MESSAGE)
+
+
+async def test_while_verification_is_missing_the_next_work_is_the_configurators(
+    unset: Lane,
+) -> None:
+    await add(unset)
+    assert unset.work.next_work() is None
+    configure = await unset.tasks.change(lambda board: board.add(CONFIGURE))
+    assert unset.work.next_work() == configure
+
+
+async def test_while_verification_is_missing_a_wake_starts_no_task_but_the_configurators(
+    unset: Lane,
+) -> None:
+    await add(unset)
+    await unset.turns.wake()
+    assert not unset.turns.running
+    await unset.turns.configure_checks()
+    assert unset.roles() == [CONFIGURATOR, "coder"]
+    assert unset.turns.running
+
+
+async def test_once_steps_are_used_the_next_work_and_runs_are_every_tasks(unset: Lane) -> None:
+    await add(unset)
+    assert unset.verifier is not None
+    await unset.verifier.use_steps(verified(Steps()).steps)
+    [task] = unset.tasks.board.tasks
+    assert unset.work.next_work() == task.id
+    await unset.turns.run_tasks()
+    assert unset.turns.running
+
+
+async def test_setting_up_runs_the_configurators_task_triggers_queued(unset: Lane) -> None:
+    await add(unset)
+    configure = await unset.tasks.change(lambda board: board.add_first(CONFIGURE))
+    await unset.turns.set_up((configure,))
+    assert unset.turns.running
+
+
+async def test_setting_up_without_a_configurators_task_starts_nothing(lane: Lane) -> None:
+    await add(lane)
+    [task] = lane.tasks.board.tasks
+    await lane.turns.set_up((task.id, "gone"))
+    assert not lane.turns.running
 
 
 async def test_a_wake_once_closed_starts_no_work(lane: Lane) -> None:

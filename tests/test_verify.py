@@ -273,3 +273,19 @@ async def test_using_new_steps_replaces_the_steps_and_their_progress_together() 
     assert verifier.step_names == ("Lint", "Unit tests")
     assert published[-1] == VerificationChanged(steps=verifier.progress.steps)
     assert verifier.progress == StepProgress.of(["Lint", "Unit tests"])
+
+
+async def test_using_new_steps_tells_whoever_watches_once_they_are_reported() -> None:
+    async def run_step(step: VerificationStep, root: str) -> tuple[bool, str]:
+        return True, ""
+
+    published: list[Event] = []
+    told: list[int] = []
+
+    async def publish(event: Event) -> None:
+        published.append(event)
+
+    verifier = Verifier(Verification((), run_step), Tasks(TaskBoard(), publish), publish)
+    verifier.steps_changed = lambda: told.append(len(published))
+    await verifier.use_steps((python_step("", "Lint"),))
+    assert told == [1]

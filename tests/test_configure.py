@@ -22,10 +22,12 @@ from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.config_file import CONFIG_PATH
 from orbit.protocol import (
     AGENT_FAILED,
+    CONFIGURE_CHECKS,
     AddTask,
     BusyChanged,
     ErrorOccurred,
     Event,
+    FireTrigger,
     MergeResult,
     Notice,
     RunTasks,
@@ -47,6 +49,7 @@ from tests.agent_fakes import (
     payloads,
     send,
     session_for,
+    until_idle,
     verified,
     work_lane_of,
 )
@@ -204,8 +207,11 @@ async def test_accepted_checks_end_the_no_steps_state() -> None:
         verification=Verification((), steps),
         proposal_review=Review(ProposalDecision("accept")),
     )
-    events = await asyncio.wait_for(everything(session, CONFIGURE, CODE), 5)
+    await send(session, AddTask(task=CODE))
+    await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
+    events = await asyncio.wait_for(until_idle(session), 5)
     assert Notice(message=NO_STEPS_NOTE) in events
+    assert [t.status for t in board(events)] == ["completed", "completed"]
     shown = [e.steps for e in events if isinstance(e, VerificationChanged)]
     assert shown[0] == (StepState(name="Lint"), StepState(name="Tests"))
     assert not any(isinstance(e, VerificationSkipped) for e in events)

@@ -98,7 +98,7 @@ async def test_opening_queues_the_task_of_the_project_trigger_taking_its_verific
     state: str,
 ) -> None:
     triggers = {
-        **TRIGGERS,
+        **switched_off("set-up-verification"),
         **{name: HELLO.model_copy(update={"when": {"verification": name}}) for name in STATES},
     }
     session, _, _ = session_for(

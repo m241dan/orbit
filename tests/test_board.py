@@ -15,6 +15,7 @@ from orbit.agent.domain.refusals import Refused
 from orbit.protocol import (
     ACTIVE_STATUSES,
     BUSY,
+    CONFIGURATOR,
     INVALID,
     PLANNER_ORIGIN,
     REVIEW_ORIGIN,
@@ -106,6 +107,18 @@ def test_setting_a_prompt_rewords_the_task_and_leaves_the_rest_as_it_is() -> Non
     assert state.task == TaskSpec(prompt="Review commit c1\n\nLanded since", role="reviewer")
     assert (state.status, state.origin) == ("running", REVIEW_ORIGIN)
     assert prompts(board) == ["one", "Review commit c1\n\nLanded since"]
+
+
+def test_a_configurators_triggered_task_goes_first_from_its_trigger() -> None:
+    board = TaskBoard()
+    board.add(ONE)
+    task = TaskSpec(prompt="Set up checks", role=CONFIGURATOR)
+    configure = board.add_triggered(task, "configure-checks")
+    assert prompts(board) == ["Set up checks", "one"]
+    assert (board.get(configure).status, board.get(configure).origin) == (
+        "pending",
+        "configure-checks",
+    )
 
 
 def test_edit_rejects_unknown_and_running_tasks() -> None:

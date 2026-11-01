@@ -40,6 +40,7 @@ from orbit.agent.domain.endings import (
     gave_up,
 )
 from orbit.agent.domain.roles import Workspace
+from orbit.agent.domain.setup_first import waiting_for_setup
 from orbit.agent.domain.usage_limits import FIX_ERROR_NOTE, Outages, RuntimeStop
 from orbit.agent.domain.verification import FallbackFixes, failure_reason, fix_prompt
 from orbit.execution.cancelling import stop, waited_out
@@ -190,11 +191,14 @@ class WorkLane:
 
     def next_work(self, tried: Collection[str] = ()) -> str | None:
         """The next task for the work lane, the one a run stopped at first; the roles of the
-        review lane, if there is one, and of the lanes that start by themselves run there, and
-        the disabled roles' run nowhere."""
+        review lane, if there is one, and of the lanes that start by themselves run there, the
+        disabled roles' run nowhere, and while verification is missing, as the gate says, every
+        task but the configurator's waits."""
         reviews = self._review.roles if self._review is not None else frozenset()
         exclude = self._elsewhere | reviews | self._disabled
-        return self._board.next_runnable(skip=tried, exclude=exclude, first=self._resume)
+        waiting = waiting_for_setup(self._gate.verification(), self._board.tasks)
+        skip = {*tried, *waiting}
+        return self._board.next_runnable(skip=skip, exclude=exclude, first=self._resume)
 
     @property
     def disabled_waiting(self) -> str | None:

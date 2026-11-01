@@ -24,14 +24,11 @@ prompt = "configure-checks.md"
 manual = true
 label = "Set up checks"
 
-# Off until orbit refuses to run tasks while verification is missing; ctrl+e starts the
-# configurator meanwhile.
 [triggers.set-up-verification]
 on = "session_started"
 role = "configurator"
 prompt = "configure-checks.md"
 when = { verification = "missing" }
-enabled = false
 
 [triggers.startup-check]
 on = "session_started"

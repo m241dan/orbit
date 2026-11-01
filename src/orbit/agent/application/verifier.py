@@ -35,6 +35,11 @@ T = TypeVar("T")
 
 _NO_TELEMETRY = NoTelemetry()
 
+
+def _unwatched() -> None:
+    """Note a change no one watches."""
+
+
 Failure = tuple[VerificationStep, str]
 """The step that failed and its output."""
 
@@ -80,7 +85,7 @@ class Verifier:
     """Runs ``verification``'s steps on ``tasks``, publishing their progress as it
     goes; a task's verification is recorded on the current span, its result and each step's,
     and each step run for an agent's call is timed as a child of the call's span, with
-    :attr:`telemetry`."""
+    :attr:`telemetry`. :attr:`steps_changed` is told whenever the steps change."""
 
     def __init__(
         self,
@@ -96,6 +101,8 @@ class Verifier:
         self._publish = publish
         self._tree = tree
         self.telemetry: Telemetry = _NO_TELEMETRY
+        # Called once the steps changed, as accepted checks set them, and are reported.
+        self.steps_changed: Callable[[], None] = _unwatched
 
     @property
     def step_names(self) -> tuple[str, ...]:
@@ -106,10 +113,12 @@ class Verifier:
         return self._progress
 
     async def use_steps(self, steps: tuple[VerificationStep, ...]) -> None:
-        """Verify with ``steps`` from now on, none of them run yet, and report them."""
+        """Verify with ``steps`` from now on, none of them run yet, report them, and tell
+        :attr:`steps_changed`."""
         self.verification = replace(self.verification, steps=steps)
         self._progress = StepProgress.of(step.name for step in steps)
         await self.publish_steps()
+        self.steps_changed()
 
     async def reset(self) -> None:
         """A task starts: report every step pending again."""

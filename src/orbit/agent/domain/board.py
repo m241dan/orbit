@@ -10,6 +10,7 @@ from orbit.agent.domain.refusals import Refused
 from orbit.protocol import (
     ACTIVE_STATUSES,
     BUSY,
+    CONFIGURATOR,
     INVALID,
     PLANNER_ORIGIN,
     REVIEW_ORIGIN,
@@ -311,10 +312,11 @@ class TaskBoard:
         return new_id
 
     def add_triggered(self, task: TaskSpec, trigger: TaskOrigin) -> str:
-        """Add ``task``, which the trigger named ``trigger`` queued, at the end, from that
-        trigger; returns its id."""
+        """Add ``task``, which the trigger named ``trigger`` queued, from that trigger: a
+        configurator's at the front, to run next, as the steps it sets up verify the others,
+        and any other at the end; returns its id."""
         state = self._new(task, origin=trigger)
-        self._tasks.append(state)
+        self._tasks.insert(0 if task.role == CONFIGURATOR else len(self._tasks), state)
         return state.id
 
     def _update(self, task_id: str, update: dict[str, str]) -> None:

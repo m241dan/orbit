@@ -101,7 +101,8 @@ class WorkCommands:
     """Handles the work commands on the session held in ``parts``; while it's read-only, or
     taking ownership, those that start work are queued, in order, rather than run, each later
     run in the span current as it was queued, its own command's, so what it starts links
-    there. A task added, accepted or edited starts at once if its lane starts by itself; one
+    there. A task added, accepted or edited starts at once if its lane starts by itself, unless
+    it waits for verification to be set up; one
     added, accepted or edited into a disabled role is refused, as is a trigger whose role is
     disabled, one added or edited with a model its role's runtime doesn't take, as are a
     conversational role's settings, and one added or edited naming a skill that isn't one."""

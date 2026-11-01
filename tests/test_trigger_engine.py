@@ -3,27 +3,33 @@ rendered from their templates, with their names as origins, unless a guard holds
 the review-rounds guard reviews the review the review lane finds due; landings count toward the
 commits triggers, and those that fire, or one fired by hand, review the whole codebase; opening a
 workspace fires the session_started triggers, those running the checks running them, and a step
-of the startup check failing the startup_check_failed ones."""
+of the startup check failing the startup_check_failed ones; one fired by hand on manual queues its
+task, a configurator's first; and a task queued while verification is missing waits, with a
+notice naming its trigger, but the configurator's."""
 
 import pytest
 
+from orbit.agent.application.lanes import SessionGate
 from orbit.agent.application.ports import TreeFailed
 from orbit.agent.application.tasks import Tasks
-from orbit.agent.application.triggers import ReviewRound, TriggerEngine
+from orbit.agent.application.triggers import ReviewRound, TriggerEngine, TriggerHooks
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.checks import Setup, configured_checks
+from orbit.agent.domain.checks import Setup, configure_prompt, configured_checks
 from orbit.agent.domain.reviews import ReviewJob, commit_review, review_prompt, review_values
 from orbit.agent.domain.roles import Role
-from orbit.agent.domain.triggers import Trigger
+from orbit.agent.domain.triggers import Trigger, VerificationState
 from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     CODER,
+    CONFIGURATOR,
+    CONFIGURE_CHECKS,
     GIT_FAILED,
     REVIEWER,
     SUPER_REVIEW,
     SUPER_REVIEWER,
     ErrorOccurred,
     Event,
+    Notice,
     TasksChanged,
     TaskSpec,
     TaskState,
@@ -36,14 +42,15 @@ COMMIT = "c1abcdef99"
 
 class Engine:
     """A trigger engine firing ``triggers`` over a board of its own, in ``tree``, with
-    ``roles`` (:data:`ROLES` unless given), recording what it publishes and the roles whose
-    lanes it kicks."""
+    ``roles`` (:data:`ROLES` unless given) and ``verification`` as its gate says it is (off
+    unless given), recording what it publishes and the roles whose lanes it kicks."""
 
     def __init__(
         self,
         triggers: dict[str, Trigger],
         tree: FakeTree | None = None,
         roles: dict[str, Role] | None = None,
+        verification: VerificationState = "off",
     ) -> None:
         self.events: list[Event] = []
         self.kicked: list[str] = []
@@ -52,7 +59,9 @@ class Engine:
         desk = desk_for(self.publish, tree=self.tree, triggers=triggers, roles=roles or ROLES)
         self.tasks = Tasks(TaskBoard(), self.publish)
         self.board = self.tasks.board
-        self.engine = TriggerEngine(desk, self.tasks, self.kicked.append, self.run_checks)
+        gate = SessionGate(verification=lambda: verification)
+        hooks = TriggerHooks(self.kicked.append, self.run_checks, gate)
+        self.engine = TriggerEngine(desk, self.tasks, hooks)
 
     async def publish(self, event: Event) -> None:
         self.events.append(event)
@@ -432,6 +441,24 @@ async def test_opening_gives_the_checks_configured_now() -> None:
     assert engine.shown()[0][3] == f"Hello. {configured_checks((LINT,), SETUP)}"
 
 
+async def test_opening_with_verification_missing_queues_todays_configurator_first() -> None:
+    engine = Engine(TRIGGERS, verification="missing")
+    engine.board.add(TaskSpec(prompt="Add a flag."))
+    queued = await engine.engine.started(())
+    configurator = engine.board.tasks[0]
+    assert queued == (configurator.id,)
+    assert (configurator.task.role, configurator.origin) == (CONFIGURATOR, "set-up-verification")
+    assert configurator.task.prompt == configure_prompt((), None)
+    assert engine.checks_run == 0
+
+
+async def test_opening_with_steps_queues_no_configurator() -> None:
+    engine = Engine(TRIGGERS, verification="configured")
+    assert await engine.engine.started((LINT,)) == ()
+    assert engine.board.tasks == ()
+    assert engine.checks_run == 1
+
+
 async def test_opening_with_verification_off_is_told_nothing_is_configured() -> None:
     engine = Engine({"hello": hello(prompt="{checks}", when={})})
     await engine.engine.started(None)
@@ -500,3 +527,71 @@ async def test_running_kicks_the_lane_of_each_role_of_the_tasks_still_on_the_boa
     engine.board.remove(gone)
     engine.engine.run((first, second, gone))
     assert engine.kicked == [REVIEWER]
+
+
+# Firing by hand on manual
+
+
+async def test_configure_checks_fired_by_hand_queues_todays_configurator_first() -> None:
+    tree = FakeTree()
+    tree.setup = SETUP
+    engine = Engine(TRIGGERS, tree)
+    engine.board.add(TaskSpec(prompt="Add a flag."))
+    queued = await engine.engine.fire_by_hand(CONFIGURE_CHECKS, (LINT,))
+    first = engine.board.tasks[0]
+    assert queued == (first.id,)
+    assert (first.task.role, first.origin, first.status) == (
+        CONFIGURATOR,
+        CONFIGURE_CHECKS,
+        "pending",
+    )
+    assert first.task.prompt == configure_prompt((LINT,), SETUP)
+    assert first.task.settings == ROLES[CONFIGURATOR].settings
+    assert isinstance(engine.events[-1], TasksChanged)
+    assert engine.kicked == []
+
+
+async def test_a_disabled_trigger_fired_by_hand_queues_nothing() -> None:
+    off = TRIGGERS[CONFIGURE_CHECKS].model_copy(update={"enabled": False})
+    engine = Engine({CONFIGURE_CHECKS: off})
+    assert await engine.engine.fire_by_hand(CONFIGURE_CHECKS, ()) == ()
+    assert engine.board.tasks == ()
+    assert engine.events == []
+
+
+# Setting up verification first
+
+
+async def test_a_task_queued_while_verification_is_missing_waits_with_a_notice() -> None:
+    engine = Engine({"look": look()}, verification="missing")
+    await engine.engine.landed(ended(), COMMIT)
+    assert engine.shown() == [(REVIEWER, "look", "pending", "Look at c1abcde")]
+    assert isinstance(engine.events[-2], TasksChanged)
+    assert engine.events[-1] == Notice(message="look's task waits: set up verification first.")
+
+
+async def test_each_task_queued_while_verification_is_missing_has_its_notice() -> None:
+    engine = Engine({"look": look(), "peek": look(prompt="Peek")}, verification="missing")
+    await engine.engine.landed(ended(), COMMIT)
+    notes = [event.message for event in engine.events if isinstance(event, Notice)]
+    assert notes == [
+        "look's task waits: set up verification first.",
+        "peek's task waits: set up verification first.",
+    ]
+
+
+async def test_the_configurators_task_queued_while_verification_is_missing_has_no_notice() -> None:
+    engine = Engine(TRIGGERS, verification="missing")
+    await engine.engine.fire_by_hand(CONFIGURE_CHECKS, ())
+    assert [role for role, _, _, _ in engine.shown()] == [CONFIGURATOR]
+    assert not any(isinstance(event, Notice) for event in engine.events)
+
+
+@pytest.mark.parametrize("verification", ["configured", "off"])
+async def test_a_task_queued_with_verification_set_up_or_off_has_no_notice(
+    verification: VerificationState,
+) -> None:
+    engine = Engine({"look": look()}, verification=verification)
+    await engine.engine.landed(ended(), COMMIT)
+    assert len(engine.board.tasks) == 1
+    assert not any(isinstance(event, Notice) for event in engine.events)

@@ -34,7 +34,7 @@ from orbit.agent.application.ports import CoderTree, Reply, TreeFailed
 from orbit.agent.application.review_trace import Queued, ReviewTally, ReviewTracing
 from orbit.agent.application.snapshots import snapshot_of
 from orbit.agent.application.tasks import Changed, Tasks
-from orbit.agent.application.triggers import ReviewRound, TriggerEngine
+from orbit.agent.application.triggers import ReviewRound, TriggerEngine, TriggerHooks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.endings import REVIEW_STOPPED_BY_YOU
 from orbit.agent.domain.reviews import (
@@ -115,7 +115,7 @@ class ReviewLane:
         # until it ends.
         self._causes: dict[str, Span] = {}
         self._tallies: dict[str, ReviewTally] = {}  # Review task id -> its suggestions, as it runs.
-        self._triggers = hooks.triggers or TriggerEngine(desk, tasks, self._kick_own)
+        self._triggers = hooks.triggers or TriggerEngine(desk, tasks, TriggerHooks(self._kick_own))
         self.runner = self._runner(hooks)
         self._paused_noted = False
         self._status: ReviewStatus | None = None

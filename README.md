@@ -98,7 +98,7 @@ In the app:
 | `t` | Hide agents' dim messages, still thinking out loud, in every tab; again, show them (works with the conversation activated too) |
 | `ctrl+b` | Hide the sidebar so the conversation takes the full width (`h`/`j`/`k`/`l` skip its windows meanwhile); again, show it as it was (not while typing) |
 | `ctrl+t` | Jump to the **planner** tab; again, to each other conversational role's tab in turn, and from the last, back to the tab you were on (with the built-in roles alone, the planner tab, the experimenter's, and back) |
-| `ctrl+r` | Run the tasks that haven't completed yet |
+| `ctrl+r` | Run the tasks that haven't completed yet (refused until verification is set up, if it's on with no steps; see [Verification steps](#verification-steps)) |
 | `ctrl+g` | Ask for a super review of the whole codebase now (works while tasks run; hidden while the `super-reviewer` is disabled) |
 | `ctrl+e` | Set up (or redo) the verification steps: after you confirm (`y` to go ahead, `n`/`esc` to cancel), queue a configurator task first and run it (see [Setting up verification](#setting-up-verification); hidden while the `configurator` is disabled) |
 | `ctrl+o` | Pick the model of the conversational role whose tab is shown, or the planner's on any other tab (default, then its runtime's aliases: fable, opus, sonnet, haiku and those your `config.toml` adds, each with the id it resolves to muted beside it when that's another; see [Models and their aliases](#models-and-their-aliases); new tasks opened there default to it too) |
@@ -361,7 +361,8 @@ closes it. It shows the task as it was when opened, even as the list changes und
 
 `ctrl+r` runs the tasks one after another, each through a fresh **agent**: a new `claude -p`
 session connected to orbit's MCP server, so tasks don't share context with each other or with the
-planner. The agent is told only who it is (`agent-1`, `agent-2`, …) and to fetch its task:
+planner. While verification is on with no steps, it's refused until a configurator sets them up
+(see [Verification steps](#verification-steps)). The agent is told only who it is (`agent-1`, `agent-2`, …) and to fetch its task:
 
 1. It calls orbit's `get_task` tool and gets the task's prompt.
 2. When it thinks it's done, it calls `complete_task` with a one-line summary. Orbit runs the
@@ -714,10 +715,22 @@ steps if they're what's wrong. `--no-verify` skips it, as does having no steps, 
 `[triggers.startup-check] enabled = false` turns it off, as
 `[triggers.startup-fix] enabled = false` does the draft.
 
-With no steps configured, nothing is verified: the conversation says so at startup (`No verification
-steps configured. Press ctrl+e to set them up.`), and each task that would have
-been verified is skipped, with the reason in the conversation. `--no-verify` turns verification off
-whatever the file says.
+With no steps configured, orbit sets them up with you before any task runs. The conversation says
+so at startup (`No verification steps configured. Press ctrl+e to set them up.`), and the
+`set-up-verification` trigger (see [Triggers](#triggers)) queues a configurator task first and
+runs it, as a confirmed `ctrl+e` does, so its agent works out the checks with you (see
+[Setting up verification](#setting-up-verification)). Until checks are accepted, running tasks is
+refused: `ctrl+r` says `Set up verification first: the configurator is working on it.` while a
+configurator task is queued or running, and `Set up verification first: press ctrl+e.` once it
+ended without accepted checks; the lanes that start by themselves start no task but a
+configurator's, and a task a trigger queues meanwhile, such as a super review, waits on the task
+list, the conversation saying so (`super-review's task waits: set up verification first.`). Adding,
+editing and accepting tasks, and every conversation, the planner's included, stay open. Once the
+checks are accepted, tasks run at once: the run going carries on with the next task, and the tasks
+waiting in the lanes that start by themselves start. `[triggers.set-up-verification] enabled =
+false` leaves starting the configurator to `ctrl+e`, and running is refused all the same until
+steps exist. Steps added to `.orbit/config.toml` by hand count once orbit opens the workspace
+again. `--no-verify` turns verification off whatever the file says, and nothing is refused.
 
 Failures go back to the same agent, which keeps the context of what it just did. After
 `fix_attempts` in-session fixes (default 5, set in `.orbit/config.toml`), or if the agent has exited, the task
@@ -748,13 +761,18 @@ inspects the repository (CI workflows, `.pre-commit-config.yaml`, `package.json`
 ones first, plus a setup command and the files whose changes should rerun it. It doesn't edit
 files.
 
-Press `ctrl+e` to start one. It asks for confirmation first, so a stray keypress does nothing:
-`y` goes ahead, `n` or `esc` cancels (`enter` doesn't answer). Once confirmed, the task goes to
-the front of the task list and runs straight away (if tasks are already running, it runs
+Orbit starts one by itself when it opens a workspace with verification on and no steps (see
+[Verification steps](#verification-steps)), and `ctrl+e` starts one whenever you like. It asks for
+confirmation first, so a stray keypress does nothing:
+`y` goes ahead, `n` or `esc` cancels (`enter` doesn't answer). Once confirmed, it fires the
+`configure-checks` trigger (see [Triggers](#triggers)): the task, its origin `configure-checks`,
+goes to the front of the task list and runs straight away (if tasks are already running, it runs
 next). It works whether or not steps are configured: its prompt
 lists the steps and setup configured now, if any, so the agent builds on them, which makes `ctrl+e`
 the way to reconfigure too. While a configurator task is queued or running, a confirmed `ctrl+e`
-doesn't add another; the conversation says `A configurator task is already queued or running.`
+doesn't add another; the conversation says `A configurator task is already queued or running.`,
+and the one queued runs if no run is going. With `[triggers.configure-checks] enabled = false`, a
+confirmed `ctrl+e` adds none.
 With `--no-verify` there's nothing to set up checks for, so a confirmed `ctrl+e` adds no task and
 the conversation says `Setting up checks needs verification on; orbit was started with --no-verify.`
 
@@ -1609,9 +1627,10 @@ reviews and super reviews [Reviews](#reviews) describes, and a project's own tri
 events queue their tasks. Orbit opening a workspace fires the `session_started` triggers, once,
 not as you switch sessions, nor while another orbit owns the repository: `startup-check` runs the
 [startup check](#verification-steps), and the step it fails fires the `startup_check_failed`
-triggers, whose `startup-fix` adds the draft fixing it. `set-up-verification` ships disabled
-until orbit refuses to run tasks while verification is missing, so the configurator still starts
-as the sections above say, and `manual` doesn't fire yet. `task_landed` and `task_finished` are
+triggers, whose `startup-fix` adds the draft fixing it; with verification on and no steps,
+`set-up-verification` queues the configurator's task first and runs it, as a confirmed `ctrl+e`
+does, which fires `configure-checks` by hand (see [Verification steps](#verification-steps)).
+`task_landed` and `task_finished` are
 the work lane's tasks' (a review's end isn't one), landings count toward the `commits` triggers
 only while reviews are on, as the review lane counts them, and a trigger with `checks` fires only
 on `session_started`.
@@ -1625,7 +1644,7 @@ The shipped triggers are data in
 | `review` | `task_landed` | every one | a `reviewer` task, from `review.md` | guard `review-rounds` |
 | `super-review` | `commits` | `origin = ["manual", "planner"]` | a `super-reviewer` task, from `super-review.md` | `every = 10`, guard `suggestions-pending`, manual as `Super review` |
 | `configure-checks` | `manual` | every one | a `configurator` task, from `configure-checks.md` | manual as `Set up checks` |
-| `set-up-verification` | `session_started` | `verification = "missing"` | a `configurator` task, from `configure-checks.md` | `enabled = false` for now |
+| `set-up-verification` | `session_started` | `verification = "missing"` | a `configurator` task, from `configure-checks.md` | runs at once, as `ctrl+e`'s does |
 | `startup-check` | `session_started` | `verification = "configured"` | runs the verification steps, `checks = "gate"` | |
 | `startup-fix` | `startup_check_failed` | every one | a `coder` task, from `startup-fix.md` | `draft = true` |
 
@@ -1666,11 +1685,13 @@ its name in braces:
 When an event fires, each enabled trigger on it fires in turn, in configuration order (the
 shipped ones, then the project's), if its role is enabled, its `when` takes the event and none of
 its guards holds it back. Its prompt is rendered from its template, and its task added at the end
-of the task list for its role, with that role's settings, or as a draft for you to accept with
-`draft = true`; the task's origin is the trigger's name, so the task list and the task's span
+of the task list for its role (a `configurator`'s at the front, as the checks it sets up verify the
+rest), with that role's settings, or as a draft for you to accept with `draft = true`; the task's origin is the trigger's name, so the task list and the task's span
 (`orbit.trigger`; see [Telemetry](#telemetry)) say which trigger queued it. A task whose role's
 lane starts by itself, such as `review`, starts there once the lane is free; one in the work lane
-runs with the run going, or the next. A trigger never fires on an event caused by a task it queued itself, one
+runs with the run going, or the next. While verification is missing, a task a trigger queues
+waits until checks are accepted, the conversation naming its trigger (`review's task waits: set up
+verification first.`), but a configurator's. A trigger never fires on an event caused by a task it queued itself, one
 whose origin is its name: a `task_finished` trigger queuing `coder` tasks doesn't fire again as
 its own tasks finish, though another trigger may.
 
@@ -3403,8 +3424,10 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     publishes the board, whole, once its callers have changed it. `WorkLane` (in `work_lane`) is
     the work lane: it runs the board's tasks one at a time, queues a fix after each failed step
     and lands work that passes, and `WorkTurns` (in `work_turns`) decides when it runs: when the
-    user asks (`ctrl+r`), when a review queues work unless the user held it, first for a
-    configurator, and again by itself once the usage limit that stopped it resets, timed by a
+    user asks (`ctrl+r`, refused while verification is missing), when a review queues work
+    unless the user held it, first for a configurator, which `configure-checks` queues or
+    `set-up-verification` did as the workspace opened, and again by itself once the usage limit
+    that stopped it resets, timed by a
     `LimitPause` (in `limit_pause`), saying meanwhile until when, why and on which runtime it's
     paused, which
     `SessionStates` (in `session_state`) publishes with the session's state; each coder's task takes one of the control plane's
@@ -3420,9 +3443,10 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `orbit.verify.step` child of the call's span; `Lander` (in `landing`) commits and merges
     verified work; every lane of the roles' but the one whose roles merge runs on a `LaneRunner`
     (in `lane_runner`), which starts its tasks by itself, one at a time, unless a halt stops it,
-    skipping those on the runtime whose pause the work lane waits out, and `Lanes` (also there)
-    holds the lanes by name; `TriggerEngine` (in `triggers`) fires the triggers on the events of
-    a task's end, queuing their tasks; `ReviewLane` (in `review_lane`)
+    skipping those on the runtime whose pause the work lane waits out and, while verification is
+    missing, as the session's `SessionGate` says, all but the configurator's, and `Lanes` (also
+    there) holds the lanes by name; `TriggerEngine` (in `triggers`) fires the triggers on the
+    events of a task's end, queuing their tasks; `ReviewLane` (in `review_lane`)
     finds the reviews due, which the `review` trigger queues and it books into batches, queues
     the super review and runs them on its lane's runner, beside the work, each traced as
     an `orbit.review` span by `ReviewTracing` (in `review_trace`), and the lane's tasks of other
@@ -3477,8 +3501,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     them), `config` (`OrbitConfig`: the
     limits, roles, verification steps, setup and skills by path a project file sets over the built-in defaults, and the skills in effect), `skills` (`Skill`, `SkillFile` and `SkillLibrary`, a skill built from its folder's files with its `SKILL.md`'s front matter, `parse_front_matter`, checked as Claude Code checks skills, and the library of the package's skill folders with the project's laid over them file by file, `load_skill_library`; `check_role_skills`, which checks the skills a role names against the library; and `SkillMapping`, a `[[skills]]` entry, whose paths and skills `check_skill_mappings` checks against the paths in the project and the library), `layers` (the layers a setting comes from, the user config's role fields and personal roles, and each role resolved across them field by field), `config_report` (what `orbit config show` reports: each setting in effect by its dotted key with the layer it came from, and a key's settings; and the skill map, `skill_map`, where each role's agents get each skill), `config_update` (what `orbit init --update` adds to a project file from the reference config: the keys a table it has doesn't mention, after the table's last line, and the tables it lacks, at the end, never changing a line of it; and the lines `orbit init --roles` adds, pointing each built-in role at its copy of its instructions; and the checks the configurator writes, in place of a file's steps and setup without changing its other lines, or of the reference config's examples of them) and `config_errors` (`ConfigError`,
     and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]` with its `TlsSettings`, which files each TLS mode needs, where now falls in a certificate's validity, and which hosts are loopback), `certificate_list` (what `orbit certs list` shows of each certificate: its expiry, days left, fingerprint and marks), `client_bundle` (what `orbit certs client --bundle` puts in a client's bundle: the CA, its certificate and key, and the `[remotes.<name>]` lines naming them where it's unpacked, which connect to a `wss://` URL alone), `remotes` (`RemoteSettings`, a `[remotes.<name>]` table, and which credentials go together), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
-    setup step that makes a fresh worktree ready, and the checks a configurator proposes), the
-    `Catalog` (in `catalog`: the workspace and its sessions, the agents' roles, the triggers and
+    setup step that makes a fresh worktree ready, and the checks a configurator proposes),
+    `setup_first` (which tasks wait while verification is missing, and why running them is
+    refused), the `Catalog` (in `catalog`: the workspace and its sessions, the agents' roles, the triggers and
     the lanes), `ReviewPlanner` (in `reviews`: when to review, batches, rounds and caps),
     `review_sample` (which code files a super review samples, rotating through them:
     `CODE_EXTENSIONS`, `sample_files` and `with_sample`), commit

@@ -14,7 +14,11 @@ review the whole codebase at the commit, each task booked into that review's bat
 
 The host raises ``session_started`` as it opens the workspace with its session, whose triggers
 with ``checks = "gate"`` run the startup check, and the startup check raises
-``startup_check_failed`` for the step that failed.
+``startup_check_failed`` for the step that failed. ctrl+e fires ``configure-checks`` by hand, on
+``manual``.
+
+While verification is missing, every task a trigger queues waits for it to be set up, as the
+session's gate says, with a notice naming its trigger, but a configurator's, which goes first.
 """
 
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
@@ -22,6 +26,7 @@ from dataclasses import dataclass
 from functools import partial
 
 from orbit.agent.application.desk import AgentDesk
+from orbit.agent.application.lanes import OPEN_GATE, SessionGate
 from orbit.agent.application.ports import TreeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
@@ -34,6 +39,7 @@ from orbit.agent.domain.reviews import (
     review_values,
 )
 from orbit.agent.domain.roles import enabled_roles, role_task
+from orbit.agent.domain.setup_first import waiting_for_setup, waiting_note
 from orbit.agent.domain.triggers import (
     COMMITS,
     REVIEW_ROUNDS,
@@ -53,7 +59,7 @@ from orbit.agent.domain.triggers import (
     verification_state,
 )
 from orbit.agent.domain.verification import VerificationStep, failure_report
-from orbit.protocol import CODER, GIT_FAILED, ErrorOccurred, TaskSpec, TaskState
+from orbit.protocol import CODER, GIT_FAILED, ErrorOccurred, Notice, TaskSpec, TaskState
 
 Values = Callable[[], Awaitable[Mapping[str, str] | None]]
 """What gathers an event's template values, but the trigger's name, once a trigger may fire on
@@ -107,6 +113,21 @@ def _no_checks() -> None:
     """Runs no checks."""
 
 
+@dataclass(frozen=True)
+class TriggerHooks:
+    """What a :class:`TriggerEngine` acts through: ``kick``, which runs the tasks waiting in a
+    role's lane if it starts by itself, ``run_checks``, which runs the verification steps as a
+    trigger with ``checks = "gate"`` asks, and the session's ``gate``, which says what
+    verification is."""
+
+    kick: Kick = _no_kick
+    run_checks: RunChecks = _no_checks
+    gate: SessionGate = OPEN_GATE
+
+
+_NO_HOOKS = TriggerHooks()
+
+
 async def _no_values() -> Mapping[str, str]:
     """The values of an event that gives none but the trigger's name."""
     return {}
@@ -119,24 +140,20 @@ async def _given(values: Mapping[str, str]) -> Mapping[str, str]:
 
 class TriggerEngine:
     """Fires the triggers of ``desk``'s agents on events, as they stand as each is raised,
-    queuing their tasks on ``tasks``' board, or for those with ``checks = "gate"`` having
-    ``run_checks`` run the verification steps, and runs those tasks when asked, with ``kick``,
-    each in its role's lane if that starts by itself.
+    queuing their tasks on ``tasks``' board, or for those with ``checks = "gate"`` having the
+    ``hooks``' ``run_checks`` run the verification steps, and runs those tasks when asked, with
+    their ``kick``, each in its role's lane if that starts by itself. While their ``gate`` says
+    verification is missing, each task it queues but a configurator's is noted as waiting.
 
     What raises an event runs the tasks it queued once it has done with them, as a lane runs the
     tasks it queues itself."""
 
-    def __init__(
-        self,
-        desk: AgentDesk,
-        tasks: Tasks,
-        kick: Kick = _no_kick,
-        run_checks: RunChecks = _no_checks,
-    ) -> None:
+    def __init__(self, desk: AgentDesk, tasks: Tasks, hooks: TriggerHooks = _NO_HOOKS) -> None:
         self._desk = desk
         self._tasks = tasks
-        self._kick = kick
-        self._run_checks = run_checks
+        self._kick = hooks.kick
+        self._run_checks = hooks.run_checks
+        self._gate = hooks.gate
 
     async def started(self, steps: Sequence[VerificationStep] | None) -> tuple[str, ...]:
         """Raise ``session_started``: orbit opened the workspace with its session, verifying
@@ -144,10 +161,25 @@ class TriggerEngine:
         and, with the tree's setup, its ``{checks}``. Those of its triggers with ``checks =
         "gate"`` run the steps. Returns the ids of the tasks the others queued."""
         fields = {"verification": verification_state(steps)}
-        tree = self._desk.agents.tree
-        checks = configured_checks(steps or (), None if tree is None else tree.setup)
         event = TriggerEvent(SESSION_STARTED, fields)
-        return await self.fire(event, partial(_given, {"checks": checks}))
+        return await self.fire(event, partial(_given, self._checks(steps or ())))
+
+    async def fire_by_hand(self, name: str, steps: Sequence[VerificationStep]) -> tuple[str, ...]:
+        """Fire the trigger ``name`` by hand, if it fires so, as :meth:`by_hand` says, whatever
+        its ``when`` and guards: its task is queued, a configurator's first, rendered from the
+        variables of ``manual``, its ``{checks}`` the ``steps`` and the tree's setup configured
+        now. The board is published if it was queued. Returns its id, for :meth:`run`; none if
+        it doesn't fire."""
+        fired = self.by_hand(name)
+        if not fired:
+            return ()
+        return await self._queue(_Firing(fired, self._checks(steps), None, counted=True))
+
+    def _checks(self, steps: Sequence[VerificationStep]) -> Mapping[str, str]:
+        """The ``{checks}`` of the verification ``steps`` and the tree's setup configured now,
+        which a configurator is told."""
+        tree = self._desk.agents.tree
+        return {"checks": configured_checks(steps, None if tree is None else tree.setup)}
 
     async def check_failed(self, step: VerificationStep, output: str) -> tuple[str, ...]:
         """Raise ``startup_check_failed``: ``step`` of the startup check failed with ``output``,
@@ -269,11 +301,24 @@ class TriggerEngine:
 
     async def _queue(self, firing: _Firing) -> tuple[str, ...]:
         """Queue the tasks of the triggers ``firing`` that no guard holds back, publishing the
-        board if any were; returns their ids."""
+        board if any were, then noting each that waits for verification to be set up; returns
+        their ids."""
         queued = self._add(self._tasks.board, firing)
         if queued:
             await self._tasks.publish()
+            await self._note_waiting(queued)
         return queued
+
+    async def _note_waiting(self, task_ids: Sequence[str]) -> None:
+        """Say of each of the tasks ``task_ids``, just queued, that waits for verification to be
+        set up, as the gate says it is, that it waits, naming the trigger that queued it, its
+        origin."""
+        board = self._tasks.board
+        states = [board.get(task_id) for task_id in task_ids]
+        waiting = waiting_for_setup(self._gate.verification(), states)
+        for state in states:
+            if state.id in waiting:
+                await self._desk.publish(Notice(message=waiting_note(state.origin)))
 
     def _add(self, board: TaskBoard, firing: _Firing) -> tuple[str, ...]:
         """Add to ``board`` the task of each of the triggers ``firing`` that no guard holds

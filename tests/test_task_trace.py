@@ -33,6 +33,7 @@ from tests.agent_fakes import (
     Call,
     FakeHost,
     FakeTree,
+    FakeWorkspace,
     Script,
     ScriptedLauncher,
     Steps,
@@ -362,9 +363,10 @@ async def test_a_merge_conflict_is_its_result_and_an_event() -> None:
     assert [event.name for event in task.events] == ["orbit.merge.conflict"]
 
 
-async def test_verification_with_no_steps_is_skipped() -> None:
+async def test_verification_of_a_task_that_changed_nothing_is_skipped() -> None:
     traced = Traced()
-    session = traced_session(traced, claims_done, verification=Verification((), Steps()))
+    unchanged = verified(Steps(), FakeWorkspace("a", "a"))
+    session = traced_session(traced, claims_done, verification=unchanged)
     await asyncio.wait_for(run(session), 5)
 
     assert attributes(traced.task())["orbit.verify.result"] == "skipped"

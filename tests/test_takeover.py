@@ -48,6 +48,7 @@ from tests.agent_fakes import (
     FakeLock,
     FakeStore,
     FakeTree,
+    Steps,
     claims_done,
     commands_of,
     events_until,
@@ -55,7 +56,6 @@ from tests.agent_fakes import (
     halt_of,
     idle,
     lane_of,
-    no_steps,
     queued,
     review_count_of,
     send,
@@ -64,6 +64,7 @@ from tests.agent_fakes import (
     switcher_of,
     tasks_of,
     turns_of,
+    verified,
 )
 from tests.attach_fakes import EARLIER, stored
 from tests.connection_helpers import views_on_joining
@@ -641,7 +642,7 @@ async def test_work_sent_while_taking_over_runs_after_the_work_queued_before() -
     session, _, launcher = session_for(
         Configurator(),
         claims_done,
-        verification=no_steps(),
+        verification=verified(Steps(True)),
         owner=OWNER,
         lock=lock,
         recover=recovery,
