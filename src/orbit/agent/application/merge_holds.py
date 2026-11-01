@@ -20,6 +20,7 @@ from orbit.agent.application.ports import CoderTree, Publish, SessionStore, Stor
 from orbit.agent.application.set_runs import SetResult
 from orbit.agent.application.storage_halt import Halting, written
 from orbit.agent.application.tasks import Tasks
+from orbit.agent.domain.board import CUT_SHORT, WAITING
 from orbit.agent.domain.merge_holds import (
     NONE_LIFTED,
     Hold,
@@ -45,9 +46,9 @@ from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.agent.domain.verification import CheckSet, VerificationStep, failure_report
 from orbit.protocol import CODER, INTERNAL, MergeHold, Notice, TaskState
 
-_FIXING = frozenset({"pending", "running", "verifying", "error"})
-"""The statuses of a task that's still to fix what it fixes: one that ended in error is left to run
-again."""
+_FIXING = WAITING | CUT_SHORT
+"""The statuses of a task that's still to fix what it fixes: one yet to finish, or one cut short by
+an error, the user or a crash, which the board runs again first."""
 
 
 type _Read = Literal["unread", "read"]
@@ -260,8 +261,8 @@ class MergeHolds:
         return find_hold(decision.holds, name) if decision.fix else None
 
     def _fixing(self, name: str) -> bool:
-        """Whether a fix for the set ``name`` is still to run, running, or ended in error, which
-        leaves it to run again."""
+        """Whether a fix for the set ``name`` is still to run, running, or cut short by an error,
+        the user or a crash, which leaves it to run again."""
         return any(
             state.status in _FIXING and self._fixes(state) == name for state in self._board.tasks
         )

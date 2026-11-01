@@ -5,6 +5,8 @@ store, restored without the sets removed, and a failing save halting the session
 import asyncio
 from collections.abc import Mapping
 
+import pytest
+
 from orbit.agent.application.merge_holds import HoldParts, MergeHolds
 from orbit.agent.application.ports import StoreFailed, TreeFailed
 from orbit.agent.application.set_runs import SetResult
@@ -14,7 +16,16 @@ from orbit.agent.domain.merge_holds import Hold
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.agent.domain.verification import CheckSet, VerificationStep
-from orbit.protocol import CODER, INTERNAL, ErrorOccurred, Event, MergeHold, Notice, TaskSpec
+from orbit.protocol import (
+    CODER,
+    INTERNAL,
+    ErrorOccurred,
+    Event,
+    MergeHold,
+    Notice,
+    TaskSpec,
+    TaskStatus,
+)
 from tests.agent_fakes import ROLES, FakeHalt, FakeStore, FakeTree
 
 STEP = VerificationStep("Stress tests", ("stress",), "stress")
@@ -119,22 +130,26 @@ async def test_a_failure_after_its_fix_ran_queues_another() -> None:
     assert holds.holds.holds == (Hold("stress", "c5", "Stress tests", "2 failed", 2),)
 
 
-async def test_a_failure_while_its_fix_is_in_error_queues_no_other() -> None:
+@pytest.mark.parametrize("cut_short", ["error", "cancelled"])
+async def test_a_failure_while_its_fix_is_cut_short_queues_no_other(cut_short: TaskStatus) -> None:
     holds = Holds()
     await failed(holds)
-    holds.tasks.board.set_status(holds.tasks.board.tasks[0].id, "error")
+    holds.tasks.board.set_status(holds.tasks.board.tasks[0].id, cut_short)
     await failed(holds, "c5")
     assert len(holds.prompts()) == 1
     assert holds.holds.holds == (Hold("stress", "c5", "Stress tests", "2 failed", 1),)
 
 
-async def test_a_fix_ending_unlanded_while_another_is_in_error_queues_no_other() -> None:
+@pytest.mark.parametrize("cut_short", ["error", "cancelled"])
+async def test_a_fix_ending_unlanded_while_another_is_cut_short_queues_no_other(
+    cut_short: TaskStatus,
+) -> None:
     holds = Holds()
     board = holds.tasks.board
     await failed(holds)
-    errored = board.tasks[0].id
-    board.set_status(errored, "error")
-    other = board.add_first(TaskSpec(prompt=board.get(errored).task.prompt), "nightly")
+    stopped = board.tasks[0].id
+    board.set_status(stopped, cut_short)
+    other = board.add_first(TaskSpec(prompt=board.get(stopped).task.prompt), "nightly")
     board.set_status(other, "gave_up")
     await holds.holds.hear_unlanded_fix(board.get(other))
     assert len(holds.prompts()) == 2 and holds.holds.holds == (HELD,)
