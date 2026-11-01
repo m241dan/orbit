@@ -605,14 +605,16 @@ class SessionStore(EventLog, Protocol):
         ...
 
     async def review_count(self) -> SuperReviewCount:
-        """The commits since the last super review and the commit it reviewed; none of either
-        when none is saved. Raises :class:`ReadFailed` when the store can't be read."""
+        """The commits since the last super review and the commit it reviewed, with the super
+        reviews so far and the number of the one that last sampled each file; none of any when
+        none is saved. Raises :class:`ReadFailed` when the store can't be read."""
         ...
 
     async def save_review_count(self, count: SuperReviewCount) -> None:
         """Save ``count`` as the commits since the last super review and the commit it
-        reviewed; raises :class:`StoreFailed`, a :class:`StorageFailed` when the database
-        failed, when it can't."""
+        reviewed, with the super reviews so far and the files they sampled; raises
+        :class:`StoreFailed`, a :class:`StorageFailed` when the database failed, when it
+        can't."""
         ...
 
     async def record_moves(self) -> dict[str, str]:

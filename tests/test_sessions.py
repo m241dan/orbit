@@ -30,6 +30,7 @@ from orbit.agent.domain.sessions import (
     openable,
     parse_record,
     parse_review_count,
+    parse_sampled,
     record_json,
     record_name,
     renamable,
@@ -37,6 +38,7 @@ from orbit.agent.domain.sessions import (
     resumed_settings,
     runtime_changed,
     runtime_changed_message,
+    sampled_json,
     session_name,
     stored_summary,
     summarize,
@@ -399,6 +401,15 @@ def test_the_review_count_and_last_super_commit_round_trip_through_json() -> Non
     assert parse_review_count(review_count_json(7, "abc")) == SuperReviewCount(7, "abc")
 
 
+def test_the_review_count_and_its_sample_record_round_trip_through_json() -> None:
+    text = '{"since_super": 1, "super_reviews": 3, "sampled": {"a.py": 1, "b.py": 3}}'
+    assert parse_review_count(text) == SuperReviewCount(1, None, 3, {"a.py": 1, "b.py": 3})
+
+
+def test_a_review_count_saved_before_the_sample_was_kept_has_no_super_reviews_or_record() -> None:
+    assert parse_review_count(review_count_json(7, "abc")) == SuperReviewCount(7, "abc", 0, {})
+
+
 def test_an_unreadable_review_count_is_zero() -> None:
     texts = (
         "",
@@ -407,8 +418,20 @@ def test_an_unreadable_review_count_is_zero() -> None:
         '{"since_super": -1}',
         '{"since_super": "many"}',
         '{"since_super": 1, "last_super_commit": 5}',
+        '{"since_super": 1, "super_reviews": -1}',
+        '{"since_super": 1, "sampled": {"a.py": "often"}}',
+        '{"since_super": 1, "sampled": {"a.py": -1}}',
     )
-    assert [parse_review_count(text) for text in texts] == [SuperReviewCount()] * 6
+    assert [parse_review_count(text) for text in texts] == [SuperReviewCount()] * 9
+
+
+def test_the_sample_record_round_trips_through_json() -> None:
+    assert parse_sampled(sampled_json({"a.py": 1, "b.py": 3})) == {"a.py": 1, "b.py": 3}
+
+
+def test_an_unreadable_sample_record_is_empty() -> None:
+    texts = ("", "{oops", "[]", '{"a.py": "often"}', '{"a.py": -1}')
+    assert [parse_sampled(text) for text in texts] == [{}] * 5
 
 
 def test_a_summary_of_tasks_has_no_last_active_time() -> None:

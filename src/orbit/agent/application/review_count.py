@@ -1,5 +1,5 @@
-"""The repository's count of commits since the last super review, and the commit that one
-reviewed, kept apart from any one session."""
+"""The repository's count of commits since the last super review, the commit that one reviewed,
+and the super reviews it has had with the files each sampled, kept apart from any one session."""
 
 import asyncio
 

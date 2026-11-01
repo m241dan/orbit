@@ -7,13 +7,21 @@ clock; these rules only shape what's in them.
 """
 
 from collections import Counter
-from collections.abc import Callable, Collection, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from functools import reduce
 from typing import Any
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    NonNegativeInt,
+    TypeAdapter,
+    ValidationError,
+)
 from pydantic_core import from_json
 
 from orbit.agent.domain.consultations import RESTARTED
@@ -201,14 +209,22 @@ class SessionRecord(BaseModel):
     caused_spent: dict[str, dict[str, Usage]] = Field(default={})
 
 
+_SAMPLED: TypeAdapter[dict[str, int]] = TypeAdapter(dict[str, NonNegativeInt])
+"""The number of the super review that last sampled each file, by path."""
+
+
 class _ReviewCount(BaseModel):
     """The commits since the last super review, and the commit it reviewed (none before the
-    first, nor in a count saved before it was kept), kept per repository."""
+    first, nor in a count saved before it was kept), with the super reviews so far and the
+    number of the one that last sampled each file (none, and nothing, in a count saved before
+    they were kept), kept per repository."""
 
     model_config = ConfigDict(frozen=True)
 
     since_super: int = Field(ge=0)
     last_super_commit: str | None = None
+    super_reviews: int = Field(default=0, ge=0)
+    sampled: dict[str, NonNegativeInt] = {}
 
 
 @dataclass(frozen=True)
@@ -461,4 +477,21 @@ def parse_review_count(text: str) -> SuperReviewCount:
         count = _ReviewCount.model_validate_json(text)
     except ValidationError:
         return SuperReviewCount()
-    return SuperReviewCount(count.since_super, count.last_super_commit)
+    return SuperReviewCount(
+        count.since_super, count.last_super_commit, count.super_reviews, count.sampled
+    )
+
+
+def sampled_json(sampled: Mapping[str, int]) -> str:
+    """``sampled``, the number of the super review that last sampled each file, by path, as
+    JSON."""
+    return _SAMPLED.dump_json(dict(sampled)).decode()
+
+
+def parse_sampled(text: str) -> dict[str, int]:
+    """The number of the super review that last sampled each file, by path, in JSON ``text``;
+    none when it's unreadable, so the rotation starts again."""
+    try:
+        return _SAMPLED.validate_json(text)
+    except ValidationError:
+        return {}

@@ -32,7 +32,6 @@ from orbit.agent.application.snapshots import snapshot_of
 from orbit.agent.application.tasks import Changed, Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.endings import REVIEW_STOPPED_BY_YOU
-from orbit.agent.domain.review_sample import sample_files
 from orbit.agent.domain.reviews import (
     LandedSince,
     LaneSnapshot,
@@ -356,15 +355,15 @@ class ReviewLane:
 
     async def _sample(self, commit: str, changed: Sequence[str]) -> tuple[str, ...]:
         """The code files tracked at ``commit`` that a super review of it reads besides those
-        ``changed`` since the last, chosen at random under the project's mapped paths, as many
-        as the limits allow; none if git can't list them."""
+        ``changed`` since the last, under the project's mapped paths, as many as the limits
+        allow: those sampled longest ago, ties chosen at random, recorded as sampled by it.
+        None, and the record as it was, if git can't list them."""
         try:
             tracked = await self._tree.tracked_files(commit)
         except TreeFailed:
             return ()
         mapped = [path for mapping in self._desk.agents.skill_mappings for path in mapping.paths]
-        size = self.planner.limits.super_sample
-        return sample_files(tracked, mapped, changed, size, random.sample)
+        return self.planner.sample(tracked, mapped, changed, random.sample)
 
     async def _add(self, job: ReviewJob, diff: str, landed: LandedSince) -> None:
         """Queue ``job``'s review task, told ``diff`` and that ``landed`` landed since."""

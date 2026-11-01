@@ -142,6 +142,13 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         # for the counts saved before it was kept.
         "ALTER TABLE reviews ADD COLUMN last_super_commit TEXT",
     ),
+    (
+        # How many super reviews each workspace has had, and the number of the one that last
+        # sampled each file, as a JSON object by path; none, and nothing, for the counts saved
+        # before they were kept.
+        "ALTER TABLE reviews ADD COLUMN super_reviews INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE reviews ADD COLUMN sampled TEXT NOT NULL DEFAULT '{}'",
+    ),
 )
 
 

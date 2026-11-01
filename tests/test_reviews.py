@@ -1,7 +1,9 @@
 """When reviews happen and what they may suggest: rounds, batches, the breaker and caps."""
 
+from collections.abc import Sequence
 from dataclasses import fields
 
+from orbit.agent.domain.review_sample import Choose
 from orbit.agent.domain.reviews import (
     DIFF_LIMIT,
     FILES_LIMIT,
@@ -529,7 +531,7 @@ def test_a_super_review_starts_from_the_commit_it_reviews_after_the_first() -> N
     reviews.count(state("1"), ())
     assert reviews.count(state("2"), ())
     reviews.super_review("def")
-    assert reviews.super_count == SuperReviewCount(0, "def")
+    assert reviews.super_count == SuperReviewCount(0, "def", 2)
 
 
 def test_the_super_review_count_is_its_commits_since_the_last_and_that_ones_commit() -> None:
@@ -540,6 +542,84 @@ def test_the_super_review_count_is_its_commits_since_the_last_and_that_ones_comm
     reviews.super_count = SuperReviewCount(2, "abc")
     assert (reviews.since_super, reviews.last_super_commit) == (2, "abc")
     assert reviews.count(state("2"), ())
+
+
+def test_the_super_review_count_holds_the_super_reviews_and_the_files_each_last_sampled() -> None:
+    reviews = counting(3)
+    reviews.super_count = SuperReviewCount(1, "abc", 4, {"a.py": 2})
+    assert (reviews.super_reviews, reviews.sampled) == (4, {"a.py": 2})
+    assert reviews.super_count == SuperReviewCount(1, "abc", 4, {"a.py": 2})
+
+
+def test_each_super_review_queued_counts_one_more_super_review() -> None:
+    reviews = counting(3)
+    assert reviews.super_reviews == 0
+    reviews.super_review("abc")
+    reviews.super_review("def")
+    assert reviews.super_reviews == 2
+
+
+ABC = ("a.py", "b.py", "c.py")
+UNCOUNTED = SuperReviewCount()
+
+
+def sampling(size: int, count: SuperReviewCount = UNCOUNTED) -> ReviewPlanner:
+    """A planner whose super reviews sample ``size`` files, counting on from ``count``."""
+    reviews = ReviewPlanner(ReviewLimits(super_sample=size))
+    reviews.super_count = count
+    return reviews
+
+
+def sampled_by_next(
+    reviews: ReviewPlanner, choose: Choose, tracked: Sequence[str] = ABC
+) -> tuple[str, ...]:
+    """What the next super review ``reviews`` queues samples of ``tracked``, with ``choose``."""
+    reviews.super_review("abc")
+    return reviews.sample(tracked, (), (), choose)
+
+
+def first(paths: Sequence[str], size: int) -> list[str]:
+    return list(paths[:size])
+
+
+def last(paths: Sequence[str], size: int) -> list[str]:
+    return list(paths[::-1][:size])
+
+
+def test_the_second_super_review_samples_the_file_never_sampled_and_one_of_the_rest() -> None:
+    reviews = sampling(2)
+    assert sampled_by_next(reviews, first) == ("a.py", "b.py")
+    assert reviews.sampled == {"a.py": 1, "b.py": 1}
+    after = reviews.super_count
+    assert sampled_by_next(reviews, first) == ("a.py", "c.py")
+    reviews.super_count = after
+    assert sampled_by_next(reviews, last) == ("b.py", "c.py")
+
+
+def test_the_sample_rotates_through_every_file_before_any_comes_up_again() -> None:
+    reviews = sampling(1, SuperReviewCount(super_reviews=3, sampled={"a.py": 1, "b.py": 3}))
+    samples = [sampled_by_next(reviews, first) for _ in range(3)]
+    assert samples == [("c.py",), ("a.py",), ("b.py",)]
+    assert reviews.super_count == SuperReviewCount(0, "abc", 6, {"a.py": 5, "b.py": 6, "c.py": 4})
+
+
+def test_a_file_no_longer_tracked_is_forgotten_when_the_next_super_review_samples() -> None:
+    reviews = sampling(1, SuperReviewCount(super_reviews=1, sampled={"gone.py": 1, "a.py": 1}))
+    assert sampled_by_next(reviews, first, ("a.py", "b.py")) == ("b.py",)
+    assert reviews.sampled == {"a.py": 1, "b.py": 2}
+
+
+def test_a_super_review_sampling_nothing_still_forgets_files_no_longer_tracked() -> None:
+    reviews = sampling(0, SuperReviewCount(super_reviews=1, sampled={"gone.py": 1}))
+    assert sampled_by_next(reviews, first) == ()
+    assert reviews.super_count == SuperReviewCount(0, "abc", 2, {})
+
+
+def test_the_sample_leaves_out_the_files_changed_and_those_outside_the_mapped_paths() -> None:
+    reviews = sampling(10)
+    reviews.super_review("abc")
+    tracked = ("src/a.py", "src/b.py", "tools/c.py")
+    assert reviews.sample(tracked, ["src"], ["src/a.py"], first) == ("src/b.py",)
 
 
 def test_a_super_reviews_batch_has_its_own_cap() -> None:
@@ -806,9 +886,9 @@ def test_the_super_review_count_is_kept_apart_from_snapshots() -> None:
     reviews = ReviewPlanner(ReviewLimits(super_every=3))
     reviews.count(state("1"), ())
     snapshot = reviews.snapshot()
-    reviews.super_count = SuperReviewCount(2, "abc")
+    reviews.super_count = SuperReviewCount(2, "abc", 3, {"a.py": 1})
     reviews.restore(snapshot)
-    assert reviews.super_count == SuperReviewCount(2, "abc")
+    assert reviews.super_count == SuperReviewCount(2, "abc", 3, {"a.py": 1})
     assert reviews.count(state("2"), ())
     assert reviews.since_super == 0
 

@@ -14,7 +14,7 @@ from orbit.agent.domain.activity import reported
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.config import load_config
 from orbit.agent.domain.endings import BUG, CANCELLED, REVIEW_STOPPED_BY_YOU, STOPPED_BY_YOU
-from orbit.agent.domain.reviews import ReviewLimits
+from orbit.agent.domain.reviews import ReviewLimits, SuperReviewCount
 from orbit.agent.domain.skills import SkillMapping
 from orbit.protocol import (
     GIT_FAILED,
@@ -694,6 +694,50 @@ async def test_a_super_review_whose_commits_since_cannot_be_listed_still_samples
     events = await asyncio.wait_for(settle(session), 10)
     prompt = super_task(events).task.prompt
     assert prompt.endswith(f"10 suggestions.\n\n{SAMPLED}\n- src/a.py")
+
+
+async def test_successive_super_reviews_sample_the_files_sampled_longest_ago() -> None:
+    tree = FakeTree()
+    tree.tracked[tree.base] = TRACKED
+    session, _, _ = session_for(
+        reviewers=(suggests(), suggests(), suggests()),
+        tree=tree,
+        review=True,
+        review_limits=ReviewLimits(super_sample=1),
+    )
+    sampled = {"src/a.py": 1, "src/b.cpp": 3}
+    lane_of(session).planner.super_count = SuperReviewCount(super_reviews=3, sampled=sampled)
+    events: list[Event] = []
+    prompts: list[str] = []
+    for _ in range(3):
+        await send(session, FireTrigger(trigger=SUPER_REVIEW))
+        events = await asyncio.wait_for(settle(session, events), 10)
+        prompts.append(super_task(events).task.prompt.split(f"{SAMPLED}\n", 1)[1])
+    assert prompts == ["- tests/t.py", "- src/a.py", "- src/b.cpp"]
+    count = lane_of(session).planner.super_count
+    assert count.super_reviews == 6
+    assert count.sampled == {"src/a.py": 5, "src/b.cpp": 6, "tests/t.py": 4}
+
+
+async def test_a_super_review_forgets_the_sampled_files_no_longer_tracked() -> None:
+    tree = FakeTree()
+    tree.tracked[tree.base] = ["src/a.py"]
+    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
+    lane_of(session).planner.super_count = SuperReviewCount(super_reviews=1, sampled={"gone.py": 1})
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
+    await asyncio.wait_for(settle(session), 10)
+    assert lane_of(session).planner.sampled == {"src/a.py": 2}
+
+
+async def test_a_super_review_whose_tracked_files_cannot_be_listed_keeps_the_record() -> None:
+    tree = FakeTree()
+    tree.failures["tracked_files"] = TreeFailed("git ls-tree failed: bad revision")
+    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
+    lane_of(session).planner.super_count = SuperReviewCount(super_reviews=1, sampled={"a.py": 1})
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
+    await asyncio.wait_for(settle(session), 10)
+    count = lane_of(session).planner.super_count
+    assert (count.super_reviews, count.sampled) == (2, {"a.py": 1})
 
 
 async def test_a_super_review_is_skipped_when_the_base_commit_cannot_be_read() -> None:

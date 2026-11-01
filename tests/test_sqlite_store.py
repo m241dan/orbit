@@ -60,11 +60,11 @@ async def test_sessions_and_the_review_count_survive_closing(
 ) -> None:
     store = await open_store(workspace)
     await store.save(record())
-    await store.save_review_count(SuperReviewCount(2, "abc"))
+    await store.save_review_count(SuperReviewCount(2, "abc", 3, {"a.py": 1, "b.py": 3}))
     await store.close()
     reopened = await open_store(workspace)
     assert await reopened.load("abc") == record()
-    assert await reopened.review_count() == SuperReviewCount(2, "abc")
+    assert await reopened.review_count() == SuperReviewCount(2, "abc", 3, {"a.py": 1, "b.py": 3})
 
 
 async def test_each_workspace_has_its_own_sessions_and_review_count(

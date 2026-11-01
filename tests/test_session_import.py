@@ -146,6 +146,15 @@ async def test_a_review_count_with_its_last_super_commit_is_imported_with_it(
     assert await store.review_count() == SuperReviewCount(3, "abc")
 
 
+async def test_a_review_count_with_its_sample_record_is_imported_with_it(
+    store: OwnView, legacy: Path
+) -> None:
+    text = '{"since_super": 3, "super_reviews": 2, "sampled": {"a.py": 2}}'
+    (legacy / "reviews.json").write_text(text)
+    assert await import_session_files(store, legacy) == first(3)
+    assert await store.review_count() == SuperReviewCount(3, None, 2, {"a.py": 2})
+
+
 async def test_without_a_sessions_folder_nothing_is_done(store: OwnView, tmp_path: Path) -> None:
     (tmp_path / "reviews.json").write_text(review_count_json(3))
     assert await import_session_files(store, tmp_path) is None

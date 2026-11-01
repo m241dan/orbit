@@ -7,12 +7,13 @@ reviewed: review pauses until the user's next task lands, which bounds how much 
 generate by themselves.
 """
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from pydantic import BaseModel, ConfigDict
 
 from orbit.agent.domain.board import WAITING
+from orbit.agent.domain.review_sample import Choose, Draw, sample_files, with_sample
 from orbit.protocol import (
     CONFIGURATOR,
     MANUAL_ORIGIN,
@@ -44,10 +45,13 @@ FILES_LIMIT = 100
 class SuperReviewCount:
     """The repository's count towards its next super review: ``since_super`` commits counted
     since the last, and ``last_super_commit``, the commit that one reviewed (none before the
-    first)."""
+    first); with the ``super_reviews`` it has had, and the number of the one that last
+    ``sampled`` each file, by path."""
 
     since_super: int = 0
     last_super_commit: str | None = None
+    super_reviews: int = 0
+    sampled: Mapping[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -199,6 +203,9 @@ class ReviewPlanner:
         self.paused = False
         self.since_super = 0  # Commits since the last super review.
         self.last_super_commit: str | None = None  # The commit it reviewed; none before one.
+        self.super_reviews = 0  # The super reviews the repository has had.
+        # The number of the super review that last sampled each file, by path.
+        self.sampled: Mapping[str, int] = {}
         self._next_batch = 1
         self._open: dict[str, _Batch] = {}
         self._suggested: set[str] = set()  # Normalised titles of the suggestions accepted.
@@ -224,13 +231,16 @@ class ReviewPlanner:
 
     @property
     def super_count(self) -> SuperReviewCount:
-        """The count towards the next super review, kept per repository rather than in
-        snapshots."""
-        return SuperReviewCount(self.since_super, self.last_super_commit)
+        """The count towards the next super review, with the super reviews so far and the files
+        they sampled, kept per repository rather than in snapshots."""
+        return SuperReviewCount(
+            self.since_super, self.last_super_commit, self.super_reviews, self.sampled
+        )
 
     @super_count.setter
     def super_count(self, count: SuperReviewCount) -> None:
         self.since_super, self.last_super_commit = count.since_super, count.last_super_commit
+        self.super_reviews, self.sampled = count.super_reviews, count.sampled
 
     @property
     def open_batches(self) -> tuple[str, ...]:
@@ -336,10 +346,28 @@ class ReviewPlanner:
         )
 
     def super_review(self, commit: str) -> ReviewJob:
-        """A super review of the codebase at ``commit``; the count starts again, from it."""
+        """A super review of the codebase at ``commit``, one more for the repository; the count
+        starts again, from it."""
         self.since_super = 0
         self.last_super_commit = commit
+        self.super_reviews += 1
         return ReviewJob(commits=(commit,), round=0, batch=None, whole=True)
+
+    def sample(
+        self,
+        tracked: Collection[str],
+        mapped_paths: Collection[str],
+        changed: Collection[str],
+        choose: Choose,
+    ) -> tuple[str, ...]:
+        """The code files of the ``tracked`` ones that the super review queued last reads
+        besides those ``changed`` since the one before, within ``mapped_paths``, as many as the
+        limits allow, as :func:`sample_files` draws them with ``choose``. They're recorded as
+        sampled by that review, and the files no longer tracked forgotten."""
+        draw = Draw(self.limits.super_sample, choose)
+        sample = sample_files(tracked, mapped_paths, changed, self.sampled, draw)
+        self.sampled = with_sample(self.sampled, sample, tracked, self.super_reviews)
+        return sample
 
     def landed(self, state: TaskState, commit: str) -> ReviewJob | None:
         """Task ``state`` landed ``commit``; returns the review that's due, if any: none while

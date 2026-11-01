@@ -182,9 +182,28 @@ async def test_the_review_state_and_the_repositorys_super_count_are_saved() -> N
 
     # Counting on from the saved 1, the first landing made a super review due, of its commit.
     assert "super-reviewer" in [t.task.role for t in board(events)]
-    assert store.counts == [SuperReviewCount(0, "c1")]
+    assert store.counts == [SuperReviewCount(0, "c1", 1)]
     assert store.last.reviews == lane_of(session).snapshot()
     assert store.last.reviews is not None and store.last.reviews.jobs
+    await session.close()
+
+
+async def test_the_files_a_super_review_samples_are_saved_with_the_count() -> None:
+    store = FakeStore(count=1)
+    tree = FakeTree()
+    tree.tracked["c1"] = ["a.py", "README.md"]
+    session, _, _ = session_for(
+        claims_done,
+        reviewers=(suggests(), suggests()),
+        tree=tree,
+        review=True,
+        review_limits=ReviewLimits(super_every=2),
+        store=store,
+    )
+    await start(session)
+    await asyncio.wait_for(settle(session), 10)
+
+    assert store.count == SuperReviewCount(0, "c1", 1, {"a.py": 1})
     await session.close()
 
 
@@ -256,7 +275,7 @@ async def test_a_super_review_asked_for_saves_its_commit_with_the_count_restarte
     await send(session, FireTrigger(trigger=SUPER_REVIEW))
     await asyncio.wait_for(settle(session), 10)
 
-    assert store.counts == [SuperReviewCount(0, tree.base)]
+    assert store.counts == [SuperReviewCount(0, tree.base, 1)]
     await session.close()
 
 

@@ -25,8 +25,10 @@ The conversation window's transcript isn't in the record: every event of a sessi
 store's event log instead, and a reopened session shows its last 500 events, paging back to its
 start, or, once the log was trimmed, to the line "Older events were removed (session_log_mb)" (see
 README's [Sessions](../README.md#sessions)). Nor does the record hold the count of commits towards
-the next super review, nor the commit the last one reviewed, which belong to the repository and are
-kept in the store's `reviews` table, one row per workspace, or anything from `.orbit/config.toml`, which is read at startup as before.
+the next super review, the commit the last one reviewed, or how many super reviews there have been
+and which one last sampled each file, which belong to the repository and are kept in the store's
+`reviews` table, one row per workspace, or anything from `.orbit/config.toml`, which is read at
+startup as before.
 
 ## Design
 

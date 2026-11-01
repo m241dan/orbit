@@ -1137,14 +1137,16 @@ review:`, then the files they changed under `Files they changed:` (sorted, the f
 the rest counted); the first super review in a repository, or one with nothing landed since the
 last, lists neither, and one whose lists git can't give goes ahead without them. It then lists, under
 `Sampled files (read these too):`, a sample of up to `super_review_sample` other code files
-(default 10; 0 for none), chosen at random, sorted: files git tracks at the reviewed commit with a
-source extension (`.py`, `.pyi`, `.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hh`, `.hpp`, `.rs`, `.go`,
-`.java`, `.kt`, `.js`, `.jsx`, `.ts`, `.tsx`, `.cs`, `.swift` or `.rb`), within the `[[skills]]`
-paths when any are mapped (see [Skills](#skills)), and not among the files the commits since
-changed, so the rest of the code comes up for review too; with none eligible, or when git can't
-list the files, there's no sample. The count, and the
-commit the last super review reviewed, belong to the repository rather than to a session, so they
-carry on across sessions and restarts. A super review that falls
+(default 10; 0 for none), sorted: files git tracks at the reviewed commit with a source extension
+(`.py`, `.pyi`, `.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hh`, `.hpp`, `.rs`, `.go`, `.java`, `.kt`,
+`.js`, `.jsx`, `.ts`, `.tsx`, `.cs`, `.swift` or `.rb`), within the `[[skills]]` paths when any are
+mapped (see [Skills](#skills)), and not among the files the commits since changed, so the rest of
+the code comes up for review too; with none eligible, or when git can't list the files, there's no
+sample. The sample rotates, so every code file is read before any is read again: files never
+sampled come first, then those sampled by the earliest super review, picking at random among files
+sampled by the same one; a file git no longer tracks is forgotten. The count, the commit the last
+super review reviewed, and which super review last sampled each file belong to the repository
+rather than to a session, so they carry on across sessions and restarts. A super review that falls
 due waits while review is paused, and while suggested tasks (or reviews) are pending or running; it
 comes with your next commit once none is.
 
@@ -3289,8 +3291,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     setup step that makes a fresh worktree ready, and the checks a configurator proposes), the
     `Catalog` (in `catalog`: the workspace and its sessions, the agents' roles, the triggers and
     the lanes), `ReviewPlanner` (in `reviews`: when to review, batches, rounds and caps),
-    `review_sample` (which code files a super review samples: `CODE_EXTENSIONS` and
-    `sample_files`), commit
+    `review_sample` (which code files a super review samples, rotating through them:
+    `CODE_EXTENSIONS`, `sample_files` and `with_sample`), commit
     messages (`commits`), `coder_tree` (how the coder's work is merged into the base branch, how
     its worktree catches up with that branch, and the notes on what earlier runs left) and `usage` (parsing the subscription's usage limits, and when to fetch
     them again). `sessions` holds the rules of saved sessions: the `SessionRecord` and its format

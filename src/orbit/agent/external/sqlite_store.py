@@ -35,7 +35,14 @@ from orbit.agent.application.ports import (
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.reports import NewReport
 from orbit.agent.domain.reviews import SuperReviewCount
-from orbit.agent.domain.sessions import SessionRecord, Unreadable, parse_record, record_json
+from orbit.agent.domain.sessions import (
+    SessionRecord,
+    Unreadable,
+    parse_record,
+    parse_sampled,
+    record_json,
+    sampled_json,
+)
 from orbit.agent.domain.usage_totals import UsageRow, UsageTotalsData
 from orbit.agent.external import sqlite_log, sqlite_reports, sqlite_usage
 from orbit.agent.external.session_locks import SessionLocks, check_session_id
@@ -77,9 +84,19 @@ class NewRows:
     review_count: SuperReviewCount | None
 
 
-def _review_columns(count: SuperReviewCount) -> tuple[int, str | None]:
-    """``count`` as the ``reviews`` table's ``since_super`` and ``last_super_commit``."""
-    return count.since_super, count.last_super_commit
+_REVIEW_COLUMNS = "since_super, last_super_commit, super_reviews, sampled"
+"""The ``reviews`` table's columns holding a count, in :func:`_review_columns`' order."""
+
+
+def _review_columns(count: SuperReviewCount) -> tuple[int, str | None, int, str]:
+    """``count`` as the ``reviews`` table's ``since_super``, ``last_super_commit``,
+    ``super_reviews`` and ``sampled``."""
+    return (
+        count.since_super,
+        count.last_super_commit,
+        count.super_reviews,
+        sampled_json(count.sampled),
+    )
 
 
 def _remove_tree(directory: Path) -> None:
@@ -517,8 +534,8 @@ class SqliteStore:
             saved = sum(self._insert_row(workspace, row) for row in new.rows)
             if new.review_count is not None:
                 self._db.execute(
-                    """INSERT INTO reviews (workspace_id, since_super, last_super_commit)
-                    VALUES (?, ?, ?)
+                    f"""INSERT INTO reviews (workspace_id, {_REVIEW_COLUMNS})
+                    VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT (workspace_id) DO NOTHING""",
                     (workspace, *_review_columns(new.review_count)),
                 )
@@ -597,19 +614,22 @@ class SqliteStore:
 
     def _review_count(self, workspace: str) -> SuperReviewCount:
         row = self._db.execute(
-            "SELECT since_super, last_super_commit FROM reviews WHERE workspace_id = ?",
-            (workspace,),
+            f"SELECT {_REVIEW_COLUMNS} FROM reviews WHERE workspace_id = ?", (workspace,)
         ).fetchone()
         if row is None:
             return SuperReviewCount()
-        since_super, last = row
-        return SuperReviewCount(int(since_super), None if last is None else str(last))
+        since_super, last, super_reviews, sampled = row
+        last_commit = None if last is None else str(last)
+        return SuperReviewCount(
+            int(since_super), last_commit, int(super_reviews), parse_sampled(str(sampled))
+        )
 
     def _save_review_count(self, workspace: str, count: SuperReviewCount) -> None:
         self._db.execute(
-            """INSERT INTO reviews (workspace_id, since_super, last_super_commit) VALUES (?, ?, ?)
+            f"""INSERT INTO reviews (workspace_id, {_REVIEW_COLUMNS}) VALUES (?, ?, ?, ?, ?)
             ON CONFLICT (workspace_id) DO UPDATE SET
-            since_super = excluded.since_super, last_super_commit = excluded.last_super_commit""",
+            since_super = excluded.since_super, last_super_commit = excluded.last_super_commit,
+            super_reviews = excluded.super_reviews, sampled = excluded.sampled""",
             (workspace, *_review_columns(count)),
         )
 

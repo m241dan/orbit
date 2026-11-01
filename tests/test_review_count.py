@@ -44,6 +44,15 @@ async def test_the_review_count_is_read_and_saved_when_it_changes() -> None:
     assert store.counts == [SuperReviewCount(5)]
 
 
+async def test_a_count_whose_sample_record_alone_changed_is_saved() -> None:
+    store = FakeStore()
+    store.count = SuperReviewCount(0, "abc", 1, {"a.py": 1})
+    _, count, _ = await loaded(store)
+    await count.save(SuperReviewCount(0, "abc", 1, {"a.py": 1}))
+    await count.save(SuperReviewCount(0, "abc", 1, {"a.py": 1, "b.py": 1}))
+    assert store.counts == [SuperReviewCount(0, "abc", 1, {"a.py": 1, "b.py": 1})]
+
+
 async def test_a_review_count_that_cannot_be_saved_halts_and_nothing_more_is_saved() -> None:
     store = FakeStore()
     store.count_failure = "Couldn't save the review count: disk full"
@@ -258,16 +267,16 @@ async def test_without_a_store_nothing_counts_on() -> None:
     assert counting.since_super == 0
 
 
-async def test_a_planner_counts_on_from_the_saved_count_and_last_super_commit() -> None:
+async def test_a_planner_counts_on_from_the_saved_count_its_commit_and_its_sample_record() -> None:
     store = FakeStore()
-    store.count = SuperReviewCount(4, "abc")
+    store.count = SuperReviewCount(4, "abc", 2, {"a.py": 2})
     _, count, _ = both_for(store)
     counting = planner()
     await count.count_on(counting)
-    assert counting.super_count == SuperReviewCount(4, "abc")
+    assert counting.super_count == SuperReviewCount(4, "abc", 2, {"a.py": 2})
     counting.super_review("def")
     await count.save(counting.super_count)
-    assert store.counts == [SuperReviewCount(0, "def")]
+    assert store.counts == [SuperReviewCount(0, "def", 3, {"a.py": 2})]
 
 
 async def test_a_planner_that_queued_a_super_review_during_the_read_keeps_its_commit() -> None:
@@ -280,4 +289,4 @@ async def test_a_planner_that_queued_a_super_review_during_the_read_keeps_its_co
         counting.super_review("new")
 
     await asyncio.gather(count.count_on(counting), super_review())
-    assert counting.super_count == SuperReviewCount(0, "new")
+    assert counting.super_count == SuperReviewCount(0, "new", 1)
