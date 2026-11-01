@@ -159,15 +159,20 @@ def note_lift(lifted: Lifted, name: str) -> Lifted:
     return lifted | {name} if isinstance(lifted, frozenset) else lifted
 
 
+def unlifted_sets(holding: Collection[str], lifted: Lifted) -> frozenset[str]:
+    """The sets still ``holding`` merges, by name, whose holds weren't ``lifted`` since the
+    holds kept were last read or saved, so a hold kept for one of them still counts."""
+    return frozenset(holding) - lifted if isinstance(lifted, frozenset) else frozenset()
+
+
 def fold_holds(
     loaded: Sequence[Hold], holding: Collection[str], lifted: Lifted, started: Sequence[Hold]
 ) -> tuple[Hold, ...]:
     """The holds to take on from ``loaded``, those kept, read afresh: those of the sets still
     ``holding`` merges, by name, and not ``lifted`` since they were last read or saved, as
-    :func:`kept_holds` says, with the holds ``started`` since then replacing their sets', as
-    :func:`merge_holds` says."""
-    unlifted = frozenset(holding) - lifted if isinstance(lifted, frozenset) else frozenset()
-    return merge_holds(kept_holds(loaded, unlifted), started)
+    :func:`unlifted_sets` and :func:`kept_holds` say, with the holds ``started`` since then
+    replacing their sets', as :func:`merge_holds` says."""
+    return merge_holds(kept_holds(loaded, unlifted_sets(holding, lifted)), started)
 
 
 def hold_view(hold: Hold) -> MergeHold:

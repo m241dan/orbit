@@ -2,9 +2,9 @@
 finishing meanwhile verified but waiting, unreviewed; the fix landing with the work beneath it;
 the set run again, passing to lift the hold and land the rest, or failing until the fixes run out;
 two sets holding at once; a hold kept across a restart, and the work waiting under it, which lands
-and is reviewed once it lifts, as it does on opening where none is left; the work waiting kept
-with the session a switch leaves; the holds read again on taking the repository over; and none
-under ``--no-verify``."""
+and is reviewed once it lifts, as it does on opening where none is left, and on a halt lifting
+only once the holds kept are read; the work waiting kept with the session a switch leaves; the
+holds read again on taking the repository over; and none under ``--no-verify``."""
 
 import asyncio
 from typing import Any
@@ -13,7 +13,11 @@ from orbit.agent import Verification, WorkspaceHost
 from orbit.agent.domain.merge_holds import Hold
 from orbit.agent.domain.triggers import Trigger
 from orbit.protocol import (
+    STORAGE_FAILED,
     ActivateSession,
+    AddTask,
+    ErrorOccurred,
+    Event,
     MergeHold,
     NewSession,
     OwnershipOffered,
@@ -32,6 +36,8 @@ from tests.agent_fakes import (
     events_until,
     greeted,
     holds_of,
+    releasing_of,
+    resume_storage,
     send,
     session_for,
     snapshot_of,
@@ -52,6 +58,7 @@ from tests.merge_hold_helpers import (
     status,
     waits_for,
 )
+from tests.server_fakes import TASK
 from tests.waiting import eventually
 
 
@@ -284,6 +291,59 @@ async def test_work_waiting_across_a_restart_lands_as_the_holds_read_show_none_l
 
     session = await reopened(store, tree)
     seen = Seen(session)
+    await eventually(lambda: len(seen.merged()) == 2)
+    seen.close()
+    await session.close()
+    assert seen.merged() == [("1", "c1"), ("2", "c2")]
+
+
+async def halt(session: WorkspaceHost, store: FakeStore, seen: Seen) -> None:
+    """Halt ``session``, saved in ``store``, with a failing save, as ``seen`` sees it, and
+    have saves work again, ready to resume."""
+    store.failure = "disk full"
+    await send(session, AddTask(task=TASK))
+    await eventually(lambda: any(storage_failed(event) for event in seen.events))
+    store.failure = None
+
+
+def storage_failed(event: Event) -> bool:
+    return isinstance(event, ErrorOccurred) and event.code == STORAGE_FAILED
+
+
+async def test_work_waiting_lands_on_a_halt_lifting_only_once_the_holds_kept_are_read() -> None:
+    store, tree = FakeStore(), LandingTree()
+    await left_waiting(store, tree)
+    store.holds_load_failure = "disk gone"
+
+    session = await reopened(store, tree)
+    seen = Seen(session)
+    _, holds = parts_of(session)
+    await eventually(lambda: any(isinstance(event, ErrorOccurred) for event in seen.events))
+    await halt(session, store, seen)
+    await resume_storage(session)
+    await eventually(lambda: not releasing_of(session).running)
+    assert seen.merged() == [] and (await snapshot_of(session)).waiting_to_merge == ("1", "2")
+
+    store.holds, store.holds_load_failure = (), None
+    await holds.restore()
+    await eventually(lambda: len(seen.merged()) == 2)
+    seen.close()
+    await session.close()
+    assert seen.merged() == [("1", "c1"), ("2", "c2")]
+
+
+async def test_work_waiting_lands_on_a_halt_lifting_with_the_holds_known_and_none_on() -> None:
+    store, tree = FakeStore(), LandingTree()
+    await left_waiting(store, tree)
+
+    session = await reopened(store, tree)
+    seen = Seen(session)
+    _, holds = parts_of(session)
+    await eventually(lambda: holds.held)
+    await halt(session, store, seen)
+    await holds.release()  # Lands nothing while halted.
+    assert seen.merged() == []
+    await resume_storage(session)
     await eventually(lambda: len(seen.merged()) == 2)
     seen.close()
     await session.close()

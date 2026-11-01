@@ -1388,6 +1388,13 @@ def count_loader_of(session: WorkspaceHost) -> Background:
     return session._count_loader
 
 
+def releasing_of(session: WorkspaceHost) -> Background:
+    """The background work landing the work waiting for the session's holds on merges."""
+    work = session._work
+    assert work is not None  # Only a session that runs work has work waiting.
+    return work._releasing
+
+
 def work_lane_of(session: WorkspaceHost) -> WorkLane | None:
     """The session's work lane, if it runs work."""
     return session._work

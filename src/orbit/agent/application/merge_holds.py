@@ -38,6 +38,7 @@ from orbit.agent.domain.merge_holds import (
     released_note,
     resumed_note,
     set_fix_prompt,
+    unlifted_sets,
 )
 from orbit.agent.domain.roles import Role, role_task
 from orbit.agent.domain.storage_halt import FailedWrite
@@ -111,8 +112,10 @@ class MergeHolds:
     @property
     def is_known(self) -> bool:
         """Whether the holds on are known, so :attr:`held` misses none: there's no store keeping
-        any, or those it keeps were read since the last restore began."""
-        return self._parts.store is None or self._read == "read"
+        any, those it keeps were read since the last restore began, or every hold they could
+        add was lifted since, as releasing them by hand lifts all."""
+        unread = self._read == "unread" and bool(unlifted_sets(self._holding, self._lifted))
+        return self._parts.store is None or not unread
 
     @property
     def holds(self) -> tuple[Hold, ...]:

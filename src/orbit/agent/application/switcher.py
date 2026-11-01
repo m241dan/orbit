@@ -371,7 +371,7 @@ class SessionSwitcher:
         if parts.lane is not None:
             await parts.lane.note_pause()
         if parts.work is not None:
-            parts.work.release_restored()
+            parts.work.release()
 
     def summary(self, last_active: datetime | None = None) -> SessionSummary:
         """The session open here, last active at ``last_active``, as the list of sessions

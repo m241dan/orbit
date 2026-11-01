@@ -381,6 +381,17 @@ async def test_holds_that_cant_be_read_are_unknown_and_release_nothing() -> None
     assert not holds.holds.is_known and holds.releases == 0
 
 
+async def test_holds_released_by_hand_though_unread_are_known() -> None:
+    store = FakeStore()
+    store.holds_load_failure = "disk gone"
+    holds = Holds(store)
+    await holds.holds.restore()
+    await failed(holds)
+    assert not holds.holds.is_known
+    await holds.holds.release()
+    assert holds.holds.is_known and holds.releases == 1
+
+
 async def test_holds_without_a_store_are_known() -> None:
     assert Holds().holds.is_known
 

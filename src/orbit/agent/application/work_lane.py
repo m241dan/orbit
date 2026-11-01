@@ -216,16 +216,10 @@ class WorkLane:
             for each in self._waiting
         )
 
-    def release_restored(self) -> None:
-        """Land the work waiting that the session opened saved, as :meth:`release` does, if
-        the holds on merges are known; the holds tell :meth:`release` once they're read
-        otherwise."""
-        if self._holds is None or self._holds.is_known:
-            self.release()
-
     def release(self) -> None:
         """Land the work waiting, in the background, as no hold is left, once no task works in
-        the tree, unless the session is halted, as lifting the halt does again."""
+        the tree, unless the session is halted, as lifting the halt does again, or the holds
+        kept are unread, as reading them does, as :meth:`_landable` says."""
         if self._waiting and not self._gate.halted():
             self._releasing.start(self._land_waiting())
 
@@ -709,10 +703,12 @@ class WorkLane:
                 await self._report_unmerged(waiting, landing)
 
     def _landable(self, waiting: Sequence[_Waiting]) -> bool:
-        """Whether the work ``waiting`` may land now: there's some, no hold is on and the
-        session isn't halted. Work a session saved waiting lands without holds, as when no set
-        holds merges any longer."""
-        held = self._holds is not None and self._holds.held
+        """Whether the work ``waiting`` may land now: there's some, the holds on merges are
+        known and none is on, and the session isn't halted. Work a session saved waiting lands
+        without holds, as when no set holds merges any longer; while the holds kept are unread,
+        it waits for them, which tell :meth:`release` once they're read and none is left."""
+        holds = self._holds
+        held = holds is not None and (holds.held or not holds.is_known)
         return bool(waiting) and not held and not self._gate.halted()
 
     async def _land_stacked(self, waiting: Sequence[_Waiting]) -> Landing:
