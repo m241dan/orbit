@@ -1542,9 +1542,16 @@ def gated_planner(gate: asyncio.Event) -> Script:
 SETTLED = {"completed", "unverified", "gave_up", "error", "cancelled"}
 
 
-def suggests(*titles: str, replies: list[Reply] | None = None) -> Script:
+def suggests(
+    *titles: str, replies: list[Reply] | None = None, briefs: list[str] | None = None
+) -> Script:
+    """A reviewer that suggests ``titles``, recording orbit's replies in ``replies`` and the
+    task it was given in ``briefs``, if they're given, then claims it done."""
+
     async def review(call: Call) -> TurnEndReason:
-        await call("get_task")
+        brief = (await call("get_task")).text
+        if briefs is not None:
+            briefs.append(brief)
         for title in titles:
             reply = await call("suggest_task", title=title, prompt=f"Please {title.lower()}.")
             if replies is not None:

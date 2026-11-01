@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from orbit.agent import WorkspaceHost
-from orbit.agent.application.ports import Reply, TreeFailed
+from orbit.agent.application.ports import Merge, Reply, TreeFailed
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.work_turns import WorkTurns
 from orbit.agent.domain.activity import reported
@@ -47,6 +47,7 @@ from tests.agent_fakes import (
     ROLES,
     Call,
     FakeTree,
+    Script,
     ScriptedLauncher,
     Steps,
     Stop,
@@ -538,7 +539,9 @@ async def test_the_first_super_review_lists_no_commits_and_the_next_starts_from_
     session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
     await send(session, FireTrigger(trigger=SUPER_REVIEW))
     events = await asyncio.wait_for(settle(session), 10)
-    prompt = super_task(events).task.prompt
+    review = super_task(events)
+    assert review.status == "completed"  # It ran, and wasn't told what landed as it started.
+    prompt = review.task.prompt
     assert "Landed since" not in prompt and SINCE_SUPER not in prompt and FILES not in prompt
     assert tree.asked_since == []
     assert lane_of(session).planner.last_super_commit == tree.base
@@ -1107,13 +1110,76 @@ def review_task(events: list[Event]) -> TaskState:
     return review
 
 
-async def test_a_review_is_told_the_subjects_landed_since_its_commit_oldest_first() -> None:
-    tree = FakeTree()
-    tree.since["c1"] = ["Add B", "Add C"]
-    session, _, _ = session_for(claims_done, reviewers=(suggests(),), tree=tree, review=True)
+class LandingTree(FakeTree):
+    """A coder tree that tells, of each commit, the subjects of the commits merged after it,
+    each only once it has merged."""
+
+    async def integrate(self) -> Merge:
+        merge = await super().integrate()
+        subject = self.commits[-1].partition("\n")[0]
+        for subjects in self.since.values():
+            subjects.append(subject)
+        self.since[await self.head()] = []
+        return merge
+
+
+def lands(subject: str) -> Script:
+    """An agent that claims its task done, so its commit's subject is ``subject``."""
+
+    async def work(call: Call) -> TurnEndReason:
+        return await claims_done(call, subject)
+
+    return work
+
+
+def prompts_of(task_id: str, events: list[Event]) -> list[str]:
+    """Task ``task_id``'s prompt each time ``events`` published the board with it."""
+    changes = [e for e in events if isinstance(e, TasksChanged)]
+    return [t.task.prompt for e in changes for t in e.tasks if t.id == task_id]
+
+
+async def test_a_review_is_told_the_subjects_that_landed_before_it_started_oldest_first() -> None:
+    started, gate = asyncio.Event(), asyncio.Event()
+    briefs: list[str] = []
+
+    async def waits_then_reviews(call: Call) -> TurnEndReason:
+        started.set()
+        await gate.wait()
+        return await suggests()(call)
+
+    session, _, _ = session_for(
+        *(lands(f"Add {letter}") for letter in "ABCD"),
+        reviewers=(waits_then_reviews, suggests(briefs=briefs), suggests(), suggests()),
+        tree=LandingTree(),
+        review=True,
+    )
+    await start(session, "one", "two", "three", "four")
+    events: list[Event] = []
+    collecting = asyncio.ensure_future(settle(session, events))
+    await eventually(lambda: [t.task.role for t in latest_board(events)].count("reviewer") == 4)
+    await started.wait()  # The review of c1 is held back, so that of c2 starts after D landed.
+    gate.set()
+    await asyncio.wait_for(collecting, 10)
+    [brief] = briefs
+    assert brief.startswith("Review commit c2")
+    assert f"{LANDED}\n- Add C\n- Add D\n\ndiff of c2" in brief
+    second = [t for t in board(events) if t.task.role == "reviewer"][1]
+    prompts = prompts_of(second.id, events)
+    assert LANDED not in prompts[0]  # As it was queued, before C and D landed.
+    assert prompts[-1] == brief.split("\n\nWhen you have finished", 1)[0]
+
+
+async def test_a_review_with_nothing_landed_before_it_started_is_told_of_none() -> None:
+    briefs: list[str] = []
+    tree = LandingTree()
+    session, _, _ = session_for(
+        lands("Add A"), reviewers=(suggests(briefs=briefs),), tree=tree, review=True
+    )
     await start(session)
     events = await asyncio.wait_for(settle(session), 10)
-    assert f"{LANDED}\n- Add B\n- Add C\n\ndiff of c1" in review_task(events).task.prompt
+    [brief] = briefs
+    assert brief.startswith("Review commit c1") and "Landed since" not in brief
+    assert "Landed since" not in review_task(events).task.prompt
     assert tree.asked_since == ["c1"]
 
 
@@ -1145,16 +1211,22 @@ async def test_a_review_of_a_commit_samples_no_files() -> None:
     assert SAMPLED not in prompt and "src/a.py" not in prompt
 
 
-async def test_a_review_whose_landed_commits_cannot_be_listed_is_queued_without_them() -> None:
+async def test_a_review_whose_landed_commits_cannot_be_listed_as_it_starts_runs_without() -> None:
+    briefs: list[str] = []
     tree = FakeTree()
     tree.since["c1"] = ["Add B"]
     tree.failures["landed_since"] = TreeFailed("git log failed: bad revision")
-    session, _, _ = session_for(claims_done, reviewers=(suggests(),), tree=tree, review=True)
+    session, _, _ = session_for(
+        claims_done, reviewers=(suggests(briefs=briefs),), tree=tree, review=True
+    )
     await start(session)
     events = await asyncio.wait_for(settle(session), 10)
     review = review_task(events)
     assert review.status == "completed" and "diff of c1" in review.task.prompt
     assert "Landed since" not in review.task.prompt
+    [brief] = briefs
+    assert "diff of c1" in brief and "Landed since" not in brief
+    assert tree.asked_since == ["c1"]  # As it started: it's not asked as a review is queued.
     assert not _errored(events)
 
 

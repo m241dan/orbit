@@ -149,6 +149,12 @@ class TaskBoard:
             update |= _NO_REASON
         self._update(task_id, update)
 
+    def set_prompt(self, task_id: str, prompt: str) -> None:
+        """Reword task ``task_id`` as ``prompt``, leaving the rest of it as it is."""
+        index = self.position(task_id)
+        task = self._tasks[index].task.model_copy(update={"prompt": prompt})
+        self._tasks[index] = self._tasks[index].model_copy(update={"task": task})
+
     def set_attempt(self, task_id: str, attempt: int, max_attempts: int) -> None:
         """Task ``task_id``'s agent has been asked for fix ``attempt`` of ``max_attempts``."""
         index = self.position(task_id)

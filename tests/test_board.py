@@ -96,6 +96,18 @@ def test_moving_records_renames_them_in_every_task_but_completed_ones() -> None:
     assert board.get(other).task == TWO
 
 
+def test_setting_a_prompt_rewords_the_task_and_leaves_the_rest_as_it_is() -> None:
+    board = TaskBoard()
+    board.add(ONE)
+    review = board.add_review(TaskSpec(prompt="Review commit c1", role="reviewer"))
+    board.set_status(review, "running")
+    board.set_prompt(review, "Review commit c1\n\nLanded since")
+    state = board.get(review)
+    assert state.task == TaskSpec(prompt="Review commit c1\n\nLanded since", role="reviewer")
+    assert (state.status, state.origin) == ("running", REVIEW_ORIGIN)
+    assert prompts(board) == ["one", "Review commit c1\n\nLanded since"]
+
+
 def test_edit_rejects_unknown_and_running_tasks() -> None:
     board = TaskBoard()
     first = board.add(ONE)

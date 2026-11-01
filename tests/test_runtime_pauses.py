@@ -62,6 +62,7 @@ from tests.agent_fakes import (
     session_for,
     settle,
     settled,
+    start,
     suggests,
     turns_of,
 )
@@ -292,6 +293,37 @@ async def test_a_review_finding_claudes_api_down_pauses_claude_for_the_backoff()
     assert last_pause(events).paused_until == backoff
     assert waits.slept == [120.0]
     assert statuses_of(session) == ["completed"]
+
+
+async def test_a_queued_review_run_again_after_an_outage_is_told_what_landed_by_then() -> None:
+    waits = Waits()
+    tree = FakeTree()
+    tree.since["c1"] = ["Add B"]
+    first: list[str] = []  # The review's prompt as it first ran.
+    briefs: list[str] = []  # The task it's given as it runs again.
+
+    async def meets_an_outage(call: Call) -> TurnEndReason:
+        first.append(board_of(session).tasks[-1].task.prompt)
+        tree.since["c1"].append("Add C")  # C lands while the review waits the outage out.
+        claude.turn_errors.append(OVERLOADED)
+        return "error"
+
+    reviewers = (meets_an_outage, suggests(briefs=briefs))
+    session, _, claude = session_for(
+        claims_done, reviewers=reviewers, tree=tree, review=True, pause=waits.pause
+    )
+    await start(session)
+    await until(session, paused)
+    waits.release.set()
+    await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    [prompt], [again] = first, briefs
+    landed = "Landed since (check your findings against these):"
+    assert prompt.endswith(f"{landed}\n- Add B\n\ndiff of c1")
+    assert f"{landed}\n- Add B\n- Add C\n\ndiff of c1" in again and again.count(landed) == 1
+    assert tree.asked_since == ["c1", "c1"]
+    assert statuses_of(session) == ["completed", "completed"]
 
 
 async def test_a_lane_runs_another_runtimes_task_while_its_review_paused_claude() -> None:

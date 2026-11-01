@@ -3,6 +3,8 @@
 from collections.abc import Sequence
 from dataclasses import fields
 
+import pytest
+
 from orbit.agent.domain.review_sample import Choose
 from orbit.agent.domain.reviews import (
     DIFF_LIMIT,
@@ -22,6 +24,7 @@ from orbit.agent.domain.reviews import (
     pending_titles,
     review_prompt,
     review_skills,
+    tell_landed_since,
 )
 from orbit.protocol import (
     CONFIGURATOR,
@@ -341,6 +344,40 @@ def test_a_review_prompt_lists_no_files_the_commits_landed_since_changed() -> No
     job = ReviewJob(commits=("abc1234def",), round=0, batch=None)
     prompt = review_prompt(job, "+new", 5, (), LandedSince(("Add B",), ("b.py",)))
     assert "b.py" not in prompt and "Files" not in prompt
+
+
+COMMIT = ReviewJob(commits=("abc1234def",), round=0, batch=None)
+BATCH = ReviewJob(commits=("a" * 10, "b" * 10), round=1, batch="batch-1", missing=("7", "8"))
+
+
+@pytest.mark.parametrize("job", [COMMIT, BATCH])
+@pytest.mark.parametrize("pending", [(), ("Add tests",)])
+@pytest.mark.parametrize("diff", ["+new", "", f"\n+new\n\n{LANDED}\n- x\n\n+more"])
+def test_a_queued_review_told_what_landed_lists_it_where_its_prompt_would(
+    job: ReviewJob, pending: tuple[str, ...], diff: str
+) -> None:
+    queued = review_prompt(job, diff, 5, pending)
+    told = tell_landed_since(queued, job, ("Add B", "Add C"))
+    assert told == review_prompt(job, diff, 5, pending, LandedSince(("Add B", "Add C")))
+
+
+def test_a_review_told_again_what_landed_lists_only_the_latest() -> None:
+    first = review_prompt(COMMIT, "+new", 5, ("Add tests",), LandedSince(("Add B",)))
+    told = tell_landed_since(first, COMMIT, ("Add B", "Add C"))
+    assert told == review_prompt(COMMIT, "+new", 5, ("Add tests",), LandedSince(("Add B", "Add C")))
+
+
+def test_a_review_told_again_that_nothing_landed_lists_nothing() -> None:
+    first = review_prompt(BATCH, "diffs", 5, (), LandedSince(("Add B",)))
+    assert tell_landed_since(first, BATCH, ()) == review_prompt(BATCH, "diffs", 5, ())
+
+
+def test_a_review_told_that_too_many_landed_names_only_so_many() -> None:
+    subjects = tuple(f"Commit {n}" for n in range(LANDED_LIMIT + 5))
+    told = tell_landed_since(review_prompt(COMMIT, "+new", 5, ()), COMMIT, subjects)
+    listed = told.split(f"{LANDED}\n", 1)[1]
+    names = [f"- {line}" for line in subjects[:LANDED_LIMIT]]
+    assert listed == "\n".join([*names, "… and 5 more", "", "+new"])
 
 
 SINCE_SUPER = "Commits since the last super review:"

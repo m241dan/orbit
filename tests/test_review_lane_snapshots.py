@@ -210,17 +210,30 @@ async def test_an_interrupted_reviews_finished_batch_is_queued_for_review_but_no
     await session.close()
 
 
-async def test_an_interrupted_reviews_queued_review_is_told_what_landed_since() -> None:
+LANDED = "Landed since (check your findings against these):"
+
+
+async def test_an_interrupted_reviews_queued_review_is_told_what_landed_since_as_it_runs() -> None:
     tree = FakeTree()
     tree.since["3"] = ["Add B"]
     snapshot = reviewing("3", finished=frozenset({"3"}))
-    session, _ = switching(
+    session, launcher = switching(
         store_with(saved("auth", *crashed("completed"), reviews=snapshot)), tree=tree
     )
+    briefs: list[str] = []
+    launcher.reviewers.append(suggests(briefs=briefs))
     events = await opened(session, ActivateSession(session="auth"))
-    added = last_of(Snapshot, events).tasks[-1]
-    assert "Landed since (check your findings against these):\n- Add B\n\n" in added.task.prompt
+    assert LANDED not in last_of(Snapshot, events).tasks[-1].task.prompt  # Queued, not run.
+    assert tree.asked_since == []
+
+    await send(session, RunTasks())
+    events = await asyncio.wait_for(settle(session, until=last_review_completed), 10)
     await session.close()
+
+    [brief] = briefs
+    assert f"{LANDED}\n- Add B\n\n" in brief
+    assert f"{LANDED}\n- Add B\n\n" in last_of(TasksChanged, events).tasks[-1].task.prompt
+    assert tree.asked_since == ["3"]
 
 
 async def test_an_interrupted_reviews_queued_review_is_published_only_in_the_snapshot() -> None:

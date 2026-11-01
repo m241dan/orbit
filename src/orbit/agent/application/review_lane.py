@@ -41,6 +41,7 @@ from orbit.agent.domain.reviews import (
     pending_titles,
     review_prompt,
     review_skills,
+    tell_landed_since,
 )
 from orbit.agent.domain.role_lanes import review_lane, task_lanes
 from orbit.agent.domain.roles import role_task
@@ -320,22 +321,36 @@ class ReviewLane:
             return None
 
     async def _landed(self, job: ReviewJob, since: str | None) -> LandedSince:
-        """What landed that ``job``'s reviewer is told, oldest first: the commits on the base
-        since its last or, for a super review, those after ``since`` up to its commit, with the
-        files they changed and the sample of other code files it reads too. What git can't list
-        is left out: the review goes ahead without it, as it's only a hint."""
+        """What landed that ``job``'s reviewer is told as it's queued: for a super review, the
+        commits after ``since`` up to its commit, oldest first, with the files they changed and
+        the sample of other code files it reads too. A review of commits is told nothing yet:
+        :meth:`_tell_landed` tells it as it starts. What git can't list is left out: the review
+        goes ahead without it, as it's only a hint."""
         if not job.whole:
-            return await self._landed_after(job.commits[-1])
+            return LandedSince()
         commit = job.commits[0]
         landed = await self._since_super(since, commit)
         return replace(landed, sampled=await self._sample(commit, landed.files))
 
-    async def _landed_after(self, commit: str) -> LandedSince:
-        """The commits on the base after ``commit``; none if git can't list them."""
+    async def _tell_landed(self, task_id: str, job: ReviewJob) -> None:
+        """Have review ``task_id``'s task, of ``job``, list the commits on the base after the
+        last one it reviews as they stand now, as it starts, in place of those it listed as it
+        last ran. A super review was told what landed as it was queued."""
+        if job.whole:
+            return
+        subjects = await self._landed_after(job.commits[-1])
+        prompt = self._board.get(task_id).task.prompt
+        told = tell_landed_since(prompt, job, subjects)
+        if told != prompt:
+            await self._tasks.change(lambda board: board.set_prompt(task_id, told))
+
+    async def _landed_after(self, commit: str) -> tuple[str, ...]:
+        """The subjects of the commits on the base after ``commit``, oldest first; none if git
+        can't list them."""
         try:
-            return LandedSince(tuple(await self._tree.landed_since(commit)))
+            return tuple(await self._tree.landed_since(commit))
         except TreeFailed:
-            return LandedSince()
+            return ()
 
     async def _since_super(self, since: str | None, commit: str) -> LandedSince:
         """The commits after ``since``, the last super review's commit, up to ``commit``, and
@@ -470,16 +485,17 @@ class ReviewLane:
         """How started review ``task_id`` ended, run as a task of its own that the user's stop
         cancels; anything unexpected escapes."""
         job = self._jobs.get(task_id)
-        commit = job.commits[-1] if job else None
-        return await self.runner.alone(task_id, partial(self._run_reviewer, task_id, commit))
+        return await self.runner.alone(task_id, partial(self._run_reviewer, task_id, job))
 
-    async def _run_reviewer(self, task_id: str, commit: str | None) -> Outcome:
-        """Run the reviewer in a snapshot of ``commit``; a review the user queued works in its
-        role's workspace, as :func:`run_in_role_workspace` says."""
-        if not commit:
+    async def _run_reviewer(self, task_id: str, job: ReviewJob | None) -> Outcome:
+        """Run the reviewer of ``job``, told what landed since as it starts, in a snapshot of the
+        last commit it reviews; a review the user queued, of no job, works in its role's
+        workspace, as :func:`run_in_role_workspace` says."""
+        if job is None:
             return await run_in_role_workspace(task_id, self._tasks, self._desk)
+        await self._tell_landed(task_id, job)
         run = AgentRun(task_id, self._tasks, None, self._desk).run
-        async with snapshot_of(self._tree, commit, self._publish) as root:
+        async with snapshot_of(self._tree, job.commits[-1], self._publish) as root:
             return await run(None, root)
 
     async def _after(self, batch: str | None) -> None:

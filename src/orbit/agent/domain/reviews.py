@@ -39,6 +39,9 @@ LANDED_LIMIT = 40
 # Files the commits since the last super review changed named in a super review's task; the rest
 # are counted.
 FILES_LIMIT = 100
+# Headings of a review task's lists, which tell_landed_since finds in the task review_prompt wrote.
+_PENDING_HEADING = "Tasks already queued (don't suggest these):"
+_LANDED_HEADING = "Landed since (check your findings against these):"
 
 
 @dataclass(frozen=True)
@@ -505,15 +508,39 @@ def review_prompt(
     parts += [f"Task {task} of that review ended without landing a commit." for task in job.missing]
     parts.append(f"You may make at most {cap} suggestions.")
     if pending:
-        heading = "Tasks already queued (don't suggest these):"
-        parts.append(_capped_list(heading, pending, PENDING_LIMIT))
+        parts.append(_capped_list(_PENDING_HEADING, pending, PENDING_LIMIT))
     if job.whole:
         sampled = _sampled(landed_since.sampled)
         return "\n\n".join([*parts, *_since_super(landed_since), *sampled])
-    if landed_since.subjects:
-        heading = "Landed since (check your findings against these):"
-        parts.append(_capped_list(heading, landed_since.subjects, LANDED_LIMIT))
-    return "\n\n".join([*parts, _trimmed(diff)])
+    return "\n\n".join([*parts, *_landed(landed_since.subjects), _trimmed(diff)])
+
+
+def tell_landed_since(prompt: str, job: ReviewJob, subjects: Sequence[str]) -> str:
+    """``prompt``, the task :func:`review_prompt` wrote for ``job``, a review of commits, listing
+    the commits whose ``subjects`` landed since in place of those it listed, if any: where
+    :func:`review_prompt` lists them, before the diff, and nowhere when none did."""
+    parts = prompt.split("\n\n")
+    head = _head_length(parts, job)
+    rest = parts[head:]
+    diff = rest[1:] if rest[0].startswith(_LANDED_HEADING) else rest
+    return "\n\n".join([*parts[:head], *_landed(subjects), *diff])
+
+
+def _head_length(parts: Sequence[str], job: ReviewJob) -> int:
+    """How many of ``parts``, the paragraphs of ``job``'s review task, come before what landed
+    since and the diff: its title, a line for each task that didn't land, its limit, then the
+    tasks already queued, if there are any. None of them holds a blank line."""
+    fixed = 2 + len(job.missing)
+    return fixed + 1 if parts[fixed].startswith(_PENDING_HEADING) else fixed
+
+
+def _landed(subjects: Sequence[str]) -> list[str]:
+    """The part of a review's task listing the commits whose ``subjects`` landed since the last
+    one it reviews, the first :data:`LANDED_LIMIT` named and the rest counted; none when none
+    did."""
+    if not subjects:
+        return []
+    return [_capped_list(_LANDED_HEADING, subjects, LANDED_LIMIT)]
 
 
 def _since_super(landed: LandedSince) -> list[str]:

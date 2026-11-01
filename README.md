@@ -1124,8 +1124,9 @@ has the same title (compared on one line, ignoring case and spacing; a reworded 
 through). Each reviewer is also told the titles of the tasks still queued or running, so it can
 steer clear of them (other than the reviews and configurator tasks orbit queues for itself), and
 the subjects of the commits that merged into the base after the last one it reviews, as they stand
-when the review is queued (the first 40, oldest first, the rest counted), so it can check its
-findings against work that may already have dealt with them; a super review is told what landed
+when the review starts, or starts again after a pause (the first 40, oldest first, the rest
+counted), so it can check its findings against work that may already have dealt with them, even
+work that landed while the review waited its turn; a super review is told what landed
 since the last super review instead (below), and a review whose list git can't give goes ahead
 without it. With the defaults, one of your commits can lead to at
 most 15 suggested tasks. Removing a suggested task drops it from its batch, which is then reviewed
