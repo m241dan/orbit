@@ -210,6 +210,19 @@ async def test_an_interrupted_reviews_finished_batch_is_queued_for_review_but_no
     await session.close()
 
 
+async def test_an_interrupted_reviews_queued_review_is_told_what_landed_since() -> None:
+    tree = FakeTree()
+    tree.since["3"] = ["Add B"]
+    snapshot = reviewing("3", finished=frozenset({"3"}))
+    session, _ = switching(
+        store_with(saved("auth", *crashed("completed"), reviews=snapshot)), tree=tree
+    )
+    events = await opened(session, ActivateSession(session="auth"))
+    added = last_of(Snapshot, events).tasks[-1]
+    assert "Landed since (check your findings against these):\n- Add B\n\n" in added.task.prompt
+    await session.close()
+
+
 async def test_an_interrupted_reviews_queued_review_is_published_only_in_the_snapshot() -> None:
     snapshot = reviewing("3", finished=frozenset({"3"}))
     session, events = await switched(crashed("completed"), snapshot)

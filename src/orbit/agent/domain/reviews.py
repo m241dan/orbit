@@ -32,6 +32,9 @@ DIFF_LIMIT = 30000
 _ORBITS_ROLES = REVIEW_ROLES | {CONFIGURATOR}
 # Queued tasks named in a review task, so the reviewer doesn't suggest them; the rest are counted.
 PENDING_LIMIT = 40
+# Commits landed since the reviewed one named in a review task, so the reviewer can check its
+# findings against them; the rest are counted.
+LANDED_LIMIT = 40
 
 
 @dataclass(frozen=True)
@@ -415,9 +418,17 @@ def pause_notice(rounds: int) -> str:
     )
 
 
-def review_prompt(job: ReviewJob, diff: str, cap: int, pending: Sequence[str]) -> str:
+def review_prompt(
+    job: ReviewJob,
+    diff: str,
+    cap: int,
+    pending: Sequence[str],
+    landed_since: Sequence[str] = (),
+) -> str:
     """The task for the reviewer of ``job``, whose commits' messages and diffs are ``diff``,
-    allowed ``cap`` suggestions and told the tasks titled ``pending`` are queued already.
+    allowed ``cap`` suggestions, told the tasks titled ``pending`` are queued already and,
+    unless it's a super review, that the commits with subjects ``landed_since`` (oldest first)
+    landed after the last one it reviews.
 
     Its first line titles it. It holds only the facts: how to review is the role's instructions.
     """
@@ -425,12 +436,21 @@ def review_prompt(job: ReviewJob, diff: str, cap: int, pending: Sequence[str]) -
     parts += [f"Task {task} of that review ended without landing a commit." for task in job.missing]
     parts.append(f"You may make at most {cap} suggestions.")
     if pending:
-        parts.append(_pending_list(pending))
+        heading = "Tasks already queued (don't suggest these):"
+        parts.append(_capped_list(heading, pending, PENDING_LIMIT))
     if job.whole:
         return "\n\n".join(parts)
+    if landed_since:
+        heading = "Landed since (check your findings against these):"
+        parts.append(_capped_list(heading, landed_since, LANDED_LIMIT))
+    return "\n\n".join([*parts, _trimmed(diff)])
+
+
+def _trimmed(diff: str) -> str:
+    """``diff``, its end trimmed past :data:`DIFF_LIMIT` characters."""
     if len(diff) > DIFF_LIMIT:
-        diff = diff[:DIFF_LIMIT] + "\n… (diff trimmed)"
-    return "\n\n".join([*parts, diff])
+        return diff[:DIFF_LIMIT] + "\n… (diff trimmed)"
+    return diff
 
 
 def _review_title(job: ReviewJob) -> str:
@@ -442,10 +462,9 @@ def _review_title(job: ReviewJob) -> str:
     return f"Review the {len(job.commits)} commits made for review {job.batch}"
 
 
-def _pending_list(pending: Sequence[str]) -> str:
-    """The tasks titled ``pending`` for a reviewer not to suggest: the first
-    :data:`PENDING_LIMIT` named, the rest counted."""
-    lines = [f"- {title}" for title in pending[:PENDING_LIMIT]]
-    if len(pending) > PENDING_LIMIT:
-        lines.append(f"… and {len(pending) - PENDING_LIMIT} more")
-    return "\n".join(["Tasks already queued (don't suggest these):", *lines])
+def _capped_list(heading: str, items: Sequence[str], limit: int) -> str:
+    """``items`` listed under ``heading``: the first ``limit`` named, the rest counted."""
+    lines = [f"- {item}" for item in items[:limit]]
+    if len(items) > limit:
+        lines.append(f"… and {len(items) - limit} more")
+    return "\n".join([heading, *lines])

@@ -796,6 +796,38 @@ async def test_show_gives_each_commits_message_and_diff(repo: Path) -> None:
     assert shown.index("Add b") < shown.index("+two") < shown.index("Add c") < shown.index("+three")
 
 
+async def test_landed_since_gives_the_subjects_on_the_base_after_a_commit_oldest_first(
+    repo: Path,
+) -> None:
+    tree = GitCoderTree(str(repo))
+    await tree.prepare(keep=False)
+    reviewed = git(repo, "rev-parse", "HEAD")
+    commit_file(repo, "b.txt", "two\n", "Add B")
+    commit_file(repo, "c.txt", "three\n", "Add C")
+    assert await tree.landed_since(reviewed) == ["Add B", "Add C"]
+
+
+async def test_landed_since_the_base_commit_is_nothing(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    assert await tree.landed_since(await tree.base_commit()) == []
+
+
+async def test_landed_since_leaves_out_commits_not_on_the_base(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.prepare(keep=False))
+    reviewed = git(repo, "rev-parse", "HEAD")
+    (path / "b.txt").write_text("two\n")
+    await tree.commit("Unmerged work")
+    commit_file(repo, "c.txt", "three\n", "Add C")
+    assert await tree.landed_since(reviewed) == ["Add C"]
+
+
+async def test_landed_since_an_unknown_commit_fails(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    with pytest.raises(TreeFailed, match="git log failed"):
+        await tree.landed_since("0" * 40)
+
+
 async def test_a_snapshot_is_a_detached_tree_at_the_commit_until_dropped(repo: Path) -> None:
     tree = GitCoderTree(str(repo))
     path = Path(await tree.prepare(keep=False))

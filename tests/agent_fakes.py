@@ -752,6 +752,8 @@ class FakeTree:
         self.setups: list[Setup | None] = []  # Each setup it was told to use, in order.
         self.setup: Setup | None = None
         self.failures: dict[str, Exception] = {}  # Method name -> what its next call raises.
+        self.since: dict[str, list[str]] = {}  # Commit -> the subjects landed after it.
+        self.asked_since: list[str] = []  # The commits landed_since() was asked about.
 
     async def prepare(self, keep: bool) -> str:
         self.prepared.append(keep)
@@ -784,6 +786,11 @@ class FakeTree:
     async def show(self, commits: Sequence[str]) -> str:
         self._fail("show")
         return "\n".join(f"diff of {commit}" for commit in commits)
+
+    async def landed_since(self, commit: str) -> list[str]:
+        self.asked_since.append(commit)
+        self._fail("landed_since")
+        return self.since.get(commit, [])
 
     async def snapshot(self, commit: str) -> str:
         self._fail("snapshot")

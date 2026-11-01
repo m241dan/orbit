@@ -344,6 +344,10 @@ class CoderTree(Protocol):
         """Each of ``commits``' message and diff."""
         ...
 
+    async def landed_since(self, commit: str) -> list[str]:
+        """The subjects of the commits on the base after ``commit``, oldest first."""
+        ...
+
     async def snapshot(self, commit: str) -> str:
         """A separate, detached tree at ``commit`` to read, under a name of its own that no
         other snapshot, earlier or in another session, shares; returns its path."""

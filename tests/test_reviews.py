@@ -4,6 +4,7 @@ from dataclasses import fields
 
 from orbit.agent.domain.reviews import (
     DIFF_LIMIT,
+    LANDED_LIMIT,
     PENDING_LIMIT,
     BatchSnapshot,
     LaneSnapshot,
@@ -298,6 +299,44 @@ def test_a_review_prompt_lists_exactly_the_limit_without_a_count() -> None:
     job = ReviewJob(commits=("a",), round=0, batch=None)
     prompt = review_prompt(job, "", 5, tuple(f"Task {n}" for n in range(PENDING_LIMIT)))
     assert f"- Task {PENDING_LIMIT - 1}\n\n" in prompt and "more" not in prompt
+
+
+LANDED = "Landed since (check your findings against these):"
+
+
+def test_a_review_prompt_lists_what_landed_since_oldest_first_before_the_diff() -> None:
+    job = ReviewJob(commits=("abc1234def",), round=0, batch=None)
+    prompt = review_prompt(job, "+new", 5, ("Add tests",), ("Add B", "Add C"))
+    assert prompt == (
+        "Review commit abc1234\n\n"
+        "You may make at most 5 suggestions.\n\n"
+        "Tasks already queued (don't suggest these):\n- Add tests\n\n"
+        f"{LANDED}\n- Add B\n- Add C\n\n"
+        "+new"
+    )
+
+
+def test_a_review_prompt_with_nothing_landed_since_has_no_such_section() -> None:
+    job = ReviewJob(commits=("abc1234def",), round=0, batch=None)
+    assert "Landed since" not in review_prompt(job, "+new", 5, (), ())
+
+
+def test_a_review_prompt_names_only_so_many_landed_commits_and_counts_the_rest() -> None:
+    job = ReviewJob(commits=("a" * 10, "b" * 10), round=1, batch="batch-1")
+    landed = tuple(f"Commit {n}" for n in range(LANDED_LIMIT + 5))
+    prompt = review_prompt(job, "diffs", 5, (), landed)
+    listed = prompt.split(f"{LANDED}\n", 1)[1]
+    names = [f"- {line}" for line in landed[:LANDED_LIMIT]]
+    assert listed == "\n".join([*names, "… and 5 more", "", "diffs"])
+    assert LANDED_LIMIT == 40
+
+
+def test_a_super_review_prompt_lists_nothing_landed_since() -> None:
+    job = ReviewJob(commits=("abc1234def",), round=0, batch=None, whole=True)
+    prompt = review_prompt(job, "", 10, (), ("Add B",))
+    assert prompt == (
+        "Super review of the codebase at abc1234\n\nYou may make at most 10 suggestions."
+    )
 
 
 def test_the_tasks_still_to_run_or_running_are_listed_by_their_first_lines() -> None:

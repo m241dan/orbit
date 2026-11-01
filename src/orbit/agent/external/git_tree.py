@@ -179,11 +179,15 @@ class GitCoderTree:
         return await self._git(await self._coder(), "rev-parse", "HEAD")
 
     async def base_commit(self) -> str:
-        base = await self._base_branch()
-        return await self._git(self._root, "rev-parse", f"refs/heads/{base}" if base else "HEAD")
+        return await self._git(self._root, "rev-parse", await self._base_ref())
 
     async def show(self, commits: Sequence[str]) -> str:
         return await self._git(self._root, "show", "--stat", "--patch", "--format=medium", *commits)
+
+    async def landed_since(self, commit: str) -> list[str]:
+        since = f"{commit}..{await self._base_ref()}"
+        listed = await self._git(self._root, "log", "--format=%s", "--reverse", since)
+        return listed.splitlines()
 
     async def snapshot(self, commit: str) -> str:
         sha = await self._sha(commit)
@@ -480,6 +484,11 @@ class GitCoderTree:
     async def _base_branch(self) -> str | None:
         """The base branch: the one checked out when the tree started, or now, before it has."""
         return self._base if self._started else await self._checked_out()
+
+    async def _base_ref(self) -> str:
+        """The ref of the base: the base branch, or ``HEAD`` while there's none."""
+        base = await self._base_branch()
+        return f"refs/heads/{base}" if base else "HEAD"
 
     async def _checked_out(self) -> str | None:
         """The branch the main checkout is on; ``None`` on a detached HEAD.

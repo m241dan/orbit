@@ -520,6 +520,17 @@ async def test_a_super_review_can_be_asked_for_before_any_task_ran() -> None:
     assert not any(isinstance(e, ErrorOccurred) for e in events)
 
 
+async def test_a_super_review_is_not_told_what_landed_since() -> None:
+    tree = FakeTree()
+    tree.since[tree.base] = ["Add B"]
+    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
+    events = await asyncio.wait_for(settle(session), 10)
+    [review] = board(events)
+    assert "Landed since" not in review.task.prompt
+    assert tree.asked_since == []
+
+
 async def test_a_super_review_is_skipped_when_the_base_commit_cannot_be_read() -> None:
     tree = FakeTree()
     tree.failures["base_commit"] = TreeFailed("git rev-parse failed: unknown revision")
@@ -876,6 +887,56 @@ async def test_a_diff_that_cannot_be_shown_skips_the_review_and_the_run_goes_on(
         in events
     )
     assert "diff of c2" in board(events)[2].task.prompt
+
+
+LANDED = "Landed since (check your findings against these):"
+
+
+def review_task(events: list[Event]) -> TaskState:
+    """The one review task last published in ``events``."""
+    [review] = [t for t in board(events) if t.task.role == "reviewer"]
+    return review
+
+
+async def test_a_review_is_told_the_subjects_landed_since_its_commit_oldest_first() -> None:
+    tree = FakeTree()
+    tree.since["c1"] = ["Add B", "Add C"]
+    session, _, _ = session_for(claims_done, reviewers=(suggests(),), tree=tree, review=True)
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    assert f"{LANDED}\n- Add B\n- Add C\n\ndiff of c1" in review_task(events).task.prompt
+    assert tree.asked_since == ["c1"]
+
+
+async def test_a_batch_review_is_told_what_landed_since_its_last_commit() -> None:
+    tree = FakeTree()
+    tree.since["c3"] = ["Fix y"]
+    session, _, _ = session_for(
+        claims_done,
+        claims_done,
+        claims_done,
+        reviewers=(suggests("Add tests", "Rename x"), suggests()),
+        tree=tree,
+        review=True,
+    )
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    batch_review = board(events)[-1]
+    assert f"{LANDED}\n- Fix y\n\n" in batch_review.task.prompt
+    assert tree.asked_since == ["c1", "c3"]
+
+
+async def test_a_review_whose_landed_commits_cannot_be_listed_is_queued_without_them() -> None:
+    tree = FakeTree()
+    tree.since["c1"] = ["Add B"]
+    tree.failures["landed_since"] = TreeFailed("git log failed: bad revision")
+    session, _, _ = session_for(claims_done, reviewers=(suggests(),), tree=tree, review=True)
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    review = review_task(events)
+    assert review.status == "completed" and "diff of c1" in review.task.prompt
+    assert "Landed since" not in review.task.prompt
+    assert not _errored(events)
 
 
 async def test_an_unexpected_error_in_the_review_lane_is_reported() -> None:

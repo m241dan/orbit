@@ -290,7 +290,7 @@ class ReviewLane:
             await self._publish_status()
             await self._hooks.changed()
             return
-        await self._add(job, diff)
+        await self._add(job, diff, await self._landed(job))
         await self._publish_status()
         await self._hooks.changed()
         self.kick()
@@ -299,7 +299,7 @@ class ReviewLane:
         """Queue ``job``'s review, if there is one, on the board without publishing it."""
         diff = None if job is None else await self._diff(job)
         if job is not None and diff is not None:
-            self._adder(job, diff)(self._board)
+            self._adder(job, diff, await self._landed(job))(self._board)
 
     async def _diff(self, job: ReviewJob) -> str | None:
         """The diff ``job``'s reviewer is shown; none, reported, if git can't show it."""
@@ -311,16 +311,30 @@ class ReviewLane:
             await self._publish(ErrorOccurred(code=GIT_FAILED, message=f"Review skipped: {exc}"))
             return None
 
-    async def _add(self, job: ReviewJob, diff: str) -> None:
-        """Queue ``job``'s review task, told ``diff``."""
-        await self._tasks.change(self._adder(job, diff))
+    async def _landed(self, job: ReviewJob) -> tuple[str, ...]:
+        """The subjects of the commits landed on the base since ``job``'s last, oldest first,
+        which its reviewer is told; none for a super review, or if git can't list them."""
+        if job.whole:
+            return ()
+        try:
+            return tuple(await self._tree.landed_since(job.commits[-1]))
+        except TreeFailed:  # The review goes ahead without them: they're only a hint.
+            return ()
 
-    def _adder(self, job: ReviewJob, diff: str) -> Callable[[TaskBoard], None]:
-        """The change to the board that queues ``job``'s review task, told ``diff``."""
+    async def _add(self, job: ReviewJob, diff: str, landed: tuple[str, ...]) -> None:
+        """Queue ``job``'s review task, told ``diff`` and that commits with subjects ``landed``
+        landed since."""
+        await self._tasks.change(self._adder(job, diff, landed))
+
+    def _adder(
+        self, job: ReviewJob, diff: str, landed: tuple[str, ...]
+    ) -> Callable[[TaskBoard], None]:
+        """The change to the board that queues ``job``'s review task, told ``diff`` and that
+        commits with subjects ``landed`` landed since."""
         batch = self.planner.open_batch(job)
         role = job.role
         pending = pending_titles(self._board.tasks)
-        prompt = review_prompt(job, diff, self.planner.cap(job), pending)
+        prompt = review_prompt(job, diff, self.planner.cap(job), pending, landed)
         skills = review_skills(job, self._board.tasks)
         task = role_task(role, self._desk.agents.roles[role], prompt, skills)
         cause = current_span()  # What queued the review, which its span links to.

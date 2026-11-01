@@ -55,12 +55,16 @@ def store_with(*records: SessionRecord) -> FakeStore:
 
 
 def switching(
-    store: FakeStore, *scripts: Script, reviews: bool = True, **session: Any
+    store: FakeStore,
+    *scripts: Script,
+    reviews: bool = True,
+    tree: FakeTree | None = None,
+    **session: Any,
 ) -> tuple[WorkspaceHost, ScriptedLauncher]:
     """A session saved in ``store``, as ``session-1`` then ``session-2`` and so on, whose tasks
-    run through agents playing ``scripts``, reviewing them if ``reviews``; ``session`` goes to
-    :class:`WorkspaceHost`."""
-    tree = FakeTree() if reviews else None
+    run through agents playing ``scripts``, reviewing them if ``reviews``, in ``tree`` (a new
+    :class:`FakeTree` unless given); ``session`` goes to :class:`WorkspaceHost`."""
+    tree = (tree or FakeTree()) if reviews else None
     agents, launcher = agents_for(*scripts, tree=tree, review=reviews)
     ids = iter(f"session-{n}" for n in range(1, 100))
     built = WorkspaceHost(
