@@ -54,6 +54,7 @@ from tests.agent_fakes import Call, FakeLedger, board_of
 from tests.connection_helpers import joined, say
 from tests.plane_fakes import agent_workspace, idle
 from tests.server_fakes import TASK, URL, serving_plane
+from tests.stopping import SlowToStop
 
 runner = CliRunner()
 
@@ -297,6 +298,24 @@ class ScriptedSession:
             self._events.put_nowait(EventEnvelope(seq=1, payload=step))
 
 
+class SlowToStopSession(ScriptedSession):
+    """A session with a control plane whose events are ``work``, so none come, and once
+    they're cancelled end only as it lets them; its link moves to each state it's ``moved``
+    to."""
+
+    def __init__(self, work: SlowToStop) -> None:
+        super().__init__()
+        self._work = work
+
+    async def events(self) -> AsyncIterator[EventEnvelope]:
+        await self._work()  # Runs until cancelled.
+        async for envelope in super().events():
+            yield envelope
+
+    def moved(self, state: LinkState) -> None:
+        self._play(state)
+
+
 WELCOME = Welcome(command_id="status", server_version="9.9.9")
 CATALOG = Catalog(workspaces=(), agents=(), triggers=(), lanes=())
 CODER = AgentRef(workspace="w", session="s", agent_id="agent-1", role="coder", task_id="t1")
@@ -407,4 +426,22 @@ async def test_a_control_plane_that_doesnt_answer_in_time_is_unreachable() -> No
         await _reported(session, URL, 0.05)
 
     assert str(raised.value) == f"The control plane at {URL} didn't answer within 0.05 seconds."
+    assert session.closed
+
+
+async def test_asking_cancelled_while_the_events_stop_is_cancelled_and_closes_the_client() -> None:
+    work = SlowToStop()
+    session = SlowToStopSession(work)
+    asking = asyncio.create_task(_reported(session, URL, 5))
+    await asyncio.wait_for(work.started.wait(), 5)
+    session.moved(Stopped(URL))
+    await asyncio.sleep(0)
+    asking.cancel()
+    await asyncio.sleep(0)
+    assert not asking.done()
+
+    work.gate.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asking
     assert session.closed

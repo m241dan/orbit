@@ -7,6 +7,7 @@ import pytest
 
 from orbit.protocol import Event, EventEnvelope, Notice
 from orbit.tui.event_stream import event_batches
+from tests.stopping import SlowToStop
 from tests.tui_fakes import FakeSession
 
 
@@ -48,3 +49,25 @@ async def test_event_batches_cancels_its_reader_when_closed() -> None:
     await asyncio.sleep(0)
     # The reader is gone, so nothing takes the event.
     assert session.queue.qsize() == 1
+
+
+async def test_closing_event_batches_cancelled_while_the_reader_stops_is_cancelled() -> None:
+    work = SlowToStop()
+
+    async def slow_to_stop() -> AsyncIterator[EventEnvelope]:
+        yield EventEnvelope(seq=1, payload=Notice(message="1"))
+        await work()
+
+    batches = event_batches(slow_to_stop(), limit=10)
+    assert await anext(batches) == [Notice(message="1")]
+    await asyncio.wait_for(work.started.wait(), 5)
+    closing = asyncio.create_task(batches.aclose())
+    await asyncio.sleep(0)
+    closing.cancel()
+    await asyncio.sleep(0)
+    assert not closing.done()
+
+    work.gate.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await closing

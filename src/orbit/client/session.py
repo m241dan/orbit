@@ -29,6 +29,7 @@ from orbit.client import messages
 from orbit.client.tls import refuse_plaintext
 from orbit.client.token import TokenUnreadable, read_token
 from orbit.client.upgrade import HandshakeRefused, TokenRejected, open_connection
+from orbit.execution.cancelling import stop
 from orbit.protocol import (
     GOING_AWAY,
     MESSAGE_TOO_BIG,
@@ -179,9 +180,7 @@ class WebSocketSession:
             await self._open.close()
         try:
             if self._running is not None:
-                self._running.cancel()
-                with suppress(asyncio.CancelledError):
-                    await self._running
+                await stop(self._running)
         finally:
             self._events.put_nowait(None)
 

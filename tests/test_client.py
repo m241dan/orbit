@@ -49,6 +49,7 @@ from orbit.protocol import (
     encode,
 )
 from tests.server_fakes import TOKEN, serving_plane
+from tests.stopping import SlowToStop
 
 TOKEN_FILE = Path("token")  # In the directory each test runs in.
 QUICK = Backoff(first=0.01, most=0.02)
@@ -878,6 +879,31 @@ async def test_closing_before_using_it_ends_the_events_without_connecting() -> N
     await session.close()
     assert [state async for state in session.events()] == []
     assert states.seen == [] and session.state is None
+
+
+async def test_closing_cancelled_while_connecting_stops_is_cancelled_and_ends_the_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    work = SlowToStop()
+
+    async def connecting(*args: object, **kwargs: object) -> None:
+        await work()
+
+    monkeypatch.setattr(session_module, "open_connection", connecting)
+    session, _ = client("ws://127.0.0.1:9/")
+    events = session.events()
+    await asyncio.wait_for(work.started.wait(), 5)
+    closing = asyncio.create_task(session.close())
+    await asyncio.sleep(0)
+    closing.cancel()
+    await asyncio.sleep(0)
+    assert not closing.done()
+
+    work.gate.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await closing
+    assert [envelope async for envelope in events] == []
 
 
 class Broken(Exception):

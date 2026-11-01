@@ -2,8 +2,8 @@
 
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator
-from contextlib import suppress
 
+from orbit.execution.cancelling import stop
 from orbit.protocol import Event, EventEnvelope
 
 # Most events rendered in one go, so a flood still lets the screen repaint now and then.
@@ -30,9 +30,7 @@ async def event_batches(
         while batch := await _next_batch(queue, limit):
             yield batch
     finally:
-        reader.cancel()
-        with suppress(asyncio.CancelledError):
-            await reader
+        await stop(reader)
 
 
 async def _next_batch(queue: asyncio.Queue[Event | None], limit: int) -> list[Event]:

@@ -35,6 +35,7 @@ from orbit.cli.options import (
 )
 from orbit.cli.status_report import StatusReport, status_json, status_report, status_text
 from orbit.client import HandshakeRefused, TokenRejected, messages
+from orbit.execution.cancelling import stop
 from orbit.protocol import (
     CONTROL_PLANE_STREAM,
     PROTOCOL_VERSION,
@@ -179,9 +180,7 @@ async def _asked(client: _Client, url: str) -> StatusReport:
             answers = answers.taking(await items.get(), url)
         return report
     finally:
-        pumping.cancel()
-        with suppress(asyncio.CancelledError):
-            await pumping
+        await stop(pumping)
 
 
 async def _pumped(client: _Client, items: asyncio.Queue[_Item]) -> None:
