@@ -181,14 +181,16 @@ class WorkCommands:
         await self._parts.events.put(ErrorOccurred(code=code, message=message))
 
     def _check(self, command: QueuedWork) -> None:
-        """Refuse ``command`` as running it would, for what doesn't change with ownership."""
+        """Refuse ``command`` as running it would, for what doesn't change with ownership: a
+        ``ReleaseHold`` only without sets that hold merges, as the holds on are the owner's to
+        start and lift until this orbit takes over and reads them again."""
         match command:
             case RunTasks():
                 self._parts.turns.check_run_tasks()
             case FireTrigger():
                 self._check_trigger(command)
             case ReleaseHold():
-                self._held()
+                self._holding()
             case _:
                 assert_never(command)
 
@@ -293,8 +295,15 @@ class WorkCommands:
 
     def _held(self) -> MergeHolds:
         """The holds on merges, refused while none is on."""
+        holds = self._holding()
+        if not holds.held:
+            raise Refused(INVALID, NOT_HELD)
+        return holds
+
+    def _holding(self) -> MergeHolds:
+        """The holds on merges, refused without sets that hold them."""
         holds = self._parts.holds
-        if holds is None or not holds.held:
+        if holds is None:
             raise Refused(INVALID, NOT_HELD)
         return holds
 

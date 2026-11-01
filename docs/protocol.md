@@ -507,8 +507,8 @@ owns it, and runs its work. Any other orbit on it is read-only: the workspace's 
 `RunTasks`, `FireTrigger` and `ReleaseHold` with `CommandAccepted` and queues them, in order,
 rather than running them, after refusing, as an owning orbit would, those that couldn't run here
 (an unknown trigger, input to one, a run with a task still to run whose role is disabled, refused
-with `not_configured` naming the role, a release with no hold on, or work without the agents,
-reviews or verification it needs), and starts no work by itself, such as reviews or the startup check; the planner, sessions,
+with `not_configured` naming the role, a release with no set that holds merges, or work without
+the agents, reviews or verification it needs), and starts no work by itself, such as reviews or the startup check; the planner, sessions,
 drafts and settings work as usual. The queue is dropped when the orbit exits.
 
 A read-only orbit tries the repository's lock every 5 seconds from its first `Welcome`. Once the
@@ -517,8 +517,10 @@ open session, once until it's answered. `TakeOwnership(take)` answers it: with `
 orbit owns the repository from then on, publishing `OwnershipTaken()` and a `Notice` ("This orbit
 now owns the repository; queued work is running."), then a `Catalog` to every listening
 connection, whatever workspace it's attached to, whose entry for the workspace has `read_only`
-false, then running the work queued, in order, a command refused now reported as an
-`ErrorOccurred` with the refusal's code; the workspace's entry in later `Catalog`s, and later
+false, then reading again the super review count and the holds on merges the owner left, a hold
+it lifted gone and one it started on, the session state re-sent, then running the work queued,
+in order, a command refused now reported as an `ErrorOccurred` with the refusal's code, such as a
+`ReleaseHold` once the owner left no hold on; the workspace's entry in later `Catalog`s, and later
 `Snapshot`s, have `read_only` false too. Declining sends no `Catalog`, as nothing in it changes. With `take` false it lets the lock go, so another orbit can
 take it, publishing `OwnershipDeclined()`, stays read-only and offers the repository again once
 it has found another orbit holding the lock since and then finds it free, or, if it stays free,
@@ -646,7 +648,9 @@ sets haven't passed (`Merges resumed by hand; stress hasn't passed.`, or `stress
 passed` for several), and the work waiting (`waiting_to_merge`) lands, in order, as when the last
 hold lifts by itself, a conflict handled as any merge's. A set that fails again afterwards starts
 a new hold, with its notice and a fix of its own. It's refused with `invalid` while no hold is
-on, as with no set that holds merges or under `--no-verify`: `Merges aren't held.` It was added
+on, as with no set that holds merges or under `--no-verify`: `Merges aren't held.` A read-only
+orbit queues it whether or not it knows of a hold, as the owner starts and lifts them, and runs
+it on the holds the owner left once it takes the repository over. It was added
 to version 2; an older backend refuses it as a command it doesn't know.
 
 `SendMessage(agent, text)` starts a turn of the conversational agent `agent`: the planner, or

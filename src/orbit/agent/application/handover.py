@@ -61,7 +61,8 @@ class Handover:
     owner's startup does, and publishes a notice for each of the notes it returns; one that
     fails, however it does, is reported as an ``ErrorOccurred`` coded ``internal``, its files
     left for the next owner's start, and the takeover goes on. It then reads the super review
-    count the owner left again; announcing failing otherwise is reported the same way, the rest
+    count and the holds on merges the owner left again, so the work queued acts on them;
+    announcing failing otherwise is reported the same way, the rest
     of the announcement skipped. It then runs the work queued, in order, and kicks the reviews
     waiting, even if announcing the ownership or running the queued work fails.
     """
@@ -109,7 +110,8 @@ class Handover:
 
     async def _announce(self) -> None:
         """Say this orbit owns the repository now, send the catalog saying so, recover the
-        fallback files the owner left and read the super review count it left."""
+        fallback files the owner left and read the super review count and the holds on merges
+        it left."""
         self._parts.owned()
         await self._parts.events.put(OwnershipTaken())
         await self._parts.events.put(Notice(message=OWNED_NOTE))

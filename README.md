@@ -763,7 +763,9 @@ merges are held: it asks `Release the merge hold? mutation hasn't passed.`, `y` 
 hasn't passed.`, and the waiting work lands, in order, as when a hold lifts by itself; the title
 goes back to `Task list`. The set isn't fixed by it: the next time it runs and fails, a new hold
 starts, with its notice and a fix of its own. Frontends send `ReleaseHold`, which is refused with
-`Merges aren't held.` while no hold is on.
+`Merges aren't held.` while no hold is on. A read-only orbit queues it, as the owner may start or
+lift holds meanwhile, and on taking the repository over reads the holds the owner left before
+running it, so the release lifts the holds on then, or is refused if none is.
 
 Orbit's own [`.orbit/config.toml`](.orbit/config.toml) lists six, quick ones first so a failure
 shows up in seconds:
