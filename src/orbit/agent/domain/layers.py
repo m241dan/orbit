@@ -16,8 +16,9 @@ from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 from pydantic_core import ErrorDetails
 
 from orbit.agent.domain.config_errors import ConfigError, dotted, validation_problems
+from orbit.agent.domain.role_lanes import role_clashes, with_enabled_consults
 from orbit.agent.domain.role_runtimes import check_runtimes
-from orbit.agent.domain.roles import Role, RoleName, role_clashes, with_enabled_consults
+from orbit.agent.domain.roles import Role, RoleName
 from orbit.agent.domain.runtimes import UNCHECKED, RuntimeRules, knows_runtime, unknown_runtime
 from orbit.protocol import Effort
 

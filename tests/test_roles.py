@@ -9,19 +9,14 @@ from orbit.agent.domain.roles import (
     Role,
     built_in_roles,
     check_enabled,
-    consult_clashes,
-    conversational_roles,
     disabled_roles,
     enabled_roles,
     load_built_in_roles,
-    merging_lane,
     names_file,
     out_of_time,
-    review_lane,
     role_task,
     suggested_task,
     suggestion_refusal,
-    task_lanes,
     task_suggestion,
     timeout_ending,
 )
@@ -32,7 +27,6 @@ from orbit.protocol import (
     BUILT_IN_ROLE_NAMES,
     NOT_CONFIGURED,
     TIMED_OUT,
-    WORK_LANE,
     Effort,
     Settings,
     TaskSpec,
@@ -400,74 +394,6 @@ def test_each_built_in_roles_capabilities_follow_its_tools(name: str) -> None:
     assert role.proposes_tasks is ("propose_task" in role.tools)
 
 
-def test_the_built_in_task_roles_run_in_the_work_and_review_lanes() -> None:
-    assert task_lanes(BUILT_IN_ROLES) == {
-        "work": frozenset({"coder", "configurator"}),
-        "review": frozenset({"reviewer", "super-reviewer"}),
-    }
-
-
-def test_a_task_role_in_a_lane_of_its_own_adds_that_lane() -> None:
-    security = Role(instructions="Audit.", verify=False, lane="security", workspace="snapshot")
-    lanes = task_lanes({**BUILT_IN_ROLES, "security": security})
-    assert lanes["security"] == frozenset({"security"})
-
-
-def test_a_disabled_role_adds_no_lane() -> None:
-    security = Role(
-        instructions="Audit.", verify=False, lane="security", workspace="snapshot", enabled=False
-    )
-    assert "security" not in task_lanes({**BUILT_IN_ROLES, "security": security})
-
-
-def test_the_built_in_conversational_roles_are_the_planner_and_experimenter() -> None:
-    assert conversational_roles(BUILT_IN_ROLES) == ("planner", "experimenter")
-
-
-def test_the_conversational_roles_are_the_enabled_ones_in_conversation_in_order() -> None:
-    architect = BUILT_IN_ROLES["planner"].model_copy(update={"lane": "design"})
-    muted = architect.model_copy(update={"lane": "muted", "enabled": False})
-    roles = {"architect": architect, **BUILT_IN_ROLES, "muted": muted}
-    assert conversational_roles(roles) == ("architect", "planner", "experimenter")
-
-
-def test_the_merging_lane_is_the_lane_of_the_roles_that_merge() -> None:
-    coder = BUILT_IN_ROLES["coder"].model_copy(update={"lane": "build"})
-    configurator = BUILT_IN_ROLES["configurator"].model_copy(update={"lane": "build"})
-    roles = {**BUILT_IN_ROLES, "coder": coder, "configurator": configurator}
-    assert merging_lane(BUILT_IN_ROLES) == WORK_LANE
-    assert merging_lane(roles) == "build"
-
-
-def test_without_an_enabled_merging_role_the_merging_lane_is_the_work_lane() -> None:
-    coder = BUILT_IN_ROLES["coder"].model_copy(update={"lane": "build", "enabled": False})
-    assert merging_lane({**BUILT_IN_ROLES, "coder": coder}) == WORK_LANE
-
-
-def with_review_roles(reviewer: dict[str, Any], super_reviewer: dict[str, Any]) -> dict[str, Role]:
-    """The built-in roles, with the ``reviewer`` and ``super_reviewer`` fields changed."""
-    return {
-        **BUILT_IN_ROLES,
-        "reviewer": BUILT_IN_ROLES["reviewer"].model_copy(update=reviewer),
-        "super-reviewer": BUILT_IN_ROLES["super-reviewer"].model_copy(update=super_reviewer),
-    }
-
-
-@pytest.mark.parametrize(
-    ("reviewer", "super_reviewer", "lane"),
-    [
-        ({}, {}, "review"),
-        ({}, {"lane": "audit"}, "review"),
-        ({"enabled": False}, {"lane": "audit"}, "audit"),
-        ({"enabled": False}, {"lane": "audit", "enabled": False}, "review"),
-    ],
-)
-def test_the_review_lane_is_the_enabled_reviewers_else_the_super_reviewers(
-    reviewer: dict[str, Any], super_reviewer: dict[str, Any], lane: str
-) -> None:
-    assert review_lane(with_review_roles(reviewer, super_reviewer)) == lane
-
-
 def test_the_disabled_roles_are_those_with_enabled_false() -> None:
     reviewer = BUILT_IN_ROLES["reviewer"].model_copy(update={"enabled": False})
     assert disabled_roles(BUILT_IN_ROLES) == frozenset()
@@ -526,21 +452,3 @@ def test_a_planners_orbit_tool_grant_gives_its_draft_tools_and_withholds_none_of
     grant = orbit_tool_grant(BUILT_IN_ROLES["planner"].granted_tools)
     drafts = {"list_drafts", "read_draft"}
     assert drafts <= set(grant.granted) and not drafts & set(grant.withheld)
-
-
-def consulting_roles(target: str, **coder: object) -> dict[str, Role]:
-    """The built-in roles, the planner consulting ``target`` and the coder updated by ``coder``."""
-    planner = BUILT_IN_ROLES["planner"].model_copy(update={"consults": (target,)})
-    updated = BUILT_IN_ROLES["coder"].model_copy(update=coder)
-    return {**BUILT_IN_ROLES, "planner": planner, "coder": updated}
-
-
-def test_consulting_a_disabled_task_role_is_no_clash() -> None:
-    assert consult_clashes(consulting_roles("coder", enabled=False)) == []
-
-
-@pytest.mark.parametrize("target", ["coder", "nobody"])
-def test_consulting_an_enabled_task_role_or_no_role_is_a_clash(target: str) -> None:
-    assert consult_clashes(consulting_roles(target)) == [
-        f"the role 'planner' can't consult {target!r}, which isn't another conversational role"
-    ]

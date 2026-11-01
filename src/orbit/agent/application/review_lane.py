@@ -42,13 +42,8 @@ from orbit.agent.domain.reviews import (
     review_prompt,
     review_skills,
 )
-from orbit.agent.domain.roles import (
-    review_lane,
-    role_task,
-    suggested_task,
-    suggestion_refusal,
-    task_lanes,
-)
+from orbit.agent.domain.role_lanes import review_lane, task_lanes
+from orbit.agent.domain.roles import role_task, suggested_task, suggestion_refusal
 from orbit.execution.cancelling import cancelling
 from orbit.protocol import (
     CODER,

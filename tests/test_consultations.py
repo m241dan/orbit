@@ -18,7 +18,8 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.consultations import failed
 from orbit.agent.domain.refusals import Refused
-from orbit.agent.domain.roles import Role, with_enabled_consults
+from orbit.agent.domain.role_lanes import with_enabled_consults
+from orbit.agent.domain.roles import Role
 from orbit.agent.domain.runtimes import CLAUDE, Failure
 from orbit.agent.domain.sessions import (
     SavedConsultation,

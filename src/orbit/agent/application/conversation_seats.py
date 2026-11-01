@@ -16,7 +16,8 @@ from orbit.agent.application.planner_seat import (
 )
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.refusals import Refused, unknown
-from orbit.agent.domain.roles import Role, conversational_roles, disabled_note
+from orbit.agent.domain.role_lanes import conversational_roles
+from orbit.agent.domain.roles import Role, disabled_note
 from orbit.agent.domain.sessions import SavedConsultation, SavedConversation, SavedCopy
 from orbit.protocol import (
     NOT_CONFIGURED,

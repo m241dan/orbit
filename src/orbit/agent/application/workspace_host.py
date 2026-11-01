@@ -93,15 +93,8 @@ from orbit.agent.domain.catalog import trigger_names
 from orbit.agent.domain.ownership import WorkspaceOwner, queued_dropped_note, read_only_note
 from orbit.agent.domain.refusals import STOPPING, Refused
 from orbit.agent.domain.reviews import ReviewPlanner
-from orbit.agent.domain.roles import (
-    Role,
-    disabled_roles,
-    enabled_roles,
-    merging_lane,
-    review_lane,
-    role_task,
-    task_lanes,
-)
+from orbit.agent.domain.role_lanes import merging_lane, review_lane, task_lanes
+from orbit.agent.domain.roles import Role, disabled_roles, enabled_roles, role_task
 from orbit.agent.domain.runtimes import ModelAliases
 from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.domain.usage_limits import Outages, RuntimeStop

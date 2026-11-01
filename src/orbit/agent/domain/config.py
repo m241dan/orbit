@@ -27,13 +27,14 @@ from orbit.agent.domain.layers import (
     runs_on_shared_runtime,
 )
 from orbit.agent.domain.reviews import ReviewLimits
+from orbit.agent.domain.role_lanes import role_clashes, with_enabled_consults
 from orbit.agent.domain.role_runtimes import (
     ASKS,
     capability_problems,
     model_problems,
     runtime_problems,
 )
-from orbit.agent.domain.roles import Role, RoleName, role_clashes, with_enabled_consults
+from orbit.agent.domain.roles import Role, RoleName
 from orbit.agent.domain.runtimes import (
     UNCHECKED,
     ModelAliases,
