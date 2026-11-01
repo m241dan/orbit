@@ -879,9 +879,11 @@ closes and the task is cancelled. When several agents propose checks, their wind
 time, in the order they proposed.
 
 Accepted checks take effect at once. Orbit itself (not the agent) writes them into
-`.orbit/config.toml`, replacing its `[[verification.steps]]` tables (each with its `set`, if it's
-in one) and its `[setup]` and leaving every other line as it was, the comments after them
-included. A set that holds merges gets its `[verification.sets.<name>]` table with `holds_merges
+`.orbit/config.toml`, replacing its task checks' `[[verification.steps]]` tables, and those of
+each set the proposal has steps in, with the proposal's (each with its `set`, if it's in one), and
+its `[setup]`, and leaving every other line as it was, the comments after them included. A step
+in a set the proposal has no steps in stays as written, with its comments, after the new steps
+(or where it was, if another table comes between). A set that holds merges gets its `[verification.sets.<name>]` table with `holds_merges
 = true`, in place of the file's table for it, and a set that reports loses the table it had; each
 trigger proposed gets its `[triggers.<name>]` table, in place of the file's for it, appended if
 the file has none. Sets and triggers the proposal doesn't name stay as they are. Without a file,

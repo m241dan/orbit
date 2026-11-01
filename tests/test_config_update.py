@@ -11,6 +11,7 @@ from datetime import date
 import pytest
 
 from orbit.agent.domain.checks import ChecksProposal, Setup, VerificationSet
+from orbit.agent.domain.config import Package, load_layered
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.config_update import (
     Additions,
@@ -23,10 +24,15 @@ from orbit.agent.domain.config_update import (
     update_text,
     with_checks,
 )
+from orbit.agent.domain.roles import built_in_roles
 from orbit.agent.domain.triggers import ChecksTrigger
 from orbit.agent.domain.verification import VerificationStep
+from orbit.agent.external.built_in_roles import read_built_in_roles
+from orbit.agent.external.built_in_triggers import read_built_in_triggers
+from orbit.protocol import BUILT_IN_ROLE_NAMES
 
 TODAY = date(2026, 10, 25)
+INSTRUCTIONS = {name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES}
 
 ADDED = "# Added by orbit init --update on 2026-10-25: settings this file didn't mention."
 
@@ -654,6 +660,83 @@ def test_a_reference_without_an_example_of_a_set_gets_its_table_at_the_end() -> 
 def test_writing_the_same_sets_and_triggers_again_changes_nothing(checks: ChecksProposal) -> None:
     once = with_checks(reference_with_checks(EXAMPLES, CHECKS), checks)
     assert with_checks(once, checks) == once
+
+
+NIGHTLY_STEP = (
+    '# Nightly, in a set.\n[[verification.steps]]\nname = "Mutation"\n# Its own comment.\n'
+    'command = ["mutmut", "run"]\nset = "mutation"\n'
+)
+NIGHTLY_TABLES = f'{SET_TABLE}\n[triggers.nightly]\non = "commits"\nchecks = "mutation"\n'
+OLD_LINT = '[[verification.steps]]\nname = "Old lint"\ncommand = ["flake8"]\n'
+
+
+def loaded_checks(text: str) -> tuple[VerificationStep, ...]:
+    """The task checks of the configuration a project file holding ``text`` makes."""
+    package = Package(built_in_roles(read_built_in_roles(), INSTRUCTIONS), read_built_in_triggers())
+    return load_layered(tomllib.loads(text), package).config.verification.task_checks
+
+
+def test_steps_in_a_set_stay_as_written_after_the_new_task_checks() -> None:
+    text = f"# Quick ones first.\n{OLD_LINT}\n{NIGHTLY_STEP}\n{NIGHTLY_TABLES}"
+    checked = with_checks(text, CHECKS)
+    assert checked == (
+        f"# Quick ones first.\n{STEP_TABLES}\n{NIGHTLY_STEP}\n{NIGHTLY_TABLES}\n{SYNC_TABLE}"
+    )
+    assert loaded_checks(checked) == (LINT, TESTS)
+
+
+def test_a_step_in_a_set_ahead_of_the_task_checks_goes_after_them_with_its_comments() -> None:
+    text = f"# The file.\n\n{NIGHTLY_STEP}\n{OLD_LINT}\n{NIGHTLY_TABLES}"
+    assert with_checks(text, LINT_ONLY) == (
+        f"# The file.\n\n{LINT_TABLE}\n{NIGHTLY_STEP}\n{NIGHTLY_TABLES}"
+    )
+
+
+def test_a_step_in_a_set_split_from_the_others_stays_where_it_was() -> None:
+    later = f'\n[roles.coder]\nmodel = "opus"\n\n{OLD_LINT}\n{NIGHTLY_STEP}'
+    text = f"{OLD_LINT}{later}\n{NIGHTLY_TABLES}"
+    assert with_checks(text, LINT_ONLY) == (
+        f'{LINT_TABLE}\n[roles.coder]\nmodel = "opus"\n\n{NIGHTLY_STEP}\n{NIGHTLY_TABLES}'
+    )
+
+
+def test_a_proposed_sets_steps_replace_that_sets_and_leave_the_other_sets() -> None:
+    stress = '[[verification.steps]]\nname = "Stress"\ncommand = ["stress"]\nset = "stress"\n'
+    text = f"{OLD_LINT}\n{NIGHTLY_STEP}\n{stress}\n{NIGHTLY_TABLES}"
+    checks = ChecksProposal(steps=(LINT, MUTANTS))
+    assert with_checks(text, checks) == (
+        f"{LINT_TABLE}\n{MUTANTS_TABLE}\n{stress}\n{NIGHTLY_TABLES}"
+    )
+
+
+def test_steps_in_a_set_set_inline_are_kept_when_rewritten_as_toml() -> None:
+    text = (
+        "[verification]\nsteps = [\n"
+        '  { name = "Old", command = ["nose"] },\n'
+        '  { name = "Mutation", command = ["mutmut", "run"], set = "mutation" },\n]\n'
+        "sets = { mutation = { holds_merges = true } }\n\n"
+        '[triggers.nightly]\non = "commits"\nchecks = "mutation"\n'
+    )
+    checked = with_checks(text, LINT_ONLY)
+    assert tomllib.loads(checked)["verification"] == {
+        "steps": [
+            {"name": "Lint", "command": ["ruff", "check"]},
+            {"name": "Mutation", "command": ["mutmut", "run"], "set": "mutation"},
+        ],
+        "sets": {"mutation": {"holds_merges": True}},
+    }
+    assert loaded_checks(checked) == (LINT,)
+
+
+def test_a_rewrite_keeps_a_step_in_a_set_written_as_its_own_table() -> None:
+    text = f'setup = {{ command = ["make"] }}\n\n{OLD_LINT}\n{NIGHTLY_STEP}\n{NIGHTLY_TABLES}'
+    checked = with_checks(text, LINT_ONLY)
+    assert "# Its own comment.\n" in checked
+    assert tomllib.loads(checked)["verification"]["steps"] == [
+        {"name": "Lint", "command": ["ruff", "check"]},
+        {"name": "Mutation", "command": ["mutmut", "run"], "set": "mutation"},
+    ]
+    assert loaded_checks(checked) == (LINT,)
 
 
 def test_a_key_missing_from_the_table_before_the_heading_goes_above_it() -> None:

@@ -16,7 +16,7 @@ from typing import Any
 import tomlkit
 from tomlkit import TOMLDocument
 from tomlkit.exceptions import TOMLKitError
-from tomlkit.items import AoT, Table
+from tomlkit.items import AoT, InlineTable, Table
 
 from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.config_errors import ConfigError
@@ -325,14 +325,17 @@ def with_checks(text: str, checks: ChecksProposal) -> str:
     """``text``, a project file, with ``checks`` as its verification steps and setup, as the
     configurator writes them.
 
-    The file's ``[[verification.steps]]`` tables, from the first one's header to the last one's
-    last setting, give way to the new ones, and its ``[setup]`` table, to its last setting, to
+    ``checks`` stand for the task checks and for each set its steps are in, so a step of the
+    file's in any other set stays as written, with the comments above and in it. The file's other
+    ``[[verification.steps]]`` tables, from the first one's header to the last one's last
+    setting, give way to the new ones, followed by those kept steps of theirs; kept steps further
+    down, after another table, stay where they are. Its ``[setup]`` table, to its last setting, to
     the new one or, without one, goes with the blank lines just above it; those it lacks are
     appended at the end. Every other line stays as it was, in order, the comments after a
     table's last setting among them. Where that wouldn't read as replacing the steps and setup,
     as when the file sets them some other way, such as inline, it's rewritten as TOML instead,
     keeping its other keys and comments but those after a replaced table's last setting, which
-    TOML counts as the table's.
+    TOML counts as the table's, and the kept steps follow the new ones.
 
     Raises :class:`ConfigError` if ``text`` isn't valid TOML.
     """
@@ -711,7 +714,7 @@ def _rewritten(document: TOMLDocument, checks: ChecksProposal) -> str:
     """``document`` as TOML with ``checks`` in place of its steps and setup, and of its sets'
     and triggers' tables that ``checks`` names, however it sets them."""
     current = document.get("verification")
-    document["verification"] = _verification(checks, _value(current, "sets"))
+    document["verification"] = _verification(checks, current)
     if checks.setup is None:
         document.pop("setup", None)
     else:
@@ -726,21 +729,52 @@ def _value(table: object, key: str) -> object:
     return table.get(key) if isinstance(table, dict) else None
 
 
-def _verification(checks: ChecksProposal, sets: object) -> Table:
-    """The table of ``checks``' steps, and of the tables of the ``sets`` a file has, a table if
-    it has any, with those of ``checks``' sets in place of theirs."""
-    verification = _steps_table(checks)
-    tables = _with_tables(sets, _sets_tables(checks))
+def _verification(checks: ChecksProposal, current: object) -> Table:
+    """The table of ``checks``' steps, then the steps of ``current``, a file's verification
+    table, that ``checks`` leave (see :func:`_kept`), and of the tables of the sets it has, a
+    table if it has any, with those of ``checks``' sets in place of theirs."""
+    steps = _value(current, "steps")
+    kept = (
+        [_as_table(step) for step in steps if _kept(step, checks)]
+        if isinstance(steps, list)
+        else []
+    )
+    verification = _steps_table(checks, kept)
+    tables = _with_tables(_value(current, "sets"), _sets_tables(checks))
     if tables:
         verification["sets"] = tables
     return verification
 
 
-def _steps_table(checks: ChecksProposal) -> Table:
-    """The table of ``checks``' steps."""
+def _steps_table(checks: ChecksProposal, kept: Sequence[Table] = ()) -> Table:
+    """The table of ``checks``' steps, then the ``kept`` steps' tables."""
     verification = tomlkit.table(is_super_table=True)
-    verification["steps"] = _steps(checks)
+    verification["steps"] = _steps(checks, kept)
     return verification
+
+
+def _kept(step: object, checks: ChecksProposal) -> bool:
+    """Whether ``step``, a file's step's table, stays as it is when ``checks`` are written:
+    whether it's in a set none of ``checks``' steps is in, as ``checks`` stand for the task
+    checks and those sets only."""
+    return isinstance(step, dict) and step.get("set") not in _proposed_sets(checks)
+
+
+def _proposed_sets(checks: ChecksProposal) -> set[str | None]:
+    """The sets ``checks``' steps are in, with none for the task checks, which they always
+    stand for."""
+    return {None, *(step.set for step in checks.steps)}
+
+
+def _as_table(step: Table | InlineTable) -> Table:
+    """``step``, a step's table set either way, as a table of its own, inline ones with a blank
+    line after them."""
+    if isinstance(step, Table):
+        return step
+    table = tomlkit.table()
+    table.update(step.unwrap())
+    table.add(tomlkit.nl())
+    return table
 
 
 def _with_tables(current: object, tables: dict[str, Table | None]) -> Table:
@@ -791,8 +825,9 @@ def _trigger(trigger: ChecksTrigger) -> Table:
     return table
 
 
-def _steps(checks: ChecksProposal) -> AoT:
-    """The tables of ``checks``' steps, each of its own, with the set it's in, if any."""
+def _steps(checks: ChecksProposal, kept: Sequence[Table] = ()) -> AoT:
+    """The tables of ``checks``' steps, each of its own, with the set it's in, if any, then the
+    ``kept`` steps' tables."""
     steps = tomlkit.aot()
     for step in checks.steps:
         table: Table = tomlkit.table()
@@ -801,7 +836,10 @@ def _steps(checks: ChecksProposal) -> AoT:
         if step.set is not None:
             table["set"] = step.set
         steps.append(table)
-    steps[-1].add(tomlkit.nl())  # A blank line before whatever follows.
+    for table in kept:
+        steps.append(table)
+    if not kept:
+        steps[-1].add(tomlkit.nl())  # A blank line before whatever follows.
     return steps
 
 
@@ -868,12 +906,28 @@ def _edited(lines: Sequence[_Line], checks: ChecksProposal) -> str:
     tables = _set_tables(lines)
     new = _check_tables(checks)
     runs = {header: _runs(tables, header) for header in new}
-    spans = chain.from_iterable(_replacing(runs[header], new[header]) for header in new)
-    text = _spliced(lines, spans)
+    text = _spliced(lines, _check_spans(lines, runs, new, checks))
     for header, block in new.items():
         if block and not runs[header]:
             text = [*text, *_apart(text), *block]
     return "\n".join(text) + "\n"
+
+
+def _check_spans(
+    lines: Sequence[_Line],
+    runs: dict[str, list[_Span]],
+    new: dict[str, tuple[str, ...]],
+    checks: ChecksProposal,
+) -> list[_Span]:
+    """The ``runs`` of the tables of ``lines`` under each header giving way to its ``new`` lines,
+    ``checks``' tables' lines, the steps' as :func:`_step_spans` has them."""
+    others = [
+        span
+        for header, block in new.items()
+        if header != _STEPS
+        for span in _replacing(runs[header], block)
+    ]
+    return [*_step_spans(lines, _set_tables(lines), new[_STEPS], checks), *others]
 
 
 def _set_tables(lines: Sequence[_Line]) -> list[_SetTable]:
@@ -899,12 +953,54 @@ def _last_setting(lines: Sequence[_Line], start: int, stop: int) -> int:
 def _runs(tables: Sequence[_SetTable], header: str) -> list[_Span]:
     """Each run of ``tables`` under ``header`` with no other table between them, from the first
     one's start to the last one's end."""
-    runs = [
+    return [_Span(run[0].start, run[-1].end) for run in _table_runs(tables, header)]
+
+
+def _table_runs(tables: Sequence[_SetTable], header: str) -> list[list[_SetTable]]:
+    """Each run of ``tables`` under ``header`` with no other table between them."""
+    return [
         list(run)
         for matches, run in groupby(tables, lambda table: table.header == header)
         if matches
     ]
-    return [_Span(run[0].start, run[-1].end) for run in runs]
+
+
+def _step_spans(
+    lines: Sequence[_Line],
+    tables: Sequence[_SetTable],
+    block: tuple[str, ...],
+    checks: ChecksProposal,
+) -> list[_Span]:
+    """Each run of the steps' ``tables`` with no other table between them, as :func:`_runs`
+    has them, giving way to the steps ``checks`` leave (see :func:`_kept`), the first run after
+    ``block``, ``checks``' steps' lines."""
+    return [
+        _step_span(lines, run, block if index == 0 else (), checks)
+        for index, run in enumerate(_table_runs(tables, _STEPS))
+    ]
+
+
+def _step_span(
+    lines: Sequence[_Line], run: Sequence[_SetTable], block: tuple[str, ...], checks: ChecksProposal
+) -> _Span:
+    """``run``, steps' tables of ``lines``, giving way to ``block`` then the steps ``checks``
+    leave, each with the comments just above it and apart from what's before it by a blank
+    line; from the comments above the first if it's kept."""
+    kept = [table for table in run if _kept(_step_of(lines, table), checks)]
+    spaced = (*block, *chain.from_iterable(("", *_commented(lines, table)) for table in kept))
+    first = _comments_above(lines, run[0].start) if run[0] in kept[:1] else run[0].start
+    return _Span(first, run[-1].end, spaced if block else spaced[1:])
+
+
+def _commented(lines: Sequence[_Line], table: _SetTable) -> list[str]:
+    """The text of ``table``, a table of ``lines``, with the comments just above it."""
+    return [line.text for line in lines[_comments_above(lines, table.start) : table.end]]
+
+
+def _step_of(lines: Sequence[_Line], table: _SetTable) -> object:
+    """The step ``table``, a ``[[verification.steps]]`` table of ``lines``, sets."""
+    text = "\n".join(line.text for line in lines[table.start : table.end])
+    return tomlkit.parse(text).unwrap()["verification"]["steps"][0]
 
 
 def _replacing(runs: Sequence[_Span], lines: tuple[str, ...]) -> list[_Span]:
