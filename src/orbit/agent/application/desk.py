@@ -132,7 +132,9 @@ class Agents:
     given, and ``skill_mappings`` are the project's ``[[skills]]``, whose skills an agent is given
     along with its role's, in its instructions, unless its task names skills of its own.
     ``triggers`` turn events into tasks, by name, in order, each prompt its template's text;
-    without them, nothing is queued on events, reviews included.
+    without them, nothing is queued on events, reviews included. ``built_in_triggers`` are those
+    orbit ships, which the project's are merged over, and proposed checks' triggers checked
+    against; without them, proposed triggers are checked alone.
     """
 
     host: AgentHost
@@ -157,6 +159,7 @@ class Agents:
     skill_library: SkillLibrary = field(default_factory=SkillLibrary, kw_only=True)
     skill_mappings: tuple[SkillMapping, ...] = field(default=(), kw_only=True)
     triggers: Mapping[str, Trigger] = field(default_factory=dict, kw_only=True)
+    built_in_triggers: Mapping[str, Trigger] = field(default_factory=dict, kw_only=True)
 
     def runtime(self, role: str) -> str | None:
         """The runtime role ``role``'s agents run on; none for a role they don't have."""

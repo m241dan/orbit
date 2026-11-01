@@ -184,6 +184,7 @@ async def test_invalid_proposals_are_refused_with_the_reason() -> None:
         {"steps": [LINT], "setup": {"command": ["make"], "watch": ["/etc/passwd"]}},
         {"steps": [LINT], "colour": "blue"},
         {"steps": [LINT], "triggers": {"slow": {"on": "commits", "checks": "mutation"}}},
+        {"steps": [LINT], "triggers": {"review": {"on": "commits", "checks": "task-checks"}}},
     ]
 
     async def script(call: Call) -> TurnEndReason:

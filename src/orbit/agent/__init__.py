@@ -71,6 +71,7 @@ from orbit.agent.domain.server import LocalTls, RunningServer, ServerSettings, T
 from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.domain.workspaces import PathKind
+from orbit.agent.external.built_in_triggers import read_built_in_triggers
 from orbit.agent.external.certificates import (
     CA_DAYS,
     CERTIFICATE_DAYS,
@@ -290,6 +291,7 @@ __all__ = [
     "orbit_dir",
     "purge",
     "purge_workspace",
+    "read_built_in_triggers",
     "read_certificate",
     "read_config",
     "read_config_sources",

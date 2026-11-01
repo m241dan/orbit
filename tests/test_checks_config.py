@@ -6,7 +6,7 @@ import pytest
 
 from orbit.agent.domain.checks import ChecksProposal, Setup, VerificationSet, parse_proposal
 from orbit.agent.domain.config_errors import ConfigError
-from orbit.agent.domain.triggers import ChecksTrigger
+from orbit.agent.domain.triggers import ChecksTrigger, Trigger
 from orbit.agent.domain.verification import VerificationStep
 
 
@@ -106,3 +106,36 @@ def test_a_trigger_may_run_the_task_checks() -> None:
     trigger = {"on": "manual", "manual": True, "label": "Check", "checks": "task-checks"}
     proposal = parse_proposal(SET_PROPOSAL | {"triggers": {"check": trigger}})
     assert proposal.triggers["check"].checks == "task-checks"
+
+
+BUILT_IN: dict[str, Trigger] = {
+    "review": Trigger(on="task_landed", role="reviewer", prompt="Review {commit}."),
+    "startup-check": Trigger(
+        on="session_started", checks="task-checks", when={"verification": "configured"}
+    ),
+}
+"""Built-in triggers, a role's and a run of the task checks, as the package might ship them."""
+
+
+def test_a_proposed_trigger_named_like_a_built_in_role_trigger_is_refused() -> None:
+    trigger = {"on": "commits", "every": 10, "checks": "mutation"}
+    with pytest.raises(ConfigError) as refused:
+        parse_proposal(SET_PROPOSAL | {"triggers": {"review": trigger}}, BUILT_IN)
+    assert str(refused.value) == (
+        "triggers.review.checks: review is taken by a built-in trigger, which queues a"
+        " reviewer's task; give this trigger another name."
+    )
+
+
+def test_a_proposed_trigger_may_override_a_built_in_checks_trigger() -> None:
+    trigger = {"on": "session_started", "checks": "task-checks"}
+    proposal = parse_proposal(SET_PROPOSAL | {"triggers": {"startup-check": trigger}}, BUILT_IN)
+    assert proposal.triggers["startup-check"] == ChecksTrigger(
+        on="session_started", checks="task-checks"
+    )
+
+
+def test_a_proposed_trigger_is_checked_merged_over_the_built_in_of_its_name() -> None:
+    trigger = {"on": "commits", "checks": "mutation"}
+    with pytest.raises(ConfigError, match=re.escape("triggers.startup-check.when")):
+        parse_proposal(SET_PROPOSAL | {"triggers": {"startup-check": trigger}}, BUILT_IN)

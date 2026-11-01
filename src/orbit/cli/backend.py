@@ -43,6 +43,7 @@ from orbit.agent import (
     file_names,
     in_git_work_tree,
     open_workspace,
+    read_built_in_triggers,
     read_config,
     read_storage,
     run_step,
@@ -314,10 +315,10 @@ def _settings(model: str | None, tools: ToolAccess | None) -> tuple[Settings, li
 def _agents(config: OrbitConfig, root: Path, backend: _Backend, config_dir: Path) -> Agents:
     """The agents that run tasks as ``config`` says in the workspace at ``root``, on the
     runtimes its enabled roles run on, given the models those runtimes take, the skills and the
-    triggers as it says, in the coder tree if ``backend`` asks for a worktree and
-    the workspace is a git work tree, reviewing landed work if it asks to, sending their own
-    telemetry to its collector, and reading the planner's role again over the user config in
-    ``config_dir``, with its runtime.
+    triggers as it says, checking proposed triggers against the built-in ones, in the coder
+    tree if ``backend`` asks for a worktree and the workspace is a git work tree, reviewing
+    landed work if it asks to, sending their own telemetry to its collector, and reading the
+    planner's role again over the user config in ``config_dir``, with its runtime.
 
     Raises :class:`WorkspaceUnavailable` if a runtime the enabled roles run on isn't on PATH.
     """
@@ -344,6 +345,7 @@ def _agents(config: OrbitConfig, root: Path, backend: _Backend, config_dir: Path
         skill_library=config.skill_library,
         skill_mappings=config.skills,
         triggers=config.triggers,
+        built_in_triggers=read_built_in_triggers(),
     )
 
 

@@ -982,6 +982,7 @@ def agents_for(
         "exit_grace": 0.5,
         "roles": ROLES,
         "triggers": TRIGGERS,
+        "built_in_triggers": TRIGGERS,
         "root": ".",
     }
     options = {**defaults, "temp_dirs": FakeTempDirs(), **options}

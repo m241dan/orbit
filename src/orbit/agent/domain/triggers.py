@@ -315,10 +315,42 @@ def _merged(
     a table."""
     if not isinstance(given, dict):
         return given, {}
-    fields = {} if shipped is None else shipped.model_dump()
     package = () if shipped is None else shipped.model_fields_set
     layers = dict.fromkeys(Trigger.model_fields, DEFAULT) | dict.fromkeys(package, PACKAGE)
-    return fields | given, layers | dict.fromkeys(given, project)
+    return _merged_fields(shipped, given), layers | dict.fromkeys(given, project)
+
+
+def _merged_fields(shipped: Trigger | None, given: dict[str, Any]) -> dict[str, Any]:
+    """The fields of a trigger, the ``shipped`` one's if any, with those ``given`` over them."""
+    return ({} if shipped is None else shipped.model_dump()) | given
+
+
+def merge_proposed(
+    package: Mapping[str, Trigger], proposed: Mapping[str, ChecksTrigger]
+) -> dict[str, Trigger]:
+    """The ``proposed`` triggers, by name, as the config reads them once they're written: each
+    with the fields it sets over those of the ``package``'s trigger of its name, if any, as
+    :func:`merge_triggers` merges them."""
+    return {
+        name: Trigger.model_validate(
+            _merged_fields(package.get(name), trigger.model_dump(exclude_defaults=True))
+        )
+        for name, trigger in proposed.items()
+    }
+
+
+def check_free_names(package: Mapping[str, Trigger], names: Iterable[str]) -> None:
+    """Raise :class:`ConfigError` naming each of ``names``, proposed for triggers that run
+    checks, that a trigger of the ``package`` with a role has, on a line of its own, if any, each
+    at ``triggers.<name>.checks``: merged over that trigger, it would have a role and checks."""
+    problems = [
+        f"triggers.{name}.checks: {name} is taken by a built-in trigger, which queues a"
+        f" {role}'s task; give this trigger another name."
+        for name in names
+        if name in package and (role := package[name].role) is not None
+    ]
+    if problems:
+        raise ConfigError("\n".join(problems))
 
 
 def check_triggers(

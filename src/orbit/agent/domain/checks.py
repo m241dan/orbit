@@ -15,8 +15,10 @@ from orbit.agent.domain.triggers import (
     ChecksTrigger,
     Trigger,
     TriggerName,
+    check_free_names,
     check_triggers,
     describe_firing,
+    merge_proposed,
 )
 from orbit.agent.domain.verification import CheckSet, SetEffect, SetName, VerificationStep
 from orbit.protocol import TASK_CHECKS
@@ -258,14 +260,19 @@ def configured_checks(
     return "Configured now (build on these):\n\n" + current
 
 
-def parse_proposal(data: dict[str, Any]) -> ChecksProposal:
+def parse_proposal(
+    data: dict[str, Any], built_in: Mapping[str, Trigger] = _NO_TRIGGERS
+) -> ChecksProposal:
     """The proposal ``data`` (an agent's arguments) describes; raises :class:`ConfigError` if
-    it's invalid, as the config would be: a set's table for a set no step is in, or a trigger
-    whose ``checks`` name neither the task checks nor a set a step is in, among the rest."""
+    it's invalid, as the config would be once it's written over the ``built_in`` triggers: a
+    set's table for a set no step is in, a trigger named like a built-in one with a role, or a
+    trigger, merged over the built-in one of its name, whose ``checks`` name neither the task
+    checks nor a set a step is in, among the rest."""
     try:
         proposal = ChecksProposal.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(validation_problems(exc)) from None
     check_sets(proposal)
-    check_triggers(proposal.trigger_settings, (), proposal.set_names)
+    check_free_names(built_in, proposal.triggers)
+    check_triggers(merge_proposed(built_in, proposal.triggers), (), proposal.set_names)
     return proposal

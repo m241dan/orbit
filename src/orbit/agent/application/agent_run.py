@@ -453,7 +453,7 @@ class AgentRun:
         if self._verifier is None or self._desk.agents.proposal_review is None:
             return Reply(NO_CHECK_PROPOSALS, is_error=True)
         try:
-            checks = parse_proposal(arguments)
+            checks = parse_proposal(arguments, self._desk.agents.built_in_triggers)
         except ConfigError as exc:
             return Reply(invalid_proposal(str(exc)), is_error=True)
         refusal = self._work.propose()
