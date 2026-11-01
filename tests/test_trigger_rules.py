@@ -140,15 +140,32 @@ def suggested(status: TaskStatus = "pending", origin: str = "review") -> TaskSta
     return task("Tidy", "coder", status, origin).model_copy(update={"batch": "batch-1", "round": 1})
 
 
+def booked(
+    role: str = "reviewer", status: TaskStatus = "pending", origin: str = "review"
+) -> TaskState:
+    """``role``'s task the trigger ``origin`` queued as a review, booked into the review lane, as
+    ``status``."""
+    return task("Review", role, status, origin).model_copy(update={"queued_as": "review"})
+
+
 @pytest.mark.parametrize("origin", ["review", "super-review", "audit"])
 def test_suggestions_pending_holds_back_while_a_task_the_reviews_queued_waits(origin: str) -> None:
     guarded = trigger(guards=("suggestions-pending",))
     assert held_back(guarded, "Look at abc", [suggested(origin=origin)])
     assert held_back(guarded, "Look at abc", [suggested("running", origin)])
-    assert held_back(guarded, "Look at abc", [task("Review", status="running", origin=origin)])
-    assert held_back(guarded, "Look at abc", [task("Review", "super-reviewer", origin=origin)])
+    assert held_back(guarded, "Look at abc", [booked(status="running", origin=origin)])
+    assert held_back(guarded, "Look at abc", [booked("super-reviewer", origin=origin)])
     assert not held_back(guarded, "Look at abc", [suggested("completed", origin)])
-    assert not held_back(guarded, "Look at abc", [task("Review", status="error", origin=origin)])
+    assert not held_back(guarded, "Look at abc", [booked(status="error", origin=origin)])
+
+
+@pytest.mark.parametrize("role", ["coder", "auditor"])
+@pytest.mark.parametrize("status", ["pending", "running"])
+def test_suggestions_pending_holds_back_while_another_roles_review_waits(
+    role: str, status: TaskStatus
+) -> None:
+    guarded = trigger(guards=("suggestions-pending",))
+    assert held_back(guarded, "Look at abc", [booked(role, status, "audit")])
 
 
 def test_suggestions_pending_does_not_hold_back_for_the_users_or_another_triggers_tasks() -> None:
@@ -161,6 +178,15 @@ def test_suggestions_pending_does_not_hold_back_for_the_users_or_another_trigger
         task("Fix the lint step", "coder", origin="startup-fix"),
     ]
     assert not held_back(guarded, "Look at abc", waiting)
+
+
+@pytest.mark.parametrize("role", ["reviewer", "super-reviewer"])
+@pytest.mark.parametrize("status", ["pending", "running"])
+def test_suggestions_pending_does_not_hold_back_for_a_review_a_trigger_did_not_book(
+    role: str, status: TaskStatus
+) -> None:
+    guarded = trigger(guards=("suggestions-pending",))
+    assert not held_back(guarded, "Look at abc", [task("Look", role, status, "look")])
 
 
 def test_dedupe_holds_nothing_back_before_there_is_a_prompt() -> None:

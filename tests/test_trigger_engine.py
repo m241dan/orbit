@@ -191,6 +191,14 @@ async def test_a_draft_trigger_adds_its_task_as_a_draft_from_it() -> None:
     await engine.engine.landed(ended(), COMMIT)
     [state] = engine.board.tasks
     assert (state.status, state.origin, state.proposed_by) == ("draft", "look", None)
+    assert state.queued_as == "task"  # Booked as no review, a reviewer's though it is.
+
+
+async def test_a_trigger_reviewing_nothing_queues_its_reviewers_task_as_a_task() -> None:
+    engine = Engine({"look": look()})
+    await engine.engine.landed(ended(), COMMIT)
+    [state] = engine.board.tasks
+    assert (state.task.role, state.origin, state.queued_as) == (REVIEWER, "look", "task")
 
 
 # Guards
@@ -228,7 +236,7 @@ async def test_review_rounds_reviews_the_review_due_and_books_its_task() -> None
     job = commit_review("1", COMMIT)
     [task_id] = await engine.engine.landed(ended(), COMMIT, ReviewRound(job, booked.__setitem__))
     review = engine.board.get(task_id)
-    assert (review.task.role, review.origin) == (REVIEWER, "review")
+    assert (review.task.role, review.origin, review.queued_as) == (REVIEWER, "review", "review")
     assert review.task.prompt == review_prompt(job, f"diff of {COMMIT}", 5, ["Make it faster."])
     assert review.task.skills == ("python",)  # Those of the task it reviews.
     assert list(booked) == [task_id]
@@ -349,17 +357,27 @@ async def test_a_landing_counts_toward_the_commits_triggers_taking_it() -> None:
 
 async def test_a_due_super_review_waits_while_a_review_on_the_board_waits() -> None:
     engine = Engine(super_every(1))
-    engine.board.add_triggered(TaskSpec(prompt="Review commit c0", role=REVIEWER), "review")
+    review = TaskSpec(prompt="Review commit c0", role=REVIEWER)
+    engine.board.add_triggered(review, "review", "review")
     counted = engine.engine.count(ended(), {})
     assert (counted.counts, counted.fires) == ({SUPER_REVIEW: 1}, [])
 
 
-async def test_a_due_super_review_waits_while_a_project_triggers_review_waits() -> None:
+@pytest.mark.parametrize("role", [SUPER_REVIEWER, CODER])
+async def test_a_due_super_review_waits_while_a_project_triggers_review_waits(role: str) -> None:
     engine = Engine(super_every(1))
-    audit = TaskSpec(prompt="Audit the codebase at c0", role=SUPER_REVIEWER)
-    engine.board.add_triggered(audit, "audit")
+    audit = TaskSpec(prompt="Audit the codebase at c0", role=role)
+    engine.board.add_triggered(audit, "audit", "review")
     counted = engine.engine.count(ended(), {})
     assert (counted.counts, counted.fires) == ({SUPER_REVIEW: 1}, [])
+
+
+async def test_a_due_super_review_does_not_wait_for_a_reviewers_task_booked_as_no_review() -> None:
+    engine = Engine(super_every(1))
+    engine.board.add_triggered(TaskSpec(prompt="Look around", role=REVIEWER), "look")
+    counted = engine.engine.count(ended(), {})
+    assert counted.counts == {SUPER_REVIEW: 0}
+    assert [name for name, _ in counted.fires] == [SUPER_REVIEW]
 
 
 async def test_a_due_super_review_waits_while_a_project_triggers_suggestion_runs() -> None:
@@ -399,6 +417,7 @@ async def test_counted_triggers_queue_their_tasks_reviewing_the_codebase_and_boo
     )
     review = engine.board.get(task_id)
     assert (review.task.role, review.origin) == (SUPER_REVIEWER, SUPER_REVIEW)
+    assert review.queued_as == "review"
     assert review.task.prompt == review_prompt(WHOLE, "", 10, ["Make it faster."])
     assert review.task.skills == ()  # It reviews no particular task.
     assert list(booked) == [task_id]
@@ -406,9 +425,24 @@ async def test_counted_triggers_queue_their_tasks_reviewing_the_codebase_and_boo
     assert engine.kicked == []
 
 
+@pytest.mark.parametrize("draft", [False, True])
+async def test_a_counted_trigger_of_another_role_queues_its_task_as_a_review(draft: bool) -> None:
+    booked: dict[str, ReviewTemplate] = {}
+    audit = Trigger(on="commits", role=CODER, prompt="Audit at {commit}.", draft=draft)
+    engine = Engine({"audit": audit})
+    values = review_values(WHOLE, "", 10, [])
+    review = ReviewRound(WHOLE, booked.__setitem__)
+    [task_id] = await engine.engine.fire_counted([("audit", audit)], values, review)
+    state = engine.board.get(task_id)
+    assert (state.task.role, state.origin, state.queued_as) == (CODER, "audit", "review")
+    assert state.status == ("draft" if draft else "pending")
+    assert list(booked) == [task_id]
+
+
 async def test_counted_triggers_are_not_held_back_again_as_they_are_queued() -> None:
     engine = Engine({SUPER_REVIEW: SUPER})
-    engine.board.add_triggered(TaskSpec(prompt="Review commit c0", role=REVIEWER), "review")
+    review_task = TaskSpec(prompt="Review commit c0", role=REVIEWER)
+    engine.board.add_triggered(review_task, "review", "review")
     values = review_values(WHOLE, "", 10, [])
     review = ReviewRound(WHOLE, unbooked)
     assert len(await engine.engine.fire_counted([(SUPER_REVIEW, SUPER)], values, review)) == 1
@@ -516,7 +550,8 @@ async def test_the_triggers_on_opening_each_fire_in_their_order() -> None:
 
 async def test_a_guard_holds_back_a_trigger_running_the_checks() -> None:
     engine = Engine({"startup-check": GATE.model_copy(update={"guards": ("suggestions-pending",)})})
-    engine.board.add_triggered(TaskSpec(prompt="Review commit c0", role=REVIEWER), "review")
+    review = TaskSpec(prompt="Review commit c0", role=REVIEWER)
+    engine.board.add_triggered(review, "review", "review")
     await engine.engine.started((LINT,))
     assert engine.checks_run == 0
 

@@ -548,8 +548,8 @@ is refused with `unknown`: `No task with id 't9'.`
   isn't one, as `AddTask` is, and with
   `busy` while the task runs or is
   verified (`Task 't3' can't be edited while it runs.`), and with `invalid` for a review orbit
-  queued itself, a `reviewer`'s or `super-reviewer`'s task from any trigger (its origin neither
-  `manual` nor `planner`), whose batch is spent: `Reviews can't be edited; remove it instead.`
+  queued itself, a task whose `queued_as` is `review`, whatever its role, whose batch is spent:
+  `Reviews can't be edited; remove it instead.`
 - A `TaskSpec`'s `skills` are the skills its agent gets beyond its role's, by name, such as
   `["python", "application"]`: the agent is given its role's skills, then these, each once, in
   place of the project's mapped skills, which a task with none gets. It was added to version 2;
@@ -559,6 +559,13 @@ is refused with `unknown`: `No task with id 't9'.`
   included. It was added to version 2; a task without it reads as `null`.
 - A `TaskState`'s `edited` says that role edited the draft since proposing it; accepting or
   editing the task clears it. It was added to version 2; a task without it reads as `false`.
+- A `TaskState`'s `queued_as` says what orbit queued the task as: `review` for a review it booked
+  into its review lane, reviewing work it picked (the commits that landed, or the codebase at
+  one) and suggesting into a batch of its own, whatever the task's role, as each task a `commits`
+  trigger queues is; `task` for every other, a review the user or the planner added, or a
+  `reviewer`'s task from a trigger that books no review, included. A frontend follows the same
+  rule as `EditTask`'s refusal: a `review` can't be edited. It was added to version 2; a task
+  without it reads as `task`.
 - `AcceptTask(task_id)` makes the draft task `task_id`, one the planner proposed, a pending
   task, to be run. It's refused with `not_configured` for a draft in a disabled role, as `AddTask`
   and `EditTask` are, leaving it a draft, and with `invalid` for a task that isn't a draft: `Task

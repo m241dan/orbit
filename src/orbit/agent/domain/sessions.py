@@ -42,7 +42,7 @@ from orbit.protocol import (
     Usage,
 )
 
-FORMAT_VERSION = 20
+FORMAT_VERSION = 21
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _OLD_SUPER_REVIEW_ORIGIN = "super_review"
@@ -122,6 +122,27 @@ def _origin_as_trigger(task: object) -> object:
     return task
 
 
+def _reviews_as_booked(record: dict[str, Any]) -> dict[str, Any]:
+    """Version 20 ``record`` with each task its review lane booked as a review, one of its
+    ``jobs``, queued as a review, whatever its role. A record without reviews, as when they were
+    off, books none; tasks that aren't a list, or reviews whose jobs aren't an object, are left
+    for the record's validation to say why, as is a task that isn't an object."""
+    reviews = record.get("reviews")
+    tasks = record.get("tasks", [])
+    jobs = reviews.get("jobs", {}) if isinstance(reviews, dict) else {}
+    if not isinstance(tasks, list) or not isinstance(jobs, dict):
+        return record
+    booked = tuple(jobs)
+    return record | {"tasks": [_booked(task, booked) for task in tasks]}
+
+
+def _booked(task: object, booked: tuple[str, ...]) -> object:
+    """``task``, a saved task, queued as a review if its id is one of those ``booked``."""
+    if isinstance(task, dict) and task.get("id") in booked:
+        return task | {"queued_as": "review"}
+    return task
+
+
 # By version N: what takes a record of version N and returns its fields in version N+1's shape.
 # The upgrade sets the version for it. Version 3 dropped the planner's rounds through a migration
 # rather than by having the snapshot ignore them, so that the format stays pinned by its fixtures
@@ -146,6 +167,9 @@ def _origin_as_trigger(task: object) -> object:
 # suggestions are from ``super-review`` rather than ``super_review``: its migration renames them.
 # Version 20 added the template and values each review of commits is rendered from, which an
 # older record keeps none of, so its reviews start with their prompts as they were queued.
+# Version 21 added what orbit queued each task as, so its reviews are told by their booking
+# rather than their role: its migration queues each task an older record's review lane booked,
+# one of its jobs, as a review, and every other as a task.
 _MIGRATIONS: dict[int, Migration] = {
     1: _spent_by_tasks,
     2: _without_rounds,
@@ -166,6 +190,7 @@ _MIGRATIONS: dict[int, Migration] = {
     17: _unchanged,
     18: _origins_as_triggers,
     19: _unchanged,
+    20: _reviews_as_booked,
 }
 
 EMPTY_NAME = "A session needs a name."

@@ -138,13 +138,38 @@ def test_edit_rejects_unknown_and_running_tasks() -> None:
 def test_edit_refuses_a_review_orbit_queued_but_not_one_the_user_added() -> None:
     board = TaskBoard()
     review = TaskSpec(prompt="Review commit abc", role="reviewer")
-    queued, added = board.add_triggered(review, REVIEW_ORIGIN), board.add(review)
+    queued, added = board.add_triggered(review, REVIEW_ORIGIN, "review"), board.add(review)
     board.set_status(queued, "completed")
     with pytest.raises(Refused, match="Reviews can't be edited") as refused:
         board.edit(queued, TWO)
     assert refused.value.code == INVALID
     board.edit(added, TWO)
     assert [t.task for t in board.tasks] == [review, TWO]
+
+
+def test_a_triggered_task_is_queued_as_a_review_only_when_it_says_so() -> None:
+    board = TaskBoard()
+    audit = board.add_triggered(TaskSpec(prompt="Audit"), "audit", "review")
+    look = board.add_triggered(TaskSpec(prompt="Look", role="reviewer"), "look")
+    assert [state.queued_as for state in board.tasks] == ["review", "task"]
+    with pytest.raises(Refused, match="Reviews can't be edited"):
+        board.edit(audit, TWO)
+    board.edit(look, TWO)
+    assert board.get(look).task == TWO
+
+
+def test_a_draft_is_queued_as_a_review_only_when_it_says_so() -> None:
+    board = TaskBoard()
+    audit = board.add_draft(TaskSpec(prompt="Audit"), None, "audit", "review")
+    look = board.add_draft(TaskSpec(prompt="Look", role="reviewer"), None, "look")
+    assert [(state.status, state.queued_as) for state in board.tasks] == [
+        ("draft", "review"),
+        ("draft", "task"),
+    ]
+    with pytest.raises(Refused, match="Reviews can't be edited"):
+        board.edit(audit, TWO)
+    board.edit(look, TWO)
+    assert board.get(look).task == TWO
 
 
 def test_next_runnable_skips_done_running_and_already_tried_tasks() -> None:

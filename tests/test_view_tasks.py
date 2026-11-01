@@ -277,9 +277,9 @@ def test_edit_refusal_says_a_running_or_verifying_task_cant_be_edited() -> None:
 
 
 def test_edit_refusal_says_a_review_orbit_queued_cant_be_edited() -> None:
-    for role in ("reviewer", "super-reviewer"):
+    for role in ("reviewer", "super-reviewer", "coder"):
         task = TaskSpec(prompt="check", role=role)
-        state = TaskState(id="1", task=task, origin=REVIEW_ORIGIN)
+        state = TaskState(id="1", task=task, origin=REVIEW_ORIGIN, queued_as="review")
         assert edit_refusal(state) == "Reviews can't be edited; remove it instead."
 
 
@@ -296,10 +296,23 @@ def test_edit_refusal_allows_a_review_the_user_added_and_a_task_a_review_suggest
     assert edit_refusal(suggestion) is None
 
 
+def test_edit_refusal_allows_a_reviewers_task_a_trigger_queued_without_booking_it() -> None:
+    for status in ("pending", "draft"):
+        task = TaskSpec(prompt="Look around", role="reviewer")
+        state = TaskState(id="1", task=task, status=status, origin="look")
+        assert edit_refusal(state) is None
+
+
 def test_edit_refusal_answers_as_the_backend_does() -> None:
     states = (
         TaskState(id="3", task=TaskSpec(prompt="go"), status="verifying"),
-        TaskState(id="1", task=TaskSpec(prompt="check", role="super-reviewer"), origin="review"),
+        TaskState(
+            id="1",
+            task=TaskSpec(prompt="check", role="super-reviewer"),
+            origin="review",
+            queued_as="review",
+        ),
+        TaskState(id="1", task=TaskSpec(prompt="check", role="reviewer"), origin="look"),
         TaskState(id="1", task=TaskSpec(prompt="check", role="reviewer")),
         TaskState(id="2", task=TaskSpec(prompt="tidy"), origin="review"),
     )

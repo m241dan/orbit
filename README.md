@@ -1193,11 +1193,17 @@ reviewed, and which super review last sampled each file belong to the repository
 session, so they carry on across sessions and restarts. A super review that falls due waits while
 suggested tasks (or reviews) are pending or running, as its `suggestions-pending` guard says; it
 comes with your next commit once none is. A session an older orbit saved, whose super reviews'
-suggestions say they're from `super_review`, reads them as from `super-review`, and a review of
-commits it had queued starts with its task as it was queued, without what landed since.
+suggestions say they're from `super_review`, reads them as from `super-review`, a review of
+commits it had queued starts with its task as it was queued, without what landed since, and each
+task its review lane had booked reads as a review orbit queued.
 
-The reviews orbit queued, a `reviewer`'s or `super-reviewer`'s task from any trigger, a
-project's own included, can't be edited: remove one instead. Reviews run in the review roles'
+The reviews orbit queued, each task it booked as a review, can't be edited: remove one instead.
+A trigger's task is booked as a review when it reviews what orbit picked: the commits that
+landed, for the trigger `review-rounds` guards, or the codebase, for any `commits` trigger, a
+project's own included, whatever role its task is for, an `auditor`'s too. A `reviewer` task
+from a trigger on another event, such as `task_finished`, reviews nothing orbit picked, so it
+isn't booked: it can be edited, a draft included, and can't suggest tasks, as a review you add
+can't. Reviews run in the review roles'
 lane, `review`, which starts its tasks by itself: a `reviewer` task you add starts there at once
 too, in its role's `workspace` (by default a fresh read-only snapshot of the base commit), as it
 has no commit to review. A task of another role in that lane, such as an `auditor` with
@@ -1730,10 +1736,11 @@ The guards:
 - `dedupe`: holds the trigger back while a task still to run or running has the first line its
   task would have.
 - `suggestions-pending`: holds the trigger back while a task the reviews queued is pending or
-  running: a review orbit queued, a `reviewer`'s or `super-reviewer`'s task from any trigger (its
-  origin neither `manual` nor `planner`), a project's own included, or a task in a review's
-  batch, a suggestion or a fix of one; so the super review waits for the work its last
-  suggestions, or another trigger's, are about to do.
+  running: a review orbit queued, a task booked as a review (see [Reviews](#reviews)), a
+  project's own `commits` trigger's included, whatever its role, or a task in a review's batch,
+  a suggestion or a fix of one; so the super review waits for the work its last suggestions, or
+  another trigger's, are about to do. A `reviewer` task that isn't booked, such as one from a
+  trigger on `task_finished`, doesn't hold it back.
 
 A `commits` trigger's guards are judged before its task's prompt is rendered, so `dedupe` holds
 none back.

@@ -162,6 +162,12 @@ TaskStatus = Literal[
 ACTIVE_STATUSES: frozenset[TaskStatus] = frozenset({"running", "verifying"})
 """Statuses of a task an agent is working on or orbit is verifying."""
 
+QueuedAs = Literal["task", "review"]
+"""What orbit queued a task as: a ``review`` it booked into its review lane, reviewing work it
+picked (the commits that landed, or the codebase at one) and suggesting into a batch of its own,
+whatever the task's role; or a ``task``, every other, a review the user or the planner added, or
+one a trigger queued without booking it, included."""
+
 
 class TaskState(_Message):
     """One entry of the task list. ``id`` stays the same while the list changes around it.
@@ -174,7 +180,9 @@ class TaskState(_Message):
     in ``reason``, one line such as ``Unit tests failed``, with the full text in
     ``reason_detail``; both are empty otherwise. ``proposed_by`` is the conversational role
     that proposed a draft, such as ``planner``; none for every other task. ``edited`` says
-    that role edited the draft since proposing it.
+    that role edited the draft since proposing it. ``queued_as`` says whether orbit queued it as
+    a ``review`` of its own, booked into its review lane, which can't be edited (see
+    :data:`QueuedAs`).
     """
 
     id: str
@@ -191,6 +199,7 @@ class TaskState(_Message):
     reason_detail: str = ""
     proposed_by: str | None = None
     edited: bool = False
+    queued_as: QueuedAs = "task"
 
 
 SessionState = Literal["running", "idle"]

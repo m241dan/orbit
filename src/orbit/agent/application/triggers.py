@@ -60,7 +60,15 @@ from orbit.agent.domain.triggers import (
     verification_state,
 )
 from orbit.agent.domain.verification import VerificationStep, failure_report
-from orbit.protocol import CODER, GIT_FAILED, ErrorOccurred, Notice, TaskSpec, TaskState
+from orbit.protocol import (
+    CODER,
+    GIT_FAILED,
+    ErrorOccurred,
+    Notice,
+    QueuedAs,
+    TaskSpec,
+    TaskState,
+)
 
 Values = Callable[[], Awaitable[Mapping[str, str] | None]]
 """What gathers an event's template values, but the trigger's name, once a trigger may fire on
@@ -350,7 +358,8 @@ class TriggerEngine:
         """Add to ``board`` the task ``trigger``, named ``name``, queues as it fires as
         ``firing`` says, unless a guard holds it back, if they're still to decide; returns its
         id if it's added. One reviewing the review due does so with the skills of what it
-        reviews, and is booked into its batches with what its prompt was rendered from."""
+        reviews, whatever its role, and is queued as a review, booked into its batches with what
+        its prompt was rendered from."""
         assert trigger.role is not None  # It listened without checks, so it queues a role's task,
         assert trigger.prompt is not None  # with a prompt.
         values = {**firing.values, TRIGGER_VARIABLE: name}
@@ -360,7 +369,7 @@ class TriggerEngine:
         review = firing.review_of(trigger)
         skills = () if review is None else review_skills(review.job, board.tasks)
         task = role_task(trigger.role, self._desk.agents.roles[trigger.role], prompt, skills)
-        task_id = _added(board, task, name, trigger)
+        task_id = _added(board, task, name, trigger, "task" if review is None else "review")
         if review is not None:
             review.book(task_id, ReviewTemplate(trigger.prompt, values))
         return task_id
@@ -384,9 +393,11 @@ class TriggerEngine:
         return review_values(job, diff, cap, pending) | landing
 
 
-def _added(board: TaskBoard, task: TaskSpec, name: str, trigger: Trigger) -> str:
-    """Add ``task``, which ``trigger``, named ``name``, queued, to ``board``: as a draft if it
-    says so; returns its id."""
+def _added(
+    board: TaskBoard, task: TaskSpec, name: str, trigger: Trigger, queued_as: QueuedAs
+) -> str:
+    """Add ``task``, which ``trigger``, named ``name``, queued as ``queued_as``, to ``board``:
+    as a draft if it says so; returns its id."""
     if trigger.draft:
-        return board.add_draft(task, None, name)
-    return board.add_triggered(task, name)
+        return board.add_draft(task, None, name, queued_as)
+    return board.add_triggered(task, name, queued_as)

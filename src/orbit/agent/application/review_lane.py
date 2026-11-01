@@ -292,10 +292,9 @@ class ReviewLane:
         await self._queue(self.planner.review_ended(batch) if open_batch else None)
 
     def edited(self, state: TaskState) -> None:
-        """A task was edited back to pending, as ``state``, so its batch waits for it again; a
-        review keeps the prompt it was given rather than being rendered again as it starts. The
-        task isn't looked up: it may have been removed since it was edited."""
-        self._templates.pop(state.id, None)
+        """A task was edited back to pending, as ``state``, so its batch waits for it again. It
+        isn't a review the lane booked, which can't be edited, so the lane keeps no template for
+        it. The task isn't looked up: it may have been removed since it was edited."""
         self.planner.reopened(state)
 
     def joined(self, task_id: str) -> None:
@@ -390,10 +389,12 @@ class ReviewLane:
         return ReviewRound(job, partial(self._book, job, current_span()))
 
     def _book(self, job: ReviewJob, cause: Span, task_id: str, template: ReviewTemplate) -> None:
-        """Record review task ``task_id``, queued for ``job`` while ``cause`` was the current
-        span, which its span links to, opening the batch its suggestions join, and, for a review
-        of commits, the ``template`` its prompt was rendered from. A super review, told what
-        landed as it was queued, isn't rendered again."""
+        """Record review task ``task_id``, queued as a review for ``job``, whatever its role,
+        while ``cause`` was the current span, which its span links to, opening the batch its
+        suggestions join, and, for a review of commits, the ``template`` its prompt was rendered
+        from. A super review, told what landed as it was queued, isn't rendered again. The
+        triggers queued its task as a review (see :data:`~orbit.protocol.QueuedAs`), so it can't
+        be edited, and holds back ``suggestions-pending`` while it waits."""
         batch = self.planner.open_batch(job)
         self._jobs[task_id], self._batches[task_id] = job, batch
         self._causes[task_id] = cause
@@ -415,7 +416,7 @@ class ReviewLane:
         last one it reviews as they stand now, as it starts, rendering it again from its
         template, which lists them where it says, in place of those it listed as it last ran.
         One with no template kept keeps its prompt: a super review, told what landed as it was
-        queued, a review the user edited, or one an older orbit saved."""
+        queued, or one an older orbit saved."""
         template = self._templates.get(task_id)
         if template is None:
             return

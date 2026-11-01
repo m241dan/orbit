@@ -15,6 +15,7 @@ from orbit.protocol import (
     PLANNER_ORIGIN,
     REVIEW_ORIGIN,
     UNKNOWN,
+    QueuedAs,
     TaskOrigin,
     TaskSpec,
     TaskState,
@@ -108,8 +109,8 @@ class TaskBoard:
 
     def edit(self, task_id: str, task: TaskSpec) -> None:
         """Replace a task and make it pending again, without a reason for how it last ended.
-        Raises ``Refused`` if it can't be: while it runs, or for a review orbit queued, whose
-        batch is spent."""
+        Raises ``Refused`` if it can't be: while it runs, or for a task orbit queued as a
+        review, whose batch is spent."""
         current = self.get(task_id)
         refusal = edit_refusal(current)
         if refusal is not None:
@@ -226,11 +227,18 @@ class TaskBoard:
         return any(state.task.role == role and state.status in WAITING for state in self._tasks)
 
     def add_draft(
-        self, task: TaskSpec, proposed_by: str | None, origin: TaskOrigin = PLANNER_ORIGIN
+        self,
+        task: TaskSpec,
+        proposed_by: str | None,
+        origin: TaskOrigin = PLANNER_ORIGIN,
+        queued_as: QueuedAs = "task",
     ) -> str:
         """Add ``task``, which role ``proposed_by`` proposed (none for orbit itself), at the end
-        as a draft from ``origin``, the planner unless given; returns its id."""
-        state = self._new(task, status="draft", origin=origin, proposed_by=proposed_by)
+        as a draft from ``origin``, the planner unless given, queued as ``queued_as``, a plain
+        task unless given; returns its id."""
+        state = self._new(
+            task, status="draft", origin=origin, proposed_by=proposed_by, queued_as=queued_as
+        )
         self._tasks.append(state)
         return state.id
 
@@ -311,11 +319,13 @@ class TaskBoard:
         self._tasks.append(state.model_copy(update={"id": new_id}))
         return new_id
 
-    def add_triggered(self, task: TaskSpec, trigger: TaskOrigin) -> str:
-        """Add ``task``, which the trigger named ``trigger`` queued, from that trigger: a
-        configurator's at the front, to run next, as the steps it sets up verify the others,
-        and any other at the end; returns its id."""
-        state = self._new(task, origin=trigger)
+    def add_triggered(
+        self, task: TaskSpec, trigger: TaskOrigin, queued_as: QueuedAs = "task"
+    ) -> str:
+        """Add ``task``, which the trigger named ``trigger`` queued as ``queued_as``, a plain
+        task unless given, from that trigger: a configurator's at the front, to run next, as the
+        steps it sets up verify the others, and any other at the end; returns its id."""
+        state = self._new(task, origin=trigger, queued_as=queued_as)
         self._tasks.insert(0 if task.role == CONFIGURATOR else len(self._tasks), state)
         return state.id
 

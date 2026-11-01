@@ -3259,7 +3259,7 @@
       "type": "object"
     },
     "TaskState": {
-      "description": "One entry of the task list. ``id`` stays the same while the list changes around it.\n\n``fixes`` is the id of the task this one was added to fix, if any; it comes right\nafter that task. ``attempt`` counts the fixes asked of the agent working on it, out\nof ``max_attempts``; both are 0 until verification first fails. A task a review\nsuggested belongs to that review's ``batch``, at review ``round`` (0 otherwise).\n``usage`` adds up what every turn run for the task cost. A task that ended badly says why\nin ``reason``, one line such as ``Unit tests failed``, with the full text in\n``reason_detail``; both are empty otherwise. ``proposed_by`` is the conversational role\nthat proposed a draft, such as ``planner``; none for every other task. ``edited`` says\nthat role edited the draft since proposing it.",
+      "description": "One entry of the task list. ``id`` stays the same while the list changes around it.\n\n``fixes`` is the id of the task this one was added to fix, if any; it comes right\nafter that task. ``attempt`` counts the fixes asked of the agent working on it, out\nof ``max_attempts``; both are 0 until verification first fails. A task a review\nsuggested belongs to that review's ``batch``, at review ``round`` (0 otherwise).\n``usage`` adds up what every turn run for the task cost. A task that ended badly says why\nin ``reason``, one line such as ``Unit tests failed``, with the full text in\n``reason_detail``; both are empty otherwise. ``proposed_by`` is the conversational role\nthat proposed a draft, such as ``planner``; none for every other task. ``edited`` says\nthat role edited the draft since proposing it. ``queued_as`` says whether orbit queued it as\na ``review`` of its own, booked into its review lane, which can't be edited (see\n:data:`QueuedAs`).",
       "properties": {
         "attempt": {
           "default": 0,
@@ -3322,6 +3322,15 @@
           ],
           "default": null,
           "title": "Proposed By"
+        },
+        "queued_as": {
+          "default": "task",
+          "enum": [
+            "task",
+            "review"
+          ],
+          "title": "Queued As",
+          "type": "string"
         },
         "reason": {
           "default": "",

@@ -44,8 +44,8 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit these for a format change: they're what orbits at versions 1 to 20 wrote, and
-# they still need to read. A new version gets its own fixture (session-v21.json) and a
+# Never edit these for a format change: they're what orbits at versions 1 to 21 wrote, and
+# they still need to read. A new version gets its own fixture (session-v22.json) and a
 # migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
 SESSION_V2 = FIXTURES / "session-v2.json"
@@ -67,6 +67,7 @@ SESSION_V17 = FIXTURES / "session-v17.json"
 SESSION_V18 = FIXTURES / "session-v18.json"
 SESSION_V19 = FIXTURES / "session-v19.json"
 SESSION_V20 = FIXTURES / "session-v20.json"
+SESSION_V21 = FIXTURES / "session-v21.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -131,6 +132,7 @@ def tasks() -> tuple[TaskState, ...]:
             task=TaskSpec(prompt="Review the whole codebase", role="reviewer"),
             status="unverified",
             origin="super-review",
+            queued_as="review",  # Booked in the review lane, as each version's jobs say.
         ),
         TaskState(id="4", task=TaskSpec(prompt="Document the parser"), status="draft"),
     )
@@ -180,7 +182,7 @@ def expected(
     lane: LaneSnapshot | None = None,
 ) -> SessionRecord:
     return SessionRecord(
-        version=20,
+        version=21,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
@@ -437,14 +439,58 @@ def templated() -> SessionRecord:
     )
 
 
-def test_a_version_20_session_file_reads_as_its_record() -> None:
-    assert parse_record(SESSION_V20.read_text(encoding="utf-8")) == templated()
+def test_a_version_20_session_file_migrates_to_its_booked_reviews_queued_as_reviews() -> None:
+    record = parse_record(SESSION_V20.read_text(encoding="utf-8"))
+    assert record == templated()
+    assert isinstance(record, SessionRecord)
+    assert [state.queued_as for state in record.tasks] == ["task", "task", "review", "task"]
 
 
-def test_a_session_record_is_written_in_the_version_20_format() -> None:
-    written = json.loads(record_json(templated()))
+def test_a_version_20_review_of_another_role_still_cant_be_edited() -> None:
     golden = json.loads(SESSION_V20.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V20.name)
+    golden["tasks"][2]["task"]["role"] = "coder"
+    record = parse_record(json.dumps(golden))
+    assert isinstance(record, SessionRecord)
+    assert edit_refusal(record.tasks[2]) == EditRefusal(
+        INVALID, "Reviews can't be edited; remove it instead."
+    )
+
+
+def test_a_version_20_record_without_reviews_queues_every_task_as_a_task() -> None:
+    golden = json.loads(SESSION_V20.read_text(encoding="utf-8"))
+    record = parse_record(json.dumps(golden | {"reviews": None}))
+    assert isinstance(record, SessionRecord)
+    assert [state.queued_as for state in record.tasks] == ["task"] * 4
+    assert edit_refusal(record.tasks[2]) is None
+
+
+def test_a_version_20_record_whose_tasks_are_not_a_list_is_left_for_validation() -> None:
+    golden = json.loads(SESSION_V20.read_text(encoding="utf-8"))
+    record = parse_record(json.dumps(golden | {"tasks": "none"}))
+    assert isinstance(record, Unreadable) and record.reason.startswith("tasks:")
+
+
+def test_a_version_20_record_whose_task_is_not_an_object_is_left_for_validation() -> None:
+    golden = json.loads(SESSION_V20.read_text(encoding="utf-8"))
+    record = parse_record(json.dumps(golden | {"tasks": ["3", *golden["tasks"]]}))
+    assert isinstance(record, Unreadable) and record.reason.startswith("tasks.0:")
+
+
+def test_a_version_20_record_whose_jobs_are_not_an_object_is_left_for_validation() -> None:
+    golden = json.loads(SESSION_V20.read_text(encoding="utf-8"))
+    reviews = golden["reviews"] | {"jobs": ["3"]}
+    record = parse_record(json.dumps(golden | {"reviews": reviews}))
+    assert isinstance(record, Unreadable) and record.reason.startswith("reviews.jobs:")
+
+
+def test_a_version_21_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V21.read_text(encoding="utf-8")) == templated()
+
+
+def test_a_session_record_is_written_in_the_version_21_format() -> None:
+    written = json.loads(record_json(templated()))
+    golden = json.loads(SESSION_V21.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V21.name)
 
 
 def test_a_version_1_review_count_reads_as_its_count_with_no_last_super_commit() -> None:
