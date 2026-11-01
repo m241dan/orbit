@@ -6,7 +6,8 @@
 - Name each test with a sentence saying what happens under what condition.
 - Check behaviour: a test fails when the behaviour it covers breaks. A line that coverage runs
   but no assertion checks is untested.
-- Cover every line and branch, each with a test that checks what it does.
+- Cover every line and branch, each with a test that checks what it does. The coverage check
+  that enforces it is the language skill's suggestion.
 - Pin each fix with the test that would have caught it, in the fix's own commit.
 - Type tests like the code; tests keep to the same function limits.
 - Keep each test independent of the machine and of other tests. Pass in the clock, randomness

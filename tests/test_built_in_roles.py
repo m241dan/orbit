@@ -9,9 +9,10 @@ from typing import Any
 
 import pytest
 
+from orbit.agent.application.skill_delivery import SkillDelivery
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
-from orbit.agent.external.skill_files import SKILL_DIRECTORY, skill_names
+from orbit.agent.external.skill_files import SKILL_DIRECTORY, read_skill_library, skill_names
 from orbit.protocol import BUILT_IN_ROLE_NAMES
 
 FOLDER = files("orbit.agent.external") / "instructions"
@@ -136,7 +137,7 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "consults": (),
         "consult_limit_per_hour": 6,
         "copy_ttl_hours": 24,
-        "skills": (),
+        "skills": ("python", "cpp"),
     },
 }
 """Each built-in role's fields but its instructions: those orbit has always had, where it
@@ -253,6 +254,19 @@ def test_the_configurator_looks_for_the_projects_own_checks() -> None:
     for hint in ("pre-commit", "package.json", "pyproject.toml", "Makefile", "quick", "setup"):
         assert hint in instructions
     assert "your work is reading and proposing" in instructions
+
+
+def test_the_configurator_proposes_from_the_suggested_checks_of_the_skills_that_fit() -> None:
+    instructions = read_built_in_roles()["configurator"].instructions
+    assert "Suggested checks of the language skills that fit the project" in instructions
+
+
+def test_the_configurator_is_launched_with_the_python_and_cpp_skills(tmp_path: Path) -> None:
+    library = read_skill_library(str(tmp_path))
+    delivery = SkillDelivery(library, (), lambda agent_id: None)
+    told = delivery.instructions(read_built_in_roles()["configurator"], None)
+    for name in ("python", "cpp"):
+        assert library.skills[name].body.rstrip() in told, name
 
 
 def test_the_readme_lists_each_built_in_roles_tools() -> None:

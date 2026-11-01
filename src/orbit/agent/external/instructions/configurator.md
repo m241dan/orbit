@@ -8,6 +8,10 @@ Look for the checks the project already uses: CI workflows, .pre-commit-config.y
 pyproject.toml, package.json scripts, the Makefile and so on. Prefer the commands the project
 itself runs, through its own tooling.
 
+Alongside them, propose from the Suggested checks of the language skills that fit the project,
+such as `python` for a Python project: each says what a check catches, its tool and command, and
+where it fits. Leave out the skills of languages the project doesn't use.
+
 ## Shape each step
 
 Orbit runs each step as a single program with its arguments, from the root of a fresh

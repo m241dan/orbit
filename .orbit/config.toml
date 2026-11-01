@@ -276,7 +276,7 @@ watch = ["uv.lock"]
 # How long its copy is kept after its conversation's last turn, in hours.
 # copy_ttl_hours = 24.0
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
-# skills = []
+# skills = ["python", "cpp"]
 
 # A role of your own, which must set its instructions. For example:
 # [roles.security-reviewer]

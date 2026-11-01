@@ -526,10 +526,10 @@ def test_the_skill_map_has_a_row_per_skill_of_the_library_in_name_order() -> Non
                 "task / mapped",
                 "reviewed task / mapped",
                 "mapped",
-                "task / mapped",
+                "role",
             ),
         ),
-        ("cpp", ("—", "—", "task", "reviewed task", "—", "task")),
+        ("cpp", ("—", "—", "task", "reviewed task", "—", "role")),
         ("review-style", ("—", "—", "task", "reviewed task", "role", "task")),
     ],
 )
@@ -550,7 +550,7 @@ def test_a_projects_own_conversational_role_gets_only_the_mappings_skills() -> N
 
 
 def test_a_role_that_names_a_mapped_skill_gets_it_from_its_role() -> None:
-    roles = {name: {"skills": ["python"]} for name in ("planner", "reviewer", "configurator")}
+    roles = {name: {"skills": ["python"]} for name in ("planner", "reviewer", "coder")}
     python = mapped({"roles": roles}).cells["python"]
     assert [python[name] for name in roles] == ["role", "role", "role"]
 

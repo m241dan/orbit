@@ -52,7 +52,7 @@ delivers the skills.
    `review-performance`; super-reviewer `code-style`, `review-style`, `review-drift`,
    `review-scaling`; experimenter and configurator none; over `code-style` for the experimenter
    and configurator (text they rarely use) and the reviewer without `security` (its security lens
-   measures against it).
+   measures against it). (00041 gives the configurator python and cpp, for their suggested checks.)
 10. `[[skills]]` entries have `paths` (a non-empty list of files or folders, relative to the
     project root) and `use` (a non-empty list of skill names), only in the project's
     `.orbit/config.toml`; the user config already refuses them; over allowing them in the user

@@ -12,18 +12,25 @@ Adds Python's tools and idioms to `code-style`.
 - Run everything through uv: `uv run pytest`, `uv run mypy`.
 - Run `ruff format` and `ruff check --fix` before the first check run; long lines and import
   order are the most common failures.
-- mypy is strict over `src` and `tests`. Narrow an optional before using it, in tests too, and
-  import each name from the module that defines it.
-- Import contracts (import-linter) keep the code types apart; add a contract line with each new
-  dependency.
-- Lizard holds functions to complexity 6 and 100 lines, and a test that counts parameters holds
-  them to 5. A CLI command or an Entry function past five parameters carries
-  `# #lizard forgives(parameter_count): <why>`.
-- pytest runs with 100% branch coverage. Coverage exclusions live only in `pyproject.toml`:
-  `TYPE_CHECKING` blocks, `assert_never(` and `__main__`.
-- mutmut runs mutation testing, and Hypothesis runs property-based tests.
-- pytest-benchmark runs the benchmarks in `benchmarks/`, apart from `tests/`, comparing each run
-  with the machine's saved baseline (`--benchmark-compare --benchmark-compare-fail=mean:10%`).
+- Type strictly, for mypy's strict mode over `src` and `tests`. Narrow an optional before using
+  it, in tests too, and import each name from the module that defines it.
+- Keep the code types apart with import contracts (import-linter); add a contract line with each
+  new dependency.
+- Keep functions to complexity 6, 100 lines and 5 parameters. A CLI command or an Entry function
+  past five parameters carries `# #lizard forgives(parameter_count): <why>`.
+- Cover every branch. Coverage exclusions live only in `pyproject.toml`: `TYPE_CHECKING` blocks,
+  `assert_never(` and `__main__`.
+- Property-based tests use Hypothesis, and benchmarks use pytest-benchmark in `benchmarks/`, apart
+  from `tests/`.
+
+## Suggested checks
+
+Suggestions for the project's verification: the configurator proposes these, and the project's
+.orbit/config.toml decides what runs. Lint, format, types, import contracts, function limits and
+the tests with full branch coverage fit every task's checks; mutation testing and benchmarks fit
+named sets.
+
+Read `python`'s `checks.md`.
 
 ## Current Python
 

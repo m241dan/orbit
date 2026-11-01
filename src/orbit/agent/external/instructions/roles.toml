@@ -82,6 +82,7 @@ runtime = "claude"
 instructions = "configurator.md"
 tool_access = "restricted"
 tools = ["get_task", "propose_checks", "report_progress", "give_up"]
+skills = ["python", "cpp"]
 verify = false
 lane = "work"
 workspace = "worktree"

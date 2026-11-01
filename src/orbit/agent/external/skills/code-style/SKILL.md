@@ -81,9 +81,10 @@ Read `code-style`'s `naming.md`.
 ## Tests
 
 Write the test first and watch it fail. Cover every line and branch with a test that checks
-behaviour, and type tests like the code. Keep each test independent of the machine and of other
-tests: pass in the clock and randomness, drive loops by hand, and give External's tests local
-stand-ins such as temp dirs, local git and loopback.
+behaviour, and type tests like the code; the coverage check that enforces it is the language
+skill's suggestion. Keep each test independent of the machine and of other tests: pass in the
+clock and randomness, drive loops by hand, and give External's tests local stand-ins such as temp
+dirs, local git and loopback.
 
 Read `code-style`'s `testing.md`: testing each type, fakes, mutation testing and property-based
 tests.
@@ -104,8 +105,9 @@ Read `code-style`'s `performance.md`.
 Keep every function, tests included, to cyclomatic complexity 6, 100 lines and 5 parameters, and
 split it well before it reaches them; past five parameters, bundle them into one object. A CLI
 command or an Entry function may pass the parameter limit with its reason written beside it.
-Every port declares its own errors, and External translates OS and library errors into them; the
-language skill says how errors are expressed.
+The checks that enforce these limits are the language skill's suggestions. Every port declares
+its own errors, and External translates OS and library errors into them; the language skill says
+how errors are expressed.
 
 An optional means a value or nothing, never success or failure. A function that can fail says so
 in its return type, with an expected or a result variant, even when success carries no value.

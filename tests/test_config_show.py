@@ -530,9 +530,9 @@ def test_skills_maps_each_skill_to_where_each_role_gets_it(project: Path) -> Non
         "task / mapped",
         "reviewed task / mapped",
         "mapped",
-        "task / mapped",
+        "role",
     ]
-    assert list(rows["cpp"].values()) == ["—", "—", "task", "reviewed task", "—", "task"]
+    assert list(rows["cpp"].values()) == ["—", "—", "task", "reviewed task", "—", "role"]
     assert rows["code-style"]["configurator"] == "task"
     assert rows["code-style"]["experimenter"] == "—"
     assert (rows["review-style"]["super-reviewer"], rows["review-style"]["reviewer"]) == (
@@ -568,7 +568,7 @@ def test_skills_with_json_gives_each_skills_cells_by_role(project: Path) -> None
         "coder": "task",
         "reviewer": "reviewed task",
         "super-reviewer": "—",
-        "configurator": "task",
+        "configurator": "role",
     }
     assert skills["python"]["reviewer"] == "reviewed task / mapped"
 

@@ -11,8 +11,8 @@ Adds C++'s tools and idioms to `code-style`.
 
 - C++23, built with CMake presets. Dependencies come through vcpkg in manifest mode, pinned in
   `vcpkg.json`.
-- Each check is a preset: the gate's test build runs under AddressSanitizer and UBSan, a `tsan`
-  build runs the concurrency tests, and a `coverage` build feeds gcovr.
+- Each check has a preset: a test build under AddressSanitizer and UBSan, a `tsan` build for the
+  concurrency tests, and a `coverage` build that feeds gcovr.
 
 Read `cpp`'s `build.md`: presets and dependencies.
 
@@ -21,19 +21,19 @@ Read `cpp`'s `build.md`: presets and dependencies.
 - A directory per code type under `src/` (`domain/`, `application/`, `external/`, `execution/`),
   grouped under components when there are several. Entry points go in `apps/`, a library's public
   headers in `include/<project>/`, and the tests mirror `src/`.
-- Each code type is a CMake library target, linked in the layer order, and Orbit's include
-  checker holds each directory to its allowed include prefixes. The linker never sees a
+- Each code type is a CMake library target, linked in the layer order, and each directory keeps
+  to its allowed include prefixes, which Orbit's include checker checks. The linker never sees a
   header-only library such as ASIO, so the include checker is what keeps it in its layers.
 
 Read `cpp`'s `build.md`: targets, includes and test labels.
 
-## Checks
+## Suggested checks
 
-- Warnings are errors: `-Wall -Wextra -Wpedantic -Werror`, and clang-tidy's warnings too.
-- Lizard holds functions to complexity 6, 100 lines and 5 parameters.
-- Coverage is 100% of lines and branches, measured by gcovr with `--exclude-throw-branches`.
-- Benchmarks use Google Benchmark in the `release` build, compared with the machine's saved
-  baseline.
+Suggestions for the project's verification: the configurator proposes these, and the project's
+.orbit/config.toml decides what runs. Warnings as errors, clang-tidy, formatting, function limits
+of complexity 6, 100 lines and 5 parameters, the include checker, the tests under AddressSanitizer
+and UBSan, and 100% line and branch coverage fit every task's checks; ThreadSanitizer, mutation
+testing, fuzzing and benchmarks fit named sets.
 
 Read `cpp`'s `checks.md`.
 

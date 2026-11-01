@@ -831,9 +831,11 @@ With `restricted` access, an agent can explain the failure but can't fix it.
 
 A task in the `configurator` role works out a project's verification steps for you. Its agent
 inspects the repository (CI workflows, `.pre-commit-config.yaml`, `package.json` scripts,
-`pyproject.toml`, the Makefile and so on) and proposes the checks the project already uses, quick
-ones first, plus a setup command and the files whose changes should rerun it. It doesn't edit
-files.
+`pyproject.toml`, the Makefile and so on) and proposes the checks the project already uses,
+alongside those its language skills suggest (the `configurator`'s skills are `python` and `cpp`,
+each with a Suggested checks table of what a check catches, its tool and command, and where it
+fits), quick ones first, plus a setup command and the files whose changes should rerun it. It
+doesn't edit files.
 
 Orbit starts one by itself when it opens a workspace with verification on and no steps, or runs
 the one the session it opens has queued already instead of adding another (see
@@ -1307,7 +1309,7 @@ you queue keeps its own settings. Built in:
 | `super-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `suggest_task` | no | `opus` / `restricted` | `code-style`, `review-style`, `review-drift`, `review-scaling` |
 | `planner` | `propose_task`, `report_progress`, `save_report`, `list_reports`, `read_report` | no | default / `restricted` | `code-style` |
 | `experimenter` | `report_progress`, `save_report`, `list_reports`, `read_report` | no | `sonnet` / `full` | none |
-| `configurator` | `get_task`, `propose_checks`, `report_progress`, `give_up` | no | default / `restricted` | none |
+| `configurator` | `get_task`, `propose_checks`, `report_progress`, `give_up` | no | default / `restricted` | `python`, `cpp` |
 
 Every role also has `read_skill`, which reads the files of its agents' skills (see
 [Skills](#skills)); a role's `tools` naming it is refused (`read_skill comes with every role;
@@ -1928,8 +1930,9 @@ Each role names the skills its agents get in its `skills` (see
 [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)): the `planner` gets `code-style`,
 the `coder` `code-style` and `security`, the `reviewer` those and the review lenses `review-fit`,
 `review-bugs`, `review-tests`, `review-logic`, `review-security` and `review-performance`, the
-`super-reviewer` `code-style`, `review-style`, `review-drift` and `review-scaling`, and the
-`experimenter` and `configurator` none. A project's `skills` for a role replaces orbit's list
+`super-reviewer` `code-style`, `review-style`, `review-drift` and `review-scaling`, the
+`configurator` the languages `python` and `cpp`, for their suggested checks, and the
+`experimenter` none. A project's `skills` for a role replaces orbit's list
 whole, so it can drop a default as well as add a skill, orbit's or its own. The reference config
 shows each built-in role's list, or, for one too long for its line, how many it holds and the
 command that lists them (`# skills: 8 of orbit's own; orbit config show roles.reviewer.skills
@@ -2203,7 +2206,7 @@ $ orbit config show --skills
 skill                planner   experimenter   coder           reviewer                 super-reviewer   configurator
 application          mapped    mapped         task / mapped   reviewed task / mapped   mapped           task / mapped
 code-style           role      —              role            role                     role             task
-cpp                  —         —              task            reviewed task            —                task
+cpp                  —         —              task            reviewed task            —                role
 ...
 review-style         —         —              task            reviewed task            role             task
 
