@@ -84,12 +84,14 @@ class ReviewTracing:
 
     def _identity(self, state: TaskState, queued: Queued | None) -> dict[str, AttributeValue]:
         """The attributes the span of review ``state``, which orbit ``queued`` if it did,
-        starts with: on the model its own settings name, if they name one, as it's launched
+        starts with: what queued it, the trigger by name or ``manual`` or ``planner``, as its
+        origin says, and the model its own settings name, if they name one, as it's launched
         with that."""
         attributes: dict[str, AttributeValue] = {
             "orbit.workspace.id": self.workspace,
             "orbit.session.id": self.session(),
             "orbit.role": state.task.role,
+            "orbit.trigger": state.origin,
         }
         if state.task.settings.model is not None:
             attributes["gen_ai.request.model"] = state.task.settings.model

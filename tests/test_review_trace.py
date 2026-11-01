@@ -148,6 +148,7 @@ async def test_a_review_after_landing_links_to_that_task_with_what_it_reviewed()
         "orbit.workspace.id": WORKSPACE,
         "orbit.session.id": "session-1",
         "orbit.role": REVIEWER,
+        "orbit.trigger": "review",
         "orbit.review.commits": 1,
         "orbit.review.round": 0,
         "orbit.review.batch": "batch-1",

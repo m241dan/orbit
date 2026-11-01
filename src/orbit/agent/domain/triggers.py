@@ -1,14 +1,15 @@
 """Triggers, which turn an event into a task for a role or a run of the verification steps: the
 events and guards orbit knows, a trigger's fields, the package's triggers merged with a project's
-and checked against its roles, and the rendering of a trigger's prompt template.
+and checked against its roles, which of them fire on an event and which guards hold one back,
+and the rendering of a trigger's prompt template.
 
 The package's triggers aren't kept here: whoever builds them passes in the contents of their
-``triggers.toml`` and the templates it names. Nothing fires from configuration yet: the shipped
-triggers describe what orbit does.
+``triggers.toml`` and the templates it names. Only ``task_landed`` and ``task_finished`` are
+raised yet, and only triggers that queue a role's task fire.
 """
 
 import re
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, get_args
 
@@ -22,9 +23,12 @@ from pydantic import (
 )
 from pydantic_core import PydanticCustomError
 
+from orbit.agent.domain.board import WAITING
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
+from orbit.agent.domain.reviews import ReviewJob
 from orbit.agent.domain.roles import PLAIN_NAME
+from orbit.protocol import TaskState
 
 EventName = Literal[
     "session_started",
@@ -50,6 +54,14 @@ GUARD_NAMES: tuple[str, ...] = get_args(GuardName)
 COMMITS = "commits"
 """The event that counts landings, the only one a trigger's ``every`` goes with."""
 
+TASK_LANDED = "task_landed"
+TASK_FINISHED = "task_finished"
+"""The events of a task's end: its work landing, and its finishing, however it did."""
+
+REVIEW_ROUNDS = "review-rounds"
+"""The guard that holds a trigger back unless today's review rounds and batches find a review
+due, whose job its task reviews."""
+
 TRIGGER_VARIABLE = "trigger"
 """The variable every event gives: the name of the trigger it fires."""
 
@@ -71,7 +83,7 @@ class Event:
 
 EVENTS: Mapping[str, Event] = {
     "session_started": Event(("verification",), (TRIGGER_VARIABLE, "checks")),
-    "task_landed": Event(
+    TASK_LANDED: Event(
         ("role", "origin"),
         (
             TRIGGER_VARIABLE,
@@ -86,7 +98,7 @@ EVENTS: Mapping[str, Event] = {
             "task_skills",
         ),
     ),
-    "task_finished": Event(("role", "origin", "status"), (TRIGGER_VARIABLE,)),
+    TASK_FINISHED: Event(("role", "origin", "status"), (TRIGGER_VARIABLE,)),
     COMMITS: Event(
         ("role", "origin"),
         (TRIGGER_VARIABLE, "commit", "cap", "queued", "since_commits", "changed_files", "sample"),
@@ -352,3 +364,82 @@ def render_template(template: str, values: Mapping[str, str]) -> str:
         for paragraph in template.split(PARAGRAPH_BREAK)
     )
     return PARAGRAPH_BREAK.join(paragraph for paragraph in paragraphs if paragraph.strip())
+
+
+@dataclass(frozen=True)
+class TriggerEvent:
+    """An event as it's raised: its ``name``, the ``fields`` a trigger's ``when`` matches, and
+    its ``cause``, the task that caused it, if one did."""
+
+    name: str
+    fields: Mapping[str, str]
+    cause: TaskState | None = None
+
+
+def listening(
+    triggers: Mapping[str, Trigger],
+    event: TriggerEvent,
+    roles: Collection[str],
+    review: ReviewJob | None,
+) -> list[tuple[str, Trigger]]:
+    """The ``triggers`` that may fire on ``event``, by name, in their order: the enabled ones on
+    it that queue a task for one of ``roles``, the enabled roles, whose ``when`` takes it and
+    that didn't queue the task that caused it, if any, as its origin says (decision 9). One
+    guarded by ``review-rounds`` only listens while today's rounds and batches find a
+    ``review`` due."""
+    return [
+        (name, trigger)
+        for name, trigger in triggers.items()
+        if _hears(name, trigger, event, roles)
+        and (review is not None or REVIEW_ROUNDS not in trigger.guards)
+    ]
+
+
+def _hears(name: str, trigger: Trigger, event: TriggerEvent, roles: Collection[str]) -> bool:
+    """Whether ``trigger``, named ``name``, hears ``event``, as :func:`listening` says, but for
+    its guards."""
+    return (
+        trigger.enabled
+        and trigger.on == event.name
+        and trigger.role in roles
+        and takes(trigger.when, event.fields)
+        and (event.cause is None or event.cause.origin != name)
+    )
+
+
+def takes(when: Mapping[str, str | tuple[str, ...]], fields: Mapping[str, str]) -> bool:
+    """Whether a trigger's ``when`` takes an event with ``fields``: each field it names has its
+    value, or one of its values."""
+    return all(
+        field in fields and fields[field] in _values(wanted) for field, wanted in when.items()
+    )
+
+
+def _values(wanted: str | tuple[str, ...]) -> tuple[str, ...]:
+    """The values ``wanted``, a ``when`` field's value or values, allows."""
+    return (wanted,) if isinstance(wanted, str) else wanted
+
+
+def held_back(trigger: Trigger, prompt: str, tasks: Sequence[TaskState]) -> bool:
+    """Whether a guard of ``trigger`` holds back its task, rendered as ``prompt``, with ``tasks``
+    on the board: ``not-queued`` while a task of its role is still to run or running, and
+    ``dedupe`` while such a task's prompt has the same first line. ``review-rounds`` is decided
+    as it listens, and ``suggestions-pending`` holds nothing until the super review fires."""
+    waiting = [state for state in tasks if state.status in WAITING]
+    return any(_holds(guard, trigger, prompt, waiting) for guard in trigger.guards)
+
+
+def _holds(guard: GuardName, trigger: Trigger, prompt: str, waiting: Sequence[TaskState]) -> bool:
+    """Whether ``guard`` holds back ``trigger``'s task, ``prompt``, with the tasks ``waiting``."""
+    match guard:
+        case "not-queued":
+            return any(state.task.role == trigger.role for state in waiting)
+        case "dedupe":
+            return any(_title(state.task.prompt) == _title(prompt) for state in waiting)
+        case _:
+            return False
+
+
+def _title(prompt: str) -> str:
+    """The first line of ``prompt``, stripped: its task's title."""
+    return prompt.strip().split("\n", 1)[0].strip()

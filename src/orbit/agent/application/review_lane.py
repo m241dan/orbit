@@ -4,6 +4,9 @@ Each review runs in a read-only snapshot of the commit it reviews, on the :class
 the review roles' lane, which runs the tasks of every role in it, the others as any lane runs its
 tasks. Its suggestions become tasks at the end of the queue, which the work lane then runs;
 :class:`ReviewPlanner` decides when a review is due and stops reviews generating work forever.
+It's the ``review-rounds`` guard: the lane raises each landing as ``task_landed``, and a review
+of commits is queued by the triggers it guards, from their templates; the super review is still
+queued by the lane itself.
 """
 
 import random
@@ -30,6 +33,7 @@ from orbit.agent.application.ports import CoderTree, Reply, TreeFailed
 from orbit.agent.application.review_trace import Queued, ReviewTally, ReviewTracing
 from orbit.agent.application.snapshots import snapshot_of
 from orbit.agent.application.tasks import Changed, Tasks
+from orbit.agent.application.triggers import ReviewRound, TriggerEngine
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.endings import REVIEW_STOPPED_BY_YOU
 from orbit.agent.domain.reviews import (
@@ -40,7 +44,6 @@ from orbit.agent.domain.reviews import (
     pause_notice,
     pending_titles,
     review_prompt,
-    review_skills,
     tell_landed_since,
 )
 from orbit.agent.domain.role_lanes import review_lane, task_lanes
@@ -69,8 +72,10 @@ class ReviewHooks:
     the session's ``gate`` tells whether another orbit owns the repository or the session is
     halted, when no review starts, ``paused`` the runtime whose pause the work lane waits out,
     if any, on which no review starts, ``tracing`` traces the reviews, ``post`` publishes,
-    without blocking, whether the lane is busy, and ``pauses`` pauses the runtime of a task
-    whose agent hit its limit or an outage.
+    without blocking, whether the lane is busy, ``pauses`` pauses the runtime of a task
+    whose agent hit its limit or an outage, and ``triggers`` fires the triggers on the landings
+    the lane hears of and on the reviews of batches it finds due; without them, the lane fires
+    its agents' triggers itself, running only the tasks of its own lane they queue.
     """
 
     wake_work: Callable[[], Awaitable[None]]
@@ -80,6 +85,7 @@ class ReviewHooks:
     paused: Callable[[], str | None] = unpaused
     post: Callable[[Event], None] = unposted
     pauses: RuntimePauses = field(default_factory=Unpausable)
+    triggers: TriggerEngine | None = None
 
 
 class ReviewLane:
@@ -107,6 +113,7 @@ class ReviewLane:
         # until it ends.
         self._causes: dict[str, Span] = {}
         self._tallies: dict[str, ReviewTally] = {}  # Review task id -> its suggestions, as it runs.
+        self._triggers = hooks.triggers or TriggerEngine(desk, tasks, self._kick_own)
         self.runner = self._runner(hooks)
         self._paused_noted = False
         self._status: ReviewStatus | None = None
@@ -182,17 +189,30 @@ class ReviewLane:
         self._status = self.status
 
     async def landed(self, state: TaskState, commit: str) -> None:
-        """The task that ended as ``state`` landed ``commit``. The task isn't looked up: it may
-        have been removed since it finished, and its work is reviewed all the same."""
+        """The task that ended as ``state`` landed ``commit``: raise ``task_landed``, its own
+        review, if due, the one ``review-rounds`` finds, and queue the review of the batch it
+        finished, if it did. The task isn't looked up: it may have been removed since it
+        finished, and its work is reviewed all the same."""
         job = self.planner.landed(state, commit)
         # Counted before the commit's own review is queued, which would hold a due super review;
         # one due is taken at once, so the count saved as that review is queued has its commit.
         due = self.planner.count(state, self._board.tasks)
         whole = self._super_review(commit) if due else None
-        await self._queue(job)
+        await self._land(state, commit, job)
         if whole is not None:
             await self._queue(*whole)
         await self._hooks.changed()  # The count changed even if no review is due.
+
+    async def _land(self, state: TaskState, commit: str, job: ReviewJob | None) -> None:
+        """Raise ``task_landed`` for the task that ended as ``state`` landing ``commit``, its
+        own review due if ``job`` is that, and queue ``job`` if it's the review of the batch the
+        landing finished."""
+        await self.note_pause()
+        own = job if job is not None and job.batch is None else None
+        review = None if own is None else self._round(own)
+        queued = await self._triggers.landed(state, commit, review)
+        batch = await self._queue_job(job if own is None else None, None)
+        await self._queue_ended((*queued, *batch))
 
     async def super_review(self) -> None:
         """Queue a super review of the codebase as the user has it: the base's latest commit.
@@ -294,40 +314,54 @@ class ReviewLane:
         """Queue ``job``'s review, if there is one, and run it; a super review is told what
         landed after ``since``."""
         await self.note_pause()
-        diff = None if job is None else await self._diff(job)
-        if job is None or diff is None:  # No review is due, or its diff can't be read.
-            await self._publish_status()
-            await self._hooks.changed()
-            return
-        await self._add(job, diff, await self._landed(job, since))
+        await self._queue_ended(await self._queue_job(job, since))
+
+    async def _queue_job(self, job: ReviewJob | None, since: str | None) -> tuple[str, ...]:
+        """Queue ``job``'s review, if there is one: a super review, told what landed after
+        ``since``, by the lane, and a batch's by the triggers ``review-rounds`` guards; returns
+        the ids of the tasks queued."""
+        if job is None:
+            return ()
+        if job.whole:
+            return (await self._add(job, await self._landed(job, since)),)
+        return await self._triggers.reviewed(self._round(job))
+
+    async def _queue_ended(self, queued: tuple[str, ...]) -> None:
+        """Publish the review status and the lane's change once the tasks ``queued``, if any,
+        were, then run them."""
         await self._publish_status()
         await self._hooks.changed()
-        self.kick()
+        self._triggers.run(queued)
+
+    def _kick_own(self, role: str) -> None:
+        """Run the tasks waiting in the lane, if ``role``'s run there."""
+        if role in self.roles:
+            self.kick()
 
     async def _queue_quietly(self, job: ReviewJob | None) -> None:
-        """Queue ``job``'s review, if there is one, on the board without publishing it."""
-        diff = None if job is None else await self._diff(job)
-        if job is not None and diff is not None:
-            self._adder(job, diff, await self._landed(job, None))(self._board)
+        """Queue ``job``'s review, the review of a batch, if there is one, on the board without
+        publishing it."""
+        if job is not None:
+            await self._triggers.reviewed_quietly(self._round(job))
 
-    async def _diff(self, job: ReviewJob) -> str | None:
-        """The diff ``job``'s reviewer is shown; none, reported, if git can't show it."""
-        if job.whole:
-            return ""
-        try:
-            return await self._tree.show(job.commits)
-        except TreeFailed as exc:  # Git failed; the review is skipped rather than the run.
-            await self._publish(ErrorOccurred(code=GIT_FAILED, message=f"Review skipped: {exc}"))
-            return None
+    def _round(self, job: ReviewJob) -> ReviewRound:
+        """``job``'s review as the ``review-rounds`` guard finds it due, booking the review task
+        queued for it."""
+        return ReviewRound(job, partial(self._book, job, current_span()))
+
+    def _book(self, job: ReviewJob, cause: Span, task_id: str) -> None:
+        """Record review task ``task_id``, queued for ``job`` while ``cause`` was the current
+        span, which its span links to, opening the batch its suggestions join."""
+        batch = self.planner.open_batch(job)
+        self._jobs[task_id], self._batches[task_id] = job, batch
+        self._causes[task_id] = cause
 
     async def _landed(self, job: ReviewJob, since: str | None) -> LandedSince:
-        """What landed that ``job``'s reviewer is told as it's queued: for a super review, the
+        """What landed that ``job``'s reviewer, a super reviewer, is told as it's queued: the
         commits after ``since`` up to its commit, oldest first, with the files they changed and
-        the sample of other code files it reads too. A review of commits is told nothing yet:
-        :meth:`_tell_landed` tells it as it starts. What git can't list is left out: the review
-        goes ahead without it, as it's only a hint."""
-        if not job.whole:
-            return LandedSince()
+        the sample of other code files it reads too. (A review of commits is told what landed by
+        :meth:`_tell_landed`, as it starts.) What git can't list is left out: the review goes
+        ahead without it, as it's only a hint."""
         commit = job.commits[0]
         landed = await self._since_super(since, commit)
         return replace(landed, sampled=await self._sample(commit, landed.files))
@@ -377,27 +411,21 @@ class ReviewLane:
         mapped = [path for mapping in self._desk.agents.skill_mappings for path in mapping.paths]
         return self.planner.sample(tracked, mapped, changed, random.sample)
 
-    async def _add(self, job: ReviewJob, diff: str, landed: LandedSince) -> None:
-        """Queue ``job``'s review task, told ``diff`` and that ``landed`` landed since."""
-        await self._tasks.change(self._adder(job, diff, landed))
-
-    def _adder(self, job: ReviewJob, diff: str, landed: LandedSince) -> Callable[[TaskBoard], None]:
-        """The change to the board that queues ``job``'s review task, told ``diff`` and that
-        ``landed`` landed since."""
-        batch = self.planner.open_batch(job)
+    async def _add(self, job: ReviewJob, landed: LandedSince) -> str:
+        """Queue ``job``'s review task, a super review's, told that ``landed`` landed since;
+        returns its id."""
         role = job.role
         pending = pending_titles(self._board.tasks)
-        prompt = review_prompt(job, diff, self.planner.cap(job), pending, landed)
-        skills = review_skills(job, self._board.tasks)
-        task = role_task(role, self._desk.agents.roles[role], prompt, skills)
-        cause = current_span()  # What queued the review, which its span links to.
+        prompt = review_prompt(job, "", self.planner.cap(job), pending, landed)
+        task = role_task(role, self._desk.agents.roles[role], prompt)
+        book = self._round(job).book  # The span current links to it, as what queued it.
 
-        def add(board: TaskBoard) -> None:
+        def add(board: TaskBoard) -> str:
             task_id = board.add_review(task)
-            self._jobs[task_id], self._batches[task_id] = job, batch
-            self._causes[task_id] = cause
+            book(task_id)
+            return task_id
 
-        return add
+        return await self._tasks.change(add)
 
     @property
     def status(self) -> ReviewStatus:

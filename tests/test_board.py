@@ -738,3 +738,19 @@ def test_moving_a_draft_is_refused_unless_both_are_the_roles_drafts(
     with pytest.raises(Refused, match=re.escape(message)):
         board.move_draft(task_id, before, "planner")
     assert board.tasks == tasks
+
+
+def test_a_triggered_task_is_added_at_the_end_with_its_triggers_name_as_its_origin() -> None:
+    board = TaskBoard()
+    board.add(ONE)
+    task_id = board.add_triggered(TWO, "look")
+    state = board.get(task_id)
+    assert (state.status, state.origin, state.task) == ("pending", "look", TWO)
+    assert prompts(board) == ["one", "two"]
+
+
+def test_a_draft_orbit_adds_for_a_trigger_has_its_name_as_its_origin() -> None:
+    board = TaskBoard()
+    draft = board.add_draft(FIX, None, "startup-fix")
+    state = board.get(draft)
+    assert (state.status, state.origin, state.proposed_by) == ("draft", "startup-fix", None)

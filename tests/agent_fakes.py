@@ -67,6 +67,7 @@ from orbit.agent.domain.usage import UsageFetch, UsageUnavailable
 from orbit.agent.domain.usage_limits import claude_failure
 from orbit.agent.domain.usage_totals import UsageRow, UsageTotalsData, usage_totals
 from orbit.agent.external.built_in_roles import read_built_in_roles
+from orbit.agent.external.built_in_triggers import read_built_in_triggers
 from orbit.agent.external.kiro_cli import KiroCliRunner
 from orbit.protocol import (
     AGENT_FAILED,
@@ -130,6 +131,9 @@ ROLES = built_in_roles(
     read_built_in_roles(), {name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES}
 )
 """The built-in roles, with stand-in instructions."""
+
+TRIGGERS = read_built_in_triggers()
+"""The shipped triggers, their prompts their templates' text."""
 
 URL = "http://orbit.test/mcp"
 Call = Callable[..., Awaitable[Reply]]
@@ -923,17 +927,23 @@ def agents_for(
     orbit through ``host``, or a new :class:`FakeHost`, with the tokens ``<tokens>-1``,
     ``<tokens>-2`` and so on.
 
-    ``options`` go to :class:`Agents`, such as ``limits``, ``tree`` or ``roles`` (:data:`ROLES`
-    unless given); agents work in ``root``, ``.`` unless given, or in ``temp_dirs``, new
-    :class:`FakeTempDirs` unless given, and have ``exit_grace``, half a second unless given, to
-    exit. The launcher runs the roles on Claude, and ``launchers`` among ``options``, by runtime,
-    those on others.
+    ``options`` go to :class:`Agents`, such as ``limits``, ``tree``, ``roles`` (:data:`ROLES`
+    unless given) or ``triggers`` (:data:`TRIGGERS` unless given); agents work in ``root``, ``.``
+    unless given, or in ``temp_dirs``, new :class:`FakeTempDirs` unless given, and have
+    ``exit_grace``, half a second unless given, to exit. The launcher runs the roles on Claude,
+    and ``launchers`` among ``options``, by runtime, those on others.
     """
     host = host or FakeHost()
     launcher = ScriptedLauncher(host, *scripts, reviewers=reviewers)
     numbers = itertools.count(1)
     launchers = {CLAUDE: launcher, **options.pop("launchers", {})}
-    defaults = {"limits": Limits(), "exit_grace": 0.5, "roles": ROLES, "root": "."}
+    defaults = {
+        "limits": Limits(),
+        "exit_grace": 0.5,
+        "roles": ROLES,
+        "triggers": TRIGGERS,
+        "root": ".",
+    }
     options = {**defaults, "temp_dirs": FakeTempDirs(), **options}
     return Agents(host, launchers, lambda: f"{tokens}-{next(numbers)}", **options), launcher
 

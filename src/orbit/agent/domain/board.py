@@ -224,10 +224,12 @@ class TaskBoard:
         """Whether a task in ``role`` is still to run, or running."""
         return any(state.task.role == role and state.status in WAITING for state in self._tasks)
 
-    def add_draft(self, task: TaskSpec, proposed_by: str | None) -> str:
+    def add_draft(
+        self, task: TaskSpec, proposed_by: str | None, origin: TaskOrigin = PLANNER_ORIGIN
+    ) -> str:
         """Add ``task``, which role ``proposed_by`` proposed (none for orbit itself), at the end
-        as a draft; returns its id."""
-        state = self._new(task, status="draft", origin=PLANNER_ORIGIN, proposed_by=proposed_by)
+        as a draft from ``origin``, the planner unless given; returns its id."""
+        state = self._new(task, status="draft", origin=origin, proposed_by=proposed_by)
         self._tasks.append(state)
         return state.id
 
@@ -310,7 +312,12 @@ class TaskBoard:
 
     def add_review(self, task: TaskSpec) -> str:
         """Add a review orbit queued itself, at the end; returns its id."""
-        state = self._new(task, origin=REVIEW_ORIGIN)
+        return self.add_triggered(task, REVIEW_ORIGIN)
+
+    def add_triggered(self, task: TaskSpec, trigger: TaskOrigin) -> str:
+        """Add ``task``, which the trigger named ``trigger`` queued, at the end, from that
+        trigger; returns its id."""
+        state = self._new(task, origin=trigger)
         self._tasks.append(state)
         return state.id
 

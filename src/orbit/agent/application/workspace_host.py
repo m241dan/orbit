@@ -75,6 +75,7 @@ from orbit.agent.application.takeover import (
 )
 from orbit.agent.application.task_trace import TaskTracing
 from orbit.agent.application.tasks import Tasks
+from orbit.agent.application.triggers import TriggerEngine
 from orbit.agent.application.usage_accounting import AccountParts, UsageAccounting
 from orbit.agent.application.usage_recorder import UsageRecorder
 from orbit.agent.application.verifier import Verification, Verifier
@@ -389,6 +390,7 @@ class WorkspaceHost:
         self._copies = self._role_copies(parts.clock)
         self._copy_keeper = Background("copies", self._events.put)
         self._seats = self._conversation_seats()
+        self._triggers = self._trigger_engine()
         self._lane = self._review_lane()
         self._runners = self._lane_runners()
         self._lanes = self._session_lanes()
@@ -706,6 +708,7 @@ class WorkspaceHost:
             self._lanes.elsewhere,
             disabled_roles(self._roles()),
             self._outages,
+            self._triggers,
         )
         return WorkLane(self._desk, self._tasks, self._verifier, beside)
 
@@ -1040,6 +1043,13 @@ class WorkspaceHost:
         assert self._desk is not None  # Only agents propose.
         return self._desk.working_on(task_id).id
 
+    def _trigger_engine(self) -> TriggerEngine | None:
+        """What fires the agents' triggers on events, queuing their tasks on the session's board
+        and running each in its role's lane if that starts by itself; none without agents."""
+        if self._desk is None:
+            return None
+        return TriggerEngine(self._desk, self._tasks, lambda role: self._lanes.kick_for(role))
+
     def _review_lane(self) -> ReviewLane | None:
         """The review lane, if reviews are on and run beside the work: in a tree, with a review
         role enabled and the enabled ones in a lane of their own; none otherwise. Only the
@@ -1060,6 +1070,7 @@ class WorkspaceHost:
             self._paused,
             self._events.put_nowait,
             self._pauses,
+            self._triggers,
         )
         lane = ReviewLane(desk, self._tasks, planner, hooks)
         desk.suggest = lane.suggest  # Set here, as the lane needs the desk it takes calls from.

@@ -2,10 +2,12 @@
 
 After each task that completes, the verification steps run until one fails; a failure adds a
 task to fix it right after the failed one. Work that passes lands, and the review lane, if any,
-hears how each task ended. A run stops at a task its agent couldn't do for the usage limit or
-for the API not answering, as the launcher of its role's runtime tells its error, at a fix that
-ends in error, which must run before anything puts its work aside, once the session halts, and
-before a task its caller holds back.
+hears how each task ended, as the triggers do: ``task_landed`` for work that landed, raised by
+the review lane while there's one, and ``task_finished`` for every task that ended. A run stops
+at a task its agent couldn't do for the usage limit or for the API not answering, as the
+launcher of its role's runtime tells its error, at a fix that ends in error, which must run
+before anything puts its work aside, once the session halts, and before a task its caller holds
+back.
 """
 
 import asyncio
@@ -27,6 +29,7 @@ from orbit.agent.application.role_workspace import workspace_for
 from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.task_trace import TaskTracing
 from orbit.agent.application.tasks import Tasks
+from orbit.agent.application.triggers import TriggerEngine
 from orbit.agent.application.verifier import Failure, Verifier
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import ChecksProposal
@@ -68,9 +71,11 @@ class Beside:
     the worktree takes one of before it starts; the ``tracing`` of its tasks; the ``records``
     moves, if any, which move a record a task names whose number another took before the task
     runs; the roles whose tasks run ``elsewhere``, in lanes that start by themselves; the
-    ``disabled`` roles, whose tasks run nowhere; and each runtime's ``outages``, shared with the
+    ``disabled`` roles, whose tasks run nowhere; each runtime's ``outages``, shared with the
     lanes that start by themselves, in which a run notes the runtime that stopped it and the
-    runtimes whose agents ended their runs without an outage."""
+    runtimes whose agents ended their runs without an outage; and the ``triggers``, if any,
+    which hear how each task ended, and of its landing while there's no review lane to raise
+    it."""
 
     review: ReviewLane | None = None
     startup: StartupCheck | None = None
@@ -81,6 +86,7 @@ class Beside:
     elsewhere: frozenset[str] = frozenset()
     disabled: frozenset[str] = frozenset()
     outages: Outages = field(default_factory=Outages)
+    triggers: TriggerEngine | None = None
 
 
 class WorkLane:
@@ -120,6 +126,7 @@ class WorkLane:
         self._elsewhere = beside.elsewhere
         self._disabled = beside.disabled
         self._outages = beside.outages
+        self._triggers = beside.triggers
         self._seated = False  # The run holds a coder's slot, for the task about to run or running.
         # Task id -> the commit it merged into the base, until reported.
         self._landed: dict[str, str] = {}
@@ -400,18 +407,34 @@ class WorkLane:
 
     async def _report_to_review(self, state: TaskState, outcome: Outcome | None) -> None:
         """Tell the review lane the commit the task that was ``state`` merged, if any, or else,
-        if it finished in ``outcome`` rather than being cut short, that it ended. The task is
-        told of as it ended, without looking it up: a task is published as finished before the
-        save that follows, and one removed in that window is reviewed all the same."""
+        if it finished in ``outcome`` rather than being cut short, that it ended, and the
+        triggers that it finished, if it did. The task is told of as it ended, without looking
+        it up: a task is published as finished before the save that follows, and one removed in
+        that window is reviewed all the same."""
         commit = self._landed.pop(state.id, None)
-        if self._review is None:
+        if outcome is None:  # Cut short: only work that landed is told of, to be reviewed.
+            if commit is not None:
+                await self._report_landed(state, commit)
             return
-        if outcome is not None:
-            state = state.model_copy(update={"status": outcome.status})
+        await self._report_end(state.model_copy(update={"status": outcome.status}), commit)
+
+    async def _report_end(self, state: TaskState, commit: str | None) -> None:
+        """Tell the review lane that the task that ended as ``state`` landed ``commit``, if it
+        did, or else that it ended, and the triggers that it finished."""
         if commit is not None:
-            await self._review.landed(state, commit)
-        elif outcome is not None:
+            await self._report_landed(state, commit)
+        elif self._review is not None:
             await self._review.ended(state)
+        if self._triggers is not None:
+            self._triggers.run(await self._triggers.finished(state))
+
+    async def _report_landed(self, state: TaskState, commit: str) -> None:
+        """Tell the review lane, which raises ``task_landed``, that the task that ended as
+        ``state`` landed ``commit``, or the triggers themselves while there's no review lane."""
+        if self._review is not None:
+            await self._review.landed(state, commit)
+        elif self._triggers is not None:
+            self._triggers.run(await self._triggers.landed(state, commit))
 
     async def _run_agent(self, task_id: str) -> Outcome:
         """Run task ``task_id`` through a new agent in its role's workspace and land its work;

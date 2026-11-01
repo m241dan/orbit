@@ -1,0 +1,238 @@
+"""Firing triggers: the events of a task's end raised, and each trigger listening for one queuing
+its role's task on the board, its prompt rendered from its template, unless a guard holds it
+back.
+
+The ``review-rounds`` guard is today's review planner: the review lane finds the review due on a
+landing, which the triggers it guards review, and books each review they queue into its batches.
+A batch's review falls due as the batch is done rather than as one task lands, so it fires the
+triggers ``review-rounds`` guards on ``task_landed`` with no task causing it, as 12d's
+``batch_landed`` will.
+"""
+
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
+from dataclasses import dataclass
+from functools import partial
+
+from orbit.agent.application.desk import AgentDesk
+from orbit.agent.application.ports import TreeFailed
+from orbit.agent.application.tasks import Tasks
+from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.reviews import (
+    ReviewJob,
+    commit_review,
+    pending_titles,
+    review_skills,
+    review_values,
+)
+from orbit.agent.domain.roles import enabled_roles, role_task
+from orbit.agent.domain.triggers import (
+    REVIEW_ROUNDS,
+    TASK_FINISHED,
+    TASK_LANDED,
+    TRIGGER_VARIABLE,
+    Trigger,
+    TriggerEvent,
+    held_back,
+    listening,
+    render_template,
+)
+from orbit.protocol import CODER, GIT_FAILED, ErrorOccurred, TaskSpec, TaskState
+
+Values = Callable[[], Awaitable[Mapping[str, str] | None]]
+"""What gathers an event's template values, but the trigger's name, once a trigger may fire on
+it; none if they can't be gathered, when none fires."""
+
+Kick = Callable[[str], None]
+"""What runs the tasks waiting in the lane of a role, by its name, if that lane starts by
+itself."""
+
+REVIEW_SKIPPED = "Review skipped"
+TRIGGERS_SKIPPED = "Triggers skipped"
+"""What an error says was skipped when git can't show the diff of what landed: a review that
+was due, or the other triggers on the landing."""
+
+
+@dataclass(frozen=True)
+class ReviewRound:
+    """A review the ``review-rounds`` guard finds due: ``job``, and ``book``, which records the
+    review task queued for it, by its id, opening the batch its suggestions join."""
+
+    job: ReviewJob
+    book: Callable[[str], None]
+
+
+@dataclass(frozen=True)
+class _Firing:
+    """The triggers ``listening`` for an event, by name, in order, with what they render their
+    tasks from: its ``values`` and the review due, ``review``, if any."""
+
+    listening: list[tuple[str, Trigger]]
+    values: Mapping[str, str]
+    review: ReviewRound | None
+
+
+def _no_kick(role: str) -> None:
+    """Runs no lane."""
+
+
+async def _no_values() -> Mapping[str, str]:
+    """The values of an event that gives none but the trigger's name."""
+    return {}
+
+
+class TriggerEngine:
+    """Fires the triggers of ``desk``'s agents on events, as they stand as each is raised,
+    queuing their tasks on ``tasks``' board, and runs those tasks when asked, with ``kick``, each
+    in its role's lane if that starts by itself.
+
+    What raises an event runs the tasks it queued once it has done with them, as a lane runs the
+    tasks it queues itself."""
+
+    def __init__(self, desk: AgentDesk, tasks: Tasks, kick: Kick = _no_kick) -> None:
+        self._desk = desk
+        self._tasks = tasks
+        self._kick = kick
+
+    async def landed(
+        self, state: TaskState, commit: str, review: ReviewRound | None = None
+    ) -> tuple[str, ...]:
+        """Raise ``task_landed``: the task that ended as ``state`` landed ``commit``, whose own
+        review, if due, is ``review``. Returns the ids of the tasks queued."""
+        fields = {"role": state.task.role, "origin": state.origin}
+        event = TriggerEvent(TASK_LANDED, fields, state)
+        skipped = TRIGGERS_SKIPPED if review is None else REVIEW_SKIPPED
+        job = commit_review(state.id, commit)
+        values = partial(self._values, job, state.task.skills, skipped)
+        return await self.fire(event, values, review)
+
+    async def finished(self, state: TaskState) -> tuple[str, ...]:
+        """Raise ``task_finished``: the task that was ``state`` ended as its status says.
+        Returns the ids of the tasks queued."""
+        fields = {"role": state.task.role, "origin": state.origin, "status": state.status}
+        return await self.fire(TriggerEvent(TASK_FINISHED, fields, state), _no_values)
+
+    async def reviewed(self, review: ReviewRound) -> tuple[str, ...]:
+        """Fire the triggers ``review-rounds`` guards on ``task_landed`` for ``review``, of a
+        batch that's done, which no one task caused. Returns the ids of the tasks queued."""
+        firing = await self._batch_firing(review)
+        return () if firing is None else await self._queue(firing)
+
+    async def reviewed_quietly(self, review: ReviewRound) -> None:
+        """Fire the triggers ``review-rounds`` guards for ``review`` as :meth:`reviewed` does,
+        their tasks queued on the board without publishing it or running them."""
+        firing = await self._batch_firing(review)
+        if firing is not None:
+            self._add(self._tasks.board, firing)
+
+    async def fire(
+        self, event: TriggerEvent, values: Values, review: ReviewRound | None = None
+    ) -> tuple[str, ...]:
+        """Fire the triggers listening for ``event``, with ``review`` the review due on it, if
+        any, as :func:`~orbit.agent.domain.triggers.listening` says: in their order, each that
+        no guard holds back queues its role's task, a draft if it says so, from it, rendered
+        from the ``values`` gathered and its name. The board is published if any was queued.
+        Returns their ids, for :meth:`run`."""
+        firing = await self._firing(self._desk.agents.triggers, event, values, review)
+        return () if firing is None else await self._queue(firing)
+
+    def run(self, task_ids: Collection[str]) -> None:
+        """Run the tasks ``task_ids`` that are still on the board, each in its role's lane if
+        that starts by itself."""
+        board = self._tasks.board
+        found = (board.find(task_id) for task_id in task_ids)
+        roles = dict.fromkeys(state.task.role for state in found if state is not None)
+        for role in roles:
+            self._kick(role)
+
+    async def _batch_firing(self, review: ReviewRound) -> _Firing | None:
+        """What the triggers ``review-rounds`` guards fire on for ``review``, the review of a
+        batch's coder tasks, from what it reviews; none if none does."""
+        job = review.job
+        triggers = {
+            name: trigger
+            for name, trigger in self._desk.agents.triggers.items()
+            if REVIEW_ROUNDS in trigger.guards
+        }
+        event = TriggerEvent(TASK_LANDED, {"role": CODER, "origin": job.origin})
+        skills = review_skills(job, self._tasks.board.tasks)
+        return await self._firing(
+            triggers, event, partial(self._values, job, skills, REVIEW_SKIPPED), review
+        )
+
+    async def _firing(
+        self,
+        triggers: Mapping[str, Trigger],
+        event: TriggerEvent,
+        values: Values,
+        review: ReviewRound | None,
+    ) -> _Firing | None:
+        """The ``triggers`` that may fire on ``event``, with ``review`` the review due, if any,
+        and the ``values`` they render from, gathered only if one may; none if none may, or the
+        values can't be gathered."""
+        roles = enabled_roles(self._desk.agents.roles)
+        found = listening(triggers, event, roles, None if review is None else review.job)
+        given = await values() if found else None
+        return None if given is None else _Firing(found, given, review)
+
+    async def _queue(self, firing: _Firing) -> tuple[str, ...]:
+        """Queue the tasks of the triggers ``firing`` that no guard holds back, publishing the
+        board if any were; returns their ids."""
+        queued = self._add(self._tasks.board, firing)
+        if queued:
+            await self._tasks.publish()
+        return queued
+
+    def _add(self, board: TaskBoard, firing: _Firing) -> tuple[str, ...]:
+        """Add to ``board`` the task of each of the triggers ``firing`` that no guard holds
+        back, in order, each seeing those before it; returns their ids."""
+        return tuple(
+            task_id
+            for name, trigger in firing.listening
+            if (task_id := self._add_one(board, name, trigger, firing)) is not None
+        )
+
+    def _add_one(
+        self, board: TaskBoard, name: str, trigger: Trigger, firing: _Firing
+    ) -> str | None:
+        """Add to ``board`` the task ``trigger``, named ``name``, queues as it fires as
+        ``firing`` says, unless a guard holds it back; returns its id if it's added. One guarded
+        by ``review-rounds`` reviews the review due with the skills of what it reviews, and is
+        booked into its batches."""
+        assert trigger.role is not None  # It listened, so it queues a role's task,
+        assert trigger.prompt is not None  # with a prompt.
+        prompt = render_template(trigger.prompt, {**firing.values, TRIGGER_VARIABLE: name})
+        if held_back(trigger, prompt, board.tasks):
+            return None
+        review = firing.review if REVIEW_ROUNDS in trigger.guards else None
+        skills = () if review is None else review_skills(review.job, board.tasks)
+        task = role_task(trigger.role, self._desk.agents.roles[trigger.role], prompt, skills)
+        task_id = _added(board, task, name, trigger)
+        if review is not None:
+            review.book(task_id)
+        return task_id
+
+    async def _values(
+        self, job: ReviewJob, skills: Sequence[str], skipped: str
+    ) -> Mapping[str, str] | None:
+        """The values of ``task_landed`` for ``job``'s commits, landed by the tasks it reviews,
+        which name ``skills``, as its review's task renders from them; none, with an error
+        published saying what's ``skipped``, if git can't show their diff."""
+        tree = self._desk.agents.tree
+        assert tree is not None  # Only work in a tree lands.
+        try:
+            diff = await tree.show(job.commits)
+        except TreeFailed as exc:  # Git failed; the triggers are skipped rather than the run.
+            await self._desk.publish(ErrorOccurred(code=GIT_FAILED, message=f"{skipped}: {exc}"))
+            return None
+        cap = self._desk.agents.review_limits.suggestions
+        pending = pending_titles(self._tasks.board.tasks)
+        landing = {"task": ", ".join(job.reviewed), "task_skills": ", ".join(skills)}
+        return review_values(job, diff, cap, pending) | landing
+
+
+def _added(board: TaskBoard, task: TaskSpec, name: str, trigger: Trigger) -> str:
+    """Add ``task``, which ``trigger``, named ``name``, queued, to ``board``: as a draft if it
+    says so; returns its id."""
+    if trigger.draft:
+        return board.add_draft(task, None, name)
+    return board.add_triggered(task, name)

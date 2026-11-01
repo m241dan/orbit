@@ -379,8 +379,7 @@ class ReviewPlanner:
             if state.origin not in (MANUAL_ORIGIN, PLANNER_ORIGIN):
                 return None
             self.paused = False
-            job = ReviewJob(commits=(commit,), round=0, batch=None, reviewed=(state.id,))
-            return job if REVIEWER in self._reviewers else None
+            return commit_review(state.id, commit) if REVIEWER in self._reviewers else None
         batch = self._open.get(state.batch)
         if batch is None:
             return None
@@ -441,6 +440,12 @@ class ReviewPlanner:
             tuple(batch.missing),
             reviewed=batch.reviewed(),
         )
+
+
+def commit_review(task_id: str, commit: str) -> ReviewJob:
+    """The review of ``commit`` on its own, which task ``task_id`` landed, as one of the user's
+    or the planner's commits is reviewed."""
+    return ReviewJob(commits=(commit,), round=0, batch=None, reviewed=(task_id,))
 
 
 def _forget_finish(batch: _Batch, task_id: str) -> None:

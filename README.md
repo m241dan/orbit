@@ -1102,9 +1102,10 @@ delete reports, never an agent; purging the workspace deletes them too.
 ### Reviews
 
 Every commit from one of your tasks that merged into the base is reviewed in the background while
-the next task runs (one that couldn't be merged isn't, and doesn't count toward a super review). Orbit
-queues a `reviewer` task (it shows in the task list) carrying the commit's diff, and runs it in a
-read-only snapshot of that commit. The reviewer judges the change against its task's prompt and,
+the next task runs (one that couldn't be merged isn't, and doesn't count toward a super review). The
+`review` trigger queues a `reviewer` task (it shows in the task list, its origin `review`) carrying
+the commit's diff, from its template (see [Triggers](#triggers)), and orbit runs it in a read-only
+snapshot of that commit. The reviewer judges the change against its task's prompt and,
 when the prompt opens with `Plan: <path>`, against that plan's record, looking through the lens
 skills its role gives it (by default `review-fit`, `review-bugs`, `review-tests`, `review-logic`,
 `review-security` and `review-performance`, each saying what it looks for and what blocks; see
@@ -1592,10 +1593,15 @@ notices say so: `The project's role helper replaces your personal role of that n
 
 A **trigger** turns an event into a task for a role, or into a run of the verification steps.
 Orbit ships triggers that describe what it does, and a project changes them, or adds its own,
-with `[triggers.<name>]` tables in `.orbit/config.toml`. Nothing fires from configuration yet:
-reviews, the super review, the startup check and its fixes, and the configurator still start as
-the sections above say, and the shipped triggers describe them for the versions that fire them.
-Only the super review's `every` already counts (below).
+with `[triggers.<name>]` tables in `.orbit/config.toml`. A task's work landing fires the
+`task_landed` triggers and a task finishing, however it ended, the `task_finished` ones, so the
+`review` trigger starts the reviews [Reviews](#reviews) describes, and a project's own triggers on
+those events queue their tasks. The other events don't fire yet: the super review, the startup
+check and its fixes, and the configurator still start as the sections above say, and their
+shipped triggers describe them for the versions that fire them; only the super review's `every`
+already counts (below). `task_landed` and `task_finished` are the work lane's tasks' (a review's
+end isn't one), and only a trigger with a role fires: one with `checks` waits for
+`session_started`.
 
 The shipped triggers are data in
 [`src/orbit/agent/external/triggers/`](src/orbit/agent/external/triggers/): `triggers.toml` has a
@@ -1622,10 +1628,7 @@ A trigger's fields:
 - `when`: the events it takes, by their fields, each a value or a list of values, such as
   `when = { origin = ["manual", "planner"] }` for your own tasks' and the planner's; left out,
   every one.
-- `guards`: the named rules that may hold it back: `review-rounds` keeps today's batching of
-  reviews (see [Reviews](#reviews)), `suggestions-pending` holds the super review while suggested
-  tasks or reviews are pending or running, and `not-queued` and `dedupe` name rules of later
-  versions.
+- `guards`: the named rules that may hold it back (below).
 - `every`: with `on = "commits"`, how many matching landings it fires after.
 - `manual` and `label`: whether you can fire it yourself, and what it's called where you do; a
   manual trigger needs a label.
@@ -1644,10 +1647,35 @@ its name in braces:
 | `startup_check_failed` | a step of the startup check fails, once for each | `step` | `{step}`, `{output}` |
 | `manual` | you fire it | none | `{checks}` |
 
+When an event fires, each enabled trigger on it fires in turn, in configuration order (the
+shipped ones, then the project's), if its role is enabled, its `when` takes the event and none of
+its guards holds it back. Its prompt is rendered from its template, and its task added at the end
+of the task list for its role, with that role's settings, or as a draft for you to accept with
+`draft = true`; the task's origin is the trigger's name, so the task list and the task's span
+(`orbit.trigger`; see [Telemetry](#telemetry)) say which trigger queued it. A task whose role's
+lane starts by itself, such as `review`, starts there once the lane is free; one in the work lane
+runs with the run going, or the next. A trigger never fires on an event caused by a task it queued itself, one
+whose origin is its name: a `task_finished` trigger queuing `coder` tasks doesn't fire again as
+its own tasks finish, though another trigger may.
+
+The guards:
+
+- `review-rounds`: today's review rounds and batches decide whether there's a review and what it
+  reviews (see [Reviews](#reviews)): the commit that landed, if it's from your task or the
+  planner's, or a batch's commits once its last task has finished, landed or not, which fires the
+  triggers it guards with no task causing it; it holds the trigger back otherwise, as while review
+  is paused. Its task gets the skills of the tasks it reviews.
+- `not-queued`: holds the trigger back while a task of its role is still to run or running.
+- `dedupe`: holds the trigger back while a task still to run or running has the first line its
+  task would have.
+- `suggestions-pending`: holds back the super review while suggested tasks or reviews are pending
+  or running; it holds nothing back until the super review fires from its trigger.
+
 Every event also gives `{trigger}`, the trigger's name, and a trigger you fire yourself gives its
 event's variables, as the super review gives those of `commits`. `{commit}` is the commit landed
-or reviewed, its first 7 characters; `{task}` the task whose work landed, and `{task_skills}` the
-skills its list names; `{title}` the review task's first line (`Review commit 0123abc`, or
+or reviewed, its first 7 characters; `{task}` the task whose work landed (for a batch's review,
+the tasks it reviews), and `{task_skills}` the skills its list names, apart by commas; `{title}`
+the review task's first line (`Review commit 0123abc`, or
 `Review the 2 commits made for review batch-1`); `{diff}` the commits' messages and diffs,
 trimmed past 30000 characters; `{missing}` a line for each task of the reviewed batch that ended
 without landing a commit; `{cap}` the suggestions the review may make; `{queued}` the tasks still
@@ -1681,10 +1709,12 @@ the field and the value, for an unknown event, role, guard or `when` field
 variable its event doesn't give (`triggers.tidy-up.prompt: {diff} isn't a variable of
 task_finished; its variables are {trigger}.`), `every` without `on = "commits"`, `manual = true`
 without a `label`, neither a role nor `checks` or both, a role without a prompt, or `checks` with
-one. A trigger whose role is disabled loads. The reference config shows each shipped trigger's
-table commented out after the roles, every field under its description, and
-`orbit config show triggers.review` lists one trigger's fields with their layers (see
-[Seeing the configuration in effect](#seeing-the-configuration-in-effect)).
+one. A trigger whose role is disabled loads, and never fires. When git can't show the diff of
+what landed, the triggers on the landing are skipped with an error (`Review skipped: …` when a
+review was due, `Triggers skipped: …` otherwise), and the run goes on. The reference config
+shows each shipped trigger's table commented out after the roles, every field under its
+description, and `orbit config show triggers.review` lists one trigger's fields with their layers
+(see [Seeing the configuration in effect](#seeing-the-configuration-in-effect)).
 
 `super_review_every` stays for this version as an alias for `[triggers.super-review] every`: set
 in `.orbit/config.toml`, it's the super review's `every` unless the trigger sets its own, which
@@ -3121,8 +3151,8 @@ proposed and how it ended. Each consulted turn runs in an `orbit.consultation` s
 own trace linked to the asking turn's: who asked whom, how long it waited in line and how it
 ended. The asker's turn hearing the replies starts its own trace too, linked to each
 consultation's span. Each review, a reviewer's or a super reviewer's, is one span,
-`orbit.review`, starting its own trace: the commits, round and batch it reviewed, its cap, the
-suggestions it made and had refused, and what it cost. Work that runs on in the background links
+`orbit.review`, starting its own trace: who queued it, the commits, round and batch it reviewed,
+its cap, the suggestions it made and had refused, and what it cost. Work that runs on in the background links
 to what started it rather than nesting under it: each task's span links to the `RunTasks` (or,
 for a configurator, `FireTrigger`) command that started its run, or to the review whose
 suggestions it runs, and keeps that link when a run the usage limit or an API outage stopped
@@ -3359,8 +3389,10 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     verified work; every lane of the roles' but the one whose roles merge runs on a `LaneRunner`
     (in `lane_runner`), which starts its tasks by itself, one at a time, unless a halt stops it,
     skipping those on the runtime whose pause the work lane waits out, and `Lanes` (also there)
-    holds the lanes by name; `ReviewLane` (in `review_lane`)
-    queues reviews and runs them on its lane's runner, beside the work, each traced as
+    holds the lanes by name; `TriggerEngine` (in `triggers`) fires the triggers on the events of
+    a task's end, queuing their tasks; `ReviewLane` (in `review_lane`)
+    finds the reviews due, which the `review` trigger queues and it books into batches, queues
+    the super review and runs them on its lane's runner, beside the work, each traced as
     an `orbit.review` span by `ReviewTracing` (in `review_trace`), and the lane's tasks of other
     roles as the runner runs any lane's; `StartupCheck`
     (in `startup_check`) runs the steps once on the base commit as orbit starts, each run traced

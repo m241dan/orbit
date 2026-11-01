@@ -51,6 +51,7 @@ from orbit.agent.domain.skills import (
     skill_instructions,
 )
 from orbit.agent.domain.tools import ORBIT_TOOLS, READ_SKILL
+from orbit.agent.domain.triggers import Trigger
 from orbit.execution.cancelling import cancel_and_wait
 from orbit.protocol import (
     INTERNAL,
@@ -145,6 +146,8 @@ class Agents:
     without them is given models as they are. ``skill_library`` holds the skills agents can be
     given, and ``skill_mappings`` are the project's ``[[skills]]``, whose skills an agent is given
     along with its role's, in its instructions, unless its task names skills of its own.
+    ``triggers`` turn events into tasks, by name, in order, each prompt its template's text;
+    without them, nothing is queued on events, reviews included.
     """
 
     host: AgentHost
@@ -168,6 +171,7 @@ class Agents:
     copies: Copies | None = field(default=None, kw_only=True)
     skill_library: SkillLibrary = field(default_factory=SkillLibrary, kw_only=True)
     skill_mappings: tuple[SkillMapping, ...] = field(default=(), kw_only=True)
+    triggers: Mapping[str, Trigger] = field(default_factory=dict, kw_only=True)
 
     def runtime(self, role: str) -> str | None:
         """The runtime role ``role``'s agents run on; none for a role they don't have."""
