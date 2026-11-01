@@ -15,6 +15,7 @@ from orbit.agent.domain.reviews import (
     pause_notice,
     pending_titles,
     review_prompt,
+    review_skills,
 )
 from orbit.protocol import (
     CONFIGURATOR,
@@ -681,6 +682,38 @@ def test_a_commit_review_suggests_review_tasks_and_is_run_by_a_reviewer() -> Non
 def test_a_super_review_suggests_super_review_tasks_and_is_run_by_a_super_reviewer() -> None:
     job = ReviewJob(commits=("abc",), round=0, batch=None, whole=True)
     assert (job.origin, job.role) == (SUPER_REVIEW_ORIGIN, SUPER_REVIEWER)
+
+
+def skilled(task_id: str, *skills: str) -> TaskState:
+    """Task ``task_id``, which landed a commit, naming ``skills``."""
+    return TaskState(id=task_id, task=TaskSpec(prompt="x", skills=skills), status="completed")
+
+
+def test_a_review_names_the_skills_of_the_task_it_reviews() -> None:
+    job = ReviewJob(commits=("c1",), round=0, batch=None, reviewed=("1",))
+    tasks = [skilled("1", "python", "application")]
+    assert review_skills(job, tasks) == ("python", "application")
+
+
+def test_a_batch_review_names_its_tasks_skills_in_task_order_each_once() -> None:
+    job = ReviewJob(commits=("c2", "c3"), round=1, batch="batch-1", reviewed=("2", "3"))
+    tasks = [skilled("1", "rust"), skilled("2", "python"), skilled("3", "cpp", "python")]
+    assert review_skills(job, tasks) == ("python", "cpp")
+
+
+def test_a_reviewed_task_no_longer_on_the_board_adds_no_skills_to_its_review() -> None:
+    job = ReviewJob(commits=("c2", "c3"), round=1, batch="batch-1", reviewed=("2", "3"))
+    assert review_skills(job, [skilled("3", "cpp")]) == ("cpp",)
+
+
+def test_a_review_whose_reviewed_tasks_are_all_gone_names_no_skills() -> None:
+    job = ReviewJob(commits=("c1",), round=0, batch=None, reviewed=("1",))
+    assert review_skills(job, [skilled("2", "python")]) == ()
+
+
+def test_a_super_review_names_no_skills() -> None:
+    job = ReviewJob(commits=("c1",), round=0, batch=None, whole=True)
+    assert review_skills(job, [skilled("1", "python")]) == ()
 
 
 def test_the_pause_notice_names_the_rounds_limit() -> None:

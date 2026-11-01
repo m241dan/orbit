@@ -549,8 +549,10 @@ class WorkLane:
             message = f"Verification step {step.name!r} still fails after {limit} fix attempts."
             await self._publish(ErrorOccurred(code=CHECKS_EXHAUSTED, message=message))
             return
-        settings = self._board.get(task_id).task.settings
-        fix = TaskSpec(prompt=fix_prompt(step, output), settings=settings)
+        failed = self._board.get(task_id).task
+        fix = TaskSpec(
+            prompt=fix_prompt(step, output), settings=failed.settings, skills=failed.skills
+        )
 
         def add(board: TaskBoard) -> None:
             fix_id = board.add(fix, fixes=task_id)

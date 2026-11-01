@@ -1659,8 +1659,14 @@ heading, and last a line for each `[[skills]]` entry saying where its skills app
 name skills of its own, its `skills` (see
 [docs/protocol.md](docs/protocol.md#tasks-settings-and-stopping-work)): its agent is given its
 role's skills, then the task's, each once, in place of the entries', with no lines saying where
-they apply; the task editor's **Skills** field sets them (see [Tasks](#tasks)). Under the entries
-above, the planner, whose role gives it `code-style`, is told:
+they apply; the task editor's **Skills** field sets them (see [Tasks](#tasks)). The tasks orbit
+makes from others take their skills from them as they're made: a review of commits names the
+skills of the tasks that landed them, in task order, each once, none coming from a task taken off
+the board since, so its reviewer gets its role's lenses and those; a super review reviews no
+particular task and names none, so its super reviewer gets every entry's; a reviewer's suggestion
+names its review's skills; and a fix orbit adds for a failing check names the failing task's. The
+startup check's fix task comes from no task and names none. Under the entries above, the planner,
+whose role gives it `code-style`, is told:
 
 ```markdown
 ## Skills

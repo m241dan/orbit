@@ -399,6 +399,14 @@ def pending_titles(tasks: Sequence[TaskState]) -> tuple[str, ...]:
     )
 
 
+def review_skills(job: ReviewJob, tasks: Sequence[TaskState]) -> tuple[str, ...]:
+    """The skills ``job``'s review task names: those of the tasks it reviews, in task order,
+    each once, but for any no longer among ``tasks``. None for a super review, which reviews no
+    particular task."""
+    found = {state.id: state.task.skills for state in tasks}
+    return tuple(dict.fromkeys(name for task in job.reviewed for name in found.get(task, ())))
+
+
 def pause_notice(rounds: int) -> str:
     """The notice that review paused after ``rounds`` rounds of review-suggested work."""
     return (

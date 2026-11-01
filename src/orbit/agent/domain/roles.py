@@ -720,17 +720,17 @@ def timeout_ending(
     return TIMED_OUT, out_of_time(who, minutes)
 
 
-def role_task(role_name: str, role: Role, prompt: str) -> TaskSpec:
-    """A task orbit queues for ``role`` (named ``role_name``), with its settings."""
-    return TaskSpec(prompt=prompt, settings=role.settings, role=role_name)
+def role_task(role_name: str, role: Role, prompt: str, skills: tuple[str, ...] = ()) -> TaskSpec:
+    """A task orbit queues for ``role`` (named ``role_name``), with its settings, naming the
+    ``skills`` its agent gets beyond its role's, none unless given."""
+    return TaskSpec(prompt=prompt, settings=role.settings, role=role_name, skills=skills)
 
 
 def suggested_task(coder: Role, title: str, prompt: str, skills: tuple[str, ...] = ()) -> TaskSpec:
     """A coder's task an agent suggested or proposed, as ``title`` and ``prompt``, naming the
     ``skills`` its agent gets beyond its role's, none unless given."""
     title, prompt = title.strip(), prompt.strip()
-    task = role_task(CODER, coder, f"{title}\n\n{prompt}" if prompt else title)
-    return task.model_copy(update={"skills": skills})
+    return role_task(CODER, coder, f"{title}\n\n{prompt}" if prompt else title, skills)
 
 
 def suggestion_refusal(roles: Mapping[str, Role]) -> str | None:

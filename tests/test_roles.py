@@ -471,6 +471,12 @@ def test_a_role_task_carries_the_roles_effort() -> None:
     assert role_task("reviewer", reviewer, "Review.").settings.effort == "xhigh"
 
 
+def test_a_role_task_names_no_skills_unless_given_them() -> None:
+    reviewer = BUILT_IN_ROLES["reviewer"]
+    assert role_task("reviewer", reviewer, "Review.").skills == ()
+    assert role_task("reviewer", reviewer, "Review.", ("python",)).skills == ("python",)
+
+
 def test_a_suggested_task_is_a_coders_titled_prompt() -> None:
     coder = BUILT_IN_ROLES["coder"]
     assert suggested_task(coder, " Add the flag \n", "\nAdd --fast. ") == TaskSpec(

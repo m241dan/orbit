@@ -38,6 +38,7 @@ from orbit.agent.domain.reviews import (
     pause_notice,
     pending_titles,
     review_prompt,
+    review_skills,
 )
 from orbit.agent.domain.roles import (
     review_lane,
@@ -250,7 +251,9 @@ class ReviewLane:
         refusal = suggestion_refusal(roles) or self.planner.refusal(batch, title, self._board.tasks)
         if refusal is not None:
             return Reply(refusal, is_error=True)
-        task = suggested_task(roles[CODER], title, prompt)
+        # The review is running, as its agent suggests, so it's on the board.
+        skills = self._board.get(task_id).task.skills
+        task = suggested_task(roles[CODER], title, prompt, skills)
         origin = self._jobs[task_id].origin
 
         def add(board: TaskBoard) -> str:
@@ -318,7 +321,8 @@ class ReviewLane:
         role = job.role
         pending = pending_titles(self._board.tasks)
         prompt = review_prompt(job, diff, self.planner.cap(job), pending)
-        task = role_task(role, self._desk.agents.roles[role], prompt)
+        skills = review_skills(job, self._board.tasks)
+        task = role_task(role, self._desk.agents.roles[role], prompt, skills)
         cause = current_span()  # What queued the review, which its span links to.
 
         def add(board: TaskBoard) -> None:
