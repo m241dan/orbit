@@ -718,11 +718,16 @@ cancels it too, and a set fired while the session is halted runs once storage re
 trigger fires again while its set runs, one more run is queued, on the latest commit as it
 starts; further firings meanwhile fold into that one. A failing run of any set shows the last 10
 lines of the failing step's output, trimmed as a fix task's prompt quotes it, under the set's
-steps in the panel, until the set's next run starts; a passing run, or one that's cancelled or
-couldn't run, shows none (frontends get it as `VerificationChanged`'s `output` and the
-`Snapshot`'s `steps_output`; see [docs/protocol.md](docs/protocol.md)). A passing run of a set
-that only reports adds nothing to the conversation; a failing one adds a notice, `mutation
-reported: Mutation tests failed (see the verification panel)`, and queues nothing. Sets run
+steps in the panel, until the set's next run starts or another set's run or a task's
+verification takes the panel; a passing run, or one that's cancelled or couldn't run, shows none
+(frontends get it as `VerificationChanged`'s `output` and the `Snapshot`'s `steps_output`; see
+[docs/protocol.md](docs/protocol.md)). A run that lost the panel to a task's verification shows
+its output nowhere there, and doesn't take the panel back. A passing run of a set that only
+reports adds nothing to the conversation; a failing one adds a notice, `mutation reported:
+Mutation tests failed (see the verification panel)`, and queues nothing. If the run had lost the
+panel, the notice instead quotes the same last 10 lines of the output: `mutation reported:
+Mutation tests failed. Its output ended:` followed by them, or `mutation reported: Mutation
+tests failed, with no output` when there was none. Sets run
 only in a git repository with the coder's worktree, where there's a commit to snapshot, and never
 with `--no-verify`.
 

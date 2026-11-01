@@ -10,9 +10,11 @@ meanwhile fold into it. As for the startup check, a halt cancels the runs, and t
 with them, and a firing while halted runs once the halt lifts.
 
 A run that passes adds nothing more; one that fails shows the failing step's output, trimmed,
-in the panel until the set's next run starts, and keeps its failure; one of a reporting set
-adds a notice too, as :func:`~orbit.agent.domain.verification.set_failed_note` words it. How a
-run of a set that holds merges came out, on which commit, is told to the site's ``heard``, which
+in the panel, if it still has it, until the set's next run starts, and keeps its failure; one of
+a reporting set adds a notice too, as :func:`~orbit.agent.domain.verification.set_failed_note`
+words it, or, once a task's verification took the panel from the run,
+:func:`~orbit.agent.domain.verification.set_failed_away_note`, quoting the output. How a run
+of a set that holds merges came out, on which commit, is told to the site's ``heard``, which
 holds merges while it fails. Each run is traced in an ``orbit.check_set`` span, as
 :class:`SetTracing` says.
 """
@@ -32,6 +34,7 @@ from orbit.agent.domain.checks import setup_step
 from orbit.agent.domain.verification import (
     CheckSet,
     StepProgress,
+    set_failed_away_note,
     set_failed_note,
     trim_output,
 )
@@ -241,10 +244,18 @@ class SetRun:
         if self._set.effect == "holds_merges":
             await self._site.heard(result)
         elif failure is not None:
-            step, _ = failure
-            await self._site.publish(Notice(message=set_failed_note(self._set.name, step.name)))
+            await self._site.publish(Notice(message=self._failed_note(failure)))
         # Only once it's reported, so a run cancelled meanwhile names no failed step.
         record_result(failure)
+
+    def _failed_note(self, failure: Failure) -> str:
+        """The notice saying the run going failed as ``failure`` says: pointing at the panel
+        while the run shows there, else quoting the failing output, as the panel shows a task's
+        verification instead."""
+        step, output = failure
+        if self._showing:
+            return set_failed_note(self._set.name, step.name)
+        return set_failed_away_note(self._set.name, step.name, output)
 
     async def _cancel_running(self) -> None:
         """Mark the step running, if any, cancelled."""

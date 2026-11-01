@@ -13,7 +13,7 @@ from orbit.agent.application.ports import StepRunner, TreeFailed
 from orbit.agent.application.set_runs import SetResult, SetRuns, SetSite, cancelled_note
 from orbit.agent.application.set_trace import SET_SPAN, SetTracing
 from orbit.agent.domain.checks import Setup
-from orbit.agent.domain.verification import CheckSet, VerificationStep, set_failed_note
+from orbit.agent.domain.verification import CheckSet, VerificationStep, set_failed_away_note
 from orbit.protocol import (
     GIT_FAILED,
     AgentExited,
@@ -396,7 +396,7 @@ async def test_the_panel_shows_the_set_whose_run_showed_its_progress_last_until_
     assert runs.runs.panel is None
 
 
-async def test_a_released_run_publishes_no_more_progress_but_still_its_failure_notice() -> None:
+async def test_a_released_run_publishes_no_more_progress_and_its_output_in_its_notice() -> None:
     steps, gate = gated(False)
     runs = Runs(steps)
     runs.runs.run("slow", "slow")
@@ -407,7 +407,7 @@ async def test_a_released_run_publishes_no_more_progress_but_still_its_failure_n
     gate.set()
     await runs.ended()
     assert runs.events[published:] == [
-        Notice(message=set_failed_note("slow", MUTATION.name)),
+        Notice(message=set_failed_away_note("slow", MUTATION.name, "1 test failed")),
         AgentExited(agent_id="set-slow", reason="finished"),
     ]
     assert runs.runs.panel is None

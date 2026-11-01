@@ -14,6 +14,7 @@ from orbit.agent.domain.triggers import Trigger, verification_state
 from orbit.agent.domain.verification import (
     CheckSet,
     VerificationStep,
+    set_failed_away_note,
     set_failed_note,
 )
 from orbit.agent.external.built_in_roles import read_built_in_roles
@@ -136,6 +137,26 @@ def test_without_a_set_anywhere_there_are_no_check_sets() -> None:
 def test_a_reporting_sets_failure_points_at_the_verification_panel() -> None:
     assert set_failed_note("slow", "Mutation tests") == (
         "slow reported: Mutation tests failed (see the verification panel)"
+    )
+
+
+def test_a_reporting_sets_failure_away_from_the_panel_quotes_its_outputs_last_lines() -> None:
+    output = "\n".join(f"line {number}" for number in range(1, 13)) + "\n\n"
+    tail = "\n".join(f"line {number}" for number in range(3, 13))
+    assert set_failed_away_note("slow", "Mutation tests", output) == (
+        f"slow reported: Mutation tests failed. Its output ended:\n\n{tail}"
+    )
+
+
+def test_a_reporting_sets_failure_away_from_the_panel_quotes_its_output_trimmed() -> None:
+    assert set_failed_away_note("slow", "Soak", "  \n 3 mutants survived \n") == (
+        "slow reported: Soak failed. Its output ended:\n\n3 mutants survived"
+    )
+
+
+def test_a_reporting_sets_failure_away_from_the_panel_without_output_says_so() -> None:
+    assert (
+        set_failed_away_note("slow", "Soak", " \n ") == "slow reported: Soak failed, with no output"
     )
 
 

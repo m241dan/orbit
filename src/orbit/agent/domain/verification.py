@@ -71,6 +71,20 @@ def set_failed_note(name: str, step: str) -> str:
     return f"{name} reported: {step} failed (see the verification panel)"
 
 
+NOTE_TAIL_LINES = 10
+"""How many of a failing step's output's last lines a notice quotes, as many as the panel shows."""
+
+
+def set_failed_away_note(name: str, step: str, output: str) -> str:
+    """The notice saying a run of the reporting set ``name`` failed at the step named ``step``,
+    once a task's verification took the panel from it: quoting the last lines of the ``output``
+    it failed with, trimmed, since the panel doesn't show them."""
+    tail = "\n".join(trim_output(output).splitlines()[-NOTE_TAIL_LINES:])
+    if not tail:
+        return f"{name} reported: {step} failed, with no output"
+    return f"{name} reported: {step} failed. Its output ended:\n\n{tail}"
+
+
 @dataclass(frozen=True)
 class StepProgress:
     """How far a run of the verification steps has got: each step's status, in order."""
