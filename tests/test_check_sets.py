@@ -16,10 +16,13 @@ from orbit.agent.domain.verification import (
     VerificationStep,
     set_failed_away_note,
     set_failed_note,
+    trim_output,
 )
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.agent.external.built_in_triggers import read_built_in_triggers
-from orbit.protocol import BUILT_IN_ROLE_NAMES, TASK_CHECKS
+from orbit.protocol import BUILT_IN_ROLE_NAMES, TASK_CHECKS, StepState
+from orbit.tui.view.panels import VerificationSteps
+from tests.view_fakes import StepsView
 
 INSTRUCTIONS = {name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES}
 ROLES = built_in_roles(read_built_in_roles(), INSTRUCTIONS)
@@ -158,6 +161,29 @@ def test_a_reporting_sets_failure_away_from_the_panel_without_output_says_so() -
     assert (
         set_failed_away_note("slow", "Soak", " \n ") == "slow reported: Soak failed, with no output"
     )
+
+
+PROGRESS = "run\r10%\r20%\r30%\r40%\r50%\r60%\r70%\r80%\r90%\r100%\r\nform\x0cfeed\nFAILED x\n"
+
+
+def test_a_reporting_sets_failure_away_from_the_panel_splits_its_output_only_at_newlines() -> None:
+    assert set_failed_away_note("slow", "Mutation tests", PROGRESS) == (
+        "slow reported: Mutation tests failed. Its output ended:\n\n"
+        "run\r10%\r20%\r30%\r40%\r50%\r60%\r70%\r80%\r90%\r100%\nform\x0cfeed\nFAILED x"
+    )
+
+
+@pytest.mark.parametrize(
+    "output",
+    [PROGRESS, "\n".join(f"line {number}" for number in range(1, 30)), "a\x0bb\x1cc\u2028d\n"],
+)
+def test_a_reporting_sets_away_notice_quotes_the_lines_the_panel_shows(output: str) -> None:
+    view = StepsView()
+    steps = VerificationSteps(view, lambda: 0.0)
+    steps.show([StepState(name="Mutation tests", status="failed")], "slow", trim_output(output))
+    note = set_failed_away_note("slow", "Mutation tests", output)
+    panel_tail = view.texts[-1].split("\n", 2)[2]
+    assert note.split("\n\n", 1)[1] == panel_tail
 
 
 def test_holds_merges_has_its_description() -> None:

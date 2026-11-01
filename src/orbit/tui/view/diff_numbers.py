@@ -4,7 +4,7 @@ that its result shows; never a number that may be wrong."""
 import re
 from collections.abc import Iterator, Sequence
 
-from orbit.tui.view.common import text_lines
+from orbit.protocol import text_lines
 from orbit.tui.view.diffs import EDIT_SEPARATOR
 
 NUMBERED_LINE = re.compile(r" *(\d+)(?:→|\t)(.*)")

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
-from orbit.tui.view.common import text_lines
+from orbit.protocol import text_lines
 
 EDIT_SEPARATOR = "⋯"
 """The line between the diffs of a MultiEdit's edits."""

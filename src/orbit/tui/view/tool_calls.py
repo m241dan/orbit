@@ -7,8 +7,14 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any, Literal, assert_never
 
-from orbit.protocol import AgentReply, AgentRequest, ToolCallFinished, ToolCallStarted
-from orbit.tui.view.common import EntryKind, clipped, counted, text_lines
+from orbit.protocol import (
+    AgentReply,
+    AgentRequest,
+    ToolCallFinished,
+    ToolCallStarted,
+    text_lines,
+)
+from orbit.tui.view.common import EntryKind, clipped, counted
 from orbit.tui.view.diffs import diff_change
 
 TOOL_CALL_SUMMARY_LIMIT = 120

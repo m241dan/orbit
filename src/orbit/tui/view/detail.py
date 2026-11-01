@@ -6,7 +6,8 @@ from collections.abc import Callable
 from rich.console import Group, RenderableType
 from rich.text import Text
 
-from orbit.tui.view.common import counted, text_lines
+from orbit.protocol import text_lines
+from orbit.tui.view.common import counted
 from orbit.tui.view.diffs import file_diff
 from orbit.tui.view.tool_calls import ToolCall
 

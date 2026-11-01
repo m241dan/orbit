@@ -142,6 +142,7 @@ from orbit.protocol.events import (
     event_adapter,
     with_state,
 )
+from orbit.protocol.lines import OUTPUT_TAIL_LINES, output_tail, text_lines
 from orbit.protocol.link import (
     NOT_CONNECTED,
     Connected,
@@ -255,6 +256,7 @@ __all__ = [
     "NOT_ACTIVE",
     "NOT_CONFIGURED",
     "NOT_CONNECTED",
+    "OUTPUT_TAIL_LINES",
     "PAUSED_FOR_API_UNAVAILABLE",
     "PAUSED_FOR_USAGE_LIMIT",
     "PLANNER",
@@ -431,6 +433,8 @@ __all__ = [
     "event_adapter",
     "is_orbit_review",
     "looks_like_url",
+    "output_tail",
+    "text_lines",
     "trace_carrier",
     "with_state",
     "with_trace_carrier",

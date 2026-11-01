@@ -5,6 +5,7 @@ import pytest
 from orbit.protocol import (
     SessionSummary,
     TaskStatus,
+    text_lines,
 )
 from orbit.tui.view.common import (
     STATUS_ICONS,
@@ -16,7 +17,6 @@ from orbit.tui.view.common import (
     option_id,
     picked_row,
     picker_hint,
-    text_lines,
     token_text,
 )
 

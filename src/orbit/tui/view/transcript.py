@@ -19,8 +19,9 @@ from orbit.protocol import (
     TaskGaveUp,
     TaskMerged,
     ToolCallFinished,
+    text_lines,
 )
-from orbit.tui.view.common import EntryKind, counted, ordinal, spinner_frame, text_lines
+from orbit.tui.view.common import EntryKind, counted, ordinal, spinner_frame
 from orbit.tui.view.tool_calls import ToolCall, orbit_request_line, tool_call_line
 
 COLLAPSED_KINDS: frozenset[EntryKind] = frozenset({"tool"})

@@ -6,15 +6,13 @@ from typing import Protocol
 
 from rich.text import Text
 
-from orbit.protocol import StepState, UsageChanged, UsageLimit
-from orbit.tui.view.common import STEP_ICONS, spinner_frame, text_lines
+from orbit.protocol import StepState, UsageChanged, UsageLimit, output_tail
+from orbit.tui.view.common import STEP_ICONS, spinner_frame
 from orbit.tui.view.rules import duration_text
 
 # The verification panel
 
 NO_STEPS_TEXT = "No verification steps"
-OUTPUT_TAIL_LINES = 10
-"""How many of a failed set's output's last lines the panel shows."""
 
 
 def step_lines(steps: Sequence[StepState], frame: str, elapsed: int, title: str = "") -> list[str]:
@@ -27,11 +25,6 @@ def step_lines(steps: Sequence[StepState], frame: str, elapsed: int, title: str 
         else f"{STEP_ICONS[s.status]} {s.name}"
         for s in steps
     ]
-
-
-def output_tail(output: str) -> list[str]:
-    """The last lines of a failed set's ``output``, as the panel shows them under its steps."""
-    return text_lines(output)[-OUTPUT_TAIL_LINES:]
 
 
 class StepsView(Protocol):

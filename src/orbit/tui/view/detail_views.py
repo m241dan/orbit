@@ -14,7 +14,7 @@ from rich.rule import Rule
 from rich.syntax import Syntax
 from rich.text import Text
 
-from orbit.tui.view.common import text_lines
+from orbit.protocol import text_lines
 from orbit.tui.view.detail import (
     DIM,
     EMPTY_DIFF,
