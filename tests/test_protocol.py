@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from orbit.protocol import (
     CODER,
     CONFIGURE_CHECKS,
+    DEFAULT_RUNTIME,
     INTERNAL,
     MANUAL_ORIGIN,
     PAUSED_FOR_API_UNAVAILABLE,
@@ -20,6 +21,7 @@ from orbit.protocol import (
     ActivateSession,
     Activity,
     AddTask,
+    AgentEntry,
     AgentExited,
     AgentReply,
     AgentRequest,
@@ -441,6 +443,12 @@ def test_usage_changed_names_its_runtime_and_without_one_is_claudes() -> None:
     assert event_adapter.validate_json('{"type": "usage_changed"}') == UsageChanged(
         runtime="claude"
     )
+
+
+def test_a_message_naming_no_runtime_means_the_default_one() -> None:
+    entry = AgentEntry(name="coder", label="coder", conversational=False)
+    assert (UsageChanged().runtime, entry.runtime) == (DEFAULT_RUNTIME, DEFAULT_RUNTIME)
+    assert DEFAULT_RUNTIME == "claude"
 
 
 def test_usage_limit_rejects_a_naive_reset_time() -> None:

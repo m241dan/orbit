@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta, timezone
 
 from orbit.protocol import (
+    DEFAULT_RUNTIME,
     PAUSED_FOR_API_UNAVAILABLE,
     PAUSED_FOR_USAGE_LIMIT,
     ActivateSession,
@@ -175,6 +176,13 @@ def test_a_pause_whose_runtime_isnt_given_is_claudes_as_older_backends_ran_only_
     assert paused_words(summary, TWO_AHEAD) == (
         "run paused: usage limit on claude; starts again at 18:01"
     )
+
+
+def test_a_pause_whose_runtime_isnt_given_is_on_the_protocols_default_runtime() -> None:
+    until = datetime(2026, 10, 23, 16, 1, tzinfo=UTC)
+    unnamed = paused(PAUSED_FOR_USAGE_LIMIT, until, None)
+    on_default = paused(PAUSED_FOR_USAGE_LIMIT, until, DEFAULT_RUNTIME)
+    assert paused_words(unnamed, TWO_AHEAD) == paused_words(on_default, TWO_AHEAD)
 
 
 def test_a_run_paused_for_a_reason_not_known_says_only_when_it_starts_again() -> None:

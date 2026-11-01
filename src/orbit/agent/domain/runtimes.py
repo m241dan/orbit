@@ -19,7 +19,8 @@ from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.protocol import Effort, ToolAccess
 
 CLAUDE = "claude"
-"""Claude Code, the runtime a role runs on unless it says otherwise."""
+"""Claude Code, the runtime a role runs on unless it says otherwise, as it's the protocol's
+``DEFAULT_RUNTIME``."""
 
 KIRO = "kiro"
 """Kiro, through its CLI, ``kiro-cli``."""

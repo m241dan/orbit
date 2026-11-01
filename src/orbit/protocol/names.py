@@ -1,8 +1,14 @@
-"""The protocol's names: its version, and the lanes, triggers, roles, task origins, pause
-reasons and pseudo-tasks both sides refer to."""
+"""The protocol's names: its version, the default runtime, and the lanes, triggers, roles, task
+origins, pause reasons and pseudo-tasks both sides refer to."""
 
 PROTOCOL_VERSION = 2
 """The protocol's major version, which a ``Hello`` must name to be welcomed."""
+
+
+DEFAULT_RUNTIME = "claude"
+"""The runtime a message naming none means, such as a ``UsageChanged`` or an ``AgentEntry``
+without a ``runtime``, or a session paused without a ``paused_runtime``: Claude, the only one
+before messages named their runtime."""
 
 
 WORK_LANE = "work"

@@ -37,7 +37,7 @@ from orbit.protocol.models import (
     message_types,
     oldest_seq_if_dropped,
 )
-from orbit.protocol.names import PLANNER, WORK_LANE, BusyLane, PauseReason
+from orbit.protocol.names import DEFAULT_RUNTIME, PLANNER, WORK_LANE, BusyLane, PauseReason
 
 if TYPE_CHECKING:  # Envelopes carry events, so those events hold are resolved in envelope.py.
     from orbit.protocol.envelope import EventEnvelope
@@ -352,7 +352,7 @@ class UsageChanged(_Message):
     status: UsageStatus = "ok"
     detail: str = ""
     retry_at: AwareDatetime | None = None
-    runtime: str = "claude"
+    runtime: str = DEFAULT_RUNTIME
 
 
 class MessageSent(_Message):
@@ -656,7 +656,7 @@ class AgentEntry(_Message):
     tool_access: ToolAccess = "restricted"
     effort: Effort | None = None
     personal: bool = False
-    runtime: str = "claude"
+    runtime: str = DEFAULT_RUNTIME
     usage_known: bool = True
 
 

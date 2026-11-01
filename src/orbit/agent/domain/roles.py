@@ -32,7 +32,6 @@ from pydantic_core import PydanticCustomError
 
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.agent.domain.refusals import Refused
-from orbit.agent.domain.runtimes import CLAUDE
 from orbit.agent.domain.tools import (
     COMPLETE_TASK,
     CONSULT,
@@ -48,6 +47,7 @@ from orbit.agent.domain.tools import (
 )
 from orbit.protocol import (
     BUILT_IN_ROLE_NAMES,
+    DEFAULT_RUNTIME,
     NOT_CONFIGURED,
     Effort,
     Settings,
@@ -168,7 +168,7 @@ class Role(_Config):
         ),
     )
     runtime: str = Field(
-        default=CLAUDE,
+        default=DEFAULT_RUNTIME,
         description=(
             'The runtime its agents run on: "claude" or "kiro".'
             ' Left out, the user config\'s, else "claude".'

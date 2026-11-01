@@ -103,14 +103,15 @@ served that has a role of that name; these were added to version 2, defaulting t
 lane, the backend's model, `restricted` and no effort. It's `personal` when the user's own config
 defines it, rather than orbit or the project (a personal role), in that first workspace; this was
 added to version 2 too, defaulting to false. It carries the `runtime` its agents run on, such as
-`claude`, in that first workspace; this was added to version 2 too, defaulting to `claude`. Its
-`usage_known` is false when that runtime doesn't report what its agents' turns cost, so a
-frontend shows their usage as unknown rather than as nothing spent; this was added to version 2
-too, defaulting to true. Each workspace also carries its own `agents`: the roles enabled there,
-each with that workspace's lane, defaults, runtime, `usage_known` and `conversational` and
-`personal` flags, so a frontend offers the task editor the roles of the workspace it's on, with
-that workspace's defaults, rather than the catalog's merged list; this was added to version 2,
-defaulting to none. Each session carries its state (see [Session state](#session-state)).
+`claude`, in that first workspace; this was added to version 2 too, defaulting to `claude`
+(`DEFAULT_RUNTIME`, the runtime a message naming none means). Its `usage_known` is false when
+that runtime doesn't report what its agents' turns cost, so a frontend shows their usage as
+unknown rather than as nothing spent; this was added to version 2 too, defaulting to true. Each
+workspace also carries its own `agents`: the roles enabled there, each with that workspace's lane,
+defaults, runtime, `usage_known` and `conversational` and `personal` flags, so a frontend offers
+the task editor the roles of the workspace it's on, with that workspace's defaults, rather than
+the catalog's merged list; this was added to version 2, defaulting to none. Each session carries
+its state (see [Session state](#session-state)).
 
 `Hello` attaches the connection to nothing, and nothing more reaches it until its first
 `Attach(workspace, session)` (see [Attaching](#attaching)); every command but `Attach` and the
@@ -140,7 +141,7 @@ with `invalid`. The first `Attach` is answered in this order:
    [Sequencing and reconnecting](#sequencing-and-reconnecting)).
 2. The latest `UsageChanged`, if usage was fetched yet. It carries the `runtime` whose
    subscription's usage limits it reports, `claude` for Claude's; this was added to version 2,
-   defaulting to `claude`.
+   defaulting to `claude` (`DEFAULT_RUNTIME`).
 3. One-off notices, such as the workspace note, a missing verification setup, leftover work or
    notes on a resumed session.
 4. The Attach's `CommandAccepted`.
@@ -460,13 +461,13 @@ Each session in a `Catalog` carries its state as it is when the Catalog is sent:
   runtime, such as `claude`: the runtime of the role whose agent hit it. `paused_for` is an open
   string, so later versions may add reasons; a frontend shows one it doesn't know as a pause
   without a reason. `paused_runtime` was added to version 2; a frontend takes a pause without
-  one as Claude's, the only runtime before it. All three are set as the run stops and cleared
-  once it starts again, once its wait is cancelled (`CancelTurn`), dropped (a switch to another
-  session, or the server closing), or replaced by a run the user starts (`RunTasks`, or
-  `FireTrigger` for `configure-checks`); a wait that ends while storage is halted keeps them
-  until the halt lifts. All three are null for any other session. Meanwhile the work lane waits,
-  keeping its order, and the lanes whose tasks start by themselves start none whose role runs on
-  the paused runtime, running their tasks on other runtimes.
+  one as on `DEFAULT_RUNTIME`, Claude, the only runtime before it. All three are set as the run
+  stops and cleared once it starts again, once its wait is cancelled (`CancelTurn`), dropped (a
+  switch to another session, or the server closing), or replaced by a run the user starts
+  (`RunTasks`, or `FireTrigger` for `configure-checks`); a wait that ends while storage is halted
+  keeps them until the halt lifts. All three are null for any other session. Meanwhile the work
+  lane waits, keeping its order, and the lanes whose tasks start by themselves start none whose
+  role runs on the paused runtime, running their tasks on other runtimes.
 - `role_spent` and `caused_spent`, in `SessionStateChanged` only, not the Catalog: what the
   open session spent, as its `Snapshot` has them, updated as its turns end; null for any other
   session, whose spend a frontend keeps as that session's `Snapshot` said.

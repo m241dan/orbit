@@ -15,10 +15,12 @@ from orbit.agent.domain.roles import (
     names_file,
     role_task,
 )
+from orbit.agent.domain.runtimes import CLAUDE
 from orbit.agent.domain.tools import ORBIT_TOOLS, PROPOSE_TASK, orbit_tool_grant
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.protocol import (
     BUILT_IN_ROLE_NAMES,
+    DEFAULT_RUNTIME,
     NOT_CONFIGURED,
     Effort,
     Settings,
@@ -98,6 +100,10 @@ def test_a_role_leaving_out_where_and_how_it_works_gets_the_coders_defaults() ->
 
 def test_a_role_leaving_out_its_runtime_runs_on_claude() -> None:
     assert Role(instructions="Do it.").runtime == "claude"
+
+
+def test_a_role_leaving_out_its_runtime_runs_on_the_protocols_default_runtime() -> None:
+    assert Role(instructions="Do it.").runtime == DEFAULT_RUNTIME == CLAUDE
 
 
 def test_the_built_in_roles_run_on_claude() -> None:

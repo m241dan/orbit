@@ -7,6 +7,7 @@ from datetime import datetime, tzinfo
 from rich.text import Text
 
 from orbit.protocol import (
+    DEFAULT_RUNTIME,
     PAUSED_FOR_API_UNAVAILABLE,
     PAUSED_FOR_USAGE_LIMIT,
     ActivateSession,
@@ -59,9 +60,6 @@ PAUSED_REASONS = {
     PAUSED_FOR_USAGE_LIMIT: ": usage limit on {runtime}; starts again at",
 }
 PAUSED_UNKNOWN = "; starts again at"
-# The runtime a pause is on when the backend doesn't say: one from before runtimes ran only
-# Claude.
-PAUSED_RUNTIME = "claude"
 
 # The order a session's task counts are shown in: finished work first, then what's still to do.
 COUNT_ORDER: tuple[TaskStatus, ...] = (
@@ -340,11 +338,11 @@ def paused_words(summary: SessionSummary, zone: tzinfo | None = None) -> str | N
 def paused_note(
     until: datetime, reason: PauseReason | None, runtime: str | None, zone: tzinfo | None = None
 ) -> str:
-    """What a run paused for ``reason`` on ``runtime``, Claude if none is given, says of
-    itself, starting again at ``until``, a time in ``zone`` (the local one by default), as
-    :func:`paused_words` words it."""
+    """What a run paused for ``reason`` on ``runtime``, the protocol's default runtime if none
+    is given, says of itself, starting again at ``until``, a time in ``zone`` (the local one by
+    default), as :func:`paused_words` words it."""
     words = PAUSED_REASONS.get(reason or "", PAUSED_UNKNOWN)
-    named = words.format(runtime=runtime or PAUSED_RUNTIME)
+    named = words.format(runtime=runtime or DEFAULT_RUNTIME)
     return f"{PAUSED_PREFIX}{named} {until.astimezone(zone):%H:%M}"
 
 
