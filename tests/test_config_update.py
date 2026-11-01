@@ -586,6 +586,7 @@ def test_a_trigger_writes_only_the_fields_it_sets() -> None:
 
 def test_proposed_sets_and_triggers_replace_theirs_and_leave_the_others() -> None:
     others = (
+        '[[verification.steps]]\nname = "Stress"\ncommand = ["stress"]\nset = "stress"\n\n'
         "# Stress.\n[verification.sets.stress]\nholds_merges = true\n\n"
         '[triggers.nightly]\non = "manual"\nchecks = "stress"\n'
     )
@@ -608,7 +609,8 @@ def test_a_set_proposed_as_reporting_loses_its_table() -> None:
 
 def test_sets_and_triggers_set_inline_are_rewritten_as_toml_keeping_the_others() -> None:
     text = (
-        "[verification]\nsets = { stress = { holds_merges = true } }\n\n"
+        '[verification]\nsteps = [{ name = "Stress", command = ["stress"], set = "stress" }]\n'
+        "sets = { stress = { holds_merges = true } }\n\n"
         '[triggers]\nnightly = { on = "manual", checks = "stress" }\n'
     )
     assert tomllib.loads(with_checks(text, HOLDING)) == {
@@ -616,6 +618,7 @@ def test_sets_and_triggers_set_inline_are_rewritten_as_toml_keeping_the_others()
             "steps": [
                 {"name": "Lint", "command": ["ruff", "check"]},
                 {"name": "Mutants", "command": ["mutmut", "run"], "set": "mutation"},
+                {"name": "Stress", "command": ["stress"], "set": "stress"},
             ],
             "sets": {"stress": {"holds_merges": True}, "mutation": {"holds_merges": True}},
         },
@@ -703,10 +706,46 @@ def test_a_step_in_a_set_split_from_the_others_stays_where_it_was() -> None:
 def test_a_proposed_sets_steps_replace_that_sets_and_leave_the_other_sets() -> None:
     stress = '[[verification.steps]]\nname = "Stress"\ncommand = ["stress"]\nset = "stress"\n'
     text = f"{OLD_LINT}\n{NIGHTLY_STEP}\n{stress}\n{NIGHTLY_TABLES}"
-    checks = ChecksProposal(steps=(LINT, MUTANTS))
+    checks = ChecksProposal(
+        steps=(LINT, MUTANTS), sets={"mutation": VerificationSet(holds_merges=True)}
+    )
     assert with_checks(text, checks) == (
         f"{LINT_TABLE}\n{MUTANTS_TABLE}\n{stress}\n{NIGHTLY_TABLES}"
     )
+
+
+UNLISTED = ChecksProposal(steps=(LINT, MUTANTS))
+NIGHTLY_TRIGGER = '[triggers.nightly]\non = "commits"\nchecks = "mutation"\n'
+
+
+def test_a_set_left_out_of_sets_is_written_as_reporting_without_the_files_holding_table() -> None:
+    text = f"{OLD_LINT}\n{NIGHTLY_STEP}\n{NIGHTLY_TABLES}"
+    assert with_checks(text, UNLISTED) == f"{LINT_TABLE}\n{MUTANTS_TABLE}\n{NIGHTLY_TRIGGER}"
+
+
+def test_a_rewrite_drops_the_holding_table_of_a_set_left_out_of_sets() -> None:
+    text = f'setup = {{ command = ["make"] }}\n\n{OLD_LINT}\n{NIGHTLY_STEP}\n{NIGHTLY_TABLES}'
+    assert "sets" not in tomllib.loads(with_checks(text, UNLISTED))["verification"]
+
+
+STALE = "[verification.sets.stale]\nholds_merges = true\n"
+
+
+def test_a_sets_table_no_written_step_is_in_goes_so_the_file_loads() -> None:
+    text = f"{OLD_LINT}\n{NIGHTLY_STEP}\n{STALE}\n{NIGHTLY_TABLES}"
+    checked = with_checks(text, LINT_ONLY)
+    assert checked == f"{LINT_TABLE}\n{NIGHTLY_STEP}\n{NIGHTLY_TABLES}"
+    assert loaded_checks(checked) == (LINT,)
+
+
+def test_a_rewrite_drops_a_sets_table_no_written_step_is_in_so_the_file_loads() -> None:
+    text = (
+        f'setup = {{ command = ["make"] }}\n\n{OLD_LINT}\n{NIGHTLY_STEP}\n'
+        f"[verification.sets.stale]\nholds_merges = true\n\n{NIGHTLY_TABLES}"
+    )
+    checked = with_checks(text, LINT_ONLY)
+    assert tomllib.loads(checked)["verification"]["sets"] == {"mutation": {"holds_merges": True}}
+    assert loaded_checks(checked) == (LINT,)
 
 
 def test_steps_in_a_set_set_inline_are_kept_when_rewritten_as_toml() -> None:

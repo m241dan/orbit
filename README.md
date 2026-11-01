@@ -897,10 +897,13 @@ Accepted checks take effect at once. Orbit itself (not the agent) writes them in
 each set the proposal has steps in, with the proposal's (each with its `set`, if it's in one), and
 its `[setup]`, and leaving every other line as it was, the comments after them included. A step
 in a set the proposal has no steps in stays as written, with its comments, after the new steps
-(or where it was, if another table comes between). A set that holds merges gets its `[verification.sets.<name>]` table with `holds_merges
-= true`, in place of the file's table for it, and a set that reports loses the table it had; each
-trigger proposed gets its `[triggers.<name>]` table, in place of the file's for it, appended if
-the file has none. Sets and triggers the proposal doesn't name stay as they are. Without a file,
+(or where it was, if another table comes between). Each set the proposal has steps in gets the
+table the window showed for it: a set that holds merges gets its `[verification.sets.<name>]`
+table with `holds_merges = true`, in place of the file's table for it, and a set that reports,
+whether the proposal says so or leaves it out of its sets, loses the table it had. A set's table
+that no step is in once the checks are written goes too, so the file still loads. Each trigger
+proposed gets its `[triggers.<name>]` table, in place of the file's for it, appended if the file
+has none. Sets and triggers the proposal doesn't affect stay as they are. Without a file,
 it starts one from the reference config (see [Starting from the reference config](#starting-from-the-reference-config)),
 with the steps, setup and the tables of the sets that hold merges in place of its commented-out
 examples of them, under the lines saying what they are, and the triggers at the end; without a

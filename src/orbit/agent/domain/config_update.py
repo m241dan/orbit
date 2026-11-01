@@ -331,19 +331,25 @@ def with_checks(text: str, checks: ChecksProposal) -> str:
     setting, give way to the new ones, followed by those kept steps of theirs; kept steps further
     down, after another table, stay where they are. Its ``[setup]`` table, to its last setting, to
     the new one or, without one, goes with the blank lines just above it; those it lacks are
-    appended at the end. Every other line stays as it was, in order, the comments after a
-    table's last setting among them. Where that wouldn't read as replacing the steps and setup,
-    as when the file sets them some other way, such as inline, it's rewritten as TOML instead,
-    keeping its other keys and comments but those after a replaced table's last setting, which
-    TOML counts as the table's, and the kept steps follow the new ones.
+    appended at the end. Each set ``checks``' steps are in gets the table its effect says: one
+    holding merges for a set that holds them, in place of the file's, and none for one that
+    reports, whether ``checks.sets`` says so or leaves it out, so the file's table for it goes the
+    same way; the file's table for a set no step is in once they're written goes too, so the file
+    loads. The file's other sets' tables stay. Every other line stays as it was, in order, the
+    comments after a table's last setting among them. Where that wouldn't read as replacing the
+    steps and setup, as when the file sets them some other way, such as inline, it's rewritten as
+    TOML instead, keeping its other keys and comments but those after a replaced table's last
+    setting, which TOML counts as the table's, and the kept steps follow the new ones.
 
     Raises :class:`ConfigError` if ``text`` isn't valid TOML.
     """
     try:
-        rewritten = _rewritten(tomlkit.parse(text), checks)
+        document = tomlkit.parse(text)
+        unused = _unused_sets(document, checks)
+        rewritten = _rewritten(document, checks, unused)
     except TOMLKitError as exc:
         raise ConfigError(str(exc)) from None
-    edited = _edited(_scanned(text), checks)
+    edited = _edited(_scanned(text), checks, unused)
     return edited if _same_settings(edited, rewritten) else rewritten
 
 
@@ -710,11 +716,30 @@ def _instructions_line(name: str) -> str:
     return f"# {instructions_setting(name)}"
 
 
-def _rewritten(document: TOMLDocument, checks: ChecksProposal) -> str:
+def _unused_sets(document: TOMLDocument, checks: ChecksProposal) -> tuple[str, ...]:
+    """The sets ``document``, a project file, has tables for that no step is in once ``checks``
+    are written: neither one of ``checks``' steps nor one of the file's."""
+    verification = document.get("verification")
+    tables = _value(verification, "sets")
+    used = {*checks.set_names, *_step_sets(_value(verification, "steps"))}
+    return tuple(name for name in tables if name not in used) if isinstance(tables, dict) else ()
+
+
+def _step_sets(steps: object) -> set[object]:
+    """The sets ``steps``, a file's steps' tables, if they're an array, are in."""
+    return (
+        {step.get("set") for step in steps if isinstance(step, dict)}
+        if isinstance(steps, list)
+        else set()
+    )
+
+
+def _rewritten(document: TOMLDocument, checks: ChecksProposal, unused: Sequence[str]) -> str:
     """``document`` as TOML with ``checks`` in place of its steps and setup, and of its sets'
-    and triggers' tables that ``checks`` names, however it sets them."""
+    and triggers' tables that ``checks`` names, without the ``unused`` sets' tables, however it
+    sets them."""
     current = document.get("verification")
-    document["verification"] = _verification(checks, current)
+    document["verification"] = _verification(checks, current, unused)
     if checks.setup is None:
         document.pop("setup", None)
     else:
@@ -729,10 +754,11 @@ def _value(table: object, key: str) -> object:
     return table.get(key) if isinstance(table, dict) else None
 
 
-def _verification(checks: ChecksProposal, current: object) -> Table:
+def _verification(checks: ChecksProposal, current: object, unused: Sequence[str]) -> Table:
     """The table of ``checks``' steps, then the steps of ``current``, a file's verification
     table, that ``checks`` leave (see :func:`_kept`), and of the tables of the sets it has, a
-    table if it has any, with those of ``checks``' sets in place of theirs."""
+    table if it has any, with those of ``checks``' sets in place of theirs and without the
+    ``unused`` sets'."""
     steps = _value(current, "steps")
     kept = (
         [_as_table(step) for step in steps if _kept(step, checks)]
@@ -740,7 +766,7 @@ def _verification(checks: ChecksProposal, current: object) -> Table:
         else []
     )
     verification = _steps_table(checks, kept)
-    tables = _with_tables(_value(current, "sets"), _sets_tables(checks))
+    tables = _with_tables(_value(current, "sets"), _sets_tables(checks, unused))
     if tables:
         verification["sets"] = tables
     return verification
@@ -791,15 +817,15 @@ def _with_tables(current: object, tables: dict[str, Table | None]) -> Table:
     return merged
 
 
-def _sets_tables(checks: ChecksProposal) -> dict[str, Table | None]:
-    """The table of each of ``checks``' sets, by name: one saying it holds merges, or none for
-    one that only reports, as without a table."""
-    return {name: _set_table() if holds else None for name, holds in _holds(checks).items()}
-
-
-def _holds(checks: ChecksProposal) -> dict[str, bool]:
-    """Whether each of ``checks``' sets holds merges, by name, as its table says."""
-    return {name: table.holds_merges for name, table in checks.sets.items()}
+def _sets_tables(checks: ChecksProposal, unused: Sequence[str] = ()) -> dict[str, Table | None]:
+    """The table of each set ``checks``' steps are in, by name: one saying it holds merges, or
+    none for one that only reports, as without a table, whether ``checks.sets`` says so or
+    leaves it out; and none for each of the ``unused`` sets."""
+    gone: dict[str, Table | None] = dict.fromkeys(unused)
+    return gone | {
+        check_set.name: _set_table() if check_set.effect == "holds_merges" else None
+        for check_set in checks.check_sets
+    }
 
 
 def _set_table() -> Table:
@@ -852,14 +878,15 @@ def _setup(setup: Setup) -> Table:
     return table
 
 
-def _check_tables(checks: ChecksProposal) -> dict[str, tuple[str, ...]]:
+def _check_tables(checks: ChecksProposal, unused: Sequence[str] = ()) -> dict[str, tuple[str, ...]]:
     """The lines of ``checks``' steps' tables and of its setup's, then of its sets' and its
-    triggers' tables, by header; none for a setup or a set's table it lacks."""
+    triggers' tables, by header; none for a setup or a set's table it lacks, or for the
+    ``unused`` sets' tables (see :func:`_sets_tables`)."""
     setup = () if checks.setup is None else _toml_lines("setup", _setup(checks.setup))
     return {
         _STEPS: _toml_lines("verification", _steps_table(checks)),
         _SETUP: setup,
-        **_named_tables(_SETS_KEY, _sets_tables(checks)),
+        **_named_tables(_SETS_KEY, _sets_tables(checks, unused)),
         **_named_tables("triggers", _trigger_tables(checks)),
     }
 
@@ -900,11 +927,12 @@ def _same_settings(text: str, other: str) -> bool:
         return False
 
 
-def _edited(lines: Sequence[_Line], checks: ChecksProposal) -> str:
+def _edited(lines: Sequence[_Line], checks: ChecksProposal, unused: Sequence[str] = ()) -> str:
     """The text of ``lines`` with ``checks`` in place of the steps' and setup's tables they set
-    under headers of their own, and appended if they set none, as :func:`with_checks` has it."""
+    under headers of their own, and appended if they set none, and without the ``unused`` sets'
+    tables, as :func:`with_checks` has it."""
     tables = _set_tables(lines)
-    new = _check_tables(checks)
+    new = _check_tables(checks, unused)
     runs = {header: _runs(tables, header) for header in new}
     text = _spliced(lines, _check_spans(lines, runs, new, checks))
     for header, block in new.items():

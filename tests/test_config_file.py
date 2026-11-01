@@ -1387,7 +1387,7 @@ label = "Stress"
     )
     stress = VerificationStep(name="Stress", command=("stress",), set="stress")
     holding = ChecksProposal(
-        steps=(A, C, stress),
+        steps=(A, C),
         sets={"mutation": VerificationSet(holds_merges=True)},
         triggers={"mutation-every-10": EVERY_10},
     )
