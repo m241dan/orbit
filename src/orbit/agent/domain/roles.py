@@ -20,7 +20,6 @@ asked of a disabled role is refused.
 
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from datetime import timedelta
 from typing import Annotated, Any, Literal, Self, get_args
 
@@ -51,6 +50,19 @@ from orbit.agent.domain.runtimes import (
     unknown_model,
     unknown_runtime,
 )
+from orbit.agent.domain.tools import (
+    COMPLETE_TASK,
+    CONSULT,
+    DRAFT_TOOLS,
+    GET_TASK,
+    GIVE_UP,
+    ORBIT_TOOLS,
+    PROPOSE_CHECKS,
+    PROPOSE_TASK,
+    READ_SKILL,
+    REPORT_PROGRESS,
+    RUN_CHECK,
+)
 from orbit.protocol import (
     AGENT_FAILED,
     BUILT_IN_ROLE_NAMES,
@@ -67,46 +79,6 @@ from orbit.protocol import (
     TaskSpec,
     ToolAccess,
 )
-
-GET_TASK = "get_task"
-COMPLETE_TASK = "complete_task"
-RUN_CHECK = "run_check"
-REPORT_PROGRESS = "report_progress"
-GIVE_UP = "give_up"
-SUGGEST_TASK = "suggest_task"
-PROPOSE_TASK = "propose_task"
-PROPOSE_CHECKS = "propose_checks"
-CONSULT = "consult"
-SAVE_REPORT = "save_report"
-LIST_REPORTS = "list_reports"
-READ_REPORT = "read_report"
-LIST_DRAFTS = "list_drafts"
-READ_DRAFT = "read_draft"
-EDIT_DRAFT = "edit_draft"
-REMOVE_DRAFT = "remove_draft"
-MOVE_DRAFT = "move_draft"
-READ_SKILL = "read_skill"
-
-DRAFT_TOOLS = (LIST_DRAFTS, READ_DRAFT, EDIT_DRAFT, REMOVE_DRAFT, MOVE_DRAFT)
-"""The tools a role that proposes tasks is granted for its drafts."""
-
-ORBIT_TOOLS = (
-    GET_TASK,
-    COMPLETE_TASK,
-    RUN_CHECK,
-    REPORT_PROGRESS,
-    GIVE_UP,
-    SUGGEST_TASK,
-    PROPOSE_TASK,
-    PROPOSE_CHECKS,
-    CONSULT,
-    SAVE_REPORT,
-    LIST_REPORTS,
-    READ_REPORT,
-    *DRAFT_TOOLS,
-    READ_SKILL,
-)
-"""Every tool orbit's MCP server offers agents."""
 
 Workspace = Literal["worktree", "snapshot", "checkout", "none", "copy"]
 """Where an agent in a role works: the coder's separate worktree, which can merge; a read-only
@@ -687,21 +659,6 @@ def check_settings(name: str, runtime: str, settings: Settings, capabilities: Ca
 def _task_roles_in(roles: Mapping[str, Role], lane: str) -> list[str]:
     """The roles among ``roles`` in ``lane`` that aren't conversational."""
     return [name for name, role in roles.items() if not role.conversation and role.lane == lane]
-
-
-@dataclass(frozen=True)
-class OrbitToolGrant:
-    """Orbit's tools an agent may call, and its others, which it may not, by orbit's names for
-    them; each runtime names them its own way."""
-
-    granted: tuple[str, ...]
-    withheld: tuple[str, ...]
-
-
-def orbit_tool_grant(tools: Sequence[str]) -> OrbitToolGrant:
-    """Which of orbit's tools an agent granted ``tools`` may call: those, in their order, and
-    none of orbit's others, in orbit's."""
-    return OrbitToolGrant(tuple(tools), tuple(tool for tool in ORBIT_TOOLS if tool not in tools))
 
 
 def out_of_time(who: str, minutes: float) -> str:

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from orbit.agent.application.ports import AgentLaunch
-from orbit.agent.domain.roles import orbit_tool_grant
+from orbit.agent.domain.tools import orbit_tool_grant
 from orbit.agent.external.whole_files import write_private
 from orbit.protocol import ToolAccess
 

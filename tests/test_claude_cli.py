@@ -10,8 +10,8 @@ import pytest
 from orbit.agent import ClaudeCliRunner
 from orbit.agent.application.ports import AgentLaunch, ResumeFailed
 from orbit.agent.domain.agents import Agent
-from orbit.agent.domain.roles import ORBIT_TOOLS
 from orbit.agent.domain.runtimes import Failure
+from orbit.agent.domain.tools import ORBIT_TOOLS
 from orbit.agent.domain.usage_limits import limit_hit
 from orbit.agent.external.claude_cli import (
     AGENT_RULES,

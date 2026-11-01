@@ -18,7 +18,7 @@ from orbit.agent.domain.reports import (
     saved_note,
     unknown_report,
 )
-from orbit.agent.domain.roles import LIST_REPORTS, READ_REPORT, SAVE_REPORT
+from orbit.agent.domain.tools import LIST_REPORTS, READ_REPORT, SAVE_REPORT
 from orbit.protocol import (
     UNKNOWN,
     DeleteReport,

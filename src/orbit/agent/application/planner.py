@@ -29,6 +29,13 @@ from orbit.agent.domain.board import TaskBoard, draft_line, draft_text
 from orbit.agent.domain.consultations import CANCELLED, failed
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.roles import (
+    suggested_task,
+    suggestion_refusal,
+    task_suggestion,
+    timeout_ending,
+)
+from orbit.agent.domain.skills import proposed_skills
+from orbit.agent.domain.tools import (
     CONSULT,
     EDIT_DRAFT,
     LIST_DRAFTS,
@@ -37,12 +44,7 @@ from orbit.agent.domain.roles import (
     READ_DRAFT,
     REMOVE_DRAFT,
     REPORT_PROGRESS,
-    suggested_task,
-    suggestion_refusal,
-    task_suggestion,
-    timeout_ending,
 )
-from orbit.agent.domain.skills import proposed_skills
 from orbit.agent.domain.usage_limits import outage_note
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (

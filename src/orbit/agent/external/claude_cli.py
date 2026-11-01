@@ -23,8 +23,8 @@ from urllib.parse import quote
 
 from orbit.agent.application.ports import AgentLaunch, ResumeFailed
 from orbit.agent.domain.agents import Agent
-from orbit.agent.domain.roles import orbit_tool_grant
 from orbit.agent.domain.runtimes import Capabilities, Failure, starting_with
+from orbit.agent.domain.tools import orbit_tool_grant
 from orbit.agent.domain.usage_limits import claude_failure
 from orbit.agent.external.cli_turns import (
     OTLP_HEADER_VARIABLES,

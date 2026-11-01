@@ -13,7 +13,7 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.types import TextContent
 
 from orbit.agent.application.ports import HostFailed, Reply
-from orbit.agent.domain.roles import ORBIT_TOOLS
+from orbit.agent.domain.tools import ORBIT_TOOLS
 from orbit.agent.external import mcp_host
 from orbit.agent.external.mcp_host import PROMPT_RECIPE, McpHost
 

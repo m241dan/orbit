@@ -15,7 +15,7 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from orbit.agent.application.ports import CallHandler
-from orbit.agent.domain.roles import (
+from orbit.agent.domain.tools import (
     COMPLETE_TASK,
     CONSULT,
     EDIT_DRAFT,

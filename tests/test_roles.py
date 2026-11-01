@@ -7,9 +7,6 @@ from pydantic import ValidationError
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.roles import (
-    ORBIT_TOOLS,
-    PROPOSE_TASK,
-    OrbitToolGrant,
     Role,
     built_in_roles,
     check_enabled,
@@ -21,7 +18,6 @@ from orbit.agent.domain.roles import (
     load_built_in_roles,
     merging_lane,
     names_file,
-    orbit_tool_grant,
     out_of_time,
     review_lane,
     role_task,
@@ -34,6 +30,7 @@ from orbit.agent.domain.roles import (
     timeout_ending,
 )
 from orbit.agent.domain.runtimes import CLAUDE, RuntimeRules
+from orbit.agent.domain.tools import ORBIT_TOOLS, PROPOSE_TASK, orbit_tool_grant
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.protocol import (
     AGENT_FAILED,
@@ -519,29 +516,6 @@ def test_a_task_suggestion_without_a_prompt_has_an_empty_one() -> None:
     assert task_suggestion({"title": "Tidy"}) == ("Tidy", "")
 
 
-def test_orbit_tools_are_the_eighteen_in_order() -> None:
-    assert ORBIT_TOOLS == (
-        "get_task",
-        "complete_task",
-        "run_check",
-        "report_progress",
-        "give_up",
-        "suggest_task",
-        "propose_task",
-        "propose_checks",
-        "consult",
-        "save_report",
-        "list_reports",
-        "read_report",
-        "list_drafts",
-        "read_draft",
-        "edit_draft",
-        "remove_draft",
-        "move_draft",
-        "read_skill",
-    )
-
-
 def test_a_role_that_consults_and_proposes_is_granted_draft_tools_consult_and_read_skill() -> None:
     planner = BUILT_IN_ROLES["planner"]
     assert planner.granted_tools == (
@@ -620,37 +594,6 @@ def test_each_built_in_roles_capabilities_follow_its_tools(name: str) -> None:
     assert role.runs_checks is ("run_check" in role.tools)
     assert role.proposes_checks is ("propose_checks" in role.tools)
     assert role.proposes_tasks is ("propose_task" in role.tools)
-
-
-def test_an_orbit_tool_grant_gives_the_roles_tools_and_withholds_orbits_others() -> None:
-    grant = orbit_tool_grant(("complete_task", "get_task"))
-    assert grant.granted == ("complete_task", "get_task")
-    assert grant.withheld == (
-        "run_check",
-        "report_progress",
-        "give_up",
-        "suggest_task",
-        "propose_task",
-        "propose_checks",
-        "consult",
-        "save_report",
-        "list_reports",
-        "read_report",
-        "list_drafts",
-        "read_draft",
-        "edit_draft",
-        "remove_draft",
-        "move_draft",
-        "read_skill",
-    )
-
-
-def test_an_orbit_tool_grant_of_every_tool_withholds_none() -> None:
-    assert orbit_tool_grant(ORBIT_TOOLS) == OrbitToolGrant(ORBIT_TOOLS, ())
-
-
-def test_an_orbit_tool_grant_of_no_tools_withholds_every_one() -> None:
-    assert orbit_tool_grant(()) == OrbitToolGrant((), ORBIT_TOOLS)
 
 
 def test_the_built_in_task_roles_run_in_the_work_and_review_lanes() -> None:

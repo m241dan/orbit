@@ -39,7 +39,7 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.agents import Agent, AgentRegistry
 from orbit.agent.domain.refusals import failed_to
 from orbit.agent.domain.reviews import ReviewLimits
-from orbit.agent.domain.roles import ORBIT_TOOLS, READ_SKILL, Role
+from orbit.agent.domain.roles import Role
 from orbit.agent.domain.runtimes import ModelAliases, resolve_model
 from orbit.agent.domain.skills import (
     SkillLibrary,
@@ -50,6 +50,7 @@ from orbit.agent.domain.skills import (
     skill_catalogue,
     skill_instructions,
 )
+from orbit.agent.domain.tools import ORBIT_TOOLS, READ_SKILL
 from orbit.protocol import (
     INTERNAL,
     AgentExited,

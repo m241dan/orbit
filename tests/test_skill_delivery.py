@@ -14,8 +14,8 @@ from orbit.agent.application.agent_trace import PROCESS_SPAN
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.ports import AgentLaunch, Reply
 from orbit.agent.domain.layers import PACKAGE
-from orbit.agent.domain.roles import READ_SKILL
 from orbit.agent.domain.skills import Skill, SkillFile, SkillLibrary, SkillMapping
+from orbit.agent.domain.tools import READ_SKILL
 from orbit.agent.external import claude_cli, kiro_cli
 from orbit.agent.external.kiro_agents import kiro_agent_config
 from orbit.protocol import (
