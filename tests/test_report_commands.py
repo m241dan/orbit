@@ -1,7 +1,7 @@
 """Frontends browsing the workspace's reports: listing them, showing one and deleting one."""
 
 from orbit.agent import WorkspaceHost
-from orbit.agent.application.workspace_host import NO_REPORTS_KEPT
+from orbit.agent.application.workspace_host import NO_REPORTS_KEPT, HostParts
 from orbit.agent.domain.reports import NewReport
 from orbit.protocol import (
     INVALID,
@@ -30,7 +30,9 @@ def with_reports(store: FakeStore) -> FakeStore:
 
 
 def host(store: FakeStore | None) -> WorkspaceHost:
-    return WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: "today", name="today")
+    return WorkspaceHost(
+        HostParts(store=store, clock=Ticks(), new_id=lambda: "today", name="today")
+    )
 
 
 async def test_listing_answers_the_asking_connection_alone_newest_first() -> None:

@@ -4,7 +4,7 @@ lock is let go, unless that would lose a clone's work."""
 
 import asyncio
 
-from orbit.agent import ControlPlane, WorkspaceHost, WorkspaceOwner
+from orbit.agent import ControlPlane, HostParts, WorkspaceHost, WorkspaceOwner
 from orbit.protocol import BUSY, INTERNAL, INVALID, CommandAccepted, RemoveWorkspace, TakeOwnership
 from tests.agent_fakes import FakeLock
 from tests.connection_helpers import joined, say, taken
@@ -18,7 +18,9 @@ class Noting(WorkspaceHost):
     """The host of the workspace ``name`` that notes in ``steps`` once it has closed."""
 
     def __init__(self, name: str, steps: list[str]) -> None:
-        super().__init__(workspace=f"/src/{name}", workspace_id=name, new_id=lambda: f"{name}-1")
+        super().__init__(
+            HostParts(workspace=f"/src/{name}", workspace_id=name, new_id=lambda: f"{name}-1")
+        )
         self.steps = steps
 
     async def close(self) -> None:

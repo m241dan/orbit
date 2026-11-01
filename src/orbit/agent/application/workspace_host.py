@@ -202,9 +202,49 @@ class _LanePauses:
         self.turns().heard_from(runtime)
 
 
+@dataclass(frozen=True, kw_only=True)
+class HostParts:
+    """What a :class:`WorkspaceHost` is built from, each with a default, so a caller gives only
+    those it has; :class:`WorkspaceHost` says what each does. They're its ``settings``,
+    ``verification``, ``agents``, ``workspace`` and ``workspace_id``, whether to
+    ``check_at_startup``, the ``store`` its sessions are saved in, the ``clock``, ``new_id``,
+    ``pinned``, ``pick_session``, ``name``, ``startup_notes`` and ``storage`` of its sessions, the
+    ``fallback`` and ``recover`` of a halt, the ``owner``, ``lock``, ``lock_retry`` and
+    ``lock_declined_retry`` of a takeover, whether it's ``managed``, the ``ledger`` its usage is
+    recorded in and the ``telemetry`` it's traced with."""
+
+    settings: Settings | None = None
+    verification: Verification | None = None
+    agents: Agents | None = None
+    workspace: str | None = None
+    check_at_startup: bool = False
+    workspace_id: str = UNREGISTERED_WORKSPACE
+    store: SessionStore | None = None
+    clock: Clock = local_now
+    new_id: IdMaker = new_session_id
+    pinned: Collection[str] = ()
+    pick_session: bool = False
+    name: str | None = None
+    startup_notes: Sequence[str] = ()
+    storage: StorageSettings = _DEFAULT_STORAGE
+    fallback: Fallback | None = None
+    recover: Callable[[], Awaitable[Sequence[str]]] = _nothing_parked
+    owner: WorkspaceOwner | None = None
+    lock: RepositoryLock | None = None
+    lock_retry: float = RETRY_SECONDS
+    lock_declined_retry: float = DECLINED_RETRY_SECONDS
+    managed: bool = False
+    ledger: UsageLedger | None = None
+    telemetry: Telemetry = _NO_TELEMETRY
+
+
+_NO_PARTS = HostParts()
+
+
 class WorkspaceHost:
     """One workspace's backend: takes the commands the control plane routes to it, runs work in
-    the background and publishes its events.
+    the background and publishes its events. The collaborators and settings named below, from
+    ``settings`` to ``telemetry``, are the fields of its ``parts``.
 
     The session owns the task board and reports it whole on every change. It starts the lanes
     of the conversational roles, whose turns answer prompts, and a lane for each lane of the
@@ -290,37 +330,9 @@ class WorkspaceHost:
     while the offer is open; ``Handover`` answers ``TakeOwnership``, calling ``owned`` first.
     """
 
-    def __init__(
-        self,
-        settings: Settings | None = None,
-        verification: Verification | None = None,
-        agents: Agents | None = None,
-        workspace: str | None = None,
-        check_at_startup: bool = False,
-        *,
-        workspace_id: str = UNREGISTERED_WORKSPACE,
-        store: SessionStore | None = None,
-        clock: Clock = local_now,
-        new_id: IdMaker = new_session_id,
-        pinned: Collection[str] = (),
-        pick_session: bool = False,
-        name: str | None = None,
-        startup_notes: Sequence[str] = (),
-        storage: StorageSettings = _DEFAULT_STORAGE,
-        fallback: Fallback | None = None,
-        recover: Callable[[], Awaitable[Sequence[str]]] = _nothing_parked,
-        owner: WorkspaceOwner | None = None,
-        lock: RepositoryLock | None = None,
-        lock_retry: float = RETRY_SECONDS,
-        lock_declined_retry: float = DECLINED_RETRY_SECONDS,
-        managed: bool = False,
-        ledger: UsageLedger | None = None,
-        telemetry: Telemetry = _NO_TELEMETRY,
-    ) -> None:
-        # #lizard forgives(parameter_count): a host is built from its workspace's collaborators,
-        # each with a default, so a caller gives only those it has.
+    def __init__(self, parts: HostParts = _NO_PARTS) -> None:
         # What its work will be traced with.
-        self.telemetry = telemetry
+        self.telemetry = parts.telemetry
         self.owned: Callable[[], None] = lambda: None
         # The usage limits fetched last, which the control plane serving this host knows.
         self.latest_usage: Callable[[], UsageChanged | None] = lambda: None
@@ -329,66 +341,76 @@ class WorkspaceHost:
         # The coders' slots its tasks take, shared by the control plane serving this host.
         self.coder_slots = CoderSlots()
         self._takeover = Takeover(
-            owner is not None,
-            lock,
+            parts.owner is not None,
+            parts.lock,
             lambda event: self._events.put(event),
-            RetryTimes(lock_retry, lock_declined_retry),
+            RetryTimes(parts.lock_retry, parts.lock_declined_retry),
         )
-        self._settings = SessionSettings(settings or Settings(), pinned, self._model_aliases)
-        self._storage = storage
+        self._settings = SessionSettings(
+            parts.settings or Settings(), parts.pinned, self._model_aliases
+        )
+        self._storage = parts.storage
         self._halt = self._storage_halt()
         self._gate = SessionGate(
             lambda: self._halt.halted, lambda: self._takeover.read_only, self._halt.check
         )
-        overflow = Overflow(fallback, self._halt.log_failed)
+        overflow = Overflow(parts.fallback, self._halt.log_failed)
         self._connections = Connections(self._connections_changed, lambda: self._keeper.id)
-        self._workspace_id = workspace_id
-        self._store = store
-        self._events = Outbox(lambda: self._keeper.id, store, storage, overflow)
-        self._events.workspace = workspace_id
-        self._events.telemetry = telemetry
-        new_sessions = NewSessions(clock, new_id, self._events.forget, self._events.catch_up)
-        self._keeper = SessionKeeper(store, self._events.put, self._halt, new_sessions)
-        self._keeper.rename(name)
-        self._review_count = ReviewCount(store, self._halt, self._events.put)
-        self._usage = UsageRecorder(ledger, self._halt, self._events.put, clock)
+        self._workspace_id = parts.workspace_id
+        self._store = parts.store
+        self._events = Outbox(lambda: self._keeper.id, parts.store, parts.storage, overflow)
+        self._events.workspace = parts.workspace_id
+        self._events.telemetry = parts.telemetry
+        new_sessions = NewSessions(
+            parts.clock, parts.new_id, self._events.forget, self._events.catch_up
+        )
+        self._keeper = SessionKeeper(parts.store, self._events.put, self._halt, new_sessions)
+        self._keeper.rename(parts.name)
+        self._review_count = ReviewCount(parts.store, self._halt, self._events.put)
+        self._usage = UsageRecorder(parts.ledger, self._halt, self._events.put, parts.clock)
         self._usage.recorded = lambda: self.usage_recorded()
         self._count_loader = Background("review count", self._events.put)
         self._tasks = Tasks(TaskBoard(), self._events.put, self._save)
         self._board = self._tasks.board
         self._proposals = FrontendReview(self._events.put, self._agent_on)
-        agents = _reviewed(agents, self._proposals)
-        self._verifier = _verifier(verification, self._tasks, self._events, agents, telemetry)
-        self._desk = _desk(
-            agents, self._publish_agents, telemetry, workspace_id, lambda: self._keeper.id
+        agents = _reviewed(parts.agents, self._proposals)
+        self._verifier = _verifier(
+            parts.verification, self._tasks, self._events, agents, parts.telemetry
         )
-        self._reports = None if store is None else Reports(store, lambda: self._keeper.id, clock)
-        if self._desk is not None and self._reports is not None:
-            self._desk.report_tools = self._reports.tools
-        self._workspace = workspace
-        self._managed = managed
-        self._recover = recover
-        self._owner = owner
-        owner_notes = () if owner is None else (read_only_note(owner),)
-        self._startup_notes = (*owner_notes, *startup_notes)
+        self._desk = _desk(
+            agents,
+            self._publish_agents,
+            parts.telemetry,
+            parts.workspace_id,
+            lambda: self._keeper.id,
+        )
+        self._reports = self._kept_reports(parts.store, parts.clock)
+        self._workspace = parts.workspace
+        self._managed = parts.managed
+        self._recover = parts.recover
+        self._owner = parts.owner
+        owner_notes = () if parts.owner is None else (read_only_note(parts.owner),)
+        self._startup_notes = (*owner_notes, *parts.startup_notes)
         self._closing = False
         self._started = False
-        self._copies = self._role_copies(clock)
+        self._copies = self._role_copies(parts.clock)
         self._copy_keeper = Background("copies", self._events.put)
         self._seats = self._conversation_seats()
         self._lane = self._review_lane()
         self._runners = self._lane_runners()
         self._lanes = self._session_lanes()
-        self._coders = CoderSeat(lambda: self.coder_slots, workspace_id, lambda: self._keeper.id)
-        self._record_moves = self._moves_kept_in(store)
+        self._coders = CoderSeat(
+            lambda: self.coder_slots, parts.workspace_id, lambda: self._keeper.id
+        )
+        self._record_moves = self._moves_kept_in(parts.store)
         self._startup = self._startup_check(
-            verification, check_at_startup and not self._takeover.read_only
+            parts.verification, parts.check_at_startup and not self._takeover.read_only
         )
         self._outages = Outages()  # One backoff per runtime, which every lane counts on.
         self._work = self._work_lane()
         self._turns = self._work_turns()
         self._activity = self._session_activity()
-        self._switcher = self._session_switcher(pick_session)
+        self._switcher = self._session_switcher(parts.pick_session)
         self._resume = self._storage_resume()
         self._commands = self._work_commands()
         self._handover = self._make_handover()
@@ -421,6 +443,16 @@ class WorkspaceHost:
             lambda role: self._settings.of(role),
         )
         return ConversationSeats(self._desk, self._tasks, self._events, hooks)
+
+    def _kept_reports(self, store: SessionStore | None, clock: Clock) -> Reports | None:
+        """The reports kept in ``store``, dated by ``clock``, whose tools the desk's agents are
+        given; none without a store."""
+        if store is None:
+            return None
+        reports = Reports(store, lambda: self._keeper.id, clock)
+        if self._desk is not None:
+            self._desk.report_tools = reports.tools
+        return reports
 
     def _role_copies(self, clock: Clock) -> RoleCopies | None:
         """The copies the conversational roles work in, their turns timed by ``clock``, saving

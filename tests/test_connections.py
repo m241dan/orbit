@@ -7,7 +7,7 @@ from dataclasses import replace
 import pytest
 
 from orbit import __version__
-from orbit.agent import WorkspaceHost
+from orbit.agent import HostParts, WorkspaceHost
 from orbit.agent.application.connection import (
     QUEUE_LIMIT,
     TOO_FAR_BEHIND,
@@ -328,7 +328,7 @@ def greeting(events: list[Event]) -> list[Event]:
 
 async def test_a_second_hello_greets_only_the_connection_saying_it() -> None:
     usage = Source(UsageReport(LIMITS))
-    session = WorkspaceHost(workspace="w", startup_notes=["n"])
+    session = WorkspaceHost(HostParts(workspace="w", startup_notes=["n"]))
     served(session, usage)
     first = await joined(session, "first")
     seen = await received(first)
@@ -364,7 +364,7 @@ async def test_a_second_hellos_failed_greeting_step_reaches_only_that_connection
 
 
 async def test_a_greetings_notices_are_not_logged() -> None:
-    session = WorkspaceHost(store=FakeStore(), workspace="w", startup_notes=["n"])
+    session = WorkspaceHost(HostParts(store=FakeStore(), workspace="w", startup_notes=["n"]))
     first = await joined(session, "first")
     second = await joined(session, "second")
     await received(first), await received(second)
@@ -393,7 +393,7 @@ async def rejoined(
     """A connection to a session over ``store`` that has said Hello with ``since`` and attached
     to the open session, the ``live`` events published while what it missed was being read,
     after which it had ``check`` see the connection, before what it missed was returned."""
-    session = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: OPEN)
+    session = WorkspaceHost(HostParts(store=store, clock=Ticks(), new_id=lambda: OPEN))
     read = session.greeting.missed
 
     async def slow(seen: int) -> Sequence[EventEnvelope] | None:

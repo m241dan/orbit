@@ -72,6 +72,7 @@ CANT_OPEN = "Orbit couldn't open a workspace's latest session: "
 
 
 def serve(
+    # #lizard forgives(parameter_count): Typer takes each of the command's options as a parameter.
     add: AddOption = None,
     model: ModelOption = None,
     tools: ToolsOption = None,
@@ -102,7 +103,6 @@ def serve(
     TLS alone, with --tls tls and a certificate and key; with --tls mtls and --client-ca,
     frontends show a client certificate that CA signed rather than the token.
     """
-    # #lizard forgives(parameter_count): Typer takes each of the command's options as a parameter.
     profile = profile.expanduser().resolve() if profile else None
     state = resolve_state_dir(state, os.environ)
     user_config = resolve_config_dir(config_dir, os.environ)

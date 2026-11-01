@@ -15,7 +15,7 @@ from typer.testing import CliRunner, Result
 from websockets.asyncio.server import ServerConnection, serve
 
 from orbit import __version__
-from orbit.agent import ControlPlane, RunFile
+from orbit.agent import ControlPlane, PlaneParts, RunFile
 from orbit.agent.domain.usage_totals import UsageTotalsData, usage_totals
 from orbit.cli import app
 from orbit.cli.status import NOT_RUNNING, _reported, _Unreachable
@@ -91,7 +91,7 @@ async def busy_plane() -> AsyncIterator[Busy]:
         return "completed"
 
     host, _ = agent_workspace("a", waits)
-    plane = ControlPlane([host], ledger=SpentLedger())
+    plane = ControlPlane([host], parts=PlaneParts(ledger=SpentLedger()))
     async with serving_plane(plane, plane.close) as (url, _):
         connection = await joined(plane, host=host)
         await say(connection, "add", AddTask(task=TASK))

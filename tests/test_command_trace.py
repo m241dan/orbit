@@ -6,7 +6,7 @@ from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.trace import StatusCode
 from opentelemetry.util.types import AttributeValue
 
-from orbit.agent import ControlPlane, WorkspaceHost
+from orbit.agent import ControlPlane, HostParts, PlaneParts, WorkspaceHost
 from orbit.agent.application.command_trace import COMMAND_SPAN
 from orbit.protocol import (
     INTERNAL,
@@ -48,7 +48,7 @@ _TYPE = "orbit.command.type"
 def _plane(traced: Traced) -> ControlPlane:
     """A control plane serving a host, both traced by ``traced``."""
     host, _, _ = session_for(telemetry=traced.telemetry)
-    return ControlPlane([host], telemetry=traced.telemetry)
+    return ControlPlane([host], parts=PlaneParts(telemetry=traced.telemetry))
 
 
 def _commands(traced: Traced, kind: str) -> list[ReadableSpan]:
@@ -177,7 +177,7 @@ async def test_a_first_attach_records_the_workspace_and_session_it_names() -> No
 
 async def test_an_attach_to_another_session_records_that_session_not_the_one_viewed() -> None:
     traced = Traced()
-    plane = ControlPlane([workspace(stored())], telemetry=traced.telemetry)
+    plane = ControlPlane([workspace(stored())], parts=PlaneParts(telemetry=traced.telemetry))
     await greeted(plane)
     switch = Attach(workspace=WORKSPACE, session=EARLIER)
     await frontend(plane).send(CommandEnvelope(command_id=COMMAND_ID, payload=switch))
@@ -212,7 +212,9 @@ async def test_a_command_whose_handling_fails_has_the_error_status(
     traced = Traced()
     store = FakeStore()
     store.list_failure = ValueError("the disk is gone")
-    plane = ControlPlane([WorkspaceHost(store=store)], telemetry=traced.telemetry)
+    plane = ControlPlane(
+        [WorkspaceHost(HostParts(store=store))], parts=PlaneParts(telemetry=traced.telemetry)
+    )
     await frontend(plane).send(CommandEnvelope(command_id=HELLO_ID, payload=HELLO))
     await close(plane)
 

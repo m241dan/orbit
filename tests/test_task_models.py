@@ -7,7 +7,7 @@ from dataclasses import replace
 
 import pytest
 
-from orbit.agent import WorkspaceHost
+from orbit.agent import HostParts, WorkspaceHost
 from orbit.agent.domain.runtimes import CLAUDE, UnknownModel
 from orbit.protocol import (
     AGENT_FAILED,
@@ -154,7 +154,7 @@ async def test_an_agent_whose_saved_model_no_longer_resolves_fails_saying_why() 
 
 async def test_a_planner_given_a_model_that_doesnt_resolve_fails_its_turn_saying_why() -> None:
     agents, launcher = agents_for(models={CLAUDE: FAST})
-    session = WorkspaceHost(Settings(model="gone"), agents=agents)
+    session = WorkspaceHost(HostParts(settings=Settings(model="gone"), agents=agents))
     launcher.planner_turns = [chats]
     await send(session, SendMessage(agent=PLANNER, text="hello"))
     events = await events_until(session, idle(PLANNER))

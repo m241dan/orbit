@@ -686,9 +686,12 @@ shows up in seconds:
 2. Ruff format: `uv run ruff format --check`
 3. Type check (mypy): `uv run mypy`
 4. Import contracts: `uv run lint-imports`
-5. Code quality (Lizard): `uv run lizard src tests -w -C 6 -L 100 -a 5`. Every function, tests
-   included, must have a cyclomatic complexity of at most 6, at most 100 lines and at most 5
-   parameters.
+5. Code quality (Lizard): `uv run lizard src tests -w -C 6 -L 100`. Every function, tests
+   included, must have a cyclomatic complexity of at most 6 and at most 100 lines. The limit of
+   5 parameters is held by a test rather than Lizard: `tests/test_parameter_limit.py`, which the
+   unit tests run, parses every function in `src` and `tests`, leaving out a method's `self` or
+   `cls` and a bare `*`; a CLI command, in `orbit.cli` or `orbit.__main__`, may pass it with
+   `# #lizard forgives(parameter_count): <why>` on its signature.
 6. Unit tests with 100% coverage: `uv run pytest --cov --cov-fail-under=100`
 
 **Startup check.** When orbit starts with verification on and at least one step configured, it
@@ -3100,8 +3103,11 @@ uv run ruff check .     # lint
 uv run ruff format .    # format
 uv run mypy             # type-check
 uv run lint-imports     # enforce frontend/backend separation
-uv run lizard src tests -w -C 6 -L 100 -a 5   # code quality: complexity and size per function
+uv run lizard src tests -w -C 6 -L 100   # code quality: complexity and length per function
 ```
+
+The limit of five parameters per function is held by `tests/test_parameter_limit.py`, which
+`pytest` runs, rather than by Lizard.
 
 Orbit's Kiro runtime is tested against what `kiro-cli` prints, captured in `tests/fixtures/kiro/`.
 `uv run python scripts/capture_kiro_fixtures.py` captures it again, on a machine where

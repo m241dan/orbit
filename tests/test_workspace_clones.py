@@ -7,7 +7,7 @@ import logging
 
 import pytest
 
-from orbit.agent import ControlPlane, WorkspaceHost
+from orbit.agent import ControlPlane, HostParts, WorkspaceHost
 from orbit.agent.application.clones import Clones
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.domain.clones import clone_served
@@ -161,7 +161,7 @@ async def test_a_clone_whose_serving_fails_is_told_as_internal() -> None:
 
     class BrokenSource(FakeSource):
         def make(self, name: str) -> WorkspaceHost:
-            return Broken(workspace=f"/clones/{name}", workspace_id=name)
+            return Broken(HostParts(workspace=f"/clones/{name}", workspace_id=name))
 
     source = BrokenSource()
     plane = ControlPlane(workspaces=source)
@@ -186,7 +186,7 @@ async def test_a_clone_whose_serving_fails_is_logged_with_its_traceback(
 
     class BrokenSource(FakeSource):
         def make(self, name: str) -> WorkspaceHost:
-            return Broken(workspace=f"/clones/{name}", workspace_id=name)
+            return Broken(HostParts(workspace=f"/clones/{name}", workspace_id=name))
 
     plane = ControlPlane(workspaces=BrokenSource())
     connection = await welcomed(plane)

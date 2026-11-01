@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 
 from opentelemetry.sdk.trace import ReadableSpan
 
-from orbit.agent import WorkspaceHost
+from orbit.agent import HostParts, WorkspaceHost
 from orbit.agent.application.consultations import title_of
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.planner import PlannerChat
@@ -469,7 +469,9 @@ def consulting_host(store: FakeStore) -> tuple[WorkspaceHost, ScriptedLauncher]:
     experimenter."""
     agents, launcher = agents_for(roles=CONSULTING)
     ids = iter(f"session-{n}" for n in range(1, 100))
-    host = WorkspaceHost(agents=agents, store=store, clock=Ticks(), new_id=lambda: next(ids))
+    host = WorkspaceHost(
+        HostParts(agents=agents, store=store, clock=Ticks(), new_id=lambda: next(ids))
+    )
     return host, launcher
 
 
@@ -590,7 +592,9 @@ async def test_a_switch_saves_the_consultations_left_pending_as_switched_away_fr
     }
     agents, launcher = agents_for(roles=roles)
     ids = iter(f"session-{n}" for n in range(1, 100))
-    session = WorkspaceHost(agents=agents, store=store, clock=Ticks(), new_id=lambda: next(ids))
+    session = WorkspaceHost(
+        HostParts(agents=agents, store=store, clock=Ticks(), new_id=lambda: next(ids))
+    )
     launcher.planner_turns = [consults("Check W", "Check X", heard=[]), chats, chats]
     await send(session, SendMessage(agent=PLANNER, text="Plan."))
     await events_until(session, finished("agent-1", 2))  # The reply to "Check W" heard.
@@ -614,7 +618,9 @@ async def pending_while(
     }
     agents, launcher = agents_for(roles=roles)
     ids = iter(f"session-{n}" for n in range(1, 100))
-    session = WorkspaceHost(agents=agents, store=store, clock=Ticks(), new_id=lambda: next(ids))
+    session = WorkspaceHost(
+        HostParts(agents=agents, store=store, clock=Ticks(), new_id=lambda: next(ids))
+    )
     launcher.planner_turns = [consults("Check W", "Check X", heard=[]), chats, chats]
     await send(session, SendMessage(agent=PLANNER, text="Plan."))
     await events_until(session, finished("agent-1", 2))

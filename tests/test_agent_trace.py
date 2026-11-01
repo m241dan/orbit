@@ -10,7 +10,7 @@ from typing import Any
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.trace import StatusCode
 
-from orbit.agent import ControlPlane, Verification, VerificationStep, WorkspaceHost
+from orbit.agent import ControlPlane, PlaneParts, Verification, VerificationStep, WorkspaceHost
 from orbit.agent.application.agent_trace import (
     PROCESS_SPAN,
     REQUEST_ERROR,
@@ -388,7 +388,7 @@ def traced_plane(
     host, _, launcher = session_for(
         *scripts, telemetry=traced.telemetry, host=ServerHost(), **options
     )
-    return ControlPlane([host], telemetry=traced.telemetry), launcher
+    return ControlPlane([host], parts=PlaneParts(telemetry=traced.telemetry)), launcher
 
 
 async def test_a_planner_turns_process_is_under_the_turn_with_its_calls_under_it() -> None:

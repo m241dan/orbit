@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from orbit.agent import WorkspaceHost
+from orbit.agent import HostParts, WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
@@ -54,7 +54,7 @@ def stored() -> FakeStore:
 
 def workspace(store: FakeStore) -> WorkspaceHost:
     """A session saved in ``store``, its open one named "today"."""
-    return WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: OPEN, name="today")
+    return WorkspaceHost(HostParts(store=store, clock=Ticks(), new_id=lambda: OPEN, name="today"))
 
 
 async def viewing(session: WorkspaceHost, name: str) -> SessionConnection:

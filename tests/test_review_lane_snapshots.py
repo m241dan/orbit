@@ -3,7 +3,7 @@ the reviews its crash interrupted ended."""
 
 import asyncio
 
-from orbit.agent import ControlPlane, WorkspaceHost
+from orbit.agent import ControlPlane, PlaneParts, WorkspaceHost
 from orbit.agent.application.ports import Reply
 from orbit.agent.application.review_trace import REVIEW_SPAN
 from orbit.agent.domain.reviews import BatchSnapshot, LaneSnapshot, PlannerSnapshot, ReviewJob
@@ -243,7 +243,7 @@ async def test_an_interrupted_reviews_queued_review_links_to_the_command_opening
     store = store_with(saved("auth", *crashed("completed"), reviews=snapshot))
     session, launcher = switching(store, telemetry=traced.telemetry)
     launcher.reviewers.append(suggests())
-    plane = ControlPlane([session], telemetry=traced.telemetry)
+    plane = ControlPlane([session], parts=PlaneParts(telemetry=traced.telemetry))
     await send(plane, ActivateSession(session="auth"))
     await events_until(plane, of_type(CommandAccepted))
     await send(plane, RunTasks())

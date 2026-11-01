@@ -23,6 +23,7 @@ from orbit.agent import (
     GitCoderTree,
     Limits,
     McpHost,
+    PlaneParts,
     Role,
     Setup,
     UsageApi,
@@ -37,7 +38,7 @@ from orbit.agent import (
     run_step,
     workspace_state,
 )
-from orbit.agent.application.ports import UsageLedger, UsageSource
+from orbit.agent.application.ports import UsageSource
 from orbit.agent.domain.ownership import read_only_note
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, default_name
@@ -58,7 +59,6 @@ from orbit.protocol import (
     TaskSpec,
     decode_event,
 )
-from orbit.tracing import Gauges, NoGauges, NoTelemetry, Telemetry
 from tests.agent_fakes import CLAUDE_MODELS, greeted, queued, send, sole, startup_of, store_of
 from tests.cli_fakes import LocalApp
 from tests.conftest import OFFLINE
@@ -135,15 +135,10 @@ def launched(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[WorkspaceH
         return built
 
     def plane(
-        hosts: list[WorkspaceHost],
-        usage: UsageSource | None = None,
-        ledger: UsageLedger | None = None,
-        telemetry: Telemetry | None = None,
-        gauges: Gauges | None = None,
+        hosts: list[WorkspaceHost], usage: UsageSource | None, parts: PlaneParts
     ) -> ControlPlane:
         LocalApp.usage_sources.append(usage)
-        telemetry, gauges = telemetry or NoTelemetry(), gauges or NoGauges()
-        return ControlPlane(hosts, usage, ledger=ledger, telemetry=telemetry, gauges=gauges)
+        return ControlPlane(hosts, usage, parts=parts)
 
     monkeypatch.setattr("orbit.cli.chat.OrbitApp", LocalApp)
     monkeypatch.setattr("orbit.cli.backend.WorkspaceHost", session)

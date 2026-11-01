@@ -5,7 +5,7 @@ import asyncio
 import pytest
 from pydantic import ValidationError
 
-from orbit.agent import WorkspaceHost
+from orbit.agent import HostParts, WorkspaceHost
 from orbit.agent.domain.usage import UsageReport
 from orbit.protocol import (
     PLANNER,
@@ -83,7 +83,7 @@ def saved_session(usage: Source | None = None) -> WorkspaceHost:
     """A session saved as ``session-1``, then ``session-2`` and so on, with usage from
     ``usage``."""
     ids = iter(f"session-{n}" for n in range(1, 100))
-    session = WorkspaceHost(store=FakeStore(), clock=Ticks(), new_id=lambda: next(ids))
+    session = WorkspaceHost(HostParts(store=FakeStore(), clock=Ticks(), new_id=lambda: next(ids)))
     served(session, usage)
     return session
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent import WorkspaceHost
+from orbit.agent import HostParts, WorkspaceHost
 from orbit.agent.application.log_writer import LogWriter, Overflow
 from orbit.agent.application.ports import ReadFailed, StoreFailed
 from orbit.agent.domain.replay import LogBounds
@@ -114,7 +114,7 @@ class BuggyForgetsFor(FakeStore):
 
 
 def stored_session(store: FakeStore | OwnView) -> WorkspaceHost:
-    return WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: "session-1")
+    return WorkspaceHost(HostParts(store=store, clock=Ticks(), new_id=lambda: "session-1"))
 
 
 def kept(sent: Sequence[EventEnvelope]) -> list[EventEnvelope]:
@@ -1289,7 +1289,7 @@ async def test_events_still_queued_end_a_snapshots_transcript_once() -> None:
 
 
 async def test_a_snapshot_without_a_store_has_no_transcript() -> None:
-    session = WorkspaceHost(clock=Ticks())
+    session = WorkspaceHost(HostParts(clock=Ticks()))
     await publish(session, Notice(message="hi"))
     await greet(session)
     await session.close()
@@ -1321,7 +1321,7 @@ async def test_a_session_opened_again_after_a_restart_shows_its_earlier_events(
     await store.close()
 
     store = await open_view(tmp_path / "state", workspace)
-    again = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: "session-2")
+    again = WorkspaceHost(HostParts(store=store, clock=Ticks(), new_id=lambda: "session-2"))
     events = await opened(again, ActivateSession(session="session-1"))
     await again.close()
     await store.close()
@@ -1344,7 +1344,7 @@ async def opened_after_another_logged_it(tmp_path: Path) -> WorkspaceHost:
     await other.save(saved("auth"))
     await other.append("auth", [notice(seq, "auth") for seq in range(1, 51)])
     await other.close()
-    session = WorkspaceHost(store=this, clock=Ticks(), new_id=lambda: "session-2")
+    session = WorkspaceHost(HostParts(store=this, clock=Ticks(), new_id=lambda: "session-2"))
     await opened(session, ActivateSession(session="auth"))
     await publish(session, Notice(message="later"))
     await session.close()
@@ -1466,7 +1466,7 @@ async def test_history_of_a_session_whose_log_cant_be_read_is_refused() -> None:
 
 
 async def test_history_without_a_store_is_an_empty_last_page() -> None:
-    session = WorkspaceHost(clock=Ticks(), new_id=lambda: "session-1")
+    session = WorkspaceHost(HostParts(clock=Ticks(), new_id=lambda: "session-1"))
     await publish(session, Notice(message="hi"))
 
     answer = await history(session, History(session="session-1", before_seq=10))
@@ -1518,7 +1518,9 @@ def log_size(state: Path, session_id: str) -> int:
 
 def trimming_session(store: OwnView, log_mb: int) -> WorkspaceHost:
     storage = StorageSettings(session_log_mb=log_mb)
-    return WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: "session-1", storage=storage)
+    return WorkspaceHost(
+        HostParts(store=store, clock=Ticks(), new_id=lambda: "session-1", storage=storage)
+    )
 
 
 async def test_a_session_log_over_its_limit_is_trimmed_after_the_next_batch(

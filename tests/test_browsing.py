@@ -4,7 +4,7 @@ connection that asked alone, refused as the path calls for, confined to the brow
 
 from pathlib import Path
 
-from orbit.agent import Browsing, ControlPlane, DirectoryLister, WorkspaceHost
+from orbit.agent import Browsing, ControlPlane, DirectoryLister, HostParts, WorkspaceHost
 from orbit.agent.domain.listings import LOCAL_BROWSING, FoundDirectory
 from orbit.protocol import (
     INTERNAL,
@@ -69,7 +69,9 @@ async def test_a_served_workspaces_directory_carries_its_id(tmp_path: Path) -> N
 
     class There(FakeSource):
         def make(self, name: str) -> WorkspaceHost:
-            return WorkspaceHost(workspace=str(tmp_path / "src" / name), workspace_id=name)
+            return WorkspaceHost(
+                HostParts(workspace=str(tmp_path / "src" / name), workspace_id=name)
+            )
 
     plane = ControlPlane(workspaces=There(), browsing=browsing(tmp_path))
     connection = await welcomed(plane)

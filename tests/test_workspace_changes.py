@@ -11,6 +11,7 @@ import pytest
 
 from orbit.agent import (
     ControlPlane,
+    HostParts,
     PathKind,
     Verification,
     WorkspaceHost,
@@ -65,7 +66,9 @@ class Slow(WorkspaceHost):
     latest session, and then fails to if it ``fails``."""
 
     def __init__(self, name: str, gate: asyncio.Event | None = None, *, fails: bool) -> None:
-        super().__init__(workspace=f"/src/{name}", workspace_id=name, new_id=lambda: f"{name}-1")
+        super().__init__(
+            HostParts(workspace=f"/src/{name}", workspace_id=name, new_id=lambda: f"{name}-1")
+        )
         self.gate = gate
         self.fails = fails
 
@@ -81,7 +84,9 @@ class Unclosable(WorkspaceHost):
     """The host of the workspace ``name`` that fails once it has closed."""
 
     def __init__(self, name: str) -> None:
-        super().__init__(workspace=f"/src/{name}", workspace_id=name, new_id=lambda: f"{name}-1")
+        super().__init__(
+            HostParts(workspace=f"/src/{name}", workspace_id=name, new_id=lambda: f"{name}-1")
+        )
 
     async def close(self) -> None:
         await super().close()
@@ -93,7 +98,9 @@ class Listing(WorkspaceHost):
     sets ``listing`` and waits for ``gate``."""
 
     def __init__(self, name: str) -> None:
-        super().__init__(workspace=f"/src/{name}", workspace_id=name, new_id=lambda: f"{name}-1")
+        super().__init__(
+            HostParts(workspace=f"/src/{name}", workspace_id=name, new_id=lambda: f"{name}-1")
+        )
         self.gate: asyncio.Event | None = None
         self.listing = asyncio.Event()
 
@@ -137,10 +144,12 @@ async def test_a_workspace_added_opens_its_latest_session_and_runs_its_startup_c
     class Checked(FakeSource):
         def make(self, name: str) -> WorkspaceHost:
             return WorkspaceHost(
-                verification=Verification((STEP,), steps),
-                check_at_startup=True,
-                workspace=f"/src/{name}",
-                workspace_id=name,
+                HostParts(
+                    verification=Verification((STEP,), steps),
+                    check_at_startup=True,
+                    workspace=f"/src/{name}",
+                    workspace_id=name,
+                )
             )
 
     plane = ControlPlane(workspaces=Checked())
@@ -155,7 +164,9 @@ async def test_a_workspace_added_reserves_the_seqs_stamped_while_none_was_served
 
     class Stored(FakeSource):
         def make(self, name: str) -> WorkspaceHost:
-            return WorkspaceHost(workspace=f"/src/{name}", workspace_id=name, store=store)
+            return WorkspaceHost(
+                HostParts(workspace=f"/src/{name}", workspace_id=name, store=store)
+            )
 
     plane = ControlPlane(workspaces=Stored())
     connection = await welcomed(plane)

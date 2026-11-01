@@ -7,7 +7,7 @@ from collections.abc import Callable
 
 import pytest
 
-from orbit.agent import WorkspaceHost
+from orbit.agent import HostParts, WorkspaceHost
 from orbit.agent.application.consultations import held_note
 from orbit.agent.application.conversation_seats import ConversationSeats
 from orbit.agent.application.desk import AgentDesk
@@ -383,7 +383,9 @@ def holding_host(store: FakeStore) -> tuple[WorkspaceHost, ScriptedLauncher]:
     experimenter once an hour."""
     agents, launcher = agents_for(roles=LIMITED)
     ids = iter(f"session-{n}" for n in range(1, 100))
-    host = WorkspaceHost(agents=agents, store=store, clock=Ticks(), new_id=lambda: next(ids))
+    host = WorkspaceHost(
+        HostParts(agents=agents, store=store, clock=Ticks(), new_id=lambda: next(ids))
+    )
     return host, launcher
 
 

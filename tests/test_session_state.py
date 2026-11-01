@@ -3,7 +3,7 @@ it's running, and how many connections view it."""
 
 import asyncio
 
-from orbit.agent import WorkspaceHost
+from orbit.agent import HostParts, WorkspaceHost
 from orbit.protocol import (
     PLANNER,
     SUPER_REVIEW,
@@ -228,7 +228,7 @@ async def test_the_startup_check_is_reported_but_leaves_the_open_session_idle() 
 
 
 async def test_a_second_hello_and_its_closing_change_the_viewers_for_every_connection() -> None:
-    session = WorkspaceHost(new_id=lambda: OPEN)
+    session = WorkspaceHost(HostParts(new_id=lambda: OPEN))
     first = await joined(session, "first")
     await received(first)
 
@@ -265,7 +265,7 @@ async def test_a_joining_connections_catalog_has_the_open_sessions_state_but_not
 async def test_the_catalog_shows_other_sessions_inactive_idle_and_unviewed() -> None:
     store = FakeStore()
     store.saved.append(saved("earlier"))
-    session = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: OPEN)
+    session = WorkspaceHost(HostParts(store=store, clock=Ticks(), new_id=lambda: OPEN))
     connection = await joined(session, "first")
     sessions = open_entry(await received(connection))
     await session.close()
@@ -277,7 +277,7 @@ async def test_the_catalog_shows_other_sessions_inactive_idle_and_unviewed() -> 
 async def test_opening_another_session_publishes_both_sessions_states() -> None:
     store = FakeStore()
     store.saved.append(saved("earlier"))
-    session = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: OPEN)
+    session = WorkspaceHost(HostParts(store=store, clock=Ticks(), new_id=lambda: OPEN))
     connection = await joined(session, "first")
     await received(connection)
 
@@ -293,7 +293,7 @@ async def test_opening_another_session_publishes_both_sessions_states() -> None:
 
 async def test_state_changes_belong_to_no_session_and_are_never_logged() -> None:
     store = FakeStore()
-    session = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: OPEN)
+    session = WorkspaceHost(HostParts(store=store, clock=Ticks(), new_id=lambda: OPEN))
     connection = await joined(session, "first")
     await say(connection, "add", AddTask(task=TASK))
     envelopes = []

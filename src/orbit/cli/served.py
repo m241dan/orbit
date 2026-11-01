@@ -16,6 +16,7 @@ from orbit.agent import (
     Cloner,
     Configuring,
     ControlPlane,
+    PlaneParts,
     ServedWorkspace,
     ServedWorkspaces,
     SqliteStore,
@@ -97,16 +98,10 @@ def _serving(
 
         def build(browsing: Browsing) -> ControlPlane:
             hosts = [make() for make in makers]
-            return ControlPlane(
-                hosts,
-                usage_source,
-                source,
-                store,
-                ledger=store,
-                browsing=browsing,
-                telemetry=flags.telemetry,
-                gauges=flags.gauges,
+            parts = PlaneParts(
+                mark=store, ledger=store, telemetry=flags.telemetry, gauges=flags.gauges
             )
+            return ControlPlane(hosts, usage_source, source, browsing, parts)
 
         source.keep_clones()
         yield _Serving(build, workspaces, source)

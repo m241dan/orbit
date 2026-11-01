@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent import ControlPlane, WorkspaceHost
+from orbit.agent import ControlPlane, HostParts, PlaneParts, WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.agent.external.workspace_registry import WorkspaceRegistry
@@ -47,7 +47,7 @@ def traced() -> Iterator[Traced]:
 
 def gauged(traced: Traced, *hosts: WorkspaceHost) -> ControlPlane:
     """A control plane serving ``hosts``, registering its gauges with ``traced``'s."""
-    return ControlPlane(hosts, gauges=traced.telemetry.gauges)
+    return ControlPlane(hosts, parts=PlaneParts(gauges=traced.telemetry.gauges))
 
 
 def by_workspace_and_role(points: list[GaugePoint]) -> dict[tuple[object, object], float]:
@@ -117,7 +117,7 @@ async def test_an_agent_of_a_role_the_workspace_doesnt_configure_counts_while_it
 
 
 async def test_a_workspace_without_agents_has_none_active(traced: Traced) -> None:
-    plane = gauged(traced, WorkspaceHost(workspace_id="a"))
+    plane = gauged(traced, WorkspaceHost(HostParts(workspace_id="a")))
     assert traced.gauge(AGENTS) == []
     await plane.close()
 
@@ -224,7 +224,7 @@ async def stored_host(
     view = store.workspace_view(registered.workspace_id)
     await view.append("s0", earlier)
     return WorkspaceHost(
-        store=view, workspace_id=view.workspace_id, clock=Ticks(), new_id=lambda: "s1"
+        HostParts(store=view, workspace_id=view.workspace_id, clock=Ticks(), new_id=lambda: "s1")
     )
 
 
@@ -255,6 +255,6 @@ async def test_the_event_log_size_of_each_workspace_is_its_sessions_stored_sizes
 
 
 async def test_a_workspace_without_a_store_has_an_event_log_size_of_0(traced: Traced) -> None:
-    plane = gauged(traced, WorkspaceHost(workspace_id="a"))
+    plane = gauged(traced, WorkspaceHost(HostParts(workspace_id="a")))
     assert traced.gauge(LOG_SIZE) == [(in_workspace("a"), 0)]
     await plane.close()

@@ -11,7 +11,7 @@ from opentelemetry.sdk.trace import ReadableSpan
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed
 
-from orbit.agent import ControlPlane, WorkspaceHost, WorkspaceSource
+from orbit.agent import ControlPlane, HostParts, PlaneParts, WorkspaceHost, WorkspaceSource
 from orbit.agent.application.connection_trace import CONNECTION_SPAN, connection_span
 from orbit.agent.external.control_plane import ControlPlaneServer, close_reason
 from orbit.protocol import (
@@ -49,7 +49,9 @@ async def traced_server(
     source ``workspaces``, if given, traced by ``traced``, and the server; stopped and closed
     after."""
     plane = ControlPlane(
-        hosts or [WorkspaceHost()], workspaces=workspaces, telemetry=traced.telemetry
+        hosts or [WorkspaceHost()],
+        workspaces=workspaces,
+        parts=PlaneParts(telemetry=traced.telemetry),
     )
     async with serving_plane(plane, plane.close) as served:
         yield served
@@ -124,7 +126,7 @@ def closing(code: int, reason: str = "") -> tuple[str, Mapping[str, Any]]:
 async def test_a_connection_is_one_root_span_with_its_hello_attach_and_close_in_order() -> None:
     traced = Traced()
     async with (
-        traced_server(traced, WorkspaceHost(workspace_id="w")) as (url, server),
+        traced_server(traced, WorkspaceHost(HostParts(workspace_id="w"))) as (url, server),
         frontend(url, server) as websocket,
     ):
         session = await attach(websocket, await hello(websocket, "orbit-tui"), "w")
@@ -169,7 +171,7 @@ async def test_a_reconnect_records_the_seq_it_gives_and_how_many_were_stamped_si
 
 async def test_moving_to_another_workspace_detaches_then_attaches_there() -> None:
     traced = Traced()
-    hosts = WorkspaceHost(workspace_id="a"), WorkspaceHost(workspace_id="b")
+    hosts = WorkspaceHost(HostParts(workspace_id="a")), WorkspaceHost(HostParts(workspace_id="b"))
     async with traced_server(traced, *hosts) as (url, server), frontend(url, server) as websocket:
         catalog = await hello(websocket, "orbit-tui")
         first = await attach(websocket, catalog, "a")
@@ -186,7 +188,7 @@ async def test_moving_to_another_workspace_detaches_then_attaches_there() -> Non
 
 async def test_removing_the_workspace_attached_to_detaches_from_it() -> None:
     traced = Traced()
-    host = WorkspaceHost(workspace_id="w")
+    host = WorkspaceHost(HostParts(workspace_id="w"))
     async with (
         traced_server(traced, host, workspaces=FakeSource()) as (url, server),
         frontend(url, server) as websocket,
@@ -237,7 +239,9 @@ async def test_a_websocket_the_frontend_closes_records_its_own_code_and_reason()
 
 async def test_a_connection_open_as_the_server_stops_records_it_going_away_once() -> None:
     traced = Traced()
-    plane = ControlPlane([WorkspaceHost(workspace_id="w")], telemetry=traced.telemetry)
+    plane = ControlPlane(
+        [WorkspaceHost(HostParts(workspace_id="w"))], parts=PlaneParts(telemetry=traced.telemetry)
+    )
     server = ControlPlaneServer(plane, the_token, LOOPBACK, quiet)
     url = await server.start()
     async with frontend(url, server) as websocket:

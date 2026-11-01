@@ -4,7 +4,7 @@ session or starting a new one, and renaming or deleting saved ones."""
 from textual.containers import Vertical
 from textual.widgets import Input, OptionList
 
-from orbit.agent import WorkspaceHost
+from orbit.agent import HostParts, WorkspaceHost
 from orbit.protocol import (
     BUSY,
     Attach,
@@ -88,7 +88,7 @@ async def test_connected_the_startup_picker_offers_to_resume_the_active_session_
 
 
 async def test_a_backend_picking_at_startup_shows_the_picker_without_its_new_session() -> None:
-    backend = WorkspaceHost(store=store_with(saved("old")), pick_session=True)
+    backend = WorkspaceHost(HostParts(store=store_with(saved("old")), pick_session=True))
     app = OrbitApp(frontend(backend), opening=Opening(pick=True))
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -96,7 +96,7 @@ async def test_a_backend_picking_at_startup_shows_the_picker_without_its_new_ses
 
 
 async def test_an_app_not_picking_shows_no_picker_and_sends_no_listing() -> None:
-    backend = WorkspaceHost(store=store_with(saved("old")), name="auth rework")
+    backend = WorkspaceHost(HostParts(store=store_with(saved("old")), name="auth rework"))
     app = OrbitApp(frontend(backend))
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -376,7 +376,7 @@ async def test_each_refusal_of_a_pick_shows_in_the_one_picker_shown_again() -> N
 
 async def test_renaming_and_deleting_through_the_backend_refresh_the_picker() -> None:
     store = store_with(saved("old"), saved("gone"))
-    backend = WorkspaceHost(store=store, pick_session=True)
+    backend = WorkspaceHost(HostParts(store=store, pick_session=True))
     app = OrbitApp(frontend(backend), opening=Opening(pick=True))
     async with app.run_test() as pilot:
         await pilot.pause()

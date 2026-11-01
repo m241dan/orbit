@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import Sequence
 
-from orbit.agent import WorkspaceHost
+from orbit.agent import HostParts, WorkspaceHost
 from orbit.agent.application.ports import StoreFailed
 from orbit.agent.application.recovery import RecoveryFailed
 from orbit.agent.application.takeover import NO_OFFER, RetryTimes, Takeover
@@ -610,7 +610,7 @@ async def test_declining_the_offer_recovers_nothing() -> None:
 
 
 async def test_a_host_given_nothing_to_recover_takes_over_with_no_recovered_note() -> None:
-    session = WorkspaceHost(owner=OWNER, lock=FakeLock(free=True), lock_retry=LOCK_RETRY)
+    session = WorkspaceHost(HostParts(owner=OWNER, lock=FakeLock(free=True), lock_retry=LOCK_RETRY))
     await greeted(session)
     await events_until(session, offered)
 

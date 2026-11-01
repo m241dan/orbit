@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from orbit.agent import ControlPlane, WorkspaceHost
+from orbit.agent import ControlPlane, HostParts, WorkspaceHost
 from orbit.agent.application.conversation_seats import ConversationSeats
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.planner_seat import SeatHooks
@@ -96,7 +96,9 @@ def talking(
     if given, as ``session-1`` then ``session-2`` and so on."""
     agents, launcher = agents_for(roles=TALKING if roles is None else roles)
     ids = iter(f"session-{n}" for n in range(1, 100))
-    host = WorkspaceHost(agents=agents, store=store, clock=Ticks(), new_id=lambda: next(ids))
+    host = WorkspaceHost(
+        HostParts(agents=agents, store=store, clock=Ticks(), new_id=lambda: next(ids))
+    )
     return host, launcher
 
 
@@ -399,7 +401,9 @@ def moved(store: FakeStore) -> tuple[WorkspaceHost, ScriptedLauncher, ScriptedLa
     fake = ScriptedLauncher(host)
     roles = {**TALKING, ARCHITECT: ARCHITECT_ROLE.model_copy(update={"runtime": FAKE})}
     agents, claude = agents_for(roles=roles, host=host, launchers={FAKE: fake})
-    session = WorkspaceHost(agents=agents, store=store, clock=Ticks(), new_id=lambda: "session-1")
+    session = WorkspaceHost(
+        HostParts(agents=agents, store=store, clock=Ticks(), new_id=lambda: "session-1")
+    )
     return session, claude, fake
 
 

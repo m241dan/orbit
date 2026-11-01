@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from orbit.agent import Setup, Verification, VerificationStep, WorkspaceHost
+from orbit.agent import HostParts, Setup, Verification, VerificationStep, WorkspaceHost
 from orbit.agent.application import workspace_host as session_module
 from orbit.agent.application.ports import TreeFailed
 from orbit.agent.application.startup_check import CANCELLED_NOTE, CheckSite, StartupCheck
@@ -135,7 +135,7 @@ async def test_a_failing_setup_is_the_failing_check() -> None:
 async def test_without_agents_it_runs_in_the_workspace_given() -> None:
     steps = Steps(True, False)
     session = WorkspaceHost(
-        verification=checked(steps), workspace="/src/project", check_at_startup=True
+        HostParts(verification=checked(steps), workspace="/src/project", check_at_startup=True)
     )
 
     events = await until_checked(session)
@@ -162,10 +162,10 @@ async def test_with_agents_but_no_tree_it_runs_in_the_workspaces_directory() -> 
 
 async def test_it_is_skipped_without_steps_or_anywhere_to_run_them_or_when_not_asked() -> None:
     sessions = [
-        WorkspaceHost(check_at_startup=True),
-        WorkspaceHost(verification=Verification((), Steps()), check_at_startup=True),
-        WorkspaceHost(verification=checked(Steps())),
-        WorkspaceHost(verification=checked(Steps(True)), check_at_startup=True),
+        WorkspaceHost(HostParts(check_at_startup=True)),
+        WorkspaceHost(HostParts(verification=Verification((), Steps()), check_at_startup=True)),
+        WorkspaceHost(HostParts(verification=checked(Steps()))),
+        WorkspaceHost(HostParts(verification=checked(Steps(True)), check_at_startup=True)),
     ]
     for session in sessions:
         events = await quiet(payloads(session))

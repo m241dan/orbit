@@ -4,7 +4,7 @@ starting a new one; refused while anything runs."""
 import asyncio
 from typing import Any
 
-from orbit.agent import WorkspaceHost
+from orbit.agent import HostParts, WorkspaceHost
 from orbit.agent.domain.activity import PLANNER_ANSWERING, REVIEW_RUNNING, TASKS_RUNNING
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
 from orbit.agent.domain.sessions import SessionRecord
@@ -139,9 +139,9 @@ LEFTOVER = "2 commits on orbit/coder not yet merged into main."
 
 def starting(**session: Any) -> WorkspaceHost:
     """A session started without the list of sessions, whose coder's tree has a leftover;
-    ``session`` goes to :class:`WorkspaceHost`."""
+    ``session`` goes to :class:`HostParts`."""
     agents, _ = agents_for(tree=FakeTree(leftovers=(LEFTOVER,)))
-    return WorkspaceHost(agents=agents, store=FakeStore(), clock=Ticks(), **session)
+    return WorkspaceHost(HostParts(agents=agents, store=FakeStore(), clock=Ticks(), **session))
 
 
 async def test_a_session_started_without_the_list_is_snapshot_before_the_leftovers() -> None:
@@ -823,7 +823,7 @@ async def test_a_switch_whose_old_lock_cant_be_released_still_opens_the_session(
 async def test_a_session_without_agents_opens_its_board_and_settings() -> None:
     settings = Settings(model="opus")
     store = store_with(saved("auth", state("1", "pending"), role_settings={PLANNER: settings}))
-    session = WorkspaceHost(store=store, clock=Ticks())
+    session = WorkspaceHost(HostParts(store=store, clock=Ticks()))
     events = await opened(session, ActivateSession(session="auth"))
     assert [t.id for t in last_of(Snapshot, events).tasks] == ["1"]
     assert session.settings == settings
@@ -849,7 +849,7 @@ async def test_a_session_without_reviews_keeps_the_reviews_of_the_session_it_ope
 async def test_a_session_without_a_planner_keeps_the_conversation_of_the_session_it_opens() -> None:
     record = saved("auth", state("1", "pending"), conversations={PLANNER: on_claude("conv-1")})
     store = store_with(record)
-    session = WorkspaceHost(store=store, clock=Ticks())
+    session = WorkspaceHost(HostParts(store=store, clock=Ticks()))
     await opened(session, ActivateSession(session="auth"))
     assert store.last.id == "auth" and store.last.conversations == {PLANNER: on_claude("conv-1")}
     await opened(session, NewSession())

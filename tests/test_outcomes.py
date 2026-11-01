@@ -5,7 +5,7 @@ import asyncio
 
 import pytest
 
-from orbit.agent import WorkspaceHost
+from orbit.agent import HostParts, WorkspaceHost
 from orbit.agent.application.lane_runner import Lanes
 from orbit.agent.application.planner_seat import (
     NO_PLANNER_MESSAGE,
@@ -163,7 +163,7 @@ async def test_a_command_for_another_workspace_is_refused_unhandled() -> None:
 
 
 async def test_a_command_for_a_session_not_open_is_refused_unhandled() -> None:
-    session = WorkspaceHost(new_id=lambda: "session-1")
+    session = WorkspaceHost(HostParts(new_id=lambda: "session-1"))
     await send_as(session, "c7", AddTask(task=TASK), session="other")
     events = await outcome(session)
     await session.close()
@@ -174,7 +174,7 @@ async def test_a_command_for_a_session_not_open_is_refused_unhandled() -> None:
 
 
 async def test_a_command_for_the_open_session_by_its_id_is_handled() -> None:
-    session = WorkspaceHost(new_id=lambda: "session-1")
+    session = WorkspaceHost(HostParts(new_id=lambda: "session-1"))
     await send_as(session, "c8", AddTask(task=TASK), session="session-1")
     events = await outcome(session)
     await session.close()
@@ -263,7 +263,7 @@ async def test_running_tasks_while_they_run_is_refused_as_busy() -> None:
 async def test_a_save_that_cannot_take_its_lock_is_an_error_not_a_refusal() -> None:
     store = FakeStore()
     store.free = False
-    session = WorkspaceHost(store=store, new_id=lambda: "session-1")
+    session = WorkspaceHost(HostParts(store=store, new_id=lambda: "session-1"))
     await send_as(session, "c14", AddTask(task=TASK))
     events = await outcome(session)
     await session.close()
@@ -278,7 +278,7 @@ async def test_a_handler_that_fails_is_refused_as_internal_and_the_session_goes_
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     store = FakeStore()
-    session = WorkspaceHost(store=store, new_id=lambda: "session-1")
+    session = WorkspaceHost(HostParts(store=store, new_id=lambda: "session-1"))
     await greeted(session)
     store.list_failure = ValueError("the disk is gone")
     refused = await refusal(session, "c15", DeleteSession(session_id="other"))
@@ -302,7 +302,7 @@ async def test_a_change_while_sessions_cannot_be_listed_reports_it_once_and_is_a
 ) -> None:
     store = FakeStore()
     store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
-    session = WorkspaceHost(store=store, new_id=lambda: "session-1")
+    session = WorkspaceHost(HostParts(store=store, new_id=lambda: "session-1"))
     await greeted(session)
     store.list_failure = StoreFailed("Couldn't list the sessions in orbit.db: busy")
     await send_as(session, "c20", command)
@@ -318,7 +318,7 @@ async def test_a_change_while_sessions_cannot_be_listed_reports_it_once_and_is_a
 async def test_a_hello_whose_catalog_fails_is_refused_as_internal_with_no_welcome() -> None:
     store = FakeStore()
     store.list_failure = ValueError("the disk is gone")
-    session = WorkspaceHost(store=store, new_id=lambda: "session-1")
+    session = WorkspaceHost(HostParts(store=store, new_id=lambda: "session-1"))
     await frontend(session).send(CommandEnvelope(command_id=HELLO_ID, payload=HELLO))
     events = queued(session)
     await session.close()
@@ -329,7 +329,7 @@ async def test_a_hello_whose_catalog_fails_is_refused_as_internal_with_no_welcom
 
 async def test_a_cancelled_handler_is_cancelled_with_no_outcome() -> None:
     store = FakeStore()
-    session = WorkspaceHost(store=store, new_id=lambda: "session-1")
+    session = WorkspaceHost(HostParts(store=store, new_id=lambda: "session-1"))
     await greeted(session)
     queued(session)  # The greeting's.
     store.list_failure = asyncio.CancelledError()

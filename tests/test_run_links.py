@@ -8,7 +8,7 @@ from typing import Any
 
 from opentelemetry.sdk.trace import ReadableSpan
 
-from orbit.agent import ControlPlane
+from orbit.agent import ControlPlane, PlaneParts
 from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.application.review_trace import REVIEW_SPAN
 from orbit.agent.application.task_trace import TASK_SPAN
@@ -75,7 +75,7 @@ def traced_plane(
     """A control plane serving a host whose tasks run through agents playing ``scripts``, both
     traced by ``traced``, and the launcher playing them; ``options`` go to :func:`session_for`."""
     host, _, launcher = session_for(*scripts, telemetry=traced.telemetry, **options)
-    return ControlPlane([host], telemetry=traced.telemetry), launcher
+    return ControlPlane([host], parts=PlaneParts(telemetry=traced.telemetry)), launcher
 
 
 async def ran(plane: ControlPlane, *prompts: str) -> None:

@@ -8,6 +8,7 @@ import pytest
 
 from orbit.agent import (
     NO_STEPS_NOTE,
+    HostParts,
     Verification,
     VerificationStep,
     Workspace,
@@ -110,7 +111,9 @@ async def test_a_prompt_starts_a_turn_of_the_planner() -> None:
 async def test_agents_are_launched_for_the_hosts_workspace_in_its_open_session() -> None:
     agents, launcher = agents_for()
     launcher.planner_turns = [chats]
-    session = WorkspaceHost(agents=agents, workspace_id="workspace-1", new_id=lambda: "session-7")
+    session = WorkspaceHost(
+        HostParts(agents=agents, workspace_id="workspace-1", new_id=lambda: "session-7")
+    )
     await send(session, SendMessage(agent=PLANNER, text="hello"))
     await collect_run(session)
 
@@ -164,7 +167,7 @@ async def test_cancel_without_a_turn_is_a_noop() -> None:
 
 async def test_session_snapshots_its_initial_settings() -> None:
     settings = Settings(model="opus", tool_access="off")
-    session = WorkspaceHost(settings)
+    session = WorkspaceHost(HostParts(settings=settings))
     assert session.settings == settings
     snapshot = await anext(payloads(session))
     assert isinstance(snapshot, Snapshot)
@@ -246,7 +249,7 @@ FAILING_STEP = VerificationStep(
 
 
 async def test_session_snapshots_its_verification_steps() -> None:
-    session = WorkspaceHost(verification=verified((FAILING_STEP,)))
+    session = WorkspaceHost(HostParts(verification=verified((FAILING_STEP,))))
     assert session.verification == verified((FAILING_STEP,))
     snapshot = await anext(payloads(session))
     assert isinstance(snapshot, Snapshot)
@@ -255,7 +258,7 @@ async def test_session_snapshots_its_verification_steps() -> None:
 
 
 async def test_verification_without_steps_notes_that_nothing_is_verified() -> None:
-    session = WorkspaceHost(verification=verified(()))
+    session = WorkspaceHost(HostParts(verification=verified(())))
     assert session.verification == verified(())
     stream = payloads(session)
     snapshot = await anext(stream)
@@ -265,7 +268,7 @@ async def test_verification_without_steps_notes_that_nothing_is_verified() -> No
 
 
 async def test_session_notes_its_workspace_at_startup() -> None:
-    session = WorkspaceHost(workspace="/code/project")
+    session = WorkspaceHost(HostParts(workspace="/code/project"))
     stream = payloads(session)
     assert isinstance(await anext(stream), Snapshot)
     assert await anext(stream) == Notice(message="Workspace: /code/project")

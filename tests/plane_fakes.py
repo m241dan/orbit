@@ -8,6 +8,7 @@ from typing import Any
 from orbit.agent import (
     CloneFailed,
     ControlPlane,
+    HostParts,
     PathKind,
     WorkspaceHost,
     WorkspaceOwner,
@@ -40,12 +41,14 @@ def workspace(
     """The host of the workspace ``name``, at ``/src/<name>``, its id ``name``, read-only if
     another ``owner`` owns it, trying the repository's ``lock``, if given, to take it over."""
     return WorkspaceHost(
-        workspace=f"/src/{name}",
-        workspace_id=name,
-        new_id=lambda: f"{name}-1",
-        owner=owner,
-        lock=lock,
-        lock_retry=LOCK_RETRY,
+        HostParts(
+            workspace=f"/src/{name}",
+            workspace_id=name,
+            new_id=lambda: f"{name}-1",
+            owner=owner,
+            lock=lock,
+            lock_retry=LOCK_RETRY,
+        )
     )
 
 
@@ -82,11 +85,13 @@ def agent_workspace(
     options = {"root": f"/src/{name}", **options}
     agents, launcher = agents_for(*scripts, reviewers=reviewers, tokens=f"{name}-token", **options)
     host = WorkspaceHost(
-        agents=agents,
-        workspace=f"/src/{name}",
-        workspace_id=name,
-        new_id=lambda: f"{name}-1",
-        ledger=ledger,
+        HostParts(
+            agents=agents,
+            workspace=f"/src/{name}",
+            workspace_id=name,
+            new_id=lambda: f"{name}-1",
+            ledger=ledger,
+        )
     )
     return host, launcher
 

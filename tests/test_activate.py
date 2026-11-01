@@ -4,7 +4,7 @@ the activating connection then views live while the others keep viewing what the
 import asyncio
 from dataclasses import dataclass
 
-from orbit.agent import WorkspaceHost
+from orbit.agent import HostParts, WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.application.ports import StoreFailed
 from orbit.agent.domain.sessions import OPEN_UNDELETABLE, OPEN_UNRENAMABLE, SessionRecord
@@ -160,7 +160,9 @@ async def test_others_following_an_unsaved_session_left_get_the_activated_one() 
 
 async def test_others_following_an_unsaved_session_left_get_a_new_one() -> None:
     ids = iter((OPEN, "fresh-id"))
-    session = WorkspaceHost(store=stored(), clock=Ticks(), new_id=lambda: next(ids), name="today")
+    session = WorkspaceHost(
+        HostParts(store=stored(), clock=Ticks(), new_id=lambda: next(ids), name="today")
+    )
     creating = await joined(session, "creating", read=True)
     other = await joined(session, "other", read=True)
     await received(creating)
@@ -174,7 +176,9 @@ async def test_others_following_an_unsaved_session_left_get_a_new_one() -> None:
 
 async def test_a_new_session_is_activated_for_the_connection_creating_it() -> None:
     ids = iter((OPEN, "fresh-id"))
-    session = WorkspaceHost(store=stored(), clock=Ticks(), new_id=lambda: next(ids), name="today")
+    session = WorkspaceHost(
+        HostParts(store=stored(), clock=Ticks(), new_id=lambda: next(ids), name="today")
+    )
     creating = await used(session, "creating")
     other = await joined(session, "other", read=True)
     await received(creating)

@@ -5,7 +5,7 @@ others are told neither."""
 import asyncio
 from datetime import UTC, datetime
 
-from orbit.agent import ControlPlane, WorkspaceHost
+from orbit.agent import ControlPlane, PlaneParts, WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.application.ports import ReadFailed
 from orbit.agent.domain.purging import Purged
@@ -87,7 +87,7 @@ def workspace(name: str, ledger: FakeLedger | None = None, *usages: Usage) -> Wo
 
 
 def plane_of(*hosts: WorkspaceHost, ledger: FakeLedger | None = None) -> ControlPlane:
-    return ControlPlane(hosts, ledger=ledger, clock=lambda: NOW)
+    return ControlPlane(hosts, parts=PlaneParts(ledger=ledger, clock=lambda: NOW))
 
 
 async def run_task(connection: SessionConnection) -> None:
@@ -348,7 +348,9 @@ async def removing(
     ledger = TotalingLedger()
     ledger.rows = [row("a"), row("b")]
     source = LedgerSource(ledger)
-    plane = ControlPlane([workspace("a"), workspace("b")], workspaces=source, ledger=ledger)
+    plane = ControlPlane(
+        [workspace("a"), workspace("b")], workspaces=source, parts=PlaneParts(ledger=ledger)
+    )
     watcher, remover = await welcomed(plane), await welcomed(plane)
     if watching:
         await say(watcher, "watch", WATCH)
@@ -378,7 +380,7 @@ async def test_a_purge_that_fails_still_tells_watchers_the_totals_read_afresh() 
     ledger.rows = [row("a")]
     source = LedgerSource(ledger)
     source.purge_fails = "The store failed."
-    plane = ControlPlane([workspace("a")], workspaces=source, ledger=ledger)
+    plane = ControlPlane([workspace("a")], workspaces=source, parts=PlaneParts(ledger=ledger))
     watcher, remover = await welcomed(plane), await welcomed(plane)
     await say(watcher, "watch", WATCH)
     taken(watcher)

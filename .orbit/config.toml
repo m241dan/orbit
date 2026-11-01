@@ -36,11 +36,11 @@ command = ["uv", "run", "mypy"]
 name = "Import contracts"
 command = ["uv", "run", "lint-imports"]
 
-# Every function, tests included: cyclomatic complexity at most 6, at most 100 lines and at
-# most 5 parameters.
+# Every function, tests included: cyclomatic complexity at most 6 and at most 100 lines. The
+# limit of 5 parameters is held by a test, tests/test_parameter_limit.py, rather than Lizard.
 [[verification.steps]]
 name = "Code quality (Lizard)"
-command = ["uv", "run", "lizard", "src", "tests", "-w", "-C", "6", "-L", "100", "-a", "5"]
+command = ["uv", "run", "lizard", "src", "tests", "-w", "-C", "6", "-L", "100"]
 
 [[verification.steps]]
 name = "Unit tests with 100% coverage"

@@ -61,6 +61,7 @@ from orbit.tui import Opening, OrbitApp
 
 
 def chat(
+    # #lizard forgives(parameter_count): Typer takes each of the command's options as a parameter.
     ctx: typer.Context,
     workspace: WorkspaceOption = Path("."),
     model: ModelOption = None,

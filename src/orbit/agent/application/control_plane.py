@@ -3,7 +3,7 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable, Iterable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from orbit.agent.application.browsing import Browsing
 from orbit.agent.application.clones import Clones
@@ -125,12 +125,31 @@ class _ControlEvents:
             connections.announce(envelope)
 
 
+@dataclass(frozen=True, kw_only=True)
+class PlaneParts:
+    """What a :class:`ControlPlane` records and reports with, each with a default, so a caller
+    gives only those it has; :class:`ControlPlane` says what each does. They're the ``mark`` of
+    the store every workspace's log shares, the ``ledger`` whose usage totals it adds up, the
+    ``clock`` telling today's midnight for them, and the ``telemetry`` and ``gauges`` it traces
+    and reports through."""
+
+    mark: SeqMark | None = None
+    ledger: UsageLedger | None = None
+    clock: Clock = local_now
+    telemetry: Telemetry = _NO_TELEMETRY
+    gauges: Gauges = _NO_GAUGES
+
+
+_NO_PARTS = PlaneParts()
+
+
 class ControlPlane:
     """What the frontends connect to: holds a host for each workspace served, ``hosts``, routes
     every command to the one it's for and passes each host's events to the connections attached
     to its workspace, and owns what's shared: the connections, the ``seq`` every event of every
     workspace is stamped with, the handshake, the ``Catalog`` and, given a ``usage`` source, the
-    monitor fetching the subscription's usage limits.
+    monitor fetching the subscription's usage limits. The ``mark``, ``ledger``, ``clock``,
+    ``telemetry`` and ``gauges`` named below are the fields of its ``parts``.
 
     Every stream opens with ``Hello``: nothing is published to it, and every other command is
     refused, until it's answered with ``Welcome``. A ``Catalog`` of every workspace served
@@ -201,31 +220,27 @@ class ControlPlane:
         hosts: Iterable[WorkspaceHost] = (),
         usage: UsageSource | None = None,
         workspaces: WorkspaceSource | None = None,
-        mark: SeqMark | None = None,
-        ledger: UsageLedger | None = None,
-        clock: Clock = local_now,
         browsing: Browsing | None = None,
-        telemetry: Telemetry = _NO_TELEMETRY,
-        gauges: Gauges = _NO_GAUGES,
+        parts: PlaneParts = _NO_PARTS,
     ) -> None:
-        self._telemetry = telemetry
-        self._gauges = gauges
+        self._telemetry = parts.telemetry
+        self._gauges = parts.gauges
         self._hosts = {host.workspace_id: host for host in hosts}
         self._workspaces = workspaces
         self._browsing = browsing
         self._changing = asyncio.Lock()
-        self._reservations = None if mark is None else MarkReservations(mark)
-        self._seqs = Seqs(_last_seq(self._hosts.values(), mark), self._reserve)
+        self._reservations = None if parts.mark is None else MarkReservations(parts.mark)
+        self._seqs = Seqs(_last_seq(self._hosts.values(), parts.mark), self._reserve)
         self._lobby = Connections(lambda: None, lambda: "")  # Those attached to no workspace.
-        self._events = _ControlEvents(self._seqs, self._everywhere, telemetry)
+        self._events = _ControlEvents(self._seqs, self._everywhere, parts.telemetry)
         self._place = Place(self._events, self._events.stamp, self._lobby)
         self._usage = UsageMonitor(usage, self._events.put) if usage else None
         self._clones = Clones(self._events.announce)
         self._coders = CoderSlots(changed=self._check_states)
-        self._stream = ControlStream(self._events, self._everywhere, ledger, clock)
+        self._stream = ControlStream(self._events, self._everywhere, parts.ledger, parts.clock)
         PlaneGauges(
             lambda: self.hosts, lambda: self._stream.agents, self._coders, self._lobby
-        ).register(gauges)
+        ).register(parts.gauges)
         for host in self._hosts.values():
             self._serve(host)
         self._started = False

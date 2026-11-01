@@ -38,6 +38,7 @@ SKILLS_ALONE = "--skills shows the whole map; it takes no key or --full."
 
 
 def show(
+    # #lizard forgives(parameter_count): Typer takes each of the command's options as a parameter.
     key: KeyArgument = None,
     workspace: WorkspaceOption = Path("."),
     as_json: ConfigJsonOption = False,
@@ -61,7 +62,6 @@ def show(
     written. Exits with status 2 if the configuration is invalid, KEY names no setting, or
     --skills is given with KEY or --full.
     """
-    # #lizard forgives(parameter_count): Typer takes each of the command's options as a parameter.
     if skills:
         _refuse_with_skills(key, full)
     root = _workspace(workspace)

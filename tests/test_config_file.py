@@ -981,7 +981,7 @@ ORBITS_OWN_STEPS = [
     ("Import contracts", ("uv", "run", "lint-imports")),
     (
         "Code quality (Lizard)",
-        ("uv", "run", "lizard", "src", "tests", "-w", "-C", "6", "-L", "100", "-a", "5"),
+        ("uv", "run", "lizard", "src", "tests", "-w", "-C", "6", "-L", "100"),
     ),
     ("Unit tests with 100% coverage", ("uv", "run", "pytest", "--cov", "--cov-fail-under=100")),
 ]
@@ -1045,8 +1045,9 @@ ORBITS_OWN_COMMENTS = (
         '[[verification.steps]]\nname = "Ruff lint"\n',
     ),
     (
-        "# Every function, tests included: cyclomatic complexity at most 6, at most 100 lines and"
-        " at\n# most 5 parameters.\n",
+        "# Every function, tests included: cyclomatic complexity at most 6 and at most 100 lines."
+        " The\n# limit of 5 parameters is held by a test, tests/test_parameter_limit.py, rather"
+        " than Lizard.\n",
         '[[verification.steps]]\nname = "Code quality (Lizard)"\n',
     ),
     (

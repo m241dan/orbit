@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from orbit.agent import WorkspaceHost
+from orbit.agent import HostParts, WorkspaceHost
 from orbit.agent.domain.ownership import WorkspaceOwner, read_only_note
 from orbit.protocol import (
     CONFIGURE_CHECKS,
@@ -144,7 +144,7 @@ async def test_a_read_only_session_refuses_invalid_work_as_an_owning_one_does(
 async def test_a_read_only_session_without_agents_refuses_work_as_an_owning_one_does(
     command: RunTasks | FireTrigger,
 ) -> None:
-    owning, read_only = WorkspaceHost(), WorkspaceHost(owner=OWNER)
+    owning, read_only = WorkspaceHost(), WorkspaceHost(HostParts(owner=OWNER))
 
     expected = await refusal_of(owning, command)
     assert await refusal_of(read_only, command) == expected

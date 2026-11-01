@@ -3,7 +3,7 @@ the events of the workspace it's attached to alone, and its commands go there.""
 
 import asyncio
 
-from orbit.agent import ControlPlane, Verification, WorkspaceHost, WorkspaceOwner
+from orbit.agent import ControlPlane, HostParts, Verification, WorkspaceHost, WorkspaceOwner
 from orbit.agent.domain.workspaces import ATTACH_FIRST
 from orbit.protocol import (
     BUILT_IN_ROLE_NAMES,
@@ -471,10 +471,12 @@ async def test_a_task_runs_in_each_workspace_at_once() -> None:
 async def test_a_workspace_served_at_start_runs_its_startup_check_with_no_frontend() -> None:
     steps = Steps(True)
     host = WorkspaceHost(
-        verification=Verification((STEP,), steps),
-        check_at_startup=True,
-        workspace="/src/a",
-        workspace_id="a",
+        HostParts(
+            verification=Verification((STEP,), steps),
+            check_at_startup=True,
+            workspace="/src/a",
+            workspace_id="a",
+        )
     )
     plane = ControlPlane([host])
     await plane.start()

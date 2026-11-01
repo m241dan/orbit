@@ -34,6 +34,7 @@ from orbit.agent import (
     INVALID_CONFIG,
     ClaudeCliRunner,
     ControlPlane,
+    HostParts,
     RunFile,
     ServedWorkspaces,
     ServeLock,
@@ -416,7 +417,7 @@ def test_serve_on_a_repository_another_orbit_owns_is_read_only_naming_it(
 @pytest.fixture
 def quick_retries(monkeypatch: pytest.MonkeyPatch) -> None:
     """Have a read-only serve try the repository's lock every 50ms rather than every 5s."""
-    defaults = WorkspaceHost.__init__.__kwdefaults__
+    defaults = HostParts.__init__.__kwdefaults__
     assert defaults is not None
     monkeypatch.setitem(defaults, "lock_retry", 0.05)
 
@@ -1604,7 +1605,7 @@ async def test_cancelling_serve_as_its_server_starts_stops_the_server_and_closes
         return servers[-1]
 
     monkeypatch.setattr(serve, "ControlPlaneServer", made)
-    host = WorkspaceHost(workspace="/src/a", workspace_id="a")
+    host = WorkspaceHost(HostParts(workspace="/src/a", workspace_id="a"))
     serving = asyncio.create_task(serve._served(serve_parts(ControlPlane([host]), tmp_path), None))
     await eventually(lambda: servers)
     await asyncio.wait_for(servers[0].starting.wait(), 5)
@@ -1620,7 +1621,7 @@ async def test_cancelling_serve_as_its_server_starts_stops_the_server_and_closes
 async def test_a_store_failing_as_serve_opens_a_latest_session_exits_with_status_2(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    host = StoreGone(workspace="/src/a", workspace_id="a")
+    host = StoreGone(HostParts(workspace="/src/a", workspace_id="a"))
 
     with pytest.raises(typer.Exit) as exited:
         await serve._served(serve_parts(ControlPlane([host]), tmp_path), None)
@@ -1643,7 +1644,7 @@ class Capped(ControlPlane):
 
 
 async def test_serve_caps_the_coders_running_at_once_as_its_settings_say(tmp_path: Path) -> None:
-    plane = Capped([StoreGone(workspace="/src/a", workspace_id="a")])
+    plane = Capped([StoreGone(HostParts(workspace="/src/a", workspace_id="a"))])
     parts = replace(serve_parts(plane, tmp_path), settings=ServerSettings(port=0, max_coders=2))
 
     with pytest.raises(typer.Exit):

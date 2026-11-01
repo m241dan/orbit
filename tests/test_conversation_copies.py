@@ -4,7 +4,7 @@ and the startup check removes the copies past their role's TTL and those left ov
 
 from datetime import datetime, timedelta
 
-from orbit.agent import WorkspaceHost
+from orbit.agent import HostParts, WorkspaceHost
 from orbit.agent.application.role_copies import RoleCopies
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.sessions import SavedCopy
@@ -52,7 +52,9 @@ def experimenting(store: FakeStore, copies: FakeCopies) -> tuple[WorkspaceHost, 
     agents, launcher = agents_for(roles=EXPERIMENTING, copies=copies)
     launcher.planner_turns = [chats] * 6
     ids = iter(f"session-{n}" for n in range(1, 100))
-    host = WorkspaceHost(agents=agents, store=store, clock=Ticks(), new_id=lambda: next(ids))
+    host = WorkspaceHost(
+        HostParts(agents=agents, store=store, clock=Ticks(), new_id=lambda: next(ids))
+    )
     return host, launcher
 
 
@@ -133,7 +135,9 @@ async def test_messaging_the_built_in_experimenter_starts_a_turn_in_a_copy() -> 
     copies = FakeCopies()
     agents, launcher = agents_for(roles=ROLES, copies=copies)
     launcher.planner_turns = [chats]
-    session = WorkspaceHost(agents=agents, store=FakeStore(), clock=Ticks(), new_id=lambda: "s")
+    session = WorkspaceHost(
+        HostParts(agents=agents, store=FakeStore(), clock=Ticks(), new_id=lambda: "s")
+    )
     await send(session, SendMessage(agent=EXPERIMENTER, text="Run it."))
     await events_until(session, idle(EXPERIMENTER))
     assert directories(launcher) == ["/copies/copy-1"]

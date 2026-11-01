@@ -6,7 +6,7 @@ import itertools
 import logging
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import UTC, datetime, timedelta
 from typing import Any, get_args
 from weakref import WeakKeyDictionary
@@ -20,20 +20,17 @@ from orbit.agent.application.planner import PlannerChat
 from orbit.agent.application.ports import (
     AgentLaunch,
     CallHandler,
-    Fallback,
     HostFailed,
     LockLeft,
     Merge,
     Publish,
     ReadFailed,
     Reply,
-    RepositoryLock,
     SessionStore,
     StoredSession,
     StoreFailed,
     TempDirFailed,
     TreeFailed,
-    UsageLedger,
     UsageSource,
 )
 from orbit.agent.application.review_count import ReviewCount
@@ -45,7 +42,7 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.work_commands import WorkCommands
 from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.application.work_turns import WorkTurns
-from orbit.agent.application.workspace_host import UNREGISTERED_WORKSPACE
+from orbit.agent.application.workspace_host import UNREGISTERED_WORKSPACE, HostParts
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import Setup
@@ -123,7 +120,6 @@ from orbit.protocol import (
     Welcome,
     encode,
 )
-from orbit.tracing import NoTelemetry, Telemetry
 from tests.loop_quiet import quiet_within
 from tests.waiting import eventually
 
@@ -912,11 +908,6 @@ LOCK_DECLINED_RETRY = 60.0
 than any test runs."""
 
 
-async def nothing_parked() -> Sequence[str]:
-    """No notes, as no fallback files are parked."""
-    return ()
-
-
 def agents_for(
     *scripts: Script,
     reviewers: Sequence[Script] = (),
@@ -951,51 +942,39 @@ def desk_for(publish: Publish, *scripts: Script, **options: Any) -> AgentDesk:
     return AgentDesk(agents, publish)
 
 
+HOST_OPTIONS = frozenset(field.name for field in fields(HostParts)) - {"agents"}
+"""The options :func:`session_for` builds its host with, rather than giving them to
+:func:`agents_for`."""
+
+
 def session_for(
     *scripts: Script,
-    verification: Verification | None = None,
     reviewers: Sequence[Script] = (),
-    check_at_startup: bool = False,
     usage: UsageSource | None = None,
-    store: SessionStore | None = None,
-    fallback: Fallback | None = None,
-    recover: Callable[[], Awaitable[Sequence[str]]] | None = None,
-    owner: WorkspaceOwner | None = None,
-    lock: RepositoryLock | None = None,
-    lock_declined_retry: float = LOCK_DECLINED_RETRY,
-    ledger: UsageLedger | None = None,
-    telemetry: Telemetry | None = None,
     **options: Any,
 ) -> tuple[WorkspaceHost, FakeHost, ScriptedLauncher]:
     """A session whose tasks run through agents playing ``scripts``, one per launch, and
-    whose reviews run through agents playing ``reviewers``, with usage from ``usage``. It's
-    saved in ``store``, if given, as ``session-1``, on a :class:`Ticks` clock, its unsaved
-    events going to ``fallback``, if given, recovering parked ones with ``recover``, if given,
-    and read-only if another ``owner`` owns the
-    repository, trying its ``lock``, if given, every :data:`LOCK_RETRY` seconds and offering it
-    again ``lock_declined_retry`` seconds after a decline. Its turns' usage is recorded in
-    ``ledger``, if given, and its work traced with ``telemetry``, if given.
+    whose reviews run through agents playing ``reviewers``, with usage from ``usage``.
 
-    ``options`` go to :func:`agents_for`, and so to :class:`Agents`, such as ``limits``,
-    ``tree`` or ``roles`` (:data:`ROLES` unless given).
+    ``options`` naming a field of :class:`HostParts`, as :data:`HOST_OPTIONS` lists them, build
+    the host, such as ``verification``, ``store``, ``owner``, ``lock`` or ``telemetry``. Unless
+    they say otherwise, it's saved as ``session-1``, on a :class:`Ticks` clock, and, read-only,
+    tries its lock every :data:`LOCK_RETRY` seconds and offers the repository again
+    :data:`LOCK_DECLINED_RETRY` seconds after a decline.
+
+    The other ``options`` go to :func:`agents_for`, and so to :class:`Agents`, such as
+    ``limits``, ``tree`` or ``roles`` (:data:`ROLES` unless given).
     """
-    agents, launcher = agents_for(*scripts, reviewers=reviewers, **options)
-    session = WorkspaceHost(
-        verification=verification,
-        agents=agents,
-        check_at_startup=check_at_startup,
-        store=store,
-        clock=Ticks(),
-        new_id=lambda: "session-1",
-        fallback=fallback,
-        recover=recover or nothing_parked,
-        owner=owner,
-        lock=lock,
-        lock_retry=LOCK_RETRY,
-        lock_declined_retry=lock_declined_retry,
-        ledger=ledger,
-        telemetry=telemetry or NoTelemetry(),
-    )
+    host_options = {name: value for name, value in options.items() if name in HOST_OPTIONS}
+    agent_options = {name: value for name, value in options.items() if name not in HOST_OPTIONS}
+    agents, launcher = agents_for(*scripts, reviewers=reviewers, **agent_options)
+    defaults: dict[str, Any] = {
+        "clock": Ticks(),
+        "new_id": lambda: "session-1",
+        "lock_retry": LOCK_RETRY,
+        "lock_declined_retry": LOCK_DECLINED_RETRY,
+    }
+    session = WorkspaceHost(HostParts(agents=agents, **{**defaults, **host_options}))
     if usage is not None:
         served(session, usage)
     return session, launcher.host, launcher

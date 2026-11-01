@@ -9,7 +9,7 @@ import pytest
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.trace import StatusCode
 
-from orbit.agent import ControlPlane
+from orbit.agent import ControlPlane, PlaneParts
 from orbit.agent.application.command_trace import COMMAND_SPAN
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.planner import PlannerChat
@@ -80,7 +80,7 @@ def traced_plane(
     by ``traced``, and the launcher playing them."""
     host, _, launcher = session_for(telemetry=traced.telemetry, roles=roles)
     launcher.planner_turns = list(turns)
-    return ControlPlane([host], telemetry=traced.telemetry), launcher
+    return ControlPlane([host], parts=PlaneParts(telemetry=traced.telemetry)), launcher
 
 
 async def planned(plane: ControlPlane) -> None:

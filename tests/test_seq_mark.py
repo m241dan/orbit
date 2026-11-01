@@ -11,7 +11,9 @@ import pytest
 from orbit.agent import (
     CloneFailed,
     ControlPlane,
+    HostParts,
     PathKind,
+    PlaneParts,
     Purged,
     SqliteStore,
     WorkspaceHost,
@@ -48,7 +50,7 @@ async def served_empty(state: Path, connections: int) -> list[int]:
     """The ``seq`` an orbit serving no workspace over the store in ``state`` stamped for the
     Hello of each of ``connections``, after which it closed."""
     store = await SqliteStore.open(state)
-    plane = ControlPlane(mark=store)
+    plane = ControlPlane(parts=PlaneParts(mark=store))
     seqs = [seq for _ in range(connections) for seq in await greeted(plane)]
     await plane.close()
     await store.close()
@@ -103,7 +105,7 @@ class GatedSource:
                 await source.gate.wait()
                 await super().open_latest()
 
-        return Gated(workspace=root, workspace_id="c", new_id=lambda: "c-1")
+        return Gated(HostParts(workspace=root, workspace_id="c", new_id=lambda: "c-1"))
 
     async def set_served(self, workspace_id: str, served: bool) -> None:
         pass
@@ -140,7 +142,7 @@ async def adding(plane: ControlPlane, source: GatedSource) -> int:
 async def test_a_block_crossed_while_a_workspace_is_added_is_recorded(tmp_path: Path) -> None:
     store = await SqliteStore.open(tmp_path)
     source = GatedSource()
-    plane = ControlPlane(workspaces=source, mark=store)
+    plane = ControlPlane(workspaces=source, parts=PlaneParts(mark=store))
 
     highest = await adding(plane, source)
     await plane.close()
@@ -153,10 +155,10 @@ async def test_a_block_crossed_while_a_workspace_is_added_is_recorded(tmp_path: 
 async def test_one_block_is_reserved_once_however_many_workspaces_are_served() -> None:
     mark, first, second = FakeStore(), FakeStore(), FakeStore()
     hosts = [
-        WorkspaceHost(workspace_id=name, store=store)
+        WorkspaceHost(HostParts(workspace_id=name, store=store))
         for name, store in [("a", first), ("b", second)]
     ]
-    plane = ControlPlane(hosts, mark=mark)
+    plane = ControlPlane(hosts, parts=PlaneParts(mark=mark))
 
     await greeted(plane)
     await plane.close()
@@ -168,7 +170,9 @@ async def test_one_block_is_reserved_once_however_many_workspaces_are_served() -
 async def test_the_seqs_stamped_start_past_the_mark_and_the_hosts_logs() -> None:
     mark, log = FakeStore(), FakeStore()
     mark.seq, log.seq = 300, 200
-    plane = ControlPlane([WorkspaceHost(workspace_id="a", store=log)], mark=mark)
+    plane = ControlPlane(
+        [WorkspaceHost(HostParts(workspace_id="a", store=log))], parts=PlaneParts(mark=mark)
+    )
 
     seqs = await greeted(plane)
     await plane.close()

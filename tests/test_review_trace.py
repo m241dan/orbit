@@ -10,7 +10,7 @@ from opentelemetry.sdk.metrics.export import Metric
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.trace import StatusCode
 
-from orbit.agent import ControlPlane
+from orbit.agent import ControlPlane, PlaneParts
 from orbit.agent.application.review_trace import REVIEW_SPAN, ReviewTracing
 from orbit.agent.application.task_trace import TASK_SPAN
 from orbit.agent.domain.board import TaskBoard
@@ -74,7 +74,7 @@ def traced_plane(
         review=True,
         **options,
     )
-    return ControlPlane([host], telemetry=traced.telemetry), launcher
+    return ControlPlane([host], parts=PlaneParts(telemetry=traced.telemetry)), launcher
 
 
 async def reviewed(plane: ControlPlane, *tasks: TaskSpec) -> None:

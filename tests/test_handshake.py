@@ -7,7 +7,7 @@ import logging
 import pytest
 
 from orbit import __version__
-from orbit.agent import Verification, WorkspaceHost
+from orbit.agent import HostParts, Verification, WorkspaceHost
 from orbit.agent.application.handshake import HELLO_AGAIN_MESSAGE, HELLO_FIRST_MESSAGE
 from orbit.agent.domain.usage import UsageReport
 from orbit.agent.domain.workspaces import ATTACH_FIRST
@@ -83,7 +83,7 @@ def version(protocol_version: int) -> Hello:
 
 
 async def test_nothing_is_published_before_hello() -> None:
-    session = WorkspaceHost(workspace="/work")
+    session = WorkspaceHost(HostParts(workspace="/work"))
     assert await silent(session)
     await session.close()
 
@@ -104,7 +104,9 @@ async def test_hello_is_welcomed_with_a_catalog_and_nothing_else() -> None:
 
 async def test_attaching_after_hello_gets_the_snapshot_the_workspace_note_and_a_viewer() -> None:
     session = WorkspaceHost(
-        workspace="/work", verification=Verification((STEP,), Steps()), new_id=lambda: "s1"
+        HostParts(
+            workspace="/work", verification=Verification((STEP,), Steps()), new_id=lambda: "s1"
+        )
     )
     await greet(session)
     events = await published(session, 6)
@@ -122,7 +124,7 @@ async def test_attaching_after_hello_gets_the_snapshot_the_workspace_note_and_a_
 
 async def test_the_startup_notes_follow_the_workspace_note() -> None:
     notes = ("Imported 2 saved sessions.", "Something else.")
-    session = WorkspaceHost(workspace="/work", startup_notes=notes)
+    session = WorkspaceHost(HostParts(workspace="/work", startup_notes=notes))
     await greet(session)
     events = await published(session, 6)
     await session.close()
@@ -170,7 +172,7 @@ OTHER_SESSION = "Session 'other' isn't open; the open session is session-1."
 
 
 async def test_a_misaddressed_command_is_refused_for_its_address() -> None:
-    session = WorkspaceHost(new_id=lambda: "session-1")
+    session = WorkspaceHost(HostParts(new_id=lambda: "session-1"))
     await greet(session)
     await published(session, 5)
     await send_as(session, "c1", AddTask(task=TaskSpec(prompt="Add a flag.")), workspace="other")
@@ -187,7 +189,7 @@ async def test_a_misaddressed_command_is_refused_for_its_address() -> None:
 
 
 async def test_an_attach_to_a_workspace_not_served_is_refused_as_unknown() -> None:
-    session = WorkspaceHost(new_id=lambda: "session-1")
+    session = WorkspaceHost(HostParts(new_id=lambda: "session-1"))
     await send_as(session, HELLO_ID, HELLO)
     await published(session, 2)
     await send_as(session, "a1", Attach(workspace="other", session="session-1"))
@@ -202,7 +204,7 @@ async def test_an_attach_to_a_workspace_not_served_is_refused_as_unknown() -> No
 async def test_an_attach_to_a_session_there_is_none_of_is_refused_and_leaves_it_unattached() -> (
     None
 ):
-    session = WorkspaceHost(store=FakeStore(), new_id=lambda: "session-1")
+    session = WorkspaceHost(HostParts(store=FakeStore(), new_id=lambda: "session-1"))
     await send_as(session, HELLO_ID, HELLO)
     await published(session, 2)
     await send_as(session, "a1", Attach(workspace=WORKSPACE, session="gone"))

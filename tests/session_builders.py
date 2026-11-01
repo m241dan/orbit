@@ -5,7 +5,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from orbit.agent import Verification, VerificationStep, WorkspaceHost
+from orbit.agent import HostParts, Verification, VerificationStep, WorkspaceHost
 from orbit.agent.domain.runtimes import CLAUDE
 from orbit.agent.domain.sessions import SavedConversation, SessionRecord
 from orbit.protocol import (
@@ -63,12 +63,12 @@ def switching(
 ) -> tuple[WorkspaceHost, ScriptedLauncher]:
     """A session saved in ``store``, as ``session-1`` then ``session-2`` and so on, whose tasks
     run through agents playing ``scripts``, reviewing them if ``reviews``, in ``tree`` (a new
-    :class:`FakeTree` unless given); ``session`` goes to :class:`WorkspaceHost`."""
+    :class:`FakeTree` unless given); ``session`` goes to :class:`HostParts`."""
     tree = (tree or FakeTree()) if reviews else None
     agents, launcher = agents_for(*scripts, tree=tree, review=reviews)
     ids = iter(f"session-{n}" for n in range(1, 100))
     built = WorkspaceHost(
-        agents=agents, store=store, clock=Ticks(), new_id=lambda: next(ids), **session
+        HostParts(agents=agents, store=store, clock=Ticks(), new_id=lambda: next(ids), **session)
     )
     return built, launcher
 

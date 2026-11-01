@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from orbit import __version__
-from orbit.agent import ControlPlane, WorkspaceHost, WorkspaceOwner
+from orbit.agent import ControlPlane, HostParts, WorkspaceHost, WorkspaceOwner
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.application.outbox import SEQ_BLOCK
 from orbit.agent.application.work_turns import WorkTurns
@@ -107,7 +107,7 @@ async def test_a_connection_after_closing_starts_no_usage_monitor() -> None:
 
 
 def test_it_reads_the_hosts_ownership_and_storage() -> None:
-    host = WorkspaceHost(owner=WorkspaceOwner(pid=1))
+    host = WorkspaceHost(HostParts(owner=WorkspaceOwner(pid=1)))
     plane = ControlPlane([host])
 
     assert plane.hosts == (host,)
@@ -118,7 +118,7 @@ def test_it_reads_the_hosts_ownership_and_storage() -> None:
 async def test_the_seqs_stamped_are_reserved_in_the_log_of_every_workspace_served() -> None:
     first, second = FakeStore(), FakeStore()
     hosts = [
-        WorkspaceHost(workspace_id=name, store=store)
+        WorkspaceHost(HostParts(workspace_id=name, store=store))
         for name, store in [("a", first), ("b", second)]
     ]
     plane = ControlPlane(hosts)
@@ -133,7 +133,7 @@ async def test_a_host_whose_close_is_cancelled_still_lets_go_of_its_lock_and_end
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = FakeStore()
-    host = WorkspaceHost(workspace_id="a", store=store)
+    host = WorkspaceHost(HostParts(workspace_id="a", store=store))
     plane = ControlPlane([host])
     connection = await joined(plane, "first")
     add = AddTask(task=TaskSpec(prompt="Add a flag."))

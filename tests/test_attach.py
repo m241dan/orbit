@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import Callable
 
-from orbit.agent import WorkspaceHost
+from orbit.agent import HostParts, WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.application.ports import StoreFailed
 from orbit.agent.domain.sessions import SessionRecord, missing_message, summarize
@@ -155,13 +155,15 @@ async def test_a_saved_sessions_view_taken_while_storage_is_halted_carries_the_h
 async def test_a_saved_sessions_view_taken_while_ownership_is_offered_says_so() -> None:
     lock = FakeLock()
     session = WorkspaceHost(
-        store=stored(),
-        clock=Ticks(),
-        new_id=lambda: OPEN,
-        name="today",
-        owner=OWNER,
-        lock=lock,
-        lock_retry=LOCK_RETRY,
+        HostParts(
+            store=stored(),
+            clock=Ticks(),
+            new_id=lambda: OPEN,
+            name="today",
+            owner=OWNER,
+            lock=lock,
+            lock_retry=LOCK_RETRY,
+        )
     )
     viewer = await joined(session, "viewer", read=True)
     lock.free = True

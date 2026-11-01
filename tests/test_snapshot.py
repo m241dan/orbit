@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import replace
 from typing import Any
 
-from orbit.agent import Verification, VerificationStep, WorkspaceHost
+from orbit.agent import HostParts, Verification, VerificationStep, WorkspaceHost
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.ports import Reply
 from orbit.agent.application.startup_check import AGENT_ID as STARTUP_AGENT
@@ -97,7 +97,7 @@ async def test_welcome_is_followed_by_a_snapshot_of_the_open_session() -> None:
 
 
 async def test_a_session_without_verification_or_agents_snapshots_none() -> None:
-    session = WorkspaceHost(settings=Settings(model="opus"))
+    session = WorkspaceHost(HostParts(settings=Settings(model="opus")))
     *_, snapshot = await opening(session, 3)
     await session.close()
 

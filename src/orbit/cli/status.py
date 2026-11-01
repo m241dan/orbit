@@ -75,6 +75,7 @@ _WATCH = CommandEnvelope(command_id="watch", payload=Watch(streams=(CONTROL_PLAN
 
 
 def status(
+    # #lizard forgives(parameter_count): Typer takes each of the command's options as a parameter.
     ctx: typer.Context,
     as_json: JsonOption = False,
     state: StateDirOption = None,
@@ -95,7 +96,6 @@ def status(
     the control plane can't be asked: a connection, TLS or credential error, usage totals it
     can't read, or no answer within 10 seconds.
     """
-    # #lizard forgives(parameter_count): Typer takes each of the command's options as a parameter.
     user_config = resolve_config_dir(config_dir, os.environ)
     given = ClientFiles(token_file, ca, cert, key)
     target = named_target(connect, remote, user_config, given)

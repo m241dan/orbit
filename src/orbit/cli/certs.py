@@ -190,6 +190,7 @@ def server(
 
 
 def client(
+    # #lizard forgives(parameter_count): Typer takes each of the command's options as a parameter.
     name: ClientNameArgument,
     key_type: KeyTypeOption = "ed25519",
     days: CertificateDaysOption = CERTIFICATE_DAYS,
@@ -201,7 +202,6 @@ def client(
 ) -> None:
     """Issue a certificate the CA signs for the client NAME, in certs/clients in your config
     directory, and print its fingerprint; with --bundle, bundle it for the client too."""
-    # #lizard forgives(parameter_count): Typer takes each of the command's options as a parameter.
     config = resolve_config_dir(config_dir, os.environ)
     certs = CertsDir(config)
     with _exit_on(CertificateError):
