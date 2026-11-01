@@ -483,6 +483,13 @@ def test_a_suggested_task_without_a_prompt_is_just_its_title() -> None:
     assert suggested_task(coder, "Add the flag", " \n").prompt == "Add the flag"
 
 
+def test_a_suggested_task_names_no_skills_unless_given_them() -> None:
+    coder = BUILT_IN_ROLES["coder"]
+    assert suggested_task(coder, "Add the flag", "Add --fast.").skills == ()
+    task = suggested_task(coder, "Add the flag", "Add --fast.", ("python", "application"))
+    assert task.skills == ("python", "application")
+
+
 def test_a_task_suggestion_is_its_stripped_title_and_prompt() -> None:
     arguments = {"title": " Add the flag ", "prompt": "\nAdd --fast. "}
     assert task_suggestion(arguments) == ("Add the flag", "Add --fast.")
@@ -594,6 +601,11 @@ def test_a_roles_capabilities_follow_its_tools(
     role = Role(instructions="Work.", tools=tools)
     assert role.runs_checks is runs
     assert role.proposes_checks is proposes
+    assert not role.proposes_tasks
+
+
+def test_a_role_holding_propose_task_proposes_tasks() -> None:
+    assert Role(instructions="Plan.", **TALKER).proposes_tasks
 
 
 @pytest.mark.parametrize("name", BUILT_IN_ROLE_NAMES)
@@ -601,6 +613,7 @@ def test_each_built_in_roles_capabilities_follow_its_tools(name: str) -> None:
     role = BUILT_IN_ROLES[name]
     assert role.runs_checks is ("run_check" in role.tools)
     assert role.proposes_checks is ("propose_checks" in role.tools)
+    assert role.proposes_tasks is ("propose_task" in role.tools)
 
 
 def test_an_orbit_tool_grant_gives_the_roles_tools_and_withholds_orbits_others() -> None:

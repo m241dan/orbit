@@ -1,7 +1,8 @@
 """Skills delivered in agents' instructions: an agent, a task's or a planner turn's, on any
 runtime, is launched with its role's instructions and then the skills it was given, its role's and
 its task's, or the project's mapped ones for a task naming none and a planner turn, and its
-process's span records those skills and the files of them it read."""
+process's span records those skills and the files of them it read. An agent that proposes tasks
+is also told the skills it can give them, and the tasks it proposes carry those it names."""
 
 import asyncio
 from collections.abc import Mapping
@@ -32,6 +33,7 @@ from tests.agent_fakes import (
     Call,
     Script,
     agents_for,
+    board_of,
     chats,
     claims_done,
     events_until,
@@ -99,6 +101,16 @@ CHOSEN = TaskSpec(prompt="Add a flag.", skills=("python", "application"))
 MAPPED = (SkillMapping(paths=("src", "tests"), use=("python", "layers", "code-style")),)
 """A project mapping its ``src`` and ``tests`` to ``python``, ``layers`` and ``code-style``."""
 
+CATALOGUE = (
+    "## Skills you can give tasks\n\n"
+    "application: application.\n"
+    "code-style: code-style.\n"
+    "layers: layers.\n"
+    "python: python.\n"
+    "security: security."
+)
+"""What an agent that proposes tasks is told of the skills in :data:`LIBRARY` it can give them."""
+
 
 async def test_a_coder_is_launched_with_its_instructions_then_its_skills() -> None:
     launch = await coder_launch(skill_library=LIBRARY, skill_mappings=CODE)
@@ -152,7 +164,8 @@ async def test_a_planner_turn_carries_the_planners_skills_and_the_workspaces_map
         f"You are orbit's planner.\n\n## Skills\n\n{READING}\n\n"
         "### code-style\n\nBe code-style.\n\n"
         "### python\n\nBe python.\n\n"
-        "`python`, `code-style` apply under `src`, `tests`."
+        "`python`, `code-style` apply under `src`, `tests`.\n\n"
+        f"{CATALOGUE}"
     )
 
 
@@ -169,7 +182,8 @@ async def test_a_planner_turn_after_the_workspace_reopens_carries_its_changed_ma
         f"You are orbit's planner.\n\n## Skills\n\n{READING}\n\n"
         "### code-style\n\nBe code-style.\n\n"
         "### security\n\nBe security.\n\n"
-        "`security` applies under `src`."
+        "`security` applies under `src`.\n\n"
+        f"{CATALOGUE}"
     )
 
 
@@ -183,11 +197,88 @@ async def test_a_planner_turn_after_a_reset_carries_the_skills_its_role_has_then
     await plan(session, "Plan again.")
     await session.close()
     before, after = (launch.instructions for launch in launcher.launches)
-    assert before.endswith("### code-style\n\nBe code-style.")
-    assert (
-        after
-        == f"You are orbit's planner.\n\n## Skills\n\n{READING}\n\n### security\n\nBe security."
+    assert before.endswith(f"### code-style\n\nBe code-style.\n\n{CATALOGUE}")
+    assert after == (
+        f"You are orbit's planner.\n\n## Skills\n\n{READING}\n\n### security\n\nBe security."
+        f"\n\n{CATALOGUE}"
     )
+
+
+# The skills a proposing agent can give tasks
+
+
+async def planner_launch(**options: Any) -> AgentLaunch:
+    """How the planner is launched for a turn in a session given ``options``, such as
+    ``skill_library``."""
+    session, _, launcher = session_for(**options)
+    launcher.planner_turns = [chats]
+    await plan(session, "Plan.")
+    await session.close()
+    [launch] = launcher.launches
+    return launch
+
+
+async def test_a_planner_given_no_skills_is_told_the_skills_it_can_give_in_their_place() -> None:
+    roles = {**ROLES, PLANNER: ROLES[PLANNER].model_copy(update={"skills": ()})}
+    launch = await planner_launch(skill_library=LIBRARY, roles=roles)
+    assert launch.instructions == f"You are orbit's planner.\n\n{CATALOGUE}"
+
+
+async def test_a_coder_isnt_told_the_skills_it_could_give_tasks() -> None:
+    launch = await coder_launch(skill_library=LIBRARY, skill_mappings=CODE)
+    assert "## Skills you can give tasks" not in launch.instructions
+
+
+async def test_a_planner_in_a_session_without_skills_is_told_its_instructions_alone() -> None:
+    roles = {**ROLES, PLANNER: ROLES[PLANNER].model_copy(update={"skills": ()})}
+    launch = await planner_launch(roles=roles)
+    assert launch.instructions == "You are orbit's planner."
+
+
+async def proposing(*lists: list[str] | None) -> tuple[list[Reply], list[tuple[str, ...]]]:
+    """The planner's replies to proposing a task naming each of ``lists`` of skills, in a session
+    given :data:`LIBRARY`, and the skills of the drafts it added, in list order."""
+    replies: list[Reply] = []
+
+    async def proposes(call: Call) -> TurnEndReason:
+        for skills in lists:
+            replies.append(await call("propose_task", title="T", prompt="P", skills=skills))
+        return "completed"
+
+    session, _, launcher = session_for(skill_library=LIBRARY)
+    launcher.planner_turns = [proposes]
+    await plan(session, "Plan.")
+    drafts = board_of(session).drafts_of(PLANNER)
+    await session.close()
+    return replies, [draft.task.skills for draft in drafts]
+
+
+async def test_a_proposed_task_carries_the_skills_the_planner_names_in_order() -> None:
+    replies, skills = await proposing(["python", "application"])
+    assert replies == [Reply("Added draft task 1; the user will accept or drop it.")]
+    assert skills == [("python", "application")]
+
+
+async def test_a_skill_named_twice_in_a_proposal_is_carried_once() -> None:
+    _, skills = await proposing(["python", "python"])
+    assert skills == [("python",)]
+
+
+async def test_a_proposal_naming_no_skills_carries_none() -> None:
+    _, skills = await proposing(None, [])
+    assert skills == [(), ()]
+
+
+async def test_a_proposal_naming_an_unknown_skill_is_refused_and_adds_no_draft() -> None:
+    replies, skills = await proposing(["python", "pyton"])
+    assert replies == [
+        Reply(
+            "Task skills names pyton, which isn't a skill; the skills are application,"
+            " code-style, layers, python, security.",
+            is_error=True,
+        )
+    ]
+    assert skills == []
 
 
 # The process's span

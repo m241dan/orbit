@@ -382,6 +382,22 @@ def test_the_planner_keeps_its_own_choices_out_of_prompts_while_proposing() -> N
     assert text.index("## 3. Propose") < carries < text.index("Proposals are drafts")
 
 
+PLANNER_GIVES_SKILLS = (
+    "Give each task the skills its coder needs with propose_task's `skills`, chosen from the"
+    " catalogue under Skills you can give tasks: the language skill for the code it changes, the"
+    " kind skill for what it changes (such as `application`), and the project's own skills that"
+    " bear on it. The coder's role brings its own skills, so name only what the task adds. Orbit"
+    " passes the list on as it is, and reviews and follow-up tasks inherit it."
+)
+
+
+def test_the_planner_gives_each_task_the_skills_its_coder_needs() -> None:
+    text = planner_text()
+    gives = text.index(PLANNER_GIVES_SKILLS)
+    done = text.index("the coder chooses test names and files to match the project's style.")
+    assert done < gives < text.index("Write each prompt against the code")
+
+
 PLANNER_FIXES_DRAFTS = (
     "Proposals are drafts the user accepts, edits or removes on the task list. Until the user"
     " accepts one, you can fix it: `edit_draft`, `move_draft` and `remove_draft` change your own"

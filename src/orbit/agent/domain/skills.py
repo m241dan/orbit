@@ -10,6 +10,7 @@ import re
 from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from itertools import takewhile
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -42,6 +43,12 @@ READING_LINE = (
     " `code-style` and file `testing.md`."
 )
 """How an agent reads a file of a skill that its skills point it to."""
+
+CATALOGUE_HEADING = "## Skills you can give tasks"
+"""The heading over the skills an agent that proposes tasks can give them."""
+
+TASK_SKILLS = "Task skills"
+"""What the refusal of a skill a proposed task names calls the task's skills."""
 
 OUTSIDE_PROJECT = "paths are relative to the project root and stay inside it."
 """Why a ``[[skills]]`` entry's path that's empty, holds a NUL byte, is absolute or leaves the
@@ -327,6 +334,30 @@ def _skill_section(skill: Skill) -> str:
     """The section delivering ``skill``: its name as a heading, then its body, without the blank
     space ending it."""
     return f"### {skill.name}\n\n{skill.body}".rstrip()
+
+
+def skill_catalogue(library: SkillLibrary) -> str:
+    """What follows the skills an agent that proposes tasks is given, or takes their place, to
+    tell it the skills it can give them: under a :data:`CATALOGUE_HEADING`, a ``name:
+    description`` line for each skill in the ``library``, in name order, its description made one
+    line. Empty for an empty library."""
+    if not library.skills:
+        return ""
+    lines = (
+        f"{name}: {' '.join(skill.description.split())}" for name, skill in library.skills.items()
+    )
+    return f"{CATALOGUE_HEADING}\n\n" + "\n".join(lines)
+
+
+def proposed_skills(arguments: Mapping[str, Any], library: SkillLibrary) -> tuple[str, ...] | str:
+    """The skills, by name, an agent proposing a task with ``arguments`` gives it, each once,
+    where first named, none if they name none; or why they're refused: the first they name that
+    isn't in the ``library``, as :func:`unknown_skill` says under :data:`TASK_SKILLS`."""
+    names = [str(name) for name in arguments.get("skills") or ()]
+    unknown = next((name for name in names if name not in library.skills), None)
+    if unknown is not None:
+        return unknown_skill(TASK_SKILLS, unknown, library)
+    return tuple(dict.fromkeys(names))
 
 
 def _where_mapped(mappings: Sequence[SkillMapping]) -> tuple[str, ...]:

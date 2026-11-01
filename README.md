@@ -992,7 +992,13 @@ asks about behaviour, edge cases and outcomes in rounds of a few questions, each
 with a recommendation, with clear-cut edge cases in a table you accept or override by row; decides
 the implementation itself, listing what it decided for you beside the requirements and the outline
 for one confirm; and breaks the goal into small tasks, proposing each with `propose_task` (a title
-is required, and kept to one line). Its drafts' tools come with `propose_task`: `list_drafts()`
+is required, and kept to one line). Its optional `skills`, a list of skill names, gives the task
+the skills its coder needs beyond its role's: the language and kind of the code it changes, and
+the project's skills that bear on it, which the planner chooses from the catalogue under `## Skills
+you can give tasks` in its instructions (see [Skills](#skills)). The draft's `skills` is that list,
+each name once, in the order given, and none without it; a name that isn't a skill refuses the
+whole call, adding nothing (`Task skills names pyton, which isn't a skill; the skills are
+application, code-style, …`). Its drafts' tools come with `propose_task`: `list_drafts()`
 gives one `<id> · <title>` line for each of its drafts you haven't accepted, in list order (`You
 have no drafts.` with none), and `read_draft(task_id)` gives one's id and title, a blank line and
 the rest of its prompt. It's refused a task that isn't there (`No task with id '99'.`), one it
@@ -1667,10 +1673,21 @@ A line such as "Read `code-style`'s `testing.md`." means: call read_skill with s
 
 `application`, `python` apply under `src`, `noxfile.py`.
 `cpp` applies under `native`.
+
+## Skills you can give tasks
+
+application: Building an application, a program with users, workflows and outside systems — …
+code-style: How code is built here — a functional style, five code types (Domain, Application, …
+cpp: C++ conventions and tools — C++23, CMake presets with vcpkg, a directory and CMake target …
+…
 ```
 
-An agent given no skills, with no `[[skills]]` entries, is told its role's instructions alone,
-with no `## Skills` section. A conversational role's agent, such as the planner's, is told its
+An agent whose role holds `propose_task`, as the planner's does, is told last, under `## Skills you
+can give tasks`, the catalogue it chooses the skills of the tasks it proposes from (see
+[Planning with the planner](#planning-with-the-planner)): a `name: description` line for each
+skill, orbit's and the project's, in name order, each description on one line. An agent given no
+skills, with no `[[skills]]` entries, is told its role's instructions alone, with no `## Skills`
+section, and then the catalogue if its role holds `propose_task`. A conversational role's agent, such as the planner's, is told its
 skills afresh each turn, so the turn after a reset that changes the planner's `skills`, or after the
 workspace reopens with changed `[[skills]]` or skill files, carries the change.
 

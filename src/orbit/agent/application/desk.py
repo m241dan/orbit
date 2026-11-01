@@ -47,6 +47,7 @@ from orbit.agent.domain.skills import (
     delivered_skills,
     given_skill_file,
     given_skills,
+    skill_catalogue,
     skill_instructions,
 )
 from orbit.protocol import (
@@ -320,12 +321,14 @@ class AgentDesk:
 
     def _instructions(self, role: Role, task_skills: Sequence[str]) -> str:
         """What an agent in ``role`` whose task names ``task_skills`` is told: its role's
-        instructions, then, after a blank line, the skills it's given, if any."""
+        instructions, then, each after a blank line, the skills it's given, if any, and, if it
+        proposes tasks, the skills it can give them."""
         agents = self.agents
         skills = skill_instructions(
             role.skills, task_skills, agents.skill_mappings, agents.skill_library
         )
-        return f"{role.instructions}\n\n{skills}" if skills else role.instructions
+        catalogue = skill_catalogue(agents.skill_library) if role.proposes_tasks else ""
+        return "\n\n".join((role.instructions, *(part for part in (skills, catalogue) if part)))
 
     def _skills_of_task(self, agent_id: str | None) -> tuple[str, ...]:
         """The skills agent ``agent_id``'s task gives it beyond its role's; none for an agent

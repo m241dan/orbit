@@ -42,6 +42,7 @@ from orbit.agent.domain.roles import (
     task_suggestion,
     timeout_ending,
 )
+from orbit.agent.domain.skills import proposed_skills
 from orbit.agent.domain.usage_limits import outage_note
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
@@ -393,12 +394,15 @@ class PlannerChat:
         suggestion = task_suggestion(arguments)
         if isinstance(suggestion, str):
             return Reply(suggestion, is_error=True)
+        skills = proposed_skills(arguments, self._desk.agents.skill_library)
+        if isinstance(skills, str):
+            return Reply(skills, is_error=True)
         roles = self._desk.agents.roles
         refusal = suggestion_refusal(roles)
         if refusal is not None:
             return Reply(refusal, is_error=True)
         title, prompt = suggestion
-        task = suggested_task(roles[CODER], title, prompt)
+        task = suggested_task(roles[CODER], title, prompt, skills)
         task_id = await self._tasks.change(lambda board: board.add_draft(task, self._role))
         self._drafts += 1
         return Reply(f"Added draft task {task_id}; the user will accept or drop it.")

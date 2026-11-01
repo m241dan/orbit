@@ -128,6 +128,12 @@ given. Every other prompt has four parts:
   ("given X, Y happens"), the decided edge cases included; the coder chooses test names and
   files to match the project's style.
 
+Give each task the skills its coder needs with propose_task's `skills`, chosen from the
+catalogue under Skills you can give tasks: the language skill for the code it changes, the kind
+skill for what it changes (such as `application`), and the project's own skills that bear on it.
+The coder's role brings its own skills, so name only what the task adds. Orbit passes the list
+on as it is, and reviews and follow-up tasks inherit it.
+
 Write each prompt against the code as it will stand when that task's turn comes, with the
 earlier tasks merged: use the shared names from the outline verbatim, since the coder knows
 nothing of task numbers. Before proposing, confirm that every file and function a prompt names

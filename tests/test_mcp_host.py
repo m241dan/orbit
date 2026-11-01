@@ -81,6 +81,7 @@ async def test_offers_orbit_tools_with_their_arguments() -> None:
         assert tools["complete_task"].input_schema["required"] == ["summary"]
         assert tools["run_check"].input_schema["required"] == ["step"]
         assert tools["suggest_task"].input_schema["required"] == ["title", "prompt"]
+        assert tools["propose_task"].input_schema["required"] == ["title", "prompt"]
         assert tools["propose_checks"].input_schema["required"] == ["steps"]
         assert tools["read_skill"].input_schema["required"] == ["skill", "file"]
         assert all(tool.description for tool in tools.values())
@@ -93,6 +94,15 @@ async def test_the_tools_that_take_a_coders_prompt_say_what_it_must_cover() -> N
             # What the tool is for, then the recipe; the role instructions say the rest.
             assert (tools[name].description or "").endswith(PROMPT_RECIPE)
         assert all(part in PROMPT_RECIPE for part in ("Where", "Change", "Keep", "Done"))
+
+
+async def test_propose_task_says_to_name_the_skills_the_tasks_coder_needs() -> None:
+    async with serving(RecordingHandler()) as url, connected(url) as client:
+        tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+    assert (
+        "Name in skills what the task's coder needs beyond its role's own: the language and kind"
+        " of the code it changes, and the project's skills that bear on it."
+    ) in (tools["propose_task"].description or "")
 
 
 async def test_read_skill_says_it_reads_a_file_of_ones_skills_by_their_names() -> None:
@@ -123,7 +133,10 @@ async def test_passes_calls_with_the_token_to_the_handler_and_returns_its_text()
         ("report_progress", {"note": "halfway"}),
         ("give_up", {"reason": "blocked"}),
         ("suggest_task", {"title": "Add tests", "prompt": "Cover parse()."}),
-        ("propose_task", {"title": "Add a CLI flag", "prompt": "Add --fast."}),
+        (
+            "propose_task",
+            {"title": "Add a CLI flag", "prompt": "Add --fast.", "skills": ["python", "cli"]},
+        ),
         ("consult", {"role": "experimenter", "message": "Check X"}),
         ("save_report", {"title": "Timings", "body": "It took 3s."}),
         ("list_reports", {}),
@@ -157,6 +170,15 @@ async def test_a_proposal_without_setup_passes_none() -> None:
     async with serving(handler) as url, connected(url) as client:
         await client.call_tool("propose_checks", {"steps": steps})
     assert handler.calls == [("tok-1", "propose_checks", {"steps": steps, "setup": None})]
+
+
+async def test_a_proposed_task_without_skills_passes_none() -> None:
+    handler = RecordingHandler()
+    async with serving(handler) as url, connected(url) as client:
+        await client.call_tool("propose_task", {"title": "Add a flag", "prompt": "Add --fast."})
+    assert handler.calls == [
+        ("tok-1", "propose_task", {"title": "Add a flag", "prompt": "Add --fast.", "skills": None})
+    ]
 
 
 async def test_error_replies_become_tool_errors() -> None:

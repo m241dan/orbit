@@ -54,7 +54,9 @@ SUGGEST_TASK_DESCRIPTION = (
 )
 PROPOSE_TASK_DESCRIPTION = (
     "Propose a task for the plan: a short title, and a prompt. It's added as a draft the user"
-    f" accepts or drops. {PROMPT_RECIPE}"
+    " accepts or drops. Name in skills what the task's coder needs beyond its role's own: the"
+    " language and kind of the code it changes, and the project's skills that bear on it."
+    f" {PROMPT_RECIPE}"
 )
 EDIT_DRAFT_DESCRIPTION = (
     "Replace the title and prompt of one of your drafts; it stays a draft in its place."
@@ -130,8 +132,10 @@ def build_server(handler: CallHandler) -> MCPServer:
         return await call(ctx, SUGGEST_TASK, {"title": title, "prompt": prompt})
 
     @server.tool(structured_output=False, description=PROPOSE_TASK_DESCRIPTION)
-    async def propose_task(title: str, prompt: str, ctx: Context) -> str:
-        return await call(ctx, PROPOSE_TASK, {"title": title, "prompt": prompt})
+    async def propose_task(
+        title: str, prompt: str, ctx: Context, skills: list[str] | None = None
+    ) -> str:
+        return await call(ctx, PROPOSE_TASK, {"title": title, "prompt": prompt, "skills": skills})
 
     @server.tool(structured_output=False)
     async def propose_checks(

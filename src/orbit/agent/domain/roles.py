@@ -303,6 +303,12 @@ class Role(_Config):
         return RUN_CHECK in self.tools
 
     @property
+    def proposes_tasks(self) -> bool:
+        """Whether an agent in this role proposes tasks, so it's told the skills it can give
+        them."""
+        return PROPOSE_TASK in self.tools
+
+    @property
     def proposes_checks(self) -> bool:
         """Whether an agent in this role proposes verification steps rather than being
         verified."""
@@ -719,10 +725,12 @@ def role_task(role_name: str, role: Role, prompt: str) -> TaskSpec:
     return TaskSpec(prompt=prompt, settings=role.settings, role=role_name)
 
 
-def suggested_task(coder: Role, title: str, prompt: str) -> TaskSpec:
-    """A coder's task an agent suggested or proposed, as ``title`` and ``prompt``."""
+def suggested_task(coder: Role, title: str, prompt: str, skills: tuple[str, ...] = ()) -> TaskSpec:
+    """A coder's task an agent suggested or proposed, as ``title`` and ``prompt``, naming the
+    ``skills`` its agent gets beyond its role's, none unless given."""
     title, prompt = title.strip(), prompt.strip()
-    return role_task(CODER, coder, f"{title}\n\n{prompt}" if prompt else title)
+    task = role_task(CODER, coder, f"{title}\n\n{prompt}" if prompt else title)
+    return task.model_copy(update={"skills": skills})
 
 
 def suggestion_refusal(roles: Mapping[str, Role]) -> str | None:

@@ -24,6 +24,8 @@ from orbit.agent.domain.skills import (
     load_skill,
     load_skill_library,
     parse_front_matter,
+    proposed_skills,
+    skill_catalogue,
     skill_instructions,
 )
 
@@ -697,3 +699,61 @@ def test_the_skills_delivered_are_those_given_that_the_library_has_in_order() ->
 
 def test_no_skills_are_delivered_to_a_role_without_any() -> None:
     assert delivered_skills((), (), (), DELIVERING) == ()
+
+
+# The skills a proposed task names
+
+
+def test_a_proposed_task_names_the_skills_its_proposal_gives_in_order() -> None:
+    arguments = {"title": "T", "prompt": "P", "skills": ["python", "application"]}
+    assert proposed_skills(arguments, DELIVERING) == ("python", "application")
+
+
+def test_a_skill_a_proposal_names_twice_is_named_once_where_first_named() -> None:
+    arguments = {"title": "T", "skills": ["python", "cpp", "python"]}
+    assert proposed_skills(arguments, DELIVERING) == ("python", "cpp")
+
+
+@pytest.mark.parametrize("arguments", [{"title": "T"}, {"title": "T", "skills": None}])
+def test_a_proposal_naming_no_skills_gives_none(arguments: dict[str, object]) -> None:
+    assert proposed_skills(arguments, DELIVERING) == ()
+
+
+def test_a_proposals_first_unknown_skill_is_refused_listing_the_skills_in_name_order() -> None:
+    arguments = {"title": "T", "skills": ["python", "pyton", "rust"]}
+    assert proposed_skills(arguments, DELIVERING) == (
+        "Task skills names pyton, which isn't a skill; the skills are application, code-style,"
+        " cpp, python, security."
+    )
+
+
+# The catalogue of skills a proposing agent can give tasks
+
+
+def described(**descriptions: str) -> SkillLibrary:
+    """The library of a skill of each name among ``descriptions``, each described as given."""
+    return SkillLibrary(
+        skills={
+            name: Skill(name=name, description=description, body="", files={})
+            for name, description in descriptions.items()
+        }
+    )
+
+
+def test_the_catalogue_has_a_line_naming_and_describing_each_skill_in_name_order() -> None:
+    library = described(python="Python conventions.", application="Building an application.")
+    assert skill_catalogue(library) == (
+        "## Skills you can give tasks\n"
+        "\n"
+        "application: Building an application.\n"
+        "python: Python conventions."
+    )
+
+
+def test_a_description_over_several_lines_is_one_line_in_the_catalogue() -> None:
+    library = described(python="Python conventions\nand tools.\n")
+    assert skill_catalogue(library).endswith("\n\npython: Python conventions and tools.")
+
+
+def test_an_empty_library_has_no_catalogue() -> None:
+    assert skill_catalogue(SkillLibrary()) == ""
