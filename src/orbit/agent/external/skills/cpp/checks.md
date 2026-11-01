@@ -9,7 +9,7 @@ Suggestions for the project's verification: the configurator proposes these, and
 | clang-tidy | Bug patterns, misused APIs, the naming `.clang-tidy` sets | clang-tidy, the checked-in `.clang-tidy`, warnings as errors | `run-clang-tidy -p build/asan -quiet` | task checks |
 | Formatting | Code out of the checked-in `.clang-format` | clang-format | `clang-format --dry-run --Werror` over the sources | task checks |
 | Function limits | Functions past complexity 6, 100 lines or 5 parameters | lizard | `lizard src apps tests -w -C 6 -L 100 -a 5` | task checks |
-| Layers | Includes a directory's code type may not use, header-only libraries such as ASIO included | One CMake target per code type, and Orbit's include checker | `python3 tools/check_includes.py` | task checks |
+| Layers | Includes a directory's code type may not use, header-only libraries such as ASIO included | One CMake target per code type, and the include checker, which the configurator copies from `cpp`'s `scripts/check_includes.py` (read with `read_skill`) to `tools/check_includes.py`, with `include-rules.toml` beside it (see `build.md`) | `python3 tools/check_includes.py` | task checks |
 | AddressSanitizer and UBSan | Memory errors and undefined behaviour in the tests | the `asan` preset | `cmake --workflow --preset asan` | task checks |
 | ThreadSanitizer | Data races in the concurrency tests | the `tsan` preset, its own build | `cmake --workflow --preset tsan` | set `tsan`, every 10 commits, holds merges |
 | Coverage | Lines and branches no test runs | gcovr over the `coverage` build | `gcovr --exclude-throw-branches --fail-under-line 100 --fail-under-branch 100`, after `cmake --workflow --preset coverage` | task checks |

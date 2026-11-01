@@ -261,6 +261,15 @@ def test_the_configurator_proposes_from_the_suggested_checks_of_the_skills_that_
     assert "Suggested checks of the language skills that fit the project" in instructions
 
 
+def test_the_configurator_sets_up_the_include_checker_before_proposing_it() -> None:
+    instructions = " ".join(read_built_in_roles()["configurator"].instructions.split())
+    assert "`python3 tools/check_includes.py`: copy `cpp`'s `scripts/check_includes.py`" in (
+        instructions
+    )
+    assert "to `tools/check_includes.py`, and write `include-rules.toml`" in instructions
+    assert "with the user" in instructions
+
+
 def test_the_configurator_is_launched_with_the_python_and_cpp_skills(tmp_path: Path) -> None:
     library = read_skill_library(str(tmp_path))
     delivery = SkillDelivery(library, (), lambda agent_id: None)

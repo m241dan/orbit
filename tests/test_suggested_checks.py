@@ -87,3 +87,11 @@ def test_cpp_suggests_tsan_as_a_set_that_holds_merges() -> None:
     for check in ("Formatting", "clang-tidy", "Function limits", "Layers", "Coverage"):
         assert rows[check][4] == "task checks", check
     assert rows["AddressSanitizer and UBSan"][4] == "task checks"
+
+
+def test_cpp_suggests_the_include_checker_it_ships_copied_to_tools() -> None:
+    tool, command = suggested("cpp")["Layers"][2:4]
+    assert command == "`python3 tools/check_includes.py`"
+    assert (
+        "`scripts/check_includes.py` (read with `read_skill`) to `tools/check_includes.py`" in tool
+    )

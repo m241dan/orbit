@@ -22,8 +22,9 @@ Read `cpp`'s `build.md`: presets and dependencies.
   grouped under components when there are several. Entry points go in `apps/`, a library's public
   headers in `include/<project>/`, and the tests mirror `src/`.
 - Each code type is a CMake library target, linked in the layer order, and each directory keeps
-  to its allowed include prefixes, which Orbit's include checker checks. The linker never sees a
-  header-only library such as ASIO, so the include checker is what keeps it in its layers.
+  to the include prefixes `include-rules.toml` allows it, which the include checker this skill
+  ships, `scripts/check_includes.py`, checks. The linker never sees a header-only library such as
+  ASIO, so the include checker is what keeps it in its layers.
 
 Read `cpp`'s `build.md`: targets, includes and test labels.
 

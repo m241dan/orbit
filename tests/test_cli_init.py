@@ -16,7 +16,7 @@ from orbit.agent.domain.roles import Role
 from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
 from orbit.agent.external.config_file import read_config
 from orbit.agent.external.reference_config import reference_config
-from orbit.agent.external.skill_files import SKILL_DIRECTORY, skill_names
+from orbit.agent.external.skill_files import SKILL_DIRECTORY, skill_names, skill_paths
 from orbit.cli import app
 from tests.git_repo import init_repo
 
@@ -420,16 +420,18 @@ def test_roles_after_an_update_say_what_the_update_did(project: Path) -> None:
 
 
 def shipped_skill(name: str) -> dict[str, str]:
-    """The text of each file of the skill ``name`` orbit ships, by its path in the folder."""
-    folder = SKILL_DIRECTORY / name
-    return {entry.name: entry.read_bytes().decode("utf-8") for entry in folder.iterdir()}
+    """The text of each file of the skill ``name`` orbit ships, at any depth, by its path in the
+    folder."""
+    entries = skill_paths(SKILL_DIRECTORY / name)
+    return {path: entry.read_bytes().decode("utf-8") for path, entry in entries}
 
 
 def skill_copy(project: Path, name: str) -> dict[str, str]:
-    """The text of each file of the workspace at ``project``'s copy of the skill ``name``, by
-    its path in the folder."""
+    """The text of each file of the workspace at ``project``'s copy of the skill ``name``, at any
+    depth, by its path in the folder."""
     folder = project / ".orbit" / "skills" / name
-    return {path.name: path.read_text(encoding="utf-8") for path in folder.iterdir()}
+    files = (path for path in folder.rglob("*") if path.is_file())
+    return {path.relative_to(folder).as_posix(): path.read_text(encoding="utf-8") for path in files}
 
 
 def test_skill_copies_the_skills_files_and_writes_no_config(project: Path) -> None:

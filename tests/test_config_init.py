@@ -33,7 +33,7 @@ from orbit.agent.external.config_init import (
     update_config,
 )
 from orbit.agent.external.reference_config import LATER_HEADING, reference_config
-from orbit.agent.external.skill_files import SKILL_DIRECTORY, skill_names
+from orbit.agent.external.skill_files import SKILL_DIRECTORY, skill_names, skill_paths
 from orbit.protocol import BUILT_IN_ROLE_NAMES
 
 TODAY = date(2026, 10, 25)
@@ -447,9 +447,10 @@ SKILLS = ".orbit/skills"
 
 
 def shipped_files(name: str) -> dict[str, str]:
-    """The text of each file of the skill ``name`` orbit ships, by its path in the folder."""
-    folder = SKILL_DIRECTORY / name
-    return {entry.name: entry.read_bytes().decode("utf-8") for entry in folder.iterdir()}
+    """The text of each file of the skill ``name`` orbit ships, at any depth, by its path in the
+    folder."""
+    entries = skill_paths(SKILL_DIRECTORY / name)
+    return {path: entry.read_bytes().decode("utf-8") for path, entry in entries}
 
 
 def copied_files(folder: Path) -> dict[str, str]:

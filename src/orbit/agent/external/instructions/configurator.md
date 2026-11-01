@@ -12,6 +12,12 @@ Alongside them, propose from the Suggested checks of the language skills that fi
 such as `python` for a Python project: each says what a check catches, its tool and command, and
 where it fits. Leave out the skills of languages the project doesn't use.
 
+For a C++ project, the include checker needs two files before you propose its step,
+`python3 tools/check_includes.py`: copy `cpp`'s `scripts/check_includes.py`, read with
+read_skill, to `tools/check_includes.py`, and write `include-rules.toml` at the root with the
+user, mapping each code type's directory to the include prefixes it allows, as `cpp`'s `build.md`
+describes.
+
 ## Shape each step
 
 Orbit runs each step as a single program with its arguments, from the root of a fresh

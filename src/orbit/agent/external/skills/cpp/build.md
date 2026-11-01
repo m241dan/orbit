@@ -16,8 +16,28 @@
 - **Targets**: one library target per code type (`<project>_domain`, `<project>_application`,
   `<project>_external`, `<project>_execution`), each linking only the ones below it. Entry points
   in `apps/` link what they wire, and each test links the target it covers.
-- **Includes**: a target's include directories are private unless a dependent needs them. Orbit's
-  include checker reads each directory's allowed include prefixes from its config, and fails the
-  check on any other include.
+- **Includes**: a target's include directories are private unless a dependent needs them. The
+  include checker, `tools/check_includes.py` (a copy of `cpp`'s `scripts/check_includes.py`),
+  reads `include-rules.toml` at the project root, whose `[rules]` map each directory, relative to
+  the root, to the include prefixes it allows:
+
+  ```toml
+  [rules]
+  "src/domain" = ["myproj/domain"]
+  "src/execution" = ["myproj/execution"]
+  "src/application" = ["myproj/application", "myproj/domain", "myproj/execution"]
+  "src/external" = ["myproj", "asio", "nlohmann"]
+  "apps" = ["myproj", "asio"]
+  "tests" = ["myproj", "catch2", "rapidcheck"]
+  ```
+
+  It checks each `#include "…"` and `#include <…>` in the C and C++ sources and headers under the
+  root. A prefix allows the headers under it by whole path segments: `myproj/domain` allows
+  `myproj/domain/rules.hpp`, not `myproj/domainx/a.hpp`. A directory not listed takes its
+  nearest listed parent's rules, and a file under none fails. Standard headers are allowed unless
+  a directory's rules list `std`, when only the headers its prefixes name are: `["std", "vector",
+  "myproj/domain"]` allows `<vector>` and no other standard header. Hidden directories, symlinked
+  ones and CMake build trees are skipped. It lists every include that isn't allowed and exits 1,
+  or 2 when `include-rules.toml` is missing or invalid.
 - **ctest labels** sort tests into check sets (`small`, `medium`, `stress`, `fuzz`, `bench`), so a
   set runs as `ctest -L stress`. Benchmarks build only in the `release` preset.
