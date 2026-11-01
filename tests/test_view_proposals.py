@@ -161,3 +161,27 @@ def test_the_task_checks_name_the_triggers_that_run_them_and_may_be_none() -> No
     assert "Task checks: every task, by hand\n  none\n\nSet stress: no trigger, reports\n" in (
         proposal_text(proposal)
     )
+
+
+def test_task_checks_with_a_trigger_show_when_they_run() -> None:
+    every_five = ProposedTrigger(on="commits", every=5, checks="task-checks")
+    proposal = ChecksProposed(
+        agent_id="a",
+        task_id="7",
+        steps=(ProposedStep(name="Lint", command=("ruff",)),),
+        triggers={"often": every_five},
+    )
+    assert proposal_text(proposal) == (
+        "Setup: none\n"
+        "\n"
+        "Task checks: every task, every 5 commits\n"
+        "  1. Lint: ruff\n"
+        "\n"
+        "✅ All passed on the current code."
+    )
+
+
+def test_a_proposal_with_no_sets_or_triggers_lists_its_steps() -> None:
+    assert proposal_text(PROPOSAL) == (
+        "Setup: none\n\nSteps:\n  1. Lint: ruff\n\n✅ All passed on the current code."
+    )

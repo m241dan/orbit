@@ -45,18 +45,23 @@ def proposal_title(agent_id: str) -> str:
 
 def proposal_text(event: ChecksProposed) -> str:
     """The proposed setup, then each step in order, and that they all passed. With steps in
-    named sets, the steps come as the task checks, then each set, each step keeping its number,
-    each group saying when it runs and each set whether it holds merges."""
+    named sets or any triggers, the steps come as the task checks, then each set, each step
+    keeping its number, each group saying when it runs and each set whether it holds merges."""
     setup = event.setup
     lines = [f"Setup: {'none' if setup is None else shlex.join(setup.command)}"]
     if setup is not None and setup.watch:
         lines.append(f"  reruns when these change: {', '.join(setup.watch)}")
-    if any(step.set is not None for step in event.steps):
+    if _is_grouped(event):
         lines += _grouped_steps(event)
     else:
         lines += ["", "Steps:", *_step_lines(event, None)]
     lines += ["", "✅ All passed on the current code."]
     return "\n".join(lines)
+
+
+def _is_grouped(event: ChecksProposed) -> bool:
+    """Whether ``event``'s steps come grouped, as some are in a set or it proposes triggers."""
+    return bool(event.triggers) or any(step.set is not None for step in event.steps)
 
 
 def _grouped_steps(event: ChecksProposed) -> list[str]:
