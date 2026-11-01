@@ -9,7 +9,7 @@ from typing import Any
 from opentelemetry.sdk.trace import ReadableSpan
 
 from orbit.agent.application.agent_trace import STEP_SPAN
-from orbit.agent.application.ports import TreeFailed
+from orbit.agent.application.ports import StepRunner, TreeFailed
 from orbit.agent.application.set_runs import SetResult, SetRuns, SetSite, cancelled_note
 from orbit.agent.application.set_trace import SET_SPAN, SetTracing
 from orbit.agent.domain.checks import Setup
@@ -43,7 +43,7 @@ class Runs:
 
     def __init__(
         self,
-        steps: Steps,
+        steps: StepRunner,
         *sets: CheckSet,
         tree: FakeTree | None = None,
         traced: Traced | None = None,
@@ -76,11 +76,11 @@ class Runs:
         await eventually(lambda: len(self.exits()) >= count)
 
 
-def shown(*statuses: StepStatus, title: str = "slow") -> VerificationChanged:
-    """The panel showing ``slow``'s steps at ``statuses``, under ``title``."""
+def shown(*statuses: StepStatus, title: str = "slow", output: str = "") -> VerificationChanged:
+    """The panel showing ``slow``'s steps at ``statuses``, under ``title``, with ``output``."""
     names = (MUTATION.name, SOAK.name)
     steps = tuple(StepState(name=n, status=s) for n, s in zip(names, statuses, strict=True))
-    return VerificationChanged(steps=steps, title=title)
+    return VerificationChanged(steps=steps, title=title, output=output)
 
 
 def gated(*results: bool) -> tuple[Steps, asyncio.Event]:
@@ -128,6 +128,48 @@ async def test_a_failing_reporting_set_adds_its_notice_and_keeps_its_failure() -
     assert shown("failed", "pending") in runs.events
     assert runs.runs.failures == {"slow": (MUTATION, "1 test failed")}
     assert runs.exits() == [AgentExited(agent_id="set-slow", reason="finished")]
+
+
+async def test_a_failing_run_shows_its_steps_trimmed_output_in_the_panel_before_its_notice() -> (
+    None
+):
+    async def survived(step: VerificationStep, root: str) -> tuple[bool, str]:
+        return False, "\n  3 mutants survived  \n"
+
+    runs = Runs(survived)
+    runs.runs.run("slow", "slow")
+    await runs.ended()
+
+    failed = shown("failed", "pending", output="3 mutants survived")
+    assert runs.events[-3:] == [
+        failed,
+        Notice(message="slow reported: Mutation tests failed (see the verification panel)"),
+        AgentExited(agent_id="set-slow", reason="finished"),
+    ]
+    assert runs.runs.panel == failed
+
+
+async def test_a_holding_sets_failing_run_shows_its_output_in_the_panel() -> None:
+    stress = CheckSet("stress", (MUTATION, SOAK), "holds_merges")
+    runs = Runs(Steps(False), stress)
+    runs.runs.run("stress", "nightly")
+    await runs.ended()
+
+    panel = runs.runs.panel
+    assert panel is not None and (panel.title, panel.output) == ("stress", "1 test failed")
+
+
+async def test_a_run_after_a_failure_shows_no_output_and_a_passing_one_adds_none() -> None:
+    runs = Runs(Steps(False, True, True))
+    runs.runs.run("slow", "slow")
+    await runs.ended()
+    runs.runs.run("slow", "slow")
+    await runs.ended(2)
+
+    starts = [i for i, event in enumerate(runs.events) if isinstance(event, AgentStarted)]
+    second = runs.events[starts[1] :]
+    assert [event.output for event in second if isinstance(event, VerificationChanged)] == [""] * 5
+    assert runs.runs.panel == shown("passed", "passed")
 
 
 async def test_a_holding_sets_runs_are_heard_with_their_commit_and_trigger_and_no_notice() -> None:
@@ -262,6 +304,20 @@ async def test_stopping_cancels_the_run_going_and_the_run_due_after_it() -> None
     assert len(runs.starts()) == 1
     assert runs.tree.dropped == [SNAPSHOT]
     assert runs.runs.failures == {}
+
+
+async def test_a_run_cancelled_after_a_failure_shows_no_output() -> None:
+    steps = Steps(False, True)
+    runs = Runs(steps)
+    runs.runs.run("slow", "slow")
+    await runs.ended()
+    gate = asyncio.Event()
+    steps.gate = gate
+    runs.runs.run("slow", "slow")
+    await eventually(lambda: len(steps.runs) == 2)
+
+    await runs.runs.stop()
+    assert runs.runs.panel == shown("cancelled", "pending")
 
 
 async def test_cancelling_a_run_while_it_sets_up_leaves_its_steps_pending() -> None:

@@ -140,7 +140,7 @@ class TaskListPane(Protocol):
 class StepsPane(Protocol):
     """The verification steps, as the router shows them."""
 
-    def show(self, steps: Sequence[StepState], title: str = "") -> None: ...
+    def show(self, steps: Sequence[StepState], title: str = "", output: str = "") -> None: ...
 
 
 class UsagePane(Protocol):
@@ -384,7 +384,7 @@ class EventRouter:
             self.set_busy(lane, busy)
         self._show_tasks(snapshot.tasks)
         self._show_merge_holds(snapshot.merge_holds, snapshot.waiting_to_merge)
-        panes.verification.show(snapshot.steps, snapshot.steps_title)
+        panes.verification.show(snapshot.steps, snapshot.steps_title, snapshot.steps_output)
         panes.agents.show_review(snapshot.review)
         handlers.proposals.follow(snapshot.proposals)
         handlers.approvals.follow(snapshot.approvals)
@@ -493,7 +493,7 @@ class EventRouter:
         """Show the verification steps' progress, whether review is paused, proposed steps, usage
         limits, a clone's progress or a session's state, which the pickers show."""
         if isinstance(event, VerificationChanged):
-            self._panes.verification.show(event.steps, event.title)
+            self._panes.verification.show(event.steps, event.title, event.output)
         elif isinstance(event, ReviewStatus):
             self._panes.agents.show_review(event)
         elif isinstance(event, ChecksProposed):

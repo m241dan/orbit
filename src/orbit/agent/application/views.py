@@ -84,6 +84,7 @@ class SessionParts(TypedDict):
     tasks: tuple[TaskState, ...]
     steps: tuple[StepState, ...]
     steps_title: NotRequired[str]
+    steps_output: NotRequired[str]
     review: ReviewStatus | None
     proposals: tuple[ChecksProposed, ...]
     agents: tuple[RunningAgent, ...]

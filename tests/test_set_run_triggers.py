@@ -244,6 +244,26 @@ async def test_the_snapshot_shows_a_sets_run_until_a_task_takes_the_panel_over()
     assert (ended.steps_title, ended.agents) == ("slow", ())
 
 
+async def test_the_snapshot_carries_a_failing_sets_output_as_its_panel_does() -> None:
+    async def survived(step: VerificationStep, root: str) -> tuple[bool, str]:
+        return step != MUTATION, "3 mutants survived"
+
+    session, _, _ = session_for(verification=with_slow(survived), tree=FakeTree())
+    running_sets(session)
+    events = await events_until(session, agent_exited("set-slow"))
+    shown = await snapshot_of(session)
+    await session.close()
+
+    failed = (StepState(name="Mutation tests", status="failed"),)
+    live = [event for event in events if isinstance(event, VerificationChanged)][-1]
+    assert (live.steps, live.title, live.output) == (failed, "slow", "3 mutants survived")
+    assert (shown.steps, shown.steps_title, shown.steps_output) == (
+        failed,
+        "slow",
+        "3 mutants survived",
+    )
+
+
 async def test_a_set_fired_while_halted_runs_once_resumed() -> None:
     steps = Steps(True)
     session, _, _ = session_for(verification=with_slow(steps), tree=FakeTree(), store=FakeStore())

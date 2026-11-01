@@ -130,11 +130,14 @@ class VerificationChanged(_Message):
 
     Not sent when no steps are configured. ``title`` names what the steps are checking when
     it isn't the current task, such as the startup check; the panel shows it as a heading.
+    ``output`` is the failing step's output, trimmed, when they're a named set's and its run
+    failed; empty otherwise.
     """
 
     type: Literal["verification_changed"] = "verification_changed"
     steps: tuple[StepState, ...]
     title: str = ""
+    output: str = ""
 
 
 class StartupChecked(_Message):
@@ -456,8 +459,9 @@ class Snapshot(_Message):
     It holds the ``session``'s summary, its ``settings`` (the planner's), each conversational role's
     settings by role (``role_settings``, the planner's among them) and the planner's
     ``model_choices``, with the id each resolves to (``model_ids``, by alias), whether each lane
-    is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they show
-    under, the ``review`` status (none when reviews are off), the checks ``proposals``
+    is ``busy``, its ``tasks``, the verification ``steps``, the ``steps_title`` they show
+    under and the ``steps_output`` of a named set's failed run, as ``VerificationChanged`` has
+    them, the ``review`` status (none when reviews are off), the checks ``proposals``
     waiting for a decision, the ``agents`` running, the consultations held for ``approvals``, the
     ``transcript``: the session's last logged
     events, at most 500, oldest first, in the envelopes they were sent in, and, while the session is
@@ -483,6 +487,7 @@ class Snapshot(_Message):
     tasks: tuple[TaskState, ...]
     steps: tuple[StepState, ...]
     steps_title: str = ""
+    steps_output: str = ""
     review: ReviewStatus | None
     proposals: tuple[ChecksProposed, ...]
     agents: tuple[RunningAgent, ...]

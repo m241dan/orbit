@@ -24,6 +24,7 @@ from orbit.protocol import (
     ProposedStep,
     RunningAgent,
     SessionSummary,
+    StepState,
     TaskStarted,
     ToolCallFinished,
     ToolCallStarted,
@@ -100,6 +101,14 @@ async def test_a_snapshot_shows_its_tasks_busy_planner_agents_and_steps() -> Non
     assert shell.agents_view.review == "review: paused"
     assert (shell.steps.steps, shell.steps.title) == (SNAPSHOT.steps, "Startup check")
     assert shell.window.title == "Conversation — auth rework"
+
+
+async def test_a_snapshot_shows_a_failed_sets_output_under_its_title() -> None:
+    shell = Shell()
+    failed = (StepState(name="Mutation tests", status="failed"),)
+    update = {"steps": failed, "steps_title": "mutation", "steps_output": "3 mutants survived"}
+    await shell.feed(SNAPSHOT.model_copy(update=update))
+    assert shell.steps_view.texts[-1] == "mutation\n❌ Mutation tests\n3 mutants survived"
 
 
 async def test_a_read_only_snapshot_marks_the_prompt_until_one_that_isnt() -> None:

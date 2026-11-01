@@ -9,8 +9,9 @@ the base's latest commit as it starts once that run ends; firings meanwhile fold
 the startup check, a halt cancels the runs, and the runs queued with them, and a firing while
 halted runs once the halt lifts.
 
-A run that passes adds nothing more; one of a reporting set that fails adds a notice, as
-:func:`~orbit.agent.domain.verification.set_failed_note` words it, and keeps its failure. How a
+A run that passes adds nothing more; one that fails shows the failing step's output, trimmed,
+in the panel until the set's next run starts, and keeps its failure; one of a reporting set
+adds a notice too, as :func:`~orbit.agent.domain.verification.set_failed_note` words it. How a
 run of a set that holds merges came out, on which commit, is told to the site's ``heard``, which
 holds merges while it fails. Each run is traced in an ``orbit.check_set`` span, as
 :class:`SetTracing` says.
@@ -28,7 +29,12 @@ from orbit.agent.application.snapshots import snapshot_of
 from orbit.agent.application.startup_check import ROLE
 from orbit.agent.application.verifier import Failure, first_failure, record_result
 from orbit.agent.domain.checks import setup_step
-from orbit.agent.domain.verification import CheckSet, StepProgress, set_failed_note
+from orbit.agent.domain.verification import (
+    CheckSet,
+    StepProgress,
+    set_failed_note,
+    trim_output,
+)
 from orbit.protocol import (
     GIT_FAILED,
     STARTUP_TASK,
@@ -107,6 +113,7 @@ class SetRun:
         self._background = Background(f"{check_set.name} set", site.publish)
         self._background.ended = self.start_due
         self._trigger = ""  # The trigger that fired the run due or going, by name.
+        self._output = ""  # The failing step's output, trimmed, once the run going failed.
         self.failure: Failure | None = None
 
     @property
@@ -127,8 +134,11 @@ class SetRun:
 
     @property
     def panel(self) -> VerificationChanged:
-        """What it shows in the verification panel: its steps' progress, under its name."""
-        return VerificationChanged(steps=self._progress.steps, title=self._set.name)
+        """What it shows in the verification panel: its steps' progress, under its name, with
+        the failing step's output once a run failed."""
+        return VerificationChanged(
+            steps=self._progress.steps, title=self._set.name, output=self._output
+        )
 
     def fire(self, trigger: str) -> None:
         """Run the set, as the trigger named ``trigger`` fired: now, unless a run is going or
@@ -166,7 +176,7 @@ class SetRun:
                 AgentStarted(agent_id=self.agent_id, role=ROLE, task_id=STARTUP_TASK)
             )
             self._announced = True
-            self._progress = self._progress.reset()
+            self._progress, self._output = self._progress.reset(), ""
             await self._show()
             reason: AgentExitReason = "killed"
             try:
@@ -212,11 +222,15 @@ class SetRun:
         return await first_failure(self._set.steps, runner, root, self._set_step)
 
     async def _report(self, result: SetResult) -> None:
-        """Keep how the run came out, as ``result`` says, and tell of it: a reporting set's
-        failure in a notice, a holding set's outcome to the site's ``heard``; then record it on
-        the run's span."""
+        """Keep how the run came out, as ``result`` says, and tell of it: a failure's output in
+        the panel, a reporting set's failure in a notice, a holding set's outcome to the site's
+        ``heard``; then record it on the run's span."""
         failure = result.failure
         self.failure = failure
+        if failure is not None:
+            _, output = failure
+            self._output = trim_output(output)
+            await self._show()
         if self._set.effect == "holds_merges":
             await self._site.heard(result)
         elif failure is not None:

@@ -73,6 +73,17 @@ def test_the_startup_check_shows_under_its_heading_until_a_task_takes_over() -> 
     assert steps.steps.title == ""
 
 
+def test_a_failed_sets_output_shows_its_tail_under_its_title() -> None:
+    steps = Steps()
+    output = "\n".join(f"line {n}" for n in range(1, 13))
+    steps.steps.show(report("failed", "skipped"), "mutation", output)
+    tail = "\n".join(f"line {n}" for n in range(3, 13))
+    assert steps.shown == f"mutation\n❌ Unit tests\n⏩ Lint\n{tail}"
+    # The next report without output, such as its next run's, drops it.
+    steps.steps.show(report("pending", "pending"), "mutation")
+    assert steps.shown == "mutation\n⏳ Unit tests\n⏳ Lint"
+
+
 def test_the_steps_are_redrawn_only_when_their_text_changes() -> None:
     steps = Steps(now=100.0)
     steps.steps.show(report("passed", "passed"))

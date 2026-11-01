@@ -7,12 +7,14 @@ from typing import Protocol
 from rich.text import Text
 
 from orbit.protocol import StepState, UsageChanged, UsageLimit
-from orbit.tui.view.common import STEP_ICONS, spinner_frame
+from orbit.tui.view.common import STEP_ICONS, spinner_frame, text_lines
 from orbit.tui.view.rules import duration_text
 
 # The verification panel
 
 NO_STEPS_TEXT = "No verification steps"
+OUTPUT_TAIL_LINES = 10
+"""How many of a failed set's output's last lines the panel shows."""
 
 
 def step_lines(steps: Sequence[StepState], frame: str, elapsed: int, title: str = "") -> list[str]:
@@ -25,6 +27,11 @@ def step_lines(steps: Sequence[StepState], frame: str, elapsed: int, title: str 
         else f"{STEP_ICONS[s.status]} {s.name}"
         for s in steps
     ]
+
+
+def output_tail(output: str) -> list[str]:
+    """The last lines of a failed set's ``output``, as the panel shows them under its steps."""
+    return text_lines(output)[-OUTPUT_TAIL_LINES:]
 
 
 class StepsView(Protocol):
@@ -53,15 +60,17 @@ class VerificationSteps:
         self._clock = clock
         self.steps: tuple[StepState, ...] = ()
         self.title = ""  # What the steps check, when it isn't the current task.
+        self.output = ""  # The failing step's output, when a named set's run failed.
         # The running step and when it started, by ``clock``.
         self._running_step: int | None = None
         self._since = 0.0
         self._text = NO_STEPS_TEXT  # What the panel shows now.
         self._height: int | None = None  # Its rows when last drawn, if its width was known.
 
-    def show(self, steps: Sequence[StepState], title: str = "") -> None:
-        """Show ``steps`` under ``title``, if there is one, ticking while one runs."""
-        self.steps, self.title = tuple(steps), title
+    def show(self, steps: Sequence[StepState], title: str = "", output: str = "") -> None:
+        """Show ``steps`` under ``title``, if there is one, with the tail of a failed set's
+        ``output`` after them, ticking while one runs."""
+        self.steps, self.title, self.output = tuple(steps), title, output
         running = next((i for i, s in enumerate(self.steps) if s.status == "running"), None)
         if running is not None and running != self._running_step:
             self._since = self._clock()
@@ -72,7 +81,8 @@ class VerificationSteps:
     def tick(self) -> None:
         """Redraw the steps, if they or the spinner's frame changed since the last time."""
         now = self._clock()
-        lines = step_lines(self.steps, spinner_frame(now), int(now - self._since), self.title)
+        steps = step_lines(self.steps, spinner_frame(now), int(now - self._since), self.title)
+        lines = steps + output_tail(self.output)
         text = "\n".join(lines) or NO_STEPS_TEXT
         if text != self._text:
             # Spinner frames keep every line's length, so only a change in the wrapped

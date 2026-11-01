@@ -125,7 +125,11 @@ with `invalid`. The first `Attach` is answered in this order:
    `UpdateSettings` under [Tasks, settings and stopping work](#tasks-settings-and-stopping-work)), busy lanes (a flag for each lane the Catalog lists, by
    name: the work lane, the conversational roles', a disabled planner's only while an enabled
    conversational role shares it, and every other lane of the enabled task roles), tasks,
-   verification steps, review status, checks proposals waiting for a decision, running
+   verification steps (`steps`, under `steps_title` when they aren't the current task's, such
+   as the startup check's or a named set's run, as `VerificationChanged` has them live, and
+   `steps_output`: while a named set's failed run has the panel, the failing step's output,
+   trimmed, as `VerificationChanged`'s `output` carries it; empty otherwise, and for an older
+   peer), review status, checks proposals waiting for a decision, running
    agents, the consultations held for approval (`approvals`) and its `transcript`: the session's last 500 logged events, oldest first, in the
    envelopes they were sent in, their `seq`s included (none without a store), and, while the
    session is halted because a write to the store failed, its `storage_halt`: the explanation

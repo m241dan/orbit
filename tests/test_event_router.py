@@ -217,6 +217,6 @@ def test_reports_reach_the_reports_list() -> None:
 
 def test_verification_steps_reach_their_panel_with_what_they_check() -> None:
     steps = (StepState(name="Lint", status="running"),)
-    calls = calls_of(VerificationChanged(steps=steps, title="Startup check"))
+    calls = calls_of(VerificationChanged(steps=steps, title="mutation", output="3 survived"))
 
-    calls.verification.show.assert_called_once_with(steps, "Startup check")
+    calls.verification.show.assert_called_once_with(steps, "mutation", "3 survived")

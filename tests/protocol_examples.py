@@ -271,6 +271,7 @@ EVENTS: tuple[EventEnvelope, ...] = (
     event(TasksChanged(tasks=(TASK,))),
     event(TaskStarted(task_id="t1")),
     event(VerificationChanged(steps=(STEP,), title="Startup check")),
+    event(VerificationChanged(steps=(STEP,), title="mutation", output="3 mutants survived")),
     event(StartupChecked(passed=False, step="Unit tests", output="1 failed")),
     event(VerificationStarted(task_id="t1", step=2)),
     event(VerificationSkipped(task_id="t1", reason="no_changes")),
@@ -364,7 +365,8 @@ EVENTS: tuple[EventEnvelope, ...] = (
             role_settings={PLANNER: SETTINGS, "architect": Settings(effort="max")},
             tasks=(TASK,),
             steps=(STEP,),
-            steps_title="Task t1",
+            steps_title="mutation",
+            steps_output="3 mutants survived",
             review=REVIEW,
             proposals=(PROPOSAL,),
             agents=(
