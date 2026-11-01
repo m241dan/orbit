@@ -29,7 +29,7 @@ from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
 from orbit.agent.domain.reviews import ReviewJob
 from orbit.agent.domain.roles import PLAIN_NAME
 from orbit.agent.domain.verification import VerificationStep
-from orbit.protocol import REVIEW_ORIGINS, TaskState
+from orbit.protocol import REVIEW_ORIGINS, REVIEWER, TaskState
 
 EventName = Literal[
     "session_started",
@@ -291,23 +291,29 @@ def check_triggers(triggers: Mapping[str, Trigger], roles: Collection[str]) -> N
     disabled one is), neither a role nor ``checks``, or both, a role without a prompt or
     ``checks`` with one, a ``when`` field or a template variable its event doesn't give, a
     ``when`` value its field never takes, a role not among ``roles`` or a value
-    :data:`WHEN_VALUES` doesn't give, ``every`` on another event than ``commits``, and
-    ``manual`` without a ``label``."""
+    :data:`WHEN_VALUES` doesn't give, ``review-rounds`` on a trigger that isn't a
+    ``reviewer``'s on ``task_landed`` or on an enabled one after the first, ``every`` on
+    another event than ``commits``, and ``manual`` without a ``label``."""
+    owner = _review_rounds_owner(triggers)
     problems = [
         f"triggers.{name}.{field}: {why}"
         for name, trigger in triggers.items()
-        for field, why in _problems(trigger, roles)
+        for field, why in _problems(name, trigger, roles, owner)
     ]
     if problems:
         raise ConfigError("\n".join(problems))
 
 
-def _problems(trigger: Trigger, roles: Collection[str]) -> list[tuple[str, str]]:
-    """Each problem of ``trigger``, by the field it's in, as :func:`check_triggers` finds them."""
+def _problems(
+    name: str, trigger: Trigger, roles: Collection[str], owner: str | None
+) -> list[tuple[str, str]]:
+    """Each problem of ``trigger``, named ``name``, by the field it's in, as
+    :func:`check_triggers` finds them, with ``owner`` the trigger ``review-rounds`` may guard."""
     return [
         *_target_problems(trigger, roles),
         *_prompt_problems(trigger),
         *_when_problems(trigger, roles),
+        *_guard_problems(name, trigger, owner),
         *_every_problems(trigger),
         *_label_problems(trigger),
     ]
@@ -384,6 +390,40 @@ def _not_values(field: str, values: Sequence[str], known: Sequence[str]) -> list
         f"{value} isn't a value of {field}; its values are {', '.join(known)}."
         for value in values
         if value not in known
+    ]
+
+
+def _review_rounds_owner(triggers: Mapping[str, Trigger]) -> str | None:
+    """The name of the first enabled one of ``triggers`` that ``review-rounds`` guards, if any:
+    the only one it may guard, since every trigger it guards would fire on the same review."""
+    return next(
+        (
+            name
+            for name, trigger in triggers.items()
+            if trigger.enabled and REVIEW_ROUNDS in trigger.guards
+        ),
+        None,
+    )
+
+
+def _guard_problems(name: str, trigger: Trigger, owner: str | None) -> list[tuple[str, str]]:
+    """Why ``review-rounds`` can't guard ``trigger``, named ``name``, if it does: the review lane
+    books its task as the review it finds due, so it must queue a ``reviewer``'s task on
+    ``task_landed``, the only event a review falls due on, and be ``owner``, the trigger it may
+    guard, if it's enabled (decision 12)."""
+    if REVIEW_ROUNDS not in trigger.guards:
+        return []
+    return [
+        ("guards", why)
+        for why, misused in (
+            (f'{REVIEW_ROUNDS} needs on = "{TASK_LANDED}".', trigger.on != TASK_LANDED),
+            (f'{REVIEW_ROUNDS} needs role = "{REVIEWER}".', trigger.role != REVIEWER),
+            (
+                f"{REVIEW_ROUNDS} guards only one enabled trigger, and {owner} already has it.",
+                trigger.enabled and owner != name,
+            ),
+        )
+        if misused
     ]
 
 

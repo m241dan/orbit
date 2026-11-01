@@ -325,6 +325,72 @@ def test_every_problem_of_every_trigger_is_named_on_a_line_of_its_own() -> None:
     ]
 
 
+# review-rounds, which only a reviewer's trigger on task_landed takes, and only one
+
+
+@pytest.mark.parametrize(
+    ("fields", "problem"),
+    [
+        (
+            {"on": "task_finished", "role": "reviewer", "prompt": "Go"},
+            'triggers.x.guards: review-rounds needs on = "task_landed".',
+        ),
+        (
+            {"on": "task_landed", "role": "coder", "prompt": "Go"},
+            'triggers.x.guards: review-rounds needs role = "reviewer".',
+        ),
+        (
+            {"on": "task_landed", "checks": "gate"},
+            'triggers.x.guards: review-rounds needs role = "reviewer".',
+        ),
+        (
+            {"on": "task_finished", "role": "reviewer", "prompt": "Go", "enabled": False},
+            'triggers.x.guards: review-rounds needs on = "task_landed".',
+        ),
+    ],
+)
+def test_review_rounds_off_a_reviewers_landing_is_refused(
+    fields: dict[str, Any], problem: str
+) -> None:
+    assert problems(guards=("review-rounds",), **fields) == problem
+
+
+def test_review_rounds_off_both_is_refused_on_a_line_for_each_after_the_when() -> None:
+    message = problems(
+        on="task_finished",
+        role="coder",
+        prompt="Go",
+        when={"step": "Lint"},
+        guards=("review-rounds",),
+        every=2,
+    )
+    assert message.splitlines() == [
+        "triggers.x.when: step isn't a field of task_finished; its fields are role, origin,"
+        " status.",
+        'triggers.x.guards: review-rounds needs on = "task_landed".',
+        'triggers.x.guards: review-rounds needs role = "reviewer".',
+        'triggers.x.every: every = 2 needs on = "commits".',
+    ]
+
+
+def test_review_rounds_on_a_second_enabled_trigger_is_refused_naming_the_first() -> None:
+    triggers = {"review": REVIEW, "check": CHECK, "again": REVIEW, "more": REVIEW}
+    with pytest.raises(ConfigError) as raised:
+        check_triggers(triggers, ROLES)
+    assert str(raised.value).splitlines() == [
+        "triggers.again.guards: review-rounds guards only one enabled trigger, and review"
+        " already has it.",
+        "triggers.more.guards: review-rounds guards only one enabled trigger, and review"
+        " already has it.",
+    ]
+
+
+def test_review_rounds_on_a_disabled_trigger_doesnt_count_as_a_second() -> None:
+    disabled = REVIEW.model_copy(update={"enabled": False})
+    check_triggers({"review": disabled, "mine": REVIEW}, ROLES)
+    check_triggers({"review": REVIEW, "spare": disabled}, ROLES)
+
+
 # Merging the package's triggers with the project's
 
 

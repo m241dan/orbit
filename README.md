@@ -1715,7 +1715,9 @@ The guards:
   reviews (see [Reviews](#reviews)): the commit that landed, if it's from your task or the
   planner's, or a batch's commits once its last task has finished, landed or not, which fires the
   triggers it guards with no task causing it; it holds the trigger back otherwise, as while review
-  is paused. Its task gets the skills of the tasks it reviews.
+  is paused. Its task gets the skills of the tasks it reviews, and is booked as that review, so
+  it guards only a `reviewer`'s trigger on `task_landed`, and only one enabled trigger: the
+  shipped `review`, unless you disable it and guard your own.
 - `not-queued`: holds the trigger back while a task of its role is still to run or running.
 - `dedupe`: holds the trigger back while a task still to run or running has the first line its
   task would have.
@@ -1766,13 +1768,16 @@ the field and the value, for an unknown event, role, guard or `when` field
 variable its event doesn't give (`triggers.tidy-up.prompt: {diff} isn't a variable of
 task_finished; its variables are {trigger}.`), `every` without `on = "commits"`, `manual = true`
 without a `label`, neither a role nor `checks` or both, a role without a prompt, or `checks` with
-one. So is a `when` value its field never takes, alone or in a list: a `role` that isn't one (a
-disabled one is), or a `verification` other than `configured`, `missing` or `off`
-(`triggers.tidy-up.when: missng isn't a value of verification; its values are configured,
-missing, off.`), while `origin`, `status` and `step` take any value. A trigger whose role is
-disabled loads, and never fires. When git can't show the diff of what landed, the triggers on the
-landing are skipped with an error (`Review skipped: …` when a review was due,
-`Triggers skipped: …` otherwise), and the run goes on. The reference config shows each shipped
+one. So is `review-rounds` on a trigger that isn't on `task_landed` or whose role isn't
+`reviewer` (`triggers.tidy-up.guards: review-rounds needs role = "reviewer".`), or on an enabled
+trigger after the first it guards (`triggers.tidy-up.guards: review-rounds guards only one
+enabled trigger, and review already has it.`), and a `when` value its field never takes, alone
+or in a list: a `role` that isn't one (a disabled one is), or a `verification` other than
+`configured`, `missing` or `off` (`triggers.tidy-up.when: missng isn't a value of verification;
+its values are configured, missing, off.`), while `origin`, `status` and `step` take any value.
+A trigger whose role is disabled loads, and never fires. When git can't show the diff of what
+landed, the triggers on the landing are skipped with an error (`Review skipped: …` when a review
+was due, `Triggers skipped: …` otherwise), and the run goes on. The reference config shows each shipped
 trigger's table commented out after the roles, every field under its description, and
 `orbit config show triggers.review` lists one trigger's fields with their layers (see
 [Seeing the configuration in effect](#seeing-the-configuration-in-effect)).

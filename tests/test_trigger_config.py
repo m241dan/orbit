@@ -28,6 +28,12 @@ SHIPPED = read_built_in_triggers()
 PATH = "/src/app/.orbit/config.toml"
 PROJECT = Layer("project", PATH)
 NIGHTLY = {"on": "task_finished", "role": "coder", "prompt": "Tidy up"}
+REVIEWS = {
+    "on": "task_landed",
+    "role": "reviewer",
+    "prompt": "Review it.",
+    "guards": ["review-rounds"],
+}
 
 
 def layered(data: dict[str, Any]) -> LayeredConfig:
@@ -183,8 +189,53 @@ def test_an_override_that_breaks_a_shipped_trigger_is_refused() -> None:
         "triggers.review.prompt: {landed_since} isn't a variable of task_finished; its variables"
         " are {trigger}.\n"
         "triggers.review.prompt: {diff} isn't a variable of task_finished; its variables are"
-        " {trigger}."
+        " {trigger}.\n"
+        'triggers.review.guards: review-rounds needs on = "task_landed".'
     )
+
+
+@pytest.mark.parametrize(
+    ("change", "problem"),
+    [
+        ({"on": "task_finished"}, 'triggers.mine.guards: review-rounds needs on = "task_landed".'),
+        ({"role": "coder"}, 'triggers.mine.guards: review-rounds needs role = "reviewer".'),
+    ],
+)
+def test_review_rounds_off_a_reviewers_landing_is_refused(
+    change: dict[str, Any], problem: str
+) -> None:
+    assert refusal({"review": {"enabled": False}, "mine": REVIEWS | change}) == problem
+
+
+def test_review_rounds_on_a_coders_landing_beside_the_review_is_refused_for_both() -> None:
+    tidy = NIGHTLY | {"on": "task_landed", "guards": ["review-rounds"]}
+    assert refusal({"tidy": tidy}).splitlines() == [
+        'triggers.tidy.guards: review-rounds needs role = "reviewer".',
+        "triggers.tidy.guards: review-rounds guards only one enabled trigger, and review already"
+        " has it.",
+    ]
+
+
+def test_a_second_review_rounds_trigger_beside_the_review_is_refused() -> None:
+    assert refusal({"second": REVIEWS}) == (
+        "triggers.second.guards: review-rounds guards only one enabled trigger, and review"
+        " already has it."
+    )
+
+
+def test_review_rounds_moves_to_a_trigger_of_your_own_with_the_review_disabled() -> None:
+    config = loaded({"triggers": {"review": {"enabled": False}, "mine": REVIEWS}})
+    assert config.triggers["mine"].guards == ("review-rounds",)
+
+
+def test_a_disabled_second_review_rounds_trigger_loads() -> None:
+    config = loaded({"triggers": {"spare": REVIEWS | {"enabled": False}}})
+    assert not config.triggers["spare"].enabled
+
+
+def test_the_review_for_a_disabled_reviewer_still_loads() -> None:
+    config = loaded({"roles": {"reviewer": {"enabled": False}}})
+    assert config.triggers["review"] == SHIPPED["review"]
 
 
 def test_a_triggers_table_that_isnt_one_is_refused() -> None:
