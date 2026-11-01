@@ -1,8 +1,10 @@
 """``cpp``'s include checker, ``scripts/check_includes.py``: each C and C++ file's includes against
 the prefixes ``include-rules.toml`` allows its directory, run on temporary trees."""
 
+import re
 import subprocess
 import sys
+import textwrap
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import cast
@@ -16,6 +18,18 @@ SCRIPT = Path(str(SKILL_DIRECTORY / "cpp" / "scripts" / "check_includes.py"))
 
 RULES = '[rules]\n"src/domain" = ["proj/domain"]\n"src" = ["proj"]\n'
 """Rules letting ``src/domain`` include ``proj/domain`` and the rest of ``src`` include ``proj``."""
+
+BUILD_GUIDE = Path(str(SKILL_DIRECTORY / "cpp" / "build.md"))
+"""``cpp``'s build guide, whose toml fence is the example include-rules.toml."""
+
+LIBRARY = {
+    "src/domain/rules.cpp": "#include <vector>\n#include <myproj/domain/rules.hpp>\n",
+    "include/myproj/domain/rules.hpp": "#pragma once\n#include <vector>\n",
+    "include/myproj/application/serve.hpp": "#include <myproj/domain/rules.hpp>\n",
+    "apps/main.cpp": "#include <asio/io_context.hpp>\n#include <myproj/application/serve.hpp>\n",
+    "tests/rules_test.cpp": "#include <catch2/catch_all.hpp>\n#include <myproj/domain/rules.hpp>\n",
+}
+"""A library laid out as ``cpp``'s SKILL.md says, public headers in ``include/myproj/``."""
 
 type Main = Callable[[Sequence[str]], int]
 """The checker's ``main``: the exit status for its command line."""
@@ -43,6 +57,13 @@ def make_tree(root: Path, files: Mapping[str, str], rules: str | None = RULES) -
         (root / path).parent.mkdir(parents=True, exist_ok=True)
         (root / path).write_text(text, encoding="utf-8")
     return root
+
+
+def read_example_rules() -> str:
+    """The example include-rules.toml in ``build.md``'s toml fence."""
+    fence = re.search(r"^( *)```toml\n(.*?)^\1```$", BUILD_GUIDE.read_text("utf-8"), re.M | re.S)
+    assert fence is not None
+    return textwrap.dedent(fence.group(2))
 
 
 def check(root: Path, capsys: pytest.CaptureFixture[str]) -> tuple[int, list[str]]:
@@ -253,6 +274,24 @@ def test_the_checker_runs_on_its_own_with_python(tmp_path: Path) -> None:
         check=False,
     )
     assert (ran.returncode, ran.stdout) == (1, "src/a.cpp:1: <asio.hpp> isn't allowed in src\n")
+
+
+def test_the_build_guides_example_rules_pass_a_library_laid_out_as_the_skill_says(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    make_tree(tmp_path, LIBRARY, read_example_rules())
+    assert check(tmp_path, capsys) == (0, [])
+
+
+def test_the_build_guides_example_rules_keep_a_public_header_in_its_layer(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    files = {**LIBRARY, "include/myproj/domain/rules.hpp": "#pragma once\n#include <asio.hpp>\n"}
+    make_tree(tmp_path, files, read_example_rules())
+    assert check(tmp_path, capsys) == (
+        1,
+        ["include/myproj/domain/rules.hpp:2: <asio.hpp> isn't allowed in include/myproj/domain"],
+    )
 
 
 def test_the_cpp_skill_serves_the_checker_as_a_file(tmp_path: Path) -> None:

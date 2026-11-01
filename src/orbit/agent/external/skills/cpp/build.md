@@ -27,9 +27,16 @@
   "src/execution" = ["myproj/execution"]
   "src/application" = ["myproj/application", "myproj/domain", "myproj/execution"]
   "src/external" = ["myproj", "asio", "nlohmann"]
+  "include/myproj/domain" = ["myproj/domain"]
+  "include/myproj/execution" = ["myproj/execution"]
+  "include/myproj/application" = ["myproj/application", "myproj/domain", "myproj/execution"]
+  "include/myproj/external" = ["myproj", "asio", "nlohmann"]
   "apps" = ["myproj", "asio"]
   "tests" = ["myproj", "catch2", "rapidcheck"]
   ```
+
+  A library lists the public headers of each code type, `include/<project>/<type>`, with the same
+  prefixes as the matching `src/<type>`, so they keep to their layers too.
 
   It checks each `#include "…"` and `#include <…>` in the C and C++ sources and headers under the
   root. A prefix allows the headers under it by whole path segments: `myproj/domain` allows
