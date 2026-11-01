@@ -175,7 +175,7 @@ class AgentRun:
             await self._publish(ErrorOccurred(code=NOT_CONFIGURED, message=message))
             return ended("error", error(message))
         self._root = root
-        self._agent = self._desk.open(self, task.role, self._task_id)
+        self._agent = self._desk.open(self, task.role, self._task_id, task.skills)
         try:
             await self._see_through(before)
         finally:

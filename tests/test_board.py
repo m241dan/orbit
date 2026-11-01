@@ -635,6 +635,16 @@ def test_editing_a_draft_keeps_it_a_draft_in_its_place_and_marks_it_edited() -> 
     assert (edited.proposed_by, edited.origin) == ("planner", PLANNER_ORIGIN)
 
 
+def test_editing_a_draft_keeps_the_skills_it_was_proposed_with() -> None:
+    board = TaskBoard()
+    skilled = TaskSpec(prompt="Add it", skills=("python", "application"))
+    task_id = board.add_draft(skilled, "planner")
+    board.edit_draft(task_id, TaskSpec(prompt="Add it\n\nWith a flag.", role="writer"), "planner")
+    edited = board.get(task_id).task
+    assert (edited.prompt, edited.role) == ("Add it\n\nWith a flag.", "writer")
+    assert edited.skills == ("python", "application")
+
+
 def test_accepting_or_the_user_editing_a_draft_clears_its_edited_mark() -> None:
     board = proposals()
     for task_id in ("1", "3"):

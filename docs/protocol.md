@@ -532,12 +532,12 @@ The task list is the session's, and every change to it publishes the whole list 
 `TasksChanged`, before the command's `CommandAccepted`. A command naming a task there's none of
 is refused with `unknown`: `No task with id 't9'.`
 
-- `AddTask(task)` appends `task`, a `TaskSpec` with its `prompt`, `settings` and `role`, to the
-  list as a pending task, with the next id. It's refused with `not_configured` for a disabled
-  role: `coder is disabled in this project's configuration.`, and with `invalid` for a model its
-  role's runtime doesn't take, naming the runtime's aliases: `coder's model "sonet" doesn't
-  resolve: the runtime claude takes the aliases fable, opus, sonnet, haiku or a full id starting
-  with "claude-".`
+- `AddTask(task)` appends `task`, a `TaskSpec` with its `prompt`, `settings`, `role` and
+  `skills`, to the list as a pending task, with the next id. It's refused with `not_configured`
+  for a disabled role: `coder is disabled in this project's configuration.`, and with `invalid`
+  for a model its role's runtime doesn't take, naming the runtime's aliases: `coder's model
+  "sonet" doesn't resolve: the runtime claude takes the aliases fable, opus, sonnet, haiku or a
+  full id starting with "claude-".`
 - `EditTask(task_id, task)` replaces task `task_id`'s `TaskSpec` with `task` and makes it pending
   again, its attempts and the reason it last ended cleared; an edited task in a review batch has
   to finish again before the batch does. It's refused with `not_configured` for a disabled role,
@@ -545,6 +545,10 @@ is refused with `unknown`: `No task with id 't9'.`
   `busy` while the task runs or is
   verified (`Task 't3' can't be edited while it runs.`), and with `invalid` for a review orbit
   queued itself, whose batch is spent: `Reviews can't be edited; remove it instead.`
+- A `TaskSpec`'s `skills` are the skills its agent gets beyond its role's, by name, such as
+  `["python", "application"]`: the agent is given its role's skills, then these, each once, in
+  place of the project's mapped skills, which a task with none gets. It was added to version 2;
+  a task without it names none.
 - A `TaskState`'s `proposed_by` names the conversational role that proposed a draft, such as
   `planner` or `architect`, and is `null` for every other task, a draft orbit added itself
   included. It was added to version 2; a task without it reads as `null`.

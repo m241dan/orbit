@@ -92,11 +92,14 @@ class TaskSpec(_Message):
     """One queued prompt, run in its own fresh context with its own settings.
 
     ``role`` names the kind of agent that takes it, such as ``coder`` or ``reviewer``.
+    ``skills`` are the skills its agent gets beyond its role's, by name; a task naming none gets
+    the project's mapped skills instead.
     """
 
     prompt: str = Field(min_length=1)
     settings: Settings = Settings()
     role: str = Field(default=CODER, min_length=1)
+    skills: tuple[str, ...] = ()
 
 
 class Usage(_Message):

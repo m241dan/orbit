@@ -1,7 +1,7 @@
 """Skills delivered in agents' instructions: an agent, a task's or a planner turn's, on any
 runtime, is launched with its role's instructions and then the skills it was given, its role's and
-the project's mapped ones, and its process's span records those skills and the files of them it
-read."""
+its task's, or the project's mapped ones for a task naming none and a planner turn, and its
+process's span records those skills and the files of them it read."""
 
 import asyncio
 from collections.abc import Mapping
@@ -24,6 +24,7 @@ from orbit.protocol import (
     ConversationReset,
     Event,
     ResetConversation,
+    TaskSpec,
     TurnEndReason,
 )
 from tests.agent_fakes import (
@@ -54,7 +55,11 @@ def skill(name: str) -> Skill:
     return Skill(name=name, description=f"{name}.", body=f"Be {name}.\n", files=files)
 
 
-LIBRARY = SkillLibrary(skills={name: skill(name) for name in ("code-style", "python", "security")})
+LIBRARY = SkillLibrary(
+    skills={
+        name: skill(name) for name in ("application", "code-style", "layers", "python", "security")
+    }
+)
 """The skills a session's agents can be given."""
 
 CODE = (SkillMapping(paths=("src", "tests"), use=("python", "code-style")),)
@@ -76,14 +81,23 @@ CODER_SKILLS = (
 """What a coder, with its built-in skills, is given under :data:`CODE`."""
 
 
-async def coder_launch(*scripts: Script, **options: Any) -> AgentLaunch:
-    """How a coder playing ``scripts``, or :func:`claims_done`, is launched in a session given
-    ``options``, such as ``skill_library``."""
+async def coder_launch(
+    *scripts: Script, task: TaskSpec | None = None, **options: Any
+) -> AgentLaunch:
+    """How a coder playing ``scripts``, or :func:`claims_done`, is launched for ``task``, or a
+    task naming no skills, in a session given ``options``, such as ``skill_library``."""
     session, _, launcher = session_for(*(scripts or (claims_done,)), **options)
-    await asyncio.wait_for(run(session), 5)
+    await asyncio.wait_for(run(session, *(() if task is None else (task,))), 5)
     await session.close()
     [launch] = launcher.launches
     return launch
+
+
+CHOSEN = TaskSpec(prompt="Add a flag.", skills=("python", "application"))
+"""A coder's task naming the skills ``python`` and ``application``."""
+
+MAPPED = (SkillMapping(paths=("src", "tests"), use=("python", "layers", "code-style")),)
+"""A project mapping its ``src`` and ``tests`` to ``python``, ``layers`` and ``code-style``."""
 
 
 async def test_a_coder_is_launched_with_its_instructions_then_its_skills() -> None:
@@ -104,6 +118,28 @@ async def test_both_runtimes_tell_an_agent_its_skills_after_orbits_rules() -> No
     assert argv[argv.index("--append-system-prompt") + 1] == f"{claude_cli.AGENT_RULES}{told}"
     config = kiro_agent_config(kiro_cli.AGENT_RULES, launch)
     assert config["prompt"] == f"{kiro_cli.AGENT_RULES}{told}"
+
+
+async def test_a_task_naming_skills_gets_its_roles_then_its_own_without_the_mapped_ones() -> None:
+    launch = await coder_launch(task=CHOSEN, skill_library=LIBRARY, skill_mappings=MAPPED)
+    assert launch.instructions == (
+        f"You are orbit's coder.\n\n## Skills\n\n{READING}\n\n"
+        "### code-style\n\nBe code-style.\n\n"
+        "### security\n\nBe security.\n\n"
+        "### python\n\nBe python.\n\n"
+        "### application\n\nBe application."
+    )
+
+
+async def test_a_skill_both_the_role_and_the_task_name_is_delivered_once() -> None:
+    task = TaskSpec(prompt="Add a flag.", skills=("security", "python"))
+    launch = await coder_launch(task=task, skill_library=LIBRARY, skill_mappings=MAPPED)
+    assert launch.instructions == (
+        f"You are orbit's coder.\n\n## Skills\n\n{READING}\n\n"
+        "### code-style\n\nBe code-style.\n\n"
+        "### security\n\nBe security.\n\n"
+        "### python\n\nBe python."
+    )
 
 
 async def test_a_planner_turn_carries_the_planners_skills_and_the_workspaces_mapped_ones() -> None:
@@ -188,6 +224,42 @@ async def test_the_process_records_the_skills_delivered_and_each_file_read_once_
     assert attributes(process)["orbit.agent.skill_files"] == (
         "code-style/testing.md",
         "security/SKILL.md",
+    )
+
+
+async def test_a_task_naming_skills_reads_those_delivered_and_no_mapped_one_beyond() -> None:
+    replies: list[Reply] = []
+
+    async def reads_each(call: Call) -> TurnEndReason:
+        await call("get_task")
+        for name in ("code-style", "security", "python", "application", "layers"):
+            replies.append(await call("read_skill", skill=name, file="SKILL.md"))
+        await call("complete_task", summary="Read.")
+        return "completed"
+
+    await coder_launch(reads_each, task=CHOSEN, skill_library=LIBRARY, skill_mappings=MAPPED)
+    *read, refused = replies
+    assert [reply.text for reply in read] == [
+        f"{name}'s SKILL.md" for name in ("code-style", "security", "python", "application")
+    ]
+    assert refused == Reply(
+        "You weren't given the skill layers; your skills are code-style, security, python,"
+        " application.",
+        is_error=True,
+    )
+
+
+async def test_the_process_of_a_task_naming_skills_records_those_delivered() -> None:
+    traced = Traced()
+    await coder_launch(
+        task=CHOSEN, skill_library=LIBRARY, skill_mappings=MAPPED, telemetry=traced.telemetry
+    )
+    [process] = traced.spans(PROCESS_SPAN)
+    assert attributes(process)["orbit.agent.skills"] == (
+        "code-style",
+        "security",
+        "python",
+        "application",
     )
 
 

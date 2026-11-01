@@ -1612,7 +1612,8 @@ A project maps paths in it to the skills for the code there with `[[skills]]` en
 `.orbit/config.toml`, and only there: your user config refuses them, as mappings would differ by
 machine. Each entry's `paths` are files or folders in the project, relative to its root, and its
 `use` the skills that apply there, by name, orbit's or the project's own; each needs at least one.
-Every agent is given every entry's skills along with its role's:
+Every agent is given every entry's skills along with its role's, unless its task names skills of
+its own:
 
 ```toml
 [[skills]]
@@ -1637,8 +1638,11 @@ An agent is given its role's `skills`, then every `[[skills]]` entry's, each onc
 read when the workspace opened, and its instructions deliver them, on every runtime: after its
 role's instructions and a blank line comes a `## Skills` section, with a line saying how to read a
 skill's files, then each skill's `SKILL.md` below its front matter, whole, under a `### <name>`
-heading, and last a line for each `[[skills]]` entry saying where its skills apply. Under the
-entries above, the planner, whose role gives it `code-style`, is told:
+heading, and last a line for each `[[skills]]` entry saying where its skills apply. A task can
+name skills of its own, its `skills` (see
+[docs/protocol.md](docs/protocol.md#tasks-settings-and-stopping-work)): its agent is given its
+role's skills, then the task's, each once, in place of the entries', with no lines saying where
+they apply. Under the entries above, the planner, whose role gives it `code-style`, is told:
 
 ```markdown
 ## Skills

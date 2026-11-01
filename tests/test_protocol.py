@@ -247,6 +247,17 @@ def test_task_spec_defaults_to_coder_role() -> None:
     assert command_adapter.validate_json(AddTask(task=task).model_dump_json()) == AddTask(task=task)
 
 
+def test_a_task_spec_names_no_skills_unless_given_and_round_trips_with_them() -> None:
+    assert TaskSpec(prompt="x").skills == ()
+    task = TaskSpec(prompt="add a flag", skills=("python", "application"))
+    assert command_adapter.validate_json(AddTask(task=task).model_dump_json()) == AddTask(task=task)
+
+
+def test_a_task_spec_from_an_older_peer_without_skills_names_none() -> None:
+    task = TaskSpec.model_validate({"prompt": "x", "role": "coder"}, context={"wire": True})
+    assert task.skills == ()
+
+
 def test_rejects_empty_role() -> None:
     with pytest.raises(ValidationError):
         TaskSpec(prompt="x", role="")

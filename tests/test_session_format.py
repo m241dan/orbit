@@ -27,8 +27,8 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit these for a format change: they're what orbits at versions 1 to 16 wrote, and
-# they still need to read. A new version gets its own fixture (session-v17.json) and a
+# Never edit these for a format change: they're what orbits at versions 1 to 17 wrote, and
+# they still need to read. A new version gets its own fixture (session-v19.json) and a
 # migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
 SESSION_V2 = FIXTURES / "session-v2.json"
@@ -47,6 +47,7 @@ SESSION_V14 = FIXTURES / "session-v14.json"
 SESSION_V15 = FIXTURES / "session-v15.json"
 SESSION_V16 = FIXTURES / "session-v16.json"
 SESSION_V17 = FIXTURES / "session-v17.json"
+SESSION_V18 = FIXTURES / "session-v18.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -160,7 +161,7 @@ def expected(
     lane: LaneSnapshot | None = None,
 ) -> SessionRecord:
     return SessionRecord(
-        version=17,
+        version=18,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
@@ -361,14 +362,31 @@ def numbering() -> SessionRecord:
     return editing().model_copy(update={"last_consultation": 2})
 
 
-def test_a_version_17_session_file_reads_as_its_record() -> None:
+def test_a_version_17_session_file_migrates_to_tasks_naming_no_skills() -> None:
     assert parse_record(SESSION_V17.read_text(encoding="utf-8")) == numbering()
 
 
-def test_a_session_record_is_written_in_the_version_17_format() -> None:
-    written = json.loads(record_json(numbering()))
-    golden = json.loads(SESSION_V17.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V17.name)
+def skilled() -> SessionRecord:
+    """The golden record as version 18 keeps it, its first task naming its skills."""
+    states = tuple(
+        state.model_copy(
+            update={"task": state.task.model_copy(update={"skills": ("python", "application")})}
+        )
+        if state.id == "1"
+        else state
+        for state in numbering().tasks
+    )
+    return numbering().model_copy(update={"tasks": states})
+
+
+def test_a_version_18_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V18.read_text(encoding="utf-8")) == skilled()
+
+
+def test_a_session_record_is_written_in_the_version_18_format() -> None:
+    written = json.loads(record_json(skilled()))
+    golden = json.loads(SESSION_V18.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V18.name)
 
 
 def test_a_version_1_review_count_reads_as_its_count() -> None:

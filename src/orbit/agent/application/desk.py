@@ -8,7 +8,7 @@ agent's role allows, among them those the desk answers for every target (:meth:`
 
 import asyncio
 import uuid
-from collections.abc import Awaitable, Callable, Iterator, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
@@ -140,8 +140,8 @@ class Agents:
     works in a copy work in; without it, such a role's agents can't run. ``models`` are the
     models each runtime takes, by its name, which agents' models resolve through; a runtime
     without them is given models as they are. ``skill_library`` holds the skills agents can be
-    given, and ``skill_mappings`` are the project's ``[[skills]]``, whose skills every agent is
-    given along with its role's, in its instructions.
+    given, and ``skill_mappings`` are the project's ``[[skills]]``, whose skills an agent is given
+    along with its role's, in its instructions, unless its task names skills of its own.
     """
 
     host: AgentHost
@@ -249,6 +249,8 @@ class AgentDesk:
         self._starting: asyncio.Task[str] | None = None  # The host's start, shared by callers.
         # How each agent running was last launched, by its id.
         self._launches: dict[str, AgentLaunch] = {}
+        # The skills each running agent's task gives it beyond its role's, by its id.
+        self._task_skills: dict[str, tuple[str, ...]] = {}
 
     async def publish(self, event: Event) -> None:
         """Publish ``event``, noting the agents it announces as started or exited and what the
@@ -292,7 +294,8 @@ class AgentDesk:
     async def launch(self, agent: Agent, prompt: str, settings: Settings, cwd: str) -> AgentLaunch:
         """How to start ``agent`` in its role: told ``prompt``, with ``settings`` (or its role's
         effort, if they set none), their model resolved to the id its runtime is given, in
-        ``cwd``, in the session open, its instructions delivering the skills it's given.
+        ``cwd``, in the session open, its instructions delivering the skills it's given, its
+        role's and its task's.
 
         Raises :class:`~orbit.agent.domain.runtimes.UnknownModel` if their model doesn't
         resolve, as one saved before its alias was taken out of the user config doesn't.
@@ -307,7 +310,7 @@ class AgentDesk:
             prompt,
             own,
             cwd,
-            self._instructions(role),
+            self._instructions(role, self._skills_of_task(agent.id)),
             role.granted_tools,
             self._workspace_id,
             self.session(),
@@ -315,12 +318,20 @@ class AgentDesk:
         self._launches[agent.id] = launch
         return launch
 
-    def _instructions(self, role: Role) -> str:
-        """What ``role``'s agents are told: its instructions, then, after a blank line, the skills
-        they're given, if any."""
+    def _instructions(self, role: Role, task_skills: Sequence[str]) -> str:
+        """What an agent in ``role`` whose task names ``task_skills`` is told: its role's
+        instructions, then, after a blank line, the skills it's given, if any."""
         agents = self.agents
-        skills = skill_instructions(role.skills, (), agents.skill_mappings, agents.skill_library)
+        skills = skill_instructions(
+            role.skills, task_skills, agents.skill_mappings, agents.skill_library
+        )
         return f"{role.instructions}\n\n{skills}" if skills else role.instructions
+
+    def _skills_of_task(self, agent_id: str | None) -> tuple[str, ...]:
+        """The skills agent ``agent_id``'s task gives it beyond its role's; none for an agent
+        that isn't opened, a conversational one, which has no task, or one whose task names
+        none."""
+        return () if agent_id is None else self._task_skills.get(agent_id, ())
 
     def launched(self, agent_id: str | None) -> AgentLaunch | None:
         """How agent ``agent_id``, if it's running, was last launched; none before it was."""
@@ -339,10 +350,12 @@ class AgentDesk:
         """The file of one of its skills that agent ``agent_id``, in the role named ``role``, asks
         for in ``arguments``, by the skill's name and the file's path, or why it's refused,
         recording what was asked on the call's span, the current one, and a file it read on its
-        process's. The role's skills are those it has now, which a reset may have changed."""
+        process's. The role's skills are those it has now, which a reset may have changed, and
+        its task's those it was opened with."""
         skill, path = str(arguments.get("skill", "")), str(arguments.get("file", ""))
         current_span().set_attributes(skill_attributes(skill, path))
-        given = given_skills(self.agents.roles[role].skills, (), self.agents.skill_mappings)
+        role_skills, task_skills = self.agents.roles[role].skills, self._skills_of_task(agent_id)
+        given = given_skills(role_skills, task_skills, self.agents.skill_mappings)
         found = given_skill_file(given, self.agents.skill_library, skill, path)
         if isinstance(found, str):
             return Reply(found, is_error=True)
@@ -360,9 +373,13 @@ class AgentDesk:
         """Have ``role`` as the role ``name`` from now on."""
         self.agents = replace(self.agents, roles={**self.agents.roles, name: role})
 
-    def open(self, run: CallTarget, role: str, task_id: str) -> Agent:
+    def open(self, run: CallTarget, role: str, task_id: str, skills: Sequence[str] = ()) -> Agent:
+        """A new agent in the role ``role``, working on task ``task_id``, whose calls ``run``
+        answers, given the ``skills`` its task names beyond its role's, none for a conversational
+        agent."""
         agent = self.registry.register(role, task_id)
         self._runs[agent.id] = run
+        self._task_skills[agent.id] = tuple(skills)
         return agent
 
     def find(self, agent_id: str) -> Agent | None:
@@ -397,16 +414,21 @@ class AgentDesk:
         self.registry.revoke(agent.id)
         self._runs.pop(agent.id, None)
         self._launches.pop(agent.id, None)
+        self._task_skills.pop(agent.id, None)
         self._announced.discard(agent.id)
         self._spent.pop(agent.id, None)
 
     @contextmanager
     def traced(self, agent: Agent, parent: Span) -> Iterator[AgentProcess]:
-        """``agent``'s process, delivered the skills its role is given, traced over the block in
-        a span that's a child of ``parent``, as :meth:`AgentTracing.process` traces it, with the
-        agent's calls traced under it meanwhile."""
+        """``agent``'s process, delivered the skills it's given, its role's and its task's,
+        traced over the block in a span that's a child of ``parent``, as
+        :meth:`AgentTracing.process` traces it, with the agent's calls traced under it
+        meanwhile."""
         role, agents = self.agents.roles[agent.role], self.agents
-        skills = delivered_skills(role.skills, (), agents.skill_mappings, agents.skill_library)
+        task_skills = self._skills_of_task(agent.id)
+        skills = delivered_skills(
+            role.skills, task_skills, agents.skill_mappings, agents.skill_library
+        )
         with self._tracing.process(agent, role.runtime, skills, parent) as process:
             self._processes[agent.id] = process
             try:

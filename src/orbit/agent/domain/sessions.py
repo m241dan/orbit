@@ -32,7 +32,7 @@ from orbit.protocol import (
     Usage,
 )
 
-FORMAT_VERSION = 17
+FORMAT_VERSION = 18
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
@@ -65,7 +65,7 @@ def _without_rounds(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def _unchanged(record: dict[str, Any]) -> dict[str, Any]:
-    """Version 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15 or 16 ``record`` as it is: the next
+    """Version 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16 or 17 ``record`` as it is: the next
     version only added fields that have defaults."""
     return record
 
@@ -110,6 +110,7 @@ def _on_claude(record: dict[str, Any]) -> dict[str, Any]:
 # and version 15 the role that proposed each draft, which an older record's tasks read as none.
 # Version 16 added whether that role edited it, which an older record's drafts read as not,
 # and version 17 the number of the last consultation asked, which an older record asked none of.
+# Version 18 added the skills each task names, which an older record's tasks name none of.
 _MIGRATIONS: dict[int, Migration] = {
     1: _spent_by_tasks,
     2: _without_rounds,
@@ -127,6 +128,7 @@ _MIGRATIONS: dict[int, Migration] = {
     14: _unchanged,
     15: _unchanged,
     16: _unchanged,
+    17: _unchanged,
 }
 
 EMPTY_NAME = "A session needs a name."

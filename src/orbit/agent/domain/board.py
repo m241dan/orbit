@@ -245,9 +245,11 @@ class TaskBoard:
 
     def edit_draft(self, task_id: str, task: TaskSpec, role: str) -> None:
         """Replace draft ``task_id``, which ``role`` proposed, with ``task``, keeping it a draft
-        in its place, and mark it edited. Raises ``Refused`` as :meth:`draft_of` does."""
+        in its place with the skills it names, and mark it edited. Raises ``Refused`` as
+        :meth:`draft_of` does."""
         state = self.draft_of(task_id, role)
-        edited = state.model_copy(update={"task": task, "edited": True})
+        kept = task.model_copy(update={"skills": state.task.skills})
+        edited = state.model_copy(update={"task": kept, "edited": True})
         self._tasks[self.position(task_id)] = edited
 
     def remove_draft(self, task_id: str, role: str) -> None:
