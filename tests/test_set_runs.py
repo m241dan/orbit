@@ -239,6 +239,48 @@ async def test_a_set_there_is_no_run_of_runs_nothing() -> None:
     assert runs.events == []
 
 
+# Sets given anew
+
+
+async def test_a_set_given_anew_runs_when_its_trigger_fires() -> None:
+    runs = Runs(Steps(True))
+    runs.runs.use_sets((FAST,))
+    runs.runs.run("fast", "fast")
+    await runs.ended()
+    assert [start.agent_id for start in runs.starts()] == ["set-fast"]
+
+
+async def test_a_set_left_out_when_sets_are_given_anew_keeps_its_run() -> None:
+    steps = Steps(True, True)
+    runs = Runs(steps)
+    runs.runs.use_sets((FAST,))
+    runs.runs.run("slow", "slow")
+    await runs.ended()
+    assert steps.runs == ["Mutation tests", "Soak"]
+
+
+async def test_a_set_changed_while_it_runs_ends_as_it_started_and_runs_as_changed_next() -> None:
+    steps, gate = gated(True, True, False)
+    runs = Runs(steps)
+    runs.runs.run("slow", "slow")
+    await eventually(lambda: steps.runs)
+    holding = CheckSet("slow", (MUTATION,), "holds_merges")
+    runs.runs.use_sets((holding,))
+    gate.set()
+    await runs.ended()
+    assert runs.heard == [] and runs.notices() == []
+
+    runs.runs.run("slow", "nightly")
+    await runs.ended(2)
+    assert steps.runs == ["Mutation tests", "Soak", "Mutation tests"]
+    assert runs.heard == [SetResult(holding, "base", "nightly", (MUTATION, "1 test failed"))]
+    assert runs.runs.panel == VerificationChanged(
+        steps=(StepState(name=MUTATION.name, status="failed"),),
+        title="slow",
+        output="1 test failed",
+    )
+
+
 # Firing again while it runs
 
 

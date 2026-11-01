@@ -329,6 +329,10 @@ class AgentDesk:
         """Have ``role`` as the role ``name`` from now on."""
         self.agents = replace(self.agents, roles={**self.agents.roles, name: role})
 
+    def use_triggers(self, triggers: Mapping[str, Trigger]) -> None:
+        """Have ``triggers`` as the triggers, by name, in order, from now on."""
+        self.agents = replace(self.agents, triggers=triggers)
+
     def open(self, run: CallTarget, role: str, task_id: str, skills: Sequence[str] = ()) -> Agent:
         """A new agent in the role ``role``, working on task ``task_id``, whose calls ``run``
         answers, given the ``skills`` its task names beyond its role's, none for a conversational

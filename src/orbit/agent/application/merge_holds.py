@@ -79,11 +79,12 @@ class HoldParts:
 
 
 class MergeHolds:
-    """The holds of the sets ``holding`` merges, each queuing at most ``limit`` fixes,
-    acting on ``parts``. :attr:`changed` is told whenever the holds change, and
-    :attr:`released` once the last lifts. A failing read of the holds kept is reported, and a
-    failing save halts the session. Nothing is saved while it's halted, nor until a read of the
-    holds kept has worked, so holds started without them can't replace those kept."""
+    """The holds of the sets ``holding`` merges, until :meth:`use_sets` gives others, each
+    queuing at most ``limit`` fixes, acting on ``parts``. :attr:`changed` is told whenever the
+    holds change, and :attr:`released` once the last lifts. A failing read of the holds kept is
+    reported, and a failing save halts the session. Nothing is saved while it's halted, nor
+    until a read of the holds kept has worked, so holds started without them can't replace those
+    kept."""
 
     write = FailedWrite.MERGE_HOLDS
 
@@ -155,6 +156,19 @@ class MergeHolds:
         if self._holds != loaded:  # Holds dropped, lifted, or started since they were last read.
             await self._save(store)
         if not self._holds:
+            self.released()
+
+    async def use_sets(self, holding: Collection[CheckSet]) -> None:
+        """Have the sets ``holding`` merges hold them from now on: a set that comes to hold them
+        holds them as it next fails, and the hold of one that no longer does is dropped, as it
+        would never lift, telling :attr:`released` if no hold is left."""
+        self._sets = tuple(holding)
+        self._holding = frozenset(check_set.name for check_set in holding)
+        kept = tuple(hold for hold in self._holds if hold.name in self._holding)
+        if kept == self._holds:
+            return
+        await self._replace(kept)
+        if not kept:
             self.released()
 
     async def heard(self, result: SetResult) -> None:

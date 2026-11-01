@@ -921,8 +921,10 @@ setup, or a set that holds merges, the example of one stays. In the worktree the
 task's work; with `--no-worktree` the file is written in the workspace's directory and not
 committed.
 The next task is verified with the new task checks, and its worktree set up with the new setup,
-without a restart; the sets and triggers take effect once orbit opens the workspace again. Agents
-can't change their checks any other way: orbit reads the file only at startup.
+without a restart, and the sets and triggers are used as the file now reads them: a new set runs
+when its trigger fires, a set that now holds merges holds them on its next failure, the hold of one that no longer does is dropped, and the next ctrl+e
+tells the configurator about them all. Agents can't change their checks any other way: orbit
+reads the file only at startup.
 
 ### Where tasks run, and how their work lands
 

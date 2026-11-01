@@ -1401,7 +1401,7 @@ def work_lane_of(session: WorkspaceHost) -> WorkLane | None:
 
 
 def holds_of(session: WorkspaceHost) -> MergeHolds | None:
-    """The session's holds on merges, if its sets hold any."""
+    """The session's holds on merges, if its agents work in a tree with verification on."""
     return session._holds
 
 

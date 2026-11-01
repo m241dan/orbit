@@ -167,6 +167,28 @@ class ChecksProposal(VerificationConfig):
 
 _NO_TRIGGERS: Mapping[str, Trigger] = MappingProxyType({})
 
+
+def merge_proposed_sets(
+    configured: Sequence[CheckSet], proposal: ChecksProposal
+) -> tuple[CheckSet, ...]:
+    """The named sets once ``proposal`` is written over the ``configured`` ones, as the config
+    reads them then: its sets, each with its steps and what its failure does, then each of the
+    ``configured`` sets none of its steps is in, as it was."""
+    kept = (check_set for check_set in configured if check_set.name not in proposal.set_names)
+    return (*proposal.check_sets, *kept)
+
+
+def merge_proposed_triggers(
+    configured: Mapping[str, Trigger], built_in: Mapping[str, Trigger], proposal: ChecksProposal
+) -> dict[str, Trigger]:
+    """The triggers once ``proposal`` is written over the ``configured`` ones, by name, as the
+    config reads them then: each of the ``configured`` in its order, but that one of the
+    proposal's of its name takes its place, then the proposal's new ones, each merged over the
+    ``built_in`` trigger of its name, if any (see
+    :func:`~orbit.agent.domain.triggers.merge_proposed`)."""
+    return {**configured, **merge_proposed(built_in, proposal.triggers)}
+
+
 _EFFECT_PHRASES: Mapping[SetEffect, str] = {"holds_merges": "holds merges", "reports": "reports"}
 """What the failure of a set with each effect does, in words."""
 

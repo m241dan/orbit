@@ -95,10 +95,11 @@ class SetSite:
 
 
 class SetRun:
-    """Runs ``check_set``'s steps at ``site``, one run at a time, each traced with ``tracing``;
-    ``shown`` hears the set's name each time a run shows its progress in the verification
-    panel, which a run does from its start until :meth:`release_panel`. :attr:`failure` is the
-    last run's failure, with its output, if it failed."""
+    """Runs ``check_set``'s steps at ``site``, one run at a time, each traced with ``tracing``,
+    the set as it is when the run starts (see :meth:`use`); ``shown`` hears the set's name each
+    time a run shows its progress in the verification panel, which a run does from its start
+    until :meth:`release_panel`. :attr:`failure` is the last run's failure, with its output, if
+    it failed."""
 
     def __init__(
         self,
@@ -145,6 +146,11 @@ class SetRun:
             steps=self._progress.steps, title=self._set.name, output=self._output
         )
 
+    def use(self, check_set: CheckSet) -> None:
+        """Run ``check_set``, the set of the same name, from its next run on: its steps, and
+        what its failure does; the run going, if any, ends as it started."""
+        self._set = check_set
+
     def fire(self, trigger: str) -> None:
         """Run the set, as the trigger named ``trigger`` fired: now, unless a run is going or
         the session is halted; else once that run ends or the halt lifts, as the one run due,
@@ -181,25 +187,27 @@ class SetRun:
         await self._background.close()
 
     async def _run(self, trigger: str) -> None:
-        with self._tracing.run(self._set.name):
+        check_set = self._set
+        with self._tracing.run(check_set.name):
             await self._site.publish(
                 AgentStarted(agent_id=self.agent_id, role=ROLE, task_id=STARTUP_TASK)
             )
             self._announced, self._showing = True, True
-            self._progress, self._output = self._progress.reset(), ""
+            self._progress = StepProgress.of(step.name for step in check_set.steps)
+            self._output = ""
             await self._show()
             reason: AgentExitReason = "killed"
             try:
-                reason = await self._check(trigger)
+                reason = await self._check(check_set, trigger)
             finally:
                 self._announced = False
                 await self._site.publish(AgentExited(agent_id=self.agent_id, reason=reason))
 
-    async def _check(self, trigger: str) -> AgentExitReason:
-        """Run the steps in a snapshot and report how they came out, the run fired by the
-        trigger named ``trigger``; returns how the run's agent exits."""
+    async def _check(self, check_set: CheckSet, trigger: str) -> AgentExitReason:
+        """Run ``check_set``'s steps in a snapshot and report how they came out, the run fired
+        by the trigger named ``trigger``; returns how the run's agent exits."""
         try:
-            commit, failure = await self._in_snapshot()
+            commit, failure = await self._in_snapshot(check_set)
         except asyncio.CancelledError:
             await self._cancel_running()
             await self._site.publish(Notice(message=cancelled_note(self._set.name)))
@@ -209,27 +217,27 @@ class SetRun:
             current_span().error(message, exc)
             await self._site.publish(ErrorOccurred(code=GIT_FAILED, message=message))
             return "crashed"
-        await self._report(SetResult(self._set, commit, trigger, failure))
+        await self._report(SetResult(check_set, commit, trigger, failure))
         return "finished"
 
-    async def _in_snapshot(self) -> tuple[str, Failure | None]:
-        """Run the steps in a snapshot of the base's latest commit; returns that commit and the
-        first failure."""
+    async def _in_snapshot(self, check_set: CheckSet) -> tuple[str, Failure | None]:
+        """Run ``check_set``'s steps in a snapshot of the base's latest commit; returns that
+        commit and the first failure."""
         tree = self._site.tree
         commit = await tree.base_commit()
         async with snapshot_of(tree, commit, self._site.publish) as root:
-            return commit, await self._verify(root)
+            return commit, await self._verify(check_set, root)
 
-    async def _verify(self, root: str) -> Failure | None:
-        """Set up ``root`` with the tree's setup, if it has one, then run the steps there;
-        returns the first failure."""
+    async def _verify(self, check_set: CheckSet, root: str) -> Failure | None:
+        """Set up ``root`` with the tree's setup, if it has one, then run ``check_set``'s steps
+        there; returns the first failure."""
         runner = self._tracing.steps(self._site.run_step)
         setup = self._site.tree.setup
         if setup is not None:
             failure = await first_failure((setup_step(setup),), runner, root)
             if failure is not None:
                 return failure
-        return await first_failure(self._set.steps, runner, root, self._set_step)
+        return await first_failure(check_set.steps, runner, root, self._set_step)
 
     async def _report(self, result: SetResult) -> None:
         """Keep how the run came out, as ``result`` says, and tell of it: a failure's output in
@@ -241,7 +249,7 @@ class SetRun:
             _, output = failure
             self._output = trim_output(output)
             await self._show()
-        if self._set.effect == "holds_merges":
+        if result.check_set.effect == "holds_merges":
             await self._site.heard(result)
         elif failure is not None:
             await self._site.publish(Notice(message=self._failed_note(failure)))
@@ -280,16 +288,37 @@ _NO_TRACING = SetTracing()
 
 class SetRuns:
     """The runs of the named ``sets`` at ``site``, a :class:`SetRun` each, traced with
-    ``tracing``. The verification panel shows the set whose run showed its progress last, until
-    a task's verification takes it over; only a run starting after that takes it back."""
+    ``tracing``, until :meth:`use_sets` gives others. The verification panel shows the set whose
+    run showed its progress last, until a task's verification takes it over; only a run starting
+    after that takes it back."""
 
     def __init__(
         self, sets: Sequence[CheckSet], site: SetSite, tracing: SetTracing = _NO_TRACING
     ) -> None:
-        self._runs = {
-            check_set.name: SetRun(check_set, site, tracing, self._show) for check_set in sets
-        }
+        self._site = site
+        self._tracing = tracing
+        self._runs = {check_set.name: self._new_run(check_set) for check_set in sets}
         self._shown: str | None = None  # The set whose run has the panel, if one has.
+
+    def use_sets(self, sets: Sequence[CheckSet]) -> None:
+        """Run ``sets`` from now on, as triggers name them: a set run here already runs as it's
+        given from its next run on (see :meth:`SetRun.use`), and a new one gets a run of its
+        own. A set left out keeps its run, as accepted checks keep each set they have no steps
+        in."""
+        self._runs = {**self._runs, **{s.name: self._run_of(s) for s in sets}}
+
+    def _run_of(self, check_set: CheckSet) -> SetRun:
+        """The run of ``check_set``: the run of its name, running it from now on, or a new one
+        if there's none."""
+        run = self._runs.get(check_set.name)
+        if run is None:
+            return self._new_run(check_set)
+        run.use(check_set)
+        return run
+
+    def _new_run(self, check_set: CheckSet) -> SetRun:
+        """A new run of ``check_set``."""
+        return SetRun(check_set, self._site, self._tracing, self._show)
 
     def run(self, name: str, trigger: str) -> None:
         """Run the set ``name``, as the trigger named ``trigger`` fired, as :meth:`SetRun.fire`

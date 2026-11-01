@@ -128,6 +128,10 @@ class Verifier:
         await self.publish_steps()
         self.steps_changed()
 
+    def use_sets(self, sets: tuple[CheckSet, ...]) -> None:
+        """Have ``sets`` as the named sets from now on."""
+        self.verification = replace(self.verification, sets=sets)
+
     async def reset(self) -> None:
         """A task starts: report every step pending again."""
         self._progress = self._progress.reset()

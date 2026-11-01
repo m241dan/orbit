@@ -25,11 +25,16 @@ HELD = Hold("stress", "c4", "Stress tests", "2 failed", 1)
 
 
 class Holds:
-    """Holds of stress and soak over ``store``, each queuing ``limit`` fixes, recording what
-    they publish, kick, run again, change and release."""
+    """Holds of the sets ``holding`` merges, stress and soak unless given, over ``store``, each
+    queuing ``limit`` fixes, recording what they publish, kick, run again, change and
+    release."""
 
     def __init__(
-        self, store: FakeStore | None = None, roles: Mapping[str, Role] = ROLES, limit: int = 3
+        self,
+        store: FakeStore | None = None,
+        roles: Mapping[str, Role] = ROLES,
+        limit: int = 3,
+        holding: tuple[CheckSet, ...] = (STRESS, SOAK),
     ) -> None:
         self.events: list[Event] = []
         self.kicked: list[str] = []
@@ -49,7 +54,7 @@ class Holds:
             self.kicked.append,
             lambda name, trigger: self.reruns.append((name, trigger)),
         )
-        self.holds = MergeHolds((STRESS, SOAK), limit, parts)
+        self.holds = MergeHolds(holding, limit, parts)
         self.holds.changed = self.change
         self.holds.released = self.release
 
@@ -539,3 +544,42 @@ async def test_releasing_by_hand_with_no_hold_on_does_nothing() -> None:
     holds = Holds()
     await holds.holds.release()
     assert holds.events == [] and holds.releases == 0 and holds.changes == 0
+
+
+# Sets given anew
+
+
+async def test_a_set_that_comes_to_hold_merges_holds_them_as_it_next_fails() -> None:
+    holds = Holds(holding=())
+    await holds.holds.use_sets((STRESS,))
+    await failed(holds)
+    assert holds.holds.holds == (HELD,)
+
+    board = holds.tasks.board
+    board.set_status(board.tasks[0].id, "gave_up")
+    await holds.holds.hear_unlanded_fix(board.tasks[0])
+    assert len(holds.prompts()) == 2 and holds.reruns == []
+
+
+async def test_the_hold_of_a_set_that_no_longer_holds_merges_is_dropped_saved_and_told() -> None:
+    store = FakeStore()
+    holds = Holds(store)
+    await holds.holds.restore()
+    await failed(holds)
+    await failed(holds, check_set=SOAK)
+    soak = holds.holds.holds[1]
+
+    await holds.holds.use_sets((SOAK,))
+    assert holds.holds.holds == (soak,) and store.holds_saved[-1] == (soak,)
+    assert holds.releases == 1  # Only as no hold kept was read.
+
+    await holds.holds.use_sets(())
+    assert not holds.holds.held and store.holds == () and holds.releases == 2
+
+
+async def test_sets_given_anew_that_drop_no_hold_change_nothing() -> None:
+    holds = Holds()
+    await failed(holds)
+    changes = holds.changes
+    await holds.holds.use_sets((STRESS,))
+    assert holds.holds.holds == (HELD,) and holds.changes == changes and holds.releases == 0

@@ -41,18 +41,28 @@ from orbit.agent.application.tasks import Changed, Tasks, unchanged
 from orbit.agent.application.triggers import TriggerEngine
 from orbit.agent.application.verifier import Failure, Verifier
 from orbit.agent.domain.board import CUT_SHORT, TaskBoard
-from orbit.agent.domain.checks import ChecksProposal
+from orbit.agent.domain.checks import (
+    ChecksProposal,
+    merge_proposed_sets,
+    merge_proposed_triggers,
+)
 from orbit.agent.domain.commits import commit_message, configure_message
 from orbit.agent.domain.endings import (
     STOPPED_BY_YOU,
     WORK_GONE,
     gave_up,
 )
+from orbit.agent.domain.merge_holds import holding_sets
 from orbit.agent.domain.roles import Workspace
 from orbit.agent.domain.sessions import SavedWaiting
 from orbit.agent.domain.setup_first import waiting_for_setup
 from orbit.agent.domain.usage_limits import FIX_ERROR_NOTE, Outages, RuntimeStop, clears_outage
-from orbit.agent.domain.verification import FallbackFixes, failure_reason, fix_prompt
+from orbit.agent.domain.verification import (
+    CheckSet,
+    FallbackFixes,
+    failure_reason,
+    fix_prompt,
+)
 from orbit.execution.cancelling import stop, waited_out
 from orbit.protocol import (
     CHECKS_EXHAUSTED,
@@ -585,13 +595,28 @@ class WorkLane:
 
     async def _configure(self, verifier: Verifier, checks: ChecksProposal, root: str) -> None:
         """Save the ``checks`` the user accepted into the config at ``root``, and use them from
-        the next task on. This, or a restart, is the only way the checks change. A failed save
-        raises :class:`ConfigWriteFailed` before anything changes, ending the task in error."""
+        the next task on: their task checks and setup, and their sets and triggers, as the config
+        reads them over those configured, which the sets' runs and the holds on merges take on
+        too. This, or a restart, is the only way the checks change. A failed save raises
+        :class:`ConfigWriteFailed` before anything changes, ending the task in error."""
         if self._desk.agents.write_config is not None:
             await asyncio.to_thread(self._desk.agents.write_config, root, checks)
-        if self._desk.agents.tree is not None:
-            self._desk.agents.tree.use_setup(checks.setup)
+        agents = self._desk.agents
+        if agents.tree is not None:
+            agents.tree.use_setup(checks.setup)
+        triggers = merge_proposed_triggers(agents.triggers, agents.built_in_triggers, checks)
+        self._desk.use_triggers(triggers)
+        verifier.use_sets(merge_proposed_sets(verifier.verification.sets, checks))
+        await self._use_sets(verifier.verification.sets)
         await verifier.use_steps(checks.task_checks)
+
+    async def _use_sets(self, sets: tuple[CheckSet, ...]) -> None:
+        """Run the named ``sets`` as triggers name them, and have those that hold merges hold
+        them, from now on."""
+        if self._sets is not None:
+            self._sets.use_sets(sets)
+        if self._holds is not None:
+            await self._holds.use_sets(holding_sets(sets))
 
     async def _land(self, task_id: str, outcome: Outcome, root: str) -> Outcome:
         """Commit and merge a completed task's work, when it worked in the coder's tree: the

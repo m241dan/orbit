@@ -43,6 +43,7 @@ from orbit.agent.application.outbox import EventSink, Outbox, Shown
 from orbit.agent.application.planner_seat import SeatHooks
 from orbit.agent.application.planner_trace import PlannerTracing
 from orbit.agent.application.ports import (
+    CoderTree,
     Fallback,
     ProposalReview,
     Publish,
@@ -768,37 +769,31 @@ class WorkspaceHost:
         self, verification: Verification | None
     ) -> tuple[MergeHolds | None, SetRuns | None]:
         """The holds on merges of ``verification``'s named sets and their runs, as
-        :meth:`_merge_holds` and :meth:`_set_runs` say."""
-        holds = self._merge_holds(verification)
-        return holds, self._set_runs(verification, holds)
-
-    def _set_runs(
-        self, verification: Verification | None, holds: MergeHolds | None
-    ) -> SetRuns | None:
-        """The runs of the named sets of ``verification`` that triggers naming them ask for, in
-        snapshots of the base of the tree the agents work in, traced with this host's
-        telemetry; none without sets, nor without agents in a tree, whose triggers run them in
-        its snapshots, leaving the coder's tree alone."""
+        :meth:`_merge_holds` and :meth:`_set_runs` say; neither while verification is off, nor
+        without agents in a tree, whose triggers run the sets in its snapshots, leaving the
+        coder's tree alone, and whose sets' runs hold merges."""
         tree = self._desk.agents.tree if self._desk else None
-        if verification is None or not verification.sets or tree is None:
-            return None
-        site = SetSite(tree, verification.run_step, self._events.put, self._gate.halted)
-        if holds is not None:  # Its runs hold merges while they fail.
-            site = replace(site, heard=holds.heard)
+        if verification is None or tree is None:
+            return None, None
+        holds = self._merge_holds(verification, tree)
+        return holds, self._set_runs(verification, tree, holds)
+
+    def _set_runs(self, verification: Verification, tree: CoderTree, holds: MergeHolds) -> SetRuns:
+        """The runs of the named sets of ``verification``, and of those accepted checks add, that
+        triggers naming them ask for, in snapshots of the base of ``tree``, traced with this
+        host's telemetry, the runs of those that hold merges holding them while they fail, as
+        ``holds`` keeps them."""
+        site = SetSite(
+            tree, verification.run_step, self._events.put, self._gate.halted, holds.heard
+        )
         return SetRuns(verification.sets, site, SetTracing(self.telemetry, self._workspace_id))
 
-    def _merge_holds(self, verification: Verification | None) -> MergeHolds | None:
-        """The holds on merges of the named sets of ``verification`` that hold them, kept in
-        the store, each queuing as many fixes as verification's fallback fixes; none without
-        such a set, nor without agents in a tree, whose sets' runs hold merges, so none while
-        verification is off."""
-        if verification is None or self._desk is None:
-            return None
+    def _merge_holds(self, verification: Verification, tree: CoderTree) -> MergeHolds:
+        """The holds on merges of the named sets of ``verification`` that hold them, and of those
+        accepted checks have hold them, kept in the store, each queuing as many fixes as
+        verification's fallback fixes, a fix listing the commits of ``tree``."""
         desk = self._desk
-        holding = holding_sets(verification.sets)
-        tree = desk.agents.tree
-        if not holding or tree is None:
-            return None
+        assert desk is not None  # Only agents work in a tree.
         parts = HoldParts(
             self._tasks,
             lambda: desk.agents.roles,
@@ -809,7 +804,7 @@ class WorkspaceHost:
             lambda role: self._lanes.kick_for(role),
             self._rerun_set,
         )
-        holds = MergeHolds(holding, verification.fallback_fixes, parts)
+        holds = MergeHolds(holding_sets(verification.sets), verification.fallback_fixes, parts)
         holds.changed = lambda: self._states.check()
         holds.released = self._release_waiting
         return holds
