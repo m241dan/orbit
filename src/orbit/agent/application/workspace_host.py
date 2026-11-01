@@ -748,6 +748,7 @@ class WorkspaceHost:
             self._triggers,
             self._sets,
             self._holds,
+            self._save,
         )
         return WorkLane(self._desk, self._tasks, self._verifier, beside)
 

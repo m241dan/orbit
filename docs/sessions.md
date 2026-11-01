@@ -15,6 +15,9 @@ A session is one JSON record (`SessionRecord`, in `orbit.agent.domain.sessions`)
 - its id, its name, and when it was created and last active;
 - the task list, each task with its status, settings and usage;
 - the review lane's state: the review jobs it queued, their batches and rounds;
+- the verified work waiting in the coder's worktree while merges are held, in the order it lands:
+  each task as it ended and how many commits it made, so it lands, and is reviewed, once no hold
+  is left, after a restart too, and a switch leaves it with the session it belongs to;
 - each conversational role's conversation, the planner's and any other's, as the runtime it ran
   on and the handle that runtime carries it on by, so its next prompt resumes that conversation;
   one from another runtime than its role now runs on isn't resumed, and messages to that role are

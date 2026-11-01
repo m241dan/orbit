@@ -30,6 +30,7 @@ from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
 from orbit.agent.domain.role_spend import RoleSpend
 from orbit.agent.domain.sessions import (
     EMPTY_NAME,
+    SavedWaiting,
     SessionRecord,
     resumed_notes,
     session_name,
@@ -107,6 +108,8 @@ class SessionSwitcher:
         self.spend = RoleSpend()  # The same, by role and by the role consulting.
         # What the opened session saved that no review lane here holds, kept to save back.
         self._kept_reviews: LaneSnapshot | None = None
+        # What work the opened session saved waiting that no work lane here holds, the same.
+        self._kept_waiting: tuple[SavedWaiting, ...] = ()
         # What orbit adds between switches waits for those under way, keeping new ones waiting,
         # so it lands in exactly one session.
         self._adding = asyncio.Lock()
@@ -182,12 +185,13 @@ class SessionSwitcher:
 
     def contents(self) -> Contents:
         """What the session holds now, to save, with what it was opened with in place of the
-        reviews it has no lane to hold."""
-        lane = self._parts.lane
+        reviews and the work waiting it has no lanes to hold."""
+        lane, work = self._parts.lane, self._parts.work
         return Contents(
             role_settings=self._settings.roles,
             conversations=self._parts.seats.conversations,
             tasks=self._parts.tasks.board.tasks,
+            waiting=work.waiting if work else self._kept_waiting,
             reviews=lane.snapshot() if lane else self._kept_reviews,
             spent=self.spent,
             planner_notes=self._parts.seats.notes,
@@ -309,12 +313,11 @@ class SessionSwitcher:
 
     def _hold(self, tasks: tuple[TaskState, ...], record: SessionRecord | None) -> None:
         """Hold a session's ``tasks`` and what else its ``record`` holds, if it has one: its
-        roles' conversations, reviews, the notes its planner is still to hear, its roles' copies
-        and its consultations pending; with no fix counts."""
+        roles' conversations, reviews, the work waiting in the tree, the notes its planner is
+        still to hear, its roles' copies and its consultations pending; with no fix counts."""
         parts = self._parts
         self._replace_board(tasks)
-        if parts.work is not None:
-            parts.work.reset()
+        self._hold_waiting(record.waiting if record else ())
         if record is None:
             parts.seats.replace({})
         else:
@@ -329,6 +332,13 @@ class SessionSwitcher:
         if parts.lane is not None:
             parts.lane.load(reviews or NO_REVIEWS)
         self._kept_reviews = reviews
+
+    def _hold_waiting(self, waiting: tuple[SavedWaiting, ...]) -> None:
+        """Hold the work a session saved ``waiting`` in the tree, in the work lane if there's
+        one, with the fix counts and the rest of the session left forgotten there."""
+        if self._parts.work is not None:
+            self._parts.work.reset(waiting)
+        self._kept_waiting = waiting
 
     def _replace_board(self, tasks: tuple[TaskState, ...]) -> None:
         """Have ``tasks`` on the board, and after them, while no session was picked yet, the
@@ -347,7 +357,7 @@ class SessionSwitcher:
         close its conversations, end the reviews ``stopped`` when it was saved, then save the
         session opened and publish to every connection the catalog and its snapshot, last active
         at ``last_active``, which alone shows what ending the reviews changed, and then note a
-        review pause."""
+        review pause and land the work the session opened saved waiting, if it may land."""
         parts = self._parts
         discard, self._picking = self._picking, False
         await self._keeper.leave(left, discard)
@@ -360,6 +370,8 @@ class SessionSwitcher:
         await parts.seats.settle()
         if parts.lane is not None:
             await parts.lane.note_pause()
+        if parts.work is not None:
+            parts.work.release_restored()
 
     def summary(self, last_active: datetime | None = None) -> SessionSummary:
         """The session open here, last active at ``last_active``, as the list of sessions

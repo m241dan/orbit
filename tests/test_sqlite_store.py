@@ -20,12 +20,12 @@ from orbit.agent.application.ports import (
 from orbit.agent.domain.merge_holds import Hold
 from orbit.agent.domain.reports import NewReport
 from orbit.agent.domain.reviews import SuperReviewCount
-from orbit.agent.domain.sessions import SessionRecord, Unreadable
+from orbit.agent.domain.sessions import SavedWaiting, SessionRecord, Unreadable
 from orbit.agent.domain.storage_halt import StorageErrorKind
 from orbit.agent.external import sqlite_schema, sqlite_store
 from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import NewRows, SqliteStore
-from orbit.protocol import EventEnvelope, Notice, ReportShown
+from orbit.protocol import EventEnvelope, Notice, ReportShown, TaskSpec, TaskState
 from tests.git_repo import git
 from tests.store_views import (
     WHEN,
@@ -66,6 +66,22 @@ async def test_sessions_and_the_review_count_survive_closing(
     reopened = await open_store(workspace)
     assert await reopened.load("abc") == record()
     assert await reopened.review_count() == SuperReviewCount(2, "abc", 3, {"a.py": 1, "b.py": 3})
+
+
+async def test_a_sessions_work_waiting_to_merge_survives_closing_in_order(
+    open_store: Opener, workspace: Path
+) -> None:
+    states = [
+        TaskState(id=task_id, task=TaskSpec(prompt=f"Add {task_id}."), status="completed")
+        for task_id in ("2", "1")
+    ]
+    waiting = (SavedWaiting(state=states[0], count=3), SavedWaiting(state=states[1], count=1))
+    saved = record().model_copy(update={"tasks": tuple(states), "waiting": waiting})
+    store = await open_store(workspace)
+    await store.save(saved)
+    await store.close()
+    reopened = await open_store(workspace)
+    assert await reopened.load("abc") == saved
 
 
 async def test_merge_holds_survive_closing_beside_the_review_count(

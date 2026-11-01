@@ -749,7 +749,12 @@ carrying on from it run out), the set's last failure handed on; past that the ho
 commit of yours that makes the set pass lifts its hold too, the next time its trigger runs it. Two
 sets holding at once each get their own fix, and merges wait until both lift. Holds are kept per
 repository, beside the super review count, so a hold outlives restarting orbit; a set removed from
-the configuration, or that no longer holds merges, drops its hold as orbit opens. Task checks
+the configuration, or that no longer holds merges, drops its hold as orbit opens. The work waiting
+is saved with its session, so it outlives a restart too: it still shows as waiting, and lands, and
+is reviewed, once no hold is left, as orbit opens if none is left by then. Switching sessions
+keeps the work waiting with the session you leave: it lands once that session is open again and
+no hold is on, though a task of another session landing first merges those commits with its own,
+and they're then told of as landing nothing. Task checks
 never hold merges, nor does a set that only reports, and with `--no-verify` nothing does.
 
 To release a hold by hand, say a set that's flaky, press `ctrl+f`, shown in the footer only while

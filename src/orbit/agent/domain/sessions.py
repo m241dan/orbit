@@ -1,9 +1,10 @@
 """Saved sessions: stretches of work the user can come back to.
 
-A saved session keeps its task list, its review state, and each conversational role's
-conversation, with the runtime it ran on, and the settings it ran with. It is unrelated to the
-backend's connection, :class:`WorkspaceHost`. The caller reads and writes the store and the
-clock; these rules only shape what's in them.
+A saved session keeps its task list, its review state, the verified work waiting in the coder's
+tree for merges to resume, and each conversational role's conversation, with the runtime it ran
+on, and the settings it ran with. It is unrelated to the backend's connection,
+:class:`WorkspaceHost`. The caller reads and writes the store and the clock; these rules only
+shape what's in them.
 """
 
 from collections import Counter
@@ -43,7 +44,7 @@ from orbit.protocol import (
     Usage,
 )
 
-FORMAT_VERSION = 21
+FORMAT_VERSION = 22
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _OLD_SUPER_REVIEW_ORIGIN = "super_review"
@@ -80,8 +81,8 @@ def _without_rounds(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def _unchanged(record: dict[str, Any]) -> dict[str, Any]:
-    """Version 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17 or 19 ``record`` as it is: the
-    next version only added fields that have defaults."""
+    """Version 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 19 or 21 ``record`` as it is:
+    the next version only added fields that have defaults."""
     return record
 
 
@@ -170,7 +171,8 @@ def _booked(task: object, booked: tuple[str, ...]) -> object:
 # older record keeps none of, so its reviews start with their prompts as they were queued.
 # Version 21 added what orbit queued each task as, so its reviews are told by their booking
 # rather than their role: its migration queues each task an older record's review lane booked,
-# one of its jobs, as a review, and every other as a task.
+# one of its jobs, as a review, and every other as a task. Version 22 added the verified work
+# waiting in the coder's tree for merges to resume, which an older record has none of.
 _MIGRATIONS: dict[int, Migration] = {
     1: _spent_by_tasks,
     2: _without_rounds,
@@ -192,6 +194,7 @@ _MIGRATIONS: dict[int, Migration] = {
     18: _origins_as_triggers,
     19: _unchanged,
     20: _reviews_as_booked,
+    21: _unchanged,
 }
 
 EMPTY_NAME = "A session needs a name."
@@ -233,13 +236,24 @@ class SavedConsultation(BaseModel):
     why: str = RESTARTED
 
 
+class SavedWaiting(BaseModel):
+    """Verified work waiting in the coder's tree for merges to resume, as a session saves it:
+    the ``count`` of commits of the task that ended as ``state``, whose id it goes by."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    state: TaskState
+    count: int = Field(ge=1)
+
+
 class SessionRecord(BaseModel):
     """A saved session ``id``, ``name``d by the user, with the settings each conversational role
     uses, by role (``role_settings``), the planner's for new tasks too, each one's conversation
     (``conversations``), the copies those working in one work in (``copies``), the consultations
     pending (``consultations``) and the number of the last asked
     (``last_consultation``), the ``planner_notes`` the planner is still to hear, its
-    ``tasks`` and, when reviews are on, its ``reviews``' state, and what its agents have
+    ``tasks``, the work of theirs ``waiting`` in the coder's tree for merges to resume, in the
+    order it lands, and, when reviews are on, its ``reviews``' state, and what its agents have
     ``spent`` in all, the planner and tasks since removed included: by role (``role_spent``),
     and what each role caused its consultants to spend, by asker then consultant
     (``caused_spent``)."""
@@ -258,6 +272,7 @@ class SessionRecord(BaseModel):
     last_consultation: int = Field(default=0, ge=0)
     planner_notes: tuple[str, ...] = ()
     tasks: tuple[TaskState, ...] = ()
+    waiting: tuple[SavedWaiting, ...] = ()
     reviews: LaneSnapshot | None = None
     spent: Usage = Usage()
     role_spent: dict[str, Usage] = Field(default={})

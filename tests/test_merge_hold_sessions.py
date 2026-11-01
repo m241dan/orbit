@@ -1,19 +1,30 @@
 """Merges held in a session while a set that holds them fails: the notice and a fix first; work
 finishing meanwhile verified but waiting, unreviewed; the fix landing with the work beneath it;
 the set run again, passing to lift the hold and land the rest, or failing until the fixes run out;
-two sets holding at once; a hold kept across a restart; the holds read again on taking the
-repository over; and none under ``--no-verify``."""
+two sets holding at once; a hold kept across a restart, and the work waiting under it, which lands
+and is reviewed once it lifts, as it does on opening where none is left; the work waiting kept
+with the session a switch leaves; the holds read again on taking the repository over; and none
+under ``--no-verify``."""
 
 import asyncio
+from typing import Any
 
 from orbit.agent import Verification, WorkspaceHost
 from orbit.agent.domain.merge_holds import Hold
 from orbit.agent.domain.triggers import Trigger
-from orbit.protocol import MergeHold, OwnershipOffered, RunTasks, TakeOwnership
+from orbit.protocol import (
+    ActivateSession,
+    MergeHold,
+    NewSession,
+    OwnershipOffered,
+    RunTasks,
+    TakeOwnership,
+)
 from tests.agent_fakes import (
     ACCEPTED,
     LINT,
     OWNER,
+    TRIGGERS,
     FakeLock,
     FakeStore,
     board_of,
@@ -202,6 +213,118 @@ async def test_a_hold_is_kept_across_closing_and_reopening() -> None:
         MergeHold(set="stress", commit="base", reason="Stress tests failed"),
     )
     assert shown.waiting_to_merge == ("1",) and seen.merged() == []
+
+
+KEPT = Hold("stress", "base", "Stress tests", FAILED, 1)
+
+
+def held_session(store: FakeStore, tree: LandingTree, **options: Any) -> WorkspaceHost:
+    """A session saved in ``store``, working in ``tree``, whose coder's tasks claim done and
+    whose stress set holds merges, passing when run, with ``options`` over the default."""
+    defaults: dict[str, Any] = {
+        "verification": Verification((LINT,), SetSteps(stress=[True]), sets=(STRESS,)),
+        "tree": tree,
+        "store": store,
+        "triggers": NO_REVIEW,
+    }
+    session, _, _ = session_for(claims_done, claims_done, **{**defaults, **options})
+    return session
+
+
+async def left_waiting(store: FakeStore, tree: LandingTree) -> None:
+    """Run two tasks in a session holding the hold :data:`KEPT`, saved in ``store``, until
+    their work waits in ``tree``, then close it."""
+    store.holds = (KEPT,)
+    session = held_session(store, tree)
+    _, holds = parts_of(session)
+    await greeted(session)
+    await eventually(lambda: holds.held)
+    await start(session, "Add A.", "Add B.")
+    await eventually(lambda: status(session, "2")() == "completed")
+    assert (await snapshot_of(session)).waiting_to_merge == ("1", "2")
+    await session.close()
+
+
+async def reopened(store: FakeStore, tree: LandingTree, **options: Any) -> WorkspaceHost:
+    """The session saved in ``store`` opened again in a new one, as a restart does, working in
+    ``tree``, with ``options`` as :func:`held_session` takes them."""
+    session = held_session(store, tree, new_id=lambda: "session-2", **options)
+    await session.open_latest()
+    return session
+
+
+async def test_work_waiting_across_a_restart_lands_and_is_reviewed_once_the_hold_lifts() -> None:
+    store, tree = FakeStore(), LandingTree()
+    await left_waiting(store, tree)
+
+    session = await reopened(
+        store, tree, reviewers=(claims_done,) * 2, review=True, triggers=TRIGGERS
+    )
+    seen = Seen(session)
+    sets, holds = parts_of(session)
+    await eventually(lambda: holds.held)
+    assert (await snapshot_of(session)).waiting_to_merge == ("1", "2")
+    sets.run("stress", "nightly")
+    await eventually(lambda: len(reviews(session)) == 2)
+    shown = await snapshot_of(session)
+    seen.close()
+    await session.close()
+    assert seen.merged() == [("1", "c1"), ("2", "c2")]
+    assert [state.task.prompt.partition("\n")[0] for state in reviews(session)] == [
+        "Review commit c1",
+        "Review commit c2",
+    ]
+    assert shown.waiting_to_merge == () and store.saved[-1].waiting == ()
+
+
+async def test_work_waiting_across_a_restart_lands_as_the_holds_read_show_none_left() -> None:
+    store, tree = FakeStore(), LandingTree()
+    await left_waiting(store, tree)
+    store.holds = ()  # Another orbit lifted the hold meanwhile.
+
+    session = await reopened(store, tree)
+    seen = Seen(session)
+    await eventually(lambda: len(seen.merged()) == 2)
+    seen.close()
+    await session.close()
+    assert seen.merged() == [("1", "c1"), ("2", "c2")]
+
+
+async def test_work_waiting_across_a_restart_into_no_verify_lands_as_the_session_opens() -> None:
+    store, tree = FakeStore(), LandingTree()
+    await left_waiting(store, tree)
+
+    session = await reopened(store, tree, verification=None)
+    seen = Seen(session)
+    await eventually(lambda: len(seen.merged()) == 2)
+    seen.close()
+    await session.close()
+    assert seen.merged() == [("1", "c1"), ("2", "c2")] and holds_of(session) is None
+
+
+async def test_a_switch_keeps_the_work_waiting_with_the_session_left_until_it_opens_again() -> None:
+    store, tree = FakeStore(), LandingTree()
+    store.holds = (KEPT,)
+    ids = iter(("session-1", "session-2"))
+    session = held_session(store, tree, new_id=lambda: next(ids))
+    seen = Seen(session)
+    sets, holds = parts_of(session)
+    await eventually(lambda: holds.held)
+    await start(session, "Add A.")
+    await eventually(lambda: status(session, "1")() == "completed")
+
+    await send(session, NewSession(name="other"))
+    await eventually(lambda: board_of(session).tasks == ())
+    assert (await snapshot_of(session)).waiting_to_merge == ()
+    await send(session, ActivateSession(session="session-1"))
+    await eventually(lambda: len(board_of(session).tasks) == 1)
+    assert (await snapshot_of(session)).waiting_to_merge == ("1",) and seen.merged() == []
+
+    sets.run("stress", "nightly")
+    await eventually(lambda: len(seen.merged()) == 1)
+    seen.close()
+    await session.close()
+    assert seen.merged() == [("1", "c1")]
 
 
 async def test_taking_over_reads_the_holds_the_owner_left_again() -> None:

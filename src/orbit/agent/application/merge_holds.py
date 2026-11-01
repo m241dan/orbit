@@ -104,6 +104,12 @@ class MergeHolds:
         return bool(self._holds)
 
     @property
+    def is_known(self) -> bool:
+        """Whether the holds on are known, so :attr:`held` misses none: there's no store keeping
+        any, or those it keeps were read since the last restore began."""
+        return self._parts.store is None or self._read == "read"
+
+    @property
     def holds(self) -> tuple[Hold, ...]:
         """The holds on, in the order they started."""
         return self._holds
@@ -117,7 +123,8 @@ class MergeHolds:
         """Take on the holds kept, read afresh, as another orbit may have changed them since
         they were last read, those of sets no longer holding merges dropped, unless they can't be
         read; a hold started since they were last read replaces the one kept for its set.
-        Nothing is saved from now until they've been read."""
+        Nothing is saved from now until they've been read, and :attr:`released` is told once
+        they have if no hold is left."""
         store = self._parts.store
         if store is None:
             return
@@ -129,8 +136,8 @@ class MergeHolds:
 
     async def _take_on(self, store: SessionStore, loaded: tuple[Hold, ...]) -> None:
         """Take on ``loaded``, the holds ``store`` keeps, as :meth:`restore` says, saving the
-        result if it differs and telling :attr:`released` if no hold is left of those on."""
-        held = self.held
+        result if it differs and telling :attr:`released` if no hold is left, as work saved
+        waiting for one that has gone lands then."""
         started = tuple(hold for hold in self._holds if hold not in self._kept)
         self._kept = loaded
         self._read = "read"
@@ -138,7 +145,7 @@ class MergeHolds:
         self.changed()
         if self._holds != loaded:  # Holds dropped, or started since they were last read.
             await self._save(store)
-        if held and not self._holds:
+        if not self._holds:
             self.released()
 
     async def heard(self, result: SetResult) -> None:

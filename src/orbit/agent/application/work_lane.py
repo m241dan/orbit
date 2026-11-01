@@ -6,8 +6,10 @@ hears how each task ended, as the triggers do: ``task_landed`` for work that lan
 the review lane while there's one, and ``task_finished`` for every task that ended. While a set
 holds merges, a task's verified work is committed in the coder's tree and waits there, unmerged
 and unreviewed, but a fix for a set held, which merges with the work stacked beneath it; once no
-hold is left, the work waiting lands, in order, and is told of as landed then; a chain of fixes
-for a set held that ends without merging is told to the holds, which queue the next. A run stops
+hold is left, the work waiting lands, in order, and is told of as landed then; the work waiting is
+saved with the session, at each change, and taken on again as the session opens. A chain of
+fixes for a set held that ends without merging is told to the holds, which queue the next. A run
+stops
 at a task its agent couldn't do for the usage limit or for the API not answering, as the
 launcher of its role's runtime tells its error, at a fix that ends in error, which must run
 before anything puts its work aside, once the session halts, and before a task its caller holds
@@ -35,7 +37,7 @@ from orbit.agent.application.role_workspace import workspace_for
 from orbit.agent.application.set_runs import SetRuns
 from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.task_trace import TaskTracing
-from orbit.agent.application.tasks import Tasks
+from orbit.agent.application.tasks import Changed, Tasks, unchanged
 from orbit.agent.application.triggers import TriggerEngine
 from orbit.agent.application.verifier import Failure, Verifier
 from orbit.agent.domain.board import TaskBoard
@@ -47,6 +49,7 @@ from orbit.agent.domain.endings import (
     gave_up,
 )
 from orbit.agent.domain.roles import Workspace
+from orbit.agent.domain.sessions import SavedWaiting
 from orbit.agent.domain.setup_first import waiting_for_setup
 from orbit.agent.domain.usage_limits import FIX_ERROR_NOTE, Outages, RuntimeStop, clears_outage
 from orbit.agent.domain.verification import FallbackFixes, failure_reason, fix_prompt
@@ -84,8 +87,9 @@ class Beside:
     lanes that start by themselves, in which a run notes the runtime that stopped it and the
     runtimes whose agents ended their runs without an outage; the ``triggers``, if any,
     which hear how each task ended, and of its landing while there's no review lane to raise
-    it; the named ``sets``' runs, if any, whose panel each task takes over too; and the
-    ``holds`` on merges, if any, which keep a task's work waiting in the tree."""
+    it; the named ``sets``' runs, if any, whose panel each task takes over too; the ``holds``
+    on merges, if any, which keep a task's work waiting in the tree; and ``save``, which saves
+    the session as the work waiting changes."""
 
     review: ReviewLane | None = None
     startup: StartupCheck | None = None
@@ -99,6 +103,7 @@ class Beside:
     triggers: TriggerEngine | None = None
     sets: SetRuns | None = None
     holds: MergeHolds | None = None
+    save: Changed = unchanged
 
 
 @dataclass(frozen=True)
@@ -150,6 +155,7 @@ class WorkLane:
         self._triggers = beside.triggers
         self._sets = beside.sets
         self._holds = beside.holds
+        self._save = beside.save
         self._waiting: list[_Waiting] = []  # The work waiting in the tree, in the order it lands.
         # The work that landed stacked beneath a task's, each with its last commit, if still
         # there, until told of.
@@ -174,16 +180,18 @@ class WorkLane:
         self._resume: str | None = None
         self._runtime_stop: RuntimeStop | None = None  # The failure that last stopped a run.
 
-    def reset(self) -> None:
-        """Forget the fix counts, the task a run stopped at and what its tasks landed, started
-        from and left waiting, of the session left, whose task ids the next one reuses; the
-        work waiting lands with the next that lands, untold of."""
+    def reset(self, waiting: Sequence[SavedWaiting] = ()) -> None:
+        """Forget the fix counts, the task a run stopped at and what its tasks landed and
+        started from, of the session left, whose task ids the next one reuses, and take on the
+        work the session opened saved ``waiting``, in the order it lands. The session left keeps
+        its own work waiting, as it was saved as the switch began, to land once it's open
+        again."""
         self._fallbacks = FallbackFixes()
         self._resume = None
         self._landed.clear()
         self._fixes_landed.clear()
         self._starts.clear()
-        self._waiting.clear()
+        self._waiting = [_Waiting(each.state, each.count) for each in waiting]
         self._stacked.clear()
 
     @property
@@ -191,6 +199,19 @@ class WorkLane:
         """The ids of the tasks whose verified work waits in the tree for merges to resume, in
         the order it lands."""
         return tuple(waiting.state.id for waiting in self._waiting)
+
+    @property
+    def waiting(self) -> tuple[SavedWaiting, ...]:
+        """The verified work waiting in the tree for merges to resume, in the order it lands,
+        as the session saves it."""
+        return tuple(SavedWaiting(state=each.state, count=each.count) for each in self._waiting)
+
+    def release_restored(self) -> None:
+        """Land the work waiting that the session opened saved, as :meth:`release` does, if
+        the holds on merges are known; the holds tell :meth:`release` once they're read
+        otherwise."""
+        if self._holds is None or self._holds.is_known:
+            self.release()
 
     def release(self) -> None:
         """Land the work waiting, in the background, as no hold is left, once no task works in
@@ -624,7 +645,7 @@ class WorkLane:
         if made:
             done = state.model_copy(update={"status": "completed"})
             self._waiting.append(_Waiting(done, len(made)))
-            holds.changed()
+            await self._waiting_changed()
 
     async def _merge(self, task_id: str, lander: Lander, message: str, root: str) -> Landing:
         """What landing task ``task_id``'s work with ``lander``, committed with ``message`` at
@@ -657,8 +678,14 @@ class WorkLane:
                 await self._report_unlanded(state)
             else:
                 await self._report_landed(state, commit)
-        if stacked and self._holds is not None:
+        if stacked:
+            await self._waiting_changed()
+
+    async def _waiting_changed(self) -> None:
+        """Tell the holds, if any, that the work waiting changed, and save the session."""
+        if self._holds is not None:
             self._holds.changed()
+        await self._save()
 
     async def _land_waiting(self) -> None:
         """Land the work waiting in the tree, in order, once no task works there, unless a
@@ -673,10 +700,10 @@ class WorkLane:
 
     def _landable(self, waiting: Sequence[_Waiting]) -> bool:
         """Whether the work ``waiting`` may land now: there's some, no hold is on and the
-        session isn't halted."""
-        holds = self._holds
-        assert holds is not None  # Only holds keep work waiting.
-        return bool(waiting) and not holds.held and not self._gate.halted()
+        session isn't halted. Work a session saved waiting lands without holds, as when no set
+        holds merges any longer."""
+        held = self._holds is not None and self._holds.held
+        return bool(waiting) and not held and not self._gate.halted()
 
     async def _land_stacked(self, waiting: Sequence[_Waiting]) -> Landing:
         """What landing the work ``waiting`` in the tree came to, rechecked after a rebase as
@@ -704,8 +731,7 @@ class WorkLane:
                 )
                 await self._publish(merged)
             await self._report_unlanded(each.state)
-        assert self._holds is not None  # Only holds keep work waiting.
-        self._holds.changed()
+        await self._waiting_changed()
 
     async def _report_unlanded(self, state: TaskState) -> None:
         """Tell the review lane, if any, that the task that ended as ``state``, whose work

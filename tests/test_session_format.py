@@ -18,6 +18,7 @@ from orbit.agent.domain.sessions import (
     SavedConsultation,
     SavedConversation,
     SavedCopy,
+    SavedWaiting,
     SessionRecord,
     Unreadable,
     parse_record,
@@ -44,8 +45,8 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit these for a format change: they're what orbits at versions 1 to 21 wrote, and
-# they still need to read. A new version gets its own fixture (session-v22.json) and a
+# Never edit these for a format change: they're what orbits at versions 1 to 22 wrote, and
+# they still need to read. A new version gets its own fixture (session-v23.json) and a
 # migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
 SESSION_V2 = FIXTURES / "session-v2.json"
@@ -68,6 +69,7 @@ SESSION_V18 = FIXTURES / "session-v18.json"
 SESSION_V19 = FIXTURES / "session-v19.json"
 SESSION_V20 = FIXTURES / "session-v20.json"
 SESSION_V21 = FIXTURES / "session-v21.json"
+SESSION_V22 = FIXTURES / "session-v22.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -182,7 +184,7 @@ def expected(
     lane: LaneSnapshot | None = None,
 ) -> SessionRecord:
     return SessionRecord(
-        version=21,
+        version=22,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
@@ -483,14 +485,32 @@ def test_a_version_20_record_whose_jobs_are_not_an_object_is_left_for_validation
     assert isinstance(record, Unreadable) and record.reason.startswith("reviews.jobs:")
 
 
-def test_a_version_21_session_file_reads_as_its_record() -> None:
+def test_a_version_21_session_file_migrates_to_having_no_work_waiting() -> None:
     assert parse_record(SESSION_V21.read_text(encoding="utf-8")) == templated()
 
 
-def test_a_session_record_is_written_in_the_version_21_format() -> None:
-    written = json.loads(record_json(templated()))
-    golden = json.loads(SESSION_V21.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V21.name)
+def waited() -> SessionRecord:
+    """The golden record as version 22 keeps it, with its first task's work of two commits
+    waiting in the tree for merges to resume."""
+    done = tasks()[0]
+    return templated().model_copy(update={"waiting": (SavedWaiting(state=done, count=2),)})
+
+
+def test_a_version_22_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V22.read_text(encoding="utf-8")) == waited()
+
+
+def test_a_session_record_is_written_in_the_version_22_format() -> None:
+    written = json.loads(record_json(waited()))
+    golden = json.loads(SESSION_V22.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V22.name)
+
+
+def test_a_record_with_work_waiting_of_no_commits_is_unreadable() -> None:
+    golden = json.loads(SESSION_V22.read_text(encoding="utf-8"))
+    golden["waiting"][0]["count"] = 0
+    record = parse_record(json.dumps(golden))
+    assert isinstance(record, Unreadable) and record.reason.startswith("waiting.0.count:")
 
 
 def test_a_version_1_review_count_reads_as_its_count_with_no_last_super_commit() -> None:

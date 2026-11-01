@@ -17,7 +17,7 @@ from orbit.agent.domain.activity import TASKS_RUNNING, Activity
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
-from orbit.agent.domain.sessions import SessionRecord
+from orbit.agent.domain.sessions import SavedWaiting, SessionRecord
 from orbit.protocol import (
     BUSY,
     PLANNER,
@@ -31,6 +31,7 @@ from orbit.protocol import (
     Settings,
     Snapshot,
     TaskSpec,
+    TaskState,
     Usage,
     WorkspaceEntry,
 )
@@ -269,6 +270,16 @@ async def test_without_a_review_lane_the_opened_reviews_are_saved_back() -> None
     await switcher.handle(ActivateSession(session="auth"))
     contents = switcher.contents()
     assert contents.reviews == REVIEWS and contents.spent == Usage(cost_usd=1.5)
+
+
+async def test_without_a_work_lane_the_opened_work_waiting_is_saved_back() -> None:
+    done = TaskState(id="1", task=TaskSpec(prompt="Add A."), status="completed")
+    waiting = (SavedWaiting(state=done, count=2),)
+    store = FakeStore()
+    store.saved = [saved(tasks=(done,), waiting=waiting)]
+    switcher, _, _ = switcher_for(store, Held(Settings()))
+    await switcher.handle(ActivateSession(session="auth"))
+    assert switcher.contents().waiting == waiting
 
 
 async def test_tasks_added_before_a_session_is_picked_carry_over() -> None:

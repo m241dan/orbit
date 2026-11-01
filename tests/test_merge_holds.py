@@ -140,14 +140,14 @@ async def test_without_a_coder_no_fix_is_queued() -> None:
 async def test_passing_lifts_the_hold_with_a_notice_and_releases_once_none_is_left() -> None:
     store = FakeStore()
     holds = Holds(store)
-    await holds.holds.restore()
+    await holds.holds.restore()  # Reading no hold kept releases once.
     await failed(holds)
     await failed(holds, check_set=SOAK)
     await passed(holds)
-    assert holds.releases == 0 and [hold.name for hold in holds.holds.holds] == ["soak"]
+    assert holds.releases == 1 and [hold.name for hold in holds.holds.holds] == ["soak"]
     await passed(holds, check_set=SOAK)
 
-    assert not holds.holds.held and holds.releases == 1
+    assert not holds.holds.held and holds.releases == 2
     assert holds.notices()[-2:] == [
         "Merges resumed: stress passed.",
         "Merges resumed: soak passed.",
@@ -158,9 +158,9 @@ async def test_passing_lifts_the_hold_with_a_notice_and_releases_once_none_is_le
 async def test_passing_with_no_hold_changes_nothing() -> None:
     store = FakeStore()
     holds = Holds(store)
-    await holds.holds.restore()
+    await holds.holds.restore()  # Reading no hold kept releases once.
     await passed(holds)
-    assert holds.notices() == [] and holds.releases == 0 and store.holds_saved == []
+    assert holds.notices() == [] and holds.releases == 1 and store.holds_saved == []
 
 
 async def test_a_held_sets_fix_is_known_through_its_chain_of_fixes() -> None:
@@ -344,6 +344,33 @@ async def test_holds_read_again_with_none_left_release_the_work_waiting() -> Non
     assert not holds.holds.held and holds.releases == 1 and store.holds_saved == []
 
 
+async def test_holds_read_with_none_kept_release_the_work_saved_waiting() -> None:
+    holds = Holds(FakeStore())
+    assert not holds.holds.is_known
+    await holds.holds.restore()
+    assert holds.holds.is_known and holds.releases == 1
+
+
+async def test_holds_that_cant_be_read_are_unknown_and_release_nothing() -> None:
+    store = FakeStore()
+    store.holds_load_failure = "disk gone"
+    holds = Holds(store)
+    await holds.holds.restore()
+    assert not holds.holds.is_known and holds.releases == 0
+
+
+async def test_holds_without_a_store_are_known() -> None:
+    assert Holds().holds.is_known
+
+
+async def test_holds_read_still_held_release_nothing() -> None:
+    store = FakeStore()
+    store.holds = (HELD,)
+    holds = Holds(store)
+    await holds.holds.restore()
+    assert holds.holds.held and holds.releases == 0
+
+
 async def test_holds_read_again_without_the_store_are_kept_and_nothing_saved() -> None:
     store = FakeStore()
     holds = Holds(store)
@@ -376,7 +403,7 @@ async def test_releasing_by_hand_lifts_every_hold_with_a_notice_saved_and_told()
     await failed(holds)
     await failed(holds, check_set=SOAK)
     await holds.holds.release()
-    assert not holds.holds.held and holds.releases == 1
+    assert not holds.holds.held and holds.releases == 2  # Once as no hold kept was read.
     assert holds.notices()[-1] == "Merges resumed by hand; stress, soak haven't passed."
     assert store.holds_saved[-1] == ()
 
