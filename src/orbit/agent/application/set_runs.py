@@ -3,11 +3,11 @@ in a read-only snapshot of the base's latest commit set up with the tree's setup
 coder's tree (decision 13), so it never races with an agent there.
 
 A run shows in the verification panel under its set's name, with the steps' states the startup
-check shows, until a task's verification takes the panel over, and in the agents pane as a
-``checker`` that can be cancelled. A trigger firing while its set runs queues one more run, on
-the base's latest commit as it starts once that run ends; firings meanwhile fold into it. As for
-the startup check, a halt cancels the runs, and the runs queued with them, and a firing while
-halted runs once the halt lifts.
+check shows, until a task's verification takes the panel over for the rest of that run, and in
+the agents pane as a ``checker`` that can be cancelled. A trigger firing while its set runs
+queues one more run, on the base's latest commit as it starts once that run ends; firings
+meanwhile fold into it. As for the startup check, a halt cancels the runs, and the runs queued
+with them, and a firing while halted runs once the halt lifts.
 
 A run that passes adds nothing more; one that fails shows the failing step's output, trimmed,
 in the panel until the set's next run starts, and keeps its failure; one of a reporting set
@@ -94,7 +94,8 @@ class SetSite:
 class SetRun:
     """Runs ``check_set``'s steps at ``site``, one run at a time, each traced with ``tracing``;
     ``shown`` hears the set's name each time a run shows its progress in the verification
-    panel. :attr:`failure` is the last run's failure, with its output, if it failed."""
+    panel, which a run does from its start until :meth:`release_panel`. :attr:`failure` is the
+    last run's failure, with its output, if it failed."""
 
     def __init__(
         self,
@@ -110,6 +111,7 @@ class SetRun:
         self._progress = StepProgress.of(step.name for step in check_set.steps)
         self._due = False  # Whether a run waits for the one running, or a halt, to end.
         self._announced = False  # Whether its start is published and its exit isn't.
+        self._showing = False  # Whether the run going still shows in the panel.
         self._background = Background(f"{check_set.name} set", site.publish)
         self._background.ended = self.start_due
         self._trigger = ""  # The trigger that fired the run due or going, by name.
@@ -155,6 +157,11 @@ class SetRun:
         self._due = False
         self._background.start(self._run(self._trigger))
 
+    def release_panel(self) -> None:
+        """A task's verification takes the panel over: the run going, if any, shows no more of
+        its progress there."""
+        self._showing = False
+
     def cancel(self) -> None:
         """Cancel the run going, if any, and the run due after it."""
         self._due = False
@@ -175,7 +182,7 @@ class SetRun:
             await self._site.publish(
                 AgentStarted(agent_id=self.agent_id, role=ROLE, task_id=STARTUP_TASK)
             )
-            self._announced = True
+            self._announced, self._showing = True, True
             self._progress, self._output = self._progress.reset(), ""
             await self._show()
             reason: AgentExitReason = "killed"
@@ -251,6 +258,8 @@ class SetRun:
         await self._show()
 
     async def _show(self) -> None:
+        if not self._showing:
+            return
         self._shown(self._set.name)
         await self._site.publish(self.panel)
 
@@ -261,7 +270,7 @@ _NO_TRACING = SetTracing()
 class SetRuns:
     """The runs of the named ``sets`` at ``site``, a :class:`SetRun` each, traced with
     ``tracing``. The verification panel shows the set whose run showed its progress last, until
-    a task's verification takes it over."""
+    a task's verification takes it over; only a run starting after that takes it back."""
 
     def __init__(
         self, sets: Sequence[CheckSet], site: SetSite, tracing: SetTracing = _NO_TRACING
@@ -294,8 +303,11 @@ class SetRuns:
         return True
 
     def release_panel(self) -> None:
-        """A task's verification takes the panel over, until a run shows its progress again."""
+        """A task's verification takes the panel over, until a run starts again: the runs going
+        show no more of their progress there."""
         self._shown = None
+        for run in self._runs.values():
+            run.release_panel()
 
     @property
     def panel(self) -> VerificationChanged | None:

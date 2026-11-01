@@ -711,7 +711,8 @@ your branch's latest commit, set up with the project's
 [setup command](#where-tasks-run-and-how-their-work-lands) first as the startup check's is, never
 in the coder's worktree, so it doesn't hold up the work or race with an agent there. The
 verification panel shows the run under the set's name, with the same step states as the startup
-check, until a task's verification takes the panel over, and the agents pane and All show it as
+check, until a task's verification takes the panel over; that run then shows no more there,
+and the set's next run takes the panel again as it starts. The agents pane and All show it as
 `checker`, its agent `set-<name>`, which you can cancel as the startup check's; a storage halt
 cancels it too, and a set fired while the session is halted runs once storage resumes. If the
 trigger fires again while its set runs, one more run is queued, on the latest commit as it

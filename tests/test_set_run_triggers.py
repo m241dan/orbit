@@ -241,7 +241,9 @@ async def test_the_snapshot_shows_a_sets_run_until_a_task_takes_the_panel_over()
     await events_until(session, agent_exited("set-slow"))
     ended = await snapshot_of(session)
     await session.close()
-    assert (ended.steps_title, ended.agents) == ("slow", ())
+    # The run's progress since doesn't take the panel back from the task's verification.
+    assert (ended.steps, ended.steps_title, ended.agents) == (after.steps, "", ())
+    assert after.steps == (StepState(name=LINT.name, status="passed"),)
 
 
 async def test_the_snapshot_carries_a_failing_sets_output_as_its_panel_does() -> None:

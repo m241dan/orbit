@@ -13,7 +13,7 @@ from orbit.agent.application.ports import StepRunner, TreeFailed
 from orbit.agent.application.set_runs import SetResult, SetRuns, SetSite, cancelled_note
 from orbit.agent.application.set_trace import SET_SPAN, SetTracing
 from orbit.agent.domain.checks import Setup
-from orbit.agent.domain.verification import CheckSet, VerificationStep
+from orbit.agent.domain.verification import CheckSet, VerificationStep, set_failed_note
 from orbit.protocol import (
     GIT_FAILED,
     AgentExited,
@@ -393,7 +393,40 @@ async def test_the_panel_shows_the_set_whose_run_showed_its_progress_last_until_
     gate.set()
     await runs.ended(2)
     assert runs.runs.agents == ()
-    assert runs.runs.panel is not None  # The runs showed their progress since.
+    assert runs.runs.panel is None
+
+
+async def test_a_released_run_publishes_no_more_progress_but_still_its_failure_notice() -> None:
+    steps, gate = gated(False)
+    runs = Runs(steps)
+    runs.runs.run("slow", "slow")
+    await eventually(lambda: steps.runs)
+    runs.runs.release_panel()
+    published = len(runs.events)
+
+    gate.set()
+    await runs.ended()
+    assert runs.events[published:] == [
+        Notice(message=set_failed_note("slow", MUTATION.name)),
+        AgentExited(agent_id="set-slow", reason="finished"),
+    ]
+    assert runs.runs.panel is None
+    assert runs.runs.failures.keys() == {"slow"}
+
+
+async def test_a_run_starting_after_a_release_takes_the_panel_again() -> None:
+    runs = Runs(Steps(True, True, True, True))
+    runs.runs.run("slow", "slow")
+    await runs.ended()
+    runs.runs.release_panel()
+
+    runs.runs.run("slow", "slow")
+    await runs.ended(2)
+    assert runs.runs.panel == shown("passed", "passed")
+    assert runs.events[-2:] == [
+        shown("passed", "passed"),
+        AgentExited(agent_id="set-slow", reason="finished"),
+    ]
 
 
 # Spans
