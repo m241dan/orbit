@@ -8,12 +8,14 @@ generate by themselves.
 """
 
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict
 
 from orbit.agent.domain.board import WAITING
 from orbit.agent.domain.review_sample import Choose, Draw, sample_files, with_sample
+from orbit.agent.domain.roles import Role
 from orbit.protocol import (
     CONFIGURATOR,
     MANUAL_ORIGIN,
@@ -117,12 +119,210 @@ class ReviewLimits:
     """How much reviews may generate: ``rounds`` is the last round reviewed by itself, and
     ``suggestions`` the tasks one review may suggest. A super review, due as its trigger says,
     may suggest ``super_suggestions`` tasks, and reads a sample of ``super_sample`` code files
-    besides those changed since the last."""
+    besides those changed since the last. A lens may report ``lens_findings`` findings in one
+    review."""
 
     rounds: int = 3
     suggestions: int = 5
     super_suggestions: int = 10
     super_sample: int = 10
+    lens_findings: int = 10
+
+
+Severity = Literal["blocking", "normal"]
+"""How much a finding matters: ``blocking``, which only a role with ``blocking_findings`` may
+report, or ``normal``."""
+
+SEVERITIES: tuple[str, ...] = get_args(Severity)
+"""The severities, in order."""
+
+FindingOutcome = Literal[
+    "undecided", "filed", "merged", "dismissed", "unanswered", "fixed", "given_up"
+]
+"""What became of a finding: none yet, filed as a task, merged into another finding's task,
+dismissed, left undecided by a merge pass that ended, fixed by its task landing, or given up on
+by its task."""
+
+ReviewStage = Literal["reviewing", "merging"]
+"""Where a review is: its lenses still reviewing, or ``reviews_finished`` raised for it, whose
+tasks merge their findings."""
+
+ReviewKind = Literal["commit", "batch", "super"]
+"""What a review reviews, as ``reviews_finished``'s ``review`` field says: one commit of the
+user's or the planner's, a batch's commits, or the whole codebase."""
+
+NOT_BOOKED_FOR_FINDINGS = "Only reviews orbit queued itself can report findings."
+"""The refusal of a finding from a task that isn't booked into a review."""
+
+BLOCKING_REFUSED = (
+    "Only a role with blocking_findings = true may report a blocking finding; report it as normal."
+)
+"""The refusal of a blocking finding from a role that may not report one."""
+
+
+@dataclass(frozen=True)
+class Finding:
+    """A finding a lens reported in a review: ``id``, ``F1``, ``F2``, … within the review, the
+    ``role`` of the task that reported it, its ``title``, ``body`` and ``severity``, its
+    ``outcome``, the ``task`` it was filed in, if any, and the ``reason`` given for its
+    outcome, if any."""
+
+    id: str
+    role: str
+    title: str
+    body: str
+    severity: Severity
+    outcome: FindingOutcome = "undecided"
+    task: str | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class FindingReport:
+    """A finding as an agent reports it with ``report_finding``: its ``title``, on one line,
+    ``body`` and ``severity``."""
+
+    title: str
+    body: str
+    severity: Severity
+
+
+@dataclass(frozen=True)
+class ReviewGroup:
+    """A review of ``job`` with more than one task, or with a task of a finding role (one
+    granted ``report_finding``): the tasks it holds are those booked into its batch. Of them,
+    ``lenses`` are the finding roles', in the order they were booked, and ``ended`` those that
+    have ended, however they did, in the order they did; ``findings`` are what the lenses
+    reported, in id order, and ``stage`` where it is.
+
+    A review of one task of another role keeps no group: it ends as that task does."""
+
+    job: ReviewJob
+    lenses: tuple[str, ...] = ()
+    ended: tuple[str, ...] = ()
+    findings: tuple[Finding, ...] = ()
+    stage: ReviewStage = "reviewing"
+
+
+def finding_report(arguments: Mapping[str, Any]) -> FindingReport | str:
+    """The finding an agent reported with ``arguments``, its title on one line; or why it's
+    refused."""
+    title = " ".join(str(arguments.get("title", "")).split())
+    if not title:
+        return "A finding needs a title."
+    severity = arguments.get("severity")
+    if severity in SEVERITIES:
+        return FindingReport(title, str(arguments.get("body", "")).strip(), severity)
+    return f'A finding\'s severity is "blocking" or "normal", not {severity!r}.'
+
+
+def with_lens(group: ReviewGroup, task_id: str) -> ReviewGroup:
+    """``group`` with task ``task_id`` among its lenses."""
+    return replace(group, lenses=_with(group.lenses, task_id))
+
+
+def with_ended(group: ReviewGroup, task_id: str) -> ReviewGroup:
+    """``group`` with its task ``task_id`` ended."""
+    return replace(group, ended=_with(group.ended, task_id))
+
+
+def _with(tasks: tuple[str, ...], task_id: str) -> tuple[str, ...]:
+    """``tasks`` with ``task_id`` last, unless it's among them already."""
+    return tasks if task_id in tasks else (*tasks, task_id)
+
+
+def finding_refusal(
+    group: ReviewGroup, reporter: str, role: Role, report: FindingReport, limit: int
+) -> str | None:
+    """Why ``report``, from a task of ``role``, named ``reporter``, can't join ``group``'s
+    findings, as the role may report ``limit`` of them in one review; ``None`` if it can."""
+    if report.severity == "blocking" and not role.blocking_findings:
+        return BLOCKING_REFUSED
+    if sum(finding.role == reporter for finding in group.findings) >= limit:
+        return f"This review has already reported {limit} findings, the most allowed."
+    return None
+
+
+def with_finding(
+    group: ReviewGroup, reporter: str, report: FindingReport
+) -> tuple[ReviewGroup, Finding]:
+    """``group`` with ``report``, from a task of the role ``reporter``, among its findings, and
+    the finding it became, numbered after the others."""
+    finding = Finding(
+        id=f"F{len(group.findings) + 1}",
+        role=reporter,
+        title=report.title,
+        body=report.body,
+        severity=report.severity,
+    )
+    return replace(group, findings=(*group.findings, finding)), finding
+
+
+def fan_in_due(group: ReviewGroup) -> bool:
+    """Whether ``reviews_finished`` is due for ``group``: it has lenses, all of them have
+    ended, and it wasn't raised for it yet."""
+    ended = all(task in group.ended for task in group.lenses)
+    return group.stage == "reviewing" and bool(group.lenses) and ended
+
+
+def review_over(group: ReviewGroup, members: Collection[str]) -> bool:
+    """Whether ``group``'s review is over, its tasks being ``members``: they have all ended, and
+    ``reviews_finished`` was raised for it if it has lenses."""
+    raised = not group.lenses or group.stage == "merging"
+    return raised and all(task in group.ended for task in members)
+
+
+def review_kind(job: ReviewJob) -> ReviewKind:
+    """What ``job`` reviews, as ``reviews_finished``'s ``review`` field says."""
+    if job.whole:
+        return "super"
+    return "commit" if job.batch is None else "batch"
+
+
+def finished_fields(job: ReviewJob, findings: Sequence[Finding]) -> dict[str, str]:
+    """The fields of ``reviews_finished`` for the review of ``job`` whose lenses reported
+    ``findings``: whether there were ``some`` or ``none``, and what it reviewed."""
+    return {"findings": "some" if findings else "none", "review": review_kind(job)}
+
+
+def finished_values(
+    job: ReviewJob,
+    findings: Sequence[Finding],
+    cap: int,
+    pending: Sequence[str],
+    landed_since: Sequence[str],
+) -> dict[str, str]:
+    """The variables of ``reviews_finished`` for the review of ``job`` whose lenses reported
+    ``findings``, its batch taking ``cap`` suggestions, told the tasks titled ``pending`` are
+    queued already and that the commits whose subjects are ``landed_since`` landed after the
+    last it reviews, as the review templates render them. ``{trigger}`` is the caller's."""
+    return {
+        "title": _merge_title(job),
+        "commit": job.commits[-1][:7],
+        "findings": _paragraphs([_finding_paragraph(finding) for finding in findings]),
+        "cap": str(cap),
+        "queued": _paragraphs(_pending(pending)),
+        "landed_since": _paragraphs(_landed(landed_since)),
+    }
+
+
+def _merge_title(job: ReviewJob) -> str:
+    """The first line of the task merging the findings of ``job``'s review."""
+    if job.whole:
+        return f"Merge the findings of the super review at {job.commits[0][:7]}"
+    if job.batch is None:
+        return f"Merge the findings of the review of commit {job.commits[0][:7]}"
+    return (
+        f"Merge the findings of the review of the {len(job.commits)} commits made for review"
+        f" {job.batch}"
+    )
+
+
+def _finding_paragraph(finding: Finding) -> str:
+    """``finding`` as a paragraph of ``{findings}``: its id, role, severity and title, then its
+    body."""
+    heading = f"{finding.id} · {finding.role} · {finding.severity}: {finding.title}"
+    return f"{heading}\n{finding.body}" if finding.body else heading
 
 
 class BatchSnapshot(BaseModel):
@@ -200,7 +400,8 @@ class PlannerSnapshot(BaseModel):
 class LaneSnapshot(BaseModel):
     """A :class:`ReviewLane`'s state for one session: its ``planner``'s, and for each review
     task it queued, the ``jobs`` it reviews and the ``batches`` it suggests into, with the
-    ``templates`` each review of commits is rendered from, while it may still run."""
+    ``templates`` each review of commits is rendered from, while it may still run, and the
+    ``groups`` of the reviews still under way that keep one, by batch."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -208,6 +409,7 @@ class LaneSnapshot(BaseModel):
     jobs: dict[str, ReviewJob] = {}
     batches: dict[str, str] = {}
     templates: dict[str, ReviewTemplate] = {}
+    groups: dict[str, ReviewGroup] = {}
 
 
 class ReviewPlanner:

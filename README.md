@@ -1335,6 +1335,30 @@ stopped is left to run again, its batch still open for it. Reviews need the work
 review roles in a lane of their own; `--no-review` turns them off, and a `reviewer` task you add
 then runs in its lane as any other role's task does, in its role's `workspace`.
 
+The tasks one review queues are booked into it together: those the triggers `review-rounds`
+guards queue for one landing or one batch, which may be any number of triggers, of any roles, or
+those one `commits` firing queues. They share the review's one batch and its one cap, any of them
+holding `suggest_task` suggests into it, and it keeps filling until they have all ended. A
+project can review by **lens** this way: a role granted `report_finding` is a finding role, whose
+agents report findings rather than filing tasks. `report_finding(title, body, severity)`, with
+`severity` `blocking` or `normal`, is taken only from a task orbit booked into a review (`Only
+reviews orbit queued itself can report findings.`), and records the finding against that review
+under an id numbered within it, `F1`, `F2` and so on, with the reporting task's role, its title
+(kept to one line), body and severity; the reply names it (`Recorded as F3.`). Only a role with
+`blocking_findings = true` may report a blocking finding (`Only a role with blocking_findings =
+true may report a blocking finding; report it as normal.`), and one lens may report at most
+`lens_findings` findings in one review (default 10; the next is refused with `This review has
+already reported 10 findings, the most allowed.`). Once every finding role's task of a review has
+ended, however it ended (finished, gave up, failed, stopped or removed), the review raises
+`reviews_finished`, once (see [Triggers](#triggers)): `findings = "some"` if they reported any,
+else `"none"`. A trigger on it, such as a merge pass, queues its task into the review, so its
+`suggest_task` files into the review's batch under the same cap, and the batch keeps filling
+until those tasks have ended too, or closes at once if none was queued, as a review that suggested
+nothing does. A review with no finding role's task raises nothing, and a disabled lens role's
+trigger queues nothing, so the review waits only for the tasks queued. The findings are saved
+with the session, so a review a restart interrupted fans in once its remaining tasks end, or as
+the session opens if they were all interrupted.
+
 ### Roles and `.orbit/config.toml`
 
 Every task names a **role**, the kind of agent that takes it (`coder` unless it says otherwise).
@@ -1377,7 +1401,8 @@ the role. `orbit init --roles` copies the built-in instructions there for you to
 [Starting from the reference config](#starting-from-the-reference-config)).
 
 A role also says which lane runs it, where it works, whether you talk to it, whether its work
-merges, whether it's enabled, how hard its agents think and what they run on:
+merges, whether it's enabled, whether it may report blocking findings, how hard its agents think
+and what they run on:
 
 - `lane`: the lane that runs the role's agents, a plain name of letters, digits, `-` and `_`. Each
   lane of the enabled roles that aren't conversational runs one task at a time, the next on the
@@ -1457,6 +1482,8 @@ merges, whether it's enabled, how hard its agents think and what they run on:
   `propose_task` get an error reply naming the `coder` as disabled, adding nothing to the task
   list or the review's batch. A disabled `planner`'s settings can still be picked with `ctrl+o`,
   `ctrl+l` and `ctrl+y`, as new tasks start with its model and tool access.
+- `blocking_findings`: whether its agents may report a finding as `blocking` with
+  `report_finding` (see [Reviews](#reviews)); left out, they may report only `normal` ones.
 - `effort`: how hard its agents think: `low`, `medium`, `high`, `xhigh` or `max`, the levels
   `claude --help` lists; any other value is refused, listing those. Left out, the effort your `config.toml`'s `[roles.<name>]` or `[roles]`
   sets, if it sets one (see [Your machine's model, effort and runtime](#your-machines-model-effort-and-runtime)), else the CLI's default.
@@ -1828,6 +1855,7 @@ its name in braces:
 | `commits` | every `every` landings matching its `when` on `role` and `origin` | `role`, `origin` | `{commit}`, `{cap}`, `{queued}`, `{since_commits}`, `{changed_files}`, `{sample}` |
 | `startup_check_failed` | a step of the startup check fails, once for each | `step` | `{step}`, `{output}` |
 | `manual` | you fire it | none | `{checks}` |
+| `reviews_finished` | every finding role's task of a review has ended (see [Reviews](#reviews)) | `findings`: `some` or `none`; `review`: `commit`, `batch` or `super` | `{title}`, `{commit}`, `{findings}`, `{cap}`, `{queued}`, `{landed_since}` |
 
 When an event fires, each enabled trigger on it fires in turn, in configuration order (the
 shipped ones, then the project's), if its role is enabled, its `when` takes the event and none of
@@ -1863,9 +1891,9 @@ The guards:
   reviews (see [Reviews](#reviews)): the commit that landed, if it's from your task or the
   planner's, or a batch's commits once its last task has finished, landed or not, which fires the
   triggers it guards with no task causing it; it holds the trigger back otherwise, as while review
-  is paused. Its task gets the skills of the tasks it reviews, and is booked as that review, so
-  it guards only a `reviewer`'s trigger on `task_landed`, and only one enabled trigger: the
-  shipped `review`, unless you disable it and guard your own.
+  is paused. Its task gets the skills of the tasks it reviews, and is booked into that review, so
+  it guards only triggers on `task_landed`; it may guard any number of them, of any roles, each
+  task they queue for one review booked into it, sharing its batch.
 - `not-queued`: holds the trigger back while a task of its role is still to run or running.
 - `dedupe`: holds the trigger back while a task still to run or running has the first line its
   task would have.
@@ -1890,7 +1918,13 @@ without landing a commit; `{cap}` the suggestions the review may make; `{queued}
 queued or running, `{landed_since}` the commits landed since the reviewed one, as they stand when
 the review starts (its task is rendered again from its template then, the other variables as
 they were when it was queued), and `{since_commits}`, `{changed_files}` and `{sample}` the super
-review's lists, each under its heading as [Reviews](#reviews) describes; `{step}` the failed step's name and `{output}` the
+review's lists, each under its heading as [Reviews](#reviews) describes. On `reviews_finished`,
+`{title}` is the merge's first line (`Merge the findings of the review of commit 1a2b3c4`,
+`Merge the findings of the review of the 3 commits made for review batch-2`, or `Merge the
+findings of the super review at 1a2b3c4`), `{commit}` the review's last commit, `{findings}` a
+paragraph for each finding in id order, `F1 · bugs-reviewer · blocking: <title>` then its body,
+`{cap}` the suggestions its batch takes (`review_suggestions`, or `super_review_suggestions` for
+a super review), and `{queued}` and `{landed_since}` as a review's are; `{step}` the failed step's name and `{output}` the
 command that failed with its output, trimmed; and `{checks}` the verification steps and setup
 configured now, under `Configured now (build on these):`, or `Nothing is configured yet.`; with
 steps in named sets, the task checks come first, then each set with its steps, whether it holds
@@ -1920,13 +1954,13 @@ the field and the value, for an unknown event, role, guard or `when` field
 variable its event doesn't give (`triggers.tidy-up.prompt: {diff} isn't a variable of
 task_finished; its variables are {trigger}.`), `every` without `on = "commits"`, `manual = true`
 without a `label`, neither a role nor `checks` or both, a role without a prompt, or `checks` with
-one. So is `review-rounds` on a trigger that isn't on `task_landed` or whose role isn't
-`reviewer` (`triggers.tidy-up.guards: review-rounds needs role = "reviewer".`), or on an enabled
-trigger after the first it guards (`triggers.tidy-up.guards: review-rounds guards only one
-enabled trigger, and review already has it.`), and a `when` value its field never takes, alone
-or in a list: a `role` that isn't one (a disabled one is), or a `verification` other than
-`configured`, `missing` or `off` (`triggers.tidy-up.when: missng isn't a value of verification;
-its values are configured, missing, off.`), while `origin`, `status` and `step` take any value.
+one. So is `review-rounds` on a trigger that isn't on `task_landed`
+(`triggers.tidy-up.guards: review-rounds needs on = "task_landed".`), and a `when` value its
+field never takes, alone or in a list: a `role` that isn't one (a disabled one is), a
+`verification` other than `configured`, `missing` or `off` (`triggers.tidy-up.when: missng isn't
+a value of verification; its values are configured, missing, off.`), a `findings` other than
+`some` or `none`, or a `review` other than `commit`, `batch` or `super`, while `origin`, `status`
+and `step` take any value.
 A trigger whose role is disabled loads, and never fires. When git can't show the diff of what
 landed, the triggers on the landing are skipped with an error (`Review skipped: …` when a review
 was due, `Triggers skipped: …` otherwise), and the run goes on. The reference config shows each shipped

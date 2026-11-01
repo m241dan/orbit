@@ -8,7 +8,7 @@ token, which decides who is asking.
 import asyncio
 import socket
 from collections.abc import Awaitable, Callable
-from typing import Any, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 import uvicorn
 from mcp.server.mcpserver import Context, MCPServer
@@ -30,6 +30,7 @@ from orbit.agent.domain.tools import (
     READ_REPORT,
     READ_SKILL,
     REMOVE_DRAFT,
+    REPORT_FINDING,
     REPORT_PROGRESS,
     RUN_CHECK,
     SAVE_REPORT,
@@ -51,6 +52,10 @@ PROMPT_RECIPE = (
 SUGGEST_TASK_DESCRIPTION = (
     "Suggest a follow-up task for a coder, queued after the current work: a short title, and a"
     f" prompt. {PROMPT_RECIPE}"
+)
+REPORT_FINDING_DESCRIPTION = (
+    "Report a finding of your review: a short title, a body saying where it is and why it"
+    ' matters, and its severity, "blocking" or "normal". Orbit replies with its id.'
 )
 PROPOSE_TASK_DESCRIPTION = (
     "Propose a task for the plan: a short title, and a prompt. It's added as a draft the user"
@@ -145,6 +150,13 @@ def build_server(handler: CallHandler) -> MCPServer:
     @server.tool(structured_output=False, description=SUGGEST_TASK_DESCRIPTION)
     async def suggest_task(title: str, prompt: str, ctx: Context) -> str:
         return await call(ctx, SUGGEST_TASK, {"title": title, "prompt": prompt})
+
+    @server.tool(structured_output=False, description=REPORT_FINDING_DESCRIPTION)
+    async def report_finding(
+        title: str, body: str, severity: Literal["blocking", "normal"], ctx: Context
+    ) -> str:
+        arguments = {"title": title, "body": body, "severity": severity}
+        return await call(ctx, REPORT_FINDING, arguments)
 
     @server.tool(structured_output=False, description=PROPOSE_TASK_DESCRIPTION)
     async def propose_task(

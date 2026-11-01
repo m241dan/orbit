@@ -7,8 +7,10 @@ from pathlib import Path
 
 from orbit.agent.domain.reviews import (
     BatchSnapshot,
+    Finding,
     LaneSnapshot,
     PlannerSnapshot,
+    ReviewGroup,
     ReviewJob,
     ReviewTemplate,
     SuperReviewCount,
@@ -45,8 +47,8 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit these for a format change: they're what orbits at versions 1 to 23 wrote, and
-# they still need to read. A new version gets its own fixture (session-v24.json) and a
+# Never edit these for a format change: they're what orbits at versions 1 to 24 wrote, and
+# they still need to read. A new version gets its own fixture (session-v25.json) and a
 # migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
 SESSION_V2 = FIXTURES / "session-v2.json"
@@ -71,6 +73,7 @@ SESSION_V20 = FIXTURES / "session-v20.json"
 SESSION_V21 = FIXTURES / "session-v21.json"
 SESSION_V22 = FIXTURES / "session-v22.json"
 SESSION_V23 = FIXTURES / "session-v23.json"
+SESSION_V24 = FIXTURES / "session-v24.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -185,7 +188,7 @@ def expected(
     lane: LaneSnapshot | None = None,
 ) -> SessionRecord:
     return SessionRecord(
-        version=23,
+        version=24,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
@@ -509,18 +512,63 @@ def subjected() -> SessionRecord:
     return templated().model_copy(update={"waiting": (work,)})
 
 
-def test_a_version_23_session_file_reads_as_its_record() -> None:
-    assert parse_record(SESSION_V23.read_text(encoding="utf-8")) == subjected()
+def test_a_version_23_session_file_migrates_to_reviews_keeping_no_groups() -> None:
+    record = parse_record(SESSION_V23.read_text(encoding="utf-8"))
+    assert record == subjected()
+    assert isinstance(record, SessionRecord) and record.reviews is not None
+    assert record.reviews.groups == {}
 
 
-def test_a_session_record_is_written_in_the_version_23_format() -> None:
-    written = json.loads(record_json(subjected()))
-    golden = json.loads(SESSION_V23.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V23.name)
+FINDINGS = (
+    Finding(
+        id="F1",
+        role="bugs-reviewer",
+        title="parse() drops the last line",
+        body="It stops at the final newline.",
+        severity="blocking",
+    ),
+    Finding(
+        id="F2",
+        role="bugs-reviewer",
+        title="parse() is slow",
+        body="",
+        severity="normal",
+        outcome="dismissed",
+        task="9",
+        reason="over the cap",
+    ),
+)
+"""The findings a lens reported, the second decided."""
+
+
+def grouped() -> SessionRecord:
+    """The golden record as version 24 keeps it, with a review under way of two lenses, one
+    ended having reported a finding."""
+    group = ReviewGroup(
+        job=ReviewJob(commits=("c3",), round=0, batch=None, reviewed=("5",)),
+        lenses=("3", "7"),
+        ended=("3",),
+        findings=FINDINGS,
+    )
+    lane = subjected().reviews
+    assert lane is not None
+    return subjected().model_copy(
+        update={"reviews": lane.model_copy(update={"groups": {"b2": group}})}
+    )
+
+
+def test_a_version_24_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V24.read_text(encoding="utf-8")) == grouped()
+
+
+def test_a_session_record_is_written_in_the_version_24_format() -> None:
+    written = json.loads(record_json(grouped()))
+    golden = json.loads(SESSION_V24.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V24.name)
 
 
 def test_a_record_with_work_waiting_of_no_commits_is_unreadable() -> None:
-    golden = json.loads(SESSION_V23.read_text(encoding="utf-8"))
+    golden = json.loads(SESSION_V24.read_text(encoding="utf-8"))
     golden["waiting"][0]["count"] = 0
     record = parse_record(json.dumps(golden))
     assert isinstance(record, Unreadable) and record.reason.startswith("waiting.0.count:")

@@ -4,7 +4,10 @@ Each review runs in a read-only snapshot of the commit it reviews, on the :class
 the review roles' lane, which runs the tasks of every role in it, the others as any lane runs its
 tasks. Its suggestions become tasks at the end of the queue, which the work lane then runs; a task
 of another role booked as a review, run in this lane or the work lane, ends its batch as a review
-does once it ends.
+does once it ends. The tasks the triggers queue for one review are booked into it, sharing one
+batch, which fills until they have all ended; once every one of a finding role, granted
+``report_finding``, has ended, the lane raises ``reviews_finished`` with the findings they
+reported, and the tasks queued on it join the review, which then fills until they end too.
 :class:`ReviewPlanner` decides when a review is due and stops reviews generating work forever.
 It's the ``review-rounds`` guard: the lane raises each landing as ``task_landed``, and a review
 of commits is queued by the triggers it guards, from their templates. It counts each landing
@@ -17,6 +20,7 @@ from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, 
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from functools import partial
+from typing import Literal
 
 from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.desk import AgentDesk
@@ -40,19 +44,37 @@ from orbit.agent.application.triggers import ReviewRound, TriggerEngine, Trigger
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.endings import REVIEW_STOPPED_BY_YOU
 from orbit.agent.domain.reviews import (
+    NOT_BOOKED_FOR_FINDINGS,
+    FindingReport,
     LandedSince,
     LaneSnapshot,
+    ReviewGroup,
     ReviewJob,
     ReviewPlanner,
     ReviewTemplate,
+    fan_in_due,
+    finding_refusal,
+    finished_fields,
+    finished_values,
     pause_notice,
     pending_titles,
+    review_over,
     review_values,
     tell_landed_since,
+    with_ended,
+    with_finding,
+    with_lens,
 )
 from orbit.agent.domain.role_lanes import review_lane, task_lanes
 from orbit.agent.domain.suggestions import suggested_task, suggestion_refusal
-from orbit.agent.domain.triggers import Trigger, render_template, restart_counts
+from orbit.agent.domain.tools import REPORT_FINDING
+from orbit.agent.domain.triggers import (
+    REVIEWS_FINISHED,
+    Trigger,
+    TriggerEvent,
+    render_template,
+    restart_counts,
+)
 from orbit.agent.domain.usage_limits import RuntimeStop
 from orbit.execution.cancelling import cancelling
 from orbit.protocol import (
@@ -67,6 +89,21 @@ from orbit.protocol import (
     TaskState,
 )
 from orbit.tracing import Span, current_span
+
+Publishing = Literal["published", "quiet"]
+"""How what a review's end queues is shown: published and run, or, as a session opens, only put
+on the board, for its snapshot to show."""
+
+
+class _Booking:
+    """Where the tasks queued for one review of ``job`` are booked, while ``cause`` was the
+    current span: into ``batch``, the batch the first of them opened, once one has, or that
+    the review opened already."""
+
+    def __init__(self, job: ReviewJob, cause: Span, batch: str | None = None) -> None:
+        self.job = job
+        self.cause = cause
+        self.batch = batch
 
 
 @dataclass(frozen=True)
@@ -122,6 +159,9 @@ class ReviewLane:
         # until it ends.
         self._causes: dict[str, Span] = {}
         self._tallies: dict[str, ReviewTally] = {}  # Review task id -> its suggestions, as it runs.
+        # Batch -> the review behind it, while it's under way, if it keeps a group.
+        self._groups: dict[str, ReviewGroup] = {}
+        self._fanning: set[str] = set()  # Batches whose reviews_finished is being raised.
         self._triggers = hooks.triggers or TriggerEngine(desk, tasks, TriggerHooks(self._kick_own))
         self.runner = self._runner(hooks)
         self._paused_noted = False
@@ -146,6 +186,7 @@ class ReviewLane:
             jobs=dict(self._jobs),
             batches=dict(self._batches),
             templates=dict(self._templates),
+            groups=dict(self._groups),
         )
 
     @property
@@ -185,6 +226,7 @@ class ReviewLane:
         self.planner.restore(snapshot.planner)
         self._jobs, self._batches = dict(snapshot.jobs), dict(snapshot.batches)
         self._templates = dict(snapshot.templates)
+        self._groups = dict(snapshot.groups)
         self._causes.clear()  # The session's task ids are reused by the next.
         self._status = self.status  # The switch's snapshot shows the restored status,
         self._paused_noted = False  # but a pause is news.
@@ -192,15 +234,25 @@ class ReviewLane:
     async def end_interrupted(self, interrupted: Collection[str]) -> None:
         """End the reviews in ``interrupted``, which were stopped by a crash, as a cancelled
         review ends, never to run again: a review of their batch that's due is queued, for the
-        next run. The board and the review status aren't published: the switch's snapshot,
+        next run, as are the tasks of ``reviews_finished`` for a review whose lenses have all
+        ended now. The board and the review status aren't published: the switch's snapshot,
         which follows, shows them, and :meth:`note_pause` then notes a pause."""
         for task_id in interrupted:
             self._templates.pop(task_id, None)
             batch = self._batches.get(task_id)
             if batch is not None and batch in self.planner.open_batches:
-                await self._queue_quietly(self.planner.review_ended(batch))
+                await self._end_quietly(task_id, batch)
                 await self._hooks.changed()
         self._status = self.status
+
+    async def _end_quietly(self, task_id: str, batch: str) -> None:
+        """End task ``task_id``, booked into the review behind open ``batch``, as a crash
+        stopped it, queuing what that leads to without publishing it."""
+        group = self._groups.get(batch)
+        if group is None or not self.planner.filling(batch):
+            await self._queue_quietly(self.planner.review_ended(batch))
+            return
+        await self._settle(batch, with_ended(group, task_id), "quiet")
 
     async def landed(self, state: TaskState, commit: str) -> None:
         """The task that ended as ``state`` landed ``commit``: raise ``task_landed``, its own
@@ -290,7 +342,8 @@ class ReviewLane:
 
     async def removed(self, task_id: str, state: TaskState) -> None:
         """Task ``task_id``, which was ``state``, was taken off the board. A review's batch
-        ends as if it suggested nothing; any other task leaves its batch."""
+        ends as if it suggested nothing, or, for a task of a review that keeps a group, the task
+        counts as ended; any other task leaves its batch."""
         batch = self._batches.pop(task_id, None)
         if batch is None:
             await self._queue(self.planner.removed(state))
@@ -298,6 +351,10 @@ class ReviewLane:
         del self._jobs[task_id]
         self._causes.pop(task_id, None)
         self._templates.pop(task_id, None)
+        group = self._groups.get(batch)
+        if group is not None and self.planner.filling(batch):
+            await self._settle(batch, with_ended(group, task_id), "published")
+            return
         open_batch = batch in self.planner.open_batches
         await self._queue(self.planner.review_ended(batch) if open_batch else None)
 
@@ -344,6 +401,32 @@ class ReviewLane:
 
         new_id = await self._tasks.change(add)
         return Reply(f"Queued as task {new_id}.")
+
+    async def report(self, task_id: str, report: FindingReport) -> Reply:
+        """Task ``task_id`` reports a finding; record it against the review it's booked into,
+        unless it's refused: from a task booked into no review, or no longer reviewing, or as
+        :func:`~orbit.agent.domain.reviews.finding_refusal` says."""
+        batch = self._reviewing_in(task_id)
+        if batch is None:
+            return Reply(NOT_BOOKED_FOR_FINDINGS, is_error=True)
+        group = self._groups[batch]
+        reporter = self._board.get(task_id).task.role
+        limit = self.planner.limits.lens_findings
+        role = self._desk.agents.roles[reporter]
+        refusal = finding_refusal(group, reporter, role, report, limit)
+        if refusal is not None:
+            return Reply(refusal, is_error=True)
+        self._groups[batch], finding = with_finding(group, reporter, report)
+        await self._hooks.changed()
+        return Reply(f"Recorded as {finding.id}.")
+
+    def _reviewing_in(self, task_id: str) -> str | None:
+        """The batch of the review keeping a group that task ``task_id``, on the board, is booked
+        into and hasn't ended in; none if there's no such review."""
+        batch = self._batches.get(task_id)
+        group = None if batch is None else self._groups.get(batch)
+        reviewing = group is not None and task_id not in group.ended
+        return batch if reviewing and self._board.find(task_id) is not None else None
 
     def cancel(self, task_id: str) -> None:
         """Stop review task ``task_id`` if it's the one running; the lane carries on."""
@@ -394,22 +477,54 @@ class ReviewLane:
             await self._triggers.reviewed_quietly(self._round(job))
 
     def _round(self, job: ReviewJob) -> ReviewRound:
-        """``job``'s review as the ``review-rounds`` guard finds it due, booking the review task
-        queued for it."""
-        return ReviewRound(job, partial(self._book, job, current_span()))
+        """``job``'s review as the ``review-rounds`` guard finds it due, booking each task
+        queued for it into it."""
+        return ReviewRound(job, partial(self._book, _Booking(job, current_span())))
 
-    def _book(self, job: ReviewJob, cause: Span, task_id: str, template: ReviewTemplate) -> None:
-        """Record review task ``task_id``, queued as a review for ``job``, whatever its role,
-        while ``cause`` was the current span, which its span links to, opening the batch its
-        suggestions join, and, for a review of commits, the ``template`` its prompt was rendered
-        from. A super review, told what landed as it was queued, isn't rendered again. The
-        triggers queued its task as a review (see :data:`~orbit.protocol.QueuedAs`), so it can't
-        be edited, and holds back ``suggestions-pending`` while it waits."""
-        batch = self.planner.open_batch(job)
-        self._jobs[task_id], self._batches[task_id] = job, batch
-        self._causes[task_id] = cause
-        if not job.whole:
+    def _book(self, booking: _Booking, task_id: str, template: ReviewTemplate) -> None:
+        """Book task ``task_id``, queued as a review, whatever its role, into the review
+        ``booking`` says, the first task opening its batch, as :meth:`_record` says, keeping it
+        in the review's group, if it keeps one: once it has a second task, or one of a finding
+        role."""
+        if booking.batch is None:
+            booking.batch = self.planner.open_batch(booking.job)
+        batch = booking.batch
+        self._record(task_id, batch, booking, template)
+        lens = self._is_lens(task_id)
+        group = self._groups.get(batch) or self._new_group(batch, booking.job, task_id)
+        if group is not None:
+            self._groups[batch] = with_lens(group, task_id) if lens else group
+
+    def _new_group(self, batch: str, job: ReviewJob, task_id: str) -> ReviewGroup | None:
+        """The group the review of ``job`` behind ``batch``, keeping none yet, keeps now that
+        task ``task_id`` joined it, if it's a finding role's or the review's second; none
+        otherwise."""
+        keeps = self._is_lens(task_id) or len(self._members(batch)) > 1
+        return ReviewGroup(job) if keeps else None
+
+    def _record(
+        self, task_id: str, batch: str, booking: _Booking, template: ReviewTemplate
+    ) -> None:
+        """Record task ``task_id``, booked into the review ``booking`` says, behind ``batch``,
+        which its suggestions join, its span linking to the span current as the review fell
+        due, and, for a review of commits, the ``template`` its prompt was rendered from. A
+        super review, told what landed as it was queued, isn't rendered again. The triggers
+        queued its task as a review (see :data:`~orbit.protocol.QueuedAs`), so it can't be
+        edited, and holds back ``suggestions-pending`` while it waits."""
+        self._jobs[task_id], self._batches[task_id] = booking.job, batch
+        self._causes[task_id] = booking.cause
+        if not booking.job.whole:
             self._templates[task_id] = template
+
+    def _is_lens(self, task_id: str) -> bool:
+        """Whether task ``task_id``, just queued, is a finding role's: one granted
+        ``report_finding``."""
+        role = self._desk.agents.roles.get(self._board.get(task_id).task.role)
+        return role is not None and REPORT_FINDING in role.granted_tools
+
+    def _members(self, batch: str) -> tuple[str, ...]:
+        """The tasks booked into the review behind ``batch`` that weren't taken off the board."""
+        return tuple(task_id for task_id, booked in self._batches.items() if booked == batch)
 
     async def _landed(self, job: ReviewJob, since: str | None) -> LandedSince:
         """What landed that ``job``'s reviewer, a super reviewer, is told as it's queued: the
@@ -491,9 +606,16 @@ class ReviewLane:
         return self._board.next_runnable(skip=tried, roles=self.runner.roles)
 
     def _spent(self) -> set[str]:
-        """Reviews that ended, however they did: their batch is over or no longer filling, so
-        running them again could suggest nothing."""
-        return {t for t, b in self._batches.items() if not self.planner.filling(b)}
+        """Reviews that ended, however they did: their batch is over or no longer filling, or
+        they ended in a review that keeps a group, so running them again could suggest
+        nothing."""
+        return {t for t, b in self._batches.items() if self._ended_in(t, b)}
+
+    def _ended_in(self, task_id: str, batch: str) -> bool:
+        """Whether task ``task_id``, booked into the review behind ``batch``, has ended there."""
+        group = self._groups.get(batch)
+        ended = group is not None and task_id in group.ended
+        return ended or not self.planner.filling(batch)
 
     def _is_review(self, task_id: str) -> bool:
         """Whether task ``task_id`` is a review: a review role's task, whether orbit queued it
@@ -563,7 +685,7 @@ class ReviewLane:
             # Its batch no longer fills, so this lane won't run it again.
             self._causes.pop(task_id, None)
             self._templates.pop(task_id, None)
-            await self._after(self._batches.get(task_id))
+            await self._after(task_id, self._batches.get(task_id))
 
     async def _reviewed(self, task_id: str) -> Outcome:
         """How started review ``task_id`` ended, run as a task of its own that the user's stop
@@ -582,12 +704,74 @@ class ReviewLane:
         async with snapshot_of(self._tree, job.commits[-1], self._publish) as root:
             return await run(None, root)
 
-    async def _after(self, batch: str | None) -> None:
-        """A review, or another task the lane booked, ended: review its batch if that's done,
-        else run the suggestions it made; either links to the task's span, the current one. A
-        batch ends once: nothing is done for one that's over or no longer filling, as when a
-        booked task the work lane runs again, once it failed, ends again."""
+    async def _after(self, task_id: str, batch: str | None) -> None:
+        """A review, or another task the lane booked, ``task_id``, ended: its review goes on as
+        :meth:`_settle` says, or, keeping no group, ends with it, as :meth:`_close_review` says;
+        either links to the task's span, the current one. A batch ends once: nothing is done for
+        one that's over or no longer filling, as when a booked task the work lane runs again,
+        once it failed, ends again."""
         if batch is None or not self.planner.filling(batch):
+            return
+        group = self._groups.get(batch)
+        if group is None:
+            await self._close_review(batch, "published")
+            return
+        await self._settle(batch, with_ended(group, task_id), "published")
+
+    async def _settle(self, batch: str, group: ReviewGroup, publishing: Publishing) -> None:
+        """Keep ``group`` as the review behind ``batch``, one of its tasks having just ended,
+        raise ``reviews_finished`` for it once its lenses have all ended, and end it once it's
+        over, showing what that queues as ``publishing`` says."""
+        self._groups[batch] = group
+        if fan_in_due(group) and batch not in self._fanning:
+            await self._fan_in(batch, group, publishing)
+        settled = self._groups[batch]
+        if batch not in self._fanning and review_over(settled, self._members(batch)):
+            await self._close_review(batch, publishing)
+
+    async def _fan_in(self, batch: str, group: ReviewGroup, publishing: Publishing) -> None:
+        """Raise ``reviews_finished`` once for ``group``, the review behind ``batch``, each task
+        a trigger queues on it booked into it, showing them as ``publishing`` says. It's marked
+        raised first, and its review held open while it's raised."""
+        self._groups[batch] = replace(group, stage="merging")
+        self._fanning.add(batch)
+        try:
+            queued = await self._raise_finished(batch, group, publishing)
+        finally:
+            self._fanning.discard(batch)
+        if publishing == "published":
+            await self._queue_ended(queued)
+
+    async def _raise_finished(
+        self, batch: str, group: ReviewGroup, publishing: Publishing
+    ) -> tuple[str, ...]:
+        """Raise ``reviews_finished`` for ``group``, the review behind ``batch``, as
+        ``publishing`` says; returns the ids of the tasks queued, if they're published."""
+        job = group.job
+        event = TriggerEvent(REVIEWS_FINISHED, finished_fields(job, group.findings))
+        values = partial(self._finished_values, batch, group)
+        review = ReviewRound(job, partial(self._book, _Booking(job, current_span(), batch)))
+        if publishing == "quiet":
+            await self._triggers.fan_in_quietly(event, values, review)
+            return ()
+        return await self._triggers.fan_in(event, values, review)
+
+    async def _finished_values(self, batch: str, group: ReviewGroup) -> Mapping[str, str]:
+        """The variables of ``reviews_finished`` for ``group``, the review behind ``batch``,
+        told what landed after the last commit it reviews as it stands now."""
+        job = group.job
+        landed = await self._landed_after(job.commits[-1])
+        pending = pending_titles(self._board.tasks)
+        cap = self.planner.cap_of(batch)
+        return finished_values(job, group.findings, cap, pending, landed)
+
+    async def _close_review(self, batch: str, publishing: Publishing) -> None:
+        """End the review behind ``batch``: its batch no longer fills, and is reviewed if
+        that's due, showing what's queued as ``publishing`` says; else, published, the
+        suggestions it made run."""
+        self._groups.pop(batch, None)
+        if publishing == "quiet":
+            await self._queue_quietly(self.planner.review_ended(batch))
             return
         await self._queue(self.planner.review_ended(batch))
         if batch in self.planner.open_batches:

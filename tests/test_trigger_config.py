@@ -134,7 +134,7 @@ def test_a_trigger_for_a_projects_own_role_is_valid() -> None:
         (
             NIGHTLY | {"on": "someday"},
             "triggers.nightly.on: someday isn't an event; the events are session_started,"
-            " task_landed, task_finished, commits, startup_check_failed, manual.",
+            " task_landed, task_finished, commits, startup_check_failed, manual, reviews_finished.",
         ),
         (
             NIGHTLY | {"role": "tidier"},
@@ -194,33 +194,19 @@ def test_an_override_that_breaks_a_shipped_trigger_is_refused() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    ("change", "problem"),
-    [
-        ({"on": "task_finished"}, 'triggers.mine.guards: review-rounds needs on = "task_landed".'),
-        ({"role": "coder"}, 'triggers.mine.guards: review-rounds needs role = "reviewer".'),
-    ],
-)
-def test_review_rounds_off_a_reviewers_landing_is_refused(
-    change: dict[str, Any], problem: str
-) -> None:
-    assert refusal({"review": {"enabled": False}, "mine": REVIEWS | change}) == problem
-
-
-def test_review_rounds_on_a_coders_landing_beside_the_review_is_refused_for_both() -> None:
-    tidy = NIGHTLY | {"on": "task_landed", "guards": ["review-rounds"]}
-    assert refusal({"tidy": tidy}).splitlines() == [
-        'triggers.tidy.guards: review-rounds needs role = "reviewer".',
-        "triggers.tidy.guards: review-rounds guards only one enabled trigger, and review already"
-        " has it.",
-    ]
-
-
-def test_a_second_review_rounds_trigger_beside_the_review_is_refused() -> None:
-    assert refusal({"second": REVIEWS}) == (
-        "triggers.second.guards: review-rounds guards only one enabled trigger, and review"
-        " already has it."
+def test_review_rounds_off_a_landing_is_refused() -> None:
+    mine = REVIEWS | {"on": "task_finished"}
+    assert refusal({"review": {"enabled": False}, "mine": mine}) == (
+        'triggers.mine.guards: review-rounds needs on = "task_landed".'
     )
+
+
+def test_review_rounds_on_two_enabled_triggers_of_other_roles_loads() -> None:
+    bugs = NIGHTLY | {"on": "task_landed", "guards": ["review-rounds"]}
+    tests = bugs | {"prompt": "Test {commit}."}
+    config = loaded({"triggers": {"bugs": bugs, "tests": tests}})
+    guarded = [name for name, t in config.triggers.items() if "review-rounds" in t.guards]
+    assert guarded == ["review", "bugs", "tests"]
 
 
 def test_review_rounds_moves_to_a_trigger_of_your_own_with_the_review_disabled() -> None:

@@ -3,7 +3,10 @@ its role's task on the board, its prompt rendered from its template, unless a gu
 back.
 
 The ``review-rounds`` guard is today's review planner: the review lane finds the review due on a
-landing, which the triggers it guards review, and books each review they queue into its batches.
+landing, which the triggers it guards review, and books each task they queue into that review,
+whose one batch its suggestions join. Once every finding role's task of a review has ended, the
+review lane raises ``reviews_finished`` for it, each task a trigger on it queues booked into the
+review too.
 A batch's review falls due as the batch is done rather than as one task lands, so it fires the
 triggers ``review-rounds`` guards on ``task_landed`` with no task causing it, as 12d's
 ``batch_landed`` will.
@@ -23,8 +26,9 @@ session's gate says, with a notice naming its trigger, but a configurator's, whi
 """
 
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
+from typing import Literal
 
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import OPEN_GATE, SessionGate
@@ -92,9 +96,10 @@ was due, or the other triggers on the landing."""
 
 @dataclass(frozen=True)
 class ReviewRound:
-    """A review the ``review-rounds`` guard finds due: ``job``, and ``book``, which records the
-    review task queued for it, by its id, with the template and values its prompt was rendered
-    from, opening the batch its suggestions join."""
+    """A review the ``review-rounds`` guard finds due, or whose lenses finished: ``job``, and
+    ``book``, which records a task queued for it, by its id, with the template and values its
+    prompt was rendered from, into the review, the first opening the batch its suggestions
+    join."""
 
     job: ReviewJob
     book: Callable[[str, ReviewTemplate], None]
@@ -111,10 +116,12 @@ class _Firing:
     values: Mapping[str, str]
     review: ReviewRound | None
     counted: bool = False
+    books: Literal["guarded", "every"] = "guarded"
 
     def review_of(self, trigger: Trigger) -> ReviewRound | None:
-        """The review ``trigger``'s task reviews, if any."""
-        reviews = self.counted or REVIEW_ROUNDS in trigger.guards
+        """The review ``trigger``'s task reviews, if any: every trigger's, on a landing counted,
+        by hand, or once a review's lenses finished, else only those ``review-rounds`` guards."""
+        reviews = self.counted or self.books == "every" or REVIEW_ROUNDS in trigger.guards
         return self.review if reviews else None
 
 
@@ -240,6 +247,33 @@ class TriggerEngine:
         firing = await self._batch_firing(review)
         if firing is not None:
             self._add(self._tasks.board, firing)
+
+    async def fan_in(
+        self, event: TriggerEvent, values: Values, review: ReviewRound
+    ) -> tuple[str, ...]:
+        """Raise ``event``, ``reviews_finished`` for ``review``, whose lenses have all ended:
+        each trigger on it that no guard holds back queues its task, rendered from the
+        ``values`` gathered and its name, booked into the review. The board is published if any
+        task was queued. Returns their ids, for :meth:`run`."""
+        firing = await self._fan_in_firing(event, values, review)
+        return () if firing is None else await self._queue(firing)
+
+    async def fan_in_quietly(
+        self, event: TriggerEvent, values: Values, review: ReviewRound
+    ) -> None:
+        """Raise ``event`` for ``review`` as :meth:`fan_in` does, the tasks queued on the board
+        without publishing it or running them."""
+        firing = await self._fan_in_firing(event, values, review)
+        if firing is not None:
+            self._add(self._tasks.board, firing)
+
+    async def _fan_in_firing(
+        self, event: TriggerEvent, values: Values, review: ReviewRound
+    ) -> _Firing | None:
+        """What the triggers on ``event`` fire on for ``review``, each booking its task into it;
+        none if none does."""
+        firing = await self._firing(self._desk.agents.triggers, event, values, review)
+        return None if firing is None else replace(firing, books="every")
 
     async def fire(
         self, event: TriggerEvent, values: Values, review: ReviewRound | None = None

@@ -62,7 +62,7 @@ def shown(tasks: tuple[TaskState, ...]) -> list[tuple[str, str, str | None]]:
     return [(state.task.role, state.origin, state.batch) for state in tasks]
 
 
-async def test_each_commits_triggers_review_suggests_tasks_from_its_own_trigger() -> None:
+async def test_one_commits_firings_reviews_share_a_batch_each_suggesting_from_its_trigger() -> None:
     triggers = with_audit(when={"origin": ["manual", "planner"]}, super_every=1)
     reviewers = (suggests("Tidy the parser"), suggests("Split the lexer"))
     session = reviewing(
@@ -77,7 +77,7 @@ async def test_each_commits_triggers_review_suggests_tasks_from_its_own_trigger(
         (SUPER_REVIEWER, SUPER_REVIEW, None),
         (SUPER_REVIEWER, AUDIT, None),
         (CODER, SUPER_REVIEW, "batch-1"),
-        (CODER, AUDIT, "batch-2"),
+        (CODER, AUDIT, "batch-1"),
     ]
 
 

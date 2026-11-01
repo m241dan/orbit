@@ -31,7 +31,7 @@ from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
 from orbit.agent.domain.reviews import ReviewJob
 from orbit.agent.domain.roles import PLAIN_NAME
 from orbit.agent.domain.verification import VerificationStep
-from orbit.protocol import REVIEWER, TASK_CHECKS, TaskState, is_orbit_review
+from orbit.protocol import TASK_CHECKS, TaskState, is_orbit_review
 
 EventName = Literal[
     "session_started",
@@ -40,10 +40,11 @@ EventName = Literal[
     "commits",
     "startup_check_failed",
     "manual",
+    "reviews_finished",
 ]
 """What a trigger fires on: orbit opening a workspace with its session, a task's work landing, a
 task finishing, landings counted up to a trigger's ``every``, a step of the startup check
-failing, or the user firing it."""
+failing, the user firing it, or every finding role's task of a review having ended."""
 
 GuardName = Literal["review-rounds", "suggestions-pending", "not-queued", "dedupe"]
 """A named rule that may hold a trigger back."""
@@ -60,6 +61,10 @@ COMMITS = "commits"
 TASK_LANDED = "task_landed"
 TASK_FINISHED = "task_finished"
 """The events of a task's end: its work landing, and its finishing, however it did."""
+
+REVIEWS_FINISHED = "reviews_finished"
+"""The event of a review's lenses having ended: every task of a finding role, one granted
+``report_finding``, that one review queued."""
 
 SESSION_STARTED = "session_started"
 STARTUP_CHECK_FAILED = "startup_check_failed"
@@ -79,7 +84,8 @@ VERIFICATION_STATES: tuple[str, ...] = get_args(VerificationState)
 
 REVIEW_ROUNDS = "review-rounds"
 """The guard that holds a trigger back unless today's review rounds and batches find a review
-due, whose job its task reviews."""
+due, whose job its task reviews; the tasks of every trigger it guards are booked into that one
+review."""
 
 TRIGGER_VARIABLE = "trigger"
 """The variable every event gives: the name of the trigger it fires."""
@@ -124,6 +130,10 @@ EVENTS: Mapping[str, Event] = {
     ),
     STARTUP_CHECK_FAILED: Event(("step",), (TRIGGER_VARIABLE, "step", "output")),
     "manual": Event((), (TRIGGER_VARIABLE, "checks")),
+    REVIEWS_FINISHED: Event(
+        ("findings", "review"),
+        (TRIGGER_VARIABLE, "title", "commit", "findings", "cap", "queued", "landed_since"),
+    ),
 }
 """Each event, by name, with what it gives. A trigger fired by hand gives the variables of its
 event, as the super review does those of ``commits``."""
@@ -132,7 +142,11 @@ ROLE_FIELD = "role"
 """The ``when`` field naming the role of an event's task, whose values are the roles: a disabled
 one among them."""
 
-WHEN_VALUES: Mapping[str, tuple[str, ...]] = {"verification": VERIFICATION_STATES}
+WHEN_VALUES: Mapping[str, tuple[str, ...]] = {
+    "verification": VERIFICATION_STATES,
+    "findings": ("some", "none"),
+    "review": ("commit", "batch", "super"),
+}
 """The values the events give each ``when`` field orbit fixes them for, by its name. Besides
 these, :data:`ROLE_FIELD`'s are the roles, and ``origin``, ``status`` and ``step`` take any
 value: origins include trigger names, and steps are the project's own."""
@@ -362,14 +376,12 @@ def check_triggers(
     checks nor one of ``sets``, those a step is in, a role without a prompt or ``checks`` with
     one, a ``when`` field or a template variable its event doesn't give, a ``when`` value its
     field never takes, a role not among ``roles`` or a value :data:`WHEN_VALUES` doesn't give,
-    ``review-rounds`` on a trigger that isn't a ``reviewer``'s on ``task_landed`` or on an
-    enabled one after the first, ``every`` on another event than ``commits``, and ``manual``
-    without a ``label``."""
-    owner = _review_rounds_owner(triggers)
+    ``review-rounds`` on a trigger on another event than ``task_landed``, ``every`` on another
+    event than ``commits``, and ``manual`` without a ``label``."""
     problems = [
         f"triggers.{name}.{field}: {why}"
         for name, trigger in triggers.items()
-        for field, why in _problems(name, trigger, _Targets(roles, sets), owner)
+        for field, why in _problems(trigger, _Targets(roles, sets))
     ]
     if problems:
         raise ConfigError("\n".join(problems))
@@ -384,17 +396,14 @@ class _Targets:
     sets: Collection[str]
 
 
-def _problems(
-    name: str, trigger: Trigger, targets: _Targets, owner: str | None
-) -> list[tuple[str, str]]:
-    """Each problem of ``trigger``, named ``name``, by the field it's in, as
-    :func:`check_triggers` finds them against the ``targets`` it may act on, with ``owner`` the
-    trigger ``review-rounds`` may guard."""
+def _problems(trigger: Trigger, targets: _Targets) -> list[tuple[str, str]]:
+    """Each problem of ``trigger``, by the field it's in, as :func:`check_triggers` finds them
+    against the ``targets`` it may act on."""
     return [
         *_target_problems(trigger, targets),
         *_prompt_problems(trigger),
         *_when_problems(trigger, targets.roles),
-        *_guard_problems(name, trigger, owner),
+        *_guard_problems(trigger),
         *_every_problems(trigger),
         *_label_problems(trigger),
     ]
@@ -485,38 +494,14 @@ def _not_values(field: str, values: Sequence[str], known: Sequence[str]) -> list
     ]
 
 
-def _review_rounds_owner(triggers: Mapping[str, Trigger]) -> str | None:
-    """The name of the first enabled one of ``triggers`` that ``review-rounds`` guards, if any:
-    the only one it may guard, since every trigger it guards would fire on the same review."""
-    return next(
-        (
-            name
-            for name, trigger in triggers.items()
-            if trigger.enabled and REVIEW_ROUNDS in trigger.guards
-        ),
-        None,
-    )
-
-
-def _guard_problems(name: str, trigger: Trigger, owner: str | None) -> list[tuple[str, str]]:
-    """Why ``review-rounds`` can't guard ``trigger``, named ``name``, if it does: the review lane
-    books its task as the review it finds due, so it must queue a ``reviewer``'s task on
-    ``task_landed``, the only event a review falls due on, and be ``owner``, the trigger it may
-    guard, if it's enabled (decision 12)."""
-    if REVIEW_ROUNDS not in trigger.guards:
+def _guard_problems(trigger: Trigger) -> list[tuple[str, str]]:
+    """Why ``review-rounds`` can't guard ``trigger``, if it does: the review lane books its task
+    into the review it finds due, which only falls due on ``task_landed``. Any number of
+    triggers may take it, whatever their roles, each task they queue for one review booked into
+    it (decision 8)."""
+    if REVIEW_ROUNDS not in trigger.guards or trigger.on == TASK_LANDED:
         return []
-    return [
-        ("guards", why)
-        for why, misused in (
-            (f'{REVIEW_ROUNDS} needs on = "{TASK_LANDED}".', trigger.on != TASK_LANDED),
-            (f'{REVIEW_ROUNDS} needs role = "{REVIEWER}".', trigger.role != REVIEWER),
-            (
-                f"{REVIEW_ROUNDS} guards only one enabled trigger, and {owner} already has it.",
-                trigger.enabled and owner != name,
-            ),
-        )
-        if misused
-    ]
+    return [("guards", f'{REVIEW_ROUNDS} needs on = "{TASK_LANDED}".')]
 
 
 def _every_problems(trigger: Trigger) -> list[tuple[str, str]]:
@@ -548,6 +533,7 @@ FIRING_PHRASES: Mapping[str, str] = {
     TASK_FINISHED: "when a task finishes",
     STARTUP_CHECK_FAILED: "when the startup check fails",
     "manual": "by hand",
+    REVIEWS_FINISHED: "when a review's lenses have finished",
 }
 """When a trigger on each event but ``commits``, which counts, fires, in words, by name."""
 

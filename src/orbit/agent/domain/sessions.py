@@ -44,7 +44,7 @@ from orbit.protocol import (
     Usage,
 )
 
-FORMAT_VERSION = 23
+FORMAT_VERSION = 24
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _OLD_SUPER_REVIEW_ORIGIN = "super_review"
@@ -81,8 +81,8 @@ def _without_rounds(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def _unchanged(record: dict[str, Any]) -> dict[str, Any]:
-    """Version 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 19, 21 or 22 ``record`` as it
-    is: the next version only added fields that have defaults."""
+    """Version 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 19, 21, 22 or 23 ``record`` as
+    it is: the next version only added fields that have defaults."""
     return record
 
 
@@ -175,7 +175,8 @@ def _booked(task: object, booked: tuple[str, ...]) -> object:
 # waiting in the coder's tree for merges to resume, which an older record has none of. Version
 # 23 added the subjects of each piece of work's commits, which find them after a rebase; an
 # older record doesn't know them, so its work is told of as landing with the landing's last
-# commit.
+# commit. Version 24 added the groups of the reviews under way, with their lenses' findings; an
+# older record has none, as each of its reviews is one task, which ends it as it ends.
 _MIGRATIONS: dict[int, Migration] = {
     1: _spent_by_tasks,
     2: _without_rounds,
@@ -199,6 +200,7 @@ _MIGRATIONS: dict[int, Migration] = {
     20: _reviews_as_booked,
     21: _unchanged,
     22: _unchanged,
+    23: _unchanged,
 }
 
 EMPTY_NAME = "A session needs a name."

@@ -97,6 +97,11 @@ class _FileConfig(_Config):
     review_suggestions: int = Field(
         default=_REVIEW_LIMITS.suggestions, ge=1, description="Tasks one review may suggest."
     )
+    lens_findings: int = Field(
+        default=_REVIEW_LIMITS.lens_findings,
+        gt=0,
+        description="Findings one lens may report in one review.",
+    )
     super_review_suggestions: int = Field(
         default=_REVIEW_LIMITS.super_suggestions,
         ge=1,
@@ -149,6 +154,7 @@ class _FileConfig(_Config):
         return ReviewLimits(
             rounds=self.review_rounds,
             suggestions=self.review_suggestions,
+            lens_findings=self.lens_findings,
             super_suggestions=self.super_review_suggestions,
             super_sample=self.super_review_sample,
         )

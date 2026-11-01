@@ -52,6 +52,7 @@ def test_the_events_are_the_records_with_their_when_fields() -> None:
         "commits",
         "startup_check_failed",
         "manual",
+        "reviews_finished",
     )
     assert {name: event.fields for name, event in EVENTS.items()} == {
         "session_started": ("verification",),
@@ -60,11 +61,16 @@ def test_the_events_are_the_records_with_their_when_fields() -> None:
         "commits": ("role", "origin"),
         "startup_check_failed": ("step",),
         "manual": (),
+        "reviews_finished": ("findings", "review"),
     }
 
 
-def test_only_verification_has_values_fixed_by_orbit() -> None:
-    assert WHEN_VALUES == {"verification": ("configured", "missing", "off")}
+def test_verification_findings_and_review_have_values_fixed_by_orbit() -> None:
+    assert WHEN_VALUES == {
+        "verification": ("configured", "missing", "off"),
+        "findings": ("some", "none"),
+        "review": ("commit", "batch", "super"),
+    }
 
 
 def test_every_event_gives_its_trigger_and_its_own_variables() -> None:
@@ -94,6 +100,15 @@ def test_every_event_gives_its_trigger_and_its_own_variables() -> None:
         ),
         "startup_check_failed": ("trigger", "step", "output"),
         "manual": ("trigger", "checks"),
+        "reviews_finished": (
+            "trigger",
+            "title",
+            "commit",
+            "findings",
+            "cap",
+            "queued",
+            "landed_since",
+        ),
     }
 
 
@@ -132,7 +147,7 @@ def test_every_field_has_a_description() -> None:
         (
             {"on": "landed"},
             "triggers.x.on: landed isn't an event; the events are session_started, task_landed,"
-            " task_finished, commits, startup_check_failed, manual.",
+            " task_finished, commits, startup_check_failed, manual, reviews_finished.",
         ),
         (
             {"on": "commits", "guards": ["review-rounds", "nightly"]},
@@ -352,37 +367,23 @@ def test_every_problem_of_every_trigger_is_named_on_a_line_of_its_own() -> None:
     ]
 
 
-# review-rounds, which only a reviewer's trigger on task_landed takes, and only one
+# review-rounds, which any number of triggers on task_landed take, whatever their roles
 
 
 @pytest.mark.parametrize(
-    ("fields", "problem"),
+    "fields",
     [
-        (
-            {"on": "task_finished", "role": "reviewer", "prompt": "Go"},
-            'triggers.x.guards: review-rounds needs on = "task_landed".',
-        ),
-        (
-            {"on": "task_landed", "role": "coder", "prompt": "Go"},
-            'triggers.x.guards: review-rounds needs role = "reviewer".',
-        ),
-        (
-            {"on": "task_landed", "checks": "gate"},
-            'triggers.x.guards: review-rounds needs role = "reviewer".',
-        ),
-        (
-            {"on": "task_finished", "role": "reviewer", "prompt": "Go", "enabled": False},
-            'triggers.x.guards: review-rounds needs on = "task_landed".',
-        ),
+        {"on": "task_finished", "role": "reviewer", "prompt": "Go"},
+        {"on": "commits", "role": "coder", "prompt": "Go"},
+        {"on": "task_finished", "role": "reviewer", "prompt": "Go", "enabled": False},
     ],
 )
-def test_review_rounds_off_a_reviewers_landing_is_refused(
-    fields: dict[str, Any], problem: str
-) -> None:
+def test_review_rounds_off_a_landing_is_refused(fields: dict[str, Any]) -> None:
+    problem = 'triggers.x.guards: review-rounds needs on = "task_landed".'
     assert problems(guards=("review-rounds",), **fields) == problem
 
 
-def test_review_rounds_off_both_is_refused_on_a_line_for_each_after_the_when() -> None:
+def test_review_rounds_off_a_landing_is_refused_on_its_line_after_the_when() -> None:
     message = problems(
         on="task_finished",
         role="coder",
@@ -395,27 +396,18 @@ def test_review_rounds_off_both_is_refused_on_a_line_for_each_after_the_when() -
         "triggers.x.when: step isn't a field of task_finished; its fields are role, origin,"
         " status.",
         'triggers.x.guards: review-rounds needs on = "task_landed".',
-        'triggers.x.guards: review-rounds needs role = "reviewer".',
         'triggers.x.every: every = 2 needs on = "commits".',
     ]
 
 
-def test_review_rounds_on_a_second_enabled_trigger_is_refused_naming_the_first() -> None:
-    triggers = {"review": REVIEW, "check": CHECK, "again": REVIEW, "more": REVIEW}
-    with pytest.raises(ConfigError) as raised:
-        check_triggers(triggers, ROLES)
-    assert str(raised.value).splitlines() == [
-        "triggers.again.guards: review-rounds guards only one enabled trigger, and review"
-        " already has it.",
-        "triggers.more.guards: review-rounds guards only one enabled trigger, and review"
-        " already has it.",
-    ]
+def test_review_rounds_on_a_landing_takes_any_role() -> None:
+    coder = REVIEW.model_copy(update={"role": "coder"})
+    check_triggers({"x": coder}, ROLES)
 
 
-def test_review_rounds_on_a_disabled_trigger_doesnt_count_as_a_second() -> None:
-    disabled = REVIEW.model_copy(update={"enabled": False})
-    check_triggers({"review": disabled, "mine": REVIEW}, ROLES)
-    check_triggers({"review": REVIEW, "spare": disabled}, ROLES)
+def test_review_rounds_may_guard_several_enabled_triggers() -> None:
+    coder = REVIEW.model_copy(update={"role": "coder"})
+    check_triggers({"review": REVIEW, "check": CHECK, "again": REVIEW, "more": coder}, ROLES)
 
 
 # Merging the package's triggers with the project's

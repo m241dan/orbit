@@ -13,6 +13,8 @@
 # super_review_every = 10
 # Tasks one review may suggest.
 # review_suggestions = 5
+# Findings one lens may report in one review.
+# lens_findings = 10
 # Tasks one super review may suggest.
 # super_review_suggestions = 10
 # Code files a super review reads besides those changed since the last one; 0, none.
@@ -50,6 +52,8 @@
 # tool_access = "restricted"
 # The orbit tools its agents may call.
 # tools = ["propose_task", "report_progress", "save_report", "list_reports", "read_report"]
+# Whether its agents may report a finding as blocking with report_finding.
+# blocking_findings = false
 # Whether its agents' claims of being done are verified.
 # verify = false
 # How long its agents may take, in minutes; unset, no limit.
@@ -86,6 +90,8 @@
 # tool_access = "full"
 # The orbit tools its agents may call.
 # tools = ["report_progress", "save_report", "list_reports", "read_report"]
+# Whether its agents may report a finding as blocking with report_finding.
+# blocking_findings = false
 # Whether its agents' claims of being done are verified.
 # verify = false
 # How long its agents may take, in minutes; unset, no limit.
@@ -122,6 +128,8 @@
 # tool_access = "full"
 # The orbit tools its agents may call.
 # tools = ["get_task", "complete_task", "run_check", "report_progress", "give_up"]
+# Whether its agents may report a finding as blocking with report_finding.
+# blocking_findings = false
 # Whether its agents' claims of being done are verified.
 # verify = true
 # How long its agents may take, in minutes; unset, no limit.
@@ -158,6 +166,8 @@
 # tool_access = "restricted"
 # The orbit tools its agents may call.
 # tools = ["get_task", "complete_task", "report_progress", "give_up", "suggest_task"]
+# Whether its agents may report a finding as blocking with report_finding.
+# blocking_findings = false
 # Whether its agents' claims of being done are verified.
 # verify = false
 # How long its agents may take, in minutes; unset, no limit.
@@ -194,6 +204,8 @@
 # tool_access = "restricted"
 # The orbit tools its agents may call.
 # tools = ["get_task", "complete_task", "report_progress", "give_up", "suggest_task"]
+# Whether its agents may report a finding as blocking with report_finding.
+# blocking_findings = false
 # Whether its agents' claims of being done are verified.
 # verify = false
 # How long its agents may take, in minutes; unset, no limit.
@@ -230,6 +242,8 @@
 # tool_access = "restricted"
 # The orbit tools its agents may call.
 # tools = ["get_task", "propose_checks", "report_progress", "give_up"]
+# Whether its agents may report a finding as blocking with report_finding.
+# blocking_findings = false
 # Whether its agents' claims of being done are verified.
 # verify = false
 # How long its agents may take, in minutes; unset, no limit.

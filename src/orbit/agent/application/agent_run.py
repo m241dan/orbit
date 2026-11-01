@@ -25,6 +25,7 @@ from orbit.agent.application.verifier import Failure, Verifier, first_failure
 from orbit.agent.domain.agent_task import (
     FINISHED,
     NO_CHECK_PROPOSALS,
+    NO_FINDINGS,
     NO_STEPS,
     NO_SUGGESTIONS,
     AgentTask,
@@ -38,6 +39,7 @@ from orbit.agent.domain.checks import ChecksProposal, parse_proposal
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.endings import error, task_ending, timeout_ending
 from orbit.agent.domain.refusals import Refused
+from orbit.agent.domain.reviews import finding_report
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.suggestions import task_suggestion
 from orbit.agent.domain.tools import (
@@ -45,6 +47,7 @@ from orbit.agent.domain.tools import (
     GET_TASK,
     GIVE_UP,
     PROPOSE_CHECKS,
+    REPORT_FINDING,
     REPORT_PROGRESS,
     RUN_CHECK,
     SUGGEST_TASK,
@@ -149,6 +152,7 @@ class AgentRun:
             REPORT_PROGRESS: self._report_progress,
             GIVE_UP: self._give_up,
             SUGGEST_TASK: self._suggest_task,
+            REPORT_FINDING: self._report_finding,
             PROPOSE_CHECKS: self._propose_checks,
         }
 
@@ -448,6 +452,14 @@ class AgentRun:
             return Reply(suggestion, is_error=True)
         title, prompt = suggestion
         return await self._desk.suggest(self._task_id, title, prompt)
+
+    async def _report_finding(self, arguments: dict[str, Any]) -> Reply:
+        if self._desk.report_finding is None:
+            return Reply(NO_FINDINGS, is_error=True)
+        report = finding_report(arguments)
+        if isinstance(report, str):
+            return Reply(report, is_error=True)
+        return await self._desk.report_finding(self._task_id, report)
 
     async def _propose_checks(self, arguments: dict[str, Any]) -> Reply:
         if self._verifier is None or self._desk.agents.proposal_review is None:

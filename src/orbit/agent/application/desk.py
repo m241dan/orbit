@@ -35,7 +35,7 @@ from orbit.agent.application.skill_delivery import SkillDelivery
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.agents import Agent, AgentRegistry
 from orbit.agent.domain.refusals import failed_to
-from orbit.agent.domain.reviews import ReviewLimits
+from orbit.agent.domain.reviews import FindingReport, ReviewLimits
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.runtimes import ModelAliases, resolve_model
 from orbit.agent.domain.skills import SkillLibrary, SkillMapping
@@ -231,6 +231,8 @@ class AgentDesk:
         self._processes: dict[str, AgentProcess] = {}  # The agents' traced processes, by id.
         # Takes a review task's suggestions: its id, then the suggestion's title and prompt.
         self.suggest: Callable[[str, str, str], Awaitable[Reply]] | None = None
+        # Takes a reviewing task's findings: its id, then the finding.
+        self.report_finding: Callable[[str, FindingReport], Awaitable[Reply]] | None = None
         # The report tools as an agent in the role named calls them; none without a store.
         self.report_tools: Callable[[str], Mapping[str, Tool]] = lambda role: {}
         self._runs: dict[str, CallTarget] = {}

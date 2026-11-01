@@ -136,6 +136,10 @@ class Role(_Config):
         default=(GET_TASK, COMPLETE_TASK, REPORT_PROGRESS, GIVE_UP),
         description="The orbit tools its agents may call.",
     )
+    blocking_findings: bool = Field(
+        default=False,
+        description="Whether its agents may report a finding as blocking with report_finding.",
+    )
     verify: bool = Field(
         default=True, description="Whether its agents' claims of being done are verified."
     )

@@ -81,6 +81,9 @@ async def test_offers_orbit_tools_with_their_arguments() -> None:
         assert tools["complete_task"].input_schema["required"] == ["summary"]
         assert tools["run_check"].input_schema["required"] == ["step"]
         assert tools["suggest_task"].input_schema["required"] == ["title", "prompt"]
+        assert tools["report_finding"].input_schema["required"] == ["title", "body", "severity"]
+        severity = tools["report_finding"].input_schema["properties"]["severity"]
+        assert severity["enum"] == ["blocking", "normal"]
         assert tools["propose_task"].input_schema["required"] == ["title", "prompt"]
         assert tools["propose_checks"].input_schema["required"] == ["steps"]
         assert tools["read_skill"].input_schema["required"] == ["skill", "file"]
@@ -133,6 +136,7 @@ async def test_passes_calls_with_the_token_to_the_handler_and_returns_its_text()
         ("report_progress", {"note": "halfway"}),
         ("give_up", {"reason": "blocked"}),
         ("suggest_task", {"title": "Add tests", "prompt": "Cover parse()."}),
+        ("report_finding", {"title": "Off by one", "body": "In parse().", "severity": "normal"}),
         (
             "propose_task",
             {"title": "Add a CLI flag", "prompt": "Add --fast.", "skills": ["python", "cli"]},
