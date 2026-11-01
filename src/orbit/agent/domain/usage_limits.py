@@ -208,6 +208,13 @@ def outage_after(last: Outage | None, runtime: str, error: str) -> Outage:
     return Outage(runtime, error, level)
 
 
+def clears_outage(stop: RuntimeStop | None) -> bool:
+    """Whether an agent's run that ended, stopped by ``stop`` on its runtime if anything, heard
+    from that runtime's API, which forgets its outage: unless its API wasn't answering, as a
+    usage limit is the API's answer too."""
+    return stop is None or stop.failure.kind != "api_unavailable"
+
+
 class Outages:
     """Each runtime's API not answering, as it last stopped a run or a lane's task, with the
     stops it made in a row in any lane, until an agent on that runtime ends its run without it
@@ -224,7 +231,7 @@ class Outages:
         """Note ``stop``, with ``error``: its runtime's outage, a level up from the last in a
         row, or, at its usage limit, which its API answered, none; returns which."""
         runtime = stop.runtime
-        if stop.failure.kind == "usage_limit":
+        if clears_outage(stop):
             self.heard_from(runtime)
             return None
         outage = self._outages[runtime] = outage_after(self.of(runtime), runtime, error)
@@ -234,7 +241,7 @@ class Outages:
         """Note ``stop``, which pauses nothing, as another pause is in force: at its usage limit,
         which its API answered, its runtime's outage is forgotten; an outage, which starts no wait
         of its own, doesn't count."""
-        if stop.failure.kind == "usage_limit":
+        if clears_outage(stop):
             self.heard_from(stop.runtime)
 
     def heard_from(self, runtime: str) -> None:

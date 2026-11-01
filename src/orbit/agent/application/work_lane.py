@@ -11,17 +11,17 @@ back.
 """
 
 import asyncio
-from collections.abc import Callable, Collection, Coroutine
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any, Literal
+from typing import Literal
 
 from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.coder_slots import CoderSeat
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.landing import Lander, Landing
 from orbit.agent.application.lane_runner import runtime_stop
-from orbit.agent.application.lanes import OPEN_GATE, SessionGate
+from orbit.agent.application.lanes import OPEN_GATE, SessionGate, StoppableRun
 from orbit.agent.application.outcomes import Outcome, UserStop, ended, run_task_to_end
 from orbit.agent.application.record_moves import RecordMoves
 from orbit.agent.application.review_lane import ReviewLane
@@ -41,7 +41,7 @@ from orbit.agent.domain.endings import (
 )
 from orbit.agent.domain.roles import Workspace
 from orbit.agent.domain.setup_first import waiting_for_setup
-from orbit.agent.domain.usage_limits import FIX_ERROR_NOTE, Outages, RuntimeStop
+from orbit.agent.domain.usage_limits import FIX_ERROR_NOTE, Outages, RuntimeStop, clears_outage
 from orbit.agent.domain.verification import FallbackFixes, failure_reason, fix_prompt
 from orbit.execution.cancelling import stop, waited_out
 from orbit.protocol import (
@@ -136,8 +136,8 @@ class WorkLane:
         # the cap.
         self._fallbacks = FallbackFixes()
         self._running = False  # A run is going.
-        self._stopped = False  # The user stopped the run going now.
-        self._agent: asyncio.Task[Outcome] | None = None  # The agent's run of the current task.
+        # The agent's run of the current task, and whether the user stopped the run going now.
+        self._agent = StoppableRun[Outcome]()
         self._current: str | None = None  # The task running, until the review lane hears of it.
         # The task a run stopped at, which the next one runs first: a fix must run before
         # another task puts its work aside.
@@ -157,11 +157,9 @@ class WorkLane:
         that task says, and run no other; returns whether a run was going."""
         if not self._running:
             return False
-        self._stopped = True
+        self._agent.stop()
         if self._coders is not None:
             self._coders.drop()
-        if self._agent is not None:
-            self._agent.cancel()
         return True
 
     @property
@@ -214,7 +212,8 @@ class WorkLane:
         ends in error for its runtime's usage limit or API not answering, noted as the
         :attr:`runtime_stop`, or as a fix; returns which. Any other cancel goes on once the task
         running has ended. Each task's span links to the span current now."""
-        self._running, self._stopped = True, False
+        self._running = True
+        self._agent.reset()
         try:
             return await self._run_tasks(current_span(), held)
         finally:
@@ -253,7 +252,7 @@ class WorkLane:
         one didn't."""
         seating = await self._seat(task_id, tried)
         if seating != "seated":
-            return None if seating == "unneeded" and not self._stopped else "cancelled"
+            return None if seating == "unneeded" and not self._agent.stopped else "cancelled"
         try:
             return await self._run_seated(task_id, tried)
         finally:
@@ -327,7 +326,7 @@ class WorkLane:
         """Why the run ends at the task that was ``started``, as it was then, which ended in
         ``outcome``: it was cancelled or stopped, or the run stops at its error, to run it first
         next time; none if the run goes on."""
-        if outcome.status == "cancelled" or self._stopped:
+        if outcome.status == "cancelled" or self._agent.stopped:
             return "cancelled"
         if outcome.status == "error" and (end := await self._stop_at(started, outcome)):
             self._resume = started.id
@@ -376,18 +375,6 @@ class WorkLane:
             return outcome
         finally:
             await self._report_to_review(state, outcome)
-
-    async def _run_alone(self, run: Coroutine[Any, Any, Outcome]) -> Outcome:
-        """How the agent's ``run`` ended, run as a task of its own that the user's stop cancels,
-        leaving the lane's run going; anything unexpected escapes."""
-        agent = asyncio.create_task(run)
-        if self._stopped:  # The user stopped the run as the task started.
-            agent.cancel()
-        self._agent = agent
-        try:
-            return await agent
-        finally:
-            self._agent = None
 
     async def _run_started(self, task_id: str) -> Outcome:
         """How started task ``task_id``'s run through an agent ended; anything unexpected
@@ -463,18 +450,17 @@ class WorkLane:
         before = await verifier.state_before(task, root) if verifier is not None else None
         with self._tracing.run() as run:
             agent = AgentRun(task_id, self._tasks, verifier, self._desk)
-            outcome = await self._run_alone(agent.run(before, root, run))
+            outcome = await self._agent.run_alone(agent.run(before, root, run))
             self._heard_from(task.role, outcome)
             return await self._settle(task_id, outcome, root)
 
     def _heard_from(self, role: str, outcome: Outcome) -> None:
         """Forget the outage of ``role``'s runtime, if the session has that role, once an agent
         in it finished its run in ``outcome`` without the API not answering, as its launcher
-        tells, however its task ended. The user's stop doesn't reach this, as it cancels the
-        agent's run, so it leaves the outage as it is."""
+        tells and :func:`clears_outage` says, however its task ended. The user's stop doesn't
+        reach this, as it cancels the agent's run, so it leaves the outage as it is."""
         runtime = self._desk.agents.runtime(role)
-        stop = self._failure(role, outcome)
-        if runtime is not None and (stop is None or stop.failure.kind != "api_unavailable"):
+        if runtime is not None and clears_outage(self._failure(role, outcome)):
             self._outages.heard_from(runtime)
 
     def _failure(self, role: str, outcome: Outcome) -> RuntimeStop | None:

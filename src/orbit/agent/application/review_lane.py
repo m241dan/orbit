@@ -525,7 +525,7 @@ class ReviewLane:
         """How started review ``task_id`` ended, run as a task of its own that the user's stop
         cancels; anything unexpected escapes."""
         job = self._jobs.get(task_id)
-        return await self.runner.alone(task_id, partial(self._run_reviewer, task_id, job))
+        return await self.runner.alone(partial(self._run_reviewer, task_id, job))
 
     async def _run_reviewer(self, task_id: str, job: ReviewJob | None) -> Outcome:
         """Run the reviewer of ``job``, told what landed since as it starts, in a snapshot of the

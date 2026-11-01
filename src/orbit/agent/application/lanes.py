@@ -1,7 +1,8 @@
 """What the lanes share: a failure that escapes one is reported to the user, not lost with the
-background task that ran it, a busy lane's turns are run one at a time, and the session's gate
-says whether work may start. A lane's work outlives whatever started it, so it starts with no
-span current: it doesn't record on its starter's, such as the task that landed what it reviews."""
+background task that ran it, a busy lane's turns are run one at a time, the session's gate says
+whether work may start, and the user's stop cancels an agent's run, even before it begins. A
+lane's work outlives whatever started it, so it starts with no span current: it doesn't record on
+its starter's, such as the task that landed what it reviews."""
 
 import asyncio
 from collections.abc import Callable, Coroutine
@@ -101,3 +102,41 @@ class TurnSlot(turns.TurnSlot):
             return super().begin(work, refusal)
         except turns.SlotBusy as busy:
             raise Refused(BUSY, busy.refusal) from None
+
+
+class StoppableRun[T]:
+    """An agent's runs in a lane, one at a time, each as a task of its own that the user's
+    :meth:`stop` cancels, leaving the lane going. A stop holds, cancelling each run as it
+    starts, until :meth:`reset`: so a stop before a run begins still cancels it."""
+
+    def __init__(self) -> None:
+        self._stopped = False  # The user stopped the run, or the one about to start.
+        self._run: asyncio.Task[T] | None = None  # The run going, which a stop cancels.
+
+    @property
+    def stopped(self) -> bool:
+        """Whether the user stopped the run since the last :meth:`reset`."""
+        return self._stopped
+
+    async def run_alone(self, run: Coroutine[Any, Any, T]) -> T:
+        """What ``run`` returned, run as a task of its own that :meth:`stop` cancels, even as it
+        starts if the user stopped it already, raising :class:`asyncio.CancelledError`; anything
+        unexpected escapes."""
+        task = asyncio.create_task(run)
+        if self._stopped:  # The user stopped the run as it started.
+            task.cancel()
+        self._run = task
+        try:
+            return await task
+        finally:
+            self._run = None
+
+    def stop(self) -> None:
+        """Cancel the run going, if any, and every run that starts until :meth:`reset`."""
+        self._stopped = True
+        if self._run is not None:
+            self._run.cancel()
+
+    def reset(self) -> None:
+        """Forget the user's stop: the runs from now on go to their end."""
+        self._stopped = False

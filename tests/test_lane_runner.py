@@ -1,9 +1,9 @@
 """A lane that starts by itself: once kicked, it runs its roles' tasks one at a time, each in a
 snapshot of the base commit, shows busy while it does, starts none while blocked and skips those
 on a paused runtime, and while verification is missing all but the configurator's, stops its task
-on the user's asking, even as it starts, and fails a task,
-or a review, whose role the session lacks without an agent; and the session's lanes, by
-name."""
+on the user's asking, even as it starts, forgets a runtime's outage once an agent on it ends its
+run but for the API not answering or the user's stop, and fails a task, or a review, whose role
+the session lacks without an agent; and the session's lanes, by name."""
 
 import asyncio
 from collections.abc import Collection
@@ -11,9 +11,15 @@ from collections.abc import Collection
 import pytest
 
 from orbit.agent.application.desk import AgentDesk
-from orbit.agent.application.lane_runner import LaneParts, LaneRunner, Lanes, LaneWork
+from orbit.agent.application.lane_runner import (
+    LaneParts,
+    LaneRunner,
+    Lanes,
+    LaneWork,
+    Unpausable,
+)
 from orbit.agent.application.lanes import OPEN_GATE, SessionGate
-from orbit.agent.application.outcomes import ended
+from orbit.agent.application.outcomes import Outcome, ended
 from orbit.agent.application.ports import TreeFailed
 from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
 from orbit.agent.application.tasks import Tasks
@@ -58,10 +64,21 @@ PENTEST = Role(instructions="Probe it.", verify=False, lane="security", runtime=
 """A role in the lane ``security``, on the fake runtime."""
 
 
+class Heard(Unpausable):
+    """Pauses no runtime, noting each runtime it hears from in :attr:`runtimes`."""
+
+    def __init__(self) -> None:
+        self.runtimes: list[str] = []
+
+    def heard_from(self, runtime: str) -> None:
+        self.runtimes.append(runtime)
+
+
 class Lane:
     """A board, what's published and what's posted, for runners of the lane ``security``,
     blocked as :attr:`read_only` and :attr:`halted` say, skipping the tasks on the runtime
-    :attr:`paused` names, if any, with verification as :attr:`verification` says."""
+    :attr:`paused` names, if any, with verification as :attr:`verification` says, pausing no
+    runtime but noting those heard from in :attr:`pauses`."""
 
     def __init__(self) -> None:
         self.events: list[Event] = []
@@ -71,6 +88,7 @@ class Lane:
         self.paused: str | None = None
         self.verification: VerificationState = "off"
         self.stopped = asyncio.Event()
+        self.pauses = Heard()
 
     async def publish(self, event: Event) -> None:
         self.events.append(event)
@@ -80,7 +98,9 @@ class Lane:
         gate = SessionGate(
             lambda: self.halted, lambda: self.read_only, verification=lambda: self.verification
         )
-        return LaneParts(desk, self.tasks, gate, lambda: self.paused, self.posted.append)
+        return LaneParts(
+            desk, self.tasks, gate, lambda: self.paused, self.posted.append, self.pauses
+        )
 
     def runner(
         self, *scripts: Script, tree: FakeTree | None = None, work: LaneWork | None = None
@@ -231,6 +251,38 @@ async def test_a_task_hitting_its_limit_with_nothing_to_pause_is_left_pending_an
     await lane.tasks.start("1")
     again = await runner.ran("1", ended("error", ("Agent failed", LIMIT)))
     assert (again, lane.statuses, runner.current) == (True, ["pending", "pending"], None)
+
+
+OVERLOADED = 'API Error: 529 {"type":"error","error":{"type":"overloaded_error"}}'
+
+
+@pytest.mark.parametrize(
+    ("outcome", "heard"),
+    [
+        (Outcome("completed"), [CLAUDE]),
+        (ended("error", ("Agent failed", LIMIT)), [CLAUDE]),
+        (ended("error", ("Agent failed", OVERLOADED)), []),
+        (ended("cancelled", (STOPPED_BY_YOU, "")), []),
+    ],
+)
+async def test_a_run_ending_by_itself_or_at_its_limit_forgets_its_runtimes_outage(
+    outcome: Outcome, heard: list[str]
+) -> None:
+    lane = Lane()
+    lane.add(audit())
+    runner = lane.runner()
+    await lane.tasks.start("1")
+    await runner.ran("1", outcome)
+    assert lane.pauses.runtimes == heard
+
+
+async def test_a_task_taken_off_the_board_as_it_ended_isnt_left_to_run_again() -> None:
+    lane = Lane()
+    lane.add(audit())
+    runner = lane.runner()
+    lane.tasks.board.remove("1")
+    assert not await runner.ran("1", ended("error", ("Agent failed", LIMIT)))
+    assert lane.pauses.runtimes == []
 
 
 async def test_a_task_in_a_role_without_a_runtime_isnt_left_to_run_again() -> None:

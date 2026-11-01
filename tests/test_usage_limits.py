@@ -14,6 +14,7 @@ from orbit.agent.domain.usage_limits import (
     RuntimeStop,
     api_unavailable,
     claude_failure,
+    clears_outage,
     kiro_failure,
     limit_hit,
     limit_resume_time,
@@ -258,6 +259,15 @@ def test_an_outage_passed_over_leaves_its_runtimes_backoff_as_it_is() -> None:
     outages.stopped(stop("api_unavailable"), "API Error: 529")
     outages.passed_over(stop("api_unavailable"))
     assert outages.of(CLAUDE) == Outage(CLAUDE, "API Error: 529")
+
+
+def test_a_run_ending_without_a_runtime_stop_or_at_a_usage_limit_clears_its_outage() -> None:
+    assert clears_outage(None)
+    assert clears_outage(stop("usage_limit"))
+
+
+def test_a_run_the_api_didnt_answer_leaves_its_outage() -> None:
+    assert not clears_outage(stop("api_unavailable"))
 
 
 def test_no_runtime_has_an_outage_at_first() -> None:

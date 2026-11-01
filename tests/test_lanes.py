@@ -1,13 +1,13 @@
 """The helpers the lanes share: background work and a busy lane's turns, whose crashes are
 reported as the lane's and which start with no span current, a turn showing its lane busy and
-a second refused as busy."""
+a second refused as busy, and an agent's run the user's stop cancels, even before it begins."""
 
 import asyncio
 from contextlib import suppress
 
 import pytest
 
-from orbit.agent.application.lanes import Background, TurnSlot
+from orbit.agent.application.lanes import Background, StoppableRun, TurnSlot
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import BUSY as BUSY_CODE
 from orbit.protocol import INTERNAL, BusyChanged, ErrorOccurred, Event
@@ -137,3 +137,45 @@ async def test_a_crash_is_reported_once_before_the_lane_frees(
     message = "The planner lane stopped on an unexpected error: boom"
     assert posted == [BUSY, ErrorOccurred(code=INTERNAL, message=message), IDLE]
     assert logged_with_traceback(caplog.records, message)
+
+
+async def test_a_run_stopped_before_it_begins_is_cancelled_before_it_runs() -> None:
+    agent, work = StoppableRun[None](), GatedWork()
+    agent.stop()
+
+    with pytest.raises(asyncio.CancelledError):
+        await agent.run_alone(work("first"))
+
+    assert work.runs == []
+
+
+async def test_a_stop_cancels_the_run_going() -> None:
+    agent, work = StoppableRun[None](), GatedWork()
+    run = asyncio.create_task(agent.run_alone(work("first")))
+    await work.started.wait()
+
+    agent.stop()
+
+    with pytest.raises(asyncio.CancelledError):
+        await run
+
+
+async def test_a_stop_holds_for_the_runs_after_it_until_reset() -> None:
+    agent, work = StoppableRun[None](), GatedWork()
+    agent.stop()
+    with pytest.raises(asyncio.CancelledError):
+        await agent.run_alone(work("first"))
+    assert agent.stopped
+
+    agent.reset()
+    work.gate.set()
+    await agent.run_alone(work("second"))
+
+    assert (agent.stopped, work.runs) == (False, ["second"])
+
+
+async def test_a_run_alone_returns_what_the_run_returned() -> None:
+    async def answer() -> int:
+        return 42
+
+    assert await StoppableRun[int]().run_alone(answer()) == 42

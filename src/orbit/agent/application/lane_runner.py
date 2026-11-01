@@ -8,7 +8,6 @@ its runtime's usage limit or finds its API not answering, as its role's launcher
 runtime, whichever lane it ran in, and is left to run again. Reviews run so too, with the rules
 :class:`ReviewLane` keeps."""
 
-import asyncio
 from collections.abc import Awaitable, Callable, Collection, Coroutine, Iterable
 from dataclasses import dataclass, field
 from functools import partial
@@ -16,14 +15,14 @@ from typing import Any, Protocol
 
 from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.desk import AgentDesk, Agents
-from orbit.agent.application.lanes import Background, SessionGate
+from orbit.agent.application.lanes import Background, SessionGate, StoppableRun
 from orbit.agent.application.outcomes import Outcome, UserStop, run_task_to_end
 from orbit.agent.application.role_workspace import workspace_for
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.endings import STOPPED_BY_YOU
 from orbit.agent.domain.roles import Workspace
 from orbit.agent.domain.setup_first import waiting_for_setup
-from orbit.agent.domain.usage_limits import RuntimeStop
+from orbit.agent.domain.usage_limits import RuntimeStop, clears_outage
 from orbit.protocol import PLANNER_LANE, WORK_LANE, BusyChanged, BusyLane, Event
 
 
@@ -144,10 +143,9 @@ class LaneRunner:
         self._background.ended = self._ended
         self._stopped: Callable[[], None] = _unwatched
         self._running: str | None = None  # The task running.
-        self._stopping: str | None = None  # The task running, once the user stopped it.
         self._busy = False  # The lane was last shown busy.
-        # The agent's run of the task running, which the user's stop cancels.
-        self._agent: asyncio.Task[Outcome] | None = None
+        # The agent's run of the task running, and whether the user stopped that task.
+        self._agent = StoppableRun[Outcome]()
         # Runtimes whose agents hit a limit that paused nothing, each with the runtime paused
         # then, if any, skipped while it stays so, or for the rest of the run; and the tasks
         # they left to run again.
@@ -186,9 +184,7 @@ class LaneRunner:
         running = self._running
         if running is None or task_id not in (None, running):
             return
-        self._stopping = running
-        if self._agent is not None:
-            self._agent.cancel()
+        self._agent.stop()
 
     async def stop(self) -> None:
         """Stop the lane's tasks running, and wait for them to; they run again once kicked."""
@@ -198,24 +194,17 @@ class LaneRunner:
         """Stop the lane's tasks running for good: a kick from now on runs none."""
         await self._background.close()
 
-    async def alone(self, task_id: str, run: Callable[[], Coroutine[Any, Any, Outcome]]) -> Outcome:
-        """How ``run``, task ``task_id``'s run through its agent, ended, run as a task of its own
-        that :meth:`cancel` cancels, leaving the lane's run going; anything unexpected
-        escapes."""
-        agent = asyncio.create_task(run())
-        if self._stopping == task_id:  # The user stopped the task as it started.
-            agent.cancel()
-        self._agent = agent
-        try:
-            return await agent
-        finally:
-            self._agent = None
+    async def alone(self, run: Callable[[], Coroutine[Any, Any, Outcome]]) -> Outcome:
+        """How ``run``, the running task's run through its agent, ended, run as a task of its own
+        that :meth:`cancel` cancels, even as it starts, leaving the lane's run going; anything
+        unexpected escapes."""
+        return await self._agent.run_alone(run())
 
     async def run_in_workspace(self, task_id: str) -> None:
         """Run task ``task_id`` to its end through a new agent, as :func:`run_in_role_workspace`
         does; the user's stop ends it as stopped by them."""
         agent = partial(run_in_role_workspace, task_id, self._tasks, self._desk)
-        run = partial(self.alone, task_id, agent)
+        run = partial(self.alone, agent)
         stop = UserStop(STOPPED_BY_YOU)
         outcome = await run_task_to_end(self._tasks, task_id, run, stop, self._desk.publish)
         await self.ran(task_id, outcome)
@@ -223,13 +212,15 @@ class LaneRunner:
     async def ran(self, task_id: str, outcome: Outcome) -> bool:
         """Whether task ``task_id``, which ended in ``outcome``, stopped at its runtime's usage
         limit or an outage, as its role's launcher tells: then it's left pending, to run again,
-        and its runtime paused, or skipped while another is."""
+        and its runtime paused, or skipped while another is. Unless it was cancelled, its
+        runtime's outage is forgotten as :func:`clears_outage` says."""
         state = self._tasks.board.find(task_id)
-        agents = self._desk.agents
-        stop = None if state is None else runtime_stop(agents, state.task.role, outcome)
+        if state is None:
+            return False
+        stop = runtime_stop(self._desk.agents, state.task.role, outcome)
+        if outcome.status != "cancelled" and clears_outage(stop):
+            self._heard_from(state.task.role)
         if stop is None:
-            if state is not None and outcome.status != "cancelled":
-                self._heard_from(state.task.role)
             return False
         await self._tasks.change(lambda board: board.set_status(task_id, "pending"))
         self._again.add(task_id)
@@ -238,7 +229,7 @@ class LaneRunner:
         return True
 
     def _heard_from(self, role: str) -> None:
-        """An agent in ``role`` ended its run without its runtime stopping it."""
+        """An agent in ``role`` ended its run having heard from its runtime's API."""
         runtime = self._desk.agents.runtime(role)
         if runtime is not None:
             self._parts.pauses.heard_from(runtime)
@@ -291,7 +282,8 @@ class LaneRunner:
             try:
                 await self._work.run(task_id)
             finally:
-                self._running = self._stopping = None
+                self._running = None
+                self._agent.reset()
             tried -= self._again  # Those left to run again run once their runtime may.
             self._again.clear()
 
