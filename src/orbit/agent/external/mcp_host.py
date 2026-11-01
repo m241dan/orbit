@@ -70,10 +70,25 @@ READ_SKILL_DESCRIPTION = (
 
 
 class ProposedStep(TypedDict):
-    """A verification step: its name, and the command (program and arguments) it runs."""
+    """A verification step: its name, the command (program and arguments) it runs, and the
+    named set it's in; in none, it's one of the task checks every task runs."""
 
     name: str
     command: list[str]
+    set: NotRequired[str]
+
+
+class ProposedTrigger(TypedDict):
+    """A trigger that runs checks: the event it fires on, the checks it runs ("task-checks" or
+    a named set), how many landings it fires after on "commits", whether the user can fire it,
+    under what label, and whether it's enabled."""
+
+    on: str
+    checks: str
+    every: NotRequired[int]
+    manual: NotRequired[bool]
+    label: NotRequired[str]
+    enabled: NotRequired[bool]
 
 
 class ProposedSetup(TypedDict):
@@ -138,19 +153,6 @@ def build_server(handler: CallHandler) -> MCPServer:
         return await call(ctx, PROPOSE_TASK, {"title": title, "prompt": prompt, "skills": skills})
 
     @server.tool(structured_output=False)
-    async def propose_checks(
-        steps: list[ProposedStep], ctx: Context, setup: ProposedSetup | None = None
-    ) -> str:
-        """Propose the project's verification steps, quick ones first, and optionally the
-        setup command that readies a fresh checkout with the files that should rerun it.
-
-        Orbit runs the setup and each step, which can take minutes, then the user decides:
-        wait for the reply. It says what failed, what the user wants changed, or that
-        they accepted or ended it.
-        """
-        return await call(ctx, PROPOSE_CHECKS, {"steps": steps, "setup": setup})
-
-    @server.tool(structured_output=False)
     async def consult(role: str, message: str, ctx: Context) -> str:
         """Ask another conversational role, by name, something only it can find out, such as by
         running code: the message's first line is its title, and the rest the details.
@@ -180,8 +182,35 @@ def build_server(handler: CallHandler) -> MCPServer:
     async def read_skill(skill: str, file: str, ctx: Context) -> str:
         return await call(ctx, READ_SKILL, {"skill": skill, "file": file})
 
+    _add_checks_tool(server, call)
     _add_draft_tools(server, call)
     return server
+
+
+def _add_checks_tool(server: MCPServer, call: ToolCall) -> None:
+    """Give ``server`` the tool a role proposes checks with, passed to ``call``."""
+
+    @server.tool(structured_output=False)
+    async def propose_checks(
+        steps: list[ProposedStep],
+        ctx: Context,
+        setup: ProposedSetup | None = None,
+        sets: dict[str, bool] | None = None,
+        triggers: dict[str, ProposedTrigger] | None = None,
+    ) -> str:
+        """Propose the project's verification steps, quick ones first, and optionally the
+        setup command that readies a fresh checkout with the files that should rerun it.
+        Steps in no set are the task checks every task runs; a slower step joins a named set.
+        Optionally say, in sets, whether each set holds merges when it fails (by name), and
+        propose the triggers that run sets (by name).
+
+        Orbit runs the setup and each step, which can take minutes, then the user decides:
+        wait for the reply. It says what failed, what the user wants changed, or that
+        they accepted or ended it.
+        """
+        given = {"sets": sets, "triggers": triggers}
+        extras = {key: value for key, value in given.items() if value is not None}
+        return await call(ctx, PROPOSE_CHECKS, {"steps": steps, "setup": setup, **extras})
 
 
 def _add_draft_tools(server: MCPServer, call: ToolCall) -> None:

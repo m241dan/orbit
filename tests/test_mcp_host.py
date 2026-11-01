@@ -155,6 +155,27 @@ async def test_passes_calls_with_the_token_to_the_handler_and_returns_its_text()
                 "setup": {"command": ["uv", "sync"], "watch": ["uv.lock"]},
             },
         ),
+        (
+            "propose_checks",
+            {
+                "steps": [
+                    {"name": "Lint", "command": ["ruff", "check"]},
+                    {"name": "Mutants", "command": ["mutmut", "run"], "set": "mutation"},
+                ],
+                "setup": None,
+                "sets": {"mutation": True},
+                "triggers": {
+                    "mutants": {
+                        "on": "manual",
+                        "checks": "mutation",
+                        "every": 2,
+                        "manual": True,
+                        "label": "Mutants",
+                        "enabled": False,
+                    }
+                },
+            },
+        ),
     ],
 )
 async def test_every_tool_passes_its_call_through(tool: str, arguments: dict[str, Any]) -> None:

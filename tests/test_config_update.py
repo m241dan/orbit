@@ -10,7 +10,7 @@ from datetime import date
 
 import pytest
 
-from orbit.agent.domain.checks import ChecksProposal, Setup
+from orbit.agent.domain.checks import ChecksProposal, Setup, VerificationSet
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.config_update import (
     Additions,
@@ -23,6 +23,7 @@ from orbit.agent.domain.config_update import (
     update_text,
     with_checks,
 )
+from orbit.agent.domain.triggers import ChecksTrigger
 from orbit.agent.domain.verification import VerificationStep
 
 TODAY = date(2026, 10, 25)
@@ -529,6 +530,128 @@ def test_writing_checks_into_a_file_that_isnt_toml_is_refused() -> None:
 
 @pytest.mark.parametrize("checks", [CHECKS, LINT_ONLY])
 def test_writing_the_same_checks_again_changes_nothing(checks: ChecksProposal) -> None:
+    once = with_checks(reference_with_checks(EXAMPLES, CHECKS), checks)
+    assert with_checks(once, checks) == once
+
+
+MUTANTS = VerificationStep("Mutants", ("mutmut", "run"), set="mutation")
+EVERY_10 = ChecksTrigger(on="commits", every=10, checks="mutation")
+HOLDING = ChecksProposal(
+    steps=(LINT, MUTANTS),
+    sets={"mutation": VerificationSet(holds_merges=True)},
+    triggers={"mutation-every-10": EVERY_10},
+)
+REPORTING = ChecksProposal(
+    steps=(LINT, MUTANTS),
+    sets={"mutation": VerificationSet(holds_merges=False)},
+    triggers={"mutation-every-10": EVERY_10},
+)
+MUTANTS_TABLE = (
+    '[[verification.steps]]\nname = "Mutants"\ncommand = ["mutmut", "run"]\nset = "mutation"\n'
+)
+SET_TABLE = "[verification.sets.mutation]\nholds_merges = true\n"
+TRIGGER_TABLE = '[triggers.mutation-every-10]\non = "commits"\nchecks = "mutation"\nevery = 10\n'
+SETS_SECTION = (
+    "# The sets. For example:\n# [verification.sets.mutation]\n# Whether it holds.\n"
+    "# holds_merges = true\n"
+)
+
+
+def test_a_steps_set_its_holding_sets_table_and_its_triggers_are_appended() -> None:
+    assert with_checks("", HOLDING) == (
+        f"{LINT_TABLE}\n{MUTANTS_TABLE}\n{SET_TABLE}\n{TRIGGER_TABLE}"
+    )
+
+
+def test_a_reporting_set_gets_no_table() -> None:
+    assert with_checks("", REPORTING) == f"{LINT_TABLE}\n{MUTANTS_TABLE}\n{TRIGGER_TABLE}"
+
+
+def test_a_trigger_writes_only_the_fields_it_sets() -> None:
+    by_hand = ChecksTrigger(
+        on="manual", checks="mutation", manual=True, label="Mutants", enabled=False
+    )
+    checks = ChecksProposal(steps=(LINT, MUTANTS), triggers={"mutants": by_hand})
+    assert with_checks("", checks).endswith(
+        '[triggers.mutants]\non = "manual"\nchecks = "mutation"\nmanual = true\n'
+        'label = "Mutants"\nenabled = false\n'
+    )
+
+
+def test_proposed_sets_and_triggers_replace_theirs_and_leave_the_others() -> None:
+    others = (
+        "# Stress.\n[verification.sets.stress]\nholds_merges = true\n\n"
+        '[triggers.nightly]\non = "manual"\nchecks = "stress"\n'
+    )
+    text = (
+        f"{LINT_TABLE}\n# Ours.\n[verification.sets.mutation]\nholds_merges = false\n\n"
+        f'[triggers.mutation-every-10]\non = "commits"\nchecks = "mutation"\nevery = 5\n\n'
+        f"{others}"
+    )
+    assert with_checks(text, HOLDING) == (
+        f"{LINT_TABLE}\n{MUTANTS_TABLE}\n# Ours.\n{SET_TABLE}\n{TRIGGER_TABLE}\n{others}"
+    )
+
+
+def test_a_set_proposed_as_reporting_loses_its_table() -> None:
+    text = f"{LINT_TABLE}\n{MUTANTS_TABLE}\n{SET_TABLE}\n# The roles.\n"
+    assert with_checks(text, REPORTING) == (
+        f"{LINT_TABLE}\n{MUTANTS_TABLE}\n# The roles.\n\n{TRIGGER_TABLE}"
+    )
+
+
+def test_sets_and_triggers_set_inline_are_rewritten_as_toml_keeping_the_others() -> None:
+    text = (
+        "[verification]\nsets = { stress = { holds_merges = true } }\n\n"
+        '[triggers]\nnightly = { on = "manual", checks = "stress" }\n'
+    )
+    assert tomllib.loads(with_checks(text, HOLDING)) == {
+        "verification": {
+            "steps": [
+                {"name": "Lint", "command": ["ruff", "check"]},
+                {"name": "Mutants", "command": ["mutmut", "run"], "set": "mutation"},
+            ],
+            "sets": {"stress": {"holds_merges": True}, "mutation": {"holds_merges": True}},
+        },
+        "triggers": {
+            "nightly": {"on": "manual", "checks": "stress"},
+            "mutation-every-10": {"on": "commits", "checks": "mutation", "every": 10},
+        },
+    }
+
+
+def test_a_rewrite_drops_a_set_proposed_as_reporting() -> None:
+    text = "[verification]\nsets = { mutation = { holds_merges = true } }\n"
+    assert tomllib.loads(with_checks(text, REPORTING))["verification"] == {
+        "steps": [
+            {"name": "Lint", "command": ["ruff", "check"]},
+            {"name": "Mutants", "command": ["mutmut", "run"], "set": "mutation"},
+        ]
+    }
+
+
+def test_the_reference_gets_holding_sets_in_place_of_its_example_and_triggers_at_the_end() -> None:
+    examples = f"# The file's header.\n\n{STEPS}\n{SETS_SECTION}\n{CODER_SECTION}"
+    expected = (
+        f"# The file's header.\n\n# The steps.\n{LINT_TABLE}\n{MUTANTS_TABLE}\n"
+        f"# The sets.\n{SET_TABLE}\n{CODER_SECTION}\n{TRIGGER_TABLE}"
+    )
+    assert reference_with_checks(examples, HOLDING) == expected
+
+
+def test_without_a_holding_set_the_references_example_of_one_stays() -> None:
+    examples = f"{STEPS}\n{SETS_SECTION}"
+    expected = f"# The steps.\n{LINT_TABLE}\n{MUTANTS_TABLE}\n{SETS_SECTION}\n{TRIGGER_TABLE}"
+    assert reference_with_checks(examples, REPORTING) == expected
+
+
+def test_a_reference_without_an_example_of_a_set_gets_its_table_at_the_end() -> None:
+    expected = f"# The steps.\n{LINT_TABLE}\n{MUTANTS_TABLE}\n{SET_TABLE}\n{TRIGGER_TABLE}"
+    assert reference_with_checks(STEPS, HOLDING) == expected
+
+
+@pytest.mark.parametrize("checks", [HOLDING, REPORTING])
+def test_writing_the_same_sets_and_triggers_again_changes_nothing(checks: ChecksProposal) -> None:
     once = with_checks(reference_with_checks(EXAMPLES, CHECKS), checks)
     assert with_checks(once, checks) == once
 

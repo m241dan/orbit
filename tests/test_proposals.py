@@ -27,6 +27,7 @@ from orbit.protocol import (
     ProposalDecided,
     ProposedSetup,
     ProposedStep,
+    ProposedTrigger,
     RunTasks,
     TurnEndReason,
 )
@@ -182,6 +183,7 @@ async def test_invalid_proposals_are_refused_with_the_reason() -> None:
         {"steps": [{"name": "Lint", "command": []}]},
         {"steps": [LINT], "setup": {"command": ["make"], "watch": ["/etc/passwd"]}},
         {"steps": [LINT], "colour": "blue"},
+        {"steps": [LINT], "triggers": {"slow": {"on": "commits", "checks": "mutation"}}},
     ]
 
     async def script(call: Call) -> TurnEndReason:
@@ -316,6 +318,42 @@ async def test_without_a_review_of_its_own_the_session_has_the_frontend_decide()
     assert shown.setup == ProposedSetup(command=("uv", "sync"), watch=("uv.lock",))
     assert "accepted" in replies[0]
     assert status(events) == "completed"
+
+
+MUTANTS = {"name": "Mutants", "command": ["mutmut", "run"], "set": "mutation"}
+EVERY_10 = {"on": "commits", "every": 10, "checks": "mutation"}
+WITH_SET = {
+    "steps": [LINT, TESTS, MUTANTS],
+    "sets": {"mutation": False},
+    "triggers": {"mutation-every-10": EVERY_10},
+}
+
+
+async def test_a_proposal_with_a_set_shows_each_steps_set_the_sets_and_their_triggers() -> None:
+    replies: list[str] = []
+    steps = Steps(True, True, True)
+    session = frontend(WITH_SET, replies=replies, steps=steps)
+    events = await asyncio.wait_for(
+        decided(session, lambda e: DecideProposal(task_id=e.task_id, action="accept")), 5
+    )
+    assert steps.runs == ["Lint", "Tests", "Mutants"]
+    [shown] = [e for e in events if isinstance(e, ChecksProposed)]
+    assert shown.steps[2] == ProposedStep(name="Mutants", command=("mutmut", "run"), set="mutation")
+    assert shown.sets == {"mutation": False}
+    assert shown.triggers == {
+        "mutation-every-10": ProposedTrigger(on="commits", every=10, checks="mutation")
+    }
+    assert status(events) == "completed"
+
+
+async def test_a_proposal_of_task_checks_only_shows_no_sets_or_triggers() -> None:
+    session = frontend({"steps": [LINT]}, replies=[], steps=Steps(True))
+    events = await asyncio.wait_for(
+        decided(session, lambda e: DecideProposal(task_id=e.task_id, action="accept")), 5
+    )
+    [shown] = [e for e in events if isinstance(e, ChecksProposed)]
+    assert shown.steps == (ProposedStep(name="Lint", command=("ruff", "check")),)
+    assert (shown.sets, shown.triggers) == ({}, {})
 
 
 def decisions_of(events: list[Event]) -> list[ProposalDecided]:

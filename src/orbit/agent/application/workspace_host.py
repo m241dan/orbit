@@ -104,10 +104,11 @@ from orbit.agent.domain.runtimes import ModelAliases
 from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.domain.triggers import VerificationState, verification_state
 from orbit.agent.domain.usage_limits import Outages, RuntimeStop
-from orbit.agent.domain.verification import TASK_CHECKS, VerificationStep
+from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import (
     INVALID,
     REVIEW_ROLES,
+    TASK_CHECKS,
     ActivateSession,
     Attach,
     DeleteReport,

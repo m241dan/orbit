@@ -25,7 +25,7 @@ from orbit.agent.domain.reviews import (
 )
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.triggers import Trigger, VerificationState, render_template
-from orbit.agent.domain.verification import TASK_CHECKS, VerificationStep, startup_fix_prompt
+from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     CODER,
     CONFIGURATOR,
@@ -34,6 +34,7 @@ from orbit.protocol import (
     REVIEWER,
     SUPER_REVIEW,
     SUPER_REVIEWER,
+    TASK_CHECKS,
     ErrorOccurred,
     Event,
     Notice,

@@ -20,6 +20,7 @@ from tomlkit.items import AoT, Table
 
 from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.config_errors import ConfigError
+from orbit.agent.domain.triggers import ChecksTrigger
 
 ADDED_NOTE = "# Added by orbit init --update on {date}: settings this file didn't mention."
 """The line the tables a file lacks are appended under, with the day they're added."""
@@ -29,6 +30,8 @@ FOR_EXAMPLE = "For example:"
 
 _STEPS = "[[verification.steps]]"
 _SETUP = "[setup]"
+_SETS_KEY = "verification.sets"
+_SETS = f"[{_SETS_KEY}.]"  # What the examples of a set's table are examples of.
 _HEADER = re.compile(r"\s*(?:#\s*)?(\[\[?)\s*([\w\-.\"' ]+?)\s*\]\]?\s*(?:#.*)?")
 _COMMENTED_KEY = re.compile(r"\s*#\s*([\w-]+)\s*[=:]")
 _COMMENTED_VALUE = re.compile(r"\s*#\s*[\w-]+\s*=")
@@ -342,18 +345,38 @@ def with_checks(text: str, checks: ChecksProposal) -> str:
 
 
 def reference_with_checks(reference: str, checks: ChecksProposal) -> str:
-    """``reference``, the reference config, with ``checks``' steps and setup in place of its
-    commented-out examples of them: each example's header and keys give way to the tables,
-    under the comments describing it, without the :data:`FOR_EXAMPLE` they end with. Without a
-    setup, its example stays as it is."""
+    """``reference``, the reference config, with ``checks``' steps, setup and the tables of its
+    sets that hold merges in place of its commented-out examples of them: each example's header
+    and keys give way to the tables, under the comments describing it, without the
+    :data:`FOR_EXAMPLE` they end with. Without a setup, or a set that holds merges, its example
+    stays as it is. The tables of ``checks``' triggers, and of its sets if the reference has no
+    example of one, are appended at the end, as :func:`with_checks` appends them."""
     lines = _scanned(reference)
-    regions = {region.header: region for region in _regions(lines)}
+    regions = {_example_kind(region.header): region for region in _regions(lines)}
+    examples = _example_tables(checks)
     spans = [
-        _example(lines, regions[header], tables)
-        for header, tables in _check_tables(checks).items()
-        if tables
+        _example(lines, regions[kind], tables)
+        for kind, tables in examples.items()
+        if tables and kind in regions
     ]
-    return "\n".join(_spliced(lines, spans)) + "\n"
+    spliced = "\n".join(_spliced(lines, spans)) + "\n"
+    return _edited(_scanned(spliced), checks)
+
+
+def _example_kind(header: str) -> str:
+    """What the example under ``header`` is an example of: :data:`_SETS` for any set's table,
+    or the header itself."""
+    return _SETS if header.startswith(_SETS.removesuffix("]")) else header
+
+
+def _example_tables(checks: ChecksProposal) -> dict[str, tuple[str, ...]]:
+    """The lines that take the place of each example, by what it's an example of: ``checks``'
+    steps, its setup, and its sets' tables, apart from each other by a blank line; none for a
+    setup or set tables it lacks."""
+    tables = _check_tables(checks)
+    sets = [block for block in _named_tables(_SETS_KEY, _sets_tables(checks)).values() if block]
+    spaced = chain.from_iterable(["", *block] for block in sets)
+    return {_STEPS: tables[_STEPS], _SETUP: tables[_SETUP], _SETS: tuple(spaced)[1:]}
 
 
 def _read(text: str, heading: str | None = None) -> _File:
@@ -685,30 +708,98 @@ def _instructions_line(name: str) -> str:
 
 
 def _rewritten(document: TOMLDocument, checks: ChecksProposal) -> str:
-    """``document`` as TOML with ``checks`` in place of its steps and setup, however it sets
-    them."""
-    document["verification"] = _verification(checks)
+    """``document`` as TOML with ``checks`` in place of its steps and setup, and of its sets'
+    and triggers' tables that ``checks`` names, however it sets them."""
+    current = document.get("verification")
+    document["verification"] = _verification(checks, _value(current, "sets"))
     if checks.setup is None:
         document.pop("setup", None)
     else:
         document["setup"] = _setup(checks.setup)
+    if checks.triggers:
+        document["triggers"] = _with_tables(document.get("triggers"), _trigger_tables(checks))
     return tomlkit.dumps(document)
 
 
-def _verification(checks: ChecksProposal) -> Table:
+def _value(table: object, key: str) -> object:
+    """``key``'s value in ``table``; none if ``table`` isn't a table or lacks it."""
+    return table.get(key) if isinstance(table, dict) else None
+
+
+def _verification(checks: ChecksProposal, sets: object) -> Table:
+    """The table of ``checks``' steps, and of the tables of the ``sets`` a file has, a table if
+    it has any, with those of ``checks``' sets in place of theirs."""
+    verification = _steps_table(checks)
+    tables = _with_tables(sets, _sets_tables(checks))
+    if tables:
+        verification["sets"] = tables
+    return verification
+
+
+def _steps_table(checks: ChecksProposal) -> Table:
     """The table of ``checks``' steps."""
     verification = tomlkit.table(is_super_table=True)
     verification["steps"] = _steps(checks)
     return verification
 
 
+def _with_tables(current: object, tables: dict[str, Table | None]) -> Table:
+    """The tables of ``current``, if it's a table, by name, but for those named in ``tables``,
+    then each of ``tables`` but those that are none, which go."""
+    merged = tomlkit.table(is_super_table=True)
+    kept = current.items() if isinstance(current, dict) else ()
+    for name, value in kept:
+        if name not in tables:
+            merged[name] = value
+    for name, table in tables.items():
+        if table is not None:
+            merged[name] = table
+    return merged
+
+
+def _sets_tables(checks: ChecksProposal) -> dict[str, Table | None]:
+    """The table of each of ``checks``' sets, by name: one saying it holds merges, or none for
+    one that only reports, as without a table."""
+    return {name: _set_table() if holds else None for name, holds in _holds(checks).items()}
+
+
+def _holds(checks: ChecksProposal) -> dict[str, bool]:
+    """Whether each of ``checks``' sets holds merges, by name, as its table says."""
+    return {name: table.holds_merges for name, table in checks.sets.items()}
+
+
+def _set_table() -> Table:
+    """The table of a set that holds merges."""
+    table = tomlkit.table()
+    table["holds_merges"] = True
+    return table
+
+
+def _trigger_tables(checks: ChecksProposal) -> dict[str, Table | None]:
+    """The table of each of ``checks``' triggers, by name."""
+    return {name: _trigger(trigger) for name, trigger in checks.triggers.items()}
+
+
+def _trigger(trigger: ChecksTrigger) -> Table:
+    """The table of ``trigger``, with the fields it sets apart from their defaults."""
+    table = tomlkit.table()
+    table["on"] = trigger.on
+    table["checks"] = trigger.checks
+    for key, value in trigger.model_dump(exclude={"on", "checks"}).items():
+        if value != ChecksTrigger.model_fields[key].default:
+            table[key] = value
+    return table
+
+
 def _steps(checks: ChecksProposal) -> AoT:
-    """The tables of ``checks``' steps, each of its own."""
+    """The tables of ``checks``' steps, each of its own, with the set it's in, if any."""
     steps = tomlkit.aot()
     for step in checks.steps:
         table: Table = tomlkit.table()
         table["name"] = step.name
         table["command"] = list(step.command)
+        if step.set is not None:
+            table["set"] = step.set
         steps.append(table)
     steps[-1].add(tomlkit.nl())  # A blank line before whatever follows.
     return steps
@@ -724,9 +815,36 @@ def _setup(setup: Setup) -> Table:
 
 
 def _check_tables(checks: ChecksProposal) -> dict[str, tuple[str, ...]]:
-    """The lines of ``checks``' steps' tables and of its setup's, none without one, by header."""
+    """The lines of ``checks``' steps' tables and of its setup's, then of its sets' and its
+    triggers' tables, by header; none for a setup or a set's table it lacks."""
     setup = () if checks.setup is None else _toml_lines("setup", _setup(checks.setup))
-    return {_STEPS: _toml_lines("verification", _verification(checks)), _SETUP: setup}
+    return {
+        _STEPS: _toml_lines("verification", _steps_table(checks)),
+        _SETUP: setup,
+        **_named_tables(_SETS_KEY, _sets_tables(checks)),
+        **_named_tables("triggers", _trigger_tables(checks)),
+    }
+
+
+def _named_tables(key: str, tables: dict[str, Table | None]) -> dict[str, tuple[str, ...]]:
+    """The lines of each of ``tables``, under ``key``, none for one that's none, by header."""
+    return {
+        f"[{key}.{name}]": (
+            () if table is None else _toml_lines(key.split(".")[0], _nested(key, name, table))
+        )
+        for name, table in tables.items()
+    }
+
+
+def _nested(key: str, name: str, table: Table) -> Table:
+    """``table`` as ``name``, under ``key``'s parts after its first, as super tables."""
+    nested = tomlkit.table(is_super_table=True)
+    nested[name] = table
+    for part in reversed(key.split(".")[1:]):
+        outer = tomlkit.table(is_super_table=True)
+        outer[part] = nested
+        nested = outer
+    return nested
 
 
 def _toml_lines(key: str, table: Table) -> tuple[str, ...]:

@@ -11,7 +11,7 @@ import pytest
 
 from orbit.agent.application.ports import ConfigWriteFailed
 from orbit.agent.domain import review_sample
-from orbit.agent.domain.checks import ChecksProposal, Setup
+from orbit.agent.domain.checks import ChecksProposal, Setup, VerificationSet
 from orbit.agent.domain.config import SUPER_REVIEW_EVERY_MOVING, OrbitConfig
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.config_report import Written
@@ -24,7 +24,8 @@ from orbit.agent.domain.config_update import (
 from orbit.agent.domain.layers import PACKAGE, Layer
 from orbit.agent.domain.runtimes import CLAUDE, KIRO, RUNTIME_NAMES, resolve_model
 from orbit.agent.domain.skills import SkillMapping
-from orbit.agent.domain.verification import VerificationStep
+from orbit.agent.domain.triggers import ChecksTrigger
+from orbit.agent.domain.verification import CheckSet, VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.agent.external.built_in_triggers import read_built_in_triggers
 from orbit.agent.external.claude_cli import ClaudeCliRunner
@@ -1336,6 +1337,68 @@ def test_writing_checks_twice_gives_the_same_file(tmp_path: Path) -> None:
     first = (tmp_path / CONFIG_PATH).read_text()
     write_checks(str(tmp_path), checks)
     assert (tmp_path / CONFIG_PATH).read_text() == first
+
+
+A = VerificationStep(name="A", command=("a",))
+B = VerificationStep(name="B", command=("b",))
+C = VerificationStep(name="C", command=("c",), set="mutation")
+EVERY_10 = ChecksTrigger(on="commits", every=10, checks="mutation")
+SET_CHECKS = ChecksProposal(
+    steps=(A, B, C),
+    sets={"mutation": VerificationSet(holds_merges=False)},
+    triggers={"mutation-every-10": EVERY_10},
+)
+
+
+@pytest.mark.parametrize("before", [None, "fix_attempts = 2\n"])
+def test_written_sets_and_triggers_read_back_as_proposed(
+    tmp_path: Path, before: str | None
+) -> None:
+    if before is not None:
+        write(tmp_path, before)
+    write_checks(str(tmp_path), SET_CHECKS)
+    config = read_config(str(tmp_path), tmp_path / "config")
+    assert config.verification.steps == (A, B, C)
+    assert config.verification.task_checks == (A, B)
+    assert config.verification.check_sets == (CheckSet("mutation", (C,), "reports"),)
+    trigger = config.triggers["mutation-every-10"]
+    assert (trigger.on, trigger.every, trigger.checks) == ("commits", 10, "mutation")
+
+
+def test_a_holding_set_is_written_and_the_files_other_sets_and_triggers_stay(
+    tmp_path: Path,
+) -> None:
+    write(
+        tmp_path,
+        """[[verification.steps]]
+name = "Stress"
+command = ["stress"]
+set = "stress"
+
+[verification.sets.stress]
+holds_merges = true
+
+[triggers.stress-by-hand]
+on = "manual"
+checks = "stress"
+manual = true
+label = "Stress"
+""",
+    )
+    stress = VerificationStep(name="Stress", command=("stress",), set="stress")
+    holding = ChecksProposal(
+        steps=(A, C, stress),
+        sets={"mutation": VerificationSet(holds_merges=True)},
+        triggers={"mutation-every-10": EVERY_10},
+    )
+    write_checks(str(tmp_path), holding)
+    config = read_config(str(tmp_path), tmp_path / "config")
+    assert config.verification.check_sets == (
+        CheckSet("mutation", (C,), "holds_merges"),
+        CheckSet("stress", (stress,), "holds_merges"),
+    )
+    assert config.triggers["stress-by-hand"].label == "Stress"
+    assert config.triggers["mutation-every-10"].every == 10
 
 
 def test_writing_checks_where_orbits_directory_is_a_file_raises_a_config_write_failure(

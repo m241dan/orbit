@@ -834,8 +834,11 @@ inspects the repository (CI workflows, `.pre-commit-config.yaml`, `package.json`
 `pyproject.toml`, the Makefile and so on) and proposes the checks the project already uses,
 alongside those its language skills suggest (the `configurator`'s skills are `python` and `cpp`,
 each with a Suggested checks table of what a check catches, its tool and command, and where it
-fits), quick ones first, plus a setup command and the files whose changes should rerun it. It
-doesn't edit files.
+fits), quick ones first, plus a setup command and the files whose changes should rerun it. Quick
+checks it proposes as task checks; slower ones, such as mutation testing or benchmarks, in named
+sets, each with the triggers that would run it (such as every 10 commits, or by hand) and whether
+it holds merges when it fails (see [Verification steps](#verification-steps)). It doesn't edit
+files.
 
 Orbit starts one by itself when it opens a workspace with verification on and no steps, or runs
 the one the session it opens has queued already instead of adding another (see
@@ -854,10 +857,13 @@ With `--no-verify` there's nothing to set up checks for, so a confirmed `ctrl+e`
 the conversation says `Setting up checks needs verification on; orbit was started with --no-verify.`
 
 Orbit tries each proposal in the agent's working directory first: the setup, then each step in
-order. If one fails, the agent gets the step's name and its output and is asked to revise,
+order, those in sets included. If one fails, the agent gets the step's name and its output and is asked to revise,
 without bothering you. Once everything passes, a window shows the proposal: the setup
 command and the files it watches, then the steps in order, each with its name and command, and a
-line saying they all passed on the current code. Then:
+line saying they all passed on the current code. A proposal with sets shows the task checks
+first, under `Task checks: every task`, then each set under a line saying when its triggers run
+it and whether it holds merges, such as `Set mutation: every 10 commits, reports` (or `by hand`,
+`no trigger`, `holds merges`), each step keeping its number. Then:
 
 | Key | Action |
 |---|---|
@@ -873,16 +879,22 @@ closes and the task is cancelled. When several agents propose checks, their wind
 time, in the order they proposed.
 
 Accepted checks take effect at once. Orbit itself (not the agent) writes them into
-`.orbit/config.toml`, replacing its `[[verification.steps]]` tables and its `[setup]` and leaving
-every other line as it was, the comments after them included. Without a file, it starts one from
-the reference config (see [Starting from the reference config](#starting-from-the-reference-config)),
-with the steps and setup in place of its commented-out examples of them, under the lines saying
-what they are; without a setup, the example of one stays. In the worktree the change is committed as
+`.orbit/config.toml`, replacing its `[[verification.steps]]` tables (each with its `set`, if it's
+in one) and its `[setup]` and leaving every other line as it was, the comments after them
+included. A set that holds merges gets its `[verification.sets.<name>]` table with `holds_merges
+= true`, in place of the file's table for it, and a set that reports loses the table it had; each
+trigger proposed gets its `[triggers.<name>]` table, in place of the file's for it, appended if
+the file has none. Sets and triggers the proposal doesn't name stay as they are. Without a file,
+it starts one from the reference config (see [Starting from the reference config](#starting-from-the-reference-config)),
+with the steps, setup and the tables of the sets that hold merges in place of its commented-out
+examples of them, under the lines saying what they are, and the triggers at the end; without a
+setup, or a set that holds merges, the example of one stays. In the worktree the change is committed as
 "Configure verification steps", with the steps listed in the body, and lands on the base like any
 task's work; with `--no-worktree` the file is written in the workspace's directory and not
 committed.
-The next task is verified with the new steps, and its worktree set up with the new setup, without
-a restart. Agents can't change their checks any other way: orbit reads the file only at startup.
+The next task is verified with the new task checks, and its worktree set up with the new setup,
+without a restart; the sets and triggers take effect once orbit opens the workspace again. Agents
+can't change their checks any other way: orbit reads the file only at startup.
 
 ### Where tasks run, and how their work lands
 

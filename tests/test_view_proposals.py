@@ -1,9 +1,20 @@
-from orbit.protocol import ChecksProposed, DecideProposal, ProposalDecided, ProposedStep
+"""How the TUI words proposed checks and the user's decisions on them."""
+
+import pytest
+
+from orbit.protocol import (
+    ChecksProposed,
+    DecideProposal,
+    ProposalDecided,
+    ProposedStep,
+    ProposedTrigger,
+)
 from orbit.tui.view.proposals import (
     FEEDBACK_HINT,
     FEEDBACK_PLACEHOLDER,
     PROPOSAL_KEYS_HINT,
     decision_entry,
+    proposal_text,
     proposal_title,
     revision,
 )
@@ -56,4 +67,97 @@ def test_another_frontends_decision_is_noted_the_same_way() -> None:
     assert decision_entry("agent-3", decided) == (
         "orbit → agent-3: changes asked for: More.",
         "agent",
+    )
+
+
+WITH_SET = ChecksProposed(
+    agent_id="agent-3",
+    task_id="7",
+    steps=(
+        ProposedStep(name="A", command=("a",)),
+        ProposedStep(name="B", command=("b",)),
+        ProposedStep(name="C", command=("c",), set="mutation"),
+    ),
+    sets={"mutation": False},
+    triggers={"mutation-every-10": ProposedTrigger(on="commits", every=10, checks="mutation")},
+)
+
+
+def test_a_proposal_with_a_set_shows_the_task_checks_then_each_set_and_when_it_runs() -> None:
+    assert proposal_text(WITH_SET) == (
+        "Setup: none\n"
+        "\n"
+        "Task checks: every task\n"
+        "  1. A: a\n"
+        "  2. B: b\n"
+        "\n"
+        "Set mutation: every 10 commits, reports\n"
+        "  3. C: c\n"
+        "\n"
+        "✅ All passed on the current code."
+    )
+
+
+def test_steps_keep_their_numbers_under_their_sets() -> None:
+    steps = (
+        ProposedStep(name="Slow", command=("s",), set="stress"),
+        ProposedStep(name="Lint", command=("l",)),
+    )
+    proposal = ChecksProposed(agent_id="a", task_id="7", steps=steps, sets={"stress": True})
+    assert proposal_text(proposal) == (
+        "Setup: none\n"
+        "\n"
+        "Task checks: every task\n"
+        "  2. Lint: l\n"
+        "\n"
+        "Set stress: no trigger, holds merges\n"
+        "  1. Slow: s\n"
+        "\n"
+        "✅ All passed on the current code."
+    )
+
+
+@pytest.mark.parametrize(
+    ("trigger", "shown"),
+    [
+        (ProposedTrigger(on="commits", checks="stress"), "every commit"),
+        (ProposedTrigger(on="commits", every=1, checks="stress"), "every commit"),
+        (ProposedTrigger(on="manual", manual=True, label="S", checks="stress"), "by hand"),
+        (ProposedTrigger(on="task_landed", checks="stress"), "when a task lands"),
+        (ProposedTrigger(on="task_finished", checks="stress"), "when a task finishes"),
+        (ProposedTrigger(on="session_started", checks="stress"), "when orbit opens"),
+        (
+            ProposedTrigger(on="startup_check_failed", checks="stress"),
+            "when the startup check fails",
+        ),
+        (ProposedTrigger(on="later", checks="stress"), "on later"),
+        (
+            ProposedTrigger(on="commits", every=5, manual=True, label="S", checks="stress"),
+            "every 5 commits or by hand",
+        ),
+        (ProposedTrigger(on="commits", checks="stress", enabled=False), "every commit (off)"),
+    ],
+)
+def test_a_sets_triggers_say_when_it_runs(trigger: ProposedTrigger, shown: str) -> None:
+    proposal = ChecksProposed(
+        agent_id="a",
+        task_id="7",
+        steps=(ProposedStep(name="Slow", command=("s",), set="stress"),),
+        sets={"stress": False},
+        triggers={"t": trigger},
+    )
+    assert f"Set stress: {shown}, reports\n  1. Slow: s\n" in proposal_text(proposal)
+
+
+def test_the_task_checks_name_the_triggers_that_run_them_and_may_be_none() -> None:
+    by_hand = ProposedTrigger(on="manual", manual=True, label="Check", checks="task-checks")
+    proposal = ChecksProposed(
+        agent_id="a",
+        task_id="7",
+        steps=(ProposedStep(name="Slow", command=("s",), set="stress"),),
+        sets={"stress": False},
+        triggers={"check": by_hand},
+    )
+    assert "Task checks: every task, by hand\n  none\n\nSet stress: no trigger, reports\n" in (
+        proposal_text(proposal)
     )

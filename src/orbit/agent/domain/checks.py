@@ -1,6 +1,6 @@
 """The checks a project is verified and set up with: its verification steps, the task checks
 among them and the named sets the others are in, the setup that makes a fresh worktree ready, and
-the checks an agent proposes."""
+the checks an agent proposes, with the triggers that would run them."""
 
 import shlex
 from collections.abc import Sequence
@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
+from orbit.agent.domain.triggers import ChecksTrigger, Trigger, TriggerName, check_triggers
 from orbit.agent.domain.verification import CheckSet, SetEffect, SetName, VerificationStep
 
 
@@ -129,10 +130,28 @@ def setup_step(setup: Setup) -> VerificationStep:
 
 
 class ChecksProposal(VerificationConfig):
-    """Verification steps, at least one, and a setup, as an agent proposes them."""
+    """Verification steps, at least one, a setup, the named sets' tables, each given as a table
+    or as whether it holds merges, and the ``triggers`` that run the checks, by name, as an agent
+    proposes them."""
 
     steps: tuple[VerificationStep, ...] = Field(min_length=1)
     setup: Setup | None = None
+    triggers: dict[TriggerName, ChecksTrigger] = Field(default_factory=dict)
+
+    @field_validator("sets", mode="before")
+    @classmethod
+    def _tables_of_holds(cls, sets: object) -> object:
+        if not isinstance(sets, dict):
+            return sets
+        return {
+            name: {"holds_merges": table} if isinstance(table, bool) else table
+            for name, table in sets.items()
+        }
+
+    @property
+    def trigger_settings(self) -> dict[str, Trigger]:
+        """The ``triggers``, by name, as the config would read them."""
+        return {name: trigger.as_trigger() for name, trigger in self.triggers.items()}
 
 
 def describe_checks(steps: Sequence[VerificationStep], setup: Setup | None) -> str:
@@ -169,8 +188,12 @@ def configured_checks(steps: Sequence[VerificationStep], setup: Setup | None) ->
 
 def parse_proposal(data: dict[str, Any]) -> ChecksProposal:
     """The proposal ``data`` (an agent's arguments) describes; raises :class:`ConfigError` if
-    it's invalid."""
+    it's invalid, as the config would be: a set's table for a set no step is in, or a trigger
+    whose ``checks`` name neither the task checks nor a set a step is in, among the rest."""
     try:
-        return ChecksProposal.model_validate(data)
+        proposal = ChecksProposal.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(validation_problems(exc)) from None
+    check_sets(proposal)
+    check_triggers(proposal.trigger_settings, (), proposal.set_names)
+    return proposal

@@ -694,11 +694,18 @@
       "type": "object"
     },
     "ChecksProposed": {
-      "description": "Agent ``agent_id`` proposed these checks for task ``task_id``, and they all passed on\nthe current code; the user decides on them with ``DecideProposal``.",
+      "description": "Agent ``agent_id`` proposed these checks for task ``task_id``, and they all passed on\nthe current code; the user decides on them with ``DecideProposal``. ``sets`` says whether\neach named set the steps are in holds merges, by name, and ``triggers`` are those it\nproposed to run the checks, by name.",
       "properties": {
         "agent_id": {
           "title": "Agent Id",
           "type": "string"
+        },
+        "sets": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "title": "Sets",
+          "type": "object"
         },
         "setup": {
           "anyOf": [
@@ -721,6 +728,13 @@
         "task_id": {
           "title": "Task Id",
           "type": "string"
+        },
+        "triggers": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ProposedTrigger"
+          },
+          "title": "Triggers",
+          "type": "object"
         },
         "type": {
           "const": "checks_proposed",
@@ -2159,7 +2173,7 @@
       "type": "object"
     },
     "ProposedStep": {
-      "description": "A verification step an agent proposed: its ``name`` and ``command``.",
+      "description": "A verification step an agent proposed: its ``name`` and ``command``, and the named ``set``\nit's in; in none, it's one of the task checks.",
       "properties": {
         "command": {
           "items": {
@@ -2171,6 +2185,18 @@
         "name": {
           "title": "Name",
           "type": "string"
+        },
+        "set": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Set"
         }
       },
       "required": [
@@ -2178,6 +2204,59 @@
         "command"
       ],
       "title": "ProposedStep",
+      "type": "object"
+    },
+    "ProposedTrigger": {
+      "description": "A trigger an agent proposed to run ``checks``, ``task-checks`` or a named set: the event\nit fires ``on``, how many landings it fires after on ``commits``, ``every``, whether the\nuser can fire it, ``manual``, under its ``label``, and whether it's ``enabled``.",
+      "properties": {
+        "checks": {
+          "title": "Checks",
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "every": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Every"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "manual": {
+          "default": false,
+          "title": "Manual",
+          "type": "boolean"
+        },
+        "on": {
+          "title": "On",
+          "type": "string"
+        }
+      },
+      "required": [
+        "on",
+        "checks"
+      ],
+      "title": "ProposedTrigger",
       "type": "object"
     },
     "ReleaseHold": {

@@ -538,3 +538,9 @@ def test_the_coder_keeps_tests_independent_as_code_style_says() -> None:
     text = role_text("coder")
     assert text.endswith(CODER_DEFERS_TEST_ISOLATION)
     assert "isolated from real files" not in text
+
+
+def test_the_configurator_proposes_slower_checks_as_sets_with_triggers() -> None:
+    instructions = read_built_in_roles()["configurator"].instructions
+    for hint in ("task checks", "named sets", "every 10 commits", "holds merges", "by hand"):
+        assert hint in instructions

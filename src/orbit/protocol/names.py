@@ -1,5 +1,5 @@
-"""The protocol's names: its version, the default runtime, and the lanes, triggers, roles, task
-origins, pause reasons and pseudo-tasks both sides refer to."""
+"""The protocol's names: its version, the default runtime, and the lanes, task checks, triggers,
+roles, task origins, pause reasons and pseudo-tasks both sides refer to."""
 
 PROTOCOL_VERSION = 2
 """The protocol's major version, which a ``Hello`` must name to be welcomed."""
@@ -14,6 +14,11 @@ before messages named their runtime."""
 WORK_LANE = "work"
 PLANNER_LANE = "planner"
 """The lanes' names: task runs in the work lane, the planner's turns in its own."""
+
+
+TASK_CHECKS = "task-checks"
+"""What a trigger's ``checks`` calls the task checks, the steps in no set, which every task
+runs; no set takes the name."""
 
 
 SUPER_REVIEW = "super-review"

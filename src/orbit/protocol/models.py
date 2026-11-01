@@ -279,10 +279,25 @@ class MergeHold(_Message):
 
 
 class ProposedStep(_Message):
-    """A verification step an agent proposed: its ``name`` and ``command``."""
+    """A verification step an agent proposed: its ``name`` and ``command``, and the named ``set``
+    it's in; in none, it's one of the task checks."""
 
     name: str
     command: tuple[str, ...]
+    set: str | None = None
+
+
+class ProposedTrigger(_Message):
+    """A trigger an agent proposed to run ``checks``, ``task-checks`` or a named set: the event
+    it fires ``on``, how many landings it fires after on ``commits``, ``every``, whether the
+    user can fire it, ``manual``, under its ``label``, and whether it's ``enabled``."""
+
+    on: str
+    checks: str
+    every: int | None = None
+    manual: bool = False
+    label: str | None = None
+    enabled: bool = True
 
 
 class ProposedSetup(_Message):

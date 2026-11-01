@@ -6,17 +6,30 @@ from collections.abc import Callable
 
 from orbit.agent.application.ports import ProposalDecision, Publish
 from orbit.agent.domain.checks import ChecksProposal
-from orbit.protocol import ChecksProposed, DecideProposal, ProposedSetup, ProposedStep
+from orbit.protocol import (
+    ChecksProposed,
+    DecideProposal,
+    ProposedSetup,
+    ProposedStep,
+    ProposedTrigger,
+)
 
 
 def proposed(agent_id: str, task_id: str, proposal: ChecksProposal) -> ChecksProposed:
-    """``proposal`` as the event that shows it."""
+    """``proposal`` as the event that shows it, saying whether each of its sets holds merges."""
     setup = proposal.setup
     return ChecksProposed(
         agent_id=agent_id,
         task_id=task_id,
-        steps=tuple(ProposedStep(name=s.name, command=s.command) for s in proposal.steps),
+        steps=tuple(
+            ProposedStep(name=s.name, command=s.command, set=s.set) for s in proposal.steps
+        ),
         setup=None if setup is None else ProposedSetup(command=setup.command, watch=setup.watch),
+        sets={s.name: s.effect == "holds_merges" for s in proposal.check_sets},
+        triggers={
+            name: ProposedTrigger.model_validate(trigger.model_dump())
+            for name, trigger in proposal.triggers.items()
+        },
     )
 
 

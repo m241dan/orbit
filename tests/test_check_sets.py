@@ -12,14 +12,13 @@ from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.roles import built_in_roles
 from orbit.agent.domain.triggers import Trigger, verification_state
 from orbit.agent.domain.verification import (
-    TASK_CHECKS,
     CheckSet,
     VerificationStep,
     set_failed_note,
 )
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.agent.external.built_in_triggers import read_built_in_triggers
-from orbit.protocol import BUILT_IN_ROLE_NAMES
+from orbit.protocol import BUILT_IN_ROLE_NAMES, TASK_CHECKS
 
 INSTRUCTIONS = {name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES}
 ROLES = built_in_roles(read_built_in_roles(), INSTRUCTIONS)

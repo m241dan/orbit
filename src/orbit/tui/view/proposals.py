@@ -5,18 +5,31 @@ from collections.abc import Awaitable, Callable
 from typing import Protocol
 
 from orbit.protocol import (
+    TASK_CHECKS,
     AgentExited,
     ChecksProposed,
     DecideProposal,
     Event,
     ProposalAction,
     ProposalDecided,
+    ProposedTrigger,
 )
 from orbit.tui.view.common import EntryKind
 
 PROPOSAL_KEYS_HINT = "a accept · r revise · x end"
 FEEDBACK_HINT = "enter send · esc back"
 FEEDBACK_PLACEHOLDER = "What should change?"
+
+COMMITS_EVENT = "commits"
+MANUAL_EVENT = "manual"
+EVENT_PHRASES = {
+    "session_started": "when orbit opens",
+    "task_landed": "when a task lands",
+    "task_finished": "when a task finishes",
+    "startup_check_failed": "when the startup check fails",
+    MANUAL_EVENT: "by hand",
+}
+"""When a proposed trigger on each event, by name, fires, in words; ``commits`` counts."""
 
 DECISION_NOTES: dict[ProposalAction, str] = {
     "accept": "proposal accepted",
@@ -31,15 +44,74 @@ def proposal_title(agent_id: str) -> str:
 
 
 def proposal_text(event: ChecksProposed) -> str:
-    """The proposed setup, then each step in order, and that they all passed."""
+    """The proposed setup, then each step in order, and that they all passed. With steps in
+    named sets, the steps come as the task checks, then each set, each step keeping its number,
+    each group saying when it runs and each set whether it holds merges."""
     setup = event.setup
     lines = [f"Setup: {'none' if setup is None else shlex.join(setup.command)}"]
     if setup is not None and setup.watch:
         lines.append(f"  reruns when these change: {', '.join(setup.watch)}")
-    lines += ["", "Steps:"]
-    lines += [f"  {i}. {s.name}: {shlex.join(s.command)}" for i, s in enumerate(event.steps, 1)]
+    if any(step.set is not None for step in event.steps):
+        lines += _grouped_steps(event)
+    else:
+        lines += ["", "Steps:", *_step_lines(event, None)]
     lines += ["", "✅ All passed on the current code."]
     return "\n".join(lines)
+
+
+def _grouped_steps(event: ChecksProposed) -> list[str]:
+    """``event``'s task checks, then each named set, in the order its steps first appear, each
+    under a line saying when it runs, and for a set, whether it holds merges."""
+    task_checks = ", ".join(["every task", *_runs(event, TASK_CHECKS)])
+    lines = ["", f"Task checks: {task_checks}", *(_step_lines(event, None) or ["  none"])]
+    return lines + [line for name in _set_names(event) for line in _set_lines(event, name)]
+
+
+def _set_names(event: ChecksProposed) -> tuple[str, ...]:
+    """The names of the sets ``event``'s steps are in, each once, in the order they first
+    appear."""
+    return tuple(dict.fromkeys(name for name in (s.set for s in event.steps) if name is not None))
+
+
+def _set_lines(event: ChecksProposed, name: str) -> list[str]:
+    """The set ``name`` of ``event``'s, under a line saying when it runs and whether it holds
+    merges, after a blank line."""
+    effect = "holds merges" if event.sets.get(name, False) else "reports"
+    runs = ", ".join([*(_runs(event, name) or ["no trigger"]), effect])
+    return ["", f"Set {name}: {runs}", *_step_lines(event, name)]
+
+
+def _step_lines(event: ChecksProposed, name: str | None) -> list[str]:
+    """The line of each of ``event``'s steps in the set ``name``, or in none, with its number
+    among all the steps."""
+    return [
+        f"  {i}. {s.name}: {shlex.join(s.command)}"
+        for i, s in enumerate(event.steps, 1)
+        if s.set == name
+    ]
+
+
+def _runs(event: ChecksProposed, checks: str) -> list[str]:
+    """When each of ``event``'s triggers that runs ``checks`` fires, in order."""
+    return [_fires(trigger) for trigger in event.triggers.values() if trigger.checks == checks]
+
+
+def _fires(trigger: ProposedTrigger) -> str:
+    """When ``trigger`` fires, as in ``every 10 commits`` or ``by hand``, and that it's off if
+    it isn't enabled."""
+    when = _event_phrase(trigger)
+    if trigger.manual and trigger.on != MANUAL_EVENT:
+        when += " or by hand"
+    return when if trigger.enabled else f"{when} (off)"
+
+
+def _event_phrase(trigger: ProposedTrigger) -> str:
+    """When ``trigger``'s event happens, in words; ``on`` and its name for one this doesn't
+    know."""
+    if trigger.on == COMMITS_EVENT:
+        every = trigger.every or 1
+        return "every commit" if every == 1 else f"every {every} commits"
+    return EVENT_PHRASES.get(trigger.on, f"on {trigger.on}")
 
 
 def revision(proposal: ChecksProposed, feedback: str) -> DecideProposal | None:

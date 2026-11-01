@@ -10,11 +10,7 @@ from pydantic import AfterValidator, Field
 from pydantic_core import PydanticCustomError
 
 from orbit.agent.domain.roles import PLAIN_NAME
-from orbit.protocol import SkipReason, StepState, StepStatus, TaskSpec
-
-TASK_CHECKS = "task-checks"
-"""What a trigger's ``checks`` calls the task checks, the steps in no set, which every task
-runs; no set takes the name."""
+from orbit.protocol import TASK_CHECKS, SkipReason, StepState, StepStatus, TaskSpec
 
 
 def _set_name(name: str) -> str:

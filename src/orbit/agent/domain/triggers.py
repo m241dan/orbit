@@ -30,8 +30,8 @@ from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
 from orbit.agent.domain.reviews import ReviewJob
 from orbit.agent.domain.roles import PLAIN_NAME
-from orbit.agent.domain.verification import TASK_CHECKS, VerificationStep
-from orbit.protocol import REVIEWER, TaskState, is_orbit_review
+from orbit.agent.domain.verification import VerificationStep
+from orbit.protocol import REVIEWER, TASK_CHECKS, TaskState, is_orbit_review
 
 EventName = Literal[
     "session_started",
@@ -68,7 +68,7 @@ trigger that runs the task checks fires on, and a step of the startup check fail
 
 GATE = "gate"
 """What a trigger's ``checks`` called the task checks before they had their name, read as
-:data:`~orbit.agent.domain.verification.TASK_CHECKS`."""
+:data:`~orbit.protocol.TASK_CHECKS`."""
 
 VerificationState = Literal["configured", "missing", "off"]
 """What ``session_started``'s ``verification`` field says: verification on with at least one
@@ -203,11 +203,7 @@ class Trigger(_Config):
     @field_validator("on", mode="before")
     @classmethod
     def _known_event(cls, on: object) -> object:
-        if isinstance(on, str) and on not in EVENT_NAMES:
-            raise PydanticCustomError(
-                "trigger_event", f"{on} isn't an event; the events are {', '.join(EVENT_NAMES)}."
-            )
-        return on
+        return _refuse_unknown_event(on)
 
     @field_validator("checks", mode="before")
     @classmethod
@@ -224,6 +220,36 @@ class Trigger(_Config):
                 f"{unknown[0]} isn't a guard; the guards are {', '.join(GUARD_NAMES)}.",
             )
         return guards
+
+
+class ChecksTrigger(_Config):
+    """A trigger that runs ``checks``, the task checks or a named set, as an agent proposes it:
+    the fields of a :class:`Trigger` such a trigger uses."""
+
+    on: EventName
+    checks: str
+    every: int | None = Field(default=None, gt=0)
+    manual: bool = False
+    label: str | None = None
+    enabled: bool = True
+
+    @field_validator("on", mode="before")
+    @classmethod
+    def _known_event(cls, on: object) -> object:
+        return _refuse_unknown_event(on)
+
+    def as_trigger(self) -> Trigger:
+        """The :class:`Trigger` it is, as the config would read it."""
+        return Trigger.model_validate(self.model_dump())
+
+
+def _refuse_unknown_event(on: object) -> object:
+    """``on``, a trigger's event, refused if it's a name that isn't among :data:`EVENT_NAMES`."""
+    if isinstance(on, str) and on not in EVENT_NAMES:
+        raise PydanticCustomError(
+            "trigger_event", f"{on} isn't an event; the events are {', '.join(EVENT_NAMES)}."
+        )
+    return on
 
 
 def _strings(value: object) -> list[str]:

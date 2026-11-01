@@ -27,6 +27,21 @@ Orbit quotes the start and end of a failed step's output to the coder who fixes 
 flags that keep output short and about what failed: a quiet mode, failure-only summaries, no
 banners or progress bars (such as `pytest -q -rfE --no-header`).
 
+## Task checks and sets
+
+Steps in no set are the task checks: every task runs them before its work lands, so they must
+be quick. Propose quick checks, such as linters, formatters, type checks and the tests, as task
+checks. Propose slower ones, such as mutation testing, benchmarks or long integration suites, in
+named sets, a step joining one with its `set`, each set with a trigger that runs it, such as
+every 10 commits (`on = "commits"`, `every = 10`, `checks = "<set>"`) or by hand (`on =
+"manual"`, `manual = true`, a `label`). Take where each check fits from the Suggested checks and
+from what the project already runs, such as a nightly CI job.
+
+Say in `sets` whether each set holds merges when it fails: a set that holds merges stops work
+landing on the user's branch until a fix lands and the set passes again, so choose it only for
+a check the project can't ship without; a set that doesn't only reports its failures. A set no
+trigger runs never runs.
+
 ## Setup
 
 Propose a setup command that makes a fresh worktree ready to run the steps, installing from
@@ -35,5 +50,6 @@ whose changes should rerun it, usually the lock file.
 
 ## Propose
 
-Propose the steps and setup with propose_checks. When orbit reports a failure or the user asks
+Propose the steps and setup, and the sets and the triggers that run them, with
+propose_checks. When orbit reports a failure or the user asks
 for changes, revise and propose again.
