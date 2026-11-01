@@ -4,8 +4,9 @@ the review-rounds guard reviews the review the review lane finds due; landings c
 commits triggers, and those that fire, or one fired by hand, review the whole codebase; opening a
 workspace fires the session_started triggers, those running the checks running them, and a step
 of the startup check failing the startup_check_failed ones; one fired by hand on manual queues its
-task, a configurator's first; and a task queued while verification is missing waits, with a
-notice naming its trigger, but the configurator's."""
+task, a configurator's first; a trigger naming a set runs it, on any event, counted or by hand;
+and a task queued while verification is missing waits, with a notice naming its trigger, but the
+configurator's."""
 
 import pytest
 
@@ -24,7 +25,7 @@ from orbit.agent.domain.reviews import (
 )
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.triggers import Trigger, VerificationState, render_template
-from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
+from orbit.agent.domain.verification import TASK_CHECKS, VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     CODER,
     CONFIGURATOR,
@@ -60,7 +61,7 @@ class Engine:
     ) -> None:
         self.events: list[Event] = []
         self.kicked: list[str] = []
-        self.checks_run = 0
+        self.checks_run: list[str] = []  # The checks run, by what each trigger's checks named.
         self.tree = tree or FakeTree()
         desk = desk_for(self.publish, tree=self.tree, triggers=triggers, roles=roles or ROLES)
         self.tasks = Tasks(TaskBoard(), self.publish)
@@ -72,8 +73,8 @@ class Engine:
     async def publish(self, event: Event) -> None:
         self.events.append(event)
 
-    def run_checks(self) -> None:
-        self.checks_run += 1
+    def run_checks(self, checks: str) -> None:
+        self.checks_run.append(checks)
 
     def shown(self) -> list[tuple[str, str, str, str]]:
         """Each task on the board: its role, origin, status and prompt."""
@@ -490,7 +491,7 @@ async def test_opening_with_steps_runs_the_checks_of_a_trigger_running_them_queu
 ):
     engine = Engine({"startup-check": STARTUP_CHECK})
     assert await engine.engine.started((LINT,)) == ()
-    assert engine.checks_run == 1
+    assert engine.checks_run == [TASK_CHECKS]
     assert engine.board.tasks == ()
     assert engine.events == []
 
@@ -527,14 +528,14 @@ async def test_opening_with_verification_missing_queues_todays_configurator_firs
     assert queued == (configurator.id,)
     assert (configurator.task.role, configurator.origin) == (CONFIGURATOR, "set-up-verification")
     assert configurator.task.prompt == configure_prompt((), None)
-    assert engine.checks_run == 0
+    assert engine.checks_run == []
 
 
 async def test_opening_with_steps_queues_no_configurator() -> None:
     engine = Engine(TRIGGERS, verification="configured")
     assert await engine.engine.started((LINT,)) == ()
     assert engine.board.tasks == ()
-    assert engine.checks_run == 1
+    assert engine.checks_run == [TASK_CHECKS]
 
 
 async def test_opening_with_verification_off_is_told_nothing_is_configured() -> None:
@@ -547,7 +548,7 @@ async def test_the_triggers_on_opening_each_fire_in_their_order() -> None:
     engine = Engine({"hello": hello(), "startup-check": STARTUP_CHECK, "bye": hello(prompt="Bye")})
     await engine.engine.started((LINT,))
     assert [prompt for _, _, _, prompt in engine.shown()] == ["Say hello", "Bye"]
-    assert engine.checks_run == 1
+    assert engine.checks_run == [TASK_CHECKS]
 
 
 async def test_a_guard_holds_back_a_trigger_running_the_checks() -> None:
@@ -557,13 +558,13 @@ async def test_a_guard_holds_back_a_trigger_running_the_checks() -> None:
     review = TaskSpec(prompt="Review commit c0", role=REVIEWER)
     engine.board.add_triggered(review, "review", "review")
     await engine.engine.started((LINT,))
-    assert engine.checks_run == 0
+    assert engine.checks_run == []
 
 
 async def test_a_disabled_trigger_running_the_checks_runs_nothing() -> None:
     engine = Engine({"startup-check": STARTUP_CHECK.model_copy(update={"enabled": False})})
     await engine.engine.started((LINT,))
-    assert engine.checks_run == 0
+    assert engine.checks_run == []
 
 
 async def test_a_failing_step_adds_todays_startup_fix_as_a_draft_from_startup_fix() -> None:
@@ -638,6 +639,73 @@ async def test_a_disabled_trigger_fired_by_hand_queues_nothing() -> None:
     assert await engine.engine.fire_by_hand(CONFIGURE_CHECKS, ()) == ()
     assert engine.board.tasks == ()
     assert engine.events == []
+
+
+# Running named sets
+
+
+def slow(**fields: object) -> Trigger:
+    """A trigger running the set ``slow`` on each landed coder commit, with ``fields`` over
+    that."""
+    return Trigger.model_validate(
+        {"on": "task_landed", "checks": "slow", "when": {"role": CODER}, **fields}
+    )
+
+
+async def test_a_landing_runs_the_set_a_trigger_names_queuing_nothing() -> None:
+    engine = Engine({"slow": slow()})
+    assert await engine.engine.landed(ended(), COMMIT) == ()
+    assert engine.checks_run == ["slow"]
+    assert engine.board.tasks == ()
+    assert engine.events == []
+
+
+async def test_a_trigger_naming_a_set_fires_on_any_event_its_when_takes() -> None:
+    engine = Engine({"slow": slow(on="task_finished", when={"status": "completed"})})
+    await engine.engine.finished(ended(status="unverified"))
+    await engine.engine.finished(ended())
+    await engine.engine.started((LINT,))
+    assert engine.checks_run == ["slow"]
+
+
+async def test_a_guard_holds_back_a_trigger_naming_a_set() -> None:
+    engine = Engine({"slow": slow(guards=("suggestions-pending",))})
+    review = TaskSpec(prompt="Review commit c0", role=REVIEWER)
+    engine.board.add_triggered(review, "review", "review")
+    await engine.engine.landed(ended(), COMMIT)
+    assert engine.checks_run == []
+
+
+async def test_a_landing_counts_toward_a_commits_trigger_naming_a_set() -> None:
+    every_two = slow(on="commits", every=2)
+    engine = Engine({"slow": every_two})
+    first = engine.engine.count(ended("1"), {})
+    second = engine.engine.count(ended("2"), first.counts)
+    assert (first.fires, second.fires) == ([], [("slow", every_two)])
+
+
+async def test_counted_triggers_naming_a_set_run_it_and_the_others_are_left_to_queue() -> None:
+    every_two = slow(on="commits", every=2)
+    engine = Engine({"slow": every_two, SUPER_REVIEW: SUPER})
+    left = engine.engine.fire_checks([("slow", every_two), (SUPER_REVIEW, SUPER)])
+    assert left == [(SUPER_REVIEW, SUPER)]
+    assert engine.checks_run == ["slow"]
+    assert engine.board.tasks == ()
+
+
+async def test_a_trigger_naming_a_set_fired_by_hand_on_manual_runs_it() -> None:
+    nightly = Trigger(on="manual", checks="slow", manual=True, label="Slow checks")
+    engine = Engine({"nightly": nightly})
+    assert await engine.engine.fire_by_hand("nightly", (LINT,)) == ()
+    assert engine.checks_run == ["slow"]
+    assert engine.events == []
+
+
+async def test_a_trigger_running_the_task_checks_does_not_fire_by_hand() -> None:
+    check = Trigger(on="manual", checks="task-checks", manual=True, label="Check")
+    engine = Engine({"check": check})
+    assert await engine.engine.fire_by_hand("check", (LINT,)) == ()
+    assert engine.checks_run == []
 
 
 # Setting up verification first

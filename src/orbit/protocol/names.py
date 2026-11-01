@@ -64,7 +64,8 @@ PAUSED_FOR_API_UNAVAILABLE = "api_unavailable"
 
 
 STARTUP_TASK = "startup"
-"""The task the startup check's ``AgentStarted`` names; no task on the list has this id."""
+"""The task the ``AgentStarted`` of the startup check, and of a named set's run, names: the base
+commit they check; no task on the list has this id."""
 
 PLAN_TASK = "plan"
 """The task the planner's ``AgentStarted`` names; it works on no task of the list."""

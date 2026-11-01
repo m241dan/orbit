@@ -9,7 +9,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
-from orbit.agent.domain.verification import SetName, VerificationStep
+from orbit.agent.domain.verification import CheckSet, SetEffect, SetName, VerificationStep
 
 
 class _Config(BaseModel):
@@ -55,6 +55,19 @@ class VerificationConfig(_Config):
         """The names of the sets the steps are in, each once, in the order they first appear."""
         return tuple(dict.fromkeys(step.set for step in self.steps if step.set is not None))
 
+    @property
+    def check_sets(self) -> tuple[CheckSet, ...]:
+        """The named sets, in the order they first appear, each with its steps, in order, and
+        what its failure does, as its table says: only report, without one."""
+        return tuple(
+            CheckSet(
+                name,
+                tuple(step for step in self.steps if step.set == name),
+                _effect(self.sets.get(name)),
+            )
+            for name in self.set_names
+        )
+
     @field_validator("steps")
     @classmethod
     def _complete_steps(cls, steps: tuple[VerificationStep, ...]) -> tuple[VerificationStep, ...]:
@@ -91,6 +104,11 @@ class Setup(_Config):
             if not path or path.startswith("/") or ".." in path.split("/"):
                 raise ValueError(f"{path!r} isn't a relative path inside the project")
         return watch
+
+
+def _effect(table: VerificationSet | None) -> SetEffect:
+    """What the failure of a set with ``table``, if it has one, does."""
+    return "holds_merges" if table is not None and table.holds_merges else "reports"
 
 
 def check_sets(verification: VerificationConfig) -> None:

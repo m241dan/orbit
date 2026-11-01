@@ -610,7 +610,7 @@ nothing running is accepted and does nothing more. It's refused with `unknown` f
 none of, naming those there are: it accepts the lanes the Catalog lists, so a disabled planner's
 only while an enabled conversational role shares it.
 
-`CancelAgent(agent_id)` stops agent `agent_id`'s work: the startup check, or the task of an agent
+`CancelAgent(agent_id)` stops agent `agent_id`'s work: the startup check, a named set's run, or the task of an agent
 in a lane whose tasks start by themselves, such as a reviewer's review, on its own; a conversational role's turn, such as the planner's, as `CancelTurn` does for its lane; and any
 other agent's, the task run it's in, as `CancelTurn` does for the `work` lane. It's refused with
 `unknown` for an agent that isn't running: `No running agent 'agent-9'.`

@@ -35,6 +35,7 @@ from orbit.agent.application.ports import (
 )
 from orbit.agent.application.review_count import ReviewCount
 from orbit.agent.application.review_lane import ReviewLane
+from orbit.agent.application.set_runs import SetRuns
 from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.storage_halt import Retry, StorageHalt
 from orbit.agent.application.switcher import SessionSwitcher
@@ -1400,6 +1401,11 @@ def desk_of(session: WorkspaceHost) -> AgentDesk | None:
 def startup_of(session: WorkspaceHost) -> StartupCheck | None:
     """The check the session runs at startup, if any."""
     return session._startup
+
+
+def sets_of(session: WorkspaceHost) -> SetRuns | None:
+    """The runs of the named sets the session's triggers ask for, if any."""
+    return session._sets
 
 
 def planner_turn(session: WorkspaceHost) -> asyncio.Task[object] | None:

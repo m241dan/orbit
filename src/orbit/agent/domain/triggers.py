@@ -5,9 +5,9 @@ fire on an event and which guards hold one back, and the rendering of a trigger'
 template.
 
 The package's triggers aren't kept here: whoever builds them passes in the contents of their
-``triggers.toml`` and the templates it names. ``manual`` isn't raised yet, a trigger that runs
-the task checks fires only on ``session_started``, and one that runs a named set doesn't fire
-yet.
+``triggers.toml`` and the templates it names. ``manual`` isn't raised yet, but a trigger fired by
+hand fires whatever its event; a trigger that runs a named set fires on any event, and one that
+runs the task checks only on ``session_started``, as the startup check.
 """
 
 import re
@@ -64,7 +64,7 @@ TASK_FINISHED = "task_finished"
 SESSION_STARTED = "session_started"
 STARTUP_CHECK_FAILED = "startup_check_failed"
 """The events of opening a workspace: orbit opening it with its session, the only event a
-trigger that runs the task checks fires on yet, and a step of the startup check failing."""
+trigger that runs the task checks fires on, and a step of the startup check failing."""
 
 GATE = "gate"
 """What a trigger's ``checks`` called the task checks before they had their name, read as
@@ -518,10 +518,10 @@ def listening(
     review: ReviewJob | None,
 ) -> list[tuple[str, Trigger]]:
     """The ``triggers`` that may fire on ``event``, by name, in their order: the enabled ones on
-    it that queue a task for one of ``roles``, the enabled roles, or run the task checks, on
-    ``session_started`` only, whose ``when`` takes it and that didn't queue the task that caused
-    it, if any, as its origin says (decision 9). One guarded by ``review-rounds`` only listens
-    while today's rounds and batches find a ``review`` due."""
+    it that queue a task for one of ``roles``, the enabled roles, run a named set, or run the task
+    checks, on ``session_started`` only, whose ``when`` takes it and that didn't queue the task
+    that caused it, if any, as its origin says (decision 9). One guarded by ``review-rounds``
+    only listens while today's rounds and batches find a ``review`` due."""
     return [
         (name, trigger)
         for name, trigger in triggers.items()
@@ -552,11 +552,11 @@ def takes(when: Mapping[str, str | tuple[str, ...]], fields: Mapping[str, str]) 
 
 def _acts(trigger: Trigger, event: str, roles: Collection[str]) -> bool:
     """Whether ``trigger`` does something on the event named ``event``: queues a task for one of
-    ``roles``, or runs the task checks, which it does only on ``session_started`` yet; a named
-    set doesn't run yet."""
-    if trigger.checks is not None:
-        return event == SESSION_STARTED and trigger.checks == TASK_CHECKS
-    return trigger.role in roles
+    ``roles``, runs a named set, on any event, or runs the task checks, only on
+    ``session_started``, as the startup check."""
+    if trigger.checks is None:
+        return trigger.role in roles
+    return trigger.checks != TASK_CHECKS or event == SESSION_STARTED
 
 
 def _values(wanted: str | tuple[str, ...]) -> tuple[str, ...]:
@@ -663,8 +663,10 @@ def restart_counts(counts: Mapping[str, int], fired: Iterable[str]) -> dict[str,
 
 def fires_by_hand(trigger: Trigger, roles: Collection[str]) -> bool:
     """Whether ``trigger`` fires when it's fired by hand, with ``roles`` the enabled roles: if
-    it's enabled and queues a task for one of them, whatever its ``when`` and guards."""
-    return trigger.enabled and trigger.role in roles
+    it's enabled and queues a task for one of them or runs a named set, whatever its ``when``
+    and guards. The task checks run only as the startup check, so not by hand."""
+    acts = trigger.role in roles or trigger.checks not in (None, TASK_CHECKS)
+    return trigger.enabled and acts
 
 
 def verification_state(steps: Sequence[VerificationStep] | None) -> VerificationState:

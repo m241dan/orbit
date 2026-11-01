@@ -44,6 +44,7 @@ from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, default_name
 from orbit.agent.domain.skills import SkillMapping
 from orbit.agent.domain.usage import UsageUnavailable
+from orbit.agent.domain.verification import CheckSet
 from orbit.agent.external.sqlite_schema import MIGRATIONS
 from orbit.cli import app
 from orbit.cli.backend import _Backend, _backend, _Directories, _in_process
@@ -778,9 +779,11 @@ def test_chat_verifies_tasks_with_only_the_task_checks(
 
     assert result.exit_code == 0
     [session] = launched
-    # The startup check, run_check and the task brief all take the verifier's steps.
+    # The startup check, run_check and the task brief all take the verifier's steps; the named
+    # sets run as their triggers ask.
     steps = (VerificationStep("A", ("a",)), VerificationStep("B", ("b",)))
-    assert session.verification == Verification(steps, run_step, workspace_state)
+    slow = CheckSet("slow", (VerificationStep("C", ("c",), "slow"),))
+    assert session.verification == Verification(steps, run_step, workspace_state, sets=(slow,))
 
 
 def test_chat_with_only_steps_in_sets_has_no_task_checks(
@@ -795,7 +798,8 @@ def test_chat_with_only_steps_in_sets_has_no_task_checks(
 
     assert result.exit_code == 0
     [session] = launched
-    assert session.verification == Verification((), run_step, workspace_state)
+    slow = CheckSet("slow", (VerificationStep("C", ("c",), "slow"),))
+    assert session.verification == Verification((), run_step, workspace_state, sets=(slow,))
 
 
 def test_chat_without_steps_verifies_nothing(

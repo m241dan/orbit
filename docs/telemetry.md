@@ -293,7 +293,8 @@ One span for each verification step run for an agent's call, a child of that cal
 `orbit.agent.request` span: each step verifying a `complete_task` claim, and the step a
 `run_check` runs. Its duration is the step's own. The steps verifying a task are still events of
 its `orbit.task` span too; the startup check's steps are children of its `orbit.startup_check`
-span (see **The startup check**); other steps run with no call to answer, as for an agent that
+span (see **The startup check**), and a named set's of its run's `orbit.check_set` span (see
+**Named sets**); other steps run with no call to answer, as for an agent that
 exited without claiming its task done or for checks a configurator proposes, have no span.
 
 | Attribute | Type | Meaning |
@@ -325,6 +326,30 @@ while it adds the draft, is just `cancelled`, with no failed step and no fix add
 couldn't run, as when git couldn't make its snapshot of the base, or that breaks on a bug before
 then, as when its fix draft can't be saved, has no result, but the span's error status with the
 error's message, and an `exception` event.
+
+## Named sets
+
+### `orbit.check_set`
+
+One span for each run of a named set of verification steps, which a trigger with
+`checks = "<set>"` asks for as it fires, from the run's start until it ends; a run queued behind
+another has its own span once it starts. Each starts its own trace: it's a root span, though what
+fires the trigger, such as a task's landing, may be in another's. The span is current while the
+run goes, so the events it publishes carry its trace context, and each step it runs, the tree's
+setup (`setup`) first if there is one, is an `orbit.verify.step` child, timed and with its result
+as for an agent's call.
+
+| Attribute | Type | Meaning |
+| --- | --- | --- |
+| `orbit.workspace.id` | string | The workspace's id (`unregistered` for one no store registers). |
+| `orbit.verify.set` | string | The set's name, such as `mutation`. |
+| `orbit.verify.result` | string | How the run came out: `passed`, `failed`, or `cancelled`, as when the user cancels its agent, a storage halt stops it or orbit closes meanwhile; absent when it couldn't run or broke on a bug. |
+| `orbit.verify.failed_step` | string | The step that failed, `setup` for the tree's setup; absent unless one did. |
+
+The result and the failed step are recorded together once the run has added its notice of a
+failure, so a run cancelled before then is just `cancelled`, with no failed step. A run that
+couldn't run, as when git couldn't find the base's latest commit or make its snapshot, has no
+result, but the span's error status with the error's message, and an `exception` event.
 
 ## Links
 

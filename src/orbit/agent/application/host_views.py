@@ -107,6 +107,16 @@ class Startup(Protocol):
     def agent(self) -> RunningAgent | None: ...
 
 
+class SetPanels(Protocol):
+    """The named sets' runs, as what's shown reads them."""
+
+    @property
+    def panel(self) -> VerificationChanged | None: ...
+
+    @property
+    def agents(self) -> tuple[RunningAgent, ...]: ...
+
+
 class Switched(Protocol):
     """The switcher, as the snapshot reads what the open session is and spent."""
 
@@ -221,7 +231,8 @@ class SnapshotParts:
     spent, its ``settings``, the conversational roles' ``seats``, the task ``board``, the
     ``proposals`` waiting, the work lane's ``turns``, the ``lanes``, the review ``lane``, the
     ``startup`` check, the ``verifier`` and the agent ``desk``, each of these four if there is
-    one, the sessions' ``states`` and the ``views`` that make the snapshot."""
+    one, the sessions' ``states``, the ``views`` that make the snapshot, and the named ``sets``'
+    runs, if any."""
 
     session: Callable[[], str]
     transcript: Callable[[str], Awaitable[Transcript]]
@@ -238,6 +249,7 @@ class SnapshotParts:
     desk: Launching | None
     states: States
     views: Snapshotting
+    sets: SetPanels | None = None
 
 
 class SessionSnapshots:
@@ -280,20 +292,23 @@ class SessionSnapshots:
         return work | parts.seats.busy() | parts.lanes.busy()
 
     def _steps_shown(self) -> tuple[tuple[StepState, ...], str]:
-        """The verification steps the panel shows, and their title: the startup check's while
-        it has the panel, else those verifying tasks; none without verification."""
+        """The verification steps the panel shows, and their title: a set's run's while one has
+        the panel, else the startup check's while it has it, else those verifying tasks; none
+        without verification."""
         parts = self._parts
+        sets = parts.sets.panel if parts.sets else None
         startup = parts.startup.panel if parts.startup else None
-        if startup is not None:
-            return startup.steps, startup.title
+        shown = sets if sets is not None else startup
+        if shown is not None:
+            return shown.steps, shown.title
         return (parts.verifier.progress.steps if parts.verifier else ()), ""
 
     def _running_agents(self) -> tuple[RunningAgent, ...]:
-        """The agents running, the startup check first while it runs."""
+        """The agents running, the startup check first while it runs, then the sets' runs going."""
         parts = self._parts
         startup = parts.startup.agent if parts.startup else None
-        agents = parts.desk.running if parts.desk else ()
-        return agents if startup is None else (startup, *agents)
+        checks = (*((startup,) if startup else ()), *(parts.sets.agents if parts.sets else ()))
+        return (*checks, *(parts.desk.running if parts.desk else ()))
 
 
 def _workspace_label(workspace: str | None) -> str | None:

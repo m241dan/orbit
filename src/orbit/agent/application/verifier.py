@@ -15,6 +15,7 @@ from orbit.agent.application.task_trace import (
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.verification import (
     MAX_FALLBACK_FIXES,
+    CheckSet,
     StepProgress,
     VerificationStep,
     may_change_files,
@@ -70,15 +71,17 @@ async def first_failure(
 class Verification:
     """How tasks are checked once their turn completes.
 
-    ``steps`` run in order through ``run_step`` until one fails. ``workspace`` tells
-    whether a task changed any files; without it, every task counts as changing them.
-    A task's chain of fixes may queue ``fallback_fixes`` fix tasks for each step.
+    ``steps``, the task checks, run in order through ``run_step`` until one fails. ``workspace``
+    tells whether a task changed any files; without it, every task counts as changing them.
+    A task's chain of fixes may queue ``fallback_fixes`` fix tasks for each step. The named
+    ``sets`` run through ``run_step`` too, as triggers ask, rather than verifying tasks.
     """
 
     steps: tuple[VerificationStep, ...]
     run_step: StepRunner
     workspace: Workspace | None = None
     fallback_fixes: int = MAX_FALLBACK_FIXES
+    sets: tuple[CheckSet, ...] = ()
 
 
 class Verifier:

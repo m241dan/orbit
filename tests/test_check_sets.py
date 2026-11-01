@@ -11,7 +11,12 @@ from orbit.agent.domain.config import OrbitConfig, Package, load_layered
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.roles import built_in_roles
 from orbit.agent.domain.triggers import Trigger, verification_state
-from orbit.agent.domain.verification import TASK_CHECKS, VerificationStep
+from orbit.agent.domain.verification import (
+    TASK_CHECKS,
+    CheckSet,
+    VerificationStep,
+    set_failed_note,
+)
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.agent.external.built_in_triggers import read_built_in_triggers
 from orbit.protocol import BUILT_IN_ROLE_NAMES
@@ -101,6 +106,42 @@ def test_a_sets_table_says_whether_it_holds_merges() -> None:
 
 def test_without_sets_tables_there_are_none() -> None:
     assert with_steps(A, C).verification.sets == {}
+
+
+# The sets as triggers run them
+
+
+def test_each_set_has_its_steps_in_order_and_reports_without_a_table() -> None:
+    d = {"name": "D", "command": ["d"], "set": "nightly"}
+    e = {"name": "E", "command": ["e"], "set": "slow"}
+    triggers = {"slow": SLOW_CHECK, "nightly": {"on": "commits", "checks": "nightly"}}
+    sets = with_steps(A, C, d, e, triggers=triggers).verification.check_sets
+    assert sets == (
+        CheckSet(
+            "slow", (VerificationStep("C", ("c",), "slow"), VerificationStep("E", ("e",), "slow"))
+        ),
+        CheckSet("nightly", (VerificationStep("D", ("d",), "nightly"),), "reports"),
+    )
+
+
+def test_a_set_whose_table_holds_merges_holds_them() -> None:
+    held = {"steps": [A, C], "sets": {"slow": {"holds_merges": True}}}
+    [slow] = with_steps(verification=held).verification.check_sets
+    assert slow.effect == "holds_merges"
+
+
+def test_without_a_set_anywhere_there_are_no_check_sets() -> None:
+    assert with_steps(A, B, triggers={}).verification.check_sets == ()
+
+
+def test_a_reporting_sets_failure_points_at_the_verification_panel() -> None:
+    assert set_failed_note(CheckSet("slow", ()), "Mutation tests") == (
+        "slow reported: Mutation tests failed (see the verification panel)"
+    )
+
+
+def test_a_holding_sets_failure_names_its_step() -> None:
+    assert set_failed_note(CheckSet("stress", (), "holds_merges"), "Soak") == "stress failed: Soak."
 
 
 def test_holds_merges_has_its_description() -> None:

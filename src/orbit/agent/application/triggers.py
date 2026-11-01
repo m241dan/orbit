@@ -15,7 +15,8 @@ review the whole codebase at the commit, each task booked into that review's bat
 The host raises ``session_started`` as it opens the workspace with its session, whose triggers
 with ``checks = "task-checks"`` run the startup check, and the startup check raises
 ``startup_check_failed`` for the step that failed. ctrl+e fires ``configure-checks`` by hand, on
-``manual``.
+``manual``. A trigger with ``checks`` naming a set has it run, in the background, on whatever
+event it fires, or by hand.
 
 While verification is missing, every task a trigger queues waits for it to be set up, as the
 session's gate says, with a notice naming its trigger, but a configurator's, which goes first.
@@ -78,8 +79,9 @@ Kick = Callable[[str], None]
 """What runs the tasks waiting in the lane of a role, by its name, if that lane starts by
 itself."""
 
-RunChecks = Callable[[], None]
-"""What runs the task checks, as a trigger with ``checks = "task-checks"`` asks."""
+RunChecks = Callable[[str], None]
+"""What runs the checks a trigger's ``checks`` names, by that name: the task checks, as the
+startup check, for ``"task-checks"``, or else the named set, in the background."""
 
 REVIEW_SKIPPED = "Review skipped"
 TRIGGERS_SKIPPED = "Triggers skipped"
@@ -119,16 +121,15 @@ def _no_kick(role: str) -> None:
     """Runs no lane."""
 
 
-def _no_checks() -> None:
+def _no_checks(checks: str) -> None:
     """Runs no checks."""
 
 
 @dataclass(frozen=True)
 class TriggerHooks:
     """What a :class:`TriggerEngine` acts through: ``kick``, which runs the tasks waiting in a
-    role's lane if it starts by itself, ``run_checks``, which runs the task checks as a trigger
-    with ``checks = "task-checks"`` asks, and the session's ``gate``, which says what
-    verification is."""
+    role's lane if it starts by itself, ``run_checks``, which runs the checks a trigger with
+    ``checks`` names, and the session's ``gate``, which says what verification is."""
 
     kick: Kick = _no_kick
     run_checks: RunChecks = _no_checks
@@ -150,8 +151,8 @@ async def _given(values: Mapping[str, str]) -> Mapping[str, str]:
 
 class TriggerEngine:
     """Fires the triggers of ``desk``'s agents on events, as they stand as each is raised,
-    queuing their tasks on ``tasks``' board, or for those with ``checks = "task-checks"`` having
-    the ``hooks``' ``run_checks`` run the task checks, and runs those tasks when asked, with
+    queuing their tasks on ``tasks``' board, or for those with ``checks`` having the ``hooks``'
+    ``run_checks`` run the checks they name, and runs those tasks when asked, with
     their ``kick``, each in its role's lane if that starts by itself. While their ``gate`` says
     verification is missing, each task it queues but a configurator's is noted as waiting.
 
@@ -169,8 +170,8 @@ class TriggerEngine:
         """Raise ``session_started``: orbit opened the workspace with its session, verifying
         tasks with ``steps``, the task checks, none while verification is off, which give its
         ``verification`` and, with the tree's setup, its ``{checks}``. Those of its triggers with
-        ``checks = "task-checks"`` run the steps. Returns the ids of the tasks the others
-        queued."""
+        ``checks = "task-checks"`` run the steps, and those naming a set run it. Returns the ids
+        of the tasks the others queued."""
         fields = {"verification": verification_state(steps)}
         event = TriggerEvent(SESSION_STARTED, fields)
         return await self.fire(event, partial(_given, self._checks(steps or ())))
@@ -179,8 +180,8 @@ class TriggerEngine:
         """Fire the trigger ``name`` by hand, if it fires so, as :meth:`by_hand` says, whatever
         its ``when`` and guards: its task is queued, a configurator's first, rendered from the
         variables of ``manual``, its ``{checks}`` the ``steps`` and the tree's setup configured
-        now. The board is published if it was queued. Returns its id, for :meth:`run`; none if
-        it doesn't fire."""
+        now, or the set it names runs. The board is published if a task was queued. Returns its
+        id, for :meth:`run`; none if it doesn't fire or queues no task."""
         fired = self.by_hand(name)
         if not fired:
             return ()
@@ -237,7 +238,7 @@ class TriggerEngine:
         """Fire the triggers listening for ``event``, with ``review`` the review due on it, if
         any, as :func:`~orbit.agent.domain.triggers.listening` says: in their order, each that
         no guard holds back queues its role's task, a draft if it says so, from it, rendered
-        from the ``values`` gathered and its name, or runs the checks if it has ``checks``. The
+        from the ``values`` gathered and its name, or runs the checks its ``checks`` names. The
         board is published if any task was queued. Returns their ids, for :meth:`run`."""
         firing = await self._firing(self._desk.agents.triggers, event, values, review)
         return () if firing is None else await self._queue(firing)
@@ -253,6 +254,15 @@ class TriggerEngine:
         roles = enabled_roles(self._desk.agents.roles)
         board = self._tasks.board.tasks
         return count_landing(self._desk.agents.triggers, event, roles, counts, board)
+
+    def fire_checks(self, fired: Sequence[tuple[str, Trigger]]) -> list[tuple[str, Trigger]]:
+        """Run the checks of each of the triggers ``fired``, by name, on a landing counted, that
+        runs them, their guards decided already; returns the others, which queue tasks, in
+        order, for :meth:`fire_counted`."""
+        for _, trigger in fired:
+            if trigger.checks is not None:
+                self._run_checks(trigger.checks)
+        return [(name, trigger) for name, trigger in fired if trigger.checks is None]
 
     def by_hand(self, name: str) -> list[tuple[str, Trigger]]:
         """The trigger ``name``, by name, if it fires when fired by hand, as
@@ -345,12 +355,13 @@ class TriggerEngine:
         self, board: TaskBoard, name: str, trigger: Trigger, firing: _Firing
     ) -> str | None:
         """Fire ``trigger``, named ``name``, as ``firing`` says: with ``checks``, run them
-        unless a guard holds it back, with ``board``'s tasks, adding none; otherwise add its
-        task to ``board`` as :meth:`_add_one` does, returning its id if it's added."""
+        unless a guard holds it back, with ``board``'s tasks, if they're still to decide, adding
+        none; otherwise add its task to ``board`` as :meth:`_add_one` does, returning its id if
+        it's added."""
         if trigger.checks is None:
             return self._add_one(board, name, trigger, firing)
-        if not held_back(trigger, None, board.tasks):
-            self._run_checks()
+        if firing.counted or not held_back(trigger, None, board.tasks):
+            self._run_checks(trigger.checks)
         return None
 
     def _add_one(

@@ -13,6 +13,7 @@ from orbit.agent.application.lanes import OPEN_GATE, SessionGate
 from orbit.agent.application.outbox import EventSink
 from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.review_lane import ReviewLane
+from orbit.agent.application.set_runs import SetRuns
 from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.startup_check import AGENT_ID as STARTUP_AGENT
 from orbit.agent.application.startup_check import StartupCheck
@@ -80,7 +81,8 @@ class CommandParts:
     review ``lane``, if any, the ``proposals`` waiting for the user, the ``desk`` running its
     agents and the ``startup`` check, if any; ``save`` saves the session and ``reviews_changed``
     saves its review state; the session's ``gate`` says whether another orbit owns the
-    repository; and its ``lanes`` are the lanes work runs in, by name."""
+    repository; its ``lanes`` are the lanes work runs in, by name; and the named ``sets``' runs,
+    if any, are cancelled as agents are."""
 
     settings: SessionSettings
     events: EventSink
@@ -95,6 +97,7 @@ class CommandParts:
     reviews_changed: Callable[[], Awaitable[None]]
     gate: SessionGate = OPEN_GATE
     lanes: Lanes = field(default_factory=Lanes)
+    sets: SetRuns | None = None
 
 
 class WorkCommands:
@@ -409,9 +412,10 @@ class WorkCommands:
         await self._parts.events.put(decided)
 
     async def _cancel_agent(self, agent_id: str) -> None:
-        """Stop the startup check, or the task of an agent in a lane that starts by itself, on its
-        own; any other agent's work, like ctrl+s."""
-        if self._cancel_startup(agent_id):
+        """Stop the startup check, a set's run, or the task of an agent in a lane that starts by
+        itself, on its own; any other agent's work, like ctrl+s."""
+        sets = self._parts.sets
+        if self._cancel_startup(agent_id) or (sets is not None and sets.cancel(agent_id)):
             return
         desk = self._parts.desk
         agent = desk.find(agent_id) if desk else None

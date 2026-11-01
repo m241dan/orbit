@@ -1,7 +1,7 @@
-"""Which triggers fire on an event: those enabled, on it, for an enabled role or running the
-checks on ``session_started``, whose ``when`` takes it and that didn't queue the task causing it,
-the guards that hold one back, the landings counted toward the ``commits`` triggers, which fire
-by hand, and what ``session_started`` says of verification."""
+"""Which triggers fire on an event: those enabled, on it, for an enabled role, running a named
+set, or running the task checks on ``session_started``, whose ``when`` takes it and that didn't
+queue the task causing it, the guards that hold one back, the landings counted toward the
+``commits`` triggers, which fire by hand, and what ``session_started`` says of verification."""
 
 from collections.abc import Mapping
 
@@ -82,14 +82,17 @@ def test_a_trigger_running_the_task_checks_listens_whatever_roles_are_enabled() 
     assert names(listening({"check": check}, started, (), None)) == ["check"]
 
 
-def test_a_trigger_running_a_named_set_doesnt_listen_yet() -> None:
+def test_a_trigger_running_a_named_set_listens_on_any_event_whatever_roles_are_enabled() -> None:
     started = TriggerEvent("session_started", {"verification": "configured"})
+    failed = TriggerEvent("startup_check_failed", {"step": "Lint"})
     sets = {
         "started": Trigger(on="session_started", checks="slow"),
-        "landed": Trigger(on="task_landed", checks="slow"),
+        "landed": Trigger(on="task_landed", checks="slow", when={"role": "coder"}),
+        "failed": Trigger(on="startup_check_failed", checks="slow"),
     }
-    assert listening(sets, started, ROLES, None) == []
-    assert listening(sets, LANDED, ROLES, None) == []
+    assert names(listening(sets, started, (), None)) == ["started"]
+    assert names(listening(sets, LANDED, (), None)) == ["landed"]
+    assert names(listening(sets, failed, (), None)) == ["failed"]
 
 
 def test_a_trigger_does_not_listen_to_an_event_a_task_it_queued_caused() -> None:
@@ -313,6 +316,12 @@ def test_a_trigger_fires_by_hand_if_it_and_its_role_are_enabled_whatever_its_whe
     )
     assert not fires_by_hand(every(10, enabled=False), roles)
     assert not fires_by_hand(every(10), ("coder",))
+
+
+def test_a_set_fires_by_hand_if_its_trigger_is_enabled_but_the_task_checks_do_not() -> None:
+    assert fires_by_hand(Trigger(on="manual", checks="slow", when={}), ())
+    assert not fires_by_hand(Trigger(on="manual", checks="slow", enabled=False), ())
+    assert not fires_by_hand(Trigger(on="manual", checks="task-checks"), ROLES)
 
 
 # What session_started says of verification

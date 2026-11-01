@@ -1,0 +1,50 @@
+"""Tracing the named sets' runs: the ``orbit.check_set`` span of each run, a root naming its set
+with ``orbit.verify.set``, with an ``orbit.verify.step`` child for each step it runs, as the
+startup check's runs are traced.
+
+The run's span is the current one while it runs, so the run records its result on it through
+:func:`current_span`, and the events it publishes carry its trace context.
+"""
+
+import asyncio
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+
+from orbit.agent.application.agent_trace import traced_steps
+from orbit.agent.application.ports import StepRunner
+from orbit.agent.application.task_trace import VERIFY_RESULT
+from orbit.tracing import AttributeValue, NoTelemetry, Span, Telemetry, current_span, no_span
+
+SET_SPAN = "orbit.check_set"
+
+VERIFY_SET = "orbit.verify.set"
+
+
+@dataclass(frozen=True)
+class SetTracing:
+    """What traces the named sets' runs: the ``telemetry`` recording them, and the id of the
+    ``workspace`` they check."""
+
+    telemetry: Telemetry = field(default_factory=NoTelemetry)
+    workspace: str = ""
+
+    @contextmanager
+    def run(self, name: str) -> Iterator[Span]:
+        """The span of a run of the set ``name``, current for the block, starting its own trace,
+        and ended on leaving it; a block cancelled is a run cancelled, and an error escaping it
+        is recorded on it."""
+        attributes: dict[str, AttributeValue] = {
+            "orbit.workspace.id": self.workspace,
+            VERIFY_SET: name,
+        }
+        with no_span(), self.telemetry.span(SET_SPAN, attributes) as span:
+            try:
+                yield span
+            except asyncio.CancelledError:
+                span.set_attributes({VERIFY_RESULT: "cancelled"})
+                raise
+
+    def steps(self, run_step: StepRunner) -> StepRunner:
+        """``run_step``, timing each step it runs as a child of the current span, the run's."""
+        return traced_steps(self.telemetry, current_span(), run_step)

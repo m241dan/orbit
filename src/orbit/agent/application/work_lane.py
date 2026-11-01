@@ -26,6 +26,7 @@ from orbit.agent.application.outcomes import Outcome, UserStop, ended, run_task_
 from orbit.agent.application.record_moves import RecordMoves
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.role_workspace import workspace_for
+from orbit.agent.application.set_runs import SetRuns
 from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.task_trace import TaskTracing
 from orbit.agent.application.tasks import Tasks
@@ -74,9 +75,9 @@ class Beside:
     runs; the roles whose tasks run ``elsewhere``, in lanes that start by themselves; the
     ``disabled`` roles, whose tasks run nowhere; each runtime's ``outages``, shared with the
     lanes that start by themselves, in which a run notes the runtime that stopped it and the
-    runtimes whose agents ended their runs without an outage; and the ``triggers``, if any,
+    runtimes whose agents ended their runs without an outage; the ``triggers``, if any,
     which hear how each task ended, and of its landing while there's no review lane to raise
-    it."""
+    it; and the named ``sets``' runs, if any, whose panel each task takes over too."""
 
     review: ReviewLane | None = None
     startup: StartupCheck | None = None
@@ -88,6 +89,7 @@ class Beside:
     disabled: frozenset[str] = frozenset()
     outages: Outages = field(default_factory=Outages)
     triggers: TriggerEngine | None = None
+    sets: SetRuns | None = None
 
 
 class WorkLane:
@@ -128,6 +130,7 @@ class WorkLane:
         self._disabled = beside.disabled
         self._outages = beside.outages
         self._triggers = beside.triggers
+        self._sets = beside.sets
         self._seated = False  # The run holds a coder's slot, for the task about to run or running.
         # Task id -> the commit it merged into the base, until reported.
         self._landed: dict[str, str] = {}
@@ -392,6 +395,8 @@ class WorkLane:
         again."""
         if self._startup is not None:
             self._startup.release_panel()
+        if self._sets is not None:
+            self._sets.release_panel()
         if self._verifier is not None:
             await self._verifier.reset()
         await self._publish(TaskStarted(task_id=task_id))

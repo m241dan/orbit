@@ -9,7 +9,7 @@ does once it ends.
 It's the ``review-rounds`` guard: the lane raises each landing as ``task_landed``, and a review
 of commits is queued by the triggers it guards, from their templates. It counts each landing
 toward the ``commits`` triggers too, and a super review is queued by those that fire, or by the
-super-review trigger fired by hand.
+super-review trigger fired by hand; those of them that run a named set run it instead.
 """
 
 import random
@@ -206,13 +206,13 @@ class ReviewLane:
         """The task that ended as ``state`` landed ``commit``: raise ``task_landed``, its own
         review, if due, the one ``review-rounds`` finds, queue the review of the batch it
         finished, if it did, and count it toward the ``commits`` triggers, those that fire
-        reviewing the codebase at it; then end the batch it suggested into, if the lane booked
-        it, as :meth:`_ended` says. The task isn't looked up: it may have been removed since it
-        finished, and its work is reviewed all the same."""
+        reviewing the codebase at it, or running the set they name; then end the batch it
+        suggested into, if the lane booked it, as :meth:`_ended` says. The task isn't looked up:
+        it may have been removed since it finished, and its work is reviewed all the same."""
         job = self.planner.landed(state, commit)
         # Counted before the commit's own review is queued, which would hold a due super review;
         # one due is taken at once, so the count saved as that review is queued has its commit.
-        fired = self._count(state)
+        fired = self._triggers.fire_checks(self._count(state))
         whole = self._super_review(commit) if fired else None
         await self._land(state, commit, job)
         if whole is not None:

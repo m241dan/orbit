@@ -296,9 +296,12 @@ def _open(state: Path) -> SqliteStore:
 
 
 def _verification(config: OrbitConfig) -> Verification:
-    """What verifies tasks with ``config``'s task checks, run as processes."""
-    steps = config.verification.task_checks
-    return Verification(steps, run_step, workspace_state, config.fallback_fixes)
+    """What verifies tasks with ``config``'s task checks, and runs its named sets as triggers
+    ask, run as processes."""
+    checks = config.verification
+    return Verification(
+        checks.task_checks, run_step, workspace_state, config.fallback_fixes, checks.check_sets
+    )
 
 
 def _settings(model: str | None, tools: ToolAccess | None) -> tuple[Settings, list[str]]:

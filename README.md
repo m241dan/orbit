@@ -702,8 +702,23 @@ reports. A set's name is a plain name (letters, digits, `-` and `_`) other than 
 which names the task checks. A `[verification.sets.<name>]` table for a set no step is in, and a
 trigger whose `checks` names neither `task-checks` nor a set a step is in, are refused at load,
 naming the setting; a set no enabled trigger runs is allowed, with a notice as the workspace opens
-(`The set mutation has no trigger, so it never runs.`). This version reads sets but doesn't run
-them yet. A project with no `set` anywhere has only task checks, as before.
+(`The set mutation has no trigger, so it never runs.`). A project with no `set` anywhere has only
+task checks, as before.
+
+A trigger running a set runs its steps in order, in the background, in a read-only snapshot of
+your branch's latest commit, set up with the project's
+[setup command](#where-tasks-run-and-how-their-work-lands) first as the startup check's is, never
+in the coder's worktree, so it doesn't hold up the work or race with an agent there. The
+verification panel shows the run under the set's name, with the same step states as the startup
+check, until a task's verification takes the panel over, and the agents pane and All show it as
+`checker`, its agent `set-<name>`, which you can cancel as the startup check's; a storage halt
+cancels it too, and a set fired while the session is halted runs once storage resumes. If the
+trigger fires again while its set runs, one more run is queued, on the latest commit as it
+starts; further firings meanwhile fold into that one. A passing run adds nothing to the
+conversation; a failing one adds a notice: `mutation reported: Mutation tests failed (see the
+verification panel)` for a set that only reports, and `mutation failed: Mutation tests.` for one
+that holds merges, which doesn't hold them yet. Sets run only in a git repository with the coder's
+worktree, where there's a commit to snapshot, and never with `--no-verify`.
 
 Orbit's own [`.orbit/config.toml`](.orbit/config.toml) lists six, quick ones first so a failure
 shows up in seconds:
@@ -842,7 +857,7 @@ Inside a git repository, agents don't touch your checkout. The coder, and any ro
 too. Other roles' agents work where their `workspace` says: in a snapshot of the base, in an empty
 temporary directory or in your checkout, read in place (see `workspace` under
 [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)). That worktree and the snapshot
-worktrees reviews, the startup check and roles working on a `snapshot` run in are all orbit keeps
+worktrees reviews, the startup check, the sets' runs and roles working on a `snapshot` run in are all orbit keeps
 under `.git/orbit`; saved sessions live in the store. Before each task the worktree catches up with the branch you
 had checked out when orbit started (the **base**), and the project's setup command runs in it: once
 when the worktree is first prepared, and again whenever a file it watches changes. Set it in
@@ -986,7 +1001,7 @@ does.
 
 When a write to the store fails, whether the event log, the session record (taking its lock on
 the first save included), the super review count or the record moves, orbit halts the session instead of carrying on with work it can't record: the running
-agents, the planner's turn, the reviews and the startup check are cancelled, and every command
+agents, the planner's turn, the reviews, the startup check and the sets' runs are cancelled, and every command
 but quitting and "Try again" is refused with `storage_failed` and the same explanation. Nothing more is written
 to `orbit.db` until storage is resumed.
 
@@ -1025,7 +1040,8 @@ is deleted and the halt is lifted: commands are accepted again, the reviews wait
 start, a run the usage limit or an API outage had stopped starts again if its wait ended
 meanwhile, a role whose consultations the halt cancelled hears so, in one turn, only now, and
 work can carry on; a startup check the halt cancelled stays cancelled, like one
-you cancelled. Events that
+you cancelled, as does a set's run until its trigger fires again, while a set fired during the
+halt runs now. Events that
 reached neither the log nor a fallback file are recorded as a gap, which the conversation, and
 paging back through it, shows in their place as a line such as "Events 1204–1210 weren't saved".
 If a write still fails, or the store still can't list, lock or read the session a rename is
@@ -1675,7 +1691,16 @@ session was saved with it, which runs instead (see [Verification steps](#verific
 `task_landed` and `task_finished` are
 the work lane's tasks' (a review's end isn't one), landings count toward the `commits` triggers
 only while reviews are on, as the review lane counts them, and a trigger with
-`checks = "task-checks"` fires only on `session_started`; one naming a set doesn't fire yet.
+`checks = "task-checks"` fires only on `session_started`, as the startup check; one naming a set
+fires on any event, and runs that set (see [Verification steps](#verification-steps)). This one
+runs the set `mutation` after every second landing:
+
+```toml
+[triggers.mutation]
+on = "commits"
+every = 2
+checks = "mutation"
+```
 
 The shipped triggers are data in
 [`src/orbit/agent/external/triggers/`](src/orbit/agent/external/triggers/): `triggers.toml` has a
@@ -1699,7 +1724,8 @@ A trigger's fields:
   itself, as a role's `instructions` are. A project's `prompt` replaces a shipped template whole.
 - `checks`: in place of a role, the checks it runs rather than queue a task: `"task-checks"`, or a
   named set (see [Verification steps](#verification-steps)). The task checks run as the startup
-  check, once, shown in the verification panel and as `checker`, not in the task list.
+  check, once, and a set each time the trigger fires, or as you fire it by hand, each shown in the
+  verification panel and as `checker`, not in the task list.
   `"gate"`, their old name, is read as `"task-checks"`. A trigger has a role or `checks`, not
   both; a role needs a prompt, and `checks` takes none.
 - `when`: the events it takes, by their fields, each a value or a list of values, such as
@@ -3284,8 +3310,10 @@ the reply was an error (a `read_skill` call's with the skill and file asked for,
 runs, verifying a `complete_task` claim or for `run_check`, is a child of that call, `orbit.verify.step`, with its name and result. Each
 run of the startup check is one span, `orbit.startup_check`, starting its own trace: the
 workspace, how it came out (`passed`, `failed` or `cancelled`), the step that failed and whether
-it added a draft task to fix it, with each step it ran a child `orbit.verify.step`. Each
-frontend's WebSocket to `orbit serve` is one span, `orbit.connection`, starting its own trace,
+it added a draft task to fix it, with each step it ran a child `orbit.verify.step`. Each run of
+a named set is one span, `orbit.check_set`, starting its own trace: the workspace, the set
+(`orbit.verify.set`), how it came out and the step that failed, with each step it ran a child
+`orbit.verify.step`. Each frontend's WebSocket to `orbit serve` is one span, `orbit.connection`, starting its own trace,
 from when it's accepted until it's closed: where it connected from, the client and protocol
 version its `Hello` gave, and, as events, that `hello`, a `reconnect` with the `seq` it catches up
 from and how many were stamped since, each `attach` (with the workspace and session) and
@@ -3517,9 +3545,12 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     an `orbit.review` span by `ReviewTracing` (in `review_trace`), and the lane's tasks of other
     roles as the runner runs any lane's; `StartupCheck`
     (in `startup_check`) runs the steps once on the base commit as orbit starts, each run traced
-    as an `orbit.startup_check` span by `StartupTracing` (in `startup_trace`); `UsageMonitor`
+    as an `orbit.startup_check` span by `StartupTracing` (in `startup_trace`); `SetRuns` (in
+    `set_runs`) runs the named sets triggers name, each in a snapshot of the base's latest
+    commit, one run at a time with one more queued behind it, each run traced as an
+    `orbit.check_set` span by `SetTracing` (in `set_trace`); `UsageMonitor`
     (in `usage_monitor`) fetches the usage limits on a schedule and after an agent's turn; these
-    three run their work through `Background` (in `lanes`), which reports a crash rather than
+    run their work through `Background` (in `lanes`), which reports a crash rather than
     losing it, and the work lane's and the planner's turns run through a `TurnSlot` each (also in
     `lanes`), which refuses a second turn and shows the lane busy while one runs;
     `FrontendReview` (in `proposals`) is where the user decides on proposed checks; `PlannerChat`

@@ -1,9 +1,10 @@
-"""Verification rules: when a task needs checking, how many fixes to try, and what to ask for."""
+"""Verification rules: when a task needs checking, how many fixes to try, what to ask for, and
+what a named set's failure says."""
 
 import shlex
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AfterValidator, Field
 from pydantic_core import PydanticCustomError
@@ -52,6 +53,29 @@ class VerificationStep:
             )
         ),
     ] = None
+
+
+SetEffect = Literal["holds_merges", "reports"]
+"""What a named set's failure does: hold merges until a fix lands, or only report."""
+
+
+@dataclass(frozen=True)
+class CheckSet:
+    """A named set of verification steps, as a trigger runs it: its ``name``, its ``steps``, in
+    order, and what its failure does, its ``effect``."""
+
+    name: str
+    steps: tuple[VerificationStep, ...]
+    effect: SetEffect = "reports"
+
+
+def set_failed_note(check_set: CheckSet, step: str) -> str:
+    """The notice saying a run of ``check_set`` failed at the step named ``step``: a reporting
+    set points at the verification panel, which shows its run, and a holding one names the
+    step."""
+    if check_set.effect == "holds_merges":
+        return f"{check_set.name} failed: {step}."
+    return f"{check_set.name} reported: {step} failed (see the verification panel)"
 
 
 @dataclass(frozen=True)
