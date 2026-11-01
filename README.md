@@ -695,19 +695,24 @@ shows up in seconds:
    `# #lizard forgives(parameter_count): <why>` on its signature.
 6. Unit tests with 100% coverage: `uv run pytest --cov --cov-fail-under=100`
 
-**Startup check.** When orbit starts with verification on and at least one step configured, it
-runs the steps once in the background against the base commit, so a broken setup shows up while
-you type your first prompt rather than on the first task. It runs in a read-only snapshot of the
-base (the same kind reviews use, under `.git/orbit`), set up with the project's setup command
-first, so it never races with an agent in the worktree; outside a git repository it runs in the
-workspace's directory. Nothing waits for it: the prompt, the planner and `ctrl+r` all work meanwhile.
+**Startup check.** When orbit opens a workspace with verification on and at least one step
+configured, the `startup-check` trigger (see [Triggers](#triggers)) runs the steps once in the
+background against the base commit, so a broken setup shows up while you type your first prompt
+rather than on the first task; switching sessions doesn't run them again. It runs in a
+read-only snapshot of the base (the same kind reviews use, under `.git/orbit`), set up with the
+project's setup command first, so it never races with an agent in the worktree; outside a git
+repository it runs in the workspace's directory. Nothing waits for it: the prompt, the planner
+and `ctrl+r` all work meanwhile.
 The verification panel shows its progress under a "Startup check" heading, with the same icons and
 timing as a task's verification, until a task starts and its own verification takes the panel
 over. It's listed in the agents pane as `startup-check`, where `c` cancels it. When it finishes,
 the conversation notes `✅ Startup check passed`, or on a failure the step that failed (`setup`
 if the setup command did) and its output, with a 📝 draft task "Fix failing check:
-<step>" whose prompt holds that output (none while the `coder` is disabled), and a reminder that
-`ctrl+e` reconfigures the steps if they're what's wrong. `--no-verify` skips it, as does having no steps.
+<step>" whose prompt holds that output, from the `startup-fix` trigger (its origin
+`startup-fix`; none while the `coder` is disabled), and a reminder that `ctrl+e` reconfigures the
+steps if they're what's wrong. `--no-verify` skips it, as does having no steps, and
+`[triggers.startup-check] enabled = false` turns it off, as
+`[triggers.startup-fix] enabled = false` does the draft.
 
 With no steps configured, nothing is verified: the conversation says so at startup (`No verification
 steps configured. Press ctrl+e to set them up.`), and each task that would have
@@ -1601,12 +1606,15 @@ with `[triggers.<name>]` tables in `.orbit/config.toml`. A task's work landing f
 `task_landed` triggers and counts toward the `commits` ones, and a task finishing, however it
 ended, fires the `task_finished` ones, so the `review` and `super-review` triggers start the
 reviews and super reviews [Reviews](#reviews) describes, and a project's own triggers on those
-events queue their tasks. The other events don't fire yet: the startup check and its fixes, and
-the configurator still start as the sections above say, and their shipped triggers describe them
-for the versions that fire them. `task_landed` and `task_finished` are the work lane's tasks' (a
-review's end isn't one), landings count toward the `commits` triggers only while reviews are on,
-as the review lane counts them, and only a trigger with a role fires: one with `checks` waits for
-`session_started`.
+events queue their tasks. Orbit opening a workspace fires the `session_started` triggers, once,
+not as you switch sessions, nor while another orbit owns the repository: `startup-check` runs the
+[startup check](#verification-steps), and the step it fails fires the `startup_check_failed`
+triggers, whose `startup-fix` adds the draft fixing it. `set-up-verification` ships disabled
+until orbit refuses to run tasks while verification is missing, so the configurator still starts
+as the sections above say, and `manual` doesn't fire yet. `task_landed` and `task_finished` are
+the work lane's tasks' (a review's end isn't one), landings count toward the `commits` triggers
+only while reviews are on, as the review lane counts them, and a trigger with `checks` fires only
+on `session_started`.
 
 The shipped triggers are data in
 [`src/orbit/agent/external/triggers/`](src/orbit/agent/external/triggers/): `triggers.toml` has a
@@ -1617,7 +1625,7 @@ The shipped triggers are data in
 | `review` | `task_landed` | every one | a `reviewer` task, from `review.md` | guard `review-rounds` |
 | `super-review` | `commits` | `origin = ["manual", "planner"]` | a `super-reviewer` task, from `super-review.md` | `every = 10`, guard `suggestions-pending`, manual as `Super review` |
 | `configure-checks` | `manual` | every one | a `configurator` task, from `configure-checks.md` | manual as `Set up checks` |
-| `set-up-verification` | `session_started` | `verification = "missing"` | a `configurator` task, from `configure-checks.md` | |
+| `set-up-verification` | `session_started` | `verification = "missing"` | a `configurator` task, from `configure-checks.md` | `enabled = false` for now |
 | `startup-check` | `session_started` | `verification = "configured"` | runs the verification steps, `checks = "gate"` | |
 | `startup-fix` | `startup_check_failed` | every one | a `coder` task, from `startup-fix.md` | `draft = true` |
 
@@ -1628,8 +1636,10 @@ A trigger's fields:
   `.md` is the path of a Markdown file under `.orbit/` whose text is the prompt
   (`prompt = "triggers/tidy.md"` reads `.orbit/triggers/tidy.md`), and anything else is the text
   itself, as a role's `instructions` are. A project's `prompt` replaces a shipped template whole.
-- `checks`: `"gate"` in place of a role, to run the verification steps rather than queue a task.
-  A trigger has a role or `checks`, not both; a role needs a prompt, and `checks` takes none.
+- `checks`: `"gate"` in place of a role, to run the verification steps rather than queue a task:
+  they run as the startup check, once, shown in the verification panel and as `checker`, not in
+  the task list. A trigger has a role or `checks`, not both; a role needs a prompt, and `checks`
+  takes none.
 - `when`: the events it takes, by their fields, each a value or a list of values, such as
   `when = { origin = ["manual", "planner"] }` for your own tasks' and the planner's; left out,
   every one.

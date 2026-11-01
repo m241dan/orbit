@@ -1,13 +1,16 @@
-"""The startup check: the verification steps run once in the background on the base commit."""
+"""The startup check: the verification steps run once in the background on the base commit, as
+the startup-check trigger asks on session_started, and a failing step's draft fix from the
+startup-fix trigger."""
 
 import asyncio
 
 import pytest
 
 from orbit.agent import HostParts, Setup, Verification, VerificationStep, WorkspaceHost
-from orbit.agent.application import workspace_host as session_module
+from orbit.agent.application import triggers as triggers_module
 from orbit.agent.application.ports import TreeFailed
 from orbit.agent.application.startup_check import CANCELLED_NOTE, CheckSite, StartupCheck
+from orbit.agent.domain.verification import startup_fix_prompt
 from orbit.protocol import (
     CODER,
     GIT_FAILED,
@@ -21,7 +24,6 @@ from orbit.protocol import (
     Event,
     Notice,
     SendMessage,
-    Settings,
     StartupChecked,
     StepState,
     TaskStarted,
@@ -108,9 +110,8 @@ async def test_a_failing_step_adds_a_draft_task_to_fix_it() -> None:
     assert titled("failed", "pending") in events
     assert StartupChecked(passed=False, step="Lint", output="1 test failed") in events
     [draft] = board(events)
-    assert draft.status == "draft"
-    assert draft.task.prompt.splitlines()[0] == "Fix failing check: Lint"
-    assert "ruff check" in draft.task.prompt and "1 test failed" in draft.task.prompt
+    assert (draft.status, draft.origin) == ("draft", "startup-fix")
+    assert draft.task.prompt == startup_fix_prompt(LINT, "1 test failed")
     assert draft.task.settings == coder.settings
     assert draft.task.role == CODER
     assert draft.proposed_by is None
@@ -132,22 +133,6 @@ async def test_a_failing_setup_is_the_failing_check() -> None:
     await session.close()
 
 
-async def test_without_agents_it_runs_in_the_workspace_given() -> None:
-    steps = Steps(True, False)
-    session = WorkspaceHost(
-        HostParts(verification=checked(steps), workspace="/src/project", check_at_startup=True)
-    )
-
-    events = await until_checked(session)
-
-    assert steps.roots == ["/src/project", "/src/project"]
-    assert StartupChecked(passed=False, step="Unit tests", output="1 test failed") in events
-    # Without agents, the draft has the default settings.
-    assert board(events)[0].task.settings == Settings()
-    assert board(events)[0].task.role == CODER
-    await session.close()
-
-
 async def test_with_agents_but_no_tree_it_runs_in_the_workspaces_directory() -> None:
     steps = Steps(True, True)
     session, _, _ = session_for(
@@ -160,12 +145,19 @@ async def test_with_agents_but_no_tree_it_runs_in_the_workspaces_directory() -> 
     await session.close()
 
 
-async def test_it_is_skipped_without_steps_or_anywhere_to_run_them_or_when_not_asked() -> None:
+async def test_it_is_skipped_without_steps_or_agents_whose_triggers_run_it_or_when_not_asked() -> (
+    None
+):
     sessions = [
         WorkspaceHost(HostParts(check_at_startup=True)),
         WorkspaceHost(HostParts(verification=Verification((), Steps()), check_at_startup=True)),
         WorkspaceHost(HostParts(verification=checked(Steps()))),
         WorkspaceHost(HostParts(verification=checked(Steps(True)), check_at_startup=True)),
+        WorkspaceHost(
+            HostParts(
+                verification=checked(Steps(True)), workspace="/src/project", check_at_startup=True
+            )
+        ),
     ]
     for session in sessions:
         events = await quiet(payloads(session))
@@ -239,7 +231,12 @@ async def test_closing_the_session_stops_it() -> None:
 
 
 async def test_closing_before_it_starts_is_harmless() -> None:
-    check = StartupCheck(checked(Steps()), CheckSite(None, "."), asyncio.Queue[Event]().put, None)
+    async def add_fix(step: VerificationStep, output: str) -> bool:
+        return False
+
+    check = StartupCheck(
+        checked(Steps()), CheckSite(None, "."), asyncio.Queue[Event]().put, add_fix
+    )
     await check.close()
     assert not check.running
 
@@ -321,7 +318,7 @@ async def test_a_crash_is_reported_and_closing_still_stops_the_host(
     def broken(step: VerificationStep, output: str) -> str:
         raise ValueError("bug")
 
-    monkeypatch.setattr(session_module, "startup_fix_prompt", broken)
+    monkeypatch.setattr(triggers_module, "failure_report", broken)
     session, host, launcher = session_for(verification=checked(Steps(False)), check_at_startup=True)
     launcher.planner_turns.append(chats)
     await send(session, SendMessage(agent=PLANNER, text="Hello."))  # Starts the host.

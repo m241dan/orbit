@@ -4,7 +4,9 @@ broken setup shows up while the user types their first prompt rather than on the
 It runs in the background, in a read-only snapshot of the base commit like a review, so it never
 races with an agent in the coder's tree. It shows in the verification panel until a task's own
 verification takes the panel over, and in the agents pane as an agent that can be cancelled. Each
-run is traced in an ``orbit.startup_check`` span, as :class:`StartupTracing` says.
+run is traced in an ``orbit.startup_check`` span, as :class:`StartupTracing` says. A trigger with
+``checks = "gate"`` starts it, on ``session_started``, and the step that fails raises
+``startup_check_failed``, whose triggers may add a task to fix it.
 """
 
 import asyncio
@@ -39,8 +41,9 @@ TITLE = "Startup check"
 BASE = "HEAD"  # The main checkout's commit: the base, as orbit starts.
 CANCELLED_NOTE = "Startup check cancelled."
 
-AddFix = Callable[[VerificationStep, str], Awaitable[None]]
-"""Adds a draft task to fix the step that failed, given its output."""
+AddFix = Callable[[VerificationStep, str], Awaitable[bool]]
+"""Raises ``startup_check_failed`` for the step that failed, given its output, whose triggers
+may add tasks to fix it; returns whether they added any."""
 
 
 @dataclass(frozen=True)
@@ -55,14 +58,14 @@ class CheckSite:
 class StartupCheck:
     """Runs ``verification``'s steps once at ``site``, in a snapshot set up with its tree's
     setup when it has a tree, publishing progress and the result. A failure goes to
-    ``add_fix``, if given. Each run, its steps and its result are traced with :attr:`tracing`."""
+    ``add_fix``. Each run, its steps and its result are traced with :attr:`tracing`."""
 
     def __init__(
         self,
         verification: Verification,
         site: CheckSite,
         publish: Publish,
-        add_fix: AddFix | None,
+        add_fix: AddFix,
     ) -> None:
         self._verification = verification
         self._tree = site.tree
@@ -175,21 +178,20 @@ class StartupCheck:
         return self.tracing.steps(self._verification.run_step)
 
     async def _report(self, failure: Failure | None) -> None:
-        """Publish how the check came out, adding a draft task to fix the step that failed
-        first, if it can, and then record it on the run's span."""
+        """Publish how the check came out, having the step that failed first fixed, as
+        ``add_fix`` does, and then record it on the run's span."""
         if failure is None:
             await self._publish(StartupChecked(passed=True))
             record_result(None)
             return
         step, output = failure
-        if self._add_fix is not None:
-            await self._add_fix(step, output)
+        added = await self._add_fix(step, output)
         await self._publish(
             StartupChecked(passed=False, step=step.name, output=trim_output(output))
         )
         # Only once it's reported, so a check cancelled or broken meanwhile names no failed step.
         record_result(failure)
-        if self._add_fix is not None:
+        if added:
             fix_added()
 
     async def _cancel_running(self) -> None:

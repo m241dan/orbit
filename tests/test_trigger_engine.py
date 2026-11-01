@@ -1,15 +1,21 @@
 """The trigger engine: triggers listening for a task's landing or end queue their roles' tasks,
 rendered from their templates, with their names as origins, unless a guard holds them back, and
 the review-rounds guard reviews the review the review lane finds due; landings count toward the
-commits triggers, and those that fire, or one fired by hand, review the whole codebase."""
+commits triggers, and those that fire, or one fired by hand, review the whole codebase; opening a
+workspace fires the session_started triggers, those running the checks running them, and a step
+of the startup check failing the startup_check_failed ones."""
+
+import pytest
 
 from orbit.agent.application.ports import TreeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.triggers import ReviewRound, TriggerEngine
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.checks import Setup, configured_checks
 from orbit.agent.domain.reviews import ReviewJob, commit_review, review_prompt, review_values
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.triggers import Trigger
+from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     CODER,
     GIT_FAILED,
@@ -41,14 +47,18 @@ class Engine:
     ) -> None:
         self.events: list[Event] = []
         self.kicked: list[str] = []
+        self.checks_run = 0
         self.tree = tree or FakeTree()
         desk = desk_for(self.publish, tree=self.tree, triggers=triggers, roles=roles or ROLES)
         self.tasks = Tasks(TaskBoard(), self.publish)
         self.board = self.tasks.board
-        self.engine = TriggerEngine(desk, self.tasks, self.kicked.append)
+        self.engine = TriggerEngine(desk, self.tasks, self.kicked.append, self.run_checks)
 
     async def publish(self, event: Event) -> None:
         self.events.append(event)
+
+    def run_checks(self) -> None:
+        self.checks_run += 1
 
     def shown(self) -> list[tuple[str, str, str, str]]:
         """Each task on the board: its role, origin, status and prompt."""
@@ -365,6 +375,118 @@ async def test_each_counted_trigger_renders_its_own_name_and_is_booked_apart() -
         ("drift", "drift at c1abcde"),
     ]
     assert booked == list(queued)
+
+
+# Firing as a workspace opens
+
+LINT = VerificationStep("Lint", ("ruff", "check"))
+SETUP = Setup(command=("uv", "sync"))
+GATE = Trigger(on="session_started", checks="gate", when={"verification": "configured"})
+
+
+def hello(**fields: object) -> Trigger:
+    """A trigger queuing a coder's hello as a workspace opens with steps, with ``fields`` over
+    that."""
+    return Trigger.model_validate(
+        {
+            "on": "session_started",
+            "role": CODER,
+            "prompt": "Say hello",
+            "when": {"verification": "configured"},
+            **fields,
+        }
+    )
+
+
+async def test_opening_with_steps_runs_the_checks_of_a_trigger_running_them_queuing_nothing() -> (
+    None
+):
+    engine = Engine({"startup-check": GATE})
+    assert await engine.engine.started((LINT,)) == ()
+    assert engine.checks_run == 1
+    assert engine.board.tasks == ()
+    assert engine.events == []
+
+
+@pytest.mark.parametrize(
+    ("steps", "state"), [((LINT,), "configured"), ((), "missing"), (None, "off")]
+)
+async def test_opening_fires_the_triggers_taking_its_verification(
+    steps: tuple[VerificationStep, ...] | None, state: str
+) -> None:
+    states = ("configured", "missing", "off")
+    triggers = {name: hello(when={"verification": name}) for name in states}
+    engine = Engine(triggers)
+    queued = await engine.engine.started(steps)
+    assert engine.shown() == [(CODER, state, "pending", "Say hello")]
+    assert queued == (engine.board.tasks[0].id,)
+    assert isinstance(engine.events[-1], TasksChanged)
+    assert engine.kicked == []
+
+
+async def test_opening_gives_the_checks_configured_now() -> None:
+    tree = FakeTree()
+    tree.setup = SETUP
+    engine = Engine({"hello": hello(prompt="Hello. {checks}")}, tree)
+    await engine.engine.started((LINT,))
+    assert engine.shown()[0][3] == f"Hello. {configured_checks((LINT,), SETUP)}"
+
+
+async def test_opening_with_verification_off_is_told_nothing_is_configured() -> None:
+    engine = Engine({"hello": hello(prompt="{checks}", when={})})
+    await engine.engine.started(None)
+    assert engine.shown()[0][3] == "Nothing is configured yet."
+
+
+async def test_the_triggers_on_opening_each_fire_in_their_order() -> None:
+    engine = Engine({"hello": hello(), "startup-check": GATE, "bye": hello(prompt="Bye")})
+    await engine.engine.started((LINT,))
+    assert [prompt for _, _, _, prompt in engine.shown()] == ["Say hello", "Bye"]
+    assert engine.checks_run == 1
+
+
+async def test_a_guard_holds_back_a_trigger_running_the_checks() -> None:
+    engine = Engine({"startup-check": GATE.model_copy(update={"guards": ("suggestions-pending",)})})
+    engine.board.add_triggered(TaskSpec(prompt="Review commit c0", role=REVIEWER), "review")
+    await engine.engine.started((LINT,))
+    assert engine.checks_run == 0
+
+
+async def test_a_disabled_trigger_running_the_checks_runs_nothing() -> None:
+    engine = Engine({"startup-check": GATE.model_copy(update={"enabled": False})})
+    await engine.engine.started((LINT,))
+    assert engine.checks_run == 0
+
+
+async def test_a_failing_step_adds_todays_startup_fix_as_a_draft_from_startup_fix() -> None:
+    engine = Engine(TRIGGERS)
+    queued = await engine.engine.check_failed(LINT, "E501 line too long\n")
+    [draft] = engine.board.tasks
+    assert queued == (draft.id,)
+    assert (draft.task.role, draft.origin, draft.status) == (CODER, "startup-fix", "draft")
+    assert draft.task.prompt == startup_fix_prompt(LINT, "E501 line too long\n")
+    assert draft.task.settings == ROLES[CODER].settings
+    assert draft.proposed_by is None
+    assert isinstance(engine.events[-1], TasksChanged)
+
+
+async def test_a_failing_step_adds_no_fix_while_the_coder_is_disabled() -> None:
+    engine = Engine(TRIGGERS, roles=disabled(CODER))
+    assert await engine.engine.check_failed(LINT, "1 test failed") == ()
+    assert engine.board.tasks == ()
+    assert engine.events == []
+
+
+async def test_a_failing_step_fires_the_triggers_taking_its_step() -> None:
+    triggers = {
+        name.lower(): Trigger(
+            on="startup_check_failed", role=CODER, prompt=f"{{step}} {name}", when={"step": name}
+        )
+        for name in ("Lint", "Tests")
+    }
+    engine = Engine(triggers)
+    await engine.engine.check_failed(LINT, "")
+    assert [(origin, prompt) for _, origin, _, prompt in engine.shown()] == [("lint", "Lint Lint")]
 
 
 # Running

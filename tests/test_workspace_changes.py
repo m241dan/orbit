@@ -43,6 +43,7 @@ from tests.agent_fakes import (
     STEP,
     FakeStore,
     Steps,
+    agents_for,
     install_greeting,
     logged_with_traceback,
 )
@@ -146,6 +147,7 @@ async def test_a_workspace_added_opens_its_latest_session_and_runs_its_startup_c
             return WorkspaceHost(
                 HostParts(
                     verification=Verification((STEP,), steps),
+                    agents=agents_for(root=f"/src/{name}")[0],
                     check_at_startup=True,
                     workspace=f"/src/{name}",
                     workspace_id=name,

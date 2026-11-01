@@ -40,6 +40,7 @@ from tests.agent_fakes import (
     FakeLock,
     ScriptedLauncher,
     Steps,
+    agents_for,
     board_of,
 )
 from tests.connection_helpers import joined, say, taken
@@ -473,6 +474,7 @@ async def test_a_workspace_served_at_start_runs_its_startup_check_with_no_fronte
     host = WorkspaceHost(
         HostParts(
             verification=Verification((STEP,), steps),
+            agents=agents_for(root="/src/a")[0],
             check_at_startup=True,
             workspace="/src/a",
             workspace_id="a",

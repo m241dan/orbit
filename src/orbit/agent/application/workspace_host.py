@@ -58,7 +58,7 @@ from orbit.agent.application.review_trace import ReviewTracing
 from orbit.agent.application.role_copies import RoleCopies, copy_ttls, saved_copies
 from orbit.agent.application.session_state import SessionStates, StateParts
 from orbit.agent.application.settings import SessionSettings
-from orbit.agent.application.startup_check import AddFix, CheckSite, StartupCheck
+from orbit.agent.application.startup_check import CheckSite, StartupCheck
 from orbit.agent.application.startup_trace import StartupTracing
 from orbit.agent.application.storage_halt import HaltHooks, StorageHalt
 from orbit.agent.application.storage_resume import ResumeParts, StorageResume
@@ -95,13 +95,12 @@ from orbit.agent.domain.ownership import WorkspaceOwner, queued_dropped_note, re
 from orbit.agent.domain.refusals import STOPPING, Refused
 from orbit.agent.domain.reviews import ReviewPlanner
 from orbit.agent.domain.role_lanes import merging_lane, review_lane, task_lanes
-from orbit.agent.domain.roles import Role, disabled_roles, enabled_roles, role_task
+from orbit.agent.domain.roles import Role, disabled_roles, enabled_roles
 from orbit.agent.domain.runtimes import ModelAliases
 from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.domain.usage_limits import Outages, RuntimeStop
-from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
+from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import (
-    CODER,
     INVALID,
     REVIEW_ROLES,
     ActivateSession,
@@ -118,7 +117,6 @@ from orbit.protocol import (
     Settings,
     ShowReport,
     TakeOwnership,
-    TaskSpec,
     UsageChanged,
     WorkspaceEntry,
 )
@@ -201,11 +199,12 @@ class HostParts:
     """What a :class:`WorkspaceHost` is built from, each with a default, so a caller gives only
     those it has; :class:`WorkspaceHost` says what each does. They're its ``settings``,
     ``verification``, ``agents``, ``workspace`` and ``workspace_id``, whether to
-    ``check_at_startup``, the ``store`` its sessions are saved in, the ``clock``, ``new_id``,
-    ``pinned``, ``pick_session``, ``name``, ``startup_notes`` and ``storage`` of its sessions, the
-    ``fallback`` and ``recover`` of a halt, the ``owner``, ``lock``, ``lock_retry`` and
-    ``lock_declined_retry`` of a takeover, whether it's ``managed``, the ``ledger`` its usage is
-    recorded in and the ``telemetry`` it's traced with."""
+    ``check_at_startup``, raising ``session_started``, the ``store`` its sessions are saved in,
+    the ``clock``, ``new_id``, ``pinned``, ``pick_session``, ``name``, ``startup_notes`` and
+    ``storage`` of its sessions, the ``fallback`` and ``recover`` of a halt, the ``owner``,
+    ``lock``, ``lock_retry`` and ``lock_declined_retry`` of a takeover, whether it's
+    ``managed``, the ``ledger`` its usage is recorded in and the ``telemetry`` it's traced
+    with."""
 
     settings: Settings | None = None
     verification: Verification | None = None
@@ -258,9 +257,13 @@ class WorkspaceHost:
     the :attr:`greeting` as it first attaches here. Commands from every connection are handled
     as they arrive. Its catalog entry says it's ``managed`` if it's a clone orbit made.
 
-    With ``check_at_startup``, the ``verification`` steps also run once in the background as
-    its background work starts, on the base commit; a failure adds a draft task to
-    fix it, unless the coder is disabled.
+    With ``check_at_startup``, starting its background work raises ``session_started``, as it
+    opens the workspace with its session, unless read-only, and never again as it switches
+    sessions, its ``verification`` field as the ``verification`` steps say. A trigger on it with
+    ``checks = "gate"``, such as ``startup-check``, runs those steps once in the background, on
+    the base commit, where the agents work, once the session isn't halted; the step that fails
+    raises ``startup_check_failed``, whose ``startup-fix`` trigger adds a draft task to fix it,
+    unless the coder is disabled. A host without agents fires no triggers.
 
     A disabled role is left out of its catalog entries: its agents, the triggers that queue its
     tasks and its lane, unless an enabled role shares it; it queues no reviews, and the work
@@ -364,6 +367,7 @@ class WorkspaceHost:
         self._usage = UsageRecorder(parts.ledger, self._halt, self._events.put, parts.clock)
         self._usage.recorded = lambda: self.usage_recorded()
         self._count_loader = Background("review count", self._events.put)
+        self._opening = Background("session start", self._events.put)
         self._tasks = Tasks(TaskBoard(), self._events.put, self._save)
         self._board = self._tasks.board
         self._proposals = FrontendReview(self._events.put, self._agent_on)
@@ -387,6 +391,8 @@ class WorkspaceHost:
         self._startup_notes = (*owner_notes, *parts.startup_notes)
         self._closing = False
         self._started = False
+        self._opens = parts.check_at_startup and not self._takeover.read_only
+        self._check_asked = False  # Whether a trigger asked for the startup check.
         self._copies = self._role_copies(parts.clock)
         self._copy_keeper = Background("copies", self._events.put)
         self._seats = self._conversation_seats()
@@ -398,9 +404,7 @@ class WorkspaceHost:
             lambda: self.coder_slots, parts.workspace_id, lambda: self._keeper.id
         )
         self._record_moves = self._moves_kept_in(parts.store)
-        self._startup = self._startup_check(
-            parts.verification, parts.check_at_startup and not self._takeover.read_only
-        )
+        self._startup = self._startup_check(parts.verification)
         self._outages = Outages()  # One backoff per runtime, which every lane counts on.
         self._work = self._work_lane()
         self._turns = self._work_turns()
@@ -712,41 +716,40 @@ class WorkspaceHost:
         )
         return WorkLane(self._desk, self._tasks, self._verifier, beside)
 
-    def _startup_check(
-        self, verification: Verification | None, wanted: bool
-    ) -> StartupCheck | None:
-        """The check to run at startup, if ``wanted``, traced with this host's telemetry; none
-        without steps to run, nor without agents or a workspace to say where to run them."""
-        if not wanted or verification is None or not verification.steps:
+    def _startup_check(self, verification: Verification | None) -> StartupCheck | None:
+        """The check a trigger with ``checks = "gate"`` runs as the workspace opens, if it raises
+        ``session_started``, where the agents work, traced with this host's telemetry; none
+        without steps to run, nor without agents, whose triggers would run it."""
+        desk = self._desk
+        if not self._opens or verification is None or not verification.steps or desk is None:
             return None
-        site = self._check_site()
-        if site is None:
-            return None
-        check = StartupCheck(verification, site, self._events.put, self._startup_fixes())
+        site = CheckSite(desk.agents.tree, desk.agents.root)
+        check = StartupCheck(verification, site, self._events.put, self._startup_failed)
         check.tracing = StartupTracing(self.telemetry, self._workspace_id)
         return check
 
-    def _startup_fixes(self) -> AddFix | None:
-        """What adds a draft task to fix a step that failed at startup: none while the coder is
-        disabled, as the draft couldn't run."""
-        return None if CODER in disabled_roles(self._roles()) else self._add_startup_fix
+    async def _open_session(self) -> None:
+        """Raise ``session_started`` in the session open once no switch is under way, as the
+        workspace opens with it, verifying tasks with the steps configured now, none while
+        verification is off, and run the tasks its triggers queued; without agents, there are
+        no triggers to fire."""
+        engine = self._triggers
+        if engine is None:
+            return
+        verification = self.verification
+        steps = None if verification is None else verification.steps
+        queued = await self._switcher.between_switches(lambda: engine.started(steps))
+        engine.run(queued)
 
-    def _check_site(self) -> CheckSite | None:
-        """Where the startup check runs: where the agents work, else in the workspace given."""
-        if self._desk is not None:
-            return CheckSite(self._desk.agents.tree, self._desk.agents.root)
-        return None if self._workspace is None else CheckSite(None, self._workspace)
-
-    async def _add_startup_fix(self, step: VerificationStep, output: str) -> None:
-        """Add a draft task to fix ``step``, which failed at startup with ``output``, to the
-        session open once no switch is under way."""
-        prompt = startup_fix_prompt(step, output)
-        task = TaskSpec(prompt=prompt, settings=Settings())
-        if self._desk is not None:
-            task = role_task(CODER, self._desk.agents.roles[CODER], prompt)
-        await self._switcher.between_switches(
-            lambda: self._tasks.change(lambda board: board.add_draft(task, None))
-        )
+    async def _startup_failed(self, step: VerificationStep, output: str) -> bool:
+        """Raise ``startup_check_failed`` for ``step``, which failed at startup with ``output``,
+        in the session open once no switch is under way, and run the tasks its triggers queued;
+        returns whether they queued any."""
+        engine = self._triggers
+        assert engine is not None  # Only agents' triggers run the startup check.
+        queued = await self._switcher.between_switches(lambda: engine.check_failed(step, output))
+        engine.run(queued)
+        return bool(queued)
 
     @property
     def workspace_id(self) -> str:
@@ -1029,8 +1032,8 @@ class WorkspaceHost:
 
     def _restart_background(self) -> None:
         """Start the tasks waiting in the lanes that start by themselves, the reviews among them,
-        and the startup check the halt kept from starting, and times the consultations held
-        for approval to expire again, as the halt lifts. A startup check
+        and the startup check a trigger asked for that the halt kept from starting, and times
+        the consultations held for approval to expire again, as the halt lifts. A startup check
         the halt cancelled stays cancelled, as one the user cancelled does: it runs once as orbit
         starts, the conversation has said it was cancelled, and the first task's verification
         runs the same steps."""
@@ -1045,10 +1048,13 @@ class WorkspaceHost:
 
     def _trigger_engine(self) -> TriggerEngine | None:
         """What fires the agents' triggers on events, queuing their tasks on the session's board
-        and running each in its role's lane if that starts by itself; none without agents."""
+        and running each in its role's lane if that starts by itself, or running the startup
+        check for those with ``checks = "gate"``; none without agents."""
         if self._desk is None:
             return None
-        return TriggerEngine(self._desk, self._tasks, lambda role: self._lanes.kick_for(role))
+        return TriggerEngine(
+            self._desk, self._tasks, lambda role: self._lanes.kick_for(role), self._run_check
+        )
 
     def _review_lane(self) -> ReviewLane | None:
         """The review lane, if reviews are on and run beside the work: in a tree, with a review
@@ -1146,14 +1152,15 @@ class WorkspaceHost:
 
     async def close(self) -> None:
         """Stop a storage halt under way, the tries of the repository's lock, the loading of
-        the super review count and the keeping of the copies, then the work, as
-        :meth:`_stop_work` does: the review lane, the other lanes that start by themselves and
-        the startup check, so that nothing wakes the work lane, then the work in progress,
-        which stops its agent, and the conversational roles' turns; then stop their retired
-        conversations, their conversations, the agents' host, the recording of turns' usage,
-        the saving of the session, releasing its lock, and the writing of its events to the
-        store, then end every connection's stream, in that order. Each is stopped even if one
-        before it fails or the close is cancelled, as :func:`close_all` does."""
+        the super review count, the raising of ``session_started`` and the keeping of the
+        copies, then the work, as :meth:`_stop_work` does: the review lane, the other lanes
+        that start by themselves and the startup check, so that nothing wakes the work lane,
+        then the work in progress, which stops its agent, and the conversational roles' turns;
+        then stop their retired conversations, their conversations, the agents' host, the
+        recording of turns' usage, the saving of the session, releasing its lock, and the
+        writing of its events to the store, then end every connection's stream, in that order.
+        Each is stopped even if one before it fails or the close is cancelled, as
+        :func:`close_all` does."""
         self._closing = True
         await close_all(self._stops())
 
@@ -1164,6 +1171,7 @@ class WorkspaceHost:
             self._halt.close,
             self._takeover.close,
             self._count_loader.close,
+            self._opening.close,
             self._copy_keeper.close,
         ]
         stops += self._work_stops(self._stop_turns, final=True)
@@ -1215,25 +1223,34 @@ class WorkspaceHost:
         self._states.check()
 
     def start_background(self) -> None:
-        """Start loading the super review count, the startup check, if there is one and the
-        session isn't halted, the tries of the repository's lock, and the keeping of the
-        copies, unless read-only, as the owner's copies would look left over, unless they were
-        started for an earlier connection attaching here. A startup check a halt kept from starting
-        starts once the halt lifts."""
+        """Start loading the super review count, raising ``session_started``, if it raises it,
+        the tries of the repository's lock, and the keeping of the copies, unless read-only, as
+        the owner's copies would look left over, unless they were started for an earlier
+        connection attaching here. A startup check a halt kept from starting starts once the
+        halt lifts."""
         if self._started:
             return
         self._started = True
         self._count_loader.start(self._load_review_count())
+        if self._opens:
+            self._opening.start(self._open_session())
         self._takeover.start()
         if self._copies is not None and not self._takeover.read_only:
             self._copy_keeper.start(self._keep_copies(self._copies))
+
+    def _run_check(self) -> None:
+        """Have the startup check run, as a trigger with ``checks = "gate"`` asks: now, unless
+        the session is halted, else once the halt lifts."""
+        self._check_asked = True
         self._start_startup_check()
 
     def _start_startup_check(self) -> None:
-        """Start the startup check, if there is one, once the background was started, unless
-        it was started already or the session is halted."""
+        """Start the startup check, if there is one, once a trigger asked for it, unless it was
+        started already or the session is halted."""
         startup = self._startup
-        if self._started and startup is not None and not startup.started and not self._halt.halted:
+        if startup is None or not self._check_asked:
+            return
+        if not startup.started and not self._halt.halted:
             startup.start()
 
     def _no_steps(self) -> bool:

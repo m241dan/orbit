@@ -50,6 +50,6 @@ class StartupTracing:
 
 
 def fix_added() -> None:
-    """Record on the current span, a run's, that it added a draft task to fix the step that
-    failed."""
+    """Record on the current span, a run's, that the triggers on the step that failed added a
+    task to fix it."""
     current_span().set_attributes({FIX_ADDED: True})

@@ -221,7 +221,8 @@ async def test_a_listener_cancelled_while_leftovers_are_found_still_starts_the_b
     await asyncio.sleep(0.01)
     listening.cancel()
     await asyncio.gather(listening, return_exceptions=True)
-    assert started == ["startup", "usage"]
+    # The startup check starts as session_started's triggers fire, after the usage monitor.
+    assert started == ["usage", "startup"]
     assert not any(isinstance(e, Notice) and "orbit/coder" in e.message for e in seen)
     await session.close()
 

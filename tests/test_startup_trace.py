@@ -210,9 +210,10 @@ async def test_a_check_cancelled_while_adding_its_fix_is_cancelled_with_no_faile
     traced = Traced()
     adding = asyncio.Event()
 
-    async def add_fix(step: VerificationStep, output: str) -> None:
+    async def add_fix(step: VerificationStep, output: str) -> bool:
         adding.set()
         await asyncio.Event().wait()
+        return True
 
     check = failing_check(traced, add_fix)
     check.start()
@@ -231,7 +232,7 @@ async def test_a_check_cancelled_while_adding_its_fix_is_cancelled_with_no_faile
 async def test_a_check_that_breaks_adding_its_fix_has_the_spans_error_and_no_fix() -> None:
     traced = Traced()
 
-    async def add_fix(step: VerificationStep, output: str) -> None:
+    async def add_fix(step: VerificationStep, output: str) -> bool:
         raise OSError("the draft couldn't be saved")
 
     check = failing_check(traced, add_fix)

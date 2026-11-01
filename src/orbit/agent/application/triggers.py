@@ -11,6 +11,10 @@ triggers ``review-rounds`` guards on ``task_landed`` with no task causing it, as
 The review lane counts each landing toward the ``commits`` triggers too, as their guards see the
 board before the landing's own review is queued, and has those that fire, or one fired by hand,
 review the whole codebase at the commit, each task booked into that review's batches.
+
+The host raises ``session_started`` as it opens the workspace with its session, whose triggers
+with ``checks = "gate"`` run the startup check, and the startup check raises
+``startup_check_failed`` for the step that failed.
 """
 
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
@@ -21,6 +25,7 @@ from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.ports import TreeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.checks import configured_checks
 from orbit.agent.domain.reviews import (
     ReviewJob,
     commit_review,
@@ -32,6 +37,8 @@ from orbit.agent.domain.roles import enabled_roles, role_task
 from orbit.agent.domain.triggers import (
     COMMITS,
     REVIEW_ROUNDS,
+    SESSION_STARTED,
+    STARTUP_CHECK_FAILED,
     TASK_FINISHED,
     TASK_LANDED,
     TRIGGER_VARIABLE,
@@ -43,7 +50,9 @@ from orbit.agent.domain.triggers import (
     held_back,
     listening,
     render_template,
+    verification_state,
 )
+from orbit.agent.domain.verification import VerificationStep, failure_report
 from orbit.protocol import CODER, GIT_FAILED, ErrorOccurred, TaskSpec, TaskState
 
 Values = Callable[[], Awaitable[Mapping[str, str] | None]]
@@ -53,6 +62,9 @@ it; none if they can't be gathered, when none fires."""
 Kick = Callable[[str], None]
 """What runs the tasks waiting in the lane of a role, by its name, if that lane starts by
 itself."""
+
+RunChecks = Callable[[], None]
+"""What runs the verification steps, as a trigger with ``checks = "gate"`` asks."""
 
 REVIEW_SKIPPED = "Review skipped"
 TRIGGERS_SKIPPED = "Triggers skipped"
@@ -91,23 +103,59 @@ def _no_kick(role: str) -> None:
     """Runs no lane."""
 
 
+def _no_checks() -> None:
+    """Runs no checks."""
+
+
 async def _no_values() -> Mapping[str, str]:
     """The values of an event that gives none but the trigger's name."""
     return {}
 
 
+async def _given(values: Mapping[str, str]) -> Mapping[str, str]:
+    """``values``, an event's values, known as it's raised."""
+    return values
+
+
 class TriggerEngine:
     """Fires the triggers of ``desk``'s agents on events, as they stand as each is raised,
-    queuing their tasks on ``tasks``' board, and runs those tasks when asked, with ``kick``, each
-    in its role's lane if that starts by itself.
+    queuing their tasks on ``tasks``' board, or for those with ``checks = "gate"`` having
+    ``run_checks`` run the verification steps, and runs those tasks when asked, with ``kick``,
+    each in its role's lane if that starts by itself.
 
     What raises an event runs the tasks it queued once it has done with them, as a lane runs the
     tasks it queues itself."""
 
-    def __init__(self, desk: AgentDesk, tasks: Tasks, kick: Kick = _no_kick) -> None:
+    def __init__(
+        self,
+        desk: AgentDesk,
+        tasks: Tasks,
+        kick: Kick = _no_kick,
+        run_checks: RunChecks = _no_checks,
+    ) -> None:
         self._desk = desk
         self._tasks = tasks
         self._kick = kick
+        self._run_checks = run_checks
+
+    async def started(self, steps: Sequence[VerificationStep] | None) -> tuple[str, ...]:
+        """Raise ``session_started``: orbit opened the workspace with its session, verifying
+        tasks with ``steps``, none while verification is off, which give its ``verification``
+        and, with the tree's setup, its ``{checks}``. Those of its triggers with ``checks =
+        "gate"`` run the steps. Returns the ids of the tasks the others queued."""
+        fields = {"verification": verification_state(steps)}
+        tree = self._desk.agents.tree
+        checks = configured_checks(steps or (), None if tree is None else tree.setup)
+        event = TriggerEvent(SESSION_STARTED, fields)
+        return await self.fire(event, partial(_given, {"checks": checks}))
+
+    async def check_failed(self, step: VerificationStep, output: str) -> tuple[str, ...]:
+        """Raise ``startup_check_failed``: ``step`` of the startup check failed with ``output``,
+        which its ``{output}`` reports with the command that failed. Returns the ids of the
+        tasks queued."""
+        values = {"step": step.name, "output": failure_report(step, output)}
+        event = TriggerEvent(STARTUP_CHECK_FAILED, {"step": step.name})
+        return await self.fire(event, partial(_given, values))
 
     async def landed(
         self, state: TaskState, commit: str, review: ReviewRound | None = None
@@ -146,8 +194,8 @@ class TriggerEngine:
         """Fire the triggers listening for ``event``, with ``review`` the review due on it, if
         any, as :func:`~orbit.agent.domain.triggers.listening` says: in their order, each that
         no guard holds back queues its role's task, a draft if it says so, from it, rendered
-        from the ``values`` gathered and its name. The board is published if any was queued.
-        Returns their ids, for :meth:`run`."""
+        from the ``values`` gathered and its name, or runs the checks if it has ``checks``. The
+        board is published if any task was queued. Returns their ids, for :meth:`run`."""
         firing = await self._firing(self._desk.agents.triggers, event, values, review)
         return () if firing is None else await self._queue(firing)
 
@@ -229,12 +277,25 @@ class TriggerEngine:
 
     def _add(self, board: TaskBoard, firing: _Firing) -> tuple[str, ...]:
         """Add to ``board`` the task of each of the triggers ``firing`` that no guard holds
-        back, in order, each seeing those before it; returns their ids."""
+        back, in order, each seeing those before it, running the checks for each with
+        ``checks``; returns their ids."""
         return tuple(
             task_id
             for name, trigger in firing.listening
-            if (task_id := self._add_one(board, name, trigger, firing)) is not None
+            if (task_id := self._fire_one(board, name, trigger, firing)) is not None
         )
+
+    def _fire_one(
+        self, board: TaskBoard, name: str, trigger: Trigger, firing: _Firing
+    ) -> str | None:
+        """Fire ``trigger``, named ``name``, as ``firing`` says: with ``checks``, run them
+        unless a guard holds it back, with ``board``'s tasks, adding none; otherwise add its
+        task to ``board`` as :meth:`_add_one` does, returning its id if it's added."""
+        if trigger.checks is None:
+            return self._add_one(board, name, trigger, firing)
+        if not held_back(trigger, None, board.tasks):
+            self._run_checks()
+        return None
 
     def _add_one(
         self, board: TaskBoard, name: str, trigger: Trigger, firing: _Firing
@@ -243,7 +304,7 @@ class TriggerEngine:
         ``firing`` says, unless a guard holds it back, if they're still to decide; returns its
         id if it's added. One reviewing the review due does so with the skills of what it
         reviews, and is booked into its batches."""
-        assert trigger.role is not None  # It listened, so it queues a role's task,
+        assert trigger.role is not None  # It listened without checks, so it queues a role's task,
         assert trigger.prompt is not None  # with a prompt.
         prompt = render_template(trigger.prompt, {**firing.values, TRIGGER_VARIABLE: name})
         if not firing.counted and held_back(trigger, prompt, board.tasks):

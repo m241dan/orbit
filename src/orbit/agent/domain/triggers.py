@@ -4,8 +4,8 @@ and checked against its roles, which of them fire on an event and which guards h
 and the rendering of a trigger's prompt template.
 
 The package's triggers aren't kept here: whoever builds them passes in the contents of their
-``triggers.toml`` and the templates it names. Only ``task_landed``, ``task_finished`` and
-``commits`` are raised yet, and only triggers that queue a role's task fire.
+``triggers.toml`` and the templates it names. ``manual`` isn't raised yet, and a trigger that
+runs the checks fires only on ``session_started``.
 """
 
 import re
@@ -28,6 +28,7 @@ from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
 from orbit.agent.domain.reviews import ReviewJob
 from orbit.agent.domain.roles import PLAIN_NAME
+from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import REVIEW_ORIGINS, TaskState
 
 EventName = Literal[
@@ -58,6 +59,15 @@ TASK_LANDED = "task_landed"
 TASK_FINISHED = "task_finished"
 """The events of a task's end: its work landing, and its finishing, however it did."""
 
+SESSION_STARTED = "session_started"
+STARTUP_CHECK_FAILED = "startup_check_failed"
+"""The events of opening a workspace: orbit opening it with its session, the only event a
+trigger that runs the checks fires on yet, and a step of the startup check failing."""
+
+VerificationState = Literal["configured", "missing", "off"]
+"""What ``session_started``'s ``verification`` field says: verification on with at least one
+step, on with none, or off."""
+
 REVIEW_ROUNDS = "review-rounds"
 """The guard that holds a trigger back unless today's review rounds and batches find a review
 due, whose job its task reviews."""
@@ -82,7 +92,7 @@ class Event:
 
 
 EVENTS: Mapping[str, Event] = {
-    "session_started": Event(("verification",), (TRIGGER_VARIABLE, "checks")),
+    SESSION_STARTED: Event(("verification",), (TRIGGER_VARIABLE, "checks")),
     TASK_LANDED: Event(
         ("role", "origin"),
         (
@@ -103,7 +113,7 @@ EVENTS: Mapping[str, Event] = {
         ("role", "origin"),
         (TRIGGER_VARIABLE, "commit", "cap", "queued", "since_commits", "changed_files", "sample"),
     ),
-    "startup_check_failed": Event(("step",), (TRIGGER_VARIABLE, "step", "output")),
+    STARTUP_CHECK_FAILED: Event(("step",), (TRIGGER_VARIABLE, "step", "output")),
     "manual": Event((), (TRIGGER_VARIABLE, "checks")),
 }
 """Each event, by name, with what it gives. A trigger fired by hand gives the variables of its
@@ -383,10 +393,10 @@ def listening(
     review: ReviewJob | None,
 ) -> list[tuple[str, Trigger]]:
     """The ``triggers`` that may fire on ``event``, by name, in their order: the enabled ones on
-    it that queue a task for one of ``roles``, the enabled roles, whose ``when`` takes it and
-    that didn't queue the task that caused it, if any, as its origin says (decision 9). One
-    guarded by ``review-rounds`` only listens while today's rounds and batches find a
-    ``review`` due."""
+    it that queue a task for one of ``roles``, the enabled roles, or run the checks, on
+    ``session_started`` only, whose ``when`` takes it and that didn't queue the task that caused
+    it, if any, as its origin says (decision 9). One guarded by ``review-rounds`` only listens
+    while today's rounds and batches find a ``review`` due."""
     return [
         (name, trigger)
         for name, trigger in triggers.items()
@@ -401,7 +411,7 @@ def _hears(name: str, trigger: Trigger, event: TriggerEvent, roles: Collection[s
     return (
         trigger.enabled
         and trigger.on == event.name
-        and trigger.role in roles
+        and _acts(trigger, event.name, roles)
         and takes(trigger.when, event.fields)
         and (event.cause is None or event.cause.origin != name)
     )
@@ -413,6 +423,14 @@ def takes(when: Mapping[str, str | tuple[str, ...]], fields: Mapping[str, str]) 
     return all(
         field in fields and fields[field] in _values(wanted) for field, wanted in when.items()
     )
+
+
+def _acts(trigger: Trigger, event: str, roles: Collection[str]) -> bool:
+    """Whether ``trigger`` does something on the event named ``event``: queues a task for one of
+    ``roles``, or runs the checks, which it does only on ``session_started`` yet."""
+    if trigger.checks is not None:
+        return event == SESSION_STARTED
+    return trigger.role in roles
 
 
 def _values(wanted: str | tuple[str, ...]) -> tuple[str, ...]:
@@ -517,3 +535,11 @@ def fires_by_hand(trigger: Trigger, roles: Collection[str]) -> bool:
     """Whether ``trigger`` fires when it's fired by hand, with ``roles`` the enabled roles: if
     it's enabled and queues a task for one of them, whatever its ``when`` and guards."""
     return trigger.enabled and trigger.role in roles
+
+
+def verification_state(steps: Sequence[VerificationStep] | None) -> VerificationState:
+    """What ``session_started``'s ``verification`` field says of the verification ``steps``,
+    none while verification is off: ``configured`` with at least one, ``missing`` with none."""
+    if steps is None:
+        return "off"
+    return "configured" if steps else "missing"

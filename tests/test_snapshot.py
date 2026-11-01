@@ -308,8 +308,8 @@ async def test_the_startup_check_is_an_agent_only_between_its_start_and_exit() -
     async def publish(event: Event) -> None:
         shown.append((type(event).__name__, check.agent))
 
-    async def add_fix(step: VerificationStep, output: str) -> None:
-        pass
+    async def add_fix(step: VerificationStep, output: str) -> bool:
+        return False
 
     check = StartupCheck(Verification((STEP,), Steps(True)), CheckSite(None, "."), publish, add_fix)
     check.start()

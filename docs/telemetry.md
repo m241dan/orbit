@@ -306,9 +306,9 @@ exited without claiming its task done or for checks a configurator proposes, hav
 ### `orbit.startup_check`
 
 One span for each run of the startup check, which runs the verification steps once on the base
-commit as a workspace's background work starts, from its start until it ends. Each starts its own
-trace: it's a root span, though what starts the check, such as the first frontend's `Attach`, may
-be a command's. The span is current while the check runs, so the events it publishes carry its
+commit as the `startup-check` trigger fires on `session_started`, as a workspace's background work
+starts, from its start until it ends. Each starts its own trace: it's a root span, though what
+starts the check, such as the first frontend's `Attach`, may be a command's. The span is current while the check runs, so the events it publishes carry its
 trace context, and each step it runs, the tree's setup (`setup`) first if there is one, is an
 `orbit.verify.step` child, timed and with its result as for an agent's call.
 
@@ -317,7 +317,7 @@ trace context, and each step it runs, the tree's setup (`setup`) first if there 
 | `orbit.workspace.id` | string | The workspace's id (`unregistered` for one no store registers). |
 | `orbit.verify.result` | string | How the check came out: `passed`, `failed`, or `cancelled`, as when the user cancels its agent or orbit closes meanwhile; absent when it couldn't run or broke on a bug. |
 | `orbit.verify.failed_step` | string | The step that failed, `setup` for the tree's setup; absent unless one did. |
-| `orbit.startup_check.fix_added` | boolean | Whether it added a draft task to fix the step that failed. |
+| `orbit.startup_check.fix_added` | boolean | Whether the `startup_check_failed` triggers, such as `startup-fix`, added a task to fix the step that failed. |
 
 The result, the failed step and the fix are recorded together once the check has published its
 result (`StartupChecked`), after adding its fix draft, so a check cancelled before then, even

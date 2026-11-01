@@ -1,6 +1,7 @@
-"""Which triggers fire on an event: those enabled, on it, for an enabled role, whose ``when``
-takes it and that didn't queue the task causing it, the guards that hold one back, the landings
-counted toward the ``commits`` triggers, and which fire by hand."""
+"""Which triggers fire on an event: those enabled, on it, for an enabled role or running the
+checks on ``session_started``, whose ``when`` takes it and that didn't queue the task causing it,
+the guards that hold one back, the landings counted toward the ``commits`` triggers, which fire
+by hand, and what ``session_started`` says of verification."""
 
 from collections.abc import Mapping
 
@@ -16,7 +17,9 @@ from orbit.agent.domain.triggers import (
     listening,
     restart_counts,
     takes,
+    verification_state,
 )
+from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import TaskSpec, TaskState, TaskStatus
 
 ROLES = ("coder", "reviewer")
@@ -60,9 +63,23 @@ def test_a_trigger_whose_role_is_not_enabled_does_not_listen() -> None:
     assert names(listening(triggers, LANDED, ROLES, None)) == ["look"]
 
 
-def test_a_trigger_running_the_checks_does_not_listen_yet() -> None:
-    gate = Trigger(on="task_landed", checks="gate")
-    assert listening({"gate": gate}, LANDED, ROLES, None) == []
+def test_a_trigger_running_the_checks_listens_only_on_session_started() -> None:
+    started = TriggerEvent("session_started", {"verification": "configured"})
+    gates = {
+        "landed": Trigger(on="task_landed", checks="gate"),
+        "started": Trigger(on="session_started", checks="gate"),
+        "failed": Trigger(on="startup_check_failed", checks="gate"),
+    }
+    assert listening(gates, LANDED, ROLES, None) == []
+    assert names(listening(gates, started, ROLES, None)) == ["started"]
+    failed = TriggerEvent("startup_check_failed", {"step": "Lint"})
+    assert listening(gates, failed, ROLES, None) == []
+
+
+def test_a_trigger_running_the_checks_listens_whatever_roles_are_enabled() -> None:
+    started = TriggerEvent("session_started", {"verification": "configured"})
+    gate = Trigger(on="session_started", checks="gate", when={"verification": "configured"})
+    assert names(listening({"gate": gate}, started, (), None)) == ["gate"]
 
 
 def test_a_trigger_does_not_listen_to_an_event_a_task_it_queued_caused() -> None:
@@ -251,3 +268,20 @@ def test_a_trigger_fires_by_hand_if_it_and_its_role_are_enabled_whatever_its_whe
     )
     assert not fires_by_hand(every(10, enabled=False), roles)
     assert not fires_by_hand(every(10), ("coder",))
+
+
+# What session_started says of verification
+
+
+@pytest.mark.parametrize(
+    ("steps", "state"),
+    [
+        (None, "off"),
+        ((), "missing"),
+        ((VerificationStep("Lint", ("ruff", "check")),), "configured"),
+    ],
+)
+def test_verification_is_configured_with_a_step_missing_with_none_and_off_without_it(
+    steps: tuple[VerificationStep, ...] | None, state: str
+) -> None:
+    assert verification_state(steps) == state
