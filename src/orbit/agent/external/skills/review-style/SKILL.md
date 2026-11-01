@@ -5,8 +5,8 @@ description: Super-review lens across many commits — do names, docs, comments 
 
 # Style lens
 
-**Your question:** across the commits since the last super review, do names, docs, comments and
-function shape follow the conventions, beyond what the checks enforce?
+**Your question:** across the commits since the last super review and the sampled files, do
+names, docs, comments and function shape follow the conventions, beyond what the checks enforce?
 
 ## Look for
 
@@ -25,8 +25,8 @@ function shape follow the conventions, beyond what the checks enforce?
 - A problem a tool could catch that keeps coming back: suggest a check (a lint rule, a contract)
   rather than another fix.
 
-Look at the names and code the commits introduced or changed; older code waits for its own
-tasks.
+Look at the names and code the commits introduced or changed and at the sampled files; other code
+waits for its own review.
 
 ## Measure against
 

@@ -475,6 +475,9 @@ SUPER_REVIEWER_LOOKS_THROUGH_ITS_LENSES = (
 )
 SUPER_REVIEWER_RETIRED_PHRASES = ("**Latent bugs**", "**Structure that no longer fits**")
 LENS_QUESTIONS = {
+    "review-style": "**Your question:** across the commits since the last super review and the"
+    " sampled files, do names, docs, comments and function shape follow the conventions, beyond"
+    " what the checks enforce?",
     "review-drift": "**Your question:** what has crept into the structure across the commits"
     " since the last super review and the sampled files?",
     "review-scaling": "**Your question:** across the commits since the last super review and the"
@@ -503,10 +506,18 @@ def test_the_super_reviewer_no_longer_has_a_built_in_list_of_lenses() -> None:
         assert phrase not in text, phrase
 
 
+def lens_text(name: str) -> str:
+    """The lens skill ``name``'s ``SKILL.md`` with every run of whitespace made a single space."""
+    return " ".join((SKILL_DIRECTORY / name / "SKILL.md").read_text(encoding="utf-8").split())
+
+
 @pytest.mark.parametrize("name", LENS_QUESTIONS)
 def test_the_super_review_lenses_ask_across_the_commits_since_and_the_sample(name: str) -> None:
-    skill = (SKILL_DIRECTORY / name / "SKILL.md").read_text(encoding="utf-8")
-    assert LENS_QUESTIONS[name] in " ".join(skill.split())
+    assert LENS_QUESTIONS[name] in lens_text(name)
+
+
+def test_the_style_lens_reads_the_sampled_files_rather_than_leaving_older_code() -> None:
+    assert "older code waits for its own tasks" not in lens_text("review-style")
 
 
 def test_the_coder_keeps_tests_independent_as_code_style_says() -> None:
