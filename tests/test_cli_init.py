@@ -165,8 +165,9 @@ def test_update_adds_what_the_file_doesnt_mention_and_says_what(project: Path) -
         f"  in [roles.coder]: {fields}",
         "  at the end: [[verification.steps]], [setup], [roles.planner],"
         " [roles.experimenter], [roles.reviewer], [roles.super-reviewer], [roles.configurator],"
-        " [roles.security-reviewer], [[skills]],"
-        " [triggers.review-each-commit], [mcp.github], [mcp.semgrep],"
+        " [roles.security-reviewer], [triggers.review], [triggers.super-review],"
+        " [triggers.configure-checks], [triggers.set-up-verification], [triggers.startup-check],"
+        " [triggers.startup-fix], [[skills]], [mcp.github], [mcp.semgrep],"
         " [roles.security-reviewer.tools], [models.local-coder]",
     ]
     added = (

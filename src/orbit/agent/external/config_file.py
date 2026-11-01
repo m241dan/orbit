@@ -4,10 +4,11 @@ from collections.abc import Iterable
 from dataclasses import replace
 from importlib.resources import files
 from pathlib import Path
+from typing import Any
 
 from orbit.agent.application.ports import ConfigWriteFailed
 from orbit.agent.domain.checks import ChecksProposal
-from orbit.agent.domain.config import LayeredConfig, OrbitConfig, load_layered
+from orbit.agent.domain.config import LayeredConfig, OrbitConfig, Package, load_layered
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.config_report import ConfigSources, Written
 from orbit.agent.domain.config_update import reference_with_checks, with_checks
@@ -19,7 +20,8 @@ from orbit.agent.domain.skills import (
     inside_project,
 )
 from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
-from orbit.agent.external.role_instructions import with_instructions
+from orbit.agent.external.built_in_triggers import read_built_in_triggers, read_template_files
+from orbit.agent.external.role_instructions import with_instructions, with_prompts
 from orbit.agent.external.runtimes import read_runtime_rules
 from orbit.agent.external.skill_files import read_skill_library
 from orbit.agent.external.toml_files import read_toml
@@ -36,8 +38,10 @@ REFERENCE = files(__package__) / "reference" / "config.toml"
 def read_config(root: str, config_dir: Path, runtime: str | None = None) -> OrbitConfig:
     """The configuration in ``root``'s file over the role fields and personal roles the user
     config in ``config_dir`` sets (see :func:`read_user_roles`) and the defaults, whose roles
-    are the built-in ones; without a file, the defaults with the user config's roles. A role's
-    instructions naming a Markdown file are that file's text (see
+    and triggers are the shipped ones (see
+    :func:`~orbit.agent.external.built_in_triggers.read_built_in_triggers`); without a file, the
+    defaults with the user config's roles. A role's instructions and a trigger's prompt naming a
+    Markdown file are that file's text (see
     :func:`~orbit.agent.external.role_instructions.resolve_instructions`), taken from the file's
     directory. A run's ``runtime``, if given, is the runtime of every role that doesn't name
     its own (see :func:`~orbit.agent.domain.layers.with_runtime`). Each role's model is held to
@@ -46,8 +50,9 @@ def read_config(root: str, config_dir: Path, runtime: str | None = None) -> Orbi
     has those models, and the skills in effect in ``root`` (see
     :func:`~orbit.agent.external.skill_files.read_skill_library`).
 
-    Raises :class:`ConfigError`, naming the file, if it, the user config or a role's
-    instructions file can't be read or is invalid, as it is when a role's runtime doesn't take
+    Raises :class:`ConfigError`, naming the file, if it, the user config, a role's instructions
+    file or a trigger's prompt file can't be read or is invalid, as it is when a role's runtime
+    doesn't take
     its model or a role asks for what its runtime can't do, a role names a skill that isn't in
     effect (see :func:`~orbit.agent.domain.skills.check_role_skills`), or a ``[[skills]]`` entry
     names a path that isn't a file or folder in ``root`` or a skill that isn't in effect (see
@@ -60,9 +65,9 @@ def read_config(root: str, config_dir: Path, runtime: str | None = None) -> Orbi
 
 def read_config_sources(root: str, config_dir: Path) -> ConfigSources:
     """What the configuration in effect in ``root`` is resolved from: the configuration
-    :func:`read_config` reads, with the layer each of its roles' fields came from, ``root``'s
-    file and the user config in ``config_dir`` as written, and the files the built-in roles'
-    instructions are in.
+    :func:`read_config` reads, with the layer each of its roles' and triggers' fields came from,
+    ``root``'s file and the user config in ``config_dir`` as written, and the files the built-in
+    roles' instructions and the shipped triggers' prompts are in.
 
     Raises :class:`ConfigError` as :func:`read_config` does.
     """
@@ -75,6 +80,8 @@ def read_config_sources(root: str, config_dir: Path) -> ConfigSources:
         Written(Layer("project", str(path)), project),
         Written(user_layer(config_dir), read_user_config(config_dir, dict, {})),
         read_instruction_files(),
+        layered.trigger_layers,
+        read_template_files(),
     )
 
 
@@ -148,20 +155,31 @@ def _read_files(root: str, config_dir: Path, runtime: str | None) -> LayeredConf
     Raises :class:`ConfigError` as :func:`read_config` does for the files.
     """
     built_in = read_built_in_roles()
+    package = Package(built_in, read_built_in_triggers())
     user = with_runtime(read_user_roles(config_dir, built_in), runtime)
     rules = read_runtime_rules(config_dir)
     path = Path(root) / CONFIG_PATH
     exists = path.exists()
-    data = read_toml(path, lambda table: with_instructions(table, path.parent)) if exists else {}
+    data = read_toml(path, lambda table: _with_texts(table, path.parent)) if exists else {}
     try:
         named = str(path) if exists else None
-        return load_layered(data, built_in, user, named, rules)
+        return load_layered(data, package, user, named, rules)
     except SharedRuntimeError as exc:
         raise ConfigError(f"{user.layer.path}{_with_runtime(runtime)}: {exc}") from None
     except UserConfigError as exc:
         raise ConfigError(f"{user.layer.path}: {exc}") from None
     except ConfigError as exc:  # Errors the user config is at fault for are raised as above.
         raise ConfigError(f"{path}: {exc}") from None
+
+
+def _with_texts(data: dict[str, Any], base: Path) -> dict[str, Any]:
+    """``data``, the project file's contents, with its roles' instructions and its triggers'
+    prompts that name Markdown files resolved from ``base``, its directory.
+
+    Raises :class:`ConfigError`, naming the role or trigger and the file, if a file can't be
+    read.
+    """
+    return with_prompts(with_instructions(data, base), base)
 
 
 def _with_runtime(runtime: str | None) -> str:

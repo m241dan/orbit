@@ -504,15 +504,66 @@ def review_prompt(
 
     Its first line titles it. It holds only the facts: how to review is the role's instructions.
     """
-    parts = [_review_title(job)]
-    parts += [f"Task {task} of that review ended without landing a commit." for task in job.missing]
-    parts.append(f"You may make at most {cap} suggestions.")
-    if pending:
-        parts.append(_capped_list(_PENDING_HEADING, pending, PENDING_LIMIT))
+    parts = [_review_title(job), *_missing(job), f"You may make at most {cap} suggestions."]
+    parts += _pending(pending)
     if job.whole:
         sampled = _sampled(landed_since.sampled)
         return "\n\n".join([*parts, *_since_super(landed_since), *sampled])
     return "\n\n".join([*parts, *_landed(landed_since.subjects), _trimmed(diff)])
+
+
+def review_values(
+    job: ReviewJob,
+    diff: str,
+    cap: int,
+    pending: Sequence[str],
+    landed_since: LandedSince = _NOTHING_LANDED,
+) -> dict[str, str]:
+    """The variables a trigger's template renders ``job``'s review task from, as
+    :func:`review_prompt` writes it from the same ``diff``, ``cap``, ``pending`` and
+    ``landed_since``, each list as its block or, with nothing in it, empty: for a super review,
+    those of ``commits``; for a review of commits, those of ``task_landed`` but ``{task}`` and
+    ``{task_skills}``, which come with the landing. ``{trigger}`` is the caller's.
+
+    ``{commit}`` is the reviewed commit, the last of a batch's, abbreviated, and ``{title}`` the
+    review task's first line.
+    """
+    shared = {
+        "commit": job.commits[-1][:7],
+        "cap": str(cap),
+        "queued": _paragraphs(_pending(pending)),
+    }
+    if job.whole:
+        return shared | {
+            "since_commits": _paragraphs(_since_commits(landed_since)),
+            "changed_files": _paragraphs(_changed_files(landed_since)),
+            "sample": _paragraphs(_sampled(landed_since.sampled)),
+        }
+    return shared | {
+        "title": _review_title(job),
+        "missing": _paragraphs(_missing(job)),
+        "landed_since": _paragraphs(_landed(landed_since.subjects)),
+        "diff": _trimmed(diff),
+    }
+
+
+def _paragraphs(parts: Sequence[str]) -> str:
+    """``parts`` as paragraphs, apart by a blank line; empty when there are none."""
+    return "\n\n".join(parts)
+
+
+def _missing(job: ReviewJob) -> list[str]:
+    """The parts of ``job``'s review task saying which of its batch's tasks ended without
+    landing a commit, one each."""
+    return [f"Task {task} of that review ended without landing a commit." for task in job.missing]
+
+
+def _pending(pending: Sequence[str]) -> list[str]:
+    """The part of a review's task listing the titles of the tasks ``pending``, the first
+    :data:`PENDING_LIMIT` named and the rest counted; none when there are none."""
+    if not pending:
+        return []
+    return [_capped_list(_PENDING_HEADING, pending, PENDING_LIMIT)]
 
 
 def tell_landed_since(prompt: str, job: ReviewJob, subjects: Sequence[str]) -> str:
@@ -545,14 +596,25 @@ def _landed(subjects: Sequence[str]) -> list[str]:
 
 def _since_super(landed: LandedSince) -> list[str]:
     """The parts of a super review's task listing the commits ``landed`` since the last super
-    review, every one, and the files they changed, sorted, the first :data:`FILES_LIMIT` named
-    and the rest counted; none when no commit landed."""
+    review and the files they changed (see :func:`_since_commits` and :func:`_changed_files`)."""
+    return [*_since_commits(landed), *_changed_files(landed)]
+
+
+def _since_commits(landed: LandedSince) -> list[str]:
+    """The part of a super review's task listing the commits ``landed`` since the last super
+    review, every one; none when no commit landed."""
     if not landed.subjects:
         return []
-    commits = "\n".join(["Commits since the last super review:", *_items(landed.subjects)])
-    if not landed.files:
-        return [commits]
-    return [commits, _capped_list("Files they changed:", sorted(landed.files), FILES_LIMIT)]
+    return ["\n".join(["Commits since the last super review:", *_items(landed.subjects)])]
+
+
+def _changed_files(landed: LandedSince) -> list[str]:
+    """The part of a super review's task listing the files the commits ``landed`` since the last
+    super review changed, sorted, the first :data:`FILES_LIMIT` named and the rest counted; none
+    when no commit landed or they changed none."""
+    if not landed.subjects or not landed.files:
+        return []
+    return [_capped_list("Files they changed:", sorted(landed.files), FILES_LIMIT)]
 
 
 def _sampled(paths: Sequence[str]) -> list[str]:

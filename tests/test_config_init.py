@@ -172,11 +172,14 @@ def test_update_adds_a_roles_other_fields_after_its_line_and_the_other_tables_at
     path = write(tmp_path, CODER_OPUS)
     update(tmp_path)
     # The reference's blocks: its header, the limits, the example step and setup, the line
-    # introducing the roles, then a block per role and per later-version setting.
+    # introducing the roles, a block per role, the line introducing the triggers, a block per
+    # trigger, then the example of skills and a block per later-version setting.
     _, limits, *rest = reference_config().removesuffix("\n").split("\n\n")
     roles_line = block_starting(rest, "# The roles agents work in")
+    triggers_line = block_starting(rest, "# The triggers that turn events")
     coder = block_starting(rest, "# [roles.coder]")
-    appended = "\n\n".join(block for block in rest if block not in (roles_line, coder))
+    left_out = (roles_line, triggers_line, coder)
+    appended = "\n\n".join(block for block in rest if block not in left_out)
     fields = fields_but_model(coder)
     expected = [limits, "", *CODER_OPUS.splitlines(), *fields, "", ADDED, "", appended]
     assert path.read_text(encoding="utf-8") == "\n".join(expected) + "\n"
@@ -200,8 +203,13 @@ def test_update_says_what_it_added_where(tmp_path: Path) -> None:
                 "[roles.super-reviewer]",
                 "[roles.configurator]",
                 "[roles.security-reviewer]",
+                "[triggers.review]",
+                "[triggers.super-review]",
+                "[triggers.configure-checks]",
+                "[triggers.set-up-verification]",
+                "[triggers.startup-check]",
+                "[triggers.startup-fix]",
                 "[[skills]]",
-                "[triggers.review-each-commit]",
                 "[mcp.github]",
                 "[mcp.semgrep]",
                 "[roles.security-reviewer.tools]",

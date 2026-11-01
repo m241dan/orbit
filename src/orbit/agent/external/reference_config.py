@@ -1,6 +1,6 @@
 """Orbit's reference project configuration: every setting a project's ``.orbit/config.toml`` can
 change, commented out at its default under a line saying what it does, generated from orbit's
-models and the built-in roles shipped with it.
+models and the built-in roles and triggers shipped with it.
 
 Run as ``python -m orbit.agent.external.reference_config [path]`` to write it, by default to
 ``REFERENCE_PATH``, the copy shipped with orbit.
@@ -19,8 +19,10 @@ from orbit.agent.domain.config import LIMIT_KEYS, OrbitConfig, load_config
 from orbit.agent.domain.config_update import FOR_EXAMPLE
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.skills import SkillMapping
+from orbit.agent.domain.triggers import Trigger
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
+from orbit.agent.external.built_in_triggers import read_built_in_triggers, read_template_files
 
 REFERENCE_PATH = Path("src/orbit/agent/external/reference/config.toml")
 """Where the reference is written, relative to the current directory: the copy shipped with
@@ -51,20 +53,6 @@ EXAMPLE_SKILLS = SkillMapping(paths=("src",), use=("application", "python"))
 LATER_HEADING = "Coming in a later version of orbit; leave commented out until then."
 
 LATER = (
-    (
-        "A trigger, which turns an event into a task for a role.",
-        "[triggers.review-each-commit]",
-        'The event it listens for, such as "task_landed", "commits", "manual" or "schedule".',
-        'on = "task_landed"',
-        "The events it takes, by their fields: here, work the coder landed.",
-        'when = { role = "coder" }',
-        "The role of the task it queues.",
-        'role = "reviewer"',
-        "The task's prompt, a template under .orbit/ that can use {commit}, {diff} and {task}.",
-        'prompt = "triggers/review.md"',
-        'The named rules that may hold it back: "review-rounds", "not-queued" or "dedupe".',
-        'guards = ["review-rounds"]',
-    ),
     (
         "An MCP server roles may use by name, which orbit proxies through its own.",
         "[mcp.github]",
@@ -109,12 +97,14 @@ explaining it."""
 def reference_config() -> str:
     """The reference config: a short header; the limits at their defaults; examples of a
     verification step and a setup; each built-in role's table with every field at its shipped
-    value, a list too long for a line in short; an example of a role of a project's own; an
-    example of skills by path; and the settings of a later version of orbit under
-    :data:`LATER_HEADING`. Everything is commented out, each key under its description.
+    value, a list too long for a line in short; an example of a role of a project's own; each
+    shipped trigger's table with every field at its shipped value; an example of skills by path;
+    and the settings of a later version of orbit under :data:`LATER_HEADING`. Everything is
+    commented out, each key under its description.
     """
     roles = read_built_in_roles()
     files = read_instruction_files()
+    templates = read_template_files()
     config = _descriptions(OrbitConfig)
     sections = [
         _comments(HEADER),
@@ -129,6 +119,11 @@ def reference_config() -> str:
             "A role of your own, which must set its instructions.",
             f"[roles.{EXAMPLE_ROLE}]",
             EXAMPLE_ROLE_FIELDS,
+        ),
+        _comments([config["triggers"]]),
+        *(
+            _shipped_trigger(name, trigger, templates.get(name))
+            for name, trigger in read_built_in_triggers().items()
         ),
         _example(config["skills"], "[[skills]]", EXAMPLE_SKILLS),
         _comments([LATER_HEADING]),
@@ -157,8 +152,17 @@ def _comments(lines: Iterable[str]) -> list[str]:
 
 
 def _key(key: str, value: Any) -> str:
-    """The commented-out line giving ``key`` its ``value``, as TOML."""
-    return f"# {key} = {tomlkit.item(value).as_string()}"
+    """The commented-out line giving ``key`` its ``value``, as TOML, a table inline."""
+    return f"# {key} = {_inline(value).as_string()}"
+
+
+def _inline(value: Any) -> Any:
+    """``value`` as a TOML item, a table as an inline one, as a key's value is on its line."""
+    if not isinstance(value, dict):
+        return tomlkit.item(value)
+    table = tomlkit.inline_table()
+    table.update(value)
+    return table
 
 
 def _described(values: Mapping[str, Any], descriptions: Mapping[str, str]) -> list[str]:
@@ -204,6 +208,26 @@ def _role_field(name: str, key: str, value: Any, file: str) -> str:
     if value is None:
         return f"# {key}: unset"
     return _fitted(name, key, value)
+
+
+def _shipped_trigger(name: str, trigger: Trigger, file: str | None) -> list[str]:
+    """Shipped trigger ``name``'s table: each of ``trigger``'s fields under its description, its
+    prompt being orbit's own ``file``, if it names one, and a field it leaves unset as unset."""
+    descriptions = _descriptions(Trigger)
+    lines = [f"# [triggers.{name}]"]
+    for key, value in trigger.model_dump(mode="json").items():
+        lines += [f"# {descriptions[key]}", _trigger_field(key, value, file)]
+    return lines
+
+
+def _trigger_field(key: str, value: Any, file: str | None) -> str:
+    """The commented-out line of a shipped trigger's field ``key``, at its ``value``: its prompt
+    as orbit's own ``file``, if it names one, and a field it leaves unset as unset."""
+    if key == "prompt" and file is not None:
+        return f"# prompt: orbit's own {file}"
+    if value is None:
+        return f"# {key}: unset"
+    return _key(key, value)
 
 
 def _fitted(name: str, key: str, value: Any) -> str:

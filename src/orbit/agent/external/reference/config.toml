@@ -9,7 +9,7 @@
 # fallback_fixes = 3
 # Rounds of review-suggested work after which review pauses.
 # review_rounds = 3
-# Commits between super reviews, counting yours and the planner's.
+# Commits between super reviews; moving to [triggers.super-review] every.
 # super_review_every = 10
 # Tasks one review may suggest.
 # review_suggestions = 5
@@ -263,6 +263,152 @@
 # Whether its finished work is committed and merged.
 # merge = false
 
+# The triggers that turn events into tasks or check runs, by name: the shipped ones, and your own.
+
+# [triggers.review]
+# The event it fires on, such as "task_landed", "commits" or "manual".
+# on = "task_landed"
+# The role of the task it queues.
+# role = "reviewer"
+# Instead of a role, "gate" to run the verification steps rather than queue a task.
+# checks: unset
+# The task's prompt: the text, or a Markdown file under .orbit/ it names.
+# prompt: orbit's own review.md
+# The events it takes, by their fields, each a value or a list of values.
+# when = {}
+# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
+# guards = ["review-rounds"]
+# With on = "commits", how many matching landings it fires after.
+# every: unset
+# Whether you can fire it yourself.
+# manual = false
+# What it's called where you fire it; a manual trigger needs one.
+# label: unset
+# Whether its task is added as a draft, for you to accept.
+# draft = false
+# Whether it fires at all.
+# enabled = true
+
+# [triggers.super-review]
+# The event it fires on, such as "task_landed", "commits" or "manual".
+# on = "commits"
+# The role of the task it queues.
+# role = "super-reviewer"
+# Instead of a role, "gate" to run the verification steps rather than queue a task.
+# checks: unset
+# The task's prompt: the text, or a Markdown file under .orbit/ it names.
+# prompt: orbit's own super-review.md
+# The events it takes, by their fields, each a value or a list of values.
+# when = {origin = ["manual", "planner"]}
+# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
+# guards = ["suggestions-pending"]
+# With on = "commits", how many matching landings it fires after.
+# every = 10
+# Whether you can fire it yourself.
+# manual = true
+# What it's called where you fire it; a manual trigger needs one.
+# label = "Super review"
+# Whether its task is added as a draft, for you to accept.
+# draft = false
+# Whether it fires at all.
+# enabled = true
+
+# [triggers.configure-checks]
+# The event it fires on, such as "task_landed", "commits" or "manual".
+# on = "manual"
+# The role of the task it queues.
+# role = "configurator"
+# Instead of a role, "gate" to run the verification steps rather than queue a task.
+# checks: unset
+# The task's prompt: the text, or a Markdown file under .orbit/ it names.
+# prompt: orbit's own configure-checks.md
+# The events it takes, by their fields, each a value or a list of values.
+# when = {}
+# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
+# guards = []
+# With on = "commits", how many matching landings it fires after.
+# every: unset
+# Whether you can fire it yourself.
+# manual = true
+# What it's called where you fire it; a manual trigger needs one.
+# label = "Set up checks"
+# Whether its task is added as a draft, for you to accept.
+# draft = false
+# Whether it fires at all.
+# enabled = true
+
+# [triggers.set-up-verification]
+# The event it fires on, such as "task_landed", "commits" or "manual".
+# on = "session_started"
+# The role of the task it queues.
+# role = "configurator"
+# Instead of a role, "gate" to run the verification steps rather than queue a task.
+# checks: unset
+# The task's prompt: the text, or a Markdown file under .orbit/ it names.
+# prompt: orbit's own configure-checks.md
+# The events it takes, by their fields, each a value or a list of values.
+# when = {verification = "missing"}
+# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
+# guards = []
+# With on = "commits", how many matching landings it fires after.
+# every: unset
+# Whether you can fire it yourself.
+# manual = false
+# What it's called where you fire it; a manual trigger needs one.
+# label: unset
+# Whether its task is added as a draft, for you to accept.
+# draft = false
+# Whether it fires at all.
+# enabled = true
+
+# [triggers.startup-check]
+# The event it fires on, such as "task_landed", "commits" or "manual".
+# on = "session_started"
+# The role of the task it queues.
+# role: unset
+# Instead of a role, "gate" to run the verification steps rather than queue a task.
+# checks = "gate"
+# The task's prompt: the text, or a Markdown file under .orbit/ it names.
+# prompt: unset
+# The events it takes, by their fields, each a value or a list of values.
+# when = {verification = "configured"}
+# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
+# guards = []
+# With on = "commits", how many matching landings it fires after.
+# every: unset
+# Whether you can fire it yourself.
+# manual = false
+# What it's called where you fire it; a manual trigger needs one.
+# label: unset
+# Whether its task is added as a draft, for you to accept.
+# draft = false
+# Whether it fires at all.
+# enabled = true
+
+# [triggers.startup-fix]
+# The event it fires on, such as "task_landed", "commits" or "manual".
+# on = "startup_check_failed"
+# The role of the task it queues.
+# role = "coder"
+# Instead of a role, "gate" to run the verification steps rather than queue a task.
+# checks: unset
+# The task's prompt: the text, or a Markdown file under .orbit/ it names.
+# prompt: orbit's own startup-fix.md
+# The events it takes, by their fields, each a value or a list of values.
+# when = {}
+# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
+# guards = []
+# With on = "commits", how many matching landings it fires after.
+# every: unset
+# Whether you can fire it yourself.
+# manual = false
+# What it's called where you fire it; a manual trigger needs one.
+# label: unset
+# Whether its task is added as a draft, for you to accept.
+# draft = true
+# Whether it fires at all.
+# enabled = true
+
 # Skills for the code under some paths, given to every agent along with its role's. For example:
 # [[skills]]
 # Files or folders in the project, relative to its root; each must exist.
@@ -271,19 +417,6 @@
 # use = ["application", "python"]
 
 # Coming in a later version of orbit; leave commented out until then.
-
-# A trigger, which turns an event into a task for a role.
-# [triggers.review-each-commit]
-# The event it listens for, such as "task_landed", "commits", "manual" or "schedule".
-# on = "task_landed"
-# The events it takes, by their fields: here, work the coder landed.
-# when = { role = "coder" }
-# The role of the task it queues.
-# role = "reviewer"
-# The task's prompt, a template under .orbit/ that can use {commit}, {diff} and {task}.
-# prompt = "triggers/review.md"
-# The named rules that may hold it back: "review-rounds", "not-queued" or "dedupe".
-# guards = ["review-rounds"]
 
 # An MCP server roles may use by name, which orbit proxies through its own.
 # [mcp.github]

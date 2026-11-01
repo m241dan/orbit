@@ -1,0 +1,42 @@
+# The triggers shipped with orbit, each turning an event into a task for a role or a run of the
+# verification steps. A trigger's prompt names its template, a Markdown file beside this one.
+
+[triggers.review]
+on = "task_landed"
+role = "reviewer"
+prompt = "review.md"
+guards = ["review-rounds"]
+
+[triggers.super-review]
+on = "commits"
+role = "super-reviewer"
+prompt = "super-review.md"
+when = { origin = ["manual", "planner"] }
+guards = ["suggestions-pending"]
+every = 10
+manual = true
+label = "Super review"
+
+[triggers.configure-checks]
+on = "manual"
+role = "configurator"
+prompt = "configure-checks.md"
+manual = true
+label = "Set up checks"
+
+[triggers.set-up-verification]
+on = "session_started"
+role = "configurator"
+prompt = "configure-checks.md"
+when = { verification = "missing" }
+
+[triggers.startup-check]
+on = "session_started"
+checks = "gate"
+when = { verification = "configured" }
+
+[triggers.startup-fix]
+on = "startup_check_failed"
+role = "coder"
+prompt = "startup-fix.md"
+draft = true

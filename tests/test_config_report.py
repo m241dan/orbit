@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from orbit.agent.domain.config import LIMIT_KEYS, load_layered
+from orbit.agent.domain.config import LIMIT_KEYS, Package, load_layered
 from orbit.agent.domain.config_report import (
     ConfigReport,
     ConfigSources,
@@ -26,7 +26,9 @@ from orbit.agent.domain.roles import Role, built_in_roles
 from orbit.agent.domain.server import ServerSettings
 from orbit.agent.domain.skills import Skill, SkillFile, SkillLibrary, SkillMapping
 from orbit.agent.domain.storage import StorageSettings
+from orbit.agent.domain.triggers import Trigger
 from orbit.agent.external.built_in_roles import read_built_in_roles
+from orbit.agent.external.built_in_triggers import read_built_in_triggers, read_template_files
 from orbit.protocol import BUILT_IN_ROLE_NAMES
 
 type Data = dict[str, Any]
@@ -34,6 +36,8 @@ type Data = dict[str, Any]
 INSTRUCTIONS = {name: f"You are orbit's {name}.\nBe brief." for name in BUILT_IN_ROLE_NAMES}
 PACKAGE_ROLES = built_in_roles(read_built_in_roles(), INSTRUCTIONS)
 PACKAGE_FILES = {name: f"{name}.md" for name in BUILT_IN_ROLE_NAMES}
+PACKAGE_TRIGGERS = read_built_in_triggers()
+TEMPLATE_FILES = read_template_files()
 USER = Layer("user", "/home/me/.config/orbit/config.toml")
 PROJECT = Layer("project", "/src/app/.orbit/config.toml")
 HELPER = {
@@ -59,13 +63,16 @@ def sources(
     instructions files they name (each as written if ``None``)."""
     project, user = project or {}, user or {}
     user_roles = load_user_roles(user_read or user, USER, PACKAGE_ROLES)
-    layered = load_layered(project_read or project, PACKAGE_ROLES, user_roles, PROJECT.path)
+    package = Package(PACKAGE_ROLES, PACKAGE_TRIGGERS)
+    layered = load_layered(project_read or project, package, user_roles, PROJECT.path)
     return ConfigSources(
         layered.config,
         layered.role_layers,
         Written(PROJECT, project),
         Written(USER, user),
         PACKAGE_FILES,
+        layered.trigger_layers,
+        TEMPLATE_FILES,
     )
 
 
@@ -189,6 +196,72 @@ def test_instructions_count_their_lines(text: str, lines: int) -> None:
     assert Instructions(text, None).lines == lines
 
 
+# The triggers
+
+
+def test_each_trigger_is_listed_field_by_field_in_order() -> None:
+    triggers = [key for key in report() if key.startswith("triggers.")]
+    assert triggers == [
+        f"triggers.{name}.{field}" for name in PACKAGE_TRIGGERS for field in Trigger.model_fields
+    ]
+
+
+def test_each_trigger_field_comes_from_the_layer_that_set_it() -> None:
+    settings = report({"triggers": {"review": {"enabled": False}}})
+    assert settings["triggers.review.enabled"] == Setting(False, PROJECT)
+    assert settings["triggers.review.on"] == Setting("task_landed", PACKAGE)
+    assert settings["triggers.review.guards"] == Setting(("review-rounds",), PACKAGE)
+    assert settings["triggers.review.every"] == Setting(None, DEFAULT)
+    assert settings["triggers.super-review.when"] == Setting(
+        {"origin": ("manual", "planner")}, PACKAGE
+    )
+
+
+def test_a_shipped_triggers_prompt_is_in_the_template_it_names() -> None:
+    prompt = PACKAGE_TRIGGERS["review"].prompt
+    assert prompt is not None
+    expected = Setting(Instructions(prompt, "review.md"), PACKAGE)
+    assert report()["triggers.review.prompt"] == expected
+
+
+def test_a_trigger_without_a_prompt_has_none_by_default() -> None:
+    assert report()["triggers.startup-check.prompt"] == Setting(None, DEFAULT)
+
+
+def test_a_shipped_prompt_naming_no_file_is_in_none() -> None:
+    given = sources()
+    settings = config_report(replace(given, template_files={}), {})
+    assert settings["triggers.review.prompt"].value.file is None
+
+
+def test_a_prompt_the_project_file_gives_as_text_is_in_no_file() -> None:
+    nightly = {"on": "task_finished", "role": "coder", "prompt": "Tidy up."}
+    settings = report({"triggers": {"nightly": nightly}})
+    assert settings["triggers.nightly.prompt"] == Setting(Instructions("Tidy up.", None), PROJECT)
+    assert settings["triggers.nightly.role"] == Setting("coder", PROJECT)
+    assert settings["triggers.nightly.enabled"] == Setting(True, DEFAULT)
+
+
+def test_a_prompt_the_project_file_names_a_file_for_is_in_that_file() -> None:
+    written = {"triggers": {"review": {"prompt": "triggers/review.md"}}}
+    read = {"triggers": {"review": {"prompt": "Review {commit}."}}}
+    settings = config_report(sources(written, project_read=read), {})
+    prompt = Instructions("Review {commit}.", "triggers/review.md")
+    assert settings["triggers.review.prompt"] == Setting(prompt, PROJECT)
+
+
+def test_super_review_every_is_the_super_reviews_every_from_the_project_file() -> None:
+    settings = report({"super_review_every": 7})
+    assert settings["triggers.super-review.every"] == Setting(7, PROJECT)
+    assert settings["super_review_every"] == Setting(7, PROJECT)
+
+
+def test_a_triggers_key_lists_only_its_fields() -> None:
+    assert list(subtree(report(), "triggers.review")) == [
+        f"triggers.review.{field}" for field in Trigger.model_fields
+    ]
+
+
 # The verification steps and setup
 
 
@@ -229,6 +302,7 @@ def test_the_project_files_sections_come_in_order() -> None:
     sections = [key.split(".")[0] for key in with_skills() if key not in LIMIT_KEYS]
     assert sorted(set(sections), key=sections.index) == [
         "roles",
+        "triggers",
         "verification",
         "setup",
         "skills",

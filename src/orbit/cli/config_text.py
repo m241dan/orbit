@@ -27,8 +27,9 @@ from orbit.tui.view.common import counted
 type Text = Instructions | SkillFileText
 """A value shown by its length, or with ``full`` as its text."""
 
-GROUPED = frozenset({"roles", "skill_files"})
-"""The sections listed in a group for each of their tables: each role, and each skill."""
+GROUPED = frozenset({"roles", "triggers", "skill_files"})
+"""The sections listed in a group for each of their tables: each role, each trigger, and each
+skill."""
 
 COLUMN_GAP = "   "
 """What parts the skill map's columns."""
@@ -46,11 +47,11 @@ SKILL_MAP_LEGEND = (
 
 def config_text(report: ConfigReport, *, full: bool, root: Path, home: Path) -> str:
     """``report`` as text: a line per setting, ``<key> = <value>   <layer>``, the limits, each
-    role, each skill's files and each other section in a group of their own, apart from the next
-    by a blank line; each value as JSON but roles' instructions, which show as the file they're
-    in and their length, and skill files, which show their length, or either with ``full`` their
-    text. A layer's file shows relative to the workspace at ``root`` inside it, and from ``~``
-    inside ``home``."""
+    role, each trigger, each skill's files and each other section in a group of their own, apart
+    from the next by a blank line; each value as JSON but roles' instructions and triggers'
+    prompts, which show as the file they're in and their length, and skill files, which show
+    their length, or any with ``full`` their text. A layer's file shows relative to the
+    workspace at ``root`` inside it, and from ``~`` inside ``home``."""
     groups = groupby(report.items(), key=lambda item: _group(item[0]))
     return "\n\n".join(
         "\n".join(_line(key, setting, full, root, home) for key, setting in settings)
@@ -96,8 +97,8 @@ def skill_map_json(skills: SkillMap) -> str:
 
 
 def _group(key: str) -> str:
-    """The group the setting at ``key`` is listed in: the limits', its role's, its skill's, or
-    its section's."""
+    """The group the setting at ``key`` is listed in: the limits', its role's, its trigger's, its
+    skill's, or its section's."""
     if key in LIMIT_KEYS:
         return ""
     section, *rest = key.split(".")

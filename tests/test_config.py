@@ -7,7 +7,7 @@ import pytest
 
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.checks import Setup
-from orbit.agent.domain.config import OrbitConfig, load_config, load_layered
+from orbit.agent.domain.config import OrbitConfig, Package, load_config, load_layered
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.copies import expired
 from orbit.agent.domain.layers import (
@@ -321,13 +321,13 @@ def test_a_built_in_role_set_to_merge_unverified_is_refused() -> None:
 def test_a_built_in_role_whose_verify_and_workspace_are_left_alone_keeps_its_merge(
     name: str, merges: bool
 ) -> None:
-    layered = load_layered({"roles": {name: {"model": "sonnet"}}}, BUILT_IN_ROLES)
+    layered = load_layered({"roles": {name: {"model": "sonnet"}}}, Package(BUILT_IN_ROLES))
     assert layered.config.roles[name].merge is merges
     assert layered.role_layers[name]["merge"] == PACKAGE
 
 
 def test_a_built_in_roles_merge_worked_out_afresh_is_the_defaults() -> None:
-    layered = load_layered({"roles": {"coder": {"verify": False}}}, BUILT_IN_ROLES)
+    layered = load_layered({"roles": {"coder": {"verify": False}}}, Package(BUILT_IN_ROLES))
     assert layered.role_layers["coder"]["merge"] == DEFAULT
     assert layered.role_layers["coder"]["verify"] == Layer("project")
 
@@ -593,7 +593,7 @@ def test_a_layered_config_is_the_config_with_the_layer_each_role_field_came_from
     user = personal(planner={"model": "opus"})
     data = {"fix_attempts": 2, "roles": {"coder": {"model": "sonnet"}}}
     path = "/src/app/.orbit/config.toml"
-    layered = load_layered(data, BUILT_IN_ROLES, user, path)
+    layered = load_layered(data, Package(BUILT_IN_ROLES), user, path)
     assert layered.config == load_config(data, BUILT_IN_ROLES, user, path)
     assert layered.role_layers["coder"]["model"] == Layer("project", path)
     assert layered.role_layers["planner"]["model"] == USER
@@ -636,7 +636,7 @@ def test_each_role_on_a_runtime_this_version_doesnt_know_is_named_on_a_line_of_i
 def test_a_layered_config_records_where_each_roles_runtime_came_from() -> None:
     user = load_user_roles({"roles": {"runtime": "claude"}}, USER, BUILT_IN_ROLES)
     data = {"roles": {"coder": {"runtime": "claude"}}}
-    layered = load_layered(data, BUILT_IN_ROLES, user, "/src/app/.orbit/config.toml")
+    layered = load_layered(data, Package(BUILT_IN_ROLES), user, "/src/app/.orbit/config.toml")
     assert layered.role_layers["coder"]["runtime"] == Layer(
         "project", "/src/app/.orbit/config.toml"
     )
@@ -772,11 +772,9 @@ LATER_VERSION = (
 @pytest.mark.parametrize(
     ("toml", "setting"),
     [
-        ('[triggers.review-each-commit]\non = "task_landed"', "[triggers.review-each-commit]"),
         ('[roles.coder.tools]\nmcp = ["semgrep"]', "[roles.coder.tools]"),
         ('[mcp.github]\ncommand = ["github-mcp-server", "stdio"]', "[mcp.github]"),
         ('[models.local]\nmodel = "openai:qwen3-coder"', "[models.local]"),
-        ("[triggers]", "[triggers]"),
         ("[mcp]\nshared = true\n\n[mcp.github]\nshared = false", "[mcp.github]"),
         ('models = "local"', "[models]"),
     ],
@@ -795,7 +793,7 @@ def test_the_first_later_versions_setting_in_the_file_is_the_one_named() -> None
 
 def test_a_layered_config_refuses_a_later_versions_setting_too() -> None:
     with pytest.raises(ConfigError, match=r"^\[mcp\.github\] isn't supported"):
-        load_layered({"mcp": {"github": {"shared": True}}}, BUILT_IN_ROLES)
+        load_layered({"mcp": {"github": {"shared": True}}}, Package(BUILT_IN_ROLES))
 
 
 def test_a_roles_list_of_orbit_tools_still_loads() -> None:
@@ -954,7 +952,7 @@ def test_a_personal_role_consulting_a_disabled_task_role_loads() -> None:
 
 
 def test_layered_roles_leave_a_disabled_role_out_of_consults() -> None:
-    layered = load_layered({"roles": {"experimenter": {"enabled": False}}}, BUILT_IN_ROLES)
+    layered = load_layered({"roles": {"experimenter": {"enabled": False}}}, Package(BUILT_IN_ROLES))
     assert layered.config.roles["planner"].consults == ()
 
 

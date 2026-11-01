@@ -49,16 +49,17 @@ def show(
     """Show the configuration orbit resolves for a workspace from this machine's files.
 
     Every setting in effect is listed, one per line, with the layer it came from: default
-    (orbit's own, in no file), package (the roles and skills shipped with orbit), user and the
-    path of your config.toml, or project and the path of the workspace's .orbit/config.toml or
-    skill file. That's the limits, each role field by field, the verification steps, the setup,
-    the [[skills]] entries, every skill file as skill_files.<skill>.<path>, and your [storage],
-    [server] and [telemetry]; a KEY shows only the settings under it. Roles' instructions show as
-    the file they're in and their length, skill files as their length, or either with --full
-    their text; --json prints the same as one JSON object. --skills prints the skill map
-    instead: a row for each skill and a column for each role, each cell saying where that role's
-    agents get the skill, role, task, reviewed task, mapped or —, then a line saying what each
-    means; with --json, one JSON object. No orbit serve needs to be running, and nothing is
+    (orbit's own, in no file), package (the roles, triggers and skills shipped with orbit), user
+    and the path of your config.toml, or project and the path of the workspace's
+    .orbit/config.toml or skill file. That's the limits, each role field by field, each trigger
+    field by field, the verification steps, the setup, the [[skills]] entries, every skill file
+    as skill_files.<skill>.<path>, and your [storage], [server] and [telemetry]; a KEY shows only
+    the settings under it. Roles' instructions and triggers' prompts show as the file they're in
+    and their length, skill files as their length, or any with --full their text; --json prints
+    the same as one JSON object. --skills prints the skill map instead: a row for each skill and
+    a column for each role, each cell saying where that role's agents get the skill, role, task,
+    reviewed task, mapped or —, then a line saying what each means; with --json, one JSON
+    object. No orbit serve needs to be running, and nothing is
     written. Exits with status 2 if the configuration is invalid, KEY names no setting, or
     --skills is given with KEY or --full.
     """

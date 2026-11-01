@@ -1133,8 +1133,9 @@ most 15 suggested tasks. Removing a suggested task drops it from its batch, whic
 without it (or closed, if nothing in it landed); removing a queued review closes the batch it would
 have suggested into.
 
-Every `super_review_every` commits (default 10, counting your own and the planner's commits, not
-those of suggested tasks), a `super-reviewer` (Opus by default) reviews the **whole codebase** at
+Every 10 commits by default (the `super-review` trigger's `every`, or `super_review_every`, its
+alias for this version; see [Triggers](#triggers)), counting your own and the planner's commits,
+not those of suggested tasks, a `super-reviewer` (Opus by default) reviews the **whole codebase** at
 the latest commit: starting from the project's shape, it reads the commits since the last super
 review and a rotating sample of other code files (below) through the lens skills its role gives it
 (by default `review-style`, `review-drift` and `review-scaling`, each asking what has built up
@@ -1430,7 +1431,7 @@ and the file (`roles.qa.lead: a role's name is a plain name: letters, digits, - 
 
 Every setting a project can change, with its default and what it does, is in orbit's reference
 config, [`reference/config.toml`](src/orbit/agent/external/reference/config.toml), shipped with
-orbit and generated from its own settings and roles, so it keeps up with them. `orbit init` writes
+orbit and generated from its own settings, roles and triggers, so it keeps up with them. `orbit init` writes
 it to `.orbit/config.toml`, every setting commented out at its default for you to uncomment what
 you change; `--update` adds the settings an older file doesn't mention, never changing a line of
 it; `--force` replaces the file, keeping the old one as a numbered backup (`config.toml.bak.1`,
@@ -1447,9 +1448,8 @@ counted from 1 as in `orbit config show` (for example
 `roles.coder.tool_access: Input should be 'off', 'restricted' or 'full'`, or
 `verification.steps.1.command: Field required` for a first step without a command). The
 settings of a later version of orbit, which the reference config shows commented out, are
-refused while uncommented, naming the first: a `[triggers.<name>]`, `[mcp.<name>]` or
-`[models.<name>]` table or a `[roles.<name>.tools]` table (`tools` as a list of orbit's tools is
-still a role's `tools`), as in
+refused while uncommented, naming the first: an `[mcp.<name>]` or `[models.<name>]` table or a
+`[roles.<name>.tools]` table (`tools` as a list of orbit's tools is still a role's `tools`), as in
 `[mcp.github] isn't supported by this version of orbit yet; it's in the reference config for a
 later version. Leave it commented out.`
 
@@ -1497,8 +1497,8 @@ and any other value is refused, listing them; `runtime` takes the runtimes this 
 knows, and any other is refused, naming the key (`roles.runtime = "nope": this version of orbit
 knows the runtimes claude, kiro.`). A `[roles.<name>]` table names its role as a project's does, with
 a plain name of letters, digits, `-` and `_`, and one that doesn't is refused, naming the file and
-the key. `[[skills]]` belongs in the project's `.orbit/config.toml` too, and is refused as a role's
-field is (see [Skills](#skills)). `orbit chat` reads
+the key. `[[skills]]` and `[triggers.<name>]` belong in the project's `.orbit/config.toml` too,
+and are refused as a role's field is (see [Skills](#skills) and [Triggers](#triggers)). `orbit chat` reads
 your `config.toml`'s roles as it opens its workspace, and `orbit serve`, with the config directory
 of the account it runs as, as it opens each workspace it serves; both read them again, with the
 project's, when the planner is reset. An invalid one is refused as an invalid
@@ -1587,6 +1587,110 @@ A project's `.orbit/config.toml` can always define a role of the same name: the 
 replaces yours entirely, none of your role's fields carrying over (your `[roles]` `model`,
 `effort` and `runtime` still apply beneath it, as to any of the project's roles), and the workspace's startup
 notices say so: `The project's role helper replaces your personal role of that name.`
+
+### Triggers
+
+A **trigger** turns an event into a task for a role, or into a run of the verification steps.
+Orbit ships triggers that describe what it does, and a project changes them, or adds its own,
+with `[triggers.<name>]` tables in `.orbit/config.toml`. Nothing fires from configuration yet:
+reviews, the super review, the startup check and its fixes, and the configurator still start as
+the sections above say, and the shipped triggers describe them for the versions that fire them.
+Only the super review's `every` already counts (below).
+
+The shipped triggers are data in
+[`src/orbit/agent/external/triggers/`](src/orbit/agent/external/triggers/): `triggers.toml` has a
+`[triggers.<name>]` table for each, and a prompt names its template, a Markdown file beside it.
+
+| Trigger | Event | When | Does | Also |
+|---|---|---|---|---|
+| `review` | `task_landed` | every one | a `reviewer` task, from `review.md` | guard `review-rounds` |
+| `super-review` | `commits` | `origin = ["manual", "planner"]` | a `super-reviewer` task, from `super-review.md` | `every = 10`, guard `suggestions-pending`, manual as `Super review` |
+| `configure-checks` | `manual` | every one | a `configurator` task, from `configure-checks.md` | manual as `Set up checks` |
+| `set-up-verification` | `session_started` | `verification = "missing"` | a `configurator` task, from `configure-checks.md` | |
+| `startup-check` | `session_started` | `verification = "configured"` | runs the verification steps, `checks = "gate"` | |
+| `startup-fix` | `startup_check_failed` | every one | a `coder` task, from `startup-fix.md` | `draft = true` |
+
+A trigger's fields:
+
+- `on`: the event it fires on (below); a trigger of your own must set it.
+- `role` and `prompt`: the role of the task it queues, and the task's prompt: one line ending in
+  `.md` is the path of a Markdown file under `.orbit/` whose text is the prompt
+  (`prompt = "triggers/tidy.md"` reads `.orbit/triggers/tidy.md`), and anything else is the text
+  itself, as a role's `instructions` are. A project's `prompt` replaces a shipped template whole.
+- `checks`: `"gate"` in place of a role, to run the verification steps rather than queue a task.
+  A trigger has a role or `checks`, not both; a role needs a prompt, and `checks` takes none.
+- `when`: the events it takes, by their fields, each a value or a list of values, such as
+  `when = { origin = ["manual", "planner"] }` for your own tasks' and the planner's; left out,
+  every one.
+- `guards`: the named rules that may hold it back: `review-rounds` keeps today's batching of
+  reviews (see [Reviews](#reviews)), `suggestions-pending` holds the super review while suggested
+  tasks or reviews are pending or running, and `not-queued` and `dedupe` name rules of later
+  versions.
+- `every`: with `on = "commits"`, how many matching landings it fires after.
+- `manual` and `label`: whether you can fire it yourself, and what it's called where you do; a
+  manual trigger needs a label.
+- `draft`: whether its task is added as a draft, for you to accept.
+- `enabled`: whether it fires at all.
+
+The events, the fields their `when` can match, and the variables their templates can use, each
+its name in braces:
+
+| Event | Fires when | `when` fields | Variables |
+|---|---|---|---|
+| `session_started` | orbit opens a workspace with its session | `verification`: `configured`, `missing` or `off` | `{checks}` |
+| `task_landed` | a task's work lands | `role`, `origin` | `{commit}`, `{task}`, `{title}`, `{diff}`, `{missing}`, `{cap}`, `{queued}`, `{landed_since}`, `{task_skills}` |
+| `task_finished` | a task finishes | `role`, `origin`, `status` | none |
+| `commits` | every `every` landings matching its `when` on `role` and `origin` | `role`, `origin` | `{commit}`, `{cap}`, `{queued}`, `{since_commits}`, `{changed_files}`, `{sample}` |
+| `startup_check_failed` | a step of the startup check fails, once for each | `step` | `{step}`, `{output}` |
+| `manual` | you fire it | none | `{checks}` |
+
+Every event also gives `{trigger}`, the trigger's name, and a trigger you fire yourself gives its
+event's variables, as the super review gives those of `commits`. `{commit}` is the commit landed
+or reviewed, its first 7 characters; `{task}` the task whose work landed, and `{task_skills}` the
+skills its list names; `{title}` the review task's first line (`Review commit 0123abc`, or
+`Review the 2 commits made for review batch-1`); `{diff}` the commits' messages and diffs,
+trimmed past 30000 characters; `{missing}` a line for each task of the reviewed batch that ended
+without landing a commit; `{cap}` the suggestions the review may make; `{queued}` the tasks still
+queued or running, `{landed_since}` the commits landed since the reviewed one, and
+`{since_commits}`, `{changed_files}` and `{sample}` the super review's lists, each under its
+heading as [Reviews](#reviews) describes; `{step}` the failed step's name and `{output}` the
+command that failed with its output, trimmed; and `{checks}` the verification steps and setup
+configured now, under `Configured now (build on these):`, or `Nothing is configured yet.`. A
+list-like variable gives its list under its heading, or nothing when the list is empty, and a
+paragraph left empty is dropped, so the shipped templates read as orbit's tasks do. Braces around
+anything but a variable's name are left as they are.
+
+The project file's `[triggers.<name>]` changes the fields it sets of a shipped trigger, the rest
+staying the package's, or adds a trigger of its own after the shipped ones:
+
+```toml
+[triggers.super-review]
+every = 5                       # a super review every 5 commits; the rest as shipped
+
+[triggers.tidy-up]
+on = "task_finished"
+role = "coder"
+prompt = "triggers/tidy.md"     # .orbit/triggers/tidy.md
+```
+
+Your `config.toml` can't set triggers, as they'd differ by machine: a `[triggers.<name>]` there is
+refused, naming the file (`triggers: belongs in the project's .orbit/config.toml; …`). A trigger's
+name is a plain name, as a role's is. A trigger is refused at load, naming the file, the trigger,
+the field and the value, for an unknown event, role, guard or `when` field
+(`triggers.tidy-up.role: tidier isn't a role; the roles are planner, experimenter, coder, …`), a
+variable its event doesn't give (`triggers.tidy-up.prompt: {diff} isn't a variable of
+task_finished; its variables are {trigger}.`), `every` without `on = "commits"`, `manual = true`
+without a `label`, neither a role nor `checks` or both, a role without a prompt, or `checks` with
+one. A trigger whose role is disabled loads. The reference config shows each shipped trigger's
+table commented out after the roles, every field under its description, and
+`orbit config show triggers.review` lists one trigger's fields with their layers (see
+[Seeing the configuration in effect](#seeing-the-configuration-in-effect)).
+
+`super_review_every` stays for this version as an alias for `[triggers.super-review] every`: set
+in `.orbit/config.toml`, it's the super review's `every` unless the trigger sets its own, which
+wins, and either way the workspace's startup notices say
+`super_review_every is moving to [triggers.super-review] every; set it there.`. The super review
+falls due every `every` commits, as [Reviews](#reviews) says.
 
 ### Skills
 
@@ -1821,12 +1925,12 @@ touch `.orbit/config.toml`, and writes no reference config by itself; with `--up
 
 `orbit config show` prints the configuration orbit resolves for a workspace (the current
 directory's, or the one `-C PATH` names, picked as `orbit chat` picks it) from this machine's
-files, each value with the layer it came from: the limits, each role field by field, the
-verification steps, the setup, the `[[skills]]` entries, every skill file, and your
-`config.toml`'s `[storage]`, `[server]` and `[telemetry]` (the config directory is
+files, each value with the layer it came from: the limits, each role field by field, each
+trigger field by field, the verification steps, the setup, the `[[skills]]` entries, every skill
+file, and your `config.toml`'s `[storage]`, `[server]` and `[telemetry]` (the config directory is
 `--config-dir`, as for `orbit chat`). It needs no running `orbit serve`, and writes nothing. Each
 value is a line, `<key> = <value>   <layer>`, the value as JSON, with the limits, each role, each
-skill's files and each other section in groups of their own:
+trigger, each skill's files and each other section in groups of their own:
 
 ```
 $ orbit config show roles.reviewer
@@ -1841,14 +1945,16 @@ roles.reviewer.runtime = "claude"   package
 The layers, least specific first:
 
 - `default`: orbit's own default, in no file.
-- `package`: the roles and skills shipped with orbit (see [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml) and [Skills](#skills)).
+- `package`: the roles, triggers and skills shipped with orbit (see [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml), [Triggers](#triggers) and [Skills](#skills)).
 - `user <path>`: your `config.toml` in the config directory.
 - `project <path>`: the workspace's `.orbit/config.toml`, or a skill file of its `.orbit/skills/`.
 
 A file inside the workspace shows relative to it, and one in your home directory from `~`. A
-role's instructions show as the file they're in and their length, `(reviewer.md, 64 lines)`, or
-`(inline, 3 lines)` for text the file gives itself; `--full` prints their text instead, between
-lines of `"""`.
+role's instructions and a trigger's prompt show as the file they're in and their length,
+`(reviewer.md, 64 lines)` or `(review.md, 11 lines)`, or `(inline, 3 lines)` for text the file
+gives itself; `--full` prints their text instead, between lines of `"""`. Each trigger is listed
+field by field as `triggers.<name>.<field>`, a field the shipped trigger sets from `package`, one
+your `.orbit/config.toml` sets from `project`, and the rest from `default`.
 
 The `[[skills]]` entries are numbered from 1, as the verification steps are, `skills.1.paths`
 and `skills.1.use` from `.orbit/config.toml`, or `skills = []   default` without any. Then every
@@ -1863,7 +1969,8 @@ skill_files.python.tests.md = (42 lines)   project .orbit/skills/python/tests.md
 ```
 
 A `KEY`, dotted as in the TOML it comes from, shows only the settings at or under it: `roles`
-every role's, `roles.reviewer` one role's, `server.port` one value, `verification.steps.1` the
+every role's, `roles.reviewer` one role's, `triggers.review` one trigger's, `server.port` one
+value, `verification.steps.1` the
 first step's, `skills` the `[[skills]]` entries, `skill_files.python` the python skill's
 files and `skill_files.python.tests.md` one file, which only its whole path names:
 `skill_files.python.tests` names no setting. `--json` prints the same as one JSON object, nested by the parts of each key, each value

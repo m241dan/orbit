@@ -93,10 +93,16 @@ def configure_prompt(steps: Sequence[VerificationStep], setup: Setup | None) -> 
         "Set up this project's verification steps: work out the checks it uses and propose"
         " them with propose_checks."
     )
+    return f"{prompt} {configured_checks(steps, setup)}"
+
+
+def configured_checks(steps: Sequence[VerificationStep], setup: Setup | None) -> str:
+    """What a configurator is told is configured now, the ``steps`` and ``setup`` (see
+    :func:`describe_checks`), or that nothing is: the ``{checks}`` a trigger's template uses."""
     current = describe_checks(steps, setup)
     if not current:
-        return prompt + " Nothing is configured yet."
-    return prompt + " Configured now (build on these):\n\n" + current
+        return "Nothing is configured yet."
+    return "Configured now (build on these):\n\n" + current
 
 
 def parse_proposal(data: dict[str, Any]) -> ChecksProposal:

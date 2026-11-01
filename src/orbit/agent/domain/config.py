@@ -1,9 +1,9 @@
-"""Orbit's configuration: the limits, roles, verification steps, setup and skills by path a
-project file sets over the user config's role fields and personal roles and the built-in
-defaults."""
+"""Orbit's configuration: the limits, roles, triggers, verification steps, setup and skills by
+path a project file sets over the user config's role fields and personal roles and the package's
+roles and triggers."""
 
 from collections.abc import Collection, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -41,7 +41,9 @@ from orbit.agent.domain.runtimes import (
     RuntimeRules,
 )
 from orbit.agent.domain.skills import SkillLibrary, SkillMapping
+from orbit.agent.domain.triggers import Trigger, TriggerName, check_triggers, merge_triggers
 from orbit.agent.domain.verification import MAX_FALLBACK_FIXES
+from orbit.protocol import SUPER_REVIEW
 
 
 class _Config(BaseModel):
@@ -82,7 +84,7 @@ class _FileConfig(_Config):
     super_review_every: int = Field(
         default=_REVIEW_LIMITS.super_every,
         ge=1,
-        description="Commits between super reviews, counting yours and the planner's.",
+        description="Commits between super reviews; moving to [triggers.super-review] every.",
     )
     review_suggestions: int = Field(
         default=_REVIEW_LIMITS.suggestions, ge=1, description="Tasks one review may suggest."
@@ -101,6 +103,13 @@ class _FileConfig(_Config):
     )
     roles: dict[RoleName, Role] = Field(
         description="The roles agents work in, by name: the built-in ones, and your own."
+    )
+    triggers: dict[TriggerName, Trigger] = Field(
+        default_factory=dict,
+        description=(
+            "The triggers that turn events into tasks or check runs, by name: the shipped ones,"
+            " and your own."
+        ),
     )
     verification: VerificationConfig = Field(
         default=VerificationConfig(), description="How tasks are verified."
@@ -132,13 +141,21 @@ class _FileConfig(_Config):
         return ReviewLimits(
             rounds=self.review_rounds,
             suggestions=self.review_suggestions,
-            super_every=self.super_review_every,
+            super_every=_super_every(self.triggers, self.super_review_every),
             super_suggestions=self.super_review_suggestions,
             super_sample=self.super_review_sample,
         )
 
 
-LATER_TABLES = ("triggers", "mcp", "models")
+def _super_every(triggers: Mapping[str, Trigger], alias: int) -> int:
+    """The commits between super reviews: the ``every`` of the super-review trigger among
+    ``triggers``, if it has one, and otherwise ``alias``, ``super_review_every``."""
+    trigger = triggers.get(SUPER_REVIEW)
+    every = None if trigger is None else trigger.every
+    return alias if every is None else every
+
+
+LATER_TABLES = ("mcp", "models")
 """The top-level tables of a later version of orbit's settings."""
 
 LATER_VERSION = (
@@ -150,9 +167,15 @@ LATER_VERSION = (
 LIMIT_KEYS = tuple(
     key
     for key in _FileConfig.model_fields
-    if key not in {"roles", "verification", "setup", "skills"}
+    if key not in {"roles", "triggers", "verification", "setup", "skills"}
 )
 """The keys of the limits a project file sets, in order."""
+
+SUPER_REVIEW_EVERY_MOVING = (
+    "super_review_every is moving to [triggers.super-review] every; set it there."
+)
+"""The startup notice that the project file sets ``super_review_every``, an alias for a version
+of the super-review trigger's ``every``."""
 
 
 class OrbitConfig(_FileConfig):
@@ -168,6 +191,15 @@ class OrbitConfig(_FileConfig):
     skill_library: SkillLibrary = SkillLibrary()
 
 
+@dataclass(frozen=True)
+class Package:
+    """What orbit ships that a configuration is resolved over: its ``roles`` and its
+    ``triggers``, each by name, in order, the triggers' prompts as their templates' text."""
+
+    roles: Mapping[str, Role]
+    triggers: Mapping[str, Trigger] = field(default_factory=dict)
+
+
 def load_config(
     data: dict[str, Any],
     built_in: Mapping[str, Role],
@@ -177,52 +209,107 @@ def load_config(
 ) -> OrbitConfig:
     """The configuration ``data`` (the contents of the project file at ``path``, if known)
     describes over the role fields and personal roles ``user`` sets and the defaults, whose
-    roles are ``built_in``, with a notice for each personal role a project role replaces, and
-    the models each runtime takes, as ``rules`` say.
-
-    A role it names that's built in keeps the fields it doesn't set; any other role is new. Each
-    role's fields are resolved as :func:`~orbit.agent.domain.layers.resolve_roles` says; each
-    role's model is held to the models its runtime takes, and each enabled role to what its
-    runtime can do, as ``rules`` say by runtime. Raises :class:`ConfigError` naming each problem
-    if it's invalid, as it is when a role's runtime is one this version of orbit doesn't know,
-    doesn't take its model or can't do what the role asks (see
-    :func:`~orbit.agent.domain.role_runtimes.runtime_problems`), a :class:`PersonalRoleError` if the
-    personal roles are at fault, and a :class:`UserConfigError` if a model the user config sets
-    isn't one its role's runtime takes, after the project's problems.
+    roles are ``built_in``, with no triggers but those ``data`` sets, as :func:`load_layered`
+    loads it.
     """
-    return load_layered(data, built_in, user, path, rules).config
+    return load_layered(data, Package(built_in), user, path, rules).config
 
 
 @dataclass(frozen=True)
 class LayeredConfig:
     """Orbit's ``config`` in effect, with the layer each of its roles' fields came from,
-    ``role_layers``, by role and field name."""
+    ``role_layers``, by role and field name, and each of its triggers' fields, ``trigger_layers``,
+    by trigger and field name."""
 
     config: OrbitConfig
     role_layers: Mapping[str, Mapping[str, Layer]]
+    trigger_layers: Mapping[str, Mapping[str, Layer]] = field(default_factory=dict)
 
 
 def load_layered(
     data: dict[str, Any],
-    built_in: Mapping[str, Role],
+    package: Package,
     user: UserRoles = NO_USER_ROLES,
     path: str | None = None,
     rules: RuntimeRules = UNCHECKED,
 ) -> LayeredConfig:
-    """The configuration :func:`load_config` loads from ``data``, ``built_in``, ``user``,
-    ``path`` and ``rules``, with the layer each of its roles' fields came from.
+    """The configuration ``data`` (the contents of the project file at ``path``, if known)
+    describes over the role fields and personal roles ``user`` sets and the ``package``'s roles
+    and triggers, with a notice for each personal role a project role replaces, and the models
+    each runtime takes, as ``rules`` say; with the layer each of its roles' and triggers' fields
+    came from.
 
-    Raises :class:`ConfigError` as :func:`load_config` does, naming the first setting of a later
-    version of orbit ``data`` sets, if any, ahead of anything else.
+    A role it names that's built in keeps the fields it doesn't set; any other role is new. Each
+    role's fields are resolved as :func:`~orbit.agent.domain.layers.resolve_roles` says; each
+    role's model is held to the models its runtime takes, and each enabled role to what its
+    runtime can do, as ``rules`` say by runtime. A trigger it names that the package has keeps
+    the fields it doesn't set; any other trigger is new, after the package's (see
+    :func:`~orbit.agent.domain.triggers.merge_triggers`). ``super_review_every``, if it sets it,
+    is the super-review trigger's ``every`` unless that trigger sets its own, with a notice that
+    it's moving there.
+
+    Raises :class:`ConfigError` naming the first setting of a later version of orbit ``data``
+    sets, if any, ahead of anything else; otherwise naming each problem if it's invalid, as it is
+    when a trigger breaks a rule of :func:`~orbit.agent.domain.triggers.check_triggers`, or a
+    role's runtime is one this version of orbit doesn't know, doesn't take its model or can't do
+    what the role asks (see :func:`~orbit.agent.domain.role_runtimes.runtime_problems`), a
+    :class:`PersonalRoleError` if the personal roles are at fault, and a
+    :class:`UserConfigError` if a model the user config sets isn't one its role's runtime takes,
+    after the project's problems.
     """
     _refuse_later_settings(data)
     roles = data.get("roles", {})
     if not isinstance(roles, dict):
         return LayeredConfig(_validated(data), {})  # Refused: the roles aren't a table.
-    merged = merge_roles(built_in, user, ProjectRoles(Layer("project", path), roles))
+    project = Layer("project", path)
+    merged = merge_roles(package.roles, user, ProjectRoles(project, roles))
     check_personal(merged)
-    notices = tuple(replaced_note(name) for name in merged.replaced)
-    config = _validated({**data, "roles": merged.tables}, merged.personal, notices, rules.models)
+    triggers = merge_triggers(package.triggers, project, data.get("triggers", {}))
+    notices = tuple(replaced_note(name) for name in merged.replaced) + _alias_notices(data)
+    tables = {**data, "roles": merged.tables, "triggers": triggers.tables}
+    validated = _validated(tables, merged.personal, notices, rules.models)
+    config, trigger_layers = _with_alias(validated, data, triggers.layers, project)
+    check_triggers(config.triggers, config.roles)
+    _check_runtimes(config, merged, user, rules)
+    return LayeredConfig(config, merged.layers, trigger_layers)
+
+
+def _alias_notices(data: dict[str, Any]) -> tuple[str, ...]:
+    """The notice that ``super_review_every`` is moving, if ``data``, the project file's
+    contents, sets it; none otherwise."""
+    return (SUPER_REVIEW_EVERY_MOVING,) if "super_review_every" in data else ()
+
+
+def _with_alias(
+    config: OrbitConfig,
+    data: dict[str, Any],
+    layers: dict[str, dict[str, Layer]],
+    project: Layer,
+) -> tuple[OrbitConfig, dict[str, dict[str, Layer]]]:
+    """``config`` with ``super_review_every`` as its super-review trigger's ``every``, if
+    ``data``, the contents of the file in ``project``, sets it and that trigger doesn't set its
+    own there, as ``layers`` say by trigger and field, and ``layers`` with ``every`` from the
+    file; both as they are otherwise."""
+    trigger = config.triggers.get(SUPER_REVIEW)
+    if (
+        trigger is None
+        or "super_review_every" not in data
+        or layers[SUPER_REVIEW]["every"] == project
+    ):
+        return config, layers
+    aliased = trigger.model_copy(update={"every": config.super_review_every})
+    triggers = {**config.triggers, SUPER_REVIEW: aliased}
+    every = {**layers, SUPER_REVIEW: {**layers[SUPER_REVIEW], "every": project}}
+    return config.model_copy(update={"triggers": triggers}), every
+
+
+def _check_runtimes(
+    config: OrbitConfig, merged: MergedRoles, user: UserRoles, rules: RuntimeRules
+) -> None:
+    """Raise as :func:`load_layered` does if ``config``'s roles, ``merged`` across the layers
+    with the ``user``'s, ask for what their runtimes don't take or can't do, as ``rules`` say:
+    :class:`ConfigError` for the project's part, then :class:`UserConfigError` for the user
+    config's."""
     users = _users_models(merged, user)
     asks = _users_asks(merged, user)
     project_set = {
@@ -233,7 +320,6 @@ def load_layered(
         name for name, layers in merged.layers.items() if runs_on_shared_runtime(name, user, layers)
     }
     _check_users_roles(config.roles, users, asks, rules, shared)
-    return LayeredConfig(config, merged.layers)
 
 
 def _projects_part(

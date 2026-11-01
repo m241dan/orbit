@@ -12,6 +12,7 @@ from orbit.agent.domain.config import LIMIT_KEYS, OrbitConfig
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
 from orbit.agent.domain.roles import Role, names_file
 from orbit.agent.domain.skills import SkillLibrary, SkillMapping
+from orbit.agent.domain.triggers import Trigger
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import REVIEWER, SUPER_REVIEWER
 
@@ -37,20 +38,24 @@ class Written:
 class ConfigSources:
     """A workspace's configuration in effect, ``config``, with what it was resolved from: the
     layer each of its roles' fields came from, ``role_layers``, by role and field name; its
-    ``project`` file and the ``user`` config as written; and the files the package's roles'
-    instructions are in, ``package_files``, by role."""
+    ``project`` file and the ``user`` config as written; the files the package's roles'
+    instructions are in, ``package_files``, by role; the layer each of its triggers' fields came
+    from, ``trigger_layers``, by trigger and field name; and the files the package's triggers'
+    prompts are in, ``template_files``, by trigger, for those that name one."""
 
     config: OrbitConfig
     role_layers: Mapping[str, Mapping[str, Layer]]
     project: Written
     user: Written
     package_files: Mapping[str, str]
+    trigger_layers: Mapping[str, Mapping[str, Layer]] = field(default_factory=dict)
+    template_files: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class Instructions:
-    """A role's instructions in effect: their ``text``, and the ``file`` it's in as the layer
-    they came from names it, ``None`` if that gives the text itself."""
+    """A role's instructions or a trigger's prompt in effect: their ``text``, and the ``file``
+    it's in as the layer they came from names it, ``None`` if that gives the text itself."""
 
     text: str
     file: str | None
@@ -101,11 +106,11 @@ class UnknownKey(LookupError):
 
 def config_report(sources: ConfigSources, tables: Mapping[str, BaseModel]) -> ConfigReport:
     """The settings in effect that ``sources`` give, each with the layer it came from: the
-    limits, each role field by field, the verification steps, the setup, the skills by path and
-    every skill file, then each of the user config's ``tables``, by name, as read, field by
-    field."""
+    limits, each role field by field, each trigger field by field, the verification steps, the
+    setup, the skills by path and every skill file, then each of the user config's ``tables``,
+    by name, as read, field by field."""
     config, project = sources.config, sources.project
-    report = _limits(config, project) | _roles(sources)
+    report = _limits(config, project) | _roles(sources) | _triggers(sources)
     report |= _steps(config.verification.steps, project) | _setup(config, project)
     report |= _skills(config.skills, project) | _skill_files(config.skill_library)
     for name, table in tables.items():
@@ -170,6 +175,36 @@ def _given_instructions(name: str, layer: Layer, sources: ConfigSources) -> str:
         return sources.package_files[name]
     written = sources.user if layer.name == "user" else sources.project
     given: str = written.data["roles"][name]["instructions"]
+    return given
+
+
+def _triggers(sources: ConfigSources) -> ConfigReport:
+    """Each trigger in effect, field by field, each from the layer it came from."""
+    return {
+        f"triggers.{name}.{key}": Setting(
+            _trigger_field(name, key, sources), sources.trigger_layers[name][key]
+        )
+        for name in sources.config.triggers
+        for key in Trigger.model_fields
+    }
+
+
+def _trigger_field(name: str, key: str, sources: ConfigSources) -> Any:
+    """The value of trigger ``name``'s field ``key``; its prompt, if any, with the file it's
+    in."""
+    value = getattr(sources.config.triggers[name], key)
+    if key != "prompt" or value is None:
+        return value
+    given = _given_prompt(name, sources.trigger_layers[name][key], sources)
+    return Instructions(value, given if names_file(given) else None)
+
+
+def _given_prompt(name: str, layer: Layer, sources: ConfigSources) -> str:
+    """Trigger ``name``'s prompt as ``layer``, the one it came from, gives it: the package's
+    template file, if it names one, or the project file's value."""
+    if layer == PACKAGE:
+        return sources.template_files.get(name, "")
+    given: str = sources.project.data["triggers"][name]["prompt"]
     return given
 
 

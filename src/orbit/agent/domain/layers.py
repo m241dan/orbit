@@ -30,6 +30,9 @@ BELONGS_IN_PROJECT = (
 )
 """Why the user config can't set a role's field other than its model, effort and runtime."""
 
+PROJECT_TABLES = ("skills", "triggers")
+"""The tables only the project file sets, which the user config is refused for setting."""
+
 
 @dataclass(frozen=True)
 class Layer:
@@ -151,16 +154,17 @@ def load_user_roles(data: dict[str, Any], layer: Layer, built_in: Collection[str
     """The role fields ``data``, the contents of the user config in ``layer``, sets: ``[roles]``'s
     ``model``, ``effort`` and ``runtime`` for every role, and its ``[roles.<name>]`` tables' for
     each; and the personal roles it defines, each a table that names a role that isn't
-    ``built_in`` and sets more than those. Its tables but ``[roles]`` and ``[[skills]]`` are
-    ignored.
+    ``built_in`` and sets more than those. Its tables but ``[roles]``, ``[[skills]]`` and
+    ``[triggers]`` are ignored.
 
-    Raises :class:`ConfigError` naming ``skills`` if it sets ``[[skills]]``, which belong in the
-    project file, and otherwise each key that's invalid, as one setting a role's field other than
-    its model, effort and runtime is, one that breaks a personal role's rules, or one giving a
-    runtime this version of orbit doesn't know.
+    Raises :class:`ConfigError` naming ``skills`` or ``triggers`` if it sets ``[[skills]]`` or
+    ``[triggers.<name>]``, which belong in the project file, and otherwise each key that's
+    invalid, as one setting a role's field other than its model, effort and runtime is, one that
+    breaks a personal role's rules, or one giving a runtime this version of orbit doesn't know.
     """
-    if "skills" in data:
-        raise ConfigError(f"skills: {BELONGS_IN_PROJECT}")
+    project_tables = [table for table in PROJECT_TABLES if table in data]
+    if project_tables:
+        raise ConfigError(f"{project_tables[0]}: {BELONGS_IN_PROJECT}")
     try:
         table = _UserConfig.model_validate(data).roles
         roles = _UserRoles.model_validate(_sorted(table, built_in))

@@ -13,6 +13,7 @@ from orbit.agent.domain.config_report import Instructions, Setting, SkillFileTex
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
 from orbit.agent.domain.roles import Role
 from orbit.agent.external.built_in_roles import ROLE_DIRECTORY
+from orbit.agent.external.built_in_triggers import TRIGGER_DIRECTORY
 from orbit.agent.external.skill_files import SKILL_DIRECTORY
 from orbit.cli import app
 from orbit.cli.config_text import config_json, config_text, skill_map_json, skill_map_text
@@ -25,11 +26,29 @@ REVIEWER = (ROLE_DIRECTORY / "reviewer.md").read_text(encoding="utf-8").strip()
 
 REVIEWER_LINES = len(REVIEWER.splitlines())
 
+REVIEW_TEMPLATE_LINES = len(
+    (TRIGGER_DIRECTORY / "review.md").read_text(encoding="utf-8").strip().splitlines()
+)
+"""How many lines the shipped review trigger's template has."""
+
+STARTUP_FIX_TEMPLATE = (TRIGGER_DIRECTORY / "startup-fix.md").read_text(encoding="utf-8").strip()
+"""The text of the shipped startup-fix trigger's template."""
+
 SHIPPED = Path(str(SKILL_DIRECTORY))
 """The folder of the skills shipped with orbit, a folder each."""
 
 SKILL_NAMES = sorted(folder.name for folder in SHIPPED.iterdir() if folder.is_dir())
 """The names of the skills shipped with orbit, in order."""
+
+TRIGGER_NAMES = (
+    "review",
+    "super-review",
+    "configure-checks",
+    "set-up-verification",
+    "startup-check",
+    "startup-fix",
+)
+"""The names of the triggers shipped with orbit, in order."""
 
 TESTS = "".join(f"Line {number}.\n" for number in range(1, 43))
 """A skill file of 42 lines."""
@@ -203,6 +222,7 @@ def test_without_a_key_every_section_is_listed_in_groups_in_order(project: Path)
     assert [group.split(" = ")[0] for group in groups] == [
         "fix_attempts",
         *(f"roles.{name}.instructions" for name in BUILT_IN_ROLE_NAMES),
+        *(f"triggers.{name}.on" for name in TRIGGER_NAMES),
         "verification.steps",
         "setup",
         "skills",
@@ -212,6 +232,40 @@ def test_without_a_key_every_section_is_listed_in_groups_in_order(project: Path)
         "telemetry.exporter",
     ]
     assert "max_checks = 20   default" in groups[0].splitlines()
+
+
+def test_a_shipped_triggers_key_lists_its_fields_in_the_package_layer(project: Path) -> None:
+    result = show(project, "triggers.review")
+    assert result.exit_code == 0, result.output
+    assert result.stdout.splitlines() == [
+        'triggers.review.on = "task_landed"   package',
+        'triggers.review.role = "reviewer"   package',
+        "triggers.review.checks = null   default",
+        f"triggers.review.prompt = (review.md, {REVIEW_TEMPLATE_LINES} lines)   package",
+        "triggers.review.when = {}   default",
+        'triggers.review.guards = ["review-rounds"]   package',
+        "triggers.review.every = null   default",
+        "triggers.review.manual = false   default",
+        "triggers.review.label = null   default",
+        "triggers.review.draft = false   default",
+        "triggers.review.enabled = true   default",
+    ]
+
+
+def test_a_trigger_the_project_overrides_shows_its_fields_from_the_file(project: Path) -> None:
+    project_file(project, "[triggers.super-review]\nevery = 5\n")
+    result = show(project, "triggers.super-review")
+    assert result.exit_code == 0, result.output
+    lines = result.stdout.splitlines()
+    assert "triggers.super-review.every = 5   project .orbit/config.toml" in lines
+    assert 'triggers.super-review.when = {"origin": ["manual", "planner"]}   package' in lines
+
+
+def test_full_prints_a_triggers_prompt_text(project: Path) -> None:
+    result = show(project, "triggers.startup-fix.prompt", "--full")
+    assert result.stdout == (
+        f'triggers.startup-fix.prompt = """\n{STARTUP_FIX_TEMPLATE}\n"""   package\n'
+    )
 
 
 def test_the_projects_steps_and_setup_are_listed_from_its_file(project: Path) -> None:

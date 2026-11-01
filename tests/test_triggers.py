@@ -1,0 +1,319 @@
+"""Triggers: the events and guards orbit knows, a trigger's fields, the package's triggers merged
+with a project's and checked against its roles, and the rendering of a prompt template."""
+
+from typing import Any
+
+import pytest
+
+from orbit.agent.domain.config_errors import ConfigError
+from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
+from orbit.agent.domain.triggers import (
+    EVENT_NAMES,
+    EVENTS,
+    GUARD_NAMES,
+    Trigger,
+    check_triggers,
+    load_built_in_triggers,
+    merge_triggers,
+    render_template,
+    template_variables,
+)
+
+PROJECT = Layer("project", "/src/app/.orbit/config.toml")
+ROLES = ("coder", "reviewer")
+REVIEW = Trigger(
+    on="task_landed", role="reviewer", prompt="Review {commit}", guards=("review-rounds",)
+)
+CHECK = Trigger(on="session_started", when={"verification": "configured"}, checks="gate")
+PACKAGE_TRIGGERS = {"review": REVIEW, "check": CHECK}
+
+
+def loaded(fields: dict[str, Any]) -> Trigger:
+    """The trigger ``x`` of a ``triggers.toml`` giving it ``fields``."""
+    return load_built_in_triggers({"triggers": {"x": fields}})["x"]
+
+
+def problems(**fields: Any) -> str:
+    """Why the trigger ``x`` with ``fields`` is refused against :data:`ROLES`."""
+    with pytest.raises(ConfigError) as raised:
+        check_triggers({"x": Trigger(**fields)}, ROLES)
+    return str(raised.value)
+
+
+# Events and guards
+
+
+def test_the_events_are_the_records_with_their_when_fields() -> None:
+    assert EVENT_NAMES == (
+        "session_started",
+        "task_landed",
+        "task_finished",
+        "commits",
+        "startup_check_failed",
+        "manual",
+    )
+    assert {name: event.fields for name, event in EVENTS.items()} == {
+        "session_started": ("verification",),
+        "task_landed": ("role", "origin"),
+        "task_finished": ("role", "origin", "status"),
+        "commits": ("role", "origin"),
+        "startup_check_failed": ("step",),
+        "manual": (),
+    }
+
+
+def test_every_event_gives_its_trigger_and_its_own_variables() -> None:
+    assert {name: event.variables for name, event in EVENTS.items()} == {
+        "session_started": ("trigger", "checks"),
+        "task_landed": (
+            "trigger",
+            "commit",
+            "task",
+            "title",
+            "diff",
+            "missing",
+            "cap",
+            "queued",
+            "landed_since",
+            "task_skills",
+        ),
+        "task_finished": ("trigger",),
+        "commits": (
+            "trigger",
+            "commit",
+            "cap",
+            "queued",
+            "since_commits",
+            "changed_files",
+            "sample",
+        ),
+        "startup_check_failed": ("trigger", "step", "output"),
+        "manual": ("trigger", "checks"),
+    }
+
+
+def test_the_guards_are_the_records() -> None:
+    assert GUARD_NAMES == ("review-rounds", "suggestions-pending", "not-queued", "dedupe")
+
+
+# A trigger's fields
+
+
+def test_a_trigger_leaves_out_what_it_doesnt_need() -> None:
+    trigger = Trigger(on="task_finished", role="coder", prompt="Tidy up")
+    assert trigger.when == {}
+    assert trigger.guards == ()
+    assert (trigger.every, trigger.checks, trigger.label) == (None, None, None)
+    assert (trigger.manual, trigger.draft, trigger.enabled) == (False, False, True)
+
+
+def test_when_takes_a_value_or_a_list_of_values() -> None:
+    trigger = loaded(
+        {"on": "commits", "role": "coder", "prompt": "Go", "when": {"origin": ["manual"]}}
+    )
+    assert trigger.when == {"origin": ("manual",)}
+    assert loaded({"on": "task_landed", "checks": "gate", "when": {"role": "coder"}}).when == {
+        "role": "coder"
+    }
+
+
+def test_every_field_has_a_description() -> None:
+    assert all(field.description for field in Trigger.model_fields.values())
+
+
+@pytest.mark.parametrize(
+    ("fields", "problem"),
+    [
+        (
+            {"on": "landed"},
+            "triggers.x.on: landed isn't an event; the events are session_started, task_landed,"
+            " task_finished, commits, startup_check_failed, manual.",
+        ),
+        (
+            {"on": "commits", "guards": ["review-rounds", "nightly"]},
+            "triggers.x.guards: nightly isn't a guard; the guards are review-rounds,"
+            " suggestions-pending, not-queued, dedupe.",
+        ),
+        ({"on": "commits", "every": 0}, "triggers.x.every: Input should be greater than 0"),
+        ({"on": "commits", "colour": "red"}, "triggers.x.colour: Extra inputs are not permitted"),
+        ({"on": "commits", "checks": "report"}, "triggers.x.checks: Input should be 'gate'"),
+    ],
+)
+def test_a_trigger_is_refused_naming_its_field_and_value(
+    fields: dict[str, Any], problem: str
+) -> None:
+    with pytest.raises(ConfigError) as raised:
+        loaded(fields)
+    assert str(raised.value) == problem
+
+
+def test_a_triggers_name_is_a_plain_name() -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_built_in_triggers({"triggers": {"a.b": {"on": "manual"}}})
+    assert str(raised.value) == (
+        "triggers.a.b: a trigger's name is a plain name: letters, digits, - and _"
+    )
+
+
+def test_the_package_keeps_its_triggers_in_order() -> None:
+    data = {
+        "triggers": {
+            "b": {"on": "manual", "role": "coder", "prompt": "b.md"},
+            "a": {"on": "commits", "checks": "gate"},
+        }
+    }
+    assert list(load_built_in_triggers(data)) == ["b", "a"]
+
+
+# Checking triggers against the roles
+
+
+def test_valid_triggers_pass() -> None:
+    check_triggers(PACKAGE_TRIGGERS, ROLES)
+
+
+def test_an_unknown_role_is_refused_naming_it_and_the_roles() -> None:
+    assert problems(on="task_finished", role="tidier", prompt="Tidy") == (
+        "triggers.x.role: tidier isn't a role; the roles are coder, reviewer."
+    )
+
+
+def test_a_trigger_needs_a_role_or_checks() -> None:
+    assert problems(on="task_finished") == (
+        'triggers.x.role: a trigger needs a role, or checks = "gate".'
+    )
+
+
+def test_a_trigger_cant_have_both_a_role_and_checks() -> None:
+    assert problems(on="task_finished", role="coder", prompt="Go", checks="gate") == (
+        'triggers.x.checks: a trigger has a role or checks = "gate", not both.'
+    )
+
+
+def test_a_trigger_with_a_role_needs_a_prompt() -> None:
+    assert problems(on="task_finished", role="coder") == (
+        "triggers.x.prompt: a trigger with a role needs a prompt."
+    )
+
+
+def test_a_checks_trigger_takes_no_prompt() -> None:
+    assert problems(on="manual", checks="gate", prompt="Go", manual=True, label="Check") == (
+        'triggers.x.prompt: checks = "gate" queues no task, so it takes no prompt.'
+    )
+
+
+def test_a_when_field_its_event_lacks_is_refused_naming_it_and_the_fields() -> None:
+    assert problems(on="task_landed", checks="gate", when={"status": "done"}) == (
+        "triggers.x.when: status isn't a field of task_landed; its fields are role, origin."
+    )
+
+
+def test_a_when_field_of_an_event_without_fields_is_refused() -> None:
+    assert problems(on="manual", checks="gate", manual=True, label="C", when={"role": "x"}) == (
+        "triggers.x.when: role isn't a field of manual; it has none."
+    )
+
+
+def test_a_variable_its_event_doesnt_give_is_refused_naming_it_and_the_variables() -> None:
+    assert problems(on="task_finished", role="coder", prompt="Look at {diff} for {trigger}") == (
+        "triggers.x.prompt: {diff} isn't a variable of task_finished; its variables are {trigger}."
+    )
+
+
+def test_each_unknown_variable_is_refused_once() -> None:
+    message = problems(on="startup_check_failed", role="coder", prompt="{a} {b} {a} {step}")
+    assert message.splitlines() == [
+        "triggers.x.prompt: {a} isn't a variable of startup_check_failed; its variables are"
+        " {trigger}, {step}, {output}.",
+        "triggers.x.prompt: {b} isn't a variable of startup_check_failed; its variables are"
+        " {trigger}, {step}, {output}.",
+    ]
+
+
+def test_every_needs_the_commits_event() -> None:
+    assert problems(on="task_landed", role="coder", prompt="Go", every=5) == (
+        'triggers.x.every: every = 5 needs on = "commits".'
+    )
+
+
+def test_a_manual_trigger_needs_a_label() -> None:
+    assert problems(on="manual", role="coder", prompt="Go", manual=True) == (
+        "triggers.x.label: manual = true needs a label."
+    )
+    assert problems(on="manual", role="coder", prompt="Go", manual=True, label="") == (
+        "triggers.x.label: manual = true needs a label."
+    )
+
+
+def test_every_problem_of_every_trigger_is_named_on_a_line_of_its_own() -> None:
+    triggers = {
+        "a": Trigger(on="task_landed", role="nope", prompt="Go"),
+        "b": Trigger(on="commits", role="coder", prompt="Go", manual=True),
+    }
+    with pytest.raises(ConfigError) as raised:
+        check_triggers(triggers, ROLES)
+    assert str(raised.value).splitlines() == [
+        "triggers.a.role: nope isn't a role; the roles are coder, reviewer.",
+        "triggers.b.label: manual = true needs a label.",
+    ]
+
+
+# Merging the package's triggers with the project's
+
+
+def test_without_a_projects_triggers_the_packages_are_merged_from_the_package() -> None:
+    merged = merge_triggers(PACKAGE_TRIGGERS, PROJECT, {})
+    assert {name: Trigger(**table) for name, table in merged.tables.items()} == PACKAGE_TRIGGERS
+    assert merged.layers["review"]["on"] == PACKAGE
+    assert merged.layers["review"]["guards"] == PACKAGE
+    assert merged.layers["review"]["every"] == DEFAULT
+    assert set(merged.layers["review"]) == set(Trigger.model_fields)
+
+
+def test_a_project_overrides_only_the_fields_it_sets() -> None:
+    merged = merge_triggers(PACKAGE_TRIGGERS, PROJECT, {"review": {"enabled": False}})
+    assert Trigger(**merged.tables["review"]) == REVIEW.model_copy(update={"enabled": False})
+    assert merged.layers["review"]["enabled"] == PROJECT
+    assert merged.layers["review"]["prompt"] == PACKAGE
+
+
+def test_a_project_adds_its_own_triggers_after_the_packages() -> None:
+    nightly = {"on": "task_finished", "role": "coder", "prompt": "Tidy up"}
+    merged = merge_triggers(PACKAGE_TRIGGERS, PROJECT, {"nightly": nightly, "check": {}})
+    assert list(merged.tables) == ["review", "check", "nightly"]
+    assert merged.tables["nightly"] == nightly
+    assert merged.layers["nightly"]["role"] == PROJECT
+    assert merged.layers["nightly"]["guards"] == DEFAULT
+
+
+def test_what_isnt_a_table_is_left_as_it_is_for_validation_to_refuse() -> None:
+    assert merge_triggers(PACKAGE_TRIGGERS, PROJECT, 5).tables == 5
+    assert merge_triggers(PACKAGE_TRIGGERS, PROJECT, {"review": 5}).tables["review"] == 5
+
+
+# Templates
+
+
+def test_a_templates_variables_are_its_names_in_braces_each_once() -> None:
+    assert template_variables("{a} and {b_c}, {a}; {Not} {not one} {}") == ("a", "b_c")
+
+
+def test_rendering_puts_each_value_in_its_variables_place() -> None:
+    assert render_template("Review {commit}: {title}", {"commit": "abc", "title": "T"}) == (
+        "Review abc: T"
+    )
+
+
+def test_rendering_drops_a_paragraph_left_empty() -> None:
+    template = "Title\n\n{missing}\n\nCap {cap}\n\n{queued}"
+    assert render_template(template, {"missing": "", "cap": "5", "queued": " \n"}) == (
+        "Title\n\nCap 5"
+    )
+
+
+def test_a_value_of_several_paragraphs_stays_whole() -> None:
+    assert render_template("A\n\n{diff}", {"diff": "x\n\n\n\ny"}) == "A\n\nx\n\n\n\ny"
+
+
+def test_braces_in_values_and_other_braces_are_left_as_they_are() -> None:
+    assert render_template("{a} {B} {}", {"a": "{b}"}) == "{b} {B} {}"

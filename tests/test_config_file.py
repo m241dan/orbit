@@ -12,7 +12,7 @@ import pytest
 from orbit.agent.application.ports import ConfigWriteFailed
 from orbit.agent.domain import review_sample
 from orbit.agent.domain.checks import ChecksProposal, Setup
-from orbit.agent.domain.config import OrbitConfig
+from orbit.agent.domain.config import SUPER_REVIEW_EVERY_MOVING, OrbitConfig
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.config_report import Written
 from orbit.agent.domain.config_update import (
@@ -26,6 +26,7 @@ from orbit.agent.domain.runtimes import CLAUDE, KIRO, RUNTIME_NAMES, resolve_mod
 from orbit.agent.domain.skills import SkillMapping
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
+from orbit.agent.external.built_in_triggers import read_built_in_triggers
 from orbit.agent.external.claude_cli import ClaudeCliRunner
 from orbit.agent.external.config_file import (
     CONFIG_PATH,
@@ -54,7 +55,12 @@ MODELS = {CLAUDE: CLAUDE_MODELS, KIRO: KIRO_MODELS}
 SKILLS = read_skill_library(str(Path(__file__).parent))
 """The skills in effect in a workspace without skills of its own: the package's."""
 
-DEFAULTS = OrbitConfig(roles=BUILT_IN_ROLES, models=MODELS, skill_library=SKILLS)
+BUILT_IN_TRIGGERS = read_built_in_triggers()
+"""The triggers shipped with orbit, their prompts their templates' text."""
+
+DEFAULTS = OrbitConfig(
+    roles=BUILT_IN_ROLES, triggers=BUILT_IN_TRIGGERS, models=MODELS, skill_library=SKILLS
+)
 """The configuration in effect without a project file or a user config."""
 
 SHIPPED_SKILLS = {
@@ -917,6 +923,63 @@ def test_an_instructions_file_no_role_names_changes_nothing(tmp_path: Path) -> N
     write(tmp_path, "fix_attempts = 2\n")
     write_instructions(tmp_path, "roles/reviewer.md", "Approve everything.\n")
     assert read_config(str(tmp_path), tmp_path / "config").roles == BUILT_IN_ROLES
+
+
+def test_without_a_file_the_triggers_are_the_six_orbit_ships(tmp_path: Path) -> None:
+    triggers = read_config(str(tmp_path), tmp_path / "config").triggers
+    assert list(triggers) == [
+        "review",
+        "super-review",
+        "configure-checks",
+        "set-up-verification",
+        "startup-check",
+        "startup-fix",
+    ]
+    assert triggers == BUILT_IN_TRIGGERS
+
+
+def test_a_trigger_is_given_the_text_of_the_markdown_file_its_prompt_names(
+    tmp_path: Path,
+) -> None:
+    write(tmp_path, '[triggers.review]\nprompt = "triggers/review.md"\n')
+    write_instructions(tmp_path, "triggers/review.md", "Review {commit}.\n\n{diff}\n")
+    review = read_config(str(tmp_path), tmp_path / "config").triggers["review"]
+    assert review == BUILT_IN_TRIGGERS["review"].model_copy(
+        update={"prompt": "Review {commit}.\n\n{diff}"}
+    )
+
+
+def test_a_missing_prompt_file_names_the_file_and_the_trigger(tmp_path: Path) -> None:
+    path = write(tmp_path, '[triggers.review]\nprompt = "triggers/missing.md"\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), tmp_path / "config")
+    assert str(raised.value).startswith(f"{path}: triggers.review.prompt: ")
+    assert ".orbit/triggers/missing.md" in str(raised.value)
+
+
+def test_an_invalid_trigger_names_the_file(tmp_path: Path) -> None:
+    path = write(tmp_path, '[triggers.nightly]\non = "task_finished"\nrole = "tidier"\n')
+    with pytest.raises(ConfigError, match=f"^{re.escape(str(path))}: triggers.nightly.role: "):
+        read_config(str(tmp_path), tmp_path / "config")
+
+
+def test_triggers_in_the_user_config_name_it(tmp_path: Path, config_dir: Path) -> None:
+    path = write_user_config(config_dir, '[triggers.nightly]\non = "task_finished"\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value) == (
+        f"{path}: triggers: belongs in the project's .orbit/config.toml; the user config sets"
+        " only a role's model, effort and runtime"
+    )
+
+
+def test_super_review_every_in_the_file_is_the_super_reviews_every_with_a_notice(
+    tmp_path: Path,
+) -> None:
+    write(tmp_path, "super_review_every = 7\n")
+    config = read_config(str(tmp_path), tmp_path / "config")
+    assert config.triggers["super-review"].every == 7
+    assert config.notices == (SUPER_REVIEW_EVERY_MOVING,)
 
 
 def test_an_instructions_file_is_ignored_without_a_config_file(tmp_path: Path) -> None:
