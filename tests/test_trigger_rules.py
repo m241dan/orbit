@@ -63,23 +63,33 @@ def test_a_trigger_whose_role_is_not_enabled_does_not_listen() -> None:
     assert names(listening(triggers, LANDED, ROLES, None)) == ["look"]
 
 
-def test_a_trigger_running_the_checks_listens_only_on_session_started() -> None:
+def test_a_trigger_running_the_task_checks_listens_only_on_session_started() -> None:
     started = TriggerEvent("session_started", {"verification": "configured"})
-    gates = {
-        "landed": Trigger(on="task_landed", checks="gate"),
-        "started": Trigger(on="session_started", checks="gate"),
-        "failed": Trigger(on="startup_check_failed", checks="gate"),
+    checks = {
+        "landed": Trigger(on="task_landed", checks="task-checks"),
+        "started": Trigger(on="session_started", checks="task-checks"),
+        "failed": Trigger(on="startup_check_failed", checks="task-checks"),
     }
-    assert listening(gates, LANDED, ROLES, None) == []
-    assert names(listening(gates, started, ROLES, None)) == ["started"]
+    assert listening(checks, LANDED, ROLES, None) == []
+    assert names(listening(checks, started, ROLES, None)) == ["started"]
     failed = TriggerEvent("startup_check_failed", {"step": "Lint"})
-    assert listening(gates, failed, ROLES, None) == []
+    assert listening(checks, failed, ROLES, None) == []
 
 
-def test_a_trigger_running_the_checks_listens_whatever_roles_are_enabled() -> None:
+def test_a_trigger_running_the_task_checks_listens_whatever_roles_are_enabled() -> None:
     started = TriggerEvent("session_started", {"verification": "configured"})
-    gate = Trigger(on="session_started", checks="gate", when={"verification": "configured"})
-    assert names(listening({"gate": gate}, started, (), None)) == ["gate"]
+    check = Trigger(on="session_started", checks="task-checks", when={"verification": "configured"})
+    assert names(listening({"check": check}, started, (), None)) == ["check"]
+
+
+def test_a_trigger_running_a_named_set_doesnt_listen_yet() -> None:
+    started = TriggerEvent("session_started", {"verification": "configured"})
+    sets = {
+        "started": Trigger(on="session_started", checks="slow"),
+        "landed": Trigger(on="task_landed", checks="slow"),
+    }
+    assert listening(sets, started, ROLES, None) == []
+    assert listening(sets, LANDED, ROLES, None) == []
 
 
 def test_a_trigger_does_not_listen_to_an_event_a_task_it_queued_caused() -> None:

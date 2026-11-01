@@ -665,8 +665,8 @@ Edge cases:
 
 ### Verification steps
 
-When an agent claims its task is done, orbit runs the verification steps in the working directory,
-in order, stopping at the first failure. While that happens the task shows 🔍, the conversation notes
+When an agent claims its task is done, orbit runs the task checks (the verification steps in no
+set, below) in the working directory, in order, stopping at the first failure. While that happens the task shows 🔍, the conversation notes
 each step as it starts and ends, and the panel under the task list shows each step's progress on the
 current task (⏳ pending, ◜ running (spinning) with its elapsed time, ✅ passed, ❌ failed,
 🛑 cancelled, ⏩ skipped). Each step is a command that must exit successfully.
@@ -680,6 +680,30 @@ run without a shell):
 name = "Ruff lint"
 command = ["uv", "run", "ruff", "check"]
 ```
+
+A step that sets `set = "<name>"` joins a named set instead. The steps in no set are the **task
+checks**: they verify every task, an agent's `run_check` and its task's list of checks take only
+them, and they run as the startup check. A set runs only when a trigger names it with
+`checks = "<name>"` (see [Triggers](#triggers)). A set's own settings go in a
+`[verification.sets.<name>]` table:
+
+```toml
+[[verification.steps]]
+name = "Mutation tests"
+command = ["uv", "run", "mutmut", "run"]
+set = "mutation"
+
+[verification.sets.mutation]
+holds_merges = true
+```
+
+`holds_merges` says whether the set's failure holds merges until a fix lands; left out, it only
+reports. A set's name is a plain name (letters, digits, `-` and `_`) other than `task-checks`,
+which names the task checks. A `[verification.sets.<name>]` table for a set no step is in, and a
+trigger whose `checks` names neither `task-checks` nor a set a step is in, are refused at load,
+naming the setting; a set no enabled trigger runs is allowed, with a notice as the workspace opens
+(`The set mutation has no trigger, so it never runs.`). This version reads sets but doesn't run
+them yet. A project with no `set` anywhere has only task checks, as before.
 
 Orbit's own [`.orbit/config.toml`](.orbit/config.toml) lists six, quick ones first so a failure
 shows up in seconds:
@@ -696,9 +720,9 @@ shows up in seconds:
    `# #lizard forgives(parameter_count): <why>` on its signature.
 6. Unit tests with 100% coverage: `uv run pytest --cov --cov-fail-under=100`
 
-**Startup check.** When orbit opens a workspace with verification on and at least one step
-configured, the `startup-check` trigger (see [Triggers](#triggers)) runs the steps once in the
-background against the base commit, so a broken setup shows up while you type your first prompt
+**Startup check.** When orbit opens a workspace with verification on and at least one task check
+configured, the `startup-check` trigger (see [Triggers](#triggers)) runs the task checks once in
+the background against the base commit, so a broken setup shows up while you type your first prompt
 rather than on the first task; switching sessions doesn't run them again. It runs in a
 read-only snapshot of the base (the same kind reviews use, under `.git/orbit`), set up with the
 project's setup command first, so it never races with an agent in the worktree; outside a git
@@ -711,11 +735,11 @@ the conversation notes `✅ Startup check passed`, or on a failure the step that
 if the setup command did) and its output, with a 📝 draft task "Fix failing check:
 <step>" whose prompt holds that output, from the `startup-fix` trigger (its origin
 `startup-fix`; none while the `coder` is disabled), and a reminder that `ctrl+e` reconfigures the
-steps if they're what's wrong. `--no-verify` skips it, as does having no steps, and
+steps if they're what's wrong. `--no-verify` skips it, as does having no task checks, and
 `[triggers.startup-check] enabled = false` turns it off, as
 `[triggers.startup-fix] enabled = false` does the draft.
 
-With no steps configured, orbit sets them up with you before any task runs. The conversation says
+With no task checks configured, orbit sets them up with you before any task runs. The conversation says
 so at startup (`No verification steps configured. Press ctrl+e to set them up.`), and the
 `set-up-verification` trigger (see [Triggers](#triggers)) queues a configurator task first and
 runs it, as a confirmed `ctrl+e` does, so its agent works out the checks with you (see
@@ -1634,7 +1658,8 @@ notices say so: `The project's role helper replaces your personal role of that n
 
 ### Triggers
 
-A **trigger** turns an event into a task for a role, or into a run of the verification steps.
+A **trigger** turns an event into a task for a role, or into a run of checks: the task checks, or
+a named set of verification steps.
 Orbit ships triggers that describe what it does, and a project changes them, or adds its own,
 with `[triggers.<name>]` tables in `.orbit/config.toml`. A task's work landing fires the
 `task_landed` triggers and counts toward the `commits` ones, and a task finishing, however it
@@ -1649,8 +1674,8 @@ does, which fires `configure-checks` by hand, unless one is queued or running al
 session was saved with it, which runs instead (see [Verification steps](#verification-steps)).
 `task_landed` and `task_finished` are
 the work lane's tasks' (a review's end isn't one), landings count toward the `commits` triggers
-only while reviews are on, as the review lane counts them, and a trigger with `checks` fires only
-on `session_started`.
+only while reviews are on, as the review lane counts them, and a trigger with
+`checks = "task-checks"` fires only on `session_started`; one naming a set doesn't fire yet.
 
 The shipped triggers are data in
 [`src/orbit/agent/external/triggers/`](src/orbit/agent/external/triggers/): `triggers.toml` has a
@@ -1662,7 +1687,7 @@ The shipped triggers are data in
 | `super-review` | `commits` | `origin = ["manual", "planner"]` | a `super-reviewer` task, from `super-review.md` | `every = 10`, guard `suggestions-pending`, manual as `Super review` |
 | `configure-checks` | `manual` | every one | a `configurator` task, from `configure-checks.md` | manual as `Set up checks` |
 | `set-up-verification` | `session_started` | `verification = "missing"` | a `configurator` task, from `configure-checks.md` | guard `not-queued`, runs at once, as `ctrl+e`'s does |
-| `startup-check` | `session_started` | `verification = "configured"` | runs the verification steps, `checks = "gate"` | |
+| `startup-check` | `session_started` | `verification = "configured"` | runs the task checks, `checks = "task-checks"` | |
 | `startup-fix` | `startup_check_failed` | every one | a `coder` task, from `startup-fix.md` | `draft = true` |
 
 A trigger's fields:
@@ -1672,10 +1697,11 @@ A trigger's fields:
   `.md` is the path of a Markdown file under `.orbit/` whose text is the prompt
   (`prompt = "triggers/tidy.md"` reads `.orbit/triggers/tidy.md`), and anything else is the text
   itself, as a role's `instructions` are. A project's `prompt` replaces a shipped template whole.
-- `checks`: `"gate"` in place of a role, to run the verification steps rather than queue a task:
-  they run as the startup check, once, shown in the verification panel and as `checker`, not in
-  the task list. A trigger has a role or `checks`, not both; a role needs a prompt, and `checks`
-  takes none.
+- `checks`: in place of a role, the checks it runs rather than queue a task: `"task-checks"`, or a
+  named set (see [Verification steps](#verification-steps)). The task checks run as the startup
+  check, once, shown in the verification panel and as `checker`, not in the task list.
+  `"gate"`, their old name, is read as `"task-checks"`. A trigger has a role or `checks`, not
+  both; a role needs a prompt, and `checks` takes none.
 - `when`: the events it takes, by their fields, each a value or a list of values, such as
   `when = { origin = ["manual", "planner"] }` for your own tasks' and the planner's; left out,
   every one.
@@ -2042,8 +2068,8 @@ touch `.orbit/config.toml`, and writes no reference config by itself; with `--up
 `orbit config show` prints the configuration orbit resolves for a workspace (the current
 directory's, or the one `-C PATH` names, picked as `orbit chat` picks it) from this machine's
 files, each value with the layer it came from: the limits, each role field by field, each
-trigger field by field, the verification steps, the setup, the `[[skills]]` entries, every skill
-file, and your `config.toml`'s `[storage]`, `[server]` and `[telemetry]` (the config directory is
+trigger field by field, the verification steps and their sets' tables, the setup, the
+`[[skills]]` entries, every skill file, and your `config.toml`'s `[storage]`, `[server]` and `[telemetry]` (the config directory is
 `--config-dir`, as for `orbit chat`). It needs no running `orbit serve`, and writes nothing. Each
 value is a line, `<key> = <value>   <layer>`, the value as JSON, with the limits, each role, each
 trigger, each skill's files and each other section in groups of their own:
@@ -2071,6 +2097,10 @@ role's instructions and a trigger's prompt show as the file they're in and their
 gives itself; `--full` prints their text instead, between lines of `"""`. Each trigger is listed
 field by field as `triggers.<name>.<field>`, a field the shipped trigger sets from `package`, one
 your `.orbit/config.toml` sets from `project`, and the rest from `default`.
+
+The verification steps are numbered from 1, each with its `set`, `verification.steps.1.set`
+(`null` for a task check), and each set's table field by field as
+`verification.sets.<name>.holds_merges`, or `verification.sets = {}   default` without any.
 
 The `[[skills]]` entries are numbered from 1, as the verification steps are, `skills.1.paths`
 and `skills.1.use` from `.orbit/config.toml`, or `skills = []   default` without any. Then every

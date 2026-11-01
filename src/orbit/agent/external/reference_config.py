@@ -14,7 +14,7 @@ from typing import Any
 import tomlkit
 from pydantic import BaseModel, TypeAdapter
 
-from orbit.agent.domain.checks import Setup, VerificationConfig
+from orbit.agent.domain.checks import Setup, VerificationConfig, VerificationSet
 from orbit.agent.domain.config import LIMIT_KEYS, OrbitConfig, load_config
 from orbit.agent.domain.config_update import FOR_EXAMPLE
 from orbit.agent.domain.roles import Role
@@ -36,7 +36,10 @@ HEADER = (
     "Uncomment the settings you change; the others keep their defaults.",
 )
 
-EXAMPLE_STEP = VerificationStep("Tests", ("uv", "run", "pytest"))
+EXAMPLE_SET = "mutation"
+EXAMPLE_STEP = VerificationStep("Mutation tests", ("uv", "run", "mutmut", "run"), set=EXAMPLE_SET)
+EXAMPLE_SET_FIELDS = VerificationSet(holds_merges=True)
+"""The example of a verification step, in a named set, and of that set's table."""
 EXAMPLE_SETUP = Setup(command=("uv", "sync"), watch=("uv.lock",))
 EXAMPLE_ROLE = "security-reviewer"
 EXAMPLE_ROLE_FIELDS = Role(
@@ -96,7 +99,8 @@ explaining it."""
 
 def reference_config() -> str:
     """The reference config: a short header; the limits at their defaults; examples of a
-    verification step and a setup; each built-in role's table with every field at its shipped
+    verification step in a named set, of that set's table, and of a setup; each built-in role's
+    table with every field at its shipped
     value, a list too long for a line in short; an example of a role of a project's own; each
     shipped trigger's table with every field at its shipped value; an example of skills by path;
     and the settings of a later version of orbit under :data:`LATER_HEADING`. Everything is
@@ -106,12 +110,12 @@ def reference_config() -> str:
     files = read_instruction_files()
     templates = read_template_files()
     config = _descriptions(OrbitConfig)
+    verification = _descriptions(VerificationConfig)
     sections = [
         _comments(HEADER),
         _limits(load_config({}, roles), config),
-        _example(
-            _descriptions(VerificationConfig)["steps"], "[[verification.steps]]", EXAMPLE_STEP
-        ),
+        _example(verification["steps"], "[[verification.steps]]", EXAMPLE_STEP),
+        _example(verification["sets"], f"[verification.sets.{EXAMPLE_SET}]", EXAMPLE_SET_FIELDS),
         _example(config["setup"], "[setup]", EXAMPLE_SETUP),
         _comments([config["roles"]]),
         *(_built_in(name, role, files[name]) for name, role in roles.items()),

@@ -18,7 +18,7 @@
 # Code files a super review reads besides those changed since the last one; 0, none.
 # super_review_sample = 10
 
-# The steps that verify a task, run in order; with none, nothing is verified.
+# The verification steps, in order; the task checks, in no set, verify every task.
 # Quick checks first, so a failure shows up in seconds rather than after the tests.
 [[verification.steps]]
 name = "Ruff lint"
@@ -42,9 +42,17 @@ command = ["uv", "run", "lint-imports"]
 name = "Code quality (Lizard)"
 command = ["uv", "run", "lizard", "src", "tests", "-w", "-C", "6", "-L", "100"]
 
+# The slowest check, but a task check like the rest, so every task runs it. A check to run
+# less often would join a named set, which a trigger runs:
+# set = "<name>"
 [[verification.steps]]
 name = "Unit tests with 100% coverage"
 command = ["uv", "run", "pytest", "--cov", "--cov-fail-under=100"]
+
+# The named sets steps are in, by name; a trigger runs one with checks = "<name>". For example:
+# [verification.sets.mutation]
+# Whether its failure holds merges until a fix lands; otherwise it only reports.
+# holds_merges = true
 
 # How the coder's worktree is set up; with none, nothing is.
 # Bring the worktree's environment in line with the lock file whenever it changes.
@@ -290,7 +298,7 @@ watch = ["uv.lock"]
 # on = "task_landed"
 # The role of the task it queues.
 # role = "reviewer"
-# Instead of a role, "gate" to run the verification steps rather than queue a task.
+# Instead of a role, the checks it runs: "task-checks", or a named set.
 # checks: unset
 # The task's prompt: the text, or a Markdown file under .orbit/ it names.
 # prompt: orbit's own review.md
@@ -314,7 +322,7 @@ watch = ["uv.lock"]
 # on = "commits"
 # The role of the task it queues.
 # role = "super-reviewer"
-# Instead of a role, "gate" to run the verification steps rather than queue a task.
+# Instead of a role, the checks it runs: "task-checks", or a named set.
 # checks: unset
 # The task's prompt: the text, or a Markdown file under .orbit/ it names.
 # prompt: orbit's own super-review.md
@@ -338,7 +346,7 @@ watch = ["uv.lock"]
 # on = "manual"
 # The role of the task it queues.
 # role = "configurator"
-# Instead of a role, "gate" to run the verification steps rather than queue a task.
+# Instead of a role, the checks it runs: "task-checks", or a named set.
 # checks: unset
 # The task's prompt: the text, or a Markdown file under .orbit/ it names.
 # prompt: orbit's own configure-checks.md
@@ -362,7 +370,7 @@ watch = ["uv.lock"]
 # on = "session_started"
 # The role of the task it queues.
 # role = "configurator"
-# Instead of a role, "gate" to run the verification steps rather than queue a task.
+# Instead of a role, the checks it runs: "task-checks", or a named set.
 # checks: unset
 # The task's prompt: the text, or a Markdown file under .orbit/ it names.
 # prompt: orbit's own configure-checks.md
@@ -386,8 +394,8 @@ watch = ["uv.lock"]
 # on = "session_started"
 # The role of the task it queues.
 # role: unset
-# Instead of a role, "gate" to run the verification steps rather than queue a task.
-# checks = "gate"
+# Instead of a role, the checks it runs: "task-checks", or a named set.
+# checks = "task-checks"
 # The task's prompt: the text, or a Markdown file under .orbit/ it names.
 # prompt: unset
 # The events it takes, by their fields, each a value or a list of values.
@@ -410,7 +418,7 @@ watch = ["uv.lock"]
 # on = "startup_check_failed"
 # The role of the task it queues.
 # role = "coder"
-# Instead of a role, "gate" to run the verification steps rather than queue a task.
+# Instead of a role, the checks it runs: "task-checks", or a named set.
 # checks: unset
 # The task's prompt: the text, or a Markdown file under .orbit/ it names.
 # prompt: orbit's own startup-fix.md

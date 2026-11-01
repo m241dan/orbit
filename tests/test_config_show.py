@@ -278,8 +278,26 @@ def test_the_projects_steps_and_setup_are_listed_from_its_file(project: Path) ->
     assert result.stdout == (
         'verification.steps.1.name = "Lint"   project .orbit/config.toml\n'
         'verification.steps.1.command = ["ruff", "check"]   project .orbit/config.toml\n'
+        "verification.steps.1.set = null   project .orbit/config.toml\n"
+        "verification.sets = {}   default\n"
     )
     assert show(project, "setup.watch").stdout == "setup.watch = []   default\n"
+
+
+def test_the_projects_sets_are_listed_with_its_steps(project: Path) -> None:
+    project_file(
+        project,
+        '[[verification.steps]]\nname = "Stress"\ncommand = ["stress"]\nset = "stress"\n\n'
+        "[verification.sets.stress]\nholds_merges = true\n\n"
+        '[triggers.nightly]\non = "commits"\nchecks = "stress"\n',
+    )
+    result = show(project, "verification")
+    assert result.stdout == (
+        'verification.steps.1.name = "Stress"   project .orbit/config.toml\n'
+        'verification.steps.1.command = ["stress"]   project .orbit/config.toml\n'
+        'verification.steps.1.set = "stress"   project .orbit/config.toml\n'
+        "verification.sets.stress.holds_merges = true   project .orbit/config.toml\n"
+    )
 
 
 def test_instructions_show_their_file_and_length(project: Path) -> None:

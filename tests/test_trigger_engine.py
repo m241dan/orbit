@@ -466,7 +466,9 @@ async def test_each_counted_trigger_renders_its_own_name_and_is_booked_apart() -
 
 LINT = VerificationStep("Lint", ("ruff", "check"))
 SETUP = Setup(command=("uv", "sync"))
-GATE = Trigger(on="session_started", checks="gate", when={"verification": "configured"})
+STARTUP_CHECK = Trigger(
+    on="session_started", checks="task-checks", when={"verification": "configured"}
+)
 
 
 def hello(**fields: object) -> Trigger:
@@ -486,7 +488,7 @@ def hello(**fields: object) -> Trigger:
 async def test_opening_with_steps_runs_the_checks_of_a_trigger_running_them_queuing_nothing() -> (
     None
 ):
-    engine = Engine({"startup-check": GATE})
+    engine = Engine({"startup-check": STARTUP_CHECK})
     assert await engine.engine.started((LINT,)) == ()
     assert engine.checks_run == 1
     assert engine.board.tasks == ()
@@ -542,14 +544,16 @@ async def test_opening_with_verification_off_is_told_nothing_is_configured() -> 
 
 
 async def test_the_triggers_on_opening_each_fire_in_their_order() -> None:
-    engine = Engine({"hello": hello(), "startup-check": GATE, "bye": hello(prompt="Bye")})
+    engine = Engine({"hello": hello(), "startup-check": STARTUP_CHECK, "bye": hello(prompt="Bye")})
     await engine.engine.started((LINT,))
     assert [prompt for _, _, _, prompt in engine.shown()] == ["Say hello", "Bye"]
     assert engine.checks_run == 1
 
 
 async def test_a_guard_holds_back_a_trigger_running_the_checks() -> None:
-    engine = Engine({"startup-check": GATE.model_copy(update={"guards": ("suggestions-pending",)})})
+    engine = Engine(
+        {"startup-check": STARTUP_CHECK.model_copy(update={"guards": ("suggestions-pending",)})}
+    )
     review = TaskSpec(prompt="Review commit c0", role=REVIEWER)
     engine.board.add_triggered(review, "review", "review")
     await engine.engine.started((LINT,))
@@ -557,7 +561,7 @@ async def test_a_guard_holds_back_a_trigger_running_the_checks() -> None:
 
 
 async def test_a_disabled_trigger_running_the_checks_runs_nothing() -> None:
-    engine = Engine({"startup-check": GATE.model_copy(update={"enabled": False})})
+    engine = Engine({"startup-check": STARTUP_CHECK.model_copy(update={"enabled": False})})
     await engine.engine.started((LINT,))
     assert engine.checks_run == 0
 

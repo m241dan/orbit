@@ -13,7 +13,7 @@ board before the landing's own review is queued, and has those that fire, or one
 review the whole codebase at the commit, each task booked into that review's batches.
 
 The host raises ``session_started`` as it opens the workspace with its session, whose triggers
-with ``checks = "gate"`` run the startup check, and the startup check raises
+with ``checks = "task-checks"`` run the startup check, and the startup check raises
 ``startup_check_failed`` for the step that failed. ctrl+e fires ``configure-checks`` by hand, on
 ``manual``.
 
@@ -79,7 +79,7 @@ Kick = Callable[[str], None]
 itself."""
 
 RunChecks = Callable[[], None]
-"""What runs the verification steps, as a trigger with ``checks = "gate"`` asks."""
+"""What runs the task checks, as a trigger with ``checks = "task-checks"`` asks."""
 
 REVIEW_SKIPPED = "Review skipped"
 TRIGGERS_SKIPPED = "Triggers skipped"
@@ -126,8 +126,8 @@ def _no_checks() -> None:
 @dataclass(frozen=True)
 class TriggerHooks:
     """What a :class:`TriggerEngine` acts through: ``kick``, which runs the tasks waiting in a
-    role's lane if it starts by itself, ``run_checks``, which runs the verification steps as a
-    trigger with ``checks = "gate"`` asks, and the session's ``gate``, which says what
+    role's lane if it starts by itself, ``run_checks``, which runs the task checks as a trigger
+    with ``checks = "task-checks"`` asks, and the session's ``gate``, which says what
     verification is."""
 
     kick: Kick = _no_kick
@@ -150,8 +150,8 @@ async def _given(values: Mapping[str, str]) -> Mapping[str, str]:
 
 class TriggerEngine:
     """Fires the triggers of ``desk``'s agents on events, as they stand as each is raised,
-    queuing their tasks on ``tasks``' board, or for those with ``checks = "gate"`` having the
-    ``hooks``' ``run_checks`` run the verification steps, and runs those tasks when asked, with
+    queuing their tasks on ``tasks``' board, or for those with ``checks = "task-checks"`` having
+    the ``hooks``' ``run_checks`` run the task checks, and runs those tasks when asked, with
     their ``kick``, each in its role's lane if that starts by itself. While their ``gate`` says
     verification is missing, each task it queues but a configurator's is noted as waiting.
 
@@ -167,9 +167,10 @@ class TriggerEngine:
 
     async def started(self, steps: Sequence[VerificationStep] | None) -> tuple[str, ...]:
         """Raise ``session_started``: orbit opened the workspace with its session, verifying
-        tasks with ``steps``, none while verification is off, which give its ``verification``
-        and, with the tree's setup, its ``{checks}``. Those of its triggers with ``checks =
-        "gate"`` run the steps. Returns the ids of the tasks the others queued."""
+        tasks with ``steps``, the task checks, none while verification is off, which give its
+        ``verification`` and, with the tree's setup, its ``{checks}``. Those of its triggers with
+        ``checks = "task-checks"`` run the steps. Returns the ids of the tasks the others
+        queued."""
         fields = {"verification": verification_state(steps)}
         event = TriggerEvent(SESSION_STARTED, fields)
         return await self.fire(event, partial(_given, self._checks(steps or ())))

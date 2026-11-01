@@ -25,7 +25,7 @@ ROLES = ("coder", "reviewer")
 REVIEW = Trigger(
     on="task_landed", role="reviewer", prompt="Review {commit}", guards=("review-rounds",)
 )
-CHECK = Trigger(on="session_started", when={"verification": "configured"}, checks="gate")
+CHECK = Trigger(on="session_started", when={"verification": "configured"}, checks="task-checks")
 PACKAGE_TRIGGERS = {"review": REVIEW, "check": CHECK}
 
 
@@ -117,7 +117,7 @@ def test_when_takes_a_value_or_a_list_of_values() -> None:
         {"on": "commits", "role": "coder", "prompt": "Go", "when": {"origin": ["manual"]}}
     )
     assert trigger.when == {"origin": ("manual",)}
-    assert loaded({"on": "task_landed", "checks": "gate", "when": {"role": "coder"}}).when == {
+    assert loaded({"on": "task_landed", "checks": "slow", "when": {"role": "coder"}}).when == {
         "role": "coder"
     }
 
@@ -141,7 +141,7 @@ def test_every_field_has_a_description() -> None:
         ),
         ({"on": "commits", "every": 0}, "triggers.x.every: Input should be greater than 0"),
         ({"on": "commits", "colour": "red"}, "triggers.x.colour: Extra inputs are not permitted"),
-        ({"on": "commits", "checks": "report"}, "triggers.x.checks: Input should be 'gate'"),
+        ({"on": "commits", "checks": 3}, "triggers.x.checks: Input should be a valid string"),
     ],
 )
 def test_a_trigger_is_refused_naming_its_field_and_value(
@@ -164,7 +164,7 @@ def test_the_package_keeps_its_triggers_in_order() -> None:
     data = {
         "triggers": {
             "b": {"on": "manual", "role": "coder", "prompt": "b.md"},
-            "a": {"on": "commits", "checks": "gate"},
+            "a": {"on": "commits", "checks": "task-checks"},
         }
     }
     assert list(load_built_in_triggers(data)) == ["b", "a"]
@@ -185,14 +185,41 @@ def test_an_unknown_role_is_refused_naming_it_and_the_roles() -> None:
 
 def test_a_trigger_needs_a_role_or_checks() -> None:
     assert problems(on="task_finished") == (
-        'triggers.x.role: a trigger needs a role, or checks = "gate".'
+        'triggers.x.role: a trigger needs a role, or checks = "task-checks" or a set.'
     )
 
 
 def test_a_trigger_cant_have_both_a_role_and_checks() -> None:
-    assert problems(on="task_finished", role="coder", prompt="Go", checks="gate") == (
-        'triggers.x.checks: a trigger has a role or checks = "gate", not both.'
+    assert problems(on="task_finished", role="coder", prompt="Go", checks="task-checks") == (
+        "triggers.x.checks: a trigger has a role or checks, not both."
     )
+
+
+def test_a_trigger_runs_the_task_checks_or_a_set_a_step_is_in() -> None:
+    triggers = {
+        "tasks": Trigger(on="commits", checks="task-checks"),
+        "slow": Trigger(on="commits", checks="slow"),
+    }
+    check_triggers(triggers, ROLES, ("slow", "fast"))
+
+
+def test_a_trigger_running_a_set_no_step_is_in_is_refused_naming_the_sets() -> None:
+    with pytest.raises(ConfigError) as raised:
+        check_triggers({"x": Trigger(on="commits", checks="slwo")}, ROLES, ("slow", "fast"))
+    assert str(raised.value) == (
+        'triggers.x.checks: slwo isn\'t "task-checks" or a set a step is in; the sets are slow,'
+        " fast."
+    )
+
+
+def test_a_trigger_running_a_set_without_sets_is_refused_saying_there_are_none() -> None:
+    assert problems(on="commits", checks="slow") == (
+        'triggers.x.checks: slow isn\'t "task-checks" or a set a step is in; no step is in a set.'
+    )
+
+
+def test_gate_is_read_as_the_task_checks() -> None:
+    assert loaded({"on": "session_started", "checks": "gate"}).checks == "task-checks"
 
 
 def test_a_trigger_with_a_role_needs_a_prompt() -> None:
@@ -203,7 +230,7 @@ def test_a_trigger_with_a_role_needs_a_prompt() -> None:
 
 def test_a_checks_trigger_takes_no_prompt() -> None:
     assert problems(on="manual", checks="gate", prompt="Go", manual=True, label="Check") == (
-        'triggers.x.prompt: checks = "gate" queues no task, so it takes no prompt.'
+        "triggers.x.prompt: checks queues no task, so it takes no prompt."
     )
 
 

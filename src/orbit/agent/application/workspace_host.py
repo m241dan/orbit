@@ -260,13 +260,13 @@ class WorkspaceHost:
 
     With ``check_at_startup``, starting its background work raises ``session_started``, as it
     opens the workspace with its session, unless read-only, and never again as it switches
-    sessions, its ``verification`` field as the ``verification`` steps say. A trigger on it with
-    ``checks = "gate"``, such as ``startup-check``, runs those steps once in the background, on
-    the base commit, where the agents work, once the session isn't halted; the step that fails
-    raises ``startup_check_failed``, whose ``startup-fix`` trigger adds a draft task to fix it,
-    unless the coder is disabled. With verification on and no steps, ``set-up-verification``
-    queues the configurator's task first, which runs as ctrl+e's does. A host without agents
-    fires no triggers.
+    sessions, its ``verification`` field as the ``verification`` steps, the task checks, say. A
+    trigger on it with ``checks = "task-checks"``, such as ``startup-check``, runs those steps
+    once in the background, on the base commit, where the agents work, once the session isn't
+    halted; the step that fails raises ``startup_check_failed``, whose ``startup-fix`` trigger
+    adds a draft task to fix it, unless the coder is disabled. With verification on and no
+    steps, ``set-up-verification`` queues the configurator's task first, which runs as ctrl+e's
+    does. A host without agents fires no triggers.
 
     Until verification has a step, while it's on, the session's gate holds back every task but
     the configurator's, and the user's runs are refused, saying why; accepted checks start the
@@ -731,9 +731,9 @@ class WorkspaceHost:
         return WorkLane(self._desk, self._tasks, self._verifier, beside)
 
     def _startup_check(self, verification: Verification | None) -> StartupCheck | None:
-        """The check a trigger with ``checks = "gate"`` runs as the workspace opens, if it raises
-        ``session_started``, where the agents work, traced with this host's telemetry; none
-        without steps to run, nor without agents, whose triggers would run it."""
+        """The check a trigger with ``checks = "task-checks"`` runs as the workspace opens, if it
+        raises ``session_started``, where the agents work, traced with this host's telemetry;
+        none without steps to run, nor without agents, whose triggers would run it."""
         desk = self._desk
         if not self._opens or verification is None or not verification.steps or desk is None:
             return None
@@ -1067,7 +1067,7 @@ class WorkspaceHost:
     def _trigger_engine(self) -> TriggerEngine | None:
         """What fires the agents' triggers on events, queuing their tasks on the session's board
         and running each in its role's lane if that starts by itself, or running the startup
-        check for those with ``checks = "gate"``; none without agents."""
+        check for those with ``checks = "task-checks"``; none without agents."""
         if self._desk is None:
             return None
         hooks = TriggerHooks(lambda role: self._lanes.kick_for(role), self._run_check, self._gate)
@@ -1256,8 +1256,8 @@ class WorkspaceHost:
             self._copy_keeper.start(self._keep_copies(self._copies))
 
     def _run_check(self) -> None:
-        """Have the startup check run, as a trigger with ``checks = "gate"`` asks: now, unless
-        the session is halted, else once the halt lifts."""
+        """Have the startup check run, as a trigger with ``checks = "task-checks"`` asks: now,
+        unless the session is halted, else once the halt lifts."""
         self._check_asked = True
         self._start_startup_check()
 

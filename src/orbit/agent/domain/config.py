@@ -1,6 +1,6 @@
-"""Orbit's configuration: the limits, roles, triggers, verification steps, setup and skills by
-path a project file sets over the user config's role fields and personal roles and the package's
-roles and triggers."""
+"""Orbit's configuration: the limits, roles, triggers, verification steps and their sets, setup
+and skills by path a project file sets over the user config's role fields and personal roles and
+the package's roles and triggers."""
 
 from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass, field
@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from pydantic_core import PydanticCustomError
 
 from orbit.agent.domain.agent_task import Limits
-from orbit.agent.domain.checks import Setup, VerificationConfig
+from orbit.agent.domain.checks import Setup, VerificationConfig, check_sets
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.agent.domain.layers import (
     NO_USER_ROLES,
@@ -41,7 +41,13 @@ from orbit.agent.domain.runtimes import (
     RuntimeRules,
 )
 from orbit.agent.domain.skills import SkillLibrary, SkillMapping
-from orbit.agent.domain.triggers import Trigger, TriggerName, check_triggers, merge_triggers
+from orbit.agent.domain.triggers import (
+    Trigger,
+    TriggerName,
+    check_triggers,
+    merge_triggers,
+    note_unrun_sets,
+)
 from orbit.agent.domain.verification import MAX_FALLBACK_FIXES
 from orbit.protocol import SUPER_REVIEW
 
@@ -114,7 +120,7 @@ class _FileConfig(_Config):
         ),
     )
     verification: VerificationConfig = Field(
-        default=VerificationConfig(), description="How tasks are verified."
+        default=VerificationConfig(), description="How tasks and the project are verified."
     )
     setup: Setup | None = Field(
         default=None, description="How the coder's worktree is set up; with none, nothing is."
@@ -239,11 +245,13 @@ def load_layered(
     the fields it doesn't set; any other trigger is new, after the package's (see
     :func:`~orbit.agent.domain.triggers.merge_triggers`). ``super_review_every``, if it sets it,
     is the super-review trigger's ``every`` unless that trigger sets its own, with a notice that
-    it's moving there.
+    it's moving there. Each set a step is in that no enabled trigger runs has a notice too.
 
     Raises :class:`ConfigError` naming the first setting of a later version of orbit ``data``
     sets, if any, ahead of anything else; otherwise naming each problem if it's invalid, as it is
-    when a trigger breaks a rule of :func:`~orbit.agent.domain.triggers.check_triggers`, or a
+    when a set's table is for a set no step is in (see
+    :func:`~orbit.agent.domain.checks.check_sets`), a trigger breaks a rule of
+    :func:`~orbit.agent.domain.triggers.check_triggers`, its sets those a step is in, or a
     role's runtime is one this version of orbit doesn't know, doesn't take its model or can't do
     what the role asks (see :func:`~orbit.agent.domain.role_runtimes.runtime_problems`), a
     :class:`PersonalRoleError` if the personal roles are at fault, and a
@@ -262,9 +270,17 @@ def load_layered(
     tables = {**data, "roles": merged.tables, "triggers": triggers.tables}
     validated = _validated(tables, merged.personal, notices, rules.models)
     config, trigger_layers = _with_alias(validated, data, triggers.layers, project)
-    check_triggers(config.triggers, config.roles)
+    check_sets(config.verification)
+    check_triggers(config.triggers, config.roles, config.verification.set_names)
     _check_runtimes(config, merged, user, rules)
-    return LayeredConfig(config, merged.layers, trigger_layers)
+    return LayeredConfig(_with_set_notices(config), merged.layers, trigger_layers)
+
+
+def _with_set_notices(config: OrbitConfig) -> OrbitConfig:
+    """``config`` with a notice after its others for each set its steps are in that none of its
+    enabled triggers runs."""
+    unrun = note_unrun_sets(config.triggers, config.verification.set_names)
+    return config.model_copy(update={"notices": (*config.notices, *unrun)})
 
 
 def _alias_notices(data: dict[str, Any]) -> tuple[str, ...]:

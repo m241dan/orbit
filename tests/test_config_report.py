@@ -276,14 +276,37 @@ def test_no_steps_the_project_file_gives_are_the_projects() -> None:
 def test_each_step_the_project_file_gives_is_listed_field_by_field() -> None:
     steps = [
         {"name": "Lint", "command": ["ruff", "check"]},
-        {"name": "Test", "command": ["pytest"]},
+        {"name": "Test", "command": ["pytest"], "set": "slow"},
     ]
-    settings = report({"verification": {"steps": steps}})
+    triggers = {"slow": {"on": "commits", "checks": "slow"}}
+    settings = report({"verification": {"steps": steps}, "triggers": triggers})
     assert {key: value for key, value in settings.items() if key.startswith("verification")} == {
         "verification.steps.1.name": Setting("Lint", PROJECT),
         "verification.steps.1.command": Setting(("ruff", "check"), PROJECT),
+        "verification.steps.1.set": Setting(None, PROJECT),
         "verification.steps.2.name": Setting("Test", PROJECT),
         "verification.steps.2.command": Setting(("pytest",), PROJECT),
+        "verification.steps.2.set": Setting("slow", PROJECT),
+        "verification.sets": Setting({}, DEFAULT),
+    }
+
+
+def test_without_sets_tables_there_are_none_by_default() -> None:
+    assert report()["verification.sets"] == Setting({}, DEFAULT)
+
+
+def test_each_sets_table_the_project_file_gives_is_listed_field_by_field() -> None:
+    steps = [
+        {"name": "A", "command": ["a"], "set": "slow"},
+        {"name": "B", "command": ["b"]},
+        {"name": "C", "command": ["c"], "set": "fast"},
+    ]
+    sets = {"slow": {"holds_merges": True}, "fast": {}}
+    triggers = {name: {"on": "commits", "checks": name} for name in sets}
+    settings = report({"verification": {"steps": steps, "sets": sets}, "triggers": triggers})
+    assert {key: value for key, value in settings.items() if ".sets" in key} == {
+        "verification.sets.slow.holds_merges": Setting(True, PROJECT),
+        "verification.sets.fast.holds_merges": Setting(False, DEFAULT),
     }
 
 

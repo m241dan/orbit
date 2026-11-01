@@ -1,5 +1,6 @@
-"""The checks a project is verified and set up with: its verification steps, the setup that
-makes a fresh worktree ready, and the checks an agent proposes."""
+"""The checks a project is verified and set up with: its verification steps, the task checks
+among them and the named sets the others are in, the setup that makes a fresh worktree ready, and
+the checks an agent proposes."""
 
 import shlex
 from collections.abc import Sequence
@@ -8,20 +9,51 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
-from orbit.agent.domain.verification import VerificationStep
+from orbit.agent.domain.verification import SetName, VerificationStep
 
 
 class _Config(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
+class VerificationSet(_Config):
+    """A named set of verification steps, as its ``[verification.sets.<name>]`` table sets it:
+    whether its failure ``holds_merges``."""
+
+    holds_merges: bool = Field(
+        default=False,
+        description=(
+            "Whether its failure holds merges until a fix lands; otherwise it only reports."
+        ),
+    )
+
+
 class VerificationConfig(_Config):
-    """The steps that verify a task, run in order; with none, nothing is verified."""
+    """The verification ``steps``, in order: the task checks, which verify every task, and those
+    in named sets, with the ``sets``' tables, by name."""
 
     steps: tuple[VerificationStep, ...] = Field(
         default=(),
-        description="The steps that verify a task, run in order; with none, nothing is verified.",
+        description=(
+            "The verification steps, in order; the task checks, in no set, verify every task."
+        ),
     )
+    sets: dict[SetName, VerificationSet] = Field(
+        default_factory=dict,
+        description=(
+            'The named sets steps are in, by name; a trigger runs one with checks = "<name>".'
+        ),
+    )
+
+    @property
+    def task_checks(self) -> tuple[VerificationStep, ...]:
+        """The steps in no set, in order: those every task, and the startup check, runs."""
+        return tuple(step for step in self.steps if step.set is None)
+
+    @property
+    def set_names(self) -> tuple[str, ...]:
+        """The names of the sets the steps are in, each once, in the order they first appear."""
+        return tuple(dict.fromkeys(step.set for step in self.steps if step.set is not None))
 
     @field_validator("steps")
     @classmethod
@@ -59,6 +91,18 @@ class Setup(_Config):
             if not path or path.startswith("/") or ".." in path.split("/"):
                 raise ValueError(f"{path!r} isn't a relative path inside the project")
         return watch
+
+
+def check_sets(verification: VerificationConfig) -> None:
+    """Raise :class:`ConfigError` naming each of ``verification``'s sets' tables for a set no
+    step is in, on a line of its own, if any, each at ``verification.sets.<name>``."""
+    problems = [
+        f'verification.sets.{name}: no step is in it; a step joins it with set = "{name}".'
+        for name in verification.sets
+        if name not in verification.set_names
+    ]
+    if problems:
+        raise ConfigError("\n".join(problems))
 
 
 def setup_step(setup: Setup) -> VerificationStep:

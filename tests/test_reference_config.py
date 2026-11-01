@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from orbit.agent.domain.checks import Setup
+from orbit.agent.domain.checks import Setup, VerificationSet
 from orbit.agent.domain.config import (
     LIMIT_KEYS,
     SUPER_REVIEW_EVERY_MOVING,
@@ -34,7 +34,12 @@ COMMITTED = files("orbit.agent.external") / "reference" / "config.toml"
 LATER = "# Coming in a later version of orbit; leave commented out until then."
 KEY_LINE = re.compile(r"# (\[|[a-z_]+ = )")
 NAMED_KEY = re.compile(r"# ([a-z_]+)(?: = |: )")
-EXAMPLE_HEADERS = {"# [[verification.steps]]", "# [setup]", "# [[skills]]"}
+EXAMPLE_HEADERS = {
+    "# [[verification.steps]]",
+    "# [verification.sets.mutation]",
+    "# [setup]",
+    "# [[skills]]",
+}
 EXAMPLE_ROLE = "security-reviewer"
 BUILT_IN = read_built_in_roles()
 SHIPPED = read_built_in_triggers()
@@ -65,7 +70,7 @@ def later() -> str:
 
 def limits_roles_and_triggers() -> str:
     """The reference's blocks of limits, roles and triggers: those before the later-version
-    heading but the examples of verification steps, setup and skills by path."""
+    heading but the examples of verification steps, their sets, setup and skills by path."""
     return "\n\n".join(
         block for block in blocks(current()) if not EXAMPLE_HEADERS & set(block.splitlines())
     )
@@ -144,6 +149,7 @@ def test_sections_are_in_order() -> None:
     markers = [
         f"# {LIMIT_KEYS[0]} = ",
         "# [[verification.steps]]",
+        "# [verification.sets.mutation]",
         "# [setup]",
         *(f"# [roles.{name}]" for name in BUILT_IN),
         f"# [roles.{EXAMPLE_ROLE}]",
@@ -195,11 +201,34 @@ def test_uncommented_example_role_is_a_security_reviewer() -> None:
     )
 
 
-def test_uncommented_examples_set_a_step_and_a_setup() -> None:
+def test_uncommented_examples_set_a_step_in_a_set_its_table_and_a_setup() -> None:
     config = load(loaded(current()))
 
-    assert config.verification.steps == (VerificationStep("Tests", ("uv", "run", "pytest")),)
+    mutation = VerificationStep("Mutation tests", ("uv", "run", "mutmut", "run"), set="mutation")
+    assert config.verification.steps == (mutation,)
+    assert config.verification.sets == {"mutation": VerificationSet(holds_merges=True)}
     assert config.setup == Setup(command=("uv", "sync"), watch=("uv.lock",))
+
+
+def test_the_step_example_shows_its_set_under_its_description() -> None:
+    example = next(block for block in blocks(REFERENCE) if "# [[verification.steps]]" in block)
+
+    assert example.splitlines()[-2:] == [
+        "# The named set it's in; left out, it's one of the task checks every task runs.",
+        '# set = "mutation"',
+    ]
+
+
+def test_the_sets_example_shows_whether_it_holds_merges() -> None:
+    example = next(block for block in blocks(REFERENCE) if "# [verification.sets." in block)
+
+    assert example.splitlines() == [
+        '# The named sets steps are in, by name; a trigger runs one with checks = "<name>". For'
+        " example:",
+        "# [verification.sets.mutation]",
+        "# Whether its failure holds merges until a fix lands; otherwise it only reports.",
+        "# holds_merges = true",
+    ]
 
 
 def test_uncommented_skills_example_maps_src_to_two_skills() -> None:
@@ -331,7 +360,7 @@ def test_a_shipped_triggers_unset_fields_say_so() -> None:
     check = trigger_table("startup-check")
 
     assert {"# role: unset", "# prompt: unset", "# every: unset", "# label: unset"} <= set(check)
-    assert '# checks = "gate"' in check
+    assert '# checks = "task-checks"' in check
 
 
 def test_every_key_is_under_a_line_explaining_it() -> None:

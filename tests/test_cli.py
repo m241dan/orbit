@@ -763,6 +763,41 @@ def test_chat_verifies_tasks_with_the_project_files_steps(
     assert session.verification == Verification(steps, run_step, workspace_state)
 
 
+def test_chat_verifies_tasks_with_only_the_task_checks(
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".orbit").mkdir()
+    (tmp_path / ".orbit" / "config.toml").write_text(
+        '[[verification.steps]]\nname = "A"\ncommand = ["a"]\n'
+        '[[verification.steps]]\nname = "C"\ncommand = ["c"]\nset = "slow"\n'
+        '[[verification.steps]]\nname = "B"\ncommand = ["b"]\n'
+        '[triggers.slow]\non = "commits"\nchecks = "slow"\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["chat"])
+
+    assert result.exit_code == 0
+    [session] = launched
+    # The startup check, run_check and the task brief all take the verifier's steps.
+    steps = (VerificationStep("A", ("a",)), VerificationStep("B", ("b",)))
+    assert session.verification == Verification(steps, run_step, workspace_state)
+
+
+def test_chat_with_only_steps_in_sets_has_no_task_checks(
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".orbit").mkdir()
+    (tmp_path / ".orbit" / "config.toml").write_text(
+        '[[verification.steps]]\nname = "C"\ncommand = ["c"]\nset = "slow"\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["chat"])
+
+    assert result.exit_code == 0
+    [session] = launched
+    assert session.verification == Verification((), run_step, workspace_state)
+
+
 def test_chat_without_steps_verifies_nothing(
     launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

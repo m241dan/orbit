@@ -5,20 +5,53 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from typing import Annotated
 
-from pydantic import Field
+from pydantic import AfterValidator, Field
+from pydantic_core import PydanticCustomError
 
+from orbit.agent.domain.roles import PLAIN_NAME
 from orbit.protocol import SkipReason, StepState, StepStatus, TaskSpec
+
+TASK_CHECKS = "task-checks"
+"""What a trigger's ``checks`` calls the task checks, the steps in no set, which every task
+runs; no set takes the name."""
+
+
+def _set_name(name: str) -> str:
+    """A set's ``name``, refused unless it's a plain name other than :data:`TASK_CHECKS`."""
+    if not PLAIN_NAME.fullmatch(name):
+        raise PydanticCustomError(
+            "set_name", "a set's name is a plain name: letters, digits, - and _"
+        )
+    if name == TASK_CHECKS:
+        raise PydanticCustomError(
+            "set_name", f"{TASK_CHECKS} names the steps in no set; a set takes another name."
+        )
+    return name
+
+
+SetName = Annotated[str, AfterValidator(_set_name)]
+"""A set's name, a plain name as a trigger's is, since its settings are keyed by it between dots,
+as in ``verification.sets.slow.holds_merges``."""
 
 
 @dataclass(frozen=True)
 class VerificationStep:
-    """A command run in the working directory; the step passes when it exits with status 0."""
+    """A command run in the working directory; the step passes when it exits with status 0. In
+    no ``set``, it's one of the task checks every task runs."""
 
     name: Annotated[str, Field(description="What the step is called; no two steps share a name.")]
     command: Annotated[
         tuple[str, ...],
         Field(description="The command run in the working directory; it passes if it exits 0."),
     ]
+    set: Annotated[
+        SetName | None,
+        Field(
+            description=(
+                "The named set it's in; left out, it's one of the task checks every task runs."
+            )
+        ),
+    ] = None
 
 
 @dataclass(frozen=True)

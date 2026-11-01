@@ -73,7 +73,7 @@ def test_the_shipped_triggers_are_the_records_in_order() -> None:
             guards=("not-queued",),
         ),
         "startup-check": Trigger(
-            on="session_started", checks="gate", when={"verification": "configured"}
+            on="session_started", checks="task-checks", when={"verification": "configured"}
         ),
         "startup-fix": Trigger(on="startup_check_failed", role="coder", draft=True),
     }

@@ -1,5 +1,5 @@
-# The triggers shipped with orbit, each turning an event into a task for a role or a run of the
-# verification steps. A trigger's prompt names its template, a Markdown file beside this one.
+# The triggers shipped with orbit, each turning an event into a task for a role or a run of
+# checks. A trigger's prompt names its template, a Markdown file beside this one.
 
 [triggers.review]
 on = "task_landed"
@@ -33,7 +33,7 @@ guards = ["not-queued"]
 
 [triggers.startup-check]
 on = "session_started"
-checks = "gate"
+checks = "task-checks"
 when = { verification = "configured" }
 
 [triggers.startup-fix]

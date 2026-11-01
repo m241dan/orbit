@@ -1,11 +1,11 @@
-"""The startup check: the verification steps, run once on the base commit as orbit starts, so a
+"""The startup check: the task checks, run once on the base commit as orbit starts, so a
 broken setup shows up while the user types their first prompt rather than on the first task.
 
 It runs in the background, in a read-only snapshot of the base commit like a review, so it never
 races with an agent in the coder's tree. It shows in the verification panel until a task's own
 verification takes the panel over, and in the agents pane as an agent that can be cancelled. Each
 run is traced in an ``orbit.startup_check`` span, as :class:`StartupTracing` says. A trigger with
-``checks = "gate"`` starts it, on ``session_started``, and the step that fails raises
+``checks = "task-checks"`` starts it, on ``session_started``, and the step that fails raises
 ``startup_check_failed``, whose triggers may add a task to fix it.
 """
 

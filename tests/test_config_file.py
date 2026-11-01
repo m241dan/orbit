@@ -1114,6 +1114,12 @@ ORBITS_OWN_COMMENTS = (
         '[[verification.steps]]\nname = "Code quality (Lizard)"\n',
     ),
     (
+        "# The slowest check, but a task check like the rest, so every task runs it. A check to"
+        " run\n# less often would join a named set, which a trigger runs:\n"
+        '# set = "<name>"\n',
+        '[[verification.steps]]\nname = "Unit tests with 100% coverage"\n',
+    ),
+    (
         "# Bring the worktree's environment in line with the lock file whenever it changes.\n",
         "[setup]\n",
     ),
@@ -1173,14 +1179,18 @@ def test_writing_checks_creates_the_file_and_its_directory(tmp_path: Path) -> No
 
 
 REFERENCE_TEXT = REFERENCE.read_text(encoding="utf-8")
-STEPS_DESCRIPTION = "# The steps that verify a task, run in order; with none, nothing is verified."
+STEPS_DESCRIPTION = (
+    "# The verification steps, in order; the task checks, in no set, verify every task."
+)
 STEPS_EXAMPLE = f"""\
 {STEPS_DESCRIPTION} For example:
 # [[verification.steps]]
 # What the step is called; no two steps share a name.
-# name = "Tests"
+# name = "Mutation tests"
 # The command run in the working directory; it passes if it exits 0.
-# command = ["uv", "run", "pytest"]
+# command = ["uv", "run", "mutmut", "run"]
+# The named set it's in; left out, it's one of the task checks every task runs.
+# set = "mutation"
 """
 SETUP_DESCRIPTION = "# How the coder's worktree is set up; with none, nothing is."
 SETUP_EXAMPLE = f"""\

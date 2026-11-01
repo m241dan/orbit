@@ -196,6 +196,7 @@ def test_update_says_what_it_added_where(tmp_path: Path) -> None:
             },
             tables=(
                 "[[verification.steps]]",
+                "[verification.sets.mutation]",
                 "[setup]",
                 "[roles.planner]",
                 "[roles.experimenter]",

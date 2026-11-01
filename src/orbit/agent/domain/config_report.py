@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from orbit.agent.domain.checks import VerificationSet
 from orbit.agent.domain.config import LIMIT_KEYS, OrbitConfig
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
 from orbit.agent.domain.roles import Role, names_file
@@ -106,12 +107,13 @@ class UnknownKey(LookupError):
 
 def config_report(sources: ConfigSources, tables: Mapping[str, BaseModel]) -> ConfigReport:
     """The settings in effect that ``sources`` give, each with the layer it came from: the
-    limits, each role field by field, each trigger field by field, the verification steps, the
-    setup, the skills by path and every skill file, then each of the user config's ``tables``,
-    by name, as read, field by field."""
+    limits, each role field by field, each trigger field by field, the verification steps and
+    their sets' tables, the setup, the skills by path and every skill file, then each of the user
+    config's ``tables``, by name, as read, field by field."""
     config, project = sources.config, sources.project
     report = _limits(config, project) | _roles(sources) | _triggers(sources)
-    report |= _steps(config.verification.steps, project) | _setup(config, project)
+    report |= _steps(config.verification.steps, project)
+    report |= _verification_sets(config.verification.sets, project) | _setup(config, project)
     report |= _skills(config.skills, project) | _skill_files(config.skill_library)
     for name, table in tables.items():
         report |= _table(name, table, sources.user)
@@ -218,7 +220,24 @@ def _steps(steps: tuple[VerificationStep, ...], project: Written) -> ConfigRepor
     for number, step in enumerate(steps, start=1):
         report[f"verification.steps.{number}.name"] = Setting(step.name, layer)
         report[f"verification.steps.{number}.command"] = Setting(step.command, layer)
+        report[f"verification.steps.{number}.set"] = Setting(step.set, layer)
     return report
+
+
+def _verification_sets(sets: Mapping[str, VerificationSet], project: Written) -> ConfigReport:
+    """The verification ``sets``' tables, by name, field by field, each from the ``project``
+    file if it sets it; no tables as one setting."""
+    verification = project.data.get("verification", {})
+    if not sets:
+        return {"verification.sets": Setting({}, _layer("sets" in verification, project))}
+    given = verification["sets"]
+    return {
+        f"verification.sets.{name}.{key}": Setting(
+            getattr(table, key), _layer(_sets(given, name, key), project)
+        )
+        for name, table in sets.items()
+        for key in VerificationSet.model_fields
+    }
 
 
 def _setup(config: OrbitConfig, project: Written) -> ConfigReport:

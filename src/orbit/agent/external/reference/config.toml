@@ -18,12 +18,19 @@
 # Code files a super review reads besides those changed since the last one; 0, none.
 # super_review_sample = 10
 
-# The steps that verify a task, run in order; with none, nothing is verified. For example:
+# The verification steps, in order; the task checks, in no set, verify every task. For example:
 # [[verification.steps]]
 # What the step is called; no two steps share a name.
-# name = "Tests"
+# name = "Mutation tests"
 # The command run in the working directory; it passes if it exits 0.
-# command = ["uv", "run", "pytest"]
+# command = ["uv", "run", "mutmut", "run"]
+# The named set it's in; left out, it's one of the task checks every task runs.
+# set = "mutation"
+
+# The named sets steps are in, by name; a trigger runs one with checks = "<name>". For example:
+# [verification.sets.mutation]
+# Whether its failure holds merges until a fix lands; otherwise it only reports.
+# holds_merges = true
 
 # How the coder's worktree is set up; with none, nothing is. For example:
 # [setup]
@@ -270,7 +277,7 @@
 # on = "task_landed"
 # The role of the task it queues.
 # role = "reviewer"
-# Instead of a role, "gate" to run the verification steps rather than queue a task.
+# Instead of a role, the checks it runs: "task-checks", or a named set.
 # checks: unset
 # The task's prompt: the text, or a Markdown file under .orbit/ it names.
 # prompt: orbit's own review.md
@@ -294,7 +301,7 @@
 # on = "commits"
 # The role of the task it queues.
 # role = "super-reviewer"
-# Instead of a role, "gate" to run the verification steps rather than queue a task.
+# Instead of a role, the checks it runs: "task-checks", or a named set.
 # checks: unset
 # The task's prompt: the text, or a Markdown file under .orbit/ it names.
 # prompt: orbit's own super-review.md
@@ -318,7 +325,7 @@
 # on = "manual"
 # The role of the task it queues.
 # role = "configurator"
-# Instead of a role, "gate" to run the verification steps rather than queue a task.
+# Instead of a role, the checks it runs: "task-checks", or a named set.
 # checks: unset
 # The task's prompt: the text, or a Markdown file under .orbit/ it names.
 # prompt: orbit's own configure-checks.md
@@ -342,7 +349,7 @@
 # on = "session_started"
 # The role of the task it queues.
 # role = "configurator"
-# Instead of a role, "gate" to run the verification steps rather than queue a task.
+# Instead of a role, the checks it runs: "task-checks", or a named set.
 # checks: unset
 # The task's prompt: the text, or a Markdown file under .orbit/ it names.
 # prompt: orbit's own configure-checks.md
@@ -366,8 +373,8 @@
 # on = "session_started"
 # The role of the task it queues.
 # role: unset
-# Instead of a role, "gate" to run the verification steps rather than queue a task.
-# checks = "gate"
+# Instead of a role, the checks it runs: "task-checks", or a named set.
+# checks = "task-checks"
 # The task's prompt: the text, or a Markdown file under .orbit/ it names.
 # prompt: unset
 # The events it takes, by their fields, each a value or a list of values.
@@ -390,7 +397,7 @@
 # on = "startup_check_failed"
 # The role of the task it queues.
 # role = "coder"
-# Instead of a role, "gate" to run the verification steps rather than queue a task.
+# Instead of a role, the checks it runs: "task-checks", or a named set.
 # checks: unset
 # The task's prompt: the text, or a Markdown file under .orbit/ it names.
 # prompt: orbit's own startup-fix.md

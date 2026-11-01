@@ -1,11 +1,13 @@
-"""Triggers, which turn an event into a task for a role or a run of the verification steps: the
-events and guards orbit knows, a trigger's fields, the package's triggers merged with a project's
-and checked against its roles, which of them fire on an event and which guards hold one back,
-and the rendering of a trigger's prompt template.
+"""Triggers, which turn an event into a task for a role or a run of checks, the task checks or a
+named set: the events and guards orbit knows, a trigger's fields, the package's triggers merged
+with a project's and checked against its roles and sets, the sets no trigger runs, which of them
+fire on an event and which guards hold one back, and the rendering of a trigger's prompt
+template.
 
 The package's triggers aren't kept here: whoever builds them passes in the contents of their
-``triggers.toml`` and the templates it names. ``manual`` isn't raised yet, and a trigger that
-runs the checks fires only on ``session_started``.
+``triggers.toml`` and the templates it names. ``manual`` isn't raised yet, a trigger that runs
+the task checks fires only on ``session_started``, and one that runs a named set doesn't fire
+yet.
 """
 
 import re
@@ -28,7 +30,7 @@ from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
 from orbit.agent.domain.reviews import ReviewJob
 from orbit.agent.domain.roles import PLAIN_NAME
-from orbit.agent.domain.verification import VerificationStep
+from orbit.agent.domain.verification import TASK_CHECKS, VerificationStep
 from orbit.protocol import REVIEWER, TaskState, is_orbit_review
 
 EventName = Literal[
@@ -62,11 +64,15 @@ TASK_FINISHED = "task_finished"
 SESSION_STARTED = "session_started"
 STARTUP_CHECK_FAILED = "startup_check_failed"
 """The events of opening a workspace: orbit opening it with its session, the only event a
-trigger that runs the checks fires on yet, and a step of the startup check failing."""
+trigger that runs the task checks fires on yet, and a step of the startup check failing."""
+
+GATE = "gate"
+"""What a trigger's ``checks`` called the task checks before they had their name, read as
+:data:`~orbit.agent.domain.verification.TASK_CHECKS`."""
 
 VerificationState = Literal["configured", "missing", "off"]
 """What ``session_started``'s ``verification`` field says: verification on with at least one
-step, on with none, or off."""
+task check, on with none, or off."""
 
 VERIFICATION_STATES: tuple[str, ...] = get_args(VerificationState)
 """The values of ``session_started``'s ``verification`` field, in order."""
@@ -152,19 +158,18 @@ class _Config(BaseModel):
 
 class Trigger(_Config):
     """A trigger, as a file sets it: what it fires ``on``, the ``role`` of the task it queues
-    with its ``prompt``, or the verification steps it runs as ``checks``, the events it takes
-    ``when`` they match, the ``guards`` that may hold it back, how many landings it fires after,
-    ``every``, whether it's ``manual``, under its ``label``, whether its task is a ``draft``, and
-    whether it's ``enabled``."""
+    with its ``prompt``, or the checks it runs, the task checks or a named set, as ``checks``
+    (``gate`` read as the task checks), the events it takes ``when`` they match, the ``guards``
+    that may hold it back, how many landings it fires after, ``every``, whether it's ``manual``,
+    under its ``label``, whether its task is a ``draft``, and whether it's ``enabled``."""
 
     on: EventName = Field(
         description='The event it fires on, such as "task_landed", "commits" or "manual".'
     )
     role: str | None = Field(default=None, description="The role of the task it queues.")
-    checks: Literal["gate"] | None = Field(
+    checks: str | None = Field(
         default=None,
-        description='Instead of a role, "gate" to run the verification steps rather than queue a'
-        " task.",
+        description='Instead of a role, the checks it runs: "task-checks", or a named set.',
     )
     prompt: str | None = Field(
         default=None,
@@ -203,6 +208,11 @@ class Trigger(_Config):
                 "trigger_event", f"{on} isn't an event; the events are {', '.join(EVENT_NAMES)}."
             )
         return on
+
+    @field_validator("checks", mode="before")
+    @classmethod
+    def _gate_as_task_checks(cls, checks: object) -> object:
+        return TASK_CHECKS if checks == GATE else checks
 
     @field_validator("guards", mode="before")
     @classmethod
@@ -285,50 +295,74 @@ def _merged(
     return fields | given, layers | dict.fromkeys(given, project)
 
 
-def check_triggers(triggers: Mapping[str, Trigger], roles: Collection[str]) -> None:
+def check_triggers(
+    triggers: Mapping[str, Trigger], roles: Collection[str], sets: Collection[str] = ()
+) -> None:
     """Raise :class:`ConfigError` naming each problem of each of ``triggers``, on a line of its
     own, if any, each at ``triggers.<name>.<field>``: a role that isn't among ``roles`` (a
-    disabled one is), neither a role nor ``checks``, or both, a role without a prompt or
-    ``checks`` with one, a ``when`` field or a template variable its event doesn't give, a
-    ``when`` value its field never takes, a role not among ``roles`` or a value
-    :data:`WHEN_VALUES` doesn't give, ``review-rounds`` on a trigger that isn't a
-    ``reviewer``'s on ``task_landed`` or on an enabled one after the first, ``every`` on
-    another event than ``commits``, and ``manual`` without a ``label``."""
+    disabled one is), neither a role nor ``checks``, or both, ``checks`` naming neither the task
+    checks nor one of ``sets``, those a step is in, a role without a prompt or ``checks`` with
+    one, a ``when`` field or a template variable its event doesn't give, a ``when`` value its
+    field never takes, a role not among ``roles`` or a value :data:`WHEN_VALUES` doesn't give,
+    ``review-rounds`` on a trigger that isn't a ``reviewer``'s on ``task_landed`` or on an
+    enabled one after the first, ``every`` on another event than ``commits``, and ``manual``
+    without a ``label``."""
     owner = _review_rounds_owner(triggers)
     problems = [
         f"triggers.{name}.{field}: {why}"
         for name, trigger in triggers.items()
-        for field, why in _problems(name, trigger, roles, owner)
+        for field, why in _problems(name, trigger, _Targets(roles, sets), owner)
     ]
     if problems:
         raise ConfigError("\n".join(problems))
 
 
+@dataclass(frozen=True)
+class _Targets:
+    """What a trigger may act on: the ``roles`` it may queue a task for, and the ``sets`` it may
+    run, besides the task checks."""
+
+    roles: Collection[str]
+    sets: Collection[str]
+
+
 def _problems(
-    name: str, trigger: Trigger, roles: Collection[str], owner: str | None
+    name: str, trigger: Trigger, targets: _Targets, owner: str | None
 ) -> list[tuple[str, str]]:
     """Each problem of ``trigger``, named ``name``, by the field it's in, as
-    :func:`check_triggers` finds them, with ``owner`` the trigger ``review-rounds`` may guard."""
+    :func:`check_triggers` finds them against the ``targets`` it may act on, with ``owner`` the
+    trigger ``review-rounds`` may guard."""
     return [
-        *_target_problems(trigger, roles),
+        *_target_problems(trigger, targets),
         *_prompt_problems(trigger),
-        *_when_problems(trigger, roles),
+        *_when_problems(trigger, targets.roles),
         *_guard_problems(name, trigger, owner),
         *_every_problems(trigger),
         *_label_problems(trigger),
     ]
 
 
-def _target_problems(trigger: Trigger, roles: Collection[str]) -> list[tuple[str, str]]:
-    """What's wrong with what ``trigger`` does: it needs a role among ``roles`` or ``checks``,
-    and not both."""
+def _target_problems(trigger: Trigger, targets: _Targets) -> list[tuple[str, str]]:
+    """What's wrong with what ``trigger`` does: it needs a role among the ``targets``' roles or
+    ``checks`` naming the task checks or one of their sets, and not both."""
     if trigger.role is None:
-        return [] if trigger.checks else [("role", 'a trigger needs a role, or checks = "gate".')]
+        return _checks_problems(trigger.checks, targets.sets)
     if trigger.checks is not None:
-        return [("checks", 'a trigger has a role or checks = "gate", not both.')]
-    if trigger.role not in roles:
-        return [("role", _not_a_role(trigger.role, roles))]
+        return [("checks", "a trigger has a role or checks, not both.")]
+    if trigger.role not in targets.roles:
+        return [("role", _not_a_role(trigger.role, targets.roles))]
     return []
+
+
+def _checks_problems(checks: str | None, sets: Collection[str]) -> list[tuple[str, str]]:
+    """What's wrong with the ``checks`` of a trigger without a role: it needs them, naming the
+    task checks or one of ``sets``, those a step is in."""
+    if checks is None:
+        return [("role", f'a trigger needs a role, or checks = "{TASK_CHECKS}" or a set.')]
+    if checks == TASK_CHECKS or checks in sets:
+        return []
+    known = f"the sets are {', '.join(sets)}" if sets else "no step is in a set"
+    return [("checks", f'{checks} isn\'t "{TASK_CHECKS}" or a set a step is in; {known}.')]
 
 
 def _not_a_role(name: str, roles: Collection[str]) -> str:
@@ -342,7 +376,7 @@ def _prompt_problems(trigger: Trigger) -> list[tuple[str, str]]:
     if trigger.prompt is None:
         return [] if trigger.role is None else [("prompt", "a trigger with a role needs a prompt.")]
     if trigger.checks is not None and trigger.role is None:
-        return [("prompt", 'checks = "gate" queues no task, so it takes no prompt.')]
+        return [("prompt", "checks queues no task, so it takes no prompt.")]
     return _variable_problems(trigger.on, trigger.prompt)
 
 
@@ -442,6 +476,14 @@ def _label_problems(trigger: Trigger) -> list[tuple[str, str]]:
     )
 
 
+def note_unrun_sets(triggers: Mapping[str, Trigger], sets: Iterable[str]) -> tuple[str, ...]:
+    """The notice of each of ``sets`` no enabled one of ``triggers`` runs, in order."""
+    run = {trigger.checks for trigger in triggers.values() if trigger.enabled}
+    return tuple(
+        f"The set {name} has no trigger, so it never runs." for name in sets if name not in run
+    )
+
+
 def template_variables(template: str) -> tuple[str, ...]:
     """The variables ``template`` uses, each once, in the order they first appear."""
     return tuple(dict.fromkeys(VARIABLE.findall(template)))
@@ -476,7 +518,7 @@ def listening(
     review: ReviewJob | None,
 ) -> list[tuple[str, Trigger]]:
     """The ``triggers`` that may fire on ``event``, by name, in their order: the enabled ones on
-    it that queue a task for one of ``roles``, the enabled roles, or run the checks, on
+    it that queue a task for one of ``roles``, the enabled roles, or run the task checks, on
     ``session_started`` only, whose ``when`` takes it and that didn't queue the task that caused
     it, if any, as its origin says (decision 9). One guarded by ``review-rounds`` only listens
     while today's rounds and batches find a ``review`` due."""
@@ -510,9 +552,10 @@ def takes(when: Mapping[str, str | tuple[str, ...]], fields: Mapping[str, str]) 
 
 def _acts(trigger: Trigger, event: str, roles: Collection[str]) -> bool:
     """Whether ``trigger`` does something on the event named ``event``: queues a task for one of
-    ``roles``, or runs the checks, which it does only on ``session_started`` yet."""
+    ``roles``, or runs the task checks, which it does only on ``session_started`` yet; a named
+    set doesn't run yet."""
     if trigger.checks is not None:
-        return event == SESSION_STARTED
+        return event == SESSION_STARTED and trigger.checks == TASK_CHECKS
     return trigger.role in roles
 
 
@@ -625,7 +668,7 @@ def fires_by_hand(trigger: Trigger, roles: Collection[str]) -> bool:
 
 
 def verification_state(steps: Sequence[VerificationStep] | None) -> VerificationState:
-    """What ``session_started``'s ``verification`` field says of the verification ``steps``,
+    """What ``session_started``'s ``verification`` field says of the task checks, ``steps``,
     none while verification is off: ``configured`` with at least one, ``missing`` with none."""
     if steps is None:
         return "off"

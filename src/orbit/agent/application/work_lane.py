@@ -498,7 +498,7 @@ class WorkLane:
             await asyncio.to_thread(self._desk.agents.write_config, root, checks)
         if self._desk.agents.tree is not None:
             self._desk.agents.tree.use_setup(checks.setup)
-        await verifier.use_steps(checks.steps)
+        await verifier.use_steps(checks.task_checks)
 
     async def _land(self, task_id: str, outcome: Outcome, root: str) -> Outcome:
         """Commit and merge a completed task's work, when it worked in the coder's tree: the
