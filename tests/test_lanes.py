@@ -1,5 +1,5 @@
-"""The helpers the lanes share: one piece of work at a time, its crash reported, and a busy
-lane's turns."""
+"""The helpers the lanes share: background work whose crash is reported as the lane's and that
+starts with no span current, and a busy lane's turns."""
 
 import asyncio
 import inspect
@@ -13,40 +13,14 @@ from orbit.protocol import BUSY as BUSY_CODE
 from orbit.protocol import INTERNAL, BusyChanged, ErrorOccurred, Event
 from orbit.tracing import NoSpan, Span, current_span, use_span
 from tests.agent_fakes import logged_with_traceback
+from tests.gated_work import GatedWork
 from tests.stopping import SlowToStop, cancelled_while_stopping
 from tests.waiting import eventually
-
-
-class Work:
-    """Work that records its runs and, once started, waits for ``gate``."""
-
-    def __init__(self) -> None:
-        self.runs: list[str] = []
-        self.gate = asyncio.Event()
-        self.started = asyncio.Event()
-
-    async def __call__(self, name: str) -> None:
-        self.runs.append(name)
-        self.started.set()
-        await self.gate.wait()
 
 
 def background() -> tuple[Background, asyncio.Queue[Event]]:
     events: asyncio.Queue[Event] = asyncio.Queue()
     return Background("test", events.put), events
-
-
-async def test_start_runs_the_work_in_the_background() -> None:
-    lane, events = background()
-    work = Work()
-
-    lane.start(work("first"))
-    await work.started.wait()
-
-    assert lane.running and work.runs == ["first"]
-    work.gate.set()
-    await lane.close()
-    assert not lane.running and events.empty()
 
 
 class NotesSpan:
@@ -73,111 +47,7 @@ async def test_work_started_inside_a_span_runs_with_no_span_current() -> None:
     assert work.seen == [current_span()]  # The no-op span current outside any block.
 
 
-async def test_ended_is_called_once_the_work_has_stopped() -> None:
-    lane, _ = background()
-    work = Work()
-    seen: list[bool] = []
-    lane.ended = lambda: seen.append(lane.running)
-    lane.start(work("first"))
-    await work.started.wait()
-    assert seen == []
-
-    work.gate.set()
-    await lane.close()
-    await asyncio.sleep(0)
-
-    assert seen == [False]
-
-
-async def test_start_while_running_drops_the_new_work() -> None:
-    lane, _ = background()
-    work = Work()
-    assert lane.start(work("first"))
-    await work.started.wait()
-
-    assert not lane.start(work("second"))
-    work.gate.set()
-    await lane.close()
-
-    assert work.runs == ["first"]
-
-
-async def test_cancel_stops_the_work() -> None:
-    lane, events = background()
-    work = Work()
-    lane.start(work("first"))
-    await work.started.wait()
-
-    lane.cancel()
-    await lane.close()
-
-    assert not lane.running and events.empty()
-
-
-async def test_work_cancelled_before_it_starts_never_runs() -> None:
-    lane, _ = background()
-    work = Work()
-
-    lane.start(work("first"))
-    await lane.close()
-
-    assert work.runs == [] and not lane.running
-
-
-async def test_cancel_when_never_started_does_nothing() -> None:
-    lane, events = background()
-
-    lane.cancel()
-
-    assert not lane.running and events.empty()
-
-
-async def test_close_when_never_started_does_nothing() -> None:
-    lane, events = background()
-
-    await lane.close()
-
-    assert not lane.running and events.empty()
-
-
-async def test_start_after_close_closes_the_work_and_starts_no_task() -> None:
-    lane, events = background()
-    work = Work()
-    await lane.close()
-
-    coroutine = work("late")
-    assert not lane.start(coroutine)
-    await asyncio.sleep(0)
-
-    assert inspect.getcoroutinestate(coroutine) == inspect.CORO_CLOSED
-    assert work.runs == [] and not lane.running and events.empty()
-    assert asyncio.all_tasks() == {asyncio.current_task()}
-
-
-async def test_close_cancelled_while_the_work_stops_is_cancelled() -> None:
-    lane, _ = background()
-    started, stop = asyncio.Event(), asyncio.Event()
-
-    async def slow_to_stop() -> None:
-        try:
-            started.set()
-            await asyncio.Event().wait()
-        finally:
-            await stop.wait()
-
-    lane.start(slow_to_stop())
-    await started.wait()
-    closing = asyncio.create_task(lane.close())
-    await asyncio.sleep(0)
-    closing.cancel()
-    stop.set()
-
-    with pytest.raises(asyncio.CancelledError):
-        await closing
-    assert not lane.running
-
-
-async def test_a_crash_is_reported_once_and_close_does_not_raise_it(
+async def test_a_crash_is_reported_once_as_an_error_naming_the_lane(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     lane, events = background()
@@ -227,7 +97,7 @@ async def ended(turn: asyncio.Task[object] | None) -> None:
 
 async def test_a_turn_shows_the_lane_busy_until_it_ends() -> None:
     turns, posted = slot()
-    work = Work()
+    work = GatedWork()
 
     await turns.start(work("first"))
     await work.started.wait()
@@ -242,7 +112,7 @@ async def test_a_turn_shows_the_lane_busy_until_it_ends() -> None:
 async def test_the_lane_is_running_when_its_busy_is_posted() -> None:
     seen: list[bool] = []
     turns = TurnSlot("planner", "Busy already.", lambda _: seen.append(turns.running))
-    work = Work()
+    work = GatedWork()
 
     await turns.start(work("first"))
     work.gate.set()
@@ -253,7 +123,7 @@ async def test_the_lane_is_running_when_its_busy_is_posted() -> None:
 
 async def test_a_turn_while_one_runs_is_refused_and_closed() -> None:
     turns, posted = slot()
-    work = Work()
+    work = GatedWork()
     await turns.start(work("first"))
     await work.started.wait()
     second = work("second")
@@ -269,7 +139,7 @@ async def test_a_turn_while_one_runs_is_refused_and_closed() -> None:
 
 async def test_a_turn_with_a_refusal_of_its_own_refuses_the_next_with_it() -> None:
     turns, _ = slot()
-    work = Work()
+    work = GatedWork()
     turn = await turns.start(work("first"), "The architect is already answering.")
     assert turn is turns.turn
 
@@ -304,7 +174,7 @@ async def test_a_crash_is_reported_once_before_the_lane_frees(
 
 async def test_a_stale_turns_end_leaves_the_lane_busy() -> None:
     turns, posted = slot()
-    work = Work()
+    work = GatedWork()
     work.gate.set()
     await turns.start(work("first"))
     first = turns.turn
@@ -319,7 +189,7 @@ async def test_a_stale_turns_end_leaves_the_lane_busy() -> None:
 
 async def test_cancel_stops_the_turn_and_says_whether_it_ran() -> None:
     turns, posted = slot()
-    work = Work()
+    work = GatedWork()
     assert not turns.cancel()
     await turns.start(work("first"))
     await work.started.wait()
@@ -332,7 +202,7 @@ async def test_cancel_stops_the_turn_and_says_whether_it_ran() -> None:
 
 async def test_close_cancels_the_turn_and_waits_for_it() -> None:
     turns, posted = slot()
-    work = Work()
+    work = GatedWork()
     await turns.start(work("first"))
     await work.started.wait()
 

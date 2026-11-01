@@ -11,6 +11,7 @@ from typing import Any
 from orbit.agent.application.failures import unexpected
 from orbit.agent.application.ports import Publish
 from orbit.agent.domain.refusals import Refused, stopped_on
+from orbit.execution import background
 from orbit.execution.cancelling import stop
 from orbit.protocol import BUSY, INTERNAL, BusyChanged, BusyLane, ErrorOccurred, Event
 from orbit.tracing import no_span
@@ -64,54 +65,16 @@ def _detached[T](work: Coroutine[Any, Any, T]) -> asyncio.Task[T]:
         return asyncio.create_task(work)
 
 
-class Background:
-    """Runs one piece of work at a time in the background for lane ``name``. A failure that
-    escapes the work is reported once with ``publish``, as it happens, and never raised;
-    :attr:`ended` is called once the work has stopped. Once closed, it starts nothing."""
+class Background(background.Background):
+    """Runs one piece of work at a time in the background for lane ``name``, as the generic
+    :class:`orbit.execution.background.Background` does: a failure that escapes the work is
+    reported once with ``publish``, and the work starts with no span current."""
 
     def __init__(self, name: str, publish: Publish) -> None:
-        self._name = name
-        self._publish = publish
-        self._task: asyncio.Task[None] | None = None
-        self._closed = False
-        self.ended: Callable[[], None] = _unwatched
+        async def report(exc: Exception) -> None:
+            await publish(crash_report(name, exc))
 
-    @property
-    def running(self) -> bool:
-        return self._task is not None and not self._task.done()
-
-    def start(self, work: Coroutine[Any, Any, object]) -> bool:
-        """Run ``work`` in the background, unless earlier work still runs or this is closed:
-        then drop it. Returns whether ``work`` was started."""
-        if self._closed or self.running:
-            work.close()
-            return False
-        self._task = _detached(self._guarded(work))
-        # Work cancelled before it starts is closed, not left never awaited.
-        self._task.add_done_callback(lambda _: work.close())
-        self._task.add_done_callback(lambda _: self.ended())
-        return True
-
-    def cancel(self) -> None:
-        if self._task is not None:
-            self._task.cancel()
-
-    async def stop(self) -> None:
-        """Cancel the work, if any, and wait for it to stop; cancelled meanwhile, this is
-        cancelled once it has. Work can start again afterwards."""
-        if self._task is not None:
-            await stop(self._task)
-
-    async def close(self) -> None:
-        """Stop the work, as :meth:`stop` does, for good: nothing starts from now on."""
-        self._closed = True
-        await self.stop()
-
-    async def _guarded(self, work: Coroutine[Any, Any, object]) -> None:
-        try:
-            await work
-        except Exception as exc:  # A bug; nothing else awaits the work, so say so here.
-            await self._publish(crash_report(self._name, exc))
+        super().__init__(report, _detached)
 
 
 class TurnSlot:
