@@ -2,6 +2,7 @@
 the front of the queue; passing lifts the hold; a fix found through its chain; holds kept in the
 store, restored without the sets removed, and a failing save halting the session."""
 
+import asyncio
 from collections.abc import Mapping
 
 from orbit.agent.application.merge_holds import HoldParts, MergeHolds
@@ -401,6 +402,100 @@ async def test_holds_read_again_without_the_store_are_kept_and_nothing_saved() -
     await holds.holds.restore()
     await passed(holds)
     assert not holds.holds.held and store.holds == (HELD,)
+
+
+async def test_a_set_passing_while_the_holds_kept_cant_be_read_takes_on_none_of_its_after() -> None:
+    store = FakeStore()
+    store.holds = (HELD,)
+    store.holds_load_failure = "disk gone"
+    holds = Holds(store)
+    await holds.holds.restore()
+    await passed(holds)
+    store.holds_load_failure = None
+    await holds.holds.restore()
+    assert not holds.holds.held and store.holds_saved == [()] and holds.releases == 1
+
+
+async def test_a_hold_lifted_while_the_store_cant_be_read_stays_lifted_once_it_can() -> None:
+    store = FakeStore()
+    holds = Holds(store)
+    await holds.holds.restore()
+    await failed(holds)
+    store.holds_load_failure = "disk gone"
+    await holds.holds.restore()
+    await passed(holds)
+    store.holds_load_failure = None
+    await holds.holds.restore()
+    assert not holds.holds.held and store.holds == () and holds.releases == 3
+
+
+async def test_a_set_failing_again_after_its_lift_before_the_read_keeps_its_new_hold() -> None:
+    store = FakeStore()
+    store.holds = (HELD,)
+    store.holds_load_failure = "disk gone"
+    holds = Holds(store)
+    await holds.holds.restore()
+    await failed(holds)
+    await passed(holds)
+    await failed(holds, commit="c6")
+    store.holds_load_failure = None
+    await holds.holds.restore()
+    assert holds.holds.holds == (Hold("stress", "c6", "Stress tests", "2 failed"),)  # Fixing.
+    assert store.holds == holds.holds.holds
+
+
+async def test_holds_released_by_hand_while_unread_are_none_of_them_taken_on_after() -> None:
+    store = FakeStore()
+    soaked = Hold("soak", "c2", "Soak", "timed out", 1)
+    store.holds = (HELD, soaked)
+    holds = Holds(store)
+    await holds.holds.restore()
+    store.holds_load_failure = "disk gone"
+    await holds.holds.restore()
+    await holds.holds.release()
+    store.holds_load_failure = None
+    await holds.holds.restore()
+    assert not holds.holds.held and store.holds_saved == [()]
+
+
+async def test_a_set_passing_during_the_takeover_read_keeps_no_hold() -> None:
+    store = FakeStore()
+    store.holds = (HELD,)
+    holds = Holds(store)
+    await holds.holds.restore()
+    reading = asyncio.create_task(holds.holds.restore())
+    await asyncio.sleep(0)  # The read begins.
+    await passed(holds)
+    await reading
+    assert not holds.holds.held and not store.holds
+
+
+async def test_a_hold_lifted_and_saved_then_put_back_elsewhere_is_taken_on_from_the_read() -> None:
+    store = FakeStore()
+    holds = Holds(store)
+    await holds.holds.restore()
+    await failed(holds)
+    await passed(holds)
+    await passed(holds, check_set=SOAK)
+    store.holds = (HELD,)
+    await holds.holds.restore()
+    assert holds.holds.holds == (HELD,)
+
+
+async def test_a_hold_lifted_during_a_save_that_saves_it_not_is_dropped_from_the_read() -> None:
+    store = FakeStore()
+    store.holds = (HELD,)
+    holds = Holds(store)
+    await holds.holds.restore()
+    saving = asyncio.create_task(failed(holds, check_set=SOAK))
+    lifting = asyncio.create_task(passed(holds))
+    await asyncio.sleep(0)  # The save of soak's hold begins, and the lift waits for it.
+    store.holds_failure = "disk full"
+    await asyncio.gather(saving, lifting)
+    store.holds_failure = None
+    await holds.holds.restore()
+    assert [hold.name for hold in store.holds] == ["stress", "soak"]
+    assert [hold.name for hold in holds.holds.holds] == ["soak"]
 
 
 async def test_a_failing_save_halts_the_session_and_a_retry_saves_the_holds() -> None:

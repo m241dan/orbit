@@ -5,6 +5,7 @@ user is told as a hold starts, lifts or needs them."""
 from collections.abc import Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass, replace
 from functools import partial, reduce
+from typing import Literal
 
 from orbit.agent.domain.commits import Commit
 from orbit.agent.domain.verification import CheckSet, VerificationStep
@@ -143,6 +144,30 @@ def merge_holds(earlier: Sequence[Hold], later: Sequence[Hold]) -> tuple[Hold, .
     ``earlier``."""
     named = {hold.name for hold in later}
     return (*(hold for hold in earlier if hold.name not in named), *later)
+
+
+type Lifted = frozenset[str] | Literal["every"]
+"""The sets whose holds were lifted since the holds kept were last read or saved, by name, or
+``"every"`` once the user released every hold by hand."""
+
+NONE_LIFTED: Lifted = frozenset()
+"""That no hold was lifted since the holds kept were last read or saved."""
+
+
+def note_lift(lifted: Lifted, name: str) -> Lifted:
+    """``lifted``, with the set ``name``'s hold among those lifted."""
+    return lifted | {name} if isinstance(lifted, frozenset) else lifted
+
+
+def fold_holds(
+    loaded: Sequence[Hold], holding: Collection[str], lifted: Lifted, started: Sequence[Hold]
+) -> tuple[Hold, ...]:
+    """The holds to take on from ``loaded``, those kept, read afresh: those of the sets still
+    ``holding`` merges, by name, and not ``lifted`` since they were last read or saved, as
+    :func:`kept_holds` says, with the holds ``started`` since then replacing their sets', as
+    :func:`merge_holds` says."""
+    unlifted = frozenset(holding) - lifted if isinstance(lifted, frozenset) else frozenset()
+    return merge_holds(kept_holds(loaded, unlifted), started)
 
 
 def hold_view(hold: Hold) -> MergeHold:

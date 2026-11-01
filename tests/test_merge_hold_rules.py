@@ -6,6 +6,7 @@ import pytest
 
 from orbit.agent.domain.commits import Commit
 from orbit.agent.domain.merge_holds import (
+    NONE_LIFTED,
     Hold,
     HoldDecision,
     decide_failure,
@@ -14,6 +15,7 @@ from orbit.agent.domain.merge_holds import (
     fix_root,
     fix_title,
     fixed_set,
+    fold_holds,
     held_note,
     held_step,
     hold_view,
@@ -21,6 +23,7 @@ from orbit.agent.domain.merge_holds import (
     kept_holds,
     lift_hold,
     merge_holds,
+    note_lift,
     resumed_note,
     set_fix_prompt,
     stacked_commits,
@@ -128,6 +131,24 @@ def test_restored_holds_keep_only_the_sets_still_holding_merges() -> None:
 def test_holds_started_before_the_kept_ones_were_read_replace_their_sets() -> None:
     newer = Hold("stress", "new", "Stress tests", "3 failed")
     assert merge_holds((STRESS, SOAK), (newer,)) == (SOAK, newer)
+
+
+def test_holds_read_drop_the_sets_lifted_since_and_take_on_those_started() -> None:
+    newer = Hold("stress", "new", "Stress tests", "3 failed")
+    lifted = note_lift(note_lift(NONE_LIFTED, "stress"), "soak")
+    assert fold_holds((STRESS, SOAK), {"stress", "soak"}, lifted, (newer,)) == (newer,)
+    soaked = note_lift(NONE_LIFTED, "soak")
+    assert fold_holds((STRESS, SOAK), {"stress", "soak"}, soaked, ()) == (STRESS,)
+
+
+def test_holds_read_drop_every_kept_one_once_every_hold_was_released() -> None:
+    newer = Hold("stress", "new", "Stress tests", "3 failed")
+    assert note_lift("every", "stress") == "every"
+    assert fold_holds((STRESS, SOAK), {"stress", "soak"}, "every", (newer,)) == (newer,)
+
+
+def test_holds_read_with_none_lifted_keep_the_sets_still_holding_merges() -> None:
+    assert fold_holds((STRESS, SOAK), {"soak"}, NONE_LIFTED, ()) == (SOAK,)
 
 
 def test_the_sets_holding_merges_are_those_whose_failure_does() -> None:

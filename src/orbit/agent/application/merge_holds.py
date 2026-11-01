@@ -21,18 +21,20 @@ from orbit.agent.application.set_runs import SetResult
 from orbit.agent.application.storage_halt import Halting, written
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.merge_holds import (
+    NONE_LIFTED,
     Hold,
     HoldDecision,
+    Lifted,
     decide_failure,
     decide_unlanded_fix,
     find_hold,
     fix_root,
     fixed_set,
+    fold_holds,
     held_step,
     hold_view,
-    kept_holds,
     lift_hold,
-    merge_holds,
+    note_lift,
     released_note,
     resumed_note,
     set_fix_prompt,
@@ -93,6 +95,7 @@ class MergeHolds:
         self._reads = ReportedOnce(parts.publish, INTERNAL)
         self._holds: tuple[Hold, ...] = ()
         self._kept: tuple[Hold, ...] = ()  # The holds the store held when last read or saved.
+        self._lifted: Lifted = NONE_LIFTED  # Those lifted here since then, which it may still hold.
         self._read: _Read = "unread"
         self._passed: dict[str, str] = {}  # Set name -> the commit it last passed on.
         self._saving = asyncio.Lock()  # Saves once at a time, so the newest is written last.
@@ -124,9 +127,9 @@ class MergeHolds:
     async def restore(self) -> None:
         """Take on the holds kept, read afresh, as another orbit may have changed them since
         they were last read, those of sets no longer holding merges dropped, unless they can't be
-        read; a hold started since they were last read replaces the one kept for its set.
-        Nothing is saved from now until they've been read, and :attr:`released` is told once
-        they have if no hold is left."""
+        read; a hold lifted here since they were last read or saved is dropped, and one started
+        since then replaces the one kept for its set. Nothing is saved from now until they've
+        been read, and :attr:`released` is told once they have if no hold is left."""
         store = self._parts.store
         if store is None:
             return
@@ -141,11 +144,12 @@ class MergeHolds:
         result if it differs and telling :attr:`released` if no hold is left, as work saved
         waiting for one that has gone lands then."""
         started = tuple(hold for hold in self._holds if hold not in self._kept)
+        self._holds = fold_holds(loaded, self._holding, self._lifted, started)
         self._kept = loaded
+        self._lifted = NONE_LIFTED
         self._read = "read"
-        self._holds = merge_holds(kept_holds(loaded, self._holding), started)
         self.changed()
-        if self._holds != loaded:  # Holds dropped, or started since they were last read.
+        if self._holds != loaded:  # Holds dropped, lifted, or started since they were last read.
             await self._save(store)
         if not self._holds:
             self.released()
@@ -203,6 +207,7 @@ class MergeHolds:
         names = tuple(hold.name for hold in self._holds)
         if not names:
             return
+        self._lifted = "every"
         await self._replace(())
         await self._parts.publish(Notice(message=released_note(names)))
         self.released()
@@ -219,7 +224,10 @@ class MergeHolds:
         """Note that the set ``name`` passed on ``commit``, and lift its hold, if any, telling
         :attr:`released` once no hold is left."""
         self._passed[name] = commit
-        if find_hold(self._holds, name) is None:
+        held = find_hold(self._holds, name)
+        if held is not None or self._read == "unread":  # The store may hold it unread.
+            self._lifted = note_lift(self._lifted, name)
+        if held is None:
             return
         await self._replace(lift_hold(self._holds, name))
         await self._parts.publish(Notice(message=resumed_note(name)))
@@ -285,12 +293,16 @@ class MergeHolds:
 
     async def _write(self, store: SessionStore) -> StoreFailed | None:
         """Save the holds on in ``store``, unless those kept haven't been read; returns the error
-        when it fails."""
+        when it fails. Once it's done the store holds none of the holds lifted before it, so they
+        needn't be dropped from the next read, unless more were lifted meanwhile, which a later
+        save writes."""
         if self._read == "unread":
             return None
-        holds = self._holds
+        holds, lifted = self._holds, self._lifted
         error = await outcome(store.save_merge_holds(holds))
         if isinstance(error, StoreFailed):
             return error
         self._kept = holds
+        if self._lifted == lifted:
+            self._lifted = NONE_LIFTED
         return None
