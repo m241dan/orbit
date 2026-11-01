@@ -25,8 +25,8 @@ from orbit.agent.domain.config_update import (
     with_checks,
 )
 from orbit.agent.domain.roles import built_in_roles
-from orbit.agent.domain.triggers import ChecksTrigger
-from orbit.agent.domain.verification import VerificationStep
+from orbit.agent.domain.triggers import ChecksTrigger, Trigger
+from orbit.agent.domain.verification import CheckSet, VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.agent.external.built_in_triggers import read_built_in_triggers
 from orbit.protocol import BUILT_IN_ROLE_NAMES
@@ -885,3 +885,56 @@ def test_steps_reusing_names_in_the_set_they_replace_are_written_and_load() -> N
         {"name": "Mutation", "command": ["mutmut", "run", "--fast"], "set": "mutation"},
     ]
     assert loaded_checks(checked) == (LINT,)
+
+
+MUTATION_MANUAL = ChecksTrigger(on="manual", checks="mutation", label="Mutation")
+KEPT_HOLDING = ChecksProposal(steps=(LINT,), sets={"mutation": VerificationSet(holds_merges=True)})
+
+
+def loaded_verification(text: str) -> tuple[tuple[CheckSet, ...], dict[str, Trigger]]:
+    """The named sets and the triggers of the configuration a project file holding ``text``
+    makes."""
+    package = Package(built_in_roles(read_built_in_roles(), INSTRUCTIONS), read_built_in_triggers())
+    config = load_layered(tomllib.loads(text), package).config
+    return config.verification.check_sets, config.triggers
+
+
+def test_a_trigger_running_a_kept_set_is_written_and_loads() -> None:
+    text = f"{OLD_LINT}\n{NIGHTLY_STEP}"
+    checks = ChecksProposal(steps=(LINT,), triggers={"mutation-manual": MUTATION_MANUAL})
+    checked = with_checks(text, checks)
+    assert checked.endswith(
+        '[triggers.mutation-manual]\non = "manual"\nchecks = "mutation"\nlabel = "Mutation"\n'
+    )
+    sets, triggers = loaded_verification(checked)
+    assert [check_set.name for check_set in sets] == ["mutation"]
+    assert triggers["mutation-manual"] == MUTATION_MANUAL.as_trigger()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"{OLD_LINT}\n{NIGHTLY_STEP}",
+        f'setup = {{ command = ["make"] }}\n\n{OLD_LINT}\n{NIGHTLY_STEP}',
+    ],
+    ids=["edited", "rewritten"],
+)
+def test_a_kept_set_given_a_table_holding_merges_gets_it_and_loads(text: str) -> None:
+    checked = with_checks(text, KEPT_HOLDING)
+    assert tomllib.loads(checked)["verification"]["sets"] == {"mutation": {"holds_merges": True}}
+    sets, _ = loaded_verification(checked)
+    assert [(check_set.name, check_set.effect) for check_set in sets] == [
+        ("mutation", "holds_merges")
+    ]
+
+
+def test_a_kept_set_given_a_table_holding_merges_has_it_written_as_its_own() -> None:
+    assert with_checks(f"{OLD_LINT}\n{NIGHTLY_STEP}", KEPT_HOLDING) == (
+        f"{LINT_TABLE}\n{NIGHTLY_STEP}\n{SET_TABLE}"
+    )
+
+
+def test_a_kept_set_proposed_as_reporting_loses_its_table() -> None:
+    checks = ChecksProposal(steps=(LINT,), sets={"mutation": VerificationSet(holds_merges=False)})
+    checked = with_checks(f"{OLD_LINT}\n{NIGHTLY_STEP}\n{NIGHTLY_TABLES}", checks)
+    assert checked == f"{LINT_TABLE}\n{NIGHTLY_STEP}\n{NIGHTLY_TRIGGER}"

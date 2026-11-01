@@ -335,8 +335,9 @@ def with_checks(text: str, checks: ChecksProposal) -> str:
     appended at the end. Each set ``checks``' steps are in gets the table its effect says: one
     holding merges for a set that holds them, in place of the file's, and none for one that
     reports, whether ``checks.sets`` says so or leaves it out, so the file's table for it goes the
-    same way; the file's table for a set no step is in once they're written goes too, so the file
-    loads. The file's other sets' tables stay. Every other line stays as it was, in order, the
+    same way; so does each set of the kept steps ``checks.sets`` names; the file's table for a set
+    no step is in once they're written goes too, so the file loads. The file's other sets' tables
+    stay. Every other line stays as it was, in order, the
     comments after a table's last setting among them. Where that wouldn't read as replacing the
     steps and setup, as when the file sets them some other way, such as inline, it's rewritten as
     TOML instead, keeping its other keys and comments but those after a replaced table's last
@@ -838,11 +839,13 @@ def _with_tables(current: object, tables: dict[str, Table | None]) -> Table:
 def _sets_tables(checks: ChecksProposal, unused: Sequence[str] = ()) -> dict[str, Table | None]:
     """The table of each set ``checks``' steps are in, by name: one saying it holds merges, or
     none for one that only reports, as without a table, whether ``checks.sets`` says so or
-    leaves it out; and none for each of the ``unused`` sets."""
+    leaves it out; then the same for each kept set ``checks.sets`` gives a table (see
+    :attr:`~orbit.agent.domain.checks.ChecksProposal.set_effects`); and none for each of the
+    ``unused`` sets."""
     gone: dict[str, Table | None] = dict.fromkeys(unused)
     return gone | {
-        check_set.name: _set_table() if check_set.effect == "holds_merges" else None
-        for check_set in checks.check_sets
+        name: _set_table() if effect == "holds_merges" else None
+        for name, effect in checks.set_effects.items()
     }
 
 

@@ -7,6 +7,7 @@ from collections.abc import Callable
 
 from orbit.agent import Verification
 from orbit.agent.application.ports import ProposalDecision
+from orbit.agent.application.proposals import proposed
 from orbit.agent.domain.checks import (
     ChecksProposal,
     merge_proposed_sets,
@@ -85,6 +86,18 @@ def test_the_proposed_sets_come_first_then_each_configured_set_it_has_no_steps_i
 def test_a_proposal_without_sets_keeps_every_configured_set() -> None:
     proposal = ChecksProposal.model_validate({"steps": [LINT_STEP]})
     assert merge_proposed_sets((SOAK,), proposal) == (SOAK,)
+
+
+def test_a_kept_set_given_a_table_takes_the_effect_it_says() -> None:
+    proposal = ChecksProposal.model_validate({"steps": [LINT_STEP], "sets": {"soak": False}})
+    assert merge_proposed_sets((SOAK,), proposal) == (CheckSet("soak", SOAK.steps, "reports"),)
+
+
+def test_the_window_says_whether_each_proposed_and_kept_set_holds_merges() -> None:
+    proposal = ChecksProposal.model_validate(
+        {"steps": [LINT_STEP, STRESS_STEP], "sets": {"soak": True}}
+    )
+    assert proposed("agent-1", "7", proposal).sets == {"stress": False, "soak": True}
 
 
 def test_proposed_triggers_take_the_place_of_those_named_so_and_new_ones_come_last() -> None:

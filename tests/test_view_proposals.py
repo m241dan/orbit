@@ -185,3 +185,41 @@ def test_a_proposal_with_no_sets_or_triggers_lists_its_steps() -> None:
     assert proposal_text(PROPOSAL) == (
         "Setup: none\n\nSteps:\n  1. Lint: ruff\n\n✅ All passed on the current code."
     )
+
+
+MANUAL_MUTATION = ProposedTrigger(on="manual", label="Mutation", checks="mutation")
+
+
+def test_a_kept_set_given_a_table_shows_whether_it_holds_merges_and_keeps_its_steps() -> None:
+    proposal = ChecksProposed(
+        agent_id="a",
+        task_id="7",
+        steps=(ProposedStep(name="Lint", command=("ruff",)),),
+        sets={"mutation": True},
+    )
+    assert proposal_text(proposal) == (
+        "Setup: none\n"
+        "\n"
+        "Task checks: every task\n"
+        "  1. Lint: ruff\n"
+        "\n"
+        "Set mutation: no trigger, holds merges\n"
+        "  steps kept as configured\n"
+        "\n"
+        "✅ All passed on the current code."
+    )
+
+
+def test_a_kept_set_only_a_trigger_runs_keeps_its_steps_and_effect() -> None:
+    proposal = ChecksProposed(
+        agent_id="a",
+        task_id="7",
+        steps=(ProposedStep(name="Lint", command=("ruff",)),),
+        triggers={"mutation-manual": MANUAL_MUTATION},
+    )
+    assert proposal_text(proposal).endswith(
+        "Set mutation: by hand\n"
+        "  steps and whether it holds merges kept as configured\n"
+        "\n"
+        "✅ All passed on the current code."
+    )

@@ -1,7 +1,7 @@
 """Proposed checks and the user's decisions on them."""
 
 import shlex
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Protocol
 
 from orbit.protocol import (
@@ -45,8 +45,9 @@ def proposal_title(agent_id: str) -> str:
 
 def proposal_text(event: ChecksProposed) -> str:
     """The proposed setup, then each step in order, and that they all passed. With steps in
-    named sets or any triggers, the steps come as the task checks, then each set, each step
-    keeping its number, each group saying when it runs and each set whether it holds merges."""
+    named sets, sets' tables or any triggers, the steps come as the task checks, then each set,
+    each step keeping its number, each group saying when it runs and each set whether it holds
+    merges; a set none of the steps is in keeps its steps as configured."""
     setup = event.setup
     lines = [f"Setup: {'none' if setup is None else shlex.join(setup.command)}"]
     if setup is not None and setup.watch:
@@ -60,8 +61,9 @@ def proposal_text(event: ChecksProposed) -> str:
 
 
 def _is_grouped(event: ChecksProposed) -> bool:
-    """Whether ``event``'s steps come grouped, as some are in a set or it proposes triggers."""
-    return bool(event.triggers) or any(step.set is not None for step in event.steps)
+    """Whether ``event``'s steps come grouped, as some are in a set, or it proposes sets' tables
+    or triggers."""
+    return bool(event.triggers or event.sets) or any(step.set is not None for step in event.steps)
 
 
 def _grouped_steps(event: ChecksProposed) -> list[str]:
@@ -74,16 +76,33 @@ def _grouped_steps(event: ChecksProposed) -> list[str]:
 
 def _set_names(event: ChecksProposed) -> tuple[str, ...]:
     """The names of the sets ``event``'s steps are in, each once, in the order they first
-    appear."""
-    return tuple(dict.fromkeys(name for name in (s.set for s in event.steps) if name is not None))
+    appear, then those only its sets' tables or its triggers name."""
+    steps = (s.set for s in event.steps)
+    triggered = (t.checks for t in event.triggers.values() if t.checks != TASK_CHECKS)
+    names = (name for name in (*steps, *event.sets, *triggered) if name is not None)
+    return tuple(dict.fromkeys(names))
+
+
+KEPT_STEPS = "  steps kept as configured"
+KEPT_SET = "  steps and whether it holds merges kept as configured"
 
 
 def _set_lines(event: ChecksProposed, name: str) -> list[str]:
     """The set ``name`` of ``event``'s, under a line saying when it runs and whether it holds
-    merges, after a blank line."""
+    merges, after a blank line; a set none of its steps is in keeps its steps, and without a
+    table, whether it holds merges, as configured."""
+    steps = _step_lines(event, name)
+    if not steps and name not in event.sets:
+        return [*_set_heading(event, name, ()), KEPT_SET]
     effect = "holds merges" if event.sets.get(name, False) else "reports"
-    runs = ", ".join([*(_runs(event, name) or ["no trigger"]), effect])
-    return ["", f"Set {name}: {runs}", *_step_lines(event, name)]
+    return [*_set_heading(event, name, (effect,)), *(steps or [KEPT_STEPS])]
+
+
+def _set_heading(event: ChecksProposed, name: str, notes: Sequence[str]) -> list[str]:
+    """A blank line, then the line naming ``event``'s set ``name``, saying when it runs, then
+    ``notes``."""
+    runs = _runs(event, name) or ["no trigger"]
+    return ["", f"Set {name}: {', '.join([*runs, *notes])}"]
 
 
 def _step_lines(event: ChecksProposed, name: str | None) -> list[str]:

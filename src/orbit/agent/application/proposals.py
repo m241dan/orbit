@@ -16,7 +16,8 @@ from orbit.protocol import (
 
 
 def proposed(agent_id: str, task_id: str, proposal: ChecksProposal) -> ChecksProposed:
-    """``proposal`` as the event that shows it, saying whether each of its sets holds merges."""
+    """``proposal`` as the event that shows it, saying whether each of its sets holds merges,
+    those its steps are in and then the kept ones its ``sets`` name."""
     setup = proposal.setup
     return ChecksProposed(
         agent_id=agent_id,
@@ -25,7 +26,7 @@ def proposed(agent_id: str, task_id: str, proposal: ChecksProposal) -> ChecksPro
             ProposedStep(name=s.name, command=s.command, set=s.set) for s in proposal.steps
         ),
         setup=None if setup is None else ProposedSetup(command=setup.command, watch=setup.watch),
-        sets={s.name: s.effect == "holds_merges" for s in proposal.check_sets},
+        sets={name: effect == "holds_merges" for name, effect in proposal.set_effects.items()},
         triggers={
             name: ProposedTrigger.model_validate(trigger.model_dump())
             for name, trigger in proposal.triggers.items()

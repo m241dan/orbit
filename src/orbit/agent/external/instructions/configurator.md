@@ -51,7 +51,9 @@ trigger runs never runs.
 When your task lists sets configured now, each with its steps, whether it holds merges and when
 its triggers run it, propose each set again under the same name, with whether it holds merges
 and the triggers that run it as they are, unless you mean to change them. Don't move a set's
-steps into the task checks, or leave a set out, without saying why.
+steps into the task checks, or leave a set out, without saying why. A configured set none of
+your steps is in stays as configured, with its steps, so a trigger may still run it, and `sets`
+may still say whether it holds merges, without your proposing its steps again.
 
 ## Setup
 

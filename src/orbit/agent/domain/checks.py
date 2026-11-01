@@ -4,7 +4,8 @@ the checks an agent proposes, with the triggers that would run them, and what a 
 told is configured now."""
 
 import shlex
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
+from dataclasses import replace
 from types import MappingProxyType
 from typing import Any
 
@@ -123,13 +124,14 @@ def _effect(table: VerificationSet | None) -> SetEffect:
     return "holds_merges" if table is not None and table.holds_merges else "reports"
 
 
-def check_sets(verification: VerificationConfig) -> None:
+def check_sets(verification: VerificationConfig, kept: Collection[str] = ()) -> None:
     """Raise :class:`ConfigError` naming each of ``verification``'s sets' tables for a set no
-    step is in, on a line of its own, if any, each at ``verification.sets.<name>``."""
+    step is in, neither one of its own nor one of the ``kept`` sets a file keeps beside them, on
+    a line of its own, if any, each at ``verification.sets.<name>``."""
     problems = [
         f'verification.sets.{name}: no step is in it; a step joins it with set = "{name}".'
         for name in verification.sets
-        if name not in verification.set_names
+        if name not in verification.set_names and name not in kept
     ]
     if problems:
         raise ConfigError("\n".join(problems))
@@ -160,6 +162,14 @@ class ChecksProposal(VerificationConfig):
         }
 
     @property
+    def set_effects(self) -> dict[SetName, SetEffect]:
+        """What the failure of each set the proposal writes the table of does, by name: those
+        its steps are in, in order, then those only the ``sets`` give a table, sets a file keeps
+        as configured beside the proposal, whose tables it replaces."""
+        effects = {check_set.name: check_set.effect for check_set in self.check_sets}
+        return effects | {name: _effect(table) for name, table in self.sets.items()}
+
+    @property
     def trigger_settings(self) -> dict[str, Trigger]:
         """The ``triggers``, by name, as the config would read them."""
         return {name: trigger.as_trigger() for name, trigger in self.triggers.items()}
@@ -173,8 +183,14 @@ def merge_proposed_sets(
 ) -> tuple[CheckSet, ...]:
     """The named sets once ``proposal`` is written over the ``configured`` ones, as the config
     reads them then: its sets, each with its steps and what its failure does, then each of the
-    ``configured`` sets none of its steps is in, as it was."""
-    kept = (check_set for check_set in configured if check_set.name not in proposal.set_names)
+    ``configured`` sets none of its steps is in, as it was but for what its failure does, if
+    ``proposal.sets`` says."""
+    effects = proposal.set_effects
+    kept = (
+        replace(check_set, effect=effects.get(check_set.name, check_set.effect))
+        for check_set in configured
+        if check_set.name not in proposal.set_names
+    )
     return (*proposal.check_sets, *kept)
 
 
@@ -282,17 +298,32 @@ def configured_checks(
     return "Configured now (build on these):\n\n" + current
 
 
-def find_clashes(
+def find_kept(
     configured: Sequence[VerificationStep], proposal: ChecksProposal
 ) -> tuple[VerificationStep, ...]:
     """The ``configured`` steps, a file's, that stay as they are once ``proposal`` is written,
-    being in a set none of its steps is in, and share a name with one of its steps: those the
-    file couldn't load beside it."""
-    proposed_sets = {None, *(step.set for step in proposal.steps)}
+    being in a set none of its steps is in, in order."""
+    proposed_sets = {None, *proposal.set_names}
+    return tuple(step for step in configured if step.set not in proposed_sets)
+
+
+def find_kept_sets(
+    configured: Sequence[VerificationStep], proposal: ChecksProposal
+) -> tuple[SetName, ...]:
+    """The names of the sets the ``configured`` steps ``proposal`` keeps are in (see
+    :func:`find_kept`), each once, in the order they first appear."""
+    kept = find_kept(configured, proposal)
+    return tuple(dict.fromkeys(step.set for step in kept if step.set is not None))
+
+
+def find_clashes(
+    configured: Sequence[VerificationStep], proposal: ChecksProposal
+) -> tuple[VerificationStep, ...]:
+    """The ``configured`` steps, a file's, that stay as they are once ``proposal`` is written
+    (see :func:`find_kept`) and share a name with one of its steps: those the file couldn't load
+    beside it."""
     proposed_names = {step.name for step in proposal.steps}
-    return tuple(
-        step for step in configured if step.set not in proposed_sets and step.name in proposed_names
-    )
+    return tuple(step for step in find_kept(configured, proposal) if step.name in proposed_names)
 
 
 def check_clashes(configured: Sequence[VerificationStep], proposal: ChecksProposal) -> None:
@@ -317,13 +348,16 @@ def parse_proposal(
     the ``configured`` steps: a set's table for a set no step is in, a step named like one of
     the ``configured`` steps it leaves as they are (see :func:`find_clashes`), a trigger named
     like a built-in one with a role, or a trigger, merged over the built-in one of its name,
-    whose ``checks`` name neither the task checks nor a set a step is in, among the rest."""
+    whose ``checks`` name neither the task checks nor a set a step is in, among the rest. Its
+    triggers and sets' tables may name a set only the ``configured`` steps it keeps are in (see
+    :func:`find_kept_sets`), as the file keeps that set."""
     try:
         proposal = ChecksProposal.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(validation_problems(exc)) from None
-    check_sets(proposal)
+    kept = find_kept_sets(configured, proposal)
+    check_sets(proposal, kept)
     check_clashes(configured, proposal)
     check_free_names(built_in, proposal.triggers)
-    check_triggers(merge_proposed(built_in, proposal.triggers), (), proposal.set_names)
+    check_triggers(merge_proposed(built_in, proposal.triggers), (), (*proposal.set_names, *kept))
     return proposal

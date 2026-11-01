@@ -192,3 +192,33 @@ def test_a_proposal_replacing_a_sets_steps_may_reuse_their_names() -> None:
     mutation = {"name": "Mutation", "command": ["mutmut", "run"], "set": "mutation"}
     proposal = parse_proposal({"steps": [LINT_STEP, mutation]}, configured=CONFIGURED)
     assert proposal.steps[1] == MUTATION
+
+
+MUTATION_MANUAL = {"on": "manual", "label": "Mutation", "checks": "mutation"}
+
+
+def test_a_trigger_may_run_a_kept_set_the_proposal_has_no_steps_in() -> None:
+    data = {"steps": [LINT_STEP], "triggers": {"mutation-manual": MUTATION_MANUAL}}
+    proposal = parse_proposal(data, configured=CONFIGURED)
+    assert proposal.triggers["mutation-manual"].checks == "mutation"
+
+
+def test_a_kept_set_may_be_given_a_table_holding_merges() -> None:
+    data = {"steps": [LINT_STEP], "sets": {"mutation": True}}
+    proposal = parse_proposal(data, configured=CONFIGURED)
+    assert proposal.set_effects == {"mutation": "holds_merges"}
+
+
+def test_a_set_neither_proposed_nor_kept_is_still_refused_with_kept_sets_configured() -> None:
+    trigger = {"on": "commits", "checks": "stress"}
+    with pytest.raises(ConfigError) as refused:
+        parse_proposal({"steps": [LINT_STEP], "triggers": {"slow": trigger}}, configured=CONFIGURED)
+    assert str(refused.value) == (
+        'triggers.slow.checks: stress isn\'t "task-checks" or a set a step is in; the sets'
+        " are mutation."
+    )
+
+
+def test_a_table_for_a_set_neither_proposed_nor_kept_is_still_refused() -> None:
+    with pytest.raises(ConfigError, match=re.escape("verification.sets.stress: no step is in it")):
+        parse_proposal({"steps": [LINT_STEP], "sets": {"stress": True}}, configured=CONFIGURED)
