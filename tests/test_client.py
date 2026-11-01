@@ -684,6 +684,23 @@ async def test_a_command_sent_while_greeting_raises_not_connected_and_follows_it
     assert isinstance(greeting[0].payload, Hello) and greeting[1:] == [ATTACH, WATCH, RUN]
 
 
+async def test_a_connection_closed_while_greeting_is_never_reported_connected_and_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gate = Gate()
+    gate.hold(monkeypatch)
+    async with plane() as (fake, url):
+        session, states = client(url)
+        await session.send(HELLO)
+        await (await fake.connection()).close(1011, "Oops")
+        await asyncio.wait_for(gate.entered.wait(), 5)
+        gate.opened.set()
+        await states.until(Connected)
+        assert await fake.command() == HELLO
+        assert [type(state) for state in states.seen] == [Reconnecting, Connected]
+        await session.close()
+
+
 async def test_closing_while_greeting_closes_the_connection_and_ends_the_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

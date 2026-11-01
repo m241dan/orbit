@@ -2,7 +2,7 @@
 and the log itself, without the list showing it."""
 
 from bisect import bisect_left
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Literal, Protocol
 
@@ -65,6 +65,12 @@ def nearest_row(rows: Sequence[int], index: int) -> int | None:
 def after_rows(rows: Sequence[int], indexes: Sequence[int]) -> bool:
     """Whether every entry at ``indexes`` comes after the last entry ``rows`` shows."""
     return not rows or all(index > rows[-1] for index in indexes)
+
+
+def calls_without(calls: Mapping[int, ToolCall], index: int) -> dict[int, ToolCall]:
+    """The running ``calls``, by their entry, once the entry at ``index`` is dropped: its own
+    call gone, and those of the entries after it moved up one."""
+    return {i - (i > index): call for i, call in calls.items() if i != index}
 
 
 def thinking_places(entries: Sequence[Entry], agent: str | None, turn: str) -> list[int]:
@@ -291,16 +297,16 @@ class EntryLog:
         self._show_rows_holding(None if held is None else held + offset)
 
     def drop(self, entry: Entry) -> None:
-        """Drop ``entry``, this very one rather than an equal one, the cursor kept on its own
-        entry, or moved to the nearest one shown if it held ``entry``; a log without it is left
-        as it is."""
+        """Drop ``entry``, this very one rather than an equal one, and its call if it's still
+        running, the cursor kept on its own entry, or moved to the nearest one shown if it held
+        ``entry``; a log without it is left as it is."""
         index = next((i for i, held in enumerate(self._entries) if held is entry), None)
         if index is None:
             return
         cursor = self.inspected
         del self._entries[index]
         del self._collapsed[index]
-        self._calls = {i - (i > index): call for i, call in self._calls.items()}
+        self._calls = calls_without(self._calls, index)
         self._show_rows_holding(None if cursor is None else cursor - (cursor > index))
 
     def swap(self, entry: Entry, new: Entry) -> None:

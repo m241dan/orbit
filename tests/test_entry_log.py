@@ -213,6 +213,24 @@ def test_a_call_after_a_dropped_entry_still_finishes() -> None:
     assert not log.running
 
 
+def test_dropping_a_running_call_leaves_none_on_the_entry_moved_into_its_place() -> None:
+    view = EntryList()
+    log = view.entry_log
+    log.append_call(tool_call_started(call("agent-1", "c1")), "agent-1", None)
+    [dropped] = log.entries
+    moved = Entry("hi", "agent", "agent-1")
+    log.append(moved)
+    log.append_call(tool_call_started(call("agent-1", "c2")), "agent-1", None)
+    log.drop(dropped)
+    log.tick()
+    assert log.entries[0] == moved
+    assert not log.finish_call(result("agent-1", "c1", "lost"))
+    assert log.finish_call(result("agent-1", "c2", "done"))
+    later = log.entries[1].call
+    assert later is not None and later.call_id == "c2" and later.status != "running"
+    assert log.entries[0] == moved and not log.running
+
+
 def test_dropping_an_entry_the_log_lacks_leaves_it() -> None:
     view = EntryList()
     log = view.entry_log

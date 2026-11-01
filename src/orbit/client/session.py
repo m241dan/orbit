@@ -308,22 +308,34 @@ class WebSocketSession:
         """Greet the control plane on ``websocket`` with the last ``Hello``, if any, and take
         its events until the connection closes, noting if it said it was shutting down; whether
         it received anything. Commands are sent on it, and it's reported connected, only once
-        it's greeted, so none goes before the ``Hello`` or the ``Attach`` sent again. Raises
-        :class:`_Ended` if it closed, from either side, in a way that would recur, unless the
-        session closed it."""
+        it's greeted, so none goes before the ``Hello`` or the ``Attach`` sent again, and one
+        that closes while it's greeted never is. Raises :class:`_Ended` if it closed, from
+        either side, in a way that would recur, unless the session closed it."""
         async with websocket:
             self._open = websocket
             self._ever_linked = True
             try:
-                with suppress(ConnectionClosed):
-                    await self._greet(websocket)
-                self._websocket = websocket
-                self._report(Connected(self.url))
-                received = await self._read(websocket)
+                received = await self._greeted(websocket) and await self._use(websocket)
             finally:
                 self._open = self._websocket = None
         self._closed_as(_closing(websocket))
         return received
+
+    async def _greeted(self, websocket: ClientConnection) -> bool:
+        """Greet the control plane on ``websocket`` as :meth:`_greet` does; whether it was
+        greeted before the connection closed."""
+        try:
+            await self._greet(websocket)
+        except ConnectionClosed:
+            return False
+        return True
+
+    async def _use(self, websocket: ClientConnection) -> bool:
+        """Send commands on ``websocket``, greeted, and report it connected, then take its
+        events until it closes; whether it brought any."""
+        self._websocket = websocket
+        self._report(Connected(self.url))
+        return await self._read(websocket)
 
     def _closed_as(self, close: Close | None) -> None:
         """Note how the connection closed, as ``close``, the frame that closed it, if any, says:
