@@ -1260,7 +1260,13 @@ triggers each queue a task for their lens reviewer, `fit-reviewer`, `bugs-review
 `tests-reviewer`, `logic-reviewer`, `security-reviewer` and `performance-reviewer` (they show in
 the task list, each with its trigger as its origin), carrying the commit's diff, from the
 `lens-review.md` template (see [Triggers](#triggers)), and orbit runs each in a read-only snapshot
-of that commit, one at a time in the review lane. A lens reviewer judges the change against its
+of that commit, side by side in the review lane: up to `review_slots` (default 3, set in
+`.orbit/config.toml`) of the review lane's tasks run at once, lens reviews, merge passes and super
+reviews alike, each taking a slot as one frees up, in the order they wait on the board, and a lens
+review of one commit may run beside one of the next. Cancelling one stops only it; a runtime's
+usage limit or outage leaves the task it stopped to run again, lets the others running finish and
+starts no other on that runtime until the pause ends; and `review_slots = 1` runs them one at a
+time. A lens reviewer judges the change against its
 task's prompt and, when the prompt opens with `Plan: <path>`, against that plan's record, looking
 only through its lens skill (`review-fit`, `review-bugs`, `review-tests`, `review-logic`,
 `review-security` or `review-performance`, each saying what it looks for and what blocks; see
@@ -3743,7 +3749,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `Verifier` (in `verifier`) runs the steps, each run for an agent's call timed as an
     `orbit.verify.step` child of the call's span; `Lander` (in `landing`) commits and merges
     verified work; every lane of the roles' but the one whose roles merge runs on a `LaneRunner`
-    (in `lane_runner`), which starts its tasks by itself, one at a time, unless a halt stops it,
+    (in `lane_runner`), which starts its tasks by itself, one at a time, or for the review lane up
+    to `review_slots` at once through `SideBySide` (in `orbit.execution.side_by_side`), unless a
+    halt stops it,
     skipping those on the runtime whose pause the work lane waits out and, while verification is
     missing, as the session's `SessionGate` says, all but the configurator's, and `Lanes` (also
     there) holds the lanes by name; `TriggerEngine` (in `triggers`) fires the triggers on the

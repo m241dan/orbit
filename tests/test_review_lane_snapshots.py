@@ -32,6 +32,7 @@ from orbit.protocol import (
     TurnEndReason,
 )
 from tests.agent_fakes import (
+    ONE_AT_A_TIME,
     Call,
     FakeStore,
     FakeTree,
@@ -341,7 +342,13 @@ async def test_a_reviews_template_is_saved_only_while_it_may_still_run() -> None
 
     store = FakeStore()
     session, _, _ = session_for(
-        claims_done, claims_done, reviewers=(slow,), tree=FakeTree(), review=True, store=store
+        claims_done,
+        claims_done,
+        reviewers=(slow,),
+        tree=FakeTree(),
+        review=True,
+        store=store,
+        review_limits=ONE_AT_A_TIME,
     )
     await start(session, "one", "two")
     events: list[Event] = []

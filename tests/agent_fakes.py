@@ -54,7 +54,7 @@ from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.reports import NewReport
-from orbit.agent.domain.reviews import SuperReviewCount
+from orbit.agent.domain.reviews import ReviewLimits, SuperReviewCount
 from orbit.agent.domain.roles import Role, built_in_roles
 from orbit.agent.domain.runtimes import (
     CLAUDE,
@@ -139,6 +139,9 @@ ROLES = built_in_roles(
     read_built_in_roles(), {name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES}
 )
 """The built-in roles, with stand-in instructions."""
+
+ONE_AT_A_TIME = ReviewLimits(slots=1)
+"""The review limits with one slot, so the review lane runs its tasks one after another."""
 
 SHIPPED_TRIGGERS = read_built_in_triggers()
 """The shipped triggers, their prompts their templates' text."""

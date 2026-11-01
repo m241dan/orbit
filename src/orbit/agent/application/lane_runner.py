@@ -1,12 +1,12 @@
 """The lanes that start by themselves: every lane among the enabled task roles' but the one whose
-roles merge, which runs on the user's asking. Each runs the board's next runnable task whose role
-is in it, one at a time, through a new agent, once a task for it is queued, unless this orbit is
-read-only or the session is halted; while a runtime is paused, it skips the tasks whose role runs
-on that runtime, and runs them once the pause ends, and while verification is missing, every task
-but the configurator's, which run once it's set up and the lane is kicked. A task whose agent hits
-its runtime's usage limit or finds its API not answering, as its role's launcher tells, pauses that
-runtime, whichever lane it ran in, and is left to run again. Reviews run so too, with the rules
-:class:`ReviewLane` keeps."""
+roles merge, which runs on the user's asking. Each runs the board's next runnable task whose role is
+in it, one at a time, or as many at once as the lane's slots allow, each through a new agent, once a
+task for it is queued, unless this orbit is read-only or the session is halted; while a runtime is
+paused, it skips the tasks whose role runs on that runtime, and runs them once the pause ends, and
+while verification is missing, every task but the configurator's, which run once it's set up and the
+lane is kicked. A task whose agent hits its runtime's usage limit or finds its API not answering, as
+its role's launcher tells, pauses that runtime, whichever lane it ran in, and is left to run again.
+Reviews run so too, with the rules :class:`ReviewLane` keeps."""
 
 from collections.abc import Awaitable, Callable, Collection, Coroutine, Iterable
 from dataclasses import dataclass, field
@@ -23,6 +23,7 @@ from orbit.agent.domain.endings import STOPPED_BY_YOU
 from orbit.agent.domain.roles import Workspace
 from orbit.agent.domain.setup_first import waiting_for_setup
 from orbit.agent.domain.usage_limits import RuntimeStop, clears_outage
+from orbit.execution.side_by_side import SideBySide
 from orbit.protocol import PLANNER_LANE, WORK_LANE, BusyChanged, BusyLane, Event
 
 
@@ -111,24 +112,28 @@ class LaneParts:
 @dataclass(frozen=True)
 class LaneWork:
     """What a lane runs: ``next_task`` is the task to run next, skipping those given, ``run``
-    runs one to its end, whatever it returns, and ``spent`` are the tasks not to run again."""
+    runs one to its end, whatever it returns, ``spent`` are the tasks not to run again, and
+    ``slots`` how many may run at once."""
 
     next_task: Callable[[Collection[str]], str | None]
     run: Callable[[str], Awaitable[object]]
     spent: Callable[[], set[str]] = set
+    slots: int = 1
 
 
 class LaneRunner:
-    """Runs lane ``lane``'s tasks, those whose role is among ``roles``, one at a time in the
-    background with ``parts``.
+    """Runs lane ``lane``'s tasks, those whose role is among ``roles``, in the background with
+    ``parts``: one at a time, unless ``work`` gives the lane more slots, each picked in board
+    order as a slot is free.
 
     Each task's agent works in its role's workspace, unless ``work`` says what to run and how.
     A task whose role runs on the paused runtime is skipped until the pause ends. A task whose
     agent hits its runtime's usage limit or finds its API not answering is left pending, to run
     again, and pauses that runtime; while another runtime is paused already, that pause stays,
-    and this runtime's tasks are skipped too until it ends, then run again. The lane shows busy
-    from when its run picks a task until the run ends; the user's :meth:`cancel` stops the task
-    running, even before its agent's run begins, and the lane carries on with the next."""
+    and this runtime's tasks are skipped too until it ends, then run again. The tasks running on
+    other runtimes carry on. The lane shows busy from when its run picks a task until the run
+    ends; the user's :meth:`cancel` stops a task running, even before its agent's run begins,
+    and the lane carries on with the others."""
 
     def __init__(
         self, lane: BusyLane, roles: Collection[str], parts: LaneParts, work: LaneWork | None = None
@@ -142,10 +147,12 @@ class LaneRunner:
         self._background = Background(lane, parts.desk.publish)
         self._background.ended = self._ended
         self._stopped: Callable[[], None] = _unwatched
-        self._running: str | None = None  # The task running.
+        # The run's slots, while it runs.
+        self._slots: SideBySide[str] | None = None
         self._busy = False  # The lane was last shown busy.
-        # The agent's run of the task running, and whether the user stopped that task.
-        self._agent = StoppableRun[Outcome]()
+        # The tasks running, earliest started first, each with its agent's run, and whether the
+        # user stopped that task.
+        self._agents: dict[str, StoppableRun[Outcome]] = {}
         # Runtimes whose agents hit a limit that paused nothing, each with the runtime paused
         # then, if any, skipped while it stays so, or for the rest of the run; and the tasks
         # they left to run again.
@@ -164,48 +171,52 @@ class LaneRunner:
 
     @property
     def current(self) -> str | None:
-        """The task running or, before the lane picks one, the one it will pick; none when
-        there's none."""
-        return self._running or self._next_task(self._work.spent())
+        """The task running, the earliest started of those running, or, before the lane picks
+        one, the one it will pick; none when there's none."""
+        return next(iter(self._agents), None) or self._next_task(self._work.spent())
 
     def on_stopped(self, stopped: Callable[[], None]) -> None:
         """Have ``stopped`` called whenever the lane's tasks stop running."""
         self._stopped = stopped
 
     def kick(self) -> None:
-        """Run the lane's tasks waiting, unless they're being run already or no task may start;
-        those queued meanwhile wait on the board."""
-        if not (self._blocked() or self.running):
+        """Run the lane's tasks waiting, unless no task may start; while they're being run
+        already, fill the slots free, and those queued meanwhile wait on the board for a slot."""
+        if self._blocked():
+            return
+        if self._slots is not None:
+            self._slots.wake()
+        elif not self.running:
             self._background.start(self._run_tasks())
 
     def cancel(self, task_id: str | None = None) -> None:
-        """Stop the task running if it's ``task_id``, or whichever it is if none is named, even
+        """Stop the task running that's ``task_id``, or every one running if none is named, even
         as it starts, before its agent's run begins; the lane carries on."""
-        running = self._running
-        if running is None or task_id not in (None, running):
-            return
-        self._agent.stop()
+        for running, agent in self._agents.items():
+            if task_id in (None, running):
+                agent.stop()
 
     async def stop(self) -> None:
-        """Stop the lane's tasks running, and wait for them to; they run again once kicked."""
+        """Stop every task of the lane's running, and wait for them all to; they run again once
+        kicked."""
         await self._background.stop()
 
     async def close(self) -> None:
         """Stop the lane's tasks running for good: a kick from now on runs none."""
         await self._background.close()
 
-    async def alone(self, run: Callable[[], Coroutine[Any, Any, Outcome]]) -> Outcome:
-        """How ``run``, the running task's run through its agent, ended, run as a task of its own
-        that :meth:`cancel` cancels, even as it starts, leaving the lane's run going; anything
-        unexpected escapes."""
-        return await self._agent.run_alone(run())
+    async def alone(self, task_id: str, run: Callable[[], Coroutine[Any, Any, Outcome]]) -> Outcome:
+        """How ``run``, running task ``task_id``'s run through its agent, ended, run as a task of
+        its own that :meth:`cancel` cancels, even as it starts, leaving the lane's run going;
+        anything unexpected escapes."""
+        return await self._agents[task_id].run_alone(run())
 
     async def run_in_workspace(self, task_id: str) -> bool:
         """Run task ``task_id`` to its end through a new agent, as :func:`run_in_role_workspace`
         does; the user's stop ends it as stopped by them. Returns whether it's left to run
         again, as :meth:`ran` says."""
         agent = partial(run_in_role_workspace, task_id, self._tasks, self._desk)
-        run = partial(self.alone, agent)
+        run = partial(self.alone, task_id, agent)
         stop = UserStop(STOPPED_BY_YOU)
         outcome = await run_task_to_end(self._tasks, task_id, run, stop, self._desk.publish)
         return await self.ran(task_id, outcome)
@@ -270,22 +281,40 @@ class LaneRunner:
         self._stopped()
 
     async def _run_tasks(self) -> None:
-        """Run the lane's tasks waiting, one at a time, until none are left but those on a paused
-        runtime or no task may start, showing the lane busy once it picks one."""
+        """Run the lane's tasks waiting, as many at once as its slots allow, until none are left
+        but those on a paused runtime or no task may start, and those running have ended,
+        showing the lane busy once it picks one."""
         tried = self._work.spent()
         self._held.clear()
-        while (task_id := self._next_task(tried)) is not None:
-            if self._blocked():  # It may have halted as the last task ended.
-                return
-            self._show_busy(True)
-            tried.add(task_id)
-            self._running = task_id
-            try:
-                await self._work.run(task_id)
-            finally:
-                self._running = None
-                self._agent.reset()
-            tried -= self._again  # Those left to run again run once their runtime may.
+        slots = self._slots = SideBySide(
+            self._work.slots, partial(self._pick, tried), partial(self._run_task, tried)
+        )
+        try:
+            await slots.run()
+        finally:
+            self._slots = None
+            self._agents.clear()
+
+    def _pick(self, tried: set[str]) -> str | None:
+        """The task to start next, skipping those ``tried``, which it joins, showing the lane
+        busy; none if there's none, or no task may start, as when the session halted as a task
+        ended."""
+        task_id = None if self._blocked() else self._next_task(tried)
+        if task_id is None:
+            return None
+        self._show_busy(True)
+        tried.add(task_id)
+        self._agents[task_id] = StoppableRun()
+        return task_id
+
+    async def _run_task(self, tried: set[str], task_id: str) -> None:
+        """Run task ``task_id`` to its end; once it has, those ``tried`` that were left to run
+        again run once their runtime may."""
+        try:
+            await self._work.run(task_id)
+        finally:
+            self._agents.pop(task_id, None)
+            tried.difference_update(self._again)
             self._again.clear()
 
     def _next_in_lane(self, tried: Collection[str]) -> str | None:

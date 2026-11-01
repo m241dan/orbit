@@ -10,7 +10,7 @@ description: Orbit's map of code types — which packages hold Domain, Applicati
 | Domain | `orbit.agent.domain`; the plain functions in `orbit.tui.view` (presentation rules); `orbit.protocol` (wire models) |
 | Application | `orbit.agent.application`, with its ports and their exceptions in `application/ports.py`; the controllers in `orbit.tui.view` |
 | External | `orbit.agent.external`, one adapter per outside system; `orbit.telemetry`; `orbit.client`; the Textual widgets in `orbit.tui` |
-| Execution | `orbit.execution`: cancelling and shielding, `Background`, `TurnSlot` and `ThreadedSession`. It imports no orbit package; a new generic helper goes here. |
+| Execution | `orbit.execution`: cancelling and shielding, `Background`, `SideBySide`, `TurnSlot` and `ThreadedSession`. It imports no orbit package; a new generic helper goes here. |
 | Entry | `orbit.cli` and `orbit.__main__` |
 | Ports and tools | `orbit.tracing` (the tracing port, standard library only) and `orbit.profiling` (wired in by the CLI) |
 

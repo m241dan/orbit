@@ -45,6 +45,7 @@ from orbit.protocol import (
     TurnEndReason,
 )
 from tests.agent_fakes import (
+    ONE_AT_A_TIME,
     ROLES,
     TRIGGERS,
     Call,
@@ -1160,6 +1161,7 @@ async def test_a_review_is_told_the_subjects_that_landed_before_it_started_oldes
         reviewers=(waits_then_reviews, suggests(briefs=briefs), suggests(), suggests()),
         tree=LandingTree(),
         review=True,
+        review_limits=ONE_AT_A_TIME,
     )
     await start(session, "one", "two", "three", "four")
     events: list[Event] = []
@@ -1303,6 +1305,7 @@ async def test_a_project_review_triggers_review_cant_be_edited_and_starts_as_que
         tree=tree,
         review=True,
         triggers={**TRIGGERS, "review": off, "check": check},
+        review_limits=ONE_AT_A_TIME,
     )
     await start(session, "one", "two")
     events: list[Event] = []
@@ -1378,7 +1381,12 @@ async def test_a_queued_review_that_is_removed_leaves_no_batch_open() -> None:
         return "completed"
 
     session, _, launcher = session_for(
-        claims_done, claims_done, reviewers=(slow,), tree=FakeTree(), review=True
+        claims_done,
+        claims_done,
+        reviewers=(slow,),
+        tree=FakeTree(),
+        review=True,
+        review_limits=ONE_AT_A_TIME,
     )
     await start(session, "one", "two")
     events: list[Event] = []

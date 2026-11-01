@@ -89,6 +89,11 @@ class _FileConfig(_Config):
         ge=1,
         description="Rounds of review-suggested work after which review pauses.",
     )
+    review_slots: int = Field(
+        default=_REVIEW_LIMITS.slots,
+        gt=0,
+        description="Review-lane tasks that run at once: lens and super reviews, merge passes.",
+    )
     super_review_every: int = Field(
         default=_SUPER_REVIEW_EVERY,
         ge=1,
@@ -157,6 +162,7 @@ class _FileConfig(_Config):
             lens_findings=self.lens_findings,
             super_suggestions=self.super_review_suggestions,
             super_sample=self.super_review_sample,
+            slots=self.review_slots,
         )
 
 

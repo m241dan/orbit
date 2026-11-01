@@ -113,13 +113,14 @@ class ReviewLimits:
     ``suggestions`` the tasks one review may suggest. A super review, due as its trigger says,
     may suggest ``super_suggestions`` tasks, and reads a sample of ``super_sample`` code files
     besides those changed since the last. A lens may report ``lens_findings`` findings in one
-    review."""
+    review. Up to ``slots`` of the review lane's tasks run at once."""
 
     rounds: int = 3
     suggestions: int = 5
     super_suggestions: int = 10
     super_sample: int = 10
     lens_findings: int = 10
+    slots: int = 3
 
 
 Severity = Literal["blocking", "normal"]

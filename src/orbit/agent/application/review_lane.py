@@ -1,21 +1,22 @@
-"""The review lane: reviews of landed work, run one at a time beside the work lane.
+"""The review lane: reviews of landed work, run beside the work lane, as many at once as the
+``review_slots`` limit allows.
 
-Each review runs in a read-only snapshot of the commit it reviews, on the :class:`LaneRunner` of
-the review roles' lane, which runs the tasks of every role in it, the others as any lane runs its
-tasks. Its suggestions become tasks at the end of the queue, which the work lane then runs; a task
-of another role booked as a review, run in this lane or the work lane, ends its batch as a review
-does once it ends. The tasks the triggers queue for one review are booked into it, sharing one
-batch, which fills until they have all ended; once every one of a finding role, granted
-``report_finding``, has ended, the lane raises ``reviews_finished`` with the findings they
-reported, and the tasks queued on it join the review, which then fills until they end too.
-Those tasks are its merge passes, which must decide every finding, as
-:mod:`~orbit.agent.domain.merge_pass` says; a review keeps its findings while its batch is open,
-so the tasks filed for them mark them fixed as they land, or given up as they give up.
-:class:`ReviewPlanner` decides when a review is due and stops reviews generating work forever.
-It's the ``review-rounds`` guard: the lane raises each landing as ``task_landed``, and a review
-of commits is queued by the triggers it guards, from their templates. It counts each landing
-toward the ``commits`` triggers too, and a super review is queued by those that fire, or by the
-super-review trigger fired by hand; those of them that run a named set run it instead.
+Each review runs in a read-only snapshot of the commit it reviews, on the :class:`LaneRunner` of the
+review roles' lane, which runs the tasks of every role in it, the others as any lane runs its tasks,
+each taking one of the lane's slots in board order. Its suggestions become tasks at the end of the
+queue, which the work lane then runs; a task of another role booked as a review, run in this lane or
+the work lane, ends its batch as a review does once it ends. The tasks the triggers queue for one
+review are booked into it, sharing one batch, which fills until they have all ended; once every one
+of a finding role, granted ``report_finding``, has ended, the lane raises ``reviews_finished`` with
+the findings they reported, and the tasks queued on it join the review, which then fills until they
+end too. Those tasks are its merge passes, which must decide every finding, as
+:mod:`~orbit.agent.domain.merge_pass` says; a review keeps its findings while its batch is open, so
+the tasks filed for them mark them fixed as they land, or given up as they give up.
+:class:`ReviewPlanner` decides when a review is due and stops reviews generating work forever. It's
+the ``review-rounds`` guard: the lane raises each landing as ``task_landed``, and a review of
+commits is queued by the triggers it guards, from their templates. It counts each landing toward the
+``commits`` triggers too, and a super review is queued by those that fire, or by the super-review
+trigger fired by hand; those of them that run a named set run it instead.
 """
 
 import random
@@ -202,7 +203,7 @@ class ReviewLane:
         ``hooks``."""
         roles = self._desk.agents.roles
         lane = review_lane(roles)
-        work = LaneWork(self._next_review, self._review, self._spent)
+        work = LaneWork(self._next_review, self._review, self._spent, self.planner.limits.slots)
         parts = LaneParts(
             self._desk, self._tasks, hooks.gate, hooks.paused, hooks.post, hooks.pauses
         )
@@ -231,9 +232,10 @@ class ReviewLane:
 
     @property
     def reviewing(self) -> tuple[str, ...] | None:
-        """The tasks whose work the review running or, before the lane picks one, the one it
-        will pick reviews, in task order; none when there's no review, such as while the lane
-        is on another role's task, and no tasks for a review of no particular task."""
+        """The tasks whose work the review running, the earliest started of the lane's tasks
+        running, or, before the lane picks one, the one it will pick reviews, in task order; none
+        when there's no review, such as while the lane is on another role's task, and no tasks
+        for a review of no particular task."""
         review = self.runner.current
         if review is None or not self._is_review(review):
             return None
@@ -242,8 +244,9 @@ class ReviewLane:
 
     @property
     def task(self) -> str | None:
-        """The task of another role than the review roles that the lane, while it runs, is on
-        or, before it picks one, will pick; none when that's a review, or there's none."""
+        """The task of another role than the review roles that the lane, while it runs, is on,
+        the earliest started of those running, or, before it picks one, will pick; none when
+        that's a review, or there's none."""
         task_id = self.runner.current if self.running else None
         return None if task_id is None or self._is_review(task_id) else task_id
 
@@ -548,17 +551,19 @@ class ReviewLane:
         return batch if reviewing and self._board.find(task_id) is not None else None
 
     def cancel(self, task_id: str) -> None:
-        """Stop review task ``task_id`` if it's the one running; the lane carries on."""
+        """Stop review task ``task_id`` if it's running; the lane and its other tasks carry
+        on."""
         self.runner.cancel(task_id)
 
     def kick(self) -> None:
-        """Run the reviews waiting, if they aren't being run already, unless this orbit is
-        read-only or the session is halted, skipping those on the runtime whose pause the work
-        lane waits out; those queued meanwhile wait on the board."""
+        """Run the reviews waiting, as many at once as the lane's slots allow, filling those free
+        if they're being run already, unless this orbit is read-only or the session is halted,
+        skipping those on the runtime whose pause the work lane waits out; those queued
+        meanwhile wait on the board for a slot."""
         self.runner.kick()
 
     async def stop(self) -> None:
-        """Stop the reviews running, and wait for them to; they run again once kicked."""
+        """Stop every review running, and wait for them all to; they run again once kicked."""
         await self.runner.stop()
 
     async def close(self) -> None:
@@ -821,7 +826,7 @@ class ReviewLane:
         """How started review ``task_id`` ended, run as a task of its own that the user's stop
         cancels; anything unexpected escapes."""
         job = self._jobs.get(task_id)
-        return await self.runner.alone(partial(self._run_reviewer, task_id, job))
+        return await self.runner.alone(task_id, partial(self._run_reviewer, task_id, job))
 
     async def _run_reviewer(self, task_id: str, job: ReviewJob | None) -> Outcome:
         """Run the reviewer of ``job``, told what landed since as it starts, in a snapshot of the

@@ -125,6 +125,7 @@ def test_the_limits_come_first_in_the_project_files_order() -> None:
         "max_checks",
         "fallback_fixes",
         "review_rounds",
+        "review_slots",
         "super_review_every",
         "review_suggestions",
         "lens_findings",

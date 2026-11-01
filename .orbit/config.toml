@@ -9,6 +9,8 @@
 # fallback_fixes = 3
 # Rounds of review-suggested work after which review pauses.
 # review_rounds = 3
+# Review-lane tasks that run at once: lens and super reviews, merge passes.
+# review_slots = 3
 # Commits between super reviews; moving to [triggers.super-review] every.
 # super_review_every = 10
 # Tasks one review may suggest.

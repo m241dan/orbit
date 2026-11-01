@@ -40,6 +40,7 @@ from orbit.protocol import (
     UsageLimit,
 )
 from tests.agent_fakes import (
+    ONE_AT_A_TIME,
     ROLES,
     START,
     Call,
@@ -260,7 +261,7 @@ def last_pause(events: list[Event]) -> SessionStateChanged:
 
 async def test_a_review_hitting_claudes_limit_pauses_claude_and_runs_again_after() -> None:
     waits = Waits()
-    session, claude = reviewing(waits, errs, claims_done, claims_done)
+    session, claude = reviewing(waits, errs, claims_done, claims_done, review_limits=ONE_AT_A_TIME)
     claude.turn_errors.append(LIMIT)
     await review(session, REVIEWER, REVIEWER)
     events = await until(session, paused)
@@ -382,7 +383,7 @@ async def test_a_second_runtime_hitting_its_limit_keeps_the_first_pause_and_wait
     fake.failures[QUOTA] = Failure("usage_limit")
     roles = {**ROLES, SUPER_REVIEWER: ROLES[SUPER_REVIEWER].model_copy(update={"runtime": FAKE})}
     options: dict[str, Any] = {"host": fake.host, "launchers": {FAKE: fake}, "roles": roles}
-    session, claude = reviewing(waits, errs, claims_done, **options)
+    session, claude = reviewing(waits, errs, claims_done, review_limits=ONE_AT_A_TIME, **options)
     claude.turn_errors.append(LIMIT)
     await review(session, REVIEWER, SUPER_REVIEWER, SUPER_REVIEWER)
     events = await until(session, paused)

@@ -427,6 +427,8 @@ async def test_a_run_started_as_the_last_one_ends_goes_on_showing_busy() -> None
     runner: LaneRunner
 
     def next_task(tried: Collection[str]) -> str | None:
+        if ran == ["x"] and queue == ["x"]:  # Kicked again before this run's end is told.
+            asyncio.get_running_loop().call_soon(queue_and_kick)
         return next((task for task in queue if task not in (*tried, *ran)), None)
 
     def queue_and_kick() -> None:
@@ -435,8 +437,6 @@ async def test_a_run_started_as_the_last_one_ends_goes_on_showing_busy() -> None
 
     async def run(task_id: str) -> None:
         ran.append(task_id)
-        if task_id == "x":  # Kicked again before this run's end is told.
-            asyncio.get_running_loop().call_soon(queue_and_kick)
 
     stops: list[None] = []
     runner = lane.runner(work=LaneWork(next_task, run))

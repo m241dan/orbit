@@ -104,7 +104,7 @@ async def test_a_halt_as_a_review_ends_starts_no_other_review() -> None:
 
     hooks = ReviewHooks(nothing, nothing, session.gate)
     desk, launcher = session.desk(FakeTree(), reviewers=[reviews, reviews])
-    lane = ReviewLane(desk, session.tasks, ReviewPlanner(ReviewLimits()), hooks)
+    lane = ReviewLane(desk, session.tasks, ReviewPlanner(ReviewLimits(slots=1)), hooks)
     stopped = asyncio.Event()
     lane.on_stopped(stopped.set)
     lane.kick()
