@@ -55,6 +55,7 @@ from orbit.protocol import (
     ListDirectory,
     ListReports,
     LogGap,
+    MergeHold,
     MessageSent,
     NewSession,
     Notice,
@@ -166,6 +167,7 @@ SUMMARY = SessionSummary(
 )
 STEP = StepState(name="Unit tests", status="failed")
 REVIEW = ReviewStatus(paused=True, open_batches=2)
+HOLD = MergeHold(set="stress", commit="1a2b3c4d", reason="Stress tests failed")
 PROPOSAL = ChecksProposed(
     agent_id="agent-1",
     task_id="t1",
@@ -345,6 +347,8 @@ EVENTS: tuple[EventEnvelope, ...] = (
             paused_runtime="claude",
             role_spent={PLANNER: USAGE, "experimenter": USAGE},
             caused_spent={PLANNER: {"experimenter": USAGE}},
+            merge_holds=(HOLD,),
+            waiting_to_merge=("t3",),
         )
     ),
     event(SessionStateChanged(session="s2", active=False, state="idle", viewers=1)),
@@ -378,6 +382,8 @@ EVENTS: tuple[EventEnvelope, ...] = (
             viewers=2,
             role_spent={PLANNER: USAGE},
             caused_spent={PLANNER: {"experimenter": USAGE}},
+            merge_holds=(HOLD,),
+            waiting_to_merge=("t3",),
         )
     ),
     event(

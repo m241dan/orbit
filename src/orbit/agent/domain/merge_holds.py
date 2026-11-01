@@ -1,0 +1,161 @@
+"""Merge holds: a set that holds merges failing holds them, recording what failed, until a fix
+lands and the set, run again, passes; the fixes it queues meanwhile, up to a limit, and what the
+user is told as a hold starts, lifts or needs them."""
+
+from collections.abc import Callable, Collection, Iterable, Sequence
+from dataclasses import dataclass, replace
+from itertools import accumulate
+
+from orbit.agent.domain.verification import CheckSet
+from orbit.agent.domain.wording import counted
+from orbit.protocol import MergeHold, TaskState
+
+FIX_TITLE = "Fix the failing set: "
+"""What the title of a task fixing a set that holds merges starts with, before the set's name."""
+
+SHORT_COMMIT = 7
+"""How many characters of a commit's id a notice shows."""
+
+_FIX_INSTRUCTIONS = (
+    "Find and fix the cause so the set passes again, leaving its checks as strong as they were:"
+    " the same thresholds, the same tests, the same code under coverage. Merges into the user's"
+    " branch are held until it passes; your work lands as soon as it's verified."
+)
+
+
+@dataclass(frozen=True)
+class Hold:
+    """The set ``name``'s hold on merges: it failed on ``commit`` at the step named ``step``
+    with ``output``, and ``fixes`` fixes were queued for it since the hold started."""
+
+    name: str
+    commit: str
+    step: str
+    output: str
+    fixes: int = 0
+
+
+@dataclass(frozen=True)
+class HoldDecision:
+    """What a set's failure comes to: the ``holds`` after it, the ``notes`` to tell the user,
+    in order, and whether a ``fix`` is to be queued for it."""
+
+    holds: tuple[Hold, ...]
+    notes: tuple[str, ...] = ()
+    fix: bool = False
+
+
+def held_note(name: str, commit: str) -> str:
+    """The notice that the set ``name`` failing on ``commit`` holds merges."""
+    return f"Merges held: {name} failed on {commit[:SHORT_COMMIT]}. A fix is queued first."
+
+
+def resumed_note(name: str) -> str:
+    """The notice that the set ``name`` passed, lifting its hold."""
+    return f"Merges resumed: {name} passed."
+
+
+def step_in_note(name: str, fixes: int) -> str:
+    """The notice that the set ``name`` still fails after ``fixes`` fixes, so the user must step
+    in."""
+    return (
+        f"{name} still fails after {counted(fixes, 'fix', 'fixes')}; merges stay held. Release"
+        " with ctrl+f or fix it yourself."
+    )
+
+
+def find_hold(holds: Sequence[Hold], name: str) -> Hold | None:
+    """The set ``name``'s hold among ``holds``; none if it holds none."""
+    return next((hold for hold in holds if hold.name == name), None)
+
+
+def decide_failure(holds: Sequence[Hold], failed: Hold, limit: int, fixing: bool) -> HoldDecision:
+    """What ``failed``, a run of a set that holds merges failing, comes to, given the ``holds``
+    on and the ``limit`` of fixes a hold queues: a new hold is told of and queues the first
+    fix; a set held already keeps its hold with the new failure, queuing another fix unless one
+    is ``fixing`` it still or ``limit`` were queued, when the user is asked to step in."""
+    held = find_hold(holds, failed.name)
+    others = lift_hold(holds, failed.name)
+    tried = 0 if held is None else held.fixes
+    notes = () if held is not None else (held_note(failed.name, failed.commit),)
+    if fixing:
+        return HoldDecision((*others, replace(failed, fixes=tried)), notes)
+    if tried >= limit:
+        return HoldDecision(
+            (*others, replace(failed, fixes=tried)), (*notes, step_in_note(failed.name, tried))
+        )
+    return HoldDecision((*others, replace(failed, fixes=tried + 1)), notes, fix=True)
+
+
+def lift_hold(holds: Sequence[Hold], name: str) -> tuple[Hold, ...]:
+    """``holds`` without the set ``name``'s."""
+    return tuple(hold for hold in holds if hold.name != name)
+
+
+def holding_sets(sets: Iterable[CheckSet]) -> tuple[str, ...]:
+    """The names of the ``sets`` that hold merges when they fail."""
+    return tuple(check_set.name for check_set in sets if check_set.effect == "holds_merges")
+
+
+def kept_holds(holds: Sequence[Hold], holding: Collection[str]) -> tuple[Hold, ...]:
+    """``holds`` of the sets still ``holding`` merges, by name, as a saved hold is restored:
+    those of sets removed, or that only report now, are dropped."""
+    return tuple(hold for hold in holds if hold.name in holding)
+
+
+def merge_holds(earlier: Sequence[Hold], later: Sequence[Hold]) -> tuple[Hold, ...]:
+    """The holds of ``earlier`` and ``later``, a set's hold in ``later`` replacing its own in
+    ``earlier``."""
+    named = {hold.name for hold in later}
+    return (*(hold for hold in earlier if hold.name not in named), *later)
+
+
+def hold_view(hold: Hold) -> MergeHold:
+    """``hold`` as frontends see it: the set, the commit it failed on and why."""
+    return MergeHold(set=hold.name, commit=hold.commit, reason=f"{hold.step} failed")
+
+
+def fix_title(name: str) -> str:
+    """The title of a task fixing the set ``name``."""
+    return f"{FIX_TITLE}{name}"
+
+
+def set_fix_prompt(hold: Hold, subjects: Sequence[str] | None, report: str) -> str:
+    """A task prompt asking to fix why ``hold``'s set failed, listing the ``subjects`` of the
+    commits since it last passed, none if that isn't known, and the failure's ``report``. Its
+    first line is :func:`fix_title`."""
+    if subjects is None:
+        since = "Orbit hasn't seen it pass since it started, so it can't list the commits since."
+    elif subjects:
+        since = "The commits since it last passed:\n" + "".join(f"\n- {s}" for s in subjects)
+    else:
+        since = "No commit landed since it last passed."
+    return (
+        f"{fix_title(hold.name)}\n\n"
+        f"The set {hold.name} failed on {hold.commit[:SHORT_COMMIT]} at its step {hold.step}."
+        f" {since}\n\n{report}\n\n{_FIX_INSTRUCTIONS}"
+    )
+
+
+def fixed_set(prompt: str) -> str | None:
+    """The set a task with ``prompt`` fixes, as its title names it; none if it fixes none."""
+    title = prompt.partition("\n")[0]
+    return title.removeprefix(FIX_TITLE) if title.startswith(FIX_TITLE) else None
+
+
+def fix_root(state: TaskState, find: Callable[[str], TaskState | None]) -> TaskState:
+    """The task ``state``'s chain of fixes started from: the task it fixes, the one that fixes,
+    and so on, as ``find`` finds them by id, up to the first that fixes none or isn't found."""
+    found = None if state.fixes is None else find(state.fixes)
+    return state if found is None else fix_root(found, find)
+
+
+def stacked_commits(commits: Sequence[str], counts: Sequence[int]) -> tuple[str | None, ...]:
+    """The last commit of each group of ``counts`` commits, in order, stacked at the end of
+    ``commits``; none for a group whose commits aren't all there, as a rebase drops those left
+    empty."""
+    start = len(commits) - sum(counts)
+    return tuple(
+        commits[start + end - 1] if count and start + end - count >= 0 else None
+        for count, end in zip(counts, accumulate(counts), strict=True)
+    )

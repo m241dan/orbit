@@ -73,7 +73,7 @@ class Engine:
     async def publish(self, event: Event) -> None:
         self.events.append(event)
 
-    def run_checks(self, checks: str) -> None:
+    def run_checks(self, checks: str, trigger: str) -> None:
         self.checks_run.append(checks)
 
     def shown(self) -> list[tuple[str, str, str, str]]:

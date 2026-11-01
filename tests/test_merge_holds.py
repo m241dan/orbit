@@ -1,0 +1,238 @@
+"""Keeping the holds on merges: a holding set's failure holds them, with its notice and a fix at
+the front of the queue; passing lifts the hold; a fix found through its chain; holds kept in the
+store, restored without the sets removed, and a failing save halting the session."""
+
+from collections.abc import Mapping
+
+from orbit.agent.application.merge_holds import HoldParts, MergeHolds
+from orbit.agent.application.ports import StoreFailed, TreeFailed
+from orbit.agent.application.set_runs import SetResult
+from orbit.agent.application.tasks import Tasks
+from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.merge_holds import Hold
+from orbit.agent.domain.roles import Role
+from orbit.agent.domain.storage_halt import FailedWrite
+from orbit.agent.domain.verification import CheckSet, VerificationStep
+from orbit.protocol import CODER, INTERNAL, ErrorOccurred, Event, MergeHold, Notice, TaskSpec
+from tests.agent_fakes import ROLES, FakeHalt, FakeStore, FakeTree
+
+STEP = VerificationStep("Stress tests", ("stress",), "stress")
+STRESS = CheckSet("stress", (STEP,), "holds_merges")
+SOAK = CheckSet("soak", (VerificationStep("Soak", ("soak",), "soak"),), "holds_merges")
+FAILED = (STEP, "2 failed")
+HELD = Hold("stress", "c4", "Stress tests", "2 failed", 1)
+
+
+class Holds:
+    """Holds of stress and soak over ``store``, each queuing ``limit`` fixes, recording what
+    they publish, kick, run again, change and release."""
+
+    def __init__(
+        self, store: FakeStore | None = None, roles: Mapping[str, Role] = ROLES, limit: int = 3
+    ) -> None:
+        self.events: list[Event] = []
+        self.kicked: list[str] = []
+        self.reruns: list[tuple[str, str]] = []
+        self.changes = 0
+        self.releases = 0
+        self.halt = FakeHalt()
+        self.tree = FakeTree()
+        self.tasks = Tasks(TaskBoard(), self.publish)
+        parts = HoldParts(
+            self.tasks,
+            lambda: roles,
+            self.tree,
+            self.publish,
+            store,
+            self.halt,
+            self.kicked.append,
+            lambda name, trigger: self.reruns.append((name, trigger)),
+        )
+        self.holds = MergeHolds(("stress", "soak"), limit, parts)
+        self.holds.changed = self.change
+        self.holds.released = self.release
+
+    async def publish(self, event: Event) -> None:
+        self.events.append(event)
+
+    def change(self) -> None:
+        self.changes += 1
+
+    def release(self) -> None:
+        self.releases += 1
+
+    def notices(self) -> list[str]:
+        return [event.message for event in self.events if isinstance(event, Notice)]
+
+    def prompts(self) -> list[str]:
+        return [state.task.prompt for state in self.tasks.board.tasks]
+
+
+async def failed(holds: Holds, commit: str = "c4", check_set: CheckSet = STRESS) -> None:
+    await holds.holds.heard(SetResult(check_set, commit, "nightly", FAILED))
+
+
+async def passed(holds: Holds, commit: str = "c5", check_set: CheckSet = STRESS) -> None:
+    await holds.holds.heard(SetResult(check_set, commit, "nightly", None))
+
+
+async def test_a_failure_holds_merges_with_a_notice_and_a_fix_first_from_its_trigger() -> None:
+    store = FakeStore()
+    holds = Holds(store)
+    holds.tasks.board.add(TaskSpec(prompt="Add a flag."))
+    await failed(holds)
+
+    assert holds.holds.held and holds.holds.holds == (HELD,)
+    assert holds.holds.views == (
+        MergeHold(set="stress", commit="c4", reason="Stress tests failed"),
+    )
+    assert holds.notices() == ["Merges held: stress failed on c4. A fix is queued first."]
+    fix = holds.tasks.board.tasks[0]
+    assert (fix.task.role, fix.origin, fix.status) == (CODER, "nightly", "pending")
+    assert fix.task.prompt.startswith("Fix the failing set: stress\n\n")
+    assert "Its output:\n\n2 failed" in fix.task.prompt
+    assert holds.kicked == [CODER]
+    assert store.holds_saved == [(HELD,)] and holds.changes == 1
+
+
+async def test_a_failure_while_its_fix_is_still_to_run_queues_no_other() -> None:
+    holds = Holds()
+    await failed(holds)
+    await failed(holds, "c5")
+    assert len(holds.prompts()) == 1
+    assert holds.holds.holds == (Hold("stress", "c5", "Stress tests", "2 failed", 1),)
+
+
+async def test_a_failure_after_its_fix_ran_queues_another() -> None:
+    holds = Holds()
+    await failed(holds)
+    holds.tasks.board.set_status(holds.tasks.board.tasks[0].id, "completed")
+    await failed(holds, "c5")
+    assert len(holds.prompts()) == 2
+    assert holds.holds.holds == (Hold("stress", "c5", "Stress tests", "2 failed", 2),)
+
+
+async def test_the_fix_lists_the_commits_since_the_set_last_passed() -> None:
+    holds = Holds()
+    holds.tree.since = {"c2": ["Add A", "Add B"]}
+    await passed(holds, "c2")
+    await failed(holds)
+    assert holds.tree.asked_since == [("c2", "c4")]
+    assert "The commits since it last passed:\n\n- Add A\n- Add B" in holds.prompts()[0]
+    assert holds.notices() == ["Merges held: stress failed on c4. A fix is queued first."]
+
+
+async def test_the_fix_lists_no_commits_when_git_cant() -> None:
+    holds = Holds()
+    holds.tree.failures["landed_since"] = TreeFailed("git log failed")
+    await passed(holds, "c2")
+    await failed(holds)
+    assert "Orbit hasn't seen it pass since it started" in holds.prompts()[0]
+
+
+async def test_without_a_coder_no_fix_is_queued() -> None:
+    holds = Holds(roles={})
+    await failed(holds)
+    assert holds.holds.held and holds.prompts() == [] and holds.kicked == []
+
+
+async def test_passing_lifts_the_hold_with_a_notice_and_releases_once_none_is_left() -> None:
+    store = FakeStore()
+    holds = Holds(store)
+    await failed(holds)
+    await failed(holds, check_set=SOAK)
+    await passed(holds)
+    assert holds.releases == 0 and [hold.name for hold in holds.holds.holds] == ["soak"]
+    await passed(holds, check_set=SOAK)
+
+    assert not holds.holds.held and holds.releases == 1
+    assert holds.notices()[-2:] == [
+        "Merges resumed: stress passed.",
+        "Merges resumed: soak passed.",
+    ]
+    assert store.holds == ()
+
+
+async def test_passing_with_no_hold_changes_nothing() -> None:
+    store = FakeStore()
+    holds = Holds(store)
+    await passed(holds)
+    assert holds.notices() == [] and holds.releases == 0 and store.holds_saved == []
+
+
+async def test_a_held_sets_fix_is_known_through_its_chain_of_fixes() -> None:
+    holds = Holds()
+    board = holds.tasks.board
+    other = board.add(TaskSpec(prompt="Add a flag."))
+    await failed(holds)
+    fix = board.tasks[0].id
+    carries_on = board.add(TaskSpec(prompt="Fix the failed verification step: Lint"), fixes=fix)
+
+    assert holds.holds.fix_of(board.get(fix)) == "stress"
+    assert holds.holds.fix_of(board.get(carries_on)) == "stress"
+    assert holds.holds.fix_of(board.get(other)) is None
+    await passed(holds)
+    assert holds.holds.fix_of(board.get(fix)) is None
+
+
+def test_a_landed_fix_runs_its_set_again_as_its_trigger() -> None:
+    holds = Holds()
+    holds.holds.fix_landed("stress", "nightly")
+    assert holds.reruns == [("stress", "nightly")]
+
+
+async def test_holds_kept_are_restored_without_the_sets_removed() -> None:
+    store = FakeStore()
+    gone = Hold("gone", "c1", "Old", "failed")
+    store.holds = (gone, HELD)
+    holds = Holds(store)
+    await holds.holds.restore()
+    assert holds.holds.holds == (HELD,) and holds.changes == 1
+    assert store.holds_saved == [(HELD,)]
+
+
+async def test_holds_kept_as_they_are_are_restored_without_saving() -> None:
+    store = FakeStore()
+    store.holds = (HELD,)
+    holds = Holds(store)
+    await holds.holds.restore()
+    assert holds.holds.held and store.holds_saved == []
+
+
+async def test_a_hold_started_before_the_kept_ones_were_read_replaces_its_sets() -> None:
+    store = FakeStore()
+    store.holds = (Hold("stress", "c1", "Stress tests", "old", 2),)
+    holds = Holds(store)
+    await failed(holds)
+    await holds.holds.restore()
+    assert holds.holds.holds == (HELD,)
+
+
+async def test_without_a_store_nothing_is_restored_or_saved() -> None:
+    holds = Holds()
+    await holds.holds.restore()
+    await failed(holds)
+    assert holds.holds.held and await holds.holds.retry() is None
+
+
+async def test_holds_that_cant_be_read_are_reported_and_none_restored() -> None:
+    store = FakeStore()
+    store.holds = (HELD,)
+    store.holds_load_failure = "disk gone"
+    holds = Holds(store)
+    await holds.holds.restore()
+    assert not holds.holds.held
+    assert [event.code for event in holds.events if isinstance(event, ErrorOccurred)] == [INTERNAL]
+
+
+async def test_a_failing_save_halts_the_session_and_a_retry_saves_the_holds() -> None:
+    store = FakeStore()
+    store.holds_failure = "disk full"
+    holds = Holds(store)
+    await failed(holds)
+    assert holds.halt.failures == [(FailedWrite.MERGE_HOLDS, "disk full")]
+    assert isinstance(await holds.holds.retry(), StoreFailed)
+
+    store.holds_failure = None
+    assert await holds.holds.retry() is None
+    assert store.holds == (HELD,)

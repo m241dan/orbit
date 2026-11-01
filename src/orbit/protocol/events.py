@@ -21,6 +21,7 @@ from orbit.protocol.commands import ApprovalDecision, ProposalAction
 from orbit.protocol.models import (
     Activity,
     Effort,
+    MergeHold,
     ProposedSetup,
     ProposedStep,
     SessionRef,
@@ -462,7 +463,9 @@ class Snapshot(_Message):
     work; one that isn't is a read-only view, from its saved record and its last logged events.
     ``open_session`` names the workspace's open session, and ``viewers`` counts the connections
     viewing this one. ``role_spent`` is what the session spent by role, and ``caused_spent`` what
-    each role caused its consultants to spend, by asker then consultant.
+    each role caused its consultants to spend, by asker then consultant. ``merge_holds`` are the
+    named sets holding merges into the user's branch, and ``waiting_to_merge`` the ids of the
+    tasks whose verified work waits in the coder's tree for them to lift, in the order it lands.
     """
 
     type: Literal["snapshot"] = "snapshot"
@@ -488,6 +491,8 @@ class Snapshot(_Message):
     viewers: int = Field(default=0, ge=0)
     role_spent: dict[str, Usage] = Field(default_factory=dict)
     caused_spent: dict[str, dict[str, Usage]] = Field(default_factory=dict)
+    merge_holds: tuple[MergeHold, ...] = ()
+    waiting_to_merge: tuple[str, ...] = ()
     _dropped_oldest: int | None = PrivateAttr(default=None)
 
     @field_validator("transcript", mode="before")
@@ -592,8 +597,10 @@ class SessionStateChanged(_Message):
     while its run waits to start again by itself, starting again at ``paused_until``, stopped
     for ``paused_for`` on the runtime ``paused_runtime``, and what it spent by role
     (``role_spent``) and what each role caused its consultants to spend, by asker then consultant
-    (``caused_spent``), as its turns end, or none for a session that isn't open; sent to every
-    connection whenever one of them changes, and never logged."""
+    (``caused_spent``), as its turns end, or none for a session that isn't open, and the named
+    sets holding merges (``merge_holds``) with the ids of the tasks whose work waits for them to
+    lift (``waiting_to_merge``), empty for a session that isn't open; sent to every connection
+    whenever one of them changes, and never logged."""
 
     type: Literal["session_state_changed"] = "session_state_changed"
     session: str
@@ -606,6 +613,8 @@ class SessionStateChanged(_Message):
     paused_runtime: str | None = None
     role_spent: dict[str, Usage] | None = None
     caused_spent: dict[str, dict[str, Usage]] | None = None
+    merge_holds: tuple[MergeHold, ...] = ()
+    waiting_to_merge: tuple[str, ...] = ()
 
 
 def with_state(summary: SessionSummary, changed: SessionStateChanged) -> SessionSummary:

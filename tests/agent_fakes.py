@@ -16,6 +16,7 @@ from orbit.agent.application.connection import SessionConnection
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.handshake import Handshake, HostGreeting
 from orbit.agent.application.lanes import Background
+from orbit.agent.application.merge_holds import MergeHolds
 from orbit.agent.application.planner import PlannerChat
 from orbit.agent.application.ports import (
     AgentLaunch,
@@ -47,6 +48,7 @@ from orbit.agent.application.workspace_host import UNREGISTERED_WORKSPACE, HostP
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import Setup
+from orbit.agent.domain.merge_holds import Hold
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.replay import LogBounds
@@ -481,7 +483,9 @@ class FakeStore:
     The record moves kept are ``moves``; ``moves_failure``, while set, is the error saving them
     raises, and ``moves_load_failure`` the error reading them raises, as :class:`ReadFailed`.
     The reports kept are ``reports_kept``, by id, and the highest id ever given
-    ``last_report_id``.
+    ``last_report_id``. The merge holds kept are ``holds``, each save in ``holds_saved``;
+    ``holds_failure``, while set, is the error saving them raises, and ``holds_load_failure``
+    the error reading them raises, as :class:`ReadFailed`.
     """
 
     def __init__(self, count: int = 0) -> None:
@@ -525,6 +529,10 @@ class FakeStore:
         self.moves: dict[str, str] = {}
         self.moves_failure: str | None = None
         self.moves_load_failure: str | None = None
+        self.holds: tuple[Hold, ...] = ()
+        self.holds_saved: list[tuple[Hold, ...]] = []  # Each save of the holds.
+        self.holds_failure: str | None = None
+        self.holds_load_failure: str | None = None
         self.reports_kept: dict[int, NewReport] = {}
         self.last_report_id = 0
 
@@ -680,6 +688,17 @@ class FakeStore:
         self.count = count
         self.counts.append(count)
 
+    async def merge_holds(self) -> tuple[Hold, ...]:
+        await self._read(self.holds_load_failure)
+        return self.holds
+
+    async def save_merge_holds(self, holds: Sequence[Hold]) -> None:
+        if self.holds_failure is not None:
+            raise StoreFailed(self.holds_failure)
+        await asyncio.sleep(0)  # Saving takes a while, as writing a file does.
+        self.holds = tuple(holds)
+        self.holds_saved.append(self.holds)
+
     async def record_moves(self) -> dict[str, str]:
         await self._read(self.moves_load_failure)
         return dict(self.moves)
@@ -734,6 +753,11 @@ class FakeWorkspace:
 
     async def __call__(self, root: str) -> object:
         return self.states.pop(0)
+
+
+def _commit_number(commit: str) -> int:
+    """How many commits a fake tree's ``commit`` is after its base: ``c3`` is 3, the base 0."""
+    return int(commit.removeprefix("c")) if commit.startswith("c") else 0
 
 
 class FakeTree:
@@ -812,6 +836,10 @@ class FakeTree:
         self.asked_changed.append((start, end))
         self._fail("changed_files")
         return self.changed.get(start, [])
+
+    async def commit_ids(self, start: str, end: str) -> list[str]:
+        self._fail("commit_ids")
+        return [f"c{n}" for n in range(_commit_number(start) + 1, _commit_number(end) + 1)]
 
     async def tracked_files(self, commit: str) -> list[str]:
         self._fail("tracked_files")
@@ -1360,6 +1388,11 @@ def count_loader_of(session: WorkspaceHost) -> Background:
 def work_lane_of(session: WorkspaceHost) -> WorkLane | None:
     """The session's work lane, if it runs work."""
     return session._work
+
+
+def holds_of(session: WorkspaceHost) -> MergeHolds | None:
+    """The session's holds on merges, if its sets hold any."""
+    return session._holds
 
 
 def switcher_of(session: WorkspaceHost) -> SessionSwitcher:

@@ -149,6 +149,11 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         "ALTER TABLE reviews ADD COLUMN super_reviews INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE reviews ADD COLUMN sampled TEXT NOT NULL DEFAULT '{}'",
     ),
+    (
+        # The named sets holding merges in each workspace, as a JSON array in the order they
+        # started; none for the counts saved before holds were kept.
+        "ALTER TABLE reviews ADD COLUMN merge_holds TEXT NOT NULL DEFAULT '[]'",
+    ),
 )
 
 

@@ -604,6 +604,15 @@ def test_a_draft_records_the_role_that_proposed_it() -> None:
     assert board.get(draft).proposed_by == "architect"
 
 
+def test_a_task_added_first_runs_next_from_the_users_origin_unless_given() -> None:
+    board = TaskBoard()
+    board.add(ONE)
+    mine = board.add_first(TWO)
+    triggered = board.add_first(FIX, "nightly")
+    assert [t.id for t in board.tasks[:2]] == [triggered, mine]
+    assert [t.origin for t in board.tasks[:2]] == ["nightly", "manual"]
+
+
 def test_tasks_added_otherwise_record_no_proposer() -> None:
     board = TaskBoard()
     added = board.add(ONE)

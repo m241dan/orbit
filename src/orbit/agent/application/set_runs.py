@@ -9,13 +9,15 @@ the base's latest commit as it starts once that run ends; firings meanwhile fold
 the startup check, a halt cancels the runs, and the runs queued with them, and a firing while
 halted runs once the halt lifts.
 
-A run that passes adds nothing more; one that fails adds a notice, as
-:func:`~orbit.agent.domain.verification.set_failed_note` words it, and keeps its failure. Each
-run is traced in an ``orbit.check_set`` span, as :class:`SetTracing` says.
+A run that passes adds nothing more; one of a reporting set that fails adds a notice, as
+:func:`~orbit.agent.domain.verification.set_failed_note` words it, and keeps its failure. How a
+run of a set that holds merges came out, on which commit, is told to the site's ``heard``, which
+holds merges while it fails. Each run is traced in an ``orbit.check_set`` span, as
+:class:`SetTracing` says.
 """
 
 import asyncio
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from orbit.agent.application.closing import close_all
@@ -56,14 +58,31 @@ def cancelled_note(name: str) -> str:
 
 
 @dataclass(frozen=True)
+class SetResult:
+    """How a run of ``check_set``, which the trigger named ``trigger`` fired, came out on
+    ``commit``, the base's latest as it started: its ``failure``, if it failed."""
+
+    check_set: CheckSet
+    commit: str
+    trigger: str
+    failure: Failure | None
+
+
+async def _unheard(result: SetResult) -> None:
+    """Hear nothing of ``result``."""
+
+
+@dataclass(frozen=True)
 class SetSite:
     """Where and how the sets run: in snapshots of ``tree``'s base, each step through
-    ``run_step``, publishing with ``publish``, while ``halted`` says the session isn't."""
+    ``run_step``, publishing with ``publish``, while ``halted`` says the session isn't; ``heard``
+    hears how each run of a set that holds merges came out."""
 
     tree: CoderTree
     run_step: StepRunner
     publish: Publish
     halted: Callable[[], bool]
+    heard: Callable[[SetResult], Awaitable[None]] = _unheard
 
 
 class SetRun:
@@ -87,6 +106,7 @@ class SetRun:
         self._announced = False  # Whether its start is published and its exit isn't.
         self._background = Background(f"{check_set.name} set", site.publish)
         self._background.ended = self.start_due
+        self._trigger = ""  # The trigger that fired the run due or going, by name.
         self.failure: Failure | None = None
 
     @property
@@ -110,10 +130,12 @@ class SetRun:
         """What it shows in the verification panel: its steps' progress, under its name."""
         return VerificationChanged(steps=self._progress.steps, title=self._set.name)
 
-    def fire(self) -> None:
-        """Run the set, as its trigger fired: now, unless a run is going or the session is
-        halted; else once that run ends or the halt lifts, as the one run due."""
+    def fire(self, trigger: str) -> None:
+        """Run the set, as the trigger named ``trigger`` fired: now, unless a run is going or
+        the session is halted; else once that run ends or the halt lifts, as the one run due,
+        fired by the trigger that fired last."""
         self._due = True
+        self._trigger = trigger
         self.start_due()
 
     def start_due(self) -> None:
@@ -121,7 +143,7 @@ class SetRun:
         if not self._due or self._background.running or self._site.halted():
             return
         self._due = False
-        self._background.start(self._run())
+        self._background.start(self._run(self._trigger))
 
     def cancel(self) -> None:
         """Cancel the run going, if any, and the run due after it."""
@@ -138,7 +160,7 @@ class SetRun:
         self._due = False
         await self._background.close()
 
-    async def _run(self) -> None:
+    async def _run(self, trigger: str) -> None:
         with self._tracing.run(self._set.name):
             await self._site.publish(
                 AgentStarted(agent_id=self.agent_id, role=ROLE, task_id=STARTUP_TASK)
@@ -148,16 +170,16 @@ class SetRun:
             await self._show()
             reason: AgentExitReason = "killed"
             try:
-                reason = await self._check()
+                reason = await self._check(trigger)
             finally:
                 self._announced = False
                 await self._site.publish(AgentExited(agent_id=self.agent_id, reason=reason))
 
-    async def _check(self) -> AgentExitReason:
-        """Run the steps in a snapshot and report how they came out; returns how the run's
-        agent exits."""
+    async def _check(self, trigger: str) -> AgentExitReason:
+        """Run the steps in a snapshot and report how they came out, the run fired by the
+        trigger named ``trigger``; returns how the run's agent exits."""
         try:
-            failure = await self._in_snapshot()
+            commit, failure = await self._in_snapshot()
         except asyncio.CancelledError:
             await self._cancel_running()
             await self._site.publish(Notice(message=cancelled_note(self._set.name)))
@@ -167,16 +189,16 @@ class SetRun:
             current_span().error(message, exc)
             await self._site.publish(ErrorOccurred(code=GIT_FAILED, message=message))
             return "crashed"
-        await self._report(failure)
+        await self._report(SetResult(self._set, commit, trigger, failure))
         return "finished"
 
-    async def _in_snapshot(self) -> Failure | None:
-        """Run the steps in a snapshot of the base's latest commit; returns the first
-        failure."""
+    async def _in_snapshot(self) -> tuple[str, Failure | None]:
+        """Run the steps in a snapshot of the base's latest commit; returns that commit and the
+        first failure."""
         tree = self._site.tree
         commit = await tree.base_commit()
         async with snapshot_of(tree, commit, self._site.publish) as root:
-            return await self._verify(root)
+            return commit, await self._verify(root)
 
     async def _verify(self, root: str) -> Failure | None:
         """Set up ``root`` with the tree's setup, if it has one, then run the steps there;
@@ -189,13 +211,17 @@ class SetRun:
                 return failure
         return await first_failure(self._set.steps, runner, root, self._set_step)
 
-    async def _report(self, failure: Failure | None) -> None:
-        """Keep how the run came out, add the notice of its failure, if it failed, and then
-        record it on the run's span."""
+    async def _report(self, result: SetResult) -> None:
+        """Keep how the run came out, as ``result`` says, and tell of it: a reporting set's
+        failure in a notice, a holding set's outcome to the site's ``heard``; then record it on
+        the run's span."""
+        failure = result.failure
         self.failure = failure
-        if failure is not None:
+        if self._set.effect == "holds_merges":
+            await self._site.heard(result)
+        elif failure is not None:
             step, _ = failure
-            await self._site.publish(Notice(message=set_failed_note(self._set, step.name)))
+            await self._site.publish(Notice(message=set_failed_note(self._set.name, step.name)))
         # Only once it's reported, so a run cancelled meanwhile names no failed step.
         record_result(failure)
 
@@ -231,12 +257,12 @@ class SetRuns:
         }
         self._shown: str | None = None  # The set whose run has the panel, if one has.
 
-    def run(self, name: str) -> None:
-        """Run the set ``name``, as a trigger naming it fired, as :meth:`SetRun.fire` says;
-        nothing if there's no such set."""
+    def run(self, name: str, trigger: str) -> None:
+        """Run the set ``name``, as the trigger named ``trigger`` fired, as :meth:`SetRun.fire`
+        says; nothing if there's no such set."""
         run = self._runs.get(name)
         if run is not None:
-            run.fire()
+            run.fire(trigger)
 
     def restart(self) -> None:
         """Start the runs due that a halt kept from starting, as it lifts."""

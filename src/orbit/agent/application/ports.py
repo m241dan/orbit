@@ -12,6 +12,7 @@ from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.listings import FoundDirectory
+from orbit.agent.domain.merge_holds import Hold
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.purging import Purged
 from orbit.agent.domain.replay import LogBounds
@@ -357,6 +358,10 @@ class CoderTree(Protocol):
         """The paths of the files the commits after ``start`` up to ``end`` changed."""
         ...
 
+    async def commit_ids(self, start: str, end: str) -> list[str]:
+        """The ids of the commits after ``start`` up to ``end``, oldest first."""
+        ...
+
     async def tracked_files(self, commit: str) -> list[str]:
         """The paths of the files git tracks at ``commit``, from the repository's root."""
         ...
@@ -618,6 +623,17 @@ class SessionStore(EventLog, Protocol):
         reviewed, with the super reviews so far and the files they sampled; raises
         :class:`StoreFailed`, a :class:`StorageFailed` when the database failed, when it
         can't."""
+        ...
+
+    async def merge_holds(self) -> tuple[Hold, ...]:
+        """The named sets' holds on merges into the user's branch, in the order they started;
+        none when none is saved. Raises :class:`ReadFailed` when they can't be read."""
+        ...
+
+    async def save_merge_holds(self, holds: Sequence[Hold]) -> None:
+        """Save ``holds`` as the named sets' holds on merges, replacing those saved; raises
+        :class:`StoreFailed`, a :class:`StorageFailed` when the database failed, when they
+        can't be saved."""
         ...
 
     async def record_moves(self) -> dict[str, str]:

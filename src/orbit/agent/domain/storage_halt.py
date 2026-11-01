@@ -15,6 +15,7 @@ class FailedWrite(StrEnum):
     REVIEW_COUNT = "the review count"
     USAGE = "the turns' usage"
     RECORD_MOVES = "the record moves"
+    MERGE_HOLDS = "the merge holds"
 
 
 class StorageErrorKind(StrEnum):

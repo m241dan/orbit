@@ -6,8 +6,8 @@ by a single thread: every database call runs there, a statement or a transaction
 caller that's cancelled while awaiting one never leaves the connection mid-transaction. The schema
 and opening it are :mod:`sqlite_schema`'s, the events' log's statements :mod:`sqlite_log`'s, the
 turns' usage :mod:`sqlite_usage`'s, the reports :mod:`sqlite_reports`'s, and copying it to a
-backup :mod:`sqlite_backup`'s; this module holds the sessions' and review counts' statements,
-and runs them all on the database's thread.
+backup :mod:`sqlite_backup`'s; this module holds the sessions', review counts' and merge holds'
+statements, and runs them all on the database's thread.
 
 Session locks are :class:`SessionLocks` lock files in ``locks/<workspace id>`` in the state
 directory, so that a crash leaves no stale lock behind.
@@ -32,12 +32,15 @@ from orbit.agent.application.ports import (
     StoredSession,
     StoreFailed,
 )
+from orbit.agent.domain.merge_holds import Hold
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.reports import NewReport
 from orbit.agent.domain.reviews import SuperReviewCount
 from orbit.agent.domain.sessions import (
     SessionRecord,
     Unreadable,
+    merge_holds_json,
+    parse_merge_holds,
     parse_record,
     parse_sampled,
     record_json,
@@ -336,6 +339,14 @@ class SqliteStore:
         message = "Couldn't save the review count to"
         await self._or_raise(message, self._save_review_count, workspace, count, write=True)
 
+    async def merge_holds(self, workspace: str) -> tuple[Hold, ...]:
+        message = "Couldn't read the merge holds from"
+        return await self._or_raise(message, self._merge_holds, workspace)
+
+    async def save_merge_holds(self, workspace: str, holds: Sequence[Hold]) -> None:
+        message = "Couldn't save the merge holds to"
+        await self._or_raise(message, self._save_merge_holds, workspace, holds, write=True)
+
     async def record_moves(self, workspace: str) -> dict[str, str]:
         message = "Couldn't read the record moves from"
         return await self._or_raise(message, self._record_moves, workspace)
@@ -633,6 +644,20 @@ class SqliteStore:
             (workspace, *_review_columns(count)),
         )
 
+    def _merge_holds(self, workspace: str) -> tuple[Hold, ...]:
+        row = self._db.execute(
+            "SELECT merge_holds FROM reviews WHERE workspace_id = ?", (workspace,)
+        ).fetchone()
+        return () if row is None else parse_merge_holds(str(row[0]))
+
+    def _save_merge_holds(self, workspace: str, holds: Sequence[Hold]) -> None:
+        # Beside the review count, which starts at none if this saves the row first.
+        self._db.execute(
+            """INSERT INTO reviews (workspace_id, since_super, merge_holds) VALUES (?, 0, ?)
+            ON CONFLICT (workspace_id) DO UPDATE SET merge_holds = excluded.merge_holds""",
+            (workspace, merge_holds_json(holds)),
+        )
+
     def _record_moves(self, workspace: str) -> dict[str, str]:
         rows = self._db.execute(
             "SELECT old_path, new_path FROM record_moves WHERE workspace_id = ?", (workspace,)
@@ -750,6 +775,12 @@ class WorkspaceStore:
 
     async def save_review_count(self, count: SuperReviewCount) -> None:
         await self._store.save_review_count(self._id, count)
+
+    async def merge_holds(self) -> tuple[Hold, ...]:
+        return await self._store.merge_holds(self._id)
+
+    async def save_merge_holds(self, holds: Sequence[Hold]) -> None:
+        await self._store.save_merge_holds(self._id, holds)
 
     async def record_moves(self) -> dict[str, str]:
         return await self._store.record_moves(self._id)

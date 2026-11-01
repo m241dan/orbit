@@ -135,13 +135,9 @@ def test_without_a_set_anywhere_there_are_no_check_sets() -> None:
 
 
 def test_a_reporting_sets_failure_points_at_the_verification_panel() -> None:
-    assert set_failed_note(CheckSet("slow", ()), "Mutation tests") == (
+    assert set_failed_note("slow", "Mutation tests") == (
         "slow reported: Mutation tests failed (see the verification panel)"
     )
-
-
-def test_a_holding_sets_failure_names_its_step() -> None:
-    assert set_failed_note(CheckSet("stress", (), "holds_merges"), "Soak") == "stress failed: Soak."
 
 
 def test_holds_merges_has_its_description() -> None:

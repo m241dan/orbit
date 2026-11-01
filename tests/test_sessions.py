@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from orbit.agent.domain import sessions
+from orbit.agent.domain.merge_holds import Hold
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import (
     BatchSnapshot,
@@ -26,8 +27,10 @@ from orbit.agent.domain.sessions import (
     default_name,
     deletion_refusal,
     imported_note,
+    merge_holds_json,
     newest_first,
     openable,
+    parse_merge_holds,
     parse_record,
     parse_review_count,
     parse_sampled,
@@ -391,6 +394,16 @@ def test_a_summary_of_a_session_without_tasks_is_empty_and_neither_current_nor_l
         False,
     )
     assert summary.unreadable is None
+
+
+def test_merge_holds_round_trip_through_json() -> None:
+    holds = (Hold("stress", "1a2b3c4", "Stress tests", "2 failed", 1), Hold("soak", "c", "S", ""))
+    assert parse_merge_holds(merge_holds_json(holds)) == holds
+
+
+@pytest.mark.parametrize("text", ["", "{}", '[{"name": "stress"}]', '[{"fixes": -1}]'])
+def test_unreadable_merge_holds_are_none(text: str) -> None:
+    assert parse_merge_holds(text) == ()
 
 
 def test_the_review_count_round_trips_through_json() -> None:

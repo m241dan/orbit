@@ -201,7 +201,7 @@ def running_sets(session: WorkspaceHost) -> SetRuns:
     """The session's runs of the named sets, once slow's is running."""
     sets = sets_of(session)
     assert sets is not None
-    sets.run("slow")
+    sets.run("slow", "slow")
     return sets
 
 

@@ -194,6 +194,10 @@ class GitCoderTree:
         listed = await self._git(self._root, "diff", "--name-only", "-z", f"{start}...{end}")
         return [path for path in listed.split("\0") if path]
 
+    async def commit_ids(self, start: str, end: str) -> list[str]:
+        listed = await self._git(self._root, "rev-list", "--reverse", f"{start}..{end}")
+        return listed.splitlines()
+
     async def tracked_files(self, commit: str) -> list[str]:
         listed = await self._git(
             self._root, "ls-tree", "-r", "--full-tree", "--name-only", "-z", commit

@@ -3,7 +3,10 @@
 After each task that completes, the verification steps run until one fails; a failure adds a
 task to fix it right after the failed one. Work that passes lands, and the review lane, if any,
 hears how each task ended, as the triggers do: ``task_landed`` for work that landed, raised by
-the review lane while there's one, and ``task_finished`` for every task that ended. A run stops
+the review lane while there's one, and ``task_finished`` for every task that ended. While a set
+holds merges, a task's verified work is committed in the coder's tree and waits there, unmerged
+and unreviewed, but a fix for a set held, which merges with the work stacked beneath it; once no
+hold is left, the work waiting lands, in order, and is told of as landed then. A run stops
 at a task its agent couldn't do for the usage limit or for the API not answering, as the
 launcher of its role's runtime tells its error, at a fix that ends in error, which must run
 before anything puts its work aside, once the session halts, and before a task its caller holds
@@ -11,7 +14,8 @@ back.
 """
 
 import asyncio
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Sequence
+from contextlib import AbstractAsyncContextManager, nullcontext
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Literal
@@ -21,7 +25,8 @@ from orbit.agent.application.coder_slots import CoderSeat
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.landing import Lander, Landing
 from orbit.agent.application.lane_runner import runtime_stop
-from orbit.agent.application.lanes import OPEN_GATE, SessionGate, StoppableRun
+from orbit.agent.application.lanes import OPEN_GATE, Background, SessionGate, StoppableRun
+from orbit.agent.application.merge_holds import MergeHolds
 from orbit.agent.application.outcomes import Outcome, UserStop, ended, run_task_to_end
 from orbit.agent.application.record_moves import RecordMoves
 from orbit.agent.application.review_lane import ReviewLane
@@ -49,6 +54,7 @@ from orbit.protocol import (
     CHECKS_EXHAUSTED,
     ErrorOccurred,
     Notice,
+    TaskMerged,
     TaskSpec,
     TaskStarted,
     TaskState,
@@ -77,7 +83,8 @@ class Beside:
     lanes that start by themselves, in which a run notes the runtime that stopped it and the
     runtimes whose agents ended their runs without an outage; the ``triggers``, if any,
     which hear how each task ended, and of its landing while there's no review lane to raise
-    it; and the named ``sets``' runs, if any, whose panel each task takes over too."""
+    it; the named ``sets``' runs, if any, whose panel each task takes over too; and the
+    ``holds`` on merges, if any, which keep a task's work waiting in the tree."""
 
     review: ReviewLane | None = None
     startup: StartupCheck | None = None
@@ -90,6 +97,16 @@ class Beside:
     outages: Outages = field(default_factory=Outages)
     triggers: TriggerEngine | None = None
     sets: SetRuns | None = None
+    holds: MergeHolds | None = None
+
+
+@dataclass(frozen=True)
+class _Waiting:
+    """Verified work waiting in the coder's tree for merges to resume: the ``count`` of commits
+    of the task that ended as ``state``."""
+
+    state: TaskState
+    count: int
 
 
 class WorkLane:
@@ -131,6 +148,13 @@ class WorkLane:
         self._outages = beside.outages
         self._triggers = beside.triggers
         self._sets = beside.sets
+        self._holds = beside.holds
+        self._waiting: list[_Waiting] = []  # The work waiting in the tree, in the order it lands.
+        # The work that landed stacked beneath a task's, each with its last commit, if still
+        # there, until told of.
+        self._stacked: list[tuple[TaskState, str | None]] = []
+        self._tree_lock = asyncio.Lock()  # Held by a task working in the tree, or a landing.
+        self._releasing = Background("landing", desk.publish)
         self._seated = False  # The run holds a coder's slot, for the task about to run or running.
         # Task id -> the commit it merged into the base, until reported.
         self._landed: dict[str, str] = {}
@@ -148,12 +172,31 @@ class WorkLane:
         self._runtime_stop: RuntimeStop | None = None  # The failure that last stopped a run.
 
     def reset(self) -> None:
-        """Forget the fix counts, the task a run stopped at and what its tasks landed and
-        started from, of the session left, whose task ids the next one reuses."""
+        """Forget the fix counts, the task a run stopped at and what its tasks landed, started
+        from and left waiting, of the session left, whose task ids the next one reuses; the
+        work waiting lands with the next that lands, untold of."""
         self._fallbacks = FallbackFixes()
         self._resume = None
         self._landed.clear()
         self._starts.clear()
+        self._waiting.clear()
+        self._stacked.clear()
+
+    @property
+    def waiting_to_merge(self) -> tuple[str, ...]:
+        """The ids of the tasks whose verified work waits in the tree for merges to resume, in
+        the order it lands."""
+        return tuple(waiting.state.id for waiting in self._waiting)
+
+    def release(self) -> None:
+        """Land the work waiting, in the background, as no hold is left, once no task works in
+        the tree, unless the session is halted, as lifting the halt does again."""
+        if self._waiting and not self._gate.halted():
+            self._releasing.start(self._land_waiting())
+
+    async def stop_releasing(self) -> None:
+        """Stop landing the work waiting, if it's landing, and wait for it to stop."""
+        await self._releasing.stop()
 
     def stopped_by_user(self) -> bool:
         """Stop the run going now, as the user asked: cancel the agent's run of its task, which
@@ -407,6 +450,7 @@ class WorkLane:
         triggers that it finished, if it did. The task is told of as it ended, without looking
         it up: a task is published as finished before the save that follows, and one removed in
         that window is reviewed all the same."""
+        await self._report_stacked()
         commit = self._landed.pop(state.id, None)
         if outcome is None:  # Cut short: only work that landed is told of, to be reviewed.
             if commit is not None:
@@ -423,7 +467,7 @@ class WorkLane:
         one did, which leaves it for a run to start with; and the triggers that it finished."""
         if commit is not None:
             await self._report_landed(state, commit)
-        elif self._review is not None:
+        elif self._review is not None and state.id not in self.waiting_to_merge:
             await self._review.ended(state, stop)
         if self._triggers is not None:
             self._triggers.run(await self._triggers.finished(state))
@@ -441,8 +485,12 @@ class WorkLane:
         a fallback queues a fix for a fresh one."""
         # A fix carries on from the work it fixes.
         keep = self._board.get(task_id).fixes is not None
+        where = self._workspace(task_id)
+        guard: AbstractAsyncContextManager[None] = (
+            self._tree_lock if where == "worktree" else nullcontext()
+        )
         try:
-            async with workspace_for(self._workspace(task_id), self._desk, keep) as root:
+            async with guard, workspace_for(where, self._desk, keep) as root:
                 await self._note_start(task_id)
                 return await self._run_prepared(task_id, root)
         finally:
@@ -510,30 +558,144 @@ class WorkLane:
         checks the user accepted from it, or else the work itself. A rebase is rechecked only
         if the task's role is verified. The work has landed, for review, only once it merged:
         the task stays completed either way, with the merge's detail."""
-        if self._desk.agents.tree is None or self._workspace(task_id) != "worktree":
+        tree = self._desk.agents.tree
+        if tree is None or self._workspace(task_id) != "worktree":
             return outcome
         state = self._board.get(task_id)
-        if outcome.checks is not None:
-            message = configure_message(outcome.checks)
-        else:
-            message = commit_message(state.task, outcome.summaries, fix=state.fixes is not None)
-        verifier = self._verifier if self._desk.agents.roles[state.task.role].verify else None
+        message = _message(state, outcome)
+        if self._held_back(state):
+            await self._wait(state, message)
+            return outcome
         landing = await self._merge(
-            task_id, Lander(self._desk.agents.tree, verifier, self._publish), message, root
+            task_id, Lander(tree, self._recheck(state), self._publish), message, root
         )
         if landing.failure is not None:
             reason, detail = failure_reason(*landing.failure, rebased=True)
             return Outcome("unverified", landing.failure, reason=reason, detail=detail)
+        self._landed_fix(state, landing)
         return outcome
+
+    def _held_back(self, state: TaskState) -> bool:
+        """Whether the work of the task that is ``state`` waits in the tree rather than
+        merging: a hold is on, and it's no fix for a set held."""
+        holds = self._holds
+        return holds is not None and holds.held and holds.fix_of(state) is None
+
+    def _landed_fix(self, state: TaskState, landing: Landing) -> None:
+        """Have the set the task that is ``state`` fixes, if it's a fix for a set held, run
+        again, if ``landing`` its work merged it."""
+        holds = self._holds
+        if holds is None or landing.result != "merged":
+            return
+        fixed = holds.fix_of(state)
+        if fixed is not None:
+            holds.fix_landed(fixed, state.origin)
+
+    def _recheck(self, state: TaskState) -> Verifier | None:
+        """What rechecks the work of the task that is ``state`` after a rebase: the verifier,
+        if its role is verified and it's still on the board, where the verifier finds it."""
+        role = self._desk.agents.roles.get(state.task.role)
+        verified = role is not None and role.verify and self._board.find(state.id) is not None
+        return self._verifier if verified else None
+
+    async def _wait(self, state: TaskState, message: str) -> None:
+        """Commit the work of the task that is ``state`` with ``message`` and leave it waiting
+        in the tree, as the holds hold merges, if it made any commit, telling them it waits."""
+        tree, holds = self._desk.agents.tree, self._holds
+        assert tree is not None and holds is not None  # Only work in the tree is held back.
+        await tree.commit(message)
+        made = await tree.commit_ids(self._starts[state.id], await tree.head())
+        if made:
+            done = state.model_copy(update={"status": "completed"})
+            self._waiting.append(_Waiting(done, len(made)))
+            holds.changed()
 
     async def _merge(self, task_id: str, lander: Lander, message: str, root: str) -> Landing:
         """What landing task ``task_id``'s work with ``lander``, committed with ``message`` at
-        ``root``, came to; work that merged is noted as landed, however the landing ends."""
+        ``root``, with the work waiting stacked beneath it, came to; work that merged is noted
+        as landed, however the landing ends."""
+        beneath = tuple(self._waiting)
+        stacked = [(waiting.state.id, waiting.count) for waiting in beneath]
         try:
-            return await lander.land(task_id, message, root, self._starts[task_id])
+            return await lander.land(task_id, message, root, self._starts[task_id], stacked)
         finally:
             if lander.merged is not None:
                 self._landed[task_id] = lander.merged
+            self._take_stacked(beneath, lander.stacked)
+
+    def _take_stacked(self, beneath: Sequence[_Waiting], stacked: Sequence[str | None]) -> None:
+        """Note the work waiting ``beneath`` a landing as landed with the ``stacked`` commits,
+        each piece's last, if the landing merged it, to be told of in order."""
+        if not stacked:
+            return
+        self._stacked += [(w.state, c) for w, c in zip(beneath, stacked, strict=True)]
+        self._waiting = [waiting for waiting in self._waiting if waiting not in beneath]
+
+    async def _report_stacked(self) -> None:
+        """Tell of each piece of work that landed stacked beneath another, in order: as landed,
+        with its last commit, as :meth:`_report_landed` does, or, its commits dropped as a
+        rebase left them empty, as ended with nothing landed."""
+        stacked, self._stacked = self._stacked, []
+        for state, commit in stacked:
+            if commit is None:
+                await self._report_unlanded(state)
+            else:
+                await self._report_landed(state, commit)
+        if stacked and self._holds is not None:
+            self._holds.changed()
+
+    async def _land_waiting(self) -> None:
+        """Land the work waiting in the tree, in order, once no task works there, unless a
+        hold is on again, or the session halted, by then; work that didn't merge is told of as
+        ended, with the merge's detail."""
+        async with self._tree_lock:
+            waiting = tuple(self._waiting)
+            if self._landable(waiting):
+                landing = await self._land_stacked(waiting)
+                await self._report_stacked()
+                await self._report_unmerged(waiting, landing)
+
+    def _landable(self, waiting: Sequence[_Waiting]) -> bool:
+        """Whether the work ``waiting`` may land now: there's some, no hold is on and the
+        session isn't halted."""
+        holds = self._holds
+        assert holds is not None  # Only holds keep work waiting.
+        return bool(waiting) and not holds.held and not self._gate.halted()
+
+    async def _land_stacked(self, waiting: Sequence[_Waiting]) -> Landing:
+        """What landing the work ``waiting`` in the tree came to, rechecked after a rebase as
+        the last piece's work; what merged is noted as landed, however the landing ends."""
+        tree = self._desk.agents.tree
+        assert tree is not None  # Only work in the tree waits.
+        last = waiting[-1].state
+        lander = Lander(tree, self._recheck(last), self._publish)
+        stacked = [(each.state.id, each.count) for each in waiting]
+        try:
+            return await lander.land_stacked(await tree.prepare(True), stacked)
+        finally:
+            self._take_stacked(waiting, lander.stacked)
+
+    async def _report_unmerged(self, waiting: Sequence[_Waiting], landing: Landing) -> None:
+        """Tell of each piece of work ``waiting`` that ``landing`` didn't merge as ended with
+        its detail, nothing landed: it stays in the tree, as work that didn't merge does."""
+        if landing.result == "merged":
+            return
+        self._waiting = [each for each in self._waiting if each not in waiting]
+        for each in waiting:
+            if landing.result is not None:
+                merged = TaskMerged(
+                    task_id=each.state.id, result=landing.result, detail=landing.detail
+                )
+                await self._publish(merged)
+            await self._report_unlanded(each.state)
+        assert self._holds is not None  # Only holds keep work waiting.
+        self._holds.changed()
+
+    async def _report_unlanded(self, state: TaskState) -> None:
+        """Tell the review lane, if any, that the task that ended as ``state``, whose work
+        waited, landed nothing after all; the triggers heard it finish as it ended."""
+        if self._review is not None:
+            await self._review.ended(state)
 
     def _workspace(self, task_id: str) -> Workspace:
         """Where task ``task_id``'s agent works, as its role says; the coder's tree for a role
@@ -584,3 +746,11 @@ class WorkLane:
                 self._review.joined(fix_id)
 
         await self._tasks.change(add)
+
+
+def _message(state: TaskState, outcome: Outcome) -> str:
+    """The message the work of the task that is ``state``, which ended in ``outcome``, is
+    committed with: the checks the user accepted from it, or else the work itself."""
+    if outcome.checks is not None:
+        return configure_message(outcome.checks)
+    return commit_message(state.task, outcome.summaries, fix=state.fixes is not None)

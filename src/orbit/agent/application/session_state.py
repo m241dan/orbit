@@ -1,6 +1,7 @@
 """Each session's state as connections see it: whether it's the open one, whether it's running
 and what's in progress in it, until when, why and on which runtime its run is paused, what it
-spent by role, and how many connections view it, published whenever any of these changes."""
+spent by role, the holds on merges and the work waiting for them, and how many connections view
+it, published whenever any of these changes."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -9,15 +10,16 @@ from orbit.agent.application.connection import Connections
 from orbit.agent.domain.activity import Activity, reported
 from orbit.agent.domain.role_spend import RoleSpend
 from orbit.agent.domain.usage_limits import Paused
-from orbit.protocol import Event, SessionStateChanged
+from orbit.protocol import Event, MergeHold, SessionStateChanged
 
 
 @dataclass(frozen=True)
 class StateParts:
     """What the state of the sessions is read from: the ``open_session``'s id, the ``activity``
     in progress there, the ``connections`` viewing the sessions, ``post``, which publishes an
-    event without blocking, how its run is ``paused``, if it is, and what it spent by role
-    (``spend``)."""
+    event without blocking, how its run is ``paused``, if it is, what it spent by role
+    (``spend``), the ``holds`` on merges, and the tasks whose work is ``waiting`` for them to
+    lift."""
 
     open_session: Callable[[], str]
     activity: Callable[[], Activity]
@@ -25,6 +27,8 @@ class StateParts:
     post: Callable[[Event], None]
     paused: Callable[[], Paused | None]
     spend: Callable[[], RoleSpend]
+    holds: Callable[[], tuple[MergeHold, ...]]
+    waiting: Callable[[], tuple[str, ...]]
 
 
 def _unviewed(session_id: str) -> SessionStateChanged:
@@ -35,7 +39,8 @@ def _unviewed(session_id: str) -> SessionStateChanged:
 
 def _open(session_id: str, viewers: int, parts: StateParts) -> SessionStateChanged:
     """The state of the open session ``session_id``, which ``viewers`` connections view, with
-    the activity in progress, the pause and the spend by role that ``parts`` say."""
+    the activity in progress, the pause, the spend by role, the holds on merges and the work
+    waiting for them that ``parts`` say."""
     activity, paused, spend = parts.activity(), parts.paused(), parts.spend()
     return SessionStateChanged(
         session=session_id,
@@ -48,13 +53,16 @@ def _open(session_id: str, viewers: int, parts: StateParts) -> SessionStateChang
         paused_runtime=paused.runtime if paused else None,
         role_spent=spend.by_role,
         caused_spent=spend.caused,
+        merge_holds=parts.holds(),
+        waiting_to_merge=parts.waiting(),
     )
 
 
 class SessionStates:
     """Publishes ``SessionStateChanged`` for a session in ``parts`` whenever whether it's the
     open one, whether it's running, what's in progress in it, how its run is paused, what it
-    spent by role or how many connections view it changes: the open session, and those
+    spent by role, the holds on merges, the work waiting for them, or how many connections view
+    it changes: the open session, and those
     connections view, and any that was and no longer is either."""
 
     def __init__(self, parts: StateParts) -> None:

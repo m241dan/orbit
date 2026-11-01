@@ -346,6 +346,23 @@ async def test_a_version_13_database_upgrades_its_review_counts_with_no_sample_r
         await view.close()
 
 
+async def test_a_version_14_database_upgrades_its_review_counts_with_no_merge_holds(
+    monkeypatch: pytest.MonkeyPatch, state: Path, workspace: Path
+) -> None:
+    with monkeypatch.context() as patched:
+        patched.setattr(sqlite_schema, "MIGRATIONS", MIGRATIONS[:14])
+        connection = sqlite_schema.open_database(state / "orbit.db")
+        workspace_id = register(connection, workspace.resolve(), None).workspace_id
+        connection.execute("INSERT INTO reviews VALUES (?, 4, 'abc', 1, '{}')", (workspace_id,))
+        connection.close()
+    view = await open_view(state, workspace)
+    try:
+        assert await view.merge_holds() == ()
+        assert await view.review_count() == SuperReviewCount(4, "abc", 1, {})
+    finally:
+        await view.close()
+
+
 async def test_a_version_12_database_upgrades_its_review_counts_with_no_last_super_commit(
     monkeypatch: pytest.MonkeyPatch, state: Path, workspace: Path
 ) -> None:

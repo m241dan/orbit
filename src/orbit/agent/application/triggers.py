@@ -79,9 +79,10 @@ Kick = Callable[[str], None]
 """What runs the tasks waiting in the lane of a role, by its name, if that lane starts by
 itself."""
 
-RunChecks = Callable[[str], None]
-"""What runs the checks a trigger's ``checks`` names, by that name: the task checks, as the
-startup check, for ``"task-checks"``, or else the named set, in the background."""
+RunChecks = Callable[[str, str], None]
+"""What runs the checks a trigger's ``checks`` names, by that name, as the trigger named second
+fired: the task checks, as the startup check, for ``"task-checks"``, or else the named set, in
+the background."""
 
 REVIEW_SKIPPED = "Review skipped"
 TRIGGERS_SKIPPED = "Triggers skipped"
@@ -121,7 +122,7 @@ def _no_kick(role: str) -> None:
     """Runs no lane."""
 
 
-def _no_checks(checks: str) -> None:
+def _no_checks(checks: str, trigger: str) -> None:
     """Runs no checks."""
 
 
@@ -259,9 +260,9 @@ class TriggerEngine:
         """Run the checks of each of the triggers ``fired``, by name, on a landing counted, that
         runs them, their guards decided already; returns the others, which queue tasks, in
         order, for :meth:`fire_counted`."""
-        for _, trigger in fired:
+        for name, trigger in fired:
             if trigger.checks is not None:
-                self._run_checks(trigger.checks)
+                self._run_checks(trigger.checks, name)
         return [(name, trigger) for name, trigger in fired if trigger.checks is None]
 
     def by_hand(self, name: str) -> list[tuple[str, Trigger]]:
@@ -361,7 +362,7 @@ class TriggerEngine:
         if trigger.checks is None:
             return self._add_one(board, name, trigger, firing)
         if firing.counted or not held_back(trigger, None, board.tasks):
-            self._run_checks(trigger.checks)
+            self._run_checks(trigger.checks, name)
         return None
 
     def _add_one(

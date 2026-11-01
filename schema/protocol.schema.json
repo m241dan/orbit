@@ -1881,6 +1881,30 @@
       "title": "LogGap",
       "type": "object"
     },
+    "MergeHold": {
+      "description": "A named set's hold on merges into the user's branch: the ``set`` that failed, the\n``commit`` it failed on and why (``reason``), such as ``Stress tests failed``.",
+      "properties": {
+        "commit": {
+          "title": "Commit",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "set": {
+          "title": "Set",
+          "type": "string"
+        }
+      },
+      "required": [
+        "set",
+        "commit",
+        "reason"
+      ],
+      "title": "MergeHold",
+      "type": "object"
+    },
     "MessageSent": {
       "description": "The user's message ``text`` to the agent ``agent``, sent as command ``command_id``, was\naccepted; the agent's turn on it follows.",
       "properties": {
@@ -2486,7 +2510,7 @@
       "type": "object"
     },
     "SessionStateChanged": {
-      "description": "Session ``session`` is now ``active`` (the workspace's open session) or not, in\n``state``, with ``viewers`` connections viewing it, ``activity`` in progress in it, and,\nwhile its run waits to start again by itself, starting again at ``paused_until``, stopped\nfor ``paused_for`` on the runtime ``paused_runtime``, and what it spent by role\n(``role_spent``) and what each role caused its consultants to spend, by asker then consultant\n(``caused_spent``), as its turns end, or none for a session that isn't open; sent to every\nconnection whenever one of them changes, and never logged.",
+      "description": "Session ``session`` is now ``active`` (the workspace's open session) or not, in\n``state``, with ``viewers`` connections viewing it, ``activity`` in progress in it, and,\nwhile its run waits to start again by itself, starting again at ``paused_until``, stopped\nfor ``paused_for`` on the runtime ``paused_runtime``, and what it spent by role\n(``role_spent``) and what each role caused its consultants to spend, by asker then consultant\n(``caused_spent``), as its turns end, or none for a session that isn't open, and the named\nsets holding merges (``merge_holds``) with the ids of the tasks whose work waits for them to\nlift (``waiting_to_merge``), empty for a session that isn't open; sent to every connection\nwhenever one of them changes, and never logged.",
       "properties": {
         "active": {
           "title": "Active",
@@ -2517,6 +2541,14 @@
           ],
           "default": null,
           "title": "Caused Spent"
+        },
+        "merge_holds": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MergeHold"
+          },
+          "title": "Merge Holds",
+          "type": "array"
         },
         "paused_for": {
           "anyOf": [
@@ -2592,6 +2624,14 @@
           "minimum": 0,
           "title": "Viewers",
           "type": "integer"
+        },
+        "waiting_to_merge": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Waiting To Merge",
+          "type": "array"
         }
       },
       "required": [
@@ -2869,7 +2909,7 @@
       "type": "object"
     },
     "Snapshot": {
-      "description": "The session a connection views as it stands, sent in answer to ``Attach`` and after every\nswitch; its envelope's ``seq`` is the point it's current to.\n\nIt holds the ``session``'s summary, its ``settings`` (the planner's), each conversational role's\nsettings by role (``role_settings``, the planner's among them) and the planner's\n``model_choices``, with the id each resolves to (``model_ids``, by alias), whether each lane\nis ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they show\nunder, the ``review`` status (none when reviews are off), the checks ``proposals``\nwaiting for a decision, the ``agents`` running, the consultations held for ``approvals``, the\n``transcript``: the session's last logged\nevents, at most 500, oldest first, in the envelopes they were sent in, and, while the session is\nhalted because storage failed, ``storage_halt``: why, and how to resume; ``read_only`` says\nanother orbit owns the repository, so the work this one is asked to run waits, and\n``ownership_offered`` that the repository is offered, as ``OwnershipOffered`` said, until the\noffer is settled. ``active`` says whether the session is the workspace's open one, which runs\nwork; one that isn't is a read-only view, from its saved record and its last logged events.\n``open_session`` names the workspace's open session, and ``viewers`` counts the connections\nviewing this one. ``role_spent`` is what the session spent by role, and ``caused_spent`` what\neach role caused its consultants to spend, by asker then consultant.",
+      "description": "The session a connection views as it stands, sent in answer to ``Attach`` and after every\nswitch; its envelope's ``seq`` is the point it's current to.\n\nIt holds the ``session``'s summary, its ``settings`` (the planner's), each conversational role's\nsettings by role (``role_settings``, the planner's among them) and the planner's\n``model_choices``, with the id each resolves to (``model_ids``, by alias), whether each lane\nis ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they show\nunder, the ``review`` status (none when reviews are off), the checks ``proposals``\nwaiting for a decision, the ``agents`` running, the consultations held for ``approvals``, the\n``transcript``: the session's last logged\nevents, at most 500, oldest first, in the envelopes they were sent in, and, while the session is\nhalted because storage failed, ``storage_halt``: why, and how to resume; ``read_only`` says\nanother orbit owns the repository, so the work this one is asked to run waits, and\n``ownership_offered`` that the repository is offered, as ``OwnershipOffered`` said, until the\noffer is settled. ``active`` says whether the session is the workspace's open one, which runs\nwork; one that isn't is a read-only view, from its saved record and its last logged events.\n``open_session`` names the workspace's open session, and ``viewers`` counts the connections\nviewing this one. ``role_spent`` is what the session spent by role, and ``caused_spent`` what\neach role caused its consultants to spend, by asker then consultant. ``merge_holds`` are the\nnamed sets holding merges into the user's branch, and ``waiting_to_merge`` the ids of the\ntasks whose verified work waits in the coder's tree for them to lift, in the order it lands.",
       "properties": {
         "active": {
           "default": true,
@@ -2907,6 +2947,14 @@
           },
           "title": "Caused Spent",
           "type": "object"
+        },
+        "merge_holds": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MergeHold"
+          },
+          "title": "Merge Holds",
+          "type": "array"
         },
         "model_choices": {
           "items": {
@@ -3030,6 +3078,14 @@
           "minimum": 0,
           "title": "Viewers",
           "type": "integer"
+        },
+        "waiting_to_merge": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Waiting To Merge",
+          "type": "array"
         }
       },
       "required": [

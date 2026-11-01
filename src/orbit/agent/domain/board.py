@@ -12,6 +12,7 @@ from orbit.protocol import (
     BUSY,
     CONFIGURATOR,
     INVALID,
+    MANUAL_ORIGIN,
     PLANNER_ORIGIN,
     REVIEW_ORIGIN,
     UNKNOWN,
@@ -93,9 +94,10 @@ class TaskBoard:
         self._tasks.insert(self.position(fixes) + 1, state.model_copy(update=inherited))
         return state.id
 
-    def add_first(self, task: TaskSpec) -> str:
-        """Add a pending ``task`` at the front, to run next; returns its id."""
-        state = self._new(task)
+    def add_first(self, task: TaskSpec, origin: TaskOrigin = MANUAL_ORIGIN) -> str:
+        """Add a pending ``task`` at the front, to run next, from ``origin``, the user's unless
+        given; returns its id."""
+        state = self._new(task, origin=origin)
         self._tasks.insert(0, state)
         return state.id
 

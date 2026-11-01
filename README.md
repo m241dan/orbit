@@ -714,11 +714,32 @@ check, until a task's verification takes the panel over, and the agents pane and
 `checker`, its agent `set-<name>`, which you can cancel as the startup check's; a storage halt
 cancels it too, and a set fired while the session is halted runs once storage resumes. If the
 trigger fires again while its set runs, one more run is queued, on the latest commit as it
-starts; further firings meanwhile fold into that one. A passing run adds nothing to the
-conversation; a failing one adds a notice: `mutation reported: Mutation tests failed (see the
-verification panel)` for a set that only reports, and `mutation failed: Mutation tests.` for one
-that holds merges, which doesn't hold them yet. Sets run only in a git repository with the coder's
-worktree, where there's a commit to snapshot, and never with `--no-verify`.
+starts; further firings meanwhile fold into that one. A passing run of a set that only reports
+adds nothing to the conversation; a failing one adds a notice, `mutation reported: Mutation tests
+failed (see the verification panel)`, its output kept in the panel, and queues nothing. Sets run
+only in a git repository with the coder's worktree, where there's a commit to snapshot, and never
+with `--no-verify`.
+
+**Merge holds.** A set with `holds_merges = true` failing holds merges into your branch, with a
+notice: `Merges held: mutation failed on 1a2b3c4. A fix is queued first.` A coder's task titled
+`Fix the failing set: mutation` goes to the front of the queue, its origin the trigger that ran
+the set, its prompt listing the subjects of the commits since the set last passed (when orbit has
+seen it pass since it started) and the step's output. While any hold is on, coders keep working:
+each task is verified as usual, but its work is committed in the coder's worktree and waits there
+instead of merging, in order, and isn't reviewed yet, as a commit is reviewed once it lands; a
+task's commit lands only once it does. Frontends see the holds and the waiting tasks in the
+session's state (`merge_holds` and `waiting_to_merge`; see [docs/protocol.md](docs/protocol.md)).
+The fix lands despite the hold, together with the work stacked beneath it, the tasks that finished
+before it started; work that finishes after it keeps waiting. Once the fix lands, the set runs
+again on the new commit: passing lifts its hold (`Merges resumed: mutation passed.`), and once no
+hold is left the waiting work lands, in order, a conflict handled as any merge's. Failing again
+queues another fix, up to `fallback_fixes` fixes in all; past that the hold stays, with
+`mutation still fails after 3 fixes; merges stay held. Release with ctrl+f or fix it yourself.` A
+commit of yours that makes the set pass lifts its hold too, the next time its trigger runs it. Two
+sets holding at once each get their own fix, and merges wait until both lift. Holds are kept per
+repository, beside the super review count, so a hold outlives restarting orbit; a set removed from
+the configuration, or that no longer holds merges, drops its hold as orbit opens. Task checks
+never hold merges, nor does a set that only reports, and with `--no-verify` nothing does.
 
 Orbit's own [`.orbit/config.toml`](.orbit/config.toml) lists six, quick ones first so a failure
 shows up in seconds:
@@ -882,7 +903,9 @@ that fails, a fresh agent fixes it. When it can't be merged, it stays committed 
 
 A commit is reviewed, and counts toward a super review, only once it has merged into the base: work
 that stays on `orbit/coder`, whether it couldn't be merged or its base kept moving, is reported to
-review as ended without landing a commit.
+review as ended without landing a commit. While a set holds merges (see
+[Verification steps](#verification-steps)), verified work waits on `orbit/coder` and is reviewed
+once it lands.
 
 Work is never thrown away. When a new task starts, changes a failed task left in the worktree are
 stashed (`git stash list` shows them as `orbit: unverified work …`); a fallback fix carries on from

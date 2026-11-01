@@ -10,7 +10,7 @@ from opentelemetry.sdk.trace import ReadableSpan
 
 from orbit.agent.application.agent_trace import STEP_SPAN
 from orbit.agent.application.ports import TreeFailed
-from orbit.agent.application.set_runs import SetRuns, SetSite, cancelled_note
+from orbit.agent.application.set_runs import SetResult, SetRuns, SetSite, cancelled_note
 from orbit.agent.application.set_trace import SET_SPAN, SetTracing
 from orbit.agent.domain.checks import Setup
 from orbit.agent.domain.verification import CheckSet, VerificationStep
@@ -49,14 +49,18 @@ class Runs:
         traced: Traced | None = None,
     ) -> None:
         self.events: list[Event] = []
+        self.heard: list[SetResult] = []
         self.halted = False
         self.tree = tree or FakeTree()
-        site = SetSite(self.tree, steps, self.publish, lambda: self.halted)
+        site = SetSite(self.tree, steps, self.publish, lambda: self.halted, self.hear)
         tracing = SetTracing() if traced is None else SetTracing(traced.telemetry, "ws")
         self.runs = SetRuns(sets or (SLOW,), site, tracing)
 
     async def publish(self, event: Event) -> None:
         self.events.append(event)
+
+    async def hear(self, result: SetResult) -> None:
+        self.heard.append(result)
 
     def exits(self) -> list[AgentExited]:
         return [event for event in self.events if isinstance(event, AgentExited)]
@@ -96,7 +100,7 @@ async def test_a_run_shows_its_steps_under_its_name_in_a_set_up_snapshot_of_the_
     tree.setup = Setup(command=("uv", "sync"))
     runs = Runs(steps, tree=tree)
 
-    runs.runs.run("slow")
+    runs.runs.run("slow", "slow")
     await runs.ended()
 
     # Never in the coder's tree: in a snapshot of the base's latest commit, set up first.
@@ -117,7 +121,7 @@ async def test_a_run_shows_its_steps_under_its_name_in_a_set_up_snapshot_of_the_
 
 async def test_a_failing_reporting_set_adds_its_notice_and_keeps_its_failure() -> None:
     runs = Runs(Steps(False))
-    runs.runs.run("slow")
+    runs.runs.run("slow", "slow")
     await runs.ended()
 
     assert runs.notices() == ["slow reported: Mutation tests failed (see the verification panel)"]
@@ -126,11 +130,37 @@ async def test_a_failing_reporting_set_adds_its_notice_and_keeps_its_failure() -
     assert runs.exits() == [AgentExited(agent_id="set-slow", reason="finished")]
 
 
-async def test_a_failing_holding_set_says_it_failed_at_its_step() -> None:
-    runs = Runs(Steps(True, False), CheckSet("stress", (MUTATION, SOAK), "holds_merges"))
-    runs.runs.run("stress")
+async def test_a_holding_sets_runs_are_heard_with_their_commit_and_trigger_and_no_notice() -> None:
+    stress = CheckSet("stress", (MUTATION, SOAK), "holds_merges")
+    runs = Runs(Steps(True, False, True, True), stress)
+    runs.runs.run("stress", "nightly")
     await runs.ended()
-    assert runs.notices() == ["stress failed: Soak."]
+    runs.runs.run("stress", "by-hand")
+    await runs.ended(2)
+    assert runs.notices() == []
+    assert runs.heard == [
+        SetResult(stress, "base", "nightly", (SOAK, "1 test failed")),
+        SetResult(stress, "base", "by-hand", None),
+    ]
+
+
+async def test_a_reporting_sets_runs_are_not_heard() -> None:
+    runs = Runs(Steps(False))
+    runs.runs.run("slow", "slow")
+    await runs.ended()
+    assert runs.heard == []
+
+
+async def test_a_holding_set_fired_again_while_it_runs_is_heard_from_the_last_trigger() -> None:
+    steps, gate = gated(True, True, True, True)
+    stress = CheckSet("stress", (MUTATION, SOAK), "holds_merges")
+    runs = Runs(steps, stress)
+    runs.runs.run("stress", "first")
+    runs.runs.run("stress", "second")
+    runs.runs.run("stress", "third")
+    gate.set()
+    await runs.ended(2)
+    assert [result.trigger for result in runs.heard] == ["first", "third"]
 
 
 async def test_a_failing_setup_fails_the_run_before_its_steps() -> None:
@@ -138,7 +168,7 @@ async def test_a_failing_setup_fails_the_run_before_its_steps() -> None:
     tree = FakeTree()
     tree.setup = Setup(command=("uv", "sync"))
     runs = Runs(steps, tree=tree)
-    runs.runs.run("slow")
+    runs.runs.run("slow", "slow")
     await runs.ended()
 
     assert steps.runs == ["setup"]
@@ -150,7 +180,7 @@ async def test_a_base_git_cannot_find_is_reported() -> None:
     tree = FakeTree()
     tree.failures["base_commit"] = TreeFailed("git rev-parse failed")
     runs = Runs(steps, tree=tree)
-    runs.runs.run("slow")
+    runs.runs.run("slow", "slow")
     await runs.ended()
 
     assert runs.events[-2:] == [
@@ -162,7 +192,7 @@ async def test_a_base_git_cannot_find_is_reported() -> None:
 
 async def test_a_set_there_is_no_run_of_runs_nothing() -> None:
     runs = Runs(Steps())
-    runs.runs.run("nightly")
+    runs.runs.run("nightly", "nightly")
     await settled()
     assert runs.events == []
 
@@ -173,11 +203,11 @@ async def test_a_set_there_is_no_run_of_runs_nothing() -> None:
 async def test_firings_while_a_set_runs_fold_into_one_more_run_on_the_latest_commit() -> None:
     steps, gate = gated(True, True, True, True)
     runs = Runs(steps)
-    runs.runs.run("slow")
+    runs.runs.run("slow", "slow")
     await eventually(lambda: steps.runs)
     runs.tree.base = "c2"
-    runs.runs.run("slow")
-    runs.runs.run("slow")
+    runs.runs.run("slow", "slow")
+    runs.runs.run("slow", "slow")
     gate.set()
 
     await runs.ended(2)
@@ -189,9 +219,9 @@ async def test_firings_while_a_set_runs_fold_into_one_more_run_on_the_latest_com
 
 async def test_a_set_fired_after_its_run_ended_runs_again() -> None:
     runs = Runs(Steps(True, True, True, True))
-    runs.runs.run("slow")
+    runs.runs.run("slow", "slow")
     await runs.ended()
-    runs.runs.run("slow")
+    runs.runs.run("slow", "slow")
     await runs.ended(2)
     assert len(runs.starts()) == 2
 
@@ -202,7 +232,7 @@ async def test_a_set_fired_after_its_run_ended_runs_again() -> None:
 async def test_a_firing_while_halted_runs_once_the_halt_lifts() -> None:
     runs = Runs(Steps(True, True))
     runs.halted = True
-    runs.runs.run("slow")
+    runs.runs.run("slow", "slow")
     runs.runs.restart()  # Still halted.
     await settled()
     assert runs.events == []
@@ -218,9 +248,9 @@ async def test_a_firing_while_halted_runs_once_the_halt_lifts() -> None:
 async def test_stopping_cancels_the_run_going_and_the_run_due_after_it() -> None:
     steps, _ = gated(True)
     runs = Runs(steps)
-    runs.runs.run("slow")
+    runs.runs.run("slow", "slow")
     await eventually(lambda: steps.runs)
-    runs.runs.run("slow")
+    runs.runs.run("slow", "slow")
 
     await runs.runs.stop()
     await settled()
@@ -239,7 +269,7 @@ async def test_cancelling_a_run_while_it_sets_up_leaves_its_steps_pending() -> N
     tree = FakeTree()
     tree.setup = Setup(command=("uv", "sync"))
     runs = Runs(steps, tree=tree)
-    runs.runs.run("slow")
+    runs.runs.run("slow", "slow")
     await eventually(lambda: steps.runs)
 
     await runs.runs.stop()
@@ -254,7 +284,7 @@ async def test_cancelling_a_run_while_it_sets_up_leaves_its_steps_pending() -> N
 async def test_stopped_runs_start_again_as_their_trigger_fires() -> None:
     runs = Runs(Steps(True, True))
     await runs.runs.stop()
-    runs.runs.run("slow")
+    runs.runs.run("slow", "slow")
     await runs.ended()
     assert runs.exits() == [AgentExited(agent_id="set-slow", reason="finished")]
 
@@ -262,9 +292,9 @@ async def test_stopped_runs_start_again_as_their_trigger_fires() -> None:
 async def test_cancelling_its_agent_stops_the_run_and_the_run_due_after_it() -> None:
     steps, _ = gated(True)
     runs = Runs(steps, SLOW, FAST)
-    runs.runs.run("slow")
+    runs.runs.run("slow", "slow")
     await eventually(lambda: steps.runs)
-    runs.runs.run("slow")
+    runs.runs.run("slow", "slow")
 
     assert not runs.runs.cancel("set-fast")  # Not going.
     assert runs.runs.cancel("set-slow")
@@ -277,7 +307,7 @@ async def test_cancelling_its_agent_stops_the_run_and_the_run_due_after_it() -> 
 async def test_closed_runs_start_no_more() -> None:
     runs = Runs(Steps(True, True))
     await runs.runs.close()
-    runs.runs.run("slow")
+    runs.runs.run("slow", "slow")
     await settled()
     assert runs.events == []
 
@@ -289,11 +319,11 @@ async def test_the_panel_shows_the_set_whose_run_showed_its_progress_last_until_
     steps, gate = gated(True, True, True)
     runs = Runs(steps, SLOW, FAST)
     assert runs.runs.panel is None
-    runs.runs.run("slow")
+    runs.runs.run("slow", "slow")
     await eventually(lambda: steps.runs)
     assert runs.runs.panel == shown("running", "pending")
 
-    runs.runs.run("fast")
+    runs.runs.run("fast", "fast")
     await eventually(lambda: len(steps.runs) == 2)
     panel = runs.runs.panel
     assert panel is not None and panel.title == "fast"
@@ -333,7 +363,7 @@ def children(traced: Traced, parent: ReadableSpan) -> list[str]:
 async def test_a_run_is_a_root_span_naming_its_set_with_each_step_a_child() -> None:
     traced = Traced()
     runs = Runs(Steps(True, False), traced=traced)
-    runs.runs.run("slow")
+    runs.runs.run("slow", "slow")
     await runs.ended()
 
     [span] = traced.spans(SET_SPAN)
@@ -351,7 +381,7 @@ async def test_a_run_cancelled_is_traced_as_cancelled() -> None:
     traced = Traced()
     steps, _ = gated(True)
     runs = Runs(steps, traced=traced)
-    runs.runs.run("slow")
+    runs.runs.run("slow", "slow")
     await eventually(lambda: steps.runs)
     await runs.runs.stop()
 

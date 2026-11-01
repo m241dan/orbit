@@ -69,13 +69,10 @@ class CheckSet:
     effect: SetEffect = "reports"
 
 
-def set_failed_note(check_set: CheckSet, step: str) -> str:
-    """The notice saying a run of ``check_set`` failed at the step named ``step``: a reporting
-    set points at the verification panel, which shows its run, and a holding one names the
-    step."""
-    if check_set.effect == "holds_merges":
-        return f"{check_set.name} failed: {step}."
-    return f"{check_set.name} reported: {step} failed (see the verification panel)"
+def set_failed_note(name: str, step: str) -> str:
+    """The notice saying a run of the reporting set ``name`` failed at the step named ``step``,
+    pointing at the verification panel, which shows its run."""
+    return f"{name} reported: {step} failed (see the verification panel)"
 
 
 @dataclass(frozen=True)

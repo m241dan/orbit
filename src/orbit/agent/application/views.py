@@ -39,6 +39,7 @@ from orbit.protocol import (
     EventEnvelope,
     History,
     ListReports,
+    MergeHold,
     NewSession,
     RenameSession,
     ResumeStorage,
@@ -92,6 +93,8 @@ class SessionParts(TypedDict):
     viewers: int
     role_spent: NotRequired[dict[str, Usage]]
     caused_spent: NotRequired[dict[str, dict[str, Usage]]]
+    merge_holds: NotRequired[tuple[MergeHold, ...]]
+    waiting_to_merge: NotRequired[tuple[str, ...]]
 
 
 @dataclass(frozen=True)

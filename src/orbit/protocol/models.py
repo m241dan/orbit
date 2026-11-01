@@ -269,6 +269,15 @@ class StepState(_Message):
     status: StepStatus = "pending"
 
 
+class MergeHold(_Message):
+    """A named set's hold on merges into the user's branch: the ``set`` that failed, the
+    ``commit`` it failed on and why (``reason``), such as ``Stress tests failed``."""
+
+    set: str
+    commit: str
+    reason: str
+
+
 class ProposedStep(_Message):
     """A verification step an agent proposed: its ``name`` and ``command``."""
 

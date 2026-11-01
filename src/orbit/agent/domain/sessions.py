@@ -25,6 +25,7 @@ from pydantic import (
 from pydantic_core import from_json
 
 from orbit.agent.domain.consultations import RESTARTED
+from orbit.agent.domain.merge_holds import Hold
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot, SuperReviewCount
 from orbit.agent.domain.runtimes import CLAUDE
@@ -279,6 +280,23 @@ class _ReviewCount(BaseModel):
     last_super_commit: str | None = None
     super_reviews: int = Field(default=0, ge=0)
     sampled: dict[str, NonNegativeInt] = {}
+
+
+class _SavedHold(BaseModel):
+    """A named set's hold on merges, kept per repository: the set, the commit it failed on, the
+    step that failed with its output, and the fixes queued for it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    commit: str
+    step: str
+    output: str
+    fixes: int = Field(ge=0)
+
+
+_HOLDS: TypeAdapter[tuple[_SavedHold, ...]] = TypeAdapter(tuple[_SavedHold, ...])
+"""The holds on merges, each set's in the order they started."""
 
 
 @dataclass(frozen=True)
@@ -536,6 +554,30 @@ def parse_review_count(text: str) -> SuperReviewCount:
     return SuperReviewCount(
         count.since_super, count.last_super_commit, count.super_reviews, count.sampled
     )
+
+
+def merge_holds_json(holds: Sequence[Hold]) -> str:
+    """``holds``, the named sets' holds on merges, as JSON."""
+    saved = tuple(
+        _SavedHold(
+            name=hold.name,
+            commit=hold.commit,
+            step=hold.step,
+            output=hold.output,
+            fixes=hold.fixes,
+        )
+        for hold in holds
+    )
+    return _HOLDS.dump_json(saved).decode()
+
+
+def parse_merge_holds(text: str) -> tuple[Hold, ...]:
+    """The named sets' holds on merges in JSON ``text``; none when it's unreadable."""
+    try:
+        saved = _HOLDS.validate_json(text)
+    except ValidationError:
+        return ()
+    return tuple(Hold(each.name, each.commit, each.step, each.output, each.fixes) for each in saved)
 
 
 def sampled_json(sampled: Mapping[str, int]) -> str:

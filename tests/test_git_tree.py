@@ -840,6 +840,23 @@ async def test_landed_since_up_to_a_commit_gives_the_subjects_between_oldest_fir
     assert await tree.landed_since(start, end) == ["Add B", "Add C"]
 
 
+async def test_commit_ids_gives_the_ids_of_the_commits_between_oldest_first(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    start = git(repo, "rev-parse", "HEAD")
+    commit_file(repo, "b.txt", "two\n", "Add B")
+    second = git(repo, "rev-parse", "HEAD")
+    commit_file(repo, "c.txt", "three\n", "Add C")
+    end = git(repo, "rev-parse", "HEAD")
+    commit_file(repo, "d.txt", "four\n", "Add D")
+    assert await tree.commit_ids(start, end) == [second, end]
+
+
+async def test_commit_ids_between_a_commit_and_itself_is_nothing(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    head = git(repo, "rev-parse", "HEAD")
+    assert await tree.commit_ids(head, head) == []
+
+
 async def test_changed_files_gives_the_paths_the_commits_between_changed(repo: Path) -> None:
     tree = GitCoderTree(str(repo))
     start = git(repo, "rev-parse", "HEAD")

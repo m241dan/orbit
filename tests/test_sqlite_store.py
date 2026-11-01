@@ -17,6 +17,7 @@ from orbit.agent.application.ports import (
     StoredSession,
     StoreFailed,
 )
+from orbit.agent.domain.merge_holds import Hold
 from orbit.agent.domain.reports import NewReport
 from orbit.agent.domain.reviews import SuperReviewCount
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
@@ -65,6 +66,36 @@ async def test_sessions_and_the_review_count_survive_closing(
     reopened = await open_store(workspace)
     assert await reopened.load("abc") == record()
     assert await reopened.review_count() == SuperReviewCount(2, "abc", 3, {"a.py": 1, "b.py": 3})
+
+
+async def test_merge_holds_survive_closing_beside_the_review_count(
+    open_store: Opener, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    assert await store.merge_holds() == ()
+    await store.save_merge_holds((HOLD,))
+    assert await store.review_count() == SuperReviewCount(0)
+    await store.save_review_count(SuperReviewCount(2))
+    await store.close()
+    reopened = await open_store(workspace)
+    assert await reopened.merge_holds() == (HOLD,)
+    assert await reopened.review_count() == SuperReviewCount(2)
+    await reopened.save_merge_holds(())
+    assert await reopened.merge_holds() == ()
+    assert await reopened.review_count() == SuperReviewCount(2)
+
+
+async def test_a_failed_merge_holds_save_says_what_the_database_reported(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    with database(state) as connection:
+        connection.execute("DROP TABLE reviews")
+    with pytest.raises(StorageFailed) as failed:
+        await store.save_merge_holds((HOLD,))
+    assert failed.value.error == "no such table: reviews"
+    with pytest.raises(ReadFailed):
+        await store.merge_holds()
 
 
 async def test_each_workspace_has_its_own_sessions_and_review_count(
@@ -749,6 +780,9 @@ async def test_a_failed_review_count_save_says_what_the_database_reported(
         "no such table: reviews",
         StorageErrorKind.UNKNOWN,
     )
+
+
+HOLD = Hold("stress", "1a2b3c4", "Stress tests", "2 failed", 1)
 
 
 def big_notice() -> EventEnvelope:

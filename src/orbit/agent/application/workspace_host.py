@@ -38,6 +38,7 @@ from orbit.agent.application.keeper import (
 from orbit.agent.application.lane_runner import LaneParts, LaneRunner, Lanes, RuntimePauses
 from orbit.agent.application.lanes import Background, SessionGate
 from orbit.agent.application.log_writer import Overflow
+from orbit.agent.application.merge_holds import HoldParts, MergeHolds
 from orbit.agent.application.outbox import EventSink, Outbox, Shown
 from orbit.agent.application.planner_seat import SeatHooks
 from orbit.agent.application.planner_trace import PlannerTracing
@@ -93,6 +94,7 @@ from orbit.agent.application.work_turns import WorkParts, WorkTurns
 from orbit.agent.domain.activity import Activity
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.catalog import trigger_names
+from orbit.agent.domain.merge_holds import holding_sets
 from orbit.agent.domain.ownership import WorkspaceOwner, queued_dropped_note, read_only_note
 from orbit.agent.domain.refusals import STOPPING, Refused
 from orbit.agent.domain.reviews import ReviewPlanner
@@ -422,7 +424,7 @@ class WorkspaceHost:
         )
         self._record_moves = self._moves_kept_in(parts.store)
         self._startup = self._startup_check(parts.verification)
-        self._sets = self._set_runs(parts.verification)
+        self._holds, self._sets = self._check_sets(parts.verification)
         self._outages = Outages()  # One backoff per runtime, which every lane counts on.
         self._work = self._work_lane()
         self._turns = self._work_turns()
@@ -508,7 +510,7 @@ class WorkspaceHost:
         parts = ResumeParts(
             self._keeper,
             self._switcher.contents,
-            (self._review_count, self._usage, self._record_moves),
+            (self._review_count, self._usage, self._record_moves, *self._kept_holds()),
             self._events,
             self._turns,
             self._restart_background,
@@ -526,8 +528,14 @@ class WorkspaceHost:
             self._events.put_nowait,
             lambda: self._turns.paused,
             lambda: self._switcher.spend,
+            lambda: () if self._holds is None else self._holds.views,
+            lambda: () if self._work is None else self._work.waiting_to_merge,
         )
         return SessionStates(parts)
+
+    def _kept_holds(self) -> tuple[MergeHolds, ...]:
+        """The holds on merges, as a save resuming retries, if there are any."""
+        return () if self._holds is None else (self._holds,)
 
     def _session_views(self) -> SessionViews:
         """What attaches connections to sessions."""
@@ -736,6 +744,7 @@ class WorkspaceHost:
             self._outages,
             self._triggers,
             self._sets,
+            self._holds,
         )
         return WorkLane(self._desk, self._tasks, self._verifier, beside)
 
@@ -751,7 +760,17 @@ class WorkspaceHost:
         check.tracing = StartupTracing(self.telemetry, self._workspace_id)
         return check
 
-    def _set_runs(self, verification: Verification | None) -> SetRuns | None:
+    def _check_sets(
+        self, verification: Verification | None
+    ) -> tuple[MergeHolds | None, SetRuns | None]:
+        """The holds on merges of ``verification``'s named sets and their runs, as
+        :meth:`_merge_holds` and :meth:`_set_runs` say."""
+        holds = self._merge_holds(verification)
+        return holds, self._set_runs(verification, holds)
+
+    def _set_runs(
+        self, verification: Verification | None, holds: MergeHolds | None
+    ) -> SetRuns | None:
         """The runs of the named sets of ``verification`` that triggers naming them ask for, in
         snapshots of the base of the tree the agents work in, traced with this host's
         telemetry; none without sets, nor without agents in a tree, whose triggers run them in
@@ -760,7 +779,47 @@ class WorkspaceHost:
         if verification is None or not verification.sets or tree is None:
             return None
         site = SetSite(tree, verification.run_step, self._events.put, self._gate.halted)
+        if holds is not None:  # Its runs hold merges while they fail.
+            site = replace(site, heard=holds.heard)
         return SetRuns(verification.sets, site, SetTracing(self.telemetry, self._workspace_id))
+
+    def _merge_holds(self, verification: Verification | None) -> MergeHolds | None:
+        """The holds on merges of the named sets of ``verification`` that hold them, kept in
+        the store, each queuing as many fixes as verification's fallback fixes; none without
+        such a set, nor without agents in a tree, whose sets' runs hold merges, so none while
+        verification is off."""
+        if verification is None or self._desk is None:
+            return None
+        desk = self._desk
+        holding = holding_sets(verification.sets)
+        tree = desk.agents.tree
+        if not holding or tree is None:
+            return None
+        parts = HoldParts(
+            self._tasks,
+            lambda: desk.agents.roles,
+            tree,
+            self._events.put,
+            self._store,
+            self._halt,
+            lambda role: self._lanes.kick_for(role),
+            self._rerun_set,
+        )
+        holds = MergeHolds(holding, verification.fallback_fixes, parts)
+        holds.changed = lambda: self._states.check()
+        holds.released = self._release_waiting
+        return holds
+
+    def _release_waiting(self) -> None:
+        """Land the work waiting for the holds on merges, as the last lifts or a halt does."""
+        if self._work is not None:
+            self._work.release()
+
+    def _rerun_set(self, name: str, trigger: str) -> None:
+        """Run the set ``name`` again, as the trigger named ``trigger`` fired, as a fix for it
+        landed."""
+        assert self._sets is not None  # Sets that hold merges run here, or none would hold.
+        self._sets.run(name, trigger)
 
     async def _open_session(self) -> None:
         """Raise ``session_started`` in the session open once no switch is under way, as the
@@ -1079,6 +1138,7 @@ class WorkspaceHost:
         self._start_startup_check()
         if self._sets is not None:
             self._sets.restart()
+        self._release_waiting()
         self._seats.start_waiting()
         self._seats.restart_expiry()
 
@@ -1165,6 +1225,13 @@ class WorkspaceHost:
         assert self._lane is not None  # Only the review lane changes it.
         await self._review_count.save(self._lane.planner.super_count)
         await self._save()
+
+    async def _load_saved(self) -> None:
+        """Have the review planner count on from the repository's saved super review count, and
+        the holds on merges take on those kept, as the background work starts."""
+        await self._load_review_count()
+        if self._holds is not None:
+            await self._holds.restore()
 
     async def _load_review_count(self) -> None:
         """Have the review planner, if there is one, count on from the repository's saved super
@@ -1258,7 +1325,8 @@ class WorkspaceHost:
         stops: list[Callable[[], Awaitable[None]]] = [
             p.close if final else p.stop for p in parts if p is not None
         ]
-        return [*stops, stop_turns]
+        landing = [] if self._work is None else [self._work.stop_releasing]
+        return [*stops, *landing, stop_turns]
 
     def check_state(self) -> None:
         """Publish the open session's state, if that changed."""
@@ -1273,20 +1341,20 @@ class WorkspaceHost:
         if self._started:
             return
         self._started = True
-        self._count_loader.start(self._load_review_count())
+        self._count_loader.start(self._load_saved())
         if self._opens:
             self._opening.start(self._open_session())
         self._takeover.start()
         if self._copies is not None and not self._takeover.read_only:
             self._copy_keeper.start(self._keep_copies(self._copies))
 
-    def _run_check(self, checks: str) -> None:
-        """Run the checks a trigger's ``checks`` names, now, unless the session is halted, else
-        once the halt lifts: the startup check, for ``"task-checks"``, or else the set it names,
-        if sets run here."""
+    def _run_check(self, checks: str, trigger: str) -> None:
+        """Run the checks a trigger's ``checks`` names, as the trigger named ``trigger`` fired,
+        now, unless the session is halted, else once the halt lifts: the startup check, for
+        ``"task-checks"``, or else the set it names, if sets run here."""
         if checks != TASK_CHECKS:
             if self._sets is not None:
-                self._sets.run(checks)
+                self._sets.run(checks, trigger)
             return
         self._check_asked = True
         self._start_startup_check()

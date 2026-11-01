@@ -265,6 +265,7 @@ class SessionSnapshots:
         transcript = await parts.transcript(parts.session())
         # Read after the transcript, so the state is as it stands once that's read.
         steps, title = self._steps_shown()
+        state = parts.states.of(parts.session())
         snapshot = parts.views.snapshot(
             session=parts.switcher.summary(last_active),
             settings=parts.settings.current,
@@ -278,9 +279,11 @@ class SessionSnapshots:
             agents=self._running_agents(),
             approvals=parts.seats.approvals,
             transcript=transcript.events,
-            viewers=parts.states.of(parts.session()).viewers,
+            viewers=state.viewers,
             role_spent=parts.switcher.spend.by_role,
             caused_spent=parts.switcher.spend.caused,
+            merge_holds=state.merge_holds,
+            waiting_to_merge=state.waiting_to_merge,
         )
         return Shown(snapshot, transcript.error)
 
