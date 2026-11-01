@@ -7,7 +7,12 @@ from typing import Protocol
 
 from orbit.protocol import AgentEntry, Settings, TaskSpec
 from orbit.tui.view.settings import effort_label, role_label, settings_fields
-from orbit.tui.view.tasks import join_prompt, skills_text, split_prompt, task_editor_title
+
+TASK_EDITOR_HINT = "j/k move · J/K scroll · i type · enter choose · ctrl+s save · esc cancel"
+TASK_TITLE_TITLE = "Title"
+TASK_PROMPT_TITLE = "Prompt"
+TASK_SKILLS_TITLE = "Skills"
+TASK_TITLE_PLACEHOLDER = "Press i to type"
 
 FIELDS = (
     "task-title",
@@ -40,6 +45,46 @@ class SavedTask:
 
     task: TaskSpec
     picked: frozenset[str] = frozenset()
+
+
+def task_editor_title(*, new: bool) -> str:
+    """The task editor's border title, for a ``new`` task or one being edited."""
+    return "New task" if new else "Edit task"
+
+
+def split_prompt(prompt: str) -> tuple[str, str]:
+    """The first line of ``prompt`` as the title, and the rest as the body.
+
+    The body loses the blank lines around it and the trailing whitespace of its last line, but
+    keeps its indentation; a single line has an empty body, and an empty prompt gives ("", "").
+    """
+    title, _, body = prompt.partition("\n")
+    return title, _trim_body(body)
+
+
+def join_prompt(title: str, body: str) -> str:
+    """The prompt the editor saves: ``title`` stripped, a blank line, then ``body`` trimmed.
+
+    The body loses only the blank lines around it and the trailing whitespace of its last
+    line; a blank body gives just the stripped title.
+    """
+    body = _trim_body(body)
+    if not body:
+        return title.strip()
+    return f"{title.strip()}\n\n{body}"
+
+
+def _trim_body(body: str) -> str:
+    """``body`` without the blank lines around it or its last line's trailing whitespace."""
+    lines = body.split("\n")
+    while lines and not lines[0].strip():
+        del lines[0]
+    return "\n".join(lines).rstrip()
+
+
+def skills_text(skills: Sequence[str]) -> str:
+    """``skills``, by name, in their order, as ``python, application``; empty for none."""
+    return ", ".join(skills)
 
 
 def skill_names(text: str) -> tuple[str, ...]:

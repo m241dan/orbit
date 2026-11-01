@@ -27,8 +27,9 @@ from orbit.tui.view.common import (
     ListHints,
     active_session,
     coder_place,
+    coder_wait,
 )
-from orbit.tui.view.tasks import coder_wait, usage_label
+from orbit.tui.view.usage import usage_label
 from orbit.tui.view.workspaces import workspace_at
 
 SESSIONS_TITLE = "Sessions"

@@ -17,8 +17,9 @@ from orbit.protocol import (
     Welcome,
     WorkspaceEntry,
 )
+from orbit.tui.view.common import coder_wait
 from orbit.tui.view.sessions import ACTIVE_NOTE, paused_note, waiting_words
-from orbit.tui.view.tasks import NO_COST, coder_wait, cost_text
+from orbit.tui.view.usage import NO_COST, cost_text
 
 
 class _Report(BaseModel):

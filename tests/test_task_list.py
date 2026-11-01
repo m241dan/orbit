@@ -24,14 +24,9 @@ from orbit.protocol import (
 from orbit.tui import OrbitApp
 from orbit.tui.sessions import SessionsScreen
 from orbit.tui.tasks import TaskList
-from orbit.tui.view.common import spinner_frame
-from orbit.tui.view.tasks import (
-    RowNotes,
-    coder_wait_row,
-    task_label,
-    task_numbers,
-    usage_label,
-)
+from orbit.tui.view.common import coder_wait_row, spinner_frame
+from orbit.tui.view.tasks import RowNotes, task_label, task_numbers
+from orbit.tui.view.usage import usage_label
 from orbit.tui.widgets import ChatPrompt
 from tests.agent_fakes import frontend
 from tests.session_apps import with_agents

@@ -12,33 +12,34 @@ from orbit.protocol import (
 )
 from orbit.protocol import edit_refusal as shared_edit_refusal
 from orbit.tui.view.rules import usage_text
-from orbit.tui.view.tasks import (
-    NEW_TASK_LABEL,
+from orbit.tui.view.task_editor import (
     TASK_EDITOR_HINT,
     TASK_PROMPT_TITLE,
     TASK_TITLE_PLACEHOLDER,
     TASK_TITLE_TITLE,
+    join_prompt,
+    split_prompt,
+    task_editor_title,
+)
+from orbit.tui.view.tasks import (
+    NEW_TASK_LABEL,
     acceptable,
     active_task,
-    cost_text,
     edit_refusal,
     follow_top,
     in_lane,
-    join_prompt,
     lane_tag,
     lanes_present,
     new_task_row,
     next_lane,
     role_lanes,
     session_usage_subtitle,
-    split_prompt,
-    task_editor_title,
     task_list_title,
     task_numbers,
     ticking,
-    usage_label,
     usage_unknown_roles,
 )
+from orbit.tui.view.usage import cost_text, usage_label
 
 
 def test_planner_prompt_splits_into_title_and_body_and_joins_back() -> None:

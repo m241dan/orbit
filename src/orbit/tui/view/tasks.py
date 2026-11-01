@@ -8,28 +8,16 @@ from typing import Protocol
 from rich.cells import cell_len
 from rich.text import Text
 
-from orbit.protocol import ACTIVE_STATUSES, WORK_LANE, Activity, AgentEntry, TaskState, Usage
+from orbit.protocol import ACTIVE_STATUSES, WORK_LANE, AgentEntry, TaskState, Usage
 from orbit.protocol import edit_refusal as shared_edit_refusal
-from orbit.tui.view.common import (
-    CODER_WAIT,
-    STATUS_ICONS,
-    coder_wait_note,
-    counted,
-    spinner_frame,
-    token_text,
-)
+from orbit.tui.view.common import STATUS_ICONS, spinner_frame
 from orbit.tui.view.detail_views import ERROR
 from orbit.tui.view.settings import settings_fields
+from orbit.tui.view.task_editor import skills_text
+from orbit.tui.view.usage import usage_label
 
-TASK_EDITOR_HINT = "j/k move · J/K scroll · i type · enter choose · ctrl+s save · esc cancel"
-TASK_TITLE_TITLE = "Title"
-TASK_PROMPT_TITLE = "Prompt"
-TASK_SKILLS_TITLE = "Skills"
-TASK_TITLE_PLACEHOLDER = "Press i to type"
-REASON_HINT = "j/k scroll · y copy · esc close"
 NEW_TASK_LABEL = "+ new task"
 USAGE_UNKNOWN = "usage unknown"
-NO_COST = "$0.00"  # What a usage that cost nothing shows for its cost beside its tokens.
 
 
 def task_numbers(tasks: Sequence[TaskState]) -> list[str]:
@@ -167,11 +155,6 @@ def _skills(skills: Sequence[str]) -> str:
     return f" · skills: {skills_text(skills)}" if skills else ""
 
 
-def skills_text(skills: Sequence[str]) -> str:
-    """``skills``, by name, in their order, as ``python, application``; empty for none."""
-    return ", ".join(skills)
-
-
 def _spent(usage: Usage, unknown: bool) -> str:
     """What a row's details end with for what its task spent, ``usage``: that it's unknown, if
     it is, else the usage, if any."""
@@ -186,90 +169,6 @@ def _reason_line(line: str, width: int | None) -> Text:
     if width is not None:
         text.truncate(width, overflow="ellipsis")
     return text
-
-
-def reason_title(state: TaskState, number: str) -> str:
-    """The reason modal's title for task ``number``: why it stopped, if cancelled, else why it
-    failed."""
-    ending = "stopped" if state.status == "cancelled" else "failed"
-    return f"Why task {number} {ending}"
-
-
-def reason_text(state: TaskState) -> str:
-    """Why ``state`` ended, in full: its reason, then a blank line and its detail, if it has
-    one. It's what the reason modal shows and what y copies."""
-    if not state.reason_detail:
-        return state.reason
-    return f"{state.reason}\n\n{state.reason_detail}"
-
-
-def split_prompt(prompt: str) -> tuple[str, str]:
-    """The first line of ``prompt`` as the title, and the rest as the body.
-
-    The body loses the blank lines around it and the trailing whitespace of its last line, but
-    keeps its indentation; a single line has an empty body, and an empty prompt gives ("", "").
-    """
-    title, _, body = prompt.partition("\n")
-    return title, _trim_body(body)
-
-
-def join_prompt(title: str, body: str) -> str:
-    """The prompt the editor saves: ``title`` stripped, a blank line, then ``body`` trimmed.
-
-    The body loses only the blank lines around it and the trailing whitespace of its last
-    line; a blank body gives just the stripped title.
-    """
-    body = _trim_body(body)
-    if not body:
-        return title.strip()
-    return f"{title.strip()}\n\n{body}"
-
-
-def _trim_body(body: str) -> str:
-    """``body`` without the blank lines around it or its last line's trailing whitespace."""
-    lines = body.split("\n")
-    while lines and not lines[0].strip():
-        del lines[0]
-    return "\n".join(lines).rstrip()
-
-
-def coder_wait(activity: Sequence[Activity]) -> Activity | None:
-    """The wait for a coder in ``activity``, if its task run waits for one."""
-    return next((each for each in activity if each.kind == "waiting_for_coder"), None)
-
-
-def coder_wait_row(activity: Sequence[Activity]) -> tuple[str, str] | None:
-    """The task about to run while ``activity``'s task run waits for a coder, and what its row
-    says: ``⏳ waiting: 3 coders busy``, or ``⏳ waiting for a coder`` while how many are busy
-    isn't known; none while it doesn't wait or its task isn't known."""
-    wait = coder_wait(activity)
-    task_id = next((each.task_id for each in activity if each.kind == "task_run"), None)
-    if wait is None or task_id is None:
-        return None
-    return task_id, _wait_note(wait.busy)
-
-
-def _wait_note(busy: int | None) -> str:
-    """What the row of the task waiting for a coder says while ``busy`` coders hold the slots:
-    ``⏳ waiting: 3 coders busy``, or ``⏳ waiting for a coder`` while that isn't known."""
-    note = CODER_WAIT if busy is None else coder_wait_note(f"{counted(busy, 'coder')} busy")
-    return f"⏳ {note}"
-
-
-def cost_text(usage: Usage) -> str:
-    """What ``usage`` cost, in what it has: dollars (``$1.20``), credits (``0.62 credits``) or
-    both (``$1.20 · 0.62 credits``); empty when it has neither."""
-    dollars = [f"${usage.cost_usd:.2f}"] if usage.cost_usd > 0 else []
-    credits = [f"{usage.credits:.2f} credits"] if usage.credits > 0 else []
-    return " · ".join(dollars + credits)
-
-
-def usage_label(usage: Usage) -> str:
-    """Tokens and cost, shortly: ``1.2M tok · $0.84``, or just ``0.62 credits`` for credits
-    with no tokens, since a runtime that charges credits may not count tokens."""
-    if usage.credits and not usage.tokens:
-        return cost_text(usage)
-    return f"{token_text(usage.tokens)} tok · {cost_text(usage) or NO_COST}"
 
 
 def session_usage_subtitle(usage: Usage) -> str:
@@ -309,11 +208,6 @@ def task_list_title(*, held: bool, lane: str | None = None) -> str:
     ``lane`` it's narrowed to, if any."""
     parts = ["Task list", *(["held"] if held else []), *([lane] if lane is not None else [])]
     return " · ".join(parts)
-
-
-def task_editor_title(*, new: bool) -> str:
-    """The task editor's border title, for a ``new`` task or one being edited."""
-    return "New task" if new else "Edit task"
 
 
 def follow_top(

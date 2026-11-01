@@ -16,6 +16,7 @@ from orbit.protocol import (
 )
 from orbit.tui.view.actions import action
 from orbit.tui.view.catalog import CatalogState
+from orbit.tui.view.common import coder_wait_row
 from orbit.tui.view.confirm import Question
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.session_picker import SessionChange, SessionChoice, SessionPicker, StartupPick
@@ -39,7 +40,6 @@ from orbit.tui.view.sessions import (
     viewed_only,
     viewing_mark,
 )
-from orbit.tui.view.tasks import coder_wait_row
 
 Send = Callable[[SessionChoice | SessionChange, Awaited], Awaitable[bool]]
 """Sends a session command to the backend, awaiting its outcome as told, returning whether it

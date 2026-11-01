@@ -6,7 +6,7 @@ from typing import Protocol
 from orbit.protocol import Event, SessionStateChanged, Snapshot, Usage
 from orbit.tui.view.common import counted
 from orbit.tui.view.tabs import ConversationTab
-from orbit.tui.view.tasks import NO_COST, cost_text
+from orbit.tui.view.usage import NO_COST, cost_text
 
 NAMED_CONSULTANTS = 2
 """The most consultants a role's corner names; beyond, it counts them."""

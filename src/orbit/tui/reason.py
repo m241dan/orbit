@@ -6,7 +6,7 @@ from textual.binding import Binding, BindingType
 
 from orbit.protocol import TaskState
 from orbit.tui.view.detail import copied_note
-from orbit.tui.view.tasks import REASON_HINT, reason_text, reason_title
+from orbit.tui.view.reason import REASON_HINT, reason_text, reason_title
 from orbit.tui.widgets import TextScreen
 
 

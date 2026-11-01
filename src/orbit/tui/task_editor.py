@@ -11,13 +11,16 @@ from textual.widgets import Input, Static
 
 from orbit.protocol import TaskSpec
 from orbit.tui.view.settings import EFFORT_TITLE, MODEL_TITLE, ROLE_TITLE, TOOL_ACCESS_TITLE
-from orbit.tui.view.task_editor import SavedTask, SettingsChooser, TaskChoices, TaskEditor
-from orbit.tui.view.tasks import (
+from orbit.tui.view.task_editor import (
     TASK_EDITOR_HINT,
     TASK_PROMPT_TITLE,
     TASK_SKILLS_TITLE,
     TASK_TITLE_PLACEHOLDER,
     TASK_TITLE_TITLE,
+    SavedTask,
+    SettingsChooser,
+    TaskChoices,
+    TaskEditor,
 )
 from orbit.tui.widgets import PromptBox, PromptInput, mark_selected
 

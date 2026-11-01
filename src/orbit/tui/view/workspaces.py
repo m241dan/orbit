@@ -25,10 +25,10 @@ from orbit.tui.view.common import (
     ListHints,
     active_session,
     coder_place,
+    coder_wait,
     coder_wait_note,
     counted,
 )
-from orbit.tui.view.tasks import coder_wait
 
 WORKSPACES_TITLE = "Workspaces"
 ADD_PATH: Literal["add_path"] = "add_path"

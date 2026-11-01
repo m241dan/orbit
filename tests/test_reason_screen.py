@@ -9,7 +9,7 @@ from textual.pilot import Pilot
 from orbit.protocol import TasksChanged, TaskSpec, TaskState, TaskStatus
 from orbit.tui import OrbitApp
 from orbit.tui.reason import ReasonScreen
-from orbit.tui.view.tasks import REASON_HINT, reason_text, reason_title
+from orbit.tui.view.reason import REASON_HINT, reason_text, reason_title
 from tests.tui_fakes import FakeSession, feed_events, open_task_list
 
 LONG = "\n".join(f"line {n}" for n in range(100))

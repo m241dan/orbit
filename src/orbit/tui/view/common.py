@@ -1,5 +1,5 @@
 """What the other view modules share: entry kinds, the spinner, status icons, model labels,
-the wording of a wait for a coder, token counts, counted nouns, the lines of text, where a
+a wait for a coder and its wording, token counts, counted nouns, the lines of text, where a
 list's highlight goes, the ids of a list's options, the keys a picker shows and the active
 session."""
 
@@ -9,7 +9,7 @@ from typing import Literal
 
 from rich.cells import cell_len, set_cell_size
 
-from orbit.protocol import SessionSummary, Settings, StepStatus, TaskStatus
+from orbit.protocol import Activity, SessionSummary, Settings, StepStatus, TaskStatus
 
 EntryKind = Literal[
     "user",
@@ -95,6 +95,29 @@ def coder_place(position: int | None) -> str | None:
 def coder_wait_note(detail: str) -> str:
     """A short note that a run waits for a coder, with ``detail``: ``waiting: 2nd``."""
     return f"waiting: {detail}"
+
+
+def coder_wait(activity: Sequence[Activity]) -> Activity | None:
+    """The wait for a coder in ``activity``, if its task run waits for one."""
+    return next((each for each in activity if each.kind == "waiting_for_coder"), None)
+
+
+def coder_wait_row(activity: Sequence[Activity]) -> tuple[str, str] | None:
+    """The task about to run while ``activity``'s task run waits for a coder, and what its row
+    says: ``⏳ waiting: 3 coders busy``, or ``⏳ waiting for a coder`` while how many are busy
+    isn't known; none while it doesn't wait or its task isn't known."""
+    wait = coder_wait(activity)
+    task_id = next((each.task_id for each in activity if each.kind == "task_run"), None)
+    if wait is None or task_id is None:
+        return None
+    return task_id, _wait_note(wait.busy)
+
+
+def _wait_note(busy: int | None) -> str:
+    """What the row of the task waiting for a coder says while ``busy`` coders hold the slots:
+    ``⏳ waiting: 3 coders busy``, or ``⏳ waiting for a coder`` while that isn't known."""
+    note = CODER_WAIT if busy is None else coder_wait_note(f"{counted(busy, 'coder')} busy")
+    return f"⏳ {note}"
 
 
 def model_label(settings: Settings) -> str:

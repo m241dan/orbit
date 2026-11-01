@@ -18,7 +18,7 @@ from orbit.protocol import (
     TurnFinished,
     Usage,
 )
-from orbit.tui.view.tasks import cost_text
+from orbit.tui.view.usage import cost_text
 
 NO_AGENTS_LABEL = "No agents running"
 
