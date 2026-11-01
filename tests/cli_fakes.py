@@ -19,8 +19,8 @@ from orbit.agent.domain.runtimes import RUNTIME_NAMES
 from orbit.agent.domain.server import ServerSettings
 from orbit.agent.external.runtimes import RUNTIME_CAPABILITIES
 from orbit.cli.runtimes import RUNTIMES, Runtime
-from orbit.cli.threaded import ThreadedSession
-from orbit.protocol import PROTOCOL_VERSION, CommandEnvelope, Hello, Settings
+from orbit.execution.threads import ThreadedSession
+from orbit.protocol import PROTOCOL_VERSION, CommandEnvelope, EventEnvelope, Hello, Settings
 from orbit.telemetry import Off, TelemetryRun, TelemetrySettings
 from orbit.tracing import NoTelemetry, Telemetry
 from orbit.tui import Opening, WarningCapture
@@ -153,7 +153,13 @@ class LocalApp:
     # The telemetry each app traced its actions with.
     telemetries: ClassVar[list[Telemetry]] = []
 
-    def __init__(self, session: ThreadedSession, *, opening: Opening, telemetry: Telemetry) -> None:
+    def __init__(
+        self,
+        session: ThreadedSession[CommandEnvelope, EventEnvelope],
+        *,
+        opening: Opening,
+        telemetry: Telemetry,
+    ) -> None:
         self.session = session
         self.storage_halt = LocalApp.halted
         self.warnings = WarningCapture()

@@ -1,3 +1,7 @@
+"""A session on its own thread: the inner session built and driven on a thread and event loop
+of its own, its events streamed and its failure raised to the caller, and the thread ended on
+close."""
+
 import asyncio
 import threading
 import time
@@ -6,7 +10,7 @@ from contextlib import contextmanager
 
 import pytest
 
-from orbit.cli.threaded import ThreadedSession
+from orbit.execution.threads import ThreadedSession
 from orbit.protocol import (
     PLANNER,
     CommandEnvelope,
@@ -16,6 +20,9 @@ from orbit.protocol import (
     SharedSession,
 )
 from tests.agent_fakes import notice
+
+type Threaded = ThreadedSession[CommandEnvelope, EventEnvelope]
+"""A threaded session driving the protocol's session."""
 
 
 def command(text: str) -> CommandEnvelope:
@@ -109,7 +116,7 @@ class EchoSession:
         pass
 
 
-def threaded(inner: FakeSession | None = None) -> tuple[ThreadedSession, list[FakeSession]]:
+def threaded(inner: FakeSession | None = None) -> tuple[Threaded, list[FakeSession]]:
     """A threaded session over ``inner`` (a fresh one by default), and the sessions it built,
     each recording that it was built."""
     built: list[FakeSession] = []
@@ -321,7 +328,7 @@ async def test_a_pump_whose_callers_loop_has_closed_ends_quietly() -> None:
     assert inner.stream_finished.is_set()
 
 
-def gated(gate: threading.Event) -> tuple[ThreadedSession, list[str]]:
+def gated(gate: threading.Event) -> tuple[Threaded, list[str]]:
     """A threaded session whose inner session is built only once ``gate`` is set, and the
     threads that built one."""
     builders: list[str] = []

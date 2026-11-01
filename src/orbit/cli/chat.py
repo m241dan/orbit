@@ -50,10 +50,10 @@ from orbit.cli.options import (
 )
 from orbit.cli.runtimes import given_runtime
 from orbit.cli.telemetry import _agent_collector, _refuse_console, _telemetry
-from orbit.cli.threaded import ThreadedSession
 from orbit.client import HandshakeRefused, TokenRejected, messages
+from orbit.execution.threads import ThreadedSession
 from orbit.profiling import profiled
-from orbit.protocol import NewSession
+from orbit.protocol import CommandEnvelope, EventEnvelope, NewSession
 from orbit.protocol.transport import is_loopback
 from orbit.telemetry import TelemetryRun
 from orbit.tracing import Telemetry
@@ -139,7 +139,9 @@ def chat(
         collector = _agent_collector(run)
         flags = replace(flags, telemetry=telemetry, gauges=telemetry.gauges, collector=collector)
         with _in_process(flags, directories, pick_session=picking, make=_backend) as backend:
-            session = ThreadedSession(backend.build, _thread_context(profile))
+            session = ThreadedSession[CommandEnvelope, EventEnvelope](
+                backend.build, _thread_context(profile)
+            )
             opening = Opening(pick=picking, repository=str(root))
             _launch(OrbitApp(session, opening=opening, telemetry=telemetry), profile)
 

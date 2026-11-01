@@ -3344,7 +3344,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   plugs the external adapters into a `WorkspaceHost`, builds a `ControlPlane` around it and
   hands that to the TUI, with the telemetry both trace with. It runs the backend on its own
   thread and event loop through
-  `ThreadedSession` (in `threaded`), so neither side's work stalls the other. `orbit serve`
+  `ThreadedSession` (from `orbit.execution.threads`), so neither side's work stalls the other. `orbit serve`
   plugs them in the same way but hands the `ControlPlane` to `ControlPlaneServer` instead, on the main thread's event loop. `orbit chat --connect` builds no
   backend: it hands the TUI an `orbit.client.WebSocketSession`, which runs on the TUI's own event
   loop, and telemetry of its own; neither does a chat that `discover_control_plane` finds a
