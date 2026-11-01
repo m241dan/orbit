@@ -828,6 +828,52 @@ async def test_landed_since_an_unknown_commit_fails(repo: Path) -> None:
         await tree.landed_since("0" * 40)
 
 
+async def test_landed_since_up_to_a_commit_gives_the_subjects_between_oldest_first(
+    repo: Path,
+) -> None:
+    tree = GitCoderTree(str(repo))
+    start = git(repo, "rev-parse", "HEAD")
+    commit_file(repo, "b.txt", "two\n", "Add B")
+    commit_file(repo, "c.txt", "three\n", "Add C")
+    end = git(repo, "rev-parse", "HEAD")
+    commit_file(repo, "d.txt", "four\n", "Add D")
+    assert await tree.landed_since(start, end) == ["Add B", "Add C"]
+
+
+async def test_changed_files_gives_the_paths_the_commits_between_changed(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    start = git(repo, "rev-parse", "HEAD")
+    commit_file(repo, "b.txt", "two\n", "Add B")
+    (repo / "src").mkdir()
+    commit_file(repo, "src/c d\u00e9.py", "three\n", "Add C")
+    commit_file(repo, "b.txt", "two again\n", "Change B")
+    end = git(repo, "rev-parse", "HEAD")
+    commit_file(repo, "d.txt", "four\n", "Add D")
+    assert sorted(await tree.changed_files(start, end)) == ["b.txt", "src/c d\u00e9.py"]
+
+
+async def test_changed_files_between_a_commit_and_itself_is_nothing(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    head = git(repo, "rev-parse", "HEAD")
+    assert await tree.changed_files(head, head) == []
+
+
+async def test_changed_files_leaves_out_what_changed_only_on_the_starts_side(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    git(repo, "checkout", "-q", "-b", "side")
+    commit_file(repo, "side.txt", "aside\n", "Add side")
+    start = git(repo, "rev-parse", "HEAD")
+    git(repo, "checkout", "-q", "main")
+    commit_file(repo, "b.txt", "two\n", "Add B")
+    assert await tree.changed_files(start, git(repo, "rev-parse", "HEAD")) == ["b.txt"]
+
+
+async def test_changed_files_from_an_unknown_commit_fails(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    with pytest.raises(TreeFailed, match="git diff failed"):
+        await tree.changed_files("0" * 40, git(repo, "rev-parse", "HEAD"))
+
+
 async def test_a_snapshot_is_a_detached_tree_at_the_commit_until_dropped(repo: Path) -> None:
     tree = GitCoderTree(str(repo))
     path = Path(await tree.prepare(keep=False))

@@ -116,7 +116,9 @@ def store_logging(*logged: EventEnvelope) -> FakeStore:
     return store
 
 
-def review_count_json(count: int) -> str:
-    """``count`` commits since the last super review as an older orbit's ``reviews.json`` text,
-    for :func:`parse_review_count` to read back."""
-    return json.dumps({"since_super": count})
+def review_count_json(count: int, last_super_commit: str | None = None) -> str:
+    """``count`` commits since the last super review, and that review's ``last_super_commit``
+    if given, as an older orbit's ``reviews.json`` text, for :func:`parse_review_count` to read
+    back."""
+    last = {} if last_super_commit is None else {"last_super_commit": last_super_commit}
+    return json.dumps({"since_super": count} | last)

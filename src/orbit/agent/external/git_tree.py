@@ -184,10 +184,15 @@ class GitCoderTree:
     async def show(self, commits: Sequence[str]) -> str:
         return await self._git(self._root, "show", "--stat", "--patch", "--format=medium", *commits)
 
-    async def landed_since(self, commit: str) -> list[str]:
-        since = f"{commit}..{await self._base_ref()}"
-        listed = await self._git(self._root, "log", "--format=%s", "--reverse", since)
+    async def landed_since(self, commit: str, until: str | None = None) -> list[str]:
+        end = until if until is not None else await self._base_ref()
+        listed = await self._git(self._root, "log", "--format=%s", "--reverse", f"{commit}..{end}")
         return listed.splitlines()
+
+    async def changed_files(self, start: str, end: str) -> list[str]:
+        # From where the two meet, as ``landed_since`` lists the commits after ``start``.
+        listed = await self._git(self._root, "diff", "--name-only", "-z", f"{start}...{end}")
+        return [path for path in listed.split("\0") if path]
 
     async def snapshot(self, commit: str) -> str:
         sha = await self._sha(commit)

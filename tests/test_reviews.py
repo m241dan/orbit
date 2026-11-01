@@ -4,14 +4,17 @@ from dataclasses import fields
 
 from orbit.agent.domain.reviews import (
     DIFF_LIMIT,
+    FILES_LIMIT,
     LANDED_LIMIT,
     PENDING_LIMIT,
     BatchSnapshot,
+    LandedSince,
     LaneSnapshot,
     PlannerSnapshot,
     ReviewJob,
     ReviewLimits,
     ReviewPlanner,
+    SuperReviewCount,
     _Batch,
     pause_notice,
     pending_titles,
@@ -306,7 +309,8 @@ LANDED = "Landed since (check your findings against these):"
 
 def test_a_review_prompt_lists_what_landed_since_oldest_first_before_the_diff() -> None:
     job = ReviewJob(commits=("abc1234def",), round=0, batch=None)
-    prompt = review_prompt(job, "+new", 5, ("Add tests",), ("Add B", "Add C"))
+    landed = LandedSince(("Add B", "Add C"))
+    prompt = review_prompt(job, "+new", 5, ("Add tests",), landed)
     assert prompt == (
         "Review commit abc1234\n\n"
         "You may make at most 5 suggestions.\n\n"
@@ -318,25 +322,69 @@ def test_a_review_prompt_lists_what_landed_since_oldest_first_before_the_diff() 
 
 def test_a_review_prompt_with_nothing_landed_since_has_no_such_section() -> None:
     job = ReviewJob(commits=("abc1234def",), round=0, batch=None)
-    assert "Landed since" not in review_prompt(job, "+new", 5, (), ())
+    assert "Landed since" not in review_prompt(job, "+new", 5, (), LandedSince())
 
 
 def test_a_review_prompt_names_only_so_many_landed_commits_and_counts_the_rest() -> None:
     job = ReviewJob(commits=("a" * 10, "b" * 10), round=1, batch="batch-1")
     landed = tuple(f"Commit {n}" for n in range(LANDED_LIMIT + 5))
-    prompt = review_prompt(job, "diffs", 5, (), landed)
+    prompt = review_prompt(job, "diffs", 5, (), LandedSince(landed))
     listed = prompt.split(f"{LANDED}\n", 1)[1]
     names = [f"- {line}" for line in landed[:LANDED_LIMIT]]
     assert listed == "\n".join([*names, "… and 5 more", "", "diffs"])
     assert LANDED_LIMIT == 40
 
 
-def test_a_super_review_prompt_lists_nothing_landed_since() -> None:
-    job = ReviewJob(commits=("abc1234def",), round=0, batch=None, whole=True)
-    prompt = review_prompt(job, "", 10, (), ("Add B",))
+def test_a_review_prompt_lists_no_files_the_commits_landed_since_changed() -> None:
+    job = ReviewJob(commits=("abc1234def",), round=0, batch=None)
+    prompt = review_prompt(job, "+new", 5, (), LandedSince(("Add B",), ("b.py",)))
+    assert "b.py" not in prompt and "Files" not in prompt
+
+
+SINCE_SUPER = "Commits since the last super review:"
+FILES = "Files they changed:"
+SUPER = ReviewJob(commits=("abc1234def",), round=0, batch=None, whole=True)
+
+
+def test_a_super_review_prompt_lists_the_commits_since_the_last_and_their_files_sorted() -> None:
+    landed = LandedSince(("Add D", "Add E"), ("src/e.py", "README.md", "src/d.py"))
+    prompt = review_prompt(SUPER, "", 10, ("Add tests",), landed)
     assert prompt == (
-        "Super review of the codebase at abc1234\n\nYou may make at most 10 suggestions."
+        "Super review of the codebase at abc1234\n\n"
+        "You may make at most 10 suggestions.\n\n"
+        "Tasks already queued (don't suggest these):\n- Add tests\n\n"
+        f"{SINCE_SUPER}\n- Add D\n- Add E\n\n"
+        f"{FILES}\n- README.md\n- src/d.py\n- src/e.py"
     )
+
+
+def test_a_super_review_prompt_lists_every_commit_since_the_last() -> None:
+    subjects = tuple(f"Commit {n}" for n in range(LANDED_LIMIT + 5))
+    prompt = review_prompt(SUPER, "", 10, (), LandedSince(subjects))
+    listed = prompt.split(f"{SINCE_SUPER}\n", 1)[1]
+    assert listed == "\n".join(f"- {subject}" for subject in subjects)
+
+
+def test_a_super_review_prompt_names_only_so_many_files_and_counts_the_rest() -> None:
+    files = tuple(f"src/f{n:03}.py" for n in range(FILES_LIMIT + 20))
+    prompt = review_prompt(SUPER, "", 10, (), LandedSince(("Add F",), files[::-1]))
+    listed = prompt.split(f"{FILES}\n", 1)[1]
+    names = [f"- {path}" for path in files[:FILES_LIMIT]]
+    assert listed == "\n".join([*names, "… and 20 more"])
+    assert FILES_LIMIT == 100
+
+
+def test_a_super_review_prompt_with_no_commits_since_the_last_lists_neither() -> None:
+    for landed in (LandedSince(), LandedSince((), ("b.py",))):
+        prompt = review_prompt(SUPER, "", 10, (), landed)
+        assert prompt == (
+            "Super review of the codebase at abc1234\n\nYou may make at most 10 suggestions."
+        )
+
+
+def test_a_super_review_prompt_with_commits_that_changed_no_files_lists_no_files() -> None:
+    prompt = review_prompt(SUPER, "", 10, (), LandedSince(("Empty commit",)))
+    assert prompt.endswith(f"{SINCE_SUPER}\n- Empty commit") and FILES not in prompt
 
 
 def test_the_tasks_still_to_run_or_running_are_listed_by_their_first_lines() -> None:
@@ -440,6 +488,27 @@ def test_asking_for_a_super_review_restarts_the_count() -> None:
     assert job == ReviewJob(commits=("abc",), round=0, batch=None, whole=True)
     assert not reviews.count(state("2"), ())
     assert reviews.count(state("3"), ())
+
+
+def test_a_super_review_starts_from_the_commit_it_reviews_after_the_first() -> None:
+    reviews = counting(2)
+    assert reviews.last_super_commit is None
+    reviews.super_review("abc")
+    assert reviews.last_super_commit == "abc"
+    reviews.count(state("1"), ())
+    assert reviews.count(state("2"), ())
+    reviews.super_review("def")
+    assert reviews.super_count == SuperReviewCount(0, "def")
+
+
+def test_the_super_review_count_is_its_commits_since_the_last_and_that_ones_commit() -> None:
+    reviews = counting(3)
+    assert reviews.super_count == SuperReviewCount(0, None)
+    reviews.count(state("1"), ())
+    assert reviews.super_count == SuperReviewCount(1, None)
+    reviews.super_count = SuperReviewCount(2, "abc")
+    assert (reviews.since_super, reviews.last_super_commit) == (2, "abc")
+    assert reviews.count(state("2"), ())
 
 
 def test_a_super_reviews_batch_has_its_own_cap() -> None:
@@ -706,9 +775,9 @@ def test_the_super_review_count_is_kept_apart_from_snapshots() -> None:
     reviews = ReviewPlanner(ReviewLimits(super_every=3))
     reviews.count(state("1"), ())
     snapshot = reviews.snapshot()
-    reviews.since_super = 2
+    reviews.super_count = SuperReviewCount(2, "abc")
     reviews.restore(snapshot)
-    assert reviews.since_super == 2
+    assert reviews.super_count == SuperReviewCount(2, "abc")
     assert reviews.count(state("2"), ())
     assert reviews.since_super == 0
 

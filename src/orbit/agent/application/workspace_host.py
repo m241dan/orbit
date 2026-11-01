@@ -1080,7 +1080,7 @@ class WorkspaceHost:
         """Save the review state, which may have changed, and the repository's super review
         count."""
         assert self._lane is not None  # Only the review lane changes it.
-        await self._review_count.save(self._lane.planner.since_super)
+        await self._review_count.save(self._lane.planner.super_count)
         await self._save()
 
     async def _load_review_count(self) -> None:

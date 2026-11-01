@@ -520,15 +520,92 @@ async def test_a_super_review_can_be_asked_for_before_any_task_ran() -> None:
     assert not any(isinstance(e, ErrorOccurred) for e in events)
 
 
-async def test_a_super_review_is_not_told_what_landed_since() -> None:
+SINCE_SUPER = "Commits since the last super review:"
+FILES = "Files they changed:"
+
+
+def super_task(events: list[Event]) -> TaskState:
+    """The last super review task published in ``events``."""
+    return [t for t in board(events) if t.task.role == "super-reviewer"][-1]
+
+
+async def test_the_first_super_review_lists_no_commits_and_the_next_starts_from_its_own() -> None:
     tree = FakeTree()
     tree.since[tree.base] = ["Add B"]
+    tree.changed[tree.base] = ["b.py"]
     session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
     await send(session, FireTrigger(trigger=SUPER_REVIEW))
     events = await asyncio.wait_for(settle(session), 10)
-    [review] = board(events)
-    assert "Landed since" not in review.task.prompt
+    prompt = super_task(events).task.prompt
+    assert "Landed since" not in prompt and SINCE_SUPER not in prompt and FILES not in prompt
     assert tree.asked_since == []
+    assert lane_of(session).planner.last_super_commit == tree.base
+
+
+async def test_the_next_super_review_lists_the_commits_since_the_last_and_their_files() -> None:
+    tree = FakeTree()
+    tree.since[tree.base] = ["Add D", "Add E"]
+    tree.changed[tree.base] = ["src/e.py", "README.md", "src/d.py"]
+    session, _, _ = session_for(reviewers=(suggests(), suggests()), tree=tree, review=True)
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
+    events = await asyncio.wait_for(settle(session), 10)
+    tree.base = "e"
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
+    events = await asyncio.wait_for(settle(session, events), 10)
+    assert super_task(events).task.prompt.endswith(
+        f"{SINCE_SUPER}\n- Add D\n- Add E\n\n{FILES}\n- README.md\n- src/d.py\n- src/e.py"
+    )
+    assert tree.asked_since == ["base"]
+    assert lane_of(session).planner.last_super_commit == "e"
+
+
+async def test_a_super_review_due_lists_the_commits_since_the_last() -> None:
+    tree = FakeTree()
+    tree.since["s0"] = ["Add D"]
+    tree.changed["s0"] = ["d.py"]
+    session, _, _ = session_for(
+        claims_done,
+        reviewers=(suggests(), suggests()),
+        tree=tree,
+        review=True,
+        review_limits=ReviewLimits(super_every=1),
+    )
+    lane_of(session).planner.last_super_commit = "s0"
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    assert super_task(events).task.prompt.endswith(f"{SINCE_SUPER}\n- Add D\n\n{FILES}\n- d.py")
+    assert lane_of(session).planner.last_super_commit == "c1"
+
+
+async def test_a_super_review_with_nothing_landed_since_the_last_lists_no_commits() -> None:
+    tree = FakeTree()
+    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
+    lane_of(session).planner.last_super_commit = "s1"
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
+    events = await asyncio.wait_for(settle(session), 10)
+    prompt = super_task(events).task.prompt
+    assert SINCE_SUPER not in prompt and FILES not in prompt
+    assert tree.asked_since == ["s1"]
+    assert lane_of(session).planner.last_super_commit == tree.base
+
+
+@pytest.mark.parametrize("method", ["landed_since", "changed_files"])
+async def test_a_super_review_whose_commits_since_cannot_be_listed_is_queued_without(
+    method: str,
+) -> None:
+    tree = FakeTree()
+    tree.since["s1"] = ["Add D"]
+    tree.changed["s1"] = ["d.py"]
+    tree.failures[method] = TreeFailed("git failed: bad revision")
+    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
+    lane_of(session).planner.last_super_commit = "s1"
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
+    events = await asyncio.wait_for(settle(session), 10)
+    review = super_task(events)
+    assert review.status == "completed"
+    assert SINCE_SUPER not in review.task.prompt and FILES not in review.task.prompt
+    assert not _errored(events)
+    assert lane_of(session).planner.last_super_commit == tree.base
 
 
 async def test_a_super_review_is_skipped_when_the_base_commit_cannot_be_read() -> None:

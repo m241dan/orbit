@@ -53,6 +53,7 @@ from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.reports import NewReport
+from orbit.agent.domain.reviews import SuperReviewCount
 from orbit.agent.domain.roles import Role, built_in_roles
 from orbit.agent.domain.runtimes import (
     CLAUDE,
@@ -436,7 +437,8 @@ class FakeFallback:
 
 
 class FakeStore:
-    """Saved sessions kept in memory, holding the super review ``count``.
+    """Saved sessions kept in memory, holding the super review ``count``, at first ``count``
+    commits since a super review of no commit.
 
     ``failure``, while set, is the error every session save raises, ``count_failure`` the error
     every count save raises, and ``count_load_failure`` the error reading the count raises;
@@ -476,8 +478,8 @@ class FakeStore:
         self.saved: list[SessionRecord] = []
         self.locked: set[str] = set()
         self.released: list[str] = []
-        self.count = count
-        self.counts: list[int] = []  # Each count saved.
+        self.count = SuperReviewCount(count)
+        self.counts: list[SuperReviewCount] = []  # Each count saved.
         self.failure: str | None = None
         self.count_failure: str | None = None
         self.count_load_failure: str | None = None
@@ -655,12 +657,12 @@ class FakeStore:
         self.seq = max([self.seq, *dropped])
         self.logged = [envelope for envelope in self.logged if envelope.session != session_id]
 
-    async def review_count(self) -> int:
+    async def review_count(self) -> SuperReviewCount:
         if self.count_load_failure is not None:
             raise StoreFailed(self.count_load_failure)
         return self.count
 
-    async def save_review_count(self, count: int) -> None:
+    async def save_review_count(self, count: SuperReviewCount) -> None:
         if self.count_failure is not None:
             raise StoreFailed(self.count_failure)
         for _ in range(self.count_yields.pop(0) if self.count_yields else 0):
@@ -754,6 +756,7 @@ class FakeTree:
         self.failures: dict[str, Exception] = {}  # Method name -> what its next call raises.
         self.since: dict[str, list[str]] = {}  # Commit -> the subjects landed after it.
         self.asked_since: list[str] = []  # The commits landed_since() was asked about.
+        self.changed: dict[str, list[str]] = {}  # Commit -> the files changed after it.
 
     async def prepare(self, keep: bool) -> str:
         self.prepared.append(keep)
@@ -787,10 +790,14 @@ class FakeTree:
         self._fail("show")
         return "\n".join(f"diff of {commit}" for commit in commits)
 
-    async def landed_since(self, commit: str) -> list[str]:
+    async def landed_since(self, commit: str, until: str | None = None) -> list[str]:
         self.asked_since.append(commit)
         self._fail("landed_since")
         return self.since.get(commit, [])
+
+    async def changed_files(self, start: str, end: str) -> list[str]:
+        self._fail("changed_files")
+        return self.changed.get(start, [])
 
     async def snapshot(self, commit: str) -> str:
         self._fail("snapshot")

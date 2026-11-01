@@ -35,6 +35,31 @@ PENDING_LIMIT = 40
 # Commits landed since the reviewed one named in a review task, so the reviewer can check its
 # findings against them; the rest are counted.
 LANDED_LIMIT = 40
+# Files the commits since the last super review changed named in a super review's task; the rest
+# are counted.
+FILES_LIMIT = 100
+
+
+@dataclass(frozen=True)
+class SuperReviewCount:
+    """The repository's count towards its next super review: ``since_super`` commits counted
+    since the last, and ``last_super_commit``, the commit that one reviewed (none before the
+    first)."""
+
+    since_super: int = 0
+    last_super_commit: str | None = None
+
+
+@dataclass(frozen=True)
+class LandedSince:
+    """What landed that a review's task lists: the ``subjects`` of the commits, oldest first,
+    and, for a super review, the paths of the ``files`` they changed."""
+
+    subjects: tuple[str, ...] = ()
+    files: tuple[str, ...] = ()
+
+
+_NOTHING_LANDED = LandedSince()
 
 
 @dataclass(frozen=True)
@@ -169,6 +194,7 @@ class ReviewPlanner:
         self._reviewers = frozenset(reviewers)
         self.paused = False
         self.since_super = 0  # Commits since the last super review.
+        self.last_super_commit: str | None = None  # The commit it reviewed; none before one.
         self._next_batch = 1
         self._open: dict[str, _Batch] = {}
         self._suggested: set[str] = set()  # Normalised titles of the suggestions accepted.
@@ -191,6 +217,16 @@ class ReviewPlanner:
             batch_id: _Batch.thawed(batch) for batch_id, batch in snapshot.batches.items()
         }
         self._suggested = set(snapshot.suggested)
+
+    @property
+    def super_count(self) -> SuperReviewCount:
+        """The count towards the next super review, kept per repository rather than in
+        snapshots."""
+        return SuperReviewCount(self.since_super, self.last_super_commit)
+
+    @super_count.setter
+    def super_count(self, count: SuperReviewCount) -> None:
+        self.since_super, self.last_super_commit = count.since_super, count.last_super_commit
 
     @property
     def open_batches(self) -> tuple[str, ...]:
@@ -296,8 +332,9 @@ class ReviewPlanner:
         )
 
     def super_review(self, commit: str) -> ReviewJob:
-        """A super review of the codebase at ``commit``; the count starts again."""
+        """A super review of the codebase at ``commit``; the count starts again, from it."""
         self.since_super = 0
+        self.last_super_commit = commit
         return ReviewJob(commits=(commit,), round=0, batch=None, whole=True)
 
     def landed(self, state: TaskState, commit: str) -> ReviewJob | None:
@@ -423,12 +460,12 @@ def review_prompt(
     diff: str,
     cap: int,
     pending: Sequence[str],
-    landed_since: Sequence[str] = (),
+    landed_since: LandedSince = _NOTHING_LANDED,
 ) -> str:
     """The task for the reviewer of ``job``, whose commits' messages and diffs are ``diff``,
-    allowed ``cap`` suggestions, told the tasks titled ``pending`` are queued already and,
-    unless it's a super review, that the commits with subjects ``landed_since`` (oldest first)
-    landed after the last one it reviews.
+    allowed ``cap`` suggestions, told the tasks titled ``pending`` are queued already and that
+    the commits ``landed_since`` landed: after the last one it reviews or, for a super review,
+    since the last super review, with the files they changed.
 
     Its first line titles it. It holds only the facts: how to review is the role's instructions.
     """
@@ -439,11 +476,23 @@ def review_prompt(
         heading = "Tasks already queued (don't suggest these):"
         parts.append(_capped_list(heading, pending, PENDING_LIMIT))
     if job.whole:
-        return "\n\n".join(parts)
-    if landed_since:
+        return "\n\n".join([*parts, *_since_super(landed_since)])
+    if landed_since.subjects:
         heading = "Landed since (check your findings against these):"
-        parts.append(_capped_list(heading, landed_since, LANDED_LIMIT))
+        parts.append(_capped_list(heading, landed_since.subjects, LANDED_LIMIT))
     return "\n\n".join([*parts, _trimmed(diff)])
+
+
+def _since_super(landed: LandedSince) -> list[str]:
+    """The parts of a super review's task listing the commits ``landed`` since the last super
+    review, every one, and the files they changed, sorted, the first :data:`FILES_LIMIT` named
+    and the rest counted; none when no commit landed."""
+    if not landed.subjects:
+        return []
+    commits = "\n".join(["Commits since the last super review:", *_items(landed.subjects)])
+    if not landed.files:
+        return [commits]
+    return [commits, _capped_list("Files they changed:", sorted(landed.files), FILES_LIMIT)]
 
 
 def _trimmed(diff: str) -> str:
@@ -464,7 +513,12 @@ def _review_title(job: ReviewJob) -> str:
 
 def _capped_list(heading: str, items: Sequence[str], limit: int) -> str:
     """``items`` listed under ``heading``: the first ``limit`` named, the rest counted."""
-    lines = [f"- {item}" for item in items[:limit]]
+    lines = _items(items[:limit])
     if len(items) > limit:
         lines.append(f"… and {len(items) - limit} more")
     return "\n".join([heading, *lines])
+
+
+def _items(items: Sequence[str]) -> list[str]:
+    """``items`` as the lines of a list, one each."""
+    return [f"- {item}" for item in items]

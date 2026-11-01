@@ -1117,8 +1117,9 @@ through). Each reviewer is also told the titles of the tasks still queued or run
 steer clear of them (other than the reviews and configurator tasks orbit queues for itself), and
 the subjects of the commits that merged into the base after the last one it reviews, as they stand
 when the review is queued (the first 40, oldest first, the rest counted), so it can check its
-findings against work that may already have dealt with them; a super review isn't told those, and
-a review whose list git can't give goes ahead without it. With the defaults, one of your commits can lead to at
+findings against work that may already have dealt with them; a super review is told what landed
+since the last super review instead (below), and a review whose list git can't give goes ahead
+without it. With the defaults, one of your commits can lead to at
 most 15 suggested tasks. Removing a suggested task drops it from its batch, which is then reviewed
 without it (or closed, if nothing in it landed); removing a queued review closes the batch it would
 have suggested into.
@@ -1129,8 +1130,14 @@ latest commit, looking for duplication, structure that no longer fits and gaps i
 suggest up to `super_review_suggestions` tasks (default 10). Those form a batch at round 1 and carry
 on like any other review's. Each review ends with a one-line verdict that also counts the findings
 its cap left out, so `5 suggestions, 2 more left out` tells you a second pass would find more.
-`ctrl+g` asks for one straight away and restarts the count. The count belongs to the repository
-rather than to a session, so it carries on across sessions and restarts. A super review that falls
+`ctrl+g` asks for one straight away and restarts the count. A super review's task lists, after the
+tasks still queued, the subjects of the commits since the last super review (every one, oldest
+first, after the commit that review reviewed up to its own) under `Commits since the last super
+review:`, then the files they changed under `Files they changed:` (sorted, the first 100 named and
+the rest counted); the first super review in a repository, or one with nothing landed since the
+last, lists neither, and one whose lists git can't give goes ahead without them. The count, and the
+commit the last super review reviewed, belong to the repository rather than to a session, so they
+carry on across sessions and restarts. A super review that falls
 due waits while review is paused, and while suggested tasks (or reviews) are pending or running; it
 comes with your next commit once none is.
 

@@ -16,6 +16,7 @@ from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.purging import Purged
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.reports import NewReport
+from orbit.agent.domain.reviews import SuperReviewCount
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.runtimes import Capabilities, Failure
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
@@ -344,8 +345,13 @@ class CoderTree(Protocol):
         """Each of ``commits``' message and diff."""
         ...
 
-    async def landed_since(self, commit: str) -> list[str]:
-        """The subjects of the commits on the base after ``commit``, oldest first."""
+    async def landed_since(self, commit: str, until: str | None = None) -> list[str]:
+        """The subjects of the commits after ``commit``, up to ``until`` or, without it, on the
+        base, oldest first."""
+        ...
+
+    async def changed_files(self, start: str, end: str) -> list[str]:
+        """The paths of the files the commits after ``start`` up to ``end`` changed."""
         ...
 
     async def snapshot(self, commit: str) -> str:
@@ -594,14 +600,15 @@ class SessionStore(EventLog, Protocol):
         :class:`StoreFailed` when it can't."""
         ...
 
-    async def review_count(self) -> int:
-        """The commits since the last super review; 0 when none is saved. Raises
-        :class:`ReadFailed` when the store can't be read."""
+    async def review_count(self) -> SuperReviewCount:
+        """The commits since the last super review and the commit it reviewed; none of either
+        when none is saved. Raises :class:`ReadFailed` when the store can't be read."""
         ...
 
-    async def save_review_count(self, count: int) -> None:
-        """Save ``count`` as the commits since the last super review; raises
-        :class:`StoreFailed`, a :class:`StorageFailed` when the database failed, when it can't."""
+    async def save_review_count(self, count: SuperReviewCount) -> None:
+        """Save ``count`` as the commits since the last super review and the commit it
+        reviewed; raises :class:`StoreFailed`, a :class:`StorageFailed` when the database
+        failed, when it can't."""
         ...
 
     async def record_moves(self) -> dict[str, str]:

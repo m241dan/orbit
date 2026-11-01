@@ -8,7 +8,13 @@ import pytest
 
 from orbit.agent.domain import sessions
 from orbit.agent.domain.refusals import Refused
-from orbit.agent.domain.reviews import BatchSnapshot, LaneSnapshot, PlannerSnapshot, ReviewJob
+from orbit.agent.domain.reviews import (
+    BatchSnapshot,
+    LaneSnapshot,
+    PlannerSnapshot,
+    ReviewJob,
+    SuperReviewCount,
+)
 from orbit.agent.domain.runtimes import CLAUDE
 from orbit.agent.domain.sessions import (
     EMPTY_NAME,
@@ -386,12 +392,23 @@ def test_a_summary_of_a_session_without_tasks_is_empty_and_neither_current_nor_l
 
 
 def test_the_review_count_round_trips_through_json() -> None:
-    assert parse_review_count(review_count_json(7)) == 7
+    assert parse_review_count(review_count_json(7)) == SuperReviewCount(7)
+
+
+def test_the_review_count_and_last_super_commit_round_trip_through_json() -> None:
+    assert parse_review_count(review_count_json(7, "abc")) == SuperReviewCount(7, "abc")
 
 
 def test_an_unreadable_review_count_is_zero() -> None:
-    texts = ("", "{oops", "[]", '{"since_super": -1}', '{"since_super": "many"}')
-    assert [parse_review_count(text) for text in texts] == [0] * 5
+    texts = (
+        "",
+        "{oops",
+        "[]",
+        '{"since_super": -1}',
+        '{"since_super": "many"}',
+        '{"since_super": 1, "last_super_commit": 5}',
+    )
+    assert [parse_review_count(text) for text in texts] == [SuperReviewCount()] * 6
 
 
 def test_a_summary_of_tasks_has_no_last_active_time() -> None:

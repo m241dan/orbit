@@ -32,6 +32,7 @@ from orbit.agent.application.tasks import Changed, Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.endings import REVIEW_STOPPED_BY_YOU
 from orbit.agent.domain.reviews import (
+    LandedSince,
     LaneSnapshot,
     ReviewJob,
     ReviewPlanner,
@@ -185,11 +186,13 @@ class ReviewLane:
         """The task that ended as ``state`` landed ``commit``. The task isn't looked up: it may
         have been removed since it finished, and its work is reviewed all the same."""
         job = self.planner.landed(state, commit)
-        # Counted before the commit's own review is queued, which would hold a due super review.
+        # Counted before the commit's own review is queued, which would hold a due super review;
+        # one due is taken at once, so the count saved as that review is queued has its commit.
         due = self.planner.count(state, self._board.tasks)
+        whole = self._super_review(commit) if due else None
         await self._queue(job)
-        if due:
-            await self._queue(self.planner.super_review(commit))
+        if whole is not None:
+            await self._queue(*whole)
         await self._hooks.changed()  # The count changed even if no review is due.
 
     async def super_review(self) -> None:
@@ -202,7 +205,13 @@ class ReviewLane:
                 ErrorOccurred(code=GIT_FAILED, message=f"Super review skipped: {exc}")
             )
             return
-        await self._queue(self.planner.super_review(commit))
+        await self._queue(*self._super_review(commit))
+
+    def _super_review(self, commit: str) -> tuple[ReviewJob, str | None]:
+        """A super review of the codebase at ``commit``, which the count starts again from, and
+        the commit the last one reviewed, if any, after which it's told what landed."""
+        since = self.planner.last_super_commit
+        return self.planner.super_review(commit), since
 
     async def ended(self, state: TaskState) -> None:
         """The task that ended as ``state`` finished without landing anything. The task isn't
@@ -282,15 +291,16 @@ class ReviewLane:
         """Stop the reviews running for good: a kick from now on runs none."""
         await self.runner.close()
 
-    async def _queue(self, job: ReviewJob | None) -> None:
-        """Queue ``job``'s review, if there is one, and run it."""
+    async def _queue(self, job: ReviewJob | None, since: str | None = None) -> None:
+        """Queue ``job``'s review, if there is one, and run it; a super review is told what
+        landed after ``since``."""
         await self.note_pause()
         diff = None if job is None else await self._diff(job)
         if job is None or diff is None:  # No review is due, or its diff can't be read.
             await self._publish_status()
             await self._hooks.changed()
             return
-        await self._add(job, diff, await self._landed(job))
+        await self._add(job, diff, await self._landed(job, since))
         await self._publish_status()
         await self._hooks.changed()
         self.kick()
@@ -299,7 +309,7 @@ class ReviewLane:
         """Queue ``job``'s review, if there is one, on the board without publishing it."""
         diff = None if job is None else await self._diff(job)
         if job is not None and diff is not None:
-            self._adder(job, diff, await self._landed(job))(self._board)
+            self._adder(job, diff, await self._landed(job, None))(self._board)
 
     async def _diff(self, job: ReviewJob) -> str | None:
         """The diff ``job``'s reviewer is shown; none, reported, if git can't show it."""
@@ -311,26 +321,33 @@ class ReviewLane:
             await self._publish(ErrorOccurred(code=GIT_FAILED, message=f"Review skipped: {exc}"))
             return None
 
-    async def _landed(self, job: ReviewJob) -> tuple[str, ...]:
-        """The subjects of the commits landed on the base since ``job``'s last, oldest first,
-        which its reviewer is told; none for a super review, or if git can't list them."""
-        if job.whole:
-            return ()
+    async def _landed(self, job: ReviewJob, since: str | None) -> LandedSince:
+        """What landed that ``job``'s reviewer is told, oldest first: the commits on the base
+        since its last or, for a super review, those after ``since`` up to its commit, with the
+        files they changed; nothing if git can't list them."""
         try:
-            return tuple(await self._tree.landed_since(job.commits[-1]))
+            if not job.whole:
+                return LandedSince(tuple(await self._tree.landed_since(job.commits[-1])))
+            return await self._since_super(since, job.commits[0])
         except TreeFailed:  # The review goes ahead without them: they're only a hint.
-            return ()
+            return LandedSince()
 
-    async def _add(self, job: ReviewJob, diff: str, landed: tuple[str, ...]) -> None:
-        """Queue ``job``'s review task, told ``diff`` and that commits with subjects ``landed``
-        landed since."""
+    async def _since_super(self, since: str | None, commit: str) -> LandedSince:
+        """The commits after ``since``, the last super review's commit, up to ``commit``, and
+        the files they changed; nothing before the first super review, without ``since``."""
+        if since is None:
+            return LandedSince()
+        subjects = await self._tree.landed_since(since, commit)
+        files = await self._tree.changed_files(since, commit)
+        return LandedSince(tuple(subjects), tuple(files))
+
+    async def _add(self, job: ReviewJob, diff: str, landed: LandedSince) -> None:
+        """Queue ``job``'s review task, told ``diff`` and that ``landed`` landed since."""
         await self._tasks.change(self._adder(job, diff, landed))
 
-    def _adder(
-        self, job: ReviewJob, diff: str, landed: tuple[str, ...]
-    ) -> Callable[[TaskBoard], None]:
+    def _adder(self, job: ReviewJob, diff: str, landed: LandedSince) -> Callable[[TaskBoard], None]:
         """The change to the board that queues ``job``'s review task, told ``diff`` and that
-        commits with subjects ``landed`` landed since."""
+        ``landed`` landed since."""
         batch = self.planner.open_batch(job)
         role = job.role
         pending = pending_titles(self._board.tasks)

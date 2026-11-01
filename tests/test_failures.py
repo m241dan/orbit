@@ -13,6 +13,7 @@ from orbit.agent.application.failures import (
 )
 from orbit.agent.application.ports import ReadFailed, StoreFailed
 from orbit.agent.domain.refusals import Refused
+from orbit.agent.domain.reviews import SuperReviewCount
 from orbit.protocol import BUSY, INTERNAL, SAVE_FAILED, ErrorOccurred, Event, RunTasks
 from tests.agent_fakes import FakeStore
 
@@ -20,14 +21,14 @@ from tests.agent_fakes import FakeStore
 class Buggy(FakeStore):
     """A store whose saves hit a bug rather than a storage problem."""
 
-    async def save_review_count(self, count: int) -> None:
+    async def save_review_count(self, count: SuperReviewCount) -> None:
         raise RuntimeError("a bug")
 
 
 class Unlistable(FakeStore):
     """A store whose review count can't be read."""
 
-    async def review_count(self) -> int:
+    async def review_count(self) -> SuperReviewCount:
         raise ReadFailed("Couldn't read the review count")
 
 
@@ -35,7 +36,7 @@ async def test_a_store_failure_is_the_outcome() -> None:
     store = FakeStore()
     store.count_failure = "disk full"
 
-    result = await outcome(store.save_review_count(1))
+    result = await outcome(store.save_review_count(SuperReviewCount(1)))
 
     assert isinstance(result, StoreFailed) and str(result) == "disk full"
 
@@ -48,7 +49,7 @@ async def test_a_read_failure_is_the_outcome() -> None:
 
 async def test_an_error_that_isnt_the_stores_escapes_the_outcome() -> None:
     with pytest.raises(RuntimeError, match="a bug"):
-        await outcome(Buggy().save_review_count(1))
+        await outcome(Buggy().save_review_count(SuperReviewCount(1)))
 
 
 async def test_an_error_that_isnt_the_stores_escapes_unreported() -> None:
@@ -58,7 +59,9 @@ async def test_an_error_that_isnt_the_stores_escapes_unreported() -> None:
         published.append(event)
 
     with pytest.raises(RuntimeError, match="a bug"):
-        await ReportedOnce(publish, SAVE_FAILED).attempt(Buggy().save_review_count(1))
+        await ReportedOnce(publish, SAVE_FAILED).attempt(
+            Buggy().save_review_count(SuperReviewCount(1))
+        )
     assert published == []
 
 
@@ -81,12 +84,12 @@ async def test_failures_in_a_row_are_reported_once_until_a_call_works() -> None:
     store = FakeStore()
     store.count_failure = "disk full"
     saves = ReportedOnce(publish, SAVE_FAILED)
-    assert await saves.attempt(store.save_review_count(1)) is False
-    assert await saves.attempt(store.save_review_count(2)) is False
+    assert await saves.attempt(store.save_review_count(SuperReviewCount(1))) is False
+    assert await saves.attempt(store.save_review_count(SuperReviewCount(2))) is False
     store.count_failure = None
-    assert await saves.attempt(store.save_review_count(3)) is True
+    assert await saves.attempt(store.save_review_count(SuperReviewCount(3))) is True
     store.count_failure = "disk full"
-    assert await saves.attempt(store.save_review_count(4)) is False
+    assert await saves.attempt(store.save_review_count(SuperReviewCount(4))) is False
     assert published == [ErrorOccurred(code=SAVE_FAILED, message="disk full")] * 2
 
 

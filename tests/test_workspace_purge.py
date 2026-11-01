@@ -14,6 +14,7 @@ import pytest
 from orbit.agent.application.purge import purge
 from orbit.agent.domain.purging import Purged, PurgeRefused
 from orbit.agent.domain.reports import NewReport
+from orbit.agent.domain.reviews import SuperReviewCount
 from orbit.agent.domain.workspaces import RegisteredWorkspace
 from orbit.agent.external import sqlite_schema, workspace_purge
 from orbit.agent.external.fallback_files import FallbackFiles
@@ -46,7 +47,7 @@ async def used(store: SqliteStore, path: Path, *, managed: bool = False) -> str:
         await registry.set_managed(workspace_id)
     await store.save(workspace_id, record())
     await store.append(workspace_id, "abc", [notice(1, "abc", "hi")])
-    await store.save_review_count(workspace_id, 3)
+    await store.save_review_count(workspace_id, SuperReviewCount(3))
     await store.save_record_moves(workspace_id, {"docs/00001-a.md": "docs/00002-a.md"})
     await store.save_report(workspace_id, NewReport("Timings", "3s", "planner", "abc", WHEN))
     assert await store.acquire(workspace_id, "abc")

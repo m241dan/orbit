@@ -137,6 +137,11 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         """INSERT INTO report_counters (workspace_id, last_id)
         SELECT workspace_id, max(id) FROM reports GROUP BY workspace_id""",
     ),
+    (
+        # The commit each workspace's last super review reviewed; null before the first, and
+        # for the counts saved before it was kept.
+        "ALTER TABLE reviews ADD COLUMN last_super_commit TEXT",
+    ),
 )
 
 

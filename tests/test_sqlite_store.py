@@ -18,6 +18,7 @@ from orbit.agent.application.ports import (
     StoreFailed,
 )
 from orbit.agent.domain.reports import NewReport
+from orbit.agent.domain.reviews import SuperReviewCount
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.storage_halt import StorageErrorKind
 from orbit.agent.external import sqlite_schema, sqlite_store
@@ -59,11 +60,11 @@ async def test_sessions_and_the_review_count_survive_closing(
 ) -> None:
     store = await open_store(workspace)
     await store.save(record())
-    await store.save_review_count(2)
+    await store.save_review_count(SuperReviewCount(2, "abc"))
     await store.close()
     reopened = await open_store(workspace)
     assert await reopened.load("abc") == record()
-    assert await reopened.review_count() == 2
+    assert await reopened.review_count() == SuperReviewCount(2, "abc")
 
 
 async def test_each_workspace_has_its_own_sessions_and_review_count(
@@ -74,11 +75,11 @@ async def test_each_workspace_has_its_own_sessions_and_review_count(
     store, other = await open_store(workspace), await open_store(other_workspace)
     await store.save(record("mine"))
     await other.save(record("theirs"))
-    await store.save_review_count(3)
+    await store.save_review_count(SuperReviewCount(3))
     assert [entry.id for entry in await store.sessions()] == ["mine"]
     assert [entry.id for entry in await other.sessions()] == ["theirs"]
     assert isinstance(await other.load("mine"), Unreadable)
-    assert await other.review_count() == 0
+    assert await other.review_count() == SuperReviewCount(0)
     assert await store.acquire("same") and await other.acquire("same")
 
 
@@ -157,7 +158,7 @@ async def test_a_database_with_reports_from_before_the_counter_numbers_after_the
     monkeypatch: pytest.MonkeyPatch, open_store: Opener, state: Path, workspace: Path
 ) -> None:
     with monkeypatch.context() as patched:
-        patched.setattr(sqlite_schema, "MIGRATIONS", sqlite_schema.MIGRATIONS[:-1])
+        patched.setattr(sqlite_schema, "MIGRATIONS", sqlite_schema.MIGRATIONS[:11])
         await (await open_store(workspace)).close()
     with database(state) as connection:
         for report_id in (1, 4):
@@ -218,11 +219,14 @@ async def test_two_views_of_one_store_see_only_their_own_sessions_and_review_cou
     await register_ids(shared, "mine", "theirs")
     await mine.save(record("a"))
     await theirs.save(record("b"))
-    await mine.save_review_count(3)
+    await mine.save_review_count(SuperReviewCount(3))
     assert [entry.id for entry in await mine.sessions()] == ["a"]
     assert [entry.id for entry in await theirs.sessions()] == ["b"]
     assert isinstance(await theirs.load("a"), Unreadable)
-    assert (await mine.review_count(), await theirs.review_count()) == (3, 0)
+    assert (await mine.review_count(), await theirs.review_count()) == (
+        SuperReviewCount(3),
+        SuperReviewCount(),
+    )
     await mine.save_record_moves({"docs/00001-a.md": "docs/00002-a.md"})
     assert await theirs.record_moves() == {}
     assert await mine.save_report(new_report("Mine")) == 1
@@ -326,7 +330,7 @@ async def test_a_broken_database_fails_each_call_as_the_port_says(
     with pytest.raises(ReadFailed, match=r"Couldn't read the review count from .*orbit\.db"):
         await store.review_count()
     with pytest.raises(StorageFailed, match=r"Couldn't save the review count to .*orbit\.db"):
-        await store.save_review_count(1)
+        await store.save_review_count(SuperReviewCount(1))
 
 
 async def test_a_delete_whose_lock_file_cannot_be_removed_deletes_and_says_so(
@@ -363,7 +367,7 @@ async def test_a_closed_store_fails_each_call_as_the_port_says(
     with pytest.raises(ReadFailed, match=r"Couldn't read the review count from .*orbit\.db"):
         await store.review_count()
     with pytest.raises(StorageFailed, match=r"Couldn't save the review count to .*orbit\.db"):
-        await store.save_review_count(1)
+        await store.save_review_count(SuperReviewCount(1))
 
 
 type StoreCall = Callable[[OwnView], Awaitable[object]]
@@ -390,7 +394,7 @@ type Outcome = type[StoreFailed] | Callable[[Path], object]
         (lambda store: store.trimmed("abc"), ReadFailed),
         (lambda store: store.forget("abc"), StorageFailed),
         (lambda store: store.review_count(), ReadFailed),
-        (lambda store: store.save_review_count(1), StorageFailed),
+        (lambda store: store.save_review_count(SuperReviewCount(1)), StorageFailed),
         (lambda store: store.record_moves(), ReadFailed),
         (lambda store: store.save_record_moves({"00001-a.md": "00002-a.md"}), StorageFailed),
         (lambda store: store.save_report(new_report("Timings")), StorageFailed),
@@ -740,7 +744,7 @@ async def test_a_failed_review_count_save_says_what_the_database_reported(
     with database(state) as connection:
         connection.execute("DROP TABLE reviews")
     with pytest.raises(StorageFailed) as failed:
-        await store.save_review_count(1)
+        await store.save_review_count(SuperReviewCount(1))
     assert (failed.value.error, failed.value.kind) == (
         "no such table: reviews",
         StorageErrorKind.UNKNOWN,

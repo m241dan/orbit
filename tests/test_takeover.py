@@ -9,6 +9,7 @@ from orbit.agent.application.recovery import RecoveryFailed
 from orbit.agent.application.takeover import NO_OFFER, RetryTimes, Takeover
 from orbit.agent.application.work_turns import TASKS_RUNNING_MESSAGE
 from orbit.agent.domain.ownership import OWNED_NOTE, queued_dropped_note
+from orbit.agent.domain.reviews import SuperReviewCount
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import (
     BUSY,
@@ -171,13 +172,13 @@ async def test_taking_over_counts_on_from_the_super_count_the_owner_left() -> No
     session, _, _ = session_for(owner=OWNER, lock=lock, tree=FakeTree(), review=True, store=store)
     await events_until(session, offered)
     await eventually(lambda: lane_of(session).planner.since_super == 3, poll=0)
-    store.count = 5
+    store.count = SuperReviewCount(5)
     await send(session, TakeOwnership(take=True))
     await events_until(session, lambda event: event == ACCEPTED)
 
     assert lane_of(session).planner.since_super == 5
-    await review_count_of(session).save(3)
-    assert store.counts == [3]
+    await review_count_of(session).save(SuperReviewCount(3))
+    assert store.counts == [SuperReviewCount(3)]
     await session.close()
 
 

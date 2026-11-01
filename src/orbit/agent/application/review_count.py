@@ -1,12 +1,12 @@
-"""The repository's count of commits since the last super review, kept apart from any one
-session."""
+"""The repository's count of commits since the last super review, and the commit that one
+reviewed, kept apart from any one session."""
 
 import asyncio
 
 from orbit.agent.application.failures import ReportedOnce, outcome
 from orbit.agent.application.ports import Publish, SessionStore, StoreFailed
 from orbit.agent.application.storage_halt import Halting, written
-from orbit.agent.domain.reviews import ReviewPlanner
+from orbit.agent.domain.reviews import ReviewPlanner, SuperReviewCount
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import INTERNAL
 
@@ -23,8 +23,8 @@ class ReviewCount:
         self._store = store
         self._halt = halt
         self._loads = ReportedOnce(publish, INTERNAL)
-        self._count: int | None = None  # The count the store holds; none until it's read.
-        self._wanted: int | None = None  # The count last asked to be saved.
+        self._count: SuperReviewCount | None = None  # The store's count; none until it's read.
+        self._wanted: SuperReviewCount | None = None  # The count last asked to be saved.
         self._saving = asyncio.Lock()  # Saves one at a time, so the newest is written last.
         self._loading = asyncio.Lock()  # Reads it once at a time, a recount's last.
 
@@ -46,15 +46,15 @@ class ReviewCount:
 
     async def _count_on(self, planner: ReviewPlanner) -> None:
         """Have ``planner`` count on from the count saved, unless that can't be read or
-        ``planner`` counted on itself while it was."""
-        before = planner.since_super
+        ``planner`` counted on itself while it was, or queued a super review."""
+        before = planner.super_count
         count = await self.load()
-        if count is not None and planner.since_super == before:
-            planner.since_super = count
+        if count is not None and planner.super_count == before:
+            planner.super_count = count
 
-    async def load(self) -> int | None:
-        """The repository's commits since the last super review; none without a store, or when
-        it can't be read, the first such failure since a load worked reported."""
+    async def load(self) -> SuperReviewCount | None:
+        """The repository's super review count; none without a store, or when it can't be
+        read, the first such failure since a load worked reported."""
         if self._store is None:
             return None
         if not await self._loads.attempt(self._read(self._store)):
@@ -70,9 +70,8 @@ class ReviewCount:
         until a load works again."""
         self._count = None
 
-    async def save(self, count: int) -> None:
-        """Save ``count`` as the repository's commits since the last super review, if it
-        changed."""
+    async def save(self, count: SuperReviewCount) -> None:
+        """Save ``count`` as the repository's super review count, if it changed."""
         if self._store is None:
             return
         store = self._store
@@ -88,7 +87,7 @@ class ReviewCount:
         async with self._saving:
             return await self._write(self._store, self._wanted)
 
-    async def _write(self, store: SessionStore, count: int) -> StoreFailed | None:
+    async def _write(self, store: SessionStore, count: SuperReviewCount) -> StoreFailed | None:
         """Save ``count`` in ``store``, if it changed and the count saved has been read; returns
         the error when it fails."""
         if self._count is None or count == self._count:

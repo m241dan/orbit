@@ -4,16 +4,18 @@ import asyncio
 
 from orbit.agent import Verification, VerificationStep, WorkspaceHost
 from orbit.agent.application.ports import StoreFailed
-from orbit.agent.domain.reviews import ReviewLimits
+from orbit.agent.domain.reviews import ReviewLimits, SuperReviewCount
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import (
     PLANNER,
     STORAGE_FAILED,
+    SUPER_REVIEW,
     AddTask,
     CommandEnvelope,
     EditTask,
     ErrorOccurred,
     Event,
+    FireTrigger,
     Notice,
     ResumeStorage,
     SendMessage,
@@ -178,9 +180,9 @@ async def test_the_review_state_and_the_repositorys_super_count_are_saved() -> N
     await start(session)
     events = await asyncio.wait_for(settle(session), 10)
 
-    # Counting on from the saved 1, the first landing made a super review due.
+    # Counting on from the saved 1, the first landing made a super review due, of its commit.
     assert "super-reviewer" in [t.task.role for t in board(events)]
-    assert store.counts == [0]
+    assert store.counts == [SuperReviewCount(0, "c1")]
     assert store.last.reviews == lane_of(session).snapshot()
     assert store.last.reviews is not None and store.last.reviews.jobs
     await session.close()
@@ -201,7 +203,7 @@ async def test_a_super_count_that_cannot_be_read_is_not_overwritten_by_a_landing
     events = await asyncio.wait_for(settle(session), 10)
 
     assert "super-reviewer" not in [t.task.role for t in board(events)]
-    assert store.counts == [] and store.count == 7
+    assert store.counts == [] and store.count == SuperReviewCount(7)
     assert store.last.reviews is not None and store.last.reviews.jobs
     await session.close()
 
@@ -245,6 +247,19 @@ async def test_the_super_count_is_loaded_from_the_store_on_the_first_join() -> N
     await session.close()
 
 
+async def test_a_super_review_asked_for_saves_its_commit_with_the_count_restarted() -> None:
+    store = FakeStore()
+    store.count = SuperReviewCount(3, "s1")
+    tree = FakeTree(leftovers=(LEFTOVER,))
+    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True, store=store)
+    await asyncio.wait_for(joined(session), 5)
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
+    await asyncio.wait_for(settle(session), 10)
+
+    assert store.counts == [SuperReviewCount(0, tree.base)]
+    await session.close()
+
+
 async def test_a_second_join_keeps_the_super_count_risen_since_the_first() -> None:
     store = FakeStore(count=7)
     session = reviewed(store)
@@ -262,10 +277,10 @@ async def test_a_join_while_halted_keeps_the_super_count_the_store_has_not_saved
     await asyncio.wait_for(joined(session), 5)
     halt_of(session).fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))
     lane_of(session).planner.since_super = 8
-    await review_count_of(session).save(8)
+    await review_count_of(session).save(SuperReviewCount(8))
     await asyncio.wait_for(joined(session), 5)
 
-    assert lane_of(session).planner.since_super == 8 and store.count == 7
+    assert lane_of(session).planner.since_super == 8 and store.count == SuperReviewCount(7)
     await session.close()
 
 
@@ -275,13 +290,13 @@ async def test_a_join_while_the_super_count_is_saved_keeps_the_count_being_saved
     session = reviewed(store)
     await asyncio.wait_for(joined(session), 5)
     lane_of(session).planner.since_super = 8
-    saving = asyncio.create_task(review_count_of(session).save(8))
+    saving = asyncio.create_task(review_count_of(session).save(SuperReviewCount(8)))
     await asyncio.sleep(0)
     await asyncio.wait_for(joined(session), 5)
 
     assert lane_of(session).planner.since_super == 8
     await saving
-    assert store.count == 8
+    assert store.count == SuperReviewCount(8)
     await session.close()
 
 
@@ -291,17 +306,17 @@ async def test_a_join_while_the_super_count_cannot_be_saved_keeps_it_to_save_on_
     await asyncio.wait_for(joined(session), 5)
     store.count_failure = "disk full"
     lane_of(session).planner.since_super = 8
-    await review_count_of(session).save(8)
+    await review_count_of(session).save(SuperReviewCount(8))
     await events_until(session, storage_failed)
     await asyncio.wait_for(joined(session), 5)
-    assert lane_of(session).planner.since_super == 8 and store.count == 7
+    assert lane_of(session).planner.since_super == 8 and store.count == SuperReviewCount(7)
 
     store.count_failure = None
     assert (await outcome_of(session, ResumeStorage()))[-1].payload == ACCEPTED
-    assert lane_of(session).planner.since_super == store.count == 8
+    assert lane_of(session).planner.super_count == store.count == SuperReviewCount(8)
     lane_of(session).planner.since_super += 1
-    await review_count_of(session).save(lane_of(session).planner.since_super)
-    assert store.counts == [8, 9]
+    await review_count_of(session).save(lane_of(session).planner.super_count)
+    assert store.counts == [SuperReviewCount(8), SuperReviewCount(9)]
     await session.close()
 
 
@@ -310,7 +325,7 @@ class MovingStore(FakeStore):
 
     session: WorkspaceHost | None = None
 
-    async def review_count(self) -> int:
+    async def review_count(self) -> SuperReviewCount:
         assert self.session is not None
         lane_of(self.session).planner.since_super = 9
         return await super().review_count()
@@ -334,7 +349,7 @@ async def test_a_super_count_that_could_not_be_read_is_not_read_again_on_a_join(
     await asyncio.wait_for(joined(session), 5)
 
     assert lane_of(session).planner.since_super == 0
-    await review_count_of(session).save(1)
+    await review_count_of(session).save(SuperReviewCount(1))
     assert store.counts == []
     await session.close()
 

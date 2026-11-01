@@ -18,7 +18,7 @@ from pydantic_core import from_json
 
 from orbit.agent.domain.consultations import RESTARTED
 from orbit.agent.domain.refusals import Refused
-from orbit.agent.domain.reviews import LaneSnapshot
+from orbit.agent.domain.reviews import LaneSnapshot, SuperReviewCount
 from orbit.agent.domain.runtimes import CLAUDE
 from orbit.protocol import (
     BUSY,
@@ -202,11 +202,13 @@ class SessionRecord(BaseModel):
 
 
 class _ReviewCount(BaseModel):
-    """The commits since the last super review, kept per repository."""
+    """The commits since the last super review, and the commit it reviewed (none before the
+    first, nor in a count saved before it was kept), kept per repository."""
 
     model_config = ConfigDict(frozen=True)
 
     since_super: int = Field(ge=0)
+    last_super_commit: str | None = None
 
 
 @dataclass(frozen=True)
@@ -453,9 +455,10 @@ def imported_note(count: int, sessions: str, folder: str) -> str:
     return f"Imported {count} saved {noun} from {sessions}; the old folder is now {folder}."
 
 
-def parse_review_count(text: str) -> int:
-    """The commits since the last super review in JSON ``text``; 0 when it's unreadable."""
+def parse_review_count(text: str) -> SuperReviewCount:
+    """The super review count in JSON ``text``; nothing counted when it's unreadable."""
     try:
-        return _ReviewCount.model_validate_json(text).since_super
+        count = _ReviewCount.model_validate_json(text)
     except ValidationError:
-        return 0
+        return SuperReviewCount()
+    return SuperReviewCount(count.since_super, count.last_super_commit)

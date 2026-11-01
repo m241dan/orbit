@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from orbit.agent.application.ports import SessionStore, StoredSession
+from orbit.agent.domain.reviews import SuperReviewCount
 from orbit.agent.domain.sessions import Unreadable
 from tests.store_views import OwnView, open_view, record
 
@@ -68,7 +69,7 @@ async def test_without_sessions_none_are_listed(open_store: Opener) -> None:
 
 
 async def test_without_a_saved_review_count_it_reads_as_zero(open_store: Opener) -> None:
-    assert await (await open_store()).review_count() == 0
+    assert await (await open_store()).review_count() == SuperReviewCount(0)
 
 
 async def test_listing_gives_the_sessions_by_id_marking_those_another_orbit_holds(
@@ -136,8 +137,8 @@ async def test_two_orbits_acquiring_at_once_cant_both_win(open_store: Opener) ->
 
 async def test_the_review_count_is_zero_until_saved_then_loads_back(open_store: Opener) -> None:
     store = await open_store()
-    assert await store.review_count() == 0
-    await store.save_review_count(3)
-    await store.save_review_count(4)
-    assert await store.review_count() == 4
-    assert await (await open_store()).review_count() == 4
+    assert await store.review_count() == SuperReviewCount(0)
+    await store.save_review_count(SuperReviewCount(3))
+    await store.save_review_count(SuperReviewCount(4, "abc"))
+    assert await store.review_count() == SuperReviewCount(4, "abc")
+    assert await (await open_store()).review_count() == SuperReviewCount(4, "abc")

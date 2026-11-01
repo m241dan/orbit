@@ -20,6 +20,7 @@ from functools import partial
 from pathlib import Path
 
 from orbit.agent.application.ports import StorageFailed
+from orbit.agent.domain.reviews import SuperReviewCount
 from orbit.agent.domain.sessions import Unreadable, parse_record, parse_review_count
 from orbit.agent.external.session_files import REVIEWS, SESSIONS
 from orbit.agent.external.session_locks import SessionLocks
@@ -132,7 +133,7 @@ def _text(path: Path) -> str:
         return NOT_UTF_8 + data.decode("utf-8", errors="replace")
 
 
-def _review_count(path: Path) -> int | None:
+def _review_count(path: Path) -> SuperReviewCount | None:
     """The review count saved in ``path``; none when there's no such file."""
     try:
         text = path.read_text(encoding="utf-8", errors="replace")

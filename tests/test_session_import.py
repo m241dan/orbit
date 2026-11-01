@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from orbit.agent import ImportBlocked
+from orbit.agent.domain.reviews import SuperReviewCount
 from orbit.agent.domain.sessions import (
     SessionRecord,
     Unreadable,
@@ -89,7 +90,7 @@ async def test_the_files_are_imported_and_the_folder_renamed(store: OwnView, leg
     assert await import_session_files(store, legacy) == first(3)
     assert await ids(store) == ["bad", "one", "two"]
     assert await store.load("one") == record("one")
-    assert await store.review_count() == 3
+    assert await store.review_count() == SuperReviewCount(3)
     assert not (legacy / "sessions").exists()
     assert (legacy / "sessions.imported" / "one.json").exists()
     assert (legacy / "reviews.json.imported").exists()
@@ -137,11 +138,19 @@ async def test_a_file_that_isnt_utf_8_is_listed_unreadable(store: OwnView, legac
     assert isinstance(await store.load("latin"), Unreadable)
 
 
+async def test_a_review_count_with_its_last_super_commit_is_imported_with_it(
+    store: OwnView, legacy: Path
+) -> None:
+    (legacy / "reviews.json").write_text(review_count_json(3, "abc"))
+    assert await import_session_files(store, legacy) == first(3)
+    assert await store.review_count() == SuperReviewCount(3, "abc")
+
+
 async def test_without_a_sessions_folder_nothing_is_done(store: OwnView, tmp_path: Path) -> None:
     (tmp_path / "reviews.json").write_text(review_count_json(3))
     assert await import_session_files(store, tmp_path) is None
     assert await ids(store) == []
-    assert await store.review_count() == 0
+    assert await store.review_count() == SuperReviewCount(0)
     assert (tmp_path / "reviews.json").exists()
 
 
@@ -149,20 +158,20 @@ async def test_without_a_review_count_only_the_sessions_are_imported(
     store: OwnView, legacy: Path
 ) -> None:
     (legacy / "reviews.json").unlink()
-    await store.save_review_count(5)
+    await store.save_review_count(SuperReviewCount(5))
     assert await import_session_files(store, legacy) == first(3)
-    assert await store.review_count() == 5
+    assert await store.review_count() == SuperReviewCount(5)
 
 
 async def test_saved_sessions_and_review_count_are_never_overwritten(
     store: OwnView, legacy: Path
 ) -> None:
     await store.save(record("one", name="Mine"))
-    await store.save_review_count(7)
+    await store.save_review_count(SuperReviewCount(7))
     assert await import_session_files(store, legacy) == first(2)
     loaded = await store.load("one")
     assert isinstance(loaded, SessionRecord) and loaded.name == "Mine"
-    assert await store.review_count() == 7
+    assert await store.review_count() == SuperReviewCount(7)
 
 
 async def test_importing_twice_imports_once(store: OwnView, legacy: Path) -> None:
@@ -181,7 +190,7 @@ async def test_a_session_open_in_another_orbit_blocks_the_import(
     ):
         await import_session_files(store, legacy)
     assert await ids(store) == []
-    assert await store.review_count() == 0
+    assert await store.review_count() == SuperReviewCount(0)
     assert (legacy / "sessions").is_dir()
     assert (legacy / "reviews.json").exists()
 
@@ -222,7 +231,7 @@ async def test_a_review_count_that_cant_be_renamed_puts_the_folder_back(
     with pytest.raises(ImportBlocked, match=r"Couldn't rename .*legacy/reviews\.json to"):
         await import_session_files(store, legacy)
     assert await ids(store) == []
-    assert await store.review_count() == 0
+    assert await store.review_count() == SuperReviewCount(0)
     assert (legacy / "sessions").is_dir()
     assert not (legacy / "sessions.imported").exists()
 
@@ -296,7 +305,7 @@ async def test_a_folder_another_orbit_imports_before_the_rename_is_left_to_it(
     monkeypatch.setattr(session_import, "_retired", importing_first)
     assert await import_session_files(store, legacy) is None
     assert await ids(store) == []
-    assert await store.review_count() == 0
+    assert await store.review_count() == SuperReviewCount(0)
     assert (legacy / "elsewhere" / "one.json").exists()
     assert (legacy / "reviews.json").exists()
     assert not (legacy / "sessions.imported").exists()
@@ -315,7 +324,7 @@ async def test_a_folder_another_orbit_imports_before_the_check_is_left_to_it(
     monkeypatch.setattr(session_import, "_checked", importing_first)
     assert await import_session_files(store, legacy) is None
     assert await ids(store) == []
-    assert await store.review_count() == 0
+    assert await store.review_count() == SuperReviewCount(0)
     assert (legacy / "reviews.json").exists()
 
 
@@ -326,7 +335,7 @@ async def test_a_failing_commit_puts_the_folder_and_review_count_back(
     with pytest.raises(ImportBlocked, match=r"sessions in .*legacy/sessions: disk I/O error"):
         await import_session_files(store, legacy)
     assert await ids(store) == []
-    assert await store.review_count() == 0
+    assert await store.review_count() == SuperReviewCount(0)
     assert (legacy / "sessions" / "one.json").exists()
     assert (legacy / "reviews.json").exists()
     assert not (legacy / "sessions.imported").exists()
@@ -368,7 +377,7 @@ async def test_a_folder_that_cant_be_checked_blocks_the_import(
             await import_session_files(store, legacy)
     finally:
         (legacy / "sessions").chmod(0o700)
-    assert await store.review_count() == 0
+    assert await store.review_count() == SuperReviewCount(0)
     assert (legacy / "sessions").is_dir()
 
 

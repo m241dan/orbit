@@ -5,7 +5,13 @@ import json
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
-from orbit.agent.domain.reviews import BatchSnapshot, LaneSnapshot, PlannerSnapshot, ReviewJob
+from orbit.agent.domain.reviews import (
+    BatchSnapshot,
+    LaneSnapshot,
+    PlannerSnapshot,
+    ReviewJob,
+    SuperReviewCount,
+)
 from orbit.agent.domain.runtimes import CLAUDE
 from orbit.agent.domain.sessions import (
     SavedConsultation,
@@ -389,8 +395,8 @@ def test_a_session_record_is_written_in_the_version_18_format() -> None:
     assert written == golden, BUMP.format(fixture=SESSION_V18.name)
 
 
-def test_a_version_1_review_count_reads_as_its_count() -> None:
-    assert parse_review_count(REVIEW_COUNT_V1) == 7
+def test_a_version_1_review_count_reads_as_its_count_with_no_last_super_commit() -> None:
+    assert parse_review_count(REVIEW_COUNT_V1) == SuperReviewCount(7)
 
 
 def test_a_review_count_is_written_in_the_version_1_format() -> None:

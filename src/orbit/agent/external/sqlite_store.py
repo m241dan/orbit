@@ -34,6 +34,7 @@ from orbit.agent.application.ports import (
 )
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.reports import NewReport
+from orbit.agent.domain.reviews import SuperReviewCount
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, parse_record, record_json
 from orbit.agent.domain.usage_totals import UsageRow, UsageTotalsData
 from orbit.agent.external import sqlite_log, sqlite_reports, sqlite_usage
@@ -73,7 +74,12 @@ class NewRows:
     any."""
 
     rows: tuple[SessionRow, ...]
-    review_count: int | None
+    review_count: SuperReviewCount | None
+
+
+def _review_columns(count: SuperReviewCount) -> tuple[int, str | None]:
+    """``count`` as the ``reviews`` table's ``since_super`` and ``last_super_commit``."""
+    return count.since_super, count.last_super_commit
 
 
 def _remove_tree(directory: Path) -> None:
@@ -305,11 +311,11 @@ class SqliteStore:
         directory = self._lock_dir(workspace)
         await asyncio.to_thread(_remove_tree, directory)
 
-    async def review_count(self, workspace: str) -> int:
+    async def review_count(self, workspace: str) -> SuperReviewCount:
         message = "Couldn't read the review count from"
         return await self._or_raise(message, self._review_count, workspace)
 
-    async def save_review_count(self, workspace: str, count: int) -> None:
+    async def save_review_count(self, workspace: str, count: SuperReviewCount) -> None:
         message = "Couldn't save the review count to"
         await self._or_raise(message, self._save_review_count, workspace, count, write=True)
 
@@ -511,9 +517,10 @@ class SqliteStore:
             saved = sum(self._insert_row(workspace, row) for row in new.rows)
             if new.review_count is not None:
                 self._db.execute(
-                    """INSERT INTO reviews (workspace_id, since_super) VALUES (?, ?)
+                    """INSERT INTO reviews (workspace_id, since_super, last_super_commit)
+                    VALUES (?, ?, ?)
                     ON CONFLICT (workspace_id) DO NOTHING""",
-                    (workspace, new.review_count),
+                    (workspace, *_review_columns(new.review_count)),
                 )
         return saved
 
@@ -588,17 +595,22 @@ class SqliteStore:
             )
         self._read_log_size(workspace)
 
-    def _review_count(self, workspace: str) -> int:
+    def _review_count(self, workspace: str) -> SuperReviewCount:
         row = self._db.execute(
-            "SELECT since_super FROM reviews WHERE workspace_id = ?", (workspace,)
+            "SELECT since_super, last_super_commit FROM reviews WHERE workspace_id = ?",
+            (workspace,),
         ).fetchone()
-        return 0 if row is None else int(row[0])
+        if row is None:
+            return SuperReviewCount()
+        since_super, last = row
+        return SuperReviewCount(int(since_super), None if last is None else str(last))
 
-    def _save_review_count(self, workspace: str, count: int) -> None:
+    def _save_review_count(self, workspace: str, count: SuperReviewCount) -> None:
         self._db.execute(
-            """INSERT INTO reviews (workspace_id, since_super) VALUES (?, ?)
-            ON CONFLICT (workspace_id) DO UPDATE SET since_super = excluded.since_super""",
-            (workspace, count),
+            """INSERT INTO reviews (workspace_id, since_super, last_super_commit) VALUES (?, ?, ?)
+            ON CONFLICT (workspace_id) DO UPDATE SET
+            since_super = excluded.since_super, last_super_commit = excluded.last_super_commit""",
+            (workspace, *_review_columns(count)),
         )
 
     def _record_moves(self, workspace: str) -> dict[str, str]:
@@ -713,10 +725,10 @@ class WorkspaceStore:
     async def release(self, session_id: str) -> None:
         await self._store.release(self._id, session_id)
 
-    async def review_count(self) -> int:
+    async def review_count(self) -> SuperReviewCount:
         return await self._store.review_count(self._id)
 
-    async def save_review_count(self, count: int) -> None:
+    async def save_review_count(self, count: SuperReviewCount) -> None:
         await self._store.save_review_count(self._id, count)
 
     async def record_moves(self) -> dict[str, str]:

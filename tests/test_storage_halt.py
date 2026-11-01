@@ -22,6 +22,7 @@ from orbit.agent.application.storage_halt import (
     written,
 )
 from orbit.agent.domain.refusals import Refused
+from orbit.agent.domain.reviews import SuperReviewCount
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.agent.domain.storage_halt import (
     NEITHER_PLACE,
@@ -946,7 +947,7 @@ async def test_resuming_while_the_review_count_still_fails_names_it() -> None:
     store.count_failure = "count still full"
     session, _, _ = session_for(store=store, fallback=FakeFallback())
     await review_count_of(session).load()
-    await review_count_of(session).save(3)
+    await review_count_of(session).save(SuperReviewCount(3))
     await halt_error(session)
 
     refusal = (await outcome_of(session, ResumeStorage()))[-1].payload
