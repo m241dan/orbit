@@ -40,7 +40,7 @@ from orbit.agent.application.task_trace import TaskTracing
 from orbit.agent.application.tasks import Changed, Tasks, unchanged
 from orbit.agent.application.triggers import TriggerEngine
 from orbit.agent.application.verifier import Failure, Verifier
-from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.board import CUT_SHORT, TaskBoard
 from orbit.agent.domain.checks import ChecksProposal
 from orbit.agent.domain.commits import commit_message, configure_message
 from orbit.agent.domain.endings import (
@@ -500,9 +500,9 @@ class WorkLane:
 
     async def _report_unlanded_fix(self, state: TaskState) -> None:
         """Tell the holds, if any, that the task that ended as ``state`` ended without its work
-        merging, in case it's a fix for a set held; not if it was cancelled, which leaves it to
-        run again."""
-        if self._holds is not None and state.status != "cancelled":
+        merging, in case it's a fix for a set held; not if it was cancelled or ended in error,
+        either of which leaves it to run again."""
+        if self._holds is not None and state.status not in CUT_SHORT:
             await self._holds.hear_unlanded_fix(state)
 
     async def _report_end(

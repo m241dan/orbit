@@ -748,10 +748,11 @@ before it started; work that finishes after it keeps waiting. Once the fix lands
 again on the new commit: passing lifts its hold (`Merges resumed: mutation passed.`), and once no
 hold is left the waiting work lands, in order, a conflict handled as any merge's. Failing again
 queues another fix, up to `fallback_fixes` fixes in all, and so does a fix that ends without
-landing (it gives up, ends in error, its merge conflicts, or it fails verification and the fixes
-carrying on from it run out), the set's last failure handed on; past that the hold stays, with
+landing (it gives up, its merge conflicts, or it fails verification and the fixes carrying on from
+it run out), the set's last failure handed on; past that the hold stays, with
 `mutation still fails after 3 fixes; merges stay held. Release with ctrl+f or fix it yourself.` A
-commit of yours that makes the set pass lifts its hold too, the next time its trigger runs it. Two
+fix that ends in error, or that you stop, is left to run again, so it queues no other fix, and
+none is queued for its set while it waits. A commit of yours that makes the set pass lifts its hold too, the next time its trigger runs it. Two
 sets holding at once each get their own fix, and merges wait until both lift. Holds are kept per
 repository, beside the super review count, so a hold outlives restarting orbit; a set removed from
 the configuration, or that no longer holds merges, drops its hold as orbit opens. The work waiting

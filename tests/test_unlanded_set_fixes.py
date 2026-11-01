@@ -1,7 +1,7 @@
-"""Fixes for a set holding merges that end without their work merging, in a session: giving up,
-ending in error or meeting a conflict queues the next fix first, counted with the hold, until the
-fixes run out and the user is asked to step in; a fix carrying on from one that failed
-verification ends the chain instead, and one the user stops is left to run again."""
+"""Fixes for a set holding merges that end without their work merging, in a session: giving up or
+meeting a conflict queues the next fix first, counted with the hold, until the fixes run out and
+the user is asked to step in; a fix carrying on from one that failed verification ends the chain
+instead, and one that ends in error, or that the user stops, is left to run again."""
 
 import asyncio
 
@@ -100,20 +100,23 @@ async def test_a_fix_whose_merge_conflicts_queues_the_next() -> None:
     assert saved_fixes(store) == [1, 2] and steps.runs == ["stress", "stress"]
 
 
-async def test_a_fix_ending_in_error_queues_the_next() -> None:
+async def test_a_fix_ending_in_error_is_left_to_run_again_with_no_other_queued() -> None:
     steps = SetSteps(stress=[False, True])
     tree = LandingTree()
     session, store, seen = await held_session(steps, claims_done, tree=tree)
     tree.failures["prepare"] = TreeFailed("disk gone")
     await send(session, RunTasks())
+    await eventually(lambda: status(session, "1")() == "error")
+    await eventually(lambda: not turns_of(session).running)
+    assert len(board_of(session).tasks) == 1 and saved_fixes(store) == [1]
+
+    await send(session, RunTasks())
     await eventually(lambda: RESUMED in seen.notices())
     await close(session, seen)
     board = board_of(session)
-    assert [(state.id, state.status) for state in board.tasks] == [
-        ("2", "completed"),
-        ("1", "error"),
-    ]
-    assert saved_fixes(store) == [1, 2]
+    assert [(state.id, state.status) for state in board.tasks] == [("1", "completed")]
+    assert saved_fixes(store) == [1] and steps.runs == ["stress", "stress"]
+    assert seen.notices() == [HELD, RESUMED]
 
 
 async def test_fixes_ending_unlanded_ask_the_user_to_step_in_once_they_run_out() -> None:

@@ -1,8 +1,9 @@
 """The holds on merges into the user's branch: a run of a set that holds merges failing holds them,
 with a notice, and queues a coder's fix at the front of the queue; once the fix lands, the set runs
 again, and passing lifts its hold, as the user releasing every hold by hand does. A chain of
-fixes that ends without its work merging counts as the set failing again, as it last did. Holds
-are kept per repository, beside the review count, so they outlive a restart.
+fixes that ends without its work merging counts as the set failing again, as it last did; a fix
+that ends in error hasn't ended its chain, as it's left to run again. Holds are kept per
+repository, beside the review count, so they outlive a restart.
 
 While any hold is on, the work lane commits each task's verified work in the coder's tree and
 leaves it there, waiting, rather than merging it; a fix merges with the work stacked beneath it.
@@ -41,8 +42,9 @@ from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.agent.domain.verification import CheckSet, VerificationStep, failure_report
 from orbit.protocol import CODER, INTERNAL, MergeHold, Notice, TaskState
 
-_FIXING = frozenset({"pending", "running", "verifying"})
-"""The statuses of a task that's still to fix what it fixes."""
+_FIXING = frozenset({"pending", "running", "verifying", "error"})
+"""The statuses of a task that's still to fix what it fixes: one that ended in error is left to run
+again."""
 
 
 type _Read = Literal["unread", "read"]
@@ -165,8 +167,8 @@ class MergeHolds:
 
     async def hear_unlanded_fix(self, state: TaskState) -> None:
         """Act on the task that ended as ``state`` without its work merging, if it's a fix for
-        a set held, or carries on from one: once no fix for that set is still to run or
-        running, its hold failed again, as it last did, as
+        a set held, or carries on from one: once no fix for that set is still to run, running,
+        or ended in error, its hold failed again, as it last did, as
         :func:`~orbit.agent.domain.merge_holds.decide_unlanded_fix` says, the next fix queued
         from the trigger that queued this one. The set runs again instead if the step it failed
         at is gone from it, as there's no failure left to fix."""
@@ -233,7 +235,8 @@ class MergeHolds:
         return find_hold(decision.holds, name) if decision.fix else None
 
     def _fixing(self, name: str) -> bool:
-        """Whether a fix for the set ``name`` is still to run or running."""
+        """Whether a fix for the set ``name`` is still to run, running, or ended in error, which
+        leaves it to run again."""
         return any(
             state.status in _FIXING and self._fixes(state) == name for state in self._board.tasks
         )

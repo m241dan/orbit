@@ -113,6 +113,27 @@ async def test_a_failure_after_its_fix_ran_queues_another() -> None:
     assert holds.holds.holds == (Hold("stress", "c5", "Stress tests", "2 failed", 2),)
 
 
+async def test_a_failure_while_its_fix_is_in_error_queues_no_other() -> None:
+    holds = Holds()
+    await failed(holds)
+    holds.tasks.board.set_status(holds.tasks.board.tasks[0].id, "error")
+    await failed(holds, "c5")
+    assert len(holds.prompts()) == 1
+    assert holds.holds.holds == (Hold("stress", "c5", "Stress tests", "2 failed", 1),)
+
+
+async def test_a_fix_ending_unlanded_while_another_is_in_error_queues_no_other() -> None:
+    holds = Holds()
+    board = holds.tasks.board
+    await failed(holds)
+    errored = board.tasks[0].id
+    board.set_status(errored, "error")
+    other = board.add_first(TaskSpec(prompt=board.get(errored).task.prompt), "nightly")
+    board.set_status(other, "gave_up")
+    await holds.holds.hear_unlanded_fix(board.get(other))
+    assert len(holds.prompts()) == 2 and holds.holds.holds == (HELD,)
+
+
 async def test_the_fix_lists_the_commits_since_the_set_last_passed() -> None:
     holds = Holds()
     holds.tree.since = {"c2": ["Add A", "Add B"]}
@@ -216,7 +237,7 @@ async def test_a_fix_ending_unlanded_once_the_fixes_ran_out_asks_the_user_to_ste
     board = holds.tasks.board
     await failed(holds)
     fix = board.tasks[0].id
-    board.set_status(fix, "error")
+    board.set_status(fix, "unverified")
     await holds.holds.hear_unlanded_fix(board.get(fix))
     assert holds.prompts() == [board.get(fix).task.prompt] and holds.holds.holds == (HELD,)
     assert holds.notices()[-1] == (
