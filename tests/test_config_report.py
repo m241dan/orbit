@@ -13,16 +13,18 @@ from orbit.agent.domain.config_report import (
     Instructions,
     Setting,
     SkillFileText,
+    SkillMap,
     UnknownKey,
     Written,
     config_report,
     key_parts,
+    skill_map,
     subtree,
 )
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer, load_user_roles
 from orbit.agent.domain.roles import Role, built_in_roles
 from orbit.agent.domain.server import ServerSettings
-from orbit.agent.domain.skills import Skill, SkillFile, SkillLibrary
+from orbit.agent.domain.skills import Skill, SkillFile, SkillLibrary, SkillMapping
 from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.protocol import BUILT_IN_ROLE_NAMES
@@ -367,3 +369,94 @@ def test_a_keys_parts_are_between_its_dots_but_a_skill_files_path_is_whole(
 def test_a_key_with_no_settings_under_it_is_unknown_naming_it(key: str) -> None:
     with pytest.raises(UnknownKey, match=f"^No setting {re.escape(key)} "):
         subtree(report(), key)
+
+
+# The skill map
+
+MAP_LIBRARY = SkillLibrary(
+    skills={
+        name: skill(name, {"SKILL.md": skill_file("")})
+        for name in ("python", "code-style", "cpp", "review-style", "application")
+    }
+)
+"""Five skills, given out of order, for the skill map."""
+
+PYTHON = SkillMapping(paths=("src",), use=("python", "application"))
+"""The one ``[[skills]]`` entry the skill map's configuration has."""
+
+ANALYST = {
+    "instructions": "You analyse.",
+    "tools": ["report_progress"],
+    "lane": "analyst",
+    "workspace": "snapshot",
+    "conversation": True,
+    "merge": False,
+    "verify": False,
+}
+"""A project's own conversational role's table."""
+
+
+def mapped(project: Data | None = None) -> SkillMap:
+    """The skill map of the configuration a project file holding ``project`` makes, with the
+    skills of :data:`MAP_LIBRARY` and the one mapping :data:`PYTHON`."""
+    config = sources(project).config
+    return skill_map(config.model_copy(update={"skills": (PYTHON,), "skill_library": MAP_LIBRARY}))
+
+
+def test_the_skill_map_has_a_column_per_role_in_the_configurations_order() -> None:
+    skills = mapped({"roles": {"qa": {"instructions": "QA."}}})
+    assert skills.roles == (*BUILT_IN_ROLE_NAMES, "qa")
+    assert all(tuple(cells) == skills.roles for cells in skills.cells.values())
+
+
+def test_the_skill_map_has_a_row_per_skill_of_the_library_in_name_order() -> None:
+    assert list(mapped().cells) == ["application", "code-style", "cpp", "python", "review-style"]
+
+
+@pytest.mark.parametrize(
+    ("name", "cells"),
+    [
+        (
+            "code-style",
+            ("role", "—", "role", "role", "role", "task"),
+        ),
+        (
+            "python",
+            (
+                "mapped",
+                "mapped",
+                "task / mapped",
+                "reviewed task / mapped",
+                "mapped",
+                "task / mapped",
+            ),
+        ),
+        ("cpp", ("—", "—", "task", "reviewed task", "—", "task")),
+        ("review-style", ("—", "—", "task", "reviewed task", "role", "task")),
+    ],
+)
+def test_each_built_in_roles_cell_says_where_its_agents_get_the_skill(
+    name: str, cells: tuple[str, ...]
+) -> None:
+    assert mapped().cells[name] == dict(zip(BUILT_IN_ROLE_NAMES, cells, strict=True))
+
+
+def test_a_projects_own_task_role_gets_a_skill_from_its_task_or_the_mapping() -> None:
+    cells = mapped({"roles": {"qa": {"instructions": "QA."}}}).cells
+    assert (cells["python"]["qa"], cells["cpp"]["qa"]) == ("task / mapped", "task")
+
+
+def test_a_projects_own_conversational_role_gets_only_the_mappings_skills() -> None:
+    cells = mapped({"roles": {"analyst": ANALYST}}).cells
+    assert (cells["python"]["analyst"], cells["cpp"]["analyst"]) == ("mapped", "—")
+
+
+def test_a_role_that_names_a_mapped_skill_gets_it_from_its_role() -> None:
+    roles = {name: {"skills": ["python"]} for name in ("planner", "reviewer", "configurator")}
+    python = mapped({"roles": roles}).cells["python"]
+    assert [python[name] for name in roles] == ["role", "role", "role"]
+
+
+def test_without_a_library_the_skill_map_has_its_roles_and_no_rows() -> None:
+    config = sources().config.model_copy(update={"skills": (PYTHON,)})
+    assert skill_map(config) == SkillMap(roles=BUILT_IN_ROLE_NAMES, cells={})

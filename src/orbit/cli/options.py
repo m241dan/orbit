@@ -215,6 +215,14 @@ FullOption = Annotated[
         "--full", help="Print roles' instructions whole rather than their file and length."
     ),
 ]
+SkillsOption = Annotated[
+    bool,
+    typer.Option(
+        "--skills",
+        help="Print the skill map rather than the settings: for each skill, where each role's"
+        " agents get it.",
+    ),
+]
 
 # The chat flags that configure the control plane, which a connected chat doesn't run.
 _SERVE_FLAGS = ("model", "tools", "runtime", "verify", "worktree", "review", "usage", "profile")

@@ -2,19 +2,20 @@
 as text or JSON."""
 
 import json
+import re
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner, Result
 
 from orbit.agent import INVALID_CONFIG
-from orbit.agent.domain.config_report import Instructions, Setting, SkillFileText
+from orbit.agent.domain.config_report import Instructions, Setting, SkillFileText, SkillMap
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
 from orbit.agent.domain.roles import Role
 from orbit.agent.external.built_in_roles import ROLE_DIRECTORY
 from orbit.agent.external.skill_files import SKILL_DIRECTORY
 from orbit.cli import app
-from orbit.cli.config_text import config_json, config_text
+from orbit.cli.config_text import config_json, config_text, skill_map_json, skill_map_text
 from orbit.protocol import BUILT_IN_ROLE_NAMES
 
 runner = CliRunner()
@@ -43,6 +44,19 @@ paths = ["native"]
 use = ["cpp"]
 """
 """Two ``[[skills]]`` entries, for paths :func:`mapped_paths` makes."""
+
+PYTHON_MAPPING = '[[skills]]\npaths = ["src"]\nuse = ["python", "application"]\n'
+"""One ``[[skills]]`` entry, for the ``src`` folder :func:`mapped_paths` makes."""
+
+LEGEND = """role: in the role's skills.
+task: when the task's list names it.
+reviewed task: when the reviewed task's list names it.
+mapped: in [[skills]]; given when the task has no list, and always to agents without tasks.
+—: never given."""
+"""The lines under the skill map, a line per value of its cells."""
+
+SKILLS_ALONE = "--skills shows the whole map; it takes no key or --full.\n"
+"""What ``orbit config show --skills`` says, given a key or ``--full``."""
 
 
 @pytest.fixture(autouse=True)
@@ -422,6 +436,89 @@ def test_showing_writes_nothing(project: Path, tmp_path: Path) -> None:
     assert sorted(tmp_path.rglob("*")) == before
 
 
+def map_rows(table: str) -> dict[str, dict[str, str]]:
+    """The cells of the skill map ``table`` prints, by skill and by role, read from its columns,
+    which at least two spaces part."""
+    header, *rows = (re.split(r" {2,}", line) for line in table.splitlines())
+    return {skill: dict(zip(header[1:], cells, strict=True)) for skill, *cells in rows}
+
+
+def test_skills_maps_each_skill_to_where_each_role_gets_it(project: Path) -> None:
+    mapped_paths(project)
+    project_file(project, PYTHON_MAPPING)
+    result = show(project, "--skills")
+    assert result.exit_code == 0, result.output
+    table = result.stdout.split("\n\n")[0]
+    assert re.split(r" {2,}", table.splitlines()[0]) == ["skill", *BUILT_IN_ROLE_NAMES]
+    rows = map_rows(table)
+    assert list(rows) == SKILL_NAMES
+    assert list(rows["python"].values()) == [
+        "mapped",
+        "mapped",
+        "task / mapped",
+        "reviewed task / mapped",
+        "mapped",
+        "task / mapped",
+    ]
+    assert list(rows["cpp"].values()) == ["—", "—", "task", "reviewed task", "—", "task"]
+    assert rows["code-style"]["configurator"] == "task"
+    assert rows["code-style"]["experimenter"] == "—"
+    assert (rows["review-style"]["super-reviewer"], rows["review-style"]["reviewer"]) == (
+        "role",
+        "reviewed task",
+    )
+
+
+def test_skills_lines_up_each_column_under_its_role(project: Path) -> None:
+    mapped_paths(project)
+    project_file(project, PYTHON_MAPPING)
+    table = show(project, "--skills").stdout.split("\n\n")[0].splitlines()
+    starts = [match.start() for match in re.finditer(r"(?<=  )\S", table[0])]
+    for line in table[1:]:
+        assert [match.start() for match in re.finditer(r"(?<=  )\S", line)] == starts
+
+
+def test_skills_ends_with_a_line_saying_what_each_value_means(project: Path) -> None:
+    result = show(project, "--skills")
+    assert result.stdout.endswith(f"\n\n{LEGEND}\n")
+
+
+def test_skills_with_json_gives_each_skills_cells_by_role(project: Path) -> None:
+    mapped_paths(project)
+    project_file(project, PYTHON_MAPPING)
+    result = show(project, "--skills", "--json")
+    assert result.exit_code == 0, result.output
+    skills = json.loads(result.stdout)["skills"]
+    assert list(skills) == SKILL_NAMES
+    assert skills["cpp"] == {
+        "planner": "—",
+        "experimenter": "—",
+        "coder": "task",
+        "reviewer": "reviewed task",
+        "super-reviewer": "—",
+        "configurator": "task",
+    }
+    assert skills["python"]["reviewer"] == "reviewed task / mapped"
+
+
+@pytest.mark.parametrize("args", [["roles"], ["--full"], ["server.port", "--json"]])
+def test_skills_with_a_key_or_full_exits_2_saying_it_shows_the_whole_map(
+    project: Path, args: list[str]
+) -> None:
+    result = show(project, "--skills", *args)
+    assert result.exit_code == 2
+    assert result.stderr == SKILLS_ALONE
+    assert result.stdout == ""
+
+
+def test_skills_with_an_invalid_configuration_exits_2_naming_its_file(project: Path) -> None:
+    path = project_file(project, "fix_attempts = 0\n")
+    result = show(project, "--skills")
+    assert result.exit_code == 2
+    assert result.stderr.startswith(f"{INVALID_CONFIG}{path}: ")
+    assert result.stdout == ""
+
+
 # How it prints
 
 
@@ -468,3 +565,33 @@ def test_json_keeps_a_skill_files_path_in_folders_whole() -> None:
         },
         "skills": {"1": {"use": {"value": ["cpp"], "layer": "default", "file": None}}},
     }
+
+
+ROLES_MAP = SkillMap(
+    roles=("planner", "reviewer"),
+    cells={
+        "code-style": {"planner": "role", "reviewer": "role"},
+        "python": {"planner": "mapped", "reviewer": "reviewed task / mapped"},
+    },
+)
+"""A skill map of two roles and two skills."""
+
+
+def test_the_skill_map_prints_its_cells_in_columns_under_its_roles() -> None:
+    assert skill_map_text(ROLES_MAP).split("\n\n")[0] == (
+        "skill        planner   reviewer\n"
+        "code-style   role      role\n"
+        "python       mapped    reviewed task / mapped"
+    )
+
+
+def test_a_skill_map_without_skills_prints_its_header_and_legend() -> None:
+    assert skill_map_text(SkillMap(roles=("coder",), cells={})) == f"skill   coder\n\n{LEGEND}"
+
+
+def test_the_skill_map_as_json_nests_cells_by_skill_and_role() -> None:
+    cells = {"cpp": {"coder": "task", "planner": "—"}}
+    assert json.loads(skill_map_json(SkillMap(roles=("coder", "planner"), cells=cells))) == {
+        "skills": cells
+    }
+    assert "—" in skill_map_json(SkillMap(roles=("planner",), cells={"cpp": {"planner": "—"}}))

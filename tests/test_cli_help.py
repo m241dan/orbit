@@ -39,7 +39,7 @@ _BACKEND = (
         (["config"], ("show",)),
         (
             ["config", "show"],
-            ("KEY", "--workspace", "-C", "--json", "--full", "--config-dir"),
+            ("KEY", "--workspace", "-C", "--json", "--full", "--skills", "--config-dir"),
         ),
         (["db"], ("backup",)),
         (["db", "backup"], ("PATH", "--force", "--state-dir")),

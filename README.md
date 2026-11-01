@@ -65,6 +65,7 @@ uv run orbit init --roles                      # copy the built-in roles' instru
 uv run orbit init --skill python               # copy orbit's python skill to .orbit/skills/ to edit
 uv run orbit config show                       # every setting in effect here, and where it's from
 uv run orbit config show roles.reviewer --full # one role's, with its instructions whole
+uv run orbit config show --skills              # which agents get each skill, and from where
 uv run orbit token rotate                      # replace the token frontends show orbit serve
 uv run orbit certs init orbit.example.lan      # make a CA and a server certificate for TLS
 uv run orbit certs server orbit.example.lan    # renew the server certificate
@@ -1615,7 +1616,8 @@ stays.
 `orbit init --skill python` copies a shipped skill's files into `.orbit/skills/python/` for you
 to start from (see [Starting from the reference config](#starting-from-the-reference-config)).
 `orbit config show skill_files` lists every skill's files with the layer each came from, orbit's
-or yours (see [Seeing the configuration in effect](#seeing-the-configuration-in-effect)).
+or yours, and `orbit config show --skills` which agents get each skill and from where (see
+[Seeing the configuration in effect](#seeing-the-configuration-in-effect)).
 
 Hidden files and folders, whose names start with a dot, are left out, in the package and in
 `.orbit/skills/` alike, and so are files directly in `.orbit/skills/`, outside any folder, so you
@@ -1836,6 +1838,36 @@ and `package`. Skill files nest by skill only, each keyed by its whole path,
 `{"skill_files": {"python": {"tests.md": {…}, "SKILL.md": {…}}}}`. A `KEY` that names no setting
 stops it with status 2 naming the key, and an invalid configuration with status 2 and the
 message `orbit chat` gives.
+
+`--skills` prints the workspace's skill map instead of the settings: a column for each role, in
+the configuration's order, and a row for each skill in name order, each cell saying where that
+role's agents get the skill, then a line saying what each value means. A role's cell is `role`
+when its `skills` names the skill. Otherwise the `super-reviewer` and the conversational roles,
+which have no task, get it only from the `[[skills]]` entries, `mapped`, or never, `—`; the
+`reviewer` gets it from the reviewed task's list, `reviewed task`, and every other role, your own
+task roles included, from its task's list, `task`, each with ` / mapped` added when the entries
+use it, as a task without a list gets every mapped skill. With
+`use = ["python", "application"]`:
+
+```
+$ orbit config show --skills
+skill                planner   experimenter   coder           reviewer                 super-reviewer   configurator
+application          mapped    mapped         task / mapped   reviewed task / mapped   mapped           task / mapped
+code-style           role      —              role            role                     role             task
+cpp                  —         —              task            reviewed task            —                task
+...
+review-style         —         —              task            reviewed task            role             task
+
+role: in the role's skills.
+task: when the task's list names it.
+reviewed task: when the reviewed task's list names it.
+mapped: in [[skills]]; given when the task has no list, and always to agents without tasks.
+—: never given.
+```
+
+With `--json` it's one JSON object, `{"skills": {"cpp": {"planner": "—", "coder": "task", …}, …}}`.
+It shows the whole map, so `--skills` with a `KEY` or `--full` stops with status 2 and
+`--skills shows the whole map; it takes no key or --full.`
 
 ### How agents reach orbit
 
@@ -3234,7 +3266,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `agents`: agent ids and tokens), `roles` (built-in roles, loaded from their `roles.toml` and
     given their instructions, which of a role's fields go together, and the tasks orbit queues in
     them), `config` (`OrbitConfig`: the
-    limits, roles, verification steps, setup and skills by path a project file sets over the built-in defaults, and the skills in effect), `skills` (`Skill`, `SkillFile` and `SkillLibrary`, a skill built from its folder's files with its `SKILL.md`'s front matter, `parse_front_matter`, checked as Claude Code checks skills, and the library of the package's skill folders with the project's laid over them file by file, `load_skill_library`; `check_role_skills`, which checks the skills a role names against the library; and `SkillMapping`, a `[[skills]]` entry, whose paths and skills `check_skill_mappings` checks against the paths in the project and the library), `layers` (the layers a setting comes from, the user config's role fields and personal roles, and each role resolved across them field by field), `config_report` (what `orbit config show` reports: each setting in effect by its dotted key with the layer it came from, and a key's settings), `config_update` (what `orbit init --update` adds to a project file from the reference config: the keys a table it has doesn't mention, after the table's last line, and the tables it lacks, at the end, never changing a line of it; and the lines `orbit init --roles` adds, pointing each built-in role at its copy of its instructions; and the checks the configurator writes, in place of a file's steps and setup without changing its other lines, or of the reference config's examples of them) and `config_errors` (`ConfigError`,
+    limits, roles, verification steps, setup and skills by path a project file sets over the built-in defaults, and the skills in effect), `skills` (`Skill`, `SkillFile` and `SkillLibrary`, a skill built from its folder's files with its `SKILL.md`'s front matter, `parse_front_matter`, checked as Claude Code checks skills, and the library of the package's skill folders with the project's laid over them file by file, `load_skill_library`; `check_role_skills`, which checks the skills a role names against the library; and `SkillMapping`, a `[[skills]]` entry, whose paths and skills `check_skill_mappings` checks against the paths in the project and the library), `layers` (the layers a setting comes from, the user config's role fields and personal roles, and each role resolved across them field by field), `config_report` (what `orbit config show` reports: each setting in effect by its dotted key with the layer it came from, and a key's settings; and the skill map, `skill_map`, where each role's agents get each skill), `config_update` (what `orbit init --update` adds to a project file from the reference config: the keys a table it has doesn't mention, after the table's last line, and the tables it lacks, at the end, never changing a line of it; and the lines `orbit init --roles` adds, pointing each built-in role at its copy of its instructions; and the checks the configurator writes, in place of a file's steps and setup without changing its other lines, or of the reference config's examples of them) and `config_errors` (`ConfigError`,
     and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]` with its `TlsSettings`, which files each TLS mode needs, where now falls in a certificate's validity, and which hosts are loopback), `certificate_list` (what `orbit certs list` shows of each certificate: its expiry, days left, fingerprint and marks), `client_bundle` (what `orbit certs client --bundle` puts in a client's bundle: the CA, its certificate and key, and the `[remotes.<name>]` lines naming them where it's unpacked, which connect to a `wss://` URL alone), `remotes` (`RemoteSettings`, a `[remotes.<name>]` table, and which credentials go together), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
     setup step that makes a fresh worktree ready, and the checks a configurator proposes), the
     `Catalog` (in `catalog`: the workspace and its sessions, the agents' roles, the triggers and
@@ -3283,7 +3315,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   It's a module per command (`chat`, `serve`, `status`, `init`, `config` for `orbit config show`, and
   `maintenance` for `version`, `db` and `token`), with `backend` wiring the adapters for both chat
   and serve, `status_report` what `orbit status` reports and how it prints it, `config_text` how
-  `orbit config show` prints the configuration, `options` the options they share and `errors` how
+  `orbit config show` prints the configuration and the skill map, `options` the options they share and `errors` how
   they exit; its `__init__` registers the commands on the app. `orbit status` joins a control
   plane as `orbit chat --connect` does, through an `orbit.client.WebSocketSession`, on an event
   loop of its own.

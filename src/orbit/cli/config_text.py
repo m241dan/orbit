@@ -1,5 +1,6 @@
 """How ``orbit config show`` prints the configuration it reports: as text, a line per setting,
-or as one JSON object."""
+or as one JSON object; and how ``--skills`` prints the skill map: as a table, or as one JSON
+object."""
 
 import json
 from itertools import groupby
@@ -8,11 +9,17 @@ from typing import Any
 
 from orbit.agent import (
     LIMIT_KEYS,
+    MAPPED_CELL,
+    NEVER_CELL,
+    REVIEWED_TASK_CELL,
+    ROLE_CELL,
+    TASK_CELL,
     ConfigReport,
     Instructions,
     Layer,
     Setting,
     SkillFileText,
+    SkillMap,
     key_parts,
 )
 
@@ -21,6 +28,19 @@ type Text = Instructions | SkillFileText
 
 GROUPED = frozenset({"roles", "skill_files"})
 """The sections listed in a group for each of their tables: each role, and each skill."""
+
+COLUMN_GAP = "   "
+"""What parts the skill map's columns."""
+
+SKILL_MAP_LEGEND = (
+    f"{ROLE_CELL}: in the role's skills.",
+    f"{TASK_CELL}: when the task's list names it.",
+    f"{REVIEWED_TASK_CELL}: when the reviewed task's list names it.",
+    f"{MAPPED_CELL}: in [[skills]]; given when the task has no list, and always to agents without"
+    " tasks.",
+    f"{NEVER_CELL}: never given.",
+)
+"""The lines under the skill map, saying what each value of its cells means."""
 
 
 def config_text(report: ConfigReport, *, full: bool, root: Path, home: Path) -> str:
@@ -50,6 +70,28 @@ def config_json(report: ConfigReport, *, full: bool) -> str:
             node = node.setdefault(part, {})
         node[name] = _json(setting, full)
     return json.dumps(tree, indent=2, ensure_ascii=False)
+
+
+def skill_map_text(skills: SkillMap) -> str:
+    """``skills`` as a table, a header row, ``skill`` then each role's name, then a row per skill,
+    its name then its cells, each column as wide as its widest cell; then, after a blank line,
+    the :data:`SKILL_MAP_LEGEND`."""
+    rows = [
+        ("skill", *skills.roles),
+        *((name, *(cells[role] for role in skills.roles)) for name, cells in skills.cells.items()),
+    ]
+    widths = [max(map(len, column)) for column in zip(*rows, strict=True)]
+    lines = (
+        COLUMN_GAP.join(cell.ljust(width) for cell, width in zip(row, widths, strict=True)).rstrip()
+        for row in rows
+    )
+    return "\n".join(lines) + "\n\n" + "\n".join(SKILL_MAP_LEGEND)
+
+
+def skill_map_json(skills: SkillMap) -> str:
+    """``skills`` as one JSON object, its cells by skill and role under ``skills``."""
+    cells = {name: dict(row) for name, row in skills.cells.items()}
+    return json.dumps({"skills": cells}, indent=2, ensure_ascii=False)
 
 
 def _group(key: str) -> str:

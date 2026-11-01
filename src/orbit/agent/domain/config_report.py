@@ -1,5 +1,6 @@
 """What ``orbit config show`` reports of a workspace's configuration: each setting in effect, by
-its dotted key, with the layer it came from."""
+its dotted key, with the layer it came from, or its skill map, saying which agents get each skill
+and from where."""
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -12,6 +13,16 @@ from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
 from orbit.agent.domain.roles import Role, names_file
 from orbit.agent.domain.skills import SkillLibrary, SkillMapping
 from orbit.agent.domain.verification import VerificationStep
+from orbit.protocol import REVIEWER, SUPER_REVIEWER
+
+ROLE_CELL = "role"
+TASK_CELL = "task"
+REVIEWED_TASK_CELL = "reviewed task"
+MAPPED_CELL = "mapped"
+NEVER_CELL = "—"
+"""What a skill map's cell says of a role's agents and a skill: they get it from the role's
+skills, from their task's list, from the reviewed task's list, from the ``[[skills]]`` entries,
+or never."""
 
 
 @dataclass(frozen=True)
@@ -72,6 +83,16 @@ class Setting:
 
 type ConfigReport = dict[str, Setting]
 """The settings in effect by dotted key, such as ``roles.reviewer.model``, in order."""
+
+
+@dataclass(frozen=True)
+class SkillMap:
+    """Which agents get each skill and from where: the ``roles``, by name, in the
+    configuration's order, and the ``cells`` of each skill in the library, in name order, each
+    role's by its name, in the same order, as :func:`skill_cell` gives it."""
+
+    roles: tuple[str, ...]
+    cells: Mapping[str, Mapping[str, str]]
 
 
 class UnknownKey(LookupError):
@@ -217,3 +238,37 @@ def _sets(data: Mapping[str, Any], table: str, key: str) -> bool:
 def _layer(given: bool, written: Written) -> Layer:
     """``written``'s layer if the setting is ``given`` there, else the default."""
     return written.layer if given else DEFAULT
+
+
+def skill_map(config: OrbitConfig) -> SkillMap:
+    """``config``'s skill map: a cell for each skill of its library and each of its roles, as
+    :func:`skill_cell` gives it from its ``[[skills]]`` entries."""
+    mapped = {name for mapping in config.skills for name in mapping.use}
+    cells = {
+        skill: {
+            name: skill_cell(name, role, skill, mapped=skill in mapped)
+            for name, role in config.roles.items()
+        }
+        for skill in config.skill_library.skills
+    }
+    return SkillMap(tuple(config.roles), cells)
+
+
+def skill_cell(name: str, role: Role, skill: str, *, mapped: bool) -> str:
+    """Where the agents of ``role``, called ``name``, get ``skill``, which the ``[[skills]]``
+    entries use if ``mapped``: from its skills if they name it; else, for the super reviewer and
+    a conversational role, which have no task's list, from the entries, or never; and for the
+    other roles as :func:`_task_cell` says."""
+    if skill in role.skills:
+        return ROLE_CELL
+    if name == SUPER_REVIEWER or role.conversation:
+        return MAPPED_CELL if mapped else NEVER_CELL
+    return _task_cell(name, mapped=mapped)
+
+
+def _task_cell(name: str, *, mapped: bool) -> str:
+    """Where the agents of the task role ``name`` get a skill its skills don't name, which the
+    ``[[skills]]`` entries use if ``mapped``: from their task's list, the reviewer's the reviewed
+    task's, or the entries when it has none."""
+    task = REVIEWED_TASK_CELL if name == REVIEWER else TASK_CELL
+    return f"{task} / {MAPPED_CELL}" if mapped else task
