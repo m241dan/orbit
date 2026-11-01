@@ -51,6 +51,7 @@ from orbit.agent.domain.skills import (
     skill_instructions,
 )
 from orbit.agent.domain.tools import ORBIT_TOOLS, READ_SKILL
+from orbit.execution.cancelling import cancel_and_wait
 from orbit.protocol import (
     INTERNAL,
     AgentExited,
@@ -287,8 +288,7 @@ class AgentDesk:
         starting, self._starting = self._starting, None
         if starting is None:
             return
-        starting.cancel()
-        await asyncio.wait({starting})
+        await cancel_and_wait(starting)
         # A start that failed left nothing to stop, though the desk may not have forgotten it yet.
         if starting.cancelled() or starting.exception() is None:
             await self.agents.host.stop()  # Also cleans up after a start cut short.

@@ -10,6 +10,7 @@ from orbit.agent.application.verifier import Failure
 from orbit.agent.domain.agent_task import AgentTask
 from orbit.agent.domain.checks import ChecksProposal, setup_step
 from orbit.agent.domain.verification import VerificationStep
+from orbit.execution.cancelling import cancel_and_wait
 
 RunSteps = Callable[[Sequence[VerificationStep]], Awaitable[Failure | None]]
 """Runs steps in order in the agent's tree until one fails; returns that failure."""
@@ -61,9 +62,7 @@ class ProposalTrial:
         try:
             await asyncio.wait({decision, self._exited}, return_when=asyncio.FIRST_COMPLETED)
         finally:
-            decision.cancel()
-            # Waits for the ask to clean up without raising its cancellation, only the caller's.
-            await asyncio.wait({decision})
+            await cancel_and_wait(decision)
         return None if decision.cancelled() else decision.result()
 
     async def _try(self, checks: ChecksProposal) -> Failure | None:

@@ -53,7 +53,7 @@ from orbit.agent.domain.verification import (
     VerificationStep,
     check_reply,
 )
-from orbit.execution.cancelling import cancelling, stop
+from orbit.execution.cancelling import cancelling, stop, stop_all
 from orbit.protocol import (
     AGENT_FAILED,
     NOT_CONFIGURED,
@@ -292,9 +292,7 @@ class AgentRun:
     async def _end_checks(self) -> None:
         """Stop the checks the agent's calls are still running: once the run is over, its tree
         is the next task's."""
-        for check in self._checks:
-            check.cancel()
-        await asyncio.gather(*self._checks, return_exceptions=True)
+        await stop_all(self._checks)
 
     def _drain(self) -> None:
         """Answer the calls left in the inbox once the run loop has stopped taking them."""

@@ -9,6 +9,7 @@ from contextlib import contextmanager, suppress
 import uvicorn
 
 from orbit.agent.application.ports import HostFailed
+from orbit.execution.cancelling import stop_all
 
 logger = logging.getLogger("uvicorn.error")
 """Where uvicorn says what a server shutting down waits for."""
@@ -63,8 +64,7 @@ class EmbeddedServer(uvicorn.Server):
             await self._started(serving, failure)
         except BaseException:
             self.should_exit = True
-            serving.cancel()
-            await asyncio.gather(serving, return_exceptions=True)
+            await stop_all([serving])
             sock.close()
             raise
         return serving

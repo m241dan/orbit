@@ -8,6 +8,7 @@ from orbit.agent.application.failures import unexpected
 from orbit.agent.application.ports import CloneFailed, Cloner
 from orbit.agent.domain.clones import clone_served
 from orbit.agent.domain.refusals import Refused, failed_to, reason
+from orbit.execution.cancelling import stop_all
 from orbit.protocol import (
     BUSY,
     GIT_FAILED,
@@ -64,10 +65,7 @@ class Clones:
 
     async def close(self) -> None:
         """Stop every clone under way, each removing what it cloned, and wait until they have."""
-        tasks = list(self._tasks.values())
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await stop_all(self._tasks.values())
 
 
 async def _served(path: str, cloner: Cloner, serve: Callable[[str], Awaitable[str]]) -> str:
