@@ -5,8 +5,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
-from orbit.agent.application.desk import Tool
-from orbit.agent.application.ports import Publish, Reply, SessionStore
+from orbit.agent.application.ports import Publish, Reply, SessionStore, Tool
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reports import (
     NO_ID,

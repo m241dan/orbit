@@ -15,9 +15,9 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any, Literal
 
-from orbit.agent.application.desk import AgentDesk, Tool, dispatch, report_progress
+from orbit.agent.application.desk import AgentDesk, dispatch, report_progress
 from orbit.agent.application.outcomes import Outcome, ended
-from orbit.agent.application.ports import Reply
+from orbit.agent.application.ports import Reply, Tool
 from orbit.agent.application.proposal_trial import ProposalTrial
 from orbit.agent.application.task_trace import CHECK_RUNS, FIX_ATTEMPTS, GAVE_UP_EVENT
 from orbit.agent.application.tasks import Tasks

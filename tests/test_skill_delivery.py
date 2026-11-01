@@ -2,17 +2,20 @@
 runtime, is launched with its role's instructions and then the skills it was given, its role's and
 its task's, or the project's mapped ones for a task naming none and a planner turn, and its
 process's span records those skills and the files of them it read. An agent that proposes tasks
-is also told the skills it can give them, and the tasks it proposes carry those it names."""
+is also told the skills it can give them, and the tasks it proposes carry those it names. The
+delivery is also tested on its own, without a desk."""
 
 import asyncio
 from collections.abc import Mapping
 from typing import Any
 
+import pytest
 from opentelemetry.sdk.trace import ReadableSpan
 
-from orbit.agent.application.agent_trace import PROCESS_SPAN
+from orbit.agent.application.agent_trace import PROCESS_SPAN, AgentProcess
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.ports import AgentLaunch, Reply
+from orbit.agent.application.skill_delivery import SkillDelivery
 from orbit.agent.domain.layers import PACKAGE
 from orbit.agent.domain.skills import Skill, SkillFile, SkillLibrary, SkillMapping
 from orbit.agent.domain.tools import READ_SKILL
@@ -403,3 +406,94 @@ async def test_a_read_for_an_agent_not_yet_opened_is_still_answered() -> None:
     agents, _ = agents_for(skill_library=LIBRARY)
     read_skill = AgentDesk(agents, ignored).tools(CODER, None)[READ_SKILL]
     assert await read_skill(SECURITY) == Reply("security's SKILL.md")
+
+
+# Delivery on its own, without a desk
+
+
+def delivering(process: AgentProcess | None = None) -> SkillDelivery:
+    """Delivery of :data:`LIBRARY`'s skills under :data:`MAPPED`, noting agent ``agent-1``'s reads
+    on ``process``, if there's one, and no other agent's."""
+    return SkillDelivery(LIBRARY, MAPPED, {"agent-1": process}.get)
+
+
+MAPPED_TO_CODER = ("code-style", "security", "python", "layers")
+"""The skills a coder is delivered under :data:`MAPPED` for a task naming none."""
+
+
+def test_delivery_tells_an_agent_its_roles_instructions_then_its_roles_and_tasks_skills() -> None:
+    skills = delivering()
+    skills.open("agent-1", ("python", "application"))
+    assert skills.instructions(ROLES[CODER], "agent-1") == (
+        f"You are orbit's coder.\n\n## Skills\n\n{READING}\n\n"
+        "### code-style\n\nBe code-style.\n\n"
+        "### security\n\nBe security.\n\n"
+        "### python\n\nBe python.\n\n"
+        "### application\n\nBe application."
+    )
+
+
+def test_delivery_chooses_a_tasks_skills_after_its_roles_each_once() -> None:
+    skills = delivering()
+    skills.open("agent-1", ("security", "application"))
+    assert skills.delivered(ROLES[CODER], "agent-1") == ("code-style", "security", "application")
+
+
+@pytest.mark.parametrize("agent_id", ["agent-1", None])
+def test_delivery_gives_a_task_naming_no_skills_or_no_agent_yet_the_mapped_ones(
+    agent_id: str | None,
+) -> None:
+    skills = delivering()
+    skills.open("agent-1", ())
+    assert skills.delivered(ROLES[CODER], agent_id) == MAPPED_TO_CODER
+
+
+def test_delivery_forgets_a_closed_agents_task_skills() -> None:
+    skills = delivering()
+    skills.open("agent-1", ("application",))
+    skills.close("agent-1")
+    assert skills.delivered(ROLES[CODER], "agent-1") == MAPPED_TO_CODER
+
+
+def test_delivery_tells_a_role_that_proposes_tasks_the_skills_it_can_give_them() -> None:
+    planner = ROLES[PLANNER].model_copy(update={"skills": ()})
+    skills = SkillDelivery(LIBRARY, (), lambda agent_id: None)
+    assert skills.instructions(planner, None) == f"You are orbit's planner.\n\n{CATALOGUE}"
+
+
+async def test_read_skill_answers_with_the_file_of_a_skill_given() -> None:
+    read_skill = delivering().tool(lambda: ROLES[CODER], "agent-1")
+    assert await read_skill({"skill": "python", "file": "testing.md"}) == Reply(
+        "python's testing.md"
+    )
+
+
+async def test_read_skill_refuses_a_skill_not_given_listing_those_given() -> None:
+    skills = delivering()
+    skills.open("agent-1", ("python",))
+    read_skill = skills.tool(lambda: ROLES[CODER], "agent-1")
+    assert await read_skill({"skill": "layers", "file": "SKILL.md"}) == Reply(
+        "You weren't given the skill layers; your skills are code-style, security, python.",
+        is_error=True,
+    )
+
+
+async def test_read_skill_reads_the_skills_the_role_has_at_the_call() -> None:
+    roles = [ROLES[CODER].model_copy(update={"skills": ("application",)})]
+    read_skill = SkillDelivery(LIBRARY, (), lambda agent_id: None).tool(lambda: roles[-1], None)
+    roles.append(ROLES[CODER])
+    assert await read_skill({"skill": "application", "file": "SKILL.md"}) == Reply(
+        "You weren't given the skill application; your skills are code-style, security.",
+        is_error=True,
+    )
+
+
+async def test_reads_are_noted_on_the_agents_process_each_once_and_refusals_are_not() -> None:
+    traced = Traced()
+    process = AgentProcess(traced.telemetry.start(PROCESS_SPAN))
+    read_skill = delivering(process).tool(lambda: ROLES[CODER], "agent-1")
+    for name, path in (("python", "testing.md"), ("python", "testing.md"), ("cpp", "SKILL.md")):
+        await read_skill({"skill": name, "file": path})
+    process.end()
+    [span] = traced.spans(PROCESS_SPAN)
+    assert attributes(span)["orbit.agent.skill_files"] == ("python/testing.md",)

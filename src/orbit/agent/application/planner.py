@@ -18,9 +18,9 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AsyncExitStack
 from typing import Any
 
-from orbit.agent.application.desk import AgentDesk, Tool, dispatch, report_progress
+from orbit.agent.application.desk import AgentDesk, dispatch, report_progress
 from orbit.agent.application.planner_trace import turn_ended
-from orbit.agent.application.ports import Reply, ResumeFailed
+from orbit.agent.application.ports import Reply, ResumeFailed, Tool
 from orbit.agent.application.role_copies import RoleCopies
 from orbit.agent.application.role_workspace import workspace_for
 from orbit.agent.application.tasks import Tasks

@@ -187,6 +187,9 @@ class Reply:
 CallHandler = Callable[[str, str, dict[str, Any]], Awaitable[Reply]]
 """Answers an agent's call: its token, the tool it called and the arguments."""
 
+Tool = Callable[[dict[str, Any]], Awaitable[Reply]]
+"""Answers a call to one of orbit's tools, given its arguments."""
+
 
 class AgentHost(Protocol):
     """Where agents reach orbit: a server that passes their tool calls to a handler."""

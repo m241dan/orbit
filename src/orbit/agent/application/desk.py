@@ -13,12 +13,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
-from orbit.agent.application.agent_trace import (
-    REQUEST_ERROR,
-    AgentProcess,
-    AgentTracing,
-    skill_attributes,
-)
+from orbit.agent.application.agent_trace import REQUEST_ERROR, AgentProcess, AgentTracing
 from orbit.agent.application.failures import unexpected
 from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.application.ports import (
@@ -34,22 +29,16 @@ from orbit.agent.application.ports import (
     Publish,
     Reply,
     TempDirs,
+    Tool,
 )
+from orbit.agent.application.skill_delivery import SkillDelivery
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.agents import Agent, AgentRegistry
 from orbit.agent.domain.refusals import failed_to
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.runtimes import ModelAliases, resolve_model
-from orbit.agent.domain.skills import (
-    SkillLibrary,
-    SkillMapping,
-    delivered_skills,
-    given_skill_file,
-    given_skills,
-    skill_catalogue,
-    skill_instructions,
-)
+from orbit.agent.domain.skills import SkillLibrary, SkillMapping
 from orbit.agent.domain.tools import ORBIT_TOOLS, READ_SKILL
 from orbit.agent.domain.triggers import Trigger
 from orbit.execution.cancelling import cancel_and_wait
@@ -88,10 +77,6 @@ def progress_note(text: str) -> str:
     if len(note) > NOTE_LIMIT:
         note = note[: NOTE_LIMIT - 1] + "…"
     return note
-
-
-Tool = Callable[[dict[str, Any]], Awaitable[Reply]]
-"""Answers a call to one of orbit's tools, given its arguments."""
 
 
 async def dispatch(
@@ -256,8 +241,10 @@ class AgentDesk:
         self._starting: asyncio.Task[str] | None = None  # The host's start, shared by callers.
         # How each agent running was last launched, by its id.
         self._launches: dict[str, AgentLaunch] = {}
-        # The skills each running agent's task gives it beyond its role's, by its id.
-        self._task_skills: dict[str, tuple[str, ...]] = {}
+        # What gives each agent its skills, its role's and its task's, and answers read_skill.
+        self._delivery = SkillDelivery(
+            agents.skill_library, agents.skill_mappings, self._processes.get
+        )
 
     async def publish(self, event: Event) -> None:
         """Publish ``event``, noting the agents it announces as started or exited and what the
@@ -316,7 +303,7 @@ class AgentDesk:
             prompt,
             own,
             cwd,
-            self._instructions(role, self._skills_of_task(agent.id)),
+            self._delivery.instructions(role, agent.id),
             role.granted_tools,
             self._workspace_id,
             self.session(),
@@ -324,58 +311,16 @@ class AgentDesk:
         self._launches[agent.id] = launch
         return launch
 
-    def _instructions(self, role: Role, task_skills: Sequence[str]) -> str:
-        """What an agent in ``role`` whose task names ``task_skills`` is told: its role's
-        instructions, then, each after a blank line, the skills it's given, if any, and, if it
-        proposes tasks, the skills it can give them."""
-        agents = self.agents
-        skills = skill_instructions(
-            role.skills, task_skills, agents.skill_mappings, agents.skill_library
-        )
-        catalogue = skill_catalogue(agents.skill_library) if role.proposes_tasks else ""
-        return "\n\n".join((role.instructions, *(part for part in (skills, catalogue) if part)))
-
-    def _skills_of_task(self, agent_id: str | None) -> tuple[str, ...]:
-        """The skills agent ``agent_id``'s task gives it beyond its role's; none for an agent
-        that isn't opened, a conversational one, which has no task, or one whose task names
-        none."""
-        return () if agent_id is None else self._task_skills.get(agent_id, ())
-
     def launched(self, agent_id: str | None) -> AgentLaunch | None:
         """How agent ``agent_id``, if it's running, was last launched; none before it was."""
         return None if agent_id is None else self._launches.get(agent_id)
 
     def tools(self, role: str, agent_id: str | None) -> dict[str, Tool]:
         """The tools the desk answers for an agent in the role named ``role``, agent ``agent_id``
-        once it's opened: ``read_skill``, and the report tools."""
-
-        async def read_skill(arguments: dict[str, Any]) -> Reply:
-            return self._read_skill(role, agent_id, arguments)
-
+        once it's opened: ``read_skill``, as its skills' delivery answers it, in the role it has
+        at each call, and the report tools."""
+        read_skill = self._delivery.tool(lambda: self.agents.roles[role], agent_id)
         return {READ_SKILL: read_skill, **self.report_tools(role)}
-
-    def _read_skill(self, role: str, agent_id: str | None, arguments: dict[str, Any]) -> Reply:
-        """The file of one of its skills that agent ``agent_id``, in the role named ``role``, asks
-        for in ``arguments``, by the skill's name and the file's path, or why it's refused,
-        recording what was asked on the call's span, the current one, and a file it read on its
-        process's. The role's skills are those it has now, which a reset may have changed, and
-        its task's those it was opened with."""
-        skill, path = str(arguments.get("skill", "")), str(arguments.get("file", ""))
-        current_span().set_attributes(skill_attributes(skill, path))
-        role_skills, task_skills = self.agents.roles[role].skills, self._skills_of_task(agent_id)
-        given = given_skills(role_skills, task_skills, self.agents.skill_mappings)
-        found = given_skill_file(given, self.agents.skill_library, skill, path)
-        if isinstance(found, str):
-            return Reply(found, is_error=True)
-        self._note_read(agent_id, skill, path)
-        return Reply(found.text)
-
-    def _note_read(self, agent_id: str | None, skill: str, path: str) -> None:
-        """Tally agent ``agent_id``'s reading the file at ``path`` of the skill ``skill`` on its
-        process, if it's opened and its process is traced."""
-        process = None if agent_id is None else self._processes.get(agent_id)
-        if process is not None:
-            process.read_skill(skill, path)
 
     def use_role(self, name: str, role: Role) -> None:
         """Have ``role`` as the role ``name`` from now on."""
@@ -387,7 +332,7 @@ class AgentDesk:
         agent."""
         agent = self.registry.register(role, task_id)
         self._runs[agent.id] = run
-        self._task_skills[agent.id] = tuple(skills)
+        self._delivery.open(agent.id, skills)
         return agent
 
     def find(self, agent_id: str) -> Agent | None:
@@ -422,7 +367,7 @@ class AgentDesk:
         self.registry.revoke(agent.id)
         self._runs.pop(agent.id, None)
         self._launches.pop(agent.id, None)
-        self._task_skills.pop(agent.id, None)
+        self._delivery.close(agent.id)
         self._announced.discard(agent.id)
         self._spent.pop(agent.id, None)
 
@@ -432,11 +377,8 @@ class AgentDesk:
         traced over the block in a span that's a child of ``parent``, as
         :meth:`AgentTracing.process` traces it, with the agent's calls traced under it
         meanwhile."""
-        role, agents = self.agents.roles[agent.role], self.agents
-        task_skills = self._skills_of_task(agent.id)
-        skills = delivered_skills(
-            role.skills, task_skills, agents.skill_mappings, agents.skill_library
-        )
+        role = self.agents.roles[agent.role]
+        skills = self._delivery.delivered(role, agent.id)
         with self._tracing.process(agent, role.runtime, skills, parent) as process:
             self._processes[agent.id] = process
             try:

@@ -3438,7 +3438,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `AgentRun` (in `agent_run`) sees one task through one agent, and a
     `ProposalTrial` (in `proposal_trial`) tries the checks a configurator proposes and has the
     user decide on them; `AgentDesk` (in `desk`) launches agents and routes their calls by token,
-    tracing each agent's process as an `orbit.agent.process` span and each of its calls as an
+    delivering each the skills it's given, in its instructions and through `read_skill`, with
+    `SkillDelivery` (in `skill_delivery`), tracing each agent's process as an `orbit.agent.process` span and each of its calls as an
     `orbit.agent.request` child of it with `AgentTracing` (in `agent_trace`);
     `Verifier` (in `verifier`) runs the steps, each run for an agent's call timed as an
     `orbit.verify.step` child of the call's span; `Lander` (in `landing`) commits and merges
