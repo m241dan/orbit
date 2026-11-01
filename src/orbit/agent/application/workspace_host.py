@@ -745,8 +745,9 @@ class WorkspaceHost:
     async def _open_session(self) -> None:
         """Raise ``session_started`` in the session open once no switch is under way, as the
         workspace opens with it, verifying tasks with the steps configured now, none while
-        verification is off, and run the tasks its triggers queued, a configurator's as ctrl+e
-        would; without agents, there are no triggers to fire."""
+        verification is off, and run the tasks its triggers queued, and a configurator's waiting
+        while verification is missing, queued then or saved with the session, as ctrl+e would;
+        without agents, there are no triggers to fire."""
         engine = self._triggers
         if engine is None:
             return
@@ -754,7 +755,7 @@ class WorkspaceHost:
         steps = None if verification is None else verification.steps
         queued = await self._switcher.between_switches(lambda: engine.started(steps))
         engine.run(queued)
-        await self._turns.set_up(queued)
+        await self._turns.set_up()
 
     async def _startup_failed(self, step: VerificationStep, output: str) -> bool:
         """Raise ``startup_check_failed`` for ``step``, which failed at startup with ``output``,

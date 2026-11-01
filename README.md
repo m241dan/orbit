@@ -719,10 +719,12 @@ With no steps configured, orbit sets them up with you before any task runs. The 
 so at startup (`No verification steps configured. Press ctrl+e to set them up.`), and the
 `set-up-verification` trigger (see [Triggers](#triggers)) queues a configurator task first and
 runs it, as a confirmed `ctrl+e` does, so its agent works out the checks with you (see
-[Setting up verification](#setting-up-verification)). Until checks are accepted, running tasks is
-refused: `ctrl+r` says `Set up verification first: the configurator is working on it.` while a
-configurator task is queued or running, and `Set up verification first: press ctrl+e.` once it
-ended without accepted checks; the lanes that start by themselves start no task but a
+[Setting up verification](#setting-up-verification)). If the session orbit opens still has a
+configurator task queued or running, as when orbit quit before one ended, the trigger's
+`not-queued` guard adds no other, and that one runs instead. Until checks are accepted, running
+tasks is refused: `ctrl+r` says `Set up verification first: the configurator is working on it.`
+while a configurator task is queued or running, and `Set up verification first: press ctrl+e.`
+once it ended without accepted checks; the lanes that start by themselves start no task but a
 configurator's, and a task a trigger queues meanwhile, such as a super review, waits on the task
 list, the conversation saying so (`super-review's task waits: set up verification first.`). Adding,
 editing and accepting tasks, and every conversation, the planner's included, stay open. Once the
@@ -761,7 +763,8 @@ inspects the repository (CI workflows, `.pre-commit-config.yaml`, `package.json`
 ones first, plus a setup command and the files whose changes should rerun it. It doesn't edit
 files.
 
-Orbit starts one by itself when it opens a workspace with verification on and no steps (see
+Orbit starts one by itself when it opens a workspace with verification on and no steps, or runs
+the one the session it opens has queued already instead of adding another (see
 [Verification steps](#verification-steps)), and `ctrl+e` starts one whenever you like. It asks for
 confirmation first, so a stray keypress does nothing:
 `y` goes ahead, `n` or `esc` cancels (`enter` doesn't answer). Once confirmed, it fires the
@@ -1632,7 +1635,8 @@ not as you switch sessions, nor while another orbit owns the repository: `startu
 [startup check](#verification-steps), and the step it fails fires the `startup_check_failed`
 triggers, whose `startup-fix` adds the draft fixing it; with verification on and no steps,
 `set-up-verification` queues the configurator's task first and runs it, as a confirmed `ctrl+e`
-does, which fires `configure-checks` by hand (see [Verification steps](#verification-steps)).
+does, which fires `configure-checks` by hand, unless one is queued or running already, as the
+session was saved with it, which runs instead (see [Verification steps](#verification-steps)).
 `task_landed` and `task_finished` are
 the work lane's tasks' (a review's end isn't one), landings count toward the `commits` triggers
 only while reviews are on, as the review lane counts them, and a trigger with `checks` fires only
@@ -1647,7 +1651,7 @@ The shipped triggers are data in
 | `review` | `task_landed` | every one | a `reviewer` task, from `review.md` | guard `review-rounds` |
 | `super-review` | `commits` | `origin = ["manual", "planner"]` | a `super-reviewer` task, from `super-review.md` | `every = 10`, guard `suggestions-pending`, manual as `Super review` |
 | `configure-checks` | `manual` | every one | a `configurator` task, from `configure-checks.md` | manual as `Set up checks` |
-| `set-up-verification` | `session_started` | `verification = "missing"` | a `configurator` task, from `configure-checks.md` | runs at once, as `ctrl+e`'s does |
+| `set-up-verification` | `session_started` | `verification = "missing"` | a `configurator` task, from `configure-checks.md` | guard `not-queued`, runs at once, as `ctrl+e`'s does |
 | `startup-check` | `session_started` | `verification = "configured"` | runs the verification steps, `checks = "gate"` | |
 | `startup-fix` | `startup_check_failed` | every one | a `coder` task, from `startup-fix.md` | `draft = true` |
 
@@ -3443,8 +3447,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     the work lane: it runs the board's tasks one at a time, queues a fix after each failed step
     and lands work that passes, and `WorkTurns` (in `work_turns`) decides when it runs: when the
     user asks (`ctrl+r`, refused while verification is missing), when a review queues work
-    unless the user held it, first for a configurator, which `configure-checks` queues or
-    `set-up-verification` did as the workspace opened, and again by itself once the usage limit
+    unless the user held it, first for a configurator, which `configure-checks` queues or which
+    waits as the workspace opens, queued by `set-up-verification` then or saved with the session,
+    and again by itself once the usage limit
     that stopped it resets, timed by a
     `LimitPause` (in `limit_pause`), saying meanwhile until when, why and on which runtime it's
     paused, which

@@ -24,6 +24,7 @@ from orbit.protocol import (
     RunTasks,
     SendMessage,
     TaskSpec,
+    TaskState,
     TurnEndReason,
     TurnFinished,
 )
@@ -55,6 +56,7 @@ from tests.agent_fakes import (
 )
 from tests.lane_fakes import running
 from tests.proposal_fakes import LINT, TESTS, Review, proposes
+from tests.session_builders import saved, store_with
 
 CODE = TaskSpec(prompt="Add a flag.")
 
@@ -105,6 +107,29 @@ async def test_opening_without_steps_queues_the_configurators_task_and_runs_it()
     )
     assert [launch.agent.role for launch in launcher.launches] == [CONFIGURATOR]
     assert "Nothing is configured yet." in configurator.tasks[0]
+
+
+RESTORED = TaskState(
+    id="configure", task=TaskSpec(prompt="Set up checks.", role=CONFIGURATOR), status="pending"
+)
+"""A configurator's task the session was saved with before it ran, as orbit quit early."""
+
+
+async def test_opening_a_session_whose_configurator_waits_runs_it_and_queues_no_other() -> None:
+    configurator = Configurator()
+    store = store_with(saved("earlier", RESTORED))
+    session, _, launcher = session_for(
+        configurator, verification=no_steps(), check_at_startup=True, store=store
+    )
+    await session.open_latest()
+    events = await until_idle(session)
+    await session.close()
+
+    [task] = board(events)
+    assert (task.id, task.origin, task.status) == (RESTORED.id, RESTORED.origin, "unverified")
+    assert [launch.agent.role for launch in launcher.launches] == [CONFIGURATOR]
+    [prompt] = configurator.tasks
+    assert prompt.startswith("Set up checks.")
 
 
 async def test_opening_with_steps_queues_no_configurator() -> None:

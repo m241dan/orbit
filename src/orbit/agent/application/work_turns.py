@@ -1,6 +1,7 @@
 """When the work lane runs: on the user's asking, after a review queues work unless the user
 held it or the session halted, first for a configurator, which the configure-checks trigger
-queues, or which a trigger queued as the workspace opened, and again by itself once the usage limit
+queues, or which waits as the workspace opens while verification is missing, a trigger having
+queued it then or the session having been saved with it, and again by itself once the usage limit
 of the runtime that stopped it resets, or, if that runtime's API not answering stopped it, after a
 backoff that grows with each outage in a row, saying meanwhile until when, why and on which
 runtime it's paused. The lane keeps its order, so it waits; the lanes that start by themselves
@@ -17,7 +18,7 @@ Meanwhile the work lane runs its tasks in order up to the first on the paused ru
 for the pause to end."""
 
 import asyncio
-from collections.abc import Awaitable, Callable, Collection
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -178,12 +179,13 @@ class WorkTurns:
         assert triggers is not None and verifier is not None  # Checked as it was asked for.
         return await triggers.fire_by_hand(CONFIGURE_CHECKS, verifier.verification.steps)
 
-    async def set_up(self, task_ids: Collection[str]) -> None:
-        """Run the configurator's task among ``task_ids``, those triggers queued as the
-        workspace opened, if one is on the board, as ctrl+e would, started by the span current,
-        unless something runs or the session is halted."""
-        found = (self._board.find(task_id) for task_id in task_ids)
-        if any(state is not None and state.task.role == CONFIGURATOR for state in found):
+    async def set_up(self) -> None:
+        """Run the configurator's task still to run or running as the workspace opens while
+        verification is missing, whether a trigger just queued it or the session was saved with
+        it, as ctrl+e would, started by the span current, unless something runs, the user held
+        the lane or the session is halted."""
+        missing = self._parts.gate.verification() == "missing"
+        if missing and self._board.has_waiting(CONFIGURATOR):
             await self._start(current_span(), asked=False)
 
     def check_run_tasks(self) -> None:

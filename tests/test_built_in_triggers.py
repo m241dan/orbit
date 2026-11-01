@@ -67,7 +67,10 @@ def test_the_shipped_triggers_are_the_records_in_order() -> None:
             on="manual", role="configurator", manual=True, label="Set up checks"
         ),
         "set-up-verification": Trigger(
-            on="session_started", role="configurator", when={"verification": "missing"}
+            on="session_started",
+            role="configurator",
+            when={"verification": "missing"},
+            guards=("not-queued",),
         ),
         "startup-check": Trigger(
             on="session_started", checks="gate", when={"verification": "configured"}

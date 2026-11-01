@@ -485,18 +485,39 @@ async def test_once_steps_are_used_the_next_work_and_runs_are_every_tasks(unset:
     assert unset.turns.running
 
 
-async def test_setting_up_runs_the_configurators_task_triggers_queued(unset: Lane) -> None:
+async def test_setting_up_runs_the_configurators_task_waiting(unset: Lane) -> None:
     await add(unset)
-    configure = await unset.tasks.change(lambda board: board.add_first(CONFIGURE))
-    await unset.turns.set_up((configure,))
+    await unset.tasks.change(lambda board: board.add_first(CONFIGURE))
+    await unset.turns.set_up()
     assert unset.turns.running
 
 
-async def test_setting_up_without_a_configurators_task_starts_nothing(lane: Lane) -> None:
-    await add(lane)
-    [task] = lane.tasks.board.tasks
-    await lane.turns.set_up((task.id, "gone"))
+async def test_setting_up_runs_a_configurators_task_behind_others(unset: Lane) -> None:
+    await add(unset)
+    await unset.tasks.change(lambda board: board.add(CONFIGURE))
+    await unset.turns.set_up()
+    assert unset.turns.running
+
+
+async def test_setting_up_without_a_configurators_task_starts_nothing(unset: Lane) -> None:
+    await add(unset)
+    await unset.turns.set_up()
+    assert not unset.turns.running
+
+
+async def test_setting_up_with_steps_starts_nothing_though_a_configurator_waits(
+    lane: Lane,
+) -> None:
+    await lane.tasks.change(lambda board: board.add(CONFIGURE))
+    await lane.turns.set_up()
     assert not lane.turns.running
+
+
+async def test_setting_up_while_halted_starts_nothing(unset: Lane) -> None:
+    await unset.tasks.change(lambda board: board.add(CONFIGURE))
+    unset.halt.on = True
+    await unset.turns.set_up()
+    assert not unset.turns.running
 
 
 async def test_a_wake_once_closed_starts_no_work(lane: Lane) -> None:

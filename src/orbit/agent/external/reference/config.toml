@@ -349,7 +349,7 @@
 # The events it takes, by their fields, each a value or a list of values.
 # when = {verification = "missing"}
 # The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
-# guards = []
+# guards = ["not-queued"]
 # With on = "commits", how many matching landings it fires after.
 # every: unset
 # Whether you can fire it yourself.
