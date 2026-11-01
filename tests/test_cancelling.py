@@ -1,12 +1,20 @@
-"""Cancelling and shielding: telling a task being cancelled, stopping a task, and awaiting work
-that cancelling the awaiter doesn't cancel."""
+"""Cancelling and shielding: telling a task being cancelled, stopping a task or several,
+cancelling a task to read its outcome, and awaiting work that cancelling the awaiter doesn't
+cancel."""
 
 import asyncio
 from contextlib import suppress
 
 import pytest
 
-from orbit.execution.cancelling import cancelling, shielded, stop, waited_out
+from orbit.execution.cancelling import (
+    cancel_and_wait,
+    cancelling,
+    shielded,
+    stop,
+    stop_all,
+    waited_out,
+)
 from tests.stopping import SlowToStop, cancelled_while_stopping
 
 
@@ -68,6 +76,88 @@ async def test_stop_of_a_finished_task_does_nothing() -> None:
     await stop(child)
 
     assert not child.cancelled()
+
+
+async def failing_once_cancelled() -> None:
+    """Wait until cancelled, then fail."""
+    try:
+        await asyncio.Event().wait()
+    except asyncio.CancelledError:
+        raise OSError("boom") from None
+
+
+async def giving_3_once_cancelled() -> int:
+    """Wait until cancelled, then give 3."""
+    with suppress(asyncio.CancelledError):
+        await asyncio.Event().wait()
+    return 3
+
+
+async def test_stop_all_waits_for_every_task_to_end_raising_none_of_their_outcomes() -> None:
+    tasks = [
+        asyncio.create_task(asyncio.Event().wait()),
+        asyncio.create_task(failing_once_cancelled()),
+        asyncio.create_task(giving_3_once_cancelled()),
+    ]
+    await asyncio.sleep(0)
+
+    await asyncio.wait_for(stop_all(tasks), 5)
+
+    assert tasks[0].cancelled()
+    assert isinstance(tasks[1].exception(), OSError)
+    assert tasks[2].result() == 3
+
+
+async def test_stop_all_of_no_tasks_returns_at_once() -> None:
+    await asyncio.wait_for(stop_all([]), 5)
+
+
+async def test_stop_all_cancelled_meanwhile_is_cancelled_once_the_tasks_have_ended() -> None:
+    work = SlowToStop()
+    child = asyncio.create_task(work())
+    await work.started.wait()
+    stopping = asyncio.create_task(stop_all([child]))
+
+    await cancelled_while_stopping(stopping, child, work.gate)
+
+    with pytest.raises(asyncio.CancelledError):
+        await stopping
+    assert child.done()
+
+
+async def test_cancel_and_wait_leaves_the_tasks_error_on_it() -> None:
+    child = asyncio.create_task(failing_once_cancelled())
+    await asyncio.sleep(0)
+
+    await asyncio.wait_for(cancel_and_wait(child), 5)
+
+    assert isinstance(child.exception(), OSError)
+
+
+async def test_cancel_and_wait_of_a_finished_task_returns_at_once() -> None:
+    child = asyncio.create_task(asyncio.sleep(0, 3))
+    await child
+
+    await asyncio.wait_for(cancel_and_wait(child), 5)
+
+    assert child.result() == 3
+
+
+async def test_cancel_and_wait_cancelled_meanwhile_is_cancelled_without_waiting() -> None:
+    work = SlowToStop()
+    child = asyncio.create_task(work())
+    await work.started.wait()
+    waiting = asyncio.create_task(cancel_and_wait(child))
+    await asyncio.sleep(0)
+
+    waiting.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await waiting
+    assert not child.done()  # The caller's cancellation goes on as the task still ends.
+    work.gate.set()
+    with pytest.raises(asyncio.CancelledError):
+        await child
 
 
 async def test_shielded_work_gives_its_result() -> None:

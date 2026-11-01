@@ -1,9 +1,10 @@
-"""Cancelling and shielding: telling a task being cancelled, stopping a task and waiting for it,
-and awaiting work that cancelling the awaiter doesn't cancel, and that is always waited out."""
+"""Cancelling and shielding: telling a task being cancelled, stopping a task or several and
+waiting for them, cancelling a task to read its outcome after, and awaiting work that cancelling
+the awaiter doesn't cancel, and that is always waited out."""
 
 import asyncio
 import contextlib
-from collections.abc import Coroutine
+from collections.abc import Coroutine, Iterable
 from typing import Any
 
 
@@ -23,6 +24,24 @@ async def stop(task: asyncio.Task[Any]) -> None:
         # The task's own cancel ends here; one meant for the caller goes on.
         if cancelling():
             raise
+
+
+async def stop_all(tasks: Iterable[asyncio.Task[Any]]) -> None:
+    """Cancel each of ``tasks`` and wait for all of them to end, raising none of their results,
+    errors or cancellations; cancelled meanwhile, this cancels them again and is cancelled once
+    they have ended."""
+    stopping = list(tasks)
+    for task in stopping:
+        task.cancel()
+    await asyncio.gather(*stopping, return_exceptions=True)
+
+
+async def cancel_and_wait(task: asyncio.Task[Any]) -> None:
+    """Cancel ``task`` and wait until it's done, raising nothing of its own: its result, error
+    or cancellation stays on it for the caller to read. Cancelled meanwhile, this is cancelled
+    at once, leaving ``task`` to end."""
+    task.cancel()
+    await asyncio.wait({task})
 
 
 async def shielded[T](future: asyncio.Future[T]) -> T:
