@@ -543,7 +543,7 @@ async def test_the_first_super_review_lists_no_commits_and_the_next_starts_from_
     assert review.status == "completed"  # It ran, and wasn't told what landed as it started.
     prompt = review.task.prompt
     assert "Landed since" not in prompt and SINCE_SUPER not in prompt and FILES not in prompt
-    assert tree.asked_since == []
+    assert tree.asked_since == [] and tree.asked_changed == []
     assert lane_of(session).planner.last_super_commit == tree.base
 
 
@@ -560,7 +560,8 @@ async def test_the_next_super_review_lists_the_commits_since_the_last_and_their_
     assert super_task(events).task.prompt.endswith(
         f"{SINCE_SUPER}\n- Add D\n- Add E\n\n{FILES}\n- README.md\n- src/d.py\n- src/e.py"
     )
-    assert tree.asked_since == ["base"]
+    assert tree.asked_since == [("base", "e")]  # Up to the base's commit it reviews.
+    assert tree.asked_changed == [("base", "e")]
     assert lane_of(session).planner.last_super_commit == "e"
 
 
@@ -579,6 +580,9 @@ async def test_a_super_review_due_lists_the_commits_since_the_last() -> None:
     await start(session)
     events = await asyncio.wait_for(settle(session), 10)
     assert super_task(events).task.prompt.endswith(f"{SINCE_SUPER}\n- Add D\n\n{FILES}\n- d.py")
+    # Up to the commit it reviews, not the base's; c1's own review asks up to the base's.
+    assert tree.asked_since == [("s0", "c1"), ("c1", None)]
+    assert tree.asked_changed == [("s0", "c1")]
     assert lane_of(session).planner.last_super_commit == "c1"
 
 
@@ -590,7 +594,7 @@ async def test_a_super_review_with_nothing_landed_since_the_last_lists_no_commit
     events = await asyncio.wait_for(settle(session), 10)
     prompt = super_task(events).task.prompt
     assert SINCE_SUPER not in prompt and FILES not in prompt
-    assert tree.asked_since == ["s1"]
+    assert tree.asked_since == tree.asked_changed == [("s1", tree.base)]
     assert lane_of(session).planner.last_super_commit == tree.base
 
 
@@ -1180,7 +1184,7 @@ async def test_a_review_with_nothing_landed_before_it_started_is_told_of_none() 
     [brief] = briefs
     assert brief.startswith("Review commit c1") and "Landed since" not in brief
     assert "Landed since" not in review_task(events).task.prompt
-    assert tree.asked_since == ["c1"]
+    assert tree.asked_since == [("c1", None)]
 
 
 async def test_a_batch_review_is_told_what_landed_since_its_last_commit() -> None:
@@ -1198,7 +1202,7 @@ async def test_a_batch_review_is_told_what_landed_since_its_last_commit() -> Non
     events = await asyncio.wait_for(settle(session), 10)
     batch_review = board(events)[-1]
     assert f"{LANDED}\n- Fix y\n\n" in batch_review.task.prompt
-    assert tree.asked_since == ["c1", "c3"]
+    assert tree.asked_since == [("c1", None), ("c3", None)]
 
 
 async def test_a_review_of_a_commit_samples_no_files() -> None:
@@ -1226,7 +1230,8 @@ async def test_a_review_whose_landed_commits_cannot_be_listed_as_it_starts_runs_
     assert "Landed since" not in review.task.prompt
     [brief] = briefs
     assert "diff of c1" in brief and "Landed since" not in brief
-    assert tree.asked_since == ["c1"]  # As it started: it's not asked as a review is queued.
+    # As it started, up to the base's head: it's not asked as a review is queued.
+    assert tree.asked_since == [("c1", None)]
     assert not _errored(events)
 
 

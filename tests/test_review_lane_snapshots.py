@@ -233,7 +233,7 @@ async def test_an_interrupted_reviews_queued_review_is_told_what_landed_since_as
     [brief] = briefs
     assert f"{LANDED}\n- Add B\n\n" in brief
     assert f"{LANDED}\n- Add B\n\n" in last_of(TasksChanged, events).tasks[-1].task.prompt
-    assert tree.asked_since == ["3"]
+    assert tree.asked_since == [("3", None)]
 
 
 async def test_an_interrupted_reviews_queued_review_is_published_only_in_the_snapshot() -> None:

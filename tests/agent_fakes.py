@@ -751,8 +751,10 @@ class FakeTree:
         self.setup: Setup | None = None
         self.failures: dict[str, Exception] = {}  # Method name -> what its next call raises.
         self.since: dict[str, list[str]] = {}  # Commit -> the subjects landed after it.
-        self.asked_since: list[str] = []  # The commits landed_since() was asked about.
+        # The (start, end) pairs landed_since() was asked for; no end is the base's head.
+        self.asked_since: list[tuple[str, str | None]] = []
         self.changed: dict[str, list[str]] = {}  # Commit -> the files changed after it.
+        self.asked_changed: list[tuple[str, str]] = []  # Those changed_files() was asked for.
         self.tracked: dict[str, list[str]] = {}  # Commit -> the files tracked at it.
 
     async def prepare(self, keep: bool) -> str:
@@ -788,11 +790,12 @@ class FakeTree:
         return "\n".join(f"diff of {commit}" for commit in commits)
 
     async def landed_since(self, commit: str, until: str | None = None) -> list[str]:
-        self.asked_since.append(commit)
+        self.asked_since.append((commit, until))
         self._fail("landed_since")
         return self.since.get(commit, [])
 
     async def changed_files(self, start: str, end: str) -> list[str]:
+        self.asked_changed.append((start, end))
         self._fail("changed_files")
         return self.changed.get(start, [])
 

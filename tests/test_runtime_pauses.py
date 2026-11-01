@@ -322,7 +322,7 @@ async def test_a_queued_review_run_again_after_an_outage_is_told_what_landed_by_
     landed = "Landed since (check your findings against these):"
     assert prompt.endswith(f"{landed}\n- Add B\n\ndiff of c1")
     assert f"{landed}\n- Add B\n- Add C\n\ndiff of c1" in again and again.count(landed) == 1
-    assert tree.asked_since == ["c1", "c1"]
+    assert tree.asked_since == [("c1", None), ("c1", None)]
     assert statuses_of(session) == ["completed", "completed"]
 
 
