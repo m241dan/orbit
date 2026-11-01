@@ -728,3 +728,28 @@ def test_a_draft_a_role_edited_ends_its_details_with_who_edited_it() -> None:
     assert str(task_label(draft, "5", "◠ ")).endswith("default · restricted")
     accepted = edited.model_copy(update={"status": "pending"})
     assert "edited" not in str(task_label(accepted, "5", "◠ "))
+
+
+def test_a_task_with_skills_ends_its_details_with_them_in_order() -> None:
+    task = TaskSpec(prompt="x", skills=("python", "application"))
+    row = str(task_label(TaskState(id="1", task=task), "1", "◠ "))
+    assert row == "1. ⏳ x\n      default · restricted · skills: python, application"
+
+
+def test_a_tasks_skills_come_after_the_rest_of_its_details() -> None:
+    task = TaskSpec(prompt="x", skills=("python",))
+    draft = TaskState(
+        id="5",
+        task=task,
+        status="draft",
+        proposed_by="planner",
+        edited=True,
+        usage=Usage(input_tokens=1_000, cost_usd=0.5),
+    )
+    assert str(task_label(draft, "5", "◠ ")).endswith(
+        "default · restricted · 1k tok · $0.50 · edited by planner · skills: python"
+    )
+
+
+def test_a_task_without_skills_says_nothing_of_them() -> None:
+    assert "skills" not in str(task_label(TaskState(id="1", task=TaskSpec(prompt="x")), "1", ""))

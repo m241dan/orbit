@@ -13,7 +13,7 @@ from orbit.tui.view.settings import (
     role_label,
     tool_access_choices,
 )
-from orbit.tui.view.task_editor import TaskChoices, TaskEditor, task_roles
+from orbit.tui.view.task_editor import TaskChoices, TaskEditor, skill_names, task_roles
 from orbit.tui.view.tasks import task_label
 
 FIX_PROMPT = (
@@ -31,11 +31,12 @@ AGENTS = (PLANNER, CODER, SECURITY)
 
 class View:
     """What the task editor shows, as it shows it, and what the user has typed in it: the
-    title and the prompt's body, set as a test types."""
+    title, the prompt's body and the skills, set as a test types."""
 
     def __init__(self) -> None:
         self.typed_title = ""
         self.typed_body = ""
+        self.typed_skills = ""
         self.selections: list[tuple[str, str]] = []
         self.typing: list[str] = []
         self.role: str | None = None
@@ -50,6 +51,9 @@ class View:
 
     def type_body(self) -> None:
         self.typing.append("body")
+
+    def type_skills(self) -> None:
+        self.typing.append("skills")
 
     def show_role(self, role: str) -> None:
         self.role = role
@@ -127,6 +131,7 @@ def editing(
     view, pickers = View(), pickers or Pickers()
     editor = TaskEditor(view, task, TaskChoices(settings, agents), pickers)
     view.typed_title, view.typed_body = editor.text
+    view.typed_skills = editor.skills_text
     return editor, view, pickers
 
 
@@ -163,14 +168,16 @@ def test_the_editor_builds_a_task_field_by_field() -> None:
     assert view.typing == ["title"]
     view.typed_title = "fix it"
 
-    # j moves past the prompt and the role to the model field; enter opens its picker.
-    for _ in range(3):
+    # j moves past the prompt, the role and the skills to the model field; enter opens its
+    # picker.
+    for _ in range(4):
         editor.move(1)
     assert editor.selected == "task-model"
     assert view.selections == [
         ("task-title", "task-prompt"),
         ("task-prompt", "task-role"),
-        ("task-role", "task-model"),
+        ("task-role", "task-skills"),
+        ("task-skills", "task-model"),
     ]
     editor.choose()
     assert (pickers.opened, pickers.current) == (["model"], 0)
@@ -188,7 +195,7 @@ def test_the_editor_builds_a_task_field_by_field() -> None:
     assert editor.selected == "task-title" and view.typing == ["title", "title"]
     assert view.selections[-1] == ("task-tools", "task-title")
     view.typed_title = "fix it!"
-    for _ in range(3):
+    for _ in range(4):
         editor.move(1)
     editor.insert()
     assert editor.selected == "task-title" and view.typing[-1] == "title"
@@ -207,19 +214,20 @@ def test_moving_stops_at_the_first_and_last_fields() -> None:
     editor, view, _ = editing(None)
     editor.move(-1)
     assert editor.selected == "task-title"
-    for _ in range(6):
+    for _ in range(7):
         editor.move(1)
     assert editor.selected == "task-effort"
     assert view.selections == [
         ("task-title", "task-title"),
         ("task-title", "task-prompt"),
         ("task-prompt", "task-role"),
-        ("task-role", "task-model"),
+        ("task-role", "task-skills"),
+        ("task-skills", "task-model"),
         ("task-model", "task-tools"),
         ("task-tools", "task-effort"),
         ("task-effort", "task-effort"),
     ]
-    for _ in range(5):
+    for _ in range(6):
         editor.move(-1)
     assert editor.selected == "task-title"
 
@@ -297,12 +305,12 @@ def test_a_fix_task_round_trips_through_the_editor_unchanged() -> None:
 
 def test_a_picker_closed_without_a_pick_keeps_the_value() -> None:
     editor, view, pickers = editing(None, Settings(model="sonnet"))
-    editor.move(3)
+    editor.move(4)
     editor.choose()
     pickers.close()
     assert editor.settings_shown[0] == "sonnet" and view.settings is None
     # Enter on the title opens no picker.
-    editor.move(-3)
+    editor.move(-4)
     editor.choose()
     assert pickers.opened == ["model"]
     view.typed_title = "x"
@@ -312,7 +320,7 @@ def test_a_picker_closed_without_a_pick_keeps_the_value() -> None:
 
 def test_the_model_picker_opens_on_nothing_for_a_custom_model() -> None:
     editor, _, pickers = editing(None, Settings(model="claude-custom-1"))
-    editor.move(3)
+    editor.move(4)
     editor.choose()
     assert pickers.opened == ["model"] and pickers.current is None
     pickers.close()
@@ -323,7 +331,7 @@ def test_the_model_picker_offers_the_choices_it_has_when_opened() -> None:
     editor, view, pickers = editing(None)
     view.typed_title = "Add a widget"
     pickers.choices = ("opus", "sonnet", "haiku")
-    editor.move(3)
+    editor.move(4)
     editor.choose()
     pickers.pick(3)
     editor.save()
@@ -333,7 +341,7 @@ def test_the_model_picker_offers_the_choices_it_has_when_opened() -> None:
 def test_a_model_pick_takes_the_model_labelled_when_choices_change_while_open() -> None:
     editor, view, pickers = editing(None, Settings(tool_access="full"))
     view.typed_title = "Add a widget"
-    editor.move(3)
+    editor.move(4)
     editor.choose()
     pickers.choices = ("haiku", "opus", "sonnet", "fable")
     pickers.pick(4)
@@ -345,7 +353,7 @@ def test_a_model_pick_takes_the_model_labelled_when_choices_change_while_open() 
 def test_a_tool_access_pick_changes_only_the_tool_access() -> None:
     editor, view, pickers = editing(None, Settings(model="opus", tool_access="off"))
     view.typed_title = "Add a widget"
-    editor.move(3)
+    editor.move(4)
     editor.choose()
     assert pickers.current == 1
     pickers.pick(2)
@@ -363,9 +371,10 @@ def test_the_editor_opens_the_pickers_it_is_given() -> None:
     editor, _, _ = editing(None, pickers=pickers)
     editor.move(2)
     editor.choose()
-    for _ in range(3):
+    for _ in range(4):
         editor.move(1)
         editor.choose()
+    # The skills, between the role and the model, are typed rather than picked.
     assert pickers.opened == ["role", "model", "tools", "effort"]
 
 
@@ -373,7 +382,7 @@ def test_editing_a_task_changes_what_is_typed_and_picked() -> None:
     editor, view, pickers = editing(TaskSpec(prompt="two"))
     assert editor.heading == "Edit task" and editor.text[0] == "two"
     view.typed_title = "two!"
-    for _ in range(4):
+    for _ in range(5):
         editor.move(1)
     editor.choose()
     pickers.pick(0)
@@ -411,19 +420,19 @@ def test_picking_a_role_fills_its_defaults_and_saves_it() -> None:
 def test_picking_a_role_keeps_the_fields_picked_in_this_edit() -> None:
     editor, view, pickers = editing(None)
     view.typed_title = "Audit it"
-    editor.move(3)
+    editor.move(4)
     editor.choose()
     pickers.pick(1)  # opus
-    editor.move(-1)
+    editor.move(-2)
     editor.choose()
     pickers.pick(1)  # security
     assert view.settings == ("opus", "restricted", "high")
 
     # The fields the last role filled take the next one's defaults.
-    editor.move(2)
+    editor.move(3)
     editor.choose()
     pickers.pick(0)  # off
-    editor.move(-2)
+    editor.move(-3)
     editor.choose()
     pickers.pick(0)  # coder
     assert view.settings == ("opus", "off", "unset")
@@ -434,10 +443,10 @@ def test_picking_a_role_keeps_the_fields_picked_in_this_edit() -> None:
 
 def test_a_role_keeps_a_picked_effort() -> None:
     editor, view, pickers = editing(None)
-    editor.move(5)
+    editor.move(6)
     editor.choose()
     pickers.pick(1)  # low
-    editor.move(-3)
+    editor.move(-4)
     editor.choose()
     pickers.pick(1)  # security
     assert view.settings == ("default", "restricted", "low")
@@ -446,7 +455,7 @@ def test_a_role_keeps_a_picked_effort() -> None:
 def test_an_effort_picked_is_saved_and_unset_saves_none() -> None:
     editor, view, pickers = editing(None)
     view.typed_title = "Think"
-    editor.move(5)
+    editor.move(6)
     assert editor.selected == "task-effort"
     editor.choose()
     assert (pickers.opened, pickers.current) == (["effort"], 0)
@@ -490,3 +499,76 @@ def test_without_a_catalog_no_roles_are_offered_and_the_role_shows_by_name() -> 
     editor.move(2)
     editor.choose()
     assert (pickers.roles, pickers.current) == ([], None)
+
+
+# The skills
+
+
+def test_an_edited_task_shows_its_skills_in_order_and_saves_them_as_typed() -> None:
+    editor, view, _ = editing(TaskSpec(prompt="Add it", skills=("python", "application")))
+    assert editor.skills_text == "python, application"
+    editor.save()
+    view.typed_skills = " python ,cpp,python "
+    editor.save()
+    assert view.dismissed == [
+        TaskSpec(prompt="Add it", skills=("python", "application")),
+        TaskSpec(prompt="Add it", skills=("python", "cpp")),
+    ]
+
+
+def test_a_new_task_starts_without_skills_and_saves_none_when_left_empty() -> None:
+    editor, view, _ = editing(None)
+    assert editor.skills_text == ""
+    view.typed_title = "Add it"
+    editor.save()
+    assert view.dismissed == [TaskSpec(prompt="Add it")]
+    assert view.dismissed[0] is not None and view.dismissed[0].skills == ()
+
+
+def test_the_skills_come_after_the_role_and_i_types_in_them() -> None:
+    editor, view, pickers = editing(None)
+    editor.move(3)
+    assert editor.selected == "task-skills"
+    editor.choose()
+    assert pickers.opened == []
+    editor.insert()
+    assert editor.selected == "task-skills" and view.typing == ["skills"]
+
+
+def test_skill_names_are_split_at_commas_trimmed_and_named_once_in_order() -> None:
+    assert skill_names(" python ,cpp,python ") == ("python", "cpp")
+    assert skill_names("python, application") == ("python", "application")
+
+
+def test_an_empty_or_blank_skills_field_names_no_skills() -> None:
+    assert skill_names("") == ()
+    assert skill_names("  , ,") == ()
+
+
+def test_an_editor_opened_again_on_a_new_task_whose_save_was_refused_starts_from_it() -> None:
+    typed = TaskSpec(
+        prompt="Audit it\n\nCarefully.",
+        settings=Settings(model="opus", effort="high"),
+        role="security",
+        skills=("pyton",),
+    )
+    editor, view, _ = editing(None, Settings(tool_access="off"))
+    editor.start_from(typed)
+    assert editor.heading == "New task"
+    assert (*editor.text, editor.skills_text, editor.role_shown) == (
+        "Audit it",
+        "Carefully.",
+        "pyton",
+        "security · security",
+    )
+    assert editor.settings_shown == ("opus", "restricted", "high")
+    view.typed_title, view.typed_body = editor.text
+    view.typed_skills = editor.skills_text
+    editor.save()
+    assert view.dismissed == [typed]
+
+
+def test_an_editor_opened_again_on_an_edited_task_whose_save_was_refused_starts_from_it() -> None:
+    editor, _, _ = editing(TaskSpec(prompt="one", skills=("python",)))
+    editor.start_from(TaskSpec(prompt="one!", skills=("pyton",)))
+    assert (editor.heading, editor.text, editor.skills_text) == ("Edit task", ("one!", ""), "pyton")

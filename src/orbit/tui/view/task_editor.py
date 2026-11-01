@@ -7,11 +7,20 @@ from typing import Protocol
 
 from orbit.protocol import AgentEntry, Settings, TaskSpec
 from orbit.tui.view.settings import effort_label, role_label, settings_fields
-from orbit.tui.view.tasks import join_prompt, split_prompt, task_editor_title
+from orbit.tui.view.tasks import join_prompt, skills_text, split_prompt, task_editor_title
 
-FIELDS = ("task-title", "task-prompt", "task-role", "task-model", "task-tools", "task-effort")
+FIELDS = (
+    "task-title",
+    "task-prompt",
+    "task-role",
+    "task-skills",
+    "task-model",
+    "task-tools",
+    "task-effort",
+)
 """The editor's fields, in the order j/k move through them."""
-TEXT_FIELDS = FIELDS[:2]
+TEXT_FIELDS = ("task-title", "task-prompt", "task-skills")
+"""The fields i types in."""
 
 
 @dataclass(frozen=True)
@@ -21,6 +30,14 @@ class TaskChoices:
 
     settings: Settings
     agents: tuple[AgentEntry, ...] = ()
+
+
+def skill_names(text: str) -> tuple[str, ...]:
+    """The skills, by name, the editor's Skills field holding ``text`` names: its
+    comma-separated names, without the spaces around them, each once, where first named; none
+    for an empty or blank field."""
+    names = (name.strip() for name in text.split(","))
+    return tuple(dict.fromkeys(name for name in names if name))
 
 
 def task_roles(agents: Iterable[AgentEntry]) -> tuple[AgentEntry, ...]:
@@ -78,7 +95,7 @@ class SettingsChooser(Protocol):
 
 class TaskEditorView(Protocol):
     """What the task editor shows and what the user has typed in it: the text fields, which
-    keep the title and the prompt's body as the user types them."""
+    keep the title, the prompt's body and the skills as the user types them."""
 
     @property
     def typed_title(self) -> str:
@@ -88,6 +105,11 @@ class TaskEditorView(Protocol):
     @property
     def typed_body(self) -> str:
         """The text in the prompt box."""
+        ...
+
+    @property
+    def typed_skills(self) -> str:
+        """The text in the skills field."""
         ...
 
     def select_field(self, previous: str, field: str) -> None:
@@ -101,6 +123,10 @@ class TaskEditorView(Protocol):
 
     def type_body(self) -> None:
         """Type in the prompt box."""
+        ...
+
+    def type_skills(self) -> None:
+        """Type in the skills field."""
         ...
 
     def show_role(self, role: str) -> None:
@@ -124,10 +150,11 @@ class TaskEditor:
     ``pickers``: it closes with the task saved, or none.
 
     The title is the prompt's first line and the prompt box its body, joined on save by
-    ``join_prompt``; a task without a title isn't saved. j/k select a field, i types in the
-    title or prompt, typing in the title when another field is selected, and enter on the
-    role, model, tools or effort opens its picker. Picking a role fills the model, tool access
-    and effort with its defaults, but those picked in this edit.
+    ``join_prompt``; a task without a title isn't saved. The skills are typed as
+    comma-separated names, read on save by :func:`skill_names`. j/k select a field, i types in
+    the title, prompt or skills, typing in the title when another field is selected, and enter
+    on the role, model, tools or effort opens its picker. Picking a role fills the model, tool
+    access and effort with its defaults, but those picked in this edit.
     """
 
     def __init__(
@@ -143,6 +170,7 @@ class TaskEditor:
         self._prompt = "" if task is None else task.prompt
         self.settings = new_task_settings(choices.settings) if task is None else task.settings
         self._role = TaskSpec.model_fields["role"].default if task is None else task.role
+        self._skills: tuple[str, ...] = () if task is None else task.skills
         self._roles = task_roles(choices.agents)
         self._picked: set[str] = set()  # The settings' fields picked in this edit.
         self._field = 0
@@ -151,6 +179,18 @@ class TaskEditor:
     def text(self) -> tuple[str, str]:
         """The title and the prompt's body the editor starts with."""
         return split_prompt(self._prompt)
+
+    @property
+    def skills_text(self) -> str:
+        """The skills field's text the editor starts with: the task's skills, in their order,
+        as ``python, application``; empty for none."""
+        return skills_text(self._skills)
+
+    def start_from(self, typed: TaskSpec) -> None:
+        """Start from ``typed``, what was saved from an earlier editor of the same task, or of
+        a new one, whose save was refused: its prompt, role, settings and skills."""
+        self._prompt, self._role, self._skills = typed.prompt, typed.role, typed.skills
+        self.settings = typed.settings
 
     @property
     def role_shown(self) -> str:
@@ -177,10 +217,13 @@ class TaskEditor:
         """Type in the selected text field, or in the title when another is selected."""
         if self.selected not in TEXT_FIELDS:
             self._select(0)
-        if self.selected == "task-title":
-            self._view.type_title()
-        else:
-            self._view.type_body()
+        match self.selected:
+            case "task-title":
+                self._view.type_title()
+            case "task-prompt":
+                self._view.type_body()
+            case _:
+                self._view.type_skills()
 
     def choose(self) -> None:
         """Open the picker of the field selected, if it's the role, the model, the tool access
@@ -196,11 +239,15 @@ class TaskEditor:
                 self._pickers.choose_effort(self._now, partial(self._pick, "effort"))
 
     def save(self) -> None:
-        """Close with the task, if it has a title; its body may be empty."""
-        title = self._view.typed_title
+        """Close with the task, if it has a title; its body and skills may be empty."""
+        view = self._view
+        title = view.typed_title
         if title.strip():
-            prompt = join_prompt(title, self._view.typed_body)
-            self._view.dismiss(TaskSpec(prompt=prompt, settings=self.settings, role=self._role))
+            prompt = join_prompt(title, view.typed_body)
+            skills = skill_names(view.typed_skills)
+            view.dismiss(
+                TaskSpec(prompt=prompt, settings=self.settings, role=self._role, skills=skills)
+            )
 
     def cancel(self) -> None:
         """Close with no task."""

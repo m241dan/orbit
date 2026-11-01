@@ -15,6 +15,7 @@ from orbit.tui.view.task_editor import SettingsChooser, TaskChoices, TaskEditor
 from orbit.tui.view.tasks import (
     TASK_EDITOR_HINT,
     TASK_PROMPT_TITLE,
+    TASK_SKILLS_TITLE,
     TASK_TITLE_PLACEHOLDER,
     TASK_TITLE_TITLE,
 )
@@ -38,14 +39,15 @@ class FieldBox(Static):
 
 
 class TaskEditorScreen(ModalScreen[TaskSpec | None]):
-    """Shows the :class:`TaskEditor` of one task's title, prompt, role, model, tool access and
-    effort. Dismisses with the task, or None.
+    """Shows the :class:`TaskEditor` of one task's title, prompt, role, skills, model, tool
+    access and effort, starting from ``typed``, if given, what an earlier editor of it saved
+    that was refused. Dismisses with the task, or None.
 
     Works like the main screen: j/k select a field, J/K scroll the prompt box from any field,
-    i types in the title or prompt (escape stops; enter stops in the title and adds a line in
-    the prompt), enter on role, model, tools or effort opens its picker, ctrl+s saves and
-    escape discards. The pickers are the app's ``pickers``, built once so they open instantly
-    and offering the app's current model choices.
+    i types in the title, prompt or skills (escape stops; enter stops in the title or skills
+    and adds a line in the prompt), enter on role, model, tools or effort opens its picker,
+    ctrl+s saves and escape discards. The pickers are the app's ``pickers``, built once so they
+    open instantly and offering the app's current model choices.
     """
 
     AUTO_FOCUS = None
@@ -76,9 +78,12 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
         task: TaskSpec | None,
         choices: TaskChoices,
         pickers: SettingsChooser,
+        typed: TaskSpec | None = None,
     ) -> None:
         super().__init__()
         self.editor = TaskEditor(self, task, choices, pickers)
+        if typed is not None:
+            self.editor.start_from(typed)
 
     @property
     def title_text(self) -> str:
@@ -95,13 +100,19 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
             yield PromptInput(value=title, placeholder=TASK_TITLE_PLACEHOLDER, id="task-title")
             yield PromptBox(body, id="task-prompt")
             yield FieldBox(ROLE_TITLE, self.editor.role_shown, id="task-role")
+            yield PromptInput(
+                value=self.editor.skills_text,
+                placeholder=TASK_TITLE_PLACEHOLDER,
+                id="task-skills",
+            )
             yield FieldBox(MODEL_TITLE, model, id="task-model")
             yield FieldBox(TOOL_ACCESS_TITLE, tools, id="task-tools")
             yield FieldBox(EFFORT_TITLE, effort, id="task-effort")
 
     def on_mount(self) -> None:
-        self.query_one(PromptInput).border_title = TASK_TITLE_TITLE
+        self.query_one("#task-title", PromptInput).border_title = TASK_TITLE_TITLE
         self.query_one(PromptBox).border_title = TASK_PROMPT_TITLE
+        self.query_one("#task-skills", PromptInput).border_title = TASK_SKILLS_TITLE
         self.query_one(f"#{self.editor.selected}").add_class("selected")
 
     def action_move(self, step: int) -> None:
@@ -123,18 +134,22 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
     def action_cancel(self) -> None:
         self.editor.cancel()
 
-    @on(Input.Submitted, "#task-title")
+    @on(Input.Submitted, "#task-title, #task-skills")
     def _stop_typing(self, event: Input.Submitted) -> None:
         event.stop()
-        self.query_one(PromptInput).action_normal_mode()
+        self.query_one(f"#{event.input.id}", PromptInput).action_normal_mode()
 
     @property
     def typed_title(self) -> str:
-        return self.query_one(PromptInput).value
+        return self.query_one("#task-title", PromptInput).value
 
     @property
     def typed_body(self) -> str:
         return self.query_one(PromptBox).text
+
+    @property
+    def typed_skills(self) -> str:
+        return self.query_one("#task-skills", PromptInput).value
 
     def select_field(self, previous: str, field: str) -> None:
         mark_selected(self.query_one(f"#{previous}"), False)
@@ -143,10 +158,13 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
         selected.scroll_visible()
 
     def type_title(self) -> None:
-        self.query_one(PromptInput).enter_insert_mode()
+        self.query_one("#task-title", PromptInput).enter_insert_mode()
 
     def type_body(self) -> None:
         self.query_one(PromptBox).enter_insert_mode()
+
+    def type_skills(self) -> None:
+        self.query_one("#task-skills", PromptInput).enter_insert_mode()
 
     def show_role(self, role: str) -> None:
         self.query_one("#task-role", FieldBox).update(role)

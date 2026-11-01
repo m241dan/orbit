@@ -16,6 +16,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.layers import Layer
+from orbit.agent.domain.refusals import Refused
+from orbit.protocol import UNKNOWN
 
 SKILL_FILE = "SKILL.md"
 """The file in a skill's folder that opens it: its front matter, then its text."""
@@ -48,7 +50,7 @@ CATALOGUE_HEADING = "## Skills you can give tasks"
 """The heading over the skills an agent that proposes tasks can give them."""
 
 TASK_SKILLS = "Task skills"
-"""What the refusal of a skill a proposed task names calls the task's skills."""
+"""What the refusal of a skill a task names calls the task's skills."""
 
 OUTSIDE_PROJECT = "paths are relative to the project root and stay inside it."
 """Why a ``[[skills]]`` entry's path that's empty, holds a NUL byte, is absolute or leaves the
@@ -351,13 +353,29 @@ def skill_catalogue(library: SkillLibrary) -> str:
 
 def proposed_skills(arguments: Mapping[str, Any], library: SkillLibrary) -> tuple[str, ...] | str:
     """The skills, by name, an agent proposing a task with ``arguments`` gives it, each once,
-    where first named, none if they name none; or why they're refused: the first they name that
-    isn't in the ``library``, as :func:`unknown_skill` says under :data:`TASK_SKILLS`."""
+    where first named, none if they name none; or why they're refused, as
+    :func:`_task_skills_refusal` says."""
     names = [str(name) for name in arguments.get("skills") or ()]
-    unknown = next((name for name in names if name not in library.skills), None)
-    if unknown is not None:
-        return unknown_skill(TASK_SKILLS, unknown, library)
-    return tuple(dict.fromkeys(names))
+    refusal = _task_skills_refusal(names, library)
+    return tuple(dict.fromkeys(names)) if refusal is None else refusal
+
+
+def check_task_skills(skills: Sequence[str], library: SkillLibrary) -> None:
+    """Refuse a task the user adds or edits naming ``skills``, unless each is in the
+    ``library``.
+
+    Raises :class:`Refused`, coded ``unknown``, saying why as :func:`_task_skills_refusal` does.
+    """
+    refusal = _task_skills_refusal(skills, library)
+    if refusal is not None:
+        raise Refused(UNKNOWN, refusal)
+
+
+def _task_skills_refusal(skills: Sequence[str], library: SkillLibrary) -> str | None:
+    """Why a task naming ``skills`` is refused: the first of them that isn't in the
+    ``library``, as :func:`unknown_skill` says under :data:`TASK_SKILLS`; None if each is."""
+    unknown = next((name for name in skills if name not in library.skills), None)
+    return None if unknown is None else unknown_skill(TASK_SKILLS, unknown, library)
 
 
 def _where_mapped(mappings: Sequence[SkillMapping]) -> tuple[str, ...]:

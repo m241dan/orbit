@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.layers import PACKAGE, Layer
+from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.skills import (
     NO_SKILLS,
     FrontMatter,
@@ -18,6 +19,7 @@ from orbit.agent.domain.skills import (
     SkillMapping,
     check_role_skills,
     check_skill_mappings,
+    check_task_skills,
     delivered_skills,
     given_skill_file,
     given_skills,
@@ -724,6 +726,24 @@ def test_a_proposals_first_unknown_skill_is_refused_listing_the_skills_in_name_o
     assert proposed_skills(arguments, DELIVERING) == (
         "Task skills names pyton, which isn't a skill; the skills are application, code-style,"
         " cpp, python, security."
+    )
+
+
+# The skills a task the user adds or edits names
+
+
+def test_a_task_naming_skills_in_the_library_or_none_isnt_refused() -> None:
+    check_task_skills(("python", "application"), DELIVERING)
+    check_task_skills((), DELIVERING)
+
+
+def test_a_tasks_first_unknown_skill_is_refused_as_unknown_listing_the_skills() -> None:
+    with pytest.raises(Refused) as refused:
+        check_task_skills(("python", "pyton", "rust"), DELIVERING)
+    assert (refused.value.code, refused.value.message) == (
+        "unknown",
+        "Task skills names pyton, which isn't a skill; the skills are application, code-style,"
+        " cpp, python, security.",
     )
 
 

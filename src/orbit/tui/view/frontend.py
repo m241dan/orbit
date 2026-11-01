@@ -120,9 +120,16 @@ class AppView(Protocol):
         """Ask ``title`` with ``message``, ``yes`` naming what ``y`` does, and await ``then``
         only if the user answers yes."""
 
-    def edit_task(self, task: TaskSpec | None, choices: TaskChoices, saved: Saved) -> None:
+    def edit_task(
+        self,
+        task: TaskSpec | None,
+        choices: TaskChoices,
+        saved: Saved,
+        typed: TaskSpec | None = None,
+    ) -> None:
         """Open the task editor on ``task``, or a new one, offering ``choices``, the settings
-        and agents now, passing on what it saves to ``saved``."""
+        and agents now, starting from ``typed``, if given, what an earlier editor of it saved
+        that was refused, and passing on what it saves to ``saved``."""
 
     def label_triggers(self, labels: dict[str, str | None]) -> None:
         """Label each trigger's key with its label in ``labels``, hiding those with none."""
@@ -578,28 +585,48 @@ class Frontend:
         with action("page_history"):
             await self.pager.earlier()
 
-    def edit_task(self, current: TaskState | None) -> None:
-        """Open the editor on the task ``current``, or a new one, offering the settings shown,
-        those of the role the prompt talks to, and the agents of the workspace this frontend is
-        on, as the catalog lists them, unless it can't be edited, which the user is told; the
-        list changes when the backend reports the new task list."""
+    def edit_task(self, current: TaskState | None, typed: TaskSpec | None = None) -> None:
+        """Open the editor on the task ``current``, or a new one, starting from ``typed``, if
+        given, what an earlier editor of it saved that was refused, offering the settings
+        shown, those of the role the prompt talks to, and the agents of the workspace this
+        frontend is on, as the catalog lists them, unless it can't be edited, which the user is
+        told; the list changes when the backend reports the new task list."""
         refusal = None if current is None else edit_refusal(current)
         if refusal is not None:
             self._app.warn(refusal)
             return
 
         async def saved(result: TaskSpec | None) -> None:
-            if result is None:
-                return
-            if current is None:
-                await self._act("add_task", AddTask(task=result))
-            else:
-                await self._act("edit_task", EditTask(task_id=current.id, task=result))
+            if result is not None:
+                await self._save_task(current, result)
 
         task = None if current is None else current.task
         agents = self.navigation.catalog.agents(self.navigation.place.workspace)
         choices = TaskChoices(self.router.seats.settings or Settings(), agents)
-        self._app.edit_task(task, choices, saved)
+        self._app.edit_task(task, choices, saved, typed)
+
+    async def _save_task(self, current: TaskState | None, task: TaskSpec) -> None:
+        """Send ``task``, saved in the editor of ``current``, to replace it, or of a new task, to
+        be added; refused or not sent, the editor opens again on it, as :meth:`_reopen` says."""
+        name: ActionName
+        command: AddTask | EditTask
+        if current is None:
+            name, command = "add_task", AddTask(task=task)
+        else:
+            name, command = "edit_task", EditTask(task_id=current.id, task=task)
+        with action(name):
+            await self.send(command, Awaited(refused=lambda: self._reopen(current, task)))
+
+    def _reopen(self, current: TaskState | None, typed: TaskSpec) -> None:
+        """Open the editor again on ``typed``, saved in the editor of ``current``, or of a new
+        task, but refused: for a new task again, or for ``current`` as the list has it now,
+        unless it's left the list."""
+        if current is None:
+            self.edit_task(None, typed)
+            return
+        now = self._parts.tasks.find(current.id)
+        if now is not None:
+            self.edit_task(now, typed)
 
     def list_sessions(self) -> None:
         """Show the session picker, the session viewed first."""

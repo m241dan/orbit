@@ -534,14 +534,17 @@ is refused with `unknown`: `No task with id 't9'.`
 
 - `AddTask(task)` appends `task`, a `TaskSpec` with its `prompt`, `settings`, `role` and
   `skills`, to the list as a pending task, with the next id. It's refused with `not_configured`
-  for a disabled role: `coder is disabled in this project's configuration.`, and with `invalid`
+  for a disabled role: `coder is disabled in this project's configuration.`, with `invalid`
   for a model its role's runtime doesn't take, naming the runtime's aliases: `coder's model
   "sonet" doesn't resolve: the runtime claude takes the aliases fable, opus, sonnet, haiku or a
-  full id starting with "claude-".`
+  full id starting with "claude-".`, and with `unknown` for a skill that isn't one, naming the
+  first such and listing the skills in name order: `Task skills names pyton, which isn't a skill;
+  the skills are application, code-style, cpp, python.`
 - `EditTask(task_id, task)` replaces task `task_id`'s `TaskSpec` with `task` and makes it pending
   again, its attempts and the reason it last ended cleared; an edited task in a review batch has
   to finish again before the batch does. It's refused with `not_configured` for a disabled role,
-  and with `invalid` for a model its role's runtime doesn't take, as `AddTask` is, and with
+  with `invalid` for a model its role's runtime doesn't take and with `unknown` for a skill that
+  isn't one, as `AddTask` is, and with
   `busy` while the task runs or is
   verified (`Task 't3' can't be edited while it runs.`), and with `invalid` for a review orbit
   queued itself, whose batch is spent: `Reviews can't be edited; remove it instead.`

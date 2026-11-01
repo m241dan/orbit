@@ -240,8 +240,14 @@ class OrbitApp(App[None], inherit_bindings=False):
     ) -> None:
         confirm(self.push_screen, title, message, yes, then)
 
-    def edit_task(self, task: TaskSpec | None, choices: TaskChoices, saved: Saved) -> None:
-        self.push_screen(TaskEditorScreen(task, choices, self._pickers.model), saved)
+    def edit_task(
+        self,
+        task: TaskSpec | None,
+        choices: TaskChoices,
+        saved: Saved,
+        typed: TaskSpec | None = None,
+    ) -> None:
+        self.push_screen(TaskEditorScreen(task, choices, self._pickers.model, typed), saved)
 
     def show_spending(self, text: str) -> None:
         self.push_screen(TextScreen(SPENDING_TITLE, SPENDING_HINT, text))

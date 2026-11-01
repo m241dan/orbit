@@ -24,6 +24,7 @@ from orbit.tui.view.settings import settings_fields
 TASK_EDITOR_HINT = "j/k move · J/K scroll · i type · enter choose · ctrl+s save · esc cancel"
 TASK_TITLE_TITLE = "Title"
 TASK_PROMPT_TITLE = "Prompt"
+TASK_SKILLS_TITLE = "Skills"
 TASK_TITLE_PLACEHOLDER = "Press i to type"
 REASON_HINT = "j/k scroll · y copy · esc close"
 NEW_TASK_LABEL = "+ new task"
@@ -147,8 +148,8 @@ def next_lane(lane: str | None, present: Sequence[str]) -> str | None:
 
 def _details(state: TaskState, notes: RowNotes) -> str:
     """What a row says under its title: the settings, the fix it's on, what it spent, or that
-    that's unknown if ``notes`` say so, and that it's waiting for a coder, if pending and they
-    say so, and that a role edited it, if it's a draft it did."""
+    that's unknown if ``notes`` say so, that it's waiting for a coder, if pending and they say
+    so, that a role edited it, if it's a draft it did, and its skills, if it has any."""
     details = " · ".join(settings_fields(state.task.settings))
     if state.attempt:
         details += f" · fix {state.attempt}/{state.max_attempts}"
@@ -157,7 +158,18 @@ def _details(state: TaskState, notes: RowNotes) -> str:
         details += f" · {notes.waiting}"
     if state.edited and state.status == "draft":
         details += f" · edited by {state.proposed_by}"
-    return details
+    return details + _skills(state.task.skills)
+
+
+def _skills(skills: Sequence[str]) -> str:
+    """What a row's details end with for its task's ``skills``: ``· skills: python,
+    application``, in their order; nothing for none."""
+    return f" · skills: {skills_text(skills)}" if skills else ""
+
+
+def skills_text(skills: Sequence[str]) -> str:
+    """``skills``, by name, in their order, as ``python, application``; empty for none."""
+    return ", ".join(skills)
 
 
 def _spent(usage: Usage, unknown: bool) -> str:

@@ -299,13 +299,16 @@ The Conversation window's title ends with the open session's name, cut to 30 cha
 
 ### Tasks
 
-The task list queues prompts to run later. Each task has its own prompt, role, model, tool access
-and effort, set in the task editor's six fields: **Title**, the prompt's first line, which is what
-the task list shows; **Prompt**, the rest of it, in a box that scrolls; **Role**, the role whose
-agent takes the task, picked among the roles enabled in the session's workspace that take tasks
+The task list queues prompts to run later. Each task has its own prompt, role, skills, model, tool
+access and effort, set in the task editor's seven fields: **Title**, the prompt's first line, which
+is what the task list shows; **Prompt**, the rest of it, in a box that scrolls; **Role**, the role
+whose agent takes the task, picked among the roles enabled in the session's workspace that take tasks
 (those that aren't conversational), each shown with its lane (`Coder · work`) and a personal role marked so
 (`helper · helper · personal`; see [Your personal roles](#your-personal-roles)), and `coder` for a
-new task; **Model**, picked as `ctrl+o` picks one (see
+new task; **Skills**, the skills the task's agent gets beyond its role's (see [Skills](#skills)),
+typed on one line as comma-separated names (`python, application`), where the spaces around a name
+are ignored, a name typed twice counts once and an empty field names none, as a new task starts;
+**Model**, picked as `ctrl+o` picks one (see
 [Models and their aliases](#models-and-their-aliases));
 **Tool access**; and **Effort**: unset, `low`, `medium`, `high`, `xhigh` or `max`, where unset
 leaves it to the role's (see `effort` under
@@ -315,12 +318,16 @@ unset, whatever that role's effort. Picking a role sets the model, tool
 access and effort to that role's defaults, as the session's workspace configures it, except those
 you've already picked in this edit. `j`/`k`
 pick a field, `J`/`K` scroll the prompt box one line at a time (whichever field is selected), `i`
-types in the title or prompt (`esc` stops; `enter` stops in the title and adds a line in the
-prompt), `enter` on role, model, tools or effort opens a picker, `ctrl+s` saves (from anywhere,
-even while typing) and `esc` discards. A task needs a title; the prompt may be empty, and its
-model must be one its role's runtime takes, or saving it is refused, naming the runtime's
-aliases. `enter` on a running or verifying task, or on a review orbit queued, only shows why it
-can't be edited.
+types in the title, prompt or skills (`esc` stops; `enter` stops in the title or skills and adds a
+line in the prompt), `enter` on role, model, tools or effort opens a picker, `ctrl+s` saves (from
+anywhere, even while typing) and `esc` discards. A task needs a title; the prompt may be empty.
+Its model must be one its role's runtime takes, or saving it is refused, naming the runtime's
+aliases, and each of its skills must be a skill, or saving it is refused, naming the first that
+isn't and listing the skills (`Task skills names pyton, which isn't a skill; the skills are
+application, code-style, …`). A refused save changes nothing: the conversation says why, and the
+editor opens again on what you saved, to fix and save again, unless the task has since left the
+list or can no longer be edited. `enter` on a running or verifying task, or on a review orbit
+queued, only shows why it can't be edited.
 
 The task list belongs to the open session, which orbit saves as you go (see [Sessions](#sessions)).
 It keeps the topmost running or verifying task in view, scrolling just enough to show it with the
@@ -331,6 +338,10 @@ leaves the list still held, with its highlight where it was; `esc` again, with t
 selected, lets go: the list scrolls to the running task at once and follows it again. Switching
 sessions lets go too, leaving list mode if the list was active.
 [docs/task-list.md](docs/task-list.md) records the requirements.
+
+Under a task's title, its row's dim details line shows its model and tool access, then what else
+applies, and ends with its skills, if it names any, in order (`opus · full (auto-approved) · skills:
+python, application`); a task without skills shows nothing for them.
 
 A task whose role runs in a lane other than `work` shows the lane as a dim tag after its title
 (`2. ⏳ Review the change  review`); a coder task shows none (see `lane` under
@@ -1648,7 +1659,8 @@ heading, and last a line for each `[[skills]]` entry saying where its skills app
 name skills of its own, its `skills` (see
 [docs/protocol.md](docs/protocol.md#tasks-settings-and-stopping-work)): its agent is given its
 role's skills, then the task's, each once, in place of the entries', with no lines saying where
-they apply. Under the entries above, the planner, whose role gives it `code-style`, is told:
+they apply; the task editor's **Skills** field sets them (see [Tasks](#tasks)). Under the entries
+above, the planner, whose role gives it `code-style`, is told:
 
 ```markdown
 ## Skills

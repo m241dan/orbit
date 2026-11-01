@@ -107,6 +107,7 @@ class AppShell:
         self.warnings: list[str] = []
         self.questions: list[tuple[str, str, str, Callable[[], Awaitable[object]]]] = []
         self.editors: list[tuple[TaskSpec | None, TaskChoices, Saved]] = []
+        self.typed: list[TaskSpec | None] = []  # What each editor opened starts from, if any.
         self.spendings: list[str] = []
         self.labels: dict[str, str | None] = {}
         self.selected: set[str] = set()
@@ -130,8 +131,15 @@ class AppShell:
     ) -> None:
         self.questions.append((title, message, yes, then))
 
-    def edit_task(self, task: TaskSpec | None, choices: TaskChoices, saved: Saved) -> None:
+    def edit_task(
+        self,
+        task: TaskSpec | None,
+        choices: TaskChoices,
+        saved: Saved,
+        typed: TaskSpec | None = None,
+    ) -> None:
         self.editors.append((task, choices, saved))
+        self.typed.append(typed)
 
     def show_spending(self, text: str) -> None:
         self.spendings.append(text)

@@ -23,6 +23,7 @@ from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.catalog import trigger_names
 from orbit.agent.domain.refusals import Refused, unknown
 from orbit.agent.domain.roles import Role, check_enabled, check_model, check_settings
+from orbit.agent.domain.skills import check_task_skills
 from orbit.protocol import (
     CONFIGURE_CHECKS,
     INVALID,
@@ -101,8 +102,8 @@ class WorkCommands:
     run in the span current as it was queued, its own command's, so what it starts links
     there. A task added, accepted or edited starts at once if its lane starts by itself; one
     added, accepted or edited into a disabled role is refused, as is a trigger whose role is
-    disabled, and one added or edited with a model its role's runtime doesn't take, as are a
-    conversational role's settings."""
+    disabled, one added or edited with a model its role's runtime doesn't take, as are a
+    conversational role's settings, and one added or edited naming a skill that isn't one."""
 
     def __init__(self, parts: CommandParts) -> None:
         self._parts = parts
@@ -254,11 +255,20 @@ class WorkCommands:
             return
         check_settings(role, runtime, settings, desk.agents.launcher(role).capabilities)
 
+    def _check_skills(self, task: TaskSpec) -> None:
+        """Refuse ``task`` unless each of its skills is one of the agents' skills, as
+        :func:`~orbit.agent.domain.skills.check_task_skills` says; nothing is refused without
+        agents."""
+        desk = self._parts.desk
+        if desk is not None:
+            check_task_skills(task.skills, desk.agents.skill_library)
+
     async def _handle_tasks(self, command: AddTask | RunTasks) -> None:
         match command:
             case AddTask(task=task):
                 check_enabled(self._roles(), task.role)
                 self._check_model(task.role, task.settings)
+                self._check_skills(task)
                 await self._parts.tasks.change(lambda board: board.add(task))
                 self._parts.lanes.kick_for(task.role)
             case RunTasks():
@@ -292,11 +302,13 @@ class WorkCommands:
         self._parts.lanes.kick_for(state.task.role)
 
     async def _edit(self, task_id: str, task: TaskSpec) -> None:
-        """Edit a task, if the board allows it, its new role isn't disabled and that role's
-        runtime takes its model, and start it if its lane starts by itself. An edited task in a
-        review batch has to finish again before the batch does."""
+        """Edit a task, if the board allows it, its new role isn't disabled, that role's
+        runtime takes its model and each of its skills is one, and start it if its lane starts
+        by itself. An edited task in a review batch has to finish again before the batch
+        does."""
         check_enabled(self._roles(), task.role)
         self._check_model(task.role, task.settings)
+        self._check_skills(task)
         lane = self._parts.lane
 
         def edit(board: TaskBoard) -> TaskState:

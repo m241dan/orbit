@@ -2,8 +2,10 @@
 tasks announced, the wait for a coder, and what running, reviewing and editing send."""
 
 from orbit.protocol import (
+    BUSY,
     NOT_CONFIGURED,
     SUPER_REVIEW,
+    UNKNOWN,
     Activity,
     AddTask,
     AgentEntry,
@@ -168,6 +170,79 @@ async def test_the_editor_opens_with_the_settings_shown_and_its_task_is_saved() 
         AddTask(task=TaskSpec(prompt="new")),
         EditTask(task_id="2", task=TaskSpec(prompt="changed")),
     ]
+
+
+PYTON = "Task skills names pyton, which isn't a skill; the skills are python."
+"""Why a task naming the skill ``pyton`` is refused."""
+
+
+async def test_a_refused_new_task_shows_why_and_opens_the_editor_again_on_what_was_typed() -> None:
+    shell = Shell()
+    shell.frontend.edit_task(None)
+    [(_, choices, add)] = shell.app.editors
+    typed = TaskSpec(prompt="Add it", skills=("pyton",))
+    await add(typed)
+    await shell.refuse(UNKNOWN, PYTON)
+    assert shell.entries() == [(PYTON, "error")]
+    assert shell.app.editors[1][:2] == (None, choices)
+    assert shell.app.typed == [None, typed]
+    # Saving it again adds it as a new task.
+    await shell.app.editors[1][2](TaskSpec(prompt="Add it", skills=("python",)))
+    assert shell.wire.commands[-1] == AddTask(task=TaskSpec(prompt="Add it", skills=("python",)))
+
+
+async def test_a_refused_edit_opens_the_editor_again_on_what_was_typed_for_the_task_now() -> None:
+    shell = Shell()
+    pending = TaskState(id="2", task=TaskSpec(prompt="go", skills=("python",)))
+    await shell.feed(TasksChanged(tasks=(pending,)))
+    shell.frontend.edit_task(pending)
+    [(_, _, edit)] = shell.app.editors
+    typed = TaskSpec(prompt="go!", skills=("pyton",))
+    await edit(typed)
+    renamed = pending.model_copy(update={"task": TaskSpec(prompt="went", skills=("python",))})
+    await shell.feed(TasksChanged(tasks=(renamed,)))
+    await shell.refuse(UNKNOWN, PYTON)
+    assert shell.app.editors[1][0] == renamed.task
+    assert shell.app.typed == [None, typed]
+    await shell.app.editors[1][2](typed)
+    assert shell.wire.commands == [EditTask(task_id="2", task=typed)] * 2
+
+
+async def test_a_refused_edit_of_a_task_now_running_says_so_rather_than_opening_the_editor() -> (
+    None
+):
+    shell = Shell()
+    pending = TaskState(id="2", task=TaskSpec(prompt="go"))
+    await shell.feed(TasksChanged(tasks=(pending,)))
+    shell.frontend.edit_task(pending)
+    [(_, _, edit)] = shell.app.editors
+    await edit(TaskSpec(prompt="go!"))
+    await shell.feed(TasksChanged(tasks=(pending.model_copy(update={"status": "running"}),)))
+    await shell.refuse(BUSY, "Task '2' can't be edited while it runs.")
+    assert shell.app.warnings == ["Task '2' can't be edited while it runs."]
+    assert len(shell.app.editors) == 1
+
+
+async def test_a_refused_edit_of_a_task_gone_from_the_list_opens_no_editor() -> None:
+    shell = Shell()
+    pending = TaskState(id="2", task=TaskSpec(prompt="go"))
+    await shell.feed(TasksChanged(tasks=(pending,)))
+    shell.frontend.edit_task(pending)
+    [(_, _, edit)] = shell.app.editors
+    await edit(TaskSpec(prompt="go!"))
+    await shell.feed(TasksChanged(tasks=()))
+    await shell.refuse(UNKNOWN, "No task with id '2'.")
+    assert shell.entries() == [("No task with id '2'.", "error")]
+    assert (len(shell.app.editors), shell.app.warnings) == (1, [])
+
+
+async def test_an_accepted_save_opens_no_editor() -> None:
+    shell = Shell()
+    shell.frontend.edit_task(None)
+    [(_, _, add)] = shell.app.editors
+    await add(TaskSpec(prompt="Add it", skills=("python",)))
+    await shell.accept_last()
+    assert len(shell.app.editors) == 1
 
 
 async def test_the_editor_opens_with_the_default_settings_before_any_are_reported() -> None:
