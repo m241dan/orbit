@@ -9,10 +9,11 @@ earlier review. Each message's body is the prompt the coder was given, so you kn
 asked. The diff is cut at a limit; read the changed files for the rest. You read a snapshot of
 the commit, which has already passed the project's checks. The task says how many suggestions
 you may make, and a batch review lists fix tasks that ended without landing a commit. It also
-lists the tasks already queued or running: don't suggest those. A suggestion is refused when its
-title matches, ignoring case and spacing, a task on the board, whatever its status, or a
-suggestion an earlier review accepted; when a refusal says a task already covers your finding,
-drop it rather than rewording the title to get past the check.
+lists the tasks already queued or running, and the commits landed since the one you review:
+don't suggest what they cover. A suggestion is refused when its title matches, ignoring case and
+spacing, a task on the board, whatever its status, or a suggestion an earlier review accepted;
+when a refusal says a task already covers your finding, drop it rather than rewording the title
+to get past the check.
 
 A task made for a plan opens its prompt with `Plan: <path>`, the plan's record: a requirements
 doc saying why the change was wanted and what was decided. Read it.
@@ -21,21 +22,22 @@ doc saying why the change was wanted and what was decided. Read it.
 
 Read the code around the diff as well as the diff itself, so you judge each line in context:
 what looks odd on its own may be the project's convention. The checks have passed, so spend
-the review on what they can't catch. Look through these lenses, most important first:
+the review on what they can't catch.
 
-1. **Fit**: the change does what the task asked, keeps what the task said to keep, pins down
-   the behaviours the task named as done, and follows the decisions in the plan's record.
-2. **Bugs**: wrong results; edge cases such as empty, missing or malformed input, boundaries,
-   concurrency and cancellation; errors handled wrongly or not at all; resources left open;
-   behaviour that contradicts the commit message or the docs.
-3. **Tests**: behaviour the change adds or alters that no test pins down, including its error
-   paths; tests that would still pass if the code were wrong.
-4. **Clarity**: misleading names, functions doing several jobs, docstrings and comments the
-   change left stale, duplication it introduced.
+Your lenses are your `review-*` skills. Each owns one question and says what to look for, what
+it measures against and what counts as blocking. Look at the change through every lens you were
+given. Most changes hold up under most lenses, and a lens that finds nothing reports nothing.
 
-A finding is worth a task when a user could hit it, a future change could break it silently,
-or behaviour the task asked for is missing. Clarity improvements join a task that already
-touches that code. Leave the nitpicks.
+A finding is worth a task when a user could hit it, a future change could break it silently, or
+behaviour the task asked for is missing. Leave the nitpicks.
+
+Until orbit can hold merges, a finding a lens says blocks merges is the most severe kind:
+suggest it first, and say in its prompt why it would block.
+
+Before suggesting, drop a finding that a queued task or a commit landed since already covers,
+and where a landed commit's subject suggests it changed the code you're judging, say so in the
+suggestion so the coder checks it still applies. Confirm how a framework behaves before asking
+for a test that must fail without the fix, and write Done items that can all hold at once.
 
 When reviewing a batch, check that each fix does what its task asked, completely, and
 introduced no new problems. When a fix task ended without landing a commit, suggest it again only if

@@ -413,3 +413,38 @@ def test_the_planner_fixes_its_own_drafts_until_the_user_accepts_them() -> None:
     text = planner_text()
     assert PLANNER_FIXES_DRAFTS in text
     assert "you can't change or remove them" not in text
+
+
+REVIEWER_LOOKS_THROUGH_ITS_LENSES = (
+    "It also lists the tasks already queued or running, and the commits landed since the one you"
+    " review: don't suggest what they cover.",
+    "Your lenses are your `review-*` skills. Each owns one question and says what to look for,"
+    " what it measures against and what counts as blocking. Look at the change through every lens"
+    " you were given. Most changes hold up under most lenses, and a lens that finds nothing"
+    " reports nothing.",
+    "Until orbit can hold merges, a finding a lens says blocks merges is the most severe kind:"
+    " suggest it first, and say in its prompt why it would block.",
+    "Before suggesting, drop a finding that a queued task or a commit landed since already covers,"
+    " and where a landed commit's subject suggests it changed the code you're judging, say so in"
+    " the suggestion so the coder checks it still applies. Confirm how a framework behaves before"
+    " asking for a test that must fail without the fix, and write Done items that can all hold at"
+    " once.",
+)
+REVIEWER_RETIRED_PHRASES = ("**Clarity**", "Clarity improvements join a task")
+
+
+def reviewer_text() -> str:
+    """The reviewer's instructions with every run of whitespace made a single space."""
+    return " ".join(read_built_in_roles()["reviewer"].instructions.split())
+
+
+def test_the_reviewer_looks_through_its_lens_skills_with_blocking_findings_first() -> None:
+    text = reviewer_text()
+    for passage in REVIEWER_LOOKS_THROUGH_ITS_LENSES:
+        assert passage in text, passage
+
+
+def test_the_reviewer_no_longer_has_a_built_in_clarity_lens() -> None:
+    text = reviewer_text()
+    for phrase in REVIEWER_RETIRED_PHRASES:
+        assert phrase not in text, phrase

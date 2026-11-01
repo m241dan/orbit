@@ -1101,8 +1101,12 @@ Every commit from one of your tasks that merged into the base is reviewed in the
 the next task runs (one that couldn't be merged isn't, and doesn't count toward a super review). Orbit
 queues a `reviewer` task (it shows in the task list) carrying the commit's diff, and runs it in a
 read-only snapshot of that commit. The reviewer judges the change against its task's prompt and,
-when the prompt opens with `Plan: <path>`, against that plan's record, then looks for bugs, gaps
-in tests and unclear code. It suggests follow-ups with `suggest_task` (a title
+when the prompt opens with `Plan: <path>`, against that plan's record, looking through the lens
+skills its role gives it (by default `review-fit`, `review-bugs`, `review-tests`, `review-logic`,
+`review-security` and `review-performance`, each saying what it looks for and what blocks; see
+[Skills](#skills)) rather than a fixed list of its own. Until orbit can hold merges, a finding a
+lens says blocks merges is suggested first, its prompt saying why it would block. It suggests
+follow-ups with `suggest_task` (a title
 is required, and kept to one line): each becomes a task at the end of the queue (with the `coder` role's default settings), and once the review ends
 orbit runs them, unless you pressed `ctrl+s` since your last `ctrl+r`.
 
