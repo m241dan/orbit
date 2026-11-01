@@ -6,6 +6,7 @@ import pytest
 
 from orbit import __version__
 from orbit.agent import ControlPlane, HostParts, WorkspaceHost, WorkspaceOwner
+from orbit.agent.application.clones import Clones
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.application.outbox import SEQ_BLOCK
 from orbit.agent.application.work_turns import WorkTurns
@@ -156,3 +157,45 @@ async def test_a_host_whose_close_is_cancelled_still_lets_go_of_its_lock_and_end
         await closing
     assert store.released == [session]
     await asyncio.wait_for(drained(connection), 5)  # Its stream ended.
+
+
+def two_hosts() -> list[WorkspaceHost]:
+    """Hosts of two workspaces, ``a`` and ``b``."""
+    return [WorkspaceHost(HostParts(workspace_id=name, store=FakeStore())) for name in "ab"]
+
+
+async def test_a_failing_stop_of_the_clones_still_closes_every_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hosts = two_hosts()
+    plane = ControlPlane(hosts)
+
+    async def failing(self: Clones) -> None:
+        raise RuntimeError("The clones didn't stop.")
+
+    monkeypatch.setattr(Clones, "close", failing)
+
+    with pytest.raises(RuntimeError, match="The clones didn't stop"):
+        await plane.close()
+    assert all(host.closing for host in hosts)
+
+
+async def test_a_close_cancelled_as_the_clones_stop_still_closes_every_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hosts = two_hosts()
+    plane = ControlPlane(hosts)
+    stopping = asyncio.Event()
+
+    async def blocked(self: Clones) -> None:
+        stopping.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(Clones, "close", blocked)
+    closing = asyncio.create_task(plane.close())
+    await stopping.wait()
+    closing.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await closing
+    assert all(host.closing for host in hosts)

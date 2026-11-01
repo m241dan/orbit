@@ -600,12 +600,17 @@ class ControlPlane:
         in the mark, if there is one, the ``seq`` still to be reserved; each is closed even if
         stopping one before it fails or the close is cancelled, as :func:`close_all` does."""
         self._closing = True
-        await self._clones.close()  # A clone being served waits for the lock this takes.
+        # A clone being served waits for the lock the rest take, so the clones stop first.
+        await close_all([self._clones.close, self._close_served])
+
+    async def _close_served(self) -> None:
+        """Close each of :meth:`_stops`, as :meth:`close` says, once no workspace is being
+        added or removed."""
         async with self._changing:  # A workspace being added is closed with the rest.
             await close_all(self._stops())
 
     def _stops(self) -> list[Callable[[], Awaitable[None]]]:
-        """What :meth:`close` awaits, in order."""
+        """What :meth:`close` awaits, in order, once the clones have stopped."""
         stops: list[Callable[[], Awaitable[None]]] = (
             [] if self._usage is None else [self._usage.close]
         )

@@ -588,3 +588,31 @@ async def test_a_websocket_accepted_as_the_server_stops_is_closed_unconnected() 
     assert [(event.name, dict(event.attributes or {})) for event in span.events] == [
         ("close", close)
     ]
+
+
+class Farewelled:
+    """A WebSocket's conversation, recording in ``asked`` that it was asked to close and how;
+    the first asked fails to close."""
+
+    def __init__(self, asked: list[tuple[Farewelled, int, str]]) -> None:
+        self._asked = asked
+
+    async def close(self, code: int, reason: str) -> None:
+        self._asked.append((self, code, reason))
+        if len(self._asked) == 1:
+            raise RuntimeError("The WebSocket didn't close.")
+
+
+async def test_a_websocket_failing_to_close_leaves_the_others_closed_and_nothing_serving() -> None:
+    session = ControlPlane([WorkspaceHost()])
+    server = ControlPlaneServer(session, lambda: TOKEN, LOOPBACK, Lines())
+    await server.start()
+    asked: list[tuple[Farewelled, int, str]] = []
+    conversations = {Farewelled(asked) for _ in range(3)}
+    server._open.update(cast(set[_Conversation], conversations))
+
+    with pytest.raises(RuntimeError, match="The WebSocket didn't close"):
+        await server.stop(session.close)
+    assert {conversation for conversation, *_ in asked} == conversations
+    assert {(code, reason) for _, code, reason in asked} == {(GOING_AWAY, SHUTTING_DOWN)}
+    assert asyncio.all_tasks() == {asyncio.current_task()}

@@ -27,6 +27,7 @@ import socket
 import ssl
 from collections.abc import Awaitable, Callable, Collection
 from contextlib import suppress
+from functools import partial
 from typing import Protocol
 
 import uvicorn
@@ -38,6 +39,7 @@ from starlette.routing import Route, WebSocketRoute
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketDisconnected
 
+from orbit.agent.application.closing import close_all
 from orbit.agent.application.connection import ConnectionDropped, SessionConnection
 from orbit.agent.application.connection_trace import closed, connection_span
 from orbit.agent.domain.health import Readiness, readiness, ready_answer
@@ -378,19 +380,25 @@ class ControlPlaneServer:
 
     async def stop(self, close_session: Callable[[], Awaitable[None]]) -> None:
         """Stop accepting frontends, ``close_session``, then close every WebSocket as the
-        server is shutting down and stop serving."""
-        if self._server is None or self._serving is None:
+        server is shutting down and stop serving; each even if one before it fails or the stop
+        is cancelled, as :func:`close_all` does."""
+        server, serving = self._server, self._serving
+        if server is None or serving is None:
             return
         self._stopping = True
-        for listener in self._server.servers:
+        for listener in server.servers:
             listener.close()
-        try:
-            await close_session()
-        finally:
-            for conversation in tuple(self._open):
-                await conversation.close(GOING_AWAY, SHUTTING_DOWN)
-            self._server.should_exit = True
-            await self._serving
+        await close_all([close_session, self._close_open, partial(_stop_serving, server, serving)])
+
+    async def _close_open(self) -> None:
+        """Close every WebSocket open as the server is shutting down, each even if closing one
+        before it fails, as :func:`close_all` does."""
+        await close_all(
+            [
+                partial(conversation.close, GOING_AWAY, SHUTTING_DOWN)
+                for conversation in tuple(self._open)
+            ]
+        )
 
     async def _readyz(self, request: Request) -> JSONResponse:
         """Whether the server is ready, as ``/readyz`` answers it."""
@@ -473,6 +481,12 @@ class ControlPlaneServer:
             self._open.discard(conversation)
             if conversation.client is not None:
                 self._say(f"{conversation.client} disconnected from {peer}.")
+
+
+async def _stop_serving(server: uvicorn.Server, serving: asyncio.Task[None]) -> None:
+    """Have ``server`` exit, and wait until ``serving``, its serving, has ended."""
+    server.should_exit = True
+    await serving
 
 
 async def _healthz(request: Request) -> JSONResponse:
