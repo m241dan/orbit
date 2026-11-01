@@ -39,8 +39,8 @@ class HandoverParts:
     owning, the ``events`` it publishes into, ``owned``, called as the repository is taken,
     ``publish_catalog``, which sends every listening connection the catalog, ``recover``, which
     imports the fallback files the owner left and returns notes on them, ``recount``, which
-    reads the repository's super review count again, and ``kick``, which starts the reviews
-    waiting."""
+    reads the repository's super review count and the holds on merges kept again, and ``kick``,
+    which starts the reviews waiting."""
 
     offer: Offer
     queue: Queue

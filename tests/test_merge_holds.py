@@ -79,6 +79,7 @@ async def passed(holds: Holds, commit: str = "c5", check_set: CheckSet = STRESS)
 async def test_a_failure_holds_merges_with_a_notice_and_a_fix_first_from_its_trigger() -> None:
     store = FakeStore()
     holds = Holds(store)
+    await holds.holds.restore()
     holds.tasks.board.add(TaskSpec(prompt="Add a flag."))
     await failed(holds)
 
@@ -92,7 +93,7 @@ async def test_a_failure_holds_merges_with_a_notice_and_a_fix_first_from_its_tri
     assert fix.task.prompt.startswith("Fix the failing set: stress\n\n")
     assert "Its output:\n\n2 failed" in fix.task.prompt
     assert holds.kicked == [CODER]
-    assert store.holds_saved == [(HELD,)] and holds.changes == 1
+    assert store.holds_saved == [(HELD,)] and holds.changes == 2
 
 
 async def test_a_failure_while_its_fix_is_still_to_run_queues_no_other() -> None:
@@ -139,6 +140,7 @@ async def test_without_a_coder_no_fix_is_queued() -> None:
 async def test_passing_lifts_the_hold_with_a_notice_and_releases_once_none_is_left() -> None:
     store = FakeStore()
     holds = Holds(store)
+    await holds.holds.restore()
     await failed(holds)
     await failed(holds, check_set=SOAK)
     await passed(holds)
@@ -156,6 +158,7 @@ async def test_passing_lifts_the_hold_with_a_notice_and_releases_once_none_is_le
 async def test_passing_with_no_hold_changes_nothing() -> None:
     store = FakeStore()
     holds = Holds(store)
+    await holds.holds.restore()
     await passed(holds)
     assert holds.notices() == [] and holds.releases == 0 and store.holds_saved == []
 
@@ -225,10 +228,74 @@ async def test_holds_that_cant_be_read_are_reported_and_none_restored() -> None:
     assert [event.code for event in holds.events if isinstance(event, ErrorOccurred)] == [INTERNAL]
 
 
+async def test_holds_that_cant_be_read_are_kept_through_holds_starting_and_lifting() -> None:
+    store = FakeStore()
+    store.holds = (HELD,)
+    store.holds_load_failure = "disk gone"
+    holds = Holds(store)
+    await holds.holds.restore()
+    store.holds_load_failure = None
+    await failed(holds, check_set=SOAK)
+    await passed(holds, check_set=SOAK)
+    await failed(holds, check_set=SOAK)
+    assert await holds.holds.retry() is None
+    assert store.holds_saved == [] and store.holds == (HELD,)
+
+
+async def test_holds_read_at_last_take_on_those_started_since_and_save_them() -> None:
+    store = FakeStore()
+    store.holds = (HELD,)
+    store.holds_load_failure = "disk gone"
+    holds = Holds(store)
+    await holds.holds.restore()
+    await failed(holds, check_set=SOAK)
+    store.holds_load_failure = None
+    await holds.holds.restore()
+    soaked = Hold("soak", "c4", "Stress tests", "2 failed", 1)
+    assert holds.holds.holds == (HELD, soaked) and store.holds_saved == [(HELD, soaked)]
+
+
+async def test_holds_read_again_take_on_those_changed_elsewhere_and_keep_those_started() -> None:
+    store = FakeStore()
+    store.holds = (HELD,)
+    holds = Holds(store)
+    await holds.holds.restore()
+    store.holds_load_failure = "disk gone"
+    await holds.holds.restore()
+    await failed(holds, check_set=SOAK)
+    elsewhere = Hold("stress", "c7", "Stress tests", "3 failed", 2)
+    store.holds, store.holds_load_failure = (elsewhere,), None
+    await holds.holds.restore()
+    soaked = Hold("soak", "c4", "Stress tests", "2 failed", 1)
+    assert holds.holds.holds == (elsewhere, soaked) and store.holds_saved == [(elsewhere, soaked)]
+
+
+async def test_holds_read_again_with_none_left_release_the_work_waiting() -> None:
+    store = FakeStore()
+    store.holds = (HELD,)
+    holds = Holds(store)
+    await holds.holds.restore()
+    store.holds = ()
+    await holds.holds.restore()
+    assert not holds.holds.held and holds.releases == 1 and store.holds_saved == []
+
+
+async def test_holds_read_again_without_the_store_are_kept_and_nothing_saved() -> None:
+    store = FakeStore()
+    holds = Holds(store)
+    await holds.holds.restore()
+    await failed(holds)
+    store.holds_load_failure = "disk gone"
+    await holds.holds.restore()
+    await passed(holds)
+    assert not holds.holds.held and store.holds == (HELD,)
+
+
 async def test_a_failing_save_halts_the_session_and_a_retry_saves_the_holds() -> None:
     store = FakeStore()
     store.holds_failure = "disk full"
     holds = Holds(store)
+    await holds.holds.restore()
     await failed(holds)
     assert holds.halt.failures == [(FailedWrite.MERGE_HOLDS, "disk full")]
     assert isinstance(await holds.holds.retry(), StoreFailed)
@@ -241,6 +308,7 @@ async def test_a_failing_save_halts_the_session_and_a_retry_saves_the_holds() ->
 async def test_releasing_by_hand_lifts_every_hold_with_a_notice_saved_and_told() -> None:
     store = FakeStore()
     holds = Holds(store)
+    await holds.holds.restore()
     await failed(holds)
     await failed(holds, check_set=SOAK)
     await holds.holds.release()

@@ -11,6 +11,7 @@ Once no hold is left, :attr:`MergeHolds.released` is told, and the work waiting 
 import asyncio
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
+from typing import Literal
 
 from orbit.agent.application.failures import ReportedOnce, outcome
 from orbit.agent.application.ports import CoderTree, Publish, SessionStore, StoreFailed, TreeFailed
@@ -40,6 +41,11 @@ _FIXING = frozenset({"pending", "running", "verifying"})
 """The statuses of a task that's still to fix what it fixes."""
 
 
+type _Read = Literal["unread", "read"]
+"""Whether the holds kept have been read since the last restore began: none is saved until they
+have, so holds started without them can't replace those kept."""
+
+
 def _unwatched() -> None:
     """Note a change no one watches."""
 
@@ -67,7 +73,8 @@ class MergeHolds:
     """The holds of the sets ``holding`` merges, by name, each queuing at most ``limit`` fixes,
     acting on ``parts``. :attr:`changed` is told whenever the holds change, and
     :attr:`released` once the last lifts. A failing read of the holds kept is reported, and a
-    failing save halts the session; nothing is saved while it's halted."""
+    failing save halts the session. Nothing is saved while it's halted, nor until a read of the
+    holds kept has worked, so holds started without them can't replace those kept."""
 
     write = FailedWrite.MERGE_HOLDS
 
@@ -78,8 +85,11 @@ class MergeHolds:
         self._board = parts.tasks.board
         self._reads = ReportedOnce(parts.publish, INTERNAL)
         self._holds: tuple[Hold, ...] = ()
+        self._kept: tuple[Hold, ...] = ()  # The holds the store held when last read or saved.
+        self._read: _Read = "unread"
         self._passed: dict[str, str] = {}  # Set name -> the commit it last passed on.
         self._saving = asyncio.Lock()  # Saves once at a time, so the newest is written last.
+        self._loading = asyncio.Lock()  # Reads the holds kept once at a time, the newest last.
         self.changed: Callable[[], None] = _unwatched
         self.released: Callable[[], None] = _unwatched
 
@@ -99,18 +109,32 @@ class MergeHolds:
         return tuple(hold_view(hold) for hold in self._holds)
 
     async def restore(self) -> None:
-        """Take on the holds kept, those of sets no longer holding merges dropped, unless they
-        can't be read; a hold started since replaces the one kept for its set."""
+        """Take on the holds kept, read afresh, as another orbit may have changed them since
+        they were last read, those of sets no longer holding merges dropped, unless they can't be
+        read; a hold started since they were last read replaces the one kept for its set.
+        Nothing is saved from now until they've been read."""
         store = self._parts.store
         if store is None:
             return
-        loaded = await self._reads.value(store.merge_holds())
-        if loaded is None:
-            return
-        self._holds = merge_holds(kept_holds(loaded, self._holding), self._holds)
+        async with self._loading:
+            self._read = "unread"
+            loaded = await self._reads.value(store.merge_holds())
+            if loaded is not None:
+                await self._take_on(store, loaded)
+
+    async def _take_on(self, store: SessionStore, loaded: tuple[Hold, ...]) -> None:
+        """Take on ``loaded``, the holds ``store`` keeps, as :meth:`restore` says, saving the
+        result if it differs and telling :attr:`released` if no hold is left of those on."""
+        held = self.held
+        started = tuple(hold for hold in self._holds if hold not in self._kept)
+        self._kept = loaded
+        self._read = "read"
+        self._holds = merge_holds(kept_holds(loaded, self._holding), started)
         self.changed()
-        if self._holds != loaded:  # Holds dropped, or started before they were read.
+        if self._holds != loaded:  # Holds dropped, or started since they were last read.
             await self._save(store)
+        if held and not self._holds:
+            self.released()
 
     async def heard(self, result: SetResult) -> None:
         """Act on how a run of a set that holds merges came out, as ``result`` says: passing
@@ -152,8 +176,8 @@ class MergeHolds:
         self.released()
 
     async def retry(self) -> StoreFailed | None:
-        """Save the holds, though the session is halted, as resuming does; returns the error
-        when the save fails."""
+        """Save the holds, though the session is halted, as resuming does, unless those kept
+        haven't been read; returns the error when the save fails."""
         if self._parts.store is None:
             return None
         async with self._saving:
@@ -219,6 +243,13 @@ class MergeHolds:
             await written(self._parts.halt, self.write, lambda: self._write(store))
 
     async def _write(self, store: SessionStore) -> StoreFailed | None:
-        """Save the holds on in ``store``; returns the error when it fails."""
-        error = await outcome(store.save_merge_holds(self._holds))
-        return error if isinstance(error, StoreFailed) else None
+        """Save the holds on in ``store``, unless those kept haven't been read; returns the error
+        when it fails."""
+        if self._read == "unread":
+            return None
+        holds = self._holds
+        error = await outcome(store.save_merge_holds(holds))
+        if isinstance(error, StoreFailed):
+            return error
+        self._kept = holds
+        return None

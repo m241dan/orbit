@@ -675,7 +675,7 @@ class WorkspaceHost:
             lambda: self.owned(),
             lambda: self._switcher.publish_catalog(),
             self._recover,
-            self._recount_reviews,
+            self._reread_saved,
             self._kick_lanes,
         )
         return Handover(parts)
@@ -1242,11 +1242,14 @@ class WorkspaceHost:
         if self._lane is not None:
             await self._review_count.count_on(self._lane.planner)
 
-    async def _recount_reviews(self) -> None:
-        """Read the repository's saved super review count again, now this orbit owns it: the
-        orbit that owned it may have counted on since it was read."""
+    async def _reread_saved(self) -> None:
+        """Read the repository's saved super review count and the holds on merges kept again,
+        now this orbit owns it: the orbit that owned it may have counted on, or started or
+        lifted holds, since they were read."""
         if self._lane is not None:
             await self._review_count.recount_on(self._lane.planner)
+        if self._holds is not None:
+            await self._holds.restore()
 
     async def _save(self) -> None:
         """Save the session, if it's used, as it is now."""

@@ -1,19 +1,25 @@
 """Merges held in a session while a set that holds them fails: the notice and a fix first; work
 finishing meanwhile verified but waiting, unreviewed; the fix landing with the work beneath it;
 the set run again, passing to lift the hold and land the rest, or failing until the fixes run out;
-two sets holding at once; a hold kept across a restart; and none under ``--no-verify``."""
+two sets holding at once; a hold kept across a restart; the holds read again on taking the
+repository over; and none under ``--no-verify``."""
 
 import asyncio
 
 from orbit.agent import Verification, WorkspaceHost
 from orbit.agent.domain.merge_holds import Hold
 from orbit.agent.domain.triggers import Trigger
-from orbit.protocol import MergeHold, RunTasks
+from orbit.protocol import MergeHold, OwnershipOffered, RunTasks, TakeOwnership
 from tests.agent_fakes import (
+    ACCEPTED,
     LINT,
+    OWNER,
+    FakeLock,
     FakeStore,
     board_of,
     claims_done,
+    events_until,
+    greeted,
     holds_of,
     send,
     session_for,
@@ -171,11 +177,11 @@ async def test_a_hold_is_kept_across_closing_and_reopening() -> None:
         store=store,
         triggers=NO_REVIEW,
     )
-    sets, holds = parts_of(session)
+    sets, _ = parts_of(session)
+    await greeted(session)  # Reads the holds kept, without which none is saved.
     sets.run("stress", "nightly")
-    await eventually(lambda: holds.held)
+    await eventually(lambda: store.holds == (Hold("stress", "base", "Stress tests", FAILED, 1),))
     await session.close()
-    assert store.holds == (Hold("stress", "base", "Stress tests", FAILED, 1),)
 
     reopened, _, _ = session_for(
         claims_done,
@@ -196,6 +202,29 @@ async def test_a_hold_is_kept_across_closing_and_reopening() -> None:
         MergeHold(set="stress", commit="base", reason="Stress tests failed"),
     )
     assert shown.waiting_to_merge == ("1",) and seen.merged() == []
+
+
+async def test_taking_over_reads_the_holds_the_owner_left_again() -> None:
+    store = FakeStore()
+    store.holds = (Hold("stress", "c4", "Stress tests", FAILED, 1),)
+    session, _, _ = session_for(
+        verification=Verification((LINT,), SetSteps(), sets=(STRESS, SOAK)),
+        tree=LandingTree(),
+        store=store,
+        triggers=NO_REVIEW,
+        owner=OWNER,
+        lock=FakeLock(free=True),
+    )
+    _, holds = parts_of(session)
+    await events_until(session, lambda event: isinstance(event, OwnershipOffered))
+    await eventually(lambda: holds.held)
+    store.holds = (Hold("soak", "c7", "Soak", "1 failed"),)  # The owner lifted stress's hold.
+    await send(session, TakeOwnership(take=True))
+    await events_until(session, lambda event: event == ACCEPTED)
+    shown = await snapshot_of(session)
+    await session.close()
+    assert holds.views == (MergeHold(set="soak", commit="c7", reason="Soak failed"),)
+    assert shown.merge_holds == holds.views
 
 
 async def test_under_no_verify_nothing_holds_merges() -> None:
