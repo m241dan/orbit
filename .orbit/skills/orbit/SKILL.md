@@ -61,3 +61,9 @@ enumerations and its unit-suffixed numbers into unit types.
 - Every test runs with isolated state and config directories, from the autouse fixtures in
   `tests/conftest.py`.
 - TUI logic is tested with fake views, synchronously; widgets with Textual's pilot.
+
+## Languages
+
+Super reviews sample code files by their extension, from `CODE_EXTENSIONS` in
+`orbit.agent.domain.review_sample`. When a plan brings in a language whose extension isn't on that
+list, add the extension in the same plan.

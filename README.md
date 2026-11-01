@@ -1670,6 +1670,9 @@ paths = ["native"]
 use = ["cpp"]
 ```
 
+Orbit's own [`.orbit/config.toml`](.orbit/config.toml) maps `src` and `tests` to `application`,
+`python` and its own two skills in [`.orbit/skills/`](.orbit/skills/), `layers` and `orbit`.
+
 The entries are checked as the workspace opens, entry by entry and path by path, and the first
 problem stops it from opening with a configuration error naming `.orbit/config.toml` and the
 entry, counted from 1: a path that's empty, holds a NUL byte, is absolute or leaves the project

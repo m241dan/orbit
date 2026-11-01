@@ -16,7 +16,7 @@ from orbit.agent.domain.roles import Role
 from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
 from orbit.agent.external.config_file import read_config
 from orbit.agent.external.reference_config import reference_config
-from orbit.agent.external.skill_files import SKILL_DIRECTORY, read_skill_library
+from orbit.agent.external.skill_files import SKILL_DIRECTORY, skill_names
 from orbit.cli import app
 from tests.git_repo import init_repo
 
@@ -479,7 +479,7 @@ def test_an_unknown_skill_exits_with_status_2_naming_every_skill_and_copies_none
 ) -> None:
     result = init(project, "--skill", "pyton", "--skill", "python")
     assert result.exit_code == 2
-    names = ", ".join(sorted(read_skill_library(".").skills))
+    names = ", ".join(skill_names())
     assert len(names.split(", ")) == 18
     assert result.stderr.splitlines() == [f"No skill named pyton; orbit's skills are {names}."]
     assert result.stdout == ""

@@ -33,7 +33,7 @@ from orbit.agent.external.config_init import (
     update_config,
 )
 from orbit.agent.external.reference_config import LATER_HEADING, reference_config
-from orbit.agent.external.skill_files import SKILL_DIRECTORY, read_skill_library
+from orbit.agent.external.skill_files import SKILL_DIRECTORY, skill_names
 from orbit.protocol import BUILT_IN_ROLE_NAMES
 
 TODAY = date(2026, 10, 25)
@@ -510,7 +510,7 @@ def test_a_skill_named_twice_is_copied_once(tmp_path: Path) -> None:
 def test_an_unknown_skill_is_refused_naming_every_skill_before_copying_any(
     tmp_path: Path,
 ) -> None:
-    names = ", ".join(sorted(read_skill_library(".").skills))
+    names = ", ".join(skill_names())
     with pytest.raises(UnknownSkill) as raised:
         add_skills(tmp_path, ["python", "pyton"])
     assert str(raised.value) == f"No skill named pyton; orbit's skills are {names}."

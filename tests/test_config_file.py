@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from orbit.agent.application.ports import ConfigWriteFailed
+from orbit.agent.domain import review_sample
 from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.config import OrbitConfig
 from orbit.agent.domain.config_errors import ConfigError
@@ -41,7 +42,7 @@ from orbit.agent.external.runtimes import (
     read_package_models,
     read_runtime_rules,
 )
-from orbit.agent.external.skill_files import SKILL_DIRECTORY, read_skill_library
+from orbit.agent.external.skill_files import PROJECT_SKILLS, SKILL_DIRECTORY, read_skill_library
 from orbit.protocol import BUILT_IN_ROLE_NAMES, PLANNER
 from tests.agent_fakes import CLAUDE_MODELS, KIRO_MODELS, LIMITED_RUNTIME
 
@@ -1004,6 +1005,34 @@ def test_orbit_syncs_its_worktree_whenever_uv_lock_changes(config_dir: Path) -> 
     assert setup == Setup(command=("uv", "sync", "--frozen"), watch=("uv.lock",))
 
 
+ORBITS_OWN_SKILLS = ("application", "python", "layers", "orbit")
+"""The skills orbit's own code is mapped to, its own two after the shipped ones."""
+
+
+def test_orbit_maps_its_skills_to_its_code_and_tests(config_dir: Path) -> None:
+    root = Path(__file__).parent.parent
+    skills = read_config(str(root), config_dir).skills
+    assert skills == (SkillMapping(paths=("src", "tests"), use=ORBITS_OWN_SKILLS),)
+
+
+@pytest.mark.parametrize("name", ["layers", "orbit"])
+def test_orbits_own_skills_come_from_the_project(config_dir: Path, name: str) -> None:
+    root = Path(__file__).parent.parent
+    library = read_config(str(root), config_dir).skill_library
+    path = root / PROJECT_SKILLS / name / "SKILL.md"
+    assert library.skills[name].files["SKILL.md"].layer == Layer("project", str(path))
+
+
+def test_orbits_own_skill_ends_by_naming_the_module_of_the_code_extensions(
+    config_dir: Path,
+) -> None:
+    root = Path(__file__).parent.parent
+    body = read_config(str(root), config_dir).skill_library.skills["orbit"].body
+    section = " ".join(body[body.rindex("\n## ") :].split())
+    assert section.startswith("## Languages ")
+    assert f"`CODE_EXTENSIONS` in `{review_sample.__name__}`" in section
+
+
 def test_orbits_own_file_mentions_every_setting_of_the_reference() -> None:
     text = (Path(__file__).parent.parent / CONFIG_PATH).read_text(encoding="utf-8")
     reference = REFERENCE.read_text(encoding="utf-8")
@@ -1029,7 +1058,27 @@ ORBITS_OWN_COMMENTS = (
 explains, just below it."""
 
 
-def test_orbits_own_file_is_the_reference_with_its_checks_and_its_comments(
+SKILLS_DESCRIPTION = (
+    "# Skills for the code under some paths, given to every agent along with its role's."
+)
+SKILLS_EXAMPLE = f"""\
+{SKILLS_DESCRIPTION} For example:
+# [[skills]]
+# Files or folders in the project, relative to its root; each must exist.
+# paths = ["src"]
+# The skills that apply there, by name.
+# use = ["application", "python"]
+"""
+ORBITS_OWN_MAPPING = f"""\
+{SKILLS_DESCRIPTION}
+[[skills]]
+paths = ["src", "tests"]
+use = ["application", "python", "layers", "orbit"]
+"""
+"""Orbit's own ``[[skills]]``, in place of the reference's example of them, as its checks are."""
+
+
+def test_orbits_own_file_is_the_reference_with_its_checks_skills_and_comments(
     config_dir: Path,
 ) -> None:
     root = Path(__file__).parent.parent
@@ -1039,9 +1088,11 @@ def test_orbits_own_file_is_the_reference_with_its_checks_and_its_comments(
         text = text.replace(f"\n{comment}{explained}", f"\n{explained}", 1)
     config = read_config(str(root), config_dir)
     checks = ChecksProposal(steps=config.verification.steps, setup=config.setup)
-    assert text == reference_with_checks(REFERENCE.read_text(encoding="utf-8"), checks), (
-        "Regenerate orbit's .orbit/config.toml from the reference with its checks, keeping its"
-        " hand-written comments above them."
+    reference = reference_with_checks(REFERENCE.read_text(encoding="utf-8"), checks)
+    assert text == reference.replace(SKILLS_EXAMPLE, ORBITS_OWN_MAPPING, 1), (
+        "Regenerate orbit's .orbit/config.toml from the reference with its checks and its"
+        " [[skills]] in place of their examples, keeping its hand-written comments above its"
+        " checks."
     )
 
 
