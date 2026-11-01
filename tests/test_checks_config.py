@@ -4,7 +4,13 @@ import re
 
 import pytest
 
-from orbit.agent.domain.checks import ChecksProposal, Setup, VerificationSet, parse_proposal
+from orbit.agent.domain.checks import (
+    ChecksProposal,
+    Setup,
+    VerificationSet,
+    find_clashes,
+    parse_proposal,
+)
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.triggers import ChecksTrigger, Trigger
 from orbit.agent.domain.verification import VerificationStep
@@ -139,3 +145,50 @@ def test_a_proposed_trigger_is_checked_merged_over_the_built_in_of_its_name() ->
     trigger = {"on": "commits", "checks": "mutation"}
     with pytest.raises(ConfigError, match=re.escape("triggers.startup-check.when")):
         parse_proposal(SET_PROPOSAL | {"triggers": {"startup-check": trigger}}, BUILT_IN)
+
+
+LINT_STEP = {"name": "Lint", "command": ["ruff", "check"]}
+MUTATION = VerificationStep("Mutation", ("mutmut", "run"), set="mutation")
+CONFIGURED = (VerificationStep("Lint", ("ruff", "check")), MUTATION)
+
+
+@pytest.mark.parametrize("step_set", [None, "nightly"])
+def test_a_step_named_like_a_kept_set_step_is_found_as_a_clash(step_set: str | None) -> None:
+    proposal = ChecksProposal(
+        steps=(VerificationStep("Lint", ("ruff",)), VerificationStep("Mutation", ("m",), step_set))
+    )
+    assert find_clashes(CONFIGURED, proposal) == (MUTATION,)
+
+
+def test_steps_reusing_names_only_in_a_set_they_replace_clash_with_nothing() -> None:
+    proposal = ChecksProposal(
+        steps=(
+            VerificationStep("Lint", ("ruff",)),
+            VerificationStep("Mutation", ("mutmut", "run", "--fast"), set="mutation"),
+        )
+    )
+    assert find_clashes(CONFIGURED, proposal) == ()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"name": "Mutation", "command": ["mutmut", "run"]},
+        {"name": "Mutation", "command": ["mutmut", "run"], "set": "nightly"},
+    ],
+)
+def test_a_proposal_clashing_with_a_kept_set_step_is_refused_naming_it_and_its_set(
+    mutation: dict[str, object],
+) -> None:
+    with pytest.raises(ConfigError) as raised:
+        parse_proposal({"steps": [LINT_STEP, mutation]}, configured=CONFIGURED)
+    assert str(raised.value) == (
+        'step "Mutation" has the same name as a step in set mutation, which stays as configured'
+        " since no proposed step is in that set; give it another name."
+    )
+
+
+def test_a_proposal_replacing_a_sets_steps_may_reuse_their_names() -> None:
+    mutation = {"name": "Mutation", "command": ["mutmut", "run"], "set": "mutation"}
+    proposal = parse_proposal({"steps": [LINT_STEP, mutation]}, configured=CONFIGURED)
+    assert proposal.steps[1] == MUTATION

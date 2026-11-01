@@ -897,7 +897,10 @@ Accepted checks take effect at once. Orbit itself (not the agent) writes them in
 each set the proposal has steps in, with the proposal's (each with its `set`, if it's in one), and
 its `[setup]`, and leaving every other line as it was, the comments after them included. A step
 in a set the proposal has no steps in stays as written, with its comments, after the new steps
-(or where it was, if another table comes between). Each set the proposal has steps in gets the
+(or where it was, if another table comes between), so no proposed step may take its name: orbit
+refuses such a proposal, naming the step and its set, for the agent to rename it, and should the
+file have gained such a step since, the write fails, changing nothing, and the task ends in error.
+Each set the proposal has steps in gets the
 table the window showed for it: a set that holds merges gets its `[verification.sets.<name>]`
 table with `holds_merges = true`, in place of the file's table for it, and a set that reports,
 whether the proposal says so or leaves it out of its sets, loses the table it had. A set's table

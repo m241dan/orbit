@@ -841,3 +841,47 @@ def test_a_table_only_under_a_commented_header_follows_its_advice_to_a_valid_con
     assert update.lines.commented == ("coder",)
     roles = _following_the_advice(update.text, "[roles.coder]")["roles"]
     assert roles == {"coder": {"instructions": "roles/coder.md"}}
+
+
+CLASHING = VerificationStep("Mutation", ("mutmut", "run"))
+CLASH = 'step "Mutation" has the same name as a step in set mutation'
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [CLASHING, VerificationStep("Mutation", ("mutmut", "run"), set="nightly")],
+    ids=["task-check", "other-set"],
+)
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"{OLD_LINT}\n{NIGHTLY_STEP}\n{NIGHTLY_TABLES}",
+        f'setup = {{ command = ["make"] }}\n\n{OLD_LINT}\n{NIGHTLY_STEP}\n{NIGHTLY_TABLES}',
+    ],
+    ids=["edited", "rewritten"],
+)
+def test_a_step_named_like_a_kept_set_step_is_refused_naming_it_and_its_set(
+    text: str, mutation: VerificationStep
+) -> None:
+    with pytest.raises(ConfigError, match=CLASH):
+        with_checks(text, ChecksProposal(steps=(LINT, mutation)))
+
+
+def test_a_set_step_set_inline_clashes_when_rewritten_as_toml() -> None:
+    text = (
+        "[verification]\nsteps = [\n"
+        '  { name = "Mutation", command = ["mutmut", "run"], set = "mutation" },\n]\n'
+    )
+    with pytest.raises(ConfigError, match=CLASH):
+        with_checks(text, ChecksProposal(steps=(LINT, CLASHING)))
+
+
+def test_steps_reusing_names_in_the_set_they_replace_are_written_and_load() -> None:
+    text = f"{OLD_LINT}\n{NIGHTLY_STEP}\n{NIGHTLY_TABLES}"
+    fast = VerificationStep("Mutation", ("mutmut", "run", "--fast"), set="mutation")
+    checked = with_checks(text, ChecksProposal(steps=(LINT, fast)))
+    assert tomllib.loads(checked)["verification"]["steps"] == [
+        {"name": "Lint", "command": ["ruff", "check"]},
+        {"name": "Mutation", "command": ["mutmut", "run", "--fast"], "set": "mutation"},
+    ]
+    assert loaded_checks(checked) == (LINT,)

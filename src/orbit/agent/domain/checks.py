@@ -260,19 +260,48 @@ def configured_checks(
     return "Configured now (build on these):\n\n" + current
 
 
+def find_clashes(
+    configured: Sequence[VerificationStep], proposal: ChecksProposal
+) -> tuple[VerificationStep, ...]:
+    """The ``configured`` steps, a file's, that stay as they are once ``proposal`` is written,
+    being in a set none of its steps is in, and share a name with one of its steps: those the
+    file couldn't load beside it."""
+    proposed_sets = {None, *(step.set for step in proposal.steps)}
+    proposed_names = {step.name for step in proposal.steps}
+    return tuple(
+        step for step in configured if step.set not in proposed_sets and step.name in proposed_names
+    )
+
+
+def check_clashes(configured: Sequence[VerificationStep], proposal: ChecksProposal) -> None:
+    """Raise :class:`ConfigError` naming each of the ``configured`` steps ``proposal`` clashes
+    with (see :func:`find_clashes`), and its set, on a line of its own, if any."""
+    problems = [
+        f'step "{step.name}" has the same name as a step in set {step.set}, which stays as'
+        " configured since no proposed step is in that set; give it another name."
+        for step in find_clashes(configured, proposal)
+    ]
+    if problems:
+        raise ConfigError("\n".join(problems))
+
+
 def parse_proposal(
-    data: dict[str, Any], built_in: Mapping[str, Trigger] = _NO_TRIGGERS
+    data: dict[str, Any],
+    built_in: Mapping[str, Trigger] = _NO_TRIGGERS,
+    configured: Sequence[VerificationStep] = (),
 ) -> ChecksProposal:
     """The proposal ``data`` (an agent's arguments) describes; raises :class:`ConfigError` if
-    it's invalid, as the config would be once it's written over the ``built_in`` triggers: a
-    set's table for a set no step is in, a trigger named like a built-in one with a role, or a
-    trigger, merged over the built-in one of its name, whose ``checks`` name neither the task
-    checks nor a set a step is in, among the rest."""
+    it's invalid, as the config would be once it's written over the ``built_in`` triggers and
+    the ``configured`` steps: a set's table for a set no step is in, a step named like one of
+    the ``configured`` steps it leaves as they are (see :func:`find_clashes`), a trigger named
+    like a built-in one with a role, or a trigger, merged over the built-in one of its name,
+    whose ``checks`` name neither the task checks nor a set a step is in, among the rest."""
     try:
         proposal = ChecksProposal.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(validation_problems(exc)) from None
     check_sets(proposal)
+    check_clashes(configured, proposal)
     check_free_names(built_in, proposal.triggers)
     check_triggers(merge_proposed(built_in, proposal.triggers), (), proposal.set_names)
     return proposal

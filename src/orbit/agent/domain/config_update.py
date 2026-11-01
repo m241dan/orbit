@@ -18,9 +18,10 @@ from tomlkit import TOMLDocument
 from tomlkit.exceptions import TOMLKitError
 from tomlkit.items import AoT, InlineTable, Table
 
-from orbit.agent.domain.checks import ChecksProposal, Setup
+from orbit.agent.domain.checks import ChecksProposal, Setup, check_clashes
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.triggers import ChecksTrigger
+from orbit.agent.domain.verification import VerificationStep
 
 ADDED_NOTE = "# Added by orbit init --update on {date}: settings this file didn't mention."
 """The line the tables a file lacks are appended under, with the day they're added."""
@@ -341,10 +342,13 @@ def with_checks(text: str, checks: ChecksProposal) -> str:
     TOML instead, keeping its other keys and comments but those after a replaced table's last
     setting, which TOML counts as the table's, and the kept steps follow the new ones.
 
-    Raises :class:`ConfigError` if ``text`` isn't valid TOML.
+    Raises :class:`ConfigError` if ``text`` isn't valid TOML, or naming each of the file's kept
+    steps and its set if one of ``checks``' steps has its name, as the file wouldn't load (see
+    :func:`~orbit.agent.domain.checks.find_clashes`).
     """
     try:
         document = tomlkit.parse(text)
+        check_clashes(_configured_steps(document), checks)
         unused = _unused_sets(document, checks)
         rewritten = _rewritten(document, checks, unused)
     except TOMLKitError as exc:
@@ -723,6 +727,20 @@ def _unused_sets(document: TOMLDocument, checks: ChecksProposal) -> tuple[str, .
     tables = _value(verification, "sets")
     used = {*checks.set_names, *_step_sets(_value(verification, "steps"))}
     return tuple(name for name in tables if name not in used) if isinstance(tables, dict) else ()
+
+
+def _configured_steps(document: TOMLDocument) -> tuple[VerificationStep, ...]:
+    """The steps ``document``, a project file, sets, however it sets them, by their names and
+    sets, which are all a clash goes by: those named, in no set or a named one."""
+    steps = _value(document.get("verification"), "steps")
+    tables = steps if isinstance(steps, list) else []
+    return tuple(
+        VerificationStep(table["name"], (), table.get("set"))
+        for table in tables
+        if isinstance(table, dict)
+        and isinstance(table.get("name"), str)
+        and isinstance(table.get("set"), str | None)
+    )
 
 
 def _step_sets(steps: object) -> set[object]:

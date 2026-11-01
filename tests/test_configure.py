@@ -18,7 +18,7 @@ from orbit.agent import (
 from orbit.agent.application.ports import ConfigWriteFailed, Merge, ProposalDecision
 from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.commits import configure_message
-from orbit.agent.domain.verification import VerificationStep
+from orbit.agent.domain.verification import CheckSet, VerificationStep
 from orbit.agent.external.config_file import CONFIG_PATH
 from orbit.protocol import (
     AGENT_FAILED,
@@ -282,3 +282,34 @@ async def test_without_a_worktree_the_real_file_is_written_here(
     await asyncio.wait_for(everything(session, CONFIGURE), 5)
     assert read_config(str(tmp_path), tmp_path / "config").verification.steps == CHECKS.steps[:1]
     assert not (tmp_path / ".git").exists()
+
+
+MUTATION = VerificationStep("Mutation", ("mutmut", "run"), set="mutation")
+MUTATION_FILE = (
+    '[[verification.steps]]\nname = "Lint"\ncommand = ["ruff", "check"]\n\n'
+    '[[verification.steps]]\nname = "Mutation"\ncommand = ["mutmut", "run"]\nset = "mutation"\n\n'
+    "[verification.sets.mutation]\nholds_merges = true\n"
+)
+
+
+async def test_a_step_named_like_a_kept_set_step_is_refused_and_nothing_is_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".orbit").mkdir()
+    (tmp_path / CONFIG_PATH).write_text(MUTATION_FILE)
+    replies: list[str] = []
+    steps = Steps()
+    session, _, _ = session_for(
+        proposes({"steps": [LINT, {"name": "Mutation", "command": ["mutmut"]}]}, replies=replies),
+        verification=Verification((STEP,), steps, sets=(CheckSet("mutation", (MUTATION,)),)),
+        proposal_review=Review(ProposalDecision("accept")),
+        write_config=write_checks,
+    )
+    await asyncio.wait_for(everything(session, CONFIGURE), 5)
+    assert replies == [
+        'Invalid proposal: step "Mutation" has the same name as a step in set mutation, which'
+        " stays as configured since no proposed step is in that set; give it another name."
+    ]
+    assert steps.runs == []
+    assert (tmp_path / CONFIG_PATH).read_text() == MUTATION_FILE

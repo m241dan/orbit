@@ -83,6 +83,11 @@ class Verification:
     fallback_fixes: int = MAX_FALLBACK_FIXES
     sets: tuple[CheckSet, ...] = ()
 
+    @property
+    def configured_steps(self) -> tuple[VerificationStep, ...]:
+        """The task checks, then each set's steps, in order: every step configured."""
+        return (*self.steps, *(step for check_set in self.sets for step in check_set.steps))
+
 
 class Verifier:
     """Runs ``verification``'s steps on ``tasks``, publishing their progress as it
