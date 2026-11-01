@@ -2,6 +2,9 @@
 the limit, lifting and restoring holds, the notices, the fix's prompt and title, and finding the
 commits of work that landed stacked."""
 
+import pytest
+
+from orbit.agent.domain.commits import Commit
 from orbit.agent.domain.merge_holds import (
     Hold,
     HoldDecision,
@@ -180,11 +183,36 @@ def test_a_chain_of_fixes_starts_from_the_first_task_found() -> None:
     assert fix_root(task("4", "gone"), tasks.get).id == "4"
 
 
-def test_stacked_work_finds_the_last_commit_of_each_piece_at_the_end() -> None:
-    commits = ["u1", "a1", "a2", "b1", "f1"]
-    assert stacked_commits(commits, (2, 1, 1)) == ("a2", "b1", "f1")
+def history(*subjects: str) -> tuple[Commit, ...]:
+    """Commits with ``subjects``, oldest first, each going by its subject in lower case."""
+    return tuple(Commit(subject.lower(), subject) for subject in subjects)
 
 
-def test_stacked_work_whose_commits_are_missing_or_none_has_no_commit() -> None:
-    assert stacked_commits(["b1", "f1"], (2, 1, 1)) == (None, "b1", "f1")
-    assert stacked_commits(["a1", "f1"], (1, 0, 1)) == ("a1", None, "f1")
+STACKED_CASES = [
+    # (the commits from the base, oldest first; each piece's subjects; each piece's last commit)
+    (history("A1", "A2", "B1", "F1"), (("A1", "A2"), ("B1",), ("F1",)), ("a2", "b1", "f1")),
+    (history("U1", "A1", "B1", "F1"), (("A1",), ("B1",), ("F1",)), ("a1", "b1", "f1")),
+    (history("A1", "X1", "B1", "G1"), (("A1",), ("B1",), ("G1",)), ("a1", "b1", "g1")),
+    (history("A1", "X1", "X2", "B1"), (("A1",), ("B1",)), ("a1", "b1")),
+    (history("A1", "B1"), (("A1", "A2"), ("B1",)), ("a1", "b1")),
+    (history("A2", "B1"), (("A1", "A2"), ("B1",)), ("a2", "b1")),
+    (history("A1", "A2"), (("A1", "A2"), ("B1",)), ("a2", None)),
+    (history("A1", "C1"), (("A1",), ("B1",), ("C1",)), ("a1", None, "c1")),
+    (history("B1", "F1"), (("A1", "A2"), ("B1",), ("F1",)), (None, "b1", "f1")),
+    (history("A1", "B1"), ((), ("B1",)), ("b1", "b1")),
+    ((), (("A1",), ()), (None, None)),
+]
+
+
+@pytest.mark.parametrize(("commits", "pieces", "found"), STACKED_CASES)
+def test_stacked_work_finds_each_piece_by_its_subjects_from_the_end(
+    commits: tuple[Commit, ...],
+    pieces: tuple[tuple[str, ...], ...],
+    found: tuple[str | None, ...],
+) -> None:
+    assert stacked_commits(commits, pieces) == found
+
+
+def test_stacked_work_whose_subjects_repeat_takes_as_many_commits_as_each_piece_made() -> None:
+    commits = (Commit("a", "Tidy"), Commit("b", "Tidy"), Commit("c", "Tidy"))
+    assert stacked_commits(commits, (("Tidy",), ("Tidy", "Tidy"))) == ("a", "c")

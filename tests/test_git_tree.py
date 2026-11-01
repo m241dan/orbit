@@ -14,6 +14,7 @@ import pytest
 
 from orbit.agent.application.ports import TreeFailed
 from orbit.agent.domain.checks import Setup
+from orbit.agent.domain.commits import Commit
 from orbit.agent.external import git_tree, whole_files
 from orbit.agent.external.git import GitResult, GitUnavailable
 from orbit.agent.external.git import git as run_git
@@ -840,21 +841,23 @@ async def test_landed_since_up_to_a_commit_gives_the_subjects_between_oldest_fir
     assert await tree.landed_since(start, end) == ["Add B", "Add C"]
 
 
-async def test_commit_ids_gives_the_ids_of_the_commits_between_oldest_first(repo: Path) -> None:
+async def test_list_commits_gives_the_commits_between_with_their_subjects_oldest_first(
+    repo: Path,
+) -> None:
     tree = GitCoderTree(str(repo))
     start = git(repo, "rev-parse", "HEAD")
-    commit_file(repo, "b.txt", "two\n", "Add B")
+    commit_file(repo, "b.txt", "two\n", "Add B\n\nWith a body.")
     second = git(repo, "rev-parse", "HEAD")
     commit_file(repo, "c.txt", "three\n", "Add C")
     end = git(repo, "rev-parse", "HEAD")
     commit_file(repo, "d.txt", "four\n", "Add D")
-    assert await tree.commit_ids(start, end) == [second, end]
+    assert await tree.list_commits(start, end) == [Commit(second, "Add B"), Commit(end, "Add C")]
 
 
-async def test_commit_ids_between_a_commit_and_itself_is_nothing(repo: Path) -> None:
+async def test_list_commits_between_a_commit_and_itself_is_nothing(repo: Path) -> None:
     tree = GitCoderTree(str(repo))
     head = git(repo, "rev-parse", "HEAD")
-    assert await tree.commit_ids(head, head) == []
+    assert await tree.list_commits(head, head) == []
 
 
 async def test_changed_files_gives_the_paths_the_commits_between_changed(repo: Path) -> None:

@@ -4,11 +4,13 @@ committed nothing leaves nothing waiting; and once released, work that conflicts
 recheck after a rebase, is told of as ended without landing."""
 
 import asyncio
+from dataclasses import replace
 from typing import Any
 
 from orbit.agent import Verification, WorkspaceHost
 from orbit.agent.application.ports import Merge
-from orbit.agent.domain.merge_holds import Hold
+from orbit.agent.domain.commits import Commit
+from orbit.agent.domain.merge_holds import Hold, fix_title
 from orbit.protocol import TaskMerged
 from tests.agent_fakes import (
     LINT,
@@ -42,9 +44,9 @@ class SquashingTree(LandingTree):
     """A tree whose landings leave only the landing task's own commit, as a rebase drops the
     commits of the work beneath it left empty."""
 
-    async def commit_ids(self, start: str, end: str) -> list[str]:
-        ids = await super().commit_ids(start, end)
-        return ids[-1:] if start == "base" else ids
+    async def list_commits(self, start: str, end: str) -> list[Commit]:
+        commits = await super().list_commits(start, end)
+        return commits[-1:] if start == "base" else commits
 
 
 def restored(**options: Any) -> tuple[WorkspaceHost, SetSteps, Seen]:
@@ -131,6 +133,32 @@ async def test_work_beneath_whose_commits_were_dropped_landed_nothing() -> None:
     await session.close()
     assert seen.merged() == [("2", "c2")]
     assert shown.waiting_to_merge == () and reviews(session) == []
+
+
+async def test_work_waiting_around_a_fix_that_conflicted_lands_with_its_own_commits() -> None:
+    conflict = Merge("conflict", "The work on orbit/coder conflicts with main: a.txt.")
+    store = FakeStore()
+    store.holds = (replace(KEPT, fixes=3),)  # No fix is queued for the hold by itself.
+    session, _, _ = session_for(
+        claims_done,
+        claims_done,
+        claims_done,
+        claims_done,
+        verification=Verification((LINT,), SetSteps(stress=[True]), sets=(STRESS,)),
+        tree=LandingTree(conflict),
+        store=store,
+        triggers=NO_REVIEW,
+    )
+    seen = Seen(session)
+    _, holds = parts_of(session)
+    await eventually(lambda: holds.held)
+    fix = fix_title("stress")
+    await start(session, "Add A.", fix, "Add B.", fix)
+    await eventually(lambda: not holds.held)
+    seen.close()
+    await session.close()
+    # Task 2's commit, c2, stays in the tree, beneath task 3's, as its merge conflicted.
+    assert seen.merged() == [("1", "c1"), ("3", "c3"), ("4", "c4")]
 
 
 async def test_a_task_that_committed_nothing_leaves_nothing_waiting() -> None:

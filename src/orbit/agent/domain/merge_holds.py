@@ -4,8 +4,9 @@ user is told as a hold starts, lifts or needs them."""
 
 from collections.abc import Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass, replace
-from itertools import accumulate
+from functools import partial, reduce
 
+from orbit.agent.domain.commits import Commit
 from orbit.agent.domain.verification import CheckSet, VerificationStep
 from orbit.agent.domain.wording import counted
 from orbit.protocol import MergeHold, TaskState
@@ -184,12 +185,52 @@ def fix_root(state: TaskState, find: Callable[[str], TaskState | None]) -> TaskS
     return state if found is None else fix_root(found, find)
 
 
-def stacked_commits(commits: Sequence[str], counts: Sequence[int]) -> tuple[str | None, ...]:
-    """The last commit of each group of ``counts`` commits, in order, stacked at the end of
-    ``commits``; none for a group whose commits aren't all there, as a rebase drops those left
-    empty."""
-    start = len(commits) - sum(counts)
+def stacked_commits(
+    commits: Sequence[Commit], pieces: Sequence[Sequence[str]]
+) -> tuple[str | None, ...]:
+    """The last commit of each of the ``pieces`` of work stacked among ``commits``, oldest
+    first, in that order, each piece given by its commits' subjects, oldest first.
+
+    Each piece is found by its subjects, the last piece first, back from the end: its commits
+    are the run ending at the last commit with one of its subjects, before the pieces after it,
+    reaching back as far as the commits are its own, in order. Commits of no piece, as those of
+    the base moving beneath it or of work that didn't wait, are passed over. A piece none of
+    whose subjects is found, as a rebase drops the commits it leaves empty, has none; one whose
+    subjects aren't known, the last of ``commits``. Subjects can repeat, so a piece whose
+    subjects another commit before it shares, and none of whose own is left, can be given that
+    commit."""
+    no_runs: tuple[range, ...] = ()
+    runs = reduce(partial(_run_beneath, commits), reversed(pieces), no_runs)
     return tuple(
-        commits[start + end - 1] if count and start + end - count >= 0 else None
-        for count, end in zip(counts, accumulate(counts), strict=True)
+        _last_of(commits, subjects, run) for subjects, run in zip(pieces, runs, strict=True)
     )
+
+
+def _run_beneath(
+    commits: Sequence[Commit], found: tuple[range, ...], subjects: Sequence[str]
+) -> tuple[range, ...]:
+    """The runs of ``commits`` ``found`` for the pieces after the one with ``subjects``, with
+    its own before them: empty, where they start, if it's not found."""
+    end = found[0].start if found else len(commits)
+    last = next((i for i in reversed(range(end)) if commits[i].subject in subjects), None)
+    run = range(end, end) if last is None else range(_run_start(commits, subjects, last), last + 1)
+    return (run, *found)
+
+
+def _run_start(commits: Sequence[Commit], subjects: Sequence[str], index: int) -> int:
+    """Where the run of ``commits`` ending at ``index``, one of the ``subjects``, starts:
+    reaching back as far as the commits before it have the subjects before its own, in
+    order."""
+    subject = commits[index].subject
+    before = subjects[: len(subjects) - 1 - subjects[::-1].index(subject)]
+    if index == 0 or commits[index - 1].subject not in before:
+        return index
+    return _run_start(commits, before, index - 1)
+
+
+def _last_of(commits: Sequence[Commit], subjects: Sequence[str], run: range) -> str | None:
+    """The last commit of the piece with ``subjects`` whose commits are the ``run`` of
+    ``commits``: the last of all if its subjects aren't known; none if its run is empty."""
+    if not subjects:
+        return commits[-1].id if commits else None
+    return commits[run[-1]].id if run else None

@@ -44,7 +44,7 @@ from orbit.protocol import (
     Usage,
 )
 
-FORMAT_VERSION = 22
+FORMAT_VERSION = 23
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _OLD_SUPER_REVIEW_ORIGIN = "super_review"
@@ -81,8 +81,8 @@ def _without_rounds(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def _unchanged(record: dict[str, Any]) -> dict[str, Any]:
-    """Version 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 19 or 21 ``record`` as it is:
-    the next version only added fields that have defaults."""
+    """Version 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 19, 21 or 22 ``record`` as it
+    is: the next version only added fields that have defaults."""
     return record
 
 
@@ -172,7 +172,10 @@ def _booked(task: object, booked: tuple[str, ...]) -> object:
 # Version 21 added what orbit queued each task as, so its reviews are told by their booking
 # rather than their role: its migration queues each task an older record's review lane booked,
 # one of its jobs, as a review, and every other as a task. Version 22 added the verified work
-# waiting in the coder's tree for merges to resume, which an older record has none of.
+# waiting in the coder's tree for merges to resume, which an older record has none of. Version
+# 23 added the subjects of each piece of work's commits, which find them after a rebase; an
+# older record doesn't know them, so its work is told of as landing with the landing's last
+# commit.
 _MIGRATIONS: dict[int, Migration] = {
     1: _spent_by_tasks,
     2: _without_rounds,
@@ -195,6 +198,7 @@ _MIGRATIONS: dict[int, Migration] = {
     19: _unchanged,
     20: _reviews_as_booked,
     21: _unchanged,
+    22: _unchanged,
 }
 
 EMPTY_NAME = "A session needs a name."
@@ -238,12 +242,15 @@ class SavedConsultation(BaseModel):
 
 class SavedWaiting(BaseModel):
     """Verified work waiting in the coder's tree for merges to resume, as a session saves it:
-    the ``count`` of commits of the task that ended as ``state``, whose id it goes by."""
+    the ``count`` of commits of the task that ended as ``state``, whose id it goes by, and
+    their ``subjects``, oldest first, which find them after a rebase; none if they aren't
+    known, as before version 23."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     state: TaskState
     count: int = Field(ge=1)
+    subjects: tuple[str, ...] = ()
 
 
 class SessionRecord(BaseModel):

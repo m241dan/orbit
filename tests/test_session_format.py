@@ -45,8 +45,8 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit these for a format change: they're what orbits at versions 1 to 22 wrote, and
-# they still need to read. A new version gets its own fixture (session-v23.json) and a
+# Never edit these for a format change: they're what orbits at versions 1 to 23 wrote, and
+# they still need to read. A new version gets its own fixture (session-v24.json) and a
 # migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
 SESSION_V2 = FIXTURES / "session-v2.json"
@@ -70,6 +70,7 @@ SESSION_V19 = FIXTURES / "session-v19.json"
 SESSION_V20 = FIXTURES / "session-v20.json"
 SESSION_V21 = FIXTURES / "session-v21.json"
 SESSION_V22 = FIXTURES / "session-v22.json"
+SESSION_V23 = FIXTURES / "session-v23.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -184,7 +185,7 @@ def expected(
     lane: LaneSnapshot | None = None,
 ) -> SessionRecord:
     return SessionRecord(
-        version=22,
+        version=23,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
@@ -496,18 +497,30 @@ def waited() -> SessionRecord:
     return templated().model_copy(update={"waiting": (SavedWaiting(state=done, count=2),)})
 
 
-def test_a_version_22_session_file_reads_as_its_record() -> None:
+def test_a_version_22_session_file_migrates_to_work_waiting_whose_subjects_are_unknown() -> None:
     assert parse_record(SESSION_V22.read_text(encoding="utf-8")) == waited()
 
 
-def test_a_session_record_is_written_in_the_version_22_format() -> None:
-    written = json.loads(record_json(waited()))
-    golden = json.loads(SESSION_V22.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V22.name)
+def subjected() -> SessionRecord:
+    """The golden record as version 23 keeps it, with its first task's work of two commits
+    waiting in the tree for merges to resume, and their subjects."""
+    done = tasks()[0]
+    work = SavedWaiting(state=done, count=2, subjects=("Add the parser", "Test the parser"))
+    return templated().model_copy(update={"waiting": (work,)})
+
+
+def test_a_version_23_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V23.read_text(encoding="utf-8")) == subjected()
+
+
+def test_a_session_record_is_written_in_the_version_23_format() -> None:
+    written = json.loads(record_json(subjected()))
+    golden = json.loads(SESSION_V23.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V23.name)
 
 
 def test_a_record_with_work_waiting_of_no_commits_is_unreadable() -> None:
-    golden = json.loads(SESSION_V22.read_text(encoding="utf-8"))
+    golden = json.loads(SESSION_V23.read_text(encoding="utf-8"))
     golden["waiting"][0]["count"] = 0
     record = parse_record(json.dumps(golden))
     assert isinstance(record, Unreadable) and record.reason.startswith("waiting.0.count:")

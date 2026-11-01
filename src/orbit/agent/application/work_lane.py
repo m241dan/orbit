@@ -26,7 +26,7 @@ from typing import Literal
 from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.coder_slots import CoderSeat
 from orbit.agent.application.desk import AgentDesk
-from orbit.agent.application.landing import Lander, Landing
+from orbit.agent.application.landing import Lander, Landing, Stacked
 from orbit.agent.application.lane_runner import runtime_stop
 from orbit.agent.application.lanes import OPEN_GATE, Background, SessionGate, StoppableRun
 from orbit.agent.application.merge_holds import MergeHolds
@@ -109,10 +109,17 @@ class Beside:
 @dataclass(frozen=True)
 class _Waiting:
     """Verified work waiting in the coder's tree for merges to resume: the ``count`` of commits
-    of the task that ended as ``state``."""
+    of the task that ended as ``state``, and their ``subjects``, oldest first, which find them
+    after a rebase; none if they aren't known."""
 
     state: TaskState
     count: int
+    subjects: tuple[str, ...]
+
+    @property
+    def stacked(self) -> Stacked:
+        """The work as a landing stacks it."""
+        return self.state.id, self.subjects
 
 
 class WorkLane:
@@ -191,7 +198,7 @@ class WorkLane:
         self._landed.clear()
         self._fixes_landed.clear()
         self._starts.clear()
-        self._waiting = [_Waiting(each.state, each.count) for each in waiting]
+        self._waiting = [_Waiting(each.state, each.count, each.subjects) for each in waiting]
         self._stacked.clear()
 
     @property
@@ -204,7 +211,10 @@ class WorkLane:
     def waiting(self) -> tuple[SavedWaiting, ...]:
         """The verified work waiting in the tree for merges to resume, in the order it lands,
         as the session saves it."""
-        return tuple(SavedWaiting(state=each.state, count=each.count) for each in self._waiting)
+        return tuple(
+            SavedWaiting(state=each.state, count=each.count, subjects=each.subjects)
+            for each in self._waiting
+        )
 
     def release_restored(self) -> None:
         """Land the work waiting that the session opened saved, as :meth:`release` does, if
@@ -641,10 +651,10 @@ class WorkLane:
         tree, holds = self._desk.agents.tree, self._holds
         assert tree is not None and holds is not None  # Only work in the tree is held back.
         await tree.commit(message)
-        made = await tree.commit_ids(self._starts[state.id], await tree.head())
+        made = await tree.list_commits(self._starts[state.id], await tree.head())
         if made:
             done = state.model_copy(update={"status": "completed"})
-            self._waiting.append(_Waiting(done, len(made)))
+            self._waiting.append(_Waiting(done, len(made), tuple(c.subject for c in made)))
             await self._waiting_changed()
 
     async def _merge(self, task_id: str, lander: Lander, message: str, root: str) -> Landing:
@@ -652,7 +662,7 @@ class WorkLane:
         ``root``, with the work waiting stacked beneath it, came to; work that merged is noted
         as landed, however the landing ends."""
         beneath = tuple(self._waiting)
-        stacked = [(waiting.state.id, waiting.count) for waiting in beneath]
+        stacked = [waiting.stacked for waiting in beneath]
         try:
             return await lander.land(task_id, message, root, self._starts[task_id], stacked)
         finally:
@@ -712,7 +722,7 @@ class WorkLane:
         assert tree is not None  # Only work in the tree waits.
         last = waiting[-1].state
         lander = Lander(tree, self._recheck(last), self._publish)
-        stacked = [(each.state.id, each.count) for each in waiting]
+        stacked = [each.stacked for each in waiting]
         try:
             return await lander.land_stacked(await tree.prepare(True), stacked)
         finally:

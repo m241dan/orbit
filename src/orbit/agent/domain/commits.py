@@ -1,6 +1,7 @@
 """Commit messages for the work agents finish."""
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from orbit.agent.domain.checks import ChecksProposal, describe_checks
 from orbit.protocol import TaskSpec
@@ -8,6 +9,14 @@ from orbit.protocol import TaskSpec
 # Git's conventional limit for a subject line, and how much of the task to quote below it.
 SUBJECT_LIMIT = 72
 PROMPT_LIMIT = 2000
+
+
+@dataclass(frozen=True)
+class Commit:
+    """A commit: its ``id`` and the ``subject`` of its message, which a rebase keeps."""
+
+    id: str
+    subject: str
 
 
 def commit_message(task: TaskSpec, summaries: Sequence[str], fix: bool = False) -> str:

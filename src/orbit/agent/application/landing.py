@@ -22,7 +22,9 @@ class Landing:
     merging it, or why the work failed verification after being rebased onto a moved base.
     Only a ``merged`` commit is on the base. ``detail`` says why the work didn't merge, as the
     tree told. ``stacked`` is, for each piece of work stacked beneath it, in order, the last
-    commit it landed with it, if it merged and that commit is still there."""
+    commit it landed with, if it merged, as its commits' subjects find it after any rebase: none
+    if the rebase dropped all its commits, left empty, and the last commit of the landing if its
+    subjects aren't known."""
 
     commit: str | None = None
     result: MergeResult | None = None
@@ -36,19 +38,19 @@ class Landing:
         return self.commit if self.result == "merged" else None
 
 
-Stacked = tuple[str, int]
-"""A piece of work waiting in the tree: the id of the task whose it is, and how many commits it
-made."""
+Stacked = tuple[str, tuple[str, ...]]
+"""A piece of work waiting in the tree: the id of the task whose it is, and the subjects of the
+commits it made, oldest first; none if they aren't known."""
 
 
 @dataclass(frozen=True)
 class _Stack:
-    """The work in the tree ahead of the base's ``base`` commit: the ``counts`` of commits each
-    piece of it made, in order, oldest first, the last of them the landing task's own if it
-    lands with them."""
+    """The work in the tree ahead of the base's ``base`` commit: the subjects of the commits
+    each piece of it made, as :data:`Stacked` gives them, in order, oldest first, the last of
+    them the landing task's own if it lands with them."""
 
     base: str
-    counts: tuple[int, ...]
+    pieces: tuple[tuple[str, ...], ...]
 
 
 class Lander:
@@ -84,7 +86,7 @@ class Lander:
         """Merge the work ``stacked`` in the tree, in order, rechecking it after a rebase as
         the last piece's task's, at ``root``; nothing is committed. Its result is published for
         the pieces that merge."""
-        stack = _Stack(await self._tree.base_commit(), tuple(count for _, count in stacked))
+        stack = _Stack(await self._tree.base_commit(), tuple(subjects for _, subjects in stacked))
         merge = await self._integrate(stacked[-1][0], root)
         if not isinstance(merge, Merge):
             return Landing(failure=merge)
@@ -96,8 +98,9 @@ class Lander:
         work ``beneath``; none if nothing's beneath it."""
         if not beneath:
             return None
-        own = await self._tree.commit_ids(start, await self._tree.head())
-        return _Stack(await self._tree.base_commit(), (*(n for _, n in beneath), len(own)))
+        own = await self._tree.list_commits(start, await self._tree.head())
+        pieces = (*(subjects for _, subjects in beneath), tuple(c.subject for c in own))
+        return _Stack(await self._tree.base_commit(), pieces)
 
     async def _report(
         self,
@@ -153,7 +156,7 @@ class Lander:
         ``merge`` merged it; none otherwise."""
         if merge.result != "merged":
             return ()
-        return stacked_commits(await self._tree.commit_ids(stack.base, head), stack.counts)
+        return stacked_commits(await self._tree.list_commits(stack.base, head), stack.pieces)
 
     async def _integrate(self, task_id: str, root: str) -> Merge | Failure:
         """Merge the tree's work, rechecking it after each of at most MAX_REBASES rebases;

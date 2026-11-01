@@ -25,6 +25,7 @@ from orbit.agent.domain.coder_tree import (
     stashed_note,
     unmerged_note,
 )
+from orbit.agent.domain.commits import Commit
 from orbit.agent.external.git import GitResult, git
 from orbit.agent.external.processes import run_process, start_failure
 from orbit.agent.external.repository import ORBIT_DIR, find_git_common_dir
@@ -194,9 +195,11 @@ class GitCoderTree:
         listed = await self._git(self._root, "diff", "--name-only", "-z", f"{start}...{end}")
         return [path for path in listed.split("\0") if path]
 
-    async def commit_ids(self, start: str, end: str) -> list[str]:
-        listed = await self._git(self._root, "rev-list", "--reverse", f"{start}..{end}")
-        return listed.splitlines()
+    async def list_commits(self, start: str, end: str) -> list[Commit]:
+        listed = await self._git(
+            self._root, "log", "--format=%H %s", "--reverse", f"{start}..{end}"
+        )
+        return [_listed_commit(line) for line in listed.splitlines()]
 
     async def tracked_files(self, commit: str) -> list[str]:
         listed = await self._git(
@@ -532,3 +535,9 @@ class GitCoderTree:
 
     async def _dirty(self, path: Path) -> bool:
         return bool(await self._git(path, "status", "--porcelain"))
+
+
+def _listed_commit(line: str) -> Commit:
+    """The commit a line of ``git log --format='%H %s'`` lists."""
+    commit_id, _, subject = line.partition(" ")
+    return Commit(commit_id, subject)

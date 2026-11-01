@@ -48,6 +48,7 @@ from orbit.agent.application.workspace_host import UNREGISTERED_WORKSPACE, HostP
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import Setup
+from orbit.agent.domain.commits import Commit
 from orbit.agent.domain.merge_holds import Hold
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.refusals import Refused
@@ -837,9 +838,10 @@ class FakeTree:
         self._fail("changed_files")
         return self.changed.get(start, [])
 
-    async def commit_ids(self, start: str, end: str) -> list[str]:
-        self._fail("commit_ids")
-        return [f"c{n}" for n in range(_commit_number(start) + 1, _commit_number(end) + 1)]
+    async def list_commits(self, start: str, end: str) -> list[Commit]:
+        self._fail("list_commits")
+        ids = [f"c{n}" for n in range(_commit_number(start) + 1, _commit_number(end) + 1)]
+        return [Commit(commit_id, f"Subject of {commit_id}") for commit_id in ids]
 
     async def tracked_files(self, commit: str) -> list[str]:
         self._fail("tracked_files")

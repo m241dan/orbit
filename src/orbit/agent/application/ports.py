@@ -10,6 +10,7 @@ from typing import Any, Protocol
 
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.checks import ChecksProposal, Setup
+from orbit.agent.domain.commits import Commit
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.listings import FoundDirectory
 from orbit.agent.domain.merge_holds import Hold
@@ -358,8 +359,8 @@ class CoderTree(Protocol):
         """The paths of the files the commits after ``start`` up to ``end`` changed."""
         ...
 
-    async def commit_ids(self, start: str, end: str) -> list[str]:
-        """The ids of the commits after ``start`` up to ``end``, oldest first."""
+    async def list_commits(self, start: str, end: str) -> list[Commit]:
+        """The commits after ``start`` up to ``end``, oldest first."""
         ...
 
     async def tracked_files(self, commit: str) -> list[str]:
