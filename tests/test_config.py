@@ -1,3 +1,4 @@
+import re
 import tomllib
 from datetime import UTC, datetime
 from typing import cast
@@ -810,6 +811,13 @@ def test_other_unknown_settings_keep_their_errors(data: dict[str, object], messa
         load_config(data, BUILT_IN_ROLES)
     assert str(raised.value).startswith(message)
     assert "later version" not in str(raised.value)
+
+
+def test_a_roles_tools_naming_read_skill_are_refused() -> None:
+    toml = '[roles.coder]\ntools = ["get_task", "complete_task", "read_skill"]'
+    message = "read_skill comes with every role; leave it out of tools."
+    with pytest.raises(ConfigError, match=f"^roles\\.coder\\.tools: .*{re.escape(message)}"):
+        load_config(tomllib.loads(toml), BUILT_IN_ROLES)
 
 
 def test_a_conversational_role_without_propose_task_or_get_task_loads() -> None:

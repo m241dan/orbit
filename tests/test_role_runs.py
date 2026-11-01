@@ -52,7 +52,7 @@ async def test_an_agent_is_launched_with_its_roles_instructions_and_tools() -> N
     await asyncio.wait_for(run(session), 5)
     [launch] = launcher.launches
     assert launch.instructions == ROLES["coder"].instructions
-    assert launch.tools == ROLES["coder"].tools
+    assert launch.tools == (*ROLES["coder"].tools, "read_skill")
 
 
 def on_fake(*names: str) -> dict[str, Role]:

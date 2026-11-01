@@ -3,7 +3,7 @@ the agent registry and the host they reach orbit through.
 
 Whatever answers an agent's calls, a task's :class:`AgentRun` or the planner's conversation, is
 a :class:`CallTarget` opened on the desk; :func:`dispatch` answers a call with the tools the
-agent's role allows.
+agent's role allows, among them those the desk answers for every target (:meth:`AgentDesk.tools`).
 """
 
 import asyncio
@@ -13,7 +13,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
-from orbit.agent.application.agent_trace import REQUEST_ERROR, AgentProcess, AgentTracing
+from orbit.agent.application.agent_trace import (
+    REQUEST_ERROR,
+    AgentProcess,
+    AgentTracing,
+    skill_attributes,
+)
 from orbit.agent.application.failures import unexpected
 from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.application.ports import (
@@ -34,8 +39,9 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.agents import Agent, AgentRegistry
 from orbit.agent.domain.refusals import failed_to
 from orbit.agent.domain.reviews import ReviewLimits
-from orbit.agent.domain.roles import ORBIT_TOOLS, Role
+from orbit.agent.domain.roles import ORBIT_TOOLS, READ_SKILL, Role
 from orbit.agent.domain.runtimes import ModelAliases, resolve_model
+from orbit.agent.domain.skills import SkillLibrary, SkillMapping, given_skill_file, given_skills
 from orbit.protocol import (
     INTERNAL,
     AgentExited,
@@ -126,7 +132,9 @@ class Agents:
     or outage stopped, until it starts again. ``copies`` makes the copies agents whose role
     works in a copy work in; without it, such a role's agents can't run. ``models`` are the
     models each runtime takes, by its name, which agents' models resolve through; a runtime
-    without them is given models as they are.
+    without them is given models as they are. ``skill_library`` holds the skills agents can be
+    given, and ``skill_mappings`` are the project's ``[[skills]]``, whose skills every agent is
+    given along with its role's.
     """
 
     host: AgentHost
@@ -148,6 +156,8 @@ class Agents:
     personal: frozenset[str] = field(default=frozenset(), kw_only=True)
     models: Mapping[str, ModelAliases] = field(default_factory=dict, kw_only=True)
     copies: Copies | None = field(default=None, kw_only=True)
+    skill_library: SkillLibrary = field(default_factory=SkillLibrary, kw_only=True)
+    skill_mappings: tuple[SkillMapping, ...] = field(default=(), kw_only=True)
 
     def runtime(self, role: str) -> str | None:
         """The runtime role ``role``'s agents run on; none for a role they don't have."""
@@ -301,6 +311,26 @@ class AgentDesk:
     def launched(self, agent_id: str | None) -> AgentLaunch | None:
         """How agent ``agent_id``, if it's running, was last launched; none before it was."""
         return None if agent_id is None else self._launches.get(agent_id)
+
+    def tools(self, role: str) -> dict[str, Tool]:
+        """The tools the desk answers for an agent in the role named ``role``: ``read_skill``,
+        and the report tools."""
+
+        async def read_skill(arguments: dict[str, Any]) -> Reply:
+            return self._read_skill(role, arguments)
+
+        return {READ_SKILL: read_skill, **self.report_tools(role)}
+
+    def _read_skill(self, role: str, arguments: dict[str, Any]) -> Reply:
+        """The file of one of its skills that an agent in the role named ``role`` asks for in
+        ``arguments``, by the skill's name and the file's path, or why it's refused, recording
+        what was asked on the call's span, the current one. The role's skills are those it has
+        now, which a reset may have changed."""
+        skill, path = str(arguments.get("skill", "")), str(arguments.get("file", ""))
+        current_span().set_attributes(skill_attributes(skill, path))
+        given = given_skills(self.agents.roles[role].skills, self.agents.skill_mappings)
+        found = given_skill_file(given, self.agents.skill_library, skill, path)
+        return Reply(found, is_error=True) if isinstance(found, str) else Reply(found.text)
 
     def use_role(self, name: str, role: Role) -> None:
         """Have ``role`` as the role ``name`` from now on."""

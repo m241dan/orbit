@@ -506,7 +506,7 @@ def test_a_task_suggestion_without_a_prompt_has_an_empty_one() -> None:
     assert task_suggestion({"title": "Tidy"}) == ("Tidy", "")
 
 
-def test_orbit_tools_are_the_twelve_in_order() -> None:
+def test_orbit_tools_are_the_eighteen_in_order() -> None:
     assert ORBIT_TOOLS == (
         "get_task",
         "complete_task",
@@ -525,10 +525,11 @@ def test_orbit_tools_are_the_twelve_in_order() -> None:
         "edit_draft",
         "remove_draft",
         "move_draft",
+        "read_skill",
     )
 
 
-def test_a_role_that_consults_and_proposes_is_granted_draft_tools_then_consult() -> None:
+def test_a_role_that_consults_and_proposes_is_granted_draft_tools_consult_and_read_skill() -> None:
     planner = BUILT_IN_ROLES["planner"]
     assert planner.granted_tools == (
         *planner.tools,
@@ -538,12 +539,29 @@ def test_a_role_that_consults_and_proposes_is_granted_draft_tools_then_consult()
         "remove_draft",
         "move_draft",
         "consult",
+        "read_skill",
     )
 
 
 def test_a_role_without_propose_task_is_granted_no_draft_tools() -> None:
     reviewer = BUILT_IN_ROLES["reviewer"]
-    assert reviewer.granted_tools == reviewer.tools
+    assert reviewer.granted_tools == (*reviewer.tools, "read_skill")
+
+
+@pytest.mark.parametrize("name", BUILT_IN_ROLE_NAMES)
+def test_every_role_is_granted_read_skill_once(name: str) -> None:
+    assert BUILT_IN_ROLES[name].granted_tools.count("read_skill") == 1
+
+
+def test_a_role_with_no_tools_is_granted_read_skill_alone() -> None:
+    role = Role(instructions="Plan.", tools=(), conversation=True, verify=False, workspace="none")
+    assert role.granted_tools == ("read_skill",)
+
+
+def test_read_skill_among_a_roles_tools_is_refused() -> None:
+    message = "read_skill comes with every role; leave it out of tools."
+    with pytest.raises(ValidationError, match=message):
+        Role(instructions="Work.", tools=("get_task", "read_skill"))
 
 
 def test_a_draft_tool_among_a_roles_tools_is_refused() -> None:
@@ -552,9 +570,9 @@ def test_a_draft_tool_among_a_roles_tools_is_refused() -> None:
         Role(instructions="Plan.", tools=("propose_task", "read_draft"))
 
 
-def test_a_role_that_consults_no_one_is_granted_its_tools_alone() -> None:
+def test_a_role_that_consults_no_one_is_granted_its_tools_and_read_skill() -> None:
     experimenter = BUILT_IN_ROLES["experimenter"]
-    assert experimenter.granted_tools == experimenter.tools
+    assert experimenter.granted_tools == (*experimenter.tools, "read_skill")
 
 
 def test_consult_among_a_roles_tools_is_refused() -> None:
@@ -604,6 +622,7 @@ def test_an_orbit_tool_grant_gives_the_roles_tools_and_withholds_orbits_others()
         "edit_draft",
         "remove_draft",
         "move_draft",
+        "read_skill",
     )
 
 

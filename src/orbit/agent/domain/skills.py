@@ -2,7 +2,8 @@
 builds software. Each opens with a ``SKILL.md`` whose front matter names and describes it, held
 to the rules Claude Code holds skills to. They come from two layers, the package's skills and the
 project's, whose files replace and add to the package's file by file. Roles name the skills
-their agents get, and a project also maps paths in it to the skills for the code there."""
+their agents get, and a project also maps paths in it to the skills for the code there; an agent
+reads the files of the skills it's given, and only those."""
 
 import posixpath
 import re
@@ -29,6 +30,9 @@ SKILL_NAME = re.compile(r"[a-z0-9-]{1,64}")
 
 MAX_DESCRIPTION = 1024
 """The most characters Claude Code takes in a skill's description."""
+
+NO_SKILLS = "You weren't given any skills."
+"""Why an agent given no skills can't read one."""
 
 OUTSIDE_PROJECT = "paths are relative to the project root and stay inside it."
 """Why a ``[[skills]]`` entry's path that's empty, holds a NUL byte, is absolute or leaves the
@@ -265,6 +269,32 @@ def unknown_skill(key: str, name: str, library: SkillLibrary) -> str:
     """Why the skill ``name`` the setting ``key`` names is refused: it isn't one of the
     ``library``'s, which it lists."""
     return f"{key} names {name}, which isn't a skill; the skills are {', '.join(library.skills)}."
+
+
+def given_skills(role_skills: Sequence[str], mappings: Sequence[SkillMapping]) -> tuple[str, ...]:
+    """The skills an agent is given, by name: its role's ``role_skills``, then each skill the
+    project's ``mappings`` use, in order, each once, where it's first named."""
+    mapped = (name for mapping in mappings for name in mapping.use)
+    return tuple(dict.fromkeys((*role_skills, *mapped)))
+
+
+def given_skill_file(
+    given: Sequence[str], library: SkillLibrary, skill: str, path: str
+) -> SkillFile | str:
+    """The file at ``path``, relative to its folder, of the skill ``skill`` in the ``library``,
+    for an agent given the skills ``given``; or why it's refused: the agent was given none, or
+    wasn't given that one, or the skill has no file at that path, as one with ``..`` or an
+    absolute one never is. A skill given that the ``library`` lacks, as one added to the project
+    since it was read does, isn't the agent's to read."""
+    readable = [name for name in given if name in library.skills]
+    if not readable:
+        return NO_SKILLS
+    if skill not in readable:
+        return f"You weren't given the skill {skill}; your skills are {', '.join(readable)}."
+    files = library.skills[skill].files
+    if path not in files:
+        return f"{skill} has no file {path}; its files are {', '.join(sorted(files))}."
+    return files[path]
 
 
 def check_role_skills(name: str, skills: Sequence[str], library: SkillLibrary) -> None:

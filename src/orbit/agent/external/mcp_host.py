@@ -28,6 +28,7 @@ from orbit.agent.domain.roles import (
     PROPOSE_TASK,
     READ_DRAFT,
     READ_REPORT,
+    READ_SKILL,
     REMOVE_DRAFT,
     REPORT_PROGRESS,
     RUN_CHECK,
@@ -58,6 +59,11 @@ PROPOSE_TASK_DESCRIPTION = (
 EDIT_DRAFT_DESCRIPTION = (
     "Replace the title and prompt of one of your drafts; it stays a draft in its place."
     f" {PROMPT_RECIPE}"
+)
+
+READ_SKILL_DESCRIPTION = (
+    "Read a file of one of your skills, by the skill's name and the file's path in it, such as"
+    " testing.md."
 )
 
 
@@ -165,6 +171,10 @@ def build_server(handler: CallHandler) -> MCPServer:
     async def read_report(id: int, ctx: Context) -> str:
         """Read a saved report, by its id from list_reports: its title and body."""
         return await call(ctx, READ_REPORT, {"id": id})
+
+    @server.tool(structured_output=False, description=READ_SKILL_DESCRIPTION)
+    async def read_skill(skill: str, file: str, ctx: Context) -> str:
+        return await call(ctx, READ_SKILL, {"skill": skill, "file": file})
 
     _add_draft_tools(server, call)
     return server

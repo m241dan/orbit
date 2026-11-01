@@ -138,6 +138,7 @@ async def test_a_reset_rereads_the_planners_role() -> None:
             "remove_draft",
             "move_draft",
             "consult",
+            "read_skill",
         ),
     )
     agents = session.agents

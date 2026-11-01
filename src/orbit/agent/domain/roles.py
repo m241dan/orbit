@@ -85,6 +85,7 @@ READ_DRAFT = "read_draft"
 EDIT_DRAFT = "edit_draft"
 REMOVE_DRAFT = "remove_draft"
 MOVE_DRAFT = "move_draft"
+READ_SKILL = "read_skill"
 
 DRAFT_TOOLS = (LIST_DRAFTS, READ_DRAFT, EDIT_DRAFT, REMOVE_DRAFT, MOVE_DRAFT)
 """The tools a role that proposes tasks is granted for its drafts."""
@@ -103,6 +104,7 @@ ORBIT_TOOLS = (
     LIST_REPORTS,
     READ_REPORT,
     *DRAFT_TOOLS,
+    READ_SKILL,
 )
 """Every tool orbit's MCP server offers agents."""
 
@@ -155,7 +157,10 @@ def _can_merge(fields: dict[str, Any]) -> bool:
 
 
 def _refuse_granted(tools: tuple[str, ...]) -> None:
-    """Raises ``ValueError`` if ``tools`` names a tool orbit grants through another one."""
+    """Raises ``ValueError`` if ``tools`` names a tool orbit grants every role, or grants through
+    another one."""
+    if READ_SKILL in tools:
+        raise ValueError(f"{READ_SKILL} comes with every role; leave it out of tools.")
     if CONSULT in tools:
         raise ValueError(f"{CONSULT} comes with consults, not tools")
     drafts = [tool for tool in tools if tool in DRAFT_TOOLS]
@@ -287,10 +292,10 @@ class Role(_Config):
     @property
     def granted_tools(self) -> tuple[str, ...]:
         """The orbit tools its agents may call: its tools, the draft tools when it proposes
-        tasks, and ``consult`` when it consults anyone."""
+        tasks, ``consult`` when it consults anyone, and ``read_skill``, which every role has."""
         drafts = DRAFT_TOOLS if PROPOSE_TASK in self.tools else ()
         consult = (CONSULT,) if self.consults else ()
-        return (*self.tools, *drafts, *consult)
+        return (*self.tools, *drafts, *consult, READ_SKILL)
 
     @property
     def runs_checks(self) -> bool:

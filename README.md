@@ -1139,6 +1139,10 @@ you queue keeps its own settings. Built in:
 | `experimenter` | `report_progress`, `save_report`, `list_reports`, `read_report` | no | `sonnet` / `full` | none |
 | `configurator` | `get_task`, `propose_checks`, `report_progress`, `give_up` | no | default / `restricted` | none |
 
+Every role also has `read_skill`, which reads the files of its agents' skills (see
+[Skills](#skills)); a role's `tools` naming it is refused (`read_skill comes with every role;
+leave it out of tools.`).
+
 The `experimenter` is a conversational role the planner consults (see `consults` below) and you
 can talk to on its own tab: it runs what it's asked to learn, such as how a library behaves, in a
 throwaway `copy` of the project that's never merged, with the network and packages it needs, and
@@ -1560,7 +1564,8 @@ languages `python` and `cpp`, the kinds of project `application`, `pure-library`
 `execution-library` and `library-api`, `security`, and the review lenses `review-fit`,
 `review-bugs`, `review-tests`, `review-logic`, `review-security`, `review-performance`,
 `review-style`, `review-drift` and `review-scaling`. They're read with the configuration as a
-workspace opens; agents get them from a later version of orbit.
+workspace opens, and agents read the files of those they're given with `read_skill` (see below);
+a later version of orbit puts them in agents' instructions too.
 
 Each role names the skills its agents get in its `skills` (see
 [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)): the `planner` gets `code-style`,
@@ -1607,8 +1612,7 @@ A project maps paths in it to the skills for the code there with `[[skills]]` en
 `.orbit/config.toml`, and only there: your user config refuses them, as mappings would differ by
 machine. Each entry's `paths` are files or folders in the project, relative to its root, and its
 `use` the skills that apply there, by name, orbit's or the project's own; each needs at least one.
-Every agent gets every entry's skills along with its role's, once a later version of orbit gives
-agents their skills:
+Every agent is given every entry's skills along with its role's:
 
 ```toml
 [[skills]]
@@ -1628,6 +1632,16 @@ through `..` or a link to somewhere outside it
 and a link to elsewhere in the project are fine), one that isn't a file or folder in the project
 (`skills.2.paths names src/orbt, which isn't in the project.`), or a skill that isn't one
 (`skills.1.use names pyton, which isn't a skill; the skills are application, code-style, …`).
+
+An agent reads its skills' files with orbit's `read_skill(skill, file)` tool, which every role has
+(see [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)): it gives the text of the file
+at `file`, a path in the skill's folder such as `testing.md`, `SKILL.md` included, of a skill the
+agent was given, its role's `skills` then every `[[skills]]` entry's, each once, as they were read
+when the workspace opened. It's refused, in this order, to an agent given no skills (`You weren't
+given any skills.`), for a skill it wasn't given (`You weren't given the skill pyton; your skills
+are code-style, security, python.`), and for a file the skill doesn't have, as a path with `..`
+or an absolute one never is (`code-style has no file nope.md; its files are SKILL.md,
+testing.md.`).
 
 ### Starting from the reference config
 
@@ -2868,8 +2882,9 @@ to the
 `orbit.agent.process`, under the task's run, the planner's turn or the review it works for: its
 role, how it exited, its turns and the tools it called, as sorted names with their counts; each
 call it makes to orbit's tools is a child span, `orbit.agent.request`, with the tool and whether
-the reply was an error, and each verification step a call runs, verifying a `complete_task` claim
-or for `run_check`, is a child of that call, `orbit.verify.step`, with its name and result. Each
+the reply was an error (a `read_skill` call's with the skill and file asked for,
+`orbit.skill.name` and `orbit.skill.file`, refused or not), and each verification step a call
+runs, verifying a `complete_task` claim or for `run_check`, is a child of that call, `orbit.verify.step`, with its name and result. Each
 run of the startup check is one span, `orbit.startup_check`, starting its own trace: the
 workspace, how it came out (`passed`, `failed` or `cancelled`), the step that failed and whether
 it added a draft task to fix it, with each step it ran a child `orbit.verify.step`. Each

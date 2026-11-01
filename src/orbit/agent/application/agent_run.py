@@ -223,7 +223,7 @@ class AgentRun:
 
     async def handle(self, tool: str, arguments: dict[str, Any]) -> Reply:
         name = self._work.task.role
-        tools = {**self._tools, **self._desk.report_tools(name)}
+        tools = {**self._tools, **self._desk.tools(name)}
         return await dispatch(name, self.role, tools, tool, arguments)
 
     # The agent's process

@@ -82,6 +82,7 @@ async def test_offers_orbit_tools_with_their_arguments() -> None:
         assert tools["run_check"].input_schema["required"] == ["step"]
         assert tools["suggest_task"].input_schema["required"] == ["title", "prompt"]
         assert tools["propose_checks"].input_schema["required"] == ["steps"]
+        assert tools["read_skill"].input_schema["required"] == ["skill", "file"]
         assert all(tool.description for tool in tools.values())
 
 
@@ -92,6 +93,15 @@ async def test_the_tools_that_take_a_coders_prompt_say_what_it_must_cover() -> N
             # What the tool is for, then the recipe; the role instructions say the rest.
             assert (tools[name].description or "").endswith(PROMPT_RECIPE)
         assert all(part in PROMPT_RECIPE for part in ("Where", "Change", "Keep", "Done"))
+
+
+async def test_read_skill_says_it_reads_a_file_of_ones_skills_by_their_names() -> None:
+    async with serving(RecordingHandler()) as url, connected(url) as client:
+        tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+    assert tools["read_skill"].description == (
+        "Read a file of one of your skills, by the skill's name and the file's path in it, such"
+        " as testing.md."
+    )
 
 
 async def test_passes_calls_with_the_token_to_the_handler_and_returns_its_text() -> None:
@@ -124,6 +134,7 @@ async def test_passes_calls_with_the_token_to_the_handler_and_returns_its_text()
         ("remove_draft", {"task_id": "5"}),
         ("move_draft", {"task_id": "5", "before": "3"}),
         ("move_draft", {"task_id": "5", "before": None}),
+        ("read_skill", {"skill": "code-style", "file": "testing.md"}),
         (
             "propose_checks",
             {

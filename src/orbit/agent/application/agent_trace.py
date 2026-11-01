@@ -1,7 +1,7 @@
 """Tracing agents: the ``orbit.agent.process`` span of each agent's process, a child of what it
-works for, with an ``orbit.agent.request`` child for each of its calls to orbit, and an
-``orbit.verify.step`` child of a call for each verification step it runs (the remaining spans
-plan's decisions 10 and 11).
+works for, with an ``orbit.agent.request`` child for each of its calls to orbit (a
+``read_skill`` call's with the skill and file asked for), and an ``orbit.verify.step`` child of
+a call for each verification step it runs (the remaining spans plan's decisions 10 and 11).
 
 Calls arrive in the MCP server's context, not the agent's, so the desk finds a call's process
 span by the agent's token and makes it current for the call.
@@ -24,6 +24,14 @@ REQUEST_SPAN = "orbit.agent.request"
 STEP_SPAN = "orbit.verify.step"
 
 REQUEST_ERROR = "orbit.agent.request.error"
+SKILL_NAME = "orbit.skill.name"
+SKILL_FILE = "orbit.skill.file"
+
+
+def skill_attributes(skill: str, path: str) -> dict[str, AttributeValue]:
+    """The attributes recording a ``read_skill`` call's ask: the skill ``skill`` and the file at
+    ``path`` in it, as asked, whether or not it's refused."""
+    return {SKILL_NAME: skill, SKILL_FILE: path}
 
 
 def tool_attributes(counts: Mapping[str, int]) -> dict[str, AttributeValue]:

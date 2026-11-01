@@ -41,6 +41,7 @@ from orbit.agent.application.ports import UsageLedger, UsageSource
 from orbit.agent.domain.ownership import read_only_note
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, default_name
+from orbit.agent.domain.skills import SkillMapping
 from orbit.agent.domain.usage import UsageUnavailable
 from orbit.agent.external.sqlite_schema import MIGRATIONS
 from orbit.cli import app
@@ -228,6 +229,23 @@ def test_chat_works_in_the_workspace_it_is_given(
     assert session.agents.limits == Limits(max_attempts=3, max_checks=4)
     assert session.agents.root == str(project.resolve())
     assert f"Workspace: {project.resolve()}" in greeting.notices
+
+
+def test_chat_gives_agents_the_workspaces_skills_and_their_mappings(
+    launched: list[WorkspaceHost], tmp_path: Path
+) -> None:
+    (tmp_path / "src").mkdir()
+    house = tmp_path / ".orbit" / "skills" / "house"
+    house.mkdir(parents=True)
+    (house / "SKILL.md").write_text("---\nname: house\ndescription: Ours.\n---\n\nBe kind.\n")
+    mapping = '[[skills]]\npaths = ["src"]\nuse = ["house"]\n'
+    (tmp_path / ".orbit" / "config.toml").write_text(mapping)
+    assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
+    [session] = launched
+    assert session.agents is not None
+    assert session.agents.skill_library.skills["house"].body == "Be kind.\n"
+    assert "code-style" in session.agents.skill_library.skills
+    assert session.agents.skill_mappings == (SkillMapping(paths=("src",), use=("house",)),)
 
 
 def test_a_workspace_inside_a_git_repository_is_its_top_level(

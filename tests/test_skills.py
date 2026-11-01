@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.layers import PACKAGE, Layer
 from orbit.agent.domain.skills import (
+    NO_SKILLS,
     FrontMatter,
     Skill,
     SkillFile,
@@ -17,6 +18,8 @@ from orbit.agent.domain.skills import (
     SkillMapping,
     check_role_skills,
     check_skill_mappings,
+    given_skill_file,
+    given_skills,
     load_skill,
     load_skill_library,
     parse_front_matter,
@@ -487,3 +490,88 @@ def test_a_roles_first_unknown_skill_is_refused_naming_the_role_and_listing_the_
     problem = "roles.coder.skills names pyton, which isn't a skill; the skills are cpp, go, python."
     with pytest.raises(ConfigError, match=whole(problem)):
         check_role_skills("coder", ("python", "pyton", "rust"), library("python", "go", "cpp"))
+
+
+# Skills given to an agent
+
+
+def test_an_agent_is_given_its_roles_skills_then_the_mapped_ones_in_order() -> None:
+    mappings = (mapping("src", use=("python", "application")), mapping("native", use=("cpp",)))
+    assert given_skills(("code-style", "security"), mappings) == (
+        "code-style",
+        "security",
+        "python",
+        "application",
+        "cpp",
+    )
+
+
+def test_a_skill_from_the_role_and_a_mapping_is_given_once_where_first_named() -> None:
+    mappings = (mapping("src", use=("python", "security")), mapping("tests", use=("python",)))
+    assert given_skills(("security",), mappings) == ("security", "python")
+
+
+def test_a_role_without_skills_and_no_mappings_gives_none() -> None:
+    assert given_skills((), ()) == ()
+
+
+# Reading a skill's files
+
+
+def skill_of(name: str, *paths: str) -> Skill:
+    """The skill ``name``, with its SKILL.md and a file at each of ``paths``, in that order,
+    each holding its skill's name and its path."""
+    files = {
+        path: SkillFile(text=f"{name} {path}\n", layer=PACKAGE, location=f"/s/{name}/{path}")
+        for path in ("SKILL.md", *paths)
+    }
+    return Skill(name=name, description=f"{name}.", body="", files=files)
+
+
+FILES = SkillLibrary(
+    skills={
+        "code-style": skill_of("code-style", "testing.md", "naming.md"),
+        "python": skill_of("python", "tests.md"),
+        "security": skill_of("security"),
+    }
+)
+"""A library of code-style, python and security, code-style's files not in order."""
+
+
+def test_a_file_of_a_given_skill_is_readable() -> None:
+    found = given_skill_file(("code-style",), FILES, "code-style", "testing.md")
+    assert found == FILES.skills["code-style"].files["testing.md"]
+
+
+def test_a_given_skills_skill_md_is_readable() -> None:
+    found = given_skill_file(("python",), FILES, "python", "SKILL.md")
+    assert isinstance(found, SkillFile) and found.text == "python SKILL.md\n"
+
+
+def test_an_agent_given_no_skills_is_told_so() -> None:
+    assert given_skill_file((), FILES, "python", "tests.md") == NO_SKILLS
+    assert NO_SKILLS == "You weren't given any skills."
+
+
+def test_a_skill_not_given_is_refused_naming_it_and_listing_the_given_in_order() -> None:
+    assert given_skill_file(("security", "code-style"), FILES, "python", "tests.md") == (
+        "You weren't given the skill python; your skills are security, code-style."
+    )
+
+
+def test_a_given_skill_the_library_lacks_is_neither_read_nor_listed() -> None:
+    given = ("code-style", "added-since")
+    assert given_skill_file(given, FILES, "added-since", "SKILL.md") == (
+        "You weren't given the skill added-since; your skills are code-style."
+    )
+
+
+def test_given_skills_the_library_wholly_lacks_count_as_none() -> None:
+    assert given_skill_file(("added-since",), FILES, "added-since", "SKILL.md") == NO_SKILLS
+
+
+@pytest.mark.parametrize("path", ["nope.md", "../python/tests.md", "/etc/passwd", "./testing.md"])
+def test_a_file_the_skill_lacks_is_refused_listing_its_files_sorted(path: str) -> None:
+    assert given_skill_file(("code-style",), FILES, "code-style", path) == (
+        f"code-style has no file {path}; its files are SKILL.md, naming.md, testing.md."
+    )
