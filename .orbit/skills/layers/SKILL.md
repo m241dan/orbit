@@ -10,7 +10,7 @@ description: Orbit's map of code types — which packages hold Domain, Applicati
 | Domain | `orbit.agent.domain`; the plain functions in `orbit.tui.view` (presentation rules); `orbit.protocol` (wire models) |
 | Application | `orbit.agent.application`, with its ports and their exceptions in `application/ports.py`; the controllers in `orbit.tui.view` |
 | External | `orbit.agent.external`, one adapter per outside system; `orbit.telemetry`; `orbit.client`; the Textual widgets in `orbit.tui` |
-| Execution | `orbit.execution`: cancelling and shielding (`orbit.execution.cancelling`), `Background` (`orbit.execution.background`), `TurnSlot` (`orbit.execution.turns`) and `ThreadedSession` (`orbit.execution.threads`). It imports no orbit package; a new generic helper goes here. |
+| Execution | `orbit.execution`: cancelling and shielding, `Background`, `TurnSlot` and `ThreadedSession`. It imports no orbit package; a new generic helper goes here. |
 | Entry | `orbit.cli` and `orbit.__main__` |
 | Ports and tools | `orbit.tracing` (the tracing port, standard library only) and `orbit.profiling` (wired in by the CLI) |
 
@@ -25,7 +25,7 @@ description: Orbit's map of code types — which packages hold Domain, Applicati
 - `orbit.agent.external` is the only place that uses mcp, uvicorn, starlette or httpx.
 - The domain and the protocol record no telemetry. Tracing goes through `orbit.tracing`, and only
   the CLI uses `orbit.telemetry`, `orbit.profiling` and `orbit.client`.
-- `orbit.execution` imports no orbit package, and neither the domain nor the protocol uses it.
+- `orbit.execution` imports no orbit package, and neither the domain nor the protocol imports it.
 
 A change that adds a package or an outside dependency adds its contract.
 
