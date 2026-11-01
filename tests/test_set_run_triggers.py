@@ -146,7 +146,9 @@ async def test_a_failing_reporting_set_adds_its_notice_and_nothing_else() -> Non
     sets = sets_of(session)
     await session.close()
 
-    assert notices(events) == ["slow reported: Mutation tests failed (see the verification panel)"]
+    assert notices(events) == [
+        "slow reported: Mutation tests failed. Its output ended:\n\n1 test failed"
+    ]
     assert panels(events)[-1] == ("failed",)
     boards = [event.tasks for event in events if isinstance(event, TasksChanged)]
     assert [state.origin for state in boards[-1]] == ["manual"]

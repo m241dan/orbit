@@ -723,11 +723,10 @@ verification takes the panel; a passing run, or one that's cancelled or couldn't
 (frontends get it as `VerificationChanged`'s `output` and the `Snapshot`'s `steps_output`; see
 [docs/protocol.md](docs/protocol.md)). A run that lost the panel to a task's verification shows
 its output nowhere there, and doesn't take the panel back. A passing run of a set that only
-reports adds nothing to the conversation; a failing one adds a notice, `mutation reported:
-Mutation tests failed (see the verification panel)`, and queues nothing. If the run had lost the
-panel, the notice instead quotes the same last 10 lines of the output: `mutation reported:
-Mutation tests failed. Its output ended:` followed by them, or `mutation reported: Mutation
-tests failed, with no output` when there was none. Sets run
+reports adds nothing to the conversation; a failing one adds a notice quoting the same last 10
+lines of the output, so you can read them however the panel has moved on since: `mutation
+reported: Mutation tests failed. Its output ended:` followed by them, or `mutation reported:
+Mutation tests failed, with no output` when there was none. It queues nothing. Sets run
 only in a git repository with the coder's worktree, where there's a commit to snapshot, and never
 with `--no-verify`.
 

@@ -13,7 +13,7 @@ from orbit.agent.application.ports import StepRunner, TreeFailed
 from orbit.agent.application.set_runs import SetResult, SetRuns, SetSite, cancelled_note
 from orbit.agent.application.set_trace import SET_SPAN, SetTracing
 from orbit.agent.domain.checks import Setup
-from orbit.agent.domain.verification import CheckSet, VerificationStep, set_failed_away_note
+from orbit.agent.domain.verification import CheckSet, VerificationStep, set_failed_note
 from orbit.protocol import (
     GIT_FAILED,
     AgentExited,
@@ -124,7 +124,9 @@ async def test_a_failing_reporting_set_adds_its_notice_and_keeps_its_failure() -
     runs.runs.run("slow", "slow")
     await runs.ended()
 
-    assert runs.notices() == ["slow reported: Mutation tests failed (see the verification panel)"]
+    assert runs.notices() == [
+        "slow reported: Mutation tests failed. Its output ended:\n\n1 test failed"
+    ]
     assert shown("failed", "pending") in runs.events
     assert runs.runs.failures == {"slow": (MUTATION, "1 test failed")}
     assert runs.exits() == [AgentExited(agent_id="set-slow", reason="finished")]
@@ -143,7 +145,7 @@ async def test_a_failing_run_shows_its_steps_trimmed_output_in_the_panel_before_
     failed = shown("failed", "pending", output="3 mutants survived")
     assert runs.events[-3:] == [
         failed,
-        Notice(message="slow reported: Mutation tests failed (see the verification panel)"),
+        Notice(message=set_failed_note("slow", MUTATION.name, "3 mutants survived")),
         AgentExited(agent_id="set-slow", reason="finished"),
     ]
     assert runs.runs.panel == failed
@@ -214,7 +216,7 @@ async def test_a_failing_setup_fails_the_run_before_its_steps() -> None:
     await runs.ended()
 
     assert steps.runs == ["setup"]
-    assert runs.notices() == ["slow reported: setup failed (see the verification panel)"]
+    assert runs.notices() == ["slow reported: setup failed. Its output ended:\n\n1 test failed"]
 
 
 async def test_a_base_git_cannot_find_is_reported() -> None:
@@ -449,11 +451,26 @@ async def test_a_released_run_publishes_no_more_progress_and_its_output_in_its_n
     gate.set()
     await runs.ended()
     assert runs.events[published:] == [
-        Notice(message=set_failed_away_note("slow", MUTATION.name, "1 test failed")),
+        Notice(message=set_failed_note("slow", MUTATION.name, "1 test failed")),
         AgentExited(agent_id="set-slow", reason="finished"),
     ]
     assert runs.runs.panel is None
     assert runs.runs.failures.keys() == {"slow"}
+
+
+async def test_a_run_failing_while_it_shows_keeps_its_output_in_its_notice_once_released() -> None:
+    async def survived(step: VerificationStep, root: str) -> tuple[bool, str]:
+        return False, "3 mutants survived"
+
+    runs = Runs(survived)
+    runs.runs.run("slow", "slow")
+    await runs.ended()
+    runs.runs.release_panel()
+
+    assert runs.runs.panel is None
+    assert runs.notices() == [
+        "slow reported: Mutation tests failed. Its output ended:\n\n3 mutants survived"
+    ]
 
 
 async def test_a_run_starting_after_a_release_takes_the_panel_again() -> None:

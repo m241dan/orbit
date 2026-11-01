@@ -65,16 +65,11 @@ class CheckSet:
     effect: SetEffect = "reports"
 
 
-def set_failed_note(name: str, step: str) -> str:
-    """The notice saying a run of the reporting set ``name`` failed at the step named ``step``,
-    pointing at the verification panel, which shows its run."""
-    return f"{name} reported: {step} failed (see the verification panel)"
-
-
-def set_failed_away_note(name: str, step: str, output: str) -> str:
-    """The notice saying a run of the reporting set ``name`` failed at the step named ``step``,
-    once a task's verification took the panel from it: quoting the last lines of the ``output``
-    it failed with, trimmed, as the panel would have shown them."""
+def set_failed_note(name: str, step: str, output: str) -> str:
+    """The notice saying a run of the reporting set ``name`` failed at the step named ``step``:
+    quoting the last lines of the ``output`` it failed with, trimmed, as the verification panel
+    shows them, since the panel may show a task's verification or another set's run by the time
+    the notice is read."""
     tail = "\n".join(output_tail(trim_output(output)))
     if not tail:
         return f"{name} reported: {step} failed, with no output"
