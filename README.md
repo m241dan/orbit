@@ -1134,33 +1134,33 @@ without it (or closed, if nothing in it landed); removing a queued review closes
 have suggested into.
 
 Every `super_review_every` commits (default 10, counting your own and the planner's commits, not
-those of suggested tasks), a `super-reviewer` (Opus by default) reviews the **whole codebase** at the
-latest commit: starting from the project's shape, it reads the commits since the last super review
-and a rotating sample of other code files (below) through the lens skills its role gives it (by
-default `review-style`, `review-drift` and `review-scaling`, each asking what has built up across
-commits; see [Skills](#skills)), and may suggest up to `super_review_suggestions` tasks (default
-10). Those form a batch at round 1 and carry on like any other review's. Each review
-ends with a one-line verdict that also counts the findings its cap left out, so
-`5 suggestions, 2 more left out` tells you a second pass would find more. `ctrl+g` asks
-for one straight away and restarts the count. A super review's task lists, after the
-tasks still queued, the subjects of the commits since the last super review (every one, oldest
-first, after the commit that review reviewed up to its own) under `Commits since the last super
-review:`, then the files they changed under `Files they changed:` (sorted, the first 100 named and
-the rest counted); the first super review in a repository, or one with nothing landed since the
-last, lists neither, and one whose lists git can't give goes ahead without them. It then lists, under
-`Sampled files (read these too):`, a sample of up to `super_review_sample` other code files
-(default 10; 0 for none), sorted: files git tracks at the reviewed commit with a source extension
-(`.py`, `.pyi`, `.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hh`, `.hpp`, `.rs`, `.go`, `.java`, `.kt`,
-`.js`, `.jsx`, `.ts`, `.tsx`, `.cs`, `.swift` or `.rb`), within the `[[skills]]` paths when any are
-mapped (see [Skills](#skills)), and not among the files the commits since changed, so the rest of
-the code comes up for review too; with none eligible, or when git can't list the files, there's no
-sample. The sample rotates, so every code file is read before any is read again: files never
-sampled come first, then those sampled by the earliest super review, picking at random among files
-sampled by the same one; a file git no longer tracks is forgotten. The count, the commit the last
-super review reviewed, and which super review last sampled each file belong to the repository
-rather than to a session, so they carry on across sessions and restarts. A super review that falls
-due waits while review is paused, and while suggested tasks (or reviews) are pending or running; it
-comes with your next commit once none is.
+those of suggested tasks), a `super-reviewer` (Opus by default) reviews the **whole codebase** at
+the latest commit: starting from the project's shape, it reads the commits since the last super
+review and a rotating sample of other code files (below) through the lens skills its role gives it
+(by default `review-style`, `review-drift` and `review-scaling`, each asking what has built up
+across commits; see [Skills](#skills)), and may suggest up to `super_review_suggestions` tasks
+(default 10). Those form a batch at round 1 and carry on like any other review's. Each review ends
+with a one-line verdict that also counts the findings its cap left out, so
+`5 suggestions, 2 more left out` tells you a second pass would find more. `ctrl+g` asks for one
+straight away and restarts the count. A super review's task lists, after the tasks still queued, the
+subjects of the commits since the last super review (every one, oldest first, after the commit that
+review reviewed up to its own) under `Commits since the last super review:`, then the files they
+changed under `Files they changed:` (sorted, the first 100 named and the rest counted); the first
+super review in a repository, or one with nothing landed since the last, lists neither, and one
+whose lists git can't give goes ahead without them. It then lists, under
+`Sampled files (read these too):`, a sample of up to `super_review_sample` other code files (default
+10; 0 for none), sorted: files git tracks at the reviewed commit with a source extension (`.py`,
+`.pyi`, `.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hh`, `.hpp`, `.rs`, `.go`, `.java`, `.kt`, `.js`,
+`.jsx`, `.ts`, `.tsx`, `.cs`, `.swift` or `.rb`), within the `[[skills]]` paths when any are mapped
+(see [Skills](#skills)), and not among the files the commits since changed, so the rest of the code
+comes up for review too; with none eligible, or when git can't list the files, there's no sample.
+The sample rotates, so every code file is read before any is read again: files never sampled come
+first, then those sampled by the earliest super review, picking at random among files sampled by the
+same one; a file git no longer tracks is forgotten. The count, the commit the last super review
+reviewed, and which super review last sampled each file belong to the repository rather than to a
+session, so they carry on across sessions and restarts. A super review that falls due waits while
+review is paused, and while suggested tasks (or reviews) are pending or running; it comes with your
+next commit once none is.
 
 The reviews orbit queued can't be edited: remove one instead. Reviews run in the review roles'
 lane, `review`, which starts its tasks by itself: a `reviewer` task you add starts there at once
