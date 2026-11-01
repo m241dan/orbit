@@ -11,6 +11,7 @@ from orbit.agent.domain.reviews import ReviewJob
 from orbit.agent.domain.triggers import (
     Trigger,
     TriggerEvent,
+    can_queue_reviews,
     count_landing,
     fires_by_hand,
     held_back,
@@ -43,6 +44,35 @@ def task(
 
 def names(found: list[tuple[str, Trigger]]) -> list[str]:
     return [name for name, _ in found]
+
+
+# Whether reviews of commits can be queued
+
+GUARDED = trigger(guards=["review-rounds"])
+"""A trigger ``review-rounds`` guards, queuing a reviewer's task."""
+
+
+def test_reviews_can_be_queued_while_an_enabled_trigger_review_rounds_guards_queues_a_task() -> (
+    None
+):
+    assert can_queue_reviews({"plain": trigger(), "lens": GUARDED}, ROLES)
+
+
+def test_reviews_cant_be_queued_without_a_trigger_review_rounds_guards() -> None:
+    assert not can_queue_reviews({"plain": trigger(), "other": trigger(on="task_finished")}, ROLES)
+
+
+def test_reviews_cant_be_queued_while_the_only_guarded_trigger_is_disabled() -> None:
+    assert not can_queue_reviews({"lens": trigger(guards=["review-rounds"], enabled=False)}, ROLES)
+
+
+def test_reviews_cant_be_queued_while_the_guarded_triggers_role_is_disabled() -> None:
+    assert not can_queue_reviews({"lens": GUARDED}, ("coder",))
+
+
+def test_reviews_can_be_queued_by_a_guarded_trigger_running_a_named_set() -> None:
+    sets = {"lens": Trigger(on="task_landed", checks="mutation", guards=("review-rounds",))}
+    assert can_queue_reviews(sets, ())
 
 
 # Listening

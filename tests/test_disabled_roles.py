@@ -14,6 +14,7 @@ from orbit.protocol import (
     CONFIGURE_CHECKS,
     EXPERIMENTER,
     INVALID,
+    LENS_REVIEWERS,
     NOT_CONFIGURED,
     PLANNER,
     REVIEWER,
@@ -133,6 +134,7 @@ async def test_a_disabled_super_reviewer_leaves_the_catalog_with_its_trigger_and
         CODER,
         REVIEWER,
         CONFIGURATOR,
+        *LENS_REVIEWERS,
     ]
     assert [trigger.name for trigger in listed.triggers] == [CONFIGURE_CHECKS]
     assert trigger_key_labels(listed.triggers) == {"ctrl+g": None, "ctrl+e": "Set up checks"}
@@ -147,7 +149,7 @@ async def test_a_disabled_configurator_takes_its_trigger_and_key_out_of_the_cata
 
 
 async def test_disabled_reviewers_and_planner_take_their_lanes_out_of_the_catalog() -> None:
-    roles = disabling(PLANNER, REVIEWER, SUPER_REVIEWER)
+    roles = disabling(PLANNER, REVIEWER, SUPER_REVIEWER, *LENS_REVIEWERS)
     session, _, _ = session_for(tree=FakeTree(), review=True, roles=roles)
     listed = await catalog_of(session)
     assert [agent.name for agent in listed.agents] == [EXPERIMENTER, CODER, CONFIGURATOR]

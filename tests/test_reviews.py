@@ -27,7 +27,6 @@ from orbit.agent.domain.reviews import (
 from orbit.protocol import (
     CONFIGURATOR,
     REVIEW_ORIGIN,
-    REVIEW_ROLES,
     REVIEWER,
     SUPER_REVIEW,
     SUPER_REVIEWER,
@@ -858,14 +857,14 @@ def test_the_super_review_count_is_kept_apart_from_snapshots() -> None:
     assert reviews.super_count == SuperReviewCount(2, "abc", 3, {"a.py": 1})
 
 
-def test_a_commit_review_suggests_review_tasks_and_is_run_by_a_reviewer() -> None:
+def test_a_commit_review_is_from_review() -> None:
     job = ReviewJob(commits=("abc",), round=0, batch=None)
-    assert (job.origin, job.role) == (REVIEW_ORIGIN, REVIEWER)
+    assert job.origin == REVIEW_ORIGIN
 
 
-def test_a_super_review_suggests_super_review_tasks_and_is_run_by_a_super_reviewer() -> None:
+def test_a_super_review_is_from_super_review() -> None:
     job = ReviewJob(commits=("abc",), round=0, batch=None, whole=True)
-    assert (job.origin, job.role) == (SUPER_REVIEW, SUPER_REVIEWER)
+    assert job.origin == SUPER_REVIEW
 
 
 def skilled(task_id: str, *skills: str) -> TaskState:
@@ -907,24 +906,28 @@ def test_the_pause_notice_names_the_rounds_limit() -> None:
     )
 
 
-def disabling(*roles: str) -> ReviewPlanner:
-    """A planner pausing after round 1, with the review ``roles`` disabled."""
-    return ReviewPlanner(ReviewLimits(rounds=1), REVIEW_ROLES - set(roles))
+def reviewing_while(fires: list[bool]) -> ReviewPlanner:
+    """A planner pausing after round 1, whose reviews of commits can be queued while the last of
+    ``fires`` says a trigger guarded by ``review-rounds`` can fire."""
+    return ReviewPlanner(ReviewLimits(rounds=1), lambda: fires[-1])
 
 
-def test_with_the_reviewer_disabled_no_commit_is_reviewed() -> None:
-    reviews = disabling(REVIEWER)
+def test_while_no_review_trigger_can_fire_no_commit_is_reviewed() -> None:
+    reviews = reviewing_while([False])
     assert reviews.landed(state("1"), "abc123") is None
 
 
-def test_with_the_reviewer_disabled_a_finished_batch_closes_unreviewed_and_unpaused() -> None:
-    reviews = disabling(REVIEWER)
+def test_while_no_review_trigger_can_fire_a_finished_batch_closes_unreviewed_and_unpaused() -> None:
+    reviews = reviewing_while([False])
     batch = filled(reviews, "2")
     assert reviews.landed(state("2", origin="review", batch=batch), "c2") is None
     assert reviews.open_batches == ()
     assert not reviews.paused
 
 
-def test_with_the_super_reviewer_disabled_commits_are_still_reviewed() -> None:
-    reviews = disabling(SUPER_REVIEWER)
-    assert reviews.landed(state("4"), "abc123") is not None
+def test_commits_are_reviewed_again_once_a_review_trigger_can_fire_again() -> None:
+    fires = [False]
+    reviews = reviewing_while(fires)
+    assert reviews.landed(state("4"), "abc123") is None
+    fires.append(True)
+    assert reviews.landed(state("5"), "def456") is not None

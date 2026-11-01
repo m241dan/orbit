@@ -13,13 +13,23 @@ from orbit.agent.application.skill_delivery import SkillDelivery
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
 from orbit.agent.external.skill_files import SKILL_DIRECTORY, read_skill_library, skill_names
-from orbit.protocol import BUILT_IN_ROLE_NAMES
+from orbit.protocol import BUILT_IN_ROLE_NAMES, LENS_REVIEWERS, PINNED_ROLE_NAMES
 
 FOLDER = files("orbit.agent.external") / "instructions"
 README = Path(__file__).parent.parent / "README.md"
+INSTRUCTION_FILES = {
+    **{name: f"{name}.md" for name in PINNED_ROLE_NAMES},
+    **dict.fromkeys(LENS_REVIEWERS, "lens-reviewer.md"),
+}
+"""The Markdown file each built-in role's instructions are in: its own, or the lens reviewers'
+shared one."""
 ROLES_TOML = (FOLDER / "roles.toml").read_text(encoding="utf-8")
 
 REVIEW_TOOLS = ("get_task", "complete_task", "report_progress", "give_up", "suggest_task")
+MERGE_PASS_TOOLS = (*REVIEW_TOOLS, "dismiss_finding")
+LENS_TOOLS = ("get_task", "complete_task", "report_progress", "give_up", "report_finding")
+LENS_FILE = "lens-reviewer.md"
+"""The instructions file every lens reviewer shares."""
 REVIEWER_SKILLS = (
     "code-style",
     "security",
@@ -53,7 +63,7 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
     "reviewer": {
         "model": None,
         "tool_access": "restricted",
-        "tools": REVIEW_TOOLS,
+        "tools": MERGE_PASS_TOOLS,
         "blocking_findings": False,
         "verify": False,
         "timeout_minutes": None,
@@ -150,15 +160,33 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
 works, which lane runs it, whether you talk to it, whether its work merges, no effort, and the
 skills its agents get."""
 
+LENS_SKILLS = {
+    "fit-reviewer": ("code-style", "review-fit"),
+    "bugs-reviewer": ("code-style", "review-bugs"),
+    "tests-reviewer": ("code-style", "review-tests"),
+    "logic-reviewer": ("code-style", "review-logic"),
+    "security-reviewer": ("code-style", "security", "review-security"),
+    "performance-reviewer": ("code-style", "review-performance"),
+}
+"""Each lens reviewer's skills: code-style and its lens, and security for the security lens."""
+
+BLOCKING_LENSES = frozenset({"bugs-reviewer", "security-reviewer"})
+"""The lens reviewers whose findings may block merges."""
+
+BUILT_IN_FIELDS |= {
+    name: BUILT_IN_FIELDS["reviewer"]
+    | {"tools": LENS_TOOLS, "skills": skills, "blocking_findings": name in BLOCKING_LENSES}
+    for name, skills in LENS_SKILLS.items()
+}
+
 
 def role_directory(tmp_path: Path, roles_toml: str, leave_out: Collection[str] = ()) -> Path:
     """``tmp_path`` holding ``roles_toml`` and the shipped Markdown files but those named in
     ``leave_out``."""
     (tmp_path / "roles.toml").write_text(roles_toml, encoding="utf-8")
-    for name in BUILT_IN_ROLE_NAMES:
-        if f"{name}.md" not in leave_out:
-            text = (FOLDER / f"{name}.md").read_text(encoding="utf-8")
-            (tmp_path / f"{name}.md").write_text(text, encoding="utf-8")
+    for file in set(INSTRUCTION_FILES.values()) - set(leave_out):
+        text = (FOLDER / file).read_text(encoding="utf-8")
+        (tmp_path / file).write_text(text, encoding="utf-8")
     return tmp_path
 
 
@@ -173,23 +201,24 @@ def readme_column(name: str, column: int) -> tuple[str, ...]:
     return tuple(re.findall(r"`([^`]+)`", row.split("|")[column]))
 
 
-def test_there_is_one_markdown_file_per_built_in_role() -> None:
+def test_there_is_one_markdown_file_per_pinned_role_and_one_the_lens_reviewers_share() -> None:
     names = {entry.name for entry in FOLDER.iterdir() if entry.name.endswith(".md")}
-    assert names == {f"{name}.md" for name in BUILT_IN_ROLE_NAMES}
+    assert names == {f"{name}.md" for name in PINNED_ROLE_NAMES} | {LENS_FILE}
 
 
 def test_each_built_in_role_is_told_its_file() -> None:
     roles = read_built_in_roles()
     assert tuple(roles) == BUILT_IN_ROLE_NAMES
     for name, role in roles.items():
-        assert role.instructions == (FOLDER / f"{name}.md").read_text(encoding="utf-8").strip()
+        text = (FOLDER / INSTRUCTION_FILES[name]).read_text(encoding="utf-8")
+        assert role.instructions == text.strip()
 
 
 def test_roles_toml_ships_in_the_package_naming_each_roles_markdown_file() -> None:
     tables = tomllib.loads(ROLES_TOML)["roles"]
     assert set(tables) == set(BUILT_IN_ROLE_NAMES)
     for name, table in tables.items():
-        assert table["instructions"] == f"{name}.md"
+        assert table["instructions"] == INSTRUCTION_FILES[name]
 
 
 def test_roles_toml_sets_each_roles_lane_workspace_conversation_merging_and_enabling() -> None:
@@ -211,7 +240,7 @@ def test_the_built_in_roles_are_read_from_the_directory_given(tmp_path: Path) ->
 
 
 def test_each_built_in_roles_instructions_are_in_the_file_roles_toml_names() -> None:
-    assert read_instruction_files() == {name: f"{name}.md" for name in BUILT_IN_ROLE_NAMES}
+    assert read_instruction_files() == INSTRUCTION_FILES
 
 
 def test_the_instructions_files_are_read_from_the_directory_given(tmp_path: Path) -> None:
@@ -444,22 +473,51 @@ def test_the_planner_fixes_its_own_drafts_until_the_user_accepts_them() -> None:
     assert "you can't change or remove them" not in text
 
 
-REVIEWER_LOOKS_THROUGH_ITS_LENSES = (
-    "It also lists the tasks already queued or running, and the commits landed since the one you"
-    " review: don't suggest what they cover.",
-    "Your lenses are your `review-*` skills. Each owns one question and says what to look for,"
-    " what it measures against and what counts as blocking. Look at the change through every lens"
-    " you were given. Most changes hold up under most lenses, and a lens that finds nothing"
-    " reports nothing.",
-    "Until orbit can hold merges, a finding a lens says blocks merges is the most severe kind:"
-    " suggest it first, and say in its prompt why it would block.",
-    "Before suggesting, drop a finding that a queued task or a commit landed since already covers,"
-    " and where a landed commit's subject suggests it changed the code you're judging, say so in"
-    " the suggestion so the coder checks it still applies. Confirm how a framework behaves before"
-    " asking for a test that must fail without the fix, and write Done items that can all hold at"
-    " once.",
+LENS_REVIEWER_REPORTS_FINDINGS = (
+    "Read the code around the diff as well as the diff itself, so you judge each line in"
+    " context: what looks odd on its own may be the project's convention.",
+    "A task made for a plan opens its prompt with `Plan: <path>`, the plan's record: a"
+    " requirements doc saying why the change was wanted and what was decided. Read it.",
+    "Look only through your `review-*` lens skill.",
+    "Report each problem worth fixing with `report_finding`:",
+    "**body**: where it is (file and function or line), the input or scenario that shows it, and"
+    " why it matters.",
+    "**severity**: `blocking` only when your lens skill says such a finding blocks merges",
+    "Drop a finding that a queued task or a commit landed since already covers.",
+    "Don't file tasks: you report findings, and the merge pass files them.",
+    "a lens that finds nothing reports nothing",
+    "Then call `complete_task` with one line giving how many findings you reported and how many"
+    ' of them block, such as "2 findings, 1 blocking", "1 finding" or "Clean".',
 )
-REVIEWER_RETIRED_PHRASES = ("**Clarity**", "Clarity improvements join a task")
+MERGE_PASS_FILES_AND_DISMISSES = (
+    "Your task hands you the findings of one review's lenses.",
+    "Check each finding against the code",
+    "Drop a finding that a queued task or a commit landed since already covers",
+    "Group related findings into one task: problems in the same function or file, or a bug"
+    " together with the test that would have caught it, even when different lenses reported"
+    " them.",
+    "Rank the tasks by severity and file the most severe within your cap. For each, call"
+    " `suggest_task` with:",
+    "**Where**: the reviewed task's `Plan: <path>` line when it had one, then the files and"
+    " functions involved.",
+    "**Change**: what to do, with the input or scenario that shows the problem.",
+    "**Keep**: what must stay as it is.",
+    "**Done**: the behaviours tests must pin down.",
+    "**findings**: the ids of the findings the task covers, the main one first.",
+    "**severity**: `blocking` only for a blocking finding that holds up once checked",
+    "Confirm how a framework behaves before asking for a test that must fail without the fix, and"
+    " write Done items that can all hold at once.",
+    "Dismiss every finding you don't file with `dismiss_finding` and a short reason, such as"
+    " `over the cap`, `covered by task 12` or `doesn't hold: <why>`.",
+    "Then call `complete_task` with one line giving how many tasks you filed from how many"
+    ' findings, and how many you dismissed, such as "3 tasks from 5 findings, 2 dismissed".',
+)
+REVIEWER_RETIRED_PHRASES = (
+    "**Clarity**",
+    "Clarity improvements join a task",
+    "Until orbit can hold merges",
+    "Look at the change through every lens you were given",
+)
 
 
 def reviewer_text() -> str:
@@ -467,9 +525,16 @@ def reviewer_text() -> str:
     return " ".join(read_built_in_roles()["reviewer"].instructions.split())
 
 
-def test_the_reviewer_looks_through_its_lens_skills_with_blocking_findings_first() -> None:
+@pytest.mark.parametrize("name", LENS_REVIEWERS)
+def test_each_lens_reviewer_reports_findings_through_its_one_lens(name: str) -> None:
+    text = role_text(name)
+    for passage in LENS_REVIEWER_REPORTS_FINDINGS:
+        assert passage in text, passage
+
+
+def test_the_reviewer_as_merge_pass_files_the_findings_that_hold_and_dismisses_the_rest() -> None:
     text = reviewer_text()
-    for passage in REVIEWER_LOOKS_THROUGH_ITS_LENSES:
+    for passage in MERGE_PASS_FILES_AND_DISMISSES:
         assert passage in text, passage
 
 

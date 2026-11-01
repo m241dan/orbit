@@ -26,6 +26,7 @@ from pydantic import (
 from pydantic_core import from_json
 
 from orbit.agent.domain.consultations import RESTARTED
+from orbit.agent.domain.endings import QUEUED_BEFORE_LENSES
 from orbit.agent.domain.merge_holds import Hold
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot, SuperReviewCount
@@ -44,7 +45,7 @@ from orbit.protocol import (
     Usage,
 )
 
-FORMAT_VERSION = 25
+FORMAT_VERSION = 26
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _OLD_SUPER_REVIEW_ORIGIN = "super_review"
@@ -169,6 +170,29 @@ def _booked_besides(batch: str, batches: dict[str, Any], lenses: list[Any]) -> l
     return [task for task in booked if task not in lenses]
 
 
+def _old_reviews_cancelled(record: dict[str, Any]) -> dict[str, Any]:
+    """Version 25 ``record`` with each task queued as a review that hadn't started cancelled,
+    for :data:`~orbit.agent.domain.endings.QUEUED_BEFORE_LENSES`: its prompt is for the
+    reviewer as it was, before lens reviewers. Tasks that aren't a list are left for the
+    record's validation to say why, as is a task that isn't an object."""
+    tasks = record.get("tasks", [])
+    if not isinstance(tasks, list):
+        return record
+    return record | {"tasks": [_cancelled_if_waiting(task) for task in tasks]}
+
+
+def _cancelled_if_waiting(task: object) -> object:
+    """``task``, a saved task, cancelled if it's a review still to start."""
+    if not isinstance(task, dict) or not _review_to_start(task):
+        return task
+    return task | {"status": "cancelled", "reason": QUEUED_BEFORE_LENSES, "reason_detail": ""}
+
+
+def _review_to_start(task: dict[str, Any]) -> bool:
+    """Whether ``task``, a saved task, is a review orbit queued that hasn't started."""
+    return task.get("queued_as") == "review" and task.get("status", "pending") == "pending"
+
+
 def _booked(task: object, booked: tuple[str, ...]) -> object:
     """``task``, a saved task, queued as a review if its id is one of those ``booked``."""
     if isinstance(task, dict) and task.get("id") in booked:
@@ -210,7 +234,10 @@ def _booked(task: object, booked: tuple[str, ...]) -> object:
 # older record has none, as each of its reviews is one task, which ends it as it ends. Version 25
 # added each group's merge passes, which its migration finds among the tasks booked into a group
 # that raised ``reviews_finished``, and the severities merge passes filed tasks at, which an
-# older record filed none at.
+# older record filed none at. Version 26 is the first whose reviews are lens reviewers' and the
+# merge pass's: its migration cancels the reviews an older record had waiting, whose prompts are
+# for the reviewer as it was, and the session opened ends them (see
+# :func:`reviews_cancelled_at_upgrade`).
 _MIGRATIONS: dict[int, Migration] = {
     1: _spent_by_tasks,
     2: _without_rounds,
@@ -236,6 +263,7 @@ _MIGRATIONS: dict[int, Migration] = {
     22: _unchanged,
     23: _unchanged,
     24: _merges_as_booked,
+    25: _old_reviews_cancelled,
 }
 
 EMPTY_NAME = "A session needs a name."
@@ -572,6 +600,34 @@ def resumed_notes(record: SessionRecord, interrupted: int) -> tuple[str, ...]:
     if interrupted == 1:
         return resumed, "1 task was interrupted and is cancelled."
     return resumed, f"{interrupted} tasks were interrupted and are cancelled."
+
+
+def reviews_cancelled_at_upgrade(record: SessionRecord) -> tuple[str, ...]:
+    """The ids of ``record``'s reviews that the upgrade to lens reviewers cancelled and that
+    haven't ended in its review lane yet, as their batches are still open: those the session
+    opened still has to end, as if they suggested nothing."""
+    reviews = record.reviews
+    if reviews is None:
+        return ()
+    return tuple(
+        state.id
+        for state in record.tasks
+        if state.reason == QUEUED_BEFORE_LENSES
+        and reviews.batches.get(state.id) in reviews.planner.batches
+    )
+
+
+def unreviewed_notes(record: SessionRecord, cancelled: Sequence[str]) -> tuple[str, ...]:
+    """What to tell the user of ``record``'s reviews ``cancelled`` at the upgrade to lens
+    reviewers: the commits they leave unreviewed, abbreviated, each once; nothing if none were
+    cancelled."""
+    if not cancelled or record.reviews is None:
+        return ()
+    jobs = record.reviews.jobs
+    commits = dict.fromkeys(commit[:7] for task in cancelled for commit in jobs[task].commits)
+    return (
+        f"Reviews queued before lens reviewers were cancelled; unreviewed: {', '.join(commits)}.",
+    )
 
 
 def runtime_changed(conversation: SavedConversation | None, runtime: str) -> bool:

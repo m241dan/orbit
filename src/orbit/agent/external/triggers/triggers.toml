@@ -1,11 +1,47 @@
 # The triggers shipped with orbit, each turning an event into a task for a role or a run of
 # checks. A trigger's prompt names its template, a Markdown file beside this one.
 
-[triggers.review]
+[triggers.fit-review]
 on = "task_landed"
-role = "reviewer"
-prompt = "review.md"
+role = "fit-reviewer"
+prompt = "lens-review.md"
 guards = ["review-rounds"]
+
+[triggers.bugs-review]
+on = "task_landed"
+role = "bugs-reviewer"
+prompt = "lens-review.md"
+guards = ["review-rounds"]
+
+[triggers.tests-review]
+on = "task_landed"
+role = "tests-reviewer"
+prompt = "lens-review.md"
+guards = ["review-rounds"]
+
+[triggers.logic-review]
+on = "task_landed"
+role = "logic-reviewer"
+prompt = "lens-review.md"
+guards = ["review-rounds"]
+
+[triggers.security-review]
+on = "task_landed"
+role = "security-reviewer"
+prompt = "lens-review.md"
+guards = ["review-rounds"]
+
+[triggers.performance-review]
+on = "task_landed"
+role = "performance-reviewer"
+prompt = "lens-review.md"
+guards = ["review-rounds"]
+
+[triggers.merge-pass]
+on = "reviews_finished"
+role = "reviewer"
+prompt = "merge-pass.md"
+when = { findings = "some" }
 
 [triggers.super-review]
 on = "commits"

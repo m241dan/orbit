@@ -17,7 +17,7 @@ from orbit.agent.external.built_in_triggers import TRIGGER_DIRECTORY
 from orbit.agent.external.skill_files import SKILL_DIRECTORY
 from orbit.cli import app
 from orbit.cli.config_text import config_json, config_text, skill_map_json, skill_map_text
-from orbit.protocol import BUILT_IN_ROLE_NAMES
+from orbit.protocol import BUILT_IN_ROLE_NAMES, LENS_REVIEWERS
 
 runner = CliRunner()
 
@@ -26,10 +26,10 @@ REVIEWER = (ROLE_DIRECTORY / "reviewer.md").read_text(encoding="utf-8").strip()
 
 REVIEWER_LINES = len(REVIEWER.splitlines())
 
-REVIEW_TEMPLATE_LINES = len(
-    (TRIGGER_DIRECTORY / "review.md").read_text(encoding="utf-8").strip().splitlines()
+LENS_TEMPLATE_LINES = len(
+    (TRIGGER_DIRECTORY / "lens-review.md").read_text(encoding="utf-8").strip().splitlines()
 )
-"""How many lines the shipped review trigger's template has."""
+"""How many lines the shipped lens review triggers' template has."""
 
 STARTUP_FIX_TEMPLATE = (TRIGGER_DIRECTORY / "startup-fix.md").read_text(encoding="utf-8").strip()
 """The text of the shipped startup-fix trigger's template."""
@@ -41,7 +41,13 @@ SKILL_NAMES = sorted(folder.name for folder in SHIPPED.iterdir() if folder.is_di
 """The names of the skills shipped with orbit, in order."""
 
 TRIGGER_NAMES = (
-    "review",
+    "fit-review",
+    "bugs-review",
+    "tests-review",
+    "logic-review",
+    "security-review",
+    "performance-review",
+    "merge-pass",
     "super-review",
     "configure-checks",
     "set-up-verification",
@@ -235,21 +241,45 @@ def test_without_a_key_every_section_is_listed_in_groups_in_order(project: Path)
 
 
 def test_a_shipped_triggers_key_lists_its_fields_in_the_package_layer(project: Path) -> None:
-    result = show(project, "triggers.review")
+    result = show(project, "triggers.bugs-review")
     assert result.exit_code == 0, result.output
     assert result.stdout.splitlines() == [
-        'triggers.review.on = "task_landed"   package',
-        'triggers.review.role = "reviewer"   package',
-        "triggers.review.checks = null   default",
-        f"triggers.review.prompt = (review.md, {REVIEW_TEMPLATE_LINES} lines)   package",
-        "triggers.review.when = {}   default",
-        'triggers.review.guards = ["review-rounds"]   package',
-        "triggers.review.every = null   default",
-        "triggers.review.manual = false   default",
-        "triggers.review.label = null   default",
-        "triggers.review.draft = false   default",
-        "triggers.review.enabled = true   default",
+        'triggers.bugs-review.on = "task_landed"   package',
+        'triggers.bugs-review.role = "bugs-reviewer"   package',
+        "triggers.bugs-review.checks = null   default",
+        f"triggers.bugs-review.prompt = (lens-review.md, {LENS_TEMPLATE_LINES} lines)   package",
+        "triggers.bugs-review.when = {}   default",
+        'triggers.bugs-review.guards = ["review-rounds"]   package',
+        "triggers.bugs-review.every = null   default",
+        "triggers.bugs-review.manual = false   default",
+        "triggers.bugs-review.label = null   default",
+        "triggers.bugs-review.draft = false   default",
+        "triggers.bugs-review.enabled = true   default",
     ]
+
+
+def test_the_merge_pass_trigger_shows_its_event_role_and_findings(project: Path) -> None:
+    result = show(project, "triggers.merge-pass")
+    assert result.exit_code == 0, result.output
+    lines = result.stdout.splitlines()
+    assert 'triggers.merge-pass.on = "reviews_finished"   package' in lines
+    assert 'triggers.merge-pass.role = "reviewer"   package' in lines
+    assert 'triggers.merge-pass.when = {"findings": "some"}   package' in lines
+
+
+def test_the_review_trigger_is_no_longer_shipped(project: Path) -> None:
+    result = show(project, "triggers")
+    assert result.exit_code == 0, result.output
+    assert not any(line.startswith("triggers.review.") for line in result.stdout.splitlines())
+
+
+def test_a_lens_reviewer_shows_its_skills_and_blocking_findings(project: Path) -> None:
+    result = show(project, "roles.security-reviewer")
+    assert result.exit_code == 0, result.output
+    lines = result.stdout.splitlines()
+    skills = '["code-style", "security", "review-security"]'
+    assert f"roles.security-reviewer.skills = {skills}   package" in lines
+    assert "roles.security-reviewer.blocking_findings = true   package" in lines
 
 
 def test_a_trigger_the_project_overrides_shows_its_fields_from_the_file(project: Path) -> None:
@@ -524,6 +554,7 @@ def test_skills_maps_each_skill_to_where_each_role_gets_it(project: Path) -> Non
     assert re.split(r" {2,}", table.splitlines()[0]) == ["skill", *BUILT_IN_ROLE_NAMES]
     rows = map_rows(table)
     assert list(rows) == SKILL_NAMES
+    lenses = len(LENS_REVIEWERS)
     assert list(rows["python"].values()) == [
         "mapped",
         "mapped",
@@ -531,8 +562,17 @@ def test_skills_maps_each_skill_to_where_each_role_gets_it(project: Path) -> Non
         "reviewed task / mapped",
         "mapped",
         "role",
+        *["reviewed task / mapped"] * lenses,
     ]
-    assert list(rows["cpp"].values()) == ["—", "—", "task", "reviewed task", "—", "role"]
+    assert list(rows["cpp"].values()) == [
+        "—",
+        "—",
+        "task",
+        "reviewed task",
+        "—",
+        "role",
+        *["reviewed task"] * lenses,
+    ]
     assert rows["code-style"]["configurator"] == "task"
     assert rows["code-style"]["experimenter"] == "—"
     assert (rows["review-style"]["super-reviewer"], rows["review-style"]["reviewer"]) == (
@@ -569,6 +609,7 @@ def test_skills_with_json_gives_each_skills_cells_by_role(project: Path) -> None
         "reviewer": "reviewed task",
         "super-reviewer": "—",
         "configurator": "role",
+        **dict.fromkeys(LENS_REVIEWERS, "reviewed task"),
     }
     assert skills["python"]["reviewer"] == "reviewed task / mapped"
 

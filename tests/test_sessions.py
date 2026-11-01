@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from orbit.agent.domain import sessions
+from orbit.agent.domain.endings import QUEUED_BEFORE_LENSES
 from orbit.agent.domain.merge_holds import Hold
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import (
@@ -39,6 +40,7 @@ from orbit.agent.domain.sessions import (
     renamable,
     resumed_notes,
     resumed_settings,
+    reviews_cancelled_at_upgrade,
     runtime_changed,
     runtime_changed_message,
     sampled_json,
@@ -46,6 +48,7 @@ from orbit.agent.domain.sessions import (
     stored_summary,
     summarize,
     tasks_summary,
+    unreviewed_notes,
 )
 from orbit.protocol import (
     INVALID,
@@ -98,7 +101,7 @@ def test_the_default_name_drops_the_days_leading_zero_but_pads_the_time() -> Non
 
 
 def test_a_new_record_carries_the_current_format_version() -> None:
-    assert record().version == FORMAT_VERSION == 25
+    assert record().version == FORMAT_VERSION == 26
 
 
 def test_a_record_round_trips_through_json() -> None:
@@ -548,6 +551,54 @@ def test_resuming_a_session_names_it_and_when_it_was_last_active() -> None:
 def test_resuming_says_how_many_tasks_were_interrupted() -> None:
     assert resumed_notes(record(), 1)[1:] == ("1 task was interrupted and is cancelled.",)
     assert resumed_notes(record(), 3)[1:] == ("3 tasks were interrupted and are cancelled.",)
+
+
+def cancelled_at_upgrade(task_id: str) -> TaskState:
+    """Task ``task_id``, a review the upgrade to lens reviewers cancelled."""
+    update = {"status": "cancelled", "reason": QUEUED_BEFORE_LENSES, "queued_as": "review"}
+    return task(task_id).model_copy(update=update)
+
+
+def upgraded(*open_batches: str) -> SessionRecord:
+    """A record whose reviews 2 and 3, of batches b2 and b3, the upgrade cancelled, and whose
+    review 4, of b4, was interrupted, those batches in ``open_batches`` still open; the reviews
+    of 2 and 3 each review two commits, the second the same."""
+    jobs = {
+        "2": ReviewJob(commits=("aaaaaaa111", "ccccccc333"), round=1, batch="b1"),
+        "3": ReviewJob(commits=("bbbbbbb222", "ccccccc333"), round=1, batch="b1"),
+        "4": ReviewJob(commits=("ddddddd444",), round=0, batch=None),
+    }
+    batches = {name: BatchSnapshot(round=1, cap=5) for name in open_batches}
+    reviews = LaneSnapshot(
+        planner=PlannerSnapshot(batches=batches),
+        jobs=jobs,
+        batches={"2": "b2", "3": "b3", "4": "b4"},
+    )
+    interrupted = task("4", "cancelled").model_copy(update={"reason": "Interrupted"})
+    tasks = (task("1"), cancelled_at_upgrade("2"), cancelled_at_upgrade("3"), interrupted)
+    return record(tasks, reviews)
+
+
+def test_the_reviews_cancelled_at_upgrade_are_those_whose_batches_are_still_open() -> None:
+    assert reviews_cancelled_at_upgrade(upgraded("b2", "b3", "b4")) == ("2", "3")
+    assert reviews_cancelled_at_upgrade(upgraded("b3")) == ("3",)
+    assert reviews_cancelled_at_upgrade(upgraded()) == ()
+
+
+def test_a_record_without_reviews_has_none_cancelled_at_upgrade() -> None:
+    assert reviews_cancelled_at_upgrade(record((cancelled_at_upgrade("2"),))) == ()
+
+
+def test_the_unreviewed_notes_name_each_commit_of_the_cancelled_reviews_once() -> None:
+    assert unreviewed_notes(upgraded("b2", "b3"), ("2", "3")) == (
+        "Reviews queued before lens reviewers were cancelled; unreviewed: aaaaaaa, ccccccc,"
+        " bbbbbbb.",
+    )
+
+
+def test_with_no_review_cancelled_at_upgrade_there_is_no_note() -> None:
+    assert unreviewed_notes(upgraded(), ()) == ()
+    assert unreviewed_notes(record(), ("2",)) == ()
 
 
 def test_resumed_settings_are_the_saved_ones_but_for_those_pinned() -> None:

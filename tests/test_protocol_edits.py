@@ -8,6 +8,7 @@ from orbit.protocol import (
     BUSY,
     CODER,
     INVALID,
+    LENS_REVIEWERS,
     MANUAL_ORIGIN,
     PLANNER_ORIGIN,
     REVIEW_ORIGIN,
@@ -30,8 +31,8 @@ RUNNING = EditRefusal(code=BUSY, message="Task '3' can't be edited while it runs
 REVIEW = EditRefusal(code=INVALID, message="Reviews can't be edited; remove it instead.")
 
 
-def test_the_review_roles_are_the_reviewer_and_the_super_reviewer() -> None:
-    assert {REVIEWER, SUPER_REVIEWER} == REVIEW_ROLES
+def test_the_review_roles_are_the_lens_reviewers_the_reviewer_and_the_super_reviewer() -> None:
+    assert {REVIEWER, SUPER_REVIEWER, *LENS_REVIEWERS} == REVIEW_ROLES
 
 
 @pytest.mark.parametrize("status", ["running", "verifying"])

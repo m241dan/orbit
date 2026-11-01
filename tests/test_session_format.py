@@ -5,7 +5,11 @@ import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
+import pytest
+
+from orbit.agent.domain.endings import QUEUED_BEFORE_LENSES
 from orbit.agent.domain.reviews import (
     BatchSnapshot,
     Finding,
@@ -48,8 +52,8 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit these for a format change: they're what orbits at versions 1 to 25 wrote, and
-# they still need to read. A new version gets its own fixture (session-v26.json) and a
+# Never edit these for a format change: they're what orbits at versions 1 to 26 wrote, and
+# they still need to read. A new version gets its own fixture (session-v27.json) and a
 # migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
 SESSION_V2 = FIXTURES / "session-v2.json"
@@ -76,6 +80,7 @@ SESSION_V22 = FIXTURES / "session-v22.json"
 SESSION_V23 = FIXTURES / "session-v23.json"
 SESSION_V24 = FIXTURES / "session-v24.json"
 SESSION_V25 = FIXTURES / "session-v25.json"
+SESSION_V26 = FIXTURES / "session-v26.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -190,7 +195,7 @@ def expected(
     lane: LaneSnapshot | None = None,
 ) -> SessionRecord:
     return SessionRecord(
-        version=25,
+        version=26,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
@@ -613,18 +618,76 @@ def merging() -> SessionRecord:
     return record.model_copy(update={"reviews": merged})
 
 
-def test_a_version_25_session_file_reads_as_its_record() -> None:
+def test_a_version_25_session_file_without_reviews_waiting_migrates_as_it_is() -> None:
     assert parse_record(SESSION_V25.read_text(encoding="utf-8")) == merging()
 
 
-def test_a_session_record_is_written_in_the_version_25_format() -> None:
-    written = json.loads(record_json(merging()))
+def v25_with(**task: object) -> dict[str, Any]:
+    """The version 25 golden record, its task 3, a review orbit queued, as ``task`` says."""
+    golden: dict[str, Any] = json.loads(SESSION_V25.read_text(encoding="utf-8"))
+    golden["tasks"][2] |= task
+    return golden
+
+
+def test_a_version_25_review_still_to_start_is_cancelled_as_queued_before_lens_reviewers() -> None:
+    record = parse_record(json.dumps(v25_with(status="pending", reason="", reason_detail="")))
+    assert isinstance(record, SessionRecord)
+    review = record.tasks[2]
+    assert (review.status, review.reason, review.reason_detail) == (
+        "cancelled",
+        QUEUED_BEFORE_LENSES,
+        "",
+    )
+    assert record.tasks[:2] == merging().tasks[:2]
+    assert record.tasks[3:] == merging().tasks[3:]
+
+
+def test_a_version_25_review_with_no_status_saved_is_pending_so_cancelled() -> None:
+    golden = v25_with()
+    del golden["tasks"][2]["status"]
+    record = parse_record(json.dumps(golden))
+    assert isinstance(record, SessionRecord) and record.tasks[2].status == "cancelled"
+
+
+@pytest.mark.parametrize("status", ["running", "verifying", "completed", "unverified"])
+def test_a_version_25_review_running_or_ended_is_left_as_it_was(status: str) -> None:
+    record = parse_record(json.dumps(v25_with(status=status)))
+    assert isinstance(record, SessionRecord) and record.tasks[2].status == status
+
+
+def test_a_version_25_task_still_to_start_that_isnt_a_review_is_left_as_it_was() -> None:
     golden = json.loads(SESSION_V25.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V25.name)
+    golden["tasks"][1] |= {"status": "pending"}
+    record = parse_record(json.dumps(golden))
+    assert isinstance(record, SessionRecord) and record.tasks[1].status == "pending"
+
+
+def test_a_version_25_record_whose_tasks_cant_be_read_is_left_to_validation() -> None:
+    golden = json.loads(SESSION_V25.read_text(encoding="utf-8"))
+    golden["tasks"] = {"3": "pending"}
+    record = parse_record(json.dumps(golden))
+    assert isinstance(record, Unreadable) and record.reason.startswith("tasks:")
+
+
+def test_a_version_25_task_that_isnt_an_object_is_left_to_validation() -> None:
+    golden = json.loads(SESSION_V25.read_text(encoding="utf-8"))
+    golden["tasks"].append("pending")
+    record = parse_record(json.dumps(golden))
+    assert isinstance(record, Unreadable) and record.reason.startswith("tasks.4:")
+
+
+def test_a_version_26_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V26.read_text(encoding="utf-8")) == merging()
+
+
+def test_a_session_record_is_written_in_the_version_26_format() -> None:
+    written = json.loads(record_json(merging()))
+    golden = json.loads(SESSION_V26.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V26.name)
 
 
 def test_a_record_with_work_waiting_of_no_commits_is_unreadable() -> None:
-    golden = json.loads(SESSION_V25.read_text(encoding="utf-8"))
+    golden = json.loads(SESSION_V26.read_text(encoding="utf-8"))
     golden["waiting"][0]["count"] = 0
     record = parse_record(json.dumps(golden))
     assert isinstance(record, Unreadable) and record.reason.startswith("waiting.0.count:")

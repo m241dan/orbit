@@ -277,7 +277,12 @@ Opening a session never starts work by
 itself: its pending tasks wait for `ctrl+r`. A task that was running or being verified when the
 session was last saved (orbit crashed, say) comes back cancelled, and orbit says how many were
 interrupted. An interrupted review ends as a cancelled one does: if its batch is then due a
-review, one is queued for the next run. The planner carries on its saved conversation, and the session's saved model and tool
+review, one is queued for the next run. A session saved by an orbit from before the lens reviewers
+(see [Reviews](#reviews)) comes back with the reviews it had waiting cancelled, as their prompts
+are for the reviewer as it was: each ends as if it suggested nothing, closing its batch, and orbit
+names the commits they leave unreviewed (`Reviews queued before lens reviewers were cancelled;
+unreviewed: 1a2b3c4, 5d6e7f8.`); a review that was running comes back interrupted, as any task
+does, and one that had ended stays as it was. The planner carries on its saved conversation, and the session's saved model and tool
 access come back, unless `--model` or `--tools` was given, which hold for this run.
 
 Each session is locked while an orbit has it open: in another orbit's list it shows `open in
@@ -410,7 +415,8 @@ tabs are there from the start and keep the whole session's history; every agent 
 once both show under **reviewer**), each message headed and every other entry prefixed with its
 agent's id, so you can tell them apart. Whether the speaker changed is judged within the tab: under
 All, where agents interleave, messages are headed more often. The planner's messages are never
-headed. Agents in any other role, such as the startup check (`checker`) or a custom role from
+headed. Agents in any other role, such as the startup check (`checker`), the lens reviewers
+(`bugs-reviewer` and the rest; see [Reviews](#reviews)) or a custom role from
 `.orbit/config.toml`, get a temporary tab of their own after the pinned ones, labelled by role
 (`checker`, `checker 2`, …), which closes when the agent exits; their entries stay under All. A
 role's tab also shows its tasks' headers (`Task 2: …`), verification results and merge notes, so a
@@ -1247,18 +1253,63 @@ delete reports, never an agent; purging the workspace deletes them too.
 ### Reviews
 
 Every commit from one of your tasks that merged into the base is reviewed in the background while
-the next task runs (one that couldn't be merged isn't, and doesn't count toward a super review). The
-`review` trigger queues a `reviewer` task (it shows in the task list, its origin `review`) carrying
-the commit's diff, from its template (see [Triggers](#triggers)), and orbit runs it in a read-only
-snapshot of that commit. The reviewer judges the change against its task's prompt and,
-when the prompt opens with `Plan: <path>`, against that plan's record, looking through the lens
-skills its role gives it (by default `review-fit`, `review-bugs`, `review-tests`, `review-logic`,
-`review-security` and `review-performance`, each saying what it looks for and what blocks; see
-[Skills](#skills)) rather than a fixed list of its own. Until orbit can hold merges, a finding a
-lens says blocks merges is suggested first, its prompt saying why it would block. It suggests
-follow-ups with `suggest_task` (a title
-is required, and kept to one line): each becomes a task at the end of the queue (with the `coder` role's default settings), and once the review ends
-orbit runs them, unless you pressed `ctrl+s` since your last `ctrl+r`.
+the next task runs (one that couldn't be merged isn't, and doesn't count toward a super review).
+Each review looks at the change through six **lenses**, one agent each: the `fit-review`,
+`bugs-review`, `tests-review`, `logic-review`, `security-review` and `performance-review`
+triggers each queue a task for their lens reviewer, `fit-reviewer`, `bugs-reviewer`,
+`tests-reviewer`, `logic-reviewer`, `security-reviewer` and `performance-reviewer` (they show in
+the task list, each with its trigger as its origin), carrying the commit's diff, from the
+`lens-review.md` template (see [Triggers](#triggers)), and orbit runs each in a read-only snapshot
+of that commit, one at a time in the review lane. A lens reviewer judges the change against its
+task's prompt and, when the prompt opens with `Plan: <path>`, against that plan's record, looking
+only through its lens skill (`review-fit`, `review-bugs`, `review-tests`, `review-logic`,
+`review-security` or `review-performance`, each saying what it looks for and what blocks; see
+[Skills](#skills)). It files no tasks: it reports each problem worth fixing with `report_finding`,
+a title and a body saying where it is, the scenario that shows it and why it matters, and a lens
+that finds nothing reports nothing. Only the `bugs-reviewer` and the `security-reviewer` may
+report a finding as `blocking`, as their lens skills define it (`blocking_findings = true`); the
+others report every finding as `normal`.
+
+Once all six have ended, the `merge-pass` trigger queues the **merge pass**, a `reviewer` task
+handed every finding of the review (`merge-pass.md`), but only if they reported at least one
+(`when = { findings = "some" }`): a review whose lenses all came back clean queues no merge pass
+and files nothing. The reviewer checks each finding against the code, the tasks queued and the
+commits landed since, groups related ones, such as a bug and the test that would have caught it,
+into one task, ranks them by severity, and files the most severe within the cap with
+`suggest_task` (a title, kept to one line, and a prompt in four parts: Where, with the reviewed
+task's `Plan:` line, Change, Keep and Done), naming the findings each covers and its severity,
+`blocking` only for a blocking finding that holds up. It dismisses every other finding with
+`dismiss_finding` and a reason (`over the cap`, `covered by task 12`, `doesn't hold: <why>`), as it
+must decide every finding before it completes (below). Each task it files is a suggestion of the
+review, at the end of the queue (with the `coder` role's default settings), and once the review
+ends orbit runs them, unless you pressed `ctrl+s` since your last `ctrl+r`.
+
+A project can review its own way instead. To go back to a single reviewer that files tasks itself,
+disable the six lens triggers and add a role holding `suggest_task`, with a `task_landed` trigger
+guarded by `review-rounds`; its task is booked into each review as the lenses' are, and its
+suggestions join the review's batch under the same cap:
+
+```toml
+[triggers.fit-review]
+enabled = false
+# … and bugs-review, tests-review, logic-review, security-review and performance-review alike.
+
+[roles.single-reviewer]
+instructions = "roles/single-reviewer.md"
+tool_access = "restricted"
+tools = ["get_task", "complete_task", "report_progress", "give_up", "suggest_task"]
+skills = ["code-style", "review-fit", "review-bugs", "review-tests"]
+verify = false
+lane = "review"
+workspace = "snapshot"
+merge = false
+
+[triggers.single-review]
+on = "task_landed"
+role = "single-reviewer"
+prompt = "Review {commit}.\n\n{missing}\n\nYou may make at most {cap} suggestions.\n\n{diff}"
+guards = ["review-rounds"]
+```
 
 Suggestions from one review form a **batch**. When every task in a batch has finished, the batch's
 commits are reviewed together, which may suggest more. To keep this from going on forever, each
@@ -1338,9 +1389,9 @@ then runs in its lane as any other role's task does, in its role's `workspace`.
 The tasks one review queues are booked into it together: those the triggers `review-rounds`
 guards queue for one landing or one batch, which may be any number of triggers, of any roles, or
 those one `commits` firing queues. They share the review's one batch and its one cap, any of them
-holding `suggest_task` suggests into it, and it keeps filling until they have all ended. A
-project can review by **lens** this way: a role granted `report_finding` is a finding role, whose
-agents report findings rather than filing tasks. `report_finding(title, body, severity)`, with
+holding `suggest_task` suggests into it, and it keeps filling until they have all ended. The
+shipped lens reviewers review by **lens** this way, as a project's own roles can: a role granted
+`report_finding` is a finding role, whose agents report findings rather than filing tasks. `report_finding(title, body, severity)`, with
 `severity` `blocking` or `normal`, is taken only from a task orbit booked into a review (`Only
 reviews orbit queued itself can report findings.`), and records the finding against that review
 under an id numbered within it, `F1`, `F2` and so on, with the reporting task's role, its title
@@ -1390,11 +1441,22 @@ you queue keeps its own settings. Built in:
 | Role | Tools | Verified | Default model / access | Skills |
 |---|---|---|---|---|
 | `coder` | `get_task`, `complete_task`, `run_check`, `report_progress`, `give_up` | yes | default / `full` | `code-style`, `security` |
-| `reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `suggest_task` | no | default / `restricted` | `code-style`, `security`, `review-fit`, `review-bugs`, `review-tests`, `review-logic`, `review-security`, `review-performance` |
+| `reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `suggest_task`, `dismiss_finding` | no | default / `restricted` | `code-style`, `security`, `review-fit`, `review-bugs`, `review-tests`, `review-logic`, `review-security`, `review-performance` |
 | `super-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `suggest_task` | no | `opus` / `restricted` | `code-style`, `review-style`, `review-drift`, `review-scaling` |
 | `planner` | `propose_task`, `report_progress`, `save_report`, `list_reports`, `read_report` | no | default / `restricted` | `code-style` |
 | `experimenter` | `report_progress`, `save_report`, `list_reports`, `read_report` | no | `sonnet` / `full` | none |
 | `configurator` | `get_task`, `propose_checks`, `report_progress`, `give_up` | no | default / `restricted` | `python`, `cpp` |
+| `fit-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | default / `restricted` | `code-style`, `review-fit` |
+| `bugs-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | default / `restricted` | `code-style`, `review-bugs` |
+| `tests-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | default / `restricted` | `code-style`, `review-tests` |
+| `logic-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | default / `restricted` | `code-style`, `review-logic` |
+| `security-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | default / `restricted` | `code-style`, `security`, `review-security` |
+| `performance-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | default / `restricted` | `code-style`, `review-performance` |
+
+The `reviewer` is the merge pass of each review, and the six lens reviewers its lenses (see
+[Reviews](#reviews)); they share one instructions file, `lens-reviewer.md`, each looking through
+its own lens skill, and only the `bugs-reviewer` and the `security-reviewer` have
+`blocking_findings = true`.
 
 Every role also has `read_skill`, which reads the files of its agents' skills (see
 [Skills](#skills)); a role's `tools` naming it is refused (`read_skill comes with every role;
@@ -1437,10 +1499,11 @@ and what they run on:
   under [Tasks](#tasks)). Each lane shows in the
   Snapshot's `busy`, by name. On the task list, a task in a lane other than `work` is tagged with
   its lane, and `L` narrows the list to each lane in turn (see [Tasks](#tasks)). Orbit's reviews
-  run in one lane, the one the enabled `reviewer` and `super-reviewer` share, so the config is
-  refused, naming them and their lanes, if they're in different lanes, the merging lane included;
-  a disabled one can be in any lane. With the `reviewer` disabled, reviews run in the
-  `super-reviewer`'s lane.
+  run in one lane, the one the enabled review roles (the lens reviewers, the `reviewer` and the
+  `super-reviewer`) share, so the config is refused, naming them and their lanes, if they're in
+  different lanes, the merging lane included; a disabled one can be in any lane. With the
+  `reviewer` disabled, reviews run in the `super-reviewer`'s lane, or, with both disabled, in the
+  first enabled lens reviewer's.
 - `workspace`: where its agent works, in whichever lane runs it: `worktree` (the coder's separate
   worktree, readied for each task as
   [Where tasks run, and how their work lands](#where-tasks-run-and-how-their-work-lands) says),
@@ -1489,7 +1552,10 @@ and what they run on:
 - `merge`: whether its finished work is committed and merged.
 - `enabled`: whether it runs at all. A disabled role is left out of the Catalog's agents, and its
   lane out of the Catalog's lanes and the Snapshot's `busy` unless an enabled role shares it. A
-  disabled `reviewer` queues no reviews as work lands, and a disabled `super-reviewer` no super
+  disabled lens reviewer's trigger queues nothing, so the review waits only for the lenses
+  queued; reviews of the work that lands are queued only while some enabled trigger guarded by
+  `review-rounds` can fire, so with every lens reviewer disabled (and no trigger of your own)
+  none is. A disabled `reviewer` queues no merge pass, and a disabled `super-reviewer` no super
   reviews, however many commits land; a disabled `super-reviewer` also takes the `super-review`
   trigger out of the Catalog, hiding `ctrl+g`, as a disabled `configurator` does `configure-checks`
   and `ctrl+e`, and firing either is then refused as an unknown trigger. A message to a disabled
@@ -1804,8 +1870,9 @@ a named set of verification steps.
 Orbit ships triggers that describe what it does, and a project changes them, or adds its own,
 with `[triggers.<name>]` tables in `.orbit/config.toml`. A task's work landing fires the
 `task_landed` triggers and counts toward the `commits` ones, and a task finishing, however it
-ended, fires the `task_finished` ones, so the `review` and `super-review` triggers start the
-reviews and super reviews [Reviews](#reviews) describes, and a project's own triggers on those
+ended, fires the `task_finished` ones, so the lens reviews' triggers (`fit-review` and the rest),
+`merge-pass` and `super-review` start the reviews, their merge passes and the super reviews
+[Reviews](#reviews) describes, and a project's own triggers on those
 events queue their tasks. Orbit opening a workspace fires the `session_started` triggers, once,
 not as you switch sessions, nor while another orbit owns the repository: `startup-check` runs the
 [startup check](#verification-steps), and the step it fails fires the `startup_check_failed`
@@ -1833,7 +1900,13 @@ The shipped triggers are data in
 
 | Trigger | Event | When | Does | Also |
 |---|---|---|---|---|
-| `review` | `task_landed` | every one | a `reviewer` task, from `review.md` | guard `review-rounds` |
+| `fit-review` | `task_landed` | every one | a `fit-reviewer` task, from `lens-review.md` | guard `review-rounds` |
+| `bugs-review` | `task_landed` | every one | a `bugs-reviewer` task, from `lens-review.md` | guard `review-rounds` |
+| `tests-review` | `task_landed` | every one | a `tests-reviewer` task, from `lens-review.md` | guard `review-rounds` |
+| `logic-review` | `task_landed` | every one | a `logic-reviewer` task, from `lens-review.md` | guard `review-rounds` |
+| `security-review` | `task_landed` | every one | a `security-reviewer` task, from `lens-review.md` | guard `review-rounds` |
+| `performance-review` | `task_landed` | every one | a `performance-reviewer` task, from `lens-review.md` | guard `review-rounds` |
+| `merge-pass` | `reviews_finished` | `findings = "some"` | a `reviewer` task, from `merge-pass.md` | |
 | `super-review` | `commits` | `origin = ["manual", "planner"]` | a `super-reviewer` task, from `super-review.md` | `every = 10`, guard `suggestions-pending`, manual as `Super review` |
 | `configure-checks` | `manual` | every one | a `configurator` task, from `configure-checks.md` | manual as `Set up checks` |
 | `set-up-verification` | `session_started` | `verification = "missing"` | a `configurator` task, from `configure-checks.md` | guard `not-queued`, runs at once, as `ctrl+e`'s does |
@@ -1886,7 +1959,7 @@ rest), with that role's settings, or as a draft for you to accept with `draft = 
 suggestions take its task's origin, the name of the trigger that queued the review. A task whose
 role's lane starts by itself, such as `review`, starts there once the lane is free; one in the work lane
 runs with the run going, or the next. While verification is missing, a task a trigger queues
-waits until checks are accepted, the conversation naming its trigger (`review's task waits: set up
+waits until checks are accepted, the conversation naming its trigger (`bugs-review's task waits: set up
 verification first.`), but a configurator's. A trigger never fires on an event caused by a task it queued itself, one
 whose origin is its name: a `task_finished` trigger queuing `coder` tasks doesn't fire again as
 its own tasks finish, though another trigger may.
@@ -1985,7 +2058,7 @@ A trigger whose role is disabled loads, and never fires. When git can't show the
 landed, the triggers on the landing are skipped with an error (`Review skipped: …` when a review
 was due, `Triggers skipped: …` otherwise), and the run goes on. The reference config shows each shipped
 trigger's table commented out after the roles, every field under its description, and
-`orbit config show triggers.review` lists one trigger's fields with their layers (see
+`orbit config show triggers.bugs-review` lists one trigger's fields with their layers (see
 [Seeing the configuration in effect](#seeing-the-configuration-in-effect)).
 
 `super_review_every` stays for this version as an alias for `[triggers.super-review] every`: set
@@ -2254,7 +2327,7 @@ The layers, least specific first:
 
 A file inside the workspace shows relative to it, and one in your home directory from `~`. A
 role's instructions and a trigger's prompt show as the file they're in and their length,
-`(reviewer.md, 64 lines)` or `(review.md, 11 lines)`, or `(inline, 3 lines)` for text the file
+`(reviewer.md, 64 lines)` or `(lens-review.md, 9 lines)`, or `(inline, 3 lines)` for text the file
 gives itself; `--full` prints their text instead, between lines of `"""`. Each trigger is listed
 field by field as `triggers.<name>.<field>`, a field the shipped trigger sets from `package`, one
 your `.orbit/config.toml` sets from `project`, and the rest from `default`.
@@ -2276,7 +2349,7 @@ skill_files.python.tests.md = (42 lines)   project .orbit/skills/python/tests.md
 ```
 
 A `KEY`, dotted as in the TOML it comes from, shows only the settings at or under it: `roles`
-every role's, `roles.reviewer` one role's, `triggers.review` one trigger's, `server.port` one
+every role's, `roles.reviewer` one role's, `triggers.bugs-review` one trigger's, `server.port` one
 value, `verification.steps.1` the
 first step's, `skills` the `[[skills]]` entries, `skill_files.python` the python skill's
 files and `skill_files.python.tests.md` one file, which only its whole path names:
@@ -3675,7 +3748,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     missing, as the session's `SessionGate` says, all but the configurator's, and `Lanes` (also
     there) holds the lanes by name; `TriggerEngine` (in `triggers`) fires the triggers on the
     events of a task's end, queuing their tasks; `ReviewLane` (in `review_lane`)
-    finds the reviews due, which the `review` trigger queues and it books into batches, queues
+    finds the reviews due, which the lens triggers queue and it books into batches, queues
     the super review and runs them on its lane's runner, beside the work, each traced as
     an `orbit.review` span by `ReviewTracing` (in `review_trace`), and the lane's tasks of other
     roles as the runner runs any lane's; `StartupCheck`

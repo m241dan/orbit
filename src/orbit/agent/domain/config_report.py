@@ -15,7 +15,7 @@ from orbit.agent.domain.roles import Role, names_file
 from orbit.agent.domain.skills import SkillLibrary, SkillMapping
 from orbit.agent.domain.triggers import Trigger
 from orbit.agent.domain.verification import VerificationStep
-from orbit.protocol import REVIEWER, SUPER_REVIEWER
+from orbit.protocol import REVIEW_ROLES, SUPER_REVIEWER
 
 ROLE_CELL = "role"
 TASK_CELL = "task"
@@ -322,7 +322,7 @@ def skill_cell(name: str, role: Role, skill: str, *, mapped: bool) -> str:
 
 def _task_cell(name: str, *, mapped: bool) -> str:
     """Where the agents of the task role ``name`` get a skill its skills don't name, which the
-    ``[[skills]]`` entries use if ``mapped``: from their task's list, the reviewer's the reviewed
+    ``[[skills]]`` entries use if ``mapped``: from their task's list, a review role's the reviewed
     task's, or the entries when it has none."""
-    task = REVIEWED_TASK_CELL if name == REVIEWER else TASK_CELL
+    task = REVIEWED_TASK_CELL if name in REVIEW_ROLES else TASK_CELL
     return f"{task} / {MAPPED_CELL}" if mapped else task

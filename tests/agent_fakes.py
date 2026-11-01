@@ -77,11 +77,13 @@ from orbit.agent.external.kiro_cli import KiroCliRunner
 from orbit.protocol import (
     AGENT_FAILED,
     BUILT_IN_ROLE_NAMES,
+    LENS_REVIEWERS,
     PLANNER,
     PROTOCOL_VERSION,
-    REVIEW_ROLES,
+    REVIEWER,
     STORAGE_FAILED,
     SUPER_REVIEW,
+    SUPER_REVIEWER,
     AddTask,
     AgentExited,
     AgentReply,
@@ -138,15 +140,49 @@ ROLES = built_in_roles(
 )
 """The built-in roles, with stand-in instructions."""
 
-TRIGGERS = read_built_in_triggers()
+SHIPPED_TRIGGERS = read_built_in_triggers()
 """The shipped triggers, their prompts their templates' text."""
+
+LENS_TRIGGERS = tuple(
+    name for name, trigger in SHIPPED_TRIGGERS.items() if trigger.role in LENS_REVIEWERS
+)
+"""The names of the shipped triggers that queue the lens reviewers, in order."""
+
+REVIEW = "review"
+"""The name of the trigger of a project's own single reviewer, in :data:`TRIGGERS`."""
+
+REVIEW_TEMPLATE = (
+    "{title}\n\n{missing}\n\nYou may make at most {cap} suggestions.\n\n{queued}\n\n"
+    "{landed_since}\n\n{diff}"
+)
+"""The template of :data:`REVIEW`'s task: the commits to review, and the suggestions allowed."""
+
+REVIEW_TRIGGER = Trigger(
+    on="task_landed", role=REVIEWER, prompt=REVIEW_TEMPLATE, guards=("review-rounds",)
+)
+"""A project's own single reviewer's trigger: the ``reviewer`` queued on each landing that's
+reviewed, filing tasks itself with ``suggest_task``."""
+
+TRIGGERS = {
+    REVIEW: REVIEW_TRIGGER,
+    **{
+        name: trigger.model_copy(update={"enabled": name not in LENS_TRIGGERS})
+        for name, trigger in SHIPPED_TRIGGERS.items()
+    },
+}
+"""The triggers of a project with a single reviewer of its own, as decision 8 of the lens
+reviews' record allows: the shipped ones with the lens triggers disabled, and :data:`REVIEW`
+first."""
 
 
 def super_every(every: int) -> dict[str, Trigger]:
-    """The shipped triggers, the super review due every ``every`` of the user's commits."""
+    """:data:`TRIGGERS`, the super review due every ``every`` of the user's commits."""
     shipped = TRIGGERS[SUPER_REVIEW]
     return {**TRIGGERS, SUPER_REVIEW: shipped.model_copy(update={"every": every})}
 
+
+SCRIPTED_REVIEWERS = frozenset({REVIEWER, SUPER_REVIEWER})
+"""The roles whose agents play the ``reviewers`` scripts of :class:`ScriptedLauncher`."""
 
 URL = "http://orbit.test/mcp"
 Call = Callable[..., Awaitable[Reply]]
@@ -245,9 +281,10 @@ runtime."""
 
 
 class ScriptedLauncher:
-    """Each launch plays the next script as the agent, calling orbit through the host. It can
-    do what ``capabilities`` say, everything at first, and tells the failure each error message
-    in ``failures`` is, and any other as Claude Code's."""
+    """Each launch plays the next script as the agent, calling orbit through the host: of
+    ``reviewers`` for the reviewer's and super-reviewer's agents, else of ``scripts``, the lens
+    reviewers' included. It can do what ``capabilities`` say, everything at first, and tells the
+    failure each error message in ``failures`` is, and any other as Claude Code's."""
 
     def __init__(self, host: FakeHost, *scripts: Script, reviewers: Sequence[Script] = ()) -> None:
         self.host = host
@@ -277,7 +314,7 @@ class ScriptedLauncher:
     async def run_agent(self, launch: AgentLaunch) -> AsyncIterator[Event]:
         self.launches.append(launch)
         agent = launch.agent
-        reviewing = agent.role in REVIEW_ROLES
+        reviewing = agent.role in SCRIPTED_REVIEWERS
         script = (self.reviewers if reviewing else self.scripts).pop(0)
         for event in self._opening(agent.id):
             yield event
@@ -982,7 +1019,7 @@ def agents_for(
         "exit_grace": 0.5,
         "roles": ROLES,
         "triggers": TRIGGERS,
-        "built_in_triggers": TRIGGERS,
+        "built_in_triggers": SHIPPED_TRIGGERS,
         "root": ".",
     }
     options = {**defaults, "temp_dirs": FakeTempDirs(), **options}

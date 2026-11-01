@@ -28,6 +28,14 @@ SHIPPED = read_built_in_triggers()
 PATH = "/src/app/.orbit/config.toml"
 PROJECT = Layer("project", PATH)
 NIGHTLY = {"on": "task_finished", "role": "coder", "prompt": "Tidy up"}
+ROLE_NAMES = ", ".join(BUILT_IN_ROLE_NAMES)
+"""The built-in roles' names, as a refusal lists them."""
+LENS_TRIGGERS = tuple(
+    f"{lens}-review" for lens in ("fit", "bugs", "tests", "logic", "security", "performance")
+)
+"""The shipped lens review triggers, in order."""
+LENSES_OFF = {name: {"enabled": False} for name in LENS_TRIGGERS}
+"""A project's triggers table disabling the shipped lens reviews."""
 REVIEWS = {
     "on": "task_landed",
     "role": "reviewer",
@@ -62,14 +70,15 @@ def test_without_a_projects_triggers_they_are_the_packages_from_the_package() ->
     result = layered({})
     assert result.config.triggers == SHIPPED
     assert list(result.config.triggers) == [
-        "review",
+        *LENS_TRIGGERS,
+        "merge-pass",
         "super-review",
         "configure-checks",
         "set-up-verification",
         "startup-check",
         "startup-fix",
     ]
-    review = result.trigger_layers["review"]
+    review = result.trigger_layers["bugs-review"]
     assert (review["on"], review["role"], review["prompt"], review["guards"]) == (PACKAGE,) * 4
     assert (review["every"], review["manual"], review["enabled"]) == (DEFAULT,) * 3
 
@@ -84,8 +93,8 @@ def test_a_project_overrides_only_the_fields_it_sets() -> None:
 
 
 def test_a_project_replaces_a_shipped_prompt_whole() -> None:
-    config = loaded({"triggers": {"review": {"prompt": "Review {commit}."}}})
-    assert config.triggers["review"].prompt == "Review {commit}."
+    config = loaded({"triggers": {"bugs-review": {"prompt": "Review {commit}."}}})
+    assert config.triggers["bugs-review"].prompt == "Review {commit}."
 
 
 def test_a_project_adds_its_own_trigger_after_the_shipped_ones() -> None:
@@ -99,7 +108,8 @@ def test_a_project_adds_its_own_trigger_after_the_shipped_ones() -> None:
 
 
 def test_a_project_can_disable_a_shipped_trigger() -> None:
-    assert not loaded({"triggers": {"review": {"enabled": False}}}).triggers["review"].enabled
+    triggers = loaded({"triggers": {"bugs-review": {"enabled": False}}}).triggers
+    assert not triggers["bugs-review"].enabled
 
 
 def test_a_project_trigger_loads_without_the_packages_too() -> None:
@@ -138,8 +148,7 @@ def test_a_trigger_for_a_projects_own_role_is_valid() -> None:
         ),
         (
             NIGHTLY | {"role": "tidier"},
-            "triggers.nightly.role: tidier isn't a role; the roles are planner, experimenter,"
-            " coder, reviewer, super-reviewer, configurator.",
+            f"triggers.nightly.role: tidier isn't a role; the roles are {ROLE_NAMES}.",
         ),
         (
             NIGHTLY | {"guards": ["weekly"]},
@@ -153,8 +162,7 @@ def test_a_trigger_for_a_projects_own_role_is_valid() -> None:
         ),
         (
             NIGHTLY | {"when": {"role": ["coder", "tidier"]}},
-            "triggers.nightly.when: tidier isn't a role; the roles are planner, experimenter,"
-            " coder, reviewer, super-reviewer, configurator.",
+            f"triggers.nightly.when: tidier isn't a role; the roles are {ROLE_NAMES}.",
         ),
         (
             NIGHTLY | {"on": "session_started", "when": {"verification": "missng"}},
@@ -177,26 +185,24 @@ def test_an_invalid_trigger_is_refused_naming_it_its_field_and_the_value(
 
 
 def test_an_override_that_breaks_a_shipped_trigger_is_refused() -> None:
-    assert refusal({"review": {"on": "task_finished"}}) == (
-        "triggers.review.prompt: {title} isn't a variable of task_finished; its variables are"
-        " {trigger}.\n"
-        "triggers.review.prompt: {missing} isn't a variable of task_finished; its variables are"
-        " {trigger}.\n"
-        "triggers.review.prompt: {cap} isn't a variable of task_finished; its variables are"
-        " {trigger}.\n"
-        "triggers.review.prompt: {queued} isn't a variable of task_finished; its variables are"
-        " {trigger}.\n"
-        "triggers.review.prompt: {landed_since} isn't a variable of task_finished; its variables"
+    assert refusal({"bugs-review": {"on": "task_finished"}}) == (
+        "triggers.bugs-review.prompt: {title} isn't a variable of task_finished; its variables"
         " are {trigger}.\n"
-        "triggers.review.prompt: {diff} isn't a variable of task_finished; its variables are"
+        "triggers.bugs-review.prompt: {missing} isn't a variable of task_finished; its variables"
+        " are {trigger}.\n"
+        "triggers.bugs-review.prompt: {queued} isn't a variable of task_finished; its variables"
+        " are {trigger}.\n"
+        "triggers.bugs-review.prompt: {landed_since} isn't a variable of task_finished; its"
+        " variables are {trigger}.\n"
+        "triggers.bugs-review.prompt: {diff} isn't a variable of task_finished; its variables are"
         " {trigger}.\n"
-        'triggers.review.guards: review-rounds needs on = "task_landed".'
+        'triggers.bugs-review.guards: review-rounds needs on = "task_landed".'
     )
 
 
 def test_review_rounds_off_a_landing_is_refused() -> None:
     mine = REVIEWS | {"on": "task_finished"}
-    assert refusal({"review": {"enabled": False}, "mine": mine}) == (
+    assert refusal({**LENSES_OFF, "mine": mine}) == (
         'triggers.mine.guards: review-rounds needs on = "task_landed".'
     )
 
@@ -206,12 +212,13 @@ def test_review_rounds_on_two_enabled_triggers_of_other_roles_loads() -> None:
     tests = bugs | {"prompt": "Test {commit}."}
     config = loaded({"triggers": {"bugs": bugs, "tests": tests}})
     guarded = [name for name, t in config.triggers.items() if "review-rounds" in t.guards]
-    assert guarded == ["review", "bugs", "tests"]
+    assert guarded == [*LENS_TRIGGERS, "bugs", "tests"]
 
 
-def test_review_rounds_moves_to_a_trigger_of_your_own_with_the_review_disabled() -> None:
-    config = loaded({"triggers": {"review": {"enabled": False}, "mine": REVIEWS}})
+def test_review_rounds_moves_to_a_trigger_of_your_own_with_the_lens_reviews_disabled() -> None:
+    config = loaded({"triggers": {**LENSES_OFF, "mine": REVIEWS}})
     assert config.triggers["mine"].guards == ("review-rounds",)
+    assert not any(config.triggers[name].enabled for name in LENS_TRIGGERS)
 
 
 def test_a_disabled_second_review_rounds_trigger_loads() -> None:
@@ -219,9 +226,9 @@ def test_a_disabled_second_review_rounds_trigger_loads() -> None:
     assert not config.triggers["spare"].enabled
 
 
-def test_the_review_for_a_disabled_reviewer_still_loads() -> None:
-    config = loaded({"roles": {"reviewer": {"enabled": False}}})
-    assert config.triggers["review"] == SHIPPED["review"]
+def test_the_lens_review_for_a_disabled_lens_reviewer_still_loads() -> None:
+    config = loaded({"roles": {"bugs-reviewer": {"enabled": False}}})
+    assert config.triggers["bugs-review"] == SHIPPED["bugs-review"]
 
 
 def test_a_triggers_table_that_isnt_one_is_refused() -> None:

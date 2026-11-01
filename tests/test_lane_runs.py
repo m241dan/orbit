@@ -17,6 +17,7 @@ from orbit.agent.domain.roles import Role
 from orbit.agent.domain.usage_limits import WAIT_CANCELLED_NOTE
 from orbit.protocol import (
     BUSY,
+    LENS_REVIEWERS,
     REVIEWER,
     SUPER_REVIEW,
     SUPER_REVIEWER,
@@ -380,11 +381,13 @@ async def test_the_merging_lane_is_named_by_its_roles() -> None:
 def with_review_roles(
     reviewer: dict[str, object], super_reviewer: dict[str, object]
 ) -> dict[str, Role]:
-    """The built-in roles, with the ``reviewer`` and ``super_reviewer`` fields changed."""
+    """The built-in roles, with the ``reviewer`` and ``super_reviewer`` fields changed and the
+    lens reviewers disabled."""
     return {
         **ROLES,
         REVIEWER: ROLES[REVIEWER].model_copy(update=reviewer),
         SUPER_REVIEWER: ROLES[SUPER_REVIEWER].model_copy(update=super_reviewer),
+        **{name: ROLES[name].model_copy(update={"enabled": False}) for name in LENS_REVIEWERS},
     }
 
 
@@ -430,7 +433,9 @@ async def test_the_review_lane_runs_the_other_roles_in_its_lane() -> None:
     session, _, launcher = session_for(
         claims_done, roles=WITH_AUDITOR, tree=FakeTree(), review=True
     )
-    assert lane_of(session).roles == frozenset({"reviewer", "super-reviewer", "auditor"})
+    assert lane_of(session).roles == frozenset(
+        {"reviewer", "super-reviewer", *LENS_REVIEWERS, "auditor"}
+    )
     await send(session, AddTask(task=AUDIT))
     await events_until(session, idle("review"))
     assert [(la.agent.role, la.cwd) for la in launcher.launches] == [

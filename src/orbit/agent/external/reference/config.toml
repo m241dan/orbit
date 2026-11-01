@@ -165,7 +165,7 @@
 # How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
 # tool_access = "restricted"
 # The orbit tools its agents may call.
-# tools = ["get_task", "complete_task", "report_progress", "give_up", "suggest_task"]
+# tools: 6 of orbit's own; orbit config show roles.reviewer.tools lists them
 # Whether its agents may report a finding as blocking with report_finding.
 # blocking_findings = false
 # Whether its agents' claims of being done are verified.
@@ -271,14 +271,242 @@
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["python", "cpp"]
 
-# A role of your own, which must set its instructions. For example:
+# [roles.fit-reviewer]
+# What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
+# instructions: orbit's own lens-reviewer.md
+# Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
+# model: unset
+# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
+# tool_access = "restricted"
+# The orbit tools its agents may call.
+# tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+# Whether its agents may report a finding as blocking with report_finding.
+# blocking_findings = false
+# Whether its agents' claims of being done are verified.
+# verify = false
+# How long its agents may take, in minutes; unset, no limit.
+# timeout_minutes: unset
+# The lane that runs its agents, a plain name; a lane runs one task at a time.
+# lane = "review"
+# Where its agents work: "worktree", "snapshot", "checkout", "none" or "copy".
+# workspace = "snapshot"
+# Whether you talk to it, as you do the planner, rather than it taking tasks.
+# conversation = false
+# Whether its finished work is committed and merged.
+# merge = false
+# Whether it runs at all.
+# enabled = true
+# Its effort: "low", "medium", "high", "xhigh" or "max"; unset, the user config's, else the CLI's.
+# effort: unset
+# The runtime its agents run on: "claude" or "kiro". Left out, the user config's, else "claude".
+# runtime = "claude"
+# The other conversational roles a conversational role may consult, by name.
+# consults = []
+# Consultations it may start in an hour; 0, no limit.
+# consult_limit_per_hour = 6
+# How long its copy is kept after its conversation's last turn, in hours.
+# copy_ttl_hours = 24.0
+# The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
+# skills = ["code-style", "review-fit"]
+
+# [roles.bugs-reviewer]
+# What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
+# instructions: orbit's own lens-reviewer.md
+# Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
+# model: unset
+# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
+# tool_access = "restricted"
+# The orbit tools its agents may call.
+# tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+# Whether its agents may report a finding as blocking with report_finding.
+# blocking_findings = true
+# Whether its agents' claims of being done are verified.
+# verify = false
+# How long its agents may take, in minutes; unset, no limit.
+# timeout_minutes: unset
+# The lane that runs its agents, a plain name; a lane runs one task at a time.
+# lane = "review"
+# Where its agents work: "worktree", "snapshot", "checkout", "none" or "copy".
+# workspace = "snapshot"
+# Whether you talk to it, as you do the planner, rather than it taking tasks.
+# conversation = false
+# Whether its finished work is committed and merged.
+# merge = false
+# Whether it runs at all.
+# enabled = true
+# Its effort: "low", "medium", "high", "xhigh" or "max"; unset, the user config's, else the CLI's.
+# effort: unset
+# The runtime its agents run on: "claude" or "kiro". Left out, the user config's, else "claude".
+# runtime = "claude"
+# The other conversational roles a conversational role may consult, by name.
+# consults = []
+# Consultations it may start in an hour; 0, no limit.
+# consult_limit_per_hour = 6
+# How long its copy is kept after its conversation's last turn, in hours.
+# copy_ttl_hours = 24.0
+# The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
+# skills = ["code-style", "review-bugs"]
+
+# [roles.tests-reviewer]
+# What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
+# instructions: orbit's own lens-reviewer.md
+# Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
+# model: unset
+# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
+# tool_access = "restricted"
+# The orbit tools its agents may call.
+# tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+# Whether its agents may report a finding as blocking with report_finding.
+# blocking_findings = false
+# Whether its agents' claims of being done are verified.
+# verify = false
+# How long its agents may take, in minutes; unset, no limit.
+# timeout_minutes: unset
+# The lane that runs its agents, a plain name; a lane runs one task at a time.
+# lane = "review"
+# Where its agents work: "worktree", "snapshot", "checkout", "none" or "copy".
+# workspace = "snapshot"
+# Whether you talk to it, as you do the planner, rather than it taking tasks.
+# conversation = false
+# Whether its finished work is committed and merged.
+# merge = false
+# Whether it runs at all.
+# enabled = true
+# Its effort: "low", "medium", "high", "xhigh" or "max"; unset, the user config's, else the CLI's.
+# effort: unset
+# The runtime its agents run on: "claude" or "kiro". Left out, the user config's, else "claude".
+# runtime = "claude"
+# The other conversational roles a conversational role may consult, by name.
+# consults = []
+# Consultations it may start in an hour; 0, no limit.
+# consult_limit_per_hour = 6
+# How long its copy is kept after its conversation's last turn, in hours.
+# copy_ttl_hours = 24.0
+# The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
+# skills = ["code-style", "review-tests"]
+
+# [roles.logic-reviewer]
+# What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
+# instructions: orbit's own lens-reviewer.md
+# Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
+# model: unset
+# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
+# tool_access = "restricted"
+# The orbit tools its agents may call.
+# tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+# Whether its agents may report a finding as blocking with report_finding.
+# blocking_findings = false
+# Whether its agents' claims of being done are verified.
+# verify = false
+# How long its agents may take, in minutes; unset, no limit.
+# timeout_minutes: unset
+# The lane that runs its agents, a plain name; a lane runs one task at a time.
+# lane = "review"
+# Where its agents work: "worktree", "snapshot", "checkout", "none" or "copy".
+# workspace = "snapshot"
+# Whether you talk to it, as you do the planner, rather than it taking tasks.
+# conversation = false
+# Whether its finished work is committed and merged.
+# merge = false
+# Whether it runs at all.
+# enabled = true
+# Its effort: "low", "medium", "high", "xhigh" or "max"; unset, the user config's, else the CLI's.
+# effort: unset
+# The runtime its agents run on: "claude" or "kiro". Left out, the user config's, else "claude".
+# runtime = "claude"
+# The other conversational roles a conversational role may consult, by name.
+# consults = []
+# Consultations it may start in an hour; 0, no limit.
+# consult_limit_per_hour = 6
+# How long its copy is kept after its conversation's last turn, in hours.
+# copy_ttl_hours = 24.0
+# The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
+# skills = ["code-style", "review-logic"]
+
 # [roles.security-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
-# instructions = "roles/security-reviewer.md"
+# instructions: orbit's own lens-reviewer.md
+# Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
+# model: unset
+# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
+# tool_access = "restricted"
+# The orbit tools its agents may call.
+# tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+# Whether its agents may report a finding as blocking with report_finding.
+# blocking_findings = true
+# Whether its agents' claims of being done are verified.
+# verify = false
+# How long its agents may take, in minutes; unset, no limit.
+# timeout_minutes: unset
+# The lane that runs its agents, a plain name; a lane runs one task at a time.
+# lane = "review"
+# Where its agents work: "worktree", "snapshot", "checkout", "none" or "copy".
+# workspace = "snapshot"
+# Whether you talk to it, as you do the planner, rather than it taking tasks.
+# conversation = false
+# Whether its finished work is committed and merged.
+# merge = false
+# Whether it runs at all.
+# enabled = true
+# Its effort: "low", "medium", "high", "xhigh" or "max"; unset, the user config's, else the CLI's.
+# effort: unset
+# The runtime its agents run on: "claude" or "kiro". Left out, the user config's, else "claude".
+# runtime = "claude"
+# The other conversational roles a conversational role may consult, by name.
+# consults = []
+# Consultations it may start in an hour; 0, no limit.
+# consult_limit_per_hour = 6
+# How long its copy is kept after its conversation's last turn, in hours.
+# copy_ttl_hours = 24.0
+# The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
+# skills = ["code-style", "security", "review-security"]
+
+# [roles.performance-reviewer]
+# What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
+# instructions: orbit's own lens-reviewer.md
+# Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
+# model: unset
+# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
+# tool_access = "restricted"
+# The orbit tools its agents may call.
+# tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+# Whether its agents may report a finding as blocking with report_finding.
+# blocking_findings = false
+# Whether its agents' claims of being done are verified.
+# verify = false
+# How long its agents may take, in minutes; unset, no limit.
+# timeout_minutes: unset
+# The lane that runs its agents, a plain name; a lane runs one task at a time.
+# lane = "review"
+# Where its agents work: "worktree", "snapshot", "checkout", "none" or "copy".
+# workspace = "snapshot"
+# Whether you talk to it, as you do the planner, rather than it taking tasks.
+# conversation = false
+# Whether its finished work is committed and merged.
+# merge = false
+# Whether it runs at all.
+# enabled = true
+# Its effort: "low", "medium", "high", "xhigh" or "max"; unset, the user config's, else the CLI's.
+# effort: unset
+# The runtime its agents run on: "claude" or "kiro". Left out, the user config's, else "claude".
+# runtime = "claude"
+# The other conversational roles a conversational role may consult, by name.
+# consults = []
+# Consultations it may start in an hour; 0, no limit.
+# consult_limit_per_hour = 6
+# How long its copy is kept after its conversation's last turn, in hours.
+# copy_ttl_hours = 24.0
+# The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
+# skills = ["code-style", "review-performance"]
+
+# A role of your own, which must set its instructions. For example:
+# [roles.license-reviewer]
+# What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
+# instructions = "roles/license-reviewer.md"
 # Whether its agents' claims of being done are verified.
 # verify = false
 # The lane that runs its agents, a plain name; a lane runs one task at a time.
-# lane = "security"
+# lane = "licenses"
 # Where its agents work: "worktree", "snapshot", "checkout", "none" or "copy".
 # workspace = "snapshot"
 # Whether its finished work is committed and merged.
@@ -286,19 +514,163 @@
 
 # The triggers that turn events into tasks or check runs, by name: the shipped ones, and your own.
 
-# [triggers.review]
+# [triggers.fit-review]
 # The event it fires on, such as "task_landed", "commits" or "manual".
 # on = "task_landed"
+# The role of the task it queues.
+# role = "fit-reviewer"
+# Instead of a role, the checks it runs: "task-checks", or a named set.
+# checks: unset
+# The task's prompt: the text, or a Markdown file under .orbit/ it names.
+# prompt: orbit's own lens-review.md
+# The events it takes, by their fields, each a value or a list of values.
+# when = {}
+# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
+# guards = ["review-rounds"]
+# With on = "commits", how many matching landings it fires after.
+# every: unset
+# Whether you can fire it yourself.
+# manual = false
+# What it's called where you fire it; a manual trigger needs one.
+# label: unset
+# Whether its task is added as a draft, for you to accept.
+# draft = false
+# Whether it fires at all.
+# enabled = true
+
+# [triggers.bugs-review]
+# The event it fires on, such as "task_landed", "commits" or "manual".
+# on = "task_landed"
+# The role of the task it queues.
+# role = "bugs-reviewer"
+# Instead of a role, the checks it runs: "task-checks", or a named set.
+# checks: unset
+# The task's prompt: the text, or a Markdown file under .orbit/ it names.
+# prompt: orbit's own lens-review.md
+# The events it takes, by their fields, each a value or a list of values.
+# when = {}
+# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
+# guards = ["review-rounds"]
+# With on = "commits", how many matching landings it fires after.
+# every: unset
+# Whether you can fire it yourself.
+# manual = false
+# What it's called where you fire it; a manual trigger needs one.
+# label: unset
+# Whether its task is added as a draft, for you to accept.
+# draft = false
+# Whether it fires at all.
+# enabled = true
+
+# [triggers.tests-review]
+# The event it fires on, such as "task_landed", "commits" or "manual".
+# on = "task_landed"
+# The role of the task it queues.
+# role = "tests-reviewer"
+# Instead of a role, the checks it runs: "task-checks", or a named set.
+# checks: unset
+# The task's prompt: the text, or a Markdown file under .orbit/ it names.
+# prompt: orbit's own lens-review.md
+# The events it takes, by their fields, each a value or a list of values.
+# when = {}
+# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
+# guards = ["review-rounds"]
+# With on = "commits", how many matching landings it fires after.
+# every: unset
+# Whether you can fire it yourself.
+# manual = false
+# What it's called where you fire it; a manual trigger needs one.
+# label: unset
+# Whether its task is added as a draft, for you to accept.
+# draft = false
+# Whether it fires at all.
+# enabled = true
+
+# [triggers.logic-review]
+# The event it fires on, such as "task_landed", "commits" or "manual".
+# on = "task_landed"
+# The role of the task it queues.
+# role = "logic-reviewer"
+# Instead of a role, the checks it runs: "task-checks", or a named set.
+# checks: unset
+# The task's prompt: the text, or a Markdown file under .orbit/ it names.
+# prompt: orbit's own lens-review.md
+# The events it takes, by their fields, each a value or a list of values.
+# when = {}
+# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
+# guards = ["review-rounds"]
+# With on = "commits", how many matching landings it fires after.
+# every: unset
+# Whether you can fire it yourself.
+# manual = false
+# What it's called where you fire it; a manual trigger needs one.
+# label: unset
+# Whether its task is added as a draft, for you to accept.
+# draft = false
+# Whether it fires at all.
+# enabled = true
+
+# [triggers.security-review]
+# The event it fires on, such as "task_landed", "commits" or "manual".
+# on = "task_landed"
+# The role of the task it queues.
+# role = "security-reviewer"
+# Instead of a role, the checks it runs: "task-checks", or a named set.
+# checks: unset
+# The task's prompt: the text, or a Markdown file under .orbit/ it names.
+# prompt: orbit's own lens-review.md
+# The events it takes, by their fields, each a value or a list of values.
+# when = {}
+# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
+# guards = ["review-rounds"]
+# With on = "commits", how many matching landings it fires after.
+# every: unset
+# Whether you can fire it yourself.
+# manual = false
+# What it's called where you fire it; a manual trigger needs one.
+# label: unset
+# Whether its task is added as a draft, for you to accept.
+# draft = false
+# Whether it fires at all.
+# enabled = true
+
+# [triggers.performance-review]
+# The event it fires on, such as "task_landed", "commits" or "manual".
+# on = "task_landed"
+# The role of the task it queues.
+# role = "performance-reviewer"
+# Instead of a role, the checks it runs: "task-checks", or a named set.
+# checks: unset
+# The task's prompt: the text, or a Markdown file under .orbit/ it names.
+# prompt: orbit's own lens-review.md
+# The events it takes, by their fields, each a value or a list of values.
+# when = {}
+# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
+# guards = ["review-rounds"]
+# With on = "commits", how many matching landings it fires after.
+# every: unset
+# Whether you can fire it yourself.
+# manual = false
+# What it's called where you fire it; a manual trigger needs one.
+# label: unset
+# Whether its task is added as a draft, for you to accept.
+# draft = false
+# Whether it fires at all.
+# enabled = true
+
+# [triggers.merge-pass]
+# The event it fires on, such as "task_landed", "commits" or "manual".
+# on = "reviews_finished"
 # The role of the task it queues.
 # role = "reviewer"
 # Instead of a role, the checks it runs: "task-checks", or a named set.
 # checks: unset
 # The task's prompt: the text, or a Markdown file under .orbit/ it names.
-# prompt: orbit's own review.md
+# prompt: orbit's own merge-pass.md
 # The events it takes, by their fields, each a value or a list of values.
-# when = {}
+# when = {findings = "some"}
 # The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
-# guards = ["review-rounds"]
+# guards = []
 # With on = "commits", how many matching landings it fires after.
 # every: unset
 # Whether you can fire it yourself.
@@ -454,7 +826,7 @@
 # url = "http://127.0.0.1:3010/mcp"
 
 # The tools a role's agents may use, in place of its tool_access and tools.
-# [roles.security-reviewer.tools]
+# [roles.license-reviewer.tools]
 # The orbit tools its agents may call.
 # orbit = ["get_task", "complete_task", "suggest_task", "report_progress"]
 # What its agents may do in their workspace: "none", "read", "write" or "shell".

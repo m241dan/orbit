@@ -7,7 +7,7 @@ from types import MappingProxyType
 from typing import TypeGuard, get_args
 
 from orbit.protocol import (
-    BUILT_IN_ROLE_NAMES,
+    PINNED_ROLE_NAMES,
     PLANNER,
     PLANNER_LANE,
     AgentExited,
@@ -30,7 +30,7 @@ from orbit.protocol import (
 ALL_TAB_LABEL = "All"
 """The fixed first tab, showing every conversation; it isn't one of the tracked tabs."""
 
-ROLE_TABS: tuple[str, ...] = BUILT_IN_ROLE_NAMES
+ROLE_TABS: tuple[str, ...] = PINNED_ROLE_NAMES
 """The built-in roles, in strip order, that each have a pinned tab shared by all their
 agents; a pinned tab's key and label are its role's name. A conversational role's (the
 planner's, ``PLANNER``, and any other the catalog lists) also keys the user's prompts to it."""

@@ -5,14 +5,20 @@ from collections.abc import Iterable, Mapping, Sequence
 
 from orbit.agent.domain.roles import Role, disabled_roles
 from orbit.protocol import (
+    BUGS_REVIEWER,
     CODER,
     CONFIGURATOR,
     CONFIGURE_CHECKS,
     EXPERIMENTER,
+    FIT_REVIEWER,
+    LOGIC_REVIEWER,
+    PERFORMANCE_REVIEWER,
     PLANNER,
     REVIEWER,
+    SECURITY_REVIEWER,
     SUPER_REVIEW,
     SUPER_REVIEWER,
+    TESTS_REVIEWER,
     AgentEntry,
     Catalog,
     SessionStateChanged,
@@ -29,6 +35,12 @@ ROLE_LABELS = {
     REVIEWER: "Reviewer",
     SUPER_REVIEWER: "Super reviewer",
     CONFIGURATOR: "Configurator",
+    FIT_REVIEWER: "Fit reviewer",
+    BUGS_REVIEWER: "Bugs reviewer",
+    TESTS_REVIEWER: "Tests reviewer",
+    LOGIC_REVIEWER: "Logic reviewer",
+    SECURITY_REVIEWER: "Security reviewer",
+    PERFORMANCE_REVIEWER: "Performance reviewer",
 }
 """The built-in roles' labels; a custom role is labelled by its name."""
 

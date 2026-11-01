@@ -41,11 +41,11 @@ EXAMPLE_STEP = VerificationStep("Mutation tests", ("uv", "run", "mutmut", "run")
 EXAMPLE_SET_FIELDS = VerificationSet(holds_merges=True)
 """The example of a verification step, in a named set, and of that set's table."""
 EXAMPLE_SETUP = Setup(command=("uv", "sync"), watch=("uv.lock",))
-EXAMPLE_ROLE = "security-reviewer"
+EXAMPLE_ROLE = "license-reviewer"
 EXAMPLE_ROLE_FIELDS = Role(
-    instructions="roles/security-reviewer.md",
+    instructions="roles/license-reviewer.md",
     verify=False,
-    lane="security",
+    lane="licenses",
     workspace="snapshot",
     merge=False,
 )
@@ -74,7 +74,7 @@ LATER = (
     ),
     (
         "The tools a role's agents may use, in place of its tool_access and tools.",
-        "[roles.security-reviewer.tools]",
+        "[roles.license-reviewer.tools]",
         "The orbit tools its agents may call.",
         'orbit = ["get_task", "complete_task", "suggest_task", "report_progress"]',
         'What its agents may do in their workspace: "none", "read", "write" or "shell".',

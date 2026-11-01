@@ -165,11 +165,15 @@ def test_update_adds_what_the_file_doesnt_mention_and_says_what(project: Path) -
         f"  in [roles.coder]: {fields}",
         "  at the end: [[verification.steps]], [verification.sets.mutation], [setup],"
         " [roles.planner], [roles.experimenter], [roles.reviewer], [roles.super-reviewer],"
-        " [roles.configurator], [roles.security-reviewer], [triggers.review],"
+        " [roles.configurator], [roles.fit-reviewer], [roles.bugs-reviewer],"
+        " [roles.tests-reviewer], [roles.logic-reviewer], [roles.security-reviewer],"
+        " [roles.performance-reviewer], [roles.license-reviewer], [triggers.fit-review],"
+        " [triggers.bugs-review], [triggers.tests-review], [triggers.logic-review],"
+        " [triggers.security-review], [triggers.performance-review], [triggers.merge-pass],"
         " [triggers.super-review],"
         " [triggers.configure-checks], [triggers.set-up-verification], [triggers.startup-check],"
         " [triggers.startup-fix], [[skills]], [mcp.github], [mcp.semgrep],"
-        " [roles.security-reviewer.tools], [models.local-coder]",
+        " [roles.license-reviewer.tools], [models.local-coder]",
     ]
     added = (
         r"# Added by orbit init --update on \d{4}-\d{2}-\d{2}: settings this file didn't mention\."

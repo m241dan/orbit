@@ -33,7 +33,9 @@ from orbit.agent.domain.sessions import (
     SavedWaiting,
     SessionRecord,
     resumed_notes,
+    reviews_cancelled_at_upgrade,
     session_name,
+    unreviewed_notes,
 )
 from orbit.protocol import (
     BUSY,
@@ -232,10 +234,11 @@ class SessionSwitcher:
 
     async def _open_session(self, session_id: str) -> str | AlreadyOpen | None:
         """Open the saved session ``session_id`` in place of this one, without running
-        anything: what was running when it was saved is cancelled; returns the id of the
-        session left if its lock was held, then let go of or deleted, or none, as
-        :meth:`activate` does. Refused while anything runs, or if it can't be opened; opening
-        this session does nothing, returning :data:`ALREADY_OPEN`."""
+        anything: what was running when it was saved is cancelled, and ended with the reviews
+        the upgrade to lens reviewers cancelled, with a notice naming the commits they leave
+        unreviewed; returns the id of the session left if its lock was held, then let go of or
+        deleted, or none, as :meth:`activate` does. Refused while anything runs, or if it can't
+        be opened; opening this session does nothing, returning :data:`ALREADY_OPEN`."""
         if session_id == self._keeper.id:
             return ALREADY_OPEN
         self._may_switch()
@@ -246,8 +249,10 @@ class SessionSwitcher:
             return opened
         record = opened.record
         tasks, count = interrupted(record.tasks)
-        await self._switched(opened.left, _stopped(record.tasks, tasks), record.last_active)
-        for note in resumed_notes(record, count):
+        cancelled = reviews_cancelled_at_upgrade(record)
+        stopped = [*_stopped(record.tasks, tasks), *cancelled]
+        await self._switched(opened.left, stopped, record.last_active)
+        for note in (*resumed_notes(record, count), *unreviewed_notes(record, cancelled)):
             await self._events.put(Notice(message=note))
         return opened.left.id
 

@@ -163,7 +163,7 @@ def _plain_trigger_name(name: str) -> str:
 
 TriggerName = Annotated[str, AfterValidator(_plain_trigger_name)]
 """A trigger's name, a plain name as a role's is, since its settings are keyed by it between
-dots, as in ``triggers.review.role``."""
+dots, as in ``triggers.bugs-review.role``."""
 
 
 class _Config(BaseModel):
@@ -599,6 +599,16 @@ def listening(
         if _hears(name, trigger, event, roles)
         and (review is not None or REVIEW_ROUNDS not in trigger.guards)
     ]
+
+
+def can_queue_reviews(triggers: Mapping[str, Trigger], roles: Collection[str]) -> bool:
+    """Whether a review of commits can be queued: one of ``triggers`` that ``review-rounds``
+    guards is enabled and queues a task for one of ``roles``, the enabled roles, or runs a
+    named set."""
+    return any(
+        trigger.enabled and REVIEW_ROUNDS in trigger.guards and _acts(trigger, TASK_LANDED, roles)
+        for trigger in triggers.values()
+    )
 
 
 def _hears(name: str, trigger: Trigger, event: TriggerEvent, roles: Collection[str]) -> bool:

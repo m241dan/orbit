@@ -40,7 +40,7 @@ EXAMPLE_HEADERS = {
     "# [setup]",
     "# [[skills]]",
 }
-EXAMPLE_ROLE = "security-reviewer"
+EXAMPLE_ROLE = "license-reviewer"
 BUILT_IN = read_built_in_roles()
 SHIPPED = read_built_in_triggers()
 PACKAGE = Package(BUILT_IN, SHIPPED)
@@ -189,12 +189,12 @@ def test_uncommented_built_in_tables_set_each_field_with_a_value() -> None:
     assert roles["super-reviewer"]["model"] == "opus"
 
 
-def test_uncommented_example_role_is_a_security_reviewer() -> None:
+def test_uncommented_example_role_is_a_license_reviewer() -> None:
     config = load(loaded(limits_roles_and_triggers()))
 
     assert config.roles[EXAMPLE_ROLE] == Role(
-        instructions="roles/security-reviewer.md",
-        lane="security",
+        instructions="roles/license-reviewer.md",
+        lane="licenses",
         workspace="snapshot",
         merge=False,
         verify=False,
@@ -340,7 +340,7 @@ def test_each_trigger_field_is_under_its_description() -> None:
 
 
 def test_shipped_trigger_tables_show_shipped_values() -> None:
-    review, super_review = trigger_table("review"), trigger_table("super-review")
+    review, super_review = trigger_table("bugs-review"), trigger_table("super-review")
 
     assert '# on = "task_landed"' in review
     assert '# guards = ["review-rounds"]' in review
@@ -349,10 +349,12 @@ def test_shipped_trigger_tables_show_shipped_values() -> None:
     assert "# every = 10" in super_review
     assert {"# manual = true", '# label = "Super review"'} <= set(super_review)
     assert "# draft = true" in trigger_table("startup-fix")
+    assert '# when = {findings = "some"}' in trigger_table("merge-pass")
 
 
 def test_shipped_prompts_name_the_template_shipped_with_orbit() -> None:
-    assert "# prompt: orbit's own review.md" in trigger_table("review")
+    assert "# prompt: orbit's own lens-review.md" in trigger_table("bugs-review")
+    assert "# prompt: orbit's own merge-pass.md" in trigger_table("merge-pass")
     assert "# prompt: orbit's own configure-checks.md" in trigger_table("set-up-verification")
 
 

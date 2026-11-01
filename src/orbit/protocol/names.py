@@ -33,13 +33,35 @@ REVIEWER = "reviewer"
 SUPER_REVIEWER = "super-reviewer"
 CONFIGURATOR = "configurator"
 EXPERIMENTER = "experimenter"
+FIT_REVIEWER = "fit-reviewer"
+BUGS_REVIEWER = "bugs-reviewer"
+TESTS_REVIEWER = "tests-reviewer"
+LOGIC_REVIEWER = "logic-reviewer"
+SECURITY_REVIEWER = "security-reviewer"
+PERFORMANCE_REVIEWER = "performance-reviewer"
 """The built-in roles' names."""
 
-BUILT_IN_ROLE_NAMES = (PLANNER, EXPERIMENTER, CODER, REVIEWER, SUPER_REVIEWER, CONFIGURATOR)
-"""The built-in roles' names, in the order the TUI's strip shows their tabs."""
+LENS_REVIEWERS = (
+    FIT_REVIEWER,
+    BUGS_REVIEWER,
+    TESTS_REVIEWER,
+    LOGIC_REVIEWER,
+    SECURITY_REVIEWER,
+    PERFORMANCE_REVIEWER,
+)
+"""The per-commit lens reviewers' names, in order: each reviews a landed commit through one
+review lens, reporting findings for the ``reviewer``, the merge pass, to file."""
 
-REVIEW_ROLES = frozenset({REVIEWER, SUPER_REVIEWER})
-"""The roles that review work rather than do it."""
+PINNED_ROLE_NAMES = (PLANNER, EXPERIMENTER, CODER, REVIEWER, SUPER_REVIEWER, CONFIGURATOR)
+"""The built-in roles with a pinned tab, in the order the TUI's strip shows them; a lens
+reviewer's agents each get a tab of their own, as other roles' do."""
+
+BUILT_IN_ROLE_NAMES = (*PINNED_ROLE_NAMES, *LENS_REVIEWERS)
+"""The built-in roles' names, in order: those with a pinned tab, then the lens reviewers."""
+
+REVIEW_ROLES = frozenset({REVIEWER, SUPER_REVIEWER, *LENS_REVIEWERS})
+"""The roles that review work rather than do it: the lens reviewers, the merge pass and the
+super reviewer, whose tasks orbit queues as reviews in the review lane."""
 
 
 BusyLane = str
@@ -49,14 +71,14 @@ such as ``work``, where task runs start on the user's asking, and ``review``."""
 
 TaskOrigin = str
 """Who queued a task: ``manual`` (the user), ``planner``, or the trigger that queued it, by
-name, such as ``review`` or ``super-review``, as the tasks a review suggests take its trigger's
-name too."""
+name, such as ``bugs-review``, ``merge-pass`` or ``super-review``, as the tasks a review
+suggests take its trigger's name too."""
 
 MANUAL_ORIGIN = "manual"
 PLANNER_ORIGIN = "planner"
 REVIEW_ORIGIN = "review"
-"""The task origins' names: the user, the planner and the review trigger; the super review's is
-its trigger's, :data:`SUPER_REVIEW`."""
+"""The task origins' names: the user, the planner and a batch's review, which no one task
+causes, as its landing is raised; the super review's is its trigger's, :data:`SUPER_REVIEW`."""
 
 
 PauseReason = str

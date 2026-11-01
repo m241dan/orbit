@@ -132,13 +132,18 @@ QUIET = Trigger(
 """A project's trigger on a review whose lenses found nothing."""
 
 
+OFF = ("review", "merge-pass")
+"""The triggers :func:`lens_triggers` disables: the single reviewer's and the shipped merge
+pass, as these tests' lenses and merge pass are their own."""
+
+
 def lens_triggers(**more: Trigger) -> dict[str, Trigger]:
-    """The shipped triggers with the review disabled, a bugs and a tests lens reviewing each
-    commit, and ``more``."""
-    off = TRIGGERS["review"].model_copy(update={"enabled": False})
+    """The triggers of :data:`~tests.agent_fakes.TRIGGERS` with the review and the shipped merge
+    pass disabled, a bugs and a tests lens reviewing each commit, and ``more``."""
+    off = {name: TRIGGERS[name].model_copy(update={"enabled": False}) for name in OFF}
     return {
         **TRIGGERS,
-        "review": off,
+        **off,
         "bugs": lens_trigger(BUGS),
         "tests": lens_trigger(TESTS),
     } | more

@@ -45,7 +45,7 @@ from orbit.agent.external.runtimes import (
     read_runtime_rules,
 )
 from orbit.agent.external.skill_files import PROJECT_SKILLS, SKILL_DIRECTORY, read_skill_library
-from orbit.protocol import BUILT_IN_ROLE_NAMES, PLANNER
+from orbit.protocol import BUILT_IN_ROLE_NAMES, LENS_REVIEWERS, PLANNER
 from tests.agent_fakes import CLAUDE_MODELS, KIRO_MODELS, LIMITED_RUNTIME
 
 BUILT_IN_ROLES = read_built_in_roles()
@@ -782,7 +782,10 @@ def test_the_sources_hold_the_files_as_written_and_where_each_role_field_came_fr
     assert sources.config.roles["reviewer"].instructions == "Review."
     assert sources.role_layers["reviewer"]["model"] == project
     assert sources.role_layers["planner"]["model"] == user
-    assert sources.package_files == {name: f"{name}.md" for name in BUILT_IN_ROLE_NAMES}
+    assert sources.package_files == {
+        name: "lens-reviewer.md" if name in LENS_REVIEWERS else f"{name}.md"
+        for name in BUILT_IN_ROLE_NAMES
+    }
 
 
 def test_without_files_the_sources_hold_nothing_as_written(
@@ -926,10 +929,16 @@ def test_an_instructions_file_no_role_names_changes_nothing(tmp_path: Path) -> N
     assert read_config(str(tmp_path), tmp_path / "config").roles == BUILT_IN_ROLES
 
 
-def test_without_a_file_the_triggers_are_the_six_orbit_ships(tmp_path: Path) -> None:
+def test_without_a_file_the_triggers_are_those_orbit_ships(tmp_path: Path) -> None:
     triggers = read_config(str(tmp_path), tmp_path / "config").triggers
     assert list(triggers) == [
-        "review",
+        "fit-review",
+        "bugs-review",
+        "tests-review",
+        "logic-review",
+        "security-review",
+        "performance-review",
+        "merge-pass",
         "super-review",
         "configure-checks",
         "set-up-verification",
@@ -942,19 +951,19 @@ def test_without_a_file_the_triggers_are_the_six_orbit_ships(tmp_path: Path) -> 
 def test_a_trigger_is_given_the_text_of_the_markdown_file_its_prompt_names(
     tmp_path: Path,
 ) -> None:
-    write(tmp_path, '[triggers.review]\nprompt = "triggers/review.md"\n')
+    write(tmp_path, '[triggers.bugs-review]\nprompt = "triggers/review.md"\n')
     write_instructions(tmp_path, "triggers/review.md", "Review {commit}.\n\n{diff}\n")
-    review = read_config(str(tmp_path), tmp_path / "config").triggers["review"]
-    assert review == BUILT_IN_TRIGGERS["review"].model_copy(
+    review = read_config(str(tmp_path), tmp_path / "config").triggers["bugs-review"]
+    assert review == BUILT_IN_TRIGGERS["bugs-review"].model_copy(
         update={"prompt": "Review {commit}.\n\n{diff}"}
     )
 
 
 def test_a_missing_prompt_file_names_the_file_and_the_trigger(tmp_path: Path) -> None:
-    path = write(tmp_path, '[triggers.review]\nprompt = "triggers/missing.md"\n')
+    path = write(tmp_path, '[triggers.bugs-review]\nprompt = "triggers/missing.md"\n')
     with pytest.raises(ConfigError) as raised:
         read_config(str(tmp_path), tmp_path / "config")
-    assert str(raised.value).startswith(f"{path}: triggers.review.prompt: ")
+    assert str(raised.value).startswith(f"{path}: triggers.bugs-review.prompt: ")
     assert ".orbit/triggers/missing.md" in str(raised.value)
 
 

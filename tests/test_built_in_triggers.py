@@ -9,8 +9,10 @@ import pytest
 from orbit.agent.domain.checks import Setup, configure_prompt, configured_checks
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.reviews import (
+    Finding,
     LandedSince,
     ReviewJob,
+    finished_values,
     review_prompt,
     review_values,
     tell_landed_since,
@@ -48,12 +50,22 @@ def directory(tmp_path: Path, triggers: str, **templates: str) -> Path:
 # The shipped triggers
 
 
+LENSES = ("fit", "bugs", "tests", "logic", "security", "performance")
+"""The per-commit lenses, in the order their triggers and reviewers are shipped."""
+
+
 def test_the_shipped_triggers_are_the_records_in_order() -> None:
     fields = {
         name: trigger.model_copy(update={"prompt": None}) for name, trigger in SHIPPED.items()
     }
     assert fields == {
-        "review": Trigger(on="task_landed", role="reviewer", guards=("review-rounds",)),
+        **{
+            f"{lens}-review": Trigger(
+                on="task_landed", role=f"{lens}-reviewer", guards=("review-rounds",)
+            )
+            for lens in LENSES
+        },
+        "merge-pass": Trigger(on="reviews_finished", role="reviewer", when={"findings": "some"}),
         "super-review": Trigger(
             on="commits",
             role="super-reviewer",
@@ -80,13 +92,14 @@ def test_the_shipped_triggers_are_the_records_in_order() -> None:
 
 
 def test_each_prompt_is_the_text_of_the_template_beside_triggers_toml_it_names() -> None:
-    assert TEMPLATES == {
-        "review": "review.md",
+    assert {
+        **{f"{lens}-review": "lens-review.md" for lens in LENSES},
+        "merge-pass": "merge-pass.md",
         "super-review": "super-review.md",
         "configure-checks": "configure-checks.md",
         "set-up-verification": "configure-checks.md",
         "startup-fix": "startup-fix.md",
-    }
+    } == TEMPLATES
     for name, file in TEMPLATES.items():
         assert template(name) == (FOLDER / file).read_text(encoding="utf-8").strip()
     assert SHIPPED["startup-check"].prompt is None
@@ -177,17 +190,26 @@ REVIEWS = {
 """Reviews of commits by what they're told: each job, the titles queued and what landed since."""
 
 
+def lens_prompt(job: ReviewJob, diff: str, pending: tuple[str, ...], landed: LandedSince) -> str:
+    """Today's review prompt for ``job`` without its cap on suggestions, as a lens files none."""
+    prompt = review_prompt(job, diff, 5, pending, landed)
+    return prompt.replace("\n\nYou may make at most 5 suggestions.", "", 1)
+
+
+@pytest.mark.parametrize("lens", LENSES)
 @pytest.mark.parametrize("case", list(REVIEWS))
-def test_the_review_template_renders_todays_review_prompt(case: str) -> None:
+def test_each_lens_template_renders_todays_review_prompt_without_a_cap(
+    lens: str, case: str
+) -> None:
     job, pending, landed = REVIEWS[case]
     values = review_values(job, DIFF, 5, pending, landed) | {
-        "trigger": "review",
+        "trigger": f"{lens}-review",
         "task": "3",
         "task_skills": "python",
     }
-    assert render_template(template("review"), values) == review_prompt(
-        job, DIFF, 5, pending, landed
-    )
+    rendered = render_template(template(f"{lens}-review"), values)
+    assert rendered == lens_prompt(job, DIFF, pending, landed)
+    assert "suggestions" not in rendered
 
 
 @pytest.mark.parametrize("case", list(REVIEWS))
@@ -197,10 +219,43 @@ def test_the_review_template_told_what_landed_as_it_starts_renders_todays_prompt
     case: str, diff: str, listed: tuple[str, ...]
 ) -> None:
     job, pending, landed = REVIEWS[case]
-    queued = review_values(job, diff, 5, pending, LandedSince(listed)) | {"trigger": "review"}
+    queued = review_values(job, diff, 5, pending, LandedSince(listed)) | {"trigger": "fit-review"}
     values = tell_landed_since(queued, landed.subjects)
-    assert render_template(template("review"), values) == review_prompt(
-        job, diff, 5, pending, landed
+    rendered = render_template(template("fit-review"), values)
+    assert rendered == lens_prompt(job, diff, pending, landed)
+
+
+FINDINGS = (
+    Finding("F1", "bugs-reviewer", "Off by one", "In parse(), the last line is lost.", "blocking"),
+    Finding("F2", "tests-reviewer", "No test of the last line", "", "normal"),
+)
+"""Findings two lenses reported."""
+
+
+def test_the_merge_pass_template_renders_the_cap_lists_and_findings() -> None:
+    job = ReviewJob(commits=(COMMIT,), round=0, batch=None)
+    values = finished_values(job, FINDINGS, 5, PENDING, LANDED.subjects) | {"trigger": "merge-pass"}
+    assert render_template(template("merge-pass"), values) == "\n\n".join(
+        [
+            "Merge the findings of the review of commit 0123456",
+            "You may file at most 5 tasks.",
+            "Tasks already queued (don't suggest these):\n- Tidy the parser\n- Speed up the tests",
+            f"{LANDED_HEADING}\n- Fix the lexer\n- Name the tokens",
+            "F1 · bugs-reviewer · blocking: Off by one\nIn parse(), the last line is lost.",
+            "F2 · tests-reviewer · normal: No test of the last line",
+        ]
+    )
+
+
+def test_the_merge_pass_template_leaves_out_empty_lists() -> None:
+    job = ReviewJob(commits=(COMMIT,), round=1, batch="batch-2")
+    values = finished_values(job, FINDINGS[1:], 3, (), ()) | {"trigger": "merge-pass"}
+    assert render_template(template("merge-pass"), values) == "\n\n".join(
+        [
+            "Merge the findings of the review of the 1 commits made for review batch-2",
+            "You may file at most 3 tasks.",
+            "F2 · tests-reviewer · normal: No test of the last line",
+        ]
     )
 
 

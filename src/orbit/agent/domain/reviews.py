@@ -7,7 +7,7 @@ reviewed: review pauses until the user's next task lands, which bounds how much 
 generate by themselves.
 """
 
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal, get_args
 
@@ -22,9 +22,7 @@ from orbit.protocol import (
     PLANNER_ORIGIN,
     REVIEW_ORIGIN,
     REVIEW_ROLES,
-    REVIEWER,
     SUPER_REVIEW,
-    SUPER_REVIEWER,
     TaskOrigin,
     TaskState,
 )
@@ -92,16 +90,11 @@ class ReviewJob:
 
     @property
     def origin(self) -> TaskOrigin:
-        """The origin of the shipped trigger that reviews work like it: ``super-review`` for a
+        """The origin a review like it is raised with: ``super-review``, its trigger's, for a
         super review, else ``review``, as a batch's landing, which no one task causes, is raised
         with. The tasks a review suggests take its own task's origin instead, the name of
         whichever trigger queued it."""
         return SUPER_REVIEW if self.whole else REVIEW_ORIGIN
-
-    @property
-    def role(self) -> str:
-        """The role of the review's task."""
-        return SUPER_REVIEWER if self.whole else REVIEWER
 
 
 @dataclass(frozen=True)
@@ -424,14 +417,20 @@ class LaneSnapshot(BaseModel):
     severities: dict[str, Severity] = {}
 
 
-class ReviewPlanner:
-    """Tracks batches and decides when to review, within ``limits``: only the reviews of the
-    ``reviewers``, the review roles enabled, fall due. It keeps the landings counted toward
-    each ``commits`` trigger, which decide when a super review is."""
+def _always() -> bool:
+    """Whether reviews of commits can be queued: always."""
+    return True
 
-    def __init__(self, limits: ReviewLimits, reviewers: Collection[str] = REVIEW_ROLES) -> None:
+
+class ReviewPlanner:
+    """Tracks batches and decides when to review, within ``limits``: reviews of commits fall due
+    only while ``reviewing`` says they can be queued, as a trigger ``review-rounds`` guards can
+    fire. It keeps the landings counted toward each ``commits`` trigger, which decide when a
+    super review is."""
+
+    def __init__(self, limits: ReviewLimits, reviewing: Callable[[], bool] = _always) -> None:
         self.limits = limits
-        self._reviewers = frozenset(reviewers)
+        self._reviewing = reviewing
         self.paused = False
         # The landings counted toward each commits trigger since it last fired, by name.
         self.counts: Mapping[str, int] = {}
@@ -580,13 +579,13 @@ class ReviewPlanner:
         return sample
 
     def landed(self, state: TaskState, commit: str) -> ReviewJob | None:
-        """Task ``state`` landed ``commit``; returns the review that's due, if any: none while
-        the reviewer is disabled."""
+        """Task ``state`` landed ``commit``; returns the review that's due, if any: none while no
+        review of commits can be queued."""
         if state.batch is None:
             if state.origin not in (MANUAL_ORIGIN, PLANNER_ORIGIN):
                 return None
             self.paused = False
-            return commit_review(state.id, commit) if REVIEWER in self._reviewers else None
+            return commit_review(state.id, commit) if self._reviewing() else None
         batch = self._open.get(state.batch)
         if batch is None:
             return None
@@ -634,8 +633,9 @@ class ReviewPlanner:
 
     def _batch_review(self, batch_id: str, batch: _Batch) -> ReviewJob | None:
         """The review of ``batch``, ``batch_id``, which just closed: due if it landed commits
-        and the reviewer is enabled, unless it's at the last round, which pauses review."""
-        if not batch.commits or REVIEWER not in self._reviewers:
+        and a review of commits can be queued, unless it's at the last round, which pauses
+        review."""
+        if not batch.commits or not self._reviewing():
             return None
         if batch.round >= self.limits.rounds:
             self.paused = True

@@ -1,0 +1,286 @@
+"""The per-commit lens reviewers and the merge pass orbit ships: a landing queues the six lens
+tasks, whose findings, if any, the ``reviewer`` files into the review's batch; and the reviews a
+session saved before them, cancelled as it opens."""
+
+import asyncio
+import json
+from typing import Any
+
+from orbit.agent import WorkspaceHost
+from orbit.agent.application.ports import Reply
+from orbit.agent.domain.endings import INTERRUPTED, QUEUED_BEFORE_LENSES
+from orbit.agent.domain.reviews import (
+    BLOCKING_REFUSED,
+    BatchSnapshot,
+    LaneSnapshot,
+    PlannerSnapshot,
+    ReviewJob,
+    ReviewLimits,
+)
+from orbit.agent.domain.sessions import SessionRecord, parse_record, record_json
+from orbit.protocol import (
+    BUGS_REVIEWER,
+    CODER,
+    LENS_REVIEWERS,
+    REVIEWER,
+    ActivateSession,
+    Notice,
+    ReviewStatus,
+    Snapshot,
+    TaskSpec,
+    TaskState,
+    TaskStatus,
+    TurnEndReason,
+)
+from tests.agent_fakes import (
+    SHIPPED_TRIGGERS,
+    Call,
+    FakeTree,
+    Script,
+    board,
+    claims_done,
+    session_for,
+    settle,
+    start,
+)
+from tests.session_builders import last_of, messages, opened, saved, store_with, switching
+
+LENS_TRIGGERS = tuple(f"{role.removesuffix('-reviewer')}-review" for role in LENS_REVIEWERS)
+"""The shipped lens triggers, each named for its lens, in the order they fire."""
+
+
+def reports(*findings: tuple[str, str], replies: list[Reply] | None = None) -> Script:
+    """A lens that reports ``findings``, each a title and severity, recording orbit's replies
+    in ``replies``, if given, then claims done."""
+
+    async def look(call: Call) -> TurnEndReason:
+        await call("get_task")
+        for title, severity in findings:
+            reply = await call("report_finding", title=title, body="Why.", severity=severity)
+            if replies is not None:
+                replies.append(reply)
+        await call("complete_task", summary=f"{len(findings)} findings")
+        return "completed"
+
+    return look
+
+
+def files(title: str, findings: list[str], dismissed: list[str]) -> Script:
+    """A merge pass filing ``findings`` as a task titled ``title``, dismissing ``dismissed``."""
+
+    async def merge(call: Call) -> TurnEndReason:
+        await call("get_task")
+        await call("suggest_task", title=title, prompt="Fix it.", findings=findings)
+        for finding in dismissed:
+            await call("dismiss_finding", finding=finding, reason="over the cap")
+        await call("complete_task", summary="1 task from 2 findings, 1 dismissed")
+        return "completed"
+
+    return merge
+
+
+def shipped(*scripts: Script, reviewers: tuple[Script, ...] = (), **options: Any) -> WorkspaceHost:
+    """A session with the shipped roles and triggers, reviewing what lands in a tree, its tasks
+    and lenses played by ``scripts`` and its merge passes by ``reviewers``; review pauses after
+    round 1, so a batch isn't reviewed. ``options`` go to :func:`session_for`."""
+    defaults: dict[str, Any] = {
+        "triggers": SHIPPED_TRIGGERS,
+        "review_limits": ReviewLimits(rounds=1),
+    }
+    session, _, _ = session_for(
+        *scripts, reviewers=reviewers, tree=FakeTree(), review=True, **(defaults | options)
+    )
+    return session
+
+
+LENSES_OFF = {
+    name: SHIPPED_TRIGGERS[name].model_copy(update={"enabled": False}) for name in LENS_TRIGGERS
+}
+"""The shipped lens triggers, disabled, as a project replacing them sets them."""
+
+
+def shown(tasks: tuple[TaskState, ...]) -> list[tuple[str, str, str | None, TaskStatus]]:
+    """Each of ``tasks``' role, origin, batch and status."""
+    return [(t.task.role, t.origin, t.batch, t.status) for t in tasks]
+
+
+LENS_TASKS = [
+    (role, name, None, "completed")
+    for role, name in zip(LENS_REVIEWERS, LENS_TRIGGERS, strict=True)
+]
+"""The six lens tasks a landing queues, as they end."""
+
+
+async def test_a_landing_queues_the_six_lens_tasks_and_nothing_else_when_they_find_nothing() -> (
+    None
+):
+    lenses = [reports() for _ in LENS_REVIEWERS]
+    session = shipped(claims_done, *lenses)
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert shown(board(events)) == [(CODER, "manual", None, "completed"), *LENS_TASKS]
+    assert all(t.queued_as == "review" for t in board(events)[1:])
+
+
+async def test_a_lens_finding_queues_one_merge_pass_that_files_into_the_reviews_batch() -> None:
+    lenses = [
+        reports(),
+        reports(("Crash on empty input", "blocking")),
+        reports(("No test for it", "normal")),
+        *(reports() for _ in LENS_REVIEWERS[3:]),
+    ]
+    session = shipped(
+        claims_done,
+        *lenses,
+        claims_done,  # The task the merge pass files.
+        reviewers=(files("Fix the crash", ["F1"], ["F2"]),),
+    )
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert shown(board(events)) == [
+        (CODER, "manual", None, "completed"),
+        *LENS_TASKS,
+        (REVIEWER, "merge-pass", None, "completed"),
+        (CODER, "merge-pass", "batch-1", "completed"),
+    ]
+    merge = board(events)[7].task.prompt
+    assert merge.startswith("Merge the findings of the review of commit ")
+    assert "You may file at most 5 tasks." in merge
+    assert f"F1 · {BUGS_REVIEWER} · blocking: Crash on empty input" in merge
+    assert "F2 · tests-reviewer · normal: No test for it" in merge
+    assert board(events)[8].task.prompt.startswith("Fix the crash")
+
+
+async def test_the_bugs_reviewer_may_report_a_blocking_finding_and_the_fit_reviewer_may_not() -> (
+    None
+):
+    fit: list[Reply] = []
+    bugs: list[Reply] = []
+    lenses = [
+        reports(("Missing the flag", "blocking"), replies=fit),
+        reports(("Crash on empty input", "blocking"), replies=bugs),
+        *(reports() for _ in LENS_REVIEWERS[2:]),
+    ]
+    session = shipped(claims_done, *lenses, claims_done, reviewers=(files("Fix it", ["F1"], []),))
+    await start(session)
+    await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert [(r.text, r.is_error) for r in fit] == [(BLOCKING_REFUSED, True)]
+    assert [(r.text, r.is_error) for r in bugs] == [("Recorded as F1.", False)]
+
+
+# A session saved before the lens reviewers
+
+
+def job(commit: str) -> ReviewJob:
+    """A review of ``commit`` on its own."""
+    return ReviewJob(commits=(commit,), round=0, batch=None, reviewed=("1",))
+
+
+def review(task_id: str, status: TaskStatus) -> TaskState:
+    """Task ``task_id``, a reviewer's review orbit queued, at ``status``."""
+    task = TaskSpec(prompt=f"Review commit {task_id}.", role=REVIEWER)
+    return TaskState(id=task_id, task=task, status=status, origin="review", queued_as="review")
+
+
+def saved_before_lenses() -> SessionRecord:
+    """A session as an orbit before the lens reviewers saved it, read back now: one of the
+    user's tasks, then reviews still to start (2), running (3) and completed (4), each booked
+    into a batch of its own; the batches of 2 and 3 still filling."""
+    reviews = LaneSnapshot(
+        planner=PlannerSnapshot(
+            next_batch=4,
+            batches={
+                "batch-1": BatchSnapshot(round=1, cap=5),
+                "batch-2": BatchSnapshot(round=1, cap=5),
+            },
+        ),
+        jobs={"2": job("2222222abc"), "3": job("3333333abc")},
+        batches={"2": "batch-1", "3": "batch-2"},
+    )
+    coder = TaskState(id="1", task=TaskSpec(prompt="Make it faster."), status="completed")
+    tasks = (coder, review("2", "pending"), review("3", "running"), review("4", "completed"))
+    old = json.loads(record_json(saved("old", *tasks, reviews=reviews)))
+    record = parse_record(json.dumps(old | {"version": 25}))
+    assert isinstance(record, SessionRecord)
+    return record
+
+
+async def test_a_review_waiting_in_an_older_session_is_cancelled_closing_its_batch() -> None:
+    store = store_with(saved_before_lenses())
+    session, _ = switching(store)
+    events = await opened(session, ActivateSession(session="old"))
+    await session.close()
+
+    tasks = last_of(Snapshot, events).tasks
+    assert [(t.id, t.status, t.reason) for t in tasks] == [
+        ("1", "completed", ""),
+        ("2", "cancelled", QUEUED_BEFORE_LENSES),
+        ("3", "cancelled", INTERRUPTED),
+        ("4", "completed", ""),
+    ]
+    assert messages(Notice, events)[1:] == [
+        "1 task was interrupted and is cancelled.",
+        "Reviews queued before lens reviewers were cancelled; unreviewed: 2222222.",
+    ]
+    assert last_of(Snapshot, events).review == ReviewStatus(paused=False, open_batches=0)
+    assert store.last.reviews is not None and store.last.reviews.planner.batches == {}
+
+
+async def test_an_upgraded_session_opened_again_gives_no_notice_again() -> None:
+    store = store_with(saved_before_lenses())
+    session, _ = switching(store)
+    await opened(session, ActivateSession(session="old"))
+    again = store.last.model_copy(update={"id": "again", "name": "again"})
+    store.saved.append(again)
+    events = await opened(session, ActivateSession(session="again"))
+    await session.close()
+
+    [resumed] = messages(Notice, events)
+    assert resumed.startswith('Resumed "again"')
+
+
+async def test_an_older_session_without_reviews_waiting_gives_no_notice() -> None:
+    record = saved_before_lenses()
+    finished = tuple(
+        t.model_copy(update={"status": "completed", "reason": ""}) for t in record.tasks
+    )
+    store = store_with(record.model_copy(update={"tasks": finished}))
+    session, _ = switching(store)
+    events = await opened(session, ActivateSession(session="old"))
+    await session.close()
+
+    assert messages(Notice, events) == ['Resumed "old" (last active Oct 16 18:02)']
+
+
+async def test_with_a_project_reviewer_of_its_own_the_landing_queues_it_alone() -> None:
+    own = SHIPPED_TRIGGERS[LENS_TRIGGERS[0]].model_copy(
+        update={"role": REVIEWER, "prompt": "Review {commit}.\n\n{diff}"}
+    )
+    session = shipped(
+        claims_done,
+        reviewers=(claims_done,),
+        triggers={**SHIPPED_TRIGGERS, **LENSES_OFF, "mine": own},
+    )
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert shown(board(events)) == [
+        (CODER, "manual", None, "completed"),
+        (REVIEWER, "mine", None, "completed"),
+    ]
+
+
+async def test_with_the_lens_triggers_disabled_and_none_of_its_own_nothing_is_reviewed() -> None:
+    session = shipped(claims_done, triggers={**SHIPPED_TRIGGERS, **LENSES_OFF})
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert shown(board(events)) == [(CODER, "manual", None, "completed")]

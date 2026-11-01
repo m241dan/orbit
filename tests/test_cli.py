@@ -50,6 +50,8 @@ from orbit.cli import app
 from orbit.cli.backend import _Backend, _backend, _Directories, _in_process
 from orbit.cli.errors import _configured, _exit_on
 from orbit.protocol import (
+    BUILT_IN_ROLE_NAMES,
+    LENS_REVIEWERS,
     PLANNER,
     SUPER_REVIEW,
     AddTask,
@@ -1047,6 +1049,7 @@ def test_chat_runs_each_role_that_doesnt_name_its_own_runtime_on_the_one_given(
         "reviewer": "fake",
         "super-reviewer": "claude",
         "configurator": "claude",
+        **dict.fromkeys(LENS_REVIEWERS, "claude"),
     }
     assert session.agents is not None
     assert set(session.agents.launchers) == {"claude", "fake"}
@@ -1071,9 +1074,8 @@ def test_chat_stops_naming_the_roles_whose_runtime_isnt_on_path(
 
     assert result.exit_code == 2
     assert result.stderr == (
-        "Roles planner, experimenter, coder, reviewer, super-reviewer, configurator use the runtime"
-        " claude, but claude isn't on PATH. Install Claude Code, or set those roles' runtime to one"
-        " you have.\n"
+        f"Roles {', '.join(BUILT_IN_ROLE_NAMES)} use the runtime claude, but claude isn't on PATH."
+        " Install Claude Code, or set those roles' runtime to one you have.\n"
     )
     assert launched == []
 

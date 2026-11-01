@@ -103,7 +103,11 @@ from orbit.agent.domain.role_lanes import merging_lane, review_lane, task_lanes
 from orbit.agent.domain.roles import Role, disabled_roles, enabled_roles
 from orbit.agent.domain.runtimes import ModelAliases
 from orbit.agent.domain.storage import StorageSettings
-from orbit.agent.domain.triggers import VerificationState, verification_state
+from orbit.agent.domain.triggers import (
+    VerificationState,
+    can_queue_reviews,
+    verification_state,
+)
 from orbit.agent.domain.usage_limits import Outages, RuntimeStop
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import (
@@ -1159,8 +1163,9 @@ class WorkspaceHost:
 
     def _review_lane(self) -> ReviewLane | None:
         """The review lane, if reviews are on and run beside the work: in a tree, with a review
-        role enabled and the enabled ones in a lane of their own; none otherwise. Only the
-        enabled review roles' reviews are queued."""
+        role enabled and the enabled ones in a lane of their own; none otherwise. Reviews of
+        commits are queued only while a trigger ``review-rounds`` guards can fire, as the
+        agents' triggers stand."""
         desk = self._desk
         if desk is None or not desk.agents.review or desk.agents.tree is None:
             return None
@@ -1168,7 +1173,10 @@ class WorkspaceHost:
         reviewers = REVIEW_ROLES - disabled_roles(roles)
         if not reviewers or review_lane(roles) == merging_lane(roles):
             return None
-        planner = ReviewPlanner(desk.agents.review_limits, reviewers)
+        enabled = enabled_roles(roles)
+        planner = ReviewPlanner(
+            desk.agents.review_limits, lambda: can_queue_reviews(desk.agents.triggers, enabled)
+        )
         hooks = ReviewHooks(
             lambda: self._turns.wake(),
             self._reviews_changed,

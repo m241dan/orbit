@@ -26,7 +26,7 @@ from orbit.agent.domain.sessions import SavedCopy
 from orbit.agent.domain.skills import SkillMapping
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
-from orbit.protocol import BUILT_IN_ROLE_NAMES
+from orbit.protocol import BUILT_IN_ROLE_NAMES, LENS_REVIEWERS
 from tests.agent_fakes import CLAUDE_MODELS, EVERYTHING, KNOWN_RULES, LIMITED_RUNTIME
 
 INSTRUCTIONS = {name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES}
@@ -419,7 +419,7 @@ def test_a_conversational_role_sharing_its_lane_with_task_roles_is_refused_namin
         load_config(talker(lane="review"), BUILT_IN_ROLES)
     assert str(raised.value) == (
         "roles: the conversational role 'x' can't share its lane 'review' with the task roles"
-        " ['reviewer', 'super-reviewer']"
+        f" {['reviewer', 'super-reviewer', *LENS_REVIEWERS]}"
     )
 
 
@@ -461,20 +461,29 @@ def test_worktree_roles_sharing_a_lane_other_than_work_load() -> None:
     assert load_config({"roles": roles}, BUILT_IN_ROLES).roles["coder"].lane == "b"
 
 
+LENSES = list(LENS_REVIEWERS)
+"""The lens reviewers' names, in order, as a lane's roles are listed."""
+
+
 @pytest.mark.parametrize(
     ("roles", "lanes"),
     [
         (
             {"super-reviewer": {"lane": "audit"}},
-            "lane 'review' has ['reviewer'] and lane 'audit' has ['super-reviewer']",
+            f"lane 'review' has {['reviewer', *LENSES]} and lane 'audit' has ['super-reviewer']",
         ),
         (
             {"super-reviewer": {"lane": "work"}},
-            "lane 'review' has ['reviewer'] and lane 'work' has ['super-reviewer']",
+            f"lane 'review' has {['reviewer', *LENSES]} and lane 'work' has ['super-reviewer']",
         ),
         (
             {"reviewer": {"lane": "work"}},
-            "lane 'work' has ['reviewer'] and lane 'review' has ['super-reviewer']",
+            f"lane 'work' has ['reviewer'] and lane 'review' has {['super-reviewer', *LENSES]}",
+        ),
+        (
+            {"bugs-reviewer": {"lane": "audit"}},
+            f"lane 'review' has {['reviewer', 'super-reviewer', *LENSES[:1], *LENSES[2:]]}"
+            " and lane 'audit' has ['bugs-reviewer']",
         ),
     ],
 )
@@ -483,26 +492,23 @@ def test_review_roles_in_different_lanes_are_refused_naming_them_and_their_lanes
 ) -> None:
     with pytest.raises(ConfigError) as raised:
         load_config({"roles": roles}, BUILT_IN_ROLES)
-    assert str(raised.value) == (
-        f"roles: the enabled reviewer and super-reviewer must share one lane, but {lanes}"
-    )
+    assert str(raised.value) == f"roles: the enabled review roles must share one lane, but {lanes}"
 
 
-@pytest.mark.parametrize("disabled", ["reviewer", "super-reviewer"])
+@pytest.mark.parametrize("disabled", ["reviewer", "super-reviewer", "bugs-reviewer"])
 @pytest.mark.parametrize("lane", ["audit", "work"])
-def test_a_disabled_review_role_can_be_in_another_lane_than_the_other(
+def test_a_disabled_review_role_can_be_in_another_lane_than_the_others(
     disabled: str, lane: str
 ) -> None:
-    roles: dict[str, dict[str, object]] = {"reviewer": {}, "super-reviewer": {"lane": lane}}
-    roles[disabled]["enabled"] = False
+    roles = {disabled: {"lane": lane, "enabled": False}}
     config = load_config({"roles": roles}, BUILT_IN_ROLES)
-    assert config.roles["super-reviewer"].lane == lane
+    assert config.roles[disabled].lane == lane
     assert not config.roles[disabled].enabled
 
 
 @pytest.mark.parametrize("lane", ["audit", "work"])
 def test_review_roles_sharing_a_lane_other_than_review_load(lane: str) -> None:
-    roles = {"reviewer": {"lane": lane}, "super-reviewer": {"lane": lane}}
+    roles = {name: {"lane": lane} for name in ("reviewer", "super-reviewer", *LENSES)}
     assert load_config({"roles": roles}, BUILT_IN_ROLES).roles["reviewer"].lane == lane
 
 

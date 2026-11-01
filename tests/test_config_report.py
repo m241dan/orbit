@@ -29,7 +29,7 @@ from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.domain.triggers import Trigger
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.agent.external.built_in_triggers import read_built_in_triggers, read_template_files
-from orbit.protocol import BUILT_IN_ROLE_NAMES
+from orbit.protocol import BUILT_IN_ROLE_NAMES, LENS_REVIEWERS
 
 type Data = dict[str, Any]
 
@@ -208,21 +208,21 @@ def test_each_trigger_is_listed_field_by_field_in_order() -> None:
 
 
 def test_each_trigger_field_comes_from_the_layer_that_set_it() -> None:
-    settings = report({"triggers": {"review": {"enabled": False}}})
-    assert settings["triggers.review.enabled"] == Setting(False, PROJECT)
-    assert settings["triggers.review.on"] == Setting("task_landed", PACKAGE)
-    assert settings["triggers.review.guards"] == Setting(("review-rounds",), PACKAGE)
-    assert settings["triggers.review.every"] == Setting(None, DEFAULT)
+    settings = report({"triggers": {"bugs-review": {"enabled": False}}})
+    assert settings["triggers.bugs-review.enabled"] == Setting(False, PROJECT)
+    assert settings["triggers.bugs-review.on"] == Setting("task_landed", PACKAGE)
+    assert settings["triggers.bugs-review.guards"] == Setting(("review-rounds",), PACKAGE)
+    assert settings["triggers.bugs-review.every"] == Setting(None, DEFAULT)
     assert settings["triggers.super-review.when"] == Setting(
         {"origin": ("manual", "planner")}, PACKAGE
     )
 
 
 def test_a_shipped_triggers_prompt_is_in_the_template_it_names() -> None:
-    prompt = PACKAGE_TRIGGERS["review"].prompt
+    prompt = PACKAGE_TRIGGERS["bugs-review"].prompt
     assert prompt is not None
-    expected = Setting(Instructions(prompt, "review.md"), PACKAGE)
-    assert report()["triggers.review.prompt"] == expected
+    expected = Setting(Instructions(prompt, "lens-review.md"), PACKAGE)
+    assert report()["triggers.bugs-review.prompt"] == expected
 
 
 def test_a_trigger_without_a_prompt_has_none_by_default() -> None:
@@ -232,7 +232,7 @@ def test_a_trigger_without_a_prompt_has_none_by_default() -> None:
 def test_a_shipped_prompt_naming_no_file_is_in_none() -> None:
     given = sources()
     settings = config_report(replace(given, template_files={}), {})
-    assert settings["triggers.review.prompt"].value.file is None
+    assert settings["triggers.bugs-review.prompt"].value.file is None
 
 
 def test_a_prompt_the_project_file_gives_as_text_is_in_no_file() -> None:
@@ -244,11 +244,11 @@ def test_a_prompt_the_project_file_gives_as_text_is_in_no_file() -> None:
 
 
 def test_a_prompt_the_project_file_names_a_file_for_is_in_that_file() -> None:
-    written = {"triggers": {"review": {"prompt": "triggers/review.md"}}}
-    read = {"triggers": {"review": {"prompt": "Review {commit}."}}}
+    written = {"triggers": {"bugs-review": {"prompt": "triggers/review.md"}}}
+    read = {"triggers": {"bugs-review": {"prompt": "Review {commit}."}}}
     settings = config_report(sources(written, project_read=read), {})
     prompt = Instructions("Review {commit}.", "triggers/review.md")
-    assert settings["triggers.review.prompt"] == Setting(prompt, PROJECT)
+    assert settings["triggers.bugs-review.prompt"] == Setting(prompt, PROJECT)
 
 
 def test_super_review_every_is_the_super_reviews_every_from_the_project_file() -> None:
@@ -258,8 +258,8 @@ def test_super_review_every_is_the_super_reviews_every_from_the_project_file() -
 
 
 def test_a_triggers_key_lists_only_its_fields() -> None:
-    assert list(subtree(report(), "triggers.review")) == [
-        f"triggers.review.{field}" for field in Trigger.model_fields
+    assert list(subtree(report(), "triggers.bugs-review")) == [
+        f"triggers.bugs-review.{field}" for field in Trigger.model_fields
     ]
 
 
@@ -495,6 +495,11 @@ ANALYST = {
 """A project's own conversational role's table."""
 
 
+def lens_cells(cell: str) -> tuple[str, ...]:
+    """The lens reviewers' cells for a skill, each ``cell``."""
+    return (cell,) * len(LENS_REVIEWERS)
+
+
 def mapped(project: Data | None = None) -> SkillMap:
     """The skill map of the configuration a project file holding ``project`` makes, with the
     skills of :data:`MAP_LIBRARY` and the one mapping :data:`PYTHON`."""
@@ -517,7 +522,7 @@ def test_the_skill_map_has_a_row_per_skill_of_the_library_in_name_order() -> Non
     [
         (
             "code-style",
-            ("role", "—", "role", "role", "role", "task"),
+            ("role", "—", "role", "role", "role", "task", *lens_cells("role")),
         ),
         (
             "python",
@@ -528,10 +533,14 @@ def test_the_skill_map_has_a_row_per_skill_of_the_library_in_name_order() -> Non
                 "reviewed task / mapped",
                 "mapped",
                 "role",
+                *lens_cells("reviewed task / mapped"),
             ),
         ),
-        ("cpp", ("—", "—", "task", "reviewed task", "—", "role")),
-        ("review-style", ("—", "—", "task", "reviewed task", "role", "task")),
+        ("cpp", ("—", "—", "task", "reviewed task", "—", "role", *lens_cells("reviewed task"))),
+        (
+            "review-style",
+            ("—", "—", "task", "reviewed task", "role", "task", *lens_cells("reviewed task")),
+        ),
     ],
 )
 def test_each_built_in_roles_cell_says_where_its_agents_get_the_skill(

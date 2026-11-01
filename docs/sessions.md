@@ -86,6 +86,13 @@ startup as before.
 - **Crash recovery.** Tasks saved as running or verifying come back cancelled, so the next run
   picks them up again, and orbit says how many. An interrupted review ends as a cancelled one
   does: if its batch is then due a review, one is queued for the next run.
+- **Reviews from before the lens reviewers.** Version 26 is the first whose reviews are the lens
+  reviewers' and the merge pass's. Upgrading an older record cancels each review it had still to
+  start, as their prompts are for the reviewer as it was (`Cancelled: queued for the reviewer
+  before lens reviewers`); the session opened ends them as if they suggested nothing, closing
+  their batches, and orbit names the commits they leave unreviewed (`Reviews queued before lens
+  reviewers were cancelled; unreviewed: 1a2b3c4.`). A review that was running is interrupted, as
+  above, and one that ended is left as it was.
 - **Settings.** A session's saved model, tool access and effort, each conversational role's, come
   back when it opens, except those given on the command line with `--model` or `--tools`, which
   hold for the whole run; a role with none saved starts with those given.

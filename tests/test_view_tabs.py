@@ -2,7 +2,9 @@ from collections.abc import Mapping
 from dataclasses import replace
 
 from orbit.protocol import (
+    BUGS_REVIEWER,
     INTERNAL,
+    LENS_REVIEWERS,
     PLANNER,
     AgentExited,
     AgentReply,
@@ -119,6 +121,18 @@ def test_marking_a_tab_read_clears_only_its_marker() -> None:
         ConversationTab("agent-2", "coder", True),
     )
     assert tab_labels(mark_tab_read(tabs, "agent-1")) == ["coder", "coder 2 *"]
+
+
+def test_each_lens_reviewers_agent_gets_a_tab_of_its_own_rather_than_a_pinned_one() -> None:
+    assert not set(LENS_REVIEWERS) & set(ROLE_TABS)
+    bugs = AgentStarted(agent_id="agent-1", role=BUGS_REVIEWER, task_id="2")
+    again = AgentStarted(agent_id="agent-2", role=BUGS_REVIEWER, task_id="3")
+    tabs = replay_tabs(replay_tabs(PINNED_TABS, bugs), again)
+    assert tabs == (
+        *PINNED_TABS,
+        ConversationTab("agent-1", BUGS_REVIEWER),
+        ConversationTab("agent-2", BUGS_REVIEWER),
+    )
 
 
 def test_the_pinned_tabs_are_the_built_in_roles_in_order() -> None:

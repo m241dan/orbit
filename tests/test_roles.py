@@ -21,6 +21,7 @@ from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.protocol import (
     BUILT_IN_ROLE_NAMES,
     DEFAULT_RUNTIME,
+    LENS_REVIEWERS,
     NOT_CONFIGURED,
     Effort,
     Settings,
@@ -160,6 +161,7 @@ def test_built_in_roles_cover_coding_reviewing_and_planning() -> None:
         "planner",
         "experimenter",
         "configurator",
+        *LENS_REVIEWERS,
     }
     coder = BUILT_IN_ROLES["coder"]
     assert coder.verify and coder.tool_access == "full"

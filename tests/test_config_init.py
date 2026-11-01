@@ -185,6 +185,10 @@ def test_update_adds_a_roles_other_fields_after_its_line_and_the_other_tables_at
     assert path.read_text(encoding="utf-8") == "\n".join(expected) + "\n"
 
 
+LENSES = ("fit", "bugs", "tests", "logic", "security", "performance")
+"""The per-commit lenses, in the order their reviewers and triggers are shipped."""
+
+
 def test_update_says_what_it_added_where(tmp_path: Path) -> None:
     path = write(tmp_path, CODER_OPUS)
     assert update(tmp_path) == UpdateResult(
@@ -203,8 +207,10 @@ def test_update_says_what_it_added_where(tmp_path: Path) -> None:
                 "[roles.reviewer]",
                 "[roles.super-reviewer]",
                 "[roles.configurator]",
-                "[roles.security-reviewer]",
-                "[triggers.review]",
+                *(f"[roles.{lens}-reviewer]" for lens in LENSES),
+                "[roles.license-reviewer]",
+                *(f"[triggers.{lens}-review]" for lens in LENSES),
+                "[triggers.merge-pass]",
                 "[triggers.super-review]",
                 "[triggers.configure-checks]",
                 "[triggers.set-up-verification]",
@@ -213,7 +219,7 @@ def test_update_says_what_it_added_where(tmp_path: Path) -> None:
                 "[[skills]]",
                 "[mcp.github]",
                 "[mcp.semgrep]",
-                "[roles.security-reviewer.tools]",
+                "[roles.license-reviewer.tools]",
                 "[models.local-coder]",
             ),
         ),
@@ -264,8 +270,8 @@ def own_security_reviewer() -> str:
     """The reference's settings of this version, the example role's table set with ``x`` as its
     instructions."""
     current = reference_config().partition(LATER)[0]
-    return current.replace("# [roles.security-reviewer]\n", "[roles.security-reviewer]\n").replace(
-        '# instructions = "roles/security-reviewer.md"', 'instructions = "x"'
+    return current.replace("# [roles.license-reviewer]\n", "[roles.license-reviewer]\n").replace(
+        '# instructions = "roles/license-reviewer.md"', 'instructions = "x"'
     )
 
 

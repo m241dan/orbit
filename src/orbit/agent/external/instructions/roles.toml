@@ -45,7 +45,14 @@ runtime = "claude"
 [roles.reviewer]
 instructions = "reviewer.md"
 tool_access = "restricted"
-tools = ["get_task", "complete_task", "report_progress", "give_up", "suggest_task"]
+tools = [
+    "get_task",
+    "complete_task",
+    "report_progress",
+    "give_up",
+    "suggest_task",
+    "dismiss_finding",
+]
 skills = [
     "code-style",
     "security",
@@ -86,6 +93,89 @@ skills = ["python", "cpp"]
 verify = false
 lane = "work"
 workspace = "worktree"
+conversation = false
+merge = false
+enabled = true
+runtime = "claude"
+
+# The per-commit lens reviewers: each reviews a landed commit through one review lens and reports
+# findings, which the reviewer, the merge pass, then files as tasks or dismisses.
+
+[roles.fit-reviewer]
+instructions = "lens-reviewer.md"
+tool_access = "restricted"
+tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+skills = ["code-style", "review-fit"]
+verify = false
+lane = "review"
+workspace = "snapshot"
+conversation = false
+merge = false
+enabled = true
+runtime = "claude"
+
+[roles.bugs-reviewer]
+instructions = "lens-reviewer.md"
+tool_access = "restricted"
+tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+skills = ["code-style", "review-bugs"]
+blocking_findings = true
+verify = false
+lane = "review"
+workspace = "snapshot"
+conversation = false
+merge = false
+enabled = true
+runtime = "claude"
+
+[roles.tests-reviewer]
+instructions = "lens-reviewer.md"
+tool_access = "restricted"
+tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+skills = ["code-style", "review-tests"]
+verify = false
+lane = "review"
+workspace = "snapshot"
+conversation = false
+merge = false
+enabled = true
+runtime = "claude"
+
+[roles.logic-reviewer]
+instructions = "lens-reviewer.md"
+tool_access = "restricted"
+tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+skills = ["code-style", "review-logic"]
+verify = false
+lane = "review"
+workspace = "snapshot"
+conversation = false
+merge = false
+enabled = true
+runtime = "claude"
+
+[roles.security-reviewer]
+instructions = "lens-reviewer.md"
+tool_access = "restricted"
+tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+skills = ["code-style", "security", "review-security"]
+blocking_findings = true
+verify = false
+lane = "review"
+workspace = "snapshot"
+conversation = false
+merge = false
+enabled = true
+runtime = "claude"
+
+[roles.performance-reviewer]
+instructions = "lens-reviewer.md"
+tool_access = "restricted"
+tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+skills = ["code-style", "review-performance"]
+verify = false
+lane = "review"
+workspace = "snapshot"
 conversation = false
 merge = false
 enabled = true
