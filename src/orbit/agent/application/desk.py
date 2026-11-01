@@ -41,7 +41,14 @@ from orbit.agent.domain.refusals import failed_to
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import ORBIT_TOOLS, READ_SKILL, Role
 from orbit.agent.domain.runtimes import ModelAliases, resolve_model
-from orbit.agent.domain.skills import SkillLibrary, SkillMapping, given_skill_file, given_skills
+from orbit.agent.domain.skills import (
+    SkillLibrary,
+    SkillMapping,
+    delivered_skills,
+    given_skill_file,
+    given_skills,
+    skill_instructions,
+)
 from orbit.protocol import (
     INTERNAL,
     AgentExited,
@@ -134,7 +141,7 @@ class Agents:
     models each runtime takes, by its name, which agents' models resolve through; a runtime
     without them is given models as they are. ``skill_library`` holds the skills agents can be
     given, and ``skill_mappings`` are the project's ``[[skills]]``, whose skills every agent is
-    given along with its role's.
+    given along with its role's, in its instructions.
     """
 
     host: AgentHost
@@ -226,7 +233,7 @@ class AgentDesk:
         self.registry = AgentRegistry(agents.new_token)
         self._publish = publish
         self._tracing = AgentTracing(telemetry)
-        self._processes: dict[str, Span] = {}  # The spans of the agents' processes, by agent id.
+        self._processes: dict[str, AgentProcess] = {}  # The agents' traced processes, by id.
         # Takes a review task's suggestions: its id, then the suggestion's title and prompt.
         self.suggest: Callable[[str, str, str], Awaitable[Reply]] | None = None
         # The report tools as an agent in the role named calls them; none without a store.
@@ -285,7 +292,7 @@ class AgentDesk:
     async def launch(self, agent: Agent, prompt: str, settings: Settings, cwd: str) -> AgentLaunch:
         """How to start ``agent`` in its role: told ``prompt``, with ``settings`` (or its role's
         effort, if they set none), their model resolved to the id its runtime is given, in
-        ``cwd``, in the session open.
+        ``cwd``, in the session open, its instructions delivering the skills it's given.
 
         Raises :class:`~orbit.agent.domain.runtimes.UnknownModel` if their model doesn't
         resolve, as one saved before its alias was taken out of the user config doesn't.
@@ -300,7 +307,7 @@ class AgentDesk:
             prompt,
             own,
             cwd,
-            role.instructions,
+            self._instructions(role),
             role.granted_tools,
             self._workspace_id,
             self.session(),
@@ -308,29 +315,46 @@ class AgentDesk:
         self._launches[agent.id] = launch
         return launch
 
+    def _instructions(self, role: Role) -> str:
+        """What ``role``'s agents are told: its instructions, then, after a blank line, the skills
+        they're given, if any."""
+        agents = self.agents
+        skills = skill_instructions(role.skills, (), agents.skill_mappings, agents.skill_library)
+        return f"{role.instructions}\n\n{skills}" if skills else role.instructions
+
     def launched(self, agent_id: str | None) -> AgentLaunch | None:
         """How agent ``agent_id``, if it's running, was last launched; none before it was."""
         return None if agent_id is None else self._launches.get(agent_id)
 
-    def tools(self, role: str) -> dict[str, Tool]:
-        """The tools the desk answers for an agent in the role named ``role``: ``read_skill``,
-        and the report tools."""
+    def tools(self, role: str, agent_id: str | None) -> dict[str, Tool]:
+        """The tools the desk answers for an agent in the role named ``role``, agent ``agent_id``
+        once it's opened: ``read_skill``, and the report tools."""
 
         async def read_skill(arguments: dict[str, Any]) -> Reply:
-            return self._read_skill(role, arguments)
+            return self._read_skill(role, agent_id, arguments)
 
         return {READ_SKILL: read_skill, **self.report_tools(role)}
 
-    def _read_skill(self, role: str, arguments: dict[str, Any]) -> Reply:
-        """The file of one of its skills that an agent in the role named ``role`` asks for in
-        ``arguments``, by the skill's name and the file's path, or why it's refused, recording
-        what was asked on the call's span, the current one. The role's skills are those it has
-        now, which a reset may have changed."""
+    def _read_skill(self, role: str, agent_id: str | None, arguments: dict[str, Any]) -> Reply:
+        """The file of one of its skills that agent ``agent_id``, in the role named ``role``, asks
+        for in ``arguments``, by the skill's name and the file's path, or why it's refused,
+        recording what was asked on the call's span, the current one, and a file it read on its
+        process's. The role's skills are those it has now, which a reset may have changed."""
         skill, path = str(arguments.get("skill", "")), str(arguments.get("file", ""))
         current_span().set_attributes(skill_attributes(skill, path))
-        given = given_skills(self.agents.roles[role].skills, self.agents.skill_mappings)
+        given = given_skills(self.agents.roles[role].skills, (), self.agents.skill_mappings)
         found = given_skill_file(given, self.agents.skill_library, skill, path)
-        return Reply(found, is_error=True) if isinstance(found, str) else Reply(found.text)
+        if isinstance(found, str):
+            return Reply(found, is_error=True)
+        self._note_read(agent_id, skill, path)
+        return Reply(found.text)
+
+    def _note_read(self, agent_id: str | None, skill: str, path: str) -> None:
+        """Tally agent ``agent_id``'s reading the file at ``path`` of the skill ``skill`` on its
+        process, if it's opened and its process is traced."""
+        process = None if agent_id is None else self._processes.get(agent_id)
+        if process is not None:
+            process.read_skill(skill, path)
 
     def use_role(self, name: str, role: Role) -> None:
         """Have ``role`` as the role ``name`` from now on."""
@@ -378,12 +402,13 @@ class AgentDesk:
 
     @contextmanager
     def traced(self, agent: Agent, parent: Span) -> Iterator[AgentProcess]:
-        """``agent``'s process, traced over the block in a span that's a child of ``parent``, as
-        :meth:`AgentTracing.process` traces it, with the agent's calls traced under it
-        meanwhile."""
-        runtime = self.agents.roles[agent.role].runtime
-        with self._tracing.process(agent, runtime, parent) as process:
-            self._processes[agent.id] = process.span
+        """``agent``'s process, delivered the skills its role is given, traced over the block in
+        a span that's a child of ``parent``, as :meth:`AgentTracing.process` traces it, with the
+        agent's calls traced under it meanwhile."""
+        role, agents = self.agents.roles[agent.role], self.agents
+        skills = delivered_skills(role.skills, (), agents.skill_mappings, agents.skill_library)
+        with self._tracing.process(agent, role.runtime, skills, parent) as process:
+            self._processes[agent.id] = process
             try:
                 yield process
             finally:
@@ -393,8 +418,9 @@ class AgentDesk:
         agent = self.registry.by_token(token)
         if agent is None:
             return UNKNOWN_AGENT
-        process = self._processes.get(agent.id, current_span())
-        with self._tracing.request(process, tool) as request:
+        process = self._processes.get(agent.id)
+        span = current_span() if process is None else process.span
+        with self._tracing.request(span, tool) as request:
             return await self._handle(agent, tool, arguments, request)
 
     async def _handle(

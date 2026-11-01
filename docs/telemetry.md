@@ -256,11 +256,13 @@ conversation couldn't be resumed runs a second process, and has a span for each.
 | `orbit.agent.id` | string | The agent's id, such as `agent-3`; the planner's is the same for each of its turns. |
 | `orbit.role` | string | The agent's role, such as `coder`, `planner` or `reviewer`. |
 | `orbit.runtime` | string | The runtime the agent's role runs on, such as `claude`. |
+| `orbit.agent.skills` | string[] | The skills its instructions delivered, by name, in their order: its role's, then the project's `[[skills]]` entries'; empty for none. |
 | `orbit.agent.exit_reason` | string | How the process ended: `finished`, `crashed` (it failed, or a turn ended in error) or `killed` (orbit stopped it, as when the user stops the task or cancels the turn). |
 | `orbit.agent.turns` | int | How many turns the process started. |
 | `orbit.agent.tool_names` | string[] | The tools the agent called, by name as the CLI reports them (`Bash`, `Edit`, `mcp__orbit__get_task`, …), sorted. |
 | `orbit.agent.tool_counts` | int[] | How many times it called each of those tools, in the same order. |
 | `orbit.agent.tool_calls_total` | int | How many tool calls it made in all. |
+| `orbit.agent.skill_files` | string[] | The skills' files it read with `read_skill`, each as `<skill>/<file>` (such as `code-style/testing.md`), sorted, once each however often it read them; a refused read isn't one. Empty for none. |
 
 A process that fails, rather than ending a turn in error, has the span's error status with the
 failure's message, and an `exception` event.

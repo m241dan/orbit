@@ -2,8 +2,8 @@
 builds software. Each opens with a ``SKILL.md`` whose front matter names and describes it, held
 to the rules Claude Code holds skills to. They come from two layers, the package's skills and the
 project's, whose files replace and add to the package's file by file. Roles name the skills
-their agents get, and a project also maps paths in it to the skills for the code there; an agent
-reads the files of the skills it's given, and only those."""
+their agents get, and a project also maps paths in it to the skills for the code there; an agent's
+instructions deliver the skills it's given, and it reads their files, and only theirs."""
 
 import posixpath
 import re
@@ -33,6 +33,15 @@ MAX_DESCRIPTION = 1024
 
 NO_SKILLS = "You weren't given any skills."
 """Why an agent given no skills can't read one."""
+
+SKILLS_HEADING = "## Skills"
+"""The heading over the skills an agent's instructions deliver."""
+
+READING_LINE = (
+    'A line such as "Read `code-style`\'s `testing.md`." means: call read_skill with skill'
+    " `code-style` and file `testing.md`."
+)
+"""How an agent reads a file of a skill that its skills point it to."""
 
 OUTSIDE_PROJECT = "paths are relative to the project root and stay inside it."
 """Why a ``[[skills]]`` entry's path that's empty, holds a NUL byte, is absolute or leaves the
@@ -271,11 +280,67 @@ def unknown_skill(key: str, name: str, library: SkillLibrary) -> str:
     return f"{key} names {name}, which isn't a skill; the skills are {', '.join(library.skills)}."
 
 
-def given_skills(role_skills: Sequence[str], mappings: Sequence[SkillMapping]) -> tuple[str, ...]:
-    """The skills an agent is given, by name: its role's ``role_skills``, then each skill the
-    project's ``mappings`` use, in order, each once, where it's first named."""
-    mapped = (name for mapping in mappings for name in mapping.use)
-    return tuple(dict.fromkeys((*role_skills, *mapped)))
+def given_skills(
+    role_skills: Sequence[str], task_skills: Sequence[str], mappings: Sequence[SkillMapping]
+) -> tuple[str, ...]:
+    """The skills an agent is given, by name: its role's ``role_skills``, then its task's
+    ``task_skills``, or, for a task without any, each skill the project's ``mappings`` use, in
+    order, each once, where it's first named."""
+    added = task_skills or [name for mapping in mappings for name in mapping.use]
+    return tuple(dict.fromkeys((*role_skills, *added)))
+
+
+def delivered_skills(
+    role_skills: Sequence[str],
+    task_skills: Sequence[str],
+    mappings: Sequence[SkillMapping],
+    library: SkillLibrary,
+) -> tuple[str, ...]:
+    """The skills delivered to an agent, by name: those it's given, as :func:`given_skills` says
+    from its role's ``role_skills``, its task's ``task_skills`` and the project's ``mappings``,
+    that the ``library`` has, in order."""
+    given = given_skills(role_skills, task_skills, mappings)
+    return tuple(name for name in given if name in library.skills)
+
+
+def skill_instructions(
+    role_skills: Sequence[str],
+    task_skills: Sequence[str],
+    mappings: Sequence[SkillMapping],
+    library: SkillLibrary,
+) -> str:
+    """What follows a role's instructions to deliver an agent its skills, those
+    :func:`delivered_skills` says from its role's ``role_skills``, its task's ``task_skills``, the
+    project's ``mappings`` and the ``library``: under a :data:`SKILLS_HEADING`, the
+    :data:`READING_LINE`, then each skill's body under its name, and, where the mappings gave
+    skills, as they do a task without any of its own, a line for each saying where its skills
+    apply. Empty for an agent delivered none."""
+    delivered = delivered_skills(role_skills, task_skills, mappings, library)
+    if not delivered:
+        return ""
+    sections = (_skill_section(library.skills[name]) for name in delivered)
+    mapped = () if task_skills else _where_mapped(mappings)
+    return "\n\n".join((SKILLS_HEADING, READING_LINE, *sections, *mapped))
+
+
+def _skill_section(skill: Skill) -> str:
+    """The section delivering ``skill``: its name as a heading, then its body, without the blank
+    space ending it."""
+    return f"### {skill.name}\n\n{skill.body}".rstrip()
+
+
+def _where_mapped(mappings: Sequence[SkillMapping]) -> tuple[str, ...]:
+    """The paragraph saying where the skills of each of the ``mappings`` apply, a line for each;
+    none without mappings."""
+    return ("\n".join(_mapping_line(mapping) for mapping in mappings),) if mappings else ()
+
+
+def _mapping_line(mapping: SkillMapping) -> str:
+    """The line saying the skills ``mapping`` uses apply under its paths, each in backticks."""
+    skills = ", ".join(f"`{name}`" for name in mapping.use)
+    paths = ", ".join(f"`{path}`" for path in mapping.paths)
+    verb = "applies" if len(mapping.use) == 1 else "apply"
+    return f"{skills} {verb} under {paths}."
 
 
 def given_skill_file(

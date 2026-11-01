@@ -200,11 +200,13 @@ async def test_a_tasks_agent_is_a_process_under_its_run_with_its_tools_tallied()
         "orbit.agent.id": "agent-1",
         "orbit.role": CODER,
         "orbit.runtime": "claude",
+        "orbit.agent.skills": (),
         "orbit.agent.exit_reason": "finished",
         "orbit.agent.turns": 1,
         "orbit.agent.tool_names": ("Bash", "Edit"),
         "orbit.agent.tool_counts": (3, 1),
         "orbit.agent.tool_calls_total": 4,
+        "orbit.agent.skill_files": (),
     }
     assert process.status.status_code is StatusCode.UNSET
 

@@ -377,7 +377,7 @@ class PlannerChat:
 
     async def handle(self, tool: str, arguments: dict[str, Any]) -> Reply:
         role = self._desk.agents.roles[self._role]
-        tools = {**self._tools, **self._desk.tools(self._role)}
+        tools = {**self._tools, **self._desk.tools(self._role, self.agent_id)}
         return await dispatch(self._role, role, tools, tool, arguments)
 
     async def close(self) -> None:

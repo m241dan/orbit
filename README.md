@@ -1040,7 +1040,7 @@ change to the planner's role, or to clear a conversation grown too long. Orbit e
 conversation, and its access to orbit, so the next prompt starts a fresh one, told the
 verification steps again, and saves the session without it. It reads `[roles.planner]` from
 `.orbit/config.toml` again, with the model, effort and runtime your `config.toml` sets for it (and the run's `--runtime`), so a change
-to the planner's instructions, tools, tool access, model or effort takes effect; other roles and
+to the planner's instructions, skills, tools, tool access, model or effort takes effect; other roles and
 settings stay as they were. If either file is invalid as it is now, aliases included, the planner keeps its role and orbit shows
 the problem, but still resets the conversation; so it does, too, if the role names a runtime no
 role ran on when orbit started, or a model the aliases orbit started with don't resolve
@@ -1564,8 +1564,8 @@ languages `python` and `cpp`, the kinds of project `application`, `pure-library`
 `execution-library` and `library-api`, `security`, and the review lenses `review-fit`,
 `review-bugs`, `review-tests`, `review-logic`, `review-security`, `review-performance`,
 `review-style`, `review-drift` and `review-scaling`. They're read with the configuration as a
-workspace opens, and agents read the files of those they're given with `read_skill` (see below);
-a later version of orbit puts them in agents' instructions too.
+workspace opens; agents' instructions deliver those they're given, and they read the skills' other
+files with `read_skill` (see below).
 
 Each role names the skills its agents get in its `skills` (see
 [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)): the `planner` gets `code-style`,
@@ -1633,11 +1633,48 @@ and a link to elsewhere in the project are fine), one that isn't a file or folde
 (`skills.2.paths names src/orbt, which isn't in the project.`), or a skill that isn't one
 (`skills.1.use names pyton, which isn't a skill; the skills are application, code-style, …`).
 
-An agent reads its skills' files with orbit's `read_skill(skill, file)` tool, which every role has
+An agent is given its role's `skills`, then every `[[skills]]` entry's, each once, as they were
+read when the workspace opened, and its instructions deliver them, on every runtime: after its
+role's instructions and a blank line comes a `## Skills` section, with a line saying how to read a
+skill's files, then each skill's `SKILL.md` below its front matter, whole, under a `### <name>`
+heading, and last a line for each `[[skills]]` entry saying where its skills apply. Under the
+entries above, the planner, whose role gives it `code-style`, is told:
+
+```markdown
+## Skills
+
+A line such as "Read `code-style`'s `testing.md`." means: call read_skill with skill `code-style` and file `testing.md`.
+
+### code-style
+
+…
+
+### application
+
+…
+
+### python
+
+…
+
+### cpp
+
+…
+
+`application`, `python` apply under `src`, `noxfile.py`.
+`cpp` applies under `native`.
+```
+
+An agent given no skills, with no `[[skills]]` entries, is told its role's instructions alone,
+with no `## Skills` section. A conversational role's agent, such as the planner's, is told its
+skills afresh each turn, so the turn after a reset that changes the planner's `skills`, or after the
+workspace reopens with changed `[[skills]]` or skill files, carries the change.
+
+An agent reads the rest of its skills' files, which their `SKILL.md`s point to, with orbit's
+`read_skill(skill, file)` tool, which every role has
 (see [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)): it gives the text of the file
 at `file`, a path in the skill's folder such as `testing.md`, `SKILL.md` included, of a skill the
-agent was given, its role's `skills` then every `[[skills]]` entry's, each once, as they were read
-when the workspace opened. It's refused, in this order, to an agent given no skills (`You weren't
+agent was given. It's refused, in this order, to an agent given no skills (`You weren't
 given any skills.`), for a skill it wasn't given (`You weren't given the skill pyton; your skills
 are code-style, security, python.`), and for a file the skill doesn't have, as a path with `..`
 or an absolute one never is (`code-style has no file nope.md; its files are SKILL.md,
@@ -1832,7 +1869,7 @@ for that run alone, so runs in other workspaces or projects never share or shado
 you alone as it holds the agent's token, just before the agent starts, and removes it when the agent ends,
 cancelled or crashed included; one a crash of orbit itself left behind is removed a day later, the
 next time orbit starts its Kiro runtime. The config's prompt is orbit's rules and then the role's
-instructions, as Claude's agents get them; its only MCP server is orbit's, by URL with the
+instructions with the agent's skills (see [Skills](#skills)), as Claude's agents get them; its only MCP server is orbit's, by URL with the
 agent's token (`includeMcpJson` is off, so no `mcp.json` of yours or the workspace's adds
 others); and its tools are the orbit tools the role is granted, each named `@orbit/<tool>` (such
 as `@orbit/get_task`), so, as on Claude, the agent isn't offered orbit's others, and the built-ins
@@ -2880,7 +2917,8 @@ starts again; each review's links to the task whose landing made it due, or, for
 to the
 `FireTrigger` command or the landing that called for it. Each agent process is one span,
 `orbit.agent.process`, under the task's run, the planner's turn or the review it works for: its
-role, how it exited, its turns and the tools it called, as sorted names with their counts; each
+role, the skills its instructions delivered, how it exited, its turns, the tools it called, as
+sorted names with their counts, and the skills' files it read with `read_skill`; each
 call it makes to orbit's tools is a child span, `orbit.agent.request`, with the tool and whether
 the reply was an error (a `read_skill` call's with the skill and file asked for,
 `orbit.skill.name` and `orbit.skill.file`, refused or not), and each verification step a call

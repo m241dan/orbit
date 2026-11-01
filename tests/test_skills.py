@@ -18,11 +18,13 @@ from orbit.agent.domain.skills import (
     SkillMapping,
     check_role_skills,
     check_skill_mappings,
+    delivered_skills,
     given_skill_file,
     given_skills,
     load_skill,
     load_skill_library,
     parse_front_matter,
+    skill_instructions,
 )
 
 FOLDER = "/orbit/skills/python"
@@ -497,7 +499,7 @@ def test_a_roles_first_unknown_skill_is_refused_naming_the_role_and_listing_the_
 
 def test_an_agent_is_given_its_roles_skills_then_the_mapped_ones_in_order() -> None:
     mappings = (mapping("src", use=("python", "application")), mapping("native", use=("cpp",)))
-    assert given_skills(("code-style", "security"), mappings) == (
+    assert given_skills(("code-style", "security"), (), mappings) == (
         "code-style",
         "security",
         "python",
@@ -508,11 +510,20 @@ def test_an_agent_is_given_its_roles_skills_then_the_mapped_ones_in_order() -> N
 
 def test_a_skill_from_the_role_and_a_mapping_is_given_once_where_first_named() -> None:
     mappings = (mapping("src", use=("python", "security")), mapping("tests", use=("python",)))
-    assert given_skills(("security",), mappings) == ("security", "python")
+    assert given_skills(("security",), (), mappings) == ("security", "python")
 
 
 def test_a_role_without_skills_and_no_mappings_gives_none() -> None:
-    assert given_skills((), ()) == ()
+    assert given_skills((), (), ()) == ()
+
+
+def test_a_tasks_skills_follow_the_roles_in_place_of_the_mapped_ones() -> None:
+    mappings = (mapping("src", use=("python", "application")),)
+    assert given_skills(("code-style", "security"), ("cpp", "code-style"), mappings) == (
+        "code-style",
+        "security",
+        "cpp",
+    )
 
 
 # Reading a skill's files
@@ -575,3 +586,114 @@ def test_a_file_the_skill_lacks_is_refused_listing_its_files_sorted(path: str) -
     assert given_skill_file(("code-style",), FILES, "code-style", path) == (
         f"code-style has no file {path}; its files are SKILL.md, naming.md, testing.md."
     )
+
+
+# Skills delivered in an agent's instructions
+
+READING = (
+    'A line such as "Read `code-style`\'s `testing.md`." means: call read_skill with skill'
+    " `code-style` and file `testing.md`."
+)
+"""The line telling an agent how to read the files its skills point it to."""
+
+
+def bodied(*names: str) -> SkillLibrary:
+    """The library of a skill of each of ``names``, each body naming its skill and ending in a
+    newline, as a SKILL.md's does."""
+    return SkillLibrary(
+        skills={
+            name: Skill(
+                name=name, description=f"{name}.", body=f"# {name}\n\nBe {name}.\n", files={}
+            )
+            for name in names
+        }
+    )
+
+
+DELIVERING = bodied("code-style", "security", "python", "application", "cpp")
+"""A library of the skills delivered below."""
+
+
+def test_the_skills_section_reads_skills_then_each_body_then_where_the_mapped_ones_apply() -> None:
+    mappings = (mapping("src", "tests", use=("python", "code-style")),)
+    assert skill_instructions(("code-style", "security"), (), mappings, DELIVERING) == (
+        "## Skills\n"
+        "\n"
+        f"{READING}\n"
+        "\n"
+        "### code-style\n"
+        "\n"
+        "# code-style\n"
+        "\n"
+        "Be code-style.\n"
+        "\n"
+        "### security\n"
+        "\n"
+        "# security\n"
+        "\n"
+        "Be security.\n"
+        "\n"
+        "### python\n"
+        "\n"
+        "# python\n"
+        "\n"
+        "Be python.\n"
+        "\n"
+        "`python`, `code-style` apply under `src`, `tests`."
+    )
+
+
+def test_each_mapping_entry_has_a_line_of_its_own_under_the_last_body() -> None:
+    mappings = (mapping("src", use=("python", "application")), mapping("native", use=("cpp",)))
+    text = skill_instructions((), (), mappings, DELIVERING)
+    assert text.endswith(
+        "Be cpp.\n\n`python`, `application` apply under `src`.\n`cpp` applies under `native`."
+    )
+
+
+def test_a_role_without_skills_and_no_mapping_has_no_skills_section() -> None:
+    assert skill_instructions((), (), (), DELIVERING) == ""
+
+
+def test_a_roles_skills_alone_have_no_mapping_lines() -> None:
+    text = skill_instructions(("security",), (), (), DELIVERING)
+    assert text == f"## Skills\n\n{READING}\n\n### security\n\n# security\n\nBe security."
+
+
+def test_a_tasks_skills_follow_the_roles_with_the_mapping_lines_left_out() -> None:
+    mappings = (mapping("src", use=("python",)),)
+    text = skill_instructions(("security",), ("cpp",), mappings, DELIVERING)
+    assert text == (
+        f"## Skills\n\n{READING}\n\n### security\n\n# security\n\nBe security.\n\n"
+        "### cpp\n\n# cpp\n\nBe cpp."
+    )
+
+
+def test_a_skill_with_an_empty_body_is_its_heading_alone() -> None:
+    empty = SkillLibrary(
+        skills={"bare": Skill(name="bare", description="Bare.", body="", files={})}
+    )
+    assert skill_instructions(("bare",), (), (), empty) == f"## Skills\n\n{READING}\n\n### bare"
+
+
+def test_a_body_is_delivered_whole_but_for_the_blank_space_ending_it() -> None:
+    body = "  Indented.\n\n" + "x" * 100_000 + "\n\n\n"
+    large = SkillLibrary(skills={"big": Skill(name="big", description="Big.", body=body, files={})})
+    text = skill_instructions(("big",), (), (), large)
+    assert text.endswith("### big\n\n  Indented.\n\n" + "x" * 100_000)
+
+
+def test_given_skills_the_library_lacks_are_not_delivered() -> None:
+    assert skill_instructions(("added-since",), (), (), DELIVERING) == ""
+    text = skill_instructions(("added-since", "security"), (), (), DELIVERING)
+    assert "added-since" not in text and "### security" in text
+
+
+def test_the_skills_delivered_are_those_given_that_the_library_has_in_order() -> None:
+    mappings = (mapping("src", use=("python", "added-since", "code-style")),)
+    delivered = delivered_skills(("code-style", "security"), (), mappings, DELIVERING)
+    assert delivered == ("code-style", "security", "python")
+
+
+def test_no_skills_are_delivered_to_a_role_without_any() -> None:
+    assert delivered_skills((), (), (), DELIVERING) == ()

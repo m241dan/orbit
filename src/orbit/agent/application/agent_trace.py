@@ -1,5 +1,6 @@
 """Tracing agents: the ``orbit.agent.process`` span of each agent's process, a child of what it
-works for, with an ``orbit.agent.request`` child for each of its calls to orbit (a
+works for, with the skills it was delivered and the files of them it read, an
+``orbit.agent.request`` child for each of its calls to orbit (a
 ``read_skill`` call's with the skill and file asked for), and an ``orbit.verify.step`` child of
 a call for each verification step it runs (the remaining spans plan's decisions 10 and 11).
 
@@ -9,7 +10,7 @@ span by the agent's token and makes it current for the call.
 
 import asyncio
 from collections import Counter
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
@@ -46,14 +47,16 @@ def tool_attributes(counts: Mapping[str, int]) -> dict[str, AttributeValue]:
 
 
 class AgentProcess:
-    """An agent's process, traced in ``span``, tallying the turns it starts and the tools it
-    calls; its ``reason`` is how it exited, ``finished`` unless something says otherwise."""
+    """An agent's process, traced in ``span``, tallying the turns it starts, the tools it calls
+    and the skills' files it reads; its ``reason`` is how it exited, ``finished`` unless
+    something says otherwise."""
 
     def __init__(self, span: SpanHandle) -> None:
         self.span = span
         self.reason: AgentExitReason = "finished"
         self._turns = 0
         self._tools: Counter[str] = Counter()
+        self._skill_files: set[str] = set()  # Each as skill/path.
 
     def saw(self, event: Event) -> None:
         """Tally ``event``, which the process reported: a turn started, a tool called, or a turn
@@ -65,13 +68,19 @@ class AgentProcess:
         elif isinstance(event, TurnFinished) and event.reason == "error":
             self.reason = "crashed"
 
+    def read_skill(self, skill: str, path: str) -> None:
+        """Tally the agent's reading the file at ``path`` of the skill ``skill``."""
+        self._skill_files.add(f"{skill}/{path}")
+
     def end(self) -> None:
-        """End the span, recording how the process exited, its turns and its tool calls."""
+        """End the span, recording how the process exited, its turns, its tool calls and the
+        skills' files it read, each once, sorted."""
         self.span.set_attributes(
             {
                 "orbit.agent.exit_reason": self.reason,
                 "orbit.agent.turns": self._turns,
                 **tool_attributes(self._tools),
+                "orbit.agent.skill_files": sorted(self._skill_files),
             }
         )
         self.span.end()
@@ -84,14 +93,17 @@ class AgentTracing:
     telemetry: Telemetry = field(default_factory=NoTelemetry)
 
     @contextmanager
-    def process(self, agent: Agent, runtime: str, parent: Span) -> Iterator[AgentProcess]:
-        """``agent``'s process on ``runtime``, traced over the block in a span that's a child of
-        ``parent`` and ended on leaving it: killed if the block is cancelled, and crashed if an
-        error escapes it, which is recorded on it."""
+    def process(
+        self, agent: Agent, runtime: str, skills: Sequence[str], parent: Span
+    ) -> Iterator[AgentProcess]:
+        """``agent``'s process on ``runtime``, delivered the ``skills``, by name, traced over the
+        block in a span that's a child of ``parent`` and ended on leaving it: killed if the block
+        is cancelled, and crashed if an error escapes it, which is recorded on it."""
         attributes = {
             "orbit.agent.id": agent.id,
             "orbit.role": agent.role,
             "orbit.runtime": runtime,
+            "orbit.agent.skills": list(skills),
         }
         with use_span(parent):
             process = AgentProcess(self.telemetry.start(PROCESS_SPAN, attributes))
