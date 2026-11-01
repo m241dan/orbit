@@ -874,6 +874,31 @@ async def test_changed_files_from_an_unknown_commit_fails(repo: Path) -> None:
         await tree.changed_files("0" * 40, git(repo, "rev-parse", "HEAD"))
 
 
+async def test_tracked_files_gives_the_paths_git_tracks_at_a_commit(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    (repo / "src").mkdir()
+    commit_file(repo, "src/c d\u00e9.py", "three\n", "Add C")
+    commit = git(repo, "rev-parse", "HEAD")
+    commit_file(repo, "d.txt", "four\n", "Add D")
+    git(repo, "rm", "-q", "a.txt")
+    git(repo, "commit", "-q", "-m", "Remove A")
+    (repo / "untracked.py").write_text("five\n")
+    assert sorted(await tree.tracked_files(commit)) == ["a.txt", "src/c d\u00e9.py"]
+
+
+async def test_tracked_files_are_the_whole_trees_from_a_subdirectory(repo: Path) -> None:
+    (repo / "src").mkdir()
+    commit_file(repo, "src/c.py", "three\n", "Add C")
+    tree = GitCoderTree(str(repo / "src"))
+    assert sorted(await tree.tracked_files("HEAD")) == ["a.txt", "src/c.py"]
+
+
+async def test_tracked_files_at_an_unknown_commit_fails(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    with pytest.raises(TreeFailed, match="git ls-tree failed"):
+        await tree.tracked_files("0" * 40)
+
+
 async def test_a_snapshot_is_a_detached_tree_at_the_commit_until_dropped(repo: Path) -> None:
     tree = GitCoderTree(str(repo))
     path = Path(await tree.prepare(keep=False))

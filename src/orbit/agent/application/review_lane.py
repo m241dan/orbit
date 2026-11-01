@@ -6,9 +6,10 @@ tasks. Its suggestions become tasks at the end of the queue, which the work lane
 :class:`ReviewPlanner` decides when a review is due and stops reviews generating work forever.
 """
 
-from collections.abc import Awaitable, Callable, Collection, Iterator
+import random
+from collections.abc import Awaitable, Callable, Collection, Iterator, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 
 from orbit.agent.application.agent_run import AgentRun
@@ -31,6 +32,7 @@ from orbit.agent.application.snapshots import snapshot_of
 from orbit.agent.application.tasks import Changed, Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.endings import REVIEW_STOPPED_BY_YOU
+from orbit.agent.domain.review_sample import sample_files
 from orbit.agent.domain.reviews import (
     LandedSince,
     LaneSnapshot,
@@ -324,22 +326,45 @@ class ReviewLane:
     async def _landed(self, job: ReviewJob, since: str | None) -> LandedSince:
         """What landed that ``job``'s reviewer is told, oldest first: the commits on the base
         since its last or, for a super review, those after ``since`` up to its commit, with the
-        files they changed; nothing if git can't list them."""
+        files they changed and the sample of other code files it reads too. What git can't list
+        is left out: the review goes ahead without it, as it's only a hint."""
+        if not job.whole:
+            return await self._landed_after(job.commits[-1])
+        commit = job.commits[0]
+        landed = await self._since_super(since, commit)
+        return replace(landed, sampled=await self._sample(commit, landed.files))
+
+    async def _landed_after(self, commit: str) -> LandedSince:
+        """The commits on the base after ``commit``; none if git can't list them."""
         try:
-            if not job.whole:
-                return LandedSince(tuple(await self._tree.landed_since(job.commits[-1])))
-            return await self._since_super(since, job.commits[0])
-        except TreeFailed:  # The review goes ahead without them: they're only a hint.
+            return LandedSince(tuple(await self._tree.landed_since(commit)))
+        except TreeFailed:
             return LandedSince()
 
     async def _since_super(self, since: str | None, commit: str) -> LandedSince:
         """The commits after ``since``, the last super review's commit, up to ``commit``, and
-        the files they changed; nothing before the first super review, without ``since``."""
+        the files they changed; nothing before the first super review, without ``since``, or if
+        git can't list them."""
         if since is None:
             return LandedSince()
-        subjects = await self._tree.landed_since(since, commit)
-        files = await self._tree.changed_files(since, commit)
+        try:
+            subjects = await self._tree.landed_since(since, commit)
+            files = await self._tree.changed_files(since, commit)
+        except TreeFailed:
+            return LandedSince()
         return LandedSince(tuple(subjects), tuple(files))
+
+    async def _sample(self, commit: str, changed: Sequence[str]) -> tuple[str, ...]:
+        """The code files tracked at ``commit`` that a super review of it reads besides those
+        ``changed`` since the last, chosen at random under the project's mapped paths, as many
+        as the limits allow; none if git can't list them."""
+        try:
+            tracked = await self._tree.tracked_files(commit)
+        except TreeFailed:
+            return ()
+        mapped = [path for mapping in self._desk.agents.skill_mappings for path in mapping.paths]
+        size = self.planner.limits.super_sample
+        return sample_files(tracked, mapped, changed, size, random.sample)
 
     async def _add(self, job: ReviewJob, diff: str, landed: LandedSince) -> None:
         """Queue ``job``'s review task, told ``diff`` and that ``landed`` landed since."""

@@ -53,10 +53,12 @@ class SuperReviewCount:
 @dataclass(frozen=True)
 class LandedSince:
     """What landed that a review's task lists: the ``subjects`` of the commits, oldest first,
-    and, for a super review, the paths of the ``files`` they changed."""
+    and, for a super review, the paths of the ``files`` they changed, with the paths of the
+    other code files it reads too, ``sampled``."""
 
     subjects: tuple[str, ...] = ()
     files: tuple[str, ...] = ()
+    sampled: tuple[str, ...] = ()
 
 
 _NOTHING_LANDED = LandedSince()
@@ -94,12 +96,14 @@ class ReviewJob:
 class ReviewLimits:
     """How much reviews may generate: ``rounds`` is the last round reviewed by itself, and
     ``suggestions`` the tasks one review may suggest. A super review is due every
-    ``super_every`` commits, and may suggest ``super_suggestions`` tasks."""
+    ``super_every`` commits, may suggest ``super_suggestions`` tasks, and reads a sample of
+    ``super_sample`` code files besides those changed since the last."""
 
     rounds: int = 3
     suggestions: int = 5
     super_every: int = 10
     super_suggestions: int = 10
+    super_sample: int = 10
 
 
 class BatchSnapshot(BaseModel):
@@ -465,7 +469,7 @@ def review_prompt(
     """The task for the reviewer of ``job``, whose commits' messages and diffs are ``diff``,
     allowed ``cap`` suggestions, told the tasks titled ``pending`` are queued already and that
     the commits ``landed_since`` landed: after the last one it reviews or, for a super review,
-    since the last super review, with the files they changed.
+    since the last super review, with the files they changed and those it samples.
 
     Its first line titles it. It holds only the facts: how to review is the role's instructions.
     """
@@ -476,7 +480,8 @@ def review_prompt(
         heading = "Tasks already queued (don't suggest these):"
         parts.append(_capped_list(heading, pending, PENDING_LIMIT))
     if job.whole:
-        return "\n\n".join([*parts, *_since_super(landed_since)])
+        sampled = _sampled(landed_since.sampled)
+        return "\n\n".join([*parts, *_since_super(landed_since), *sampled])
     if landed_since.subjects:
         heading = "Landed since (check your findings against these):"
         parts.append(_capped_list(heading, landed_since.subjects, LANDED_LIMIT))
@@ -493,6 +498,14 @@ def _since_super(landed: LandedSince) -> list[str]:
     if not landed.files:
         return [commits]
     return [commits, _capped_list("Files they changed:", sorted(landed.files), FILES_LIMIT)]
+
+
+def _sampled(paths: Sequence[str]) -> list[str]:
+    """The part of a super review's task listing the ``paths`` it samples, as they are; none
+    when there are none."""
+    if not paths:
+        return []
+    return ["\n".join(["Sampled files (read these too):", *_items(paths)])]
 
 
 def _trimmed(diff: str) -> str:

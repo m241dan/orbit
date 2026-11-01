@@ -387,6 +387,37 @@ def test_a_super_review_prompt_with_commits_that_changed_no_files_lists_no_files
     assert prompt.endswith(f"{SINCE_SUPER}\n- Empty commit") and FILES not in prompt
 
 
+SAMPLED = "Sampled files (read these too):"
+
+
+def test_a_super_review_prompt_lists_the_sampled_files_after_the_changed_ones() -> None:
+    landed = LandedSince(("Add D",), ("src/d.py",), ("src/a.py", "src/b.cpp"))
+    prompt = review_prompt(SUPER, "", 10, (), landed)
+    assert prompt.endswith(
+        f"{SINCE_SUPER}\n- Add D\n\n{FILES}\n- src/d.py\n\n{SAMPLED}\n- src/a.py\n- src/b.cpp"
+    )
+
+
+def test_the_first_super_review_prompt_lists_the_sampled_files_alone() -> None:
+    prompt = review_prompt(SUPER, "", 10, (), LandedSince(sampled=("src/a.py",)))
+    assert prompt == (
+        "Super review of the codebase at abc1234\n\n"
+        "You may make at most 10 suggestions.\n\n"
+        f"{SAMPLED}\n- src/a.py"
+    )
+
+
+def test_a_super_review_prompt_with_nothing_sampled_has_no_such_section() -> None:
+    prompt = review_prompt(SUPER, "", 10, (), LandedSince(("Add D",), ("src/d.py",)))
+    assert SAMPLED not in prompt
+
+
+def test_a_review_prompt_lists_no_sampled_files() -> None:
+    job = ReviewJob(commits=("abc1234def",), round=0, batch=None)
+    prompt = review_prompt(job, "+new", 5, (), LandedSince(sampled=("src/a.py",)))
+    assert "src/a.py" not in prompt and SAMPLED not in prompt
+
+
 def test_the_tasks_still_to_run_or_running_are_listed_by_their_first_lines() -> None:
     tasks = (
         state("1", status="completed", prompt="Done already"),

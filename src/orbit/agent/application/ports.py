@@ -354,6 +354,10 @@ class CoderTree(Protocol):
         """The paths of the files the commits after ``start`` up to ``end`` changed."""
         ...
 
+    async def tracked_files(self, commit: str) -> list[str]:
+        """The paths of the files git tracks at ``commit``, from the repository's root."""
+        ...
+
     async def snapshot(self, commit: str) -> str:
         """A separate, detached tree at ``commit`` to read, under a name of its own that no
         other snapshot, earlier or in another session, shares; returns its path."""

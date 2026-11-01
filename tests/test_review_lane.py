@@ -2,6 +2,7 @@
 
 import asyncio
 import itertools
+from typing import Any
 
 import pytest
 
@@ -14,6 +15,7 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.config import load_config
 from orbit.agent.domain.endings import BUG, CANCELLED, REVIEW_STOPPED_BY_YOU, STOPPED_BY_YOU
 from orbit.agent.domain.reviews import ReviewLimits
+from orbit.agent.domain.skills import SkillMapping
 from orbit.protocol import (
     GIT_FAILED,
     INTERNAL,
@@ -608,6 +610,92 @@ async def test_a_super_review_whose_commits_since_cannot_be_listed_is_queued_wit
     assert lane_of(session).planner.last_super_commit == tree.base
 
 
+SAMPLED = "Sampled files (read these too):"
+TRACKED = ["src/a.py", "src/b.cpp", "docs/x.md", "uv.lock", "tests/t.py"]
+SRC = (SkillMapping(paths=("src",), use=("python",)),)
+
+
+async def super_review_prompt(tree: FakeTree, **options: Any) -> str:
+    """The task of the super review the user asks for in a session on ``tree``, whose other
+    ``options`` go to :func:`session_for`."""
+    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True, **options)
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
+    events = await asyncio.wait_for(settle(session), 10)
+    return super_task(events).task.prompt
+
+
+async def test_a_super_review_samples_the_code_files_under_the_mapped_paths() -> None:
+    tree = FakeTree()
+    tree.tracked[tree.base] = TRACKED
+    prompt = await super_review_prompt(tree, skill_mappings=SRC)
+    assert prompt.endswith(f"10 suggestions.\n\n{SAMPLED}\n- src/a.py\n- src/b.cpp")
+
+
+async def test_a_super_review_without_mapped_paths_samples_every_code_file() -> None:
+    tree = FakeTree()
+    tree.tracked[tree.base] = TRACKED
+    prompt = await super_review_prompt(tree)
+    assert prompt.endswith(f"{SAMPLED}\n- src/a.py\n- src/b.cpp\n- tests/t.py")
+
+
+async def test_a_super_review_samples_no_file_changed_since_the_last() -> None:
+    tree = FakeTree()
+    tree.since["s1"] = ["Add A"]
+    tree.changed["s1"] = ["src/a.py"]
+    tree.tracked[tree.base] = TRACKED
+    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True, skill_mappings=SRC)
+    lane_of(session).planner.last_super_commit = "s1"
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
+    events = await asyncio.wait_for(settle(session), 10)
+    assert super_task(events).task.prompt.endswith(
+        f"{SINCE_SUPER}\n- Add A\n\n{FILES}\n- src/a.py\n\n{SAMPLED}\n- src/b.cpp"
+    )
+
+
+async def test_a_super_review_samples_as_many_files_as_its_limit_allows() -> None:
+    tree = FakeTree()
+    tree.tracked[tree.base] = TRACKED
+    prompt = await super_review_prompt(tree, review_limits=ReviewLimits(super_sample=2))
+    sampled = prompt.split(f"{SAMPLED}\n", 1)[1].splitlines()
+    assert len(set(sampled)) == len(sampled) == 2
+    assert set(sampled) <= {"- src/a.py", "- src/b.cpp", "- tests/t.py"}
+
+
+async def test_a_super_review_with_a_sample_size_of_zero_lists_no_sample() -> None:
+    tree = FakeTree()
+    tree.tracked[tree.base] = TRACKED
+    prompt = await super_review_prompt(tree, review_limits=ReviewLimits(super_sample=0))
+    assert SAMPLED not in prompt
+
+
+async def test_a_super_review_whose_tracked_files_cannot_be_listed_has_no_sample() -> None:
+    tree = FakeTree()
+    tree.since["s1"] = ["Add D"]
+    tree.tracked[tree.base] = TRACKED
+    tree.failures["tracked_files"] = TreeFailed("git ls-tree failed: bad revision")
+    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
+    lane_of(session).planner.last_super_commit = "s1"
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
+    events = await asyncio.wait_for(settle(session), 10)
+    review = super_task(events)
+    assert review.status == "completed"
+    assert review.task.prompt.endswith(f"{SINCE_SUPER}\n- Add D")
+    assert not _errored(events)
+
+
+async def test_a_super_review_whose_commits_since_cannot_be_listed_still_samples() -> None:
+    tree = FakeTree()
+    tree.since["s1"] = ["Add D"]
+    tree.tracked[tree.base] = ["src/a.py"]
+    tree.failures["landed_since"] = TreeFailed("git log failed: bad revision")
+    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
+    lane_of(session).planner.last_super_commit = "s1"
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
+    events = await asyncio.wait_for(settle(session), 10)
+    prompt = super_task(events).task.prompt
+    assert prompt.endswith(f"10 suggestions.\n\n{SAMPLED}\n- src/a.py")
+
+
 async def test_a_super_review_is_skipped_when_the_base_commit_cannot_be_read() -> None:
     tree = FakeTree()
     tree.failures["base_commit"] = TreeFailed("git rev-parse failed: unknown revision")
@@ -1001,6 +1089,16 @@ async def test_a_batch_review_is_told_what_landed_since_its_last_commit() -> Non
     batch_review = board(events)[-1]
     assert f"{LANDED}\n- Fix y\n\n" in batch_review.task.prompt
     assert tree.asked_since == ["c1", "c3"]
+
+
+async def test_a_review_of_a_commit_samples_no_files() -> None:
+    tree = FakeTree()
+    tree.tracked["c1"] = TRACKED
+    session, _, _ = session_for(claims_done, reviewers=(suggests(),), tree=tree, review=True)
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    prompt = review_task(events).task.prompt
+    assert SAMPLED not in prompt and "src/a.py" not in prompt
 
 
 async def test_a_review_whose_landed_commits_cannot_be_listed_is_queued_without_them() -> None:

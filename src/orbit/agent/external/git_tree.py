@@ -194,6 +194,12 @@ class GitCoderTree:
         listed = await self._git(self._root, "diff", "--name-only", "-z", f"{start}...{end}")
         return [path for path in listed.split("\0") if path]
 
+    async def tracked_files(self, commit: str) -> list[str]:
+        listed = await self._git(
+            self._root, "ls-tree", "-r", "--full-tree", "--name-only", "-z", commit
+        )
+        return [path for path in listed.split("\0") if path]
+
     async def snapshot(self, commit: str) -> str:
         sha = await self._sha(commit)
         path = await self._new_tree_dir(

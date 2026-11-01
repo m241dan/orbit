@@ -1155,7 +1155,7 @@ def test_chat_reviews_landed_work_with_the_files_limits(
     (tmp_path / ".orbit").mkdir()
     (tmp_path / ".orbit" / "config.toml").write_text(
         "review_rounds = 2\nreview_suggestions = 4\nsuper_review_every = 7\n"
-        "super_review_suggestions = 6\n"
+        "super_review_suggestions = 6\nsuper_review_sample = 3\n"
     )
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("orbit.cli.backend.in_git_work_tree", lambda path: True)
@@ -1165,7 +1165,7 @@ def test_chat_reviews_landed_work_with_the_files_limits(
     assert agents is not None
     assert agents.review
     assert agents.review_limits == ReviewLimits(
-        rounds=2, suggestions=4, super_every=7, super_suggestions=6
+        rounds=2, suggestions=4, super_every=7, super_suggestions=6, super_sample=3
     )
 
 

@@ -39,6 +39,7 @@ def test_defaults_without_a_file() -> None:
     assert config.roles == BUILT_IN_ROLES
     assert (config.fix_attempts, config.review_rounds, config.super_review_every) == (5, 3, 10)
     assert (config.review_suggestions, config.super_review_suggestions) == (5, 10)
+    assert config.super_review_sample == 10
     assert config.fallback_fixes == 3
     assert config.verification.steps == ()
 
@@ -63,6 +64,11 @@ def test_a_file_overrides_settings_and_role_fields() -> None:
     assert (coder.model, coder.timeout_minutes) == ("sonnet", 30)
     assert coder.instructions == BUILT_IN_ROLES["coder"].instructions  # Untouched fields kept.
     assert config.roles["reviewer"] == BUILT_IN_ROLES["reviewer"]
+
+
+def test_a_file_sets_the_super_review_sample_which_may_be_zero() -> None:
+    assert load_config({"super_review_sample": 3}, BUILT_IN_ROLES).review_limits.super_sample == 3
+    assert load_config({"super_review_sample": 0}, BUILT_IN_ROLES).review_limits.super_sample == 0
 
 
 def test_the_built_in_roles_are_the_ones_given() -> None:
@@ -150,6 +156,7 @@ def test_a_file_maps_paths_to_skills_entry_by_entry() -> None:
         ({"fix_attempts": 0}, "fix_attempts"),
         ({"max_checks": 0}, "max_checks"),
         ({"fallback_fixes": 0}, "fallback_fixes"),
+        ({"super_review_sample": -1}, "super_review_sample"),
         ({"surprise": 1}, "surprise"),
         ({"roles": "everyone"}, "roles"),
         ({"roles": {"coder": {"tools": ["launch_rockets"]}}}, "launch_rockets"),

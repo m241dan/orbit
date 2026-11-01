@@ -757,6 +757,7 @@ class FakeTree:
         self.since: dict[str, list[str]] = {}  # Commit -> the subjects landed after it.
         self.asked_since: list[str] = []  # The commits landed_since() was asked about.
         self.changed: dict[str, list[str]] = {}  # Commit -> the files changed after it.
+        self.tracked: dict[str, list[str]] = {}  # Commit -> the files tracked at it.
 
     async def prepare(self, keep: bool) -> str:
         self.prepared.append(keep)
@@ -798,6 +799,10 @@ class FakeTree:
     async def changed_files(self, start: str, end: str) -> list[str]:
         self._fail("changed_files")
         return self.changed.get(start, [])
+
+    async def tracked_files(self, commit: str) -> list[str]:
+        self._fail("tracked_files")
+        return self.tracked.get(commit, [])
 
     async def snapshot(self, commit: str) -> str:
         self._fail("snapshot")

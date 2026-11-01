@@ -94,6 +94,13 @@ class _FileConfig(_Config):
         ge=1,
         description="Tasks one super review may suggest.",
     )
+    super_review_sample: int = Field(
+        default=_REVIEW_LIMITS.super_sample,
+        ge=0,
+        description=(
+            "Code files a super review reads besides those changed since the last one; 0, none."
+        ),
+    )
     roles: dict[RoleName, Role] = Field(
         description="The roles agents work in, by name: the built-in ones, and your own."
     )
@@ -129,6 +136,7 @@ class _FileConfig(_Config):
             suggestions=self.review_suggestions,
             super_every=self.super_review_every,
             super_suggestions=self.super_review_suggestions,
+            super_sample=self.super_review_sample,
         )
 
 

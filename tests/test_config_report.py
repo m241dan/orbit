@@ -121,6 +121,7 @@ def test_the_limits_come_first_in_the_project_files_order() -> None:
         "super_review_every",
         "review_suggestions",
         "super_review_suggestions",
+        "super_review_sample",
     )
 
 

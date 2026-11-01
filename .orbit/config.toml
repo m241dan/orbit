@@ -15,6 +15,8 @@
 # review_suggestions = 5
 # Tasks one super review may suggest.
 # super_review_suggestions = 10
+# Code files a super review reads besides those changed since the last one; 0, none.
+# super_review_sample = 10
 
 # The steps that verify a task, run in order; with none, nothing is verified.
 # Quick checks first, so a failure shows up in seconds rather than after the tests.
