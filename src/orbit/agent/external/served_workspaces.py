@@ -28,13 +28,13 @@ from orbit.agent.external.repository import (
     orbit_dir,
 )
 from orbit.agent.external.session_import import ImportBlocked
-from orbit.agent.external.shielding import shielded
 from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.agent.external.store_startup import OpenedStore, open_workspace_store
 from orbit.agent.external.workspace_lock import WorkspaceLock
 from orbit.agent.external.workspace_purge import purge_losses, purge_workspace
 from orbit.agent.external.workspace_registry import WorkspaceRegistry
+from orbit.execution.cancelling import shielded
 from orbit.protocol import INTERNAL, WorkspaceCloning
 
 

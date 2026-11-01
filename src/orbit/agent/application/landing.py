@@ -2,10 +2,10 @@
 
 from dataclasses import dataclass
 
-from orbit.agent.application.lanes import waited_out
 from orbit.agent.application.ports import CoderTree, Merge, Publish
 from orbit.agent.application.task_trace import MERGE_CONFLICT_EVENT, MERGE_RESULT
 from orbit.agent.application.verifier import Failure, Verifier
+from orbit.execution.cancelling import waited_out
 from orbit.protocol import MergeResult, TaskMerged
 from orbit.tracing import current_span
 

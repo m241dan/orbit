@@ -7,7 +7,7 @@ import shutil
 import tempfile
 
 from orbit.agent.application.ports import TempDirFailed
-from orbit.agent.external.shielding import shielded
+from orbit.execution.cancelling import shielded
 
 PREFIX = "orbit-agent-"
 """What the names of the temporary directories start with."""

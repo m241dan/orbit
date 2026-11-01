@@ -19,7 +19,7 @@ from orbit.agent.application.coder_slots import CoderSeat
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.landing import Lander, Landing
 from orbit.agent.application.lane_runner import runtime_stop
-from orbit.agent.application.lanes import OPEN_GATE, SessionGate, stop, waited_out
+from orbit.agent.application.lanes import OPEN_GATE, SessionGate
 from orbit.agent.application.outcomes import Outcome, UserStop, ended, run_task_to_end
 from orbit.agent.application.record_moves import RecordMoves
 from orbit.agent.application.review_lane import ReviewLane
@@ -39,6 +39,7 @@ from orbit.agent.domain.endings import (
 from orbit.agent.domain.roles import Workspace
 from orbit.agent.domain.usage_limits import FIX_ERROR_NOTE, Outages, RuntimeStop
 from orbit.agent.domain.verification import FallbackFixes, failure_reason, fix_prompt
+from orbit.execution.cancelling import stop, waited_out
 from orbit.protocol import (
     CHECKS_EXHAUSTED,
     ErrorOccurred,

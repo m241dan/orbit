@@ -18,8 +18,8 @@ from pathlib import Path
 
 from orbit.agent.application.ports import StorageFailed, StoreFailed
 from orbit.agent.external.file_locks import take_flock
-from orbit.agent.external.shielding import shielded
 from orbit.agent.external.sqlite_errors import error_kind
+from orbit.execution.cancelling import shielded
 
 
 def check_session_id(session_id: str) -> None:

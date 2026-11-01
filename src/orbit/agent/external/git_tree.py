@@ -28,8 +28,8 @@ from orbit.agent.domain.coder_tree import (
 from orbit.agent.external.git import GitResult, git
 from orbit.agent.external.processes import run_process, start_failure
 from orbit.agent.external.repository import ORBIT_DIR, find_git_common_dir
-from orbit.agent.external.shielding import shielded
 from orbit.agent.external.whole_files import write_whole
+from orbit.execution.cancelling import shielded
 
 BRANCH = "orbit/coder"
 STASH_MESSAGE = "orbit: unverified work"

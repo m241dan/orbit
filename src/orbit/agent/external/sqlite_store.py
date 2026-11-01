@@ -46,7 +46,6 @@ from orbit.agent.domain.sessions import (
 from orbit.agent.domain.usage_totals import UsageRow, UsageTotalsData
 from orbit.agent.external import sqlite_log, sqlite_reports, sqlite_usage
 from orbit.agent.external.session_locks import SessionLocks, check_session_id
-from orbit.agent.external.shielding import shielded
 from orbit.agent.external.sqlite_backup import copy_to, is_database_file
 from orbit.agent.external.sqlite_errors import error_kind
 from orbit.agent.external.sqlite_schema import (
@@ -55,6 +54,7 @@ from orbit.agent.external.sqlite_schema import (
     open_existing,
     transaction,
 )
+from orbit.execution.cancelling import shielded
 from orbit.protocol import EventEnvelope, ReportShown, ReportSummary
 
 DATABASE = "orbit.db"

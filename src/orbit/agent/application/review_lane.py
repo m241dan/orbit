@@ -25,7 +25,7 @@ from orbit.agent.application.lane_runner import (
     unposted,
 )
 from orbit.agent.application.lanes import SessionGate
-from orbit.agent.application.outcomes import Outcome, UserStop, cancelling, run_task_to_end
+from orbit.agent.application.outcomes import Outcome, UserStop, run_task_to_end
 from orbit.agent.application.ports import CoderTree, Reply, TreeFailed
 from orbit.agent.application.review_trace import Queued, ReviewTally, ReviewTracing
 from orbit.agent.application.snapshots import snapshot_of
@@ -49,6 +49,7 @@ from orbit.agent.domain.roles import (
     suggestion_refusal,
     task_lanes,
 )
+from orbit.execution.cancelling import cancelling
 from orbit.protocol import (
     CODER,
     GIT_FAILED,

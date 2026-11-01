@@ -4,43 +4,17 @@ lane's turns."""
 import asyncio
 import inspect
 from contextlib import suppress
-from typing import Any
 
 import pytest
 
-from orbit.agent.application.lanes import Background, TurnSlot, stop
+from orbit.agent.application.lanes import Background, TurnSlot
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import BUSY as BUSY_CODE
 from orbit.protocol import INTERNAL, BusyChanged, ErrorOccurred, Event
 from orbit.tracing import NoSpan, Span, current_span, use_span
 from tests.agent_fakes import logged_with_traceback
+from tests.stopping import SlowToStop, cancelled_while_stopping
 from tests.waiting import eventually
-
-
-class SlowToStop:
-    """Work that, once started, runs until cancelled and then waits for ``gate`` to end."""
-
-    def __init__(self) -> None:
-        self.started = asyncio.Event()
-        self.gate = asyncio.Event()
-
-    async def __call__(self) -> None:
-        try:
-            self.started.set()
-            await asyncio.Event().wait()
-        finally:
-            await self.gate.wait()
-
-
-async def cancelled_while_stopping(
-    stopping: asyncio.Task[None], child: asyncio.Task[Any], gate: asyncio.Event
-) -> None:
-    """Cancel ``stopping`` while ``child`` stops, then let the child end through ``gate``."""
-    await asyncio.sleep(0)
-    stopping.cancel()
-    await asyncio.sleep(0)
-    assert not stopping.done() and not child.done()
-    gate.set()
 
 
 class Work:
@@ -55,39 +29,6 @@ class Work:
         self.runs.append(name)
         self.started.set()
         await self.gate.wait()
-
-
-async def test_stop_cancels_the_task_and_waits_for_it_to_end() -> None:
-    work = SlowToStop()
-    child = asyncio.create_task(work())
-    await work.started.wait()
-    work.gate.set()
-
-    await stop(child)
-
-    assert child.cancelled()
-
-
-async def test_stop_cancelled_meanwhile_is_cancelled_once_the_task_has_ended() -> None:
-    work = SlowToStop()
-    child = asyncio.create_task(work())
-    await work.started.wait()
-    stopping = asyncio.create_task(stop(child))
-
-    await cancelled_while_stopping(stopping, child, work.gate)
-
-    with pytest.raises(asyncio.CancelledError):
-        await stopping
-    assert child.done()
-
-
-async def test_stop_of_a_finished_task_does_nothing() -> None:
-    child = asyncio.create_task(asyncio.sleep(0))
-    await child
-
-    await stop(child)
-
-    assert not child.cancelled()
 
 
 def background() -> tuple[Background, asyncio.Queue[Event]]:

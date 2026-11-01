@@ -16,8 +16,7 @@ from functools import partial
 from typing import Any, Literal
 
 from orbit.agent.application.desk import AgentDesk, Tool, dispatch, report_progress
-from orbit.agent.application.lanes import stop
-from orbit.agent.application.outcomes import Outcome, cancelling, ended
+from orbit.agent.application.outcomes import Outcome, ended
 from orbit.agent.application.ports import Reply
 from orbit.agent.application.proposal_trial import ProposalTrial
 from orbit.agent.application.task_trace import CHECK_RUNS, FIX_ATTEMPTS, GAVE_UP_EVENT
@@ -55,6 +54,7 @@ from orbit.agent.domain.verification import (
     VerificationStep,
     check_reply,
 )
+from orbit.execution.cancelling import cancelling, stop
 from orbit.protocol import (
     AGENT_FAILED,
     NOT_CONFIGURED,

@@ -16,13 +16,8 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Failure
 from orbit.agent.domain.checks import ChecksProposal
 from orbit.agent.domain.endings import CANCELLED, Ending, bug, error
+from orbit.execution.cancelling import cancelling
 from orbit.protocol import ACTIVE_STATUSES, AGENT_FAILED, GIT_FAILED, ErrorOccurred, TaskStatus
-
-
-def cancelling() -> bool:
-    """Whether the task running now is being cancelled."""
-    task = asyncio.current_task()
-    return task is not None and task.cancelling() > 0
 
 
 @dataclass(frozen=True)

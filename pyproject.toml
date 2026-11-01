@@ -158,6 +158,7 @@ forbidden_modules = [
     "orbit.client",
     "orbit.profiling",
     "orbit.telemetry",
+    "orbit.execution",
     "orbit.__main__",
     "pydantic",
 ]
@@ -167,6 +168,29 @@ name = "Neither the domain nor the protocol traces"
 type = "forbidden"
 source_modules = ["orbit.agent.domain", "orbit.protocol"]
 forbidden_modules = ["orbit.tracing"]
+
+# Execution knows how work runs, and nothing of what the work is or of orbit's packages.
+[[tool.importlinter.contracts]]
+name = "Execution imports no orbit package"
+type = "forbidden"
+source_modules = ["orbit.execution"]
+forbidden_modules = [
+    "orbit.agent",
+    "orbit.tui",
+    "orbit.protocol",
+    "orbit.cli",
+    "orbit.client",
+    "orbit.telemetry",
+    "orbit.profiling",
+    "orbit.tracing",
+]
+
+# The domain's pure rules and the wire contract run no work of their own.
+[[tool.importlinter.contracts]]
+name = "Neither the domain nor the protocol uses execution"
+type = "forbidden"
+source_modules = ["orbit.agent.domain", "orbit.protocol"]
+forbidden_modules = ["orbit.execution"]
 
 # Telemetry implements the tracing port with OpenTelemetry, which nothing else imports, and only
 # the CLI, which starts it, knows it.
@@ -180,6 +204,7 @@ source_modules = [
     "orbit.client",
     "orbit.tracing",
     "orbit.profiling",
+    "orbit.execution",
 ]
 forbidden_modules = ["orbit.telemetry"]
 
@@ -199,6 +224,7 @@ source_modules = [
     "orbit.client",
     "orbit.tracing",
     "orbit.profiling",
+    "orbit.execution",
     "orbit.cli",
 ]
 forbidden_modules = ["opentelemetry"]

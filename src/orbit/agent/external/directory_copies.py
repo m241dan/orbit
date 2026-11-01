@@ -12,7 +12,7 @@ from pathlib import Path
 from orbit.agent.application.ports import TreeFailed
 from orbit.agent.domain.checks import Setup
 from orbit.agent.external.git_tree import run_setup
-from orbit.agent.external.shielding import shielded
+from orbit.execution.cancelling import shielded
 
 COPIES_DIR = "copies"
 """The folder in the state directory the copies are made in, a folder for each workspace."""

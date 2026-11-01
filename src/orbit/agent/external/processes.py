@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from orbit.agent.external.shielding import shielded
+from orbit.execution.cancelling import shielded
 
 # How long a stopped program's process group has to exit after SIGTERM before it's SIGKILLed.
 STOP_GRACE_SECONDS = 2.0

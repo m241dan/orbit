@@ -4,15 +4,14 @@ says whether work may start. A lane's work outlives whatever started it, so it s
 span current: it doesn't record on its starter's, such as the task that landed what it reviews."""
 
 import asyncio
-import contextlib
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
 
 from orbit.agent.application.failures import unexpected
-from orbit.agent.application.outcomes import cancelling
 from orbit.agent.application.ports import Publish
 from orbit.agent.domain.refusals import Refused, stopped_on
+from orbit.execution.cancelling import stop
 from orbit.protocol import BUSY, INTERNAL, BusyChanged, BusyLane, ErrorOccurred, Event
 from orbit.tracing import no_span
 
@@ -52,32 +51,6 @@ def crash_report(lane: str, exc: BaseException) -> ErrorOccurred:
     """The event telling the user that ``lane`` stopped on ``exc``, which nothing expected."""
     message = unexpected(stopped_on(f"The {lane} lane", exc), exc)
     return ErrorOccurred(code=INTERNAL, message=message)
-
-
-async def stop(task: asyncio.Task[Any]) -> None:
-    """Cancel ``task`` and wait for it to end; cancelled meanwhile, this is cancelled once it
-    has."""
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        # The task's own cancel ends here; one meant for the caller goes on.
-        if cancelling():
-            raise
-
-
-async def waited_out[T](work: Coroutine[Any, Any, T]) -> T:
-    """``work``'s result, run as a task of its own that cancelling this doesn't cancel. When
-    cancelled, this waits for ``work`` to finish, however often it's cancelled meanwhile, then
-    is cancelled itself."""
-    task = asyncio.ensure_future(work)
-    try:
-        return await asyncio.shield(task)
-    except asyncio.CancelledError:
-        while not task.done():
-            with contextlib.suppress(asyncio.CancelledError):
-                await asyncio.wait([task])
-        raise
 
 
 def _unwatched() -> None:
