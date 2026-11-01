@@ -10,6 +10,7 @@ from orbit.agent.domain.reviews import (
     LaneSnapshot,
     PlannerSnapshot,
     ReviewJob,
+    ReviewTemplate,
     SuperReviewCount,
 )
 from orbit.agent.domain.runtimes import CLAUDE
@@ -43,8 +44,8 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit these for a format change: they're what orbits at versions 1 to 19 wrote, and
-# they still need to read. A new version gets its own fixture (session-v20.json) and a
+# Never edit these for a format change: they're what orbits at versions 1 to 20 wrote, and
+# they still need to read. A new version gets its own fixture (session-v21.json) and a
 # migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
 SESSION_V2 = FIXTURES / "session-v2.json"
@@ -65,6 +66,7 @@ SESSION_V16 = FIXTURES / "session-v16.json"
 SESSION_V17 = FIXTURES / "session-v17.json"
 SESSION_V18 = FIXTURES / "session-v18.json"
 SESSION_V19 = FIXTURES / "session-v19.json"
+SESSION_V20 = FIXTURES / "session-v20.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -178,7 +180,7 @@ def expected(
     lane: LaneSnapshot | None = None,
 ) -> SessionRecord:
     return SessionRecord(
-        version=19,
+        version=20,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
@@ -420,14 +422,29 @@ def test_a_version_18_record_whose_tasks_are_not_a_list_is_left_for_validation()
     assert isinstance(record, Unreadable) and record.reason.startswith("tasks:")
 
 
-def test_a_version_19_session_file_reads_as_its_record() -> None:
+def test_a_version_19_session_file_migrates_to_reviews_keeping_no_templates() -> None:
     assert parse_record(SESSION_V19.read_text(encoding="utf-8")) == skilled()
 
 
-def test_a_session_record_is_written_in_the_version_19_format() -> None:
-    written = json.loads(record_json(skilled()))
-    golden = json.loads(SESSION_V19.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V19.name)
+def templated() -> SessionRecord:
+    """The golden record as version 20 keeps it, its review keeping what it's rendered from."""
+    values = {"trigger": "review", "commit": "c2", "landed_since": ""}
+    template = ReviewTemplate("Review {commit}.\n\n{landed_since}", values)
+    lane = skilled().reviews
+    assert lane is not None
+    return skilled().model_copy(
+        update={"reviews": lane.model_copy(update={"templates": {"3": template}})}
+    )
+
+
+def test_a_version_20_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V20.read_text(encoding="utf-8")) == templated()
+
+
+def test_a_session_record_is_written_in_the_version_20_format() -> None:
+    written = json.loads(record_json(templated()))
+    golden = json.loads(SESSION_V20.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V20.name)
 
 
 def test_a_version_1_review_count_reads_as_its_count_with_no_last_super_commit() -> None:

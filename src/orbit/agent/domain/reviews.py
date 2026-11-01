@@ -39,7 +39,7 @@ LANDED_LIMIT = 40
 # Files the commits since the last super review changed named in a super review's task; the rest
 # are counted.
 FILES_LIMIT = 100
-# Headings of a review task's lists, which tell_landed_since finds in the task review_prompt wrote.
+# Headings of a review task's lists.
 _PENDING_HEADING = "Tasks already queued (don't suggest these):"
 _LANDED_HEADING = "Landed since (check your findings against these):"
 
@@ -97,6 +97,16 @@ class ReviewJob:
     def role(self) -> str:
         """The role of the review's task."""
         return SUPER_REVIEWER if self.whole else REVIEWER
+
+
+@dataclass(frozen=True)
+class ReviewTemplate:
+    """What a review task of commits is rendered from: its trigger's ``template`` and the
+    ``values`` it was queued with, the trigger's name among them, kept so that it's rendered
+    again, told what landed since, as it starts (see :func:`tell_landed_since`)."""
+
+    template: str
+    values: Mapping[str, str]
 
 
 @dataclass(frozen=True)
@@ -186,13 +196,15 @@ class PlannerSnapshot(BaseModel):
 
 class LaneSnapshot(BaseModel):
     """A :class:`ReviewLane`'s state for one session: its ``planner``'s, and for each review
-    task it queued, the ``jobs`` it reviews and the ``batches`` it suggests into."""
+    task it queued, the ``jobs`` it reviews and the ``batches`` it suggests into, with the
+    ``templates`` each review of commits is rendered from, while it may still run."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     planner: PlannerSnapshot
     jobs: dict[str, ReviewJob] = {}
     batches: dict[str, str] = {}
+    templates: dict[str, ReviewTemplate] = {}
 
 
 class ReviewPlanner:
@@ -544,23 +556,11 @@ def _pending(pending: Sequence[str]) -> list[str]:
     return [_capped_list(_PENDING_HEADING, pending, PENDING_LIMIT)]
 
 
-def tell_landed_since(prompt: str, job: ReviewJob, subjects: Sequence[str]) -> str:
-    """``prompt``, the task :func:`review_prompt` wrote for ``job``, a review of commits, listing
-    the commits whose ``subjects`` landed since in place of those it listed, if any: where
-    :func:`review_prompt` lists them, before the diff, and nowhere when none did."""
-    parts = prompt.split("\n\n")
-    head = _head_length(parts, job)
-    rest = parts[head:]
-    diff = rest[1:] if rest[0].startswith(_LANDED_HEADING) else rest
-    return "\n\n".join([*parts[:head], *_landed(subjects), *diff])
-
-
-def _head_length(parts: Sequence[str], job: ReviewJob) -> int:
-    """How many of ``parts``, the paragraphs of ``job``'s review task, come before what landed
-    since and the diff: its title, a line for each task that didn't land, its limit, then the
-    tasks already queued, if there are any. None of them holds a blank line."""
-    fixed = 2 + len(job.missing)
-    return fixed + 1 if parts[fixed].startswith(_PENDING_HEADING) else fixed
+def tell_landed_since(values: Mapping[str, str], subjects: Sequence[str]) -> dict[str, str]:
+    """``values``, those a review of commits is rendered from, telling it of the commits whose
+    ``subjects`` landed since in place of those they told of: ``{landed_since}`` lists them
+    under its heading, or is empty when none did."""
+    return {**values, "landed_since": _paragraphs(_landed(subjects))}
 
 
 def _landed(subjects: Sequence[str]) -> list[str]:

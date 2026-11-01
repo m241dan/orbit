@@ -16,6 +16,7 @@ from orbit.agent.domain.config import load_config
 from orbit.agent.domain.endings import BUG, CANCELLED, REVIEW_STOPPED_BY_YOU, STOPPED_BY_YOU
 from orbit.agent.domain.reviews import ReviewLimits, SuperReviewCount
 from orbit.agent.domain.skills import SkillMapping
+from orbit.agent.domain.triggers import Trigger
 from orbit.protocol import (
     GIT_FAILED,
     INTERNAL,
@@ -45,6 +46,7 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import (
     ROLES,
+    TRIGGERS,
     Call,
     FakeTree,
     Script,
@@ -1235,6 +1237,86 @@ async def test_a_review_whose_landed_commits_cannot_be_listed_as_it_starts_runs_
     # As it started, up to the base's head: it's not asked as a review is queued.
     assert tree.asked_since == [("c1", None)]
     assert not _errored(events)
+
+
+def reviewed_as(template: str) -> dict[str, Trigger]:
+    """The shipped triggers, the review's template replaced whole by ``template``, as a project
+    may replace it."""
+    return {**TRIGGERS, "review": TRIGGERS["review"].model_copy(update={"prompt": template})}
+
+
+async def reviewed_from(template: str, *landed: str) -> tuple[TaskState, str]:
+    """The review task, as it ended, and the brief of the one review of a commit queued from the
+    review trigger's ``template``, the commits with subjects ``landed`` merged after it."""
+    briefs: list[str] = []
+    tree = FakeTree()
+    tree.since["c1"] = list(landed)
+    session, _, _ = session_for(
+        claims_done,
+        reviewers=(suggests(briefs=briefs),),
+        tree=tree,
+        review=True,
+        triggers=reviewed_as(template),
+    )
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    [brief] = briefs
+    return review_task(events), brief.split("\n\nWhen you have finished", 1)[0]
+
+
+async def test_a_project_review_template_of_one_paragraph_starts_and_keeps_its_text() -> None:
+    review, brief = await reviewed_from("Review {commit}.", "Add B")
+    assert (review.status, review.task.prompt, brief) == ("completed", "Review c1.", "Review c1.")
+
+
+async def test_a_project_review_template_in_another_order_is_not_spliced_into() -> None:
+    template = "{diff}\n\nYou may make at most {cap} suggestions.\n\n{title}"
+    review, brief = await reviewed_from(template, "Add B")
+    expected = "diff of c1\n\nYou may make at most 5 suggestions.\n\nReview commit c1"
+    assert (review.task.prompt, brief) == (expected, expected)
+
+
+async def test_a_project_review_template_lists_what_landed_since_as_the_review_starts() -> None:
+    review, brief = await reviewed_from("Review {commit}.\n\n{landed_since}", "Add B", "Add C")
+    expected = f"Review c1.\n\n{LANDED}\n- Add B\n- Add C"
+    assert (review.task.prompt, brief) == (expected, expected)
+
+
+async def test_a_review_the_user_edited_starts_with_their_prompt() -> None:
+    started, gate = asyncio.Event(), asyncio.Event()
+    briefs: list[str] = []
+
+    async def waits_then_reviews(call: Call) -> TurnEndReason:
+        started.set()
+        await gate.wait()
+        return await suggests()(call)
+
+    # A project's review trigger of its own, whose reviews, unlike the shipped one's, can be
+    # edited.
+    check = TRIGGERS["review"].model_copy(update={"prompt": "Review {commit}.\n\n{landed_since}"})
+    off = TRIGGERS["review"].model_copy(update={"enabled": False})
+    tree = FakeTree()
+    tree.since["c2"] = ["Add C"]
+    session, _, _ = session_for(
+        claims_done,
+        claims_done,
+        reviewers=(waits_then_reviews, suggests(briefs=briefs)),
+        tree=tree,
+        review=True,
+        triggers={**TRIGGERS, "review": off, "check": check},
+    )
+    await start(session, "one", "two")
+    events: list[Event] = []
+    collecting = asyncio.ensure_future(settle(session, events))
+    await eventually(lambda: [t.task.role for t in latest_board(events)].count("reviewer") == 2)
+    await started.wait()  # The review of c1 is held back, so that of c2 waits to start.
+    edited = TaskSpec(prompt="Look closely at c2.", role="reviewer")
+    await send(session, EditTask(task_id="4", task=edited))
+    gate.set()
+    await asyncio.wait_for(collecting, 10)
+    assert board(events)[3].task.prompt == "Look closely at c2."
+    [brief] = briefs
+    assert brief.split("\n\nWhen you have finished", 1)[0] == "Look closely at c2."
 
 
 async def test_an_unexpected_error_in_the_review_lane_is_reported() -> None:

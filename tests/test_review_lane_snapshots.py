@@ -6,7 +6,13 @@ import asyncio
 from orbit.agent import ControlPlane, PlaneParts, WorkspaceHost
 from orbit.agent.application.ports import Reply
 from orbit.agent.application.review_trace import REVIEW_SPAN
-from orbit.agent.domain.reviews import BatchSnapshot, LaneSnapshot, PlannerSnapshot, ReviewJob
+from orbit.agent.domain.reviews import (
+    BatchSnapshot,
+    LaneSnapshot,
+    PlannerSnapshot,
+    ReviewJob,
+    ReviewTemplate,
+)
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
     ActivateSession,
@@ -14,6 +20,7 @@ from orbit.protocol import (
     Event,
     HistoryPage,
     Notice,
+    RemoveTask,
     ReviewStatus,
     RunTasks,
     Snapshot,
@@ -41,6 +48,7 @@ from tests.agent_fakes import (
 )
 from tests.session_builders import last_of, messages, opened, saved, store_with, switching
 from tests.telemetry_helpers import Traced, linked_to
+from tests.waiting import eventually
 
 
 async def suggesting() -> tuple[WorkspaceHost, FakeStore]:
@@ -85,6 +93,16 @@ async def test_a_saved_sessions_reviews_remember_what_they_suggested() -> None:
     await crashing.close()
 
 
+async def test_a_saved_sessions_running_review_keeps_what_its_prompt_renders_from() -> None:
+    crashing, kept = await suggesting()
+    template = reviews_of(kept).templates["2"]
+    assert (template.values["trigger"], template.values["commit"]) == ("review", "c1")
+    record = from_disk(kept.last)
+    assert record.reviews is not None
+    assert record.reviews.templates == {"2": template}
+    await crashing.close()
+
+
 async def test_an_opened_session_refuses_what_an_earlier_review_suggested() -> None:
     remembered = PlannerSnapshot(next_batch=2, suggested=frozenset({"add tests"}))
     snapshot = LaneSnapshot(planner=remembered)
@@ -108,10 +126,11 @@ async def test_an_opened_session_has_the_reviews_it_was_saved_with() -> None:
     session, launcher = switching(store)
     events = await opened(session, ActivateSession(session="auth"))
 
-    # The running review was interrupted, so its batch no longer fills.
+    # The running review was interrupted, so its batch no longer fills, and it won't run again.
     batch = snapshot.planner.batches["batch-1"].model_copy(update={"filling": False})
     planner = snapshot.planner.model_copy(update={"batches": {"batch-1": batch}})
-    assert reviews_of(store) == snapshot.model_copy(update={"planner": planner})
+    assert snapshot.templates.keys() == {"2"}
+    assert reviews_of(store) == snapshot.model_copy(update={"planner": planner, "templates": {}})
     assert last_of(Snapshot, events).review == ReviewStatus(paused=False, open_batches=1)
     assert launcher.launches == []
     await crashing.close()
@@ -236,6 +255,52 @@ async def test_an_interrupted_reviews_queued_review_is_told_what_landed_since_as
     assert tree.asked_since == [("3", None)]
 
 
+QUEUED = (task("1", "coder", "completed"), task("2", "reviewer", "pending", "review"))
+"""A board saved with the review of task 1's commit queued, its prompt ``2``."""
+
+
+def queued_review(templates: dict[str, ReviewTemplate]) -> LaneSnapshot:
+    """The lane of :data:`QUEUED`, keeping ``templates``."""
+    batch = BatchSnapshot(round=1, cap=5)
+    return LaneSnapshot(
+        planner=PlannerSnapshot(next_batch=2, batches={"batch-1": batch}),
+        jobs={"2": ReviewJob(commits=("c1",), round=0, batch=None)},
+        batches={"2": "batch-1"},
+        templates=templates,
+    )
+
+
+async def run_queued_review(snapshot: LaneSnapshot, tree: FakeTree) -> tuple[str, str]:
+    """The prompt and the brief of the review of :data:`QUEUED` as it ran in a session that
+    opened it saved with ``snapshot``, in ``tree``."""
+    session, launcher = switching(store_with(saved("auth", *QUEUED, reviews=snapshot)), tree=tree)
+    briefs: list[str] = []
+    launcher.reviewers.append(suggests(briefs=briefs))
+    await opened(session, ActivateSession(session="auth"))
+    await send(session, RunTasks())
+    events = await asyncio.wait_for(settle(session, until=last_review_completed), 10)
+    await session.close()
+    [brief] = briefs
+    prompt = last_of(TasksChanged, events).tasks[-1].task.prompt
+    return prompt, brief.split("\n\nWhen you have finished", 1)[0]
+
+
+async def test_an_opened_sessions_queued_review_is_rendered_from_its_template_as_it_runs() -> None:
+    tree = FakeTree()
+    tree.since["c1"] = ["Add B"]
+    values = {"trigger": "review", "commit": "c1", "landed_since": ""}
+    snapshot = queued_review({"2": ReviewTemplate("Review {commit}.\n\n{landed_since}", values)})
+    expected = f"Review c1.\n\n{LANDED}\n- Add B"
+    assert await run_queued_review(snapshot, tree) == (expected, expected)
+
+
+async def test_an_opened_sessions_queued_review_kept_without_a_template_keeps_its_prompt() -> None:
+    tree = FakeTree()
+    tree.since["c1"] = ["Add B"]
+    assert await run_queued_review(queued_review({}), tree) == ("2", "2")
+    assert tree.asked_since == []
+
+
 async def test_an_interrupted_reviews_queued_review_is_published_only_in_the_snapshot() -> None:
     snapshot = reviewing("3", finished=frozenset({"3"}))
     session, events = await switched(crashed("completed"), snapshot)
@@ -265,6 +330,29 @@ async def test_an_interrupted_reviews_queued_review_links_to_the_command_opening
 
     [review] = traced.spans(REVIEW_SPAN)
     assert linked_to(review, traced.command("activate_session"))
+
+
+async def test_a_reviews_template_is_saved_only_while_it_may_still_run() -> None:
+    gate = asyncio.Event()
+
+    async def slow(call: Call) -> TurnEndReason:
+        await gate.wait()
+        return await suggests()(call)
+
+    store = FakeStore()
+    session, _, _ = session_for(
+        claims_done, claims_done, reviewers=(slow,), tree=FakeTree(), review=True, store=store
+    )
+    await start(session, "one", "two")
+    events: list[Event] = []
+    collecting = asyncio.ensure_future(settle(session, events))
+    await eventually(lambda: reviews_of(store).templates.keys() == {"3", "4"})
+    await send(session, RemoveTask(task_id="4"))
+    await eventually(lambda: reviews_of(store).templates.keys() == {"3"})
+    gate.set()
+    await asyncio.wait_for(collecting, 10)
+    assert reviews_of(store).templates == {}
+    await session.close()
 
 
 async def test_interrupted_tasks_that_are_not_open_reviews_change_nothing() -> None:

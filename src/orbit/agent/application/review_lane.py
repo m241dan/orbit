@@ -42,6 +42,7 @@ from orbit.agent.domain.reviews import (
     LaneSnapshot,
     ReviewJob,
     ReviewPlanner,
+    ReviewTemplate,
     pause_notice,
     pending_titles,
     review_values,
@@ -49,7 +50,7 @@ from orbit.agent.domain.reviews import (
 )
 from orbit.agent.domain.role_lanes import review_lane, task_lanes
 from orbit.agent.domain.suggestions import suggested_task, suggestion_refusal
-from orbit.agent.domain.triggers import Trigger, restart_counts
+from orbit.agent.domain.triggers import Trigger, render_template, restart_counts
 from orbit.execution.cancelling import cancelling
 from orbit.protocol import (
     CODER,
@@ -111,6 +112,9 @@ class ReviewLane:
         self._publish = desk.publish
         self._jobs: dict[str, ReviewJob] = {}  # Review task id -> what it reviews.
         self._batches: dict[str, str] = {}  # Review task id -> the batch it suggests into.
+        # Review task id -> what its prompt is rendered from, for a review of commits that may
+        # still run.
+        self._templates: dict[str, ReviewTemplate] = {}
         # Review task id -> the span current as it was queued, this time the session was open,
         # until it ends.
         self._causes: dict[str, Span] = {}
@@ -135,7 +139,10 @@ class ReviewLane:
     def snapshot(self) -> LaneSnapshot:
         """The lane's state for this session, to :meth:`load` later."""
         return LaneSnapshot(
-            planner=self.planner.snapshot(), jobs=dict(self._jobs), batches=dict(self._batches)
+            planner=self.planner.snapshot(),
+            jobs=dict(self._jobs),
+            batches=dict(self._batches),
+            templates=dict(self._templates),
         )
 
     @property
@@ -174,16 +181,18 @@ class ReviewLane:
         """Replace the lane's state with ``snapshot``'s; :meth:`end_interrupted` follows."""
         self.planner.restore(snapshot.planner)
         self._jobs, self._batches = dict(snapshot.jobs), dict(snapshot.batches)
+        self._templates = dict(snapshot.templates)
         self._causes.clear()  # The session's task ids are reused by the next.
         self._status = self.status  # The switch's snapshot shows the restored status,
         self._paused_noted = False  # but a pause is news.
 
     async def end_interrupted(self, interrupted: Collection[str]) -> None:
         """End the reviews in ``interrupted``, which were stopped by a crash, as a cancelled
-        review ends: a review of their batch that's due is queued, for the next run. The board
-        and the review status aren't published: the switch's snapshot, which follows, shows
-        them, and :meth:`note_pause` then notes a pause."""
+        review ends, never to run again: a review of their batch that's due is queued, for the
+        next run. The board and the review status aren't published: the switch's snapshot,
+        which follows, shows them, and :meth:`note_pause` then notes a pause."""
         for task_id in interrupted:
+            self._templates.pop(task_id, None)
             batch = self._batches.get(task_id)
             if batch is not None and batch in self.planner.open_batches:
                 await self._queue_quietly(self.planner.review_ended(batch))
@@ -278,12 +287,15 @@ class ReviewLane:
             return
         del self._jobs[task_id]
         self._causes.pop(task_id, None)
+        self._templates.pop(task_id, None)
         open_batch = batch in self.planner.open_batches
         await self._queue(self.planner.review_ended(batch) if open_batch else None)
 
     def edited(self, state: TaskState) -> None:
-        """A task was edited back to pending, as ``state``, so its batch waits for it again. The
+        """A task was edited back to pending, as ``state``, so its batch waits for it again; a
+        review keeps the prompt it was given rather than being rendered again as it starts. The
         task isn't looked up: it may have been removed since it was edited."""
+        self._templates.pop(state.id, None)
         self.planner.reopened(state)
 
     def joined(self, task_id: str) -> None:
@@ -377,12 +389,16 @@ class ReviewLane:
         queued for it."""
         return ReviewRound(job, partial(self._book, job, current_span()))
 
-    def _book(self, job: ReviewJob, cause: Span, task_id: str) -> None:
+    def _book(self, job: ReviewJob, cause: Span, task_id: str, template: ReviewTemplate) -> None:
         """Record review task ``task_id``, queued for ``job`` while ``cause`` was the current
-        span, which its span links to, opening the batch its suggestions join."""
+        span, which its span links to, opening the batch its suggestions join, and, for a review
+        of commits, the ``template`` its prompt was rendered from. A super review, told what
+        landed as it was queued, isn't rendered again."""
         batch = self.planner.open_batch(job)
         self._jobs[task_id], self._batches[task_id] = job, batch
         self._causes[task_id] = cause
+        if not job.whole:
+            self._templates[task_id] = template
 
     async def _landed(self, job: ReviewJob, since: str | None) -> LandedSince:
         """What landed that ``job``'s reviewer, a super reviewer, is told as it's queued: the
@@ -396,14 +412,16 @@ class ReviewLane:
 
     async def _tell_landed(self, task_id: str, job: ReviewJob) -> None:
         """Have review ``task_id``'s task, of ``job``, list the commits on the base after the
-        last one it reviews as they stand now, as it starts, in place of those it listed as it
-        last ran. A super review was told what landed as it was queued."""
-        if job.whole:
+        last one it reviews as they stand now, as it starts, rendering it again from its
+        template, which lists them where it says, in place of those it listed as it last ran.
+        One with no template kept keeps its prompt: a super review, told what landed as it was
+        queued, a review the user edited, or one an older orbit saved."""
+        template = self._templates.get(task_id)
+        if template is None:
             return
         subjects = await self._landed_after(job.commits[-1])
-        prompt = self._board.get(task_id).task.prompt
-        told = tell_landed_since(prompt, job, subjects)
-        if told != prompt:
+        told = render_template(template.template, tell_landed_since(template.values, subjects))
+        if told != self._board.get(task_id).task.prompt:
             await self._tasks.change(lambda board: board.set_prompt(task_id, told))
 
     async def _landed_after(self, commit: str) -> tuple[str, ...]:
@@ -518,7 +536,9 @@ class ReviewLane:
         says, unless the lane is stopping, which leaves its batches as they are and the review
         to run again, linked to what queued it."""
         if not cancelling():
-            self._causes.pop(task_id, None)  # Its batch no longer fills, so it won't run again.
+            # Its batch no longer fills, so it won't run again.
+            self._causes.pop(task_id, None)
+            self._templates.pop(task_id, None)
             await self._after(self._batches.get(task_id))
 
     async def _reviewed(self, task_id: str) -> Outcome:

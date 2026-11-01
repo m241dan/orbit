@@ -8,7 +8,13 @@ import pytest
 
 from orbit.agent.domain.checks import Setup, configure_prompt, configured_checks
 from orbit.agent.domain.config_errors import ConfigError
-from orbit.agent.domain.reviews import LandedSince, ReviewJob, review_prompt, review_values
+from orbit.agent.domain.reviews import (
+    LandedSince,
+    ReviewJob,
+    review_prompt,
+    review_values,
+    tell_landed_since,
+)
 from orbit.agent.domain.triggers import Trigger, render_template
 from orbit.agent.domain.verification import VerificationStep, failure_report, startup_fix_prompt
 from orbit.agent.external.built_in_triggers import (
@@ -146,6 +152,7 @@ COMMIT = "0123456789abcdef"
 DIFF = "Add the thing\n\ndiff --git a/x.py b/x.py\n+x = 1\n\n\n+y = 2\n"
 PENDING = ("Tidy the parser", "Speed up the tests")
 LANDED = LandedSince(subjects=("Fix the lexer", "Name the tokens"))
+LANDED_HEADING = "Landed since (check your findings against these):"
 REVIEWS = {
     "a commit": (ReviewJob(commits=(COMMIT,), round=0, batch=None), (), LandedSince()),
     "a commit with queued tasks and landings since": (
@@ -177,6 +184,20 @@ def test_the_review_template_renders_todays_review_prompt(case: str) -> None:
     }
     assert render_template(template("review"), values) == review_prompt(
         job, DIFF, 5, pending, landed
+    )
+
+
+@pytest.mark.parametrize("case", list(REVIEWS))
+@pytest.mark.parametrize("diff", [DIFF, f"\n+new\n\n{LANDED_HEADING}\n- x\n\n+more"])
+@pytest.mark.parametrize("listed", [(), ("Fix the lexer",)])
+def test_the_review_template_told_what_landed_as_it_starts_renders_todays_prompt(
+    case: str, diff: str, listed: tuple[str, ...]
+) -> None:
+    job, pending, landed = REVIEWS[case]
+    queued = review_values(job, diff, 5, pending, LandedSince(listed)) | {"trigger": "review"}
+    values = tell_landed_since(queued, landed.subjects)
+    assert render_template(template("review"), values) == review_prompt(
+        job, diff, 5, pending, landed
     )
 
 

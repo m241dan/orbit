@@ -33,6 +33,7 @@ from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import configured_checks
 from orbit.agent.domain.reviews import (
     ReviewJob,
+    ReviewTemplate,
     commit_review,
     pending_titles,
     review_skills,
@@ -81,10 +82,11 @@ was due, or the other triggers on the landing."""
 @dataclass(frozen=True)
 class ReviewRound:
     """A review the ``review-rounds`` guard finds due: ``job``, and ``book``, which records the
-    review task queued for it, by its id, opening the batch its suggestions join."""
+    review task queued for it, by its id, with the template and values its prompt was rendered
+    from, opening the batch its suggestions join."""
 
     job: ReviewJob
-    book: Callable[[str], None]
+    book: Callable[[str, ReviewTemplate], None]
 
 
 @dataclass(frozen=True)
@@ -348,10 +350,11 @@ class TriggerEngine:
         """Add to ``board`` the task ``trigger``, named ``name``, queues as it fires as
         ``firing`` says, unless a guard holds it back, if they're still to decide; returns its
         id if it's added. One reviewing the review due does so with the skills of what it
-        reviews, and is booked into its batches."""
+        reviews, and is booked into its batches with what its prompt was rendered from."""
         assert trigger.role is not None  # It listened without checks, so it queues a role's task,
         assert trigger.prompt is not None  # with a prompt.
-        prompt = render_template(trigger.prompt, {**firing.values, TRIGGER_VARIABLE: name})
+        values = {**firing.values, TRIGGER_VARIABLE: name}
+        prompt = render_template(trigger.prompt, values)
         if not firing.counted and held_back(trigger, prompt, board.tasks):
             return None
         review = firing.review_of(trigger)
@@ -359,7 +362,7 @@ class TriggerEngine:
         task = role_task(trigger.role, self._desk.agents.roles[trigger.role], prompt, skills)
         task_id = _added(board, task, name, trigger)
         if review is not None:
-            review.book(task_id)
+            review.book(task_id, ReviewTemplate(trigger.prompt, values))
         return task_id
 
     async def _values(

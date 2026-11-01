@@ -1190,7 +1190,8 @@ reviewed, and which super review last sampled each file belong to the repository
 session, so they carry on across sessions and restarts. A super review that falls due waits while
 suggested tasks (or reviews) are pending or running, as its `suggestions-pending` guard says; it
 comes with your next commit once none is. A session an older orbit saved, whose super reviews'
-suggestions say they're from `super_review`, reads them as from `super-review`.
+suggestions say they're from `super_review`, reads them as from `super-review`, and a review of
+commits it had queued starts with its task as it was queued, without what landed since.
 
 The reviews orbit queued can't be edited: remove one instead. Reviews run in the review roles'
 lane, `review`, which starts its tasks by itself: a `reviewer` task you add starts there at once
@@ -1733,7 +1734,9 @@ the review task's first line (`Review commit 0123abc`, or
 `Review the 2 commits made for review batch-1`); `{diff}` the commits' messages and diffs,
 trimmed past 30000 characters; `{missing}` a line for each task of the reviewed batch that ended
 without landing a commit; `{cap}` the suggestions the review may make; `{queued}` the tasks still
-queued or running, `{landed_since}` the commits landed since the reviewed one, and
+queued or running, `{landed_since}` the commits landed since the reviewed one, as they stand when
+the review starts (its task is rendered again from its template then, the other variables as
+they were when it was queued, unless you've edited it, when it keeps your words), and
 `{since_commits}`, `{changed_files}` and `{sample}` the super review's lists, each under its
 heading as [Reviews](#reviews) describes; `{step}` the failed step's name and `{output}` the
 command that failed with its output, trimmed; and `{checks}` the verification steps and setup

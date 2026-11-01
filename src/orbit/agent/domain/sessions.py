@@ -42,7 +42,7 @@ from orbit.protocol import (
     Usage,
 )
 
-FORMAT_VERSION = 19
+FORMAT_VERSION = 20
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _OLD_SUPER_REVIEW_ORIGIN = "super_review"
@@ -79,8 +79,8 @@ def _without_rounds(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def _unchanged(record: dict[str, Any]) -> dict[str, Any]:
-    """Version 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16 or 17 ``record`` as it is: the next
-    version only added fields that have defaults."""
+    """Version 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17 or 19 ``record`` as it is: the
+    next version only added fields that have defaults."""
     return record
 
 
@@ -144,6 +144,8 @@ def _origin_as_trigger(task: object) -> object:
 # Version 18 added the skills each task names, which an older record's tasks name none of.
 # Version 19 names each task's origin by the trigger that queued it, so a super review's
 # suggestions are from ``super-review`` rather than ``super_review``: its migration renames them.
+# Version 20 added the template and values each review of commits is rendered from, which an
+# older record keeps none of, so its reviews start with their prompts as they were queued.
 _MIGRATIONS: dict[int, Migration] = {
     1: _spent_by_tasks,
     2: _without_rounds,
@@ -163,6 +165,7 @@ _MIGRATIONS: dict[int, Migration] = {
     16: _unchanged,
     17: _unchanged,
     18: _origins_as_triggers,
+    19: _unchanged,
 }
 
 EMPTY_NAME = "A session needs a name."
