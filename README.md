@@ -1318,9 +1318,16 @@ guards = ["review-rounds"]
 ```
 
 Suggestions from one review form a **batch**. When every task in a batch has finished, the batch's
-commits are reviewed together, which may suggest more. To keep this from going on forever, each
-batch is a round further from your own work, and once the batches reach `review_rounds` (default 3)
-review pauses, with a note in the conversation (given again when you open a session whose review
+commits are reviewed together, which may suggest more. A batch of fixes gets a **narrow review**:
+the `bugs-review` and `tests-review` triggers review every batch, while `fit-review`,
+`logic-review`, `security-review` and `performance-review` are guarded by `raised-finding` (see
+[Triggers](#triggers)), so each reviews a batch only if its lens raised a finding the merge pass
+filed, or merged, into one of the batch's tasks. A fix that joined the batch because a task in it
+failed verification carries the findings of the task it fixes. So a batch filed from a Fit and a
+Bugs finding is reviewed by Fit, Bugs and Tests, then by the merge pass if they found anything,
+and one filed only from a Tests finding by Bugs and Tests. To keep this from going on forever,
+each batch is a round further from your own work, whichever lenses reviewed the batch before it,
+and once the batches reach `review_rounds` (default 3) review pauses, with a note in the conversation (given again when you open a session whose review
 is paused); it resumes with the next commit from one of your tasks. A review may suggest at most `review_suggestions` tasks (default 5), and a suggestion is
 refused when any task on the board, whatever its status, or any earlier suggestion of the session
 has the same title (compared on one line, ignoring case and spacing; a reworded repeat gets
@@ -1430,7 +1437,8 @@ is undecided (`Decide every finding first: F2, F5 have no outcome. File them wit
 dismiss them with dismiss_finding.`), and the findings it leaves undecided as it ends otherwise,
 by giving up, failing, being stopped or removed, are recorded `unanswered`. When a task filed with
 findings lands, they're recorded `fixed`, or, if it or a fix of it gives up, `given_up`; one that
-ends otherwise leaves them `filed`. Each review keeps its findings while its batch is open. A
+ends otherwise leaves them `filed`. Each review keeps its findings until the batch they were filed
+into has been reviewed, closed or dropped, then forgets them, so the saved session doesn't grow. A
 review task that isn't a merge pass, such as a project's own single reviewer, suggests with a
 title and prompt as before: naming findings is refused (`Only a merge pass files findings; suggest
 the task without them.`), as is `dismiss_finding` (`Only a merge pass can dismiss findings.`). The
@@ -1906,12 +1914,12 @@ The shipped triggers are data in
 
 | Trigger | Event | When | Does | Also |
 |---|---|---|---|---|
-| `fit-review` | `task_landed` | every one | a `fit-reviewer` task, from `lens-review.md` | guard `review-rounds` |
+| `fit-review` | `task_landed` | every one | a `fit-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding` |
 | `bugs-review` | `task_landed` | every one | a `bugs-reviewer` task, from `lens-review.md` | guard `review-rounds` |
 | `tests-review` | `task_landed` | every one | a `tests-reviewer` task, from `lens-review.md` | guard `review-rounds` |
-| `logic-review` | `task_landed` | every one | a `logic-reviewer` task, from `lens-review.md` | guard `review-rounds` |
-| `security-review` | `task_landed` | every one | a `security-reviewer` task, from `lens-review.md` | guard `review-rounds` |
-| `performance-review` | `task_landed` | every one | a `performance-reviewer` task, from `lens-review.md` | guard `review-rounds` |
+| `logic-review` | `task_landed` | every one | a `logic-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding` |
+| `security-review` | `task_landed` | every one | a `security-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding` |
+| `performance-review` | `task_landed` | every one | a `performance-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding` |
 | `merge-pass` | `reviews_finished` | `findings = "some"` | a `reviewer` task, from `merge-pass.md` | |
 | `super-review` | `commits` | `origin = ["manual", "planner"]` | a `super-reviewer` task, from `super-review.md` | `every = 10`, guard `suggestions-pending`, manual as `Super review` |
 | `configure-checks` | `manual` | every one | a `configurator` task, from `configure-checks.md` | manual as `Set up checks` |
@@ -1949,7 +1957,7 @@ its name in braces:
 | Event | Fires when | `when` fields | Variables |
 |---|---|---|---|
 | `session_started` | orbit opens a workspace with its session | `verification`: `configured`, `missing` or `off` | `{checks}` |
-| `task_landed` | a task's work lands | `role`, `origin` | `{commit}`, `{task}`, `{title}`, `{diff}`, `{missing}`, `{cap}`, `{queued}`, `{landed_since}`, `{task_skills}` |
+| `task_landed` | a task's work lands, or a batch is done and due its review | `role`, `origin`; `review`: `commit` or `batch` | `{commit}`, `{task}`, `{title}`, `{diff}`, `{missing}`, `{cap}`, `{queued}`, `{landed_since}`, `{task_skills}` |
 | `task_finished` | a task finishes | `role`, `origin`, `status` | none |
 | `commits` | every `every` landings matching its `when` on `role` and `origin` | `role`, `origin` | `{commit}`, `{cap}`, `{queued}`, `{since_commits}`, `{changed_files}`, `{sample}` |
 | `startup_check_failed` | a step of the startup check fails, once for each | `step` | `{step}`, `{output}` |
@@ -1992,7 +2000,14 @@ The guards:
   triggers it guards with no task causing it; it holds the trigger back otherwise, as while review
   is paused. Its task gets the skills of the tasks it reviews, and is booked into that review, so
   it guards only triggers on `task_landed`; it may guard any number of them, of any roles, each
-  task they queue for one review booked into it, sharing its batch.
+  task they queue for one review booked into it, sharing its batch. A batch's review fires them on
+  `task_landed` with `review = "batch"`, where a landing's own gives `review = "commit"`, so
+  `when = { review = "batch" }` takes batch reviews only.
+- `raised-finding`: on a batch's review, holds the trigger back unless its role raised a finding
+  that the merge pass filed, or merged, into one of the batch's tasks, a fix that joined the batch
+  carrying the findings of the task it fixes; it holds nothing back on a landing's own review, or
+  on any other event. A trigger of your own without it hears every batch's review, as
+  `bugs-review` and `tests-review` do.
 - `not-queued`: holds the trigger back while a task of its role is still to run or running.
 - `dedupe`: holds the trigger back while a task still to run or running has the first line its
   task would have.
@@ -2058,8 +2073,9 @@ one. So is `review-rounds` on a trigger that isn't on `task_landed`
 field never takes, alone or in a list: a `role` that isn't one (a disabled one is), a
 `verification` other than `configured`, `missing` or `off` (`triggers.tidy-up.when: missng isn't
 a value of verification; its values are configured, missing, off.`), a `findings` other than
-`some` or `none`, or a `review` other than `commit`, `batch` or `super`, while `origin`, `status`
-and `step` take any value.
+`some` or `none`, or a `review` other than `commit`, `batch` or `super` on `reviews_finished`,
+or other than `commit` or `batch` on `task_landed` (`triggers.tidy-up.when: nothing isn't a value
+of review; its values are commit, batch.`), while `origin`, `status` and `step` take any value.
 A trigger whose role is disabled loads, and never fires. When git can't show the diff of what
 landed, the triggers on the landing are skipped with an error (`Review skipped: …` when a review
 was due, `Triggers skipped: …` otherwise), and the run goes on. The reference config shows each shipped

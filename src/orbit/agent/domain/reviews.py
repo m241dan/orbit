@@ -7,7 +7,7 @@ reviewed: review pauses until the user's next task lands, which bounds how much 
 generate by themselves.
 """
 
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal, get_args
 
@@ -274,6 +274,45 @@ def review_over(group: ReviewGroup, members: Collection[str]) -> bool:
     ``reviews_finished`` was raised for it if it has lenses."""
     raised = not group.lenses or group.stage == "merging"
     return raised and all(task in group.ended for task in members)
+
+
+def raised_roles(
+    job: ReviewJob, groups: Iterable[ReviewGroup], tasks: Sequence[TaskState]
+) -> frozenset[str]:
+    """The roles that raised a finding of ``groups`` filed, or merged, into one of the tasks of
+    the batch ``job`` reviews, those that landed and those that didn't, whatever became of it
+    since. A fix in the batch takes the findings of the task it fixes, up the chain of fixes
+    ``tasks``, the board's, record. None for a review of no batch."""
+    if job.batch is None:
+        return frozenset()
+    batch = _batch_tasks(job, tasks)
+    return frozenset(
+        finding.role for group in groups for finding in group.findings if finding.task in batch
+    )
+
+
+def _batch_tasks(job: ReviewJob, tasks: Sequence[TaskState]) -> frozenset[str]:
+    """The tasks of the batch ``job`` reviews, those that landed and those that didn't, with
+    those they fix, up the chain of fixes ``tasks``, the board's, record."""
+    fixes = {state.id: state.fixes for state in tasks}
+    return frozenset(
+        task for ended in (*job.reviewed, *job.missing) for task in _with_fixed(ended, fixes)
+    )
+
+
+def _with_fixed(task_id: str, fixes: Mapping[str, str | None]) -> tuple[str, ...]:
+    """Task ``task_id`` and the tasks it fixes, up the chain of fixes ``fixes``, each task's by
+    id, records."""
+    fixed = fixes.get(task_id)
+    return (task_id,) if fixed is None else (task_id, *_with_fixed(fixed, fixes))
+
+
+def kept_groups(
+    groups: Mapping[str, ReviewGroup], open_batches: Collection[str]
+) -> dict[str, ReviewGroup]:
+    """The ``groups``, by batch, whose batch is among ``open_batches``: a review's findings are
+    kept until the batch they were filed into has been reviewed, closed or dropped."""
+    return {batch: group for batch, group in groups.items() if batch in open_batches}
 
 
 def review_kind(job: ReviewJob) -> ReviewKind:

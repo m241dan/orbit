@@ -24,8 +24,11 @@ from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import TaskSpec, TaskState, TaskStatus
 
 ROLES = ("coder", "reviewer")
-LANDED = TriggerEvent("task_landed", {"role": "coder", "origin": "manual"})
+LANDED = TriggerEvent("task_landed", {"role": "coder", "origin": "manual", "review": "commit"})
 REVIEW = ReviewJob(commits=("c1",), round=0, batch=None, reviewed=("1",))
+BATCH_LANDED = TriggerEvent("task_landed", {"role": "coder", "origin": "review", "review": "batch"})
+"""A batch that's done, whose review fires the triggers ``review-rounds`` guards."""
+BATCH_REVIEW = ReviewJob(commits=("c2", "c3"), round=1, batch="batch-1", reviewed=("5", "6"))
 
 
 def trigger(**fields: object) -> Trigger:
@@ -137,6 +140,44 @@ def test_review_rounds_holds_a_trigger_back_unless_a_review_is_due() -> None:
     assert names(listening(triggers, LANDED, ROLES, REVIEW)) == ["review", "look"]
 
 
+RAISING = {
+    "fit": trigger(role="fit-reviewer", guards=("review-rounds", "raised-finding")),
+    "bugs": trigger(role="bugs-reviewer", guards=("review-rounds",)),
+}
+"""A lens ``raised-finding`` guards, and one it doesn't, each reviewing what's due."""
+LENS_ROLES = ("fit-reviewer", "bugs-reviewer")
+
+
+def test_raised_finding_holds_a_trigger_back_on_a_batch_review_its_role_raised_nothing_in() -> None:
+    found = listening(RAISING, BATCH_LANDED, LENS_ROLES, BATCH_REVIEW, ("tests-reviewer",))
+    assert names(found) == ["bugs"]
+
+
+def test_raised_finding_lets_a_trigger_review_a_batch_its_role_raised_a_finding_in() -> None:
+    found = listening(RAISING, BATCH_LANDED, LENS_ROLES, BATCH_REVIEW, ("fit-reviewer",))
+    assert names(found) == ["fit", "bugs"]
+
+
+def test_raised_finding_holds_nothing_back_on_a_commit_review() -> None:
+    assert names(listening(RAISING, LANDED, LENS_ROLES, REVIEW)) == ["fit", "bugs"]
+
+
+def test_raised_finding_holds_nothing_back_on_another_event_of_a_batch() -> None:
+    finished = TriggerEvent("reviews_finished", {"findings": "some", "review": "batch"})
+    merge = {"merge": trigger(on="reviews_finished", guards=("raised-finding",))}
+    assert names(listening(merge, finished, ROLES, BATCH_REVIEW)) == ["merge"]
+
+
+def test_a_trigger_taking_review_batch_listens_on_a_batch_review_only() -> None:
+    triggers = {"fix": trigger(guards=("review-rounds",), when={"review": "batch"})}
+    assert listening(triggers, LANDED, ROLES, REVIEW) == []
+    assert names(listening(triggers, BATCH_LANDED, ROLES, BATCH_REVIEW)) == ["fix"]
+
+
+def test_raised_finding_is_decided_as_a_trigger_listens_so_the_board_holds_nothing_back() -> None:
+    assert not held_back(RAISING["fit"], "Look at c1", [task("Look at c1")])
+
+
 @pytest.mark.parametrize(
     ("when", "taken"),
     [
@@ -147,6 +188,8 @@ def test_review_rounds_holds_a_trigger_back_unless_a_review_is_due() -> None:
         ({"origin": ["review"]}, False),
         ({"role": "coder", "origin": "review"}, False),
         ({"status": "completed"}, False),
+        ({"review": "commit"}, True),
+        ({"review": "batch"}, False),
     ],
 )
 def test_when_takes_an_event_whose_fields_each_match_its_value_or_one_of_its_values(

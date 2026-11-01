@@ -10,8 +10,10 @@ review are booked into it, sharing one batch, which fills until they have all en
 of a finding role, granted ``report_finding``, has ended, the lane raises ``reviews_finished`` with
 the findings they reported, and the tasks queued on it join the review, which then fills until they
 end too. Those tasks are its merge passes, which must decide every finding, as
-:mod:`~orbit.agent.domain.merge_pass` says; a review keeps its findings while its batch is open, so
-the tasks filed for them mark them fixed as they land, or given up as they give up.
+:mod:`~orbit.agent.domain.merge_pass` says; a review keeps its findings until its batch has been
+reviewed, closed or dropped, so the tasks filed for them mark them fixed as they land, or given up
+as they give up, and the batch's own review is queued by the lenses that raised them, as the
+``raised-finding`` guard says.
 :class:`ReviewPlanner` decides when a review is due and stops reviews generating work forever. It's
 the ``review-rounds`` guard: the lane raises each landing as ``task_landed``, and a review of
 commits is queued by the triggers it guards, from their templates. It counts each landing toward the
@@ -78,8 +80,10 @@ from orbit.agent.domain.reviews import (
     finding_refusal,
     finished_fields,
     finished_values,
+    kept_groups,
     pause_notice,
     pending_titles,
+    raised_roles,
     review_over,
     review_values,
     tell_landed_since,
@@ -298,7 +302,6 @@ class ReviewLane:
         since it finished, and its work is reviewed all the same."""
         self._end_filed(state, "fixed")
         job = self.planner.landed(state, commit)
-        self._prune()
         # Counted before the commit's own review is queued, which would hold a due super review;
         # one due is taken at once, so the count saved as that review is queued has its commit.
         fired = self._triggers.fire_checks(self._count(state))
@@ -377,7 +380,6 @@ class ReviewLane:
         if stop is None and state.status == "gave_up":
             self._end_filed(state, "given_up")
         job = self.planner.ended(state)
-        self._prune()
         await self._queue(job)
         if stop is None:
             await self._ended(state.id)
@@ -395,10 +397,9 @@ class ReviewLane:
         current_span().set_attributes({_ENDED_FINDINGS[ending]: count})
 
     def _prune(self) -> None:
-        """Forget the groups of the batches that closed, and the severities of the tasks whose
-        findings they kept."""
-        open_batches = self.planner.open_batches
-        self._groups = {b: g for b, g in self._groups.items() if b in open_batches}
+        """Forget the groups of the batches that closed, reviewed or not, and the severities of
+        the tasks whose findings they kept."""
+        self._groups = kept_groups(self._groups, self.planner.open_batches)
         filed = self._filed_tasks()
         self._severities = {t: s for t, s in self._severities.items() if t in filed}
 
@@ -412,9 +413,7 @@ class ReviewLane:
         counts as ended; any other task leaves its batch."""
         batch = self._batches.pop(task_id, None)
         if batch is None:
-            job = self.planner.removed(state)
-            self._prune()
-            await self._queue(job)
+            await self._queue(self.planner.removed(state))
             return
         del self._jobs[task_id]
         self._causes.pop(task_id, None)
@@ -577,10 +576,11 @@ class ReviewLane:
 
     async def _queue_job(self, job: ReviewJob | None) -> tuple[str, ...]:
         """Queue ``job``'s review, the review of a batch, if there is one, by the triggers
-        ``review-rounds`` guards; returns the ids of the tasks queued."""
-        if job is None:
-            return ()
-        return await self._triggers.reviewed(self._round(job))
+        ``review-rounds`` guards, then forget the findings of the batches that closed, kept till
+        now for it; returns the ids of the tasks queued."""
+        queued = () if job is None else await self._triggers.reviewed(self._round(job))
+        self._prune()
+        return queued
 
     async def _queue_ended(self, queued: tuple[str, ...]) -> None:
         """Publish the review status and the lane's change once the tasks ``queued``, if any,
@@ -596,14 +596,18 @@ class ReviewLane:
 
     async def _queue_quietly(self, job: ReviewJob | None) -> None:
         """Queue ``job``'s review, the review of a batch, if there is one, on the board without
-        publishing it."""
+        publishing it, then forget the findings of the batches that closed, kept till now for
+        it."""
         if job is not None:
             await self._triggers.reviewed_quietly(self._round(job))
+        self._prune()
 
     def _round(self, job: ReviewJob) -> ReviewRound:
         """``job``'s review as the ``review-rounds`` guard finds it due, booking each task
-        queued for it into it."""
-        return ReviewRound(job, partial(self._book, _Booking(job, current_span())))
+        queued for it into it, with the roles that raised the findings of the batch it reviews,
+        if it reviews one."""
+        raised = raised_roles(job, self._groups.values(), self._board.tasks)
+        return ReviewRound(job, partial(self._book, _Booking(job, current_span())), raised)
 
     def _book(self, booking: _Booking, task_id: str, template: ReviewTemplate) -> None:
         """Book task ``task_id``, queued as a review, whatever its role, into the review
@@ -914,7 +918,6 @@ class ReviewLane:
         that's due, showing what's queued as ``publishing`` says; else, published, the
         suggestions it made run."""
         job = self.planner.review_ended(batch)
-        self._prune()  # The group is kept while the findings it filed may still land.
         if publishing == "quiet":
             await self._queue_quietly(job)
             return

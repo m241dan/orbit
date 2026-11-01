@@ -10,16 +10,21 @@ from orbit.agent.domain.reviews import (
     LANDED_LIMIT,
     PENDING_LIMIT,
     BatchSnapshot,
+    Finding,
+    FindingOutcome,
     LandedSince,
     LaneSnapshot,
     PlannerSnapshot,
+    ReviewGroup,
     ReviewJob,
     ReviewLimits,
     ReviewPlanner,
     SuperReviewCount,
     _Batch,
+    kept_groups,
     pause_notice,
     pending_titles,
+    raised_roles,
     review_prompt,
     review_skills,
     tell_landed_since,
@@ -931,3 +936,67 @@ def test_commits_are_reviewed_again_once_a_review_trigger_can_fire_again() -> No
     assert reviews.landed(state("4"), "abc123") is None
     fires.append(True)
     assert reviews.landed(state("5"), "def456") is not None
+
+
+# Which lenses raised a batch's findings, and how long findings are kept
+
+COMMIT_JOB = ReviewJob(commits=("c1",), round=0, batch=None, reviewed=("1",))
+
+
+def finding(finding_id: str, role: str, task: str | None) -> Finding:
+    """Finding ``finding_id``, which ``role`` raised, filed in ``task``, if any."""
+    outcome: FindingOutcome = "dismissed" if task is None else "filed"
+    return Finding(finding_id, role, "Title", "Body", "normal", outcome=outcome, task=task)
+
+
+RAISED = ReviewGroup(
+    COMMIT_JOB,
+    findings=(
+        finding("F1", "fit-reviewer", "5"),
+        finding("F2", "bugs-reviewer", "5"),
+        finding("F3", "logic-reviewer", None),
+        finding("F4", "tests-reviewer", "6"),
+    ),
+)
+"""A commit's review whose fit and bugs lenses' findings were filed into task 5, the tests
+lens's into task 6, and whose logic lens's finding was dismissed."""
+
+
+def batch_job(reviewed: tuple[str, ...], missing: tuple[str, ...] = ()) -> ReviewJob:
+    """The review of batch-1, whose tasks ``reviewed`` landed and ``missing`` didn't."""
+    return ReviewJob(("c2",), 1, "batch-1", missing, reviewed=reviewed)
+
+
+def fixing(task_id: str, fixes: str) -> TaskState:
+    """Task ``task_id``, a fix of task ``fixes``."""
+    return state(task_id, batch="batch-1").model_copy(update={"fixes": fixes})
+
+
+def test_the_roles_raising_a_batchs_findings_are_those_filed_or_merged_into_its_tasks() -> None:
+    assert raised_roles(batch_job(("5",)), [RAISED], []) == {"fit-reviewer", "bugs-reviewer"}
+
+
+def test_a_batch_task_that_landed_nothing_still_counts_its_findings() -> None:
+    assert raised_roles(batch_job((), missing=("6",)), [RAISED], []) == {"tests-reviewer"}
+
+
+def test_a_fix_in_the_batch_takes_the_findings_of_the_task_it_fixes_up_the_chain() -> None:
+    tasks = [fixing("7", "6"), fixing("8", "7")]
+    assert raised_roles(batch_job(("8",)), [RAISED], tasks) == {"tests-reviewer"}
+
+
+def test_a_dismissed_finding_raises_nothing_in_any_batch() -> None:
+    assert raised_roles(batch_job(("5", "6")), [RAISED], []) == {
+        "fit-reviewer",
+        "bugs-reviewer",
+        "tests-reviewer",
+    }
+
+
+def test_a_commit_review_has_no_roles_raising_its_findings() -> None:
+    assert raised_roles(COMMIT_JOB, [RAISED], []) == frozenset()
+
+
+def test_the_groups_kept_are_those_whose_batch_is_still_open() -> None:
+    groups = {"batch-1": RAISED, "batch-2": ReviewGroup(COMMIT_JOB)}
+    assert kept_groups(groups, ("batch-2", "batch-3")) == {"batch-2": ReviewGroup(COMMIT_JOB)}

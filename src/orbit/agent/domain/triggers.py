@@ -28,7 +28,7 @@ from pydantic_core import PydanticCustomError
 from orbit.agent.domain.board import WAITING
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
-from orbit.agent.domain.reviews import ReviewJob
+from orbit.agent.domain.reviews import ReviewJob, ReviewKind
 from orbit.agent.domain.roles import PLAIN_NAME
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import TASK_CHECKS, TaskState, is_orbit_review
@@ -46,7 +46,9 @@ EventName = Literal[
 task finishing, landings counted up to a trigger's ``every``, a step of the startup check
 failing, the user firing it, or every finding role's task of a review having ended."""
 
-GuardName = Literal["review-rounds", "suggestions-pending", "not-queued", "dedupe"]
+GuardName = Literal[
+    "review-rounds", "raised-finding", "suggestions-pending", "not-queued", "dedupe"
+]
 """A named rule that may hold a trigger back."""
 
 EVENT_NAMES: tuple[str, ...] = get_args(EventName)
@@ -87,6 +89,22 @@ REVIEW_ROUNDS = "review-rounds"
 due, whose job its task reviews; the tasks of every trigger it guards are booked into that one
 review."""
 
+RAISED_FINDING = "raised-finding"
+"""The guard that holds a trigger back on a batch's review unless its role raised a finding
+filed, or merged, into one of the batch's tasks, so a batch of fixes is reviewed by the lenses
+whose findings it fixes (decision 20). It holds nothing back on any other event."""
+
+REVIEW_FIELD = "review"
+"""The ``when`` field saying what a review reviews: on ``task_landed``, a landing's own commit
+or a batch that's done."""
+
+LandingReview = Literal["commit", "batch"]
+"""What ``task_landed``'s ``review`` field says: the landing's own commit is reviewed, or a
+batch that's done, which no one task caused."""
+
+LANDING_REVIEWS: tuple[str, ...] = get_args(LandingReview)
+"""The values of ``task_landed``'s ``review`` field, in order."""
+
 TRIGGER_VARIABLE = "trigger"
 """The variable every event gives: the name of the trigger it fires."""
 
@@ -109,7 +127,7 @@ class Event:
 EVENTS: Mapping[str, Event] = {
     SESSION_STARTED: Event(("verification",), (TRIGGER_VARIABLE, "checks")),
     TASK_LANDED: Event(
-        ("role", "origin"),
+        ("role", "origin", REVIEW_FIELD),
         (
             TRIGGER_VARIABLE,
             "commit",
@@ -142,14 +160,14 @@ ROLE_FIELD = "role"
 """The ``when`` field naming the role of an event's task, whose values are the roles: a disabled
 one among them."""
 
-WHEN_VALUES: Mapping[str, tuple[str, ...]] = {
-    "verification": VERIFICATION_STATES,
-    "findings": ("some", "none"),
-    "review": ("commit", "batch", "super"),
+WHEN_VALUES: Mapping[str, Mapping[str, tuple[str, ...]]] = {
+    SESSION_STARTED: {"verification": VERIFICATION_STATES},
+    TASK_LANDED: {REVIEW_FIELD: LANDING_REVIEWS},
+    REVIEWS_FINISHED: {"findings": ("some", "none"), REVIEW_FIELD: get_args(ReviewKind)},
 }
-"""The values the events give each ``when`` field orbit fixes them for, by its name. Besides
-these, :data:`ROLE_FIELD`'s are the roles, and ``origin``, ``status`` and ``step`` take any
-value: origins include trigger names, and steps are the project's own."""
+"""The values each event gives the ``when`` fields orbit fixes them for, by event and field
+name. Besides these, :data:`ROLE_FIELD`'s are the roles, and ``origin``, ``status`` and
+``step`` take any value: origins include trigger names, and steps are the project's own."""
 
 
 def _plain_trigger_name(name: str) -> str:
@@ -196,7 +214,7 @@ class Trigger(_Config):
     guards: tuple[GuardName, ...] = Field(
         default=(),
         description=(
-            "The named rules that may hold it back: review-rounds, suggestions-pending, not-queued"
+            "What may hold it back: review-rounds, raised-finding, suggestions-pending, not-queued"
             " or dedupe."
         ),
     )
@@ -375,9 +393,9 @@ def check_triggers(
     disabled one is), neither a role nor ``checks``, or both, ``checks`` naming neither the task
     checks nor one of ``sets``, those a step is in, a role without a prompt or ``checks`` with
     one, a ``when`` field or a template variable its event doesn't give, a ``when`` value its
-    field never takes, a role not among ``roles`` or a value :data:`WHEN_VALUES` doesn't give,
-    ``review-rounds`` on a trigger on another event than ``task_landed``, ``every`` on another
-    event than ``commits``, and ``manual`` without a ``label``."""
+    field never takes on its event, a role not among ``roles`` or a value :data:`WHEN_VALUES`
+    doesn't give, ``review-rounds`` on a trigger on another event than ``task_landed``,
+    ``every`` on another event than ``commits``, and ``manual`` without a ``label``."""
     problems = [
         f"triggers.{name}.{field}: {why}"
         for name, trigger in triggers.items()
@@ -468,19 +486,25 @@ def _when_problems(trigger: Trigger, roles: Collection[str]) -> list[tuple[str, 
         ("when", why)
         for field, wanted in trigger.when.items()
         for why in (
-            _value_problems(field, _values(wanted), roles)
+            _value_problems(field, _values(wanted), roles, WHEN_VALUES.get(trigger.on, {}))
             if field in fields
             else [f"{field} isn't a field of {trigger.on}; {theirs}."]
         )
     ]
 
 
-def _value_problems(field: str, values: Sequence[str], roles: Collection[str]) -> list[str]:
+def _value_problems(
+    field: str,
+    values: Sequence[str],
+    roles: Collection[str],
+    fixed: Mapping[str, tuple[str, ...]],
+) -> list[str]:
     """Why each of ``values``, a ``when`` field ``field``'s, is refused, if it is: a role not
-    among ``roles``, or a value of a field in :data:`WHEN_VALUES` not among its values."""
+    among ``roles``, or a value of a field its event ``fixed``, as :data:`WHEN_VALUES` gives
+    them, not among its values."""
     if field == ROLE_FIELD:
         return [_not_a_role(value, roles) for value in values if value not in roles]
-    known = WHEN_VALUES.get(field)
+    known = fixed.get(field)
     return [] if known is None else _not_values(field, values, known)
 
 
@@ -587,18 +611,30 @@ def listening(
     event: TriggerEvent,
     roles: Collection[str],
     review: ReviewJob | None,
+    raised: Collection[str] = (),
 ) -> list[tuple[str, Trigger]]:
     """The ``triggers`` that may fire on ``event``, by name, in their order: the enabled ones on
     it that queue a task for one of ``roles``, the enabled roles, run a named set, or run the task
     checks, on ``session_started`` only, whose ``when`` takes it and that didn't queue the task
     that caused it, if any, as its origin says (decision 9). One guarded by ``review-rounds``
-    only listens while today's rounds and batches find a ``review`` due."""
+    only listens while today's rounds and batches find a ``review`` due, and one guarded by
+    ``raised-finding``, on a batch's review, only if its role is among those that ``raised``
+    the batch's findings."""
     return [
         (name, trigger)
         for name, trigger in triggers.items()
         if _hears(name, trigger, event, roles)
         and (review is not None or REVIEW_ROUNDS not in trigger.guards)
+        and _raised_in(trigger, event, raised)
     ]
+
+
+def _raised_in(trigger: Trigger, event: TriggerEvent, raised: Collection[str]) -> bool:
+    """Whether ``raised-finding`` lets ``trigger`` hear ``event``: it doesn't guard it, the
+    event isn't a batch's review, or the trigger's role is among those that ``raised`` the
+    batch's findings."""
+    batch = event.name == TASK_LANDED and event.fields.get(REVIEW_FIELD) == "batch"
+    return RAISED_FINDING not in trigger.guards or not batch or trigger.role in raised
 
 
 def can_queue_reviews(triggers: Mapping[str, Trigger], roles: Collection[str]) -> bool:
@@ -650,9 +686,9 @@ def held_back(trigger: Trigger, prompt: str | None, tasks: Sequence[TaskState]) 
     on the board: ``not-queued`` while a task of its role is still to run or running,
     ``dedupe`` while such a task's prompt has the same first line, and ``suggestions-pending``
     while a task the reviews queued is: a task orbit queued as a review, booked into its review
-    lane, whatever its role, or a task in a review's batch. ``review-rounds`` is decided as it
-    listens. Without a ``prompt``, as a landing is counted before there's one, ``dedupe`` holds
-    nothing back."""
+    lane, whatever its role, or a task in a review's batch. ``review-rounds`` and
+    ``raised-finding`` are decided as it listens. Without a ``prompt``, as a landing is counted
+    before there's one, ``dedupe`` holds nothing back."""
     waiting = [state for state in tasks if state.status in WAITING]
     return any(_holds(guard, trigger, prompt, waiting) for guard in trigger.guards)
 

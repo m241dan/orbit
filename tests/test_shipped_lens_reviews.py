@@ -1,5 +1,6 @@
 """The per-commit lens reviewers and the merge pass orbit ships: a landing queues the six lens
-tasks, whose findings, if any, the ``reviewer`` files into the review's batch; and the reviews a
+tasks, whose findings, if any, the ``reviewer`` files into the review's batch; a batch of fixes
+reviewed narrowly, by Bugs, Tests and the lenses whose findings it fixes; and the reviews a
 session saved before them, cancelled as it opens."""
 
 import asyncio
@@ -8,6 +9,7 @@ from typing import Any
 
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.ports import Reply
+from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.endings import INTERRUPTED, QUEUED_BEFORE_LENSES
 from orbit.agent.domain.reviews import (
     BLOCKING_REFUSED,
@@ -16,6 +18,7 @@ from orbit.agent.domain.reviews import (
     PlannerSnapshot,
     ReviewJob,
     ReviewLimits,
+    pause_notice,
 )
 from orbit.agent.domain.sessions import SessionRecord, parse_record, record_json
 from orbit.protocol import (
@@ -35,13 +38,17 @@ from orbit.protocol import (
 from tests.agent_fakes import (
     SHIPPED_TRIGGERS,
     Call,
+    FakeStore,
     FakeTree,
     Script,
+    Steps,
     board,
     claims_done,
+    keeps_claiming,
     session_for,
     settle,
     start,
+    verified,
 )
 from tests.session_builders import last_of, messages, opened, saved, store_with, switching
 
@@ -172,6 +179,150 @@ async def test_the_bugs_reviewer_may_report_a_blocking_finding_and_the_fit_revie
 
     assert [(r.text, r.is_error) for r in fit] == [(BLOCKING_REFUSED, True)]
     assert [(r.text, r.is_error) for r in bugs] == [("Recorded as F1.", False)]
+
+
+# A batch of fixes, reviewed narrowly
+
+
+def dismisses(*findings: str) -> Script:
+    """A merge pass dismissing each of ``findings``."""
+
+    async def merge(call: Call) -> TurnEndReason:
+        await call("get_task")
+        for finding in findings:
+            await call("dismiss_finding", finding=finding, reason="Fixed already.")
+        await call("complete_task", summary="Nothing to file")
+        return "completed"
+
+    return merge
+
+
+def watching(store: FakeStore, seen: list[LaneSnapshot], script: Script) -> Script:
+    """A task that notes the review state last saved in ``store`` in ``seen`` as it starts,
+    then plays ``script``."""
+
+    async def watch(call: Call) -> TurnEndReason:
+        reviews = store.last.reviews
+        assert reviews is not None
+        seen.append(reviews)
+        return await script(call)
+
+    return watch
+
+
+def lenses_finding(**found: tuple[str, str]) -> list[Script]:
+    """The six lenses of a commit's review, in order, those named in ``found`` by their lens
+    each reporting its one finding, a title and severity, the rest nothing."""
+    return [
+        reports(found[lens]) if lens in found else reports()
+        for lens in (role.removesuffix("-reviewer") for role in LENS_REVIEWERS)
+    ]
+
+
+TWO_ROUNDS = ReviewLimits(rounds=2)
+"""Limits under which a batch of round 1 is reviewed, and one of round 2 isn't."""
+
+
+def batch_lenses(events: list[Any]) -> list[tuple[str, str, str | None, TaskStatus]]:
+    """The tasks queued after the first merge pass's, the batch's review and what followed."""
+    return shown(board(events))[9:]
+
+
+async def test_a_batch_fixing_fit_and_bugs_findings_is_reviewed_by_fit_bugs_and_tests() -> None:
+    store, seen = FakeStore(), list[LaneSnapshot]()
+    session = shipped(
+        claims_done,
+        *lenses_finding(fit=("Missing the flag", "normal"), bugs=("Crash on empty", "blocking")),
+        claims_done,  # The task the merge pass files both findings in.
+        watching(store, seen, reports(("Flag still unread", "normal"))),
+        reports(),
+        reports(),
+        reviewers=(files("Fix the flag and crash", ["F1", "F2"], []), dismisses("F1")),
+        review_limits=TWO_ROUNDS,
+        store=store,
+    )
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert shown(board(events))[8] == (CODER, "merge-pass", "batch-1", "completed")
+    assert batch_lenses(events) == [
+        ("fit-reviewer", "fit-review", None, "completed"),
+        (BUGS_REVIEWER, "bugs-review", None, "completed"),
+        ("tests-reviewer", "tests-review", None, "completed"),
+        (REVIEWER, "merge-pass", None, "completed"),
+    ]
+    assert board(events)[12].task.prompt.startswith(
+        "Merge the findings of the review of the 1 commits made for review batch-1"
+    )
+    # The findings filed into batch-1 were forgotten once its review was queued.
+    [during] = seen
+    assert list(during.groups) == ["batch-2"]
+    assert store.last.reviews is not None
+    assert (store.last.reviews.groups, store.last.reviews.severities) == ({}, {})
+
+
+async def test_a_batch_fixing_only_a_tests_finding_is_reviewed_by_bugs_and_tests() -> None:
+    session = shipped(
+        claims_done,
+        *lenses_finding(tests=("No test for it", "normal")),
+        claims_done,
+        reports(),
+        reports(),
+        reviewers=(files("Add a test", ["F1"], []),),
+        review_limits=TWO_ROUNDS,
+    )
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert batch_lenses(events) == [
+        (BUGS_REVIEWER, "bugs-review", None, "completed"),
+        ("tests-reviewer", "tests-review", None, "completed"),
+    ]
+
+
+async def test_a_fix_in_the_batch_carries_the_findings_of_the_task_it_fixes() -> None:
+    session = shipped(
+        claims_done,
+        *lenses_finding(fit=("Missing the flag", "normal")),
+        keeps_claiming,  # The filed task, which fails verification and is fixed.
+        claims_done,  # Its fix, which joins the batch.
+        reports(),
+        reports(),
+        reports(),
+        reviewers=(files("Read the flag", ["F1"], []),),
+        review_limits=TWO_ROUNDS,
+        verification=verified(Steps(True, False, False, True, True)),
+        limits=Limits(max_attempts=1),
+    )
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    fix = board(events)[9]
+    assert (fix.batch, fix.fixes) == ("batch-1", board(events)[8].id)
+    assert shown(board(events))[10:] == [
+        ("fit-reviewer", "fit-review", None, "completed"),
+        (BUGS_REVIEWER, "bugs-review", None, "completed"),
+        ("tests-reviewer", "tests-review", None, "completed"),
+    ]
+
+
+async def test_a_batch_at_the_last_round_is_not_reviewed_but_pauses_review() -> None:
+    session = shipped(
+        claims_done,
+        *lenses_finding(fit=("Missing the flag", "normal")),
+        claims_done,
+        reviewers=(files("Read the flag", ["F1"], []),),
+    )
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert batch_lenses(events) == []
+    assert pause_notice(1) in messages(Notice, events)
+    assert [e for e in events if isinstance(e, ReviewStatus)][-1].paused
 
 
 # A session saved before the lens reviewers

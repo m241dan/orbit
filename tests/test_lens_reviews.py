@@ -316,6 +316,35 @@ async def test_the_merge_pass_files_into_the_reviews_batch_under_its_one_cap() -
     assert statuses[-1] == ReviewStatus(paused=False, open_batches=0)
 
 
+async def test_review_commit_takes_a_landings_own_review_and_review_batch_a_batchs() -> None:
+    on_commits = lens_trigger(TESTS).model_copy(update={"when": {"review": "commit"}})
+    on_batches = lens_trigger(TESTS).model_copy(update={"when": {"review": "batch"}})
+    session = lensing(
+        claims_done,
+        reports(("Crash on empty input", "blocking")),
+        reports(),
+        claims_done,  # The suggestion.
+        reports(),  # The batch's review, by the bugs lens and the batch's tests lens.
+        reports(),
+        reviewers=(merges(("Fix the crash", ("F1",))),),
+        roles=MERGING_ROLES,
+        triggers=lens_triggers(merge=MERGE, tests=on_commits, fixes=on_batches),
+    )
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert shown(board(events)) == [
+        (CODER, "manual", None, "completed"),
+        (BUGS, "bugs", None, "completed"),
+        (TESTS, "tests", None, "completed"),
+        (REVIEWER, "merge", None, "completed"),
+        (CODER, "merge", "batch-1", "completed"),
+        (BUGS, "bugs", None, "completed"),
+        (TESTS, "fixes", None, "completed"),
+    ]
+
+
 async def test_a_review_closes_its_batch_once_the_merge_pass_ends() -> None:
     session = lensing(
         claims_done,

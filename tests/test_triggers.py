@@ -56,7 +56,7 @@ def test_the_events_are_the_records_with_their_when_fields() -> None:
     )
     assert {name: event.fields for name, event in EVENTS.items()} == {
         "session_started": ("verification",),
-        "task_landed": ("role", "origin"),
+        "task_landed": ("role", "origin", "review"),
         "task_finished": ("role", "origin", "status"),
         "commits": ("role", "origin"),
         "startup_check_failed": ("step",),
@@ -65,11 +65,14 @@ def test_the_events_are_the_records_with_their_when_fields() -> None:
     }
 
 
-def test_verification_findings_and_review_have_values_fixed_by_orbit() -> None:
+def test_verification_findings_and_review_have_values_fixed_by_orbit_on_each_event() -> None:
     assert WHEN_VALUES == {
-        "verification": ("configured", "missing", "off"),
-        "findings": ("some", "none"),
-        "review": ("commit", "batch", "super"),
+        "session_started": {"verification": ("configured", "missing", "off")},
+        "task_landed": {"review": ("commit", "batch")},
+        "reviews_finished": {
+            "findings": ("some", "none"),
+            "review": ("commit", "batch", "super"),
+        },
     }
 
 
@@ -113,7 +116,13 @@ def test_every_event_gives_its_trigger_and_its_own_variables() -> None:
 
 
 def test_the_guards_are_the_records() -> None:
-    assert GUARD_NAMES == ("review-rounds", "suggestions-pending", "not-queued", "dedupe")
+    assert GUARD_NAMES == (
+        "review-rounds",
+        "raised-finding",
+        "suggestions-pending",
+        "not-queued",
+        "dedupe",
+    )
 
 
 # A trigger's fields
@@ -152,7 +161,7 @@ def test_every_field_has_a_description() -> None:
         (
             {"on": "commits", "guards": ["review-rounds", "nightly"]},
             "triggers.x.guards: nightly isn't a guard; the guards are review-rounds,"
-            " suggestions-pending, not-queued, dedupe.",
+            " raised-finding, suggestions-pending, not-queued, dedupe.",
         ),
         ({"on": "commits", "every": 0}, "triggers.x.every: Input should be greater than 0"),
         ({"on": "commits", "colour": "red"}, "triggers.x.colour: Extra inputs are not permitted"),
@@ -251,7 +260,7 @@ def test_a_checks_trigger_takes_no_prompt() -> None:
 
 def test_a_when_field_its_event_lacks_is_refused_naming_it_and_the_fields() -> None:
     assert problems(on="task_landed", checks="gate", when={"status": "done"}) == (
-        "triggers.x.when: status isn't a field of task_landed; its fields are role, origin."
+        "triggers.x.when: status isn't a field of task_landed; its fields are role, origin, review."
     )
 
 
@@ -266,6 +275,26 @@ def test_an_unknown_verification_is_refused_naming_it_and_the_values() -> None:
         "triggers.x.when: missng isn't a value of verification; its values are configured,"
         " missing, off."
     )
+
+
+def test_an_unknown_landing_review_is_refused_naming_its_two_values() -> None:
+    assert problems(on="task_landed", checks="gate", when={"review": "nothing"}) == (
+        "triggers.x.when: nothing isn't a value of review; its values are commit, batch."
+    )
+
+
+def test_a_landing_review_of_the_super_review_is_refused_though_reviews_finished_takes_it() -> None:
+    assert problems(on="task_landed", checks="gate", when={"review": "super"}) == (
+        "triggers.x.when: super isn't a value of review; its values are commit, batch."
+    )
+    check_triggers(
+        {"x": Trigger(on="reviews_finished", checks="gate", when={"review": "super"})}, ROLES
+    )
+
+
+@pytest.mark.parametrize("review", ["commit", "batch", ("commit", "batch")])
+def test_each_landing_review_is_taken(review: str | tuple[str, ...]) -> None:
+    check_triggers({"x": Trigger(on="task_landed", checks="gate", when={"review": review})}, ROLES)
 
 
 @pytest.mark.parametrize("role", ["codr", ("coder", "codr")])
@@ -319,7 +348,8 @@ def test_each_unknown_value_in_when_is_refused_after_the_other_problems() -> Non
         " {task_skills}.",
         "triggers.x.when: codr isn't a role; the roles are coder, reviewer.",
         "triggers.x.when: revewer isn't a role; the roles are coder, reviewer.",
-        "triggers.x.when: status isn't a field of task_landed; its fields are role, origin.",
+        "triggers.x.when: status isn't a field of task_landed; its fields are role, origin,"
+        " review.",
     ]
 
 

@@ -1,11 +1,14 @@
 # The triggers shipped with orbit, each turning an event into a task for a role or a run of
 # checks. A trigger's prompt names its template, a Markdown file beside this one.
+#
+# Every lens reviews each commit; a batch of fixes is reviewed by Bugs and Tests, and by the
+# lenses guarded by raised-finding only if they raised one of its findings.
 
 [triggers.fit-review]
 on = "task_landed"
 role = "fit-reviewer"
 prompt = "lens-review.md"
-guards = ["review-rounds"]
+guards = ["review-rounds", "raised-finding"]
 
 [triggers.bugs-review]
 on = "task_landed"
@@ -23,19 +26,19 @@ guards = ["review-rounds"]
 on = "task_landed"
 role = "logic-reviewer"
 prompt = "lens-review.md"
-guards = ["review-rounds"]
+guards = ["review-rounds", "raised-finding"]
 
 [triggers.security-review]
 on = "task_landed"
 role = "security-reviewer"
 prompt = "lens-review.md"
-guards = ["review-rounds"]
+guards = ["review-rounds", "raised-finding"]
 
 [triggers.performance-review]
 on = "task_landed"
 role = "performance-reviewer"
 prompt = "lens-review.md"
-guards = ["review-rounds"]
+guards = ["review-rounds", "raised-finding"]
 
 [triggers.merge-pass]
 on = "reviews_finished"

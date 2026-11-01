@@ -153,7 +153,7 @@ def test_a_trigger_for_a_projects_own_role_is_valid() -> None:
         (
             NIGHTLY | {"guards": ["weekly"]},
             "triggers.nightly.guards: weekly isn't a guard; the guards are review-rounds,"
-            " suggestions-pending, not-queued, dedupe.",
+            " raised-finding, suggestions-pending, not-queued, dedupe.",
         ),
         (
             NIGHTLY | {"when": {"branch": "main"}},

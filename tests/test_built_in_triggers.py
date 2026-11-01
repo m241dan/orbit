@@ -17,7 +17,7 @@ from orbit.agent.domain.reviews import (
     review_values,
     tell_landed_since,
 )
-from orbit.agent.domain.triggers import Trigger, render_template
+from orbit.agent.domain.triggers import GuardName, Trigger, render_template
 from orbit.agent.domain.verification import VerificationStep, failure_report, startup_fix_prompt
 from orbit.agent.external.built_in_triggers import (
     TRIGGER_DIRECTORY,
@@ -53,6 +53,12 @@ def directory(tmp_path: Path, triggers: str, **templates: str) -> Path:
 LENSES = ("fit", "bugs", "tests", "logic", "security", "performance")
 """The per-commit lenses, in the order their triggers and reviewers are shipped."""
 
+EVERY_BATCH = ("bugs", "tests")
+"""The lenses that review every batch, not only those whose findings they raised."""
+
+NARROW: tuple[GuardName, ...] = ("review-rounds", "raised-finding")
+"""The guards of a lens that reviews only the batches whose findings it raised."""
+
 
 def test_the_shipped_triggers_are_the_records_in_order() -> None:
     fields = {
@@ -61,7 +67,9 @@ def test_the_shipped_triggers_are_the_records_in_order() -> None:
     assert fields == {
         **{
             f"{lens}-review": Trigger(
-                on="task_landed", role=f"{lens}-reviewer", guards=("review-rounds",)
+                on="task_landed",
+                role=f"{lens}-reviewer",
+                guards=("review-rounds",) if lens in EVERY_BATCH else NARROW,
             )
             for lens in LENSES
         },

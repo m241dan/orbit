@@ -8,8 +8,10 @@ whose one batch its suggestions join. Once every finding role's task of a review
 review lane raises ``reviews_finished`` for it, each task a trigger on it queues booked into the
 review too.
 A batch's review falls due as the batch is done rather than as one task lands, so it fires the
-triggers ``review-rounds`` guards on ``task_landed`` with no task causing it, as 12d's
-``batch_landed`` will.
+triggers ``review-rounds`` guards on ``task_landed`` with no task causing it, its ``review``
+field ``batch`` where a landing's is ``commit``. Of them, those ``raised-finding`` guards fire
+only if their role raised one of the batch's findings, so a batch of fixes is reviewed narrowly
+by the lenses whose findings it fixes.
 
 The review lane counts each landing toward the ``commits`` triggers too, as their guards see the
 board before the landing's own review is queued, and has those that fire, or one fired by hand,
@@ -48,6 +50,7 @@ from orbit.agent.domain.roles import enabled_roles, role_task
 from orbit.agent.domain.setup_first import waiting_for_setup, waiting_note
 from orbit.agent.domain.triggers import (
     COMMITS,
+    REVIEW_FIELD,
     REVIEW_ROUNDS,
     SESSION_STARTED,
     STARTUP_CHECK_FAILED,
@@ -99,10 +102,12 @@ class ReviewRound:
     """A review the ``review-rounds`` guard finds due, or whose lenses finished: ``job``, and
     ``book``, which records a task queued for it, by its id, with the template and values its
     prompt was rendered from, into the review, the first opening the batch its suggestions
-    join."""
+    join. For a batch's review, ``raised`` are the roles that raised the batch's findings, which
+    the ``raised-finding`` guard lets review it."""
 
     job: ReviewJob
     book: Callable[[str, ReviewTemplate], None]
+    raised: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -222,7 +227,7 @@ class TriggerEngine:
     ) -> tuple[str, ...]:
         """Raise ``task_landed``: the task that ended as ``state`` landed ``commit``, whose own
         review, if due, is ``review``. Returns the ids of the tasks queued."""
-        fields = {"role": state.task.role, "origin": state.origin}
+        fields = {"role": state.task.role, "origin": state.origin, REVIEW_FIELD: "commit"}
         event = TriggerEvent(TASK_LANDED, fields, state)
         skipped = TRIGGERS_SKIPPED if review is None else REVIEW_SKIPPED
         job = commit_review(state.id, commit)
@@ -237,7 +242,9 @@ class TriggerEngine:
 
     async def reviewed(self, review: ReviewRound) -> tuple[str, ...]:
         """Fire the triggers ``review-rounds`` guards on ``task_landed`` for ``review``, of a
-        batch that's done, which no one task caused. Returns the ids of the tasks queued."""
+        batch that's done, which no one task caused, as its ``review`` field says, but those
+        ``raised-finding`` guards whose role raised none of its findings. Returns the ids of the
+        tasks queued."""
         firing = await self._batch_firing(review)
         return () if firing is None else await self._queue(firing)
 
@@ -342,7 +349,8 @@ class TriggerEngine:
             for name, trigger in self._desk.agents.triggers.items()
             if REVIEW_ROUNDS in trigger.guards
         }
-        event = TriggerEvent(TASK_LANDED, {"role": CODER, "origin": job.origin})
+        fields = {"role": CODER, "origin": job.origin, REVIEW_FIELD: "batch"}
+        event = TriggerEvent(TASK_LANDED, fields)
         skills = review_skills(job, self._tasks.board.tasks)
         return await self._firing(
             triggers, event, partial(self._values, job, skills, REVIEW_SKIPPED), review
@@ -356,10 +364,11 @@ class TriggerEngine:
         review: ReviewRound | None,
     ) -> _Firing | None:
         """The ``triggers`` that may fire on ``event``, with ``review`` the review due, if any,
-        and the ``values`` they render from, gathered only if one may; none if none may, or the
-        values can't be gathered."""
+        and the roles that raised its batch's findings, and the ``values`` they render from,
+        gathered only if one may; none if none may, or the values can't be gathered."""
         roles = enabled_roles(self._desk.agents.roles)
-        found = listening(triggers, event, roles, None if review is None else review.job)
+        job, raised = (None, frozenset[str]()) if review is None else (review.job, review.raised)
+        found = listening(triggers, event, roles, job, raised)
         given = await values() if found else None
         return None if given is None else _Firing(found, given, review)
 

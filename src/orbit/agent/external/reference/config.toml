@@ -527,8 +527,8 @@
 # prompt: orbit's own lens-review.md
 # The events it takes, by their fields, each a value or a list of values.
 # when = {}
-# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
-# guards = ["review-rounds"]
+# What may hold it back: review-rounds, raised-finding, suggestions-pending, not-queued or dedupe.
+# guards = ["review-rounds", "raised-finding"]
 # With on = "commits", how many matching landings it fires after.
 # every: unset
 # Whether you can fire it yourself.
@@ -551,7 +551,7 @@
 # prompt: orbit's own lens-review.md
 # The events it takes, by their fields, each a value or a list of values.
 # when = {}
-# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
+# What may hold it back: review-rounds, raised-finding, suggestions-pending, not-queued or dedupe.
 # guards = ["review-rounds"]
 # With on = "commits", how many matching landings it fires after.
 # every: unset
@@ -575,7 +575,7 @@
 # prompt: orbit's own lens-review.md
 # The events it takes, by their fields, each a value or a list of values.
 # when = {}
-# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
+# What may hold it back: review-rounds, raised-finding, suggestions-pending, not-queued or dedupe.
 # guards = ["review-rounds"]
 # With on = "commits", how many matching landings it fires after.
 # every: unset
@@ -599,8 +599,8 @@
 # prompt: orbit's own lens-review.md
 # The events it takes, by their fields, each a value or a list of values.
 # when = {}
-# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
-# guards = ["review-rounds"]
+# What may hold it back: review-rounds, raised-finding, suggestions-pending, not-queued or dedupe.
+# guards = ["review-rounds", "raised-finding"]
 # With on = "commits", how many matching landings it fires after.
 # every: unset
 # Whether you can fire it yourself.
@@ -623,8 +623,8 @@
 # prompt: orbit's own lens-review.md
 # The events it takes, by their fields, each a value or a list of values.
 # when = {}
-# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
-# guards = ["review-rounds"]
+# What may hold it back: review-rounds, raised-finding, suggestions-pending, not-queued or dedupe.
+# guards = ["review-rounds", "raised-finding"]
 # With on = "commits", how many matching landings it fires after.
 # every: unset
 # Whether you can fire it yourself.
@@ -647,8 +647,8 @@
 # prompt: orbit's own lens-review.md
 # The events it takes, by their fields, each a value or a list of values.
 # when = {}
-# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
-# guards = ["review-rounds"]
+# What may hold it back: review-rounds, raised-finding, suggestions-pending, not-queued or dedupe.
+# guards = ["review-rounds", "raised-finding"]
 # With on = "commits", how many matching landings it fires after.
 # every: unset
 # Whether you can fire it yourself.
@@ -671,7 +671,7 @@
 # prompt: orbit's own merge-pass.md
 # The events it takes, by their fields, each a value or a list of values.
 # when = {findings = "some"}
-# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
+# What may hold it back: review-rounds, raised-finding, suggestions-pending, not-queued or dedupe.
 # guards = []
 # With on = "commits", how many matching landings it fires after.
 # every: unset
@@ -695,7 +695,7 @@
 # prompt: orbit's own super-review.md
 # The events it takes, by their fields, each a value or a list of values.
 # when = {origin = ["manual", "planner"]}
-# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
+# What may hold it back: review-rounds, raised-finding, suggestions-pending, not-queued or dedupe.
 # guards = ["suggestions-pending"]
 # With on = "commits", how many matching landings it fires after.
 # every = 10
@@ -719,7 +719,7 @@
 # prompt: orbit's own configure-checks.md
 # The events it takes, by their fields, each a value or a list of values.
 # when = {}
-# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
+# What may hold it back: review-rounds, raised-finding, suggestions-pending, not-queued or dedupe.
 # guards = []
 # With on = "commits", how many matching landings it fires after.
 # every: unset
@@ -743,7 +743,7 @@
 # prompt: orbit's own configure-checks.md
 # The events it takes, by their fields, each a value or a list of values.
 # when = {verification = "missing"}
-# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
+# What may hold it back: review-rounds, raised-finding, suggestions-pending, not-queued or dedupe.
 # guards = ["not-queued"]
 # With on = "commits", how many matching landings it fires after.
 # every: unset
@@ -767,7 +767,7 @@
 # prompt: unset
 # The events it takes, by their fields, each a value or a list of values.
 # when = {verification = "configured"}
-# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
+# What may hold it back: review-rounds, raised-finding, suggestions-pending, not-queued or dedupe.
 # guards = []
 # With on = "commits", how many matching landings it fires after.
 # every: unset
@@ -791,7 +791,7 @@
 # prompt: orbit's own startup-fix.md
 # The events it takes, by their fields, each a value or a list of values.
 # when = {}
-# The named rules that may hold it back: review-rounds, suggestions-pending, not-queued or dedupe.
+# What may hold it back: review-rounds, raised-finding, suggestions-pending, not-queued or dedupe.
 # guards = []
 # With on = "commits", how many matching landings it fires after.
 # every: unset
