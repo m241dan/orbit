@@ -20,9 +20,7 @@ from orbit.agent import (
     ServedWorkspace,
     ServedWorkspaces,
     SqliteStore,
-    StoreError,
     WorkspaceHost,
-    WorkspaceRegistry,
     WorkspaceUnavailable,
 )
 from orbit.cli.backend import _Backend, _maker, _open, _usage_source, _user_config, _UserConfig
@@ -86,13 +84,8 @@ def _serving(
         store = _open(state)
         stack.callback(lambda: asyncio.run(store.close()))
         source = _workspaces(stack, flags, store, user, clone_dir)
-        served = [_added(source, root) for root in dict.fromkeys(added)]
-        # Read the flags before setting any, so a store failing leaves them as they were, and
-        # serve the earlier workspaces after, so setting them doesn't stamp those added again.
-        flagged = _flagged(store)
-        with _exit_on(WorkspaceUnavailable):
-            source.flag_served()
-        served += _earlier(source, flagged)
+        # Those added are served first, so restoring flags them and doesn't serve them twice.
+        served = [_added(source, root) for root in dict.fromkeys(added)] + _restore_earlier(source)
         workspaces = tuple(workspace for workspace, _ in served)
         makers = [make for _, make in served]
 
@@ -135,37 +128,17 @@ def _cloned(source: ServedWorkspaces, url: str) -> Path:
     return root
 
 
-def _earlier(
-    source: ServedWorkspaces, flagged: list[tuple[str, Path]]
+def _restore_earlier(
+    source: ServedWorkspaces,
 ) -> list[tuple[ServedWorkspace, Callable[[], WorkspaceHost]]]:
-    """The workspaces ``flagged`` as served by an earlier run, by id and directory, that
-    ``source`` doesn't serve yet, served by it, but for those that can't be served, warning of
-    each."""
-    served: list[tuple[ServedWorkspace, Callable[[], WorkspaceHost]]] = []
-    for workspace_id, root in flagged:
-        if source.serves(workspace_id):
-            continue
-        try:
-            served.append(source.served(root))
-        except WorkspaceUnavailable as exc:
-            typer.echo(f"Warning: The workspace {root} isn't served: {exc}", err=True)
-    return served
+    """The workspaces flagged as served by an earlier run that ``source`` doesn't serve yet,
+    served by it once it has flagged those it serves, but for those that are gone or can't be
+    served, warning of each.
 
-
-def _flagged(store: SqliteStore) -> list[tuple[str, Path]]:
-    """The id and directory of each workspace flagged as served in ``store``, but for those
-    that are gone, warning of each.
-
-    Exits with status 2 if the store fails.
+    Exits with status 2 if the store fails as the flags are read or set.
     """
-    with _exit_on(StoreError):
-        served = asyncio.run(WorkspaceRegistry(store).served())
-    return [(workspace_id, Path(path)) for workspace_id, path in served if _present(Path(path))]
-
-
-def _present(root: Path) -> bool:
-    """Whether the workspace at ``root`` is still there, warning that it isn't served if not."""
-    if root.is_dir():
-        return True
-    typer.echo(f"Warning: The workspace {root} is gone, so it isn't served.", err=True)
-    return False
+    with _exit_on(WorkspaceUnavailable):
+        restored = source.flag_and_restore()
+    for warning in restored.warnings:
+        typer.echo(f"Warning: {warning}", err=True)
+    return list(restored.served)

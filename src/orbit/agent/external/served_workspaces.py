@@ -1,9 +1,10 @@
 """Opening a workspace, locked, checked and configured off the event loop, then found or
 registered in the store; and the workspaces a server serves as frontends add and remove them,
-by their paths or as clones it makes, each opened so and flagged served, and purged if asked."""
+by their paths or as clones it makes, each opened so and flagged served, and purged if asked,
+and those an earlier server flagged served, served again as it starts."""
 
 import asyncio
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -53,6 +54,16 @@ class ServedWorkspace:
         """Let go of the lock, unless it's kept."""
         if not self.kept:
             self.lock.close()
+
+
+@dataclass(frozen=True)
+class Restored:
+    """The workspaces an earlier server flagged served that are ``served`` again, each with what
+    builds its host, and the ``warnings`` of those that aren't, as their directories are gone
+    or they can't be served."""
+
+    served: tuple[tuple[ServedWorkspace, Callable[[], WorkspaceHost]], ...]
+    warnings: tuple[str, ...]
 
 
 type HostMaker = Callable[[ServedWorkspace, OrbitConfig], Callable[[OpenedStore], WorkspaceHost]]
@@ -150,11 +161,11 @@ class ServedWorkspaces:
     """The workspaces a server serves from the ``store``, each with its host made by
     ``make_host``, configured as ``configuring`` says, and its workspace lock held, if it's
     free, until it's removed or :meth:`let_go`: those it starts with, as :meth:`served` serves
-    them, and those frontends add, by their paths or as clones ``cloner`` makes, as a control
-    plane's ``WorkspaceSource``; one added again at the same root while its lock is still held,
-    as it is when unflagging it failed, keeps that lock, while another worktree of its
-    repository takes a lock of its own. Once the server's ``url`` is known, the locks taken name
-    it."""
+    them and :meth:`flag_and_restore` serves those an earlier server flagged, and those
+    frontends add, by their paths or as clones ``cloner`` makes, as a control plane's
+    ``WorkspaceSource``; one added again at the same root while its lock is still held, as it is
+    when unflagging it failed, keeps that lock, while another worktree of its repository takes
+    a lock of its own. Once the server's ``url`` is known, the locks taken name it."""
 
     def __init__(
         self, store: SqliteStore, make_host: HostMaker, cloner: Cloner, *, configuring: Configuring
@@ -224,6 +235,46 @@ class ServedWorkspaces:
         """Flag the workspace ``workspace_id``, at ``root``, not served again, as
         :func:`_unflag_anyway` does."""
         await _unflag_anyway(WorkspaceRegistry(self._store), workspace_id, root)
+
+    def flag_and_restore(self) -> Restored:
+        """Flag every workspace served as served, then serve from the start those flagged served
+        before that aren't served yet, as :meth:`restore` does. Raises
+        :class:`WorkspaceUnavailable` as :meth:`read_flagged` says, leaving every flag as it
+        was, or as :meth:`flag_served` says."""
+        # Read the flags before setting any, so a store failing leaves them as they were, and
+        # serve the earlier workspaces after, so setting them doesn't stamp those added again.
+        flagged = self.read_flagged()
+        self.flag_served()
+        return self.restore(flagged)
+
+    def read_flagged(self) -> list[tuple[str, Path]]:
+        """The id and directory of each workspace flagged served in the store, by directory.
+        Raises :class:`WorkspaceUnavailable` as ``INTERNAL`` if the store fails."""
+        with _unavailable(StoreError):
+            flagged = asyncio.run(WorkspaceRegistry(self._store).served())
+        return [(workspace_id, Path(path)) for workspace_id, path in flagged]
+
+    def restore(self, flagged: Sequence[tuple[str, Path]]) -> Restored:
+        """The workspaces ``flagged`` served by an earlier server, by id and directory, that
+        aren't served yet, served from the start as :meth:`served` serves them, but for those
+        whose directory is gone or that can't be served, warning of each."""
+        return _collect_restored(
+            [
+                self._serve_again(root)
+                for workspace_id, root in flagged
+                if not self.serves(workspace_id)
+            ]
+        )
+
+    def _serve_again(self, root: Path) -> tuple[ServedWorkspace, Callable[[], WorkspaceHost]] | str:
+        """The workspace at ``root`` served from the start, with what builds its host, or the
+        warning that it isn't, as its directory is gone or it can't be served."""
+        if not root.is_dir():
+            return f"The workspace {root} is gone, so it isn't served."
+        try:
+            return self.served(root)
+        except WorkspaceUnavailable as exc:
+            return f"The workspace {root} isn't served: {exc}"
 
     def serves(self, workspace_id: str) -> bool:
         """Whether the workspace ``workspace_id`` is served."""
@@ -356,6 +407,17 @@ def _unavailable(*errors: type[Exception]) -> Iterator[None]:
         yield
     except errors as exc:
         raise WorkspaceUnavailable(str(exc), INTERNAL) from None
+
+
+def _collect_restored(
+    outcomes: Sequence[tuple[ServedWorkspace, Callable[[], WorkspaceHost]] | str],
+) -> Restored:
+    """What restoring gave: each workspace among ``outcomes`` served again, with what builds its
+    host, and each warning among them of one that isn't."""
+    return Restored(
+        tuple(outcome for outcome in outcomes if not isinstance(outcome, str)),
+        tuple(outcome for outcome in outcomes if isinstance(outcome, str)),
+    )
 
 
 def _unshown(progress: WorkspaceCloning) -> None:
