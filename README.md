@@ -1130,9 +1130,11 @@ have suggested into.
 
 Every `super_review_every` commits (default 10, counting your own and the planner's commits, not
 those of suggested tasks), a `super-reviewer` (Opus by default) reviews the **whole codebase** at the
-latest commit, looking for duplication, structure that no longer fits and gaps in tests, and may
-suggest up to `super_review_suggestions` tasks (default 10). Those form a batch at round 1 and carry
-on like any other review's. Each review ends with a one-line verdict that also counts the findings
+latest commit: starting from the project's shape, it reads the commits since the last super review
+and a rotating sample of other code files (below) through the lens skills its role gives it (by
+default `review-style`, `review-drift` and `review-scaling`, each asking what has built up across
+commits; see [Skills](#skills)), and may suggest up to `super_review_suggestions` tasks (default
+10). Those form a batch at round 1 and carry on like any other review's. Each review ends with a one-line verdict that also counts the findings
 its cap left out, so `5 suggestions, 2 more left out` tells you a second pass would find more.
 `ctrl+g` asks for one straight away and restarts the count. A super review's task lists, after the
 tasks still queued, the subjects of the commits since the last super review (every one, oldest

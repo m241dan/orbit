@@ -54,5 +54,5 @@ Where the project sets no precedent, these are the defaults:
   returns. Raise specific errors, and catch only the ones you expect and can handle.
 - Test with the project's framework: behaviour through the public interface, one idea per
   test, named for what should happen. Cover the error paths and edge cases the task names as
-  well as the happy path, and keep tests isolated from real files, the network and global
-  state.
+  well as the happy path, and keep tests independent of the machine and of each other, as
+  `code-style` says.

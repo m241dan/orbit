@@ -11,7 +11,7 @@ import pytest
 
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
-from orbit.agent.external.skill_files import skill_names
+from orbit.agent.external.skill_files import SKILL_DIRECTORY, skill_names
 from orbit.protocol import BUILT_IN_ROLE_NAMES
 
 FOLDER = files("orbit.agent.external") / "instructions"
@@ -448,3 +448,68 @@ def test_the_reviewer_no_longer_has_a_built_in_clarity_lens() -> None:
     text = reviewer_text()
     for phrase in REVIEWER_RETIRED_PHRASES:
         assert phrase not in text, phrase
+
+
+SUPER_REVIEWER_LOOKS_THROUGH_ITS_LENSES = (
+    "A read-only snapshot of the codebase at its latest commit, which has passed the project's"
+    " checks; orbit asks for this every few commits, or when the user does. The task lists the"
+    " commits landed since the last super review, the files they changed, and a sample of other"
+    " code files orbit chose so that, review by review, every code file gets read.",
+    "Start with the shape of the project: its README, its configuration, its package layout and"
+    " its own guidance (CLAUDE.md and the like), which says what structure the project means to"
+    " keep. Then read the files changed since the last super review and the sampled ones, and"
+    " follow what you find into the code around them.",
+    "The project's plans are recorded in numbered requirements docs, under `docs/` or wherever"
+    " the project keeps them. Take one search over their titles and Goal lines to learn what each"
+    " covers, and read a record in full only when a finding touches the code it covers, before"
+    " you suggest anything about it. Code that no longer does what its record agreed, with no"
+    " later record explaining the change, is drift: the record is what was agreed, so the code is"
+    " the suspect, unless the user-facing docs say the behaviour changed on purpose.",
+    "Your lenses are your `review-*` skills. Each owns one question and says what to look for and"
+    " what it measures against. The checks pass and every commit has had its own review, so look"
+    " through each lens for what only shows across commits and across the codebase. A lens that"
+    " finds nothing reports nothing.",
+    "Before suggesting, drop a finding that a queued task already covers. Confirm how a framework"
+    " behaves before asking for a test that must fail without the fix, and write Done items that"
+    " can all hold at once.",
+)
+SUPER_REVIEWER_RETIRED_PHRASES = ("**Latent bugs**", "**Structure that no longer fits**")
+LENS_QUESTIONS = {
+    "review-drift": "**Your question:** what has crept into the structure across the commits"
+    " since the last super review and the sampled files?",
+    "review-scaling": "**Your question:** across the commits since the last super review and the"
+    " sampled files, what cost has built up?",
+}
+CODER_DEFERS_TEST_ISOLATION = (
+    "Cover the error paths and edge cases the task names as well as the happy path, and keep tests"
+    " independent of the machine and of each other, as `code-style` says."
+)
+
+
+def role_text(name: str) -> str:
+    """The instructions of the role ``name`` with every run of whitespace made a single space."""
+    return " ".join(read_built_in_roles()[name].instructions.split())
+
+
+def test_the_super_reviewer_looks_through_its_lens_skills_at_what_landed_and_the_sample() -> None:
+    text = role_text("super-reviewer")
+    for passage in SUPER_REVIEWER_LOOKS_THROUGH_ITS_LENSES:
+        assert passage in text, passage
+
+
+def test_the_super_reviewer_no_longer_has_a_built_in_list_of_lenses() -> None:
+    text = role_text("super-reviewer")
+    for phrase in SUPER_REVIEWER_RETIRED_PHRASES:
+        assert phrase not in text, phrase
+
+
+@pytest.mark.parametrize("name", LENS_QUESTIONS)
+def test_the_super_review_lenses_ask_across_the_commits_since_and_the_sample(name: str) -> None:
+    skill = (SKILL_DIRECTORY / name / "SKILL.md").read_text(encoding="utf-8")
+    assert LENS_QUESTIONS[name] in " ".join(skill.split())
+
+
+def test_the_coder_keeps_tests_independent_as_code_style_says() -> None:
+    text = role_text("coder")
+    assert text.endswith(CODER_DEFERS_TEST_ISOLATION)
+    assert "isolated from real files" not in text

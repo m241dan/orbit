@@ -5,7 +5,8 @@ description: Super-review lens across many commits — what cost has built up? C
 
 # Scaling lens
 
-**Your question:** across the commits since the last super review, what cost has built up?
+**Your question:** across the commits since the last super review and the sampled files, what
+cost has built up?
 
 ## Look for
 

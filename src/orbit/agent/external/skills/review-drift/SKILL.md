@@ -6,7 +6,7 @@ description: Super-review lens across many commits — what has crept into the s
 # Drift lens
 
 **Your question:** what has crept into the structure across the commits since the last super
-review?
+review and the sampled files?
 
 ## Look for
 
