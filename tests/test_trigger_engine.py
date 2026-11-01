@@ -25,7 +25,7 @@ from orbit.agent.domain.reviews import (
 )
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.triggers import Trigger, VerificationState, render_template
-from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
+from orbit.agent.domain.verification import CheckSet, VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     CODER,
     CONFIGURATOR,
@@ -632,6 +632,24 @@ async def test_configure_checks_fired_by_hand_queues_todays_configurator_first()
     assert first.task.settings == ROLES[CONFIGURATOR].settings
     assert isinstance(engine.events[-1], TasksChanged)
     assert engine.kicked == []
+
+
+async def test_configure_checks_fired_by_hand_tells_the_configurator_the_sets() -> None:
+    slow = CheckSet("slow", (VerificationStep("mutation", ("mutmut", "run"), "slow"),))
+    mutation = Trigger(on="commits", every=10, checks="slow")
+    triggers = {**TRIGGERS, "mutation": mutation}
+    engine = Engine(triggers)
+    await engine.engine.fire_by_hand(CONFIGURE_CHECKS, (LINT,), (slow,))
+    prompt = engine.board.tasks[0].task.prompt
+    assert prompt == configure_prompt((LINT,), None, (slow,), triggers)
+    assert "Set slow: every 10 commits, reports\n- mutation: mutmut run" in prompt
+
+
+async def test_opening_tells_the_configurator_the_sets() -> None:
+    slow = CheckSet("slow", (VerificationStep("mutation", ("mutmut", "run"), "slow"),))
+    engine = Engine({"hello": hello(prompt="{checks}", when={})})
+    await engine.engine.started((), (slow,))
+    assert engine.shown()[0][3] == configured_checks((), None, (slow,), {})
 
 
 async def test_a_disabled_trigger_fired_by_hand_queues_nothing() -> None:

@@ -60,7 +60,7 @@ from orbit.agent.domain.triggers import (
     render_template,
     verification_state,
 )
-from orbit.agent.domain.verification import VerificationStep, failure_report
+from orbit.agent.domain.verification import CheckSet, VerificationStep, failure_report
 from orbit.protocol import (
     CODER,
     GIT_FAILED,
@@ -167,32 +167,40 @@ class TriggerEngine:
         self._run_checks = hooks.run_checks
         self._gate = hooks.gate
 
-    async def started(self, steps: Sequence[VerificationStep] | None) -> tuple[str, ...]:
+    async def started(
+        self, steps: Sequence[VerificationStep] | None, sets: Sequence[CheckSet] = ()
+    ) -> tuple[str, ...]:
         """Raise ``session_started``: orbit opened the workspace with its session, verifying
         tasks with ``steps``, the task checks, none while verification is off, which give its
-        ``verification`` and, with the tree's setup, its ``{checks}``. Those of its triggers with
-        ``checks = "task-checks"`` run the steps, and those naming a set run it. Returns the ids
-        of the tasks the others queued."""
+        ``verification`` and, with the named ``sets`` and the tree's setup, its ``{checks}``.
+        Those of its triggers with ``checks = "task-checks"`` run the steps, and those naming a
+        set run it. Returns the ids of the tasks the others queued."""
         fields = {"verification": verification_state(steps)}
         event = TriggerEvent(SESSION_STARTED, fields)
-        return await self.fire(event, partial(_given, self._checks(steps or ())))
+        return await self.fire(event, partial(_given, self._checks(steps or (), sets)))
 
-    async def fire_by_hand(self, name: str, steps: Sequence[VerificationStep]) -> tuple[str, ...]:
+    async def fire_by_hand(
+        self, name: str, steps: Sequence[VerificationStep], sets: Sequence[CheckSet] = ()
+    ) -> tuple[str, ...]:
         """Fire the trigger ``name`` by hand, if it fires so, as :meth:`by_hand` says, whatever
         its ``when`` and guards: its task is queued, a configurator's first, rendered from the
-        variables of ``manual``, its ``{checks}`` the ``steps`` and the tree's setup configured
-        now, or the set it names runs. The board is published if a task was queued. Returns its
-        id, for :meth:`run`; none if it doesn't fire or queues no task."""
+        variables of ``manual``, its ``{checks}`` the task checks ``steps``, the named ``sets``
+        and the tree's setup configured now, or the set it names runs. The board is published if
+        a task was queued. Returns its id, for :meth:`run`; none if it doesn't fire or queues no
+        task."""
         fired = self.by_hand(name)
         if not fired:
             return ()
-        return await self._queue(_Firing(fired, self._checks(steps), None, counted=True))
+        return await self._queue(_Firing(fired, self._checks(steps, sets), None, counted=True))
 
-    def _checks(self, steps: Sequence[VerificationStep]) -> Mapping[str, str]:
-        """The ``{checks}`` of the verification ``steps`` and the tree's setup configured now,
-        which a configurator is told."""
+    def _checks(
+        self, steps: Sequence[VerificationStep], sets: Sequence[CheckSet]
+    ) -> Mapping[str, str]:
+        """The ``{checks}`` of the task checks ``steps``, the named ``sets`` with the triggers
+        that run them, and the tree's setup configured now, which a configurator is told."""
         tree = self._desk.agents.tree
-        return {"checks": configured_checks(steps, None if tree is None else tree.setup)}
+        setup = None if tree is None else tree.setup
+        return {"checks": configured_checks(steps, setup, sets, self._desk.agents.triggers)}
 
     async def check_failed(self, step: VerificationStep, output: str) -> tuple[str, ...]:
         """Raise ``startup_check_failed``: ``step`` of the startup check failed with ``output``,

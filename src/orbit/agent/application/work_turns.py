@@ -173,11 +173,12 @@ class WorkTurns:
             await self._start_asked()
 
     async def _fire_configure(self) -> tuple[str, ...]:
-        """Fire the configure-checks trigger by hand, its configurator told the steps configured
-        now; returns the ids of the tasks it queued."""
+        """Fire the configure-checks trigger by hand, its configurator told the task checks and
+        named sets configured now; returns the ids of the tasks it queued."""
         triggers, verifier = self._parts.triggers, self._parts.verifier
         assert triggers is not None and verifier is not None  # Checked as it was asked for.
-        return await triggers.fire_by_hand(CONFIGURE_CHECKS, verifier.verification.steps)
+        verification = verifier.verification
+        return await triggers.fire_by_hand(CONFIGURE_CHECKS, verification.steps, verification.sets)
 
     async def set_up(self) -> None:
         """Run the configurator's task still to run or running as the workspace opens while

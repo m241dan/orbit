@@ -59,3 +59,21 @@ def test_a_setup_without_watched_files_is_listed_alone_and_none_is_left_out() ->
     with_setup = ChecksProposal(steps=steps, setup=Setup(command=("make",)))
     assert configure_message(with_setup).endswith("- Lint: ruff\n\nSetup: make")
     assert configure_message(ChecksProposal(steps=steps)).endswith("- Lint: ruff")
+
+
+def test_steps_in_sets_are_grouped_by_set_with_the_triggers_that_run_them() -> None:
+    checks = ChecksProposal.model_validate(
+        {
+            "steps": [
+                {"name": "Lint", "command": ["ruff"]},
+                {"name": "mutation", "command": ["mutmut", "run"], "set": "slow"},
+            ],
+            "sets": {"slow": True},
+            "triggers": {"mutation": {"on": "commits", "every": 10, "checks": "slow"}},
+        }
+    )
+    assert configure_message(checks) == (
+        "Configure verification steps\n\n"
+        "Task checks: every task\n- Lint: ruff\n\n"
+        "Set slow: every 10 commits, holds merges\n- mutation: mutmut run"
+    )

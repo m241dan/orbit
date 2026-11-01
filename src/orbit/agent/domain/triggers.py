@@ -1,8 +1,8 @@
 """Triggers, which turn an event into a task for a role or a run of checks, the task checks or a
 named set: the events and guards orbit knows, a trigger's fields, the package's triggers merged
 with a project's and checked against its roles and sets, the sets no trigger runs, which of them
-fire on an event and which guards hold one back, and the rendering of a trigger's prompt
-template.
+fire on an event and which guards hold one back, when one fires in words, and the rendering of
+a trigger's prompt template.
 
 The package's triggers aren't kept here: whoever builds them passes in the contents of their
 ``triggers.toml`` and the templates it names. ``manual`` isn't raised yet, but a trigger fired by
@@ -508,6 +508,33 @@ def note_unrun_sets(triggers: Mapping[str, Trigger], sets: Iterable[str]) -> tup
     return tuple(
         f"The set {name} has no trigger, so it never runs." for name in sets if name not in run
     )
+
+
+FIRING_PHRASES: Mapping[str, str] = {
+    SESSION_STARTED: "when orbit opens",
+    TASK_LANDED: "when a task lands",
+    TASK_FINISHED: "when a task finishes",
+    STARTUP_CHECK_FAILED: "when the startup check fails",
+    "manual": "by hand",
+}
+"""When a trigger on each event but ``commits``, which counts, fires, in words, by name."""
+
+
+def describe_firing(trigger: Trigger) -> str:
+    """When ``trigger`` fires, in words, as in ``every 10 commits`` or ``by hand``, and that
+    it's off if it isn't enabled."""
+    when = _describe_event(trigger)
+    if trigger.manual and trigger.on != "manual":
+        when += " or by hand"
+    return when if trigger.enabled else f"{when} (off)"
+
+
+def _describe_event(trigger: Trigger) -> str:
+    """When ``trigger``'s event happens, in words."""
+    if trigger.on != COMMITS:
+        return FIRING_PHRASES[trigger.on]
+    every = trigger.every or 1
+    return "every commit" if every == 1 else f"every {every} commits"
 
 
 def template_variables(template: str) -> tuple[str, ...]:

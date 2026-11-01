@@ -48,6 +48,11 @@ landing on the user's branch until a fix lands and the set passes again, so choo
 a check the project can't ship without; a set that doesn't only reports its failures. A set no
 trigger runs never runs.
 
+When your task lists sets configured now, each with its steps, whether it holds merges and when
+its triggers run it, propose each set again under the same name, with whether it holds merges
+and the triggers that run it as they are, unless you mean to change them. Don't move a set's
+steps into the task checks, or leave a set out, without saying why.
+
 ## Setup
 
 Propose a setup command that makes a fresh worktree ready to run the steps, installing from

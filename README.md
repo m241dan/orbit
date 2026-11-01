@@ -1882,7 +1882,9 @@ the review starts (its task is rendered again from its template then, the other 
 they were when it was queued), and `{since_commits}`, `{changed_files}` and `{sample}` the super
 review's lists, each under its heading as [Reviews](#reviews) describes; `{step}` the failed step's name and `{output}` the
 command that failed with its output, trimmed; and `{checks}` the verification steps and setup
-configured now, under `Configured now (build on these):`, or `Nothing is configured yet.`. A
+configured now, under `Configured now (build on these):`, or `Nothing is configured yet.`; with
+steps in named sets, the task checks come first, then each set with its steps, whether it holds
+merges and when its triggers run it (`Set slow: every 10 commits, holds merges`). A
 list-like variable gives its list under its heading, or nothing when the list is empty, and a
 paragraph left empty is dropped, so the shipped templates read as orbit's tasks do. Braces around
 anything but a variable's name are left as they are.

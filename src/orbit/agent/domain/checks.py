@@ -1,16 +1,25 @@
 """The checks a project is verified and set up with: its verification steps, the task checks
 among them and the named sets the others are in, the setup that makes a fresh worktree ready, and
-the checks an agent proposes, with the triggers that would run them."""
+the checks an agent proposes, with the triggers that would run them, and what a configurator is
+told is configured now."""
 
 import shlex
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from types import MappingProxyType
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
-from orbit.agent.domain.triggers import ChecksTrigger, Trigger, TriggerName, check_triggers
+from orbit.agent.domain.triggers import (
+    ChecksTrigger,
+    Trigger,
+    TriggerName,
+    check_triggers,
+    describe_firing,
+)
 from orbit.agent.domain.verification import CheckSet, SetEffect, SetName, VerificationStep
+from orbit.protocol import TASK_CHECKS
 
 
 class _Config(BaseModel):
@@ -154,33 +163,96 @@ class ChecksProposal(VerificationConfig):
         return {name: trigger.as_trigger() for name, trigger in self.triggers.items()}
 
 
-def describe_checks(steps: Sequence[VerificationStep], setup: Setup | None) -> str:
-    """``steps``, one per line, then ``setup``; each part only if there is one."""
-    parts = []
-    if steps:
-        lines = [f"- {step.name}: {shlex.join(step.command)}" for step in steps]
-        parts.append("Steps:\n" + "\n".join(lines))
-    if setup is not None:
-        line = f"Setup: {shlex.join(setup.command)}"
-        if setup.watch:
-            line += f" (again when {', '.join(setup.watch)} changes)"
-        parts.append(line)
-    return "\n\n".join(parts)
+_NO_TRIGGERS: Mapping[str, Trigger] = MappingProxyType({})
+
+_EFFECT_PHRASES: Mapping[SetEffect, str] = {"holds_merges": "holds merges", "reports": "reports"}
+"""What the failure of a set with each effect does, in words."""
 
 
-def configure_prompt(steps: Sequence[VerificationStep], setup: Setup | None) -> str:
-    """The task for a configurator asked for from the frontend, told what's configured now."""
+def describe_checks(
+    steps: Sequence[VerificationStep],
+    setup: Setup | None,
+    sets: Sequence[CheckSet] = (),
+    triggers: Mapping[str, Trigger] = _NO_TRIGGERS,
+) -> str:
+    """``steps``, the task checks, one per line, then ``setup``; each part only if there is
+    one. With named ``sets``, the task checks come under a line saying when they run, then each
+    set with its steps, under a line saying when those of ``triggers`` that run it fire and
+    whether it holds merges, as the proposal window groups them."""
+    groups = _describe_groups(steps, sets, triggers) if sets else _describe_steps(steps)
+    return "\n\n".join([*groups, *_describe_setup(setup)])
+
+
+def _describe_steps(steps: Sequence[VerificationStep]) -> list[str]:
+    """``steps`` under ``Steps:``, if there are any."""
+    return ["Steps:\n" + _step_lines(steps)] if steps else []
+
+
+def _describe_groups(
+    steps: Sequence[VerificationStep], sets: Sequence[CheckSet], triggers: Mapping[str, Trigger]
+) -> list[str]:
+    """The task checks ``steps``, then each of ``sets``, each under a line saying when
+    ``triggers`` run it, and for a set, whether it holds merges."""
+    task_checks = _group("Task checks", ["every task", *_runs(triggers, TASK_CHECKS)], steps)
+    return [task_checks, *(_describe_set(check_set, triggers) for check_set in sets)]
+
+
+def _describe_set(check_set: CheckSet, triggers: Mapping[str, Trigger]) -> str:
+    """``check_set``'s steps under a line saying when ``triggers`` run it and whether it holds
+    merges."""
+    runs = _runs(triggers, check_set.name) or ["no trigger"]
+    effect = _EFFECT_PHRASES[check_set.effect]
+    return _group(f"Set {check_set.name}", [*runs, effect], check_set.steps)
+
+
+def _group(title: str, notes: Sequence[str], steps: Sequence[VerificationStep]) -> str:
+    """``steps``, or ``none``, under ``title`` and its ``notes``."""
+    return f"{title}: {', '.join(notes)}\n" + (_step_lines(steps) or "none")
+
+
+def _runs(triggers: Mapping[str, Trigger], checks: str) -> list[str]:
+    """When each of ``triggers`` that runs ``checks`` fires, in order, in words."""
+    return [describe_firing(trigger) for trigger in triggers.values() if trigger.checks == checks]
+
+
+def _step_lines(steps: Sequence[VerificationStep]) -> str:
+    """Each of ``steps``, with its command, on a line of its own."""
+    return "\n".join(f"- {step.name}: {shlex.join(step.command)}" for step in steps)
+
+
+def _describe_setup(setup: Setup | None) -> list[str]:
+    """``setup``'s command and the files that run it again, if there is one."""
+    if setup is None:
+        return []
+    watched = f" (again when {', '.join(setup.watch)} changes)" if setup.watch else ""
+    return [f"Setup: {shlex.join(setup.command)}{watched}"]
+
+
+def configure_prompt(
+    steps: Sequence[VerificationStep],
+    setup: Setup | None,
+    sets: Sequence[CheckSet] = (),
+    triggers: Mapping[str, Trigger] = _NO_TRIGGERS,
+) -> str:
+    """The task for a configurator asked for from the frontend, told what's configured now (see
+    :func:`configured_checks`)."""
     prompt = (
         "Set up this project's verification steps: work out the checks it uses and propose"
         " them with propose_checks."
     )
-    return f"{prompt} {configured_checks(steps, setup)}"
+    return f"{prompt} {configured_checks(steps, setup, sets, triggers)}"
 
 
-def configured_checks(steps: Sequence[VerificationStep], setup: Setup | None) -> str:
-    """What a configurator is told is configured now, the ``steps`` and ``setup`` (see
-    :func:`describe_checks`), or that nothing is: the ``{checks}`` a trigger's template uses."""
-    current = describe_checks(steps, setup)
+def configured_checks(
+    steps: Sequence[VerificationStep],
+    setup: Setup | None,
+    sets: Sequence[CheckSet] = (),
+    triggers: Mapping[str, Trigger] = _NO_TRIGGERS,
+) -> str:
+    """What a configurator is told is configured now, the task checks ``steps``, the named
+    ``sets`` with when ``triggers`` run them, and ``setup`` (see :func:`describe_checks`), or
+    that nothing is: the ``{checks}`` a trigger's template uses."""
+    current = describe_checks(steps, setup, sets, triggers)
     if not current:
         return "Nothing is configured yet."
     return "Configured now (build on these):\n\n" + current

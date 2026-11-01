@@ -56,5 +56,10 @@ def _first_line(text: str) -> str:
 
 
 def configure_message(checks: ChecksProposal) -> str:
-    """The message committing accepted ``checks``: each step listed, then the setup."""
-    return "Configure verification steps\n\n" + describe_checks(checks.steps, checks.setup)
+    """The message committing accepted ``checks``: each step listed, then the setup, as
+    :func:`~orbit.agent.domain.checks.describe_checks` describes them, the steps in named sets
+    grouped by set with the triggers that run them."""
+    described = describe_checks(
+        checks.task_checks, checks.setup, checks.check_sets, checks.trigger_settings
+    )
+    return "Configure verification steps\n\n" + described

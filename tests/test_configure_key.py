@@ -7,9 +7,10 @@ import pytest
 from textual.widgets import Static
 
 from orbit.agent import NO_STEPS_NOTE, WorkspaceHost
+from orbit.agent.application.verifier import Verification
 from orbit.agent.application.work_turns import CONFIGURING_NOTE, NO_VERIFY_MESSAGE
 from orbit.agent.domain.checks import Setup, configure_prompt
-from orbit.agent.domain.verification import VerificationStep
+from orbit.agent.domain.verification import CheckSet, VerificationStep
 from orbit.protocol import (
     CONFIGURE_CHECKS,
     INVALID,
@@ -102,6 +103,16 @@ async def test_it_queues_a_configurator_first_and_runs_it_straight_away() -> Non
     assert tasks[0].task.settings.tool_access == "restricted"
     assert "- Unit tests: pytest" in configurator.tasks[0]
     assert "Setup: uv sync" in configurator.tasks[0]
+
+
+async def test_the_prompt_names_the_sets_configured() -> None:
+    configurator = Configurator()
+    slow = CheckSet("slow", (VerificationStep("mutation", ("mutmut", "run"), "slow"),))
+    verification = Verification((STEP,), Steps(True), sets=(slow,))
+    session, _, _ = session_for(configurator, verification=verification)
+    await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
+    await until_idle(session)
+    assert "Set slow: no trigger, reports\n- mutation: mutmut run" in configurator.tasks[0]
 
 
 async def test_with_nothing_configured_the_prompt_says_so() -> None:
