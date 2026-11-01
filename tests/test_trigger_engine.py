@@ -354,6 +354,22 @@ async def test_a_due_super_review_waits_while_a_review_on_the_board_waits() -> N
     assert (counted.counts, counted.fires) == ({SUPER_REVIEW: 1}, [])
 
 
+async def test_a_due_super_review_waits_while_a_project_triggers_review_waits() -> None:
+    engine = Engine(super_every(1))
+    audit = TaskSpec(prompt="Audit the codebase at c0", role=SUPER_REVIEWER)
+    engine.board.add_triggered(audit, "audit")
+    counted = engine.engine.count(ended(), {})
+    assert (counted.counts, counted.fires) == ({SUPER_REVIEW: 1}, [])
+
+
+async def test_a_due_super_review_waits_while_a_project_triggers_suggestion_runs() -> None:
+    engine = Engine(super_every(1))
+    suggestion = engine.board.add_suggestion(TaskSpec(prompt="Tidy"), "batch-1", 1, "audit")
+    engine.board.set_status(suggestion, "running")
+    counted = engine.engine.count(ended(), {})
+    assert (counted.counts, counted.fires) == ({SUPER_REVIEW: 1}, [])
+
+
 async def test_a_landing_counts_toward_no_trigger_whose_role_is_disabled() -> None:
     engine = Engine(super_every(1), roles=disabled(SUPER_REVIEWER))
     assert engine.engine.count(ended(), {}).counts == {}

@@ -1193,7 +1193,8 @@ comes with your next commit once none is. A session an older orbit saved, whose 
 suggestions say they're from `super_review`, reads them as from `super-review`, and a review of
 commits it had queued starts with its task as it was queued, without what landed since.
 
-The reviews orbit queued can't be edited: remove one instead. Reviews run in the review roles'
+The reviews orbit queued, a `reviewer`'s or `super-reviewer`'s task from any trigger, a
+project's own included, can't be edited: remove one instead. Reviews run in the review roles'
 lane, `review`, which starts its tasks by itself: a `reviewer` task you add starts there at once
 too, in its role's `workspace` (by default a fresh read-only snapshot of the base commit), as it
 has no commit to review. A task of another role in that lane, such as an `auditor` with
@@ -1689,8 +1690,9 @@ shipped ones, then the project's), if its role is enabled, its `when` takes the 
 its guards holds it back. Its prompt is rendered from its template, and its task added at the end
 of the task list for its role (a `configurator`'s at the front, as the checks it sets up verify the
 rest), with that role's settings, or as a draft for you to accept with `draft = true`; the task's origin is the trigger's name, so the task list and the task's span
-(`orbit.trigger`; see [Telemetry](#telemetry)) say which trigger queued it. A task whose role's
-lane starts by itself, such as `review`, starts there once the lane is free; one in the work lane
+(`orbit.trigger`; see [Telemetry](#telemetry)) say which trigger queued it, and a review's
+suggestions take its task's origin, the name of the trigger that queued the review. A task whose
+role's lane starts by itself, such as `review`, starts there once the lane is free; one in the work lane
 runs with the run going, or the next. While verification is missing, a task a trigger queues
 waits until checks are accepted, the conversation naming its trigger (`review's task waits: set up
 verification first.`), but a configurator's. A trigger never fires on an event caused by a task it queued itself, one
@@ -1706,8 +1708,10 @@ project's own `commits` trigger counts from when orbit opens the workspace. Each
 trigger that fires, or that you fire yourself (`ctrl+g` fires `super-review`), reviews the
 codebase at the commit: it renders the super review's variables, its task is booked as a review
 whose suggestions form a batch at round 1, and the super review's record moves on to that commit
-and its sample. Fired by hand, a trigger fires at once, whatever its `when` and guards, if it and
-its role are enabled, and its count starts again.
+and its sample. Its suggestions take its name as their origin, as its task does: those of a
+project's `[triggers.audit]` say `audit`, and, as a trigger never fires on its own tasks, their
+landings don't count toward it. Fired by hand, a trigger fires at once, whatever its `when` and
+guards, if it and its role are enabled, and its count starts again.
 
 The guards:
 
@@ -1721,9 +1725,11 @@ The guards:
 - `not-queued`: holds the trigger back while a task of its role is still to run or running.
 - `dedupe`: holds the trigger back while a task still to run or running has the first line its
   task would have.
-- `suggestions-pending`: holds the trigger back while a task the reviews queued, a review or a
-  suggestion (origin `review` or `super-review`), is pending or running; so the super review
-  waits for the work its last suggestions are about to do.
+- `suggestions-pending`: holds the trigger back while a task the reviews queued is pending or
+  running: a review orbit queued, a `reviewer`'s or `super-reviewer`'s task from any trigger (its
+  origin neither `manual` nor `planner`), a project's own included, or a task in a review's
+  batch, a suggestion or a fix of one; so the super review waits for the work its last
+  suggestions, or another trigger's, are about to do.
 
 A `commits` trigger's guards are judged before its task's prompt is rendered, so `dedupe` holds
 none back.
@@ -1738,9 +1744,8 @@ trimmed past 30000 characters; `{missing}` a line for each task of the reviewed 
 without landing a commit; `{cap}` the suggestions the review may make; `{queued}` the tasks still
 queued or running, `{landed_since}` the commits landed since the reviewed one, as they stand when
 the review starts (its task is rendered again from its template then, the other variables as
-they were when it was queued, unless you've edited it, when it keeps your words), and
-`{since_commits}`, `{changed_files}` and `{sample}` the super review's lists, each under its
-heading as [Reviews](#reviews) describes; `{step}` the failed step's name and `{output}` the
+they were when it was queued), and `{since_commits}`, `{changed_files}` and `{sample}` the super
+review's lists, each under its heading as [Reviews](#reviews) describes; `{step}` the failed step's name and `{output}` the
 command that failed with its output, trimmed; and `{checks}` the verification steps and setup
 configured now, under `Configured now (build on these):`, or `Nothing is configured yet.`. A
 list-like variable gives its list under its heading, or nothing when the list is empty, and a

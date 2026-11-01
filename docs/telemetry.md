@@ -29,7 +29,7 @@ verification fails has its own.
 | `orbit.role` | string | The role that takes the task, such as `coder` or `reviewer`. |
 | `orbit.runtime` | string | The runtime the task's role runs on, such as `claude`; absent for a role the session doesn't have, whose task fails without an agent. |
 | `gen_ai.request.model` | string | The model the task's agent is launched with; absent when the task names none (the CLI's default). |
-| `orbit.trigger` | string | Who queued the task, its origin: the trigger that queued it, by name, such as `review`, `super-review` or a project's own, as a review's suggestion takes its review's trigger's; or `manual` or `planner`. |
+| `orbit.trigger` | string | Who queued the task, its origin: the trigger that queued it, by name, such as `review`, `super-review` or a project's own, as a review's suggestion takes the origin of the review that suggested it, the name of the trigger that queued that review; or `manual` or `planner`. |
 | `orbit.task.fixes` | string | For a fix task, the id of the task it fixes; absent otherwise. |
 | `orbit.task.fix_attempts` | int | How many times the agent was told its work failed verification and asked to fix it. |
 | `orbit.task.wait_ms` | double | How long the task waited in line for a coder's slot, in milliseconds; 0 when it didn't. |
@@ -214,7 +214,7 @@ to run its suggestions. Each starts its own trace: it's a root span, linked to w
 | `orbit.workspace.id` | string | The workspace's id (`unregistered` for one no store registers). |
 | `orbit.session.id` | string | The id of the session open as the review started. |
 | `orbit.role` | string | The review's role: `reviewer`, or `super-reviewer` for a super review. |
-| `orbit.trigger` | string | Who queued the review, its origin: the trigger that queued it, by name, `review` for those orbit queues and a project's trigger for its own; or `manual` or `planner`. |
+| `orbit.trigger` | string | Who queued the review, its origin: the trigger that queued it, by name, `review` or `super-review` for those of orbit's shipped triggers and a project's trigger, such as a `commits` one, for its own; or `manual` or `planner`. |
 | `gen_ai.request.model` | string | The model the review's agent is launched with; absent when the task names none (the CLI's default). |
 | `orbit.review.commits` | int | How many commits the review reads: 1 for a commit's own review or a super review (of the codebase at one commit), the batch's for a batch's review. |
 | `orbit.review.round` | int | The round of the work reviewed: 0 for a commit of the user's or the planner's task, and for a super review; one more for each round of review-suggested work. |

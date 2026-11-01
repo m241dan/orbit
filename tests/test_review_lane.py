@@ -1282,7 +1282,7 @@ async def test_a_project_review_template_lists_what_landed_since_as_the_review_s
     assert (review.task.prompt, brief) == (expected, expected)
 
 
-async def test_a_review_the_user_edited_starts_with_their_prompt() -> None:
+async def test_a_project_review_triggers_review_cant_be_edited_and_starts_as_queued() -> None:
     started, gate = asyncio.Event(), asyncio.Event()
     briefs: list[str] = []
 
@@ -1291,8 +1291,7 @@ async def test_a_review_the_user_edited_starts_with_their_prompt() -> None:
         await gate.wait()
         return await suggests()(call)
 
-    # A project's review trigger of its own, whose reviews, unlike the shipped one's, can be
-    # edited.
+    # A project's review trigger of its own, whose reviews are booked as the shipped one's are.
     check = TRIGGERS["review"].model_copy(update={"prompt": "Review {commit}.\n\n{landed_since}"})
     off = TRIGGERS["review"].model_copy(update={"enabled": False})
     tree = FakeTree()
@@ -1314,9 +1313,11 @@ async def test_a_review_the_user_edited_starts_with_their_prompt() -> None:
     await send(session, EditTask(task_id="4", task=edited))
     gate.set()
     await asyncio.wait_for(collecting, 10)
-    assert board(events)[3].task.prompt == "Look closely at c2."
+    assert refused(INVALID, "Reviews can't be edited; remove it instead.") in events
+    expected = f"Review c2.\n\n{LANDED}\n- Add C"
+    assert board(events)[3].task.prompt == expected
     [brief] = briefs
-    assert brief.split("\n\nWhen you have finished", 1)[0] == "Look closely at c2."
+    assert brief.split("\n\nWhen you have finished", 1)[0] == expected
 
 
 async def test_an_unexpected_error_in_the_review_lane_is_reported() -> None:

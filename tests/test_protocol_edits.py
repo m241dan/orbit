@@ -18,7 +18,11 @@ from orbit.protocol import (
     TaskState,
     TaskStatus,
     edit_refusal,
+    is_orbit_review,
 )
+
+AUDIT = "audit"
+"""A project's own trigger, such as a ``commits`` one queuing a super reviewer's task."""
 
 RUNNING = EditRefusal(code=BUSY, message="Task '3' can't be edited while it runs.")
 REVIEW = EditRefusal(code=INVALID, message="Reviews can't be edited; remove it instead.")
@@ -41,7 +45,7 @@ def test_a_running_review_is_refused_as_running() -> None:
 
 
 @pytest.mark.parametrize("role", sorted(REVIEW_ROLES))
-@pytest.mark.parametrize("origin", [REVIEW_ORIGIN, SUPER_REVIEW])
+@pytest.mark.parametrize("origin", [REVIEW_ORIGIN, SUPER_REVIEW, AUDIT])
 def test_a_review_orbit_queued_cant_be_edited(role: str, origin: str) -> None:
     for status in ("pending", "completed", "error"):
         state = TaskState(id="1", task=TaskSpec(prompt="check", role=role), status=status)
@@ -55,7 +59,7 @@ def test_a_review_the_user_or_the_planner_queued_can_be_edited(role: str, origin
     assert edit_refusal(state) is None
 
 
-@pytest.mark.parametrize("origin", [REVIEW_ORIGIN, SUPER_REVIEW])
+@pytest.mark.parametrize("origin", [REVIEW_ORIGIN, SUPER_REVIEW, AUDIT])
 def test_a_task_a_review_suggested_can_be_edited(origin: str) -> None:
     state = TaskState(id="1", task=TaskSpec(prompt="tidy"), origin=origin, batch="b1", round=1)
     assert edit_refusal(state) is None
@@ -65,3 +69,21 @@ def test_a_task_a_review_suggested_can_be_edited(origin: str) -> None:
 def test_a_settled_or_waiting_coder_task_can_be_edited(status: TaskStatus) -> None:
     state = TaskState(id="1", task=TaskSpec(prompt="go"), status=status)
     assert edit_refusal(state) is None
+
+
+@pytest.mark.parametrize("origin", [REVIEW_ORIGIN, SUPER_REVIEW, AUDIT])
+def test_a_review_roles_task_any_trigger_queued_is_a_review_orbit_queued(origin: str) -> None:
+    for role in REVIEW_ROLES:
+        state = TaskState(id="1", task=TaskSpec(prompt="check", role=role), origin=origin)
+        assert is_orbit_review(state)
+
+
+@pytest.mark.parametrize("origin", [MANUAL_ORIGIN, PLANNER_ORIGIN])
+def test_a_review_the_user_or_the_planner_queued_is_not_one_orbit_queued(origin: str) -> None:
+    state = TaskState(id="1", task=TaskSpec(prompt="check", role=REVIEWER), origin=origin)
+    assert not is_orbit_review(state)
+
+
+def test_a_task_a_trigger_queued_for_another_role_is_not_a_review() -> None:
+    state = TaskState(id="1", task=TaskSpec(prompt="tidy"), origin=AUDIT, batch="b1", round=1)
+    assert not is_orbit_review(state)

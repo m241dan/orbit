@@ -53,9 +53,6 @@ REVIEW_ORIGIN = "review"
 """The task origins' names: the user, the planner and the review trigger; the super review's is
 its trigger's, :data:`SUPER_REVIEW`."""
 
-REVIEW_ORIGINS = frozenset({REVIEW_ORIGIN, SUPER_REVIEW})
-"""The origins of what orbit's reviews queue: their reviews and the tasks they suggest."""
-
 
 PauseReason = str
 """Why a session's run waits to start again by itself: ``usage_limit``, Claude's usage limit

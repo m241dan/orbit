@@ -135,12 +135,20 @@ def test_without_guards_held_on_the_board_nothing_holds_a_trigger_back() -> None
     assert not held_back(guarded, "Look at abc", [task("Look at abc", origin="review")])
 
 
-@pytest.mark.parametrize("origin", ["review", "super-review"])
+def suggested(status: TaskStatus = "pending", origin: str = "review") -> TaskState:
+    """A coder's task a review queued by ``origin`` suggested, in its batch, as ``status``."""
+    return task("Tidy", "coder", status, origin).model_copy(update={"batch": "batch-1", "round": 1})
+
+
+@pytest.mark.parametrize("origin", ["review", "super-review", "audit"])
 def test_suggestions_pending_holds_back_while_a_task_the_reviews_queued_waits(origin: str) -> None:
     guarded = trigger(guards=("suggestions-pending",))
-    assert held_back(guarded, "Look at abc", [task("Tidy", "coder", origin=origin)])
+    assert held_back(guarded, "Look at abc", [suggested(origin=origin)])
+    assert held_back(guarded, "Look at abc", [suggested("running", origin)])
     assert held_back(guarded, "Look at abc", [task("Review", status="running", origin=origin)])
-    assert not held_back(guarded, "Look at abc", [task("Tidy", status="completed", origin=origin)])
+    assert held_back(guarded, "Look at abc", [task("Review", "super-reviewer", origin=origin)])
+    assert not held_back(guarded, "Look at abc", [suggested("completed", origin)])
+    assert not held_back(guarded, "Look at abc", [task("Review", status="error", origin=origin)])
 
 
 def test_suggestions_pending_does_not_hold_back_for_the_users_or_another_triggers_tasks() -> None:
@@ -148,7 +156,9 @@ def test_suggestions_pending_does_not_hold_back_for_the_users_or_another_trigger
     waiting = [
         task("Tidy", "coder"),
         task("Plan", "coder", origin="planner"),
-        task("Look", origin="look"),
+        task("Look"),
+        task("Check", origin="planner"),
+        task("Fix the lint step", "coder", origin="startup-fix"),
     ]
     assert not held_back(guarded, "Look at abc", waiting)
 
@@ -233,8 +243,7 @@ def test_a_disabled_commits_trigger_or_one_whose_role_is_disabled_does_not_count
 
 def test_a_due_trigger_a_guard_holds_back_stays_due_and_fires_once_none_does() -> None:
     triggers = {"super": every(2, guards=("suggestions-pending",))}
-    waiting = (task("Tidy", "coder", origin="review"),)
-    fired, counts = counted_over(triggers, [landing()] * 3, waiting)
+    fired, counts = counted_over(triggers, [landing()] * 3, (suggested(),))
     assert (fired, counts) == ([[], [], []], {"super": 3})
     fired, counts = counted_over(triggers, [landing()], counts=counts)
     assert (fired, counts) == ([["super"]], {"super": 0})

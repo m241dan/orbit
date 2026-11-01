@@ -14,7 +14,6 @@ from orbit.protocol import (
     PLANNER_LANE,
     PLANNER_ORIGIN,
     REVIEW_ORIGIN,
-    REVIEW_ORIGINS,
     SUPER_REVIEW,
     WORK_LANE,
     AcceptTask,
@@ -346,7 +345,7 @@ def test_task_origins_keep_the_names_saved_sessions_use() -> None:
 
 
 def test_the_reviews_origins_are_their_triggers_names() -> None:
-    assert {REVIEW_ORIGIN, SUPER_REVIEW} == REVIEW_ORIGINS == {"review", "super-review"}
+    assert (REVIEW_ORIGIN, SUPER_REVIEW) == ("review", "super-review")
 
 
 def test_fire_trigger_needs_a_trigger_name() -> None:

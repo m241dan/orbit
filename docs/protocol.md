@@ -548,7 +548,8 @@ is refused with `unknown`: `No task with id 't9'.`
   isn't one, as `AddTask` is, and with
   `busy` while the task runs or is
   verified (`Task 't3' can't be edited while it runs.`), and with `invalid` for a review orbit
-  queued itself, whose batch is spent: `Reviews can't be edited; remove it instead.`
+  queued itself, a `reviewer`'s or `super-reviewer`'s task from any trigger (its origin neither
+  `manual` nor `planner`), whose batch is spent: `Reviews can't be edited; remove it instead.`
 - A `TaskSpec`'s `skills` are the skills its agent gets beyond its role's, by name, such as
   `["python", "application"]`: the agent is given its role's skills, then these, each once, in
   place of the project's mapped skills, which a task with none gets. It was added to version 2;

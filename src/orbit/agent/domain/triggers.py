@@ -29,7 +29,7 @@ from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
 from orbit.agent.domain.reviews import ReviewJob
 from orbit.agent.domain.roles import PLAIN_NAME
 from orbit.agent.domain.verification import VerificationStep
-from orbit.protocol import REVIEW_ORIGINS, REVIEWER, TaskState
+from orbit.protocol import REVIEWER, TaskState, is_orbit_review
 
 EventName = Literal[
     "session_started",
@@ -525,9 +525,9 @@ def held_back(trigger: Trigger, prompt: str | None, tasks: Sequence[TaskState]) 
     """Whether a guard of ``trigger`` holds back its task, rendered as ``prompt``, with ``tasks``
     on the board: ``not-queued`` while a task of its role is still to run or running,
     ``dedupe`` while such a task's prompt has the same first line, and ``suggestions-pending``
-    while a task the reviews queued, a review or a suggestion, is (see :data:`REVIEW_ORIGINS`).
-    ``review-rounds`` is decided as it listens. Without a ``prompt``, as a landing is counted
-    before there's one, ``dedupe`` holds nothing back."""
+    while a task the reviews queued is: a review orbit queued, whichever trigger did, or a task
+    in a review's batch. ``review-rounds`` is decided as it listens. Without a ``prompt``, as a
+    landing is counted before there's one, ``dedupe`` holds nothing back."""
     waiting = [state for state in tasks if state.status in WAITING]
     return any(_holds(guard, trigger, prompt, waiting) for guard in trigger.guards)
 
@@ -554,9 +554,11 @@ def _queued(role: str | None, waiting: Sequence[TaskState]) -> bool:
 
 
 def _reviews_queued(waiting: Sequence[TaskState]) -> bool:
-    """Whether one of the tasks ``waiting`` was queued by the reviews, a review or a suggestion
-    (see :data:`REVIEW_ORIGINS`)."""
-    return any(state.origin in REVIEW_ORIGINS for state in waiting)
+    """Whether one of the tasks ``waiting`` was queued by the reviews: a review orbit queued,
+    whichever trigger did (see :func:`~orbit.protocol.is_orbit_review`), or a task in a review's
+    batch, a suggestion or a fix of one. What the tasks hold says so, so a session read back
+    from a save is judged alike."""
+    return any(state.batch is not None or is_orbit_review(state) for state in waiting)
 
 
 def _repeats(prompt: str, waiting: Sequence[TaskState]) -> bool:

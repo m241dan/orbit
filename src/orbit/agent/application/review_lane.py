@@ -305,8 +305,8 @@ class ReviewLane:
             self.planner.added(batch, task_id)
 
     async def suggest(self, task_id: str, title: str, prompt: str) -> Reply:
-        """Review task ``task_id`` suggests a task; queue it unless it's refused, counting it on
-        the review's span either way."""
+        """Review task ``task_id`` suggests a task; queue it unless it's refused, from the
+        review's own origin, its trigger's name, counting it on the review's span either way."""
         # Taken now: the review may end as the suggestion is queued. One ended counts no more.
         tally = self._tallies.get(task_id, ReviewTally())
         reply = await self._suggestion(task_id, title, prompt)
@@ -323,13 +323,13 @@ class ReviewLane:
         refusal = suggestion_refusal(roles) or self.planner.refusal(batch, title, self._board.tasks)
         if refusal is not None:
             return Reply(refusal, is_error=True)
-        # The review is running, as its agent suggests, so it's on the board.
-        skills = self._board.get(task_id).task.skills
-        task = suggested_task(roles[CODER], title, prompt, skills)
-        origin = self._jobs[task_id].origin
+        # The review is running, as its agent suggests, so it's on the board. Its suggestions
+        # take its origin, the trigger that queued it, whatever its job is.
+        review = self._board.get(task_id)
+        task = suggested_task(roles[CODER], title, prompt, review.task.skills)
 
         def add(board: TaskBoard) -> str:
-            new_id = board.add_suggestion(task, batch, self.planner.round_of(batch), origin)
+            new_id = board.add_suggestion(task, batch, self.planner.round_of(batch), review.origin)
             self.planner.added(batch, new_id, title)
             return new_id
 

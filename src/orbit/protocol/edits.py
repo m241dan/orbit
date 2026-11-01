@@ -5,7 +5,11 @@ from dataclasses import dataclass
 
 from orbit.protocol.codes import BUSY, INVALID
 from orbit.protocol.models import ACTIVE_STATUSES, TaskState
-from orbit.protocol.names import REVIEW_ORIGINS, REVIEW_ROLES
+from orbit.protocol.names import MANUAL_ORIGIN, PLANNER_ORIGIN, REVIEW_ROLES
+
+_USERS_ORIGINS = frozenset({MANUAL_ORIGIN, PLANNER_ORIGIN})
+"""The origins of the tasks the user queued, themselves or from the planner's drafts; any other
+is the name of the trigger that queued its task."""
 
 
 @dataclass(frozen=True)
@@ -17,15 +21,23 @@ class EditRefusal:
     message: str
 
 
+def is_orbit_review(state: TaskState) -> bool:
+    """Whether ``state`` is a review orbit queued itself: a review role's task that a trigger
+    queued, its origin that trigger's name, such as ``review``, ``super-review`` or a project's
+    own, rather than the user's or the planner's. Its saved origin says so, so a session read
+    back from a save knows its reviews."""
+    return state.task.role in REVIEW_ROLES and state.origin not in _USERS_ORIGINS
+
+
 def edit_refusal(state: TaskState) -> EditRefusal | None:
     """Why ``state`` can't be edited; None if it can.
 
-    A running or verifying task can't change under its agent, and a review orbit queued, in a
-    review role with a review's origin, has a batch that's spent, so it couldn't run again. A
-    review the user added, or a task a review suggested, can be edited.
+    A running or verifying task can't change under its agent, and a review orbit queued (see
+    :func:`is_orbit_review`) has a batch that's spent, so it couldn't run again. A review the
+    user added, or a task a review suggested, can be edited.
     """
     if state.status in ACTIVE_STATUSES:
         return EditRefusal(BUSY, f"Task {state.id!r} can't be edited while it runs.")
-    if state.task.role in REVIEW_ROLES and state.origin in REVIEW_ORIGINS:
+    if is_orbit_review(state):
         return EditRefusal(INVALID, "Reviews can't be edited; remove it instead.")
     return None

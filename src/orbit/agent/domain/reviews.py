@@ -90,7 +90,10 @@ class ReviewJob:
 
     @property
     def origin(self) -> TaskOrigin:
-        """The origin of the tasks the review suggests."""
+        """The origin of the shipped trigger that reviews work like it: ``super-review`` for a
+        super review, else ``review``, as a batch's landing, which no one task causes, is raised
+        with. The tasks a review suggests take its own task's origin instead, the name of
+        whichever trigger queued it."""
         return SUPER_REVIEW if self.whole else REVIEW_ORIGIN
 
     @property

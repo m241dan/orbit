@@ -61,7 +61,7 @@ from orbit.protocol.commands import (
     command_adapter,
 )
 from orbit.protocol.deprecated import DEPRECATED_MESSAGES
-from orbit.protocol.edits import EditRefusal, edit_refusal
+from orbit.protocol.edits import EditRefusal, edit_refusal, is_orbit_review
 from orbit.protocol.envelope import (
     CONNECTION_EVENTS,
     CONTROL_PLANE_EVENTS,
@@ -190,7 +190,6 @@ from orbit.protocol.names import (
     PLANNER_ORIGIN,
     PROTOCOL_VERSION,
     REVIEW_ORIGIN,
-    REVIEW_ORIGINS,
     REVIEW_ROLES,
     REVIEWER,
     STARTUP_TASK,
@@ -262,7 +261,6 @@ __all__ = [
     "REFUSAL_CODES",
     "REVIEWER",
     "REVIEW_ORIGIN",
-    "REVIEW_ORIGINS",
     "REVIEW_ROLES",
     "SAVE_FAILED",
     "SESSIONLESS_EVENTS",
@@ -421,6 +419,7 @@ __all__ = [
     "edit_refusal",
     "encode",
     "event_adapter",
+    "is_orbit_review",
     "looks_like_url",
     "trace_carrier",
     "with_state",
