@@ -22,6 +22,7 @@ from orbit.agent import (
     SkillMap,
     key_parts,
 )
+from orbit.tui.view.common import counted
 
 type Text = Instructions | SkillFileText
 """A value shown by its length, or with ``full`` as its text."""
@@ -130,7 +131,7 @@ def _json(setting: Setting, full: bool) -> dict[str, Any]:
 
 def _summary(text: Text) -> str:
     """``text`` as how many lines it has, after the file instructions are in, or ``inline``."""
-    lines = f"{text.lines} line{'' if text.lines == 1 else 's'}"
+    lines = counted(text.lines, "line")
     if isinstance(text, SkillFileText):
         return f"({lines})"
     return f"({text.file or 'inline'}, {lines})"

@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable
 from typing import Protocol
 
 from orbit.protocol import ApprovalDecided, ApprovalDecision, ApprovalRequested, DecideApproval
+from orbit.tui.view.common import counted
 
 APPROVAL_TITLE = "Consultation past the hourly limit"
 
@@ -17,10 +18,9 @@ APPROVAL_CHOICES: tuple[tuple[str, ApprovalDecision, str], ...] = (
 
 def approval_text(request: ApprovalRequested) -> str:
     """What the approval modal asks about ``request``, then its choices, each by its key."""
-    asked = f"{request.asked} time" if request.asked == 1 else f"{request.asked} times"
     question = (
         f"The {request.asker} wants to ask the {request.consultant}: '{request.title}'. "
-        f"It has asked {asked} this hour."
+        f"It has asked {counted(request.asked, 'time')} this hour."
     )
     choices = [f"{key}  {label}" for key, _, label in APPROVAL_CHOICES]
     return "\n".join([question, "", *choices])

@@ -21,6 +21,7 @@ from orbit.agent import (
 )
 from orbit.cli.errors import _exit_on
 from orbit.cli.options import ConfigDirOption, StateDirOption
+from orbit.tui.view.common import counted
 
 
 def version() -> None:
@@ -80,18 +81,13 @@ async def _forgotten(state: Path, key: str) -> Purged:
 def _forgotten_note(purged: Purged) -> str:
     """What's said once ``purged`` is purged: what was deleted."""
     deleted = [
-        _counted(purged.sessions, "session"),
-        _counted(purged.fallback_files, "fallback file"),
+        counted(purged.sessions, "session"),
+        counted(purged.fallback_files, "fallback file"),
     ]
     if purged.clone is not None:
         deleted.append(f"its clone {purged.clone}")
     *rest, last = deleted
     return f"Forgot {purged.workspace.path}: deleted {', '.join(rest)} and {last}."
-
-
-def _counted(count: int, thing: str) -> str:
-    """``count`` of ``thing``, made plural unless there's one."""
-    return f"{count} {thing}" if count == 1 else f"{count} {thing}s"
 
 
 def rotate(config_dir: ConfigDirOption = None) -> None:

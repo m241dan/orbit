@@ -4,6 +4,8 @@ from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 
+from orbit.agent.domain.wording import counted
+
 
 class FailedWrite(StrEnum):
     """Which write to the store failed."""
@@ -123,5 +125,4 @@ def lost_spans(lost: Collection[int], seqs: Iterable[int]) -> list[SeqSpan]:
 
 def recovered_note(count: int, path: str) -> str:
     """The note that ``count`` events parked in the fallback file at ``path`` were recovered."""
-    events = "event" if count == 1 else "events"
-    return f"Recovered {count} {events} from {path} into the session's log."
+    return f"Recovered {counted(count, 'event')} from {path} into the session's log."

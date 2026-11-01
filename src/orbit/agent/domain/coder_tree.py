@@ -4,6 +4,8 @@ facts and carries out the step."""
 
 from typing import Literal
 
+from orbit.agent.domain.wording import counted, noun
+
 MergeStep = Literal["detached", "merged", "fast-forward", "rebase"]
 """How the coder's work goes into the base branch: not at all, without one; nothing to do, as
 the base has it already; the base moved up to it; or replayed onto the base first."""
@@ -38,24 +40,21 @@ def unmerged_note(count: int, branch: str, base: str) -> str | None:
     none."""
     if not count:
         return None
-    commits = "commit" if count == 1 else "commits"
-    return f"{count} {commits} on {branch} not yet merged into {base}."
+    return f"{counted(count, 'commit')} on {branch} not yet merged into {base}."
 
 
 def stashed_note(count: int) -> str | None:
     """The note that ``count`` stashes hold unverified work; none for none."""
     if not count:
         return None
-    stashes = "stash" if count == 1 else "stashes"
-    return f"{count} {stashes} of unverified orbit work; see git stash list."
+    return f"{counted(count, 'stash', 'stashes')} of unverified orbit work; see git stash list."
 
 
 def stale_snapshots_note(count: int) -> str | None:
     """The note that earlier runs left ``count`` snapshot worktrees; none for none."""
     if not count:
         return None
-    worktrees = "worktree" if count == 1 else "worktrees"
     return (
-        f"{count} snapshot {worktrees} left in .git/orbit by earlier runs; "
+        f"{count} snapshot {noun(count, 'worktree')} left in .git/orbit by earlier runs; "
         "remove them with git worktree remove."
     )

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.refusals import Refused
+from orbit.agent.domain.wording import counted
 from orbit.agent.domain.workspaces import RegisteredWorkspace
 from orbit.protocol import INVALID
 
@@ -29,11 +30,6 @@ class Purged:
     clone: str | None
 
 
-def _counted(count: int, one: str, many: str) -> str:
-    """``count`` of something, called ``one`` or ``many`` as the count says."""
-    return f"{count} {one if count == 1 else many}"
-
-
 def clone_losses(
     changed: int, stashes: int, unpushed: Sequence[tuple[str, int]], detached: int
 ) -> list[str]:
@@ -43,18 +39,16 @@ def clone_losses(
     has; none when it would lose nothing."""
     losses: list[str] = []
     if changed:
-        losses.append(f"uncommitted changes to {_counted(changed, 'file', 'files')}")
+        losses.append(f"uncommitted changes to {counted(changed, 'file')}")
     if stashes:
-        losses.append(_counted(stashes, "stash", "stashes"))
+        losses.append(counted(stashes, "stash", "stashes"))
     losses += [
-        f"{_counted(count, 'commit', 'commits')} on {branch} not on its remote"
+        f"{counted(count, 'commit')} on {branch} not on its remote"
         for branch, count in unpushed
         if count
     ]
     if detached:
-        losses.append(
-            f"{_counted(detached, 'commit', 'commits')} on a detached HEAD not on its remote"
-        )
+        losses.append(f"{counted(detached, 'commit')} on a detached HEAD not on its remote")
     return losses
 
 

@@ -28,6 +28,7 @@ from orbit.agent.domain.consultations import RESTARTED
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot, SuperReviewCount
 from orbit.agent.domain.runtimes import CLAUDE
+from orbit.agent.domain.wording import noun
 from orbit.protocol import (
     BUSY,
     INVALID,
@@ -467,8 +468,10 @@ def resumed_settings(saved: Settings, given: Settings, pinned: Collection[str]) 
 def imported_note(count: int, sessions: str, folder: str) -> str:
     """The note that ``count`` sessions saved as files in the folder ``sessions`` were imported,
     and that the folder is now named ``folder``."""
-    noun = "session" if count == 1 else "sessions"
-    return f"Imported {count} saved {noun} from {sessions}; the old folder is now {folder}."
+    return (
+        f"Imported {count} saved {noun(count, 'session')} from {sessions}; "
+        f"the old folder is now {folder}."
+    )
 
 
 def parse_review_count(text: str) -> SuperReviewCount:
