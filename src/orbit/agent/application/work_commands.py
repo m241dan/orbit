@@ -22,7 +22,8 @@ from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.catalog import trigger_names
 from orbit.agent.domain.refusals import Refused, unknown
-from orbit.agent.domain.roles import Role, check_enabled, check_model, check_settings
+from orbit.agent.domain.role_runtimes import check_model, check_settings
+from orbit.agent.domain.roles import Role, check_enabled
 from orbit.agent.domain.skills import check_task_skills
 from orbit.protocol import (
     CONFIGURE_CHECKS,
@@ -238,7 +239,7 @@ class WorkCommands:
 
     def _check_model(self, role: str, settings: Settings) -> None:
         """Refuse ``settings`` for role ``role`` unless its runtime takes their model, as
-        :func:`~orbit.agent.domain.roles.check_model` says; nothing is refused without
+        :func:`~orbit.agent.domain.role_runtimes.check_model` says; nothing is refused without
         agents."""
         desk = self._parts.desk
         check_model(role, settings.model, desk.agents.model_aliases(role) if desk else None)
@@ -246,8 +247,8 @@ class WorkCommands:
 
     def _check_capabilities(self, role: str, settings: Settings) -> None:
         """Refuse ``settings`` for role ``role`` if they ask for more than its runtime's
-        launcher can do, as :func:`~orbit.agent.domain.roles.check_settings` says; nothing is
-        refused without agents, for a role they don't have or on a runtime without a
+        launcher can do, as :func:`~orbit.agent.domain.role_runtimes.check_settings` says;
+        nothing is refused without agents, for a role they don't have or on a runtime without a
         launcher."""
         desk = self._parts.desk
         runtime = desk.agents.runtime(role) if desk else None

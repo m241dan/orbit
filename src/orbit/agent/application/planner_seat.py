@@ -17,7 +17,8 @@ from orbit.agent.application.role_copies import RoleCopies
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.refusals import Refused
-from orbit.agent.domain.roles import Role, check_model, disabled_note
+from orbit.agent.domain.role_runtimes import check_model
+from orbit.agent.domain.roles import Role, disabled_note
 from orbit.agent.domain.runtimes import not_running
 from orbit.agent.domain.sessions import (
     SavedConversation,

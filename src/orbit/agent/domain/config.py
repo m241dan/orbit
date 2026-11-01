@@ -27,16 +27,13 @@ from orbit.agent.domain.layers import (
     runs_on_shared_runtime,
 )
 from orbit.agent.domain.reviews import ReviewLimits
-from orbit.agent.domain.roles import (
+from orbit.agent.domain.role_runtimes import (
     ASKS,
-    Role,
-    RoleName,
     capability_problems,
     model_problems,
-    role_clashes,
     runtime_problems,
-    with_enabled_consults,
 )
+from orbit.agent.domain.roles import Role, RoleName, role_clashes, with_enabled_consults
 from orbit.agent.domain.runtimes import (
     UNCHECKED,
     ModelAliases,
@@ -188,7 +185,7 @@ def load_config(
     runtime can do, as ``rules`` say by runtime. Raises :class:`ConfigError` naming each problem
     if it's invalid, as it is when a role's runtime is one this version of orbit doesn't know,
     doesn't take its model or can't do what the role asks (see
-    :func:`~orbit.agent.domain.roles.runtime_problems`), a :class:`PersonalRoleError` if the
+    :func:`~orbit.agent.domain.role_runtimes.runtime_problems`), a :class:`PersonalRoleError` if the
     personal roles are at fault, and a :class:`UserConfigError` if a model the user config sets
     isn't one its role's runtime takes, after the project's problems.
     """
@@ -359,15 +356,15 @@ def _users_problems(
 
 def _model_problem(key: str, role: Role, rules: RuntimeRules) -> list[str]:
     """Why ``role``'s model, set under ``key``, is refused, as
-    :func:`~orbit.agent.domain.roles.model_problems` says with the models ``rules`` say its
+    :func:`~orbit.agent.domain.role_runtimes.model_problems` says with the models ``rules`` say its
     runtime takes."""
     return model_problems(key, role, rules.models.get(role.runtime))
 
 
 def _ask_problems(name: str, role: Role, rules: RuntimeRules, fields: tuple[str, ...]) -> list[str]:
     """What role ``name``, ``role``, asks for in its ``fields`` that its runtime can't do, as
-    :func:`~orbit.agent.domain.roles.capability_problems` says, if it's enabled and ``rules``
-    say what its runtime can do; nothing otherwise."""
+    :func:`~orbit.agent.domain.role_runtimes.capability_problems` says, if it's enabled and
+    ``rules`` say what its runtime can do; nothing otherwise."""
     can = rules.capabilities.get(role.runtime)
     if not role.enabled or can is None:
         return []

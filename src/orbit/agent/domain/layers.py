@@ -16,13 +16,8 @@ from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 from pydantic_core import ErrorDetails
 
 from orbit.agent.domain.config_errors import ConfigError, dotted, validation_problems
-from orbit.agent.domain.roles import (
-    Role,
-    RoleName,
-    check_runtimes,
-    role_clashes,
-    with_enabled_consults,
-)
+from orbit.agent.domain.role_runtimes import check_runtimes
+from orbit.agent.domain.roles import Role, RoleName, role_clashes, with_enabled_consults
 from orbit.agent.domain.runtimes import UNCHECKED, RuntimeRules, knows_runtime, unknown_runtime
 from orbit.protocol import Effort
 
@@ -283,9 +278,9 @@ def resolve_roles(
 
     Raises :class:`ConfigError` naming the role and field if a role is invalid, or each role
     whose runtime this version of orbit doesn't know, doesn't take its model or can't do what
-    it asks (see
-    :func:`~orbit.agent.domain.roles.runtime_problems`), and :class:`PersonalRoleError` if the
-    personal roles break a rule across the roles that the others keep.
+    it asks (see :func:`~orbit.agent.domain.role_runtimes.runtime_problems`), and
+    :class:`PersonalRoleError` if the personal roles break a rule across the roles that the
+    others keep.
     """
     merged = merge_roles(package, user, project)
     roles = _validated(merged.tables)

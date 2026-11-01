@@ -64,7 +64,8 @@ from orbit.agent.domain.layers import Layer
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.purging import Purged, PurgeRefused
 from orbit.agent.domain.remotes import RemoteSettings
-from orbit.agent.domain.roles import Role, runtime_roles
+from orbit.agent.domain.role_runtimes import runtime_roles
+from orbit.agent.domain.roles import Role
 from orbit.agent.domain.runtimes import CLAUDE, KIRO, known_runtimes, knows_runtime, not_on_path
 from orbit.agent.domain.server import LocalTls, RunningServer, ServerSettings, TlsMode
 from orbit.agent.domain.storage import StorageSettings
