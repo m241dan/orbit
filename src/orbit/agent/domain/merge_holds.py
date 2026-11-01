@@ -6,7 +6,7 @@ from collections.abc import Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass, replace
 from itertools import accumulate
 
-from orbit.agent.domain.verification import CheckSet
+from orbit.agent.domain.verification import CheckSet, VerificationStep
 from orbit.agent.domain.wording import counted
 from orbit.protocol import MergeHold, TaskState
 
@@ -103,14 +103,32 @@ def decide_failure(holds: Sequence[Hold], failed: Hold, limit: int, fixing: bool
     return HoldDecision((*others, replace(failed, fixes=tried + 1)), notes, fix=True)
 
 
+def decide_unlanded_fix(holds: Sequence[Hold], name: str, limit: int, fixing: bool) -> HoldDecision:
+    """What a chain of fixes for the set ``name`` ending without its work merging comes to,
+    given the ``holds`` on and the ``limit`` of fixes a hold queues: another failure of its
+    hold, as the failure it recorded, as :func:`decide_failure` says; nothing while a fix is
+    ``fixing`` it still, or if the set holds none."""
+    held = find_hold(holds, name)
+    if held is None or fixing:
+        return HoldDecision(tuple(holds))
+    return decide_failure(holds, held, limit, fixing=False)
+
+
 def lift_hold(holds: Sequence[Hold], name: str) -> tuple[Hold, ...]:
     """``holds`` without the set ``name``'s."""
     return tuple(hold for hold in holds if hold.name != name)
 
 
-def holding_sets(sets: Iterable[CheckSet]) -> tuple[str, ...]:
-    """The names of the ``sets`` that hold merges when they fail."""
-    return tuple(check_set.name for check_set in sets if check_set.effect == "holds_merges")
+def holding_sets(sets: Iterable[CheckSet]) -> tuple[CheckSet, ...]:
+    """The ``sets`` that hold merges when they fail."""
+    return tuple(check_set for check_set in sets if check_set.effect == "holds_merges")
+
+
+def held_step(sets: Iterable[CheckSet], hold: Hold) -> VerificationStep | None:
+    """The step ``hold``'s set failed at, among ``sets``; none if no set of its name has a step
+    of that name, as when the set changed since."""
+    steps = (step for check_set in sets if check_set.name == hold.name for step in check_set.steps)
+    return next((step for step in steps if step.name == hold.step), None)
 
 
 def kept_holds(holds: Sequence[Hold], holding: Collection[str]) -> tuple[Hold, ...]:

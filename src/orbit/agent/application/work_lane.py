@@ -6,7 +6,8 @@ hears how each task ended, as the triggers do: ``task_landed`` for work that lan
 the review lane while there's one, and ``task_finished`` for every task that ended. While a set
 holds merges, a task's verified work is committed in the coder's tree and waits there, unmerged
 and unreviewed, but a fix for a set held, which merges with the work stacked beneath it; once no
-hold is left, the work waiting lands, in order, and is told of as landed then. A run stops
+hold is left, the work waiting lands, in order, and is told of as landed then; a chain of fixes
+for a set held that ends without merging is told to the holds, which queue the next. A run stops
 at a task its agent couldn't do for the usage limit or for the API not answering, as the
 launcher of its role's runtime tells its error, at a fix that ends in error, which must run
 before anything puts its work aside, once the session halts, and before a task its caller holds
@@ -158,6 +159,8 @@ class WorkLane:
         self._seated = False  # The run holds a coder's slot, for the task about to run or running.
         # Task id -> the commit it merged into the base, until reported.
         self._landed: dict[str, str] = {}
+        # The fixes for sets held whose work merged, running their sets again, until reported.
+        self._fixes_landed: set[str] = set()
         self._starts: dict[str, str] = {}  # Task id -> the tree's head when it started.
         # Fixes queued per step along each chain, kept across runs so a restart can't reset
         # the cap.
@@ -178,6 +181,7 @@ class WorkLane:
         self._fallbacks = FallbackFixes()
         self._resume = None
         self._landed.clear()
+        self._fixes_landed.clear()
         self._starts.clear()
         self._waiting.clear()
         self._stacked.clear()
@@ -446,18 +450,29 @@ class WorkLane:
 
     async def _report_to_review(self, state: TaskState, outcome: Outcome | None) -> None:
         """Tell the review lane the commit the task that was ``state`` merged, if any, or else,
-        if it finished in ``outcome`` rather than being cut short, that it ended, and the
-        triggers that it finished, if it did. The task is told of as it ended, without looking
-        it up: a task is published as finished before the save that follows, and one removed in
-        that window is reviewed all the same."""
+        if it finished in ``outcome`` rather than being cut short, that it ended, the triggers
+        that it finished, if it did, and the holds, if it's a fix that didn't land. The task is
+        told of as it ended, without looking it up: a task is published as finished before the
+        save that follows, and one removed in that window is reviewed all the same."""
         await self._report_stacked()
         commit = self._landed.pop(state.id, None)
+        fix_landed = state.id in self._fixes_landed
+        self._fixes_landed.discard(state.id)
         if outcome is None:  # Cut short: only work that landed is told of, to be reviewed.
             if commit is not None:
                 await self._report_landed(state, commit)
             return
         ended = state.model_copy(update={"status": outcome.status})
         await self._report_end(ended, commit, self._failure(state.task.role, outcome))
+        if not fix_landed:
+            await self._report_unlanded_fix(ended)
+
+    async def _report_unlanded_fix(self, state: TaskState) -> None:
+        """Tell the holds, if any, that the task that ended as ``state`` ended without its work
+        merging, in case it's a fix for a set held; not if it was cancelled, which leaves it to
+        run again."""
+        if self._holds is not None and state.status != "cancelled":
+            await self._holds.hear_unlanded_fix(state)
 
     async def _report_end(
         self, state: TaskState, commit: str | None, stop: RuntimeStop | None
@@ -589,6 +604,7 @@ class WorkLane:
             return
         fixed = holds.fix_of(state)
         if fixed is not None:
+            self._fixes_landed.add(state.id)
             holds.fix_landed(fixed, state.origin)
 
     def _recheck(self, state: TaskState) -> Verifier | None:

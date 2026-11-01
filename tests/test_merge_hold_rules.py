@@ -6,11 +6,13 @@ from orbit.agent.domain.merge_holds import (
     Hold,
     HoldDecision,
     decide_failure,
+    decide_unlanded_fix,
     find_hold,
     fix_root,
     fix_title,
     fixed_set,
     held_note,
+    held_step,
     hold_view,
     holding_sets,
     kept_holds,
@@ -21,7 +23,7 @@ from orbit.agent.domain.merge_holds import (
     stacked_commits,
     step_in_note,
 )
-from orbit.agent.domain.verification import CheckSet
+from orbit.agent.domain.verification import CheckSet, VerificationStep
 from orbit.protocol import MergeHold, TaskSpec, TaskState
 
 STRESS = Hold("stress", "1a2b3c4d5e", "Stress tests", "2 failed")
@@ -85,6 +87,29 @@ def test_with_no_fixes_allowed_a_first_failure_holds_and_asks_the_user_to_step_i
     )
 
 
+def test_a_fix_ending_unlanded_is_its_holds_failure_again_queuing_another_fix() -> None:
+    held = (Hold("stress", "c4", "Stress tests", "2 failed", 1), SOAK)
+    assert decide_unlanded_fix(held, "stress", 3, fixing=False) == HoldDecision(
+        (SOAK, Hold("stress", "c4", "Stress tests", "2 failed", 2)), fix=True
+    )
+
+
+def test_a_fix_ending_unlanded_once_the_fixes_ran_out_asks_the_user_to_step_in() -> None:
+    held = (Hold("stress", "c4", "Stress tests", "2 failed", 3),)
+    assert decide_unlanded_fix(held, "stress", 3, fixing=False) == HoldDecision(
+        held, (step_in_note("stress", 3),)
+    )
+
+
+def test_a_fix_ending_unlanded_while_another_carries_on_changes_nothing() -> None:
+    held = (Hold("stress", "c4", "Stress tests", "2 failed", 1), SOAK)
+    assert decide_unlanded_fix(held, "stress", 3, fixing=True) == HoldDecision(held)
+
+
+def test_a_fix_ending_unlanded_for_a_set_holding_none_changes_nothing() -> None:
+    assert decide_unlanded_fix((SOAK,), "stress", 3, fixing=False) == HoldDecision((SOAK,))
+
+
 def test_each_set_holds_on_its_own() -> None:
     decision = decide_failure((SOAK,), STRESS, 3, fixing=False)
     assert decision.holds == (SOAK, Hold("stress", "1a2b3c4d5e", "Stress tests", "2 failed", 1))
@@ -103,8 +128,23 @@ def test_holds_started_before_the_kept_ones_were_read_replace_their_sets() -> No
 
 
 def test_the_sets_holding_merges_are_those_whose_failure_does() -> None:
-    sets = (CheckSet("stress", (), "holds_merges"), CheckSet("nightly", ()))
-    assert holding_sets(sets) == ("stress",)
+    stress = CheckSet("stress", (), "holds_merges")
+    assert holding_sets((stress, CheckSet("nightly", ()))) == (stress,)
+
+
+def test_a_holds_step_is_found_in_its_set_by_name() -> None:
+    step = VerificationStep("Stress tests", ("stress",), "stress")
+    sets = (
+        CheckSet("soak", (VerificationStep("Stress tests", ("soak",), "soak"),), "holds_merges"),
+        CheckSet("stress", (VerificationStep("Lint", ("lint",), "stress"), step), "holds_merges"),
+    )
+    assert held_step(sets, STRESS) == step
+
+
+def test_a_holds_step_gone_from_its_set_is_found_nowhere() -> None:
+    sets = (CheckSet("stress", (VerificationStep("Lint", ("lint",), "stress"),), "holds_merges"),)
+    assert held_step(sets, STRESS) is None
+    assert held_step((), STRESS) is None
 
 
 def test_a_hold_shows_its_set_commit_and_failed_step() -> None:

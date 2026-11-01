@@ -48,7 +48,7 @@ class Holds:
             self.kicked.append,
             lambda name, trigger: self.reruns.append((name, trigger)),
         )
-        self.holds = MergeHolds(("stress", "soak"), limit, parts)
+        self.holds = MergeHolds((STRESS, SOAK), limit, parts)
         self.holds.changed = self.change
         self.holds.released = self.release
 
@@ -182,6 +182,70 @@ def test_a_landed_fix_runs_its_set_again_as_its_trigger() -> None:
     holds = Holds()
     holds.holds.fix_landed("stress", "nightly")
     assert holds.reruns == [("stress", "nightly")]
+
+
+async def test_a_fix_ending_unlanded_queues_the_next_first_from_its_trigger() -> None:
+    holds = Holds()
+    board = holds.tasks.board
+    await failed(holds)
+    fix = board.tasks[0].id
+    board.set_status(fix, "gave_up")
+    await holds.holds.hear_unlanded_fix(board.get(fix))
+
+    assert holds.holds.holds == (Hold("stress", "c4", "Stress tests", "2 failed", 2),)
+    nxt = board.tasks[0]
+    assert (nxt.origin, nxt.status) == ("nightly", "pending") and nxt.id != fix
+    assert nxt.task.prompt.startswith("Fix the failing set: stress\n\n")
+    assert "Its output:\n\n2 failed" in nxt.task.prompt
+    assert holds.kicked == [CODER, CODER]
+
+
+async def test_a_fix_ending_unlanded_while_a_fix_carries_on_from_it_queues_no_other() -> None:
+    holds = Holds()
+    board = holds.tasks.board
+    await failed(holds)
+    fix = board.tasks[0].id
+    board.set_status(fix, "unverified")
+    board.add(TaskSpec(prompt="Fix the failed verification step: Lint"), fixes=fix)
+    await holds.holds.hear_unlanded_fix(board.get(fix))
+    assert len(holds.prompts()) == 2 and holds.holds.holds == (HELD,)
+
+
+async def test_a_fix_ending_unlanded_once_the_fixes_ran_out_asks_the_user_to_step_in() -> None:
+    holds = Holds(limit=1)
+    board = holds.tasks.board
+    await failed(holds)
+    fix = board.tasks[0].id
+    board.set_status(fix, "error")
+    await holds.holds.hear_unlanded_fix(board.get(fix))
+    assert holds.prompts() == [board.get(fix).task.prompt] and holds.holds.holds == (HELD,)
+    assert holds.notices()[-1] == (
+        "stress still fails after 1 fix; merges stay held. Release with ctrl+f or fix it yourself."
+    )
+
+
+async def test_a_task_ending_unlanded_that_fixes_no_set_held_changes_nothing() -> None:
+    holds = Holds()
+    board = holds.tasks.board
+    other = board.add(TaskSpec(prompt="Add a flag."))
+    await failed(holds)
+    fix = board.tasks[0].id
+    await passed(holds)
+    await holds.holds.hear_unlanded_fix(board.get(other))
+    await holds.holds.hear_unlanded_fix(board.get(fix))
+    assert len(holds.prompts()) == 2 and not holds.holds.held and holds.reruns == []
+
+
+async def test_a_fix_ending_unlanded_runs_its_set_again_if_its_step_is_gone() -> None:
+    store = FakeStore()
+    store.holds = (Hold("stress", "c4", "Old step", "2 failed", 1),)
+    holds = Holds(store)
+    await holds.holds.restore()
+    board = holds.tasks.board
+    fix = board.add_first(TaskSpec(prompt="Fix the failing set: stress"), "nightly")
+    board.set_status(fix, "gave_up")
+    await holds.holds.hear_unlanded_fix(board.get(fix))
+    assert holds.reruns == [("stress", "nightly")] and len(holds.prompts()) == 1
 
 
 async def test_holds_kept_are_restored_without_the_sets_removed() -> None:
