@@ -11,6 +11,7 @@ from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.reviews import ReviewLimits, ReviewPlanner
 from orbit.agent.domain.roles import Role
+from orbit.agent.domain.usage_limits import RuntimeStop
 from orbit.protocol import Event, TasksChanged, TaskSpec, TaskState
 from tests.agent_fakes import ROLES
 
@@ -46,7 +47,7 @@ class Hearing(ReviewLane):
     async def landed(self, state: TaskState, commit: str) -> None:
         self.heard.append(("landed", state.id, commit))
 
-    async def ended(self, state: TaskState) -> None:
+    async def ended(self, state: TaskState, stop: RuntimeStop | None = None) -> None:
         self.heard.append(("ended", state.id, state.status))
 
 

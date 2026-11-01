@@ -111,10 +111,10 @@ class LaneParts:
 @dataclass(frozen=True)
 class LaneWork:
     """What a lane runs: ``next_task`` is the task to run next, skipping those given, ``run``
-    runs one to its end, and ``spent`` are the tasks not to run again."""
+    runs one to its end, whatever it returns, and ``spent`` are the tasks not to run again."""
 
     next_task: Callable[[Collection[str]], str | None]
-    run: Callable[[str], Awaitable[None]]
+    run: Callable[[str], Awaitable[object]]
     spent: Callable[[], set[str]] = set
 
 
@@ -200,14 +200,15 @@ class LaneRunner:
         unexpected escapes."""
         return await self._agent.run_alone(run())
 
-    async def run_in_workspace(self, task_id: str) -> None:
+    async def run_in_workspace(self, task_id: str) -> bool:
         """Run task ``task_id`` to its end through a new agent, as :func:`run_in_role_workspace`
-        does; the user's stop ends it as stopped by them."""
+        does; the user's stop ends it as stopped by them. Returns whether it's left to run
+        again, as :meth:`ran` says."""
         agent = partial(run_in_role_workspace, task_id, self._tasks, self._desk)
         run = partial(self.alone, agent)
         stop = UserStop(STOPPED_BY_YOU)
         outcome = await run_task_to_end(self._tasks, task_id, run, stop, self._desk.publish)
-        await self.ran(task_id, outcome)
+        return await self.ran(task_id, outcome)
 
     async def ran(self, task_id: str, outcome: Outcome) -> bool:
         """Whether task ``task_id``, which ended in ``outcome``, stopped at its runtime's usage

@@ -407,15 +407,19 @@ class WorkLane:
             if commit is not None:
                 await self._report_landed(state, commit)
             return
-        await self._report_end(state.model_copy(update={"status": outcome.status}), commit)
+        ended = state.model_copy(update={"status": outcome.status})
+        await self._report_end(ended, commit, self._failure(state.task.role, outcome))
 
-    async def _report_end(self, state: TaskState, commit: str | None) -> None:
+    async def _report_end(
+        self, state: TaskState, commit: str | None, stop: RuntimeStop | None
+    ) -> None:
         """Tell the review lane that the task that ended as ``state`` landed ``commit``, if it
-        did, or else that it ended, and the triggers that it finished."""
+        did, or else that it ended, stopped by its runtime's limit or an outage, ``stop``, if
+        one did, which leaves it for a run to start with; and the triggers that it finished."""
         if commit is not None:
             await self._report_landed(state, commit)
         elif self._review is not None:
-            await self._review.ended(state)
+            await self._review.ended(state, stop)
         if self._triggers is not None:
             self._triggers.run(await self._triggers.finished(state))
 

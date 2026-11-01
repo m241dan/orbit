@@ -2,7 +2,9 @@
 
 Each review runs in a read-only snapshot of the commit it reviews, on the :class:`LaneRunner` of
 the review roles' lane, which runs the tasks of every role in it, the others as any lane runs its
-tasks. Its suggestions become tasks at the end of the queue, which the work lane then runs;
+tasks. Its suggestions become tasks at the end of the queue, which the work lane then runs; a task
+of another role booked as a review, run in this lane or the work lane, ends its batch as a review
+does once it ends.
 :class:`ReviewPlanner` decides when a review is due and stops reviews generating work forever.
 It's the ``review-rounds`` guard: the lane raises each landing as ``task_landed``, and a review
 of commits is queued by the triggers it guards, from their templates. It counts each landing
@@ -51,6 +53,7 @@ from orbit.agent.domain.reviews import (
 from orbit.agent.domain.role_lanes import review_lane, task_lanes
 from orbit.agent.domain.suggestions import suggested_task, suggestion_refusal
 from orbit.agent.domain.triggers import Trigger, render_template, restart_counts
+from orbit.agent.domain.usage_limits import RuntimeStop
 from orbit.execution.cancelling import cancelling
 from orbit.protocol import (
     CODER,
@@ -203,7 +206,8 @@ class ReviewLane:
         """The task that ended as ``state`` landed ``commit``: raise ``task_landed``, its own
         review, if due, the one ``review-rounds`` finds, queue the review of the batch it
         finished, if it did, and count it toward the ``commits`` triggers, those that fire
-        reviewing the codebase at it. The task isn't looked up: it may have been removed since it
+        reviewing the codebase at it; then end the batch it suggested into, if the lane booked
+        it, as :meth:`_ended` says. The task isn't looked up: it may have been removed since it
         finished, and its work is reviewed all the same."""
         job = self.planner.landed(state, commit)
         # Counted before the commit's own review is queued, which would hold a due super review;
@@ -213,6 +217,7 @@ class ReviewLane:
         await self._land(state, commit, job)
         if whole is not None:
             await self._queue_whole(fired, *whole)
+        await self._ended(state.id)
         await self._hooks.changed()  # The count changed even if no review is due.
 
     def _count(self, state: TaskState) -> list[tuple[str, Trigger]]:
@@ -273,10 +278,15 @@ class ReviewLane:
         pending = pending_titles(self._board.tasks)
         return review_values(job, "", self.planner.cap(job), pending, landed)
 
-    async def ended(self, state: TaskState) -> None:
-        """The task that ended as ``state`` finished without landing anything. The task isn't
-        looked up: it may have been removed since it finished."""
+    async def ended(self, state: TaskState, stop: RuntimeStop | None = None) -> None:
+        """The task that ended as ``state`` finished without landing anything, or was stopped
+        by ``stop``, its runtime's usage limit or an outage, which leaves it to run again. The
+        batch it suggested into, if the lane booked it, ends as :meth:`_ended` says, unless it's
+        left to run again. The task isn't looked up: it may have been removed since it
+        finished."""
         await self._queue(self.planner.ended(state))
+        if stop is None:
+            await self._ended(state.id)
 
     async def removed(self, task_id: str, state: TaskState) -> None:
         """Task ``task_id``, which was ``state``, was taken off the board. A review's batch
@@ -487,29 +497,42 @@ class ReviewLane:
 
     def _is_review(self, task_id: str) -> bool:
         """Whether task ``task_id`` is a review: a review role's task, whether orbit queued it
-        or the user added it. One taken off the board is a review the lane still follows up, as
-        only a review is followed up once it ends."""
+        or the user added it. One taken off the board is a review the lane still follows up. A
+        task of another role isn't, even one the lane booked as a review, such as a ``commits``
+        trigger's: it runs as any task of its lane does, this lane's or the work lane's, and its
+        batch ends as it ends, however it does, as a review's does (see :meth:`_ended`), unless
+        its runtime's limit or an outage leaves it to run again."""
         state = self._board.find(task_id)
         return state is None or state.task.role in REVIEW_ROLES
 
     async def _review(self, task_id: str) -> None:
         """Run task ``task_id`` to its end: as a review if it's one, else as any lane runs its
-        tasks. A review its runtime's limit or an outage stopped is left to run again, its batch
-        as it was."""
+        tasks; either way, it then ends, as :meth:`_run_and_end` says."""
         if not self._is_review(task_id):
-            await self.runner.run_in_workspace(task_id)
+            await self._run_and_end(task_id, partial(self.runner.run_in_workspace, task_id))
             return
+        with self._traced(task_id):
+            await self._run_and_end(task_id, partial(self._run_review, task_id))
+
+    async def _run_and_end(self, task_id: str, run: Callable[[], Awaitable[bool]]) -> None:
+        """Run task ``task_id`` to its end with ``run``, which returns whether it's left to run
+        again, as one its runtime's limit or an outage stopped is, its batch as it was; any
+        other then ends, as :meth:`_ended` says."""
+        again = False
+        try:  # Even a bug ends the task, or the batch the lane booked it into would stay open.
+            again = await run()
+        finally:
+            if not again:
+                await self._ended(task_id)
+
+    async def _run_review(self, task_id: str) -> bool:
+        """Run review ``task_id`` to its end; returns whether it's left to run again, as
+        :meth:`LaneRunner.ran` says."""
         # Only :meth:`cancel`, which the user asks for, stops a review on its own.
         run = partial(self._reviewed, task_id)
         stop = UserStop(REVIEW_STOPPED_BY_YOU)
-        again = False
-        with self._traced(task_id):
-            try:  # Even a bug ends the review, or its batch would stay open.
-                outcome = await run_task_to_end(self._tasks, task_id, run, stop, self._publish)
-                again = await self.runner.ran(task_id, outcome)
-            finally:
-                if not again:
-                    await self._ended(task_id)
+        outcome = await run_task_to_end(self._tasks, task_id, run, stop, self._publish)
+        return await self.runner.ran(task_id, outcome)
 
     @contextmanager
     def _traced(self, task_id: str) -> Iterator[None]:
@@ -533,11 +556,11 @@ class ReviewLane:
         return Queued(job, batch, self.planner.cap_of(batch), self._causes.get(task_id))
 
     async def _ended(self, task_id: str) -> None:
-        """The review of ``task_id`` ended: forget what queued it and go on as :meth:`_after`
-        says, unless the lane is stopping, which leaves its batches as they are and the review
-        to run again, linked to what queued it."""
+        """Task ``task_id``, a review or another task, ended: forget what queued it, if the lane
+        booked it, and go on as :meth:`_after` says, unless the lane is stopping, which leaves
+        its batches as they are and the task to run again, linked to what queued it."""
         if not cancelling():
-            # Its batch no longer fills, so it won't run again.
+            # Its batch no longer fills, so this lane won't run it again.
             self._causes.pop(task_id, None)
             self._templates.pop(task_id, None)
             await self._after(self._batches.get(task_id))
@@ -560,9 +583,11 @@ class ReviewLane:
             return await run(None, root)
 
     async def _after(self, batch: str | None) -> None:
-        """A review ended: review its batch if that's done, else run the suggestions it made;
-        either links to the review's span, the current one."""
-        if batch is None:
+        """A review, or another task the lane booked, ended: review its batch if that's done,
+        else run the suggestions it made; either links to the task's span, the current one. A
+        batch ends once: nothing is done for one that's over or no longer filling, as when a
+        booked task the work lane runs again, once it failed, ends again."""
+        if batch is None or not self.planner.filling(batch):
             return
         await self._queue(self.planner.review_ended(batch))
         if batch in self.planner.open_batches:

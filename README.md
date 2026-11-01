@@ -1209,9 +1209,13 @@ too, in its role's `workspace` (by default a fresh read-only snapshot of the bas
 has no commit to review. A task of another role in that lane, such as an `auditor` with
 `lane = "review"`, runs there as in any other lane rather than as a review: in its role's
 `workspace`, shown as a task running in a lane of its own, and ending as `Stopped by you` if you
-stop it. Reviews need the worktree, and the review roles in a lane of their own; `--no-review`
-turns them off, and a `reviewer` task you add then runs in its lane as any other role's task does,
-in its role's `workspace`.
+stop it. Booked as a review, though, as a `commits` trigger's task is, such a task ends its batch
+as it ends, as a review does, in that lane or in the work lane: whether it completes, lands a
+commit, fails or is stopped, the suggestions it made run, and the batch is reviewed once they've
+all finished, or closed if it suggested nothing. One its runtime's usage limit or an outage
+stopped is left to run again, its batch still open for it. Reviews need the worktree, and the
+review roles in a lane of their own; `--no-review` turns them off, and a `reviewer` task you add
+then runs in its lane as any other role's task does, in its role's `workspace`.
 
 ### Roles and `.orbit/config.toml`
 
