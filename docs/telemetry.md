@@ -45,6 +45,8 @@ verification fails has its own.
 | `orbit.merge.result` | string | What came of merging the task's work: `merged`, `rebased`, `conflict`, `blocked` or `detached`; absent when it wasn't merged. |
 | `orbit.task.status` | string | The task's final status, such as `completed`, `unverified`, `gave_up`, `error` or `cancelled`; `pending` if the run stopped before it started. |
 | `orbit.task.reason` | string | Why the task ended badly, in one line, such as `Gave up: …` or `Unit tests failed`; absent when it didn't. |
+| `orbit.findings.fixed` | int | For a task a merge pass filed with findings, or a fix of one, how many of them its landing marked `fixed`; absent for any other task, or one that didn't land. |
+| `orbit.findings.given_up` | int | For such a task, how many of them its giving up marked `given_up`; absent for any other task, or one that didn't give up. |
 
 The usage, status and reason are those the task list holds as the span ends; a task removed from
 it by then has none of them.
@@ -203,9 +205,10 @@ starts its own trace: it's a root span, linked to the asking turn's `orbit.plann
 
 ### `orbit.review`
 
-One span for each review the review lane runs, a reviewer's or a super reviewer's, from when it
-starts until it's followed up: its batch's review queued, if that's due, or the work lane asked
-to run its suggestions. Each starts its own trace: it's a root span, linked to what queued it (see
+One span for each review the review lane runs, a reviewer's or a super reviewer's, and each
+finding role's (a lens's) task booked into a review that runs there, from when it starts until
+it's followed up: its batch's review queued, if that's due, or the work lane asked to run its
+suggestions. Each starts its own trace: it's a root span, linked to what queued it (see
 **Links**). The span is current while the review runs and is followed up; the reviewer's
 `orbit.agent.process` span is its child.
 
@@ -213,7 +216,8 @@ to run its suggestions. Each starts its own trace: it's a root span, linked to w
 | --- | --- | --- |
 | `orbit.workspace.id` | string | The workspace's id (`unregistered` for one no store registers). |
 | `orbit.session.id` | string | The id of the session open as the review started. |
-| `orbit.role` | string | The review's role: `reviewer`, or `super-reviewer` for a super review. |
+| `orbit.role` | string | The review's role: `reviewer`, `super-reviewer` for a super review, or a lens's role, such as `bugs-reviewer`. |
+| `orbit.lens` | string | For a lens's task, its role, such as `bugs-reviewer`; absent for any other review. |
 | `orbit.trigger` | string | Who queued the review, its origin: the trigger that queued it, by name, `review` or `super-review` for those of orbit's shipped triggers and a project's trigger, such as a `commits` one, for its own; or `manual` or `planner`. |
 | `gen_ai.request.model` | string | The model the review's agent is launched with; absent when the task names none (the CLI's default). |
 | `orbit.review.commits` | int | How many commits the review reads: 1 for a commit's own review or a super review (of the codebase at one commit), the batch's for a batch's review. |
@@ -222,6 +226,11 @@ to run its suggestions. Each starts its own trace: it's a root span, linked to w
 | `orbit.review.cap` | int | The most suggestions the review may make. |
 | `orbit.review.suggestions` | int | How many of the review's suggestions were queued as tasks. |
 | `orbit.review.refused` | int | How many were refused: over the cap, repeating a task or an earlier suggestion, once the review's batch was closed, or made by a review the user queued, which can't suggest. |
+| `orbit.review.findings` | int | For a lens's task, how many findings it reported (`report_finding`); absent for any other review. |
+| `orbit.findings.filed` | int | For a merge pass, a task queued on `reviews_finished`, how many of its review's findings stood `filed` as it ended; absent for any other review. |
+| `orbit.findings.merged` | int | For a merge pass, how many stood `merged` into another finding's task. |
+| `orbit.findings.dismissed` | int | For a merge pass, how many stood `dismissed`. |
+| `orbit.findings.unanswered` | int | For a merge pass, how many it left undecided as it ended, recorded `unanswered`. |
 | `gen_ai.usage.input_tokens` | int | Input tokens over every turn of the review's agent. |
 | `gen_ai.usage.output_tokens` | int | Output tokens over those turns. |
 | `gen_ai.usage.cache_creation.input_tokens` | int | Input tokens written to the cache over those turns. |
@@ -231,6 +240,7 @@ to run its suggestions. Each starts its own trace: it's a root span, linked to w
 
 A review the user queued, rather than orbit, reviews no particular commits: it has no
 `orbit.review.commits`, `orbit.review.round`, `orbit.review.batch` or `orbit.review.cap`. The
+findings' counts carry no finding's title, body or reason. The
 usage is the task list's as the span ends; a review removed from it by then has none.
 
 A review that ends in error, or whose run breaks on a bug, has the span's error status with its

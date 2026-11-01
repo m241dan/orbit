@@ -44,6 +44,7 @@ REFUSALS: dict[Phase, str] = {
 NO_STEPS = "No verification steps are configured."
 NO_SUGGESTIONS = "Orbit isn't taking suggestions."
 NO_FINDINGS = "Orbit isn't taking findings."
+NO_DISMISSALS = "Orbit isn't taking dismissals."
 NO_CHECK_PROPOSALS = "Orbit isn't taking check proposals."
 
 

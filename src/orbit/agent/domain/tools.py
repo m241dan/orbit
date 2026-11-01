@@ -11,6 +11,7 @@ REPORT_PROGRESS = "report_progress"
 GIVE_UP = "give_up"
 SUGGEST_TASK = "suggest_task"
 REPORT_FINDING = "report_finding"
+DISMISS_FINDING = "dismiss_finding"
 PROPOSE_TASK = "propose_task"
 PROPOSE_CHECKS = "propose_checks"
 CONSULT = "consult"
@@ -35,6 +36,7 @@ ORBIT_TOOLS = (
     GIVE_UP,
     SUGGEST_TASK,
     REPORT_FINDING,
+    DISMISS_FINDING,
     PROPOSE_TASK,
     PROPOSE_CHECKS,
     CONSULT,

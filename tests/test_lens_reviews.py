@@ -4,10 +4,16 @@ landing booked into one review, the findings its lenses report with ``report_fin
 the review's batch; in a session as it runs, and in one read back from a save."""
 
 import asyncio
+from collections.abc import Mapping
 from typing import Any
+
+from opentelemetry.sdk.trace import ReadableSpan
 
 from orbit.agent import HostParts, WorkspaceHost
 from orbit.agent.application.ports import Reply
+from orbit.agent.application.review_trace import REVIEW_SPAN
+from orbit.agent.application.task_trace import TASK_SPAN
+from orbit.agent.domain.merge_pass import COUNTED_OUTCOMES
 from orbit.agent.domain.reviews import (
     BatchSnapshot,
     Finding,
@@ -20,10 +26,12 @@ from orbit.agent.domain.reviews import (
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.tools import (
     COMPLETE_TASK,
+    DISMISS_FINDING,
     GET_TASK,
     GIVE_UP,
     REPORT_FINDING,
     REPORT_PROGRESS,
+    SUGGEST_TASK,
 )
 from orbit.agent.domain.triggers import Trigger
 from orbit.protocol import (
@@ -31,6 +39,7 @@ from orbit.protocol import (
     REVIEWER,
     ActivateSession,
     AddTask,
+    CancelTurn,
     Event,
     RemoveTask,
     ReviewStatus,
@@ -59,9 +68,9 @@ from tests.agent_fakes import (
     session_for,
     settle,
     start,
-    suggests,
 )
 from tests.session_builders import last_of, opened, saved, store_with
+from tests.telemetry_helpers import Traced
 from tests.waiting import eventually
 
 BUGS = "bugs-reviewer"
@@ -85,6 +94,15 @@ def lens(blocking: bool) -> Role:
 LENS_ROLES = {**ROLES, BUGS: lens(blocking=True), TESTS: lens(blocking=False)}
 """The built-in roles, with a bugs lens, which may report blocking findings, and a tests lens,
 which may not."""
+
+
+MERGE_TOOLS = (GET_TASK, COMPLETE_TASK, REPORT_PROGRESS, GIVE_UP, SUGGEST_TASK, DISMISS_FINDING)
+
+MERGING_ROLES = {
+    **LENS_ROLES,
+    REVIEWER: LENS_ROLES[REVIEWER].model_copy(update={"tools": MERGE_TOOLS}),
+}
+"""The lens roles, with a reviewer that may dismiss findings, as a merge pass does."""
 
 
 def lens_trigger(role: str) -> Trigger:
@@ -141,6 +159,42 @@ def reports(*findings: tuple[str, str], replies: list[Reply] | None = None) -> S
         return "completed"
 
     return look
+
+
+Decision = tuple[str, tuple[str, ...]] | tuple[str, tuple[str, ...], str]
+"""What a merge pass does: files a task titled as the first, the findings the second names, at
+the severity the third gives, if it gives one; or, titled ``dismiss``, dismisses the one
+finding the second names."""
+
+
+def merges(*decisions: Decision, replies: list[Reply] | None = None) -> Script:
+    """A merge pass that makes ``decisions``, recording orbit's replies in ``replies``, if
+    given, with the reply to its claim that it's done last."""
+
+    async def merge(call: Call) -> TurnEndReason:
+        await call("get_task")
+        for decision in decisions:
+            reply = await _decide(call, decision)
+            if replies is not None:
+                replies.append(reply)
+        done = await call("complete_task", summary="Merged")
+        if replies is not None:
+            replies.append(done)
+        return "completed"
+
+    return merge
+
+
+async def _decide(call: Call, decision: Decision) -> Reply:
+    """Make ``decision`` through ``call``."""
+    title, findings, *severity = decision
+    if title == "dismiss":
+        return await call("dismiss_finding", finding=findings[0], reason="Not worth a task.")
+    options = {"severity": severity[0]} if severity else {}
+    prompt = f"Please {title.lower()}."
+    return await call(
+        "suggest_task", title=title, prompt=prompt, findings=list(findings), **options
+    )
 
 
 def lensing(*scripts: Script, reviewers: tuple[Script, ...] = (), **options: Any) -> WorkspaceHost:
@@ -219,11 +273,19 @@ async def test_the_merge_pass_files_into_the_reviews_batch_under_its_one_cap() -
     session = lensing(
         claims_done,
         reports(("Crash on empty input", "blocking")),
-        reports(),
+        reports(("No test for it", "normal")),
         claims_done,  # The suggestion.
         reports(),  # The batch's review, by both lenses.
         reports(),
-        reviewers=(suggests("Fix the crash", "Add a test", replies=replies),),
+        reviewers=(
+            merges(
+                ("Fix the crash", ("F1",)),
+                ("Add a test", ("F2",)),
+                ("dismiss", ("F2",)),
+                replies=replies,
+            ),
+        ),
+        roles=MERGING_ROLES,
         triggers=lens_triggers(merge=MERGE),
         review_limits=ReviewLimits(suggestions=1),
     )
@@ -231,9 +293,10 @@ async def test_the_merge_pass_files_into_the_reviews_batch_under_its_one_cap() -
     events = await asyncio.wait_for(settle(session), 10)
     await session.close()
 
-    assert [reply.text for reply in replies] == [
+    assert [reply.text for reply in replies][:3] == [
         "Queued as task 5.",
         "This review has already suggested 1 tasks, the most allowed.",
+        "Dismissed F2.",
     ]
     assert shown(board(events)) == [
         (CODER, "manual", None, "completed"),
@@ -395,6 +458,370 @@ async def test_a_finding_of_an_unknown_severity_is_refused() -> None:
     assert [reply.text for reply in replies] == [
         'A finding\'s severity is "blocking" or "normal", not \'urgent\'.'
     ]
+
+
+# Merge passes deciding findings
+
+THREE_FINDINGS = (
+    reports(("Crash on empty input", "blocking")),
+    reports(("No test for it", "normal"), ("Flaky timing", "normal")),
+)
+"""A bugs lens reporting F1 and a tests lens reporting F2 and F3."""
+
+
+def merging(*scripts: Script, merge: Script, **options: Any) -> WorkspaceHost:
+    """A session whose task 1 lands and whose lenses report :data:`THREE_FINDINGS`, its merge
+    pass played by ``merge`` and its later tasks by ``scripts``; ``options`` go to
+    :func:`lensing`."""
+    defaults: dict[str, Any] = {"roles": MERGING_ROLES, "triggers": lens_triggers(merge=MERGE)}
+    return lensing(
+        claims_done, *THREE_FINDINGS, *scripts, reviewers=(merge,), **(defaults | options)
+    )
+
+
+def span_attributes(span: ReadableSpan) -> Mapping[str, Any]:
+    """``span``'s attributes."""
+    assert span.attributes is not None
+    return span.attributes
+
+
+def outcomes(lane: LaneSnapshot) -> list[tuple[str, str, str | None, str | None]]:
+    """Each finding of ``lane``'s group of batch-1: its id, outcome, task and reason."""
+    return [(f.id, f.outcome, f.task, f.reason) for f in lane.groups["batch-1"].findings]
+
+
+def watching(store: FakeStore, seen: list[LaneSnapshot], script: Script = claims_done) -> Script:
+    """A task that notes the review state last saved in ``store`` in ``seen`` as it starts,
+    then plays ``script``."""
+
+    async def watch(call: Call) -> TurnEndReason:
+        seen.append(reviews_of(store))
+        return await script(call)
+
+    return watch
+
+
+async def test_a_merge_pass_files_merges_and_dismisses_every_finding_then_completes() -> None:
+    store, replies, seen = FakeStore(), list[Reply](), list[LaneSnapshot]()
+    merge = merges(
+        ("Fix the crash", ("F1", "F3"), "blocking"), ("dismiss", ("F2",)), replies=replies
+    )
+    session = merging(watching(store, seen), reports(), reports(), merge=merge, store=store)
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert [(reply.text, reply.is_error) for reply in replies] == [
+        ("Queued as task 5.", False),
+        ("Dismissed F2.", False),
+        ("All verification steps passed. End your turn now.", False),
+    ]
+    assert outcomes(seen[0]) == [
+        ("F1", "filed", "5", None),
+        ("F2", "dismissed", None, "Not worth a task."),
+        ("F3", "merged", "5", None),
+    ]
+    assert seen[0].severities == {"5": "blocking"}
+    assert shown(board(events))[3:5] == [
+        (REVIEWER, "merge", None, "completed"),
+        (CODER, "merge", "batch-1", "completed"),
+    ]
+    assert (reviews_of(store).groups, reviews_of(store).severities) == ({}, {})
+
+
+async def test_a_merge_pass_completing_with_a_finding_undecided_is_refused_naming_it() -> None:
+    store, replies, seen = FakeStore(), list[Reply](), list[LaneSnapshot]()
+    merge = merges(("Fix the crash", ("F1", "F3")), replies=replies)
+    session = merging(watching(store, seen), reports(), reports(), merge=merge, store=store)
+    await start(session)
+    await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert (replies[-1].text, replies[-1].is_error) == (
+        "Decide every finding first: F2 has no outcome. File them with suggest_task or dismiss"
+        " them with dismiss_finding.",
+        True,
+    )
+    # The agent ended its turn regardless: the finding it left is unanswered.
+    assert outcomes(seen[0])[1] == ("F2", "unanswered", None, None)
+
+
+async def test_completing_with_findings_undecided_names_them_all() -> None:
+    replies: list[Reply] = []
+    session = merging(merge=merges(replies=replies))
+    await start(session)
+    await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert replies[-1].text == (
+        "Decide every finding first: F1, F2, F3 have no outcome. File them with suggest_task or"
+        " dismiss them with dismiss_finding."
+    )
+
+
+async def test_suggestions_naming_no_unknown_or_decided_findings_are_refused() -> None:
+    replies: list[Reply] = []
+    merge = merges(
+        ("Fix nothing", ()),
+        ("Fix a ghost", ("F9",)),
+        ("dismiss", ("F1",)),
+        ("Fix the crash", ("F1",)),
+        ("Fix the tests", ("F2", "F1")),
+        ("dismiss", ("F1",)),
+        ("dismiss", ("F9",)),
+        ("dismiss", ("F2",)),
+        ("dismiss", ("F3",)),
+        replies=replies,
+    )
+    session = merging(merge=merge)
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert [(reply.text, reply.is_error) for reply in replies] == [
+        (
+            "Name the findings the task covers: at least one of this review's undecided findings.",
+            True,
+        ),
+        ("F9 isn't an undecided finding of this review.", True),
+        ("Dismissed F1.", False),
+        ("F1 is already dismissed.", True),
+        ("F1 is already dismissed.", True),
+        ("F1 is already dismissed.", True),
+        ("F9 isn't an undecided finding of this review.", True),
+        # F2 was named in a refused suggestion, which decided nothing.
+        ("Dismissed F2.", False),
+        ("Dismissed F3.", False),
+        ("All verification steps passed. End your turn now.", False),
+    ]
+    assert len(board(events)) == 4  # Nothing was filed.
+
+
+async def test_a_suggestion_refused_as_a_repeat_leaves_its_findings_undecided() -> None:
+    replies: list[Reply] = []
+    merge = merges(
+        ("Make it faster.", ("F1",)),
+        ("dismiss", ("F1",)),
+        ("dismiss", ("F2",)),
+        ("dismiss", ("F3",)),
+        replies=replies,
+    )
+    session = merging(merge=merge)
+    await start(session)
+    await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert [reply.text for reply in replies[:2]] == ["Task 1 already covers that.", "Dismissed F1."]
+
+
+async def test_a_merge_pass_that_gives_up_leaves_its_undecided_findings_unanswered() -> None:
+    store, seen = FakeStore(), list[LaneSnapshot]()
+
+    async def files_then_gives_up(call: Call) -> TurnEndReason:
+        await call("get_task")
+        await call("suggest_task", title="Fix the crash", prompt="", findings=["F1"])
+        await call("give_up", reason="Too much to merge.")
+        return "completed"
+
+    session = merging(
+        watching(store, seen), reports(), reports(), merge=files_then_gives_up, store=store
+    )
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert board(events)[3].status == "gave_up"
+    assert outcomes(seen[0]) == [
+        ("F1", "filed", "5", None),
+        ("F2", "unanswered", None, None),
+        ("F3", "unanswered", None, None),
+    ]
+
+
+async def test_a_merge_pass_cancelled_leaves_its_undecided_findings_unanswered() -> None:
+    store, seen, gate = FakeStore(), list[LaneSnapshot](), asyncio.Event()
+    filed = asyncio.Event()
+
+    async def files_then_waits(call: Call) -> TurnEndReason:
+        await call("get_task")
+        await call("suggest_task", title="Fix the crash", prompt="", findings=["F1"])
+        filed.set()
+        await gate.wait()
+        return "completed"
+
+    session = merging(
+        watching(store, seen), reports(), reports(), merge=files_then_waits, store=store
+    )
+    await start(session)
+    events: list[Event] = []
+    collecting = asyncio.ensure_future(settle(session, events))
+    await asyncio.wait_for(filed.wait(), 10)
+    await send(session, CancelTurn(lane="review"))
+    await asyncio.wait_for(collecting, 10)
+    await session.close()
+
+    assert board(events)[3].status == "cancelled"
+    assert [outcome for _, outcome, _, _ in outcomes(seen[0])] == [
+        "filed",
+        "unanswered",
+        "unanswered",
+    ]
+
+
+async def test_a_filed_task_landing_fixes_its_findings_and_one_giving_up_gives_them_up() -> None:
+    store, seen = FakeStore(), list[LaneSnapshot]()
+    merge = merges(
+        ("Fix the crash", ("F1", "F3")),
+        ("Add a test", ("F2",)),
+        ("Note the timing", ("F9",)),
+    )
+    session = merging(
+        claims_done,
+        watching(store, seen, gives_up),
+        reports(),
+        reports(),
+        merge=merge,
+        store=store,
+    )
+    await start(session)
+    await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert outcomes(seen[0]) == [
+        ("F1", "fixed", "5", None),
+        ("F2", "filed", "6", None),
+        ("F3", "fixed", "5", None),
+    ]
+    assert reviews_of(store).groups == {}
+
+
+async def test_spans_count_lens_findings_merge_outcomes_and_the_findings_fixed() -> None:
+    traced = Traced()
+    merge = merges(("Fix the crash", ("F1", "F3")), ("dismiss", ("F2",)))
+    session = merging(claims_done, reports(), reports(), merge=merge, telemetry=traced.telemetry)
+    await start(session)
+    await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    by_role = [span_attributes(span) for span in traced.spans(REVIEW_SPAN)]
+    lenses = [
+        (a["orbit.role"], a.get("orbit.lens"), a.get("orbit.review.findings")) for a in by_role
+    ]
+    assert lenses == [
+        (BUGS, BUGS, 1),
+        (TESTS, TESTS, 2),
+        (REVIEWER, None, None),
+        (BUGS, BUGS, 0),
+        (TESTS, TESTS, 0),
+    ]
+    merged = by_role[2]
+    assert [merged[f"orbit.findings.{name}"] for name in COUNTED_OUTCOMES] == [1, 1, 1, 0]
+    assert "orbit.findings.filed" not in by_role[0]
+    tasks = {
+        span_attributes(s)["orbit.task.id"]: span_attributes(s) for s in traced.spans(TASK_SPAN)
+    }
+    assert tasks["5"]["orbit.findings.fixed"] == 2
+    assert "orbit.findings.fixed" not in tasks["1"]
+
+
+async def test_a_filed_task_giving_up_counts_its_findings_given_up_on_its_span() -> None:
+    traced = Traced()
+    merge = merges(("Fix the crash", ("F1", "F2", "F3")))
+    session = merging(gives_up, merge=merge, telemetry=traced.telemetry)
+    await start(session)
+    await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    tasks = {
+        span_attributes(s)["orbit.task.id"]: span_attributes(s) for s in traced.spans(TASK_SPAN)
+    }
+    assert tasks["5"]["orbit.findings.given_up"] == 3
+
+
+async def test_a_merge_pass_ending_unanswered_counts_them_on_its_span() -> None:
+    traced = Traced()
+    session = merging(merge=gives_up, telemetry=traced.telemetry)
+    await start(session)
+    await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    [merged] = [
+        span_attributes(s)
+        for s in traced.spans(REVIEW_SPAN)
+        if span_attributes(s)["orbit.role"] == REVIEWER
+    ]
+    assert [merged[f"orbit.findings.{name}"] for name in COUNTED_OUTCOMES] == [0, 0, 0, 3]
+
+
+async def test_a_reviewer_that_isnt_a_merge_pass_files_without_findings_and_cant_dismiss() -> None:
+    replies: list[Reply] = []
+    merge = merges(
+        ("Fix the crash", ()), ("Fix it", ("F1",)), ("dismiss", ("F1",)), replies=replies
+    )
+    session, _, _ = session_for(
+        claims_done,
+        claims_done,
+        reviewers=(merge,),
+        roles=MERGING_ROLES,
+        tree=FakeTree(),
+        review=True,
+    )
+    await start(session)
+    await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert [(reply.text, reply.is_error) for reply in replies] == [
+        ("Queued as task 3.", False),
+        ("Only a merge pass files findings; suggest the task without them.", True),
+        ("Only a merge pass can dismiss findings.", True),
+        ("All verification steps passed. End your turn now.", False),
+    ]
+
+
+async def test_a_dismissal_without_a_reason_is_refused() -> None:
+    replies: list[Reply] = []
+
+    async def dismisses_without_reason(call: Call) -> TurnEndReason:
+        await call("get_task")
+        replies.append(await call("dismiss_finding", finding="F1", reason=" "))
+        return "completed"
+
+    session = merging(merge=dismisses_without_reason)
+    await start(session)
+    await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert (replies[0].text, replies[0].is_error) == ("A dismissal needs a reason.", True)
+
+
+async def test_a_lens_running_in_the_work_lane_reports_into_its_review_untraced() -> None:
+    traced, replies = Traced(), list[Reply]()
+    working = LENS_ROLES[TESTS].model_copy(update={"lane": "work", "workspace": "worktree"})
+    session = lensing(
+        claims_done,
+        reports(),
+        reports(("No test for it", "normal"), replies=replies),
+        roles={**LENS_ROLES, TESTS: working},
+        telemetry=traced.telemetry,
+    )
+    await start(session)
+    await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert [reply.text for reply in replies] == ["Recorded as F1."]
+    assert [span_attributes(s)["orbit.role"] for s in traced.spans(REVIEW_SPAN)] == [BUGS]
+
+
+async def test_a_dismissal_is_refused_while_reviews_are_off() -> None:
+    replies: list[Reply] = []
+    merge = merges(("dismiss", ("F1",)), replies=replies)
+    session, _, _ = session_for(reviewers=(merge,), roles=MERGING_ROLES)
+    await send(session, AddTask(task=TaskSpec(prompt="Merge.", role=REVIEWER)))
+    await send(session, RunTasks())
+    await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert replies[0].text == "Orbit isn't taking dismissals."
 
 
 # In a session read back from a save

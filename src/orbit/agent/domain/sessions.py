@@ -44,7 +44,7 @@ from orbit.protocol import (
     Usage,
 )
 
-FORMAT_VERSION = 24
+FORMAT_VERSION = 25
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _OLD_SUPER_REVIEW_ORIGIN = "super_review"
@@ -138,6 +138,37 @@ def _reviews_as_booked(record: dict[str, Any]) -> dict[str, Any]:
     return record | {"tasks": [_booked(task, booked) for task in tasks]}
 
 
+def _merges_as_booked(record: dict[str, Any]) -> dict[str, Any]:
+    """Version 24 ``record`` with the merge passes of each review group that raised
+    ``reviews_finished`` (see :func:`_with_merges`). Reviews, groups or batches that can't be
+    read are left for the record's validation to say why."""
+    reviews = record.get("reviews")
+    if not isinstance(reviews, dict):
+        return record
+    groups, batches = reviews.get("groups", {}), reviews.get("batches", {})
+    if not isinstance(groups, dict) or not isinstance(batches, dict):
+        return record
+    merged = {batch: _with_merges(group, batch, batches) for batch, group in groups.items()}
+    return record | {"reviews": reviews | {"groups": merged}}
+
+
+def _with_merges(group: object, batch: str, batches: dict[str, Any]) -> object:
+    """``group``, the saved group of the review behind ``batch``, with its merge passes, once it
+    raised ``reviews_finished``: the tasks ``batches`` books into it that aren't its lenses."""
+    if not isinstance(group, dict) or group.get("stage") != "merging":
+        return group
+    lenses = group.get("lenses", [])
+    if not isinstance(lenses, list):
+        return group
+    return group | {"merges": _booked_besides(batch, batches, lenses)}
+
+
+def _booked_besides(batch: str, batches: dict[str, Any], lenses: list[Any]) -> list[str]:
+    """The tasks ``batches`` books into ``batch`` that aren't among ``lenses``, in order."""
+    booked = [task for task, into in batches.items() if into == batch]
+    return [task for task in booked if task not in lenses]
+
+
 def _booked(task: object, booked: tuple[str, ...]) -> object:
     """``task``, a saved task, queued as a review if its id is one of those ``booked``."""
     if isinstance(task, dict) and task.get("id") in booked:
@@ -176,7 +207,10 @@ def _booked(task: object, booked: tuple[str, ...]) -> object:
 # 23 added the subjects of each piece of work's commits, which find them after a rebase; an
 # older record doesn't know them, so its work is told of as landing with the landing's last
 # commit. Version 24 added the groups of the reviews under way, with their lenses' findings; an
-# older record has none, as each of its reviews is one task, which ends it as it ends.
+# older record has none, as each of its reviews is one task, which ends it as it ends. Version 25
+# added each group's merge passes, which its migration finds among the tasks booked into a group
+# that raised ``reviews_finished``, and the severities merge passes filed tasks at, which an
+# older record filed none at.
 _MIGRATIONS: dict[int, Migration] = {
     1: _spent_by_tasks,
     2: _without_rounds,
@@ -201,6 +235,7 @@ _MIGRATIONS: dict[int, Migration] = {
     21: _unchanged,
     22: _unchanged,
     23: _unchanged,
+    24: _merges_as_booked,
 }
 
 EMPTY_NAME = "A session needs a name."

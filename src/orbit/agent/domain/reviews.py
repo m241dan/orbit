@@ -191,9 +191,10 @@ class FindingReport:
 class ReviewGroup:
     """A review of ``job`` with more than one task, or with a task of a finding role (one
     granted ``report_finding``): the tasks it holds are those booked into its batch. Of them,
-    ``lenses`` are the finding roles', in the order they were booked, and ``ended`` those that
-    have ended, however they did, in the order they did; ``findings`` are what the lenses
-    reported, in id order, and ``stage`` where it is.
+    ``lenses`` are the finding roles', in the order they were booked, ``merges`` the other
+    roles' booked once ``reviews_finished`` was raised for it, its merge passes, and ``ended``
+    those that have ended, however they did, in the order they did; ``findings`` are what the
+    lenses reported, in id order, and ``stage`` where it is.
 
     A review of one task of another role keeps no group: it ends as that task does."""
 
@@ -202,6 +203,7 @@ class ReviewGroup:
     ended: tuple[str, ...] = ()
     findings: tuple[Finding, ...] = ()
     stage: ReviewStage = "reviewing"
+    merges: tuple[str, ...] = ()
 
 
 def finding_report(arguments: Mapping[str, Any]) -> FindingReport | str:
@@ -219,6 +221,14 @@ def finding_report(arguments: Mapping[str, Any]) -> FindingReport | str:
 def with_lens(group: ReviewGroup, task_id: str) -> ReviewGroup:
     """``group`` with task ``task_id`` among its lenses."""
     return replace(group, lenses=_with(group.lenses, task_id))
+
+
+def with_task(group: ReviewGroup, task_id: str) -> ReviewGroup:
+    """``group`` with task ``task_id``, of a role other than a finding role, booked into it:
+    among its merge passes once ``reviews_finished`` was raised for it."""
+    if group.stage != "merging":
+        return group
+    return replace(group, merges=_with(group.merges, task_id))
 
 
 def with_ended(group: ReviewGroup, task_id: str) -> ReviewGroup:
@@ -400,8 +410,9 @@ class PlannerSnapshot(BaseModel):
 class LaneSnapshot(BaseModel):
     """A :class:`ReviewLane`'s state for one session: its ``planner``'s, and for each review
     task it queued, the ``jobs`` it reviews and the ``batches`` it suggests into, with the
-    ``templates`` each review of commits is rendered from, while it may still run, and the
-    ``groups`` of the reviews still under way that keep one, by batch."""
+    ``templates`` each review of commits is rendered from, while it may still run, the
+    ``groups`` of the reviews that keep one, by batch, while their batch is open, and the
+    ``severities`` merge passes filed tasks at, by task id, while their batch is open."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -410,6 +421,7 @@ class LaneSnapshot(BaseModel):
     batches: dict[str, str] = {}
     templates: dict[str, ReviewTemplate] = {}
     groups: dict[str, ReviewGroup] = {}
+    severities: dict[str, Severity] = {}
 
 
 class ReviewPlanner:

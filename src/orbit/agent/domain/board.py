@@ -191,6 +191,12 @@ class TaskBoard:
                 self._update(fixed.id, {"status": "completed"} | _NO_REASON)
             fixed = self.find(fixed.fixes)
 
+    def list_fixed(self, state: TaskState) -> tuple[str, ...]:
+        """The ids of task ``state`` and of the tasks it fixes, up the chain of fixes, stopping
+        at a task that's no longer on the board."""
+        fixed = self.find(state.fixes)
+        return (state.id,) if fixed is None else (state.id, *self.list_fixed(fixed))
+
     def find(self, task_id: str | None) -> TaskState | None:
         """Task ``task_id``, or None if there's no such task on the board."""
         return next((state for state in self._tasks if state.id == task_id), None)

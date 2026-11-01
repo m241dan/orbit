@@ -81,7 +81,12 @@ async def test_offers_orbit_tools_with_their_arguments() -> None:
         assert tools["complete_task"].input_schema["required"] == ["summary"]
         assert tools["run_check"].input_schema["required"] == ["step"]
         assert tools["suggest_task"].input_schema["required"] == ["title", "prompt"]
+        assert tools["suggest_task"].input_schema["properties"]["severity"]["enum"] == [
+            "blocking",
+            "normal",
+        ]
         assert tools["report_finding"].input_schema["required"] == ["title", "body", "severity"]
+        assert tools["dismiss_finding"].input_schema["required"] == ["finding", "reason"]
         severity = tools["report_finding"].input_schema["properties"]["severity"]
         assert severity["enum"] == ["blocking", "normal"]
         assert tools["propose_task"].input_schema["required"] == ["title", "prompt"]
@@ -135,8 +140,17 @@ async def test_passes_calls_with_the_token_to_the_handler_and_returns_its_text()
         ("run_check", {"step": "Unit tests"}),
         ("report_progress", {"note": "halfway"}),
         ("give_up", {"reason": "blocked"}),
-        ("suggest_task", {"title": "Add tests", "prompt": "Cover parse()."}),
+        (
+            "suggest_task",
+            {
+                "title": "Add tests",
+                "prompt": "Cover parse().",
+                "findings": ["F1", "F3"],
+                "severity": "blocking",
+            },
+        ),
         ("report_finding", {"title": "Off by one", "body": "In parse().", "severity": "normal"}),
+        ("dismiss_finding", {"finding": "F2", "reason": "Already covered."}),
         (
             "propose_task",
             {"title": "Add a CLI flag", "prompt": "Add --fast.", "skills": ["python", "cli"]},
@@ -187,6 +201,19 @@ async def test_every_tool_passes_its_call_through(tool: str, arguments: dict[str
     async with serving(handler) as url, connected(url) as client:
         await client.call_tool(tool, arguments)
     assert handler.calls == [("tok-1", tool, arguments)]
+
+
+async def test_a_suggestion_without_findings_or_severity_passes_none_and_normal() -> None:
+    handler = RecordingHandler()
+    async with serving(handler) as url, connected(url) as client:
+        await client.call_tool("suggest_task", {"title": "Add tests", "prompt": "Cover it."})
+    assert handler.calls == [
+        (
+            "tok-1",
+            "suggest_task",
+            {"title": "Add tests", "prompt": "Cover it.", "findings": [], "severity": "normal"},
+        )
+    ]
 
 
 async def test_a_proposal_without_setup_passes_none() -> None:

@@ -35,6 +35,8 @@ CHECK_RUNS = "orbit.task.check_runs"
 VERIFY_RESULT = "orbit.verify.result"
 VERIFY_FAILED_STEP = "orbit.verify.failed_step"
 MERGE_RESULT = "orbit.merge.result"
+FINDINGS_FIXED = "orbit.findings.fixed"
+FINDINGS_GIVEN_UP = "orbit.findings.given_up"
 
 VERIFY_STEP_EVENT = "orbit.verify.step"
 GAVE_UP_EVENT = "orbit.task.gave_up"

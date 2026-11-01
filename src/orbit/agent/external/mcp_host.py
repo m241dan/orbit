@@ -18,6 +18,7 @@ from orbit.agent.application.ports import CallHandler
 from orbit.agent.domain.tools import (
     COMPLETE_TASK,
     CONSULT,
+    DISMISS_FINDING,
     EDIT_DRAFT,
     GET_TASK,
     GIVE_UP,
@@ -51,11 +52,17 @@ PROMPT_RECIPE = (
 )
 SUGGEST_TASK_DESCRIPTION = (
     "Suggest a follow-up task for a coder, queued after the current work: a short title, and a"
-    f" prompt. {PROMPT_RECIPE}"
+    " prompt. A merge pass names in findings the ids of the findings the task covers, at least"
+    ' one, the first filed and the rest merged into it, and gives its severity, "blocking" or'
+    f' "normal" (the default); any other review leaves both out. {PROMPT_RECIPE}'
 )
 REPORT_FINDING_DESCRIPTION = (
     "Report a finding of your review: a short title, a body saying where it is and why it"
     ' matters, and its severity, "blocking" or "normal". Orbit replies with its id.'
+)
+DISMISS_FINDING_DESCRIPTION = (
+    "Dismiss one of your review's undecided findings, by id, such as F2, saying why it needs no"
+    " task."
 )
 PROPOSE_TASK_DESCRIPTION = (
     "Propose a task for the plan: a short title, and a prompt. It's added as a draft the user"
@@ -147,17 +154,6 @@ def build_server(handler: CallHandler) -> MCPServer:
         needs a decision only the user can make. Use only when it's truly blocked."""
         return await call(ctx, GIVE_UP, {"reason": reason})
 
-    @server.tool(structured_output=False, description=SUGGEST_TASK_DESCRIPTION)
-    async def suggest_task(title: str, prompt: str, ctx: Context) -> str:
-        return await call(ctx, SUGGEST_TASK, {"title": title, "prompt": prompt})
-
-    @server.tool(structured_output=False, description=REPORT_FINDING_DESCRIPTION)
-    async def report_finding(
-        title: str, body: str, severity: Literal["blocking", "normal"], ctx: Context
-    ) -> str:
-        arguments = {"title": title, "body": body, "severity": severity}
-        return await call(ctx, REPORT_FINDING, arguments)
-
     @server.tool(structured_output=False, description=PROPOSE_TASK_DESCRIPTION)
     async def propose_task(
         title: str, prompt: str, ctx: Context, skills: list[str] | None = None
@@ -194,9 +190,42 @@ def build_server(handler: CallHandler) -> MCPServer:
     async def read_skill(skill: str, file: str, ctx: Context) -> str:
         return await call(ctx, READ_SKILL, {"skill": skill, "file": file})
 
+    _add_review_tools(server, call)
     _add_checks_tool(server, call)
     _add_draft_tools(server, call)
     return server
+
+
+def _add_review_tools(server: MCPServer, call: ToolCall) -> None:
+    """Give ``server`` the tools reviews suggest tasks, report findings and dismiss them with,
+    passed to ``call``."""
+
+    @server.tool(structured_output=False, description=SUGGEST_TASK_DESCRIPTION)
+    async def suggest_task(
+        title: str,
+        prompt: str,
+        ctx: Context,
+        findings: list[str] | None = None,
+        severity: Literal["blocking", "normal"] = "normal",
+    ) -> str:
+        arguments = {
+            "title": title,
+            "prompt": prompt,
+            "findings": findings or [],
+            "severity": severity,
+        }
+        return await call(ctx, SUGGEST_TASK, arguments)
+
+    @server.tool(structured_output=False, description=REPORT_FINDING_DESCRIPTION)
+    async def report_finding(
+        title: str, body: str, severity: Literal["blocking", "normal"], ctx: Context
+    ) -> str:
+        arguments = {"title": title, "body": body, "severity": severity}
+        return await call(ctx, REPORT_FINDING, arguments)
+
+    @server.tool(structured_output=False, description=DISMISS_FINDING_DESCRIPTION)
+    async def dismiss_finding(finding: str, reason: str, ctx: Context) -> str:
+        return await call(ctx, DISMISS_FINDING, {"finding": finding, "reason": reason})
 
 
 def _add_checks_tool(server: MCPServer, call: ToolCall) -> None:

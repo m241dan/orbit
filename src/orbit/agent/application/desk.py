@@ -34,6 +34,7 @@ from orbit.agent.application.ports import (
 from orbit.agent.application.skill_delivery import SkillDelivery
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.agents import Agent, AgentRegistry
+from orbit.agent.domain.merge_pass import Dismissal, ReviewSuggestion
 from orbit.agent.domain.refusals import failed_to
 from orbit.agent.domain.reviews import FindingReport, ReviewLimits
 from orbit.agent.domain.roles import Role
@@ -66,6 +67,11 @@ UNKNOWN_AGENT = Reply("Unknown or expired agent token.", is_error=True)
 STOPPED_HANDLING = Reply("Orbit stopped handling this call.", is_error=True)
 
 _NO_TELEMETRY = NoTelemetry()
+
+
+def _completes(task_id: str) -> None:
+    """No reason task ``task_id`` can't complete: without reviews, every task may."""
+
 
 # Longest progress note shown; agents can be chatty.
 NOTE_LIMIT = 200
@@ -229,10 +235,15 @@ class AgentDesk:
         self._publish = publish
         self._tracing = AgentTracing(telemetry)
         self._processes: dict[str, AgentProcess] = {}  # The agents' traced processes, by id.
-        # Takes a review task's suggestions: its id, then the suggestion's title and prompt.
-        self.suggest: Callable[[str, str, str], Awaitable[Reply]] | None = None
+        # Takes a review task's suggestions: its id, then the suggestion.
+        self.suggest: Callable[[str, ReviewSuggestion], Awaitable[Reply]] | None = None
         # Takes a reviewing task's findings: its id, then the finding.
         self.report_finding: Callable[[str, FindingReport], Awaitable[Reply]] | None = None
+        # Takes a merge pass's dismissals: its id, then the dismissal.
+        self.dismiss_finding: Callable[[str, Dismissal], Awaitable[Reply]] | None = None
+        # Why a task, by id, can't complete yet, such as a merge pass with findings undecided;
+        # none if it can.
+        self.completion_refusal: Callable[[str], str | None] = _completes
         # The report tools as an agent in the role named calls them; none without a store.
         self.report_tools: Callable[[str], Mapping[str, Tool]] = lambda role: {}
         self._runs: dict[str, CallTarget] = {}

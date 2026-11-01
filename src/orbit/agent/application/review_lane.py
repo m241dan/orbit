@@ -8,6 +8,9 @@ does once it ends. The tasks the triggers queue for one review are booked into i
 batch, which fills until they have all ended; once every one of a finding role, granted
 ``report_finding``, has ended, the lane raises ``reviews_finished`` with the findings they
 reported, and the tasks queued on it join the review, which then fills until they end too.
+Those tasks are its merge passes, which must decide every finding, as
+:mod:`~orbit.agent.domain.merge_pass` says; a review keeps its findings while its batch is open,
+so the tasks filed for them mark them fixed as they land, or given up as they give up.
 :class:`ReviewPlanner` decides when a review is due and stops reviews generating work forever.
 It's the ``review-rounds`` guard: the lane raises each landing as ``task_landed``, and a review
 of commits is queued by the triggers it guards, from their templates. It counts each landing
@@ -17,7 +20,7 @@ super-review trigger fired by hand; those of them that run a named set run it in
 
 import random
 from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import Literal
@@ -39,10 +42,27 @@ from orbit.agent.application.outcomes import Outcome, UserStop, run_task_to_end
 from orbit.agent.application.ports import CoderTree, Reply, TreeFailed
 from orbit.agent.application.review_trace import Queued, ReviewTally, ReviewTracing
 from orbit.agent.application.snapshots import snapshot_of
+from orbit.agent.application.task_trace import FINDINGS_FIXED, FINDINGS_GIVEN_UP
 from orbit.agent.application.tasks import Changed, Tasks
 from orbit.agent.application.triggers import ReviewRound, TriggerEngine, TriggerHooks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.endings import REVIEW_STOPPED_BY_YOU
+from orbit.agent.domain.merge_pass import (
+    NOT_A_MERGE_PASS,
+    NOT_MERGING,
+    Dismissal,
+    ReviewSuggestion,
+    TaskEnding,
+    decision_refusal,
+    ended_in,
+    filed_in,
+    filing_refusal,
+    outcome_counts,
+    undecided_refusal,
+    with_dismissed,
+    with_filed,
+    with_task_ended,
+)
 from orbit.agent.domain.reviews import (
     NOT_BOOKED_FOR_FINDINGS,
     FindingReport,
@@ -52,6 +72,7 @@ from orbit.agent.domain.reviews import (
     ReviewJob,
     ReviewPlanner,
     ReviewTemplate,
+    Severity,
     fan_in_due,
     finding_refusal,
     finished_fields,
@@ -61,9 +82,9 @@ from orbit.agent.domain.reviews import (
     review_over,
     review_values,
     tell_landed_since,
-    with_ended,
     with_finding,
     with_lens,
+    with_task,
 )
 from orbit.agent.domain.role_lanes import review_lane, task_lanes
 from orbit.agent.domain.suggestions import suggested_task, suggestion_refusal
@@ -89,6 +110,12 @@ from orbit.protocol import (
     TaskState,
 )
 from orbit.tracing import Span, current_span
+
+_ENDED_FINDINGS: Mapping[TaskEnding, str] = {
+    "fixed": FINDINGS_FIXED,
+    "given_up": FINDINGS_GIVEN_UP,
+}
+"""The attribute of a filed task's span counting its findings, by what its end made of them."""
 
 Publishing = Literal["published", "quiet"]
 """How what a review's end queues is shown: published and run, or, as a session opens, only put
@@ -159,8 +186,10 @@ class ReviewLane:
         # until it ends.
         self._causes: dict[str, Span] = {}
         self._tallies: dict[str, ReviewTally] = {}  # Review task id -> its suggestions, as it runs.
-        # Batch -> the review behind it, while it's under way, if it keeps a group.
+        # Batch -> the review behind it, if it keeps a group, while the batch is open.
         self._groups: dict[str, ReviewGroup] = {}
+        # Task id -> the severity a merge pass filed it at, while its findings are kept.
+        self._severities: dict[str, Severity] = {}
         self._fanning: set[str] = set()  # Batches whose reviews_finished is being raised.
         self._triggers = hooks.triggers or TriggerEngine(desk, tasks, TriggerHooks(self._kick_own))
         self.runner = self._runner(hooks)
@@ -187,6 +216,7 @@ class ReviewLane:
             batches=dict(self._batches),
             templates=dict(self._templates),
             groups=dict(self._groups),
+            severities=dict(self._severities),
         )
 
     @property
@@ -227,6 +257,7 @@ class ReviewLane:
         self._jobs, self._batches = dict(snapshot.jobs), dict(snapshot.batches)
         self._templates = dict(snapshot.templates)
         self._groups = dict(snapshot.groups)
+        self._severities = dict(snapshot.severities)
         self._causes.clear()  # The session's task ids are reused by the next.
         self._status = self.status  # The switch's snapshot shows the restored status,
         self._paused_noted = False  # but a pause is news.
@@ -252,16 +283,19 @@ class ReviewLane:
         if group is None or not self.planner.filling(batch):
             await self._queue_quietly(self.planner.review_ended(batch))
             return
-        await self._settle(batch, with_ended(group, task_id), "quiet")
+        await self._settle(batch, ended_in(group, task_id), "quiet")
 
     async def landed(self, state: TaskState, commit: str) -> None:
         """The task that ended as ``state`` landed ``commit``: raise ``task_landed``, its own
         review, if due, the one ``review-rounds`` finds, queue the review of the batch it
         finished, if it did, and count it toward the ``commits`` triggers, those that fire
         reviewing the codebase at it, or running the set they name; then end the batch it
-        suggested into, if the lane booked it, as :meth:`_ended` says. The task isn't looked up:
-        it may have been removed since it finished, and its work is reviewed all the same."""
+        suggested into, if the lane booked it, as :meth:`_ended` says. The findings filed in it,
+        or in a task it fixes, are fixed. The task isn't looked up: it may have been removed
+        since it finished, and its work is reviewed all the same."""
+        self._end_filed(state, "fixed")
         job = self.planner.landed(state, commit)
+        self._prune()
         # Counted before the commit's own review is queued, which would hold a due super review;
         # one due is taken at once, so the count saved as that review is queued has its commit.
         fired = self._triggers.fire_checks(self._count(state))
@@ -334,11 +368,40 @@ class ReviewLane:
         """The task that ended as ``state`` finished without landing anything, or was stopped
         by ``stop``, its runtime's usage limit or an outage, which leaves it to run again. The
         batch it suggested into, if the lane booked it, ends as :meth:`_ended` says, unless it's
-        left to run again. The task isn't looked up: it may have been removed since it
-        finished."""
-        await self._queue(self.planner.ended(state))
+        left to run again. The findings filed in a task that gave up, or in a task it fixes,
+        are given up; those of a task that ended otherwise stay filed. The task isn't looked
+        up: it may have been removed since it finished."""
+        if stop is None and state.status == "gave_up":
+            self._end_filed(state, "given_up")
+        job = self.planner.ended(state)
+        self._prune()
+        await self._queue(job)
         if stop is None:
             await self._ended(state.id)
+
+    def _end_filed(self, state: TaskState, ending: TaskEnding) -> None:
+        """Mark the findings filed in the task that ended as ``state``, or in a task it fixes,
+        as ``ending`` says, counting them on the span current, the task's."""
+        fixed = self._board.list_fixed(state)
+        count = sum(len(filed_in(group, fixed)) for group in self._groups.values())
+        if not count:
+            return
+        self._groups = {
+            batch: with_task_ended(group, fixed, ending) for batch, group in self._groups.items()
+        }
+        current_span().set_attributes({_ENDED_FINDINGS[ending]: count})
+
+    def _prune(self) -> None:
+        """Forget the groups of the batches that closed, and the severities of the tasks whose
+        findings they kept."""
+        open_batches = self.planner.open_batches
+        self._groups = {b: g for b, g in self._groups.items() if b in open_batches}
+        filed = self._filed_tasks()
+        self._severities = {t: s for t, s in self._severities.items() if t in filed}
+
+    def _filed_tasks(self) -> set[str | None]:
+        """The tasks the findings of the groups kept were filed in."""
+        return {finding.task for group in self._groups.values() for finding in group.findings}
 
     async def removed(self, task_id: str, state: TaskState) -> None:
         """Task ``task_id``, which was ``state``, was taken off the board. A review's batch
@@ -346,14 +409,16 @@ class ReviewLane:
         counts as ended; any other task leaves its batch."""
         batch = self._batches.pop(task_id, None)
         if batch is None:
-            await self._queue(self.planner.removed(state))
+            job = self.planner.removed(state)
+            self._prune()
+            await self._queue(job)
             return
         del self._jobs[task_id]
         self._causes.pop(task_id, None)
         self._templates.pop(task_id, None)
         group = self._groups.get(batch)
         if group is not None and self.planner.filling(batch):
-            await self._settle(batch, with_ended(group, task_id), "published")
+            await self._settle(batch, ended_in(group, task_id), "published")
             return
         open_batch = batch in self.planner.open_batches
         await self._queue(self.planner.review_ended(batch) if open_batch else None)
@@ -370,37 +435,88 @@ class ReviewLane:
         if batch is not None and batch in self.planner.open_batches:
             self.planner.added(batch, task_id)
 
-    async def suggest(self, task_id: str, title: str, prompt: str) -> Reply:
-        """Review task ``task_id`` suggests a task; queue it unless it's refused, from the
-        review's own origin, its trigger's name, counting it on the review's span either way."""
+    async def suggest(self, task_id: str, suggestion: ReviewSuggestion) -> Reply:
+        """Review task ``task_id`` makes ``suggestion``; queue it unless it's refused, from the
+        review's own origin, its trigger's name, counting it on the review's span either way.
+        A merge pass's suggestion files the findings it names."""
         # Taken now: the review may end as the suggestion is queued. One ended counts no more.
         tally = self._tallies.get(task_id, ReviewTally())
-        reply = await self._suggestion(task_id, title, prompt)
+        reply = await self._suggestion(task_id, suggestion)
         tally.count(refused=reply.is_error)
         return reply
 
-    async def _suggestion(self, task_id: str, title: str, prompt: str) -> Reply:
-        """What review task ``task_id`` suggesting a task titled ``title`` comes to: queued, or
-        refused."""
+    async def _suggestion(self, task_id: str, suggestion: ReviewSuggestion) -> Reply:
+        """What review task ``task_id`` making ``suggestion`` comes to: queued, or refused."""
         batch = self._batches.get(task_id)
         if batch is None:
             return Reply("Only reviews orbit queued itself can suggest tasks.", is_error=True)
         roles = self._desk.agents.roles
-        refusal = suggestion_refusal(roles) or self.planner.refusal(batch, title, self._board.tasks)
+        title = suggestion.title
+        refusal = (
+            suggestion_refusal(roles)
+            or self._filing_refusal(task_id, batch, suggestion.findings)
+            or self.planner.refusal(batch, title, self._board.tasks)
+        )
         if refusal is not None:
             return Reply(refusal, is_error=True)
         # The review is running, as its agent suggests, so it's on the board. Its suggestions
         # take its origin, the trigger that queued it, whatever its job is.
         review = self._board.get(task_id)
-        task = suggested_task(roles[CODER], title, prompt, review.task.skills)
+        task = suggested_task(roles[CODER], title, suggestion.prompt, review.task.skills)
 
         def add(board: TaskBoard) -> str:
             new_id = board.add_suggestion(task, batch, self.planner.round_of(batch), review.origin)
             self.planner.added(batch, new_id, title)
+            self._file(batch, suggestion, new_id)
             return new_id
 
         new_id = await self._tasks.change(add)
         return Reply(f"Queued as task {new_id}.")
+
+    def _filing_refusal(self, task_id: str, batch: str, findings: Sequence[str]) -> str | None:
+        """Why review task ``task_id``, booked into the review behind ``batch``, can't file
+        ``findings``: a merge pass must name some it may decide, and another review none;
+        ``None`` if it can."""
+        group = self._groups.get(batch)
+        if group is None or task_id not in group.merges:
+            return NOT_A_MERGE_PASS if findings else None
+        return filing_refusal(group, findings)
+
+    def _file(self, batch: str, suggestion: ReviewSuggestion, task_id: str) -> None:
+        """Record the findings ``suggestion`` names, if any, of the review behind ``batch``, as
+        filed in task ``task_id``, keeping the severity it was filed at."""
+        if not suggestion.findings:
+            return
+        self._groups[batch] = with_filed(self._groups[batch], suggestion.findings, task_id)
+        self._severities[task_id] = suggestion.severity
+
+    async def dismiss(self, task_id: str, dismissed: Dismissal) -> Reply:
+        """Merge pass ``task_id`` dismisses a finding of its review, unless it's refused: from a
+        task that isn't a merge pass still running, or of a finding it can't decide."""
+        batch = self._merging_in(task_id)
+        if batch is None:
+            return Reply(NOT_MERGING, is_error=True)
+        group = self._groups[batch]
+        refusal = decision_refusal(group, dismissed.finding)
+        if refusal is not None:
+            return Reply(refusal, is_error=True)
+        self._groups[batch] = with_dismissed(group, dismissed)
+        await self._hooks.changed()
+        return Reply(f"Dismissed {dismissed.finding}.")
+
+    def completion_refusal(self, task_id: str) -> str | None:
+        """Why task ``task_id`` can't complete yet: it's a merge pass whose review has findings
+        undecided; ``None`` if it can."""
+        batch = self._merging_in(task_id)
+        return None if batch is None else undecided_refusal(self._groups[batch])
+
+    def _merging_in(self, task_id: str) -> str | None:
+        """The batch of the review whose merge pass task ``task_id`` is, if it hasn't ended
+        there; none otherwise."""
+        batch = self._batches.get(task_id)
+        group = None if batch is None else self._groups.get(batch)
+        merging = group is not None and task_id in group.merges and task_id not in group.ended
+        return batch if merging else None
 
     async def report(self, task_id: str, report: FindingReport) -> Reply:
         """Task ``task_id`` reports a finding; record it against the review it's booked into,
@@ -417,6 +533,9 @@ class ReviewLane:
         if refusal is not None:
             return Reply(refusal, is_error=True)
         self._groups[batch], finding = with_finding(group, reporter, report)
+        tally = self._tallies.get(task_id)
+        if tally is not None:
+            tally.found()
         await self._hooks.changed()
         return Reply(f"Recorded as {finding.id}.")
 
@@ -493,7 +612,7 @@ class ReviewLane:
         lens = self._is_lens(task_id)
         group = self._groups.get(batch) or self._new_group(batch, booking.job, task_id)
         if group is not None:
-            self._groups[batch] = with_lens(group, task_id) if lens else group
+            self._groups[batch] = with_lens(group, task_id) if lens else with_task(group, task_id)
 
     def _new_group(self, batch: str, job: ReviewJob, task_id: str) -> ReviewGroup | None:
         """The group the review of ``job`` behind ``batch``, keeping none yet, keeps now that
@@ -629,12 +748,21 @@ class ReviewLane:
 
     async def _review(self, task_id: str) -> None:
         """Run task ``task_id`` to its end: as a review if it's one, else as any lane runs its
-        tasks; either way, it then ends, as :meth:`_run_and_end` says."""
+        tasks, traced as a review if it's a lens booked into one; either way, it then ends, as
+        :meth:`_run_and_end` says."""
         if not self._is_review(task_id):
-            await self._run_and_end(task_id, partial(self.runner.run_in_workspace, task_id))
+            run = partial(self.runner.run_in_workspace, task_id)
+            with self._lens_traced(task_id):
+                await self._run_and_end(task_id, run)
             return
         with self._traced(task_id):
             await self._run_and_end(task_id, partial(self._run_review, task_id))
+
+    def _lens_traced(self, task_id: str) -> AbstractContextManager[None]:
+        """What traces task ``task_id``, on the board, as it runs: a review's span if it's a
+        finding role's booked into a review, else nothing."""
+        lens = task_id in self._jobs and self._is_lens(task_id)
+        return self._traced(task_id) if lens else nullcontext()
 
     async def _run_and_end(self, task_id: str, run: Callable[[], Awaitable[bool]]) -> None:
         """Run task ``task_id`` to its end with ``run``, which returns whether it's left to run
@@ -675,7 +803,9 @@ class ReviewLane:
         if job is None:
             return None
         batch = self._batches[task_id]
-        return Queued(job, batch, self.planner.cap_of(batch), self._causes.get(task_id))
+        state = self._board.find(task_id)
+        lens = state.task.role if state is not None and self._is_lens(task_id) else None
+        return Queued(job, batch, self.planner.cap_of(batch), self._causes.get(task_id), lens)
 
     async def _ended(self, task_id: str) -> None:
         """Task ``task_id``, a review or another task, ended: forget what queued it, if the lane
@@ -716,7 +846,16 @@ class ReviewLane:
         if group is None:
             await self._close_review(batch, "published")
             return
-        await self._settle(batch, with_ended(group, task_id), "published")
+        ended = ended_in(group, task_id)
+        self._count_outcomes(task_id, ended)
+        await self._settle(batch, ended, "published")
+
+    def _count_outcomes(self, task_id: str, group: ReviewGroup) -> None:
+        """Count the outcomes of ``group``'s findings on task ``task_id``'s review span, if it's
+        a merge pass of it traced as it runs."""
+        tally = self._tallies.get(task_id)
+        if tally is not None and task_id in group.merges:
+            tally.outcomes = outcome_counts(group)
 
     async def _settle(self, batch: str, group: ReviewGroup, publishing: Publishing) -> None:
         """Keep ``group`` as the review behind ``batch``, one of its tasks having just ended,
@@ -769,10 +908,11 @@ class ReviewLane:
         """End the review behind ``batch``: its batch no longer fills, and is reviewed if
         that's due, showing what's queued as ``publishing`` says; else, published, the
         suggestions it made run."""
-        self._groups.pop(batch, None)
+        job = self.planner.review_ended(batch)
+        self._prune()  # The group is kept while the findings it filed may still land.
         if publishing == "quiet":
-            await self._queue_quietly(self.planner.review_ended(batch))
+            await self._queue_quietly(job)
             return
-        await self._queue(self.planner.review_ended(batch))
+        await self._queue(job)
         if batch in self.planner.open_batches:
             await self._hooks.wake_work()

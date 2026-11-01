@@ -25,6 +25,7 @@ from orbit.agent.application.verifier import Failure, Verifier, first_failure
 from orbit.agent.domain.agent_task import (
     FINISHED,
     NO_CHECK_PROPOSALS,
+    NO_DISMISSALS,
     NO_FINDINGS,
     NO_STEPS,
     NO_SUGGESTIONS,
@@ -38,12 +39,13 @@ from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import ChecksProposal, parse_proposal
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.endings import error, task_ending, timeout_ending
+from orbit.agent.domain.merge_pass import dismissal, review_suggestion
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import finding_report
 from orbit.agent.domain.roles import Role
-from orbit.agent.domain.suggestions import task_suggestion
 from orbit.agent.domain.tools import (
     COMPLETE_TASK,
+    DISMISS_FINDING,
     GET_TASK,
     GIVE_UP,
     PROPOSE_CHECKS,
@@ -153,6 +155,7 @@ class AgentRun:
             GIVE_UP: self._give_up,
             SUGGEST_TASK: self._suggest_task,
             REPORT_FINDING: self._report_finding,
+            DISMISS_FINDING: self._dismiss_finding,
             PROPOSE_CHECKS: self._propose_checks,
         }
 
@@ -399,6 +402,9 @@ class AgentRun:
         return Reply(self._work.get_task(steps, self.role.runs_checks))
 
     async def _complete_task(self, arguments: dict[str, Any]) -> Reply:
+        refusal = self._desk.completion_refusal(self._task_id)
+        if refusal is not None:
+            return Reply(refusal, is_error=True)
         claim = self._work.claim_done(str(arguments.get("summary", "")))
         if not claim.verify:
             return Reply(claim.reply or "", is_error=True)
@@ -447,11 +453,10 @@ class AgentRun:
     async def _suggest_task(self, arguments: dict[str, Any]) -> Reply:
         if self._desk.suggest is None:
             return Reply(NO_SUGGESTIONS, is_error=True)
-        suggestion = task_suggestion(arguments)
+        suggestion = review_suggestion(arguments)
         if isinstance(suggestion, str):
             return Reply(suggestion, is_error=True)
-        title, prompt = suggestion
-        return await self._desk.suggest(self._task_id, title, prompt)
+        return await self._desk.suggest(self._task_id, suggestion)
 
     async def _report_finding(self, arguments: dict[str, Any]) -> Reply:
         if self._desk.report_finding is None:
@@ -460,6 +465,14 @@ class AgentRun:
         if isinstance(report, str):
             return Reply(report, is_error=True)
         return await self._desk.report_finding(self._task_id, report)
+
+    async def _dismiss_finding(self, arguments: dict[str, Any]) -> Reply:
+        if self._desk.dismiss_finding is None:
+            return Reply(NO_DISMISSALS, is_error=True)
+        dismissed = dismissal(arguments)
+        if isinstance(dismissed, str):
+            return Reply(dismissed, is_error=True)
+        return await self._desk.dismiss_finding(self._task_id, dismissed)
 
     async def _propose_checks(self, arguments: dict[str, Any]) -> Reply:
         if self._verifier is None or self._desk.agents.proposal_review is None:

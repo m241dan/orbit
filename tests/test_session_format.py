@@ -2,6 +2,7 @@
 older orbit wrote them still read the same, and this orbit still writes them so."""
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -47,8 +48,8 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit these for a format change: they're what orbits at versions 1 to 24 wrote, and
-# they still need to read. A new version gets its own fixture (session-v25.json) and a
+# Never edit these for a format change: they're what orbits at versions 1 to 25 wrote, and
+# they still need to read. A new version gets its own fixture (session-v26.json) and a
 # migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
 SESSION_V2 = FIXTURES / "session-v2.json"
@@ -74,6 +75,7 @@ SESSION_V21 = FIXTURES / "session-v21.json"
 SESSION_V22 = FIXTURES / "session-v22.json"
 SESSION_V23 = FIXTURES / "session-v23.json"
 SESSION_V24 = FIXTURES / "session-v24.json"
+SESSION_V25 = FIXTURES / "session-v25.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -188,7 +190,7 @@ def expected(
     lane: LaneSnapshot | None = None,
 ) -> SessionRecord:
     return SessionRecord(
-        version=24,
+        version=25,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
@@ -557,18 +559,72 @@ def grouped() -> SessionRecord:
     )
 
 
-def test_a_version_24_session_file_reads_as_its_record() -> None:
-    assert parse_record(SESSION_V24.read_text(encoding="utf-8")) == grouped()
+def test_a_version_24_session_file_migrates_to_groups_with_no_merge_passes() -> None:
+    record = parse_record(SESSION_V24.read_text(encoding="utf-8"))
+    assert record == grouped()
+    assert isinstance(record, SessionRecord) and record.reviews is not None
+    assert record.reviews.groups["b2"].merges == ()
+    assert record.reviews.severities == {}
 
 
-def test_a_session_record_is_written_in_the_version_24_format() -> None:
-    written = json.loads(record_json(grouped()))
+def test_a_version_24_group_that_raised_reviews_finished_has_its_other_tasks_as_merges() -> None:
     golden = json.loads(SESSION_V24.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V24.name)
+    golden["reviews"]["groups"]["b2"]["stage"] = "merging"
+    golden["reviews"]["batches"] |= {"8": "b2", "9": "b1"}
+    record = parse_record(json.dumps(golden))
+    assert isinstance(record, SessionRecord) and record.reviews is not None
+    assert record.reviews.groups["b2"].merges == ("8",)
+
+
+def test_a_version_24_record_whose_groups_cant_be_read_is_left_to_validation() -> None:
+    golden = json.loads(SESSION_V24.read_text(encoding="utf-8"))
+    golden["reviews"]["groups"] = ["b2"]
+    record = parse_record(json.dumps(golden))
+    assert isinstance(record, Unreadable) and record.reason.startswith("reviews.groups:")
+
+
+def test_a_version_24_group_whose_lenses_cant_be_read_is_left_to_validation() -> None:
+    golden = json.loads(SESSION_V24.read_text(encoding="utf-8"))
+    golden["reviews"]["groups"]["b2"] |= {"stage": "merging", "lenses": 3}
+    record = parse_record(json.dumps(golden))
+    assert isinstance(record, Unreadable) and record.reason.startswith("reviews.groups.b2.lenses:")
+
+
+def test_a_version_24_record_without_reviews_migrates_as_it_is() -> None:
+    golden = json.loads(SESSION_V24.read_text(encoding="utf-8"))
+    golden["reviews"] = None
+    record = parse_record(json.dumps(golden))
+    assert isinstance(record, SessionRecord) and record.reviews is None
+
+
+def merging() -> SessionRecord:
+    """The golden record as version 25 keeps it: its review's merge pass, task 8, filed F1 as
+    task 9, at blocking."""
+    record = grouped()
+    lane = record.reviews
+    assert lane is not None
+    group = replace(
+        lane.groups["b2"],
+        stage="merging",
+        merges=("8",),
+        findings=(replace(FINDINGS[0], outcome="filed", task="9"), FINDINGS[1]),
+    )
+    merged = lane.model_copy(update={"groups": {"b2": group}, "severities": {"9": "blocking"}})
+    return record.model_copy(update={"reviews": merged})
+
+
+def test_a_version_25_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V25.read_text(encoding="utf-8")) == merging()
+
+
+def test_a_session_record_is_written_in_the_version_25_format() -> None:
+    written = json.loads(record_json(merging()))
+    golden = json.loads(SESSION_V25.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V25.name)
 
 
 def test_a_record_with_work_waiting_of_no_commits_is_unreadable() -> None:
-    golden = json.loads(SESSION_V24.read_text(encoding="utf-8"))
+    golden = json.loads(SESSION_V25.read_text(encoding="utf-8"))
     golden["waiting"][0]["count"] = 0
     record = parse_record(json.dumps(golden))
     assert isinstance(record, Unreadable) and record.reason.startswith("waiting.0.count:")

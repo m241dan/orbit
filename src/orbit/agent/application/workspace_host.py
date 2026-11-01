@@ -1182,6 +1182,8 @@ class WorkspaceHost:
         lane = ReviewLane(desk, self._tasks, planner, hooks)
         desk.suggest = lane.suggest  # Set here, as the lane needs the desk it takes calls from.
         desk.report_finding = lane.report
+        desk.dismiss_finding = lane.dismiss
+        desk.completion_refusal = lane.completion_refusal
         return lane
 
     def _lane_runners(self) -> tuple[LaneRunner, ...]:

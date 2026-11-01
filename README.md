@@ -1359,6 +1359,26 @@ trigger queues nothing, so the review waits only for the tasks queued. The findi
 with the session, so a review a restart interrupted fans in once its remaining tasks end, or as
 the session opens if they were all interrupted.
 
+A task a trigger queues on `reviews_finished` is the review's **merge pass**, and it must decide
+every finding its review's lenses reported. `suggest_task(title, prompt, findings, severity)`
+files the findings it names by id, at least one, as one task: the first is recorded `filed` and
+the rest `merged` into it, each with the new task's id, and the task's `severity`, `blocking` or
+`normal` (the default), is kept with it. `dismiss_finding(finding, reason)` dismisses one, with a
+reason, which is required (`Dismissed F2.`). A merge pass's suggestion naming no finding is
+refused, as is one naming an id that isn't one of its review's undecided findings (`F9 isn't an
+undecided finding of this review.`); a finding decided once isn't decided again (`F1 is already
+filed.`, or `dismissed`, and so on), and a suggestion refused for any reason, a repeated title or
+the cap included, decides nothing. `complete_task` from a merge pass is refused while any finding
+is undecided (`Decide every finding first: F2, F5 have no outcome. File them with suggest_task or
+dismiss them with dismiss_finding.`), and the findings it leaves undecided as it ends otherwise,
+by giving up, failing, being stopped or removed, are recorded `unanswered`. When a task filed with
+findings lands, they're recorded `fixed`, or, if it or a fix of it gives up, `given_up`; one that
+ends otherwise leaves them `filed`. Each review keeps its findings while its batch is open. A
+review task that isn't a merge pass, such as a project's own single reviewer, suggests with a
+title and prompt as before: naming findings is refused (`Only a merge pass files findings; suggest
+the task without them.`), as is `dismiss_finding` (`Only a merge pass can dismiss findings.`). The
+outcomes are counted on spans (see [docs/telemetry.md](docs/telemetry.md)).
+
 ### Roles and `.orbit/config.toml`
 
 Every task names a **role**, the kind of agent that takes it (`coder` unless it says otherwise).

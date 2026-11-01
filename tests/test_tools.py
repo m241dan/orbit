@@ -1,7 +1,7 @@
 from orbit.agent.domain.tools import DRAFT_TOOLS, ORBIT_TOOLS, OrbitToolGrant, orbit_tool_grant
 
 
-def test_orbit_tools_are_the_nineteen_in_order() -> None:
+def test_orbit_tools_are_the_twenty_in_order() -> None:
     assert ORBIT_TOOLS == (
         "get_task",
         "complete_task",
@@ -10,6 +10,7 @@ def test_orbit_tools_are_the_nineteen_in_order() -> None:
         "give_up",
         "suggest_task",
         "report_finding",
+        "dismiss_finding",
         "propose_task",
         "propose_checks",
         "consult",
@@ -38,6 +39,7 @@ def test_an_orbit_tool_grant_gives_the_roles_tools_and_withholds_orbits_others()
         "give_up",
         "suggest_task",
         "report_finding",
+        "dismiss_finding",
         "propose_task",
         "propose_checks",
         "consult",
