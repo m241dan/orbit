@@ -28,7 +28,7 @@ from orbit.protocol import (
     WorkspaceEntry,
 )
 from orbit.tui.view.opening import Opening
-from orbit.tui.view.task_editor import TaskChoices, role_defaults
+from orbit.tui.view.task_editor import SavedTask, TaskChoices, role_defaults
 from tests.frontend_fakes import Shell
 from tests.session_apps import CATALOG
 from tests.tui_fakes import board, opened
@@ -163,8 +163,8 @@ async def test_the_editor_opens_with_the_settings_shown_and_its_task_is_saved() 
     shell.frontend.edit_task(pending)
     [(new, new_choices, add), (old, _, edit)] = shell.app.editors
     assert (new, new_choices, old) == (None, TaskChoices(settings), pending.task)
-    await add(TaskSpec(prompt="new"))
-    await edit(TaskSpec(prompt="changed"))
+    await add(SavedTask(TaskSpec(prompt="new")))
+    await edit(SavedTask(TaskSpec(prompt="changed")))
     await edit(None)
     assert shell.wire.commands == [
         AddTask(task=TaskSpec(prompt="new")),
@@ -180,14 +180,14 @@ async def test_a_refused_new_task_shows_why_and_opens_the_editor_again_on_what_w
     shell = Shell()
     shell.frontend.edit_task(None)
     [(_, choices, add)] = shell.app.editors
-    typed = TaskSpec(prompt="Add it", skills=("pyton",))
+    typed = SavedTask(TaskSpec(prompt="Add it", skills=("pyton",)), frozenset({"model"}))
     await add(typed)
     await shell.refuse(UNKNOWN, PYTON)
     assert shell.entries() == [(PYTON, "error")]
     assert shell.app.editors[1][:2] == (None, choices)
     assert shell.app.typed == [None, typed]
     # Saving it again adds it as a new task.
-    await shell.app.editors[1][2](TaskSpec(prompt="Add it", skills=("python",)))
+    await shell.app.editors[1][2](SavedTask(TaskSpec(prompt="Add it", skills=("python",))))
     assert shell.wire.commands[-1] == AddTask(task=TaskSpec(prompt="Add it", skills=("python",)))
 
 
@@ -197,7 +197,7 @@ async def test_a_refused_edit_opens_the_editor_again_on_what_was_typed_for_the_t
     await shell.feed(TasksChanged(tasks=(pending,)))
     shell.frontend.edit_task(pending)
     [(_, _, edit)] = shell.app.editors
-    typed = TaskSpec(prompt="go!", skills=("pyton",))
+    typed = SavedTask(TaskSpec(prompt="go!", skills=("pyton",)), frozenset({"effort"}))
     await edit(typed)
     renamed = pending.model_copy(update={"task": TaskSpec(prompt="went", skills=("python",))})
     await shell.feed(TasksChanged(tasks=(renamed,)))
@@ -205,7 +205,7 @@ async def test_a_refused_edit_opens_the_editor_again_on_what_was_typed_for_the_t
     assert shell.app.editors[1][0] == renamed.task
     assert shell.app.typed == [None, typed]
     await shell.app.editors[1][2](typed)
-    assert shell.wire.commands == [EditTask(task_id="2", task=typed)] * 2
+    assert shell.wire.commands == [EditTask(task_id="2", task=typed.task)] * 2
 
 
 async def test_a_refused_edit_of_a_task_now_running_says_so_rather_than_opening_the_editor() -> (
@@ -216,7 +216,7 @@ async def test_a_refused_edit_of_a_task_now_running_says_so_rather_than_opening_
     await shell.feed(TasksChanged(tasks=(pending,)))
     shell.frontend.edit_task(pending)
     [(_, _, edit)] = shell.app.editors
-    await edit(TaskSpec(prompt="go!"))
+    await edit(SavedTask(TaskSpec(prompt="go!")))
     await shell.feed(TasksChanged(tasks=(pending.model_copy(update={"status": "running"}),)))
     await shell.refuse(BUSY, "Task '2' can't be edited while it runs.")
     assert shell.app.warnings == ["Task '2' can't be edited while it runs."]
@@ -229,7 +229,7 @@ async def test_a_refused_edit_of_a_task_gone_from_the_list_opens_no_editor() -> 
     await shell.feed(TasksChanged(tasks=(pending,)))
     shell.frontend.edit_task(pending)
     [(_, _, edit)] = shell.app.editors
-    await edit(TaskSpec(prompt="go!"))
+    await edit(SavedTask(TaskSpec(prompt="go!")))
     await shell.feed(TasksChanged(tasks=()))
     await shell.refuse(UNKNOWN, "No task with id '2'.")
     assert shell.entries() == [("No task with id '2'.", "error")]
@@ -240,7 +240,7 @@ async def test_an_accepted_save_opens_no_editor() -> None:
     shell = Shell()
     shell.frontend.edit_task(None)
     [(_, _, add)] = shell.app.editors
-    await add(TaskSpec(prompt="Add it", skills=("python",)))
+    await add(SavedTask(TaskSpec(prompt="Add it", skills=("python",))))
     await shell.accept_last()
     assert len(shell.app.editors) == 1
 

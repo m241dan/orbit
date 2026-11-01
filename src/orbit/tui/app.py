@@ -39,7 +39,7 @@ from orbit.tui.view.opening import Opening
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.seats import PLANNER_SEAT
 from orbit.tui.view.spend import SPENDING_HINT, SPENDING_TITLE
-from orbit.tui.view.task_editor import TaskChoices
+from orbit.tui.view.task_editor import SavedTask, TaskChoices
 from orbit.tui.view.transcript import prompt_placeholder
 from orbit.tui.warning_capture import WarningCapture
 from orbit.tui.widgets import ChatPrompt, StatusLine, TextScreen, confirm, mark_selected
@@ -245,7 +245,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         task: TaskSpec | None,
         choices: TaskChoices,
         saved: Saved,
-        typed: TaskSpec | None = None,
+        typed: SavedTask | None = None,
     ) -> None:
         self.push_screen(TaskEditorScreen(task, choices, self._pickers.model, typed), saved)
 

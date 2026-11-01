@@ -79,14 +79,14 @@ from orbit.tui.view.storage import StorageHalt
 from orbit.tui.view.tab_strip import TabStrip
 from orbit.tui.view.tabs import ConversationTab
 from orbit.tui.view.takeover import TakeoverOffer
-from orbit.tui.view.task_editor import TaskChoices
+from orbit.tui.view.task_editor import SavedTask, TaskChoices
 from orbit.tui.view.tasks import TaskBoard, edit_refusal
 from orbit.tui.view.transcript import busy_note, role_label, warning_entry
 from orbit.tui.view.windows import SIDEBAR_WINDOWS, Windows
 from orbit.tui.view.workspace_list import WorkspaceListView
 
-Saved = Callable[[TaskSpec | None], Awaitable[None]]
-"""Takes the task the editor saved, or none if it was discarded."""
+Saved = Callable[[SavedTask | None], Awaitable[None]]
+"""Takes what the editor saved, its task and the fields picked, or none if it was discarded."""
 
 Choose = Callable[[Callable[[], Settings], Picked], None]
 """Opens a settings picker on the settings it reads, passing on those picked."""
@@ -125,7 +125,7 @@ class AppView(Protocol):
         task: TaskSpec | None,
         choices: TaskChoices,
         saved: Saved,
-        typed: TaskSpec | None = None,
+        typed: SavedTask | None = None,
     ) -> None:
         """Open the task editor on ``task``, or a new one, offering ``choices``, the settings
         and agents now, starting from ``typed``, if given, what an earlier editor of it saved
@@ -585,7 +585,7 @@ class Frontend:
         with action("page_history"):
             await self.pager.earlier()
 
-    def edit_task(self, current: TaskState | None, typed: TaskSpec | None = None) -> None:
+    def edit_task(self, current: TaskState | None, typed: SavedTask | None = None) -> None:
         """Open the editor on the task ``current``, or a new one, starting from ``typed``, if
         given, what an earlier editor of it saved that was refused, offering the settings
         shown, those of the role the prompt talks to, and the agents of the workspace this
@@ -596,7 +596,7 @@ class Frontend:
             self._app.warn(refusal)
             return
 
-        async def saved(result: TaskSpec | None) -> None:
+        async def saved(result: SavedTask | None) -> None:
             if result is not None:
                 await self._save_task(current, result)
 
@@ -605,19 +605,20 @@ class Frontend:
         choices = TaskChoices(self.router.seats.settings or Settings(), agents)
         self._app.edit_task(task, choices, saved, typed)
 
-    async def _save_task(self, current: TaskState | None, task: TaskSpec) -> None:
-        """Send ``task``, saved in the editor of ``current``, to replace it, or of a new task, to
-        be added; refused or not sent, the editor opens again on it, as :meth:`_reopen` says."""
+    async def _save_task(self, current: TaskState | None, saved: SavedTask) -> None:
+        """Send ``saved``'s task, saved in the editor of ``current``, to replace it, or of a new
+        task, to be added; refused or not sent, the editor opens again on what was saved, as
+        :meth:`_reopen` says."""
         name: ActionName
         command: AddTask | EditTask
         if current is None:
-            name, command = "add_task", AddTask(task=task)
+            name, command = "add_task", AddTask(task=saved.task)
         else:
-            name, command = "edit_task", EditTask(task_id=current.id, task=task)
+            name, command = "edit_task", EditTask(task_id=current.id, task=saved.task)
         with action(name):
-            await self.send(command, Awaited(refused=lambda: self._reopen(current, task)))
+            await self.send(command, Awaited(refused=lambda: self._reopen(current, saved)))
 
-    def _reopen(self, current: TaskState | None, typed: TaskSpec) -> None:
+    def _reopen(self, current: TaskState | None, typed: SavedTask) -> None:
         """Open the editor again on ``typed``, saved in the editor of ``current``, or of a new
         task, but refused: for a new task again, or for ``current`` as the list has it now,
         unless it's left the list."""

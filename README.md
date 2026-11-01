@@ -326,8 +326,9 @@ Its model must be one its role's runtime takes, or saving it is refused, naming 
 aliases, and each of its skills must be a skill, or saving it is refused, naming the first that
 isn't and listing the skills (`Task skills names pyton, which isn't a skill; the skills are
 application, code-style, …`). A refused save changes nothing: the conversation says why, and the
-editor opens again on what you saved, to fix and save again, unless the task has since left the
-list or can no longer be edited. `enter` on a running or verifying task, or on a review orbit
+editor opens again on what you saved, to fix and save again, with the model, tool access and effort
+you'd picked still counting as picked in this edit, unless the task has since left the list or can
+no longer be edited. `enter` on a running or verifying task, or on a review orbit
 queued, only shows why it can't be edited.
 
 The task list belongs to the open session, which orbit saves as you go (see [Sessions](#sessions)).

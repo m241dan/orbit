@@ -11,7 +11,7 @@ from textual.widgets import Input, Static
 
 from orbit.protocol import TaskSpec
 from orbit.tui.view.settings import EFFORT_TITLE, MODEL_TITLE, ROLE_TITLE, TOOL_ACCESS_TITLE
-from orbit.tui.view.task_editor import SettingsChooser, TaskChoices, TaskEditor
+from orbit.tui.view.task_editor import SavedTask, SettingsChooser, TaskChoices, TaskEditor
 from orbit.tui.view.tasks import (
     TASK_EDITOR_HINT,
     TASK_PROMPT_TITLE,
@@ -38,10 +38,10 @@ class FieldBox(Static):
         self.border_title = title
 
 
-class TaskEditorScreen(ModalScreen[TaskSpec | None]):
+class TaskEditorScreen(ModalScreen[SavedTask | None]):
     """Shows the :class:`TaskEditor` of one task's title, prompt, role, skills, model, tool
     access and effort, starting from ``typed``, if given, what an earlier editor of it saved
-    that was refused. Dismisses with the task, or None.
+    that was refused. Dismisses with the task and the fields picked, or None.
 
     Works like the main screen: j/k select a field, J/K scroll the prompt box from any field,
     i types in the title, prompt or skills (escape stops; enter stops in the title or skills
@@ -78,7 +78,7 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
         task: TaskSpec | None,
         choices: TaskChoices,
         pickers: SettingsChooser,
-        typed: TaskSpec | None = None,
+        typed: SavedTask | None = None,
     ) -> None:
         super().__init__()
         self.editor = TaskEditor(self, task, choices, pickers)

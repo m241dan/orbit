@@ -13,7 +13,13 @@ from orbit.tui.view.settings import (
     role_label,
     tool_access_choices,
 )
-from orbit.tui.view.task_editor import TaskChoices, TaskEditor, skill_names, task_roles
+from orbit.tui.view.task_editor import (
+    SavedTask,
+    TaskChoices,
+    TaskEditor,
+    skill_names,
+    task_roles,
+)
 from orbit.tui.view.tasks import task_label
 
 FIX_PROMPT = (
@@ -31,7 +37,8 @@ AGENTS = (PLANNER, CODER, SECURITY)
 
 class View:
     """What the task editor shows, as it shows it, and what the user has typed in it: the
-    title, the prompt's body and the skills, set as a test types."""
+    title, the prompt's body and the skills, set as a test types; ``closed`` is what it closed
+    with each time, and ``dismissed`` the task of each, or None."""
 
     def __init__(self) -> None:
         self.typed_title = ""
@@ -41,7 +48,12 @@ class View:
         self.typing: list[str] = []
         self.role: str | None = None
         self.settings: tuple[str, str, str] | None = None
-        self.dismissed: list[TaskSpec | None] = []
+        self.closed: list[SavedTask | None] = []
+
+    @property
+    def dismissed(self) -> list[TaskSpec | None]:
+        """The task the editor closed with each time, or None for each it closed without."""
+        return [None if saved is None else saved.task for saved in self.closed]
 
     def select_field(self, previous: str, field: str) -> None:
         self.selections.append((previous, field))
@@ -61,8 +73,8 @@ class View:
     def show_settings(self, model: str, tools: str, effort: str) -> None:
         self.settings = (model, tools, effort)
 
-    def dismiss(self, result: TaskSpec | None) -> None:
-        self.dismissed.append(result)
+    def dismiss(self, result: SavedTask | None) -> None:
+        self.closed.append(result)
 
 
 class Pickers:
@@ -553,7 +565,7 @@ def test_an_editor_opened_again_on_a_new_task_whose_save_was_refused_starts_from
         skills=("pyton",),
     )
     editor, view, _ = editing(None, Settings(tool_access="off"))
-    editor.start_from(typed)
+    editor.start_from(SavedTask(typed))
     assert editor.heading == "New task"
     assert (*editor.text, editor.skills_text, editor.role_shown) == (
         "Audit it",
@@ -565,10 +577,59 @@ def test_an_editor_opened_again_on_a_new_task_whose_save_was_refused_starts_from
     view.typed_title, view.typed_body = editor.text
     view.typed_skills = editor.skills_text
     editor.save()
-    assert view.dismissed == [typed]
+    assert view.closed == [SavedTask(typed)]
 
 
 def test_an_editor_opened_again_on_an_edited_task_whose_save_was_refused_starts_from_it() -> None:
     editor, _, _ = editing(TaskSpec(prompt="one", skills=("python",)))
-    editor.start_from(TaskSpec(prompt="one!", skills=("pyton",)))
+    editor.start_from(SavedTask(TaskSpec(prompt="one!", skills=("pyton",))))
     assert (editor.heading, editor.text, editor.skills_text) == ("Edit task", ("one!", ""), "pyton")
+
+
+def test_a_saved_task_carries_the_settings_fields_picked_in_its_edit() -> None:
+    editor, view, pickers = editing(None)
+    view.typed_title = "Audit it"
+    editor.move(4)
+    editor.choose()
+    pickers.pick(1)  # opus
+    editor.move(2)
+    editor.choose()
+    pickers.pick(2)  # medium
+    editor.save()
+    task = TaskSpec(prompt="Audit it", settings=Settings(model="opus", effort="medium"))
+    assert view.closed == [SavedTask(task, frozenset({"model", "effort"}))]
+
+
+def test_an_editor_opened_afresh_saves_with_nothing_picked() -> None:
+    editor, view, _ = editing(TaskSpec(prompt="Audit it", settings=Settings(model="opus")))
+    editor.save()
+    task = TaskSpec(prompt="Audit it", settings=Settings(model="opus"))
+    assert view.closed == [SavedTask(task, frozenset())]
+
+
+def test_a_role_picked_after_a_refused_save_keeps_the_fields_picked_before_it() -> None:
+    settings = Settings(model="opus", tool_access="off")
+    typed = TaskSpec(prompt="Audit it", settings=settings, skills=("pyton",))
+    editor, view, pickers = editing(None)
+    editor.start_from(SavedTask(typed, frozenset({"model"})))
+    editor.move(2)
+    editor.choose()
+    pickers.pick(1)  # security
+    assert view.settings == ("opus", "restricted", "high")
+
+    # Saved again, the model still counts as picked, should that save be refused too.
+    view.typed_title = "Audit it"
+    editor.save()
+    settings = Settings(model="opus", effort="high")
+    task = TaskSpec(prompt="Audit it", settings=settings, role="security")
+    assert view.closed == [SavedTask(task, frozenset({"model"}))]
+
+
+def test_a_role_picked_after_a_refused_save_where_nothing_was_picked_takes_its_defaults() -> None:
+    settings = Settings(model="opus", tool_access="off", effort="low")
+    editor, view, pickers = editing(None)
+    editor.start_from(SavedTask(TaskSpec(prompt="Audit it", settings=settings)))
+    editor.move(2)
+    editor.choose()
+    pickers.pick(1)  # security
+    assert view.settings == ("default", "restricted", "high")

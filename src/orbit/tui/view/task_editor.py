@@ -32,6 +32,16 @@ class TaskChoices:
     agents: tuple[AgentEntry, ...] = ()
 
 
+@dataclass(frozen=True)
+class SavedTask:
+    """What the task editor saves: the ``task``, and the fields of its settings ``picked`` in
+    the edit, which an editor opened again on it, should its save be refused, keeps from the
+    roles picked there."""
+
+    task: TaskSpec
+    picked: frozenset[str] = frozenset()
+
+
 def skill_names(text: str) -> tuple[str, ...]:
     """The skills, by name, the editor's Skills field holding ``text`` names: its
     comma-separated names, without the spaces around them, each once, where first named; none
@@ -138,7 +148,7 @@ class TaskEditorView(Protocol):
         effort."""
         ...
 
-    def dismiss(self, result: TaskSpec | None) -> object:
+    def dismiss(self, result: SavedTask | None) -> object:
         """Close the editor with ``result``."""
         ...
 
@@ -154,7 +164,8 @@ class TaskEditor:
     comma-separated names, read on save by :func:`skill_names`. j/k select a field, i types in
     the title, prompt or skills, typing in the title when another field is selected, and enter
     on the role, model, tools or effort opens its picker. Picking a role fills the model, tool
-    access and effort with its defaults, but those picked in this edit.
+    access and effort with its defaults, but those picked in this edit, which it saves with the
+    task, or in the edit it starts from.
     """
 
     def __init__(
@@ -186,11 +197,14 @@ class TaskEditor:
         as ``python, application``; empty for none."""
         return skills_text(self._skills)
 
-    def start_from(self, typed: TaskSpec) -> None:
+    def start_from(self, typed: SavedTask) -> None:
         """Start from ``typed``, what was saved from an earlier editor of the same task, or of
-        a new one, whose save was refused: its prompt, role, settings and skills."""
-        self._prompt, self._role, self._skills = typed.prompt, typed.role, typed.skills
-        self.settings = typed.settings
+        a new one, whose save was refused: its task's prompt, role, settings and skills, and
+        the fields picked there, as though picked in this edit."""
+        task = typed.task
+        self._prompt, self._role, self._skills = task.prompt, task.role, task.skills
+        self.settings = task.settings
+        self._picked = set(typed.picked)
 
     @property
     def role_shown(self) -> str:
@@ -239,15 +253,15 @@ class TaskEditor:
                 self._pickers.choose_effort(self._now, partial(self._pick, "effort"))
 
     def save(self) -> None:
-        """Close with the task, if it has a title; its body and skills may be empty."""
+        """Close with the task, if it has a title, and the fields picked in this edit; its body
+        and skills may be empty."""
         view = self._view
         title = view.typed_title
         if title.strip():
             prompt = join_prompt(title, view.typed_body)
             skills = skill_names(view.typed_skills)
-            view.dismiss(
-                TaskSpec(prompt=prompt, settings=self.settings, role=self._role, skills=skills)
-            )
+            task = TaskSpec(prompt=prompt, settings=self.settings, role=self._role, skills=skills)
+            view.dismiss(SavedTask(task, frozenset(self._picked)))
 
     def cancel(self) -> None:
         """Close with no task."""

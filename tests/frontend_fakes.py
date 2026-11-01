@@ -29,7 +29,7 @@ from orbit.tui.view.settings import Pickers
 from orbit.tui.view.storage import StorageHalt
 from orbit.tui.view.tab_strip import ALL_TAB_ID, OPENING, TabStrip
 from orbit.tui.view.takeover import TakeoverOffer
-from orbit.tui.view.task_editor import TaskChoices
+from orbit.tui.view.task_editor import SavedTask, TaskChoices
 from orbit.tui.view.tasks import TaskBoard
 from tests.navigation_fakes import Modals, WorkspaceViews
 from tests.transcript_fakes import Window
@@ -107,7 +107,7 @@ class AppShell:
         self.warnings: list[str] = []
         self.questions: list[tuple[str, str, str, Callable[[], Awaitable[object]]]] = []
         self.editors: list[tuple[TaskSpec | None, TaskChoices, Saved]] = []
-        self.typed: list[TaskSpec | None] = []  # What each editor opened starts from, if any.
+        self.typed: list[SavedTask | None] = []  # What each editor opened starts from, if any.
         self.spendings: list[str] = []
         self.labels: dict[str, str | None] = {}
         self.selected: set[str] = set()
@@ -136,7 +136,7 @@ class AppShell:
         task: TaskSpec | None,
         choices: TaskChoices,
         saved: Saved,
-        typed: TaskSpec | None = None,
+        typed: SavedTask | None = None,
     ) -> None:
         self.editors.append((task, choices, saved))
         self.typed.append(typed)

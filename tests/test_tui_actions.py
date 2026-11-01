@@ -22,6 +22,7 @@ from orbit.tracing import Telemetry
 from orbit.tui import Opening, OrbitApp
 from orbit.tui.view.actions import ACTION_SPAN
 from orbit.tui.view.frontend import Frontend
+from orbit.tui.view.task_editor import SavedTask
 from orbit.tui.view.workspaces import CANCEL_INDEX
 from tests.frontend_fakes import Shell
 from tests.protocol_examples import PROPOSAL
@@ -187,7 +188,7 @@ async def add_task(telemetry: Telemetry) -> Shell:
     shell = Shell(telemetry=telemetry)
     shell.frontend.edit_task(None)
     *_, saved = shell.app.editors[-1]
-    await saved(TaskSpec(prompt="Add a flag."))
+    await saved(SavedTask(TaskSpec(prompt="Add a flag.")))
     return shell
 
 
@@ -197,7 +198,7 @@ async def edit_task(telemetry: Telemetry) -> Shell:
     await shell.feed(TasksChanged(tasks=(pending,)))
     shell.frontend.edit_task(pending)
     *_, saved = shell.app.editors[-1]
-    await saved(TaskSpec(prompt="Add a flag."))
+    await saved(SavedTask(TaskSpec(prompt="Add a flag.")))
     return shell
 
 

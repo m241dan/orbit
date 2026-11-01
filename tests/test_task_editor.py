@@ -19,7 +19,7 @@ from orbit.tui import OrbitApp
 from orbit.tui.settings_pickers import SettingsPickers
 from orbit.tui.task_editor import TaskEditorScreen
 from orbit.tui.tasks import TaskList
-from orbit.tui.view.task_editor import TaskChoices
+from orbit.tui.view.task_editor import SavedTask, TaskChoices
 from orbit.tui.widgets import PromptBox, PromptInput
 from tests.tui_fakes import (
     FakeSession,
@@ -49,20 +49,25 @@ CATALOG = Catalog(
 class EditorApp(App[None]):
     """An app opening just the task editor, on ``task`` or a new task, starting from ``typed``,
     if given, with the default settings and the roles of :data:`AGENTS`, for what the editor
-    does on its own; ``saved`` is what it closes with."""
+    does on its own; ``closed`` is what it closes with, and ``saved`` its task."""
 
-    def __init__(self, task: TaskSpec | None, typed: TaskSpec | None = None) -> None:
+    def __init__(self, task: TaskSpec | None, typed: SavedTask | None = None) -> None:
         super().__init__()
         self.editing = task
         self.typed = typed
-        self.saved: list[TaskSpec | None] = []
+        self.closed: list[SavedTask | None] = []
+
+    @property
+    def saved(self) -> list[TaskSpec | None]:
+        """The task the editor closed with, or None if it closed without one."""
+        return [None if saved is None else saved.task for saved in self.closed]
 
     def on_mount(self) -> None:
         pickers = SettingsPickers()
         pickers.install(self)
         choices = TaskChoices(Settings(), AGENTS)
         editor = TaskEditorScreen(self.editing, choices, pickers.model, self.typed)
-        self.push_screen(editor, self.saved.append)
+        self.push_screen(editor, self.closed.append)
 
 
 def editor_screen(app: App[None]) -> TaskEditorScreen:
@@ -546,7 +551,7 @@ async def test_escape_stops_typing_in_the_skills() -> None:
 
 
 async def test_an_editor_starting_from_what_was_typed_shows_it() -> None:
-    typed = TaskSpec(prompt="Add it!\n\nNow.", skills=("pyton",))
+    typed = SavedTask(TaskSpec(prompt="Add it!\n\nNow.", skills=("pyton",)))
     app = EditorApp(TaskSpec(prompt="Add it"), typed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -573,3 +578,24 @@ async def test_a_refused_save_opens_the_editor_again_on_what_was_typed() -> None
         assert editor_screen(app).title_text == "New task"
         assert editor_fields(app)[0] == "Add it"
         assert skills_field(app).value == "pyton"
+
+
+async def test_a_role_picked_after_a_refused_save_keeps_the_model_picked_before_it() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings(tool_access="full"))
+        await feed_events(session, pilot, CATALOG)
+        await open_task_list(pilot)
+        await pilot.press("enter", "i", *"Audit it", "escape")
+        await pilot.press("j", "j", "j", "j", "enter", "j", "enter")  # opus
+        await pilot.press("k", "i", *"pyton", "escape", "ctrl+s")
+        message = "Task skills names pyton, which isn't a skill; the skills are python."
+        refusal = CommandRefused(
+            command_id=session.envelopes[-1].command_id, code=UNKNOWN, message=message
+        )
+        await feed_events(session, pilot, refusal)
+        assert editor_fields(app)[2:] == ("opus", "full (auto-approved)")
+        await pilot.press("j", "j", "enter", "j", "enter")  # the security role
+        assert role_and_effort(app) == ("security · security", "high")
+        assert editor_fields(app)[2:] == ("opus", "restricted")
