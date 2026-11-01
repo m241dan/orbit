@@ -67,6 +67,11 @@ def _admit() -> None:
     """Refuse nothing."""
 
 
+def _never() -> bool:
+    """Says the session is never halted."""
+    return False
+
+
 def _default_settings(role: str) -> Settings:
     return Settings()
 
@@ -120,8 +125,9 @@ class SeatHooks:
     ``step_names`` verifying tasks now, to ``check`` it, refusing a turn by raising
     :class:`Refused` while it's halted, the ``tracing`` its turns are traced by, its
     ``copies``, which a role working in a copy takes its turns in, the ``settings`` of each
-    role, which the turns it didn't ask for run with, and the ``timer`` its consultations held
-    for approval are timed by."""
+    role, which the turns it didn't ask for run with, the ``timer`` its consultations held
+    for approval are timed by, and whether it's ``halted``, which keeps the turns waiting from
+    starting."""
 
     save: Callable[[], Awaitable[None]]
     use: Callable[[], None]
@@ -131,6 +137,7 @@ class SeatHooks:
     copies: RoleCopies | None = None
     settings: Callable[[str], Settings] = _default_settings
     timer: Timer = field(default_factory=Timer)
+    halted: Callable[[], bool] = _never
 
 
 def _unwatched(lane: BusyLane) -> None:
@@ -339,17 +346,25 @@ class PlannerSeat:
 
     def advance(self) -> None:
         """Start the seat's next waiting turn, if it has one and its lane is free: the first in
-        its line, else one hearing every message delivered."""
-        if self._held or self._planner is None or self._stale or self._turns.running:
+        its line, else one hearing every message delivered; none while the session is halted,
+        until it's advanced again as the halt lifts."""
+        planner = self._planner
+        if planner is None or self._kept_waiting():
             return
         turn = self._next()
         if turn is None:
             return
-        work = self._answer_waiting(self._planner, turn)
+        work = self._answer_waiting(planner, turn)
         self._turn = self._turns.begin(work, self._refusal)
         self._waited = True
         turn.placed(1)
         self._place()
+
+    def _kept_waiting(self) -> bool:
+        """Whether the turns waiting are kept from starting: they're held as turns stop, the
+        conversation opened is from another runtime than its role's, the seat's lane is busy,
+        or the session is halted."""
+        return self._held or self._stale is not None or self._turns.running or self._hooks.halted()
 
     def hold(self) -> None:
         """Keep the turns waiting from starting, as the seat's turn stops, until

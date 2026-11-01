@@ -452,6 +452,7 @@ class WorkspaceHost:
             tracing,
             self._copies,
             lambda role: self._settings.of(role),
+            halted=self._gate.halted,
         )
         return ConversationSeats(self._desk, self._tasks, self._events, hooks)
 
@@ -1046,13 +1047,15 @@ class WorkspaceHost:
 
     def _restart_background(self) -> None:
         """Start the tasks waiting in the lanes that start by themselves, the reviews among them,
-        and the startup check a trigger asked for that the halt kept from starting, and times
-        the consultations held for approval to expire again, as the halt lifts. A startup check
-        the halt cancelled stays cancelled, as one the user cancelled does: it runs once as orbit
-        starts, the conversation has said it was cancelled, and the first task's verification
-        runs the same steps."""
+        the startup check a trigger asked for that the halt kept from starting, and the
+        conversational roles' turns waiting, such as those hearing of the consultations the
+        halt cancelled, and times the consultations held for approval to expire again, as the
+        halt lifts. A startup check the halt cancelled stays cancelled, as one the user
+        cancelled does: it runs once as orbit starts, the conversation has said it was
+        cancelled, and the first task's verification runs the same steps."""
         self._lanes.kick()
         self._start_startup_check()
+        self._seats.start_waiting()
         self._seats.restart_expiry()
 
     def _agent_on(self, task_id: str) -> str:

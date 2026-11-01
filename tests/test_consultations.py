@@ -56,6 +56,7 @@ from tests.agent_fakes import (
     chats,
     events_until,
     halt_of,
+    planner_turn,
     resume_storage,
     send,
     session_for,
@@ -553,6 +554,23 @@ async def test_a_storage_halt_answers_the_consultations_waiting_as_cancelled() -
     assert store.last.consultations == ()
 
 
+async def test_a_consultation_a_storage_halt_cancels_is_heard_only_once_the_halt_lifts() -> None:
+    session, launcher = consulting_host(FakeStore())
+    launcher.planner_turns = [consults("Check X", heard=[]), gated(asyncio.Event()), chats]
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    await eventually(lambda: len(launcher.launches) == 2, poll=0)
+    asking_turn = planner_turn(session)
+    halt_of(session).fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))  # Stops the turns.
+    await events_until(session, answered(1))
+    assert (planner_turn(session) is asking_turn, halt_of(session).halted) == (True, True)
+    await resume_storage(session)
+    await events_until(session, finished("agent-1", 1))
+    await session.close()
+
+    assert len(launcher.launches) == 3
+    assert prompts(launcher)[-1][1].endswith(told("it was cancelled"))
+
+
 async def traced_halt(*messages: str) -> tuple[ReadableSpan, list[ReadableSpan], ReadableSpan]:
     """The planner's last turn, hearing its consultations with ``messages`` answered as cancelled by
     a storage halt as the first runs, the consultations' spans, and the asking turn's span."""
@@ -580,9 +598,10 @@ async def test_a_consultation_cancelled_mid_turn_links_its_reply_turn_to_its_spa
 
 
 async def test_a_consultation_cancelled_in_line_links_its_reply_turn_to_the_asking_turn() -> None:
-    reply, _, asking_turn = await traced_halt("Check X", "Check Y")
+    reply, consultations, asking_turn = await traced_halt("Check X", "Check Y")
     assert reply.parent is None
-    assert links_to_all(reply, [asking_turn])
+    assert len(consultations) == 1  # Only "Check X" ran; both are heard in one turn.
+    assert links_to_all(reply, [*consultations, asking_turn])
 
 
 async def test_a_switch_saves_the_consultations_left_pending_as_switched_away_from() -> None:

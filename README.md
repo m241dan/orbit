@@ -996,7 +996,8 @@ count, the record moves and the event log. When they work, the events in the fal
 are appended to the log in `seq` order in one go, skipping any it already holds, the fallback file
 is deleted and the halt is lifted: commands are accepted again, the reviews waiting on the board
 start, a run the usage limit or an API outage had stopped starts again if its wait ended
-meanwhile, and work can carry on; a startup check the halt cancelled stays cancelled, like one
+meanwhile, a role whose consultations the halt cancelled hears so, in one turn, only now, and
+work can carry on; a startup check the halt cancelled stays cancelled, like one
 you cancelled. Events that
 reached neither the log nor a fallback file are recorded as a gap, which the conversation, and
 paging back through it, shows in their place as a line such as "Events 1204–1210 weren't saved".

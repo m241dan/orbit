@@ -39,7 +39,8 @@ class ConversationSeats:
     of roles that now run on another runtime than their conversation's, until they're reset.
     The roles working in a copy take their turns in theirs among the ``hooks``' copies. The roles
     consult those their role names, each consultation waiting in its consultant's line; a lane
-    freed starts the next turn waiting for a seat in it."""
+    freed starts the next turn waiting for a seat in it. While the ``hooks`` say the session is
+    halted, no turn waiting starts, until :meth:`start_waiting`."""
 
     def __init__(
         self, desk: AgentDesk | None, tasks: Tasks, events: EventSink, hooks: SeatHooks
@@ -220,8 +221,10 @@ class ConversationSeats:
         """Cancel each role's turn, if it runs, and wait for them to end, starting none of the
         turns waiting meanwhile, which are forgotten. If ``final``, as orbit stops, the
         consultations they answered stay pending, to answer as the session opens again; else
-        they're answered as cancelled, but for those held for approval, which stay held. Either
-        way the held ones stop expiring, until :meth:`restart_expiry`."""
+        they're answered as cancelled, but for those held for approval, which stay held, their
+        askers hearing so in turns that wait, while the session is halted, until
+        :meth:`start_waiting`. Either way the held ones stop expiring, until
+        :meth:`restart_expiry`."""
         self._consultations.hold()
         self._consultations.stop_expiry()
         for seat in self._seats.values():
@@ -238,6 +241,12 @@ class ConversationSeats:
     def restart_expiry(self) -> None:
         """Time the consultations held for approval to expire again, as a halt lifts."""
         self._consultations.restart_expiry()
+
+    def start_waiting(self) -> None:
+        """Start each seat's next waiting turn whose lane is free, as a halt that kept them
+        waiting lifts, such as the one hearing its consultations the halt cancelled."""
+        for seat in self._seats.values():
+            seat.advance()
 
     async def close(self) -> None:
         """End each role's current conversation, at the session's end."""

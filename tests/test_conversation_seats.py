@@ -477,3 +477,24 @@ async def test_roles_sharing_a_lane_take_turns_in_it_each_keeping_its_own_turn_a
     await eventually(lambda: not seats.answering)
     assert launcher.launches[-1].instructions == "You critique."
     await seats.close()
+
+
+async def test_a_message_delivered_while_halted_starts_its_turn_once_the_halt_lifts() -> None:
+    agents, launcher = agents_for(roles=ROLES)
+    events: asyncio.Queue[Event] = asyncio.Queue()
+    lifted = asyncio.Event()
+    hooks = SeatHooks(nothing, lambda: None, tuple, halted=lambda: not lifted.is_set())
+    tasks = Tasks(TaskBoard(), events.put)
+    seats = ConversationSeats(AgentDesk(agents, events.put), tasks, events, hooks)
+    launcher.planner_turns = [chats]
+    seats.planner.deliver("Heard.", None)
+    seats.start_waiting()  # Still halted.
+    assert (seats.planner.turn, seats.answering) == (None, ())
+    lifted.set()
+    seats.start_waiting()
+    assert seats.answering == (PLANNER,)
+    await eventually(lambda: not seats.answering)
+    await seats.close()
+
+    [launch] = launcher.launches
+    assert launch.prompt.endswith("Heard.")
