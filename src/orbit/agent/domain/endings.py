@@ -1,11 +1,13 @@
 """Why a task ended other than completed: a line for the board, and the full text.
 
 Each ending is a ``(reason, detail)`` pair; the detail is ``""`` when the reason says it all.
+Work that timed out ends with an error code and message instead, saying whether its role's time
+ran out.
 """
 
 from orbit.agent.domain.agent_task import Phase
 from orbit.agent.domain.verification import VerificationStep, failure_reason, failure_report
-from orbit.protocol import TaskStatus
+from orbit.protocol import AGENT_FAILED, TIMED_OUT, TaskStatus
 
 Ending = tuple[str, str]
 """Why a task ended: the reason in a line, and its detail in full."""
@@ -65,6 +67,22 @@ def error(message: str) -> Ending:
 def bug(exc: BaseException) -> Ending:
     """Why a task ended in error when its run broke on ``exc``."""
     return BUG, str(exc)
+
+
+def out_of_time(who: str, minutes: float) -> str:
+    """The error saying ``who`` ran out of their role's ``minutes``."""
+    return f"{who} ran out of time ({minutes:g} minutes)."
+
+
+def timeout_ending(
+    expired: bool, minutes: float | None, who: str, exc: TimeoutError
+) -> tuple[str, str]:
+    """The error code and message for ``who``'s work that raised ``exc``: they ran out of their
+    role's ``minutes`` only if its deadline ``expired``, as the work can raise a TimeoutError of
+    its own."""
+    if minutes is None or not expired:
+        return AGENT_FAILED, str(exc)
+    return TIMED_OUT, out_of_time(who, minutes)
 
 
 def run_ending(status: TaskStatus, phase: Phase, given_up: str, failed: str | None) -> Ending:

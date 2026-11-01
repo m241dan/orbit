@@ -27,14 +27,10 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import TaskBoard, draft_line, draft_text
 from orbit.agent.domain.consultations import CANCELLED, failed
+from orbit.agent.domain.endings import timeout_ending
 from orbit.agent.domain.refusals import Refused
-from orbit.agent.domain.roles import (
-    suggested_task,
-    suggestion_refusal,
-    task_suggestion,
-    timeout_ending,
-)
 from orbit.agent.domain.skills import proposed_skills
+from orbit.agent.domain.suggestions import suggested_task, suggestion_refusal, task_suggestion
 from orbit.agent.domain.tools import (
     CONSULT,
     EDIT_DRAFT,

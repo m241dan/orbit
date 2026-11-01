@@ -13,20 +13,13 @@ from orbit.agent.domain.roles import (
     enabled_roles,
     load_built_in_roles,
     names_file,
-    out_of_time,
     role_task,
-    suggested_task,
-    suggestion_refusal,
-    task_suggestion,
-    timeout_ending,
 )
 from orbit.agent.domain.tools import ORBIT_TOOLS, PROPOSE_TASK, orbit_tool_grant
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.protocol import (
-    AGENT_FAILED,
     BUILT_IN_ROLE_NAMES,
     NOT_CONFIGURED,
-    TIMED_OUT,
     Effort,
     Settings,
     TaskSpec,
@@ -236,24 +229,6 @@ def test_a_roles_timeout_in_seconds_is_its_minutes_or_no_limit(
     assert Role(instructions="Do it.", timeout_minutes=minutes).timeout_seconds == seconds
 
 
-@pytest.mark.parametrize(("minutes", "shown"), [(2, "2"), (2.0, "2"), (0.5, "0.5")])
-def test_out_of_time_names_who_and_their_minutes(minutes: float, shown: str) -> None:
-    assert out_of_time("agent-3", minutes) == f"agent-3 ran out of time ({shown} minutes)."
-
-
-def test_a_timeout_after_the_deadline_expired_is_running_out_of_time() -> None:
-    ending = timeout_ending(True, 2, "agent-3", TimeoutError("pipe timed out"))
-    assert ending == (TIMED_OUT, "agent-3 ran out of time (2 minutes).")
-
-
-@pytest.mark.parametrize(("expired", "minutes"), [(False, 2), (False, None), (True, None)])
-def test_a_timeout_the_deadline_didnt_cause_is_a_failure(
-    expired: bool, minutes: float | None
-) -> None:
-    ending = timeout_ending(expired, minutes, "agent-3", TimeoutError("pipe timed out"))
-    assert ending == (AGENT_FAILED, "pipe timed out")
-
-
 def test_a_role_task_runs_in_the_role_with_its_settings() -> None:
     reviewer = BUILT_IN_ROLES["super-reviewer"]
     assert role_task("super-reviewer", reviewer, "Review.") == TaskSpec(
@@ -270,48 +245,6 @@ def test_a_role_task_names_no_skills_unless_given_them() -> None:
     reviewer = BUILT_IN_ROLES["reviewer"]
     assert role_task("reviewer", reviewer, "Review.").skills == ()
     assert role_task("reviewer", reviewer, "Review.", ("python",)).skills == ("python",)
-
-
-def test_a_suggested_task_is_a_coders_titled_prompt() -> None:
-    coder = BUILT_IN_ROLES["coder"]
-    assert suggested_task(coder, " Add the flag \n", "\nAdd --fast. ") == TaskSpec(
-        prompt="Add the flag\n\nAdd --fast.", settings=Settings(tool_access="full")
-    )
-
-
-def test_a_suggested_task_without_a_prompt_is_just_its_title() -> None:
-    coder = BUILT_IN_ROLES["coder"]
-    assert suggested_task(coder, "Add the flag", " \n").prompt == "Add the flag"
-
-
-def test_a_suggested_task_names_no_skills_unless_given_them() -> None:
-    coder = BUILT_IN_ROLES["coder"]
-    assert suggested_task(coder, "Add the flag", "Add --fast.").skills == ()
-    task = suggested_task(coder, "Add the flag", "Add --fast.", ("python", "application"))
-    assert task.skills == ("python", "application")
-
-
-def test_a_task_suggestion_is_its_stripped_title_and_prompt() -> None:
-    arguments = {"title": " Add the flag ", "prompt": "\nAdd --fast. "}
-    assert task_suggestion(arguments) == ("Add the flag", "Add --fast.")
-
-
-def test_a_task_suggestions_title_is_flattened_to_one_line() -> None:
-    arguments = {"title": "Fix A\n  and\tB\n", "prompt": "Both."}
-    assert task_suggestion(arguments) == ("Fix A and B", "Both.")
-
-
-@pytest.mark.parametrize("title", ["", " \n\t "])
-def test_a_task_suggestion_with_a_blank_title_is_refused(title: str) -> None:
-    assert task_suggestion({"title": title, "prompt": "Do X"}) == "A task needs a title."
-
-
-def test_a_task_suggestion_without_a_title_is_refused() -> None:
-    assert task_suggestion({"prompt": "Do X"}) == "A task needs a title."
-
-
-def test_a_task_suggestion_without_a_prompt_has_an_empty_one() -> None:
-    assert task_suggestion({"title": "Tidy"}) == ("Tidy", "")
 
 
 def test_a_role_that_consults_and_proposes_is_granted_draft_tools_consult_and_read_skill() -> None:
@@ -420,16 +353,6 @@ def test_work_in_a_disabled_role_is_refused_as_not_configured_naming_it() -> Non
 @pytest.mark.parametrize("name", ["coder", "nobody"])
 def test_work_in_an_enabled_role_or_one_there_is_none_of_is_not_refused(name: str) -> None:
     check_enabled(BUILT_IN_ROLES, name)
-
-
-def test_a_suggested_task_is_refused_while_the_coder_is_disabled_naming_it() -> None:
-    coder = BUILT_IN_ROLES["coder"].model_copy(update={"enabled": False})
-    refusal = suggestion_refusal({**BUILT_IN_ROLES, "coder": coder})
-    assert refusal == "coder is disabled in this project's configuration."
-
-
-def test_a_suggested_task_is_not_refused_while_the_coder_is_enabled() -> None:
-    assert suggestion_refusal(BUILT_IN_ROLES) is None
 
 
 @pytest.mark.parametrize(

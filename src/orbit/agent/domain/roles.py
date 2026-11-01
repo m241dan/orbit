@@ -47,11 +47,8 @@ from orbit.agent.domain.tools import (
     RUN_CHECK,
 )
 from orbit.protocol import (
-    AGENT_FAILED,
     BUILT_IN_ROLE_NAMES,
-    CODER,
     NOT_CONFIGURED,
-    TIMED_OUT,
     Effort,
     Settings,
     TaskSpec,
@@ -357,48 +354,10 @@ def check_enabled(roles: Mapping[str, Role], name: str) -> None:
         raise Refused(NOT_CONFIGURED, disabled_note(name))
 
 
-def out_of_time(who: str, minutes: float) -> str:
-    """The error saying ``who`` ran out of their role's ``minutes``."""
-    return f"{who} ran out of time ({minutes:g} minutes)."
-
-
-def timeout_ending(
-    expired: bool, minutes: float | None, who: str, exc: TimeoutError
-) -> tuple[str, str]:
-    """The error code and message for ``who``'s work that raised ``exc``: they ran out of their
-    role's ``minutes`` only if its deadline ``expired``, as the work can raise a TimeoutError of
-    its own."""
-    if minutes is None or not expired:
-        return AGENT_FAILED, str(exc)
-    return TIMED_OUT, out_of_time(who, minutes)
-
-
 def role_task(role_name: str, role: Role, prompt: str, skills: tuple[str, ...] = ()) -> TaskSpec:
     """A task orbit queues for ``role`` (named ``role_name``), with its settings, naming the
     ``skills`` its agent gets beyond its role's, none unless given."""
     return TaskSpec(prompt=prompt, settings=role.settings, role=role_name, skills=skills)
-
-
-def suggested_task(coder: Role, title: str, prompt: str, skills: tuple[str, ...] = ()) -> TaskSpec:
-    """A coder's task an agent suggested or proposed, as ``title`` and ``prompt``, naming the
-    ``skills`` its agent gets beyond its role's, none unless given."""
-    title, prompt = title.strip(), prompt.strip()
-    return role_task(CODER, coder, f"{title}\n\n{prompt}" if prompt else title, skills)
-
-
-def suggestion_refusal(roles: Mapping[str, Role]) -> str | None:
-    """Why a task an agent suggests or proposes is refused, if it is: it's a coder's task, and
-    nothing would run it while the coder is disabled among ``roles``."""
-    return disabled_note(CODER) if CODER in disabled_roles(roles) else None
-
-
-def task_suggestion(arguments: Mapping[str, Any]) -> tuple[str, str] | str:
-    """The title, on one line, and prompt of the task an agent suggested or proposed with
-    ``arguments``; or why it's refused."""
-    title = " ".join(str(arguments.get("title", "")).split())
-    if not title:
-        return "A task needs a title."
-    return title, str(arguments.get("prompt", "")).strip()
 
 
 def names_file(instructions: str) -> bool:

@@ -1,4 +1,6 @@
-"""Why tasks end: given up, in error or by a bug, worded for the board."""
+"""Why tasks end: given up, in error, by a bug or out of time, worded for the board."""
+
+import pytest
 
 from orbit.agent.domain.endings import (
     BUG,
@@ -9,11 +11,14 @@ from orbit.agent.domain.endings import (
     error,
     first_line,
     gave_up,
+    out_of_time,
     run_ending,
     task_ending,
+    timeout_ending,
     unaccepted,
 )
 from orbit.agent.domain.verification import VerificationStep, failure_reason, failure_report
+from orbit.protocol import AGENT_FAILED, TIMED_OUT
 
 
 def test_the_first_line_skips_blank_lines_and_strips_it() -> None:
@@ -124,3 +129,21 @@ def test_other_phases_end_as_their_run_ended() -> None:
     )
     assert task_ending("done", None, None, "", None) == ("completed", ("", ""))
     assert task_ending("ended", None, None, "", None) == ("cancelled", (ENDED_AT_PROPOSAL, ""))
+
+
+@pytest.mark.parametrize(("minutes", "shown"), [(2, "2"), (2.0, "2"), (0.5, "0.5")])
+def test_out_of_time_names_who_and_their_minutes(minutes: float, shown: str) -> None:
+    assert out_of_time("agent-3", minutes) == f"agent-3 ran out of time ({shown} minutes)."
+
+
+def test_a_timeout_after_the_deadline_expired_is_running_out_of_time() -> None:
+    ending = timeout_ending(True, 2, "agent-3", TimeoutError("pipe timed out"))
+    assert ending == (TIMED_OUT, "agent-3 ran out of time (2 minutes).")
+
+
+@pytest.mark.parametrize(("expired", "minutes"), [(False, 2), (False, None), (True, None)])
+def test_a_timeout_the_deadline_didnt_cause_is_a_failure(
+    expired: bool, minutes: float | None
+) -> None:
+    ending = timeout_ending(expired, minutes, "agent-3", TimeoutError("pipe timed out"))
+    assert ending == (AGENT_FAILED, "pipe timed out")

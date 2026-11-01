@@ -36,9 +36,10 @@ from orbit.agent.domain.agents import Agent, bootstrap_prompt
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import ChecksProposal, parse_proposal
 from orbit.agent.domain.config_errors import ConfigError
-from orbit.agent.domain.endings import error, task_ending
+from orbit.agent.domain.endings import error, task_ending, timeout_ending
 from orbit.agent.domain.refusals import Refused
-from orbit.agent.domain.roles import Role, task_suggestion, timeout_ending
+from orbit.agent.domain.roles import Role
+from orbit.agent.domain.suggestions import task_suggestion
 from orbit.agent.domain.tools import (
     COMPLETE_TASK,
     GET_TASK,
