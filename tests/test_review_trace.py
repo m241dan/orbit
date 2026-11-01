@@ -14,7 +14,6 @@ from orbit.agent import ControlPlane, PlaneParts
 from orbit.agent.application.review_trace import REVIEW_SPAN, ReviewTracing
 from orbit.agent.application.task_trace import TASK_SPAN
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.reviews import ReviewLimits
 from orbit.protocol import (
     REVIEWER,
     SUPER_REVIEW,
@@ -42,6 +41,7 @@ from tests.agent_fakes import (
     session_for,
     settle,
     suggests,
+    super_every,
 )
 from tests.telemetry_helpers import Traced, linked_to, trace_id
 from tests.waiting import eventually
@@ -108,7 +108,7 @@ def unit_tracing(
     and its id."""
     board = TaskBoard()
     spec = TaskSpec(prompt="Review commit c1", role=REVIEWER, settings=settings or Settings())
-    task_id = board.add_review(spec)
+    task_id = board.add_triggered(spec, "review")
     return ReviewTracing(traced.telemetry, "workspace", lambda: "session"), board, task_id
 
 
@@ -288,6 +288,7 @@ async def test_a_super_review_asked_for_links_to_its_fire_trigger_command() -> N
     assert linked_to(review, fire_trigger)
     assert trace_id(review) != trace_id(fire_trigger)
     assert attributes(review)["orbit.role"] == SUPER_REVIEWER
+    assert attributes(review)["orbit.trigger"] == SUPER_REVIEW
     assert attributes(review)["orbit.review.cap"] == 10
 
 
@@ -297,7 +298,7 @@ async def test_a_super_review_due_on_count_links_to_the_landing_that_reached_it(
         traced,
         claims_done,
         reviewers=(suggests(), suggests()),
-        review_limits=ReviewLimits(super_every=1),
+        triggers=super_every(1),
     )
     await reviewed(plane, FLAG)
     await close(plane)
@@ -305,6 +306,7 @@ async def test_a_super_review_due_on_count_links_to_the_landing_that_reached_it(
     spans = traced.spans(REVIEW_SPAN)
     [whole] = [span for span in spans if attributes(span)["orbit.role"] == SUPER_REVIEWER]
     assert linked_to(whole, task_span(traced, "1"))
+    assert attributes(whole)["orbit.trigger"] == SUPER_REVIEW
 
 
 async def test_a_review_the_user_queued_records_no_job_and_links_to_nothing() -> None:

@@ -75,7 +75,6 @@ def test_a_project_overrides_only_the_fields_it_sets() -> None:
     )
     assert result.trigger_layers[SUPER_REVIEW]["every"] == PROJECT
     assert result.trigger_layers[SUPER_REVIEW]["label"] == PACKAGE
-    assert result.config.review_limits.super_every == 5
 
 
 def test_a_project_replaces_a_shipped_prompt_whole() -> None:
@@ -207,14 +206,12 @@ def test_super_review_every_alone_is_the_super_reviews_every_with_a_notice() -> 
     assert result.config.triggers[SUPER_REVIEW].every == 7
     assert result.trigger_layers[SUPER_REVIEW]["every"] == PROJECT
     assert result.config.notices == (SUPER_REVIEW_EVERY_MOVING,)
-    assert result.config.review_limits.super_every == 7
 
 
 def test_the_super_reviews_own_every_wins_over_super_review_every_with_the_notice() -> None:
     config = loaded({"super_review_every": 7, "triggers": {SUPER_REVIEW: {"every": 5}}})
     assert config.triggers[SUPER_REVIEW].every == 5
     assert config.notices == (SUPER_REVIEW_EVERY_MOVING,)
-    assert config.review_limits.super_every == 5
 
 
 def test_the_notice_says_where_super_review_every_is_moving() -> None:
@@ -226,20 +223,10 @@ def test_the_notice_says_where_super_review_every_is_moving() -> None:
 def test_without_super_review_every_there_is_no_notice() -> None:
     config = loaded({})
     assert config.notices == ()
-    assert config.review_limits.super_every == 10
+    assert config.triggers[SUPER_REVIEW].every == 10
 
 
-def test_without_a_super_review_trigger_super_review_every_still_counts() -> None:
+def test_without_a_super_review_trigger_super_review_every_still_loads_with_the_notice() -> None:
     config = load_config({"super_review_every": 4}, ROLES)
     assert config.triggers == {}
-    assert config.review_limits.super_every == 4
     assert config.notices == (SUPER_REVIEW_EVERY_MOVING,)
-
-
-def test_a_super_review_trigger_without_every_leaves_it_to_super_review_every() -> None:
-    config = OrbitConfig(
-        roles=ROLES,
-        super_review_every=6,
-        triggers={SUPER_REVIEW: SHIPPED[SUPER_REVIEW].model_copy(update={"every": None})},
-    )
-    assert config.review_limits.super_every == 6

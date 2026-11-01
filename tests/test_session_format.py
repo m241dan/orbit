@@ -18,11 +18,21 @@ from orbit.agent.domain.sessions import (
     SavedConversation,
     SavedCopy,
     SessionRecord,
+    Unreadable,
     parse_record,
     parse_review_count,
     record_json,
 )
-from orbit.protocol import Effort, Settings, TaskSpec, TaskState, Usage
+from orbit.protocol import (
+    INVALID,
+    EditRefusal,
+    Effort,
+    Settings,
+    TaskSpec,
+    TaskState,
+    Usage,
+    edit_refusal,
+)
 from tests.session_builders import review_count_json
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -33,8 +43,8 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit these for a format change: they're what orbits at versions 1 to 17 wrote, and
-# they still need to read. A new version gets its own fixture (session-v19.json) and a
+# Never edit these for a format change: they're what orbits at versions 1 to 19 wrote, and
+# they still need to read. A new version gets its own fixture (session-v20.json) and a
 # migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
 SESSION_V2 = FIXTURES / "session-v2.json"
@@ -54,6 +64,7 @@ SESSION_V15 = FIXTURES / "session-v15.json"
 SESSION_V16 = FIXTURES / "session-v16.json"
 SESSION_V17 = FIXTURES / "session-v17.json"
 SESSION_V18 = FIXTURES / "session-v18.json"
+SESSION_V19 = FIXTURES / "session-v19.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -117,7 +128,7 @@ def tasks() -> tuple[TaskState, ...]:
             id="3",
             task=TaskSpec(prompt="Review the whole codebase", role="reviewer"),
             status="unverified",
-            origin="super_review",
+            origin="super-review",
         ),
         TaskState(id="4", task=TaskSpec(prompt="Document the parser"), status="draft"),
     )
@@ -167,7 +178,7 @@ def expected(
     lane: LaneSnapshot | None = None,
 ) -> SessionRecord:
     return SessionRecord(
-        version=18,
+        version=19,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
@@ -385,14 +396,38 @@ def skilled() -> SessionRecord:
     return numbering().model_copy(update={"tasks": states})
 
 
-def test_a_version_18_session_file_reads_as_its_record() -> None:
-    assert parse_record(SESSION_V18.read_text(encoding="utf-8")) == skilled()
+def test_a_version_18_session_file_migrates_to_super_review_tasks_from_its_trigger() -> None:
+    record = parse_record(SESSION_V18.read_text(encoding="utf-8"))
+    assert record == skilled()
+    assert isinstance(record, SessionRecord) and record.tasks[2].origin == "super-review"
 
 
-def test_a_session_record_is_written_in_the_version_18_format() -> None:
-    written = json.loads(record_json(skilled()))
+def test_a_super_review_saved_as_from_super_review_still_cant_be_edited() -> None:
     golden = json.loads(SESSION_V18.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V18.name)
+    golden["tasks"][2]["task"]["role"] = "super-reviewer"
+    record = parse_record(json.dumps(golden))
+    assert isinstance(record, SessionRecord)
+    review = record.tasks[2]
+    assert (review.task.role, review.origin) == ("super-reviewer", "super-review")
+    assert edit_refusal(review) == EditRefusal(
+        INVALID, "Reviews can't be edited; remove it instead."
+    )
+
+
+def test_a_version_18_record_whose_tasks_are_not_a_list_is_left_for_validation() -> None:
+    golden = json.loads(SESSION_V18.read_text(encoding="utf-8"))
+    record = parse_record(json.dumps(golden | {"tasks": "none"}))
+    assert isinstance(record, Unreadable) and record.reason.startswith("tasks:")
+
+
+def test_a_version_19_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V19.read_text(encoding="utf-8")) == skilled()
+
+
+def test_a_session_record_is_written_in_the_version_19_format() -> None:
+    written = json.loads(record_json(skilled()))
+    golden = json.loads(SESSION_V19.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V19.name)
 
 
 def test_a_version_1_review_count_reads_as_its_count_with_no_last_super_commit() -> None:

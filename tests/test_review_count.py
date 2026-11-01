@@ -7,7 +7,7 @@ from orbit.agent.application.ports import StoreFailed
 from orbit.agent.application.review_count import ReviewCount
 from orbit.agent.domain.reviews import ReviewLimits, ReviewPlanner, SuperReviewCount
 from orbit.agent.domain.storage_halt import FailedWrite
-from orbit.protocol import INTERNAL, ErrorOccurred
+from orbit.protocol import INTERNAL, SUPER_REVIEW, ErrorOccurred
 from tests.agent_fakes import FakeHalt, FakeStore, Ticks
 from tests.keeper_fakes import EMPTY, WITH_TASK, Published, save
 
@@ -207,7 +207,7 @@ async def test_loads_at_once_read_the_count_once() -> None:
     first, second = planner(), planner()
     await asyncio.gather(count.count_on(first), count.count_on(second))
     assert store.reads == 1
-    assert first.since_super == 4 and second.since_super == 0
+    assert first.super_count.since_super == 4 and second.super_count.since_super == 0
 
 
 async def test_a_count_read_once_is_not_read_again() -> None:
@@ -215,9 +215,9 @@ async def test_a_count_read_once_is_not_read_again() -> None:
     _, count, _ = both_for(store)
     counting = planner()
     await count.count_on(counting)
-    counting.since_super = 5
+    counting.counts = {SUPER_REVIEW: 5}
     await count.count_on(counting)
-    assert store.reads == 1 and counting.since_super == 5
+    assert store.reads == 1 and counting.super_count.since_super == 5
 
 
 async def test_a_load_that_failed_is_tried_again_on_the_next() -> None:
@@ -226,10 +226,10 @@ async def test_a_load_that_failed_is_tried_again_on_the_next() -> None:
     _, count, _ = both_for(store)
     counting = planner()
     await count.count_on(counting)
-    assert counting.since_super == 0
+    assert counting.super_count.since_super == 0
     store.count_load_failure = None
     await count.count_on(counting)
-    assert store.reads == 2 and counting.since_super == 4
+    assert store.reads == 2 and counting.super_count.since_super == 4
 
 
 async def test_a_planner_that_counted_on_during_the_read_keeps_its_count() -> None:
@@ -238,10 +238,10 @@ async def test_a_planner_that_counted_on_during_the_read_keeps_its_count() -> No
     counting = planner()
 
     async def count_one() -> None:
-        counting.since_super += 1
+        counting.counts = {SUPER_REVIEW: counting.super_count.since_super + 1}
 
     await asyncio.gather(count.count_on(counting), count_one())
-    assert counting.since_super == 1
+    assert counting.super_count.since_super == 1
     await count.save(SuperReviewCount(1))
     assert store.counts == [SuperReviewCount(1)]
 
@@ -256,7 +256,7 @@ async def test_a_recount_reads_the_count_again_after_a_load_in_flight() -> None:
         store.count = SuperReviewCount(6)
 
     await asyncio.gather(count.count_on(counting), count.recount_on(counting), moved())
-    assert store.reads == 2 and counting.since_super == 6
+    assert store.reads == 2 and counting.super_count.since_super == 6
 
 
 async def test_without_a_store_nothing_counts_on() -> None:
@@ -264,7 +264,7 @@ async def test_without_a_store_nothing_counts_on() -> None:
     counting = planner()
     await count.count_on(counting)
     await count.recount_on(counting)
-    assert counting.since_super == 0
+    assert counting.super_count.since_super == 0
 
 
 async def test_a_planner_counts_on_from_the_saved_count_its_commit_and_its_sample_record() -> None:
@@ -274,9 +274,9 @@ async def test_a_planner_counts_on_from_the_saved_count_its_commit_and_its_sampl
     counting = planner()
     await count.count_on(counting)
     assert counting.super_count == SuperReviewCount(4, "abc", 2, {"a.py": 2})
-    counting.super_review("def")
+    counting.start_super_review("def")  # The trigger's count starts again as it fires.
     await count.save(counting.super_count)
-    assert store.counts == [SuperReviewCount(0, "def", 3, {"a.py": 2})]
+    assert store.counts == [SuperReviewCount(4, "def", 3, {"a.py": 2})]
 
 
 async def test_a_planner_that_queued_a_super_review_during_the_read_keeps_its_commit() -> None:
@@ -286,7 +286,7 @@ async def test_a_planner_that_queued_a_super_review_during_the_read_keeps_its_co
     counting = planner()
 
     async def super_review() -> None:
-        counting.super_review("new")
+        counting.start_super_review("new")
 
     await asyncio.gather(count.count_on(counting), super_review())
     assert counting.super_count == SuperReviewCount(0, "new", 1)

@@ -66,6 +66,7 @@ from tests.agent_fakes import (
     settle,
     start,
     suggests,
+    super_every,
     verified,
 )
 from tests.waiting import eventually
@@ -494,7 +495,7 @@ async def test_every_so_many_of_the_users_commits_the_whole_codebase_is_super_re
         reviewers=(waits_then_reviews, suggests(), suggests(), suggests("Split the parser")),
         tree=tree,
         review=True,
-        review_limits=ReviewLimits(super_every=2),
+        triggers=super_every(2),
     )
     events = await _landed_two_while_the_first_review_waited(session, gate)
     assert "super-reviewer" not in _roles_seen(events)  # Due at c2, but a review was pending.
@@ -506,9 +507,10 @@ async def test_every_so_many_of_the_users_commits_the_whole_codebase_is_super_re
     supers = [t for t in tasks if t.task.role == "super-reviewer"]
     assert len(supers) == 1
     assert supers[0].task.prompt.startswith("Super review of the codebase at c3")
+    assert supers[0].origin == SUPER_REVIEW  # From its trigger.
     assert supers[0].task.settings.model == "opus"  # The super reviewer's default.
     [suggestion] = [t for t in tasks if t.batch]
-    assert (suggestion.origin, suggestion.round) == ("super_review", 1)
+    assert (suggestion.origin, suggestion.round) == ("super-review", 1)
     assert "c3" in tree.snapshots
 
 
@@ -574,7 +576,7 @@ async def test_a_super_review_due_lists_the_commits_since_the_last() -> None:
         reviewers=(suggests(), suggests()),
         tree=tree,
         review=True,
-        review_limits=ReviewLimits(super_every=1),
+        triggers=super_every(1),
     )
     lane_of(session).planner.last_super_commit = "s0"
     await start(session)

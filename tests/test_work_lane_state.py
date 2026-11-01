@@ -230,7 +230,7 @@ async def test_work_that_did_not_merge_does_not_count_toward_a_super_review(
 
     assert await asyncio.wait_for(lane.run(), 5) == "finished"
 
-    assert review.planner.since_super == 0
+    assert review.planner.super_count.since_super == 0
     assert review.snapshot().jobs == {}
 
 
@@ -241,7 +241,7 @@ async def test_work_that_merged_lands_its_commit_and_counts() -> None:
 
     assert await asyncio.wait_for(lane.run(), 5) == "finished"
 
-    assert review.planner.since_super == 1
+    assert review.planner.super_count.since_super == 1
     assert [job.commits for job in review.snapshot().jobs.values()] == [("c1",)]
     assert tasks.board.get(task_id).status == "completed"
 

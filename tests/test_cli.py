@@ -50,6 +50,7 @@ from orbit.cli.backend import _Backend, _backend, _Directories, _in_process
 from orbit.cli.errors import _configured, _exit_on
 from orbit.protocol import (
     PLANNER,
+    SUPER_REVIEW,
     AddTask,
     Catalog,
     Notice,
@@ -1160,8 +1161,9 @@ def test_chat_reviews_landed_work_with_the_files_limits(
     assert agents is not None
     assert agents.review
     assert agents.review_limits == ReviewLimits(
-        rounds=2, suggestions=4, super_every=7, super_suggestions=6, super_sample=3
+        rounds=2, suggestions=4, super_suggestions=6, super_sample=3
     )
+    assert agents.triggers[SUPER_REVIEW].every == 7
 
 
 def test_chat_can_turn_review_off(launched: list[WorkspaceHost]) -> None:

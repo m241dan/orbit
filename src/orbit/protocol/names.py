@@ -12,7 +12,8 @@ PLANNER_LANE = "planner"
 
 SUPER_REVIEW = "super-review"
 CONFIGURE_CHECKS = "configure-checks"
-"""The built-in triggers' names: a super review now, and a configurator task to set up checks."""
+"""The built-in triggers' names: a super review now, and a configurator task to set up checks.
+The super review's tasks, and those it suggests, take its name as their origin."""
 
 
 PLANNER = "planner"
@@ -36,14 +37,18 @@ such as ``work``, where task runs start on the user's asking, and ``review``."""
 
 
 TaskOrigin = str
-"""Who queued a task: ``manual`` (the user), ``planner``, or a review's suggestions,
-``review`` or ``super_review``."""
+"""Who queued a task: ``manual`` (the user), ``planner``, or the trigger that queued it, by
+name, such as ``review`` or ``super-review``, as the tasks a review suggests take its trigger's
+name too."""
 
 MANUAL_ORIGIN = "manual"
 PLANNER_ORIGIN = "planner"
 REVIEW_ORIGIN = "review"
-SUPER_REVIEW_ORIGIN = "super_review"
-"""The task origins' names: the user, the planner, a review and a super review."""
+"""The task origins' names: the user, the planner and the review trigger; the super review's is
+its trigger's, :data:`SUPER_REVIEW`."""
+
+REVIEW_ORIGINS = frozenset({REVIEW_ORIGIN, SUPER_REVIEW})
+"""The origins of what orbit's reviews queue: their reviews and the tasks they suggest."""
 
 
 PauseReason = str

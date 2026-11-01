@@ -7,6 +7,10 @@ landing, which the triggers it guards review, and books each review they queue i
 A batch's review falls due as the batch is done rather than as one task lands, so it fires the
 triggers ``review-rounds`` guards on ``task_landed`` with no task causing it, as 12d's
 ``batch_landed`` will.
+
+The review lane counts each landing toward the ``commits`` triggers too, as their guards see the
+board before the landing's own review is queued, and has those that fire, or one fired by hand,
+review the whole codebase at the commit, each task booked into that review's batches.
 """
 
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
@@ -26,12 +30,16 @@ from orbit.agent.domain.reviews import (
 )
 from orbit.agent.domain.roles import enabled_roles, role_task
 from orbit.agent.domain.triggers import (
+    COMMITS,
     REVIEW_ROUNDS,
     TASK_FINISHED,
     TASK_LANDED,
     TRIGGER_VARIABLE,
+    Counted,
     Trigger,
     TriggerEvent,
+    count_landing,
+    fires_by_hand,
     held_back,
     listening,
     render_template,
@@ -64,11 +72,19 @@ class ReviewRound:
 @dataclass(frozen=True)
 class _Firing:
     """The triggers ``listening`` for an event, by name, in order, with what they render their
-    tasks from: its ``values`` and the review due, ``review``, if any."""
+    tasks from: its ``values`` and the review due, ``review``, if any. On a landing ``counted``
+    toward the ``commits`` triggers, or fired by hand, their guards were decided already, and
+    each of them reviews ``review``; otherwise only those ``review-rounds`` guards do."""
 
     listening: list[tuple[str, Trigger]]
     values: Mapping[str, str]
     review: ReviewRound | None
+    counted: bool = False
+
+    def review_of(self, trigger: Trigger) -> ReviewRound | None:
+        """The review ``trigger``'s task reviews, if any."""
+        reviews = self.counted or REVIEW_ROUNDS in trigger.guards
+        return self.review if reviews else None
 
 
 def _no_kick(role: str) -> None:
@@ -135,6 +151,35 @@ class TriggerEngine:
         firing = await self._firing(self._desk.agents.triggers, event, values, review)
         return () if firing is None else await self._queue(firing)
 
+    def count(self, state: TaskState, counts: Mapping[str, int]) -> Counted:
+        """Count the landing of the task that ended as ``state`` toward the ``commits``
+        triggers, from ``counts``, the landings counted toward each since it last fired, by
+        name, as :func:`~orbit.agent.domain.triggers.count_landing` says, their guards seeing
+        the board as it stands; returns the counts after it and the triggers that fire, for
+        :meth:`fire_counted`."""
+        fields = {"role": state.task.role, "origin": state.origin}
+        event = TriggerEvent(COMMITS, fields, state)
+        roles = enabled_roles(self._desk.agents.roles)
+        board = self._tasks.board.tasks
+        return count_landing(self._desk.agents.triggers, event, roles, counts, board)
+
+    def by_hand(self, name: str) -> list[tuple[str, Trigger]]:
+        """The trigger ``name``, by name, if it fires when fired by hand, as
+        :func:`~orbit.agent.domain.triggers.fires_by_hand` says, for :meth:`fire_counted`; none
+        otherwise."""
+        trigger = self._desk.agents.triggers.get(name)
+        roles = enabled_roles(self._desk.agents.roles)
+        return [] if trigger is None or not fires_by_hand(trigger, roles) else [(name, trigger)]
+
+    async def fire_counted(
+        self, fired: Sequence[tuple[str, Trigger]], values: Mapping[str, str], review: ReviewRound
+    ) -> tuple[str, ...]:
+        """Queue the tasks of the triggers ``fired``, by name, in order, on a landing counted
+        or by hand, their guards decided already, each rendered from ``values`` and its name,
+        reviewing ``review``, which books it. The board is published if any was queued.
+        Returns their ids, for :meth:`run`."""
+        return await self._queue(_Firing(list(fired), values, review, counted=True))
+
     def run(self, task_ids: Collection[str]) -> None:
         """Run the tasks ``task_ids`` that are still on the board, each in its role's lane if
         that starts by itself."""
@@ -195,15 +240,15 @@ class TriggerEngine:
         self, board: TaskBoard, name: str, trigger: Trigger, firing: _Firing
     ) -> str | None:
         """Add to ``board`` the task ``trigger``, named ``name``, queues as it fires as
-        ``firing`` says, unless a guard holds it back; returns its id if it's added. One guarded
-        by ``review-rounds`` reviews the review due with the skills of what it reviews, and is
-        booked into its batches."""
+        ``firing`` says, unless a guard holds it back, if they're still to decide; returns its
+        id if it's added. One reviewing the review due does so with the skills of what it
+        reviews, and is booked into its batches."""
         assert trigger.role is not None  # It listened, so it queues a role's task,
         assert trigger.prompt is not None  # with a prompt.
         prompt = render_template(trigger.prompt, {**firing.values, TRIGGER_VARIABLE: name})
-        if held_back(trigger, prompt, board.tasks):
+        if not firing.counted and held_back(trigger, prompt, board.tasks):
             return None
-        review = firing.review if REVIEW_ROUNDS in trigger.guards else None
+        review = firing.review_of(trigger)
         skills = () if review is None else review_skills(review.job, board.tasks)
         task = role_task(trigger.role, self._desk.agents.roles[trigger.role], prompt, skills)
         task_id = _added(board, task, name, trigger)

@@ -4,12 +4,12 @@ and checked against its roles, which of them fire on an event and which guards h
 and the rendering of a trigger's prompt template.
 
 The package's triggers aren't kept here: whoever builds them passes in the contents of their
-``triggers.toml`` and the templates it names. Only ``task_landed`` and ``task_finished`` are
-raised yet, and only triggers that queue a role's task fire.
+``triggers.toml`` and the templates it names. Only ``task_landed``, ``task_finished`` and
+``commits`` are raised yet, and only triggers that queue a role's task fire.
 """
 
 import re
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, get_args
 
@@ -28,7 +28,7 @@ from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
 from orbit.agent.domain.reviews import ReviewJob
 from orbit.agent.domain.roles import PLAIN_NAME
-from orbit.protocol import TaskState
+from orbit.protocol import REVIEW_ORIGINS, TaskState
 
 EventName = Literal[
     "session_started",
@@ -420,26 +420,100 @@ def _values(wanted: str | tuple[str, ...]) -> tuple[str, ...]:
     return (wanted,) if isinstance(wanted, str) else wanted
 
 
-def held_back(trigger: Trigger, prompt: str, tasks: Sequence[TaskState]) -> bool:
+def held_back(trigger: Trigger, prompt: str | None, tasks: Sequence[TaskState]) -> bool:
     """Whether a guard of ``trigger`` holds back its task, rendered as ``prompt``, with ``tasks``
-    on the board: ``not-queued`` while a task of its role is still to run or running, and
-    ``dedupe`` while such a task's prompt has the same first line. ``review-rounds`` is decided
-    as it listens, and ``suggestions-pending`` holds nothing until the super review fires."""
+    on the board: ``not-queued`` while a task of its role is still to run or running,
+    ``dedupe`` while such a task's prompt has the same first line, and ``suggestions-pending``
+    while a task the reviews queued, a review or a suggestion, is (see :data:`REVIEW_ORIGINS`).
+    ``review-rounds`` is decided as it listens. Without a ``prompt``, as a landing is counted
+    before there's one, ``dedupe`` holds nothing back."""
     waiting = [state for state in tasks if state.status in WAITING]
     return any(_holds(guard, trigger, prompt, waiting) for guard in trigger.guards)
 
 
-def _holds(guard: GuardName, trigger: Trigger, prompt: str, waiting: Sequence[TaskState]) -> bool:
-    """Whether ``guard`` holds back ``trigger``'s task, ``prompt``, with the tasks ``waiting``."""
+def _holds(
+    guard: GuardName, trigger: Trigger, prompt: str | None, waiting: Sequence[TaskState]
+) -> bool:
+    """Whether ``guard`` holds back ``trigger``'s task, ``prompt``, if there's one yet, with the
+    tasks ``waiting``."""
     match guard:
         case "not-queued":
-            return any(state.task.role == trigger.role for state in waiting)
+            return _queued(trigger.role, waiting)
         case "dedupe":
-            return any(_title(state.task.prompt) == _title(prompt) for state in waiting)
+            return prompt is not None and _repeats(prompt, waiting)
+        case "suggestions-pending":
+            return _reviews_queued(waiting)
         case _:
             return False
+
+
+def _queued(role: str | None, waiting: Sequence[TaskState]) -> bool:
+    """Whether one of the tasks ``waiting`` is ``role``'s."""
+    return any(state.task.role == role for state in waiting)
+
+
+def _reviews_queued(waiting: Sequence[TaskState]) -> bool:
+    """Whether one of the tasks ``waiting`` was queued by the reviews, a review or a suggestion
+    (see :data:`REVIEW_ORIGINS`)."""
+    return any(state.origin in REVIEW_ORIGINS for state in waiting)
+
+
+def _repeats(prompt: str, waiting: Sequence[TaskState]) -> bool:
+    """Whether one of the tasks ``waiting`` has the first line of ``prompt``."""
+    return any(_title(state.task.prompt) == _title(prompt) for state in waiting)
 
 
 def _title(prompt: str) -> str:
     """The first line of ``prompt``, stripped: its task's title."""
     return prompt.strip().split("\n", 1)[0].strip()
+
+
+@dataclass(frozen=True)
+class Counted:
+    """A landing counted toward the ``commits`` triggers: the landings counted toward each since
+    it last fired, by name, after it, ``counts``, and the triggers it ``fires``, by name, in
+    order."""
+
+    counts: Mapping[str, int]
+    fires: list[tuple[str, Trigger]]
+
+
+def count_landing(
+    triggers: Mapping[str, Trigger],
+    event: TriggerEvent,
+    roles: Collection[str],
+    counts: Mapping[str, int],
+    tasks: Sequence[TaskState],
+) -> Counted:
+    """Count ``event``, a landing on ``commits``, toward each of ``triggers`` that hears it, as
+    :func:`listening` says with ``roles`` the enabled roles, from ``counts``, the landings
+    counted toward each since it last fired, by name: its count goes up by one, and once that
+    reaches its ``every`` (1 if it sets none) it's due, and fires unless a guard holds it back
+    with ``tasks`` on the board, its count starting again. One held back stays due, and fires
+    on the first landing it hears once none does."""
+    heard = listening(triggers, event, roles, None)
+    raised = {**counts, **{name: counts.get(name, 0) + 1 for name, _ in heard}}
+    fires = [
+        (name, trigger)
+        for name, trigger in heard
+        if _due(trigger, raised[name]) and not held_back(trigger, None, tasks)
+    ]
+    return Counted(restart_counts(raised, (name for name, _ in fires)), fires)
+
+
+def _due(trigger: Trigger, count: int) -> bool:
+    """Whether ``trigger``, a ``commits`` one with ``count`` landings counted toward it since it
+    last fired, is due: once the count reaches its ``every``, 1 if it sets none."""
+    return count >= (trigger.every or 1)
+
+
+def restart_counts(counts: Mapping[str, int], fired: Iterable[str]) -> dict[str, int]:
+    """``counts``, the landings counted toward each ``commits`` trigger since it last fired, by
+    name, with those of the triggers ``fired`` starting again."""
+    return {**counts, **dict.fromkeys(fired, 0)}
+
+
+def fires_by_hand(trigger: Trigger, roles: Collection[str]) -> bool:
+    """Whether ``trigger`` fires when it's fired by hand, with ``roles`` the enabled roles: if
+    it's enabled and queues a task for one of them, whatever its ``when`` and guards."""
+    return trigger.enabled and trigger.role in roles

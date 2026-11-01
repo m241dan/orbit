@@ -1136,15 +1136,18 @@ have suggested into.
 
 Every 10 commits by default (the `super-review` trigger's `every`, or `super_review_every`, its
 alias for this version; see [Triggers](#triggers)), counting your own and the planner's commits,
-not those of suggested tasks, a `super-reviewer` (Opus by default) reviews the **whole codebase** at
+not those of suggested tasks, the `super-review` trigger queues a `super-reviewer` task (Opus by
+default; its origin `super-review`, as is that of the tasks it suggests) from its template, which
+reviews the **whole codebase** at
 the latest commit: starting from the project's shape, it reads the commits since the last super
 review and a rotating sample of other code files (below) through the lens skills its role gives it
 (by default `review-style`, `review-drift` and `review-scaling`, each asking what has built up
 across commits; see [Skills](#skills)), and may suggest up to `super_review_suggestions` tasks
 (default 10). Those form a batch at round 1 and carry on like any other review's. Each review ends
 with a one-line verdict that also counts the findings its cap left out, so
-`5 suggestions, 2 more left out` tells you a second pass would find more. `ctrl+g` asks for one
-straight away and restarts the count. A super review's task lists, after the tasks still queued, the
+`5 suggestions, 2 more left out` tells you a second pass would find more. `ctrl+g` fires the
+trigger by hand, queuing one straight away, and restarts the count. A super review's task lists,
+after the tasks still queued, the
 subjects of the commits since the last super review (every one, oldest first, after the commit that
 review reviewed up to its own) under `Commits since the last super review:`, then the files they
 changed under `Files they changed:` (sorted, the first 100 named and the rest counted); the first
@@ -1161,8 +1164,9 @@ first, then those sampled by the earliest super review, picking at random among 
 same one; a file git no longer tracks is forgotten. The count, the commit the last super review
 reviewed, and which super review last sampled each file belong to the repository rather than to a
 session, so they carry on across sessions and restarts. A super review that falls due waits while
-review is paused, and while suggested tasks (or reviews) are pending or running; it comes with your
-next commit once none is.
+suggested tasks (or reviews) are pending or running, as its `suggestions-pending` guard says; it
+comes with your next commit once none is. A session an older orbit saved, whose super reviews'
+suggestions say they're from `super_review`, reads them as from `super-review`.
 
 The reviews orbit queued can't be edited: remove one instead. Reviews run in the review roles'
 lane, `review`, which starts its tasks by itself: a `reviewer` task you add starts there at once
@@ -1594,13 +1598,14 @@ notices say so: `The project's role helper replaces your personal role of that n
 A **trigger** turns an event into a task for a role, or into a run of the verification steps.
 Orbit ships triggers that describe what it does, and a project changes them, or adds its own,
 with `[triggers.<name>]` tables in `.orbit/config.toml`. A task's work landing fires the
-`task_landed` triggers and a task finishing, however it ended, the `task_finished` ones, so the
-`review` trigger starts the reviews [Reviews](#reviews) describes, and a project's own triggers on
-those events queue their tasks. The other events don't fire yet: the super review, the startup
-check and its fixes, and the configurator still start as the sections above say, and their
-shipped triggers describe them for the versions that fire them; only the super review's `every`
-already counts (below). `task_landed` and `task_finished` are the work lane's tasks' (a review's
-end isn't one), and only a trigger with a role fires: one with `checks` waits for
+`task_landed` triggers and counts toward the `commits` ones, and a task finishing, however it
+ended, fires the `task_finished` ones, so the `review` and `super-review` triggers start the
+reviews and super reviews [Reviews](#reviews) describes, and a project's own triggers on those
+events queue their tasks. The other events don't fire yet: the startup check and its fixes, and
+the configurator still start as the sections above say, and their shipped triggers describe them
+for the versions that fire them. `task_landed` and `task_finished` are the work lane's tasks' (a
+review's end isn't one), landings count toward the `commits` triggers only while reviews are on,
+as the review lane counts them, and only a trigger with a role fires: one with `checks` waits for
 `session_started`.
 
 The shipped triggers are data in
@@ -1629,7 +1634,8 @@ A trigger's fields:
   `when = { origin = ["manual", "planner"] }` for your own tasks' and the planner's; left out,
   every one.
 - `guards`: the named rules that may hold it back (below).
-- `every`: with `on = "commits"`, how many matching landings it fires after.
+- `every`: with `on = "commits"`, how many matching landings it fires after; left out, every
+  one.
 - `manual` and `label`: whether you can fire it yourself, and what it's called where you do; a
   manual trigger needs a label.
 - `draft`: whether its task is added as a draft, for you to accept.
@@ -1658,6 +1664,18 @@ runs with the run going, or the next. A trigger never fires on an event caused b
 whose origin is its name: a `task_finished` trigger queuing `coder` tasks doesn't fire again as
 its own tasks finish, though another trigger may.
 
+A `commits` trigger counts each landing its `when` takes, and once its count reaches its `every`
+it's due: it fires unless one of its guards holds it back, judged as the landing is counted,
+before that landing's own review is queued, and its count starts again; one held back stays due,
+and fires on the first landing it counts once none holds it. The `super-review` trigger's count
+is the repository's super review count, which carries on across sessions and restarts; a
+project's own `commits` trigger counts from when orbit opens the workspace. Each `commits`
+trigger that fires, or that you fire yourself (`ctrl+g` fires `super-review`), reviews the
+codebase at the commit: it renders the super review's variables, its task is booked as a review
+whose suggestions form a batch at round 1, and the super review's record moves on to that commit
+and its sample. Fired by hand, a trigger fires at once, whatever its `when` and guards, if it and
+its role are enabled, and its count starts again.
+
 The guards:
 
 - `review-rounds`: today's review rounds and batches decide whether there's a review and what it
@@ -1668,8 +1686,12 @@ The guards:
 - `not-queued`: holds the trigger back while a task of its role is still to run or running.
 - `dedupe`: holds the trigger back while a task still to run or running has the first line its
   task would have.
-- `suggestions-pending`: holds back the super review while suggested tasks or reviews are pending
-  or running; it holds nothing back until the super review fires from its trigger.
+- `suggestions-pending`: holds the trigger back while a task the reviews queued, a review or a
+  suggestion (origin `review` or `super-review`), is pending or running; so the super review
+  waits for the work its last suggestions are about to do.
+
+A `commits` trigger's guards are judged before its task's prompt is rendered, so `dedupe` holds
+none back.
 
 Every event also gives `{trigger}`, the trigger's name, and a trigger you fire yourself gives its
 event's variables, as the super review gives those of `commits`. `{commit}` is the commit landed

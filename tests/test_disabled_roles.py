@@ -6,7 +6,6 @@ import asyncio
 
 from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.agent.application.ports import Reply
-from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import Role
 from orbit.protocol import (
     BUILT_IN_ROLE_NAMES,
@@ -74,6 +73,7 @@ from tests.agent_fakes import (
     snapshot_of,
     start,
     suggests,
+    super_every,
     until_idle,
     verified,
 )
@@ -199,7 +199,7 @@ async def test_a_disabled_super_reviewer_queues_no_super_review_however_many_com
         reviewers=(suggests(),),
         tree=FakeTree(),
         review=True,
-        review_limits=ReviewLimits(super_every=1),
+        triggers=super_every(1),
         roles=disabling(SUPER_REVIEWER),
     )
     await start(session)

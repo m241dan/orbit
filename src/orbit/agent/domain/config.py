@@ -52,13 +52,15 @@ class _Config(BaseModel):
 
 _LIMITS = Limits()
 _REVIEW_LIMITS = ReviewLimits()
+_SUPER_REVIEW_EVERY = 10
+"""The shipped super-review trigger's ``every``, which ``super_review_every`` stands in for."""
 
 
 class _FileConfig(_Config):
     """Orbit's settings, as a project file sets them, each field with its description.
 
-    A super review that's due after ``super_review_every`` commits waits while suggested tasks
-    are pending.
+    ``super_review_every`` stands in for the super-review trigger's ``every`` when the trigger
+    doesn't set its own.
     """
 
     fix_attempts: int = Field(
@@ -82,7 +84,7 @@ class _FileConfig(_Config):
         description="Rounds of review-suggested work after which review pauses.",
     )
     super_review_every: int = Field(
-        default=_REVIEW_LIMITS.super_every,
+        default=_SUPER_REVIEW_EVERY,
         ge=1,
         description="Commits between super reviews; moving to [triggers.super-review] every.",
     )
@@ -141,18 +143,9 @@ class _FileConfig(_Config):
         return ReviewLimits(
             rounds=self.review_rounds,
             suggestions=self.review_suggestions,
-            super_every=_super_every(self.triggers, self.super_review_every),
             super_suggestions=self.super_review_suggestions,
             super_sample=self.super_review_sample,
         )
-
-
-def _super_every(triggers: Mapping[str, Trigger], alias: int) -> int:
-    """The commits between super reviews: the ``every`` of the super-review trigger among
-    ``triggers``, if it has one, and otherwise ``alias``, ``super_review_every``."""
-    trigger = triggers.get(SUPER_REVIEW)
-    every = None if trigger is None else trigger.every
-    return alias if every is None else every
 
 
 LATER_TABLES = ("mcp", "models")

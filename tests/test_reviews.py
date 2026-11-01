@@ -31,7 +31,7 @@ from orbit.protocol import (
     REVIEW_ORIGIN,
     REVIEW_ROLES,
     REVIEWER,
-    SUPER_REVIEW_ORIGIN,
+    SUPER_REVIEW,
     SUPER_REVIEWER,
     TaskSpec,
     TaskState,
@@ -251,7 +251,7 @@ def test_a_batch_review_names_the_tasks_that_landed_in_task_order() -> None:
 
 
 def test_a_super_review_reviews_no_particular_task() -> None:
-    assert planner().super_review("abc").reviewed == ()
+    assert planner().start_super_review("abc").reviewed == ()
 
 
 def test_a_lane_snapshot_saved_before_jobs_named_their_tasks_still_loads() -> None:
@@ -492,107 +492,48 @@ def test_long_diffs_are_trimmed_from_the_end() -> None:
     assert prompt.endswith("d" * DIFF_LIMIT + "\n… (diff trimmed)")
 
 
-def counting(super_every: int) -> ReviewPlanner:
-    return ReviewPlanner(
-        ReviewLimits(rounds=3, suggestions=5, super_every=super_every, super_suggestions=10)
-    )
-
-
-def test_a_super_review_is_due_every_so_many_of_the_users_commits() -> None:
-    reviews = counting(3)
-    due = [reviews.count(state(str(n)), ()) for n in range(7)]
-    assert due == [False, False, True, False, False, True, False]
-
-
-def test_a_commit_from_a_planner_task_counts_toward_a_super_review() -> None:
-    reviews = counting(2)
-    assert not reviews.count(state("1", origin="planner"), ())
-    assert reviews.count(state("2", origin="planner"), ())
-
-
-def test_a_commit_from_a_suggested_task_does_not_count_toward_a_super_review() -> None:
-    reviews = counting(1)
-    batch = filled(reviews, "2", "3")
-    assert not reviews.count(state("2", origin="review", batch=batch), ())
-    assert not reviews.count(state("3", origin="super_review", batch=batch), ())
-    assert reviews.since_super == 0
-
-
-def test_a_super_review_due_while_a_suggested_task_waits_fires_on_the_next_landing() -> None:
-    reviews = counting(2)
-    reviews.count(state("1"), ())
-    pending = (state("1"), state("3", status="pending", origin="review", batch="batch-1"))
-    assert not reviews.count(state("2"), pending)
-    running = (state("3", status="running", origin="super_review", batch="batch-1"),)
-    assert not reviews.count(state("4"), running)
-    assert reviews.since_super == 3
-    assert not reviews.count(state("5", origin="review"), ())
-    assert reviews.count(state("6"), (state("3", origin="review", batch="batch-1"),))
-    assert reviews.since_super == 0
-
-
-def test_a_review_orbit_queued_holds_a_due_super_review_like_a_suggestion() -> None:
-    reviews = counting(1)
-    review = state("2", status="pending", origin="review", prompt="Review of commit c1")
-    assert not reviews.count(state("1"), (review,))
-    assert reviews.count(state("3"), ())
-
-
-def test_a_super_review_due_while_paused_waits_until_review_resumes() -> None:
-    reviews = ReviewPlanner(
-        ReviewLimits(rounds=1, suggestions=5, super_every=1, super_suggestions=10)
-    )
-    batch = filled(reviews, "2")
-    reviews.landed(state("2", origin="review", batch=batch), "c2")
-    assert reviews.paused
-    reviews.since_super = 1
-    assert not reviews.count(state("8"), ())
-    reviews.landed(state("9"), "c9")
-    assert reviews.count(state("9"), ())
-
-
-def test_asking_for_a_super_review_restarts_the_count() -> None:
-    reviews = counting(2)
-    assert not reviews.count(state("1"), ())
-    job = reviews.super_review("abc")
+def test_a_super_review_is_of_the_whole_codebase_at_its_commit() -> None:
+    job = planner().start_super_review("abc")
     assert job == ReviewJob(commits=("abc",), round=0, batch=None, whole=True)
-    assert not reviews.count(state("2"), ())
-    assert reviews.count(state("3"), ())
 
 
 def test_a_super_review_starts_from_the_commit_it_reviews_after_the_first() -> None:
-    reviews = counting(2)
+    reviews = planner()
     assert reviews.last_super_commit is None
-    reviews.super_review("abc")
+    reviews.start_super_review("abc")
     assert reviews.last_super_commit == "abc"
-    reviews.count(state("1"), ())
-    assert reviews.count(state("2"), ())
-    reviews.super_review("def")
+    reviews.start_super_review("def")
     assert reviews.super_count == SuperReviewCount(0, "def", 2)
 
 
-def test_the_super_review_count_is_its_commits_since_the_last_and_that_ones_commit() -> None:
-    reviews = counting(3)
+def test_starting_a_super_review_leaves_the_count_to_its_trigger() -> None:
+    reviews = planner()
+    reviews.counts = {SUPER_REVIEW: 4, "nightly": 2}
+    reviews.start_super_review("abc")
+    assert reviews.counts == {SUPER_REVIEW: 4, "nightly": 2}
+
+
+def test_the_super_review_count_is_the_super_review_triggers_and_that_ones_commit() -> None:
+    reviews = planner()
     assert reviews.super_count == SuperReviewCount(0, None)
-    reviews.count(state("1"), ())
+    reviews.counts = {SUPER_REVIEW: 1, "nightly": 5}
     assert reviews.super_count == SuperReviewCount(1, None)
     reviews.super_count = SuperReviewCount(2, "abc")
-    assert (reviews.since_super, reviews.last_super_commit) == (2, "abc")
-    assert reviews.count(state("2"), ())
+    assert (reviews.counts, reviews.last_super_commit) == ({SUPER_REVIEW: 2, "nightly": 5}, "abc")
 
 
 def test_the_super_review_count_holds_the_super_reviews_and_the_files_each_last_sampled() -> None:
-    reviews = counting(3)
+    reviews = planner()
     reviews.super_count = SuperReviewCount(1, "abc", 4, {"a.py": 2})
     assert (reviews.super_reviews, reviews.sampled) == (4, {"a.py": 2})
     assert reviews.super_count == SuperReviewCount(1, "abc", 4, {"a.py": 2})
 
 
 def test_each_super_review_queued_counts_one_more_super_review() -> None:
-    reviews = counting(3)
+    reviews = planner()
     assert reviews.super_reviews == 0
-    reviews.super_review("abc")
-    reviews.super_review("def")
+    reviews.start_super_review("abc")
+    reviews.start_super_review("def")
     assert reviews.super_reviews == 2
 
 
@@ -611,7 +552,7 @@ def sampled_by_next(
     reviews: ReviewPlanner, choose: Choose, tracked: Sequence[str] = ABC
 ) -> tuple[str, ...]:
     """What the next super review ``reviews`` queues samples of ``tracked``, with ``choose``."""
-    reviews.super_review("abc")
+    reviews.start_super_review("abc")
     return reviews.sample(tracked, (), (), choose)
 
 
@@ -654,16 +595,14 @@ def test_a_super_review_sampling_nothing_still_forgets_files_no_longer_tracked()
 
 def test_the_sample_leaves_out_the_files_changed_and_those_outside_the_mapped_paths() -> None:
     reviews = sampling(10)
-    reviews.super_review("abc")
+    reviews.start_super_review("abc")
     tracked = ("src/a.py", "src/b.py", "tools/c.py")
     assert reviews.sample(tracked, ["src"], ["src/a.py"], first) == ("src/b.py",)
 
 
 def test_a_super_reviews_batch_has_its_own_cap() -> None:
-    reviews = ReviewPlanner(
-        ReviewLimits(rounds=3, suggestions=1, super_every=10, super_suggestions=2)
-    )
-    batch = reviews.open_batch(reviews.super_review("abc"))
+    reviews = ReviewPlanner(ReviewLimits(rounds=3, suggestions=1, super_suggestions=2))
+    batch = reviews.open_batch(reviews.start_super_review("abc"))
     assert reviews.round_of(batch) == 1
     for task_id in ("2", "3"):
         assert reviews.refusal(batch, f"Task {task_id}", tasks=()) is None
@@ -675,7 +614,7 @@ def test_a_super_reviews_batch_has_its_own_cap() -> None:
 def test_a_batchs_cap_is_the_one_it_opened_with_even_once_restored_under_other_limits() -> None:
     reviews = ReviewPlanner(ReviewLimits(suggestions=1, super_suggestions=2))
     batch = reviews.open_batch(ReviewJob(commits=("abc",), round=0, batch=None))
-    whole = reviews.open_batch(reviews.super_review("abc"))
+    whole = reviews.open_batch(reviews.start_super_review("abc"))
     again = ReviewPlanner(ReviewLimits(suggestions=4, super_suggestions=8))
     again.restore(reviews.snapshot())
     assert (again.cap_of(batch), again.cap_of(whole)) == (1, 2)
@@ -920,14 +859,12 @@ def test_restoring_replaces_what_the_planner_had() -> None:
 
 
 def test_the_super_review_count_is_kept_apart_from_snapshots() -> None:
-    reviews = ReviewPlanner(ReviewLimits(super_every=3))
-    reviews.count(state("1"), ())
+    reviews = planner()
+    reviews.counts = {SUPER_REVIEW: 1}
     snapshot = reviews.snapshot()
     reviews.super_count = SuperReviewCount(2, "abc", 3, {"a.py": 1})
     reviews.restore(snapshot)
     assert reviews.super_count == SuperReviewCount(2, "abc", 3, {"a.py": 1})
-    assert reviews.count(state("2"), ())
-    assert reviews.since_super == 0
 
 
 def test_a_commit_review_suggests_review_tasks_and_is_run_by_a_reviewer() -> None:
@@ -937,7 +874,7 @@ def test_a_commit_review_suggests_review_tasks_and_is_run_by_a_reviewer() -> Non
 
 def test_a_super_review_suggests_super_review_tasks_and_is_run_by_a_super_reviewer() -> None:
     job = ReviewJob(commits=("abc",), round=0, batch=None, whole=True)
-    assert (job.origin, job.role) == (SUPER_REVIEW_ORIGIN, SUPER_REVIEWER)
+    assert (job.origin, job.role) == (SUPER_REVIEW, SUPER_REVIEWER)
 
 
 def skilled(task_id: str, *skills: str) -> TaskState:
@@ -980,9 +917,8 @@ def test_the_pause_notice_names_the_rounds_limit() -> None:
 
 
 def disabling(*roles: str) -> ReviewPlanner:
-    """A planner due a super review with every commit, pausing after round 1, with the review
-    ``roles`` disabled."""
-    return ReviewPlanner(ReviewLimits(rounds=1, super_every=1), REVIEW_ROLES - set(roles))
+    """A planner pausing after round 1, with the review ``roles`` disabled."""
+    return ReviewPlanner(ReviewLimits(rounds=1), REVIEW_ROLES - set(roles))
 
 
 def test_with_the_reviewer_disabled_no_commit_is_reviewed() -> None:
@@ -998,7 +934,6 @@ def test_with_the_reviewer_disabled_a_finished_batch_closes_unreviewed_and_unpau
     assert not reviews.paused
 
 
-def test_with_the_super_reviewer_disabled_no_super_review_falls_due() -> None:
+def test_with_the_super_reviewer_disabled_commits_are_still_reviewed() -> None:
     reviews = disabling(SUPER_REVIEWER)
-    assert [reviews.count(state(str(n)), ()) for n in range(3)] == [False, False, False]
     assert reviews.landed(state("4"), "abc123") is not None

@@ -5,10 +5,7 @@ from dataclasses import dataclass
 
 from orbit.protocol.codes import BUSY, INVALID
 from orbit.protocol.models import ACTIVE_STATUSES, TaskState
-from orbit.protocol.names import REVIEW_ORIGIN, REVIEW_ROLES, SUPER_REVIEW_ORIGIN
-
-_REVIEW_ORIGINS = frozenset({REVIEW_ORIGIN, SUPER_REVIEW_ORIGIN})
-"""The origins of what orbit's reviews queue: their reviews and the tasks they suggest."""
+from orbit.protocol.names import REVIEW_ORIGINS, REVIEW_ROLES
 
 
 @dataclass(frozen=True)
@@ -29,6 +26,6 @@ def edit_refusal(state: TaskState) -> EditRefusal | None:
     """
     if state.status in ACTIVE_STATUSES:
         return EditRefusal(BUSY, f"Task {state.id!r} can't be edited while it runs.")
-    if state.task.role in REVIEW_ROLES and state.origin in _REVIEW_ORIGINS:
+    if state.task.role in REVIEW_ROLES and state.origin in REVIEW_ORIGINS:
         return EditRefusal(INVALID, "Reviews can't be edited; remove it instead.")
     return None

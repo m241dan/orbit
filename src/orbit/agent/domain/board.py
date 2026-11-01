@@ -310,10 +310,6 @@ class TaskBoard:
         self._tasks.append(state.model_copy(update={"id": new_id}))
         return new_id
 
-    def add_review(self, task: TaskSpec) -> str:
-        """Add a review orbit queued itself, at the end; returns its id."""
-        return self.add_triggered(task, REVIEW_ORIGIN)
-
     def add_triggered(self, task: TaskSpec, trigger: TaskOrigin) -> str:
         """Add ``task``, which the trigger named ``trigger`` queued, at the end, from that
         trigger; returns its id."""

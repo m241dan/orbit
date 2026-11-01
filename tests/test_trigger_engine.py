@@ -1,18 +1,21 @@
 """The trigger engine: triggers listening for a task's landing or end queue their roles' tasks,
 rendered from their templates, with their names as origins, unless a guard holds them back, and
-the review-rounds guard reviews the review the review lane finds due."""
+the review-rounds guard reviews the review the review lane finds due; landings count toward the
+commits triggers, and those that fire, or one fired by hand, review the whole codebase."""
 
 from orbit.agent.application.ports import TreeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.triggers import ReviewRound, TriggerEngine
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.reviews import ReviewJob, commit_review, review_prompt
+from orbit.agent.domain.reviews import ReviewJob, commit_review, review_prompt, review_values
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.triggers import Trigger
 from orbit.protocol import (
     CODER,
     GIT_FAILED,
     REVIEWER,
+    SUPER_REVIEW,
+    SUPER_REVIEWER,
     ErrorOccurred,
     Event,
     TasksChanged,
@@ -275,6 +278,93 @@ async def test_a_batchs_review_queued_quietly_with_none_listening_adds_nothing()
     engine = Engine({})
     await engine.engine.reviewed_quietly(ReviewRound(BATCH, lambda task_id: None))
     assert engine.board.tasks == ()
+
+
+# Landings counted toward the commits triggers, and firing by hand
+
+
+SUPER = TRIGGERS[SUPER_REVIEW]
+WHOLE = ReviewJob(commits=(COMMIT,), round=0, batch=None, whole=True)
+
+
+def super_every(every: int) -> dict[str, Trigger]:
+    """The shipped super-review trigger, due every ``every`` landings."""
+    return {SUPER_REVIEW: SUPER.model_copy(update={"every": every})}
+
+
+async def test_a_landing_counts_toward_the_commits_triggers_taking_it() -> None:
+    engine = Engine(super_every(2))
+    first = engine.engine.count(ended("1", origin="planner"), {})
+    assert (first.counts, first.fires) == ({SUPER_REVIEW: 1}, [])
+    second = engine.engine.count(ended("2"), first.counts)
+    assert (second.counts, second.fires) == (
+        {SUPER_REVIEW: 0},
+        [(SUPER_REVIEW, SUPER.model_copy(update={"every": 2}))],
+    )
+    assert engine.board.tasks == ()  # Queuing is left to fire_counted.
+
+
+async def test_a_due_super_review_waits_while_a_review_on_the_board_waits() -> None:
+    engine = Engine(super_every(1))
+    engine.board.add_triggered(TaskSpec(prompt="Review commit c0", role=REVIEWER), "review")
+    counted = engine.engine.count(ended(), {})
+    assert (counted.counts, counted.fires) == ({SUPER_REVIEW: 1}, [])
+
+
+async def test_a_landing_counts_toward_no_trigger_whose_role_is_disabled() -> None:
+    engine = Engine(super_every(1), roles=disabled(SUPER_REVIEWER))
+    assert engine.engine.count(ended(), {}).counts == {}
+
+
+async def test_a_trigger_fired_by_hand_is_found_by_its_name() -> None:
+    engine = Engine({SUPER_REVIEW: SUPER})
+    assert engine.engine.by_hand(SUPER_REVIEW) == [(SUPER_REVIEW, SUPER)]
+    assert engine.engine.by_hand("nightly") == []
+
+
+async def test_a_disabled_trigger_or_one_whose_role_is_disabled_does_not_fire_by_hand() -> None:
+    off = Engine({SUPER_REVIEW: SUPER.model_copy(update={"enabled": False})})
+    assert off.engine.by_hand(SUPER_REVIEW) == []
+    unrolled = Engine({SUPER_REVIEW: SUPER}, roles=disabled(SUPER_REVIEWER))
+    assert unrolled.engine.by_hand(SUPER_REVIEW) == []
+
+
+async def test_counted_triggers_queue_their_tasks_reviewing_the_codebase_and_booked() -> None:
+    booked: list[str] = []
+    engine = Engine({SUPER_REVIEW: SUPER})
+    engine.board.add(TaskSpec(prompt="Make it faster.", skills=("python",)))
+    values = review_values(WHOLE, "", 10, ["Make it faster."])
+    fired = [(SUPER_REVIEW, SUPER)]
+    [task_id] = await engine.engine.fire_counted(fired, values, ReviewRound(WHOLE, booked.append))
+    review = engine.board.get(task_id)
+    assert (review.task.role, review.origin) == (SUPER_REVIEWER, SUPER_REVIEW)
+    assert review.task.prompt == review_prompt(WHOLE, "", 10, ["Make it faster."])
+    assert review.task.skills == ()  # It reviews no particular task.
+    assert booked == [task_id]
+    assert isinstance(engine.events[-1], TasksChanged)
+    assert engine.kicked == []
+
+
+async def test_counted_triggers_are_not_held_back_again_as_they_are_queued() -> None:
+    engine = Engine({SUPER_REVIEW: SUPER})
+    engine.board.add_triggered(TaskSpec(prompt="Review commit c0", role=REVIEWER), "review")
+    values = review_values(WHOLE, "", 10, [])
+    review = ReviewRound(WHOLE, lambda task_id: None)
+    assert len(await engine.engine.fire_counted([(SUPER_REVIEW, SUPER)], values, review)) == 1
+
+
+async def test_each_counted_trigger_renders_its_own_name_and_is_booked_apart() -> None:
+    booked: list[str] = []
+    other = SUPER.model_copy(update={"prompt": "{trigger} at {commit}"})
+    engine = Engine({SUPER_REVIEW: SUPER, "drift": other})
+    fired = [(SUPER_REVIEW, SUPER), ("drift", other)]
+    values = review_values(WHOLE, "", 10, [])
+    queued = await engine.engine.fire_counted(fired, values, ReviewRound(WHOLE, booked.append))
+    assert [(origin, prompt.split("\n", 1)[0]) for _, origin, _, prompt in engine.shown()] == [
+        (SUPER_REVIEW, "Super review of the codebase at c1abcde"),
+        ("drift", "drift at c1abcde"),
+    ]
+    assert booked == list(queued)
 
 
 # Running

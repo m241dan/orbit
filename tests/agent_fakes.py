@@ -63,6 +63,7 @@ from orbit.agent.domain.runtimes import (
 )
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.storage_halt import FailedWrite
+from orbit.agent.domain.triggers import Trigger
 from orbit.agent.domain.usage import UsageFetch, UsageUnavailable
 from orbit.agent.domain.usage_limits import claude_failure
 from orbit.agent.domain.usage_totals import UsageRow, UsageTotalsData, usage_totals
@@ -76,6 +77,7 @@ from orbit.protocol import (
     PROTOCOL_VERSION,
     REVIEW_ROLES,
     STORAGE_FAILED,
+    SUPER_REVIEW,
     AddTask,
     AgentExited,
     AgentReply,
@@ -134,6 +136,13 @@ ROLES = built_in_roles(
 
 TRIGGERS = read_built_in_triggers()
 """The shipped triggers, their prompts their templates' text."""
+
+
+def super_every(every: int) -> dict[str, Trigger]:
+    """The shipped triggers, the super review due every ``every`` of the user's commits."""
+    shipped = TRIGGERS[SUPER_REVIEW]
+    return {**TRIGGERS, SUPER_REVIEW: shipped.model_copy(update={"every": every})}
+
 
 URL = "http://orbit.test/mcp"
 Call = Callable[..., Awaitable[Reply]]

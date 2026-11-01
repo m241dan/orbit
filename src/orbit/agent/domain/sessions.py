@@ -34,6 +34,7 @@ from orbit.protocol import (
     INVALID,
     LOCKED,
     PLANNER,
+    SUPER_REVIEW,
     WRONG_SESSION,
     SessionSummary,
     Settings,
@@ -41,8 +42,12 @@ from orbit.protocol import (
     Usage,
 )
 
-FORMAT_VERSION = 18
+FORMAT_VERSION = 19
 """The version of the record format this orbit writes, and the newest it reads."""
+
+_OLD_SUPER_REVIEW_ORIGIN = "super_review"
+"""The origin of the tasks a super review suggested before version 19, which named it so rather
+than by its trigger's name."""
 
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
@@ -100,6 +105,23 @@ def _on_claude(record: dict[str, Any]) -> dict[str, Any]:
     return record | {"conversations": saved}
 
 
+def _origins_as_triggers(record: dict[str, Any]) -> dict[str, Any]:
+    """Version 18 ``record`` with each task from the super review, ``super_review``, from the
+    trigger that queues it, ``super-review``. Tasks that aren't a list are left for the record's
+    validation to say why, as is a task that isn't an object."""
+    tasks = record.get("tasks", [])
+    if not isinstance(tasks, list):
+        return record
+    return record | {"tasks": [_origin_as_trigger(task) for task in tasks]}
+
+
+def _origin_as_trigger(task: object) -> object:
+    """``task``, a saved task, from the super-review trigger if it was from ``super_review``."""
+    if isinstance(task, dict) and task.get("origin") == _OLD_SUPER_REVIEW_ORIGIN:
+        return task | {"origin": SUPER_REVIEW}
+    return task
+
+
 # By version N: what takes a record of version N and returns its fields in version N+1's shape.
 # The upgrade sets the version for it. Version 3 dropped the planner's rounds through a migration
 # rather than by having the snapshot ignore them, so that the format stays pinned by its fixtures
@@ -120,6 +142,8 @@ def _on_claude(record: dict[str, Any]) -> dict[str, Any]:
 # Version 16 added whether that role edited it, which an older record's drafts read as not,
 # and version 17 the number of the last consultation asked, which an older record asked none of.
 # Version 18 added the skills each task names, which an older record's tasks name none of.
+# Version 19 names each task's origin by the trigger that queued it, so a super review's
+# suggestions are from ``super-review`` rather than ``super_review``: its migration renames them.
 _MIGRATIONS: dict[int, Migration] = {
     1: _spent_by_tasks,
     2: _without_rounds,
@@ -138,6 +162,7 @@ _MIGRATIONS: dict[int, Migration] = {
     15: _unchanged,
     16: _unchanged,
     17: _unchanged,
+    18: _origins_as_triggers,
 }
 
 EMPTY_NAME = "A session needs a name."

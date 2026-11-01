@@ -11,7 +11,7 @@ from orbit.protocol import (
     REVIEW_ORIGIN,
     REVIEW_ROLES,
     REVIEWER,
-    SUPER_REVIEW_ORIGIN,
+    SUPER_REVIEW,
     SUPER_REVIEWER,
     EditRefusal,
     TaskSpec,
@@ -41,7 +41,7 @@ def test_a_running_review_is_refused_as_running() -> None:
 
 
 @pytest.mark.parametrize("role", sorted(REVIEW_ROLES))
-@pytest.mark.parametrize("origin", [REVIEW_ORIGIN, SUPER_REVIEW_ORIGIN])
+@pytest.mark.parametrize("origin", [REVIEW_ORIGIN, SUPER_REVIEW])
 def test_a_review_orbit_queued_cant_be_edited(role: str, origin: str) -> None:
     for status in ("pending", "completed", "error"):
         state = TaskState(id="1", task=TaskSpec(prompt="check", role=role), status=status)
@@ -55,7 +55,7 @@ def test_a_review_the_user_or_the_planner_queued_can_be_edited(role: str, origin
     assert edit_refusal(state) is None
 
 
-@pytest.mark.parametrize("origin", [REVIEW_ORIGIN, SUPER_REVIEW_ORIGIN])
+@pytest.mark.parametrize("origin", [REVIEW_ORIGIN, SUPER_REVIEW])
 def test_a_task_a_review_suggested_can_be_edited(origin: str) -> None:
     state = TaskState(id="1", task=TaskSpec(prompt="tidy"), origin=origin, batch="b1", round=1)
     assert edit_refusal(state) is None

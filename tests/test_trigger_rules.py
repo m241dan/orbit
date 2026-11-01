@@ -1,10 +1,22 @@
 """Which triggers fire on an event: those enabled, on it, for an enabled role, whose ``when``
-takes it and that didn't queue the task causing it, and the guards that hold one back."""
+takes it and that didn't queue the task causing it, the guards that hold one back, the landings
+counted toward the ``commits`` triggers, and which fire by hand."""
+
+from collections.abc import Mapping
 
 import pytest
 
 from orbit.agent.domain.reviews import ReviewJob
-from orbit.agent.domain.triggers import Trigger, TriggerEvent, held_back, listening, takes
+from orbit.agent.domain.triggers import (
+    Trigger,
+    TriggerEvent,
+    count_landing,
+    fires_by_hand,
+    held_back,
+    listening,
+    restart_counts,
+    takes,
+)
 from orbit.protocol import TaskSpec, TaskState, TaskStatus
 
 ROLES = ("coder", "reviewer")
@@ -102,5 +114,140 @@ def test_dedupe_holds_back_a_task_whose_first_line_a_waiting_task_has() -> None:
 
 
 def test_without_guards_held_on_the_board_nothing_holds_a_trigger_back() -> None:
-    guarded = trigger(guards=("review-rounds", "suggestions-pending"))
-    assert not held_back(guarded, "Look at abc", [task("Look at abc")])
+    guarded = trigger(guards=("review-rounds",))
+    assert not held_back(guarded, "Look at abc", [task("Look at abc", origin="review")])
+
+
+@pytest.mark.parametrize("origin", ["review", "super-review"])
+def test_suggestions_pending_holds_back_while_a_task_the_reviews_queued_waits(origin: str) -> None:
+    guarded = trigger(guards=("suggestions-pending",))
+    assert held_back(guarded, "Look at abc", [task("Tidy", "coder", origin=origin)])
+    assert held_back(guarded, "Look at abc", [task("Review", status="running", origin=origin)])
+    assert not held_back(guarded, "Look at abc", [task("Tidy", status="completed", origin=origin)])
+
+
+def test_suggestions_pending_does_not_hold_back_for_the_users_or_another_triggers_tasks() -> None:
+    guarded = trigger(guards=("suggestions-pending",))
+    waiting = [
+        task("Tidy", "coder"),
+        task("Plan", "coder", origin="planner"),
+        task("Look", origin="look"),
+    ]
+    assert not held_back(guarded, "Look at abc", waiting)
+
+
+def test_dedupe_holds_nothing_back_before_there_is_a_prompt() -> None:
+    guarded = trigger(guards=("dedupe",))
+    assert not held_back(guarded, None, [task("Look at abc")])
+    assert held_back(trigger(guards=("dedupe", "not-queued")), None, [task("Look at abc")])
+
+
+# Counting landings toward commits triggers
+
+
+def every(count: int | None, **fields: object) -> Trigger:
+    """A trigger on ``commits`` queuing a super reviewer's task every ``count`` landings of the
+    user's and the planner's tasks, with ``fields`` over that."""
+    return Trigger.model_validate(
+        {
+            "on": "commits",
+            "role": "super-reviewer",
+            "prompt": "Review the codebase at {commit}",
+            "when": {"origin": ["manual", "planner"]},
+            "every": count,
+            **fields,
+        }
+    )
+
+
+def landing(origin: str = "manual", role: str = "coder") -> TriggerEvent:
+    """A landing of ``role``'s task from ``origin``, raised on ``commits``."""
+    return TriggerEvent(
+        "commits", {"role": role, "origin": origin}, task("Add", role, origin=origin)
+    )
+
+
+def counted_over(
+    triggers: dict[str, Trigger],
+    events: list[TriggerEvent],
+    tasks: tuple[TaskState, ...] = (),
+    counts: Mapping[str, int] | None = None,
+) -> tuple[list[list[str]], Mapping[str, int]]:
+    """The names of the triggers that fire on each of ``events``, landings counted in turn from
+    ``counts`` with ``tasks`` on the board, and the counts after the last."""
+    fired: list[list[str]] = []
+    now: Mapping[str, int] = counts or {}
+    for event in events:
+        counted = count_landing(triggers, event, (*ROLES, "super-reviewer"), now, tasks)
+        fired.append(names(counted.fires))
+        now = counted.counts
+    return fired, now
+
+
+def test_a_commits_trigger_fires_every_so_many_landings_its_count_starting_again() -> None:
+    fired, counts = counted_over({"super": every(3)}, [landing()] * 7)
+    assert fired == [[], [], ["super"], [], [], ["super"], []]
+    assert counts == {"super": 1}
+
+
+def test_landings_from_the_planner_count_too() -> None:
+    fired, _ = counted_over({"super": every(2)}, [landing("planner"), landing("manual")])
+    assert fired == [[], ["super"]]
+
+
+def test_landings_its_when_does_not_take_do_not_count() -> None:
+    events = [landing("review"), landing("super-review"), landing("manual", "reviewer")]
+    fired, counts = counted_over(
+        {"super": every(1, when={"origin": "manual", "role": "coder"})}, events
+    )
+    assert fired == [[], [], []]
+    assert counts == {}
+
+
+def test_a_trigger_does_not_count_the_landings_of_tasks_it_queued() -> None:
+    fired, counts = counted_over({"super": every(1, when={})}, [landing("super")])
+    assert (fired, counts) == ([[]], {})
+
+
+def test_a_disabled_commits_trigger_or_one_whose_role_is_disabled_does_not_count() -> None:
+    triggers = {"off": every(1, enabled=False), "tidy": every(1, role="tidier")}
+    assert counted_over(triggers, [landing()]) == ([[]], {})
+
+
+def test_a_due_trigger_a_guard_holds_back_stays_due_and_fires_once_none_does() -> None:
+    triggers = {"super": every(2, guards=("suggestions-pending",))}
+    waiting = (task("Tidy", "coder", origin="review"),)
+    fired, counts = counted_over(triggers, [landing()] * 3, waiting)
+    assert (fired, counts) == ([[], [], []], {"super": 3})
+    fired, counts = counted_over(triggers, [landing()], counts=counts)
+    assert (fired, counts) == ([["super"]], {"super": 0})
+
+
+def test_each_commits_trigger_counts_apart_and_fires_in_its_order() -> None:
+    triggers = {"often": every(1), "rarely": every(2), "listening": trigger()}
+    fired, counts = counted_over(triggers, [landing()] * 2)
+    assert fired == [["often"], ["often", "rarely"]]
+    assert counts == {"often": 0, "rarely": 0}
+
+
+def test_a_commits_trigger_without_every_fires_on_each_landing_it_counts() -> None:
+    fired, _ = counted_over({"each": every(None)}, [landing()] * 2)
+    assert fired == [["each"], ["each"]]
+
+
+def test_counting_keeps_the_counts_of_the_triggers_that_did_not_hear_it() -> None:
+    _, counts = counted_over({"super": every(5)}, [landing()], counts={"gone": 4})
+    assert counts == {"gone": 4, "super": 1}
+
+
+def test_restarting_counts_sets_only_the_triggers_fired_back_to_nothing() -> None:
+    assert restart_counts({"a": 3, "b": 2}, ["a", "c"]) == {"a": 0, "b": 2, "c": 0}
+
+
+def test_a_trigger_fires_by_hand_if_it_and_its_role_are_enabled_whatever_its_when() -> None:
+    roles = ("super-reviewer",)
+    assert fires_by_hand(
+        every(10, when={"origin": "nobody"}, guards=("suggestions-pending",)), roles
+    )
+    assert not fires_by_hand(every(10, enabled=False), roles)
+    assert not fires_by_hand(every(10), ("coder",))

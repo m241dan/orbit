@@ -18,7 +18,7 @@ from orbit.protocol import (
     INVALID,
     PLANNER_ORIGIN,
     REVIEW_ORIGIN,
-    SUPER_REVIEW_ORIGIN,
+    SUPER_REVIEW,
     UNKNOWN,
     Settings,
     TaskSpec,
@@ -99,7 +99,7 @@ def test_moving_records_renames_them_in_every_task_but_completed_ones() -> None:
 def test_setting_a_prompt_rewords_the_task_and_leaves_the_rest_as_it_is() -> None:
     board = TaskBoard()
     board.add(ONE)
-    review = board.add_review(TaskSpec(prompt="Review commit c1", role="reviewer"))
+    review = board.add_triggered(TaskSpec(prompt="Review commit c1", role="reviewer"), "review")
     board.set_status(review, "running")
     board.set_prompt(review, "Review commit c1\n\nLanded since")
     state = board.get(review)
@@ -125,7 +125,7 @@ def test_edit_rejects_unknown_and_running_tasks() -> None:
 def test_edit_refuses_a_review_orbit_queued_but_not_one_the_user_added() -> None:
     board = TaskBoard()
     review = TaskSpec(prompt="Review commit abc", role="reviewer")
-    queued, added = board.add_review(review), board.add(review)
+    queued, added = board.add_triggered(review, REVIEW_ORIGIN), board.add(review)
     board.set_status(queued, "completed")
     with pytest.raises(Refused, match="Reviews can't be edited") as refused:
         board.edit(queued, TWO)
@@ -322,12 +322,6 @@ def test_next_runnable_can_be_limited_to_roles_or_exclude_them() -> None:
     assert board.next_runnable(roles={"reviewer", "super-reviewer"}) == review
 
 
-def test_reviews_orbit_queues_are_marked_as_from_review() -> None:
-    board = TaskBoard()
-    review = board.add_review(TaskSpec(prompt="Review commit abc", role="reviewer"))
-    assert board.get(review).origin == REVIEW_ORIGIN
-
-
 def test_tasks_given_up_on_are_not_run_again() -> None:
     board = TaskBoard()
     task_id = board.add(ONE)
@@ -347,9 +341,9 @@ def test_fixes_inherit_the_origin_batch_and_round_of_what_they_fix() -> None:
 def test_suggestions_take_the_origin_they_are_given() -> None:
     board = TaskBoard()
     suggestion = board.add_suggestion(
-        TaskSpec(prompt="tidy"), batch="batch-1", round=0, origin=SUPER_REVIEW_ORIGIN
+        TaskSpec(prompt="tidy"), batch="batch-1", round=0, origin=SUPER_REVIEW
     )
-    assert board.get(suggestion).origin == SUPER_REVIEW_ORIGIN
+    assert board.get(suggestion).origin == SUPER_REVIEW
 
 
 def test_suggestions_join_the_end_of_the_queue() -> None:

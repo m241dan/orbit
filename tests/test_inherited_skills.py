@@ -4,10 +4,11 @@ suggestion names its review's; a fallback fix names the failing task's; and the 
 fix task, which comes from no task, names none."""
 
 import asyncio
+from collections.abc import Mapping
 
 from orbit.agent.domain.agent_task import Limits
-from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.skills import Skill, SkillLibrary
+from orbit.agent.domain.triggers import Trigger
 from orbit.protocol import (
     CODER,
     REVIEWER,
@@ -19,6 +20,7 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import (
     ROLES,
+    TRIGGERS,
     FakeTree,
     Script,
     ScriptedLauncher,
@@ -34,6 +36,7 @@ from tests.agent_fakes import (
     session_for,
     settle,
     suggests,
+    super_every,
     verified,
 )
 
@@ -50,10 +53,10 @@ CHOSEN = TaskSpec(prompt="Add a flag.", skills=("python", "application"))
 
 
 async def reviewed(
-    *reviewers: Script, limits: ReviewLimits | None = None
+    *reviewers: Script, triggers: Mapping[str, Trigger] = TRIGGERS
 ) -> tuple[list[TaskState], ScriptedLauncher]:
     """The tasks on the board once :data:`CHOSEN` has landed and been reviewed by
-    ``reviewers``, under ``limits``, and the suggestions they made have run and been reviewed in
+    ``reviewers``, with ``triggers``, and the suggestions they made have run and been reviewed in
     turn; and the launcher that played them."""
     session, _, launcher = session_for(
         claims_done,
@@ -61,7 +64,7 @@ async def reviewed(
         reviewers=reviewers,
         tree=FakeTree(),
         review=True,
-        review_limits=limits or ReviewLimits(),
+        triggers=triggers,
         skill_library=LIBRARY,
     )
     await send(session, AddTask(task=CHOSEN))
@@ -104,7 +107,7 @@ async def test_the_review_of_a_batch_names_the_skills_of_its_suggestions() -> No
 
 
 async def test_a_super_review_names_no_skills_after_a_task_naming_some_lands() -> None:
-    tasks, _ = await reviewed(suggests(), suggests(), limits=ReviewLimits(super_every=1))
+    tasks, _ = await reviewed(suggests(), suggests(), triggers=super_every(1))
     [super_review] = [t for t in tasks if t.task.role == SUPER_REVIEWER]
     assert super_review.task.skills == ()
 

@@ -29,7 +29,7 @@ verification fails has its own.
 | `orbit.role` | string | The role that takes the task, such as `coder` or `reviewer`. |
 | `orbit.runtime` | string | The runtime the task's role runs on, such as `claude`; absent for a role the session doesn't have, whose task fails without an agent. |
 | `gen_ai.request.model` | string | The model the task's agent is launched with; absent when the task names none (the CLI's default). |
-| `orbit.trigger` | string | Who queued the task, its origin: the trigger that queued it, by name, such as `review` or a project's own; `manual` or `planner`; or, for a review's suggestion, `review` or `super_review`. |
+| `orbit.trigger` | string | Who queued the task, its origin: the trigger that queued it, by name, such as `review`, `super-review` or a project's own, as a review's suggestion takes its review's trigger's; or `manual` or `planner`. |
 | `orbit.task.fixes` | string | For a fix task, the id of the task it fixes; absent otherwise. |
 | `orbit.task.fix_attempts` | int | How many times the agent was told its work failed verification and asked to fix it. |
 | `orbit.task.wait_ms` | double | How long the task waited in line for a coder's slot, in milliseconds; 0 when it didn't. |

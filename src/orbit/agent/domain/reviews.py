@@ -21,7 +21,7 @@ from orbit.protocol import (
     REVIEW_ORIGIN,
     REVIEW_ROLES,
     REVIEWER,
-    SUPER_REVIEW_ORIGIN,
+    SUPER_REVIEW,
     SUPER_REVIEWER,
     TaskOrigin,
     TaskState,
@@ -91,7 +91,7 @@ class ReviewJob:
     @property
     def origin(self) -> TaskOrigin:
         """The origin of the tasks the review suggests."""
-        return SUPER_REVIEW_ORIGIN if self.whole else REVIEW_ORIGIN
+        return SUPER_REVIEW if self.whole else REVIEW_ORIGIN
 
     @property
     def role(self) -> str:
@@ -102,13 +102,12 @@ class ReviewJob:
 @dataclass(frozen=True)
 class ReviewLimits:
     """How much reviews may generate: ``rounds`` is the last round reviewed by itself, and
-    ``suggestions`` the tasks one review may suggest. A super review is due every
-    ``super_every`` commits, may suggest ``super_suggestions`` tasks, and reads a sample of
-    ``super_sample`` code files besides those changed since the last."""
+    ``suggestions`` the tasks one review may suggest. A super review, due as its trigger says,
+    may suggest ``super_suggestions`` tasks, and reads a sample of ``super_sample`` code files
+    besides those changed since the last."""
 
     rounds: int = 3
     suggestions: int = 5
-    super_every: int = 10
     super_suggestions: int = 10
     super_sample: int = 10
 
@@ -174,8 +173,8 @@ class _Batch:
 class PlannerSnapshot(BaseModel):
     """A :class:`ReviewPlanner`'s state for one session: whether review is ``paused``, the
     number of the ``next_batch``, the ``batches`` still open and the normalised titles of
-    every suggestion it accepted, ``suggested``. The count towards a super review isn't in
-    it: that's kept per repository."""
+    every suggestion it accepted, ``suggested``. The counts towards the ``commits`` triggers
+    aren't in it: the super review's is kept per repository."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -198,13 +197,15 @@ class LaneSnapshot(BaseModel):
 
 class ReviewPlanner:
     """Tracks batches and decides when to review, within ``limits``: only the reviews of the
-    ``reviewers``, the review roles enabled, fall due."""
+    ``reviewers``, the review roles enabled, fall due. It keeps the landings counted toward
+    each ``commits`` trigger, which decide when a super review is."""
 
     def __init__(self, limits: ReviewLimits, reviewers: Collection[str] = REVIEW_ROLES) -> None:
         self.limits = limits
         self._reviewers = frozenset(reviewers)
         self.paused = False
-        self.since_super = 0  # Commits since the last super review.
+        # The landings counted toward each commits trigger since it last fired, by name.
+        self.counts: Mapping[str, int] = {}
         self.last_super_commit: str | None = None  # The commit it reviewed; none before one.
         self.super_reviews = 0  # The super reviews the repository has had.
         # The number of the super review that last sampled each file, by path.
@@ -234,15 +235,16 @@ class ReviewPlanner:
 
     @property
     def super_count(self) -> SuperReviewCount:
-        """The count towards the next super review, with the super reviews so far and the files
-        they sampled, kept per repository rather than in snapshots."""
-        return SuperReviewCount(
-            self.since_super, self.last_super_commit, self.super_reviews, self.sampled
-        )
+        """The count towards the next super review, the super-review trigger's, with the super
+        reviews so far and the files they sampled, kept per repository rather than in
+        snapshots."""
+        since = self.counts.get(SUPER_REVIEW, 0)
+        return SuperReviewCount(since, self.last_super_commit, self.super_reviews, self.sampled)
 
     @super_count.setter
     def super_count(self, count: SuperReviewCount) -> None:
-        self.since_super, self.last_super_commit = count.since_super, count.last_super_commit
+        self.counts = {**self.counts, SUPER_REVIEW: count.since_super}
+        self.last_super_commit = count.last_super_commit
         self.super_reviews, self.sampled = count.super_reviews, count.sampled
 
     @property
@@ -325,33 +327,9 @@ class ReviewPlanner:
             return "This review's suggestions are closed: its review is over."
         return None
 
-    def count(self, state: TaskState, tasks: Sequence[TaskState]) -> bool:
-        """Task ``state`` landed a commit, with ``tasks`` on the board; returns whether a super
-        review is due now. Only the user's and the planner's commits count: a suggested task's
-        doesn't. One that falls due waits, as it does while review is paused, while a suggested
-        task or a review (any task with origin review or super_review) is pending or running,
-        and comes with the first of the user's commits to find none. None falls due while the
-        super reviewer is disabled."""
-        if not _users_work(state) or SUPER_REVIEWER not in self._reviewers:
-            return False
-        self.since_super += 1
-        if self.since_super < self.limits.super_every or self._holds_super_review(tasks):
-            return False
-        self.since_super = 0
-        return True
-
-    def _holds_super_review(self, tasks: Sequence[TaskState]) -> bool:
-        """Whether a super review that's due waits: review is paused, or a task that reviews
-        suggested, or a review itself, is in ``tasks`` still to run or running."""
-        return self.paused or any(
-            task.origin in (REVIEW_ORIGIN, SUPER_REVIEW_ORIGIN) and task.status in WAITING
-            for task in tasks
-        )
-
-    def super_review(self, commit: str) -> ReviewJob:
-        """A super review of the codebase at ``commit``, one more for the repository; the count
-        starts again, from it."""
-        self.since_super = 0
+    def start_super_review(self, commit: str) -> ReviewJob:
+        """A super review of the codebase at ``commit``, one more for the repository, which the
+        next is told what landed after."""
         self.last_super_commit = commit
         self.super_reviews += 1
         return ReviewJob(commits=(commit,), round=0, batch=None, whole=True)
@@ -458,11 +436,6 @@ def _forget_finish(batch: _Batch, task_id: str) -> None:
 def _first_line(text: str) -> str:
     """The first line of ``text``, stripped: a task's title."""
     return text.strip().split("\n", 1)[0].strip()
-
-
-def _users_work(state: TaskState) -> bool:
-    """Whether ``state`` is one of the user's own tasks, or the planner's, outside any batch."""
-    return state.batch is None and state.origin in (MANUAL_ORIGIN, PLANNER_ORIGIN)
 
 
 def _normalized(text: str) -> str:
