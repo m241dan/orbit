@@ -19,7 +19,7 @@ from orbit.agent.domain.merge_holds import (
 )
 from orbit.agent.domain.merge_pass import NOT_BLOCKING
 from orbit.agent.domain.reviews import ReviewLimits, pause_notice
-from orbit.agent.domain.roles import Role
+from orbit.agent.domain.roles import Role, RoleTools
 from orbit.agent.domain.tools import (
     COMPLETE_TASK,
     DISMISS_FINDING,
@@ -43,6 +43,7 @@ from tests.agent_fakes import (
     session_for,
     snapshot_of,
     start,
+    with_orbit_tools,
     work_lane_of,
 )
 from tests.merge_hold_helpers import LandingTree, Seen, SetSteps
@@ -60,7 +61,7 @@ def lens(blocking: bool) -> Role:
         verify=False,
         lane="review",
         workspace="snapshot",
-        tools=LENS_TOOLS,
+        tools=RoleTools(orbit=LENS_TOOLS),
         blocking_findings=blocking,
     )
 
@@ -69,7 +70,7 @@ ROLES_WITH_LENSES = {
     **ROLES,
     BUGS_REVIEWER: lens(blocking=True),
     TESTS: lens(blocking=False),
-    REVIEWER: ROLES[REVIEWER].model_copy(update={"tools": MERGE_TOOLS}),
+    REVIEWER: with_orbit_tools(ROLES[REVIEWER], MERGE_TOOLS),
 }
 """The built-in roles, with a bugs lens, which may report blocking findings, a tests lens, and a
 reviewer that merges their findings."""

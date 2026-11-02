@@ -18,7 +18,7 @@ from pydantic_core import ErrorDetails
 from orbit.agent.domain.config_errors import ConfigError, dotted, validation_problems
 from orbit.agent.domain.role_lanes import role_clashes, with_enabled_consults
 from orbit.agent.domain.role_runtimes import check_runtimes
-from orbit.agent.domain.roles import Role, RoleName
+from orbit.agent.domain.roles import ROLE_KEYS, ROLE_TABLES, Role, RoleName, old_tools_problems
 from orbit.agent.domain.runtimes import UNCHECKED, RuntimeRules, knows_runtime, unknown_runtime
 from orbit.protocol import Effort
 
@@ -158,13 +158,15 @@ def load_user_roles(data: dict[str, Any], layer: Layer, built_in: Collection[str
     ``[triggers]`` are ignored.
 
     Raises :class:`ConfigError` naming ``skills`` or ``triggers`` if it sets ``[[skills]]`` or
-    ``[triggers.<name>]``, which belong in the project file, and otherwise each key that's
+    ``[triggers.<name>]``, which belong in the project file, then each role's tools it gives the
+    old way (see :func:`~orbit.agent.domain.roles.old_tools_problems`), and otherwise each key
+    that's
     invalid, as one setting a role's field other than its model, effort and runtime is, one that
     breaks a personal role's rules, or one giving a runtime this version of orbit doesn't know.
     """
-    project_tables = [table for table in PROJECT_TABLES if table in data]
-    if project_tables:
-        raise ConfigError(f"{project_tables[0]}: {BELONGS_IN_PROJECT}")
+    _refuse_project_tables(data)
+    if old_tools := old_tools_problems(_roles_table(data)):
+        raise ConfigError("\n".join(old_tools))
     try:
         table = _UserConfig.model_validate(data).roles
         roles = _UserRoles.model_validate(_sorted(table, built_in))
@@ -173,6 +175,21 @@ def load_user_roles(data: dict[str, Any], layer: Layer, built_in: Collection[str
     if problems := _unknown_runtimes(roles):
         raise ConfigError("\n".join(problems))
     return UserRoles(layer, roles.every, roles.named, roles.personal)
+
+
+def _refuse_project_tables(data: dict[str, Any]) -> None:
+    """Raise :class:`ConfigError` naming the first of :data:`PROJECT_TABLES` that ``data``, the
+    user config's contents, sets, if it sets one: it belongs in the project file."""
+    project_tables = [table for table in PROJECT_TABLES if table in data]
+    if project_tables:
+        raise ConfigError(f"{project_tables[0]}: {BELONGS_IN_PROJECT}")
+
+
+def _roles_table(data: dict[str, Any]) -> dict[str, Any]:
+    """The ``[roles]`` table of ``data``, a config file's contents; empty if it has none, or
+    something else under that name."""
+    roles = data.get("roles", {})
+    return roles if isinstance(roles, dict) else {}
 
 
 def _unknown_runtimes(roles: _UserRoles) -> list[str]:
@@ -364,12 +381,48 @@ def _resolved(
     given = project.roles.get(name, {})
     if not isinstance(given, dict):
         return given, {}
-    fields: dict[str, Any] = {} if built_in is None else built_in.model_dump()
-    layers = dict.fromkeys(Role.model_fields, DEFAULT)
+    fields: dict[str, Any] = {} if built_in is None else _flat(built_in.model_dump())
+    layers = dict.fromkeys(ROLE_KEYS, DEFAULT)
     for layer, values in _layered(name, built_in, user, project.layer, given):
-        fields |= values
-        layers |= dict.fromkeys(values, layer)
-    return _merging_worked_out(fields, layers, given)
+        flat = _flat(values)
+        fields |= flat
+        layers |= dict.fromkeys(flat, layer)
+    return _merging_worked_out(_nested(fields), layers, given)
+
+
+def _flat(fields: Mapping[str, Any]) -> dict[str, Any]:
+    """A role's ``fields`` with each of :data:`~orbit.agent.domain.roles.ROLE_TABLES` given as a
+    table split into its fields, each under its dotted key, so that each is merged on its own."""
+    return {
+        key: value
+        for field_name, given in fields.items()
+        for key, value in _split_table(field_name, given)
+    }
+
+
+def _split_table(name: str, value: Any) -> list[tuple[str, Any]]:
+    """Role field ``name``'s ``value``, each of its fields under its dotted key if it's one of
+    :data:`~orbit.agent.domain.roles.ROLE_TABLES` given as a table, or as it is otherwise."""
+    if name in ROLE_TABLES and isinstance(value, dict):
+        return [(f"{name}.{key}", each) for key, each in value.items()]
+    return [(name, value)]
+
+
+def _nested(flat: Mapping[str, Any]) -> dict[str, Any]:
+    """A role's fields as validating it takes them from the ``flat`` ones :func:`_flat` gives:
+    each table's fields back in their table, but a table given as something else, which
+    validating it refuses, as it was given."""
+    plain = {key: value for key, value in flat.items() if "." not in key}
+    tables = {table: _table_fields(flat, table) for table in ROLE_TABLES}
+    return {**{table: fields for table, fields in tables.items() if fields}, **plain}
+
+
+def _table_fields(flat: Mapping[str, Any], table: str) -> dict[str, Any]:
+    """The fields of a role's ``table`` among its ``flat`` ones, each by its own name."""
+    prefix = f"{table}."
+    return {
+        key.removeprefix(prefix): value for key, value in flat.items() if key.startswith(prefix)
+    }
 
 
 def _merging_worked_out(
@@ -409,5 +462,5 @@ def _users_own(name: str, user: UserRoles) -> dict[str, Any]:
 
 
 def _fields_set(role: Role) -> dict[str, Any]:
-    """The fields ``role`` was given, rather than left to their defaults."""
-    return role.model_dump(include=role.model_fields_set)
+    """The fields ``role`` was given, rather than left to their defaults, its tables' too."""
+    return role.model_dump(exclude_unset=True)

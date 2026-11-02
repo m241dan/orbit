@@ -11,7 +11,7 @@ from typer.testing import CliRunner, Result
 from orbit.agent import INVALID_CONFIG
 from orbit.agent.domain.config_report import Instructions, Setting, SkillFileText, SkillMap
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
-from orbit.agent.domain.roles import Role
+from orbit.agent.domain.roles import ROLE_KEYS
 from orbit.agent.external.built_in_roles import ROLE_DIRECTORY
 from orbit.agent.external.built_in_triggers import TRIGGER_DIRECTORY
 from orbit.agent.external.skill_files import SKILL_DIRECTORY
@@ -175,7 +175,9 @@ def test_roles_lists_each_role_field_with_the_layer_it_came_from(
     assert 'roles.reviewer.model = "sonnet"   project .orbit/config.toml' in lines
     assert f'roles.planner.model = "opus"   user {user_path}' in lines
     tools = '["get_task", "complete_task", "run_check", "report_progress", "give_up"]'
-    assert f"roles.coder.tools = {tools}   package" in lines
+    assert f"roles.coder.tools.orbit = {tools}   package" in lines
+    assert 'roles.coder.tools.workspace = "shell"   package' in lines
+    assert "roles.coder.tools.web = true   package" in lines
     assert "roles.coder.effort = null   default" in lines
     assert all(line.startswith("roles.") for line in lines if line)
 
@@ -463,8 +465,8 @@ def test_json_gives_the_same_values_and_layers(project: Path, config_dir: Path) 
     roles = json.loads(result.stdout)["roles"]
     assert roles["reviewer"]["model"] == {"value": "sonnet", "layer": "project", "file": str(path)}
     assert roles["planner"]["model"] == {"value": "opus", "layer": "user", "file": str(user_path)}
-    assert roles["coder"]["tools"]["layer"] == "package"
-    assert roles["coder"]["tools"]["file"] is None
+    assert roles["coder"]["tools"]["workspace"]["layer"] == "package"
+    assert roles["coder"]["tools"]["workspace"]["file"] is None
     summary = f"(reviewer.md, {REVIEWER_LINES} lines)"
     assert roles["reviewer"]["instructions"]["value"] == summary
 
@@ -557,7 +559,7 @@ def test_a_plainly_named_roles_key_lists_only_its_fields(project: Path) -> None:
     result = show(project, "roles.qa-lead")
     assert result.exit_code == 0, result.output
     keys = [line.split(" = ")[0] for line in result.stdout.splitlines()]
-    assert keys == [f"roles.qa-lead.{key}" for key in Role.model_fields]
+    assert keys == [f"roles.qa-lead.{key}" for key in ROLE_KEYS]
 
 
 def test_a_missing_workspace_exits_2(tmp_path: Path) -> None:

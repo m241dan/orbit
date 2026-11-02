@@ -20,13 +20,13 @@ from orbit.agent.domain.layers import (
     load_user_roles,
 )
 from orbit.agent.domain.reviews import ReviewLimits
-from orbit.agent.domain.roles import MAX_COPY_TTL_HOURS, Role, built_in_roles
+from orbit.agent.domain.roles import MAX_COPY_TTL_HOURS, Role, RoleTools, built_in_roles
 from orbit.agent.domain.runtimes import CLAUDE, RuntimeRules
 from orbit.agent.domain.sessions import SavedCopy
 from orbit.agent.domain.skills import SkillMapping
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
-from orbit.protocol import BUILT_IN_ROLE_NAMES, LENS_REVIEWERS, SUPER_LENS_REVIEWERS
+from orbit.protocol import BUILT_IN_ROLE_NAMES, LENS_REVIEWERS, SUPER_LENS_REVIEWERS, Settings
 from tests.agent_fakes import CLAUDE_MODELS, EVERYTHING, KNOWN_RULES, LIMITED_RUNTIME
 
 INSTRUCTIONS = {name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES}
@@ -72,7 +72,7 @@ def test_a_file_sets_the_super_review_sample_which_may_be_zero() -> None:
 
 
 def test_the_built_in_roles_are_the_ones_given() -> None:
-    reviewer = Role(instructions="Review.", tools=("get_task",))
+    reviewer = Role(instructions="Review.", tools=RoleTools(orbit=("get_task",)))
     assert load_config({}, {"reviewer": reviewer}).roles == {"reviewer": reviewer}
 
 
@@ -82,7 +82,7 @@ def test_a_file_can_add_a_role() -> None:
             "roles": {
                 "docs-writer": {
                     "instructions": "Write docs.",
-                    "tools": ["get_task", "complete_task"],
+                    "tools": {"orbit": ["get_task", "complete_task"]},
                     "verify": False,
                 }
             }
@@ -91,9 +91,11 @@ def test_a_file_can_add_a_role() -> None:
     )
     writer = config.roles["docs-writer"]
     assert writer == Role(
-        instructions="Write docs.", tools=("get_task", "complete_task"), verify=False
+        instructions="Write docs.",
+        tools=RoleTools(orbit=("get_task", "complete_task")),
+        verify=False,
     )
-    assert writer.tool_access == "restricted"
+    assert (writer.workspace_level, writer.web) == ("read", True)
 
 
 def test_a_file_lists_verification_steps_in_order() -> None:
@@ -159,9 +161,9 @@ def test_a_file_maps_paths_to_skills_entry_by_entry() -> None:
         ({"super_review_sample": -1}, "super_review_sample"),
         ({"surprise": 1}, "surprise"),
         ({"roles": "everyone"}, "roles"),
-        ({"roles": {"coder": {"tools": ["launch_rockets"]}}}, "launch_rockets"),
-        ({"roles": {"coder": {"tool_access": "sometimes"}}}, "roles.coder.tool_access"),
-        ({"roles": {"new": {"tools": ["get_task"]}}}, "roles.new.instructions"),
+        ({"roles": {"coder": {"tools": {"orbit": ["launch_rockets"]}}}}, "launch_rockets"),
+        ({"roles": {"coder": {"tools": {"workspace": "all"}}}}, "roles.coder.tools.workspace"),
+        ({"roles": {"new": {"tools": {"orbit": ["get_task"]}}}}, "roles.new.instructions"),
         ({"roles": {"coder": {"timeout_minutes": 0}}}, "timeout_minutes"),
         ({"verification": {"steps": [{"name": "", "command": ["x"]}]}}, "step 1 has no name"),
         ({"verification": {"steps": [{"name": "a", "command": []}]}}, "step 1 has no command"),
@@ -233,7 +235,7 @@ def test_a_position_in_a_list_is_counted_from_1(data: dict[str, object], where: 
 @pytest.mark.parametrize(
     ("roles", "where"),
     [
-        ({"coder": {"tools": ["launch_rockets"]}}, "roles.coder.tools"),
+        ({"coder": {"tools": {"orbit": ["launch_rockets"]}}}, "roles.coder.tools.orbit"),
         ({"coder": "everything"}, "roles.coder"),
         ({"x": {"instructions": "Do it.", "lane": "b"}}, "roles"),
     ],
@@ -249,15 +251,15 @@ def test_a_role_problem_and_another_problem_are_refused_together_each_on_its_own
 
 @pytest.mark.parametrize("tools", [["complete_task"], ["propose_task"]])
 def test_a_task_role_without_get_task_is_refused(tools: list[str]) -> None:
-    roles = {"new": {"instructions": "x", "tools": tools}}
-    with pytest.raises(ConfigError, match=r"new.*a task role needs get_task in its tools"):
+    roles = {"new": {"instructions": "x", "tools": {"orbit": tools}}}
+    with pytest.raises(ConfigError, match=r"new.*a task role needs get_task in its tools.orbit"):
         load_config({"roles": roles}, BUILT_IN_ROLES)
 
 
 def test_a_task_role_with_get_task_loads() -> None:
-    roles = {"new": {"instructions": "x", "tools": ["get_task"]}}
+    roles = {"new": {"instructions": "x", "tools": {"orbit": ["get_task"]}}}
     config = load_config({"roles": roles}, BUILT_IN_ROLES)
-    assert config.roles["new"].tools == ("get_task",)
+    assert config.roles["new"].tools.orbit == ("get_task",)
 
 
 def custom(**fields: object) -> dict[str, object]:
@@ -269,7 +271,7 @@ def talker(**fields: object) -> dict[str, object]:
     """A project file adding the conversational role ``x`` in its own lane, with ``fields``."""
     conversational: dict[str, object] = {
         "conversation": True,
-        "tools": ["propose_task"],
+        "tools": {"orbit": ["propose_task"]},
         "verify": False,
         "workspace": "checkout",
         "lane": "talk",
@@ -348,12 +350,12 @@ def test_conversational_roles_can_share_a_lane() -> None:
         (custom(verify=False, merge=True), "merge = true needs verify = true"),
         (custom(verify=True, merge=False), "verify = true needs merge = true"),
         (
-            custom(workspace="checkout", tool_access="full"),
+            custom(workspace="checkout", tools={"workspace": "shell"}),
             'workspace = "checkout" can\'t have the workspace level "shell"',
         ),
         (
-            talker(tools=["get_task", "propose_task"]),
-            "conversation = true needs get_task left out of its tools",
+            talker(tools={"orbit": ["get_task", "propose_task"]}),
+            "conversation = true needs get_task left out of its tools.orbit",
         ),
         (talker(merge=True), "conversation = true needs merge = false"),
         (talker(verify=True), "conversation = true needs verify = false"),
@@ -595,12 +597,15 @@ def test_the_projects_own_clash_beside_a_personal_role_is_the_projects() -> None
 
 
 def test_a_project_role_problem_beside_a_personal_role_is_refused_with_the_rest() -> None:
-    roles = {"coder": {"tool_access": "sometimes"}}
+    roles = {"coder": {"tools": {"workspace": "all"}}}
     with pytest.raises(ConfigError) as raised:
         load_config({"fix_attempts": 0, "roles": roles}, BUILT_IN_ROLES, personal(helper=HELPER))
     assert not isinstance(raised.value, PersonalRoleError)
     lines = str(raised.value).splitlines()
-    assert [line.split(":", 1)[0] for line in lines] == ["fix_attempts", "roles.coder.tool_access"]
+    assert [line.split(":", 1)[0] for line in lines] == [
+        "fix_attempts",
+        "roles.coder.tools.workspace",
+    ]
 
 
 @pytest.mark.parametrize("key", ["personal", "notices"])
@@ -620,7 +625,7 @@ def test_a_layered_config_is_the_config_with_the_layer_each_role_field_came_from
     assert layered.config == load_config(data, BUILT_IN_ROLES, user, path)
     assert layered.role_layers["coder"]["model"] == Layer("project", path)
     assert layered.role_layers["planner"]["model"] == USER
-    assert layered.role_layers["coder"]["tools"] == PACKAGE
+    assert layered.role_layers["coder"]["tools.orbit"] == PACKAGE
 
 
 # A role's runtime
@@ -739,9 +744,13 @@ def test_a_disabled_role_asking_beyond_its_runtime_loads() -> None:
 def test_on_claude_every_valid_configuration_loads_as_it_did() -> None:
     data = {
         "roles": {
-            "planner": {"effort": "low", "tool_access": "off"},
-            "coder": {"effort": "max"},
-            "reviewer": {"effort": "xhigh", "tool_access": "full", "workspace": "snapshot"},
+            "planner": {"effort": "low", "tools": {"workspace": "none", "web": False}},
+            "coder": {"effort": "max", "tools": {"workspace": "write"}},
+            "reviewer": {
+                "effort": "xhigh",
+                "tools": {"workspace": "shell"},
+                "workspace": "snapshot",
+            },
         }
     }
     claude = RuntimeRules({CLAUDE: EVERYTHING}, {CLAUDE: CLAUDE_MODELS})
@@ -795,7 +804,7 @@ LATER_VERSION = (
 @pytest.mark.parametrize(
     ("toml", "setting"),
     [
-        ('[roles.coder.tools]\nmcp = ["semgrep"]', "[roles.coder.tools]"),
+        ('[roles.coder.tools]\nmcp = ["semgrep"]', "roles.coder.tools.mcp"),
         ('[mcp.github]\ncommand = ["github-mcp-server", "stdio"]', "[mcp.github]"),
         ('[models.local]\nmodel = "openai:qwen3-coder"', "[models.local]"),
         ("[mcp]\nshared = true\n\n[mcp.github]\nshared = false", "[mcp.github]"),
@@ -810,7 +819,7 @@ def test_a_later_versions_setting_is_refused_naming_it(toml: str, setting: str) 
 
 def test_the_first_later_versions_setting_in_the_file_is_the_one_named() -> None:
     toml = '[roles.coder.tools]\nmcp = []\n\n[mcp.github]\nurl = "http://127.0.0.1:3010/mcp"'
-    with pytest.raises(ConfigError, match=r"^\[roles\.coder\.tools\] isn't supported"):
+    with pytest.raises(ConfigError, match=r"^roles\.coder\.tools\.mcp isn't supported"):
         load_config(tomllib.loads(toml), BUILT_IN_ROLES)
 
 
@@ -819,10 +828,48 @@ def test_a_layered_config_refuses_a_later_versions_setting_too() -> None:
         load_layered({"mcp": {"github": {"shared": True}}}, Package(BUILT_IN_ROLES))
 
 
-def test_a_roles_list_of_orbit_tools_still_loads() -> None:
-    tools = ("get_task", "complete_task", "report_progress", "give_up")
-    toml = f"[roles.coder]\ntools = {list(tools)}"
-    assert load_config(tomllib.loads(toml), BUILT_IN_ROLES).roles["coder"].tools == tools
+def test_a_roles_tools_table_loads() -> None:
+    toml = '[roles.coder.tools]\norbit = ["get_task", "complete_task"]\nweb = false'
+    tools = load_config(tomllib.loads(toml), BUILT_IN_ROLES).roles["coder"].tools
+    assert tools == RoleTools(orbit=("get_task", "complete_task"), workspace="shell", web=False)
+
+
+def test_a_project_setting_only_a_roles_workspace_keeps_its_orbit_tools_and_web() -> None:
+    toml = '[roles.reviewer.tools]\nworkspace = "none"'
+    layered = load_layered(tomllib.loads(toml), Package(BUILT_IN_ROLES))
+    reviewer, shipped = layered.config.roles["reviewer"], BUILT_IN_ROLES["reviewer"]
+    assert reviewer.tools == shipped.tools.model_copy(update={"workspace": "none"})
+    assert reviewer.settings == Settings(workspace_level="none", web=True)
+    layers = layered.role_layers["reviewer"]
+    assert (layers["tools.orbit"], layers["tools.web"]) == (PACKAGE, PACKAGE)
+    assert layers["tools.workspace"] == Layer("project")
+
+
+def test_a_project_file_setting_a_roles_tool_access_is_refused_showing_the_new_form() -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_config(tomllib.loads('[roles.coder]\ntool_access = "full"'), BUILT_IN_ROLES)
+    assert str(raised.value) == (
+        "roles.coder.tool_access is gone; write [roles.coder.tools]"
+        ' workspace = "shell", web = true.'
+    )
+
+
+def test_a_project_file_setting_a_roles_tools_as_a_list_is_refused_showing_the_table() -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_config(tomllib.loads('[roles.coder]\ntools = ["get_task"]'), BUILT_IN_ROLES)
+    assert str(raised.value) == (
+        'roles.coder.tools is now a table; write [roles.coder.tools] orbit = ["get_task"].'
+    )
+
+
+def test_a_project_files_old_tools_are_refused_ahead_of_its_other_problems() -> None:
+    data = {"fix_attempts": 0, "roles": {"reviewer": {"tool_access": "off"}, "coder": "x"}}
+    with pytest.raises(ConfigError) as raised:
+        load_config(data, BUILT_IN_ROLES)
+    assert str(raised.value).splitlines() == [
+        'roles.reviewer.tool_access is gone; write [roles.reviewer.tools] workspace = "none",'
+        " web = false."
+    ]
 
 
 @pytest.mark.parametrize(
@@ -842,20 +889,22 @@ def test_other_unknown_settings_keep_their_errors(data: dict[str, object], messa
 
 
 def test_a_roles_tools_naming_read_skill_are_refused() -> None:
-    toml = '[roles.coder]\ntools = ["get_task", "complete_task", "read_skill"]'
+    toml = '[roles.coder.tools]\norbit = ["get_task", "complete_task", "read_skill"]'
     message = "read_skill comes with every role; leave it out of tools."
-    with pytest.raises(ConfigError, match=f"^roles\\.coder\\.tools: .*{re.escape(message)}"):
+    with pytest.raises(
+        ConfigError, match=f"^roles\\.coder\\.tools\\.orbit: .*{re.escape(message)}"
+    ):
         load_config(tomllib.loads(toml), BUILT_IN_ROLES)
 
 
 def test_a_conversational_role_without_propose_task_or_get_task_loads() -> None:
-    role = load_config(talker(tools=["report_progress"]), BUILT_IN_ROLES).roles["x"]
-    assert role.tools == ("report_progress",)
+    role = load_config(talker(tools={"orbit": ["report_progress"]}), BUILT_IN_ROLES).roles["x"]
+    assert role.tools.orbit == ("report_progress",)
 
 
 def test_a_conversational_role_with_only_get_task_is_refused() -> None:
     with pytest.raises(ConfigError, match="get_task left out"):
-        load_config(talker(tools=["get_task"]), BUILT_IN_ROLES)
+        load_config(talker(tools={"orbit": ["get_task"]}), BUILT_IN_ROLES)
 
 
 def test_consultation_fields_default_to_none_six_and_a_day() -> None:

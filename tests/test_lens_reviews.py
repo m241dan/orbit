@@ -28,7 +28,7 @@ from orbit.agent.domain.reviews import (
     ReviewLimits,
     ReviewStage,
 )
-from orbit.agent.domain.roles import Role
+from orbit.agent.domain.roles import Role, RoleTools
 from orbit.agent.domain.tools import (
     COMPLETE_TASK,
     DISMISS_FINDING,
@@ -76,6 +76,7 @@ from tests.agent_fakes import (
     session_for,
     settle,
     start,
+    with_orbit_tools,
 )
 from tests.loop_quiet import quiet_within
 from tests.merge_hold_helpers import STRESS, LandingTree, SetSteps, parts_of, status, waits_for
@@ -96,7 +97,7 @@ def lens(blocking: bool) -> Role:
         verify=False,
         lane="review",
         workspace="snapshot",
-        tools=LENS_TOOLS,
+        tools=RoleTools(orbit=LENS_TOOLS),
         blocking_findings=blocking,
     )
 
@@ -110,7 +111,7 @@ MERGE_TOOLS = (GET_TASK, COMPLETE_TASK, REPORT_PROGRESS, GIVE_UP, SUGGEST_TASK, 
 
 MERGING_ROLES = {
     **LENS_ROLES,
-    REVIEWER: LENS_ROLES[REVIEWER].model_copy(update={"tools": MERGE_TOOLS}),
+    REVIEWER: with_orbit_tools(LENS_ROLES[REVIEWER], MERGE_TOOLS),
 }
 """The lens roles, with a reviewer that may dismiss findings, as a merge pass does."""
 

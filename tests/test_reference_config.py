@@ -20,7 +20,7 @@ from orbit.agent.domain.config import (
     Package,
     load_layered,
 )
-from orbit.agent.domain.roles import Role
+from orbit.agent.domain.roles import ROLE_TABLES, Role, RoleTools, old_tools_problems
 from orbit.agent.domain.skills import SkillMapping
 from orbit.agent.domain.triggers import Trigger
 from orbit.agent.domain.verification import VerificationStep
@@ -102,6 +102,19 @@ def table(name: str, section: str = "roles") -> list[str]:
         for block in blocks(REFERENCE)
         if block.startswith(f"# [{section}.{name}]")
     )
+
+
+def tools_table(name: str) -> list[str]:
+    """The lines of built-in role ``name``'s tools table, from the line describing it."""
+    return next(
+        block.splitlines()
+        for block in blocks(REFERENCE)
+        if f"# [roles.{name}.tools]" in block.splitlines()
+    )
+
+
+OWN_FIELDS = [key for key in Role.model_fields if key not in ROLE_TABLES]
+"""A role's fields that aren't tables of their own, in order."""
 
 
 def trigger_table(name: str) -> list[str]:
@@ -260,23 +273,37 @@ def test_limits_come_in_order_each_under_its_description() -> None:
 
 
 @pytest.mark.parametrize("name", BUILT_IN_ROLE_NAMES)
-def test_each_built_in_table_lists_every_role_field(name: str) -> None:
+def test_each_built_in_table_lists_every_role_field_but_its_tools(name: str) -> None:
     keys = [key for line in table(name) if (key := named(line))]
 
-    assert keys == list(Role.model_fields)
+    assert keys == OWN_FIELDS
+
+
+@pytest.mark.parametrize("name", BUILT_IN_ROLE_NAMES)
+def test_each_built_in_roles_tools_table_follows_it_under_its_description(name: str) -> None:
+    tools = tools_table(name)
+    following = blocks(REFERENCE)[blocks(REFERENCE).index("\n".join(table(name))) + 1]
+
+    assert following == "\n".join(tools)
+    assert tools[:2] == [f"# {Role.model_fields['tools'].description}", f"# [roles.{name}.tools]"]
+    assert [key for line in tools if (key := named(line))] == list(RoleTools.model_fields)
 
 
 def test_each_role_field_is_under_its_description() -> None:
-    for key, field in Role.model_fields.items():
-        assert described(key, table("coder")) == f"# {field.description}"
+    for key in OWN_FIELDS:
+        assert described(key, table("coder")) == f"# {Role.model_fields[key].description}"
+    for key, field in RoleTools.model_fields.items():
+        assert described(key, tools_table("coder")) == f"# {field.description}"
 
 
 def test_built_in_tables_show_shipped_values() -> None:
     coder = table("coder")
 
-    assert '# tool_access = "full"' in coder
-    assert '# tools = ["get_task", "complete_task", "run_check", "report_progress", "give_up"]' in (
-        coder
+    assert '# workspace = "shell"' in tools_table("coder")
+    assert '# workspace = "read"' in tools_table("planner")
+    assert "# web = true" in tools_table("coder")
+    assert '# orbit = ["get_task", "complete_task", "run_check", "report_progress", "give_up"]' in (
+        tools_table("coder")
     )
     assert "# merge = true" in coder
     assert '# runtime = "claude"' in coder
@@ -303,6 +330,10 @@ def test_a_list_too_long_for_a_line_says_how_many_and_where_to_see_them() -> Non
         reviewer
     )
     assert described("skills", reviewer) == f"# {Role.model_fields['skills'].description}"
+    assert (
+        "# orbit: 6 of orbit's own; orbit config show roles.reviewer.tools.orbit lists them"
+        in tools_table("reviewer")
+    )
 
 
 def test_unset_fields_say_so() -> None:
@@ -392,6 +423,32 @@ def test_later_version_settings_follow_their_heading_commented_out() -> None:
 def test_a_roles_runtime_is_among_its_fields_rather_than_a_later_versions() -> None:
     assert "runtime" not in later()
     assert '# runtime = "claude"' in table("planner")
+
+
+OLD_TOOLS_LINE = re.compile(r"^(# )?(tool_access = |tools = \[)", re.MULTILINE)
+"""A line, set or commented out, giving a role's tools the old way."""
+ROOT = Path(__file__).parent.parent
+STANDING_CONFIGS = (
+    COMMITTED,
+    files("orbit.agent.external") / "instructions" / "roles.toml",
+    ROOT / ".orbit" / "config.toml",
+    ROOT / "README.md",
+)
+"""The configs orbit ships or keeps that give roles' tools: the reference, the built-in roles,
+orbit's own file, and the README's examples."""
+
+
+@pytest.mark.parametrize("path", STANDING_CONFIGS, ids=lambda path: path.name)
+def test_no_standing_config_gives_a_roles_tools_the_old_way(path: Path) -> None:
+    assert not OLD_TOOLS_LINE.search(path.read_text(encoding="utf-8"))
+
+
+def test_the_uncommented_reference_and_the_built_in_roles_give_tools_only_as_tables() -> None:
+    shipped = tomllib.loads(STANDING_CONFIGS[1].read_text(encoding="utf-8"))["roles"]
+    reference = loaded(current() + later())["roles"]
+
+    assert old_tools_problems(shipped) == old_tools_problems(reference) == []
+    assert all(isinstance(fields["tools"], dict) for fields in shipped.values())
 
 
 def test_later_version_settings_are_valid_toml_uncommented() -> None:

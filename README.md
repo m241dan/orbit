@@ -1262,7 +1262,7 @@ change to the planner's role, or to clear a conversation grown too long. Orbit e
 conversation, and its access to orbit, so the next prompt starts a fresh one, told the
 verification steps again, and saves the session without it. It reads `[roles.planner]` from
 `.orbit/config.toml` again, with the model, effort and runtime your `config.toml` sets for it (and the run's `--runtime`), so a change
-to the planner's instructions, skills, tools, tool access, model or effort takes effect; other roles and
+to the planner's instructions, skills, tools, workspace level, web access, model or effort takes effect; other roles and
 settings stay as they were. If either file is invalid as it is now, aliases included, the planner keeps its role and orbit shows
 the problem, but still resets the conversation; so it does, too, if the role names a runtime no
 role ran on when orbit started, or a model the aliases orbit started with don't resolve
@@ -1352,13 +1352,14 @@ enabled = false
 
 [roles.single-reviewer]
 instructions = "roles/single-reviewer.md"
-tool_access = "restricted"
-tools = ["get_task", "complete_task", "report_progress", "give_up", "suggest_task"]
 skills = ["code-style", "review-fit", "review-bugs", "review-tests"]
 verify = false
 lane = "review"
 workspace = "snapshot"
 merge = false
+
+[roles.single-reviewer.tools]
+orbit = ["get_task", "complete_task", "report_progress", "give_up", "suggest_task"]
 
 [triggers.single-review]
 on = "task_landed"
@@ -1544,26 +1545,27 @@ Holds need verification on, so under `--no-verify` blocking findings hold nothin
 
 Every task names a **role**, the kind of agent that takes it (`coder` unless it says otherwise).
 A role sets what the agent is told about its job, the skills it gets (see [Skills](#skills)),
-which of orbit's tools it may call, whether its claims of being done are verified, and an optional
-time limit. Its model and tool access are the defaults for tasks orbit queues in that role; a task
-you queue keeps its own settings. Built in:
+what it may use (which of orbit's tools it may call, what it may do in its workspace and whether
+it has the web), whether its claims of being done are verified, and an optional time limit. Its
+model, workspace level and web access are the defaults for tasks orbit queues in that role; a task
+you queue keeps its own settings. Built in, every one with web access:
 
-| Role | Tools | Verified | Default model / access | Skills |
+| Role | Tools | Verified | Default model / workspace | Skills |
 |---|---|---|---|---|
-| `coder` | `get_task`, `complete_task`, `run_check`, `report_progress`, `give_up` | yes | default / `full` | `code-style`, `security` |
-| `reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `suggest_task`, `dismiss_finding` | no | default / `restricted` | `code-style`, `security`, `review-fit`, `review-bugs`, `review-tests`, `review-logic`, `review-security`, `review-performance`, `review-style`, `review-drift`, `review-scaling` |
-| `planner` | `propose_task`, `report_progress`, `save_report`, `list_reports`, `read_report` | no | default / `restricted` | `code-style` |
-| `experimenter` | `report_progress`, `save_report`, `list_reports`, `read_report` | no | `sonnet` / `full` | none |
-| `configurator` | `get_task`, `propose_checks`, `report_progress`, `give_up` | no | default / `restricted` | `python`, `cpp` |
-| `fit-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | default / `restricted` | `code-style`, `review-fit` |
-| `bugs-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | default / `restricted` | `code-style`, `review-bugs` |
-| `tests-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | default / `restricted` | `code-style`, `review-tests` |
-| `logic-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | default / `restricted` | `code-style`, `review-logic` |
-| `security-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | default / `restricted` | `code-style`, `security`, `review-security` |
-| `performance-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | default / `restricted` | `code-style`, `review-performance` |
-| `style-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | `opus` / `restricted` | `code-style`, `review-style` |
-| `drift-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | `opus` / `restricted` | `code-style`, `review-drift` |
-| `scaling-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | `opus` / `restricted` | `code-style`, `review-scaling` |
+| `coder` | `get_task`, `complete_task`, `run_check`, `report_progress`, `give_up` | yes | default / `shell` | `code-style`, `security` |
+| `reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `suggest_task`, `dismiss_finding` | no | default / `read` | `code-style`, `security`, `review-fit`, `review-bugs`, `review-tests`, `review-logic`, `review-security`, `review-performance`, `review-style`, `review-drift`, `review-scaling` |
+| `planner` | `propose_task`, `report_progress`, `save_report`, `list_reports`, `read_report` | no | default / `read` | `code-style` |
+| `experimenter` | `report_progress`, `save_report`, `list_reports`, `read_report` | no | `sonnet` / `shell` | none |
+| `configurator` | `get_task`, `propose_checks`, `report_progress`, `give_up` | no | default / `read` | `python`, `cpp` |
+| `fit-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | default / `read` | `code-style`, `review-fit` |
+| `bugs-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | default / `read` | `code-style`, `review-bugs` |
+| `tests-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | default / `read` | `code-style`, `review-tests` |
+| `logic-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | default / `read` | `code-style`, `review-logic` |
+| `security-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | default / `read` | `code-style`, `security`, `review-security` |
+| `performance-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | default / `read` | `code-style`, `review-performance` |
+| `style-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | `opus` / `read` | `code-style`, `review-style` |
+| `drift-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | `opus` / `read` | `code-style`, `review-drift` |
+| `scaling-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | `opus` / `read` | `code-style`, `review-scaling` |
 
 The `reviewer` is the merge pass of each review, and the six per-commit lens reviewers its lenses
 (see [Reviews](#reviews)); they share one instructions file, `lens-reviewer.md`, each looking
@@ -1576,8 +1578,34 @@ They replace the `super-reviewer` of earlier versions: a project file that sets 
 and scaling-reviewer.`).
 
 Every role also has `read_skill`, which reads the files of its agents' skills (see
-[Skills](#skills)); a role's `tools` naming it is refused (`read_skill comes with every role;
+[Skills](#skills)); a role's `tools.orbit` naming it is refused (`read_skill comes with every role;
 leave it out of tools.`).
+
+What a role's agents may use is its `[roles.<name>.tools]` table:
+
+- `orbit`: the orbit tools its agents may call, the Tools column above; left out of a role of
+  your own, `get_task`, `complete_task`, `report_progress` and `give_up`.
+- `workspace`: what its agents may do in their workspace: `none`, `read` (the default), `write`
+  or `shell` (see the levels under [How agents reach orbit](#how-agents-reach-orbit)). The
+  `coder` and the `experimenter` have `shell`, every other built-in role `read`.
+- `web`: whether its agents may search and fetch the web, `true` by default, as it is for every
+  built-in role.
+
+Each is merged across the layers on its own, as a role's other fields are, so a project can set
+one and keep the rest: this keeps the reviewer's orbit tools and web access, and takes away its
+workspace:
+
+```toml
+[roles.reviewer.tools]
+workspace = "none"
+```
+
+The `tool_access` and the list of orbit's tools in `tools` that roles had before are refused as
+the configuration loads, in the project's `.orbit/config.toml` or your `config.toml`, a line for
+each showing the new form: `roles.coder.tool_access is gone; write [roles.coder.tools] workspace
+= "shell", web = true.` (`off` was `workspace = "none", web = false`, `restricted` was `workspace
+= "read", web = true` and `full` was `workspace = "shell", web = true`), and `roles.coder.tools
+is now a table; write [roles.coder.tools] orbit = ["get_task", "complete_task"].`
 
 The `experimenter` is a conversational role the planner consults (see `consults` below) and you
 can talk to on its own tab: it runs what it's asked to learn, such as how a library behaves, in a
@@ -1654,7 +1682,7 @@ and what they run on:
   Each enabled conversational role has a seat of its own: its own conversation, which the session
   saves and carries on when you open it again, unless the role now runs on another runtime (see
   [Planning with the planner](#planning-with-the-planner)), and which resetting it ends alone; its own model,
-  tool access and effort, saved with the session; and its turns in its own lane, so it answers
+  workspace level, web access and effort, saved with the session; and its turns in its own lane, so it answers
   while the planner does. Conversational roles that share a lane take turns in it: a message to
   one while another there answers is refused, naming the one answering (`The planner is already
   answering.`), and the lane shows busy until no turn in it runs; on its tab, `enter` then says
@@ -1692,7 +1720,7 @@ and what they run on:
 - `effort`: how hard its agents think: `low`, `medium`, `high`, `xhigh` or `max`, the levels
   `claude --help` lists; any other value is refused, listing those. Left out, the effort your `config.toml`'s `[roles.<name>]` or `[roles]`
   sets, if it sets one (see [Your machine's model, effort and runtime](#your-machines-model-effort-and-runtime)), else the CLI's default.
-  Like its model and tool access, it's the default for tasks orbit queues in the role, and what
+  Like its model, workspace level and web access, it's the default for tasks orbit queues in the role, and what
   the task editor fills in when you pick the role, and is saved with them and the session. An agent runs with its task's effort, or for a conversational
   role its session's, and otherwise with its role's, passed to the CLI as `--effort`; with none,
   no flag is passed and the CLI's default applies. A model on Kiro may ignore it, which the
@@ -1719,7 +1747,7 @@ and what they run on:
   An enabled role asking for more than its runtime can do is refused as the configuration
   loads, before anything runs, naming the role, the runtime, what it asks for and what the
   runtime takes. For a runtime `lite` that took only the workspace level `read`, no effort and
-  couldn't resume, that's a workspace level its `tool_access` gives that it doesn't take
+  couldn't resume, that's a workspace level its `tools.workspace` asks for that it doesn't take
   (`roles.coder asks for workspace_level "shell", but its runtime lite accepts only
   workspace_level "read".`), web access, for a runtime without it (`roles.reviewer asks for web =
   true, but its runtime lite doesn't support web access.`), an `effort`
@@ -1785,7 +1813,7 @@ and what they run on:
 In the TUI, the task editor's **Role** field picks a task's role among the roles enabled in the
 session's workspace that aren't conversational, each shown with its lane (`Coder · work`) and a
 personal role marked `personal` (`helper · helper · personal`), and fills in the role's model,
-tool access and effort as that workspace configures them; its **Effort** field sets the task's own effort, or leaves it unset for the
+workspace level, web access and effort as that workspace configures them; its **Effort** field sets the task's own effort, or leaves it unset for the
 role's (see [Tasks](#tasks)). `ctrl+y` picks the effort of the conversational role whose tab is
 shown, or the planner's elsewhere, as `ctrl+o` and `ctrl+l` pick its model and workspace level.
 
@@ -1796,11 +1824,11 @@ and run on `claude`, and none sets an effort.
 A role whose fields don't go together is refused, naming the role and the rule: `merge = true`
 needs `workspace = "worktree"` and `verify = true`; `verify = true` needs `merge = true`, as checked
 work that doesn't merge would vanish once put aside; `workspace = "checkout"` can't have
-the workspace level `write` or `shell` (`tool_access = "full"` gives `shell`), as the agent could
+the workspace level `write` or `shell` in its `tools.workspace`, as the agent could
 edit your tree (`workspace = "checkout" can't have the workspace level "shell"`); `conversation = true` needs
-`get_task` left out of its tools, `merge = false`, `verify = false` and a
+`get_task` left out of its `tools.orbit`, `merge = false`, `verify = false` and a
 workspace other than `worktree`; and no role that isn't conversational may share a conversational
-role's lane; a role that isn't conversational needs `get_task` in its tools to fetch its task.
+role's lane; a role that isn't conversational needs `get_task` in its `tools.orbit` to fetch its task.
 There's one worktree, so every enabled role with `workspace = "worktree"` must share
 one lane, or the config is refused, naming the roles and their lanes.
 
@@ -1815,7 +1843,7 @@ A project can change these, orbit's limits, its verification steps (see
 [Where tasks run, and how their work lands](#where-tasks-run-and-how-their-work-lands)), in
 `.orbit/config.toml`. A role it names that's built in keeps the fields it doesn't set; any other
 name adds a role, which must set `instructions` and otherwise gets `get_task`, `complete_task`,
-`report_progress` and `give_up` as its tools, `restricted` tool access, the default model, its
+`report_progress` and `give_up` as its orbit tools, the workspace level `read` with web access, the default model, its
 claims verified, no time limit, the coder's lane `work`, `worktree`, no conversation and
 enabled, no effort, the runtime `claude` and no skills. A role that doesn't set `merge` merges if it can, being verified and in a
 worktree, and a built-in role whose `verify` or `workspace` the file changes without setting
@@ -1842,11 +1870,11 @@ six verification steps and its setup filled in, under its own comments on why.
 `orbit chat` reads `.orbit/config.toml` at startup, and `orbit serve` at startup and as a frontend
 adds a workspace; each refuses an invalid one, naming each problem by its key, with list entries
 counted from 1 as in `orbit config show` (for example
-`roles.coder.tool_access: Input should be 'off', 'restricted' or 'full'`, or
+`roles.coder.tools.workspace: Input should be 'none', 'read', 'write' or 'shell'`, or
 `verification.steps.1.command: Field required` for a first step without a command). The
 settings of a later version of orbit, which the reference config shows commented out, are
 refused while uncommented, naming the first: an `[mcp.<name>]` or `[models.<name>]` table or a
-`[roles.<name>.tools]` table (`tools` as a list of orbit's tools is still a role's `tools`), as in
+role's MCP servers, `mcp` in its `[roles.<name>.tools]` table (`roles.coder.tools.mcp`), as in
 `[mcp.github] isn't supported by this version of orbit yet; it's in the reference config for a
 later version. Leave it commented out.`
 
@@ -2560,11 +2588,17 @@ trigger, each skill's files and each other section in groups of their own:
 $ orbit config show roles.reviewer
 roles.reviewer.instructions = (reviewer.md, 64 lines)   package
 roles.reviewer.model = "sonnet"   project .orbit/config.toml
-roles.reviewer.tool_access = "restricted"   package
 ...
 roles.reviewer.effort = "low"   user ~/.config/orbit/config.toml
 roles.reviewer.runtime = "claude"   package
+...
+roles.reviewer.tools.orbit = ["get_task", "complete_task", "report_progress", "give_up", "suggest_task", "dismiss_finding"]   package
+roles.reviewer.tools.workspace = "none"   project .orbit/config.toml
+roles.reviewer.tools.web = true   package
 ```
+
+A role's `[roles.<name>.tools]` is listed field by field, `orbit`, `workspace` and `web`, each with
+the layer it came from.
 
 The layers, least specific first:
 
@@ -2661,8 +2695,8 @@ A model picked with `ctrl+o` applies from the planner's next prompt and keeps it
 an effort picked with `ctrl+y`; the workspace level picked with `ctrl+l` is what new tasks start
 with in the task editor, keeping their web access. On another conversational role's tab, the three
 pick that role's settings instead, leaving the planner's as they were. All are saved with the
-session. `ctrl+l` does not change the planner's own level, which its role's `tool_access` gives
-(`[roles.planner] tool_access` in `.orbit/config.toml`, `restricted` by default).
+session. `ctrl+l` does not change the planner's own level, which its role's tools give
+(`[roles.planner.tools] workspace` in `.orbit/config.toml`, `read` by default).
 
 What an agent may use is its **workspace level** and whether it has **web access**, set apart, so
 an agent at any level may have the web or not. The levels, each allowing what the one before it
@@ -2686,8 +2720,9 @@ does:
 Without web access, `WebSearch` and `WebFetch` are disallowed at every level. Older frontends
 and saved sessions speak of **tool access** instead, which orbit maps both ways: `off` is `none`
 without web, `restricted` is `read` with web and `full` is `shell` with web; `write` reads as
-`full` to them. A role's `tool_access` in its config maps the same way, so every shipped role
-keeps what it had: web, and `read` or `shell`.
+`full` to them. A role sets its level and web access in its `[roles.<name>.tools]` table (see
+[Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)); every shipped role has web, and
+`read` or `shell`.
 
 ### Running agents on Kiro
 

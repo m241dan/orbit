@@ -4,10 +4,12 @@ queues in them.
 The built-in roles aren't kept here: whoever builds them passes in the contents of their
 ``roles.toml`` and the instructions it names.
 
-A role says what an agent is told about its job, the skills it gets, which of orbit's tools it
-may call, whether its claims of being done are verified, how long it may take and the runtime it
-runs on; whether the skills it names exist is checked once they're read. Its model,
-tool access and effort are the defaults for tasks orbit queues in that role; a task the user
+A role says what an agent is told about its job, the skills it gets, what it may use (its
+``[roles.<name>.tools]`` table: which of orbit's tools it may call, what it may do in its
+workspace and whether it has the web), whether its claims of being done are verified, how long it
+may take and the runtime it runs on; whether the skills it names exist is checked once they're
+read. Its model, workspace level, web access and effort are the defaults for tasks orbit queues in
+that role; a task the user
 queues keeps its own settings, but one without an effort runs with its role's. It also says
 which lane runs it, where it works, whether you talk to it, whether its work merges and whether
 it's enabled, which are checked here role by role. Where a role works decides whether its tasks
@@ -15,10 +17,11 @@ take a coder's slot, and the work asked of a disabled role is refused.
 """
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from datetime import timedelta
 from typing import Annotated, Any, Literal, Self
 
+import tomlkit
 from pydantic import (
     AfterValidator,
     BaseModel,
@@ -49,13 +52,12 @@ from orbit.agent.domain.tools import (
 from orbit.protocol import (
     BUILT_IN_ROLE_NAMES,
     DEFAULT_RUNTIME,
-    LEVEL_OF_TOOL_ACCESS,
     NOT_CONFIGURED,
     Effort,
     Settings,
     TaskSpec,
-    ToolAccess,
     WorkspaceLevel,
+    levels_of_tool_access,
 )
 
 Workspace = Literal["worktree", "snapshot", "checkout", "none", "copy"]
@@ -127,6 +129,33 @@ def _refuse_granted(tools: tuple[str, ...]) -> None:
         raise ValueError(f"{drafts[0]} comes with {PROPOSE_TASK}; list that instead.")
 
 
+class RoleTools(_Config):
+    """What a role's agents may use: the ``orbit`` tools they may call, what they may do in their
+    ``workspace``, and whether they have the ``web``. Each field is merged across the layers on
+    its own, as a role's other fields are."""
+
+    orbit: tuple[str, ...] = Field(
+        default=(GET_TASK, COMPLETE_TASK, REPORT_PROGRESS, GIVE_UP),
+        description="The orbit tools its agents may call.",
+    )
+    workspace: WorkspaceLevel = Field(
+        default="read",
+        description=(
+            'What its agents may do in their workspace: "none", "read", "write" or "shell".'
+        ),
+    )
+    web: bool = Field(default=True, description="Whether its agents may search and fetch the web.")
+
+    @field_validator("orbit")
+    @classmethod
+    def _known_tools(cls, tools: tuple[str, ...]) -> tuple[str, ...]:
+        unknown = [tool for tool in tools if tool not in ORBIT_TOOLS]
+        if unknown:
+            raise ValueError(f"unknown tools {unknown}; orbit's tools are {list(ORBIT_TOOLS)}")
+        _refuse_granted(tools)
+        return tools
+
+
 class Role(_Config):
     instructions: str = Field(
         min_length=1,
@@ -142,17 +171,6 @@ class Role(_Config):
             ' "opus" or a full id;'
             " unset, the user config's, else the CLI's."
         ),
-    )
-    tool_access: ToolAccess = Field(
-        default="restricted",
-        description=(
-            "How its tasks may use the CLI's tools:"
-            ' "off", "restricted" (read and search) or "full".'
-        ),
-    )
-    tools: tuple[str, ...] = Field(
-        default=(GET_TASK, COMPLETE_TASK, REPORT_PROGRESS, GIVE_UP),
-        description="The orbit tools its agents may call.",
     )
     blocking_findings: bool = Field(
         default=False,
@@ -216,15 +234,10 @@ class Role(_Config):
             "The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/."
         ),
     )
-
-    @field_validator("tools")
-    @classmethod
-    def _known_tools(cls, tools: tuple[str, ...]) -> tuple[str, ...]:
-        unknown = [tool for tool in tools if tool not in ORBIT_TOOLS]
-        if unknown:
-            raise ValueError(f"unknown tools {unknown}; orbit's tools are {list(ORBIT_TOOLS)}")
-        _refuse_granted(tools)
-        return tools
+    tools: RoleTools = Field(
+        default=RoleTools(),
+        description="What its agents may use: orbit's tools, their workspace and the web.",
+    )
 
     @field_validator("lane")
     @classmethod
@@ -256,26 +269,26 @@ class Role(_Config):
     def granted_tools(self) -> tuple[str, ...]:
         """The orbit tools its agents may call: its tools, the draft tools when it proposes
         tasks, ``consult`` when it consults anyone, and ``read_skill``, which every role has."""
-        drafts = DRAFT_TOOLS if PROPOSE_TASK in self.tools else ()
+        drafts = DRAFT_TOOLS if PROPOSE_TASK in self.tools.orbit else ()
         consult = (CONSULT,) if self.consults else ()
-        return (*self.tools, *drafts, *consult, READ_SKILL)
+        return (*self.tools.orbit, *drafts, *consult, READ_SKILL)
 
     @property
     def runs_checks(self) -> bool:
         """Whether an agent in this role can run verification steps itself."""
-        return RUN_CHECK in self.tools
+        return RUN_CHECK in self.tools.orbit
 
     @property
     def proposes_tasks(self) -> bool:
         """Whether an agent in this role proposes tasks, so it's told the skills it can give
         them."""
-        return PROPOSE_TASK in self.tools
+        return PROPOSE_TASK in self.tools.orbit
 
     @property
     def proposes_checks(self) -> bool:
         """Whether an agent in this role proposes verification steps rather than being
         verified."""
-        return PROPOSE_CHECKS in self.tools
+        return PROPOSE_CHECKS in self.tools.orbit
 
     @property
     def timeout_seconds(self) -> float | None:
@@ -284,13 +297,13 @@ class Role(_Config):
 
     @property
     def workspace_level(self) -> WorkspaceLevel:
-        """The workspace level its tool access gives its agents."""
-        return LEVEL_OF_TOOL_ACCESS[self.tool_access][0]
+        """The workspace level its tools give its agents."""
+        return self.tools.workspace
 
     @property
     def web(self) -> bool:
-        """Whether its tool access gives its agents web access."""
-        return LEVEL_OF_TOOL_ACCESS[self.tool_access][1]
+        """Whether its tools give its agents web access."""
+        return self.tools.web
 
     @property
     def settings(self) -> Settings:
@@ -306,6 +319,64 @@ class Role(_Config):
         """``settings`` as an agent in this role runs with them: with the role's effort when they
         set none."""
         return settings.model_copy(update={"effort": settings.effort or self.effort})
+
+
+ROLE_TABLES: Mapping[str, type[BaseModel]] = {"tools": RoleTools}
+"""A role's fields that are tables of their own, by name; each of their fields is merged across
+the layers, and reported, on its own."""
+
+
+def _keys_of(field: str) -> list[str]:
+    """The keys role ``field`` is set and reported under: its own, or each of its table's fields
+    under it, dotted, if it's one of :data:`ROLE_TABLES`."""
+    table = ROLE_TABLES.get(field)
+    return [field] if table is None else [f"{field}.{key}" for key in table.model_fields]
+
+
+ROLE_KEYS: tuple[str, ...] = tuple(key for field in Role.model_fields for key in _keys_of(field))
+"""The keys of a role's settings, in order, such as ``model`` and ``tools.workspace``."""
+
+
+def role_setting(role: Role, key: str) -> Any:
+    """The value of ``role``'s setting ``key``, one of :data:`ROLE_KEYS`."""
+    value: Any = role
+    for part in key.split("."):
+        value = getattr(value, part)
+    return value
+
+
+def old_tools_problems(roles: Mapping[str, object]) -> list[str]:
+    """Why each role table among ``roles``, a config file's, that gives its tools the old way is
+    refused, a line per problem in order, each showing the new form: it sets ``tool_access``, or
+    ``tools`` as a list."""
+    return [
+        problem
+        for name, fields in roles.items()
+        if isinstance(fields, Mapping)
+        for problem in _old_tools(name, fields)
+    ]
+
+
+def _old_tools(name: str, fields: Mapping[str, object]) -> Iterator[str]:
+    """Why role ``name``'s table of ``fields`` is refused for giving its tools the old way, a
+    line per problem."""
+    if "tool_access" in fields:
+        levels = _levels_of(fields["tool_access"])
+        yield f"roles.{name}.tool_access is gone; write [roles.{name}.tools] {levels}."
+    tools = fields.get("tools")
+    if isinstance(tools, list):
+        orbit = tomlkit.item(tools).as_string()
+        yield f"roles.{name}.tools is now a table; write [roles.{name}.tools] orbit = {orbit}."
+
+
+def _levels_of(access: object) -> str:
+    """The ``workspace`` and ``web`` settings tool access ``access`` meant, or what they take if
+    it isn't tool access."""
+    levels = levels_of_tool_access(access)
+    if levels is None:
+        return 'workspace = "none", "read", "write" or "shell", and web = true or false'
+    level, web = levels
+    return f'workspace = "{level}", web = {str(web).lower()}'
 
 
 def _unmet(rule: str, needs: Mapping[str, bool]) -> list[str]:
@@ -344,7 +415,7 @@ def _conversation_problems(role: Role) -> list[str]:
     if not role.conversation:
         return []
     needs = {
-        "get_task left out of its tools": GET_TASK not in role.tools,
+        "get_task left out of its tools.orbit": GET_TASK not in role.tools.orbit,
         "merge = false": not role.merge,
         "verify = false": not role.verify,
         'a workspace other than "worktree"': role.workspace != "worktree",
@@ -358,8 +429,8 @@ def _task_problems(role: Role) -> list[str]:
         return []
     problems = (
         []
-        if GET_TASK in role.tools
-        else ["a task role needs get_task in its tools to fetch its task"]
+        if GET_TASK in role.tools.orbit
+        else ["a task role needs get_task in its tools.orbit to fetch its task"]
     )
     if role.consults:
         problems.append("consults needs conversation = true")

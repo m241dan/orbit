@@ -550,10 +550,33 @@ def test_a_users_runtime_refusing_what_the_project_asks_names_the_project_file(
     tmp_path: Path, config_dir: Path
 ) -> None:
     write_user_config(config_dir, '[roles.coder]\nruntime = "lite"\n')
-    path = write(tmp_path, '[roles.coder]\ntool_access = "full"\n')
+    path = write(tmp_path, '[roles.coder.tools]\nworkspace = "shell"\n')
     with pytest.raises(ConfigError) as raised:
         read_config(str(tmp_path), config_dir)
     assert str(raised.value).startswith(f"{path}: roles.coder asks for")
+
+
+def test_a_project_file_setting_tool_access_fails_to_load_naming_it_and_the_new_form(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    path = write(tmp_path, '[roles.coder]\ntool_access = "full"\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value) == (
+        f"{path}: roles.coder.tool_access is gone; write [roles.coder.tools]"
+        ' workspace = "shell", web = true.'
+    )
+
+
+def test_a_user_config_setting_tools_as_a_list_fails_to_load_naming_it_and_the_table(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    path = write_user_config(config_dir, '[roles.coder]\ntools = ["get_task"]\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value) == (
+        f'{path}: roles.coder.tools is now a table; write [roles.coder.tools] orbit = ["get_task"].'
+    )
 
 
 @pytest.mark.usefixtures("limited_runtime")

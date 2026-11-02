@@ -77,7 +77,7 @@ def model_problems(key: str, role: Role, models: ModelAliases | None) -> list[st
     return [unknown_model(key, role.model, models)]
 
 
-ASKS = ("tool_access", "effort", "conversation")
+ASKS = ("tools.workspace", "tools.web", "effort", "conversation")
 """The role fields that ask for what a runtime may not be able to do."""
 
 
@@ -86,10 +86,11 @@ def capability_problems(
 ) -> list[str]:
     """What role ``name``, ``role``, asks for in its ``fields`` that its runtime can't do, as
     its ``capabilities`` say, in order, each naming the role, the runtime, the request and what
-    the runtime does: the workspace level or web access its tool access gives that it doesn't
-    accept, a level of effort it doesn't accept, and a conversation it can't carry on."""
+    the runtime does: the workspace level or web access its tools give that it doesn't accept,
+    a level of effort it doesn't accept, and a conversation it can't carry on."""
     found = {
-        "tool_access": _tools_asks(role.workspace_level, role.web, capabilities),
+        "tools.workspace": _workspace_ask(role.workspace_level, capabilities),
+        "tools.web": _web_ask(role.web, capabilities.web),
         "effort": _level_ask("effort", role.effort, capabilities.effort, EFFORTS),
         "conversation": _conversation_ask(role.conversation, capabilities.resume),
     }
@@ -110,10 +111,19 @@ def _tools_asks(
 ) -> list[tuple[str, str]]:
     """The workspace ``level`` and ``web`` access asked for that a runtime's ``capabilities``
     don't accept, each with what says what it does accept; nothing for those it does."""
-    asks = _level_ask("workspace_level", level, capabilities.workspace_levels, WORKSPACE_LEVELS)
-    if web and not capabilities.web:
-        return [*asks, ("web = true", "doesn't support web access")]
-    return asks
+    return _workspace_ask(level, capabilities) + _web_ask(web, capabilities.web)
+
+
+def _workspace_ask(level: WorkspaceLevel, capabilities: Capabilities) -> list[tuple[str, str]]:
+    """The workspace ``level`` asked for, if a runtime's ``capabilities`` don't accept it, with
+    what says which levels they do; nothing otherwise."""
+    return _level_ask("workspace_level", level, capabilities.workspace_levels, WORKSPACE_LEVELS)
+
+
+def _web_ask(web: bool, supported: bool) -> list[tuple[str, str]]:
+    """``web`` access, if it's asked for of a runtime whose web access isn't ``supported``, with
+    what says so; nothing otherwise."""
+    return [("web = true", "doesn't support web access")] if web and not supported else []
 
 
 def _level_ask(

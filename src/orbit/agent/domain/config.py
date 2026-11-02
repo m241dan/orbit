@@ -34,7 +34,7 @@ from orbit.agent.domain.role_runtimes import (
     model_problems,
     runtime_problems,
 )
-from orbit.agent.domain.roles import RETIRED_ROLES, Role, RoleName
+from orbit.agent.domain.roles import RETIRED_ROLES, Role, RoleName, old_tools_problems
 from orbit.agent.domain.runtimes import (
     UNCHECKED,
     ModelAliases,
@@ -261,7 +261,9 @@ def load_layered(
 
     Raises :class:`ConfigError` naming the first setting of a later version of orbit ``data`` sets,
     if any, ahead of anything else, then saying what became of a built-in role it sets that orbit no
-    longer ships (see :data:`~orbit.agent.domain.roles.RETIRED_ROLES`); otherwise naming each
+    longer ships (see :data:`~orbit.agent.domain.roles.RETIRED_ROLES`), then showing the new form
+    of each role's tools it gives the old way (see
+    :func:`~orbit.agent.domain.roles.old_tools_problems`); otherwise naming each
     problem if it's invalid, as it is when a set's table is for a set no step is in (see
     :func:`~orbit.agent.domain.checks.check_sets`), a trigger breaks a rule of
     :func:`~orbit.agent.domain.triggers.check_triggers`, its sets those a step is in, or a role's
@@ -275,6 +277,8 @@ def load_layered(
     if not isinstance(roles, dict):
         return LayeredConfig(_validated(data), {})  # Refused: the roles aren't a table.
     _refuse_retired_roles(roles)
+    if old_tools := old_tools_problems(roles):
+        raise ConfigError("\n".join(old_tools))
     project = Layer("project", path)
     merged = merge_roles(package.roles, user, ProjectRoles(project, roles))
     check_personal(merged)
@@ -498,7 +502,7 @@ def _refuse_retired_roles(roles: Mapping[str, object]) -> None:
 
 def _later_settings(data: dict[str, Any]) -> Iterator[str]:
     """The settings of a later version of orbit ``data`` sets, in order, each named as the
-    reference config names it: its :data:`LATER_TABLES`, and its roles' ``tools`` tables."""
+    reference config names it: its :data:`LATER_TABLES`, and its roles' MCP servers."""
     for key, value in data.items():
         if key in LATER_TABLES:
             yield _table_name(key, value)
@@ -524,10 +528,11 @@ def _table_name(key: str, value: object) -> str:
 
 
 def _later_role_settings(name: str, fields: object) -> Iterator[str]:
-    """The settings of a later version of orbit the ``fields`` of role ``name`` set: its
-    ``tools`` as a table rather than a list of orbit's tools."""
-    if isinstance(fields, dict) and isinstance(fields.get("tools"), dict):
-        yield f"[roles.{name}.tools]"
+    """The settings of a later version of orbit the ``fields`` of role ``name`` set: the MCP
+    servers in its ``tools`` table."""
+    tools = fields.get("tools") if isinstance(fields, dict) else None
+    if isinstance(tools, dict) and "mcp" in tools:
+        yield f"roles.{name}.tools.mcp"
 
 
 def _validated(

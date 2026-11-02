@@ -13,11 +13,11 @@ from orbit.agent.domain.role_runtimes import (
     runtime_problems,
     runtime_roles,
 )
-from orbit.agent.domain.roles import Role, built_in_roles
+from orbit.agent.domain.roles import Role, RoleTools, built_in_roles
 from orbit.agent.domain.runtimes import CLAUDE, RuntimeRules
 from orbit.agent.domain.tools import PROPOSE_TASK
 from orbit.agent.external.built_in_roles import read_built_in_roles
-from orbit.protocol import BUILT_IN_ROLE_NAMES, INVALID, Effort, Settings, ToolAccess
+from orbit.protocol import BUILT_IN_ROLE_NAMES, INVALID, Effort, Settings, WorkspaceLevel
 from tests.agent_fakes import CLAUDE_MODELS, EVERYTHING, KNOWN_RULES, LIMITED, LIMITED_RUNTIME
 
 INSTRUCTIONS = {name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES}
@@ -72,7 +72,7 @@ def lite(**fields: Any) -> dict[str, Role]:
 
 TALKER: dict[str, Any] = {
     "conversation": True,
-    "tools": (PROPOSE_TASK,),
+    "tools": RoleTools(orbit=(PROPOSE_TASK,)),
     "verify": False,
     "merge": False,
     "workspace": "snapshot",
@@ -80,16 +80,22 @@ TALKER: dict[str, Any] = {
 """A conversational role's fields."""
 
 
+def talking(level: WorkspaceLevel, *, web: bool) -> dict[str, Any]:
+    """A conversational role's fields, with the workspace ``level`` and ``web`` access."""
+    return TALKER | {"tools": RoleTools(orbit=(PROPOSE_TASK,), workspace=level, web=web)}
+
+
 def test_the_built_in_roles_ask_nothing_claude_cant_do() -> None:
     assert runtime_problems(BUILT_IN_ROLES, RuntimeRules({CLAUDE: EVERYTHING})) == []
 
 
 @pytest.mark.parametrize("effort", get_args(Effort))
-@pytest.mark.parametrize("tool_access", get_args(ToolAccess))
-def test_a_role_on_claude_may_ask_for_any_effort_or_tool_access(
-    effort: Effort, tool_access: ToolAccess
+@pytest.mark.parametrize("level", get_args(WorkspaceLevel))
+@pytest.mark.parametrize("web", [True, False])
+def test_a_role_on_claude_may_ask_for_any_effort_level_or_web(
+    effort: Effort, level: WorkspaceLevel, web: bool
 ) -> None:
-    roles = {"x": Role(instructions="Do x.", effort=effort, tool_access=tool_access, **TALKER)}
+    roles = {"x": Role(instructions="Do x.", effort=effort, **talking(level, web=web))}
     assert runtime_problems(roles, RuntimeRules({CLAUDE: EVERYTHING})) == []
 
 
@@ -119,8 +125,8 @@ def test_a_role_asking_for_an_effort_its_runtime_doesnt_take_is_refused_listing_
 
 
 @pytest.mark.usefixtures("limited_runtime")
-def test_a_role_whose_tool_access_gives_a_level_its_runtime_doesnt_take_is_refused() -> None:
-    assert runtime_problems(lite(tool_access="full"), KNOWN_RULES) == [
+def test_a_role_whose_tools_give_a_level_its_runtime_doesnt_take_is_refused() -> None:
+    assert runtime_problems(lite(tools=RoleTools(workspace="shell")), KNOWN_RULES) == [
         'roles.x asks for workspace_level "shell", but its runtime lite accepts only'
         ' workspace_level "read".'
     ]
@@ -136,7 +142,7 @@ def test_a_role_asking_for_a_level_from_a_runtime_taking_none_is_refused() -> No
 
 
 @pytest.mark.usefixtures("limited_runtime")
-def test_a_role_whose_tool_access_gives_web_its_runtime_cant_give_is_refused() -> None:
+def test_a_role_whose_tools_give_web_its_runtime_cant_give_is_refused() -> None:
     capabilities = {LIMITED_RUNTIME: replace(LIMITED, web=False)}
     assert runtime_problems(lite(), RuntimeRules(capabilities)) == [
         "roles.x asks for web = true, but its runtime lite doesn't support web access."
@@ -148,7 +154,8 @@ def test_a_role_without_web_isnt_refused_by_a_runtime_without_it() -> None:
     capabilities = {
         LIMITED_RUNTIME: replace(LIMITED, web=False, workspace_levels=frozenset({"none"}))
     }
-    assert runtime_problems(lite(tool_access="off"), RuntimeRules(capabilities)) == []
+    no_web = lite(tools=RoleTools(workspace="none", web=False))
+    assert runtime_problems(no_web, RuntimeRules(capabilities)) == []
 
 
 @pytest.mark.usefixtures("limited_runtime")
@@ -161,8 +168,10 @@ def test_a_conversational_role_on_a_runtime_that_cant_resume_is_refused_naming_r
 @pytest.mark.usefixtures("limited_runtime")
 def test_everything_a_role_asks_beyond_its_runtime_is_named_in_order() -> None:
     roles = {
-        **lite(tool_access="off", effort="low", **TALKER),
-        "coder": Role(instructions="Code.", runtime=LIMITED_RUNTIME, tool_access="full"),
+        **lite(effort="low", **talking("none", web=False)),
+        "coder": Role(
+            instructions="Code.", runtime=LIMITED_RUNTIME, tools=RoleTools(workspace="shell")
+        ),
     }
     problems = runtime_problems(roles, KNOWN_RULES)
     assert [problem.split(", but")[0] for problem in problems] == [
@@ -174,8 +183,8 @@ def test_everything_a_role_asks_beyond_its_runtime_is_named_in_order() -> None:
 
 
 def test_a_roles_asks_in_only_the_fields_given_are_named_in_their_usual_order() -> None:
-    role = lite(tool_access="off", effort="low", **TALKER)["x"]
-    problems = capability_problems("x", role, LIMITED, ("conversation", "tool_access"))
+    role = lite(effort="low", **talking("none", web=False))["x"]
+    problems = capability_problems("x", role, LIMITED, ("conversation", "tools.workspace"))
     assert [problem.split(", but")[0] for problem in problems] == [
         'roles.x asks for workspace_level "none"',
         "roles.x asks for conversation = true",
@@ -184,12 +193,12 @@ def test_a_roles_asks_in_only_the_fields_given_are_named_in_their_usual_order() 
 
 @pytest.mark.usefixtures("limited_runtime")
 def test_a_role_asking_only_what_its_runtime_can_do_has_no_runtime_problems() -> None:
-    assert runtime_problems(lite(tool_access="restricted"), KNOWN_RULES) == []
+    assert runtime_problems(lite(tools=RoleTools(workspace="read")), KNOWN_RULES) == []
 
 
 @pytest.mark.usefixtures("limited_runtime")
 def test_a_disabled_role_isnt_held_to_its_runtimes_capabilities() -> None:
-    roles = lite(effort="max", tool_access="full", enabled=False)
+    roles = lite(effort="max", tools=RoleTools(workspace="shell"), enabled=False)
     assert runtime_problems(roles, KNOWN_RULES) == []
 
 

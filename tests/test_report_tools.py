@@ -28,6 +28,7 @@ from tests.agent_fakes import (
     run,
     send,
     session_for,
+    with_orbit_tools,
 )
 
 
@@ -36,11 +37,11 @@ def finished(agent_id: str) -> Callable[[Event], bool]:
     return lambda event: isinstance(event, TurnFinished) and event.agent_id == agent_id
 
 
-REPORTING_PLANNER = ROLES[PLANNER].model_copy(
-    update={"tools": (*ROLES[PLANNER].tools, "save_report", "list_reports", "read_report")}
+REPORTING_PLANNER = with_orbit_tools(
+    ROLES[PLANNER], (*ROLES[PLANNER].tools.orbit, "save_report", "list_reports", "read_report")
 )
-READING_CODER = ROLES[CODER].model_copy(
-    update={"tools": (*ROLES[CODER].tools, "list_reports", "read_report")}
+READING_CODER = with_orbit_tools(
+    ROLES[CODER], (*ROLES[CODER].tools.orbit, "list_reports", "read_report")
 )
 REPORTING = {**ROLES, PLANNER: REPORTING_PLANNER, CODER: READING_CODER}
 """The built-in roles, with a planner granted the report tools and a coder reading them."""
@@ -102,7 +103,7 @@ async def test_reading_an_unknown_report_is_refused() -> None:
 
 async def test_a_role_without_the_report_tools_is_refused_them() -> None:
     heard: list[Reply] = []
-    planner = ROLES[PLANNER].model_copy(update={"tools": ("propose_task", "report_progress")})
+    planner = with_orbit_tools(ROLES[PLANNER], ("propose_task", "report_progress"))
     session, _, launcher = session_for(store=FakeStore(), roles={**ROLES, PLANNER: planner})
     launcher.planner_turns = [calls(heard, SAVE)]
     await send(session, SendMessage(agent=PLANNER, text="Plan."))

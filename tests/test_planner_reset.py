@@ -50,14 +50,13 @@ from tests.agent_fakes import (
     send,
     session_for,
     steps_chat,
+    with_orbit_tools,
 )
 from tests.loop_quiet import quiet_within
 from tests.session_builders import on_claude, opened, saved, store_with, switching
 from tests.waiting import eventually
 
-NEW_ROLE = ROLES["planner"].model_copy(
-    update={"instructions": "Plan small.", "tools": ("propose_task",)}
-)
+NEW_ROLE = with_orbit_tools(ROLES["planner"], ("propose_task",), instructions="Plan small.")
 
 
 async def reset(session: WorkspaceHost) -> list[Event]:

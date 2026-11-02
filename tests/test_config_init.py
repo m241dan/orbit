@@ -13,7 +13,7 @@ import pytest
 from orbit.agent.domain.config import LIMIT_KEYS
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.config_update import Additions, InstructionLines, add_instructions
-from orbit.agent.domain.roles import Role
+from orbit.agent.domain.roles import ROLE_TABLES, Role
 from orbit.agent.external.built_in_roles import (
     ROLE_DIRECTORY,
     read_built_in_roles,
@@ -189,6 +189,15 @@ LENSES = ("fit", "bugs", "tests", "logic", "security", "performance")
 """The per-commit lenses, in the order their reviewers and triggers are shipped."""
 
 
+OTHER_ROLE_TABLES = tuple(
+    table
+    for name in BUILT_IN_ROLE_NAMES
+    for table in (f"[roles.{name}]", f"[roles.{name}.tools]")
+    if table != "[roles.coder]"
+)
+"""The built-in roles' tables, each followed by its tools table, but the coder's own."""
+
+
 def test_update_says_what_it_added_where(tmp_path: Path) -> None:
     path = write(tmp_path, CODER_OPUS)
     assert update(tmp_path) == UpdateResult(
@@ -196,18 +205,15 @@ def test_update_says_what_it_added_where(tmp_path: Path) -> None:
         Additions(
             keys={
                 "": LIMIT_KEYS,
-                "[roles.coder]": tuple(key for key in Role.model_fields if key != "model"),
+                "[roles.coder]": tuple(
+                    key for key in Role.model_fields if key not in {"model", *ROLE_TABLES}
+                ),
             },
             tables=(
                 "[[verification.steps]]",
                 "[verification.sets.mutation]",
                 "[setup]",
-                "[roles.planner]",
-                "[roles.experimenter]",
-                "[roles.reviewer]",
-                "[roles.configurator]",
-                *(f"[roles.{lens}-reviewer]" for lens in LENSES),
-                *(f"[roles.{lens}-reviewer]" for lens in ("style", "drift", "scaling")),
+                *OTHER_ROLE_TABLES,
                 "[roles.license-reviewer]",
                 *(f"[triggers.{lens}-review]" for lens in LENSES),
                 "[triggers.merge-pass]",

@@ -140,6 +140,14 @@ ROLES = built_in_roles(
 )
 """The built-in roles, with stand-in instructions."""
 
+
+def with_orbit_tools(role: Role, tools: tuple[str, ...], **fields: object) -> Role:
+    """``role`` granted the orbit ``tools`` in place of its own, keeping the rest of its tools
+    table, with ``fields`` changed too."""
+    table = role.tools.model_copy(update={"orbit": tools})
+    return role.model_copy(update={**fields, "tools": table})
+
+
 ONE_AT_A_TIME = ReviewLimits(slots=1)
 """The review limits with one slot, so the review lane runs its tasks one after another."""
 

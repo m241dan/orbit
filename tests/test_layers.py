@@ -19,7 +19,7 @@ from orbit.agent.domain.layers import (
     resolve_roles,
     with_runtime,
 )
-from orbit.agent.domain.roles import Role, built_in_roles
+from orbit.agent.domain.roles import ROLE_KEYS, Role, RoleTools, built_in_roles
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.protocol import BUILT_IN_ROLE_NAMES, PLANNER
 from tests.agent_fakes import KNOWN_RULES
@@ -143,6 +143,36 @@ def test_each_unknown_runtime_in_the_user_config_is_named_on_a_line_of_its_own()
     assert [line.split(" = ", 1)[0] for line in lines] == ["roles.runtime", "roles.coder.runtime"]
 
 
+@pytest.mark.parametrize(
+    "roles",
+    [{"coder": {"tool_access": "full"}}, {"helper": {**HELPER, "tool_access": "full"}}],
+)
+def test_the_user_configs_tool_access_on_a_role_is_refused_showing_the_new_form(
+    roles: dict[str, object],
+) -> None:
+    with pytest.raises(ConfigError) as raised:
+        user({"roles": roles})
+    [name] = roles
+    assert str(raised.value) == (
+        f"roles.{name}.tool_access is gone; write [roles.{name}.tools]"
+        ' workspace = "shell", web = true.'
+    )
+
+
+def test_a_personal_roles_tools_as_a_list_are_refused_showing_the_table() -> None:
+    with pytest.raises(ConfigError) as raised:
+        user({"roles": {"helper": {**HELPER, "tools": ["get_task"]}}})
+    assert str(raised.value) == (
+        'roles.helper.tools is now a table; write [roles.helper.tools] orbit = ["get_task"].'
+    )
+
+
+def test_a_personal_roles_tools_table_loads() -> None:
+    helper = {**HELPER, "tools": {"workspace": "write", "web": False}}
+    tools = user({"roles": {"helper": helper}}).personal["helper"].tools
+    assert (tools.workspace, tools.web) == ("write", False)
+
+
 def test_a_roles_value_that_isnt_a_table_is_refused() -> None:
     with pytest.raises(ConfigError, match=r"^roles: "):
         user({"roles": "everyone"})
@@ -224,10 +254,33 @@ def test_without_user_or_project_roles_the_packages_roles_are_the_roles() -> Non
 def test_a_field_the_package_sets_comes_from_it_and_any_other_from_the_defaults() -> None:
     layers = resolve_roles(PACKAGE_ROLES, NO_USER_ROLES, NO_PROJECT_ROLES).layers
     assert set(layers) == set(PACKAGE_ROLES)
-    assert set(layers["coder"]) == set(Role.model_fields)
+    assert set(layers["coder"]) == set(ROLE_KEYS)
     assert layers["drift-reviewer"]["model"] == PACKAGE
     assert (layers["coder"]["model"], layers["coder"]["effort"]) == (DEFAULT, DEFAULT)
-    assert layers["coder"]["tools"] == PACKAGE
+    tools = (layers["coder"]["tools.orbit"], layers["coder"]["tools.workspace"])
+    assert tools == (PACKAGE, PACKAGE)
+
+
+def test_each_field_of_a_roles_tools_is_merged_across_the_layers_on_its_own() -> None:
+    resolved = resolve_roles(
+        PACKAGE_ROLES, NO_USER_ROLES, project({"reviewer": {"tools": {"workspace": "none"}}})
+    )
+    reviewer = resolved.roles["reviewer"]
+    shipped = PACKAGE_ROLES["reviewer"].tools
+    assert reviewer.tools == RoleTools(orbit=shipped.orbit, workspace="none", web=shipped.web)
+    layers = resolved.layers["reviewer"]
+    assert (layers["tools.orbit"], layers["tools.workspace"]) == (PACKAGE, PROJECT)
+
+
+def test_a_tools_field_a_role_leaves_to_its_default_comes_from_the_defaults() -> None:
+    package = {"coder": Role(instructions="Code.", tools=RoleTools(workspace="shell"))}
+    layers = resolve_roles(package, NO_USER_ROLES, NO_PROJECT_ROLES).layers["coder"]
+    assert (layers["tools.workspace"], layers["tools.web"]) == (PACKAGE, DEFAULT)
+
+
+def test_a_projects_tools_given_as_something_else_are_refused_as_given() -> None:
+    with pytest.raises(ConfigError, match=r"^roles\.coder\.tools: Input should be a valid"):
+        resolve_roles(PACKAGE_ROLES, NO_USER_ROLES, project({"coder": {"tools": "all"}}))
 
 
 def test_a_projects_skills_replace_a_built_in_roles_whole() -> None:
@@ -341,7 +394,11 @@ def test_a_role_the_project_adds_takes_the_users_fields_after_the_packages_roles
         instructions="Write docs.", verify=False, effort="max"
     )
     layers = resolved.layers["docs-writer"]
-    assert (layers["instructions"], layers["effort"], layers["tools"]) == (PROJECT, USER, DEFAULT)
+    assert (layers["instructions"], layers["effort"], layers["tools.orbit"]) == (
+        PROJECT,
+        USER,
+        DEFAULT,
+    )
 
 
 def test_a_personal_role_comes_after_the_packages_roles_and_before_the_projects() -> None:
@@ -352,7 +409,7 @@ def test_a_personal_role_comes_after_the_packages_roles_and_before_the_projects(
     assert list(resolved.roles) == [*PACKAGE_ROLES, "helper", "docs-writer"]
     assert resolved.roles["helper"] == Role.model_validate(HELPER)
     layers = resolved.layers["helper"]
-    assert (layers["instructions"], layers["lane"], layers["tools"]) == (USER, USER, DEFAULT)
+    assert (layers["instructions"], layers["lane"], layers["tools.orbit"]) == (USER, USER, DEFAULT)
     assert resolved.personal == {"helper"}
     assert resolved.replaced == ()
 
@@ -425,9 +482,9 @@ def test_a_role_only_the_user_config_names_isnt_a_role() -> None:
 @pytest.mark.parametrize(
     ("roles", "message"),
     [
-        ({"coder": {"tools": ["launch_rockets"]}}, "roles.coder.tools: "),
+        ({"coder": {"tools": {"orbit": ["launch_rockets"]}}}, "roles.coder.tools.orbit: "),
         ({"coder": "everything"}, "roles.coder: "),
-        ({"new": {"tools": ["get_task"]}}, "roles.new.instructions: "),
+        ({"new": {"tools": {"orbit": ["get_task"]}}}, "roles.new.instructions: "),
         ({"qa.lead": {"instructions": "Lead."}}, f"roles.qa.lead: {ROLE_NAME_RULE}$"),
     ],
 )
@@ -512,7 +569,7 @@ def test_the_personal_roles_check_leaves_an_invalid_role_to_be_reported_with_the
     merged = merge_roles(
         PACKAGE_ROLES,
         user({"roles": {"helper": helper}}),
-        project({"coder": {"tools": ["launch_rockets"]}}),
+        project({"coder": {"tools": {"orbit": ["launch_rockets"]}}}),
     )
     check_personal(merged)
 
@@ -520,7 +577,7 @@ def test_the_personal_roles_check_leaves_an_invalid_role_to_be_reported_with_the
 TALKER: dict[str, object] = {
     "instructions": "Talk.",
     "conversation": True,
-    "tools": ["propose_task"],
+    "tools": {"orbit": ["propose_task"]},
     "verify": False,
     "workspace": "checkout",
     "lane": "talk",

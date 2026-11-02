@@ -12,12 +12,13 @@ import pytest
 from typer.testing import CliRunner, Result
 
 from orbit.agent.domain.config import LIMIT_KEYS
-from orbit.agent.domain.roles import Role
+from orbit.agent.domain.roles import ROLE_TABLES, Role
 from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
 from orbit.agent.external.config_file import read_config
 from orbit.agent.external.reference_config import reference_config
 from orbit.agent.external.skill_files import SKILL_DIRECTORY, skill_names, skill_paths
 from orbit.cli import app
+from orbit.protocol import BUILT_IN_ROLE_NAMES
 from tests.git_repo import init_repo
 
 runner = CliRunner()
@@ -158,17 +159,19 @@ def test_update_adds_what_the_file_doesnt_mention_and_says_what(project: Path) -
     path.write_text('[roles.coder]\nmodel = "opus"\n')
     result = init(project, "--update")
     assert result.exit_code == 0, result.output
-    fields = ", ".join(key for key in Role.model_fields if key != "model")
+    fields = ", ".join(key for key in Role.model_fields if key not in {"model", *ROLE_TABLES})
+    roles = ", ".join(
+        table
+        for name in BUILT_IN_ROLE_NAMES
+        for table in (f"[roles.{name}]", f"[roles.{name}.tools]")
+        if table != "[roles.coder]"
+    )
     assert result.stdout.splitlines() == [
         f"Added to {path}, commented out:",
         f"  in the top level: {', '.join(LIMIT_KEYS)}",
         f"  in [roles.coder]: {fields}",
         "  at the end: [[verification.steps]], [verification.sets.mutation], [setup],"
-        " [roles.planner], [roles.experimenter], [roles.reviewer],"
-        " [roles.configurator], [roles.fit-reviewer], [roles.bugs-reviewer],"
-        " [roles.tests-reviewer], [roles.logic-reviewer], [roles.security-reviewer],"
-        " [roles.performance-reviewer], [roles.style-reviewer], [roles.drift-reviewer],"
-        " [roles.scaling-reviewer], [roles.license-reviewer], [triggers.fit-review],"
+        f" {roles}, [roles.license-reviewer], [triggers.fit-review],"
         " [triggers.bugs-review], [triggers.tests-review], [triggers.logic-review],"
         " [triggers.security-review], [triggers.performance-review], [triggers.merge-pass],"
         " [triggers.super-merge-pass], [triggers.super-review], [triggers.super-fix-review],"
@@ -531,3 +534,20 @@ def test_skills_that_cant_be_copied_exit_with_status_2(project: Path) -> None:
     assert result.exit_code == 2
     assert result.stderr.startswith("Couldn't copy orbit's skills: ")
     assert result.stdout == ""
+
+
+def test_the_written_config_loads_and_a_tools_table_uncommented_changes_only_its_field(
+    project: Path,
+) -> None:
+    init(project)
+    path = project / ".orbit" / "config.toml"
+    config_dir = project.parent / "config"
+    assert read_config(str(project), config_dir).roles == read_built_in_roles()
+    before, header, after = path.read_text(encoding="utf-8").partition("# [roles.reviewer.tools]\n")
+    level = after.replace('# workspace = "read"', 'workspace = "none"', 1)
+    path.write_text(f"{before}{header.removeprefix('# ')}{level}", encoding="utf-8")
+    reviewer = read_config(str(project), config_dir).roles["reviewer"]
+    shipped = read_built_in_roles()["reviewer"]
+    assert reviewer == shipped.model_copy(
+        update={"tools": shipped.tools.model_copy(update={"workspace": "none"})}
+    )

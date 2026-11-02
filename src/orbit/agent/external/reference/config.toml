@@ -50,10 +50,6 @@
 # instructions: orbit's own planner.md
 # Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
 # model: unset
-# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
-# tool_access = "restricted"
-# The orbit tools its agents may call.
-# tools = ["propose_task", "report_progress", "save_report", "list_reports", "read_report"]
 # Whether its agents may report a finding as blocking with report_finding.
 # blocking_findings = false
 # Whether its agents' claims of being done are verified.
@@ -83,15 +79,20 @@
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["code-style"]
 
+# What its agents may use: orbit's tools, their workspace and the web.
+# [roles.planner.tools]
+# The orbit tools its agents may call.
+# orbit = ["propose_task", "report_progress", "save_report", "list_reports", "read_report"]
+# What its agents may do in their workspace: "none", "read", "write" or "shell".
+# workspace = "read"
+# Whether its agents may search and fetch the web.
+# web = true
+
 # [roles.experimenter]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
 # instructions: orbit's own experimenter.md
 # Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
 # model = "sonnet"
-# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
-# tool_access = "full"
-# The orbit tools its agents may call.
-# tools = ["report_progress", "save_report", "list_reports", "read_report"]
 # Whether its agents may report a finding as blocking with report_finding.
 # blocking_findings = false
 # Whether its agents' claims of being done are verified.
@@ -121,15 +122,20 @@
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = []
 
+# What its agents may use: orbit's tools, their workspace and the web.
+# [roles.experimenter.tools]
+# The orbit tools its agents may call.
+# orbit = ["report_progress", "save_report", "list_reports", "read_report"]
+# What its agents may do in their workspace: "none", "read", "write" or "shell".
+# workspace = "shell"
+# Whether its agents may search and fetch the web.
+# web = true
+
 # [roles.coder]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
 # instructions: orbit's own coder.md
 # Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
 # model: unset
-# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
-# tool_access = "full"
-# The orbit tools its agents may call.
-# tools = ["get_task", "complete_task", "run_check", "report_progress", "give_up"]
 # Whether its agents may report a finding as blocking with report_finding.
 # blocking_findings = false
 # Whether its agents' claims of being done are verified.
@@ -159,15 +165,20 @@
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["code-style", "security"]
 
+# What its agents may use: orbit's tools, their workspace and the web.
+# [roles.coder.tools]
+# The orbit tools its agents may call.
+# orbit = ["get_task", "complete_task", "run_check", "report_progress", "give_up"]
+# What its agents may do in their workspace: "none", "read", "write" or "shell".
+# workspace = "shell"
+# Whether its agents may search and fetch the web.
+# web = true
+
 # [roles.reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
 # instructions: orbit's own reviewer.md
 # Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
 # model: unset
-# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
-# tool_access = "restricted"
-# The orbit tools its agents may call.
-# tools: 6 of orbit's own; orbit config show roles.reviewer.tools lists them
 # Whether its agents may report a finding as blocking with report_finding.
 # blocking_findings = false
 # Whether its agents' claims of being done are verified.
@@ -197,15 +208,20 @@
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills: 11 of orbit's own; orbit config show roles.reviewer.skills lists them
 
+# What its agents may use: orbit's tools, their workspace and the web.
+# [roles.reviewer.tools]
+# The orbit tools its agents may call.
+# orbit: 6 of orbit's own; orbit config show roles.reviewer.tools.orbit lists them
+# What its agents may do in their workspace: "none", "read", "write" or "shell".
+# workspace = "read"
+# Whether its agents may search and fetch the web.
+# web = true
+
 # [roles.configurator]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
 # instructions: orbit's own configurator.md
 # Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
 # model: unset
-# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
-# tool_access = "restricted"
-# The orbit tools its agents may call.
-# tools = ["get_task", "propose_checks", "report_progress", "give_up"]
 # Whether its agents may report a finding as blocking with report_finding.
 # blocking_findings = false
 # Whether its agents' claims of being done are verified.
@@ -235,15 +251,20 @@
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["python", "cpp"]
 
+# What its agents may use: orbit's tools, their workspace and the web.
+# [roles.configurator.tools]
+# The orbit tools its agents may call.
+# orbit = ["get_task", "propose_checks", "report_progress", "give_up"]
+# What its agents may do in their workspace: "none", "read", "write" or "shell".
+# workspace = "read"
+# Whether its agents may search and fetch the web.
+# web = true
+
 # [roles.fit-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
 # instructions: orbit's own lens-reviewer.md
 # Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
 # model: unset
-# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
-# tool_access = "restricted"
-# The orbit tools its agents may call.
-# tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
 # Whether its agents may report a finding as blocking with report_finding.
 # blocking_findings = false
 # Whether its agents' claims of being done are verified.
@@ -273,15 +294,20 @@
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["code-style", "review-fit"]
 
+# What its agents may use: orbit's tools, their workspace and the web.
+# [roles.fit-reviewer.tools]
+# The orbit tools its agents may call.
+# orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+# What its agents may do in their workspace: "none", "read", "write" or "shell".
+# workspace = "read"
+# Whether its agents may search and fetch the web.
+# web = true
+
 # [roles.bugs-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
 # instructions: orbit's own lens-reviewer.md
 # Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
 # model: unset
-# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
-# tool_access = "restricted"
-# The orbit tools its agents may call.
-# tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
 # Whether its agents may report a finding as blocking with report_finding.
 # blocking_findings = true
 # Whether its agents' claims of being done are verified.
@@ -311,15 +337,20 @@
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["code-style", "review-bugs"]
 
+# What its agents may use: orbit's tools, their workspace and the web.
+# [roles.bugs-reviewer.tools]
+# The orbit tools its agents may call.
+# orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+# What its agents may do in their workspace: "none", "read", "write" or "shell".
+# workspace = "read"
+# Whether its agents may search and fetch the web.
+# web = true
+
 # [roles.tests-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
 # instructions: orbit's own lens-reviewer.md
 # Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
 # model: unset
-# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
-# tool_access = "restricted"
-# The orbit tools its agents may call.
-# tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
 # Whether its agents may report a finding as blocking with report_finding.
 # blocking_findings = false
 # Whether its agents' claims of being done are verified.
@@ -349,15 +380,20 @@
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["code-style", "review-tests"]
 
+# What its agents may use: orbit's tools, their workspace and the web.
+# [roles.tests-reviewer.tools]
+# The orbit tools its agents may call.
+# orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+# What its agents may do in their workspace: "none", "read", "write" or "shell".
+# workspace = "read"
+# Whether its agents may search and fetch the web.
+# web = true
+
 # [roles.logic-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
 # instructions: orbit's own lens-reviewer.md
 # Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
 # model: unset
-# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
-# tool_access = "restricted"
-# The orbit tools its agents may call.
-# tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
 # Whether its agents may report a finding as blocking with report_finding.
 # blocking_findings = false
 # Whether its agents' claims of being done are verified.
@@ -387,15 +423,20 @@
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["code-style", "review-logic"]
 
+# What its agents may use: orbit's tools, their workspace and the web.
+# [roles.logic-reviewer.tools]
+# The orbit tools its agents may call.
+# orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+# What its agents may do in their workspace: "none", "read", "write" or "shell".
+# workspace = "read"
+# Whether its agents may search and fetch the web.
+# web = true
+
 # [roles.security-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
 # instructions: orbit's own lens-reviewer.md
 # Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
 # model: unset
-# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
-# tool_access = "restricted"
-# The orbit tools its agents may call.
-# tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
 # Whether its agents may report a finding as blocking with report_finding.
 # blocking_findings = true
 # Whether its agents' claims of being done are verified.
@@ -425,15 +466,20 @@
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["code-style", "security", "review-security"]
 
+# What its agents may use: orbit's tools, their workspace and the web.
+# [roles.security-reviewer.tools]
+# The orbit tools its agents may call.
+# orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+# What its agents may do in their workspace: "none", "read", "write" or "shell".
+# workspace = "read"
+# Whether its agents may search and fetch the web.
+# web = true
+
 # [roles.performance-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
 # instructions: orbit's own lens-reviewer.md
 # Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
 # model: unset
-# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
-# tool_access = "restricted"
-# The orbit tools its agents may call.
-# tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
 # Whether its agents may report a finding as blocking with report_finding.
 # blocking_findings = false
 # Whether its agents' claims of being done are verified.
@@ -463,15 +509,20 @@
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["code-style", "review-performance"]
 
+# What its agents may use: orbit's tools, their workspace and the web.
+# [roles.performance-reviewer.tools]
+# The orbit tools its agents may call.
+# orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+# What its agents may do in their workspace: "none", "read", "write" or "shell".
+# workspace = "read"
+# Whether its agents may search and fetch the web.
+# web = true
+
 # [roles.style-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
 # instructions: orbit's own super-lens-reviewer.md
 # Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
 # model = "opus"
-# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
-# tool_access = "restricted"
-# The orbit tools its agents may call.
-# tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
 # Whether its agents may report a finding as blocking with report_finding.
 # blocking_findings = false
 # Whether its agents' claims of being done are verified.
@@ -501,15 +552,20 @@
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["code-style", "review-style"]
 
+# What its agents may use: orbit's tools, their workspace and the web.
+# [roles.style-reviewer.tools]
+# The orbit tools its agents may call.
+# orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+# What its agents may do in their workspace: "none", "read", "write" or "shell".
+# workspace = "read"
+# Whether its agents may search and fetch the web.
+# web = true
+
 # [roles.drift-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
 # instructions: orbit's own super-lens-reviewer.md
 # Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
 # model = "opus"
-# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
-# tool_access = "restricted"
-# The orbit tools its agents may call.
-# tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
 # Whether its agents may report a finding as blocking with report_finding.
 # blocking_findings = false
 # Whether its agents' claims of being done are verified.
@@ -539,15 +595,20 @@
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["code-style", "review-drift"]
 
+# What its agents may use: orbit's tools, their workspace and the web.
+# [roles.drift-reviewer.tools]
+# The orbit tools its agents may call.
+# orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+# What its agents may do in their workspace: "none", "read", "write" or "shell".
+# workspace = "read"
+# Whether its agents may search and fetch the web.
+# web = true
+
 # [roles.scaling-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
 # instructions: orbit's own super-lens-reviewer.md
 # Its tasks' model, an alias such as "opus" or a full id; unset, the user config's, else the CLI's.
 # model = "opus"
-# How its tasks may use the CLI's tools: "off", "restricted" (read and search) or "full".
-# tool_access = "restricted"
-# The orbit tools its agents may call.
-# tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
 # Whether its agents may report a finding as blocking with report_finding.
 # blocking_findings = false
 # Whether its agents' claims of being done are verified.
@@ -576,6 +637,15 @@
 # copy_ttl_hours = 24.0
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["code-style", "review-scaling"]
+
+# What its agents may use: orbit's tools, their workspace and the web.
+# [roles.scaling-reviewer.tools]
+# The orbit tools its agents may call.
+# orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+# What its agents may do in their workspace: "none", "read", "write" or "shell".
+# workspace = "read"
+# Whether its agents may search and fetch the web.
+# web = true
 
 # A role of your own, which must set its instructions. For example:
 # [roles.license-reviewer]
@@ -1035,12 +1105,8 @@
 # The URL it serves MCP at.
 # url = "http://127.0.0.1:3010/mcp"
 
-# The tools a role's agents may use, in place of its tool_access and tools.
+# The MCP servers a role's agents may use, in its tools table.
 # [roles.license-reviewer.tools]
-# The orbit tools its agents may call.
-# orbit = ["get_task", "complete_task", "suggest_task", "report_progress"]
-# What its agents may do in their workspace: "none", "read", "write" or "shell".
-# workspace = "read"
 # The MCP servers its agents may use, each declared in an [mcp.<name>] table.
 # mcp = ["semgrep"]
 

@@ -54,8 +54,11 @@ REVIEWER_SKILLS = (
 BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
     "coder": {
         "model": None,
-        "tool_access": "full",
-        "tools": ("get_task", "complete_task", "run_check", "report_progress", "give_up"),
+        "tools": {
+            "orbit": ("get_task", "complete_task", "run_check", "report_progress", "give_up"),
+            "workspace": "shell",
+            "web": True,
+        },
         "blocking_findings": False,
         "verify": True,
         "timeout_minutes": None,
@@ -73,8 +76,7 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
     },
     "reviewer": {
         "model": None,
-        "tool_access": "restricted",
-        "tools": MERGE_PASS_TOOLS,
+        "tools": {"orbit": MERGE_PASS_TOOLS, "workspace": "read", "web": True},
         "blocking_findings": False,
         "verify": False,
         "timeout_minutes": None,
@@ -92,8 +94,17 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
     },
     "planner": {
         "model": None,
-        "tool_access": "restricted",
-        "tools": ("propose_task", "report_progress", "save_report", "list_reports", "read_report"),
+        "tools": {
+            "orbit": (
+                "propose_task",
+                "report_progress",
+                "save_report",
+                "list_reports",
+                "read_report",
+            ),
+            "workspace": "read",
+            "web": True,
+        },
         "blocking_findings": False,
         "verify": False,
         "timeout_minutes": None,
@@ -111,8 +122,11 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
     },
     "experimenter": {
         "model": "sonnet",
-        "tool_access": "full",
-        "tools": ("report_progress", "save_report", "list_reports", "read_report"),
+        "tools": {
+            "orbit": ("report_progress", "save_report", "list_reports", "read_report"),
+            "workspace": "shell",
+            "web": True,
+        },
         "blocking_findings": False,
         "verify": False,
         "timeout_minutes": 30,
@@ -130,8 +144,11 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
     },
     "configurator": {
         "model": None,
-        "tool_access": "restricted",
-        "tools": ("get_task", "propose_checks", "report_progress", "give_up"),
+        "tools": {
+            "orbit": ("get_task", "propose_checks", "report_progress", "give_up"),
+            "workspace": "read",
+            "web": True,
+        },
         "blocking_findings": False,
         "verify": False,
         "timeout_minutes": None,
@@ -167,7 +184,11 @@ BLOCKING_LENSES = frozenset({"bugs-reviewer", "security-reviewer"})
 
 BUILT_IN_FIELDS |= {
     name: BUILT_IN_FIELDS["reviewer"]
-    | {"tools": LENS_TOOLS, "skills": skills, "blocking_findings": name in BLOCKING_LENSES}
+    | {
+        "tools": {"orbit": LENS_TOOLS, "workspace": "read", "web": True},
+        "skills": skills,
+        "blocking_findings": name in BLOCKING_LENSES,
+    }
     for name, skills in LENS_SKILLS.items()
 }
 
@@ -319,7 +340,13 @@ def test_the_configurator_is_launched_with_the_python_and_cpp_skills(tmp_path: P
 
 def test_the_readme_lists_each_built_in_roles_tools() -> None:
     for name, role in read_built_in_roles().items():
-        assert readme_column(name, 2) == role.tools, name
+        assert readme_column(name, 2) == role.tools.orbit, name
+
+
+def test_the_readme_lists_each_built_in_roles_workspace_level() -> None:
+    for name, role in read_built_in_roles().items():
+        assert readme_column(name, 4)[-1] == role.workspace_level, name
+        assert role.web, name
 
 
 def test_the_readme_lists_each_built_in_roles_skills() -> None:

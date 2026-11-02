@@ -66,6 +66,7 @@ from tests.agent_fakes import (
     session_for,
     steps_chat,
     until_idle,
+    with_orbit_tools,
 )
 from tests.telemetry_helpers import Traced
 from tests.waiting import eventually
@@ -182,7 +183,7 @@ async def test_a_role_without_propose_task_cant_list_drafts() -> None:
         replies.append(await call("list_drafts"))
         return "completed"
 
-    roles = {**ROLES, PLANNER: ROLES[PLANNER].model_copy(update={"tools": ("report_progress",)})}
+    roles = {**ROLES, PLANNER: with_orbit_tools(ROLES[PLANNER], ("report_progress",))}
     session, _, launcher = session_for(roles=roles)
     launcher.planner_turns = [lists]
     await plan(session, "Plan it.")

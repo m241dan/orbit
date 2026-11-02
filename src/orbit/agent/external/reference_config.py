@@ -17,7 +17,7 @@ from pydantic import BaseModel, TypeAdapter
 from orbit.agent.domain.checks import Setup, VerificationConfig, VerificationSet
 from orbit.agent.domain.config import LIMIT_KEYS, OrbitConfig, load_config
 from orbit.agent.domain.config_update import FOR_EXAMPLE
-from orbit.agent.domain.roles import Role
+from orbit.agent.domain.roles import ROLE_TABLES, Role
 from orbit.agent.domain.skills import SkillMapping
 from orbit.agent.domain.triggers import Trigger
 from orbit.agent.domain.verification import VerificationStep
@@ -73,12 +73,8 @@ LATER = (
         'url = "http://127.0.0.1:3010/mcp"',
     ),
     (
-        "The tools a role's agents may use, in place of its tool_access and tools.",
+        "The MCP servers a role's agents may use, in its tools table.",
         "[roles.license-reviewer.tools]",
-        "The orbit tools its agents may call.",
-        'orbit = ["get_task", "complete_task", "suggest_task", "report_progress"]',
-        'What its agents may do in their workspace: "none", "read", "write" or "shell".',
-        'workspace = "read"',
         "The MCP servers its agents may use, each declared in an [mcp.<name>] table.",
         'mcp = ["semgrep"]',
     ),
@@ -100,8 +96,8 @@ explaining it."""
 def reference_config() -> str:
     """The reference config: a short header; the limits at their defaults; examples of a
     verification step in a named set, of that set's table, and of a setup; each built-in role's
-    table with every field at its shipped
-    value, a list too long for a line in short; an example of a role of a project's own; each
+    table with every field at its shipped value, a list too long for a line in short, followed by
+    its tools table; an example of a role of a project's own; each
     shipped trigger's table with every field at its shipped value; an example of skills by path;
     and the settings of a later version of orbit under :data:`LATER_HEADING`. Everything is
     commented out, each key under its description.
@@ -118,7 +114,11 @@ def reference_config() -> str:
         _example(verification["sets"], f"[verification.sets.{EXAMPLE_SET}]", EXAMPLE_SET_FIELDS),
         _example(config["setup"], "[setup]", EXAMPLE_SETUP),
         _comments([config["roles"]]),
-        *(_built_in(name, role, files[name]) for name, role in roles.items()),
+        *(
+            section
+            for name, role in roles.items()
+            for section in _built_in(name, role, files[name])
+        ),
         _example(
             "A role of your own, which must set its instructions.",
             f"[roles.{EXAMPLE_ROLE}]",
@@ -193,25 +193,50 @@ def _example(description: str, header: str, example: BaseModel | VerificationSte
     ]
 
 
-def _built_in(name: str, role: Role, file: str) -> list[str]:
-    """Built-in role ``name``'s table: each of ``role``'s fields under its description, its
-    instructions being orbit's own ``file``."""
+def _built_in(name: str, role: Role, file: str) -> list[list[str]]:
+    """Built-in role ``name``'s tables: its own, each of ``role``'s fields under its description,
+    its instructions being orbit's own ``file``; then each of its fields that's a table of its
+    own, under its description, its fields under theirs."""
     descriptions = _descriptions(Role)
-    lines = [f"# [roles.{name}]"]
-    for key, value in role.model_dump(mode="json").items():
-        lines += [f"# {descriptions[key]}", _role_field(name, key, value, file)]
-    return lines
+    values = role.model_dump(mode="json")
+    own = [
+        line
+        for key, value in values.items()
+        if key not in ROLE_TABLES
+        for line in (f"# {descriptions[key]}", _role_field(f"roles.{name}", key, value, file))
+    ]
+    tables = [
+        [
+            f"# {descriptions[key]}",
+            f"# [roles.{name}.{key}]",
+            *_role_table(f"roles.{name}.{key}", model, values[key]),
+        ]
+        for key, model in ROLE_TABLES.items()
+    ]
+    return [[f"# [roles.{name}]", *own], *tables]
 
 
-def _role_field(name: str, key: str, value: Any, file: str) -> str:
-    """The commented-out line of built-in role ``name``'s field ``key``, at its ``value``: its
-    instructions as orbit's own ``file``, a field it leaves unset as unset, as TOML has no value
-    for that, and a list too long for a line in short (see :func:`_fitted`)."""
+def _role_table(table: str, model: type[BaseModel], values: Mapping[str, Any]) -> list[str]:
+    """The lines of a built-in role's ``table``, a ``model``, at its ``values``: each field under
+    its description."""
+    descriptions = _descriptions(model)
+    return [
+        line
+        for key, value in values.items()
+        for line in (f"# {descriptions[key]}", _role_field(table, key, value, ""))
+    ]
+
+
+def _role_field(table: str, key: str, value: Any, file: str) -> str:
+    """The commented-out line of the field ``key`` of a built-in role's ``table``, at its
+    ``value``: its instructions as orbit's own ``file``, a field it leaves unset as unset, as
+    TOML has no value for that, and a list too long for a line in short (see
+    :func:`_fitted`)."""
     if key == "instructions":
         return f"# instructions: orbit's own {file}"
     if value is None:
         return f"# {key}: unset"
-    return _fitted(name, key, value)
+    return _fitted(table, key, value)
 
 
 def _shipped_trigger(name: str, trigger: Trigger, file: str | None) -> list[str]:
@@ -234,14 +259,14 @@ def _trigger_field(key: str, value: Any, file: str | None) -> str:
     return _key(key, value)
 
 
-def _fitted(name: str, key: str, value: Any) -> str:
-    """The commented-out line giving built-in role ``name``'s field ``key`` its ``value``, if it
-    fits in :data:`REFERENCE_WIDTH` columns or isn't a list; otherwise how many the list holds,
-    and the command that lists them."""
+def _fitted(table: str, key: str, value: Any) -> str:
+    """The commented-out line giving the field ``key`` of a built-in role's ``table`` its
+    ``value``, if it fits in :data:`REFERENCE_WIDTH` columns or isn't a list; otherwise how many
+    the list holds, and the command that lists them."""
     line = _key(key, value)
     if len(line) <= REFERENCE_WIDTH or not isinstance(value, list):
         return line
-    show = f"orbit config show roles.{name}.{key}"
+    show = f"orbit config show {table}.{key}"
     return f"# {key}: {len(value)} of orbit's own; {show} lists them"
 
 

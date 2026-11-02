@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from orbit.agent.domain.checks import VerificationSet
 from orbit.agent.domain.config import LIMIT_KEYS, OrbitConfig
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
-from orbit.agent.domain.roles import Role, names_file
+from orbit.agent.domain.roles import ROLE_KEYS, Role, names_file, role_setting
 from orbit.agent.domain.skills import SkillLibrary, SkillMapping
 from orbit.agent.domain.triggers import Trigger
 from orbit.agent.domain.verification import VerificationStep
@@ -153,20 +153,22 @@ def _limits(config: OrbitConfig, project: Written) -> ConfigReport:
 
 
 def _roles(sources: ConfigSources) -> ConfigReport:
-    """Each role in effect, field by field, each from the layer it came from."""
+    """Each role in effect, field by field, a table's field by field too, each from the layer
+    it came from."""
     report: ConfigReport = {}
     for name in sources.config.roles:
         layers = sources.role_layers[name]
-        for key in Role.model_fields:
+        for key in ROLE_KEYS:
             report[f"roles.{name}.{key}"] = Setting(_role_field(name, key, sources), layers[key])
     return report
 
 
 def _role_field(name: str, key: str, sources: ConfigSources) -> Any:
-    """The value of role ``name``'s field ``key``; its instructions with the file they're in."""
+    """The value of role ``name``'s setting ``key``; its instructions with the file they're
+    in."""
     role = sources.config.roles[name]
     if key != "instructions":
-        return getattr(role, key)
+        return role_setting(role, key)
     given = _given_instructions(name, sources.role_layers[name][key], sources)
     return Instructions(role.instructions, given if names_file(given) else None)
 

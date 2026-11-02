@@ -3,8 +3,6 @@
 
 [roles.planner]
 instructions = "planner.md"
-tool_access = "restricted"
-tools = ["propose_task", "report_progress", "save_report", "list_reports", "read_report"]
 skills = ["code-style"]
 consults = ["experimenter"]
 verify = false
@@ -15,12 +13,15 @@ merge = false
 enabled = true
 runtime = "claude"
 
+[roles.planner.tools]
+orbit = ["propose_task", "report_progress", "save_report", "list_reports", "read_report"]
+workspace = "read"
+web = true
+
 [roles.experimenter]
 instructions = "experimenter.md"
 model = "sonnet"
 timeout_minutes = 30
-tool_access = "full"
-tools = ["report_progress", "save_report", "list_reports", "read_report"]
 verify = false
 lane = "experimenter"
 workspace = "copy"
@@ -29,10 +30,13 @@ merge = false
 enabled = true
 runtime = "claude"
 
+[roles.experimenter.tools]
+orbit = ["report_progress", "save_report", "list_reports", "read_report"]
+workspace = "shell"
+web = true
+
 [roles.coder]
 instructions = "coder.md"
-tool_access = "full"
-tools = ["get_task", "complete_task", "run_check", "report_progress", "give_up"]
 skills = ["code-style", "security"]
 verify = true
 lane = "work"
@@ -42,17 +46,13 @@ merge = true
 enabled = true
 runtime = "claude"
 
+[roles.coder.tools]
+orbit = ["get_task", "complete_task", "run_check", "report_progress", "give_up"]
+workspace = "shell"
+web = true
+
 [roles.reviewer]
 instructions = "reviewer.md"
-tool_access = "restricted"
-tools = [
-    "get_task",
-    "complete_task",
-    "report_progress",
-    "give_up",
-    "suggest_task",
-    "dismiss_finding",
-]
 skills = [
     "code-style",
     "security",
@@ -74,10 +74,20 @@ merge = false
 enabled = true
 runtime = "claude"
 
+[roles.reviewer.tools]
+orbit = [
+    "get_task",
+    "complete_task",
+    "report_progress",
+    "give_up",
+    "suggest_task",
+    "dismiss_finding",
+]
+workspace = "read"
+web = true
+
 [roles.configurator]
 instructions = "configurator.md"
-tool_access = "restricted"
-tools = ["get_task", "propose_checks", "report_progress", "give_up"]
 skills = ["python", "cpp"]
 verify = false
 lane = "work"
@@ -87,13 +97,16 @@ merge = false
 enabled = true
 runtime = "claude"
 
+[roles.configurator.tools]
+orbit = ["get_task", "propose_checks", "report_progress", "give_up"]
+workspace = "read"
+web = true
+
 # The per-commit lens reviewers: each reviews a landed commit through one review lens and reports
 # findings, which the reviewer, the merge pass, then files as tasks or dismisses.
 
 [roles.fit-reviewer]
 instructions = "lens-reviewer.md"
-tool_access = "restricted"
-tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
 skills = ["code-style", "review-fit"]
 verify = false
 lane = "review"
@@ -103,10 +116,13 @@ merge = false
 enabled = true
 runtime = "claude"
 
+[roles.fit-reviewer.tools]
+orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+workspace = "read"
+web = true
+
 [roles.bugs-reviewer]
 instructions = "lens-reviewer.md"
-tool_access = "restricted"
-tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
 skills = ["code-style", "review-bugs"]
 blocking_findings = true
 verify = false
@@ -117,10 +133,13 @@ merge = false
 enabled = true
 runtime = "claude"
 
+[roles.bugs-reviewer.tools]
+orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+workspace = "read"
+web = true
+
 [roles.tests-reviewer]
 instructions = "lens-reviewer.md"
-tool_access = "restricted"
-tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
 skills = ["code-style", "review-tests"]
 verify = false
 lane = "review"
@@ -130,10 +149,13 @@ merge = false
 enabled = true
 runtime = "claude"
 
+[roles.tests-reviewer.tools]
+orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+workspace = "read"
+web = true
+
 [roles.logic-reviewer]
 instructions = "lens-reviewer.md"
-tool_access = "restricted"
-tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
 skills = ["code-style", "review-logic"]
 verify = false
 lane = "review"
@@ -143,10 +165,13 @@ merge = false
 enabled = true
 runtime = "claude"
 
+[roles.logic-reviewer.tools]
+orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+workspace = "read"
+web = true
+
 [roles.security-reviewer]
 instructions = "lens-reviewer.md"
-tool_access = "restricted"
-tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
 skills = ["code-style", "security", "review-security"]
 blocking_findings = true
 verify = false
@@ -157,10 +182,13 @@ merge = false
 enabled = true
 runtime = "claude"
 
+[roles.security-reviewer.tools]
+orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+workspace = "read"
+web = true
+
 [roles.performance-reviewer]
 instructions = "lens-reviewer.md"
-tool_access = "restricted"
-tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
 skills = ["code-style", "review-performance"]
 verify = false
 lane = "review"
@@ -170,14 +198,17 @@ merge = false
 enabled = true
 runtime = "claude"
 
+[roles.performance-reviewer.tools]
+orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+workspace = "read"
+web = true
+
 # The super review's lens reviewers: now and then each reviews the whole codebase through one
 # review lens, and later the fixes of the findings it raised, reporting findings for the merge pass.
 
 [roles.style-reviewer]
 instructions = "super-lens-reviewer.md"
 model = "opus"
-tool_access = "restricted"
-tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
 skills = ["code-style", "review-style"]
 verify = false
 lane = "review"
@@ -187,11 +218,14 @@ merge = false
 enabled = true
 runtime = "claude"
 
+[roles.style-reviewer.tools]
+orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+workspace = "read"
+web = true
+
 [roles.drift-reviewer]
 instructions = "super-lens-reviewer.md"
 model = "opus"
-tool_access = "restricted"
-tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
 skills = ["code-style", "review-drift"]
 verify = false
 lane = "review"
@@ -201,11 +235,14 @@ merge = false
 enabled = true
 runtime = "claude"
 
+[roles.drift-reviewer.tools]
+orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+workspace = "read"
+web = true
+
 [roles.scaling-reviewer]
 instructions = "super-lens-reviewer.md"
 model = "opus"
-tool_access = "restricted"
-tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
 skills = ["code-style", "review-scaling"]
 verify = false
 lane = "review"
@@ -214,3 +251,8 @@ conversation = false
 merge = false
 enabled = true
 runtime = "claude"
+
+[roles.scaling-reviewer.tools]
+orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+workspace = "read"
+web = true

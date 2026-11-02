@@ -14,7 +14,7 @@ from orbit.agent import WorkspaceHost
 from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.application.ports import Reply
 from orbit.agent.domain.reviews import BatchSnapshot, LaneSnapshot, PlannerSnapshot, ReviewJob
-from orbit.agent.domain.roles import Role
+from orbit.agent.domain.roles import Role, RoleTools
 from orbit.agent.domain.sessions import SessionRecord, parse_record, record_json
 from orbit.agent.domain.triggers import Trigger
 from orbit.protocol import (
@@ -240,7 +240,7 @@ AUDITOR_IN = {
             verify=False,
             lane=lane,
             workspace="snapshot",
-            tools=ROLES[REVIEWER].tools,
+            tools=RoleTools(orbit=ROLES[REVIEWER].tools.orbit),
         ),
     }
     for lane in ("work", "review")

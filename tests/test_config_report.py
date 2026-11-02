@@ -22,7 +22,7 @@ from orbit.agent.domain.config_report import (
     subtree,
 )
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer, load_user_roles
-from orbit.agent.domain.roles import Role, built_in_roles
+from orbit.agent.domain.roles import ROLE_KEYS, built_in_roles
 from orbit.agent.domain.server import ServerSettings
 from orbit.agent.domain.skills import Skill, SkillFile, SkillLibrary, SkillMapping
 from orbit.agent.domain.storage import StorageSettings
@@ -147,9 +147,7 @@ def test_a_limit_the_project_file_sets_is_the_projects() -> None:
 
 def test_each_role_is_listed_field_by_field_in_order() -> None:
     roles = [key for key in report() if key.startswith("roles.")]
-    assert roles == [
-        f"roles.{name}.{field}" for name in BUILT_IN_ROLE_NAMES for field in Role.model_fields
-    ]
+    assert roles == [f"roles.{name}.{field}" for name in BUILT_IN_ROLE_NAMES for field in ROLE_KEYS]
 
 
 def test_each_role_field_comes_from_the_layer_that_set_it() -> None:
@@ -158,7 +156,17 @@ def test_each_role_field_comes_from_the_layer_that_set_it() -> None:
     )
     assert settings["roles.reviewer.model"] == Setting("sonnet", PROJECT)
     assert settings["roles.planner.model"] == Setting("opus", USER)
-    assert settings["roles.coder.tools"] == Setting(PACKAGE_ROLES["coder"].tools, PACKAGE)
+    orbit = PACKAGE_ROLES["coder"].tools.orbit
+    assert settings["roles.coder.tools.orbit"] == Setting(orbit, PACKAGE)
+    assert settings["roles.coder.tools.workspace"] == Setting("shell", PACKAGE)
+
+
+def test_each_field_of_a_roles_tools_comes_from_the_layer_that_set_it() -> None:
+    settings = report({"roles": {"reviewer": {"tools": {"workspace": "none"}}}})
+    orbit = PACKAGE_ROLES["reviewer"].tools.orbit
+    assert settings["roles.reviewer.tools.orbit"] == Setting(orbit, PACKAGE)
+    assert settings["roles.reviewer.tools.workspace"] == Setting("none", PROJECT)
+    assert settings["roles.reviewer.tools.web"] == Setting(True, PACKAGE)
     assert settings["roles.coder.effort"] == Setting(None, DEFAULT)
 
 
@@ -190,7 +198,7 @@ def test_a_personal_role_is_listed_with_its_fields_and_instructions_file_from_th
     instructions = Instructions("You help.", "roles/helper.md")
     assert settings["roles.helper.instructions"] == Setting(instructions, USER)
     assert settings["roles.helper.lane"] == Setting("helper", USER)
-    assert settings["roles.helper.tools"].layer == DEFAULT
+    assert settings["roles.helper.tools.orbit"].layer == DEFAULT
 
 
 @pytest.mark.parametrize(("text", "lines"), [("One.", 1), ("One.\nTwo.\n\nFour.", 4)])
@@ -403,7 +411,7 @@ def test_a_table_the_user_config_gives_as_something_else_sets_nothing() -> None:
 def test_a_key_gives_the_settings_under_it() -> None:
     settings = report()
     assert list(subtree(settings, "roles.reviewer")) == [
-        f"roles.reviewer.{field}" for field in Role.model_fields
+        f"roles.reviewer.{field}" for field in ROLE_KEYS
     ]
 
 
@@ -486,7 +494,7 @@ PYTHON = SkillMapping(paths=("src",), use=("python", "application"))
 
 ANALYST = {
     "instructions": "You analyse.",
-    "tools": ["report_progress"],
+    "tools": {"orbit": ["report_progress"]},
     "lane": "analyst",
     "workspace": "snapshot",
     "conversation": True,

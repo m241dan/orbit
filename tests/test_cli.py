@@ -1176,8 +1176,8 @@ def test_rereading_an_invalid_project_file_gives_its_problems(
     config = tmp_path / ".orbit" / "config.toml"
     monkeypatch.chdir(tmp_path)
     assert runner.invoke(app, ["chat"]).exit_code == 0
-    error = planner_role_read_after(config, "[roles.planner]\ntools = ['fly']\n", launched)
-    assert isinstance(error, ConfigError) and "roles.planner.tools" in str(error)
+    error = planner_role_read_after(config, "[roles.planner.tools]\norbit = ['fly']\n", launched)
+    assert isinstance(error, ConfigError) and "roles.planner.tools.orbit" in str(error)
 
 
 def test_an_invalid_project_file_stops_chat_with_its_problems(
