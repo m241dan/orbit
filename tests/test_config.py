@@ -916,6 +916,31 @@ def test_the_users_command_replaces_the_projects_from_the_user_layer() -> None:
     assert layered.server_layers["github"]["env"] == Layer("project", PROJECT_PATH)
 
 
+def test_the_users_command_over_a_project_url_with_headers_loads_without_them() -> None:
+    headers = 'headers = { Authorization = "Bearer ${SEMGREP_TOKEN}" }'
+    project = GITHUB_PROJECT.replace("[roles.coder.tools]", f"{headers}\n\n[roles.coder.tools]")
+    layered = with_servers(project, '[mcp.semgrep]\ncommand = ["semgrep", "mcp"]')
+    semgrep = layered.config.mcp["semgrep"]
+    assert (semgrep.command, semgrep.url, semgrep.headers) == (("semgrep", "mcp"), None, {})
+    assert layered.server_layers["semgrep"]["headers"] == USER
+
+
+def test_the_users_headers_over_a_command_are_its_fault() -> None:
+    with pytest.raises(UserConfigError) as raised:
+        with_servers(GITHUB_PROJECT, '[mcp.github]\nheaders = { A = "1" }')
+    assert str(raised.value) == "mcp.github.headers: headers go with a url, not a command"
+
+
+def test_a_projects_headers_with_a_command_are_its_fault() -> None:
+    project = GITHUB_PROJECT.replace(
+        '"$GITHUB_TOKEN" }', '"$GITHUB_TOKEN" }\nheaders = { A = "1" }'
+    )
+    with pytest.raises(ConfigError) as raised:
+        with_servers(project)
+    assert not isinstance(raised.value, UserConfigError)
+    assert str(raised.value).startswith("mcp.github: headers go with a url, not a command")
+
+
 def test_a_project_server_at_a_plain_http_url_elsewhere_fails_to_load() -> None:
     project = GITHUB_PROJECT.replace("http://127.0.0.1:3010/mcp", "http://example.com/mcp")
     with pytest.raises(ConfigError) as raised:

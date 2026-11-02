@@ -209,7 +209,7 @@ def test_mcp_lists_each_servers_fields_in_a_group_with_their_layers(
         f'mcp.github.command = ["/opt/bin/github-mcp", "stdio"]   user {user_path}',
         f"mcp.github.url = null   user {user_path}",
         'mcp.github.env = {"GITHUB_TOKEN": "$GITHUB_TOKEN"}   project .orbit/config.toml',
-        "mcp.github.headers = {}   default",
+        f"mcp.github.headers = {{}}   user {user_path}",
         "mcp.github.shared = true   default",
         "mcp.github.idle_minutes = 10   default",
         "mcp.github.timeout_seconds = 300   default",

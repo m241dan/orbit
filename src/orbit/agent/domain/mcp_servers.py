@@ -37,6 +37,9 @@ TRANSPORT_FIELDS = frozenset({"command", "url"})
 TRANSPORT_RULE = "a server has either a command or a url"
 """Why a server setting both ``command`` and ``url``, or neither, is refused."""
 
+HEADERS_RULE = "headers go with a url, not a command"
+"""Why a server reached by its ``command`` is refused for setting ``headers``."""
+
 SERVER_FIELD_BELONGS_IN_PROJECT = (
     "belongs in the project's .orbit/config.toml; the user config sets only a server's command,"
     " url, env and headers"
@@ -179,7 +182,7 @@ class McpServer(_Config):
         if (self.command is None) == (self.url is None):
             raise PydanticCustomError("server_transport", TRANSPORT_RULE)
         if self.headers and self.url is None:
-            raise PydanticCustomError("server_headers", "headers go with a url, not a command")
+            raise PydanticCustomError("server_headers", HEADERS_RULE)
         _refuse_in_the_clear(self.url)
         return self
 
@@ -221,11 +224,13 @@ def merge_servers(given: object, project: Layer, user: UserRoles) -> MergedServe
     """The servers the file in ``project`` declares in ``given``, its ``[mcp]`` table, each
     field the ``user`` config's value if it overrides it, else the project's, else the default.
     Setting ``command`` or ``url``, the user config replaces how the server is reached, both
-    fields. ``given``, or one of its servers, as it is if it isn't a table, for validation to
+    fields, and setting ``command`` it drops the project's ``headers`` too, as only a URL takes
+    them. ``given``, or one of its servers, as it is if it isn't a table, for validation to
     refuse.
 
     Raises :class:`UserConfigError` naming each of the user config's server fields that's invalid
-    or that it can't set, or else each server it overrides that ``given`` doesn't declare.
+    or that it can't set, or else each server it overrides that ``given`` doesn't declare, or else
+    each server it gives ``headers`` that's reached by its command.
     """
     overrides = _user_servers(user.servers)
     if not isinstance(given, dict):
@@ -235,6 +240,7 @@ def merge_servers(given: object, project: Layer, user: UserRoles) -> MergedServe
         name: _merged(table, overrides.get(name), project, user.layer)
         for name, table in given.items()
     }
+    _refuse_headers_with_command(overrides, merged)
     return _split(merged)
 
 
@@ -243,6 +249,26 @@ def _refuse_added(overrides: Collection[str], declared: Collection[str]) -> None
     project hasn't ``declared``, on a line of its own, if any."""
     if added := [name for name in overrides if name not in declared]:
         raise UserConfigError("\n".join(map(added_server_note, added)))
+
+
+def _refuse_headers_with_command(
+    overrides: Mapping[str, ServerFields], merged: Mapping[str, tuple[object, object]]
+) -> None:
+    """Raise :class:`UserConfigError` naming each server the user config ``overrides`` with
+    headers that's reached by its command once ``merged``, on a line of its own, if any."""
+    if misplaced := [
+        name
+        for name, override in overrides.items()
+        if override.headers and _is_reached_by_command(merged[name][0])
+    ]:
+        raise UserConfigError(
+            "\n".join(f"mcp.{name}.headers: {HEADERS_RULE}" for name in misplaced)
+        )
+
+
+def _is_reached_by_command(table: object) -> bool:
+    """Whether ``table``, a merged server's fields, is reached by its command alone."""
+    return isinstance(table, dict) and "command" in table and "url" not in table
 
 
 def _split(merged: Mapping[str, tuple[object, dict[str, Layer]]]) -> MergedServers:
@@ -292,10 +318,20 @@ def _merged(
     if not isinstance(given, dict):
         return given, {}
     users = {} if override is None else override.model_dump(exclude_unset=True)
-    replaced = TRANSPORT_FIELDS if users.keys() & TRANSPORT_FIELDS else frozenset()
+    replaced = _replaced_by(users.keys())
     fields = {key: value for key, value in given.items() if key not in replaced} | users
     layers = dict.fromkeys(McpServer.model_fields, DEFAULT) | dict.fromkeys(given, project)
     return fields, layers | dict.fromkeys(users.keys() | replaced, user)
+
+
+def _replaced_by(overridden: Collection[str]) -> frozenset[str]:
+    """The project's fields of a server that the user config's ``overridden`` fields replace:
+    both ways of reaching it if it sets either, and its headers too if it sets a command."""
+    if "command" in overridden:
+        return TRANSPORT_FIELDS | {"headers"}
+    if "url" in overridden:
+        return TRANSPORT_FIELDS
+    return frozenset()
 
 
 def check_role_servers(

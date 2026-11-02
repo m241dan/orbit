@@ -159,6 +159,57 @@ def test_the_users_url_replaces_how_the_server_is_reached() -> None:
     assert servers.layers["github"]["command"] == servers.layers["github"]["url"] == USER
 
 
+SEMGREP_WITH_HEADERS = {**SEMGREP, "headers": {"Authorization": "Bearer ${SEMGREP_TOKEN}"}}
+
+
+def test_the_users_command_drops_the_projects_url_and_headers() -> None:
+    servers = merged(
+        {"semgrep": SEMGREP_WITH_HEADERS}, {"semgrep": {"command": ["semgrep", "mcp"]}}
+    )
+    assert servers.tables["semgrep"] == {"command": ("semgrep", "mcp")}
+    layers = servers.layers["semgrep"]
+    assert layers["command"] == layers["url"] == layers["headers"] == USER
+
+
+def test_the_users_url_keeps_the_projects_headers() -> None:
+    servers = merged({"semgrep": SEMGREP_WITH_HEADERS}, {"semgrep": {"url": "https://h/mcp"}})
+    assert servers.tables["semgrep"] == {**SEMGREP_WITH_HEADERS, "url": "https://h/mcp"}
+    assert servers.layers["semgrep"]["headers"] == PROJECT
+    assert servers.layers["semgrep"]["url"] == USER
+
+
+@pytest.mark.parametrize(
+    ("given", "user"),
+    [
+        (GITHUB, {"headers": {"A": "1"}}),
+        (SEMGREP, {"command": ["semgrep", "mcp"], "headers": {"A": "1"}}),
+    ],
+    ids=["the project's command", "the user's command"],
+)
+def test_the_users_headers_on_a_server_reached_by_a_command_are_its_fault(
+    given: dict[str, Any], user: dict[str, Any]
+) -> None:
+    with pytest.raises(UserConfigError) as raised:
+        merged({"github": GITHUB, "semgrep": given}, {"semgrep": user})
+    assert str(raised.value) == "mcp.semgrep.headers: headers go with a url, not a command"
+
+
+def test_the_users_headers_with_its_url_over_a_command_pass() -> None:
+    user = {"github": {"url": "https://h/mcp", "headers": {"A": "1"}}}
+    servers = merged({"github": GITHUB}, user)
+    assert servers.tables["github"] == {"env": GITHUB["env"], **user["github"]}
+
+
+def test_the_users_empty_headers_on_a_server_reached_by_a_command_pass() -> None:
+    servers = merged({"github": GITHUB}, {"github": {"headers": {}}})
+    assert servers.tables["github"] == {**GITHUB, "headers": {}}
+
+
+def test_a_projects_headers_with_a_command_are_left_for_validation() -> None:
+    given = {**GITHUB, "headers": {"A": "1"}}
+    assert merged({"github": given}).tables == {"github": given}
+
+
 def test_the_users_env_and_headers_replace_the_projects_whole() -> None:
     given = {"semgrep": {**SEMGREP, "headers": {"A": "1", "B": "2"}, "env": {"X": "1"}}}
     servers = merged(given, {"semgrep": {"headers": {"A": "$A"}, "env": {}}})

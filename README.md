@@ -2071,7 +2071,8 @@ and are refused as a role's field is (see [Skills](#skills) and [Triggers](#trig
 An MCP server the project declares (see [MCP servers](#mcp-servers)) may be pointed at your
 machine's copy: an `[mcp.<name>]` table in your `config.toml` sets its `command`, `url`, `env`
 and `headers`, each replacing the project's value; setting `command` or `url` replaces how the
-server is reached, so the project's other one is dropped:
+server is reached, so the project's other one is dropped, and setting `command` drops the
+project's `headers` too, as only a `url` takes them:
 
 ```toml
 [mcp.github]
