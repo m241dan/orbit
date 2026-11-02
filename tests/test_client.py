@@ -274,7 +274,7 @@ async def test_an_unreadable_event_ends_the_link_without_reconnecting() -> None:
         ended = await states.until(Ended)
         assert isinstance(ended, Ended) and ended == session.state
         assert ended.url == url and ended.reason.startswith("An event can't be read: Not JSON")
-        await asyncio.sleep(0.1)  # Long enough for several attempts.
+        await asyncio.sleep(0.1)  # fixed wait: long enough for attempts it mustn't make
         assert fake.connections.empty()
         assert [type(state) for state in states.seen] == [Connected, Ended]
         await session.close()
@@ -305,7 +305,8 @@ async def test_a_connection_lost_at_once_each_time_is_retried_with_growing_waits
         fake.hang_up = True
         session, _ = client(url, backoff=Backoff(first=0.02, most=1, jitter=0))
         session.events()
-        await asyncio.sleep(0.3)  # Waits of 0.02, 0.04, 0.08 and 0.16 s fit in it.
+        # Waits of 0.02, 0.04, 0.08 and 0.16 s fit in it.
+        await asyncio.sleep(0.3)  # fixed wait: the backoff's waits are what is measured
         await session.close()
         assert 2 <= fake.connections.qsize() <= 6
 
@@ -725,7 +726,7 @@ async def test_failing_to_connect_is_retried_and_reported_once() -> None:
     session, states = client(url)
     session.events()
     await states.until(Reconnecting)
-    await asyncio.sleep(0.1)  # Long enough for several attempts.
+    await asyncio.sleep(0.1)  # fixed wait: long enough for several attempts
     assert len(states.seen) == 1
     await session.close()
 
@@ -778,7 +779,7 @@ async def test_a_close_that_would_recur_ends_the_link_with_its_reason(
         await fake.command()
         await (await fake.connection()).close(code, reason)
         assert await states.until(Ended) == Ended(url, reason) == session.state
-        await asyncio.sleep(0.1)  # Long enough for several attempts.
+        await asyncio.sleep(0.1)  # fixed wait: long enough for attempts it mustn't make
         assert fake.connections.empty()
         assert [type(state) for state in states.seen] == [Connected, Ended]
         await session.close()
@@ -839,7 +840,7 @@ async def test_a_refused_token_is_reported_naming_its_file_and_not_retried() -> 
         session.events()
         refused = await states.until(TokenRefused)
         assert refused == TokenRefused(messages.TOKEN_REFUSED.format(path=TOKEN_FILE))
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.1)  # fixed wait: long enough for attempts it mustn't make
         assert len(fake.headers) == 1
         await session.close()
 

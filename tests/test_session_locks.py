@@ -51,6 +51,25 @@ def directory_held(directory: Path) -> Iterator[None]:
         os.close(guard)
 
 
+@pytest.fixture
+def lock_contended(monkeypatch: pytest.MonkeyPatch) -> threading.Event:
+    """Set once a thread has to wait for a file lock that another holds."""
+    real = fcntl.flock
+    contended = threading.Event()
+
+    def flock(fd: int, operation: int) -> None:
+        if operation & fcntl.LOCK_NB:
+            return real(fd, operation)
+        try:
+            return real(fd, operation | fcntl.LOCK_NB)
+        except BlockingIOError:
+            contended.set()
+            return real(fd, operation)
+
+    monkeypatch.setattr(fcntl, "flock", flock)
+    return contended
+
+
 async def test_acquiring_writes_a_lock_with_our_process_id(tmp_path: Path) -> None:
     assert await locks_in(tmp_path).acquire("abc")
     assert (sessions(tmp_path) / "abc.lock").read_text() == str(os.getpid())
@@ -183,11 +202,13 @@ async def test_a_lock_that_cant_be_released_raises(
         await locks.release("abc")
 
 
-async def test_a_cancelled_acquire_leaves_no_lock_behind(tmp_path: Path) -> None:
+async def test_a_cancelled_acquire_leaves_no_lock_behind(
+    tmp_path: Path, lock_contended: threading.Event
+) -> None:
     sessions(tmp_path).mkdir(parents=True)
     with directory_held(sessions(tmp_path)):  # Holds the acquire mid-flight.
         acquiring = asyncio.create_task(locks_in(tmp_path).acquire("abc"))
-        await asyncio.sleep(0.05)
+        assert await asyncio.to_thread(lock_contended.wait, 5)
         acquiring.cancel()
         await asyncio.sleep(0)
     with pytest.raises(asyncio.CancelledError):
@@ -197,7 +218,7 @@ async def test_a_cancelled_acquire_leaves_no_lock_behind(tmp_path: Path) -> None
 
 
 async def test_an_acquire_cancelled_twice_still_leaves_no_lock_behind(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, lock_contended: threading.Event
 ) -> None:
     real = SessionLocks._acquire
     taken = threading.Event()
@@ -213,7 +234,7 @@ async def test_an_acquire_cancelled_twice_still_leaves_no_lock_behind(
     locks = locks_in(tmp_path)
     with directory_held(sessions(tmp_path)):
         acquiring = asyncio.create_task(locks.acquire("abc"))
-        await asyncio.sleep(0.05)
+        assert await asyncio.to_thread(lock_contended.wait, 5)
         for _ in range(2):  # Again while it waits for the thread: it still lets go.
             acquiring.cancel()
             await asyncio.sleep(0)
@@ -225,7 +246,7 @@ async def test_an_acquire_cancelled_twice_still_leaves_no_lock_behind(
 
 
 async def test_a_cancelled_acquire_whose_lock_fails_stays_cancelled(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, lock_contended: threading.Event
 ) -> None:
     def fail(fd: int, length: int) -> None:
         raise OSError("boom")
@@ -235,7 +256,7 @@ async def test_a_cancelled_acquire_whose_lock_fails_stays_cancelled(
     monkeypatch.setattr(os, "ftruncate", fail)
     with directory_held(sessions(tmp_path)):
         acquiring = asyncio.create_task(locks_in(tmp_path).acquire("abc"))
-        await asyncio.sleep(0.05)
+        assert await asyncio.to_thread(lock_contended.wait, 5)
         acquiring.cancel()
         await asyncio.sleep(0)
     with pytest.raises(asyncio.CancelledError):
@@ -244,7 +265,7 @@ async def test_a_cancelled_acquire_whose_lock_fails_stays_cancelled(
 
 
 async def test_a_cancelled_acquire_whose_lock_cant_be_released_stays_cancelled(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, lock_contended: threading.Event
 ) -> None:
     def refused(path: Path, missing_ok: bool = False) -> None:
         raise PermissionError("read-only")
@@ -253,19 +274,21 @@ async def test_a_cancelled_acquire_whose_lock_cant_be_released_stays_cancelled(
     monkeypatch.setattr(Path, "unlink", refused)
     with directory_held(sessions(tmp_path)):
         acquiring = asyncio.create_task(locks_in(tmp_path).acquire("abc"))
-        await asyncio.sleep(0.05)
+        assert await asyncio.to_thread(lock_contended.wait, 5)
         acquiring.cancel()
         await asyncio.sleep(0)
     with pytest.raises(asyncio.CancelledError):
         await acquiring
 
 
-async def test_a_cancelled_acquire_of_a_lock_we_hold_keeps_it(tmp_path: Path) -> None:
+async def test_a_cancelled_acquire_of_a_lock_we_hold_keeps_it(
+    tmp_path: Path, lock_contended: threading.Event
+) -> None:
     locks = locks_in(tmp_path)
     assert await locks.acquire("abc")
     with directory_held(sessions(tmp_path)):
         acquiring = asyncio.create_task(locks.acquire("abc"))
-        await asyncio.sleep(0.05)
+        assert await asyncio.to_thread(lock_contended.wait, 5)
         acquiring.cancel()
         await asyncio.sleep(0)
     with pytest.raises(asyncio.CancelledError):
@@ -284,12 +307,14 @@ async def test_acquiring_after_closing_raises_and_takes_no_lock(tmp_path: Path) 
     assert await locks_in(tmp_path).acquire("abc")
 
 
-async def test_a_lock_being_taken_when_closed_is_free_once_both_finish(tmp_path: Path) -> None:
+async def test_a_lock_being_taken_when_closed_is_free_once_both_finish(
+    tmp_path: Path, lock_contended: threading.Event
+) -> None:
     locks = locks_in(tmp_path)
     sessions(tmp_path).mkdir(parents=True)
     with directory_held(sessions(tmp_path)):  # Holds the acquire mid-flight.
         acquiring = asyncio.create_task(locks.acquire("abc"))
-        await asyncio.sleep(0.05)
+        assert await asyncio.to_thread(lock_contended.wait, 5)
         locks.close()
     with pytest.raises(StoreFailed, match="closed"):
         await acquiring

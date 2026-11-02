@@ -6,9 +6,9 @@ import re
 import subprocess
 import sys
 import threading
-import time
 from collections.abc import Callable, Mapping
 from contextlib import ExitStack
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -783,12 +783,22 @@ def test_serve_startup_and_a_frontend_add_refuse_a_workspace_saying_the_same(
     assert capsys.readouterr().err == f"{refused.value}\n"
 
 
-def gated(monkeypatch: pytest.MonkeyPatch, gate: threading.Event, fails: bool = False) -> None:
-    """Have opening a workspace wait on ``gate`` as it reads the configuration, then fail if
+@dataclass(frozen=True)
+class Gate:
+    """Where opening a workspace waits as it reads the configuration: ``reached`` is set as one
+    comes to it, and setting ``opened`` lets it through."""
+
+    reached: threading.Event = field(default_factory=threading.Event)
+    opened: threading.Event = field(default_factory=threading.Event)
+
+
+def gated(monkeypatch: pytest.MonkeyPatch, gate: Gate, fails: bool = False) -> None:
+    """Have opening a workspace wait at ``gate`` as it reads the configuration, then fail if
     ``fails``."""
 
     def waits(path: str, config_dir: Path, runtime: str | None) -> OrbitConfig:
-        assert gate.wait(10)
+        gate.reached.set()
+        assert gate.opened.wait(10)
         if fails:
             raise RuntimeError("A bug.")
         return read_config(path, config_dir, runtime)
@@ -796,15 +806,13 @@ def gated(monkeypatch: pytest.MonkeyPatch, gate: threading.Event, fails: bool = 
     monkeypatch.setattr(served_workspaces, "read_config", waits)
 
 
-async def cancelled_while_preparing(
-    source: ServedWorkspaces, root: Path, gate: threading.Event
-) -> None:
+async def cancelled_while_preparing(source: ServedWorkspaces, root: Path, gate: Gate) -> None:
     """Open the workspace at ``root`` with ``source``, cancel it while it's being prepared, then
     let the preparation finish and the cancellation end."""
     opening = asyncio.create_task(source.open(str(root)))
-    await asyncio.sleep(0.05)
+    assert await asyncio.to_thread(gate.reached.wait, 5)
     opening.cancel()
-    gate.set()
+    gate.opened.set()
     with pytest.raises(asyncio.CancelledError):
         await opening
 
@@ -813,7 +821,7 @@ async def test_an_add_cancelled_while_preparing_lets_the_lock_go_once_prepared(
     stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = directory(tmp_path)
-    gate = threading.Event()
+    gate = Gate()
     gated(monkeypatch, gate)
     source = workspaces(stack, store)
 
@@ -827,7 +835,7 @@ async def test_a_later_add_of_a_workspace_whose_add_was_cancelled_takes_its_lock
     stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = directory(tmp_path)
-    gate = threading.Event()
+    gate = Gate()
     gated(monkeypatch, gate)
     source = workspaces(stack, store)
     await cancelled_while_preparing(source, root, gate)
@@ -842,7 +850,7 @@ async def test_an_add_cancelled_while_preparing_that_then_fails_takes_no_lock(
     stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = directory(tmp_path)
-    gate = threading.Event()
+    gate = Gate()
     gated(monkeypatch, gate, fails=True)
     source = workspaces(stack, store)
 
@@ -947,14 +955,14 @@ async def test_an_add_cancelled_as_it_reads_the_registry_leaves_the_workspace_un
 
 
 async def opened_as_the_server_starts(
-    source: ServedWorkspaces, root: Path, gate: threading.Event, url: str
+    source: ServedWorkspaces, root: Path, gate: Gate, url: str
 ) -> WorkspaceHost:
     """The host of the workspace at ``root``, opened with ``source`` before the server's
     ``url`` is known and prepared once it is."""
     opening = asyncio.create_task(source.open(str(root)))
-    await asyncio.sleep(0.05)
+    assert await asyncio.to_thread(gate.reached.wait, 5)
     source.url = url
-    gate.set()
+    gate.opened.set()
     return await opening
 
 
@@ -962,7 +970,7 @@ async def test_a_lock_taken_as_the_server_starts_names_its_url(
     stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = directory(tmp_path)
-    gate = threading.Event()
+    gate = Gate()
     gated(monkeypatch, gate)
     source = workspaces(stack, store)
 
@@ -976,7 +984,7 @@ async def test_a_lock_that_cant_name_the_url_known_once_taken_is_unavailable_and
     stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = directory(tmp_path)
-    gate = threading.Event()
+    gate = Gate()
     gated(monkeypatch, gate)
 
     def unwritable(lock: WorkspaceLock, url: str) -> None:
@@ -1002,7 +1010,7 @@ async def test_a_lock_that_cant_name_the_url_whose_unflagging_fails_is_unavailab
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     root = directory(tmp_path)
-    gate = threading.Event()
+    gate = Gate()
     gated(monkeypatch, gate)
     set_served = WorkspaceRegistry.set_served
 
@@ -1032,7 +1040,7 @@ def test_a_lock_served_from_the_start_that_cant_name_the_url_leaves_the_flag_alo
     stack: ExitStack, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = directory(tmp_path)
-    gate = threading.Event()
+    gate = Gate()
     gated(monkeypatch, gate)
 
     def unwritable(lock: WorkspaceLock, url: str) -> None:
@@ -1040,15 +1048,16 @@ def test_a_lock_served_from_the_start_that_cant_name_the_url_leaves_the_flag_alo
 
     store = asyncio.run(SqliteStore.open(tmp_path / "state"))
     source = workspaces(stack, store)
-    gate.set()
+    gate.opened.set()
     workspace_id = asyncio.run(flagged_and_closed(source, root))
-    gate.clear()
+    gate.opened.clear()
+    gate.reached.clear()
     monkeypatch.setattr(WorkspaceLock, "announce", unwritable)
     serving = threading.Thread(target=lambda: refused_served(source, root))
     serving.start()
-    time.sleep(0.05)
+    assert gate.reached.wait(5)
     source.url = "ws://127.0.0.1:7433/"
-    gate.set()
+    gate.opened.set()
     serving.join()
     served = asyncio.run(WorkspaceRegistry(store).served())
     asyncio.run(store.close())

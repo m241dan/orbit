@@ -61,6 +61,9 @@ enumerations and its unit-suffixed numbers into unit types.
 - Every test runs with isolated state and config directories, from the autouse fixtures in
   `tests/conftest.py`.
 - TUI logic is tested with fake views, synchronously; widgets with Textual's pilot.
+- Tests wait on conditions (`tests/waiting.py`, `tests/loop_quiet.py`), not fixed sleeps; a
+  contract in `tests/test_contracts.py` fails on a sleep for a literal while unless its line
+  says why with `# fixed wait: <why>`.
 
 ## Languages
 

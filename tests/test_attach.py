@@ -65,6 +65,7 @@ from tests.attach_fakes import (
 )
 from tests.connection_helpers import envelopes, joined, received, say
 from tests.server_fakes import TASK
+from tests.waiting import eventually
 
 LATER = "later"
 """The id of another saved session that isn't open."""
@@ -507,14 +508,15 @@ async def test_a_connection_attaching_while_its_session_is_deleted_views_the_ope
     session = workspace(store)
     deleting = await joined(session, "deleting", read=True)
     attaching = await joined(session, "attaching", read=True)
-    release = asyncio.Event()
+    release, holding = asyncio.Event(), asyncio.Event()
 
     async def held() -> None:
+        holding.set()
         await release.wait()
 
     store.on_delete = held
     delete = asyncio.create_task(say(deleting, "delete", DeleteSession(session_id=EARLIER)))
-    await asyncio.sleep(0.01)
+    await eventually(holding.is_set)
     await say(attaching, "attach", Attach(workspace=WORKSPACE, session=EARLIER))
     release.set()
     await delete
@@ -702,17 +704,18 @@ async def test_attaching_to_a_session_opened_while_its_record_is_held_attaches_l
     session = workspace(store)
     other = await joined(session, "other", read=True)
     attaching = await joined(session, "attaching", read=True)
-    release = asyncio.Event()
+    release, holding = asyncio.Event(), asyncio.Event()
 
     async def held() -> None:
         store.on_list = None
+        holding.set()
         await release.wait()
 
     store.on_list = held
     attach = asyncio.create_task(
         say(attaching, "attach", Attach(workspace=WORKSPACE, session=EARLIER))
     )
-    await asyncio.sleep(0.01)
+    await eventually(holding.is_set)
     await say(other, "activate", ActivateSession(session=EARLIER))
     release.set()
     await attach
@@ -732,17 +735,18 @@ async def attach_held(
 ) -> tuple[asyncio.Task[None], asyncio.Event]:
     """``attaching``'s attach to ``earlier``, held as its view's events are read from
     ``store`` until the event returned is set."""
-    release = asyncio.Event()
+    release, holding = asyncio.Event(), asyncio.Event()
 
     async def held(session_id: str) -> None:
         store.on_recent = None
+        holding.set()
         await release.wait()
 
     store.on_recent = held
     attach = asyncio.create_task(
         say(attaching, "attach", Attach(workspace=WORKSPACE, session=EARLIER))
     )
-    await asyncio.sleep(0.01)
+    await eventually(holding.is_set)
     return attach, release
 
 

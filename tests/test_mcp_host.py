@@ -16,6 +16,7 @@ from orbit.agent.application.ports import HostFailed, Reply
 from orbit.agent.domain.tools import ORBIT_TOOLS
 from orbit.agent.external import mcp_host
 from orbit.agent.external.mcp_host import PROMPT_RECIPE, McpHost
+from tests.waiting import eventually
 
 OK = Reply("ok")
 
@@ -310,7 +311,10 @@ async def test_a_server_that_cant_be_built_closes_its_socket(
 
 
 async def test_starting_cancelled_leaves_nothing_serving(monkeypatch: pytest.MonkeyPatch) -> None:
+    serving = asyncio.Event()
+
     async def hang(self: object, sockets: object = None) -> None:
+        serving.set()
         await asyncio.Event().wait()
 
     sockets = Sockets()
@@ -318,7 +322,7 @@ async def test_starting_cancelled_leaves_nothing_serving(monkeypatch: pytest.Mon
     monkeypatch.setattr("uvicorn.Server.serve", hang)
     host = McpHost()
     starting = asyncio.create_task(host.start(RecordingHandler()))
-    await asyncio.sleep(0.05)
+    await eventually(serving.is_set)
     starting.cancel()
     with pytest.raises(asyncio.CancelledError):
         await starting

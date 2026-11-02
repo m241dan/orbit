@@ -12,7 +12,6 @@ import stat
 import subprocess
 import sys
 import threading
-import time
 import urllib.request
 from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass, field, replace
@@ -80,7 +79,7 @@ from tests.git_repo import bare_repository, commit_file, init_repo
 from tests.server_fakes import TASK
 from tests.store_views import database, workspace_id_of
 from tests.tls_certs import DAY, Ca, ServerFiles, make_ca, make_client, make_server, other_key
-from tests.waiting import eventually
+from tests.waiting import eventually, eventually_sync
 
 runner = CliRunner()
 QUIET = ["--no-usage", "--no-verify"]
@@ -204,14 +203,14 @@ class Frontend:
 
 def _run_file(state: Path) -> dict[str, object]:
     """The run file in ``state``, once there is one."""
-    deadline = time.monotonic() + 30
-    while time.monotonic() < deadline:
-        found = list((state / "run").glob("*.json")) if (state / "run").exists() else []
-        if found:
-            data: dict[str, object] = json.loads(found[0].read_text())
-            return data
-        time.sleep(0.02)
-    raise AssertionError("orbit serve never started")
+    eventually_sync(lambda: _run_files(state), timeout=30)
+    data: dict[str, object] = json.loads(_run_files(state)[0].read_text())
+    return data
+
+
+def _run_files(state: Path) -> list[Path]:
+    """The run files in ``state``."""
+    return list((state / "run").glob("*.json")) if (state / "run").exists() else []
 
 
 def say(websocket: Client, command_id: str, command: Command) -> None:
@@ -611,9 +610,8 @@ def test_a_stale_run_file_is_replaced(state: Path, config_dir: Path) -> None:
     RunFile(state).write("ws://127.0.0.1:1/", process.pid)
 
     def ours(state: Path) -> dict[str, object]:
-        while (found := _run_file(state))["pid"] != os.getpid():
-            time.sleep(0.02)
-        return found
+        eventually_sync(lambda: _run_file(state)["pid"] == os.getpid(), timeout=30)
+        return _run_file(state)
 
     frontend = Frontend(state, config_dir, listening=ours)
     served(frontend, "--port", "0")
@@ -627,9 +625,8 @@ def test_a_run_file_naming_this_process_is_stale_and_replaced(
     RunFile(state).write("ws://127.0.0.1:1/", os.getpid())
 
     def ours(state: Path) -> dict[str, object]:
-        while (found := _run_file(state))["url"] == "ws://127.0.0.1:1/":
-            time.sleep(0.02)
-        return found
+        eventually_sync(lambda: _run_file(state)["url"] != "ws://127.0.0.1:1/", timeout=30)
+        return _run_file(state)
 
     frontend = Frontend(state, config_dir, listening=ours)
     served(frontend, "--port", "0")

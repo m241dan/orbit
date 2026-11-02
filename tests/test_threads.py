@@ -19,7 +19,8 @@ from orbit.protocol import (
     Session,
     SharedSession,
 )
-from tests.agent_fakes import notice
+from tests.agent_fakes import notice, settled
+from tests.waiting import eventually
 
 type Threaded = ThreadedSession[CommandEnvelope, EventEnvelope]
 """A threaded session driving the protocol's session."""
@@ -238,7 +239,7 @@ async def test_a_cancelled_close_still_stops_the_thread() -> None:
     session, _ = threaded(inner)
     session.start()
     closing = asyncio.create_task(session.close())
-    await asyncio.sleep(0.05)
+    await eventually(lambda: inner.closes == 1)  # The inner close hangs.
     closing.cancel()
 
     with pytest.raises(asyncio.CancelledError):
@@ -273,7 +274,7 @@ async def test_a_blocked_backend_does_not_stop_the_callers_loop() -> None:
     async def tick() -> None:
         nonlocal ticks
         while True:
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0.01)  # fixed wait: ticks of the caller's loop, counted
             ticks += 1
 
     ticker = asyncio.create_task(tick())
@@ -328,26 +329,28 @@ async def test_a_pump_whose_callers_loop_has_closed_ends_quietly() -> None:
     assert inner.stream_finished.is_set()
 
 
-def gated(gate: threading.Event) -> tuple[Threaded, list[str]]:
-    """A threaded session whose inner session is built only once ``gate`` is set, and the
-    threads that built one."""
+def gated(gate: threading.Event) -> tuple[Threaded, list[str], threading.Event]:
+    """A threaded session whose inner session is built only once ``gate`` is set, the threads
+    that built one, and an event set once a build waits for ``gate``."""
     builders: list[str] = []
+    building = threading.Event()
 
     def make() -> SharedSession:
+        building.set()
         gate.wait()
         builders.append(threading.current_thread().name)
         return FakeSession()
 
-    return ThreadedSession(make), builders
+    return ThreadedSession(make), builders, building
 
 
 async def test_the_callers_loop_runs_while_the_first_send_waits_for_the_build() -> None:
     gate = threading.Event()
-    session, _ = gated(gate)
+    session, _, building = gated(gate)
     release = threading.Timer(1, gate.set)  # Ends a build that blocks the loop, so it fails.
     release.start()
     sending = asyncio.create_task(session.send(command("hi")))
-    await asyncio.sleep(0.05)
+    assert await asyncio.to_thread(building.wait, 5)
 
     assert not gate.is_set() and not sending.done()
     gate.set()
@@ -358,11 +361,11 @@ async def test_the_callers_loop_runs_while_the_first_send_waits_for_the_build() 
 
 async def test_the_callers_loop_runs_while_the_first_events_waits_for_the_build() -> None:
     gate = threading.Event()
-    session, _ = gated(gate)
+    session, _, building = gated(gate)
     release = threading.Timer(1, gate.set)
     release.start()
     collecting = asyncio.create_task(collect(session))
-    await asyncio.sleep(0.05)
+    assert await asyncio.to_thread(building.wait, 5)
 
     assert not gate.is_set() and not collecting.done()
     gate.set()
@@ -373,10 +376,10 @@ async def test_the_callers_loop_runs_while_the_first_events_waits_for_the_build(
 
 async def test_a_concurrent_first_send_and_events_start_one_backend_thread() -> None:
     gate = threading.Event()
-    session, builders = gated(gate)
+    session, builders, building = gated(gate)
     sending = asyncio.create_task(session.send(command("hi")))
     collecting = asyncio.create_task(collect(session))
-    await asyncio.sleep(0.05)
+    assert await asyncio.to_thread(building.wait, 5)
     gate.set()
     await sending
     await collecting
@@ -414,7 +417,7 @@ async def test_close_during_the_build_returns_once_it_completes_and_closes_it() 
     starting = asyncio.create_task(asyncio.to_thread(session.start))
     assert await asyncio.to_thread(building.wait, 5)
     closing = asyncio.create_task(session.close())
-    await asyncio.sleep(0.05)
+    await settled()  # Only the build keeps it from closing.
 
     assert not closing.done()
     gate.set()
@@ -437,7 +440,7 @@ async def test_close_during_a_build_that_fails_returns() -> None:
     starting = asyncio.create_task(asyncio.to_thread(session.start))
     assert await asyncio.to_thread(building.wait, 5)
     closing = asyncio.create_task(session.close())
-    await asyncio.sleep(0.05)
+    await settled()
     gate.set()
 
     await asyncio.wait_for(closing, 5)

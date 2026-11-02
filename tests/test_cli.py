@@ -78,6 +78,7 @@ from tests.store_views import (
     parked_notice,
     store_threads,
 )
+from tests.waiting import eventually_awaited
 
 runner = CliRunner()
 
@@ -330,9 +331,11 @@ def adds_tasks(*prompts: str, before_last: Callable[[], None] = lambda: None) ->
 async def logged_tasks(session: WorkspaceHost, count: int) -> None:
     """Wait until the latest task list the session logged in its store holds ``count`` tasks,
     as the log is written behind the events' delivery."""
-    async with asyncio.timeout(60):
-        while count and await logged_task_count(session) != count:
-            await asyncio.sleep(0.01)
+
+    async def all_logged() -> bool:
+        return not count or await logged_task_count(session) == count
+
+    await eventually_awaited(all_logged, timeout=60)
 
 
 async def logged_task_count(session: WorkspaceHost) -> int | None:

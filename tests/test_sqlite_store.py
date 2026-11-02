@@ -27,6 +27,7 @@ from orbit.agent.external import sqlite_schema, sqlite_store
 from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import NewRows, SqliteStore
 from orbit.protocol import EventEnvelope, Notice, ReportShown, TaskSpec, TaskState
+from tests.agent_fakes import settled
 from tests.git_repo import git
 from tests.store_views import (
     WHEN,
@@ -35,6 +36,7 @@ from tests.store_views import (
     database,
     fill_up,
     record,
+    statement_started,
     store_threads,
 )
 
@@ -594,12 +596,13 @@ async def test_closing_while_a_call_is_in_flight_finishes_it_and_leaves_no_threa
     open_store: Opener, state: Path, workspace: Path
 ) -> None:
     store = await open_store(workspace)
+    started = await statement_started(store)
     with database(state) as connection:
         connection.execute("BEGIN IMMEDIATE")  # Holds the save mid-flight.
         saving = asyncio.create_task(store.save(record()))
-        await asyncio.sleep(0.05)
+        assert await asyncio.to_thread(started.wait, 5)
         closing_store = asyncio.create_task(store.close())
-        await asyncio.sleep(0.05)
+        await settled()  # Only the held save keeps it from closing.
         assert not closing_store.done()
         connection.execute("ROLLBACK")
         await closing_store
@@ -612,14 +615,15 @@ async def test_a_cancelled_close_waits_for_the_thread_to_end_before_it_is_cancel
     open_store: Opener, state: Path, workspace: Path
 ) -> None:
     store = await open_store(workspace)
+    started = await statement_started(store)
     with database(state) as connection:
         connection.execute("BEGIN IMMEDIATE")  # Holds the save mid-flight.
         saving = asyncio.create_task(store.save(record()))
-        await asyncio.sleep(0.05)
+        assert await asyncio.to_thread(started.wait, 5)
         closing_store = asyncio.create_task(store.close())
-        await asyncio.sleep(0.05)
+        await settled()
         closing_store.cancel()
-        await asyncio.sleep(0.05)
+        await settled()  # Only the held save keeps it from closing.
         assert not closing_store.done()
         connection.execute("ROLLBACK")
         with pytest.raises(asyncio.CancelledError):
@@ -632,10 +636,11 @@ async def test_a_cancelled_call_leaves_the_store_usable(
     open_store: Opener, state: Path, workspace: Path
 ) -> None:
     store = await open_store(workspace)
+    started = await statement_started(store)
     with database(state) as connection:
         connection.execute("BEGIN IMMEDIATE")
         saving = asyncio.create_task(store.save(record("first")))
-        await asyncio.sleep(0.05)
+        assert await asyncio.to_thread(started.wait, 5)
         saving.cancel()
         with pytest.raises(asyncio.CancelledError):
             await saving

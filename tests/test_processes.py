@@ -52,10 +52,7 @@ async def test_cancelling_kills_the_child(tmp_path: Path) -> None:
     pid_file = tmp_path / "pid"
     code = f"import os, time; open({str(pid_file)!r}, 'w').write(str(os.getpid())); time.sleep(30)"
     task = asyncio.create_task(run_process((sys.executable, "-c", code), tmp_path))
-    for _ in range(100):
-        if pid_file.exists() and pid_file.read_text():
-            break
-        await asyncio.sleep(0.05)
+    await eventually(lambda: pid_file.exists() and pid_file.read_text())
     pid = int(pid_file.read_text())
     task.cancel()
     await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5)
@@ -133,19 +130,25 @@ async def test_a_group_ignoring_sigterm_is_killed_after_the_grace(
     assert await gone(grandchild)
 
 
-def gated_start(monkeypatch: pytest.MonkeyPatch, gate: asyncio.Event, *, fails: bool) -> None:
+def gated_start(
+    monkeypatch: pytest.MonkeyPatch, gate: asyncio.Event, *, fails: bool
+) -> asyncio.Event:
     """Make starting a program hold until ``gate`` is set, as a busy loop can, after the
-    program is running; then fail with ``FileNotFoundError`` if ``fails``."""
+    program is running; then fail with ``FileNotFoundError`` if ``fails``. Returns the event
+    set once a start is held."""
     start = asyncio.create_subprocess_exec
+    held = asyncio.Event()
 
     async def gated(*command: str, **options: Any) -> asyncio.subprocess.Process:
         process = await start(*command, **options)
+        held.set()
         await gate.wait()
         if fails:
             raise FileNotFoundError(command[0])
         return process
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", gated)
+    return held
 
 
 async def test_cancelling_while_starting_stops_what_the_child_started(
@@ -191,9 +194,9 @@ async def test_cancelling_a_start_that_then_fails_stays_cancelled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     gate = asyncio.Event()
-    gated_start(monkeypatch, gate, fails=True)
+    held = gated_start(monkeypatch, gate, fails=True)
     task = asyncio.create_task(run_process(("true",), tmp_path))
-    await asyncio.sleep(0.1)
+    await eventually(held.is_set)
     task.cancel()
     await asyncio.sleep(0)
     gate.set()

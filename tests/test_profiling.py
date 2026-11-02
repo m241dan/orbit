@@ -6,10 +6,11 @@ import time
 from pathlib import Path
 
 from orbit.profiling import LoopWatchdog, profiled
+from tests.waiting import eventually
 
 
 def hogs_the_loop() -> None:
-    time.sleep(0.4)
+    time.sleep(0.4)  # fixed wait: blocks the loop well past the watchdog's 0.1 s threshold
 
 
 def watchdog(log: io.StringIO) -> LoopWatchdog:
@@ -21,9 +22,9 @@ async def test_a_blocked_loop_logs_one_record_with_what_was_running() -> None:
     log = io.StringIO()
     dog = watchdog(log)
     dog.start()
-    await asyncio.sleep(0.05)
+    await asyncio.sleep(0.05)  # fixed wait: the watchdog's first checks, a sampling interval
     hogs_the_loop()
-    await asyncio.sleep(0.05)
+    await eventually(lambda: "unblocked after" in log.getvalue())
     dog.stop()
 
     text = log.getvalue()
@@ -37,7 +38,7 @@ async def test_a_loop_that_keeps_running_logs_nothing() -> None:
     log = io.StringIO()
     dog = watchdog(log)
     dog.start()
-    await asyncio.sleep(0.3)
+    await asyncio.sleep(0.3)  # fixed wait: several of the watchdog's checks, finding nothing
     dog.stop()
 
     assert log.getvalue() == ""
@@ -54,7 +55,7 @@ def test_stopping_a_watchdog_that_never_started_does_nothing() -> None:
 async def test_profiled_writes_a_profile_and_a_blocked_log(tmp_path: Path) -> None:
     directory = tmp_path / "profile" / "run"
     with profiled(directory, "backend"):
-        await asyncio.sleep(0.02)
+        await asyncio.sleep(0.02)  # fixed wait: the loop running a while under the profile
 
     stats = pstats.Stats(str(directory / "backend.prof"))
     assert stats.total_calls > 0  # type: ignore[attr-defined]
@@ -92,7 +93,7 @@ async def test_stopping_from_the_loops_thread_mid_block_returns() -> None:
     log = io.StringIO()
     dog = watchdog(log)
     dog.start()
-    await asyncio.sleep(0.05)
+    await asyncio.sleep(0.05)  # fixed wait: the watchdog's first checks, a sampling interval
     rescued = threading.Event()
 
     def rescue() -> None:

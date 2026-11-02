@@ -167,3 +167,15 @@ async def fill_up(store: OwnView) -> None:
         store.store._db.execute(f"PRAGMA max_page_count = {pages}")
 
     await store.store._call(cap)
+
+
+async def statement_started(store: OwnView) -> threading.Event:
+    """An event set once ``store``'s database starts running a statement from now on, as a call
+    on its thread does before waiting for a lock another connection holds."""
+    started = threading.Event()
+
+    def trace() -> None:
+        store.store._db.set_trace_callback(lambda statement: started.set())
+
+    await store.store._call(trace)
+    return started

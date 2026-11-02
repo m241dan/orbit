@@ -100,6 +100,71 @@ def test_imports_from_test_modules_are_found_however_they_are_written() -> None:
     ]
 
 
+FIXED_WAIT_REASON = "# fixed wait:"
+"""What a line that sleeps for a set while must carry, followed by why it can't wait on a
+condition instead."""
+
+
+def _sleep_seconds(call: ast.Call) -> object:
+    """What ``call`` passes ``asyncio.sleep`` or ``time.sleep`` as its seconds, if it calls one
+    of them with a literal."""
+    match call:
+        case ast.Call(
+            func=ast.Attribute(value=ast.Name(id="asyncio" | "time"), attr="sleep"),
+            args=[ast.Constant(value=seconds), *_],
+        ):
+            return seconds
+    return None
+
+
+def _is_positive_number(value: object) -> bool:
+    """Whether ``value`` is a number, but not a bool, above zero."""
+    return isinstance(value, int | float) and not isinstance(value, bool) and value > 0
+
+
+def _unexplained_fixed_sleeps(source: str) -> list[int]:
+    """The lines of the Python ``source`` that sleep for a positive number of seconds written
+    out as a literal, without saying why."""
+    lines = source.splitlines()
+    calls = [node for node in ast.walk(ast.parse(source)) if isinstance(node, ast.Call)]
+    return sorted(
+        call.lineno
+        for call in calls
+        if _is_positive_number(_sleep_seconds(call))
+        and FIXED_WAIT_REASON not in lines[call.lineno - 1]
+    )
+
+
+def test_no_test_module_sleeps_for_a_fixed_while_without_saying_why() -> None:
+    sleeping = [
+        f"{path.name}:{line}"
+        for path in sorted(TESTS.glob("test_*.py"))
+        for line in _unexplained_fixed_sleeps(path.read_text())
+    ]
+    assert not sleeping, (
+        f"{', '.join(sleeping)} sleep for a fixed while; wait on a condition with "
+        f"tests/waiting.py or tests/loop_quiet.py, or say why with {FIXED_WAIT_REASON!r}"
+    )
+
+
+def test_fixed_sleeps_are_found_however_they_are_written() -> None:
+    source = (
+        "import asyncio, time\n"
+        "async def waits() -> None:\n"
+        "    await asyncio.sleep(0.05)\n"
+        "    time.sleep(0.02)\n"
+        "    time.sleep(1)\n"
+        "    time.sleep(True)\n"
+        "    await asyncio.sleep(0.05)  # fixed wait: a sampling interval\n"
+        "    await asyncio.sleep(0)\n"
+        "    await asyncio.sleep(poll)\n"
+        "    await clock.sleep(5)\n"
+        "    sleep(5)\n"
+        "    print('time.sleep(60)')\n"
+    )
+    assert _unexplained_fixed_sleeps(source) == [3, 4, 5]
+
+
 def test_tracing_imports_no_orbit_package() -> None:
     forbidden: list[str] = _contract(TRACING_CONTRACT)["forbidden_modules"]
     modules = pkgutil.iter_modules(orbit.__path__, prefix="orbit.")

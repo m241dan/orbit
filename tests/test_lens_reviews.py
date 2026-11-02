@@ -69,6 +69,7 @@ from tests.agent_fakes import (
     settle,
     start,
 )
+from tests.loop_quiet import quiet_within
 from tests.session_builders import last_of, opened, saved, store_with
 from tests.telemetry_helpers import Traced
 from tests.waiting import eventually
@@ -931,7 +932,7 @@ async def test_a_review_whose_last_lens_was_interrupted_fans_in_on_load() -> Non
     store = store_with(saved("auth", *tasks, reviews=lane))
     session, launcher = reopening(store, triggers=lens_triggers(merge=MERGE))
     events = await opened(session, ActivateSession(session="auth"))
-    await asyncio.sleep(0.05)
+    await quiet_within(0.05)
     await session.close()
 
     snapshot = last_of(Snapshot, events)

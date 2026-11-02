@@ -2,6 +2,7 @@
 
 import asyncio
 import sqlite3
+import time
 from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
 from datetime import UTC, datetime
@@ -15,6 +16,7 @@ from orbit.agent.external.sqlite_schema import MIGRATIONS, StoreError, transacti
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.agent.external.workspace_registry import register
 from tests.store_views import Opener, database, open_view, store_threads
+from tests.waiting import eventually
 
 # Failures at open
 
@@ -141,12 +143,26 @@ def locked_new_database(state: Path) -> sqlite3.Connection:
     return connection
 
 
+class Retries:
+    """Stands in for the schema module's ``time``, counting the waits before trying again."""
+
+    def __init__(self) -> None:
+        self.waits = 0
+        self.monotonic = time.monotonic
+
+    def sleep(self, seconds: float) -> None:
+        self.waits += 1
+        time.sleep(seconds)
+
+
 async def test_a_switch_to_wal_mode_refused_at_once_is_tried_until_it_works(
-    open_store: Opener, state: Path, workspace: Path
+    monkeypatch: pytest.MonkeyPatch, open_store: Opener, state: Path, workspace: Path
 ) -> None:
+    retries = Retries()
+    monkeypatch.setattr(sqlite_schema, "time", retries)
     with closing(locked_new_database(state)) as connection:
         opening = asyncio.ensure_future(open_store(workspace))
-        await asyncio.sleep(0.1)
+        await eventually(lambda: retries.waits >= 2)
         assert not opening.done()
         connection.execute("ROLLBACK")
         await opening

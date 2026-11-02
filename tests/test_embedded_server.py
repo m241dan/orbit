@@ -59,10 +59,16 @@ async def test_serving_that_ends_before_starting_raises_and_closes_the_socket(
 async def test_starting_cancelled_stops_serving_and_closes_the_socket(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("uvicorn.Server.serve", hang)
+    serving = asyncio.Event()
+
+    async def hang_noted(self: object, sockets: object = None) -> None:
+        serving.set()
+        await hang(self, sockets)
+
+    monkeypatch.setattr("uvicorn.Server.serve", hang_noted)
     server, sock = embedded(), bound()
     starting = asyncio.create_task(server.start_serving(sock, "It failed."))
-    await asyncio.sleep(0.05)
+    await eventually(serving.is_set)
     starting.cancel()
     with pytest.raises(asyncio.CancelledError):
         await starting
@@ -160,7 +166,7 @@ async def test_past_the_grace_a_connection_still_open_is_left_and_the_tasks_canc
 async def test_tasks_left_running_are_waited_for_until_they_finish() -> None:
     server = embedded()
     serving = await server.start_serving(bound(), "It failed.")
-    task = asyncio.create_task(asyncio.sleep(0.05))
+    task = asyncio.create_task(asyncio.sleep(0.05))  # fixed wait: work still running at exit
     server.server_state.tasks.add(task)
     task.add_done_callback(server.server_state.tasks.discard)
     server.should_exit = True
@@ -200,7 +206,7 @@ async def test_a_server_forced_to_exit_while_waiting_on_a_connection_stops_waiti
     connection = Lingering(server, after=None)
     server.should_exit = True
     await eventually(lambda: connection.asked, poll=0)
-    await asyncio.sleep(0.02)
+    await asyncio.sleep(0.02)  # fixed wait: it must still be waiting on the connection later
     assert not serving.done()
     server.force_exit = True
     await asyncio.wait_for(serving, 5)

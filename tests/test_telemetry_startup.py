@@ -50,6 +50,7 @@ from orbit.telemetry.file_exporter import (
 )
 from orbit.telemetry.otel import OtelTelemetry
 from orbit.tracing import NoGauges
+from tests.waiting import eventually_sync
 
 
 def _run(tmp_path: Path, environ: dict[str, str] | None = None) -> TelemetryRun:
@@ -183,9 +184,7 @@ def test_metrics_are_exported_every_metrics_interval(tmp_path: Path) -> None:
         pass
 
     directory = tmp_path / "state" / "telemetry"
-    deadline = time.monotonic() + 5
-    while not _metric_lines(directory) and time.monotonic() < deadline:
-        time.sleep(0.05)
+    eventually_sync(lambda: _metric_lines(directory), poll=0.05)
     exported = _metric_lines(directory)
     telemetry.close()
 
