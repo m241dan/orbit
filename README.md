@@ -1039,6 +1039,7 @@ your checkout out of its way, it doesn't sandbox it.
 | Config files | `.orbit/config.toml` in the repository | the verification steps, setup, roles and limits, committed with your code |
 | User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]`, `[server]`, `[remotes]`, `[telemetry]`, and in `[roles]` your machine's model, effort and runtime for roles and your personal roles, with the instructions files they name, and in `[runtimes]` the aliases of each runtime's models |
 | The token | `token` in the config directory | what frontends show `orbit serve` to connect (see [Serving the control plane](#serving-the-control-plane)) |
+| MCP credentials | `credentials.toml` in the config directory | the values MCP servers' `$NAME` references are filled from when orbit's environment doesn't set them, readable and writable by you alone (see [MCP servers](#mcp-servers)) |
 | Certificates | `certs/` in the config directory | the CA, server and client certificates and keys `orbit certs` makes for TLS and mutual TLS (see [Serving the control plane](#serving-the-control-plane)) |
 | The run file | `run/server.json` in the state directory | where the `orbit serve` running on that state directory listens, beside `run/serve.lock`, which that serve holds |
 | Runtime-owned | `~/.claude` | Claude Code's own: your login, read for usage limits, and the agents' conversations |
@@ -1648,8 +1649,29 @@ A server's fields:
   (`true`), or those a list names.
 
 A value in `env` or `headers` may reference a variable as `$NAME` or `${NAME}`, which orbit fills
-in from its own environment when it starts or connects to the server; text without a reference
-is passed as it is. So the file names a secret rather than holding its value.
+in from its own environment when it starts or connects to the server, else from
+`credentials.toml` in the config directory; text without a reference is passed as it is. So the
+file names a secret rather than holding its value.
+
+`credentials.toml` is a flat table of strings, one per variable:
+
+```toml
+GITHUB_TOKEN = "ghp_..."
+SEMGREP_TOKEN = "..."
+```
+
+A variable set in orbit's environment wins over the file, which is read only for a variable the
+environment doesn't set. Orbit reads the file afresh each time it starts or connects to a server
+that needs it, so an edit applies to the next start without restarting orbit, keeps nothing of it
+past that start, and puts its values in no log, span or agent's environment. The file must be
+readable and writable by you alone (`chmod 600`), in a directory others can't write to; a missing
+file is no error. A file your group or others can read or write is refused, and nothing is read
+from it (`/home/you/.config/orbit/credentials.toml must be private: chmod 600 it.`), as is one
+that isn't valid TOML, naming the file and the line, or that holds a value that isn't a string,
+naming its key. A refused file fails the start of each server needing a variable the environment
+doesn't set, saying both why (`MCP server github failed: GITHUB_TOKEN isn't set in orbit's
+environment or credentials.toml. /home/you/.config/orbit/credentials.toml must be private: chmod
+600 it.`), with a notice to the workspace once per failure streak, like other server failures.
 
 A server's name is a plain name of letters, digits, `-` and `_`, without `__`, which parts a
 server's name from its tools' in the names agents see, and isn't the name of one of orbit's
@@ -1691,7 +1713,7 @@ for the workspace, started in a neutral directory of its own in the state direct
 each agent gets its own, started in the agent's own workspace directory, and stopped when the
 agent's run ends. A server started by a `command` is a process of orbit's, given only `PATH` and
 `HOME` from orbit's environment and then its `env`, its `$NAME` and `${NAME}` references filled
-in from orbit's environment as it starts; a variable that isn't set fails the start
+in from orbit's environment, else `credentials.toml`, as it starts; a variable that isn't set fails the start
 (`GITHUB_TOKEN isn't set in orbit's environment or credentials.toml.`). A server at a `url` is
 reached over streamable HTTP and sent its `headers` with every request, their references filled
 in the same way as orbit connects, a variable that isn't set failing the connection with the same
@@ -4085,7 +4107,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     MCP server, whose middleware lists each agent's own tools and passes its calls to proxied
     ones on; `StdioConnector` (in `mcp_stdio`) starts an external MCP server's command as a child
     process and speaks MCP with it, and `EnvironmentCredentials` (in `environment_credentials`)
-    fills its variables in from orbit's environment; `GitCoderTree` is the coder's worktree and its snapshots; `repository` finds the
+    fills its variables in from orbit's environment, and `CredentialsFile` (in `credentials_file`)
+    from `credentials.toml` in the config directory; `GitCoderTree` is the coder's worktree and its snapshots; `repository` finds the
     git repository a workspace is in, fingerprints it, and places orbit's directory in it
     (`orbit_dir`: `.git/orbit`, or `.orbit` outside git); `config_file` reads
     `.orbit/config.toml`, checking the skills its roles name, naming the file that named them,
@@ -4173,7 +4196,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `orbit.agent.request` child of it with `AgentTracing` (in `agent_trace`), and passing calls
     to MCP servers' tools to a `ToolProxy` (in `tool_proxy`), which owns the workspace's
     connections to the servers, lazy, shared or the agent's own, closed when idle, and traces
-    each call as an `orbit.mcp.call` span;
+    each call as an `orbit.mcp.call` span, filling the servers' variables from
+    `LayeredCredentials` (in `credentials`), orbit's environment first, then `credentials.toml`;
     `Verifier` (in `verifier`) runs the steps, each run for an agent's call timed as an
     `orbit.verify.step` child of the call's span; `Lander` (in `landing`) commits and merges
     verified work; every lane of the roles' but the one whose roles merge runs on a `LaneRunner`

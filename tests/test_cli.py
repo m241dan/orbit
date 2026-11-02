@@ -20,9 +20,11 @@ from orbit.agent import (
     ClaudeCliRunner,
     ConfigError,
     ControlPlane,
+    CredentialsFile,
     EnvironmentCredentials,
     GitCoderTree,
     HttpConnector,
+    LayeredCredentials,
     Limits,
     McpHost,
     PlaneParts,
@@ -868,7 +870,7 @@ def test_chat_runs_tasks_through_agents_connected_over_mcp(launched: list[Worksp
 
 
 def test_chat_proxies_the_mcp_servers_started_in_the_state_directory_or_at_their_urls(
-    launched: list[WorkspaceHost], state: Path, tmp_path: Path
+    launched: list[WorkspaceHost], state: Path, config_dir: Path, tmp_path: Path
 ) -> None:
     assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
 
@@ -879,7 +881,10 @@ def test_chat_proxies_the_mcp_servers_started_in_the_state_directory_or_at_their
     assert isinstance(mcp.connector, TransportConnector)
     assert isinstance(mcp.connector.stdio, StdioConnector)
     assert isinstance(mcp.connector.http, HttpConnector)
-    assert isinstance(mcp.credentials, EnvironmentCredentials)
+    assert isinstance(mcp.credentials, LayeredCredentials)
+    assert isinstance(mcp.credentials.first, EnvironmentCredentials)
+    assert isinstance(mcp.credentials.fallback, CredentialsFile)
+    assert mcp.credentials.fallback.path == config_dir / "credentials.toml"
     assert mcp.folder == str(state / "mcp" / store_in(session).workspace_id)
     assert mcp.servers == {}
 

@@ -10,6 +10,7 @@ Layered, outermost first; each layer may import only the ones below it:
 
 from orbit.agent.application.browsing import Browsing
 from orbit.agent.application.control_plane import ControlPlane, PlaneParts
+from orbit.agent.application.credentials import LayeredCredentials
 from orbit.agent.application.desk import Agents
 from orbit.agent.application.handshake import NO_STEPS_NOTE
 from orbit.agent.application.ports import (
@@ -108,6 +109,7 @@ from orbit.agent.external.config_init import (
     update_config,
 )
 from orbit.agent.external.control_plane import ControlPlaneServer, ListenFailed
+from orbit.agent.external.credentials_file import CredentialsFile
 from orbit.agent.external.directories import resolve_config_dir, resolve_state_dir
 from orbit.agent.external.directory_copies import DirectoryCopies, copies_folder
 from orbit.agent.external.directory_lister import DirectoryLister
@@ -192,6 +194,7 @@ __all__ = [
     "Configuring",
     "ControlPlane",
     "ControlPlaneServer",
+    "CredentialsFile",
     "DirectoryCopies",
     "DirectoryLister",
     "EnvironmentCredentials",
@@ -207,6 +210,7 @@ __all__ = [
     "KeyType",
     "KiroCliRunner",
     "Layer",
+    "LayeredCredentials",
     "Limits",
     "ListenFailed",
     "LocalDiscoveryUnavailable",

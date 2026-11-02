@@ -16,12 +16,14 @@ from orbit.agent import (
     ConfigError,
     Configuring,
     ControlPlane,
+    CredentialsFile,
     DirectoryCopies,
     EnvironmentCredentials,
     GitCoderTree,
     HostMaker,
     HostParts,
     HttpConnector,
+    LayeredCredentials,
     LocalZone,
     McpHost,
     McpProxying,
@@ -263,7 +265,9 @@ def _host_maker(
             HostParts(
                 settings=settings,
                 verification=verification,
-                agents=_with_mcp(_with_copies(agents, opened, config), opened, config),
+                agents=_with_mcp(
+                    _with_copies(agents, opened, config), opened, config, user.directory
+                ),
                 workspace=str(root),
                 check_at_startup=True,
                 workspace_id=opened.store.workspace_id,
@@ -376,15 +380,17 @@ def _with_copies(agents: Agents, opened: OpenedStore, config: OrbitConfig) -> Ag
     return replace(agents, copies=DirectoryCopies(agents.root, folder, config.setup))
 
 
-def _with_mcp(agents: Agents, opened: OpenedStore, config: OrbitConfig) -> Agents:
+def _with_mcp(agents: Agents, opened: OpenedStore, config: OrbitConfig, config_dir: Path) -> Agents:
     """``agents`` offered the MCP servers ``config`` declares, as their roles allow: those with a
     command started as processes of orbit's, the shared ones in neutral directories in the state
     directory of the store ``opened`` for their workspace, and those with a URL reached over
-    HTTP, their variables and headers filled from orbit's environment."""
+    HTTP, their variables and headers filled from orbit's environment, else from
+    ``credentials.toml`` in the user config directory ``config_dir``."""
     store = opened.store
     folder = mcp_folder(store.ledger.state_dir, store.workspace_id)
     connector = TransportConnector(StdioConnector(), HttpConnector())
-    proxying = McpProxying(config.mcp, connector, EnvironmentCredentials(), str(folder))
+    credentials = LayeredCredentials(EnvironmentCredentials(), CredentialsFile(config_dir))
+    proxying = McpProxying(config.mcp, connector, credentials, str(folder))
     return replace(agents, mcp=proxying)
 
 
