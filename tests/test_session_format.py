@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from orbit.agent.domain.endings import QUEUED_BEFORE_LENSES
+from orbit.agent.domain.repository_state import parse_review_count
 from orbit.agent.domain.reviews import (
     BatchSnapshot,
     Finding,
@@ -29,7 +30,6 @@ from orbit.agent.domain.sessions import (
     SessionRecord,
     Unreadable,
     parse_record,
-    parse_review_count,
     record_json,
 )
 from orbit.protocol import (

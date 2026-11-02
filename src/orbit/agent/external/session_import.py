@@ -20,8 +20,9 @@ from functools import partial
 from pathlib import Path
 
 from orbit.agent.application.ports import StorageFailed
+from orbit.agent.domain.repository_state import parse_review_count
 from orbit.agent.domain.reviews import SuperReviewCount
-from orbit.agent.domain.sessions import Unreadable, parse_record, parse_review_count
+from orbit.agent.domain.sessions import Unreadable, parse_record
 from orbit.agent.external.session_files import REVIEWS, SESSIONS
 from orbit.agent.external.session_locks import SessionLocks
 from orbit.agent.external.sqlite_store import NewRows, SessionRow, WorkspaceStore

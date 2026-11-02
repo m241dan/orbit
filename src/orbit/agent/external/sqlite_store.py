@@ -35,19 +35,16 @@ from orbit.agent.application.ports import (
 from orbit.agent.domain.merge_holds import AnyHold
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.reports import NewReport
-from orbit.agent.domain.reviews import SuperReviewCount
-from orbit.agent.domain.sessions import (
-    SessionRecord,
-    Unreadable,
+from orbit.agent.domain.repository_state import (
     fired_json,
     merge_holds_json,
     parse_fired,
     parse_merge_holds,
-    parse_record,
     parse_sampled,
-    record_json,
     sampled_json,
 )
+from orbit.agent.domain.reviews import SuperReviewCount
+from orbit.agent.domain.sessions import SessionRecord, Unreadable, parse_record, record_json
 from orbit.agent.domain.usage_totals import UsageRow, UsageTotalsData
 from orbit.agent.external import sqlite_log, sqlite_reports, sqlite_usage
 from orbit.agent.external.session_locks import SessionLocks, check_session_id
