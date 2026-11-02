@@ -1172,11 +1172,12 @@ def fires_by_hand(trigger: Trigger, roles: Collection[str]) -> bool:
     return trigger.enabled and acts
 
 
-def trigger_tab(triggers: Mapping[str, Trigger], origin: str) -> str | None:
-    """The tab of the trigger among ``triggers`` named ``origin``, a task's origin, which its
-    agent shows under; none if no trigger has that name or it has no tab."""
+def trigger_tab(triggers: Mapping[str, Trigger], origin: str, role: str) -> str | None:
+    """The tab of the trigger among ``triggers`` named ``origin``, a task's origin, which the
+    task's agent, in ``role``, shows under; none if no trigger has that name, it has no tab, or
+    it queues no task for ``role``, as a merge pass's fix coder's."""
     trigger = triggers.get(origin)
-    return None if trigger is None else trigger.tab
+    return None if trigger is None or role not in trigger.roles else trigger.tab
 
 
 @dataclass(frozen=True)

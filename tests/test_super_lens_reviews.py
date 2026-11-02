@@ -28,6 +28,7 @@ from orbit.protocol import (
     SUPER_REVIEW,
     TESTS_REVIEWER,
     ActivateSession,
+    AgentStarted,
     FireTrigger,
     Notice,
     ReviewStatus,
@@ -110,6 +111,23 @@ async def test_ctrl_g_queues_the_three_lenses_whose_findings_one_merge_pass_file
     assert "You may file at most 10 tasks." in merge
     assert f"F1 · {STYLE_REVIEWER} · normal: Naming drifted" in merge
     assert f"F2 · {DRIFT_REVIEWER} · normal: Two copies of the parser" in merge
+
+
+async def test_the_merge_pass_shows_under_super_review_but_the_coder_it_files_doesnt() -> None:
+    session = shipped(
+        reports(("Naming drifted", "normal")),
+        claims_done,
+        claims_done,
+        claims_done,  # The task the merge pass files.
+        reviewers=(files("Rename it", ["F1"], []),),
+        review_limits=ONE_ROUND,
+    )
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
+    events = await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    tabs = [(e.role, e.tab) for e in events if isinstance(e, AgentStarted)]
+    assert tabs[3:] == [(REVIEWER, "super-review"), (CODER, None)]
 
 
 async def test_with_the_drift_reviewer_disabled_a_super_review_queues_two_tasks() -> None:

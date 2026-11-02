@@ -424,9 +424,11 @@ again as you move to another workspace; the task list tags each task with the la
 in there. The pinned
 tabs are there from the start and keep the whole session's history; every agent in a role shares its tab (two coders running at
 once both show under **coder**), each message headed and every other entry prefixed with its
-agent's id, so you can tell them apart. Every agent of a trigger with a `tab` writes into that
-tab instead, its messages headed by its role rather than its id, under All too
-(`bugs-reviewer`, `tests-reviewer`, …, two lenses running at once both show under **review**).
+agent's id, so you can tell them apart. Every agent of a trigger with a `tab`, in one of the
+roles that trigger queues, writes into that tab instead, its messages headed by its role rather
+than its id, under All too (`bugs-reviewer`, `tests-reviewer`, …, two lenses running at once both
+show under **review**). A task in another role that carries the trigger's name as its origin,
+such as a fix a merge pass files for the coder, stays with its role, under **coder**.
 Agents of one role at work in the same trigger's tab at once, such as the bugs lenses of two
 landed commits reviewed side by side, are numbered in the order they started: `bugs-reviewer`,
 then `bugs-reviewer 2`, which heads its messages and prefixes its other entries; once the first

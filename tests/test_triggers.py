@@ -25,6 +25,7 @@ from orbit.agent.domain.triggers import (
     trigger_tab,
 )
 from orbit.agent.domain.verification import OUTPUT_LIMIT, trim_output
+from tests.agent_fakes import SHIPPED_TRIGGERS
 
 PROJECT = Layer("project", "/src/app/.orbit/config.toml")
 ROLES = ("coder", "reviewer")
@@ -234,14 +235,21 @@ def test_a_triggers_name_is_a_plain_name() -> None:
 
 def test_a_tasks_tab_is_that_of_the_trigger_its_origin_names() -> None:
     tabbed = {"review": REVIEW.model_copy(update={"tab": "review"}), "check": CHECK}
-    assert trigger_tab(tabbed, "review") == "review"
+    assert trigger_tab(tabbed, "review", "reviewer") == "review"
 
 
 def test_a_task_has_no_tab_when_its_origin_names_no_trigger_or_one_without() -> None:
-    assert (trigger_tab(PACKAGE_TRIGGERS, "planner"), trigger_tab(PACKAGE_TRIGGERS, "check")) == (
-        None,
-        None,
-    )
+    assert (
+        trigger_tab(PACKAGE_TRIGGERS, "planner", "planner"),
+        trigger_tab(PACKAGE_TRIGGERS, "check", "coder"),
+    ) == (None, None)
+
+
+def test_a_merge_pass_fix_coder_has_no_tab_but_the_merge_pass_reviewer_has_its_triggers() -> None:
+    assert (
+        trigger_tab(SHIPPED_TRIGGERS, "merge-pass", "coder"),
+        trigger_tab(SHIPPED_TRIGGERS, "merge-pass", "reviewer"),
+    ) == (None, "review")
 
 
 def test_the_package_keeps_its_triggers_in_order() -> None:

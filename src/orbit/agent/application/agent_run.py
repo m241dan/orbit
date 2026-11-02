@@ -138,7 +138,8 @@ class AgentRun:
         state = self._board.get(task_id)
         self._work = AgentTask(state.task, desk.agents.limits)
         self._role: Role | None = desk.agents.roles.get(self._work.task.role)
-        self._tab = trigger_tab(desk.agents.triggers, state.origin)  # Its trigger's, if any.
+        # Its trigger's tab, if any, and if that trigger queues its role.
+        self._tab = trigger_tab(desk.agents.triggers, state.origin, state.task.role)
         self._stream_task: asyncio.Task[None] | None = None  # The agent's process, once launched.
         self._inbox: asyncio.Queue[_Claim | _Proposal | Wake] = asyncio.Queue()
         self._checking = asyncio.Lock()  # One verification step at a time.

@@ -399,22 +399,43 @@ def tab_key(agent: str | None, roles: Mapping[str, str]) -> str | None:
     return None if agent is None else roles.get(agent, agent)
 
 
-def tabs_by_trigger(triggers: Iterable[TriggerEntry]) -> Mapping[str, str]:
-    """The tabs of the tabbed ones of ``triggers``, by trigger name."""
-    return {trigger.name: trigger.tab for trigger in triggers if trigger.tab is not None}
+@dataclass(frozen=True)
+class TriggerTab:
+    """The ``tab`` a trigger's agents share, and the ``roles`` of the tasks it queues, the only
+    ones whose agents and notes go under it."""
+
+    tab: str
+    roles: tuple[str, ...]
+
+
+def tabs_by_trigger(triggers: Iterable[TriggerEntry]) -> Mapping[str, TriggerTab]:
+    """The tabs of the tabbed ones of ``triggers``, with the roles they queue, by trigger
+    name."""
+    return {
+        trigger.name: TriggerTab(trigger.tab, trigger.roles)
+        for trigger in triggers
+        if trigger.tab is not None
+    }
 
 
 def task_tab_key(
-    state: TaskState | None, triggers: Mapping[str, str], pinned: Collection[str]
+    state: TaskState | None, triggers: Mapping[str, TriggerTab], pinned: Collection[str]
 ) -> str | None:
     """Which of the ``pinned`` tabs the notes on a task (its header, verification results and
     merge notes) belong to: the one its agent writes into (see :func:`pinned_key`), its
-    trigger's tab's, by its origin among the tabs of ``triggers`` by name, or its role's. None,
-    for All only, when it writes into neither or the task isn't on the list (``state``
-    None)."""
+    trigger's tab's, by its origin among the tabs of ``triggers`` by name, if that trigger
+    queues the task's role, or its role's. None, for All only, when it writes into neither or
+    the task isn't on the list (``state`` None)."""
     if state is None:
         return None
-    return pinned_key(state.task.role, triggers.get(state.origin), pinned)
+    return pinned_key(state.task.role, _task_trigger_tab(state, triggers), pinned)
+
+
+def _task_trigger_tab(state: TaskState, triggers: Mapping[str, TriggerTab]) -> str | None:
+    """The tab of the trigger among ``triggers`` that ``state``'s origin names, if it queues the
+    task's role, as a merge pass doesn't its fix coders."""
+    trigger = triggers.get(state.origin)
+    return None if trigger is None or state.task.role not in trigger.roles else trigger.tab
 
 
 def track_tabs(

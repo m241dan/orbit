@@ -10,6 +10,7 @@ from orbit.tui.view.tabs import (
     PINNED_TABS,
     ConversationTab,
     Speakers,
+    TriggerTab,
     follow_running,
     mark_lane_busy,
     mark_tab_read,
@@ -86,9 +87,9 @@ class TabStrip:
         # The agents writing into a trigger's tab on the earlier page of the log being shown,
         # numbered among themselves.
         self._earlier = Speakers()
-        # The catalog's tabbed triggers' tabs, by trigger name, which their tasks' notes go
-        # under.
-        self._trigger_tabs: Mapping[str, str] = {}
+        # The catalog's tabbed triggers' tabs and roles, by trigger name: the tabs their
+        # roles' tasks' notes go under.
+        self._trigger_tabs: Mapping[str, TriggerTab] = {}
         # Tab key (an agent id, a pinned role's or a trigger's tab's) to its tab's id.
         self._tab_ids: dict[str, str] = {tab.key: f"tab-{tab.key}" for tab in PINNED_TABS}
         self._labels: dict[str, str] = dict(OPENING)  # Each tab's label, by its id.

@@ -28,6 +28,7 @@ from orbit.tui.view.tabs import (
     PINNED_TABS,
     ConversationTab,
     Speakers,
+    TriggerTab,
     follow_running,
     pin_conversations,
     pin_trigger_tabs,
@@ -289,7 +290,10 @@ SHIPPED_PINNED = frozenset(tab.key for tab in grouped(*SHIPPED))
 
 
 def test_the_tabbed_triggers_tabs_are_mapped_by_name() -> None:
-    assert tabs_by_trigger((LENS, UNTABBED, SUPER)) == {"bugs-review": "review", "super": "super"}
+    assert tabs_by_trigger((LENS, UNTABBED, SUPER)) == {
+        "bugs-review": TriggerTab("review", ("lens",)),
+        "super": TriggerTab("super", ("lens",)),
+    }
 
 
 def test_a_tasks_notes_go_under_the_tab_its_agent_writes_into() -> None:
@@ -297,6 +301,8 @@ def test_a_tasks_notes_go_under_the_tab_its_agent_writes_into() -> None:
         (task("bugs-reviewer", "bugs-review"), REVIEW),
         (task("reviewer", "merge-pass"), REVIEW),
         (task("reviewer", "super-merge-pass"), trigger_tab_key("super-review")),
+        (task("coder", "merge-pass"), "coder"),
+        (task("coder", "super-merge-pass"), "coder"),
         (task("coder", "manual"), "coder"),
         (task("coder", "startup-fix"), "coder"),
         (task("configurator", "configure-checks"), "configurator"),
