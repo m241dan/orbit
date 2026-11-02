@@ -52,8 +52,8 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit these for a format change: they're what orbits at versions 1 to 26 wrote, and
-# they still need to read. A new version gets its own fixture (session-v27.json) and a
+# Never edit these for a format change: they're what orbits at versions 1 to 27 wrote, and
+# they still need to read. A new version gets its own fixture (session-v28.json) and a
 # migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
 SESSION_V2 = FIXTURES / "session-v2.json"
@@ -81,6 +81,7 @@ SESSION_V23 = FIXTURES / "session-v23.json"
 SESSION_V24 = FIXTURES / "session-v24.json"
 SESSION_V25 = FIXTURES / "session-v25.json"
 SESSION_V26 = FIXTURES / "session-v26.json"
+SESSION_V27 = FIXTURES / "session-v27.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -195,7 +196,7 @@ def expected(
     lane: LaneSnapshot | None = None,
 ) -> SessionRecord:
     return SessionRecord(
-        version=26,
+        version=27,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
@@ -676,18 +677,31 @@ def test_a_version_25_task_that_isnt_an_object_is_left_to_validation() -> None:
     assert isinstance(record, Unreadable) and record.reason.startswith("tasks.4:")
 
 
-def test_a_version_26_session_file_reads_as_its_record() -> None:
+def test_a_version_26_session_file_migrates_with_its_reviews_of_no_set() -> None:
     assert parse_record(SESSION_V26.read_text(encoding="utf-8")) == merging()
 
 
-def test_a_session_record_is_written_in_the_version_26_format() -> None:
+def test_a_version_27_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V27.read_text(encoding="utf-8")) == merging()
+
+
+def test_a_session_record_is_written_in_the_version_27_format() -> None:
     written = json.loads(record_json(merging()))
-    golden = json.loads(SESSION_V26.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V26.name)
+    golden = json.loads(SESSION_V27.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V27.name)
+
+
+def test_a_review_of_a_sets_report_reads_back_as_it_was_written() -> None:
+    record = merging()
+    lane = record.reviews
+    assert lane is not None
+    job = ReviewJob(commits=("c9",), round=0, batch=None, check_set="mutation")
+    reported = record.model_copy(update={"reviews": lane.model_copy(update={"jobs": {"8": job}})})
+    assert parse_record(record_json(reported)) == reported
 
 
 def test_a_record_with_work_waiting_of_no_commits_is_unreadable() -> None:
-    golden = json.loads(SESSION_V26.read_text(encoding="utf-8"))
+    golden = json.loads(SESSION_V27.read_text(encoding="utf-8"))
     golden["waiting"][0]["count"] = 0
     record = parse_record(json.dumps(golden))
     assert isinstance(record, Unreadable) and record.reason.startswith("waiting.0.count:")

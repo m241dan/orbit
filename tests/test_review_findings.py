@@ -18,6 +18,7 @@ from orbit.agent.domain.reviews import (
     finished_fields,
     finished_values,
     review_over,
+    set_review,
     with_ended,
     with_finding,
     with_lens,
@@ -27,6 +28,7 @@ from orbit.agent.domain.roles import Role
 COMMIT = ReviewJob(commits=("1a2b3c4d",), round=0, batch=None, reviewed=("1",))
 BATCH = ReviewJob(commits=("c1", "c2", "9f8e7d6c"), round=1, batch="batch-2")
 SUPER = ReviewJob(commits=("5e6f7a8b9",), round=0, batch=None, whole=True)
+SET = set_review("mutation", "1a2b3c4d")
 
 LENS = Role(instructions="Look.", verify=False)
 BLOCKER = LENS.model_copy(update={"blocking_findings": True})
@@ -179,10 +181,14 @@ def test_a_review_with_lenses_is_over_only_once_it_fanned_in_and_its_tasks_ended
 
 
 @pytest.mark.parametrize(
-    ("job", "review"), [(COMMIT, "commit"), (BATCH, "batch"), (SUPER, "super")]
+    ("job", "review"), [(COMMIT, "commit"), (BATCH, "batch"), (SUPER, "super"), (SET, "set")]
 )
 def test_reviews_finished_says_what_the_review_reviewed(job: ReviewJob, review: str) -> None:
     assert finished_fields(job, ())["review"] == review
+
+
+def test_a_sets_report_is_reviewed_at_round_0_of_its_one_commit_reviewing_no_task() -> None:
+    assert ReviewJob(commits=("1a2b3c4d",), round=0, batch=None, check_set="mutation") == SET
 
 
 def test_reviews_finished_says_whether_there_were_findings() -> None:
@@ -201,6 +207,7 @@ def test_reviews_finished_says_whether_there_were_findings() -> None:
             "9f8e7d6",
         ),
         (SUPER, "Merge the findings of the super review at 5e6f7a8", "5e6f7a8"),
+        (SET, "Merge the findings of the mutation report at 1a2b3c4", "1a2b3c4"),
     ],
 )
 def test_reviews_finished_titles_the_merge_by_what_was_reviewed(

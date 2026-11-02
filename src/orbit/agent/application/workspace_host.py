@@ -104,8 +104,10 @@ from orbit.agent.domain.roles import Role, disabled_roles, enabled_roles
 from orbit.agent.domain.runtimes import ModelAliases
 from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.domain.triggers import (
+    SetOutcome,
     VerificationState,
     can_queue_reviews,
+    set_finished_event,
     verification_state,
 )
 from orbit.agent.domain.usage_limits import Outages, RuntimeStop
@@ -787,9 +789,14 @@ class WorkspaceHost:
         """The runs of the named sets of ``verification``, and of those accepted checks add, that
         triggers naming them ask for, in snapshots of the base of ``tree``, traced with this
         host's telemetry, the runs of those that hold merges holding them while they fail, as
-        ``holds`` keeps them."""
+        ``holds`` keeps them, and each run that ends raising ``set_finished``."""
         site = SetSite(
-            tree, verification.run_step, self._events.put, self._gate.halted, holds.heard
+            tree,
+            verification.run_step,
+            self._events.put,
+            self._gate.halted,
+            holds.heard,
+            self._set_finished,
         )
         return SetRuns(verification.sets, site, SetTracing(self.telemetry, self._workspace_id))
 
@@ -853,6 +860,22 @@ class WorkspaceHost:
         queued = await self._switcher.between_switches(lambda: engine.check_failed(step, output))
         engine.run(queued)
         return bool(queued)
+
+    async def _set_finished(self, outcome: SetOutcome) -> bool:
+        """Raise ``set_finished`` for ``outcome``, a named set's run ending, in the session open
+        once no switch is under way, through the review lane, which books the finding roles'
+        tasks into a review of the set's report, if reviews run, and run the tasks its triggers
+        queued; returns whether a trigger listens for it."""
+        engine = self._triggers
+        assert engine is not None  # Only agents' triggers run the sets.
+        heard = engine.hears(set_finished_event(outcome))
+        lane = self._lane
+        if lane is not None:
+            await self._switcher.between_switches(lambda: lane.set_finished(outcome))
+            return heard
+        queued = await self._switcher.between_switches(lambda: engine.set_finished(outcome))
+        engine.run(queued)
+        return heard
 
     @property
     def workspace_id(self) -> str:

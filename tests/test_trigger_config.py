@@ -145,7 +145,8 @@ def test_a_trigger_for_a_projects_own_role_is_valid() -> None:
         (
             NIGHTLY | {"on": "someday"},
             "triggers.nightly.on: someday isn't an event; the events are session_started,"
-            " task_landed, task_finished, commits, startup_check_failed, manual, reviews_finished.",
+            " task_landed, task_finished, commits, startup_check_failed, manual, reviews_finished,"
+            " set_finished.",
         ),
         (
             NIGHTLY | {"role": "tidier"},

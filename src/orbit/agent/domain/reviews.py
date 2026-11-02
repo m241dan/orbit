@@ -4,7 +4,8 @@ A commit from one of the user's tasks (or the planner's) is reviewed on its own,
 review's suggestions become a **batch** of tasks one round on; once every task in a batch has
 finished, the batch's commits are reviewed together, and so on. A batch at the last round isn't
 reviewed: review pauses until the user's next task lands, which bounds how much work reviews can
-generate by themselves.
+generate by themselves. A named set's run reported to finding roles, through a trigger on
+``set_finished``, is reviewed as one commit is, its suggestions a batch at round 1.
 """
 
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
@@ -78,7 +79,8 @@ class ReviewJob:
     ``batch`` is the batch whose work it is (``None`` for a commit of the user's task),
     ``missing`` the batch's tasks that ended without landing a commit, and ``reviewed`` the
     tasks that landed the commits, in task order. A ``whole`` review is a super review: of the
-    whole codebase at its one commit, reviewing no particular task.
+    whole codebase at its one commit, reviewing no particular task. A review of a ``check_set``
+    is of what that named set's run at its one commit reported, reviewing no particular task.
     """
 
     commits: tuple[str, ...]
@@ -87,6 +89,7 @@ class ReviewJob:
     missing: tuple[str, ...] = ()
     whole: bool = False
     reviewed: tuple[str, ...] = ()
+    check_set: str | None = None
 
     @property
     def origin(self) -> TaskOrigin:
@@ -141,9 +144,9 @@ ReviewStage = Literal["reviewing", "merging"]
 """Where a review is: its lenses still reviewing, or ``reviews_finished`` raised for it, whose
 tasks merge their findings."""
 
-ReviewKind = Literal["commit", "batch", "super"]
+ReviewKind = Literal["commit", "batch", "super", "set"]
 """What a review reviews, as ``reviews_finished``'s ``review`` field says: one commit of the
-user's or the planner's, a batch's commits, or the whole codebase."""
+user's or the planner's, a batch's commits, the whole codebase, or a named set's report."""
 
 NOT_BOOKED_FOR_FINDINGS = "Only reviews orbit queued itself can report findings."
 """The refusal of a finding from a task that isn't booked into a review."""
@@ -336,6 +339,8 @@ def review_kind(job: ReviewJob) -> ReviewKind:
     """What ``job`` reviews, as ``reviews_finished``'s ``review`` field says."""
     if job.whole:
         return "super"
+    if job.check_set is not None:
+        return "set"
     return "commit" if job.batch is None else "batch"
 
 
@@ -370,6 +375,8 @@ def _merge_title(job: ReviewJob) -> str:
     """The first line of the task merging the findings of ``job``'s review."""
     if job.whole:
         return f"Merge the findings of the super review at {job.commits[0][:7]}"
+    if job.check_set is not None:
+        return f"Merge the findings of the {job.check_set} report at {job.commits[0][:7]}"
     if job.batch is None:
         return f"Merge the findings of the review of commit {job.commits[0][:7]}"
     return (
@@ -722,6 +729,12 @@ def commit_review(task_id: str, commit: str) -> ReviewJob:
     """The review of ``commit`` on its own, which task ``task_id`` landed, as one of the user's
     or the planner's commits is reviewed."""
     return ReviewJob(commits=(commit,), round=0, batch=None, reviewed=(task_id,))
+
+
+def set_review(name: str, commit: str) -> ReviewJob:
+    """The review of what the named set ``name`` reported of its run at ``commit``, read in a
+    snapshot of it, its suggestions a batch at round 1."""
+    return ReviewJob(commits=(commit,), round=0, batch=None, check_set=name)
 
 
 def _forget_finish(batch: _Batch, task_id: str) -> None:

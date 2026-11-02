@@ -50,7 +50,7 @@ from orbit.protocol import (
     Usage,
 )
 
-FORMAT_VERSION = 26
+FORMAT_VERSION = 27
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _OLD_SUPER_REVIEW_ORIGIN = "super_review"
@@ -87,8 +87,8 @@ def _without_rounds(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def _unchanged(record: dict[str, Any]) -> dict[str, Any]:
-    """Version 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 19, 21, 22 or 23 ``record`` as
-    it is: the next version only added fields that have defaults."""
+    """Version 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 19, 21, 22, 23 or 26 ``record``
+    as it is: the next version only added fields that have defaults."""
     return record
 
 
@@ -279,7 +279,8 @@ def _booked(task: object, booked: tuple[str, ...]) -> object:
 # older record filed none at. Version 26 is the first whose reviews are lens reviewers' and the
 # merge pass's: its migration cancels the reviews an older record had waiting, whose prompts are
 # for the reviewer as it was, and the session opened ends them (see
-# :func:`reviews_cancelled_at_upgrade`).
+# :func:`reviews_cancelled_at_upgrade`). Version 27 added the named set whose report a review
+# reviews, which an older record's reviews, of commits or the codebase, review none of.
 _MIGRATIONS: dict[int, Migration] = {
     1: _spent_by_tasks,
     2: _without_rounds,
@@ -306,6 +307,7 @@ _MIGRATIONS: dict[int, Migration] = {
     23: _unchanged,
     24: _merges_as_booked,
     25: _old_reviews_cancelled,
+    26: _unchanged,
 }
 
 EMPTY_NAME = "A session needs a name."

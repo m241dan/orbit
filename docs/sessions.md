@@ -14,7 +14,8 @@ A session is one JSON record (`SessionRecord`, in `orbit.agent.domain.sessions`)
 
 - its id, its name, and when it was created and last active;
 - the task list, each task with its status, settings and usage;
-- the review lane's state: the review jobs it queued, their batches and rounds, and, for each
+- the review lane's state: the review jobs it queued, their batches and rounds, the named set
+  whose report a job reviews, if it reviews one (version 27; an older record's review none), and, for each
   review with more than one task or a finding role's, while its batch is open, which of its tasks
   are lenses, which are merge passes and which have ended, the findings they reported with their
   outcomes and whether `reviews_finished` was raised for it, so it fans in once after a restart,

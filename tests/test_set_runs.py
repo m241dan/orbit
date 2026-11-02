@@ -1,6 +1,7 @@
 """The named sets' runs: each in the background, in a set-up snapshot of the base's latest
-commit, shown in the verification panel under its set's name and as a checker; a failure's
-notice, a firing while one runs folded into one more run, halts, cancelling, and their spans."""
+commit, shown in the verification panel under its set's name and as a checker; ``set_finished``
+raised as each ends, a failure's notice while no trigger listens, a firing while one runs folded
+into one more run, halts, cancelling, and their spans."""
 
 import asyncio
 from collections.abc import Mapping
@@ -13,6 +14,7 @@ from orbit.agent.application.ports import StepRunner, TreeFailed
 from orbit.agent.application.set_runs import SetResult, SetRuns, SetSite, cancelled_note
 from orbit.agent.application.set_trace import SET_SPAN, SetTracing
 from orbit.agent.domain.checks import Setup
+from orbit.agent.domain.triggers import SetOutcome
 from orbit.agent.domain.verification import CheckSet, VerificationStep, set_failed_note
 from orbit.protocol import (
     GIT_FAILED,
@@ -39,7 +41,8 @@ SNAPSHOT = "/work/review-base"
 
 class Runs:
     """Runs of ``sets`` in ``tree``, their steps played by ``steps``, recording what they
-    publish, halted while :attr:`halted` says so, traced by ``traced`` if given."""
+    publish and the ``set_finished`` they raise, halted while :attr:`halted` says so, a trigger
+    listening while :attr:`listens` says so, traced by ``traced`` if given."""
 
     def __init__(
         self,
@@ -50,9 +53,11 @@ class Runs:
     ) -> None:
         self.events: list[Event] = []
         self.heard: list[SetResult] = []
+        self.finished: list[SetOutcome] = []
         self.halted = False
+        self.listens = False
         self.tree = tree or FakeTree()
-        site = SetSite(self.tree, steps, self.publish, lambda: self.halted, self.hear)
+        site = SetSite(self.tree, steps, self.publish, lambda: self.halted, self.hear, self.finish)
         tracing = SetTracing() if traced is None else SetTracing(traced.telemetry, "ws")
         self.runs = SetRuns(sets or (SLOW,), site, tracing)
 
@@ -61,6 +66,10 @@ class Runs:
 
     async def hear(self, result: SetResult) -> None:
         self.heard.append(result)
+
+    async def finish(self, outcome: SetOutcome) -> bool:
+        self.finished.append(outcome)
+        return self.listens
 
     def exits(self) -> list[AgentExited]:
         return [event for event in self.events if isinstance(event, AgentExited)]
@@ -205,6 +214,71 @@ async def test_a_holding_set_fired_again_while_it_runs_is_heard_from_the_last_tr
     gate.set()
     await runs.ended(2)
     assert [result.trigger for result in runs.heard] == ["first", "third"]
+
+
+# set_finished
+
+
+async def test_a_passing_run_raises_set_finished_passed_on_its_commit() -> None:
+    runs = Runs(Steps(True, True))
+    runs.runs.run("slow", "slow")
+    await runs.ended()
+    assert runs.finished == [SetOutcome("slow", "base")]
+    assert runs.finished[0].status == "passed"
+
+
+async def test_a_failing_run_raises_set_finished_failed_with_its_step_and_output() -> None:
+    runs = Runs(Steps(False))
+    runs.runs.run("slow", "slow")
+    await runs.ended()
+    assert runs.finished == [SetOutcome("slow", "base", (MUTATION.name, "1 test failed"))]
+    assert runs.finished[0].status == "failed"
+
+
+async def test_a_failing_reporting_set_a_trigger_listens_for_gives_no_notice() -> None:
+    runs = Runs(Steps(False))
+    runs.listens = True
+    runs.runs.run("slow", "slow")
+    await runs.ended()
+    assert runs.notices() == []
+    assert runs.runs.failures == {"slow": (MUTATION, "1 test failed")}
+
+
+async def test_a_holding_sets_failure_is_heard_and_raises_set_finished_too() -> None:
+    stress = CheckSet("stress", (MUTATION, SOAK), "holds_merges")
+    runs = Runs(Steps(False), stress)
+    runs.runs.run("stress", "nightly")
+    await runs.ended()
+    assert runs.heard == [SetResult(stress, "base", "nightly", (MUTATION, "1 test failed"))]
+    assert runs.finished == [SetOutcome("stress", "base", (MUTATION.name, "1 test failed"))]
+    assert runs.notices() == []
+
+
+async def test_a_site_raising_no_set_finished_has_no_trigger_listening() -> None:
+    events: list[Event] = []
+
+    async def publish(event: Event) -> None:
+        events.append(event)
+
+    site = SetSite(FakeTree(), Steps(False), publish, lambda: False)
+    runs = SetRuns((SLOW,), site)
+    runs.run("slow", "slow")
+    await eventually(lambda: any(isinstance(event, AgentExited) for event in events))
+    assert [event for event in events if isinstance(event, Notice)] == [
+        Notice(message=set_failed_note("slow", MUTATION.name, "1 test failed"))
+    ]
+
+
+async def test_a_run_cancelled_or_one_git_cannot_start_raises_nothing() -> None:
+    steps, _ = gated(True)
+    runs = Runs(steps)
+    runs.runs.run("slow", "slow")
+    await eventually(lambda: steps.runs)
+    await runs.runs.stop()
+    runs.tree.failures["base_commit"] = TreeFailed("git rev-parse failed")
+    runs.runs.run("slow", "slow")
+    await runs.ended(2)
+    assert runs.finished == []
 
 
 async def test_a_failing_setup_fails_the_run_before_its_steps() -> None:

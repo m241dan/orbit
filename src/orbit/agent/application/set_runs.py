@@ -9,14 +9,16 @@ queues one more run, on the base's latest commit as it starts once that run ends
 meanwhile fold into it. As for the startup check, a halt cancels the runs, and the runs queued
 with them, and a firing while halted runs once the halt lifts.
 
-A run that passes adds nothing more; one that fails shows the failing step's output, trimmed,
-in the panel, if it still has it, until the set's next run starts or another set's run or a
-task's verification takes the panel, and keeps its failure; one of a reporting set adds a
-notice too, quoting the output, as :func:`~orbit.agent.domain.verification.set_failed_note`
-words it, so the output stays at hand however the panel moves on. How a run
-of a set that holds merges came out, on which commit, is told to the site's ``heard``, which
-holds merges while it fails. Each run is traced in an ``orbit.check_set`` span, as
-:class:`SetTracing` says.
+A run that fails shows the failing step's output, trimmed, in the panel, if it still has it,
+until the set's next run starts or another set's run or a task's verification takes the panel,
+and keeps its failure. How a run of a set that holds merges came out, on which commit, is told
+to the site's ``heard``, which holds merges while it fails. Every run that ends, passed or
+failed, of whichever set, raises ``set_finished`` through the site's ``finished``, which says
+whether a trigger listens; a run cancelled, or one git couldn't start, raises nothing. A
+reporting set's failure that no trigger listens for adds a notice, quoting the output, as
+:func:`~orbit.agent.domain.verification.set_failed_note` words it, so the output stays at hand
+however the panel moves on; one a trigger listens for adds none, as its task carries the output.
+Each run is traced in an ``orbit.check_set`` span, as :class:`SetTracing` says.
 """
 
 import asyncio
@@ -31,6 +33,7 @@ from orbit.agent.application.snapshots import snapshot_of
 from orbit.agent.application.startup_check import ROLE
 from orbit.agent.application.verifier import Failure, first_failure, record_result
 from orbit.agent.domain.checks import setup_step
+from orbit.agent.domain.triggers import SetOutcome
 from orbit.agent.domain.verification import (
     CheckSet,
     StepProgress,
@@ -80,17 +83,31 @@ async def _unheard(result: SetResult) -> None:
     """Hear nothing of ``result``."""
 
 
+async def _unlistened(outcome: SetOutcome) -> bool:
+    """Raise nothing for ``outcome``; returns that no trigger listens."""
+    return False
+
+
+def _outcome_of(result: SetResult) -> SetOutcome:
+    """How the run ``result`` tells of came out, as ``set_finished`` is raised for it."""
+    failure = result.failure
+    failed = None if failure is None else (failure[0].name, failure[1])
+    return SetOutcome(result.check_set.name, result.commit, failed)
+
+
 @dataclass(frozen=True)
 class SetSite:
     """Where and how the sets run: in snapshots of ``tree``'s base, each step through
     ``run_step``, publishing with ``publish``, while ``halted`` says the session isn't; ``heard``
-    hears how each run of a set that holds merges came out."""
+    hears how each run of a set that holds merges came out, and ``finished`` raises
+    ``set_finished`` for each run that ended, returning whether a trigger listens for it."""
 
     tree: CoderTree
     run_step: StepRunner
     publish: Publish
     halted: Callable[[], bool]
     heard: Callable[[SetResult], Awaitable[None]] = _unheard
+    finished: Callable[[SetOutcome], Awaitable[bool]] = _unlistened
 
 
 class SetRun:
@@ -240,22 +257,31 @@ class SetRun:
 
     async def _report(self, result: SetResult) -> None:
         """Keep how the run came out, as ``result`` says, and tell of it: a failure's output in
-        the panel, a reporting set's failure in a notice, a holding set's outcome to the site's
-        ``heard``; then record it on the run's span."""
+        the panel, a holding set's outcome to the site's ``heard``, the run's end as
+        ``set_finished``, and a reporting set's failure no trigger listens for in a notice; then
+        record it on the run's span."""
         failure = result.failure
         self.failure = failure
         if failure is not None:
             _, output = failure
             self._output = trim_output(output)
             await self._show()
-        if result.check_set.effect == "holds_merges":
+        holds = result.check_set.effect == "holds_merges"
+        if holds:
             await self._site.heard(result)
-        elif failure is not None:
-            step, output = failure
-            note = set_failed_note(self._set.name, step.name, output)
-            await self._site.publish(Notice(message=note))
+        listened = await self._site.finished(_outcome_of(result))
+        if not holds and not listened:
+            await self._note_failure(failure)
         # Only once it's reported, so a run cancelled meanwhile names no failed step.
         record_result(failure)
+
+    async def _note_failure(self, failure: Failure | None) -> None:
+        """Add the notice of a reporting set's ``failure``, quoting its output, if it failed."""
+        if failure is None:
+            return
+        step, output = failure
+        note = set_failed_note(self._set.name, step.name, output)
+        await self._site.publish(Notice(message=note))
 
     async def _cancel_running(self) -> None:
         """Mark the step running, if any, cancelled."""

@@ -12,14 +12,19 @@ from orbit.agent.domain.triggers import (
     EVENTS,
     GUARD_NAMES,
     WHEN_VALUES,
+    SetOutcome,
     Trigger,
+    TriggerEvent,
     check_triggers,
     load_built_in_triggers,
     merge_triggers,
     render_template,
+    set_finished_event,
+    set_finished_values,
     template_variables,
     trigger_tab,
 )
+from orbit.agent.domain.verification import OUTPUT_LIMIT, trim_output
 
 PROJECT = Layer("project", "/src/app/.orbit/config.toml")
 ROLES = ("coder", "reviewer")
@@ -54,6 +59,7 @@ def test_the_events_are_the_records_with_their_when_fields() -> None:
         "startup_check_failed",
         "manual",
         "reviews_finished",
+        "set_finished",
     )
     assert {name: event.fields for name, event in EVENTS.items()} == {
         "session_started": ("verification",),
@@ -63,6 +69,7 @@ def test_the_events_are_the_records_with_their_when_fields() -> None:
         "startup_check_failed": ("step",),
         "manual": (),
         "reviews_finished": ("findings", "review"),
+        "set_finished": ("set", "status"),
     }
 
 
@@ -72,8 +79,9 @@ def test_verification_findings_and_review_have_values_fixed_by_orbit_on_each_eve
         "task_landed": {"review": ("commit", "batch")},
         "reviews_finished": {
             "findings": ("some", "none"),
-            "review": ("commit", "batch", "super"),
+            "review": ("commit", "batch", "super", "set"),
         },
+        "set_finished": {"status": ("passed", "failed")},
     }
 
 
@@ -113,7 +121,41 @@ def test_every_event_gives_its_trigger_and_its_own_variables() -> None:
             "queued",
             "landed_since",
         ),
+        "set_finished": ("trigger", "set", "status", "commit", "output"),
     }
+
+
+def test_set_finished_gives_a_passing_runs_set_status_and_commit_and_no_output() -> None:
+    outcome = SetOutcome("mutation", "1a2b3c4d5e")
+    assert set_finished_event(outcome) == TriggerEvent(
+        "set_finished", {"set": "mutation", "status": "passed"}
+    )
+    assert set_finished_values(outcome) == {
+        "set": "mutation",
+        "status": "passed",
+        "commit": "1a2b3c4",
+        "output": "",
+    }
+
+
+def test_set_finished_gives_a_failing_runs_step_and_output_as_its_output() -> None:
+    outcome = SetOutcome("mutation", "1a2b3c4d5e", ("Mutation tests", "  3 survived \n"))
+    assert set_finished_event(outcome).fields == {"set": "mutation", "status": "failed"}
+    assert set_finished_values(outcome)["output"] == (
+        "Mutation tests failed. Its output:\n\n3 survived"
+    )
+
+
+def test_a_failing_runs_output_says_when_there_was_none() -> None:
+    outcome = SetOutcome("mutation", "1a2b3c4", ("Mutation tests", " \n"))
+    assert set_finished_values(outcome)["output"] == "Mutation tests failed, with no output."
+
+
+def test_a_failing_runs_output_is_trimmed_as_the_panel_trims_it() -> None:
+    long = "x" * (OUTPUT_LIMIT + 100)
+    outcome = SetOutcome("mutation", "1a2b3c4", ("Mutation tests", long))
+    output = set_finished_values(outcome)["output"]
+    assert output == f"Mutation tests failed. Its output:\n\n{trim_output(long)}"
 
 
 def test_the_guards_are_the_records() -> None:
@@ -157,7 +199,8 @@ def test_every_field_has_a_description() -> None:
         (
             {"on": "landed"},
             "triggers.x.on: landed isn't an event; the events are session_started, task_landed,"
-            " task_finished, commits, startup_check_failed, manual, reviews_finished.",
+            " task_finished, commits, startup_check_failed, manual, reviews_finished,"
+            " set_finished.",
         ),
         (
             {"on": "commits", "guards": ["review-rounds", "nightly"]},
@@ -302,6 +345,28 @@ def test_a_landing_review_of_the_super_review_is_refused_though_reviews_finished
     )
     check_triggers(
         {"x": Trigger(on="reviews_finished", checks="gate", when={"review": "super"})}, ROLES
+    )
+
+
+def test_an_unknown_set_status_is_refused_naming_its_two_values() -> None:
+    assert problems(on="set_finished", checks="gate", when={"status": "maybe"}) == (
+        "triggers.x.when: maybe isn't a value of status; its values are passed, failed."
+    )
+
+
+def test_a_set_finished_trigger_may_name_any_set_and_either_status() -> None:
+    when: dict[str, str | tuple[str, ...]] = {
+        "set": "renamed-long-ago",
+        "status": ("passed", "failed"),
+    }
+    prompt = "{trigger}: {set} {status} at {commit}.\n\n{output}"
+    check_triggers({"x": Trigger(on="set_finished", role="coder", prompt=prompt, when=when)}, ROLES)
+
+
+def test_a_set_finished_trigger_using_another_events_variable_is_refused() -> None:
+    assert problems(on="set_finished", role="coder", prompt="{diff}") == (
+        "triggers.x.prompt: {diff} isn't a variable of set_finished; its variables are"
+        " {trigger}, {set}, {status}, {commit}, {output}."
     )
 
 

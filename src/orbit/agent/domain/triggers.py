@@ -2,8 +2,8 @@
 named set: the events and guards orbit knows, a trigger's fields, the package's triggers merged
 with a project's and checked against its roles and sets, the sets no trigger runs, which of them
 fire on an event and which guards hold one back, which of them a landing's changed paths let
-fire, when one fires in words, the tab a task's agent shows under, and the rendering of a
-trigger's prompt template.
+fire, when one fires in words, the tab a task's agent shows under, what a named set's run
+ending raises, and the rendering of a trigger's prompt template.
 
 The package's triggers aren't kept here: whoever builds them passes in the contents of their
 ``triggers.toml`` and the templates it names. ``manual`` isn't raised yet, but a trigger fired by
@@ -32,7 +32,7 @@ from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
 from orbit.agent.domain.reviews import ReviewJob, ReviewKind
 from orbit.agent.domain.roles import PLAIN_NAME
-from orbit.agent.domain.verification import VerificationStep
+from orbit.agent.domain.verification import VerificationStep, set_report
 from orbit.protocol import TASK_CHECKS, TaskState, is_orbit_review
 
 EventName = Literal[
@@ -43,10 +43,12 @@ EventName = Literal[
     "startup_check_failed",
     "manual",
     "reviews_finished",
+    "set_finished",
 ]
 """What a trigger fires on: orbit opening a workspace with its session, a task's work landing, a
 task finishing, landings counted up to a trigger's ``every``, a step of the startup check
-failing, the user firing it, or every finding role's task of a review having ended."""
+failing, the user firing it, every finding role's task of a review having ended, or a run of a
+named set ending."""
 
 GuardName = Literal[
     "review-rounds", "raised-finding", "suggestions-pending", "not-queued", "dedupe"
@@ -69,6 +71,16 @@ TASK_FINISHED = "task_finished"
 REVIEWS_FINISHED = "reviews_finished"
 """The event of a review's lenses having ended: every task of a finding role, one granted
 ``report_finding``, that one review queued."""
+
+SET_FINISHED = "set_finished"
+"""The event of a named set's run ending, passed or failed; neither a run cancelled or one git
+couldn't start, nor the task checks, raise it."""
+
+SetStatus = Literal["passed", "failed"]
+"""What ``set_finished``'s ``status`` field says: the set's run passed, or failed."""
+
+SET_STATUSES: tuple[str, ...] = get_args(SetStatus)
+"""The values of ``set_finished``'s ``status`` field, in order."""
 
 SESSION_STARTED = "session_started"
 STARTUP_CHECK_FAILED = "startup_check_failed"
@@ -157,6 +169,7 @@ EVENTS: Mapping[str, Event] = {
         ("findings", "review"),
         (TRIGGER_VARIABLE, "title", "commit", "findings", "cap", "queued", "landed_since"),
     ),
+    SET_FINISHED: Event(("set", "status"), (TRIGGER_VARIABLE, "set", "status", "commit", "output")),
 }
 """Each event, by name, with what it gives. A trigger fired by hand gives the variables of its
 event, as the super review does those of ``commits``."""
@@ -169,10 +182,12 @@ WHEN_VALUES: Mapping[str, Mapping[str, tuple[str, ...]]] = {
     SESSION_STARTED: {"verification": VERIFICATION_STATES},
     TASK_LANDED: {REVIEW_FIELD: LANDING_REVIEWS},
     REVIEWS_FINISHED: {"findings": ("some", "none"), REVIEW_FIELD: get_args(ReviewKind)},
+    SET_FINISHED: {"status": SET_STATUSES},
 }
 """The values each event gives the ``when`` fields orbit fixes them for, by event and field
-name. Besides these, :data:`ROLE_FIELD`'s are the roles, and ``origin``, ``status`` and
-``step`` take any value: origins include trigger names, and steps are the project's own."""
+name. Besides these, :data:`ROLE_FIELD`'s are the roles, and ``origin``, ``task_finished``'s
+``status``, ``step`` and ``set`` take any value: origins include trigger names, steps are the
+project's own, and a set may be renamed, so a ``set`` no set has simply never matches."""
 
 
 def _plain_trigger_name(name: str) -> str:
@@ -622,6 +637,7 @@ FIRING_PHRASES: Mapping[str, str] = {
     STARTUP_CHECK_FAILED: "when the startup check fails",
     "manual": "by hand",
     REVIEWS_FINISHED: "when a review's lenses have finished",
+    SET_FINISHED: "when a set finishes",
 }
 """When a trigger on each event but ``commits``, which counts, fires, in words, by name."""
 
@@ -932,6 +948,41 @@ def trigger_tab(triggers: Mapping[str, Trigger], origin: str) -> str | None:
     agent shows under; none if no trigger has that name or it has no tab."""
     trigger = triggers.get(origin)
     return None if trigger is None else trigger.tab
+
+
+@dataclass(frozen=True)
+class SetOutcome:
+    """How a run of a named set came out: the set's ``name``, the ``commit`` it ran on, and, if
+    it failed, the ``failed`` step's name with its output."""
+
+    name: str
+    commit: str
+    failed: tuple[str, str] | None = None
+
+    @property
+    def status(self) -> SetStatus:
+        """What ``set_finished``'s ``status`` field says of it."""
+        return "passed" if self.failed is None else "failed"
+
+
+def set_finished_event(outcome: SetOutcome) -> TriggerEvent:
+    """``set_finished`` as ``outcome``, a named set's run ending, raises it: the set's name and
+    how it came out, as its ``set`` and ``status``."""
+    return TriggerEvent(SET_FINISHED, {"set": outcome.name, "status": outcome.status})
+
+
+def set_finished_values(outcome: SetOutcome) -> dict[str, str]:
+    """The variables of ``set_finished`` for ``outcome``, but ``{trigger}``, the caller's: the
+    set's name, its status, the commit it ran on, abbreviated, and the failing step's name with
+    its output, trimmed as the verification panel trims it, as ``{output}``, empty when it
+    passed, so its paragraph drops."""
+    output = "" if outcome.failed is None else set_report(*outcome.failed)
+    return {
+        "set": outcome.name,
+        "status": outcome.status,
+        "commit": outcome.commit[:7],
+        "output": output,
+    }
 
 
 def verification_state(steps: Sequence[VerificationStep] | None) -> VerificationState:

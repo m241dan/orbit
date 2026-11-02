@@ -25,7 +25,9 @@ The host raises ``session_started`` as it opens the workspace with its session, 
 with ``checks = "task-checks"`` run the startup check, and the startup check raises
 ``startup_check_failed`` for the step that failed. ctrl+e fires ``configure-checks`` by hand, on
 ``manual``. A trigger with ``checks`` naming a set has it run, in the background, on whatever
-event it fires, or by hand.
+event it fires, or by hand. A named set's run ending raises ``set_finished``: each task of a
+finding role its triggers queue is booked into one review of the set's report, as the review
+lane asks, and any other role's is an ordinary task.
 
 While verification is missing, every task a trigger queues waits for it to be set up, as the
 session's gate says, with a notice naming its trigger, but a configurator's, which goes first.
@@ -50,8 +52,9 @@ from orbit.agent.domain.reviews import (
     review_skills,
     review_values,
 )
-from orbit.agent.domain.roles import enabled_roles, role_task
+from orbit.agent.domain.roles import Role, enabled_roles, role_task
 from orbit.agent.domain.setup_first import waiting_for_setup, waiting_note
+from orbit.agent.domain.tools import REPORT_FINDING
 from orbit.agent.domain.triggers import (
     COMMITS,
     REVIEW_FIELD,
@@ -62,6 +65,7 @@ from orbit.agent.domain.triggers import (
     TASK_LANDED,
     TRIGGER_VARIABLE,
     Counted,
+    SetOutcome,
     Trigger,
     TriggerEvent,
     count_landing,
@@ -71,6 +75,8 @@ from orbit.agent.domain.triggers import (
     listening,
     needs_paths,
     render_template,
+    set_finished_event,
+    set_finished_values,
     verification_state,
     within_paths,
 )
@@ -127,22 +133,30 @@ class _Firing:
     """The triggers ``listening`` for an event, by name, in order, with what they render their
     tasks from: its ``values`` and the review due, ``review``, if any. On a landing ``counted``
     toward the ``commits`` triggers, or fired by hand, their guards were decided already, and
-    each of them reviews ``review``; otherwise only those ``review-rounds`` guards do. The
-    ``event`` raised, if any, narrows the roles each queues for, as
+    each of them reviews ``review``; otherwise those ``review-rounds`` guards do, every one of
+    them once a review's lenses finished, and, on a set's report, the tasks of finding roles, as
+    ``books`` says. The ``event`` raised, if any, narrows the roles each queues for, as
     :func:`~orbit.agent.domain.triggers.firing_roles` says."""
 
     listening: list[tuple[str, Trigger]]
     values: Mapping[str, str]
     review: ReviewRound | None
     counted: bool = False
-    books: Literal["guarded", "every"] = "guarded"
+    books: Literal["guarded", "every", "lenses"] = "guarded"
     event: TriggerEvent | None = None
 
-    def review_of(self, trigger: Trigger) -> ReviewRound | None:
-        """The review ``trigger``'s task reviews, if any: every trigger's, on a landing counted,
-        by hand, or once a review's lenses finished, else only those ``review-rounds`` guards."""
-        reviews = self.counted or self.books == "every" or REVIEW_ROUNDS in trigger.guards
-        return self.review if reviews else None
+    def review_of(self, trigger: Trigger, role: Role) -> ReviewRound | None:
+        """The review the task of ``role`` that ``trigger`` queues reviews, if any: every
+        trigger's, on a landing counted, by hand, or once a review's lenses finished, a finding
+        role's on a set's report, else only those ``review-rounds`` guards."""
+        return self.review if self._books(trigger, role) else None
+
+    def _books(self, trigger: Trigger, role: Role) -> bool:
+        """Whether the task of ``role`` that ``trigger`` queues is booked into the review, as
+        :meth:`review_of` says."""
+        if self.books == "lenses":
+            return REPORT_FINDING in role.granted_tools
+        return self.books == "every" or self.counted or REVIEW_ROUNDS in trigger.guards
 
 
 def _no_kick(role: str) -> None:
@@ -296,6 +310,26 @@ class TriggerEngine:
         none if none does."""
         firing = await self._firing(self._desk.agents.triggers, event, values, review)
         return None if firing is None else replace(firing, books="every")
+
+    def hears(self, event: TriggerEvent) -> bool:
+        """Whether a trigger listens for ``event``, with no review due, as
+        :func:`~orbit.agent.domain.triggers.listening` says, whether or not a guard then holds
+        it back."""
+        roles = enabled_roles(self._desk.agents.roles)
+        return bool(listening(self._desk.agents.triggers, event, roles, None))
+
+    async def set_finished(
+        self, outcome: SetOutcome, review: ReviewRound | None = None
+    ) -> tuple[str, ...]:
+        """Raise ``set_finished``: a named set's run ended as ``outcome`` says. Each trigger on
+        it that no guard holds back queues its tasks, or runs its checks; those of finding roles
+        are booked into ``review``, the review of the set's report, if there's one, and the
+        others are ordinary tasks. The board is published if any task was queued. Returns their
+        ids, for :meth:`run`."""
+        event = set_finished_event(outcome)
+        values = partial(_given, set_finished_values(outcome))
+        firing = await self._firing(self._desk.agents.triggers, event, values, review)
+        return () if firing is None else await self._queue(replace(firing, books="lenses"))
 
     async def fire(
         self, event: TriggerEvent, values: Values, review: ReviewRound | None = None
@@ -479,9 +513,10 @@ class TriggerEngine:
         ``firing`` says; returns its id. One reviewing the review due does so with the skills of
         what it reviews, and is queued as a review, booked into its batches with what its
         prompt was rendered from."""
-        review = firing.review_of(queued.trigger)
+        spec = self._desk.agents.roles[role]
+        review = firing.review_of(queued.trigger, spec)
         skills = () if review is None else review_skills(review.job, board.tasks)
-        task = role_task(role, self._desk.agents.roles[role], queued.prompt, skills)
+        task = role_task(role, spec, queued.prompt, skills)
         queued_as: QueuedAs = "task" if review is None else "review"
         task_id = _added(board, task, queued.name, queued.trigger, queued_as)
         if review is not None:

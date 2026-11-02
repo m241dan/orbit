@@ -73,6 +73,7 @@ def test_each_trigger_running_a_set_is_named_in_its_order() -> None:
         ({"on": "task_finished"}, "when a task finishes"),
         ({"on": "startup_check_failed"}, "when the startup check fails"),
         ({"on": "reviews_finished"}, "when a review's lenses have finished"),
+        ({"on": "set_finished"}, "when a set finishes"),
         ({"on": "manual", "manual": True, "label": "Run"}, "by hand"),
         ({"on": "task_landed", "manual": True, "label": "Run"}, "when a task lands or by hand"),
         ({"on": "commits", "every": 5, "enabled": False}, "every 5 commits (off)"),

@@ -737,13 +737,17 @@ steps in the panel, until the set's next run starts or another set's run or a ta
 verification takes the panel; a passing run, or one that's cancelled or couldn't run, shows none
 (frontends get it as `VerificationChanged`'s `output` and the `Snapshot`'s `steps_output`; see
 [docs/protocol.md](docs/protocol.md)). A run that lost the panel to a task's verification shows
-its output nowhere there, and doesn't take the panel back. A passing run of a set that only
-reports adds nothing to the conversation; a failing one adds a notice quoting the same last 10
-lines of the output, so you can read them however the panel has moved on since: `mutation
-reported: Mutation tests failed. Its output ended:` followed by them, or `mutation reported:
-Mutation tests failed, with no output` when there was none. It queues nothing. Sets run
-only in a git repository with the coder's worktree, where there's a commit to snapshot, and never
-with `--no-verify`.
+its output nowhere there, and doesn't take the panel back. Every run of a named set that ends,
+passed or failed, whether it reports or holds merges, raises `set_finished` (see
+[Triggers](#triggers)), so a trigger of yours can hand its output to a lens; a run that's
+cancelled, or that git couldn't start, raises nothing, nor does the startup check. A passing run
+of a set that only reports adds nothing to the conversation; a failing one that no trigger listens
+for, as none ships, adds a notice quoting the same last 10 lines of the output, so you can read
+them however the panel has moved on since: `mutation reported: Mutation tests failed. Its output
+ended:` followed by them, or `mutation reported: Mutation tests failed, with no output` when there
+was none. With a trigger listening for that failure (enabled, its role enabled, its `when` taking
+it), there's no notice: its task carries the output. Sets run only in a git repository with the
+coder's worktree, where there's a commit to snapshot, and never with `--no-verify`.
 
 **Merge holds.** A set with `holds_merges = true` failing holds merges into your branch, with a
 notice: `Merges held: mutation failed on 1a2b3c4. A fix is queued first.` A coder's task titled
@@ -1431,7 +1435,11 @@ true may report a blocking finding; report it as normal.`), and one lens may rep
 already reported 10 findings, the most allowed.`). Once every finding role's task of a review has
 ended, however it ended (finished, gave up, failed, stopped or removed), the review raises
 `reviews_finished`, once (see [Triggers](#triggers)): `findings = "some"` if they reported any,
-else `"none"`. A trigger on it, such as a merge pass, queues its task into the review, so its
+else `"none"`, and `review` saying what it reviewed. A **set report** is a review too: the finding
+roles' tasks one `set_finished` firing queues are booked into one review of kind `set`, read in a
+fresh snapshot of the commit the set ran on, which fans in as any review does, its merge pass
+capped by `review_suggestions` and its batch at round 1; a task of another role queued on
+`set_finished` is an ordinary task. A trigger on it, such as a merge pass, queues its task into the review, so its
 `suggest_task` files into the review's batch under the same cap, and the batch keeps filling
 until those tasks have ended too, or closes at once if none was queued, as a review that suggested
 nothing does. A review with no finding role's task raises nothing, and a disabled lens role's
@@ -1965,6 +1973,22 @@ every = 2
 checks = "mutation"
 ```
 
+No shipped trigger listens on `set_finished`. This one hands a failing `mutation` run to the
+`tests-reviewer`, whose findings go through the merge pass as a set report (see
+[Reviews](#reviews)), in place of the notice:
+
+```toml
+[triggers.mutation-report]
+on = "set_finished"
+role = "tests-reviewer"
+when = { set = "mutation", status = "failed" }
+prompt = """
+Mutation testing failed at {commit}: report the surviving mutants that matter as findings.
+
+{output}
+"""
+```
+
 The shipped triggers are data in
 [`src/orbit/agent/external/triggers/`](src/orbit/agent/external/triggers/): `triggers.toml` has a
 `[triggers.<name>]` table for each, and a prompt names its template, a Markdown file beside it.
@@ -2047,7 +2071,8 @@ its name in braces:
 | `commits` | every `every` landings matching its `when` on `role` and `origin` | `role`, `origin` | `{commit}`, `{cap}`, `{queued}`, `{since_commits}`, `{changed_files}`, `{sample}` |
 | `startup_check_failed` | a step of the startup check fails, once for each | `step` | `{step}`, `{output}` |
 | `manual` | you fire it | none | `{checks}` |
-| `reviews_finished` | every finding role's task of a review has ended (see [Reviews](#reviews)) | `findings`: `some` or `none`; `review`: `commit`, `batch` or `super` | `{title}`, `{commit}`, `{findings}`, `{cap}`, `{queued}`, `{landed_since}` |
+| `reviews_finished` | every finding role's task of a review has ended (see [Reviews](#reviews)) | `findings`: `some` or `none`; `review`: `commit`, `batch`, `super` or `set` | `{title}`, `{commit}`, `{findings}`, `{cap}`, `{queued}`, `{landed_since}` |
+| `set_finished` | a run of a named set ends, passed or failed (not one cancelled, nor the task checks) | `set`: any set's name; `status`: `passed` or `failed` | `{set}`, `{status}`, `{commit}`, `{output}` |
 
 When an event fires, each enabled trigger on it fires in turn, in configuration order (the
 shipped ones, then the project's), if its role, or one of its list's, is enabled, its `when` takes the event, its `paths`, if it has
@@ -2122,11 +2147,16 @@ they were when it was queued), and `{since_commits}`, `{changed_files}` and `{sa
 review's lists, each under its heading as [Reviews](#reviews) describes. On `reviews_finished`,
 `{title}` is the merge's first line (`Merge the findings of the review of commit 1a2b3c4`,
 `Merge the findings of the review of the 3 commits made for review batch-2`, or `Merge the
-findings of the super review at 1a2b3c4`), `{commit}` the review's last commit, `{findings}` a
+findings of the super review at 1a2b3c4`, or, for a set report, `Merge the findings of the
+mutation report at 1a2b3c4`), `{commit}` the review's last commit, `{findings}` a
 paragraph for each finding in id order, `F1 · bugs-reviewer · blocking: <title>` then its body,
 `{cap}` the suggestions its batch takes (`review_suggestions`, or `super_review_suggestions` for
-a super review), and `{queued}` and `{landed_since}` as a review's are; `{step}` the failed step's name and `{output}` the
-command that failed with its output, trimmed; and `{checks}` the verification steps and setup
+a super review), and `{queued}` and `{landed_since}` as a review's are; on `startup_check_failed`,
+`{step}` the failed step's name and `{output}` the command that failed with its output, trimmed;
+on `set_finished`, `{set}` the set's name, `{status}` `passed` or `failed`, `{commit}` the commit
+it ran on, and `{output}` the failing step's name and its output, trimmed as the verification
+panel trims it (`Mutation tests failed. Its output:` then the output), empty when it passed, so
+its paragraph drops; and `{checks}` the verification steps and setup
 configured now, under `Configured now (build on these):`, or `Nothing is configured yet.`; with
 steps in named sets, the task checks come first, then each set with its steps, whether it holds
 merges and when its triggers run it (`Set slow: every 10 commits, holds merges`). A
@@ -2161,9 +2191,13 @@ refused (`triggers.tidy-up.role: a list of roles names at least one.`). So is `r
 field never takes, alone or in a list: a `role` that isn't one (a disabled one is), a
 `verification` other than `configured`, `missing` or `off` (`triggers.tidy-up.when: missng isn't
 a value of verification; its values are configured, missing, off.`), a `findings` other than
-`some` or `none`, or a `review` other than `commit`, `batch` or `super` on `reviews_finished`,
-or other than `commit` or `batch` on `task_landed` (`triggers.tidy-up.when: nothing isn't a value
-of review; its values are commit, batch.`), while `origin`, `status` and `step` take any value.
+`some` or `none`, or a `review` other than `commit`, `batch`, `super` or `set` on
+`reviews_finished`, or other than `commit` or `batch` on `task_landed` (`triggers.tidy-up.when:
+nothing isn't a value of review; its values are commit, batch.`), or a `status` other than
+`passed` or `failed` on `set_finished` (`triggers.mutation-report.when: maybe isn't a value of
+status; its values are passed, failed.`), while `origin`, `step`, `task_finished`'s `status` and
+`set_finished`'s `set` take any value: a `set` naming no set, as after a rename, simply never
+matches.
 A trigger whose role is disabled loads, and never fires; one listing roles fires while any of them
 is enabled. When git can't show the diff of what
 landed, the triggers on the landing are skipped with an error (`Review skipped: …` when a review

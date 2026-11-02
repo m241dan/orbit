@@ -22,7 +22,10 @@ place; a fix's batch closing with no review by that lens queued leaves the hold 
 the ``review-rounds`` guard: the lane raises each landing as ``task_landed``, and a review of
 commits is queued by the triggers it guards, from their templates. It counts each landing toward the
 ``commits`` triggers too, and a super review is queued by those that fire, or by the super-review
-trigger fired by hand; those of them that run a named set run it instead.
+trigger fired by hand; those of them that run a named set run it instead. A named set's run
+ending raises ``set_finished``, and the tasks of finding roles its triggers queue are booked into
+one review of the set's report, read in a snapshot of the commit it ran on, which fans in to its
+merge passes as any review does, its batch at round 1.
 """
 
 import random
@@ -92,8 +95,10 @@ from orbit.agent.domain.reviews import (
     pause_notice,
     pending_titles,
     raised_roles,
+    review_kind,
     review_over,
     review_values,
+    set_review,
     tell_landed_since,
     with_finding,
     with_lens,
@@ -104,6 +109,7 @@ from orbit.agent.domain.suggestions import suggested_task, suggestion_refusal
 from orbit.agent.domain.tools import REPORT_FINDING
 from orbit.agent.domain.triggers import (
     REVIEWS_FINISHED,
+    SetOutcome,
     Trigger,
     TriggerEvent,
     render_template,
@@ -379,6 +385,14 @@ class ReviewLane:
         landed = await self._landed(job, since)
         pending = pending_titles(self._board.tasks)
         return review_values(job, "", self.planner.cap(job), pending, landed)
+
+    async def set_finished(self, outcome: SetOutcome) -> None:
+        """A named set's run ended as ``outcome`` says: raise ``set_finished``, each task of a
+        finding role its triggers queue booked into one review of the set's report, read in a
+        snapshot of the commit it ran on, then run them, and the others it queued."""
+        job = set_review(outcome.name, outcome.commit)
+        queued = await self._triggers.set_finished(outcome, self._round(job))
+        await self._queue_ended(queued)
 
     async def ended(self, state: TaskState, stop: RuntimeStop | None = None) -> None:
         """The task that ended as ``state`` finished without landing anything, or was stopped
@@ -729,12 +743,13 @@ class ReviewLane:
         """Record task ``task_id``, booked into the review ``booking`` says, behind ``batch``,
         which its suggestions join, its span linking to the span current as the review fell
         due, and, for a review of commits, the ``template`` its prompt was rendered from. A
-        super review, told what landed as it was queued, isn't rendered again. The triggers
+        super review, told what landed as it was queued, isn't rendered again, nor is a review
+        of a set's report, whose prompt tells nothing of what landed. The triggers
         queued its task as a review (see :data:`~orbit.protocol.QueuedAs`), so it can't be
         edited, and holds back ``suggestions-pending`` while it waits."""
         self._jobs[task_id], self._batches[task_id] = booking.job, batch
         self._causes[task_id] = booking.cause
-        if not booking.job.whole:
+        if review_kind(booking.job) in ("commit", "batch"):
             self._templates[task_id] = template
 
     def _is_lens(self, task_id: str) -> bool:

@@ -101,7 +101,7 @@ def test_the_default_name_drops_the_days_leading_zero_but_pads_the_time() -> Non
 
 
 def test_a_new_record_carries_the_current_format_version() -> None:
-    assert record().version == FORMAT_VERSION == 26
+    assert record().version == FORMAT_VERSION == 27
 
 
 def test_a_record_round_trips_through_json() -> None:

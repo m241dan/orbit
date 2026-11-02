@@ -76,6 +76,16 @@ def set_failed_note(name: str, step: str, output: str) -> str:
     return f"{name} reported: {step} failed. Its output ended:\n\n{tail}"
 
 
+def set_report(step: str, output: str) -> str:
+    """What a named set's run that failed at the step named ``step`` with ``output`` reports to
+    the triggers on ``set_finished``, as their ``{output}``: the step's name, then its output
+    trimmed as the verification panel trims it."""
+    trimmed = trim_output(output)
+    if not trimmed:
+        return f"{step} failed, with no output."
+    return f"{step} failed. Its output:\n\n{trimmed}"
+
+
 @dataclass(frozen=True)
 class StepProgress:
     """How far a run of the verification steps has got: each step's status, in order."""
