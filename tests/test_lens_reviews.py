@@ -5,6 +5,7 @@ the review's batch; in a session as it runs, and in one read back from a save.""
 
 import asyncio
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any
 
 from opentelemetry.sdk.trace import ReadableSpan
@@ -22,6 +23,7 @@ from orbit.agent.domain.reviews import (
     ReviewGroup,
     ReviewJob,
     ReviewLimits,
+    ReviewStage,
 )
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.tools import (
@@ -957,3 +959,54 @@ async def test_a_review_interrupted_with_no_trigger_on_its_end_closes_on_load() 
     await session.close()
 
     assert last_of(Snapshot, events).review == ReviewStatus(paused=False, open_batches=0)
+
+
+def lenses_ended(stage: ReviewStage) -> tuple[tuple[TaskState, ...], LaneSnapshot]:
+    """A board and review lane saved as the review of task 1's commit had every lens ended, its
+    bugs lens having found :data:`FOUND`, and its group at ``stage``, with no merge pass
+    booked."""
+    tasks, lane = mid_review("completed")
+    group = replace(lane.groups["batch-1"], ended=("2", "3"), stage=stage)
+    return tasks, lane.model_copy(update={"groups": {"batch-1": group}})
+
+
+async def test_a_review_saved_merging_with_no_merge_pass_booked_closes_on_load() -> None:
+    tasks, lane = lenses_ended("merging")
+    store = store_with(saved("auth", *tasks, reviews=lane))
+    session, launcher = reopening(store, triggers=lens_triggers(merge=MERGE))
+    events = await opened(session, ActivateSession(session="auth"))
+    await session.close()
+
+    snapshot = last_of(Snapshot, events)
+    assert len(snapshot.tasks) == 3
+    assert snapshot.review == ReviewStatus(paused=False, open_batches=0)
+    assert launcher.launches == []
+
+
+async def test_a_review_saved_with_every_lens_ended_fans_in_once_on_load() -> None:
+    tasks, lane = lenses_ended("reviewing")
+    store = store_with(saved("auth", *tasks, reviews=lane))
+    session, launcher = reopening(store, triggers=lens_triggers(merge=MERGE))
+    events = await opened(session, ActivateSession(session="auth"))
+    await quiet_within(0.05)
+    await session.close()
+
+    snapshot = last_of(Snapshot, events)
+    assert shown(snapshot.tasks)[3:] == [(REVIEWER, "merge", None, "pending")]
+    assert snapshot.review == ReviewStatus(paused=False, open_batches=1)
+    assert reviews_of(store).groups["batch-1"].stage == "merging"
+    assert reviews_of(store).batches["4"] == "batch-1"
+    assert launcher.launches == []
+
+
+async def test_a_review_saved_with_a_lens_pending_stays_open_on_load() -> None:
+    tasks, lane = mid_review("pending")
+    store = store_with(saved("auth", *tasks, reviews=lane))
+    session, _ = reopening(store, triggers=lens_triggers(merge=MERGE))
+    events = await opened(session, ActivateSession(session="auth"))
+    await session.close()
+
+    snapshot = last_of(Snapshot, events)
+    assert len(snapshot.tasks) == 3
+    assert snapshot.review == ReviewStatus(paused=False, open_batches=1)
+    assert reviews_of(store).groups["batch-1"].stage == "reviewing"

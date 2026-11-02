@@ -289,15 +289,33 @@ class ReviewLane:
         """End the reviews in ``interrupted``, which were stopped by a crash, as a cancelled
         review ends, never to run again: a review of their batch that's due is queued, for the
         next run, as are the tasks of ``reviews_finished`` for a review whose lenses have all
-        ended now. The board and the review status aren't published: the switch's snapshot,
-        which follows, shows them, and :meth:`note_pause` then notes a pause."""
+        ended now. Then each review restored still filling is settled as :meth:`_settle_restored`
+        says. The board and the review status aren't published: the switch's snapshot, which
+        follows, shows them, and :meth:`note_pause` then notes a pause."""
         for task_id in interrupted:
             self._templates.pop(task_id, None)
             batch = self._batches.get(task_id)
             if batch is not None and batch in self.planner.open_batches:
                 await self._end_quietly(task_id, batch)
                 await self._hooks.changed()
+        await self._settle_restored()
         self._status = self.status
+
+    async def _settle_restored(self) -> None:
+        """Settle quietly each review restored whose batch still fills though its tasks ended
+        before the crash, as one saved as it fanned in did: ``reviews_finished`` is raised for
+        one whose lenses have all ended, if it wasn't yet, and one that's over ends."""
+        # Settling one changes no other group; it may only prune those whose batch closed.
+        for batch, group in tuple(self._groups.items()):
+            if self._settling_due(batch, group):
+                await self._settle(batch, group, "quiet")
+                await self._hooks.changed()
+
+    def _settling_due(self, batch: str, group: ReviewGroup) -> bool:
+        """Whether ``group``, the review behind ``batch``, still fills and is due to fan in or
+        to end."""
+        due = fan_in_due(group) or review_over(group, self._members(batch))
+        return self.planner.filling(batch) and due
 
     async def _end_quietly(self, task_id: str, batch: str) -> None:
         """End task ``task_id``, booked into the review behind open ``batch``, as a crash
