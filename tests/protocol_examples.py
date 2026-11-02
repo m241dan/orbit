@@ -169,6 +169,9 @@ SUMMARY = SessionSummary(
 STEP = StepState(name="Unit tests", status="failed")
 REVIEW = ReviewStatus(paused=True, open_batches=2)
 HOLD = MergeHold(set="stress", commit="1a2b3c4d", reason="Stress tests failed")
+FINDING_HOLD = MergeHold(
+    set="bugs-reviewer", commit="5e6f7a8b", reason="blocking finding", finding="Fix the crash"
+)
 PROPOSAL = ChecksProposed(
     agent_id="agent-1",
     task_id="t1",
@@ -350,7 +353,7 @@ EVENTS: tuple[EventEnvelope, ...] = (
             paused_runtime="claude",
             role_spent={PLANNER: USAGE, "experimenter": USAGE},
             caused_spent={PLANNER: {"experimenter": USAGE}},
-            merge_holds=(HOLD,),
+            merge_holds=(HOLD, FINDING_HOLD),
             waiting_to_merge=("t3",),
         )
     ),

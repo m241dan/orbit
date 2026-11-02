@@ -270,12 +270,16 @@ class StepState(_Message):
 
 
 class MergeHold(_Message):
-    """A named set's hold on merges into the user's branch: the ``set`` that failed, the
-    ``commit`` it failed on and why (``reason``), such as ``Stress tests failed``."""
+    """A hold on merges into the user's branch: a named set's, the ``set`` that failed, the
+    ``commit`` it failed on and why (``reason``), such as ``Stress tests failed``; or a blocking
+    finding's, the lens role that raised it as ``set``, the ``commit`` reviewed, ``reason``
+    ``blocking finding``, and the title of the task it was filed as, ``finding``, which a set's
+    hold has none of."""
 
     set: str
     commit: str
     reason: str
+    finding: str | None = None
 
 
 class ProposedStep(_Message):

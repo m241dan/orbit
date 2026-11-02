@@ -493,14 +493,18 @@ Each session in a `Catalog` carries its state as it is when the Catalog is sent:
   open session spent, as its `Snapshot` has them, updated as its turns end; null for any other
   session, whose spend a frontend keeps as that session's `Snapshot` said.
 - `merge_holds` and `waiting_to_merge`, in `SessionStateChanged` and `Snapshot`, not the
-  Catalog: the named sets holding merges into the user's branch, each a `MergeHold` with the
-  `set`, the `commit` it failed on and its `reason`, such as `Stress tests failed`, and the ids
-  of the open session's tasks whose verified work waits in the coder's tree for the holds to
-  lift, in the order it lands. Holds are kept per repository, so they outlive a restart; the
-  waiting tasks aren't a task status, so an older frontend reads the task list as before. Both
-  are additive, empty for an older peer and for any session that isn't open; they change as a
-  hold starts, a hold's failure changes, a hold lifts or is released (`ReleaseHold`), or work
-  starts or stops waiting.
+  Catalog: the holds on merges into the user's branch, in the order they started, each a
+  `MergeHold`, and the ids of the open session's tasks whose verified work waits in the coder's
+  tree for the holds to lift, in the order it lands. A named set's hold has the `set`, the
+  `commit` it failed on and its `reason`, such as `Stress tests failed`, and `finding` null. A
+  blocking finding's hold, which a merge pass filing a task as `blocking` starts, has the lens
+  role that raised it as `set` (`bugs-reviewer`), the `commit` reviewed, `reason` `blocking
+  finding`, and `finding`, the title of the task it was filed as; `finding` is additive, absent
+  from an older backend, which holds merges only for sets. Holds are kept per repository, so
+  they outlive a restart; the waiting tasks aren't a task status, so an older frontend reads the
+  task list as before. Both are additive, empty for an older peer and for any session that isn't
+  open; they change as a hold starts, a hold's failure or fix changes, a hold lifts or is
+  released (`ReleaseHold`), or work starts or stops waiting.
 
 Whenever one of them changes for a session, every welcomed connection gets
 `SessionStateChanged(session, active, state, viewers, activity, paused_until, paused_for,
@@ -657,10 +661,12 @@ in a lane whose tasks start by themselves, such as a reviewer's review, on its o
 other agent's, the task run it's in, as `CancelTurn` does for the `work` lane. It's refused with
 `unknown` for an agent that isn't running: `No running agent 'agent-9'.`
 
-`ReleaseHold()` releases every hold on merges into the user's branch by hand, though the sets
-holding them haven't passed: the `merge_holds` in session state go empty, a `Notice` says which
-sets haven't passed (`Merges resumed by hand; stress hasn't passed.`, or `stress, soak haven't
-passed` for several), and the work waiting (`waiting_to_merge`) lands, in order, as when the last
+`ReleaseHold()` releases every hold on merges into the user's branch by hand, the sets' and the
+blocking findings', though the sets holding them haven't passed: the `merge_holds` in session
+state go empty, a `Notice` says which sets haven't passed and which findings aren't fixed
+(`Merges resumed by hand; stress hasn't passed.`, or `stress, soak haven't passed` for several,
+`the finding from bugs-reviewer isn't fixed` for a finding's, joined with `and`), and the work
+waiting (`waiting_to_merge`) lands, in order, as when the last
 hold lifts by itself, a conflict handled as any merge's. A set that fails again afterwards starts
 a new hold, with its notice and a fix of its own. It's refused with `invalid` while no hold is
 on, as with no set that holds merges or under `--no-verify`: `Merges aren't held.` A read-only

@@ -12,7 +12,7 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from functools import reduce
-from typing import Any
+from typing import Any, Literal, assert_never
 
 from pydantic import (
     AwareDatetime,
@@ -31,7 +31,7 @@ from orbit.agent.domain.endings import (
     QUEUED_BEFORE_LENSES,
     QUEUED_FOR_RETIRED_ROLE,
 )
-from orbit.agent.domain.merge_holds import Hold
+from orbit.agent.domain.merge_holds import AnyHold, FindingHold, Hold
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot, SuperReviewCount
 from orbit.agent.domain.roles import RETIRED_ROLES
@@ -413,10 +413,12 @@ class _ReviewCount(BaseModel):
 
 class _SavedHold(BaseModel):
     """A named set's hold on merges, kept per repository: the set, the commit it failed on, the
-    step that failed with its output, and the fixes queued for it."""
+    step that failed with its output, and the fixes queued for it. A hold saved before findings
+    held merges has no ``kind``, and is a set's."""
 
     model_config = ConfigDict(frozen=True)
 
+    kind: Literal["set"] = "set"
     name: str
     commit: str
     step: str
@@ -424,8 +426,26 @@ class _SavedHold(BaseModel):
     fixes: int = Field(ge=0)
 
 
-_HOLDS: TypeAdapter[tuple[_SavedHold, ...]] = TypeAdapter(tuple[_SavedHold, ...])
-"""The holds on merges, each set's in the order they started."""
+class _SavedFindingHold(BaseModel):
+    """A blocking finding's hold on merges, kept per repository: the lens that raised it, the
+    commit reviewed, the title of the task it was filed as, its latest fix and that fix's batch,
+    none once no review can check it, and the fixes queued for it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["finding"]
+    lens: str
+    commit: str
+    title: str
+    task: str
+    batch: str | None
+    fixes: int = Field(ge=0)
+
+
+_HOLDS: TypeAdapter[tuple[_SavedHold | _SavedFindingHold, ...]] = TypeAdapter(
+    tuple[_SavedHold | _SavedFindingHold, ...]
+)
+"""The holds on merges, in the order they started."""
 
 
 @dataclass(frozen=True)
@@ -715,28 +735,57 @@ def parse_review_count(text: str) -> SuperReviewCount:
     )
 
 
-def merge_holds_json(holds: Sequence[Hold]) -> str:
-    """``holds``, the named sets' holds on merges, as JSON."""
-    saved = tuple(
-        _SavedHold(
-            name=hold.name,
-            commit=hold.commit,
-            step=hold.step,
-            output=hold.output,
-            fixes=hold.fixes,
-        )
-        for hold in holds
-    )
-    return _HOLDS.dump_json(saved).decode()
+def merge_holds_json(holds: Sequence[AnyHold]) -> str:
+    """``holds``, the holds on merges, the named sets' and the blocking findings', as JSON."""
+    return _HOLDS.dump_json(tuple(_saved_hold(hold) for hold in holds)).decode()
 
 
-def parse_merge_holds(text: str) -> tuple[Hold, ...]:
-    """The named sets' holds on merges in JSON ``text``; none when it's unreadable."""
+def _saved_hold(hold: AnyHold) -> _SavedHold | _SavedFindingHold:
+    """``hold`` as it's kept."""
+    match hold:
+        case Hold():
+            return _SavedHold(
+                name=hold.name,
+                commit=hold.commit,
+                step=hold.step,
+                output=hold.output,
+                fixes=hold.fixes,
+            )
+        case FindingHold():
+            return _SavedFindingHold(
+                kind="finding",
+                lens=hold.lens,
+                commit=hold.commit,
+                title=hold.title,
+                task=hold.task,
+                batch=hold.batch,
+                fixes=hold.fixes,
+            )
+        case _:
+            assert_never(hold)
+
+
+def parse_merge_holds(text: str) -> tuple[AnyHold, ...]:
+    """The holds on merges in JSON ``text``, those saved before findings held merges read as the
+    named sets' they were; none when it's unreadable."""
     try:
         saved = _HOLDS.validate_json(text)
     except ValidationError:
         return ()
-    return tuple(Hold(each.name, each.commit, each.step, each.output, each.fixes) for each in saved)
+    return tuple(_kept_hold(each) for each in saved)
+
+
+def _kept_hold(saved: _SavedHold | _SavedFindingHold) -> AnyHold:
+    """The hold ``saved`` keeps."""
+    match saved:
+        case _SavedHold():
+            return Hold(saved.name, saved.commit, saved.step, saved.output, saved.fixes)
+        case _SavedFindingHold():
+            return FindingHold(
+                saved.lens, saved.commit, saved.title, saved.task, saved.batch, saved.fixes
+            )
+        case _:
+            assert_never(saved)
 
 
 def sampled_json(sampled: Mapping[str, int]) -> str:

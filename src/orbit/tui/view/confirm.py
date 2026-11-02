@@ -38,11 +38,22 @@ def reset_message(role: str) -> str:
     )
 
 
-def release_message(sets: Sequence[str]) -> str:
-    """What releasing the hold on merges of the ``sets`` holding them leaves undone, as the
-    confirmation says: ``stress hasn't passed.``, several sets joined with commas."""
+def release_message(sets: Sequence[str], lenses: Sequence[str] = ()) -> str:
+    """What releasing the holds on merges of the ``sets`` and of the findings the ``lenses``
+    raised leaves undone, as the confirmation says: ``stress hasn't passed.``, several sets
+    joined with commas, ``the finding from bugs-reviewer isn't fixed.``, or both, joined with
+    ``and``."""
     verb = "hasn't" if len(sets) == 1 else "haven't"
-    return f"{', '.join(sets)} {verb} passed."
+    unfixed = (
+        f"the finding from {lenses[0]} isn't fixed"
+        if len(lenses) == 1
+        else f"the findings from {', '.join(lenses)} aren't fixed"
+    )
+    parts = [
+        *([f"{', '.join(sets)} {verb} passed"] if sets else []),
+        *([unfixed] if lenses else []),
+    ]
+    return f"{' and '.join(parts)}."
 
 
 def confirm_hint(yes: str, no: str = "cancel") -> str:

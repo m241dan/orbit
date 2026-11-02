@@ -308,11 +308,28 @@ def _with_fixed(task_id: str, fixes: Mapping[str, str | None]) -> tuple[str, ...
 
 
 def kept_groups(
-    groups: Mapping[str, ReviewGroup], open_batches: Collection[str]
+    groups: Mapping[str, ReviewGroup],
+    open_batches: Collection[str],
+    batches: Mapping[str, str | None],
 ) -> dict[str, ReviewGroup]:
-    """The ``groups``, by batch, whose batch is among ``open_batches``: a review's findings are
-    kept until the batch they were filed into has been reviewed, closed or dropped."""
-    return {batch: group for batch, group in groups.items() if batch in open_batches}
+    """The ``groups``, by batch, whose batch is among ``open_batches``, or one of whose findings
+    was filed into a task, as ``batches`` gives each task's batch by id, whose batch is: a
+    review's findings are kept until the batches they were filed into, its own and the batch of
+    its own a blocking finding's fix goes into, have been reviewed, closed or dropped."""
+    return {
+        batch: group
+        for batch, group in groups.items()
+        if batch in open_batches or _filed_into(group, open_batches, batches)
+    }
+
+
+def _filed_into(
+    group: ReviewGroup, open_batches: Collection[str], batches: Mapping[str, str | None]
+) -> bool:
+    """Whether one of ``group``'s findings was filed into a task, as ``batches`` gives each
+    task's batch by id, in one of ``open_batches``."""
+    tasks = (finding.task for finding in group.findings if finding.task is not None)
+    return any(batches.get(task) in open_batches for task in tasks)
 
 
 def review_kind(job: ReviewJob) -> ReviewKind:
@@ -538,10 +555,19 @@ class ReviewPlanner:
 
     def open_batch(self, job: ReviewJob) -> str:
         """Start the batch for ``job``'s suggestions; returns its id."""
-        batch = f"batch-{self._next_batch}"
+        return self._open_new(_Batch(round=job.round + 1, cap=self.cap(job)))
+
+    def open_fix_batch(self, round: int) -> str:
+        """Start a batch of its own, at ``round``, for a blocking finding's fix, which no review
+        fills, so it's reviewed once its task has finished; returns its id."""
+        return self._open_new(_Batch(round=round, cap=self.limits.suggestions, filling=False))
+
+    def _open_new(self, batch: _Batch) -> str:
+        """Open ``batch`` under the next id; returns that id."""
+        batch_id = f"batch-{self._next_batch}"
         self._next_batch += 1
-        self._open[batch] = _Batch(round=job.round + 1, cap=self.cap(job))
-        return batch
+        self._open[batch_id] = batch
+        return batch_id
 
     def added(self, batch: str, task_id: str, title: str | None = None) -> None:
         """Task ``task_id`` joined ``batch``: a suggestion titled ``title``, which no later
@@ -560,8 +586,11 @@ class ReviewPlanner:
             return None
         return self._due(batch_id)
 
-    def refusal(self, batch: str, title: str, tasks: Sequence[TaskState]) -> str | None:
-        """Why a suggestion titled ``title`` can't join ``batch``; ``None`` if it can.
+    def refusal(
+        self, batch: str, title: str, tasks: Sequence[TaskState], elsewhere: int = 0
+    ) -> str | None:
+        """Why a suggestion titled ``title`` can't join ``batch``, whose review filed
+        ``elsewhere`` tasks into batches of their own; ``None`` if it can.
 
         A title that, once normalised, is the first line of a task in ``tasks`` (the board's
         tasks, whatever their role and status) or of a suggestion the planner accepted this
@@ -572,7 +601,7 @@ class ReviewPlanner:
         if closed is not None:
             return closed
         cap = self._open[batch].cap
-        if len(self._open[batch].tasks) >= cap:
+        if len(self._open[batch].tasks) + elsewhere >= cap:
             return f"This review has already suggested {cap} tasks, the most allowed."
         return self._repeat(title, tasks)
 

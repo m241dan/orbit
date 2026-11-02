@@ -147,6 +147,25 @@ def test_suggestions_are_capped_per_review() -> None:
     assert refusal is not None and "2" in refusal
 
 
+def test_tasks_a_review_filed_into_batches_of_their_own_count_toward_its_cap() -> None:
+    reviews = planner(cap=2)
+    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
+    assert reviews.refusal(batch, "One", tasks=(), elsewhere=1) is None
+    reviews.added(batch, "2")
+    refusal = reviews.refusal(batch, "Two", tasks=(), elsewhere=1)
+    assert refusal is not None and "2" in refusal
+
+
+def test_a_fix_batch_is_reviewed_once_its_task_lands_as_no_review_fills_it() -> None:
+    reviews = planner()
+    batch = reviews.open_fix_batch(2)
+    reviews.added(batch, "4", "Fix the crash")
+    assert reviews.round_of(batch) == 2 and not reviews.filling(batch)
+    job = reviews.landed(state("4", origin="review", batch=batch), "c4")
+    assert job == ReviewJob(commits=("c4",), round=2, batch=batch, reviewed=("4",))
+    assert batch not in reviews.open_batches
+
+
 def test_suggestions_already_queued_are_refused() -> None:
     reviews = planner()
     batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
@@ -997,6 +1016,12 @@ def test_a_commit_review_has_no_roles_raising_its_findings() -> None:
     assert raised_roles(COMMIT_JOB, [RAISED], []) == frozenset()
 
 
+def test_a_group_is_kept_while_a_task_it_filed_a_finding_into_is_in_an_open_batch() -> None:
+    groups = {"batch-1": RAISED}
+    assert kept_groups(groups, ("batch-4",), {"5": "batch-4"}) == groups
+    assert kept_groups(groups, ("batch-4",), {"5": "batch-1", "6": None}) == {}
+
+
 def test_the_groups_kept_are_those_whose_batch_is_still_open() -> None:
     groups = {"batch-1": RAISED, "batch-2": ReviewGroup(COMMIT_JOB)}
-    assert kept_groups(groups, ("batch-2", "batch-3")) == {"batch-2": ReviewGroup(COMMIT_JOB)}
+    assert kept_groups(groups, ("batch-2", "batch-3"), {}) == {"batch-2": ReviewGroup(COMMIT_JOB)}

@@ -213,22 +213,28 @@ def edit_refusal(state: TaskState) -> str | None:
     return None if refusal is None else refusal.message
 
 
-def task_list_title(*, held: bool, lane: str | None = None, merge_holds: Sequence[str] = ()) -> str:
-    """The task list's border title, which says which sets, ``merge_holds``, hold merges, if
-    any, when the list is held from following, and the ``lane`` it's narrowed to, if any."""
+def task_list_title(
+    *, held: bool, lane: str | None = None, merge_holds: Sequence[str] = (), findings: int = 0
+) -> str:
+    """The task list's border title, which says which sets, ``merge_holds``, and how many
+    blocking ``findings`` hold merges, if any, when the list is held from following, and the
+    ``lane`` it's narrowed to, if any."""
     parts = [
         "Task list",
-        *([merges_held(merge_holds)] if merge_holds else []),
+        *([merges_held(merge_holds, findings)] if merge_holds or findings else []),
         *(["held"] if held else []),
         *([lane] if lane is not None else []),
     ]
     return " · ".join(parts)
 
 
-def merges_held(sets: Sequence[str]) -> str:
-    """What the task list's title says while the ``sets`` hold merges: ``merges held: stress
-    failed``, several sets joined with commas."""
-    return f"merges held: {', '.join(sets)} failed"
+def merges_held(sets: Sequence[str], findings: int = 0) -> str:
+    """What the task list's title says while the ``sets`` and ``findings`` blocking findings
+    hold merges: ``merges held: stress failed``, several sets joined with commas, then
+    ``blocking finding``, or ``blocking findings`` for several."""
+    blocking = "blocking finding" if findings == 1 else "blocking findings"
+    parts = [*([f"{', '.join(sets)} failed"] if sets else []), *([blocking] if findings else [])]
+    return f"merges held: {', '.join(parts)}"
 
 
 def follow_top(
@@ -418,10 +424,17 @@ class TaskBoard:
     @property
     def held_sets(self) -> tuple[str, ...]:
         """The names of the sets holding merges, in the order their holds started."""
-        return tuple(hold.set for hold in self.merge_holds)
+        return tuple(hold.set for hold in self.merge_holds if hold.finding is None)
+
+    @property
+    def held_findings(self) -> tuple[str, ...]:
+        """The lenses that raised the blocking findings holding merges, in the order their holds
+        started."""
+        return tuple(hold.set for hold in self.merge_holds if hold.finding is not None)
 
     def show_merge_holds(self, holds: Sequence[MergeHold], waiting: Iterable[str]) -> None:
-        """Title the list with the sets whose ``holds`` hold merges, and have the tasks whose
+        """Title the list with the sets and findings whose ``holds`` hold merges, and have the
+        tasks whose
         work is ``waiting`` for them say so; nothing for the holds and waiting work shown."""
         holds, waiting = tuple(holds), frozenset(waiting)
         if (holds, waiting) == (self.merge_holds, self.waiting_to_merge):
@@ -431,9 +444,14 @@ class TaskBoard:
         self.redraw()
 
     def _show_title(self) -> None:
-        """Title the list with the sets holding merges, whether it's held and the lane it's
-        narrowed to."""
-        title = task_list_title(held=not self.following, lane=self.lane, merge_holds=self.held_sets)
+        """Title the list with the sets and blocking findings holding merges, whether it's held
+        and the lane it's narrowed to."""
+        title = task_list_title(
+            held=not self.following,
+            lane=self.lane,
+            merge_holds=self.held_sets,
+            findings=len(self.held_findings),
+        )
         self._view.show_title(title)
 
     def show_waiting(self, waiting: tuple[str, str] | None) -> None:

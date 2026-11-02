@@ -34,6 +34,10 @@ def test_the_release_wording() -> None:
     assert RELEASE_YES == "release"
     assert release_message(("stress",)) == "stress hasn't passed."
     assert release_message(("stress", "soak")) == "stress, soak haven't passed."
+    assert release_message((), ("bugs-reviewer",)) == "the finding from bugs-reviewer isn't fixed."
+    assert release_message(("stress",), ("bugs-reviewer", "security-reviewer")) == (
+        "stress hasn't passed and the findings from bugs-reviewer, security-reviewer aren't fixed."
+    )
 
 
 async def test_a_snapshot_holding_merges_titles_the_list_and_marks_the_work_waiting() -> None:
@@ -71,6 +75,18 @@ async def test_releasing_asks_naming_the_sets_then_sends_release_hold() -> None:
     assert shell.wire.changes == []
     await then()
     assert shell.wire.changes == [ReleaseHold()]
+
+
+async def test_releasing_a_findings_hold_asks_naming_the_lens_that_raised_it() -> None:
+    shell = Shell()
+    finding = MergeHold(
+        set="bugs-reviewer", commit="c1", reason="blocking finding", finding="Fix the crash"
+    )
+    await shell.feed(HELD.model_copy(update={"merge_holds": (finding,)}))
+    assert shell.task_view.title == "Task list · merges held: blocking finding"
+    shell.frontend.release_hold()
+    _, message, _, _ = shell.app.questions[-1]
+    assert message == "the finding from bugs-reviewer isn't fixed."
 
 
 async def test_releasing_with_merges_not_held_asks_nothing() -> None:

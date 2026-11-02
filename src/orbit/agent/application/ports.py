@@ -13,7 +13,7 @@ from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.commits import Commit
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.listings import FoundDirectory
-from orbit.agent.domain.merge_holds import Hold
+from orbit.agent.domain.merge_holds import AnyHold
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.purging import Purged
 from orbit.agent.domain.replay import LogBounds
@@ -626,13 +626,14 @@ class SessionStore(EventLog, Protocol):
         can't."""
         ...
 
-    async def merge_holds(self) -> tuple[Hold, ...]:
-        """The named sets' holds on merges into the user's branch, in the order they started;
-        none when none is saved. Raises :class:`ReadFailed` when they can't be read."""
+    async def merge_holds(self) -> tuple[AnyHold, ...]:
+        """The holds on merges into the user's branch, the named sets' and the blocking
+        findings', in the order they started; none when none is saved. Raises
+        :class:`ReadFailed` when they can't be read."""
         ...
 
-    async def save_merge_holds(self, holds: Sequence[Hold]) -> None:
-        """Save ``holds`` as the named sets' holds on merges, replacing those saved; raises
+    async def save_merge_holds(self, holds: Sequence[AnyHold]) -> None:
+        """Save ``holds`` as the holds on merges, replacing those saved; raises
         :class:`StoreFailed`, a :class:`StorageFailed` when the database failed, when they
         can't be saved."""
         ...

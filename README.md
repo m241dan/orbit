@@ -778,8 +778,8 @@ and they're then told of as landing nothing. Task checks
 never hold merges, nor does a set that only reports, and with `--no-verify` nothing does.
 
 To release a hold by hand, say a set that's flaky, press `ctrl+f`, shown in the footer only while
-merges are held: it asks `Release the merge hold? mutation hasn't passed.`, `y` releases and
-`n`/`esc` cancels. Releasing lifts every hold, with the notice `Merges resumed by hand; mutation
+merges are held: it asks `Release the merge hold? mutation hasn't passed.` (or `the finding from
+bugs-reviewer isn't fixed.` for a blocking finding's hold), `y` releases and `n`/`esc` cancels. Releasing lifts every hold, with the notice `Merges resumed by hand; mutation
 hasn't passed.`, and the waiting work lands, in order, as when a hold lifts by itself; the title
 goes back to `Task list`. The set isn't fixed by it: the next time it runs and fails, a new hold
 starts, with its notice and a fix of its own. Frontends send `ReleaseHold`, which is refused with
@@ -1446,19 +1446,52 @@ the rest `merged` into it, each with the new task's id, and the task's `severity
 `normal` (the default), is kept with it. `dismiss_finding(finding, reason)` dismisses one, with a
 reason, which is required (`Dismissed F2.`). A merge pass's suggestion naming no finding is
 refused, as is one naming an id that isn't one of its review's undecided findings (`F9 isn't an
-undecided finding of this review.`); a finding decided once isn't decided again (`F1 is already
-filed.`, or `dismissed`, and so on), and a suggestion refused for any reason, a repeated title or
-the cap included, decides nothing. `complete_task` from a merge pass is refused while any finding
+undecided finding of this review.`), and so is one filed as `blocking` when none of the findings
+it names is blocking (`File as blocking only when a blocking finding is among findings.`); a
+finding decided once isn't decided again (`F1 is already filed.`, or `dismissed`, and so on), and
+a suggestion refused for any reason, a repeated title or the cap included, decides nothing. `complete_task` from a merge pass is refused while any finding
 is undecided (`Decide every finding first: F2, F5 have no outcome. File them with suggest_task or
 dismiss them with dismiss_finding.`), and the findings it leaves undecided as it ends otherwise,
 by giving up, failing, being stopped or removed, are recorded `unanswered`. When a task filed with
 findings lands, they're recorded `fixed`, or, if it or a fix of it gives up, `given_up`; one that
-ends otherwise leaves them `filed`. Each review keeps its findings until the batch they were filed
-into has been reviewed, closed or dropped, then forgets them, so the saved session doesn't grow. A
+ends otherwise leaves them `filed`. Each review keeps its findings until the batches they were
+filed into, its own and a blocking finding's batch of its own (below), have been reviewed, closed
+or dropped, then forgets them, so the saved session doesn't grow. A
 review task that isn't a merge pass, such as a project's own single reviewer, suggests with a
 title and prompt as before: naming findings is refused (`Only a merge pass files findings; suggest
-the task without them.`), as is `dismiss_finding` (`Only a merge pass can dismiss findings.`). The
-outcomes are counted on spans (see [docs/telemetry.md](docs/telemetry.md)).
+the task without them.`), as is `dismiss_finding` (`Only a merge pass can dismiss findings.`), and
+so is a `blocking` severity. The outcomes are counted on spans (see
+[docs/telemetry.md](docs/telemetry.md)).
+
+**Blocking findings.** A task a merge pass files as `blocking` holds merges into your branch, as a
+failing set that holds merges does (see *Merge holds* under
+[Verification steps](#verification-steps)), with a notice: `Merges held: a blocking finding from bugs-reviewer in 1a2b3c4: <title>. Its fix is
+queued first.`, naming the lens that raised the first finding it files and the commit reviewed. The
+task goes to the front of the queue, in a batch of its own at the review's next round, so the work
+waiting to merge meanwhile can't keep that batch from closing, and it lands despite the hold, with
+the work stacked beneath it, while work that finishes after it waits. Its tasks count toward the
+review's cap all the same. Once it lands, its batch is reviewed as any batch is: by Bugs, Tests
+and the lenses that raised its findings. When that review ends, the hold lifts (`Merges resumed:
+the finding from bugs-reviewer is fixed.`) unless its merge pass files another blocking task from
+that lens's findings: a review that found nothing, that lens finding nothing blocking, and a merge
+pass dismissing the finding or filing it as `normal` all lift it, and the waiting work lands, in
+order. Another blocking task from that lens keeps the hold and becomes the next fix, first in a
+batch of its own, up to `fallback_fixes` fixes in all; past that it's filed as a normal suggestion,
+at the end of the review's batch, and the hold stays: `The finding from bugs-reviewer still holds
+after 3 fixes; merges stay held. Release with ctrl+f or fix it yourself.` If no review by that lens
+can check the fix, as when its batch is at `review_rounds`, that lens's triggers are disabled or
+don't fire on a batch, that lens's task in the review doesn't complete, or the fix ends without
+landing (it gives up, or its chain of fixes runs out), the hold stays too: `The finding from
+bugs-reviewer can't be checked by a review; merges stay held. Release with ctrl+f or fix it
+yourself.` A blocking finding the merge pass dismisses, or files as `normal`, holds nothing, and
+normal findings never hold merges. Finding holds sit beside the sets': merges wait until every hold
+lifts, two blocking findings hold separately, and `ctrl+f` releases them all, the notice naming
+what isn't done (`Merges resumed by hand; stress hasn't passed and the finding from bugs-reviewer
+isn't fixed.`). They're kept per repository with the sets' holds, so a restart restores them. The
+task list's title reads `Task list · merges held: blocking finding`, or `merges held: stress
+failed, blocking finding` with a set holding too; frontends see each as a `MergeHold` whose `set`
+is the lens and whose `finding` is the task's title (see [docs/protocol.md](docs/protocol.md)).
+Holds need verification on, so under `--no-verify` blocking findings hold nothing.
 
 ### Roles and `.orbit/config.toml`
 

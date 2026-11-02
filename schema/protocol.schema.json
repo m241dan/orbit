@@ -1912,11 +1912,23 @@
       "type": "object"
     },
     "MergeHold": {
-      "description": "A named set's hold on merges into the user's branch: the ``set`` that failed, the\n``commit`` it failed on and why (``reason``), such as ``Stress tests failed``.",
+      "description": "A hold on merges into the user's branch: a named set's, the ``set`` that failed, the\n``commit`` it failed on and why (``reason``), such as ``Stress tests failed``; or a blocking\nfinding's, the lens role that raised it as ``set``, the ``commit`` reviewed, ``reason``\n``blocking finding``, and the title of the task it was filed as, ``finding``, which a set's\nhold has none of.",
       "properties": {
         "commit": {
           "title": "Commit",
           "type": "string"
+        },
+        "finding": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Finding"
         },
         "reason": {
           "title": "Reason",

@@ -7,7 +7,8 @@ the review lane while there's one, and ``task_finished`` for every task that end
 holds merges, a task's verified work is committed in the coder's tree and waits there, unmerged
 and unreviewed, but a fix for a set held, which merges with the work stacked beneath it; once no
 hold is left, the work waiting lands, in order, and is told of as landed then; the work waiting is
-saved with the session, at each change, and taken on again as the session opens. A chain of
+saved with the session, at each change, and taken on again as the session opens. A blocking
+finding's fix merges despite the holds too. A chain of
 fixes for a set held that ends without merging is told to the holds, which queue the next. A run
 stops
 at a task its agent couldn't do for the usage limit or for the API not answering, as the
@@ -642,9 +643,10 @@ class WorkLane:
 
     def _held_back(self, state: TaskState) -> bool:
         """Whether the work of the task that is ``state`` waits in the tree rather than
-        merging: a hold is on, and it's no fix for a set held."""
+        merging: a hold is on, and it's no fix for a hold on, a set's or a blocking
+        finding's."""
         holds = self._holds
-        return holds is not None and holds.held and holds.fix_of(state) is None
+        return holds is not None and holds.held and not holds.is_fix(state)
 
     def _landed_fix(self, state: TaskState, landing: Landing) -> None:
         """Have the set the task that is ``state`` fixes, if it's a fix for a set held, run

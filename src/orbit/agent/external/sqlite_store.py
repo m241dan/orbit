@@ -32,7 +32,7 @@ from orbit.agent.application.ports import (
     StoredSession,
     StoreFailed,
 )
-from orbit.agent.domain.merge_holds import Hold
+from orbit.agent.domain.merge_holds import AnyHold
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.reports import NewReport
 from orbit.agent.domain.reviews import SuperReviewCount
@@ -339,11 +339,11 @@ class SqliteStore:
         message = "Couldn't save the review count to"
         await self._or_raise(message, self._save_review_count, workspace, count, write=True)
 
-    async def merge_holds(self, workspace: str) -> tuple[Hold, ...]:
+    async def merge_holds(self, workspace: str) -> tuple[AnyHold, ...]:
         message = "Couldn't read the merge holds from"
         return await self._or_raise(message, self._merge_holds, workspace)
 
-    async def save_merge_holds(self, workspace: str, holds: Sequence[Hold]) -> None:
+    async def save_merge_holds(self, workspace: str, holds: Sequence[AnyHold]) -> None:
         message = "Couldn't save the merge holds to"
         await self._or_raise(message, self._save_merge_holds, workspace, holds, write=True)
 
@@ -644,13 +644,13 @@ class SqliteStore:
             (workspace, *_review_columns(count)),
         )
 
-    def _merge_holds(self, workspace: str) -> tuple[Hold, ...]:
+    def _merge_holds(self, workspace: str) -> tuple[AnyHold, ...]:
         row = self._db.execute(
             "SELECT merge_holds FROM reviews WHERE workspace_id = ?", (workspace,)
         ).fetchone()
         return () if row is None else parse_merge_holds(str(row[0]))
 
-    def _save_merge_holds(self, workspace: str, holds: Sequence[Hold]) -> None:
+    def _save_merge_holds(self, workspace: str, holds: Sequence[AnyHold]) -> None:
         # Beside the review count, which starts at none if this saves the row first.
         self._db.execute(
             """INSERT INTO reviews (workspace_id, since_super, merge_holds) VALUES (?, 0, ?)
@@ -776,10 +776,10 @@ class WorkspaceStore:
     async def save_review_count(self, count: SuperReviewCount) -> None:
         await self._store.save_review_count(self._id, count)
 
-    async def merge_holds(self) -> tuple[Hold, ...]:
+    async def merge_holds(self) -> tuple[AnyHold, ...]:
         return await self._store.merge_holds(self._id)
 
-    async def save_merge_holds(self, holds: Sequence[Hold]) -> None:
+    async def save_merge_holds(self, holds: Sequence[AnyHold]) -> None:
         await self._store.save_merge_holds(self._id, holds)
 
     async def record_moves(self) -> dict[str, str]:

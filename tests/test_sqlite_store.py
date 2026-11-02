@@ -17,7 +17,7 @@ from orbit.agent.application.ports import (
     StoredSession,
     StoreFailed,
 )
-from orbit.agent.domain.merge_holds import Hold
+from orbit.agent.domain.merge_holds import FindingHold, Hold
 from orbit.agent.domain.reports import NewReport
 from orbit.agent.domain.reviews import SuperReviewCount
 from orbit.agent.domain.sessions import SavedWaiting, SessionRecord, Unreadable
@@ -99,6 +99,31 @@ async def test_merge_holds_survive_closing_beside_the_review_count(
     await reopened.save_merge_holds(())
     assert await reopened.merge_holds() == ()
     assert await reopened.review_count() == SuperReviewCount(2)
+
+
+async def test_finding_holds_survive_closing_beside_set_holds(
+    open_store: Opener, workspace: Path
+) -> None:
+    holds = (HOLD, FindingHold("bugs-reviewer", "c1", "Fix the crash", "9", "batch-2"))
+    store = await open_store(workspace)
+    await store.save_merge_holds(holds)
+    await store.close()
+    reopened = await open_store(workspace)
+    assert await reopened.merge_holds() == holds
+
+
+async def test_set_holds_saved_before_findings_held_merges_are_read_as_set_holds(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.save_merge_holds(())
+    older = (
+        '[{"name": "stress", "commit": "c1", "step": "Stress tests", "output": "2 failed",'
+        ' "fixes": 1}]'
+    )
+    with database(state) as connection:
+        connection.execute("UPDATE reviews SET merge_holds = ?", (older,))
+    assert await store.merge_holds() == (Hold("stress", "c1", "Stress tests", "2 failed", 1),)
 
 
 async def test_a_failed_merge_holds_save_says_what_the_database_reported(

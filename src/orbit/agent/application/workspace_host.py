@@ -796,7 +796,8 @@ class WorkspaceHost:
     def _merge_holds(self, verification: Verification, tree: CoderTree) -> MergeHolds:
         """The holds on merges of the named sets of ``verification`` that hold them, and of those
         accepted checks have hold them, kept in the store, each queuing as many fixes as
-        verification's fallback fixes, a fix listing the commits of ``tree``."""
+        verification's fallback fixes, a fix listing the commits of ``tree``; the review lane's
+        merge passes filing blocking tasks hold them too."""
         desk = self._desk
         assert desk is not None  # Only agents work in a tree.
         parts = HoldParts(
@@ -812,6 +813,8 @@ class WorkspaceHost:
         holds = MergeHolds(holding_sets(verification.sets), verification.fallback_fixes, parts)
         holds.changed = lambda: self._states.check()
         holds.released = self._release_waiting
+        if self._lane is not None:
+            self._lane.holds = holds  # Its merge passes' blocking tasks hold merges.
         return holds
 
     def _release_waiting(self) -> None:

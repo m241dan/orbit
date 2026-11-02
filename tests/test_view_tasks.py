@@ -187,6 +187,16 @@ def test_a_task_list_names_the_sets_holding_merges_in_its_title() -> None:
     )
 
 
+def test_a_task_list_says_blocking_findings_hold_merges_beside_the_sets() -> None:
+    assert task_list_title(held=False, findings=1) == "Task list · merges held: blocking finding"
+    assert task_list_title(held=False, merge_holds=("stress",), findings=1) == (
+        "Task list · merges held: stress failed, blocking finding"
+    )
+    assert task_list_title(held=True, findings=2) == (
+        "Task list · merges held: blocking findings · held"
+    )
+
+
 def test_a_task_list_narrowed_to_a_lane_names_it_in_its_title() -> None:
     assert task_list_title(held=False, lane="review") == "Task list · review"
     assert task_list_title(held=True, lane="review") == "Task list · held · review"

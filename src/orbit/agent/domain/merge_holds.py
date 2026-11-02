@@ -1,11 +1,13 @@
 """Merge holds: a set that holds merges failing holds them, recording what failed, until a fix
-lands and the set, run again, passes; the fixes it queues meanwhile, up to a limit, and what the
-user is told as a hold starts, lifts or needs them."""
+lands and the set, run again, passes; a blocking finding a merge pass files holds them too, until
+the review of its fix by the lens that raised it files no blocking task again; the fixes each
+queues meanwhile, up to a limit, and what the user is told as a hold starts, lifts or needs
+them."""
 
 from collections.abc import Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass, replace
 from functools import partial, reduce
-from typing import Literal
+from typing import Literal, assert_never
 
 from orbit.agent.domain.commits import Commit
 from orbit.agent.domain.verification import CheckSet, VerificationStep
@@ -36,15 +38,67 @@ class Hold:
     output: str
     fixes: int = 0
 
+    @property
+    def key(self) -> str:
+        """What tells the hold apart from the others: its set's name."""
+        return self.name
+
+
+@dataclass(frozen=True)
+class FindingHold:
+    """A blocking finding's hold on merges: the lens ``lens`` raised it in the review of
+    ``commit``, and a merge pass filed it as the task titled ``title``. ``task`` is its latest
+    fix, in ``batch``, a batch of its own, until a review checks it, none once no review can,
+    and ``fixes`` fixes were queued for it since the hold started."""
+
+    lens: str
+    commit: str
+    title: str
+    task: str
+    batch: str | None
+    fixes: int = 1
+
+    @property
+    def key(self) -> str:
+        """What tells the hold apart from the others, whichever fix it's on: its lens, commit
+        and title."""
+        return f"finding:{self.lens}:{self.commit}:{self.title}"
+
+
+type AnyHold = Hold | FindingHold
+"""A hold on merges: a named set's, or a blocking finding's."""
+
 
 @dataclass(frozen=True)
 class HoldDecision:
-    """What a set's failure comes to: the ``holds`` after it, the ``notes`` to tell the user,
-    in order, and whether a ``fix`` is to be queued for it."""
+    """What a set's failure, or a blocking finding's filing or review, comes to: the ``holds``
+    after it, the ``notes`` to tell the user, in order, and whether a ``fix`` is to be queued for
+    a set."""
 
-    holds: tuple[Hold, ...]
+    holds: tuple[AnyHold, ...]
     notes: tuple[str, ...] = ()
     fix: bool = False
+
+
+@dataclass(frozen=True)
+class BlockingTask:
+    """A task a merge pass filed as blocking, titled ``title``: the lens ``lens`` raised the
+    first finding it files, in the review of ``commit``, which reviewed the batch ``reviewed``,
+    none for a review of no batch."""
+
+    lens: str
+    commit: str
+    title: str
+    reviewed: str | None
+
+
+type FindingFiling = Literal["held", "fixed_again", "stepped_in"]
+"""How a blocking task is filed: as the first fix of the hold it starts, as the next fix of the
+hold whose latest fix its review checked, or, that hold's fixes having run out, as a normal
+suggestion, the hold staying."""
+
+BLOCKING_REASON = "blocking finding"
+"""Why a blocking finding's hold holds merges, as frontends see it."""
 
 
 def held_note(name: str, commit: str) -> str:
@@ -68,9 +122,50 @@ def unpassed(names: Sequence[str]) -> str:
     return f"{', '.join(names)} {verb} passed"
 
 
-def released_note(names: Sequence[str]) -> str:
-    """The notice that the user released the holds of the sets ``names`` by hand."""
-    return f"Merges resumed by hand; {unpassed(names)}."
+def unfixed(lenses: Sequence[str]) -> str:
+    """That the findings the ``lenses`` raised aren't fixed: ``the finding from bugs-reviewer
+    isn't fixed``, ``the findings from bugs-reviewer, security-reviewer aren't fixed``."""
+    if len(lenses) == 1:
+        return f"the finding from {lenses[0]} isn't fixed"
+    return f"the findings from {', '.join(lenses)} aren't fixed"
+
+
+def released_note(names: Sequence[str], lenses: Sequence[str] = ()) -> str:
+    """The notice that the user released the holds of the sets ``names`` and of the findings
+    the ``lenses`` raised by hand."""
+    parts = [*([unpassed(names)] if names else []), *([unfixed(lenses)] if lenses else [])]
+    return f"Merges resumed by hand; {' and '.join(parts)}."
+
+
+def finding_held_note(hold: FindingHold) -> str:
+    """The notice that the blocking finding ``hold`` is about holds merges."""
+    return (
+        f"Merges held: a blocking finding from {hold.lens} in {hold.commit[:SHORT_COMMIT]}:"
+        f" {hold.title}. Its fix is queued first."
+    )
+
+
+def finding_resumed_note(lens: str) -> str:
+    """The notice that the finding the lens ``lens`` raised is fixed, lifting its hold."""
+    return f"Merges resumed: the finding from {lens} is fixed."
+
+
+def finding_step_in_note(lens: str, fixes: int) -> str:
+    """The notice that the finding the lens ``lens`` raised still holds after ``fixes`` fixes,
+    so the user must step in."""
+    return (
+        f"The finding from {lens} still holds after {counted(fixes, 'fix', 'fixes')}; merges stay"
+        " held. Release with ctrl+f or fix it yourself."
+    )
+
+
+def unchecked_note(lens: str) -> str:
+    """The notice that no review can check the fix of the finding the lens ``lens`` raised, so
+    the user must step in."""
+    return (
+        f"The finding from {lens} can't be checked by a review; merges stay held. Release with"
+        " ctrl+f or fix it yourself."
+    )
 
 
 def step_in_note(name: str, fixes: int) -> str:
@@ -82,12 +177,24 @@ def step_in_note(name: str, fixes: int) -> str:
     )
 
 
-def find_hold(holds: Sequence[Hold], name: str) -> Hold | None:
+def find_hold(holds: Sequence[AnyHold], name: str) -> Hold | None:
     """The set ``name``'s hold among ``holds``; none if it holds none."""
-    return next((hold for hold in holds if hold.name == name), None)
+    return next((hold for hold in set_holds(holds) if hold.name == name), None)
 
 
-def decide_failure(holds: Sequence[Hold], failed: Hold, limit: int, fixing: bool) -> HoldDecision:
+def set_holds(holds: Sequence[AnyHold]) -> tuple[Hold, ...]:
+    """The named sets' holds among ``holds``, in order."""
+    return tuple(hold for hold in holds if isinstance(hold, Hold))
+
+
+def finding_holds(holds: Sequence[AnyHold]) -> tuple[FindingHold, ...]:
+    """The blocking findings' holds among ``holds``, in order."""
+    return tuple(hold for hold in holds if isinstance(hold, FindingHold))
+
+
+def decide_failure(
+    holds: Sequence[AnyHold], failed: Hold, limit: int, fixing: bool
+) -> HoldDecision:
     """What ``failed``, a run of a set that holds merges failing, comes to, given the ``holds``
     on and the ``limit`` of fixes a hold queues: a new hold is told of and queues the first
     fix; a set held already keeps its hold with the new failure, queuing another fix unless one
@@ -105,7 +212,9 @@ def decide_failure(holds: Sequence[Hold], failed: Hold, limit: int, fixing: bool
     return HoldDecision((*others, replace(failed, fixes=tried + 1)), notes, fix=True)
 
 
-def decide_unlanded_fix(holds: Sequence[Hold], name: str, limit: int, fixing: bool) -> HoldDecision:
+def decide_unlanded_fix(
+    holds: Sequence[AnyHold], name: str, limit: int, fixing: bool
+) -> HoldDecision:
     """What a chain of fixes for the set ``name`` ending without its work merging comes to,
     given the ``holds`` on and the ``limit`` of fixes a hold queues: another failure of its
     hold, as the failure it recorded, as :func:`decide_failure` says; nothing while a fix is
@@ -116,9 +225,101 @@ def decide_unlanded_fix(holds: Sequence[Hold], name: str, limit: int, fixing: bo
     return decide_failure(holds, held, limit, fixing=False)
 
 
-def lift_hold(holds: Sequence[Hold], name: str) -> tuple[Hold, ...]:
-    """``holds`` without the set ``name``'s."""
-    return tuple(hold for hold in holds if hold.name != name)
+def lift_hold(holds: Sequence[AnyHold], key: str) -> tuple[AnyHold, ...]:
+    """``holds`` without the one whose key is ``key``, such as a set's name."""
+    return tuple(hold for hold in holds if hold.key != key)
+
+
+def refiled_hold(holds: Sequence[AnyHold], filed: BlockingTask) -> FindingHold | None:
+    """The hold among ``holds`` whose latest fix the review that filed ``filed`` checked, if
+    the hold's lens raised it; none if ``filed`` starts a hold of its own."""
+    return next(
+        (
+            hold
+            for hold in finding_holds(holds)
+            if hold.lens == filed.lens and hold.batch is not None and hold.batch == filed.reviewed
+        ),
+        None,
+    )
+
+
+def decide_filing(holds: Sequence[AnyHold], filed: BlockingTask, limit: int) -> FindingFiling:
+    """How ``filed`` is filed, given the ``holds`` on and the ``limit`` of fixes a hold queues:
+    as the next fix of the hold whose fix its review checked, as :func:`refiled_hold` finds it,
+    unless that hold queued ``limit`` fixes already; else as the first fix of a hold of its
+    own."""
+    held = refiled_hold(holds, filed)
+    if held is None:
+        return "held"
+    return "stepped_in" if held.fixes >= limit else "fixed_again"
+
+
+def decide_blocking(
+    holds: Sequence[AnyHold], filed: BlockingTask, task: str, batch: str, limit: int
+) -> HoldDecision:
+    """What ``filed``, filed as the task ``task`` in ``batch``, comes to, given the ``holds`` on
+    and the ``limit`` of fixes a hold queues, as :func:`decide_filing` says: a new hold is told
+    of; a hold fixed again takes the task as its latest fix; one whose fixes ran out stays,
+    checked by no review, and the user is asked to step in."""
+    held = refiled_hold(holds, filed)
+    if held is None:
+        new = FindingHold(filed.lens, filed.commit, filed.title, task, batch)
+        return HoldDecision((*holds, new), (finding_held_note(new),))
+    if held.fixes >= limit:
+        note = finding_step_in_note(held.lens, held.fixes)
+        return HoldDecision(merge_holds(holds, (replace(held, batch=None),)), (note,))
+    again = replace(held, task=task, batch=batch, fixes=held.fixes + 1)
+    return HoldDecision(merge_holds(holds, (again,)))
+
+
+def decide_fix_review(
+    holds: Sequence[AnyHold], batch: str, completed: Collection[str]
+) -> HoldDecision:
+    """What the end of the review of ``batch``, given the ``holds`` on, comes to, the roles
+    whose tasks completed in it being ``completed``: each hold whose latest fix is ``batch``'s
+    lifts, told of, if its lens completed, or else stays, told no review can check it."""
+    checked = _fixed_in(holds, batch)
+    fixed = _by_lens(checked, completed)
+    unchecked = tuple(hold for hold in checked if hold not in fixed)
+    notes = tuple(finding_resumed_note(hold.lens) for hold in fixed)
+    return _with_unchecked(HoldDecision(_without(holds, fixed), notes), unchecked)
+
+
+def _fixed_in(holds: Sequence[AnyHold], batch: str) -> tuple[FindingHold, ...]:
+    """The findings' holds among ``holds`` whose latest fix is ``batch``'s."""
+    return tuple(hold for hold in finding_holds(holds) if hold.batch == batch)
+
+
+def _by_lens(holds: Sequence[FindingHold], lenses: Collection[str]) -> tuple[FindingHold, ...]:
+    """The ``holds`` raised by one of the ``lenses``."""
+    return tuple(hold for hold in holds if hold.lens in lenses)
+
+
+def _without(holds: Sequence[AnyHold], dropped: Collection[AnyHold]) -> tuple[AnyHold, ...]:
+    """``holds`` without those ``dropped``."""
+    return tuple(hold for hold in holds if hold not in dropped)
+
+
+def decide_unreviewed(
+    holds: Sequence[AnyHold], unreviewed: Collection[FindingHold]
+) -> HoldDecision:
+    """What the batches of the latest fixes of the ``unreviewed`` holds among ``holds`` closing
+    with no review by their lenses comes to: each stays, checked by no review, telling the
+    user."""
+    return _with_unchecked(HoldDecision(tuple(holds)), unreviewed)
+
+
+def _with_unchecked(decision: HoldDecision, unchecked: Collection[FindingHold]) -> HoldDecision:
+    """``decision``, with the ``unchecked`` holds among its holds checked by no review, and
+    notes telling the user so after its own."""
+    holds = tuple(_unchecked(hold) if hold in unchecked else hold for hold in decision.holds)
+    notes = (*decision.notes, *(unchecked_note(hold.lens) for hold in unchecked))
+    return replace(decision, holds=holds, notes=notes)
+
+
+def _unchecked(hold: AnyHold) -> AnyHold:
+    """``hold``, a finding's, checked by no review."""
+    return replace(hold, batch=None) if isinstance(hold, FindingHold) else hold
 
 
 def holding_sets(sets: Iterable[CheckSet]) -> tuple[CheckSet, ...]:
@@ -133,30 +334,36 @@ def held_step(sets: Iterable[CheckSet], hold: Hold) -> VerificationStep | None:
     return next((step for step in steps if step.name == hold.step), None)
 
 
-def kept_holds(holds: Sequence[Hold], holding: Collection[str]) -> tuple[Hold, ...]:
-    """``holds`` of the sets still ``holding`` merges, by name, as a saved hold is restored:
-    those of sets removed, or that only report now, are dropped."""
-    return tuple(hold for hold in holds if hold.name in holding)
+def kept_holds(holds: Sequence[AnyHold], holding: Collection[str]) -> tuple[AnyHold, ...]:
+    """``holds`` of the sets still ``holding`` merges, by name, and of every finding, as a saved
+    hold is restored: those of sets removed, or that only report now, are dropped."""
+    return tuple(hold for hold in holds if isinstance(hold, FindingHold) or hold.name in holding)
 
 
-def merge_holds(earlier: Sequence[Hold], later: Sequence[Hold]) -> tuple[Hold, ...]:
-    """The holds of ``earlier`` and ``later``, a set's hold in ``later`` replacing its own in
-    ``earlier``."""
-    named = {hold.name for hold in later}
-    return (*(hold for hold in earlier if hold.name not in named), *later)
+def merge_holds(earlier: Sequence[AnyHold], later: Sequence[AnyHold]) -> tuple[AnyHold, ...]:
+    """The holds of ``earlier`` and ``later``, a hold in ``later`` replacing the one of its key
+    in ``earlier``."""
+    keys = {hold.key for hold in later}
+    return (*(hold for hold in earlier if hold.key not in keys), *later)
 
 
 type Lifted = frozenset[str] | Literal["every"]
-"""The sets whose holds were lifted since the holds kept were last read or saved, by name, or
+"""The holds lifted since the holds kept were last read or saved, by key, a set's its name, or
 ``"every"`` once the user released every hold by hand."""
 
 NONE_LIFTED: Lifted = frozenset()
 """That no hold was lifted since the holds kept were last read or saved."""
 
 
-def note_lift(lifted: Lifted, name: str) -> Lifted:
-    """``lifted``, with the set ``name``'s hold among those lifted."""
-    return lifted | {name} if isinstance(lifted, frozenset) else lifted
+def note_lift(lifted: Lifted, key: str) -> Lifted:
+    """``lifted``, with the hold whose key is ``key``, such as a set's name, among those
+    lifted."""
+    return lifted | {key} if isinstance(lifted, frozenset) else lifted
+
+
+def _is_lifted(hold: AnyHold, lifted: Lifted) -> bool:
+    """Whether ``hold`` is among those ``lifted``."""
+    return lifted == "every" or hold.key in lifted
 
 
 def unlifted_sets(holding: Collection[str], lifted: Lifted) -> frozenset[str]:
@@ -166,18 +373,32 @@ def unlifted_sets(holding: Collection[str], lifted: Lifted) -> frozenset[str]:
 
 
 def fold_holds(
-    loaded: Sequence[Hold], holding: Collection[str], lifted: Lifted, started: Sequence[Hold]
-) -> tuple[Hold, ...]:
-    """The holds to take on from ``loaded``, those kept, read afresh: those of the sets still
-    ``holding`` merges, by name, and not ``lifted`` since they were last read or saved, as
-    :func:`unlifted_sets` and :func:`kept_holds` say, with the holds ``started`` since then
-    replacing their sets', as :func:`merge_holds` says."""
-    return merge_holds(kept_holds(loaded, unlifted_sets(holding, lifted)), started)
+    loaded: Sequence[AnyHold],
+    holding: Collection[str],
+    lifted: Lifted,
+    started: Sequence[AnyHold],
+) -> tuple[AnyHold, ...]:
+    """The holds to take on from ``loaded``, those kept, read afresh: those not ``lifted``
+    since they were last read or saved, of the sets still ``holding`` merges, by name, and of
+    the findings, as :func:`kept_holds` says, with the holds ``started`` since then replacing
+    those of their keys, as :func:`merge_holds` says."""
+    unlifted = tuple(hold for hold in loaded if not _is_lifted(hold, lifted))
+    return merge_holds(kept_holds(unlifted, holding), started)
 
 
-def hold_view(hold: Hold) -> MergeHold:
-    """``hold`` as frontends see it: the set, the commit it failed on and why."""
-    return MergeHold(set=hold.name, commit=hold.commit, reason=f"{hold.step} failed")
+def hold_view(hold: AnyHold) -> MergeHold:
+    """``hold`` as frontends see it: a set's, the set, the commit it failed on and why; a
+    finding's, the lens that raised it as the set, the commit reviewed, and the title of the task
+    it was filed as."""
+    match hold:
+        case Hold():
+            return MergeHold(set=hold.name, commit=hold.commit, reason=f"{hold.step} failed")
+        case FindingHold():
+            return MergeHold(
+                set=hold.lens, commit=hold.commit, reason=BLOCKING_REASON, finding=hold.title
+            )
+        case _:
+            assert_never(hold)
 
 
 def fix_title(name: str) -> str:

@@ -11,6 +11,7 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Literal
 
+from orbit.agent.domain.merge_holds import BlockingTask
 from orbit.agent.domain.reviews import (
     SEVERITIES,
     Finding,
@@ -28,6 +29,9 @@ NO_FINDING_NAMED = (
     "Name the findings the task covers: at least one of this review's undecided findings."
 )
 """The refusal of a merge pass's suggestion naming no finding."""
+
+NOT_BLOCKING = "File as blocking only when a blocking finding is among findings."
+"""The refusal of a suggestion filed as blocking whose findings are all normal."""
 
 NOT_MERGING = "Only a merge pass can dismiss findings."
 """The refusal of a dismissal from a task that isn't a merge pass."""
@@ -114,13 +118,41 @@ def decision_refusal(group: ReviewGroup, finding_id: str) -> str | None:
     return None
 
 
-def filing_refusal(group: ReviewGroup, finding_ids: Sequence[str]) -> str | None:
-    """Why a merge pass of ``group`` can't file the findings ``finding_ids`` as one task: it
-    names none, or one of them can't be decided; ``None`` if it can."""
+def filing_refusal(
+    group: ReviewGroup, finding_ids: Sequence[str], severity: Severity = "normal"
+) -> str | None:
+    """Why a merge pass of ``group`` can't file the findings ``finding_ids`` as one task at
+    ``severity``: it names none, one of them can't be decided, or it's blocking with none of
+    them blocking; ``None`` if it can."""
     if not finding_ids:
         return NO_FINDING_NAMED
+    named = tuple(finding for finding in group.findings if finding.id in finding_ids)
+    return _undecidable(group, finding_ids) or severity_refusal(named, severity)
+
+
+def _undecidable(group: ReviewGroup, finding_ids: Sequence[str]) -> str | None:
+    """Why the first of the findings ``finding_ids`` of ``group`` that can't be decided can't;
+    ``None`` if each can."""
     refusals = (decision_refusal(group, finding_id) for finding_id in finding_ids)
     return next((refusal for refusal in refusals if refusal is not None), None)
+
+
+def severity_refusal(findings: Sequence[Finding], severity: Severity) -> str | None:
+    """Why a task can't be filed at ``severity`` from ``findings``: it's blocking, and none of
+    them is; ``None`` if it can."""
+    blocking = any(finding.severity == "blocking" for finding in findings)
+    return NOT_BLOCKING if severity == "blocking" and not blocking else None
+
+
+def blocking_task(group: ReviewGroup, suggestion: ReviewSuggestion) -> BlockingTask | None:
+    """The blocking task ``suggestion``, which a merge pass of ``group`` may file, is: raised
+    by the lens of the first finding it names, in the review of ``group``'s last commit; none
+    unless it's blocking."""
+    first = _finding(group, suggestion.findings[0]) if suggestion.findings else None
+    if suggestion.severity != "blocking" or first is None:
+        return None
+    job = group.job
+    return BlockingTask(first.role, job.commits[-1], suggestion.title, job.batch)
 
 
 def with_filed(group: ReviewGroup, finding_ids: Sequence[str], task_id: str) -> ReviewGroup:

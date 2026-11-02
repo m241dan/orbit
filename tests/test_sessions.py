@@ -8,7 +8,7 @@ import pytest
 
 from orbit.agent.domain import sessions
 from orbit.agent.domain.endings import QUEUED_BEFORE_LENSES, QUEUED_FOR_RETIRED_ROLE
-from orbit.agent.domain.merge_holds import Hold
+from orbit.agent.domain.merge_holds import FindingHold, Hold
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import (
     BatchSnapshot,
@@ -400,11 +400,30 @@ def test_a_summary_of_a_session_without_tasks_is_empty_and_neither_current_nor_l
 
 
 def test_merge_holds_round_trip_through_json() -> None:
-    holds = (Hold("stress", "1a2b3c4", "Stress tests", "2 failed", 1), Hold("soak", "c", "S", ""))
+    holds = (
+        Hold("stress", "1a2b3c4", "Stress tests", "2 failed", 1),
+        FindingHold("bugs-reviewer", "c1", "Fix the crash", "9", "batch-2", 2),
+        Hold("soak", "c", "S", ""),
+        FindingHold("security-reviewer", "c2", "Escape it", "12", None),
+    )
     assert parse_merge_holds(merge_holds_json(holds)) == holds
 
 
-@pytest.mark.parametrize("text", ["", "{}", '[{"name": "stress"}]', '[{"fixes": -1}]'])
+def test_merge_holds_saved_before_findings_held_merges_read_as_set_holds() -> None:
+    saved = '[{"name": "stress", "commit": "c1", "step": "Stress tests", "output": "", "fixes": 1}]'
+    assert parse_merge_holds(saved) == (Hold("stress", "c1", "Stress tests", "", 1),)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "{}",
+        '[{"name": "stress"}]',
+        '[{"fixes": -1}]',
+        '[{"kind": "finding", "lens": "bugs-reviewer"}]',
+    ],
+)
 def test_unreadable_merge_holds_are_none(text: str) -> None:
     assert parse_merge_holds(text) == ()
 

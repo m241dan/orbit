@@ -391,6 +391,15 @@ def test_suggestions_join_the_end_of_the_queue() -> None:
     assert [t.id for t in board.tasks] == [first, suggestion]
 
 
+def test_a_suggestion_added_first_runs_next_in_its_batch_from_its_origin() -> None:
+    board = TaskBoard()
+    first = board.add(ONE)
+    fix = board.add_suggestion_first(TaskSpec(prompt="fix"), "batch-2", 1, "merge-pass")
+    assert [t.id for t in board.tasks] == [fix, first]
+    state = board.get(fix)
+    assert (state.origin, state.batch, state.round) == ("merge-pass", "batch-2", 1)
+
+
 def test_editing_a_suggestion_keeps_where_it_came_from() -> None:
     board = TaskBoard()
     suggestion = board.add_suggestion(TaskSpec(prompt="tidy"), batch="batch-1", round=1)

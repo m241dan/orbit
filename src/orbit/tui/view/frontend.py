@@ -560,19 +560,20 @@ class Frontend:
 
     @property
     def merges_held(self) -> bool:
-        """Whether sets hold merges in the session viewed, so ctrl+f can release them."""
+        """Whether sets or findings hold merges in the session viewed, so ctrl+f can release
+        them."""
         return bool(self._parts.tasks.merge_holds)
 
     def release_hold(self) -> None:
-        """Ask first, naming the sets that haven't passed, so a stray key doesn't land work
-        they hold; nothing while merges aren't held."""
+        """Ask first, naming the sets that haven't passed and the findings not fixed, so a
+        stray key doesn't land work they hold; nothing while merges aren't held."""
         # The backend refuses it if the holds lifted meanwhile.
-        sets = self._parts.tasks.held_sets
-        if not sets:
+        tasks = self._parts.tasks
+        if not tasks.merge_holds:
             return
         self._app.confirm(
             RELEASE_TITLE,
-            release_message(sets),
+            release_message(tasks.held_sets, tasks.held_findings),
             RELEASE_YES,
             lambda: self._act("release_hold", ReleaseHold()),
         )

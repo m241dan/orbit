@@ -542,6 +542,16 @@ def test_holds_on_merges_title_the_list_and_mark_the_work_waiting_until_they_lif
     assert view.rows[0] == "1. ✅ one\n      default · restricted"
 
 
+def test_a_finding_holding_merges_titles_the_list_beside_the_sets() -> None:
+    tasks, view = started()
+    finding = MergeHold(
+        set="bugs-reviewer", commit="c1", reason="blocking finding", finding="Fix the crash"
+    )
+    tasks.show_merge_holds((STRESS_HOLD, finding), ())
+    assert view.title == "Task list · merges held: stress failed, blocking finding"
+    assert (tasks.held_sets, tasks.held_findings) == (("stress",), ("bugs-reviewer",))
+
+
 def test_a_held_list_with_merges_held_says_both() -> None:
     tasks, view = started()
     soak = STRESS_HOLD.model_copy(update={"set": "soak"})

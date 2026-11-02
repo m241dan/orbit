@@ -109,6 +109,14 @@ class TaskBoard:
         self._tasks.append(state)
         return state.id
 
+    def add_suggestion_first(
+        self, task: TaskSpec, batch: str, round: int, origin: TaskOrigin = REVIEW_ORIGIN
+    ) -> str:
+        """Add ``task``, suggested into ``batch``, at the front, to run next; returns its id."""
+        state = self._new(task, origin=origin, batch=batch, round=round)
+        self._tasks.insert(0, state)
+        return state.id
+
     def edit(self, task_id: str, task: TaskSpec) -> None:
         """Replace a task and make it pending again, without a reason for how it last ended.
         Raises ``Refused`` if it can't be: while it runs, or for a task orbit queued as a

@@ -49,7 +49,7 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import Setup
 from orbit.agent.domain.commits import Commit
-from orbit.agent.domain.merge_holds import Hold
+from orbit.agent.domain.merge_holds import AnyHold
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.replay import LogBounds
@@ -569,8 +569,8 @@ class FakeStore:
         self.moves: dict[str, str] = {}
         self.moves_failure: str | None = None
         self.moves_load_failure: str | None = None
-        self.holds: tuple[Hold, ...] = ()
-        self.holds_saved: list[tuple[Hold, ...]] = []  # Each save of the holds.
+        self.holds: tuple[AnyHold, ...] = ()
+        self.holds_saved: list[tuple[AnyHold, ...]] = []  # Each save of the holds.
         self.holds_failure: str | None = None
         self.holds_load_failure: str | None = None
         self.reports_kept: dict[int, NewReport] = {}
@@ -728,11 +728,11 @@ class FakeStore:
         self.count = count
         self.counts.append(count)
 
-    async def merge_holds(self) -> tuple[Hold, ...]:
+    async def merge_holds(self) -> tuple[AnyHold, ...]:
         await self._read(self.holds_load_failure)
         return self.holds
 
-    async def save_merge_holds(self, holds: Sequence[Hold]) -> None:
+    async def save_merge_holds(self, holds: Sequence[AnyHold]) -> None:
         if self.holds_failure is not None:
             raise StoreFailed(self.holds_failure)
         await asyncio.sleep(0)  # Saving takes a while, as writing a file does.

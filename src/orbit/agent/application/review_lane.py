@@ -13,7 +13,11 @@ end too. Those tasks are its merge passes, which must decide every finding, as
 :mod:`~orbit.agent.domain.merge_pass` says; a review keeps its findings until its batch has been
 reviewed, closed or dropped, so the tasks filed for them mark them fixed as they land, or given up
 as they give up, and the batch's own review is queued by the lenses that raised them, as the
-``raised-finding`` guard says.
+``raised-finding`` guard says. A merge pass filing a task as blocking holds merges, as
+:class:`~orbit.agent.application.merge_holds.MergeHolds` says: the task goes first, in a batch of
+its own, at its review's next round, and the end of that batch's review lifts the hold, unless
+its merge pass files another blocking task from the raising lens's findings, which takes its
+place; a fix's batch closing with no review by that lens queued leaves the hold unchecked.
 :class:`ReviewPlanner` decides when a review is due and stops reviews generating work forever. It's
 the ``review-rounds`` guard: the lane raises each landing as ``task_landed``, and a review of
 commits is queued by the triggers it guards, from their templates. It counts each landing toward the
@@ -41,6 +45,7 @@ from orbit.agent.application.lane_runner import (
     unposted,
 )
 from orbit.agent.application.lanes import SessionGate
+from orbit.agent.application.merge_holds import MergeHolds
 from orbit.agent.application.outcomes import Outcome, UserStop, run_task_to_end
 from orbit.agent.application.ports import CoderTree, Reply, TreeFailed
 from orbit.agent.application.review_trace import Queued, ReviewTally, ReviewTracing
@@ -50,17 +55,20 @@ from orbit.agent.application.tasks import Changed, Tasks
 from orbit.agent.application.triggers import ReviewRound, TriggerEngine, TriggerHooks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.endings import REVIEW_STOPPED_BY_YOU
+from orbit.agent.domain.merge_holds import BlockingTask, FindingFiling
 from orbit.agent.domain.merge_pass import (
     NOT_A_MERGE_PASS,
     NOT_MERGING,
     Dismissal,
     ReviewSuggestion,
     TaskEnding,
+    blocking_task,
     decision_refusal,
     ended_in,
     filed_in,
     filing_refusal,
     outcome_counts,
+    severity_refusal,
     undecided_refusal,
     with_dismissed,
     with_filed,
@@ -165,7 +173,8 @@ class ReviewHooks:
 
 class ReviewLane:
     """Queues and runs reviews of ``tasks``' tasks through ``desk``'s agents, reaching the rest
-    of the session through ``hooks``.
+    of the session through ``hooks``. Blocking tasks its merge passes file hold merges through
+    :attr:`holds`, once the session gives it them; none hold them without.
 
     Each review is traced from its start until it's followed up, linked to the span current as
     it was queued: the task whose landing, or ending, made it due, the command asking for it,
@@ -196,6 +205,7 @@ class ReviewLane:
         # Task id -> the severity a merge pass filed it at, while its findings are kept.
         self._severities: dict[str, Severity] = {}
         self._fanning: set[str] = set()  # Batches whose reviews_finished is being raised.
+        self.holds: MergeHolds | None = None
         self._triggers = hooks.triggers or TriggerEngine(desk, tasks, TriggerHooks(self._kick_own))
         self.runner = self._runner(hooks)
         self._paused_noted = False
@@ -397,9 +407,11 @@ class ReviewLane:
         current_span().set_attributes({_ENDED_FINDINGS[ending]: count})
 
     def _prune(self) -> None:
-        """Forget the groups of the batches that closed, reviewed or not, and the severities of
-        the tasks whose findings they kept."""
-        self._groups = kept_groups(self._groups, self.planner.open_batches)
+        """Forget the groups of the batches that closed, reviewed or not, unless they filed a
+        finding into a batch still open, and the severities of the tasks whose findings they
+        kept."""
+        batches = {state.id: state.batch for state in self._board.tasks}
+        self._groups = kept_groups(self._groups, self.planner.open_batches, batches)
         filed = self._filed_tasks()
         self._severities = {t: s for t, s in self._severities.items() if t in filed}
 
@@ -454,43 +466,94 @@ class ReviewLane:
             return Reply("Only reviews orbit queued itself can suggest tasks.", is_error=True)
         roles = self._desk.agents.roles
         title = suggestion.title
+        elsewhere = self._filed_elsewhere(batch)
         refusal = (
             suggestion_refusal(roles)
-            or self._filing_refusal(task_id, batch, suggestion.findings)
-            or self.planner.refusal(batch, title, self._board.tasks)
+            or self._filing_refusal(task_id, batch, suggestion)
+            or self.planner.refusal(batch, title, self._board.tasks, elsewhere)
         )
         if refusal is not None:
             return Reply(refusal, is_error=True)
+        filed = self._blocking(batch, suggestion)
+        new_id, placed = await self._add(task_id, batch, suggestion, filed)
+        await self._hold(filed, new_id, placed)
+        return Reply(f"Queued as task {new_id}.")
+
+    async def _hold(self, filed: BlockingTask | None, task_id: str, batch: str) -> None:
+        """Have the blocking task ``filed``, if any, filed as task ``task_id`` in ``batch``, hold
+        merges, if holds are kept."""
+        if filed is not None and self.holds is not None:
+            await self.holds.hold_finding(filed, task_id, batch)
+
+    async def _add(
+        self,
+        task_id: str,
+        batch: str,
+        suggestion: ReviewSuggestion,
+        filed: BlockingTask | None,
+    ) -> tuple[str, str]:
+        """Add ``suggestion``, from review task ``task_id``, booked into the review behind
+        ``batch``, to the board: at the end, in ``batch``, or, if it's ``filed`` as a blocking
+        task that holds merges, first, in a batch of its own at the same round; returns its id
+        and the batch it went into."""
         # The review is running, as its agent suggests, so it's on the board. Its suggestions
         # take its origin, the trigger that queued it, whatever its job is.
         review = self._board.get(task_id)
+        roles = self._desk.agents.roles
+        title = suggestion.title
         task = suggested_task(roles[CODER], title, suggestion.prompt, review.task.skills)
+        filing = self._filing(filed)
+        first = filing in ("held", "fixed_again")
+        severity: Severity = "normal" if filing == "stepped_in" else suggestion.severity
 
-        def add(board: TaskBoard) -> str:
-            new_id = board.add_suggestion(task, batch, self.planner.round_of(batch), review.origin)
-            self.planner.added(batch, new_id, title)
-            self._file(batch, suggestion, new_id)
-            return new_id
+        def add(board: TaskBoard) -> tuple[str, str]:
+            round = self.planner.round_of(batch)
+            placed = self.planner.open_fix_batch(round) if first else batch
+            adding = board.add_suggestion_first if first else board.add_suggestion
+            new_id = adding(task, placed, round, review.origin)
+            self.planner.added(placed, new_id, title)
+            self._file(batch, suggestion.findings, new_id, severity)
+            return new_id, placed
 
-        new_id = await self._tasks.change(add)
-        return Reply(f"Queued as task {new_id}.")
+        return await self._tasks.change(add)
 
-    def _filing_refusal(self, task_id: str, batch: str, findings: Sequence[str]) -> str | None:
-        """Why review task ``task_id``, booked into the review behind ``batch``, can't file
-        ``findings``: a merge pass must name some it may decide, and another review none;
-        ``None`` if it can."""
+    def _filing(self, filed: BlockingTask | None) -> FindingFiling | None:
+        """How the blocking task ``filed``, if any, is filed, as the holds say; none if it
+        isn't one, or no holds are kept, when it's filed as any other task is."""
+        holds = self.holds
+        return None if filed is None or holds is None else holds.filing_of(filed)
+
+    def _blocking(self, batch: str, suggestion: ReviewSuggestion) -> BlockingTask | None:
+        """The blocking task ``suggestion``, accepted from the merge pass of the review behind
+        ``batch``, is; none if it isn't one."""
         group = self._groups.get(batch)
-        if group is None or task_id not in group.merges:
-            return NOT_A_MERGE_PASS if findings else None
-        return filing_refusal(group, findings)
+        return None if group is None else blocking_task(group, suggestion)
 
-    def _file(self, batch: str, suggestion: ReviewSuggestion, task_id: str) -> None:
-        """Record the findings ``suggestion`` names, if any, of the review behind ``batch``, as
-        filed in task ``task_id``, keeping the severity it was filed at."""
-        if not suggestion.findings:
+    def _filed_elsewhere(self, batch: str) -> int:
+        """How many tasks the review behind ``batch`` filed findings into outside it, as a
+        blocking finding's fix goes into a batch of its own: they count toward its cap."""
+        group = self._groups.get(batch)
+        tasks = {finding.task for finding in group.findings} if group is not None else set()
+        return sum(1 for state in self._board.tasks if state.id in tasks and state.batch != batch)
+
+    def _filing_refusal(self, task_id: str, batch: str, suggestion: ReviewSuggestion) -> str | None:
+        """Why review task ``task_id``, booked into the review behind ``batch``, can't file
+        ``suggestion``'s findings at its severity: a merge pass must name some it may decide, a
+        blocking one among them if it's blocking, and another review none, nor file a blocking
+        task; ``None`` if it can."""
+        group = self._groups.get(batch)
+        findings, severity = suggestion.findings, suggestion.severity
+        if group is None or task_id not in group.merges:
+            return NOT_A_MERGE_PASS if findings else severity_refusal((), severity)
+        return filing_refusal(group, findings, severity)
+
+    def _file(self, batch: str, findings: Sequence[str], task_id: str, severity: Severity) -> None:
+        """Record ``findings``, if any, of the review behind ``batch``, as filed in task
+        ``task_id``, keeping the ``severity`` it was filed at."""
+        if not findings:
             return
-        self._groups[batch] = with_filed(self._groups[batch], suggestion.findings, task_id)
-        self._severities[task_id] = suggestion.severity
+        self._groups[batch] = with_filed(self._groups[batch], findings, task_id)
+        self._severities[task_id] = severity
 
     async def dismiss(self, task_id: str, dismissed: Dismissal) -> Reply:
         """Merge pass ``task_id`` dismisses a finding of its review, unless it's refused: from a
@@ -580,6 +643,7 @@ class ReviewLane:
         now for it; returns the ids of the tasks queued."""
         queued = () if job is None else await self._triggers.reviewed(self._round(job))
         self._prune()
+        await self._check_fixes()
         return queued
 
     async def _queue_ended(self, queued: tuple[str, ...]) -> None:
@@ -601,6 +665,35 @@ class ReviewLane:
         if job is not None:
             await self._triggers.reviewed_quietly(self._round(job))
         self._prune()
+        await self._check_fixes()
+
+    async def _check_fixes(self) -> None:
+        """Have the holds whose latest fix's batch closed with no review by their lens queued
+        for it, as when it's at the last round, its lens's triggers can't fire, or the fix ended
+        without landing anything, stay, checked by no review."""
+        holds = self.holds
+        if holds is None:
+            return
+        open_batches = self.planner.open_batches
+        unreviewed = tuple(
+            hold
+            for hold in holds.checking
+            if hold.batch not in open_batches and not self._reviewed_by(hold.batch, hold.lens)
+        )
+        if unreviewed:
+            await holds.hear_unreviewed(unreviewed)
+
+    def _reviewed_by(self, batch: str | None, lens: str) -> bool:
+        """Whether a task of the role ``lens`` was booked into a review of ``batch``."""
+        return any(
+            job.batch == batch and self._role_of(task_id) == lens
+            for task_id, job in self._jobs.items()
+        )
+
+    def _role_of(self, task_id: str) -> str | None:
+        """The role of task ``task_id``; none if it's off the board."""
+        state = self._board.find(task_id)
+        return None if state is None else state.task.role
 
     def _round(self, job: ReviewJob) -> ReviewRound:
         """``job``'s review as the ``review-rounds`` guard finds it due, booking each task
@@ -916,11 +1009,41 @@ class ReviewLane:
     async def _close_review(self, batch: str, publishing: Publishing) -> None:
         """End the review behind ``batch``: its batch no longer fills, and is reviewed if
         that's due, showing what's queued as ``publishing`` says; else, published, the
-        suggestions it made run."""
+        suggestions it made run, and a blocking finding's fix it filed. The end of the review of
+        a blocking finding's fix may lift the finding's hold, as
+        :meth:`MergeHolds.hear_fix_review` says."""
+        await self._hear_fix_review(batch)
         job = self.planner.review_ended(batch)
         if publishing == "quiet":
             await self._queue_quietly(job)
             return
         await self._queue(job)
-        if batch in self.planner.open_batches:
+        if batch in self.planner.open_batches or self._fixes_waiting():
             await self._hooks.wake_work()
+
+    async def _hear_fix_review(self, batch: str) -> None:
+        """Tell the holds that the review behind ``batch`` ended, if it reviewed a batch, with
+        the roles whose tasks completed in it."""
+        holds = self.holds
+        job = self._job_of(batch)
+        if holds is None or job is None or job.batch is None:
+            return
+        await holds.hear_fix_review(job.batch, self._completed_in(batch))
+
+    def _completed_in(self, batch: str) -> frozenset[str]:
+        """The roles of the tasks booked into the review behind ``batch`` that completed."""
+        members = (self._board.find(task_id) for task_id in self._members(batch))
+        return frozenset(s.task.role for s in members if s is not None and s.status == "completed")
+
+    def _job_of(self, batch: str) -> ReviewJob | None:
+        """What the review behind ``batch`` reviews; none if none of its tasks is on the
+        board."""
+        group = self._groups.get(batch)
+        booked = (self._jobs[task_id] for task_id in self._members(batch))
+        return group.job if group is not None else next(booked, None)
+
+    def _fixes_waiting(self) -> bool:
+        """Whether the batch of a blocking finding's latest fix is open, its fix still to run."""
+        holds = self.holds
+        open_batches = self.planner.open_batches
+        return holds is not None and any(hold.batch in open_batches for hold in holds.checking)

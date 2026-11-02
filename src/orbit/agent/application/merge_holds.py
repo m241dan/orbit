@@ -2,8 +2,11 @@
 with a notice, and queues a coder's fix at the front of the queue; once the fix lands, the set runs
 again, and passing lifts its hold, as the user releasing every hold by hand does. A chain of
 fixes that ends without its work merging counts as the set failing again, as it last did; a fix
-that ends in error hasn't ended its chain, as it's left to run again. Holds are kept per
-repository, beside the review count, so they outlive a restart.
+that ends in error hasn't ended its chain, as it's left to run again. A merge pass filing a
+blocking task holds them too: the review lane puts the task first, in a batch of its own, and
+the hold lifts once the review of that batch ends with the raising lens's task completed and no
+blocking task filed from its findings again, as :func:`decide_fix_review` says. Holds are kept
+per repository, beside the review count, so they outlive a restart.
 
 While any hold is on, the work lane commits each task's verified work in the coder's tree and
 leaves it there, waiting, rather than merging it; a fix merges with the work stacked beneath it.
@@ -13,6 +16,7 @@ Once no hold is left, :attr:`MergeHolds.released` is told, and the work waiting 
 import asyncio
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
+from functools import reduce
 from typing import Literal
 
 from orbit.agent.application.failures import ReportedOnce, outcome
@@ -23,22 +27,33 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import CUT_SHORT, WAITING
 from orbit.agent.domain.merge_holds import (
     NONE_LIFTED,
+    AnyHold,
+    BlockingTask,
+    FindingFiling,
+    FindingHold,
     Hold,
     HoldDecision,
     Lifted,
+    decide_blocking,
     decide_failure,
+    decide_filing,
+    decide_fix_review,
     decide_unlanded_fix,
+    decide_unreviewed,
     find_hold,
+    finding_holds,
     fix_root,
     fixed_set,
     fold_holds,
     held_step,
     hold_view,
+    kept_holds,
     lift_hold,
     note_lift,
     released_note,
     resumed_note,
     set_fix_prompt,
+    set_holds,
     unlifted_sets,
 )
 from orbit.agent.domain.roles import Role, role_task
@@ -80,8 +95,9 @@ class HoldParts:
 
 
 class MergeHolds:
-    """The holds of the sets ``holding`` merges, until :meth:`use_sets` gives others, each
-    queuing at most ``limit`` fixes, acting on ``parts``. :attr:`changed` is told whenever the
+    """The holds of the sets ``holding`` merges, until :meth:`use_sets` gives others, and of
+    the blocking findings the review lane files, each queuing at most ``limit`` fixes, acting on
+    ``parts``. :attr:`changed` is told whenever the
     holds change, and :attr:`released` once the last lifts. A failing read of the holds kept is
     reported, and a failing save halts the session. Nothing is saved while it's halted, nor
     until a read of the holds kept has worked, so holds started without them can't replace those
@@ -96,8 +112,8 @@ class MergeHolds:
         self._parts = parts
         self._board = parts.tasks.board
         self._reads = ReportedOnce(parts.publish, INTERNAL)
-        self._holds: tuple[Hold, ...] = ()
-        self._kept: tuple[Hold, ...] = ()  # The holds the store held when last read or saved.
+        self._holds: tuple[AnyHold, ...] = ()
+        self._kept: tuple[AnyHold, ...] = ()  # The holds the store held when last read or saved.
         self._lifted: Lifted = NONE_LIFTED  # Those lifted here since then, which it may still hold.
         self._read: _Read = "unread"
         self._passed: dict[str, str] = {}  # Set name -> the commit it last passed on.
@@ -120,9 +136,15 @@ class MergeHolds:
         return self._parts.store is None or not unread
 
     @property
-    def holds(self) -> tuple[Hold, ...]:
+    def holds(self) -> tuple[AnyHold, ...]:
         """The holds on, in the order they started."""
         return self._holds
+
+    @property
+    def checking(self) -> tuple[FindingHold, ...]:
+        """The blocking findings' holds whose latest fix a review is still to check, in the
+        order they started."""
+        return tuple(hold for hold in finding_holds(self._holds) if hold.batch is not None)
 
     @property
     def views(self) -> tuple[MergeHold, ...]:
@@ -144,7 +166,7 @@ class MergeHolds:
             if loaded is not None:
                 await self._take_on(store, loaded)
 
-    async def _take_on(self, store: SessionStore, loaded: tuple[Hold, ...]) -> None:
+    async def _take_on(self, store: SessionStore, loaded: tuple[AnyHold, ...]) -> None:
         """Take on ``loaded``, the holds ``store`` keeps, as :meth:`restore` says, saving the
         result if it differs and telling :attr:`released` if no hold is left, as work saved
         waiting for one that has gone lands then."""
@@ -162,10 +184,10 @@ class MergeHolds:
     async def use_sets(self, holding: Collection[CheckSet]) -> None:
         """Have the sets ``holding`` merges hold them from now on: a set that comes to hold them
         holds them as it next fails, and the hold of one that no longer does is dropped, as it
-        would never lift, telling :attr:`released` if no hold is left."""
+        would never lift, telling :attr:`released` if no hold is left. Findings' holds stay."""
         self._sets = tuple(holding)
         self._holding = frozenset(check_set.name for check_set in holding)
-        kept = tuple(hold for hold in self._holds if hold.name in self._holding)
+        kept = kept_holds(self._holds, self._holding)
         if kept == self._holds:
             return
         await self._replace(kept)
@@ -213,21 +235,52 @@ class MergeHolds:
         name = self._fixes(state)
         return name if name is not None and find_hold(self._holds, name) else None
 
+    def is_fix(self, state: TaskState) -> bool:
+        """Whether the task that is ``state`` is, or carries on from, a fix for a hold on, a
+        set's or a blocking finding's latest, whose work lands despite the holds."""
+        root = fix_root(state, self._board.find).id
+        fixing = any(hold.task == root for hold in finding_holds(self._holds))
+        return fixing or self.fix_of(state) is not None
+
+    def filing_of(self, filed: BlockingTask) -> FindingFiling:
+        """How the blocking task ``filed`` is to be filed, as
+        :func:`~orbit.agent.domain.merge_holds.decide_filing` says."""
+        return decide_filing(self._holds, filed, self._limit)
+
+    async def hold_finding(self, filed: BlockingTask, task: str, batch: str) -> None:
+        """Act on the blocking task ``filed``, filed as the task ``task`` in ``batch``: it holds
+        merges, or fixes the hold it was filed from again, or asks the user to step in, as
+        :func:`~orbit.agent.domain.merge_holds.decide_blocking` says."""
+        await self._settle(decide_blocking(self._holds, filed, task, batch, self._limit))
+
+    async def hear_fix_review(self, batch: str, completed: Collection[str]) -> None:
+        """Act on the end of the review of ``batch``, in which the tasks of the roles
+        ``completed`` completed: the hold whose latest fix is ``batch``'s lifts, or stays, as
+        :func:`~orbit.agent.domain.merge_holds.decide_fix_review` says."""
+        await self._settle(decide_fix_review(self._holds, batch, completed))
+
+    async def hear_unreviewed(self, unreviewed: Collection[FindingHold]) -> None:
+        """Act on the batches of the latest fixes of the ``unreviewed`` holds closing with no
+        review by their lenses: they stay, checked by no review, telling the user."""
+        await self._settle(decide_unreviewed(self._holds, unreviewed))
+
     def fix_landed(self, name: str, trigger: str) -> None:
         """A fix for the set ``name``, queued by the trigger named ``trigger``, landed: run the
         set again, on the new commit, to see whether its hold lifts."""
         self._parts.rerun(name, trigger)
 
     async def release(self) -> None:
-        """Lift every hold, as the user asked by hand, telling them which sets haven't passed,
-        and :attr:`released`; nothing while none is on. A set that fails again starts a new
-        hold."""
-        names = tuple(hold.name for hold in self._holds)
-        if not names:
+        """Lift every hold, as the user asked by hand, telling them which sets haven't passed
+        and which findings aren't fixed, and :attr:`released`; nothing while none is on. A set
+        that fails again, or a finding filed as blocking again, starts a new hold."""
+        holds = self._holds
+        if not holds:
             return
+        names = tuple(hold.name for hold in set_holds(holds))
+        lenses = tuple(hold.lens for hold in finding_holds(holds))
         self._lifted = "every"
         await self._replace(())
-        await self._parts.publish(Notice(message=released_note(names)))
+        await self._parts.publish(Notice(message=released_note(names, lenses)))
         self.released()
 
     async def retry(self) -> StoreFailed | None:
@@ -249,6 +302,17 @@ class MergeHolds:
         await self._replace(lift_hold(self._holds, name))
         await self._parts.publish(Notice(message=resumed_note(name)))
         if not self._holds:
+            self.released()
+
+    async def _settle(self, decision: HoldDecision) -> None:
+        """Have the holds be as ``decision`` says, noting those it lifts, telling the user its
+        notes, and :attr:`released` once it lifted the last."""
+        dropped = {hold.key for hold in self._holds} - {hold.key for hold in decision.holds}
+        self._lifted = reduce(note_lift, sorted(dropped), self._lifted)
+        await self._replace(decision.holds)
+        for note in decision.notes:
+            await self._parts.publish(Notice(message=note))
+        if dropped and not self._holds:
             self.released()
 
     def _lift_unread(self, name: str) -> None:
@@ -305,7 +369,7 @@ class MergeHolds:
         except TreeFailed:
             return None
 
-    async def _replace(self, holds: tuple[Hold, ...]) -> None:
+    async def _replace(self, holds: tuple[AnyHold, ...]) -> None:
         """Have ``holds`` be the holds on, telling :attr:`changed`, and save them, if they
         changed and there's a store."""
         changed = holds != self._holds

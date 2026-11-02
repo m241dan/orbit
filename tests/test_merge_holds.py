@@ -186,7 +186,7 @@ async def test_passing_lifts_the_hold_with_a_notice_and_releases_once_none_is_le
     await failed(holds)
     await failed(holds, check_set=SOAK)
     await passed(holds)
-    assert holds.releases == 1 and [hold.name for hold in holds.holds.holds] == ["soak"]
+    assert holds.releases == 1 and [hold.key for hold in holds.holds.holds] == ["soak"]
     await passed(holds, check_set=SOAK)
 
     assert not holds.holds.held and holds.releases == 2
@@ -556,8 +556,8 @@ async def test_a_hold_lifted_during_a_save_that_saves_it_not_is_dropped_from_the
     await asyncio.gather(saving, lifting)
     store.holds_failure = None
     await holds.holds.restore()
-    assert [hold.name for hold in store.holds] == ["stress", "soak"]
-    assert [hold.name for hold in holds.holds.holds] == ["soak"]
+    assert [hold.key for hold in store.holds] == ["stress", "soak"]
+    assert [hold.key for hold in holds.holds.holds] == ["soak"]
 
 
 async def test_a_failing_save_halts_the_session_and_a_retry_saves_the_holds() -> None:
