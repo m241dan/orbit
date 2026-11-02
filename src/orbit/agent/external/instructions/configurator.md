@@ -65,16 +65,19 @@ and `{output}`, the failing step's output. Orbit writes each as a `set_finished`
 report's set must be one you propose or one configured now, its role an enabled lens, and its
 name not a built-in trigger's.
 
-When your task lists reports configured now, each under its set by name, propose each again
-under the same name, as it is, unless you mean to change it: a report you leave out, or propose
-under another name, stays as configured, so its set's runs would queue a task for each.
+When your task lists reports configured now, each under its set by name, a listed report stays
+as configured without your proposing it again, with its own prompt, whether it's off, and any
+status, roles or sets a proposal can't express. Propose one under its listed name only to
+change it, since that replaces it whole. Don't propose another report for a set that already
+has one listed for the same lens: both would stay, and the set's runs would queue a task for
+each.
 
-When you propose a mutation testing or benchmark set, also propose its report to the lens the
-Suggested checks name for it, such as mutation testing to `tests-reviewer` and benchmarks to
-`scaling-reviewer`, with a prompt like the sample there, unless the user drops it. Its command
-must exit non-zero when it finds surviving mutants or a slowdown, or the report never fires:
-where the tool alone exits 0, use the Suggested checks' wrapper, the one kind of step that runs
-`sh -c`.
+When you propose a mutation testing or benchmark set and no report is listed for it, also
+propose its report to the lens the Suggested checks name for it, such as mutation testing to
+`tests-reviewer` and benchmarks to `scaling-reviewer`, with a prompt like the sample there,
+unless the user drops it. Its command must exit non-zero when it finds surviving mutants or a
+slowdown, or the report never fires: where the tool alone exits 0, use the Suggested checks'
+wrapper, the one kind of step that runs `sh -c`.
 
 ## Setup
 
