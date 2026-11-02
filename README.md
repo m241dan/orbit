@@ -2255,8 +2255,10 @@ the field and the value, for an unknown event, role, guard or `when` field
 variable its event doesn't give (`triggers.tidy-up.prompt: {diff} isn't a variable of
 task_finished; its variables are {trigger}.`), `every` without `on = "commits"`, `manual = true`
 without a `label`, neither a role nor `checks` or both, a role without a prompt, or `checks` with
-one. A list of roles names each one that isn't a role on a line of its own, and an empty one is
-refused (`triggers.tidy-up.role: a list of roles names at least one.`). So is `review-rounds` on a trigger that isn't on `task_landed`
+one. A list of roles names each one that isn't a role on a line of its own, once however often
+it's listed, and refuses a role listed more than once (`triggers.tidy-up.role: style-reviewer is
+listed twice.`); an empty one is refused (`triggers.tidy-up.role: a list of roles names at least
+one.`). So is `review-rounds` on a trigger that isn't on `task_landed`
 (`triggers.tidy-up.guards: review-rounds needs on = "task_landed".`), and `raised-finding` on a
 trigger that isn't guarded by `review-rounds` and on `task_landed`, since only those hear a batch's
 review (`triggers.tidy-up.guards: raised-finding needs review-rounds and on = "task_landed".`), or

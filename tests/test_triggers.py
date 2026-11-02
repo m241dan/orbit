@@ -267,6 +267,31 @@ def test_an_unknown_role_is_refused_naming_it_and_the_roles() -> None:
     )
 
 
+def test_a_role_listed_twice_is_refused_naming_it_once() -> None:
+    assert problems(on="task_finished", role=("reviewer", "coder", "reviewer"), prompt="Go") == (
+        "triggers.x.role: reviewer is listed twice."
+    )
+
+
+def test_a_role_listed_three_times_is_refused_saying_how_often() -> None:
+    assert problems(on="task_finished", role=("coder", "coder", "coder"), prompt="Go") == (
+        "triggers.x.role: coder is listed 3 times."
+    )
+
+
+def test_an_unknown_role_listed_twice_is_named_once_as_not_a_role() -> None:
+    assert problems(on="task_finished", role=("tidier", "coder", "tidier"), prompt="Go") == (
+        "triggers.x.role: tidier isn't a role; the roles are coder, reviewer.\n"
+        "triggers.x.role: tidier is listed twice."
+    )
+
+
+def test_a_list_of_distinct_roles_passes_and_keeps_its_order() -> None:
+    trigger = Trigger(on="task_finished", role=("reviewer", "coder"), prompt="Go")
+    check_triggers({"x": trigger}, ROLES)
+    assert trigger.roles == ("reviewer", "coder")
+
+
 def test_a_trigger_needs_a_role_or_checks() -> None:
     assert problems(on="task_finished") == (
         'triggers.x.role: a trigger needs a role, or checks = "task-checks" or a set.'

@@ -13,6 +13,7 @@ runs the task checks only on ``session_started``, as the startup check.
 """
 
 import re
+from collections import Counter
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, tzinfo
@@ -610,19 +611,32 @@ def _problems(trigger: Trigger, targets: _Targets) -> list[tuple[str, str]]:
 
 def _target_problems(trigger: Trigger, targets: _Targets) -> list[tuple[str, str]]:
     """What's wrong with what ``trigger`` does: it needs a role among the ``targets``' roles, or
-    a list of at least one, each among them, or ``checks`` naming the task checks or one of
-    their sets, and not both."""
+    a list of at least one, each among them and listed once, or ``checks`` naming the task checks
+    or one of their sets, and not both."""
     if trigger.role is None:
         return _checks_problems(trigger.checks, targets.sets)
     if trigger.checks is not None:
         return [("checks", "a trigger has a role or checks, not both.")]
     if not trigger.roles:
         return [("role", "a list of roles names at least one.")]
-    return [
-        ("role", _not_a_role(role, targets.roles))
-        for role in trigger.roles
-        if role not in targets.roles
+    return _role_list_problems(Counter(trigger.roles), targets.roles)
+
+
+def _role_list_problems(listed: Counter[str], roles: Collection[str]) -> list[tuple[str, str]]:
+    """What's wrong with the roles a trigger lists, each counted as often as ``listed`` says:
+    each needs to be among ``roles``, and listed once. Each is named once per problem."""
+    unknown = [("role", _not_a_role(role, roles)) for role in listed if role not in roles]
+    repeated = [
+        ("role", f"{role} is listed {_how_often(count)}.")
+        for role, count in listed.items()
+        if count > 1
     ]
+    return unknown + repeated
+
+
+def _how_often(count: int) -> str:
+    """How often something is listed ``count`` times, in words."""
+    return "twice" if count == 2 else f"{count} times"
 
 
 def _checks_problems(checks: str | None, sets: Collection[str]) -> list[tuple[str, str]]:
