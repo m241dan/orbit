@@ -114,7 +114,6 @@ from orbit.agent.domain.triggers import (
     VerificationState,
     can_queue_reviews,
     scheduled_crons,
-    set_finished_event,
     verification_state,
 )
 from orbit.agent.domain.usage_limits import Outages, RuntimeStop
@@ -904,17 +903,16 @@ class WorkspaceHost:
         """Raise ``set_finished`` for ``outcome``, a named set's run ending, in the session open
         once no switch is under way, through the review lane, which books the finding roles'
         tasks into a review of the set's report, if reviews run, and run the tasks its triggers
-        queued; returns whether a trigger listens for it."""
+        queued; returns whether they queued any, a task that carries its output."""
         engine = self._triggers
         assert engine is not None  # Only agents' triggers run the sets.
-        heard = engine.hears(set_finished_event(outcome))
         lane = self._lane
         if lane is not None:
-            await self._switcher.between_switches(lambda: lane.set_finished(outcome))
-            return heard
+            booked = await self._switcher.between_switches(lambda: lane.set_finished(outcome))
+            return bool(booked)
         queued = await self._switcher.between_switches(lambda: engine.set_finished(outcome))
         engine.run(queued)
-        return heard
+        return bool(queued)
 
     @property
     def workspace_id(self) -> str:

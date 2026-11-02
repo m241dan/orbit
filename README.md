@@ -746,12 +746,13 @@ its output nowhere there, and doesn't take the panel back. Every run of a named 
 passed or failed, whether it reports or holds merges, raises `set_finished` (see
 [Triggers](#triggers)), so a trigger of yours can hand its output to a lens; a run that's
 cancelled, or that git couldn't start, raises nothing, nor does the startup check. A passing run
-of a set that only reports adds nothing to the conversation; a failing one that no trigger listens
-for, as none ships, adds a notice quoting the same last 10 lines of the output, so you can read
-them however the panel has moved on since: `mutation reported: Mutation tests failed. Its output
-ended:` followed by them, or `mutation reported: Mutation tests failed, with no output` when there
-was none. With a trigger listening for that failure (enabled, its role enabled, its `when` taking
-it), there's no notice: its task carries the output. Sets run only in a git repository with the
+of a set that only reports adds nothing to the conversation; a failing one that no trigger queues
+a task for, as none ships, adds a notice quoting the same last 10 lines of the output, so you can
+read them however the panel has moved on since: `mutation reported: Mutation tests failed. Its
+output ended:` followed by them, or `mutation reported: Mutation tests failed, with no output`
+when there was none. The notice is left out when a trigger queued a task for that failure: the
+task carries the output. A trigger that a guard holds back, or that only runs another set,
+queues none, so the notice is given. Sets run only in a git repository with the
 coder's worktree, where there's a commit to snapshot, and never with `--no-verify`.
 
 **Merge holds.** A set with `holds_merges = true` failing holds merges into your branch, with a

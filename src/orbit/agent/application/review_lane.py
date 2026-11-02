@@ -409,13 +409,15 @@ class ReviewLane:
         pending = pending_titles(self._board.tasks)
         return review_values(job, "", self.planner.cap(job), pending, landed)
 
-    async def set_finished(self, outcome: SetOutcome) -> None:
+    async def set_finished(self, outcome: SetOutcome) -> tuple[str, ...]:
         """A named set's run ended as ``outcome`` says: raise ``set_finished``, each task of a
         finding role its triggers queue booked into one review of the set's report, read in a
-        snapshot of the commit it ran on, then run them, and the others it queued."""
+        snapshot of the commit it ran on, then run them, and the others it queued. Returns the
+        ids of the tasks queued."""
         job = set_review(outcome.name, outcome.commit)
         queued = await self._triggers.set_finished(outcome, self._round(job))
         await self._queue_ended(queued)
+        return queued
 
     async def ended(self, state: TaskState, stop: RuntimeStop | None = None) -> None:
         """The task that ended as ``state`` finished without landing anything, or was stopped

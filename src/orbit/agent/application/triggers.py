@@ -313,13 +313,6 @@ class TriggerEngine:
         firing = await self._firing(self._desk.agents.triggers, event, values, review)
         return None if firing is None else replace(firing, books="every")
 
-    def hears(self, event: TriggerEvent) -> bool:
-        """Whether a trigger listens for ``event``, with no review due, as
-        :func:`~orbit.agent.domain.triggers.listening` says, whether or not a guard then holds
-        it back."""
-        roles = enabled_roles(self._desk.agents.roles)
-        return bool(listening(self._desk.agents.triggers, event, roles, None))
-
     async def set_finished(
         self, outcome: SetOutcome, review: ReviewRound | None = None
     ) -> tuple[str, ...]:

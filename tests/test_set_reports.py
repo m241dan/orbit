@@ -1,5 +1,5 @@
 """``set_finished`` in a session: a named set's run ending, passed or failed, fires the triggers
-on it; a failing reporting set's notice given only while none listens; the tasks of finding
+on it; a failing reporting set's notice given unless they queued a task; the tasks of finding
 roles it queues reviewed as one report of the set, fanning in to a merge pass with
 ``review = "set"``; any other role's an ordinary task, with reviews on or off; and the startup
 check raising nothing."""
@@ -20,10 +20,12 @@ from orbit.protocol import (
     TasksChanged,
     TaskState,
     TaskStatus,
+    TurnEndReason,
 )
 from tests.agent_fakes import (
     LINT,
     TRIGGERS,
+    Call,
     FakeTree,
     Script,
     Steps,
@@ -38,6 +40,7 @@ from tests.agent_fakes import (
     settled,
     start,
 )
+from tests.waiting import eventually
 
 MUTATION = VerificationStep("Mutation tests", ("mutmut", "run"), "mutation")
 MUTATION_SET = CheckSet("mutation", (MUTATION,))
@@ -84,14 +87,15 @@ def reporting(
 ) -> WorkspaceHost:
     """A session landing work in a tree, running mutation as it lands, played by ``steps``,
     its tasks by ``scripts`` and its merge passes by ``reviewers``; ``options`` go to
-    :func:`session_for`, the triggers of :func:`mutation_triggers` unless they give others."""
-    defaults: dict[str, Any] = {"triggers": mutation_triggers(), "review": True}
+    :func:`session_for`, the triggers of :func:`mutation_triggers` and the verification of
+    :func:`with_mutation` unless they give others."""
+    defaults: dict[str, Any] = {
+        "triggers": mutation_triggers(),
+        "review": True,
+        "verification": with_mutation(steps),
+    }
     session, _, _ = session_for(
-        *scripts,
-        reviewers=reviewers,
-        verification=with_mutation(steps),
-        tree=FakeTree(),
-        **(defaults | options),
+        *scripts, reviewers=reviewers, tree=FakeTree(), **(defaults | options)
     )
     return session
 
@@ -179,6 +183,101 @@ async def test_a_trigger_naming_a_set_there_is_none_of_never_listens() -> None:
 
     assert [t.task.role for t in board(events)] == [CODER]
     assert len(notices(events)) == 1
+
+
+MUTATION_NOTICE = "mutation reported: Mutation tests failed. Its output ended:\n\n1 test failed"
+"""The notice of mutation failing, as :class:`~tests.agent_fakes.Steps` fails it."""
+
+
+def gated(gate: asyncio.Event) -> Script:
+    """A task that claims done once ``gate`` opens."""
+
+    async def look(call: Call) -> TurnEndReason:
+        await call("get_task")
+        await gate.wait()
+        await call("complete_task", summary="Looked")
+        return "completed"
+
+    return look
+
+
+async def test_a_listening_trigger_held_back_by_not_queued_leaves_the_notice() -> None:
+    gate = asyncio.Event()
+    look = Trigger(on="task_landed", role=TESTS_REVIEWER, prompt="Look.", when={"origin": "manual"})
+    held = MUTATION_REPORT.model_copy(update={"guards": ("not-queued",)})
+    session = reporting(
+        Steps(True, False),
+        claims_done,
+        gated(gate),
+        triggers=mutation_triggers(look=look, **{"mutation-report": held}),
+    )
+    await start(session)
+    events: list[Event] = []
+    collecting = asyncio.ensure_future(settle(session, events))
+    await eventually(lambda: notices(events))
+    gate.set()
+    await asyncio.wait_for(collecting, 10)
+    await session.close()
+
+    assert shown(board(events)) == [
+        (CODER, "manual", None, 0, "completed"),
+        (TESTS_REVIEWER, "look", None, 0, "completed"),
+    ]
+    assert notices(events) == [MUTATION_NOTICE]
+
+
+SMOKE = VerificationStep("Smoke tests", ("smoke",), "smoke")
+
+
+async def test_a_listening_trigger_that_only_runs_another_set_leaves_the_notice() -> None:
+    run_smoke = Trigger.model_validate(
+        {"on": "set_finished", "checks": "smoke", "when": {"set": "mutation", "status": "failed"}}
+    )
+    steps = Steps(True, False, True)
+    session = reporting(
+        steps,
+        claims_done,
+        triggers=mutation_triggers(**{"run-smoke": run_smoke}),
+        verification=Verification((LINT,), steps, sets=(MUTATION_SET, CheckSet("smoke", (SMOKE,)))),
+    )
+    exited = agent_exited("set-smoke")
+    await start(session)
+    events = await asyncio.wait_for(
+        settle(session, until=lambda events: any(exited(event) for event in events)), 10
+    )
+    await session.close()
+
+    assert steps.runs == ["Lint", "Mutation tests", "Smoke tests"]
+    assert [t.task.role for t in board(events)] == [CODER]
+    assert notices(events) == [MUTATION_NOTICE]
+
+
+async def test_a_review_rounds_trigger_queues_its_task_with_no_notice_while_reviews_run() -> None:
+    rounds = MUTATION_REPORT.model_copy(update={"guards": ("review-rounds",)})
+    session = reporting(
+        Steps(True, False),
+        claims_done,
+        claims_done,
+        triggers=mutation_triggers(**{"mutation-report": rounds}),
+    )
+    events = await run_until(session, "completed", "completed")
+
+    assert [t.task.role for t in board(events)] == [CODER, TESTS_REVIEWER]
+    assert notices(events) == []
+
+
+async def test_without_reviews_a_listening_trigger_queues_its_task_with_no_notice() -> None:
+    session = reporting(
+        Steps(True, False),
+        claims_done,
+        claims_done,
+        triggers=mutation_triggers(**{"mutation-report": MUTATION_REPORT}),
+        review=False,
+    )
+    events = await run_until(session, "completed", "completed")
+
+    assert shown(board(events))[1] == (TESTS_REVIEWER, "mutation-report", None, 0, "completed")
+    assert notices(events) == []
 
 
 PASSED = Trigger(

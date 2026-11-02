@@ -14,10 +14,11 @@ until the set's next run starts or another set's run or a task's verification ta
 and keeps its failure. How a run of a set that holds merges came out, on which commit, is told
 to the site's ``heard``, which holds merges while it fails. Every run that ends, passed or
 failed, of whichever set, raises ``set_finished`` through the site's ``finished``, which says
-whether a trigger listens; a run cancelled, or one git couldn't start, raises nothing. A
-reporting set's failure that no trigger listens for adds a notice, quoting the output, as
+whether its triggers queued a task; a run cancelled, or one git couldn't start, raises nothing.
+A reporting set's failure that no trigger queued a task for adds a notice, quoting the output, as
 :func:`~orbit.agent.domain.verification.set_failed_note` words it, so the output stays at hand
-however the panel moves on; one a trigger listens for adds none, as its task carries the output.
+however the panel moves on; one a trigger queued a task for adds none, as the task carries the
+output.
 Each run is traced in an ``orbit.check_set`` span, as :class:`SetTracing` says.
 """
 
@@ -84,7 +85,7 @@ async def _unheard(result: SetResult) -> None:
 
 
 async def _unlistened(outcome: SetOutcome) -> bool:
-    """Raise nothing for ``outcome``; returns that no trigger listens."""
+    """Raise nothing for ``outcome``; returns that no trigger queued a task."""
     return False
 
 
@@ -100,7 +101,7 @@ class SetSite:
     """Where and how the sets run: in snapshots of ``tree``'s base, each step through
     ``run_step``, publishing with ``publish``, while ``halted`` says the session isn't; ``heard``
     hears how each run of a set that holds merges came out, and ``finished`` raises
-    ``set_finished`` for each run that ended, returning whether a trigger listens for it."""
+    ``set_finished`` for each run that ended, returning whether a trigger queued a task for it."""
 
     tree: CoderTree
     run_step: StepRunner
@@ -258,8 +259,8 @@ class SetRun:
     async def _report(self, result: SetResult) -> None:
         """Keep how the run came out, as ``result`` says, and tell of it: a failure's output in
         the panel, a holding set's outcome to the site's ``heard``, the run's end as
-        ``set_finished``, and a reporting set's failure no trigger listens for in a notice; then
-        record it on the run's span."""
+        ``set_finished``, and a reporting set's failure no trigger queued a task for in a
+        notice; then record it on the run's span."""
         failure = result.failure
         self.failure = failure
         if failure is not None:
