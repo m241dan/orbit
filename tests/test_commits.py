@@ -77,3 +77,21 @@ def test_steps_in_sets_are_grouped_by_set_with_the_triggers_that_run_them() -> N
         "Task checks: every task\n- Lint: ruff\n\n"
         "Set slow: every 10 commits, holds merges\n- mutation: mutmut run"
     )
+
+
+def test_a_proposals_reports_are_listed_under_their_sets() -> None:
+    checks = ChecksProposal.model_validate(
+        {
+            "steps": [{"name": "mutation", "command": ["mutmut", "run"], "set": "slow"}],
+            "triggers": {"mutation": {"on": "commits", "every": 10, "checks": "slow"}},
+            "reports": {
+                "mutation-report": {"set": "slow", "role": "tests-reviewer", "prompt": "Look"}
+            },
+        }
+    )
+    assert configure_message(checks) == (
+        "Configure verification steps\n\n"
+        "Task checks: every task\nnone\n\n"
+        "Set slow: every 10 commits, reports\n- mutation: mutmut run\n"
+        "Report mutation-report: slow → tests-reviewer when it fails"
+    )

@@ -81,3 +81,67 @@ def test_each_trigger_running_a_set_is_named_in_its_order() -> None:
 )
 def test_when_a_trigger_fires_is_said_in_words(fields: dict[str, object], when: str) -> None:
     assert describe_firing(Trigger.model_validate({"checks": "slow", **fields})) == when
+
+
+def report_trigger(name: str = "slow", **when: str) -> Trigger:
+    """A ``set_finished`` trigger queuing a tests-reviewer task when set ``name`` finishes, with
+    ``when`` fields over that."""
+    return Trigger(
+        on="set_finished", role="tests-reviewer", prompt="Look", when={"set": name, **when}
+    )
+
+
+def test_a_set_failure_report_is_named_under_its_set_after_its_steps() -> None:
+    triggers = {
+        "mutation": checks_trigger("slow"),
+        "mutation-report": report_trigger(status="failed"),
+    }
+    assert configured_checks((LINT,), None, (SLOW,), triggers) == (
+        "Configured now (build on these):\n\n"
+        "Task checks: every task\n- Lint: ruff check\n\n"
+        "Set slow: every 10 commits, holds merges\n- mutation: mutmut run\n"
+        "Report mutation-report: slow → tests-reviewer when it fails"
+    )
+
+
+@pytest.mark.parametrize(
+    ("when", "phrase"),
+    [
+        ({}, "when it finishes"),
+        ({"status": "passed"}, "when it passes"),
+        ({"status": ("passed", "failed")}, "when it finishes"),
+    ],
+)
+def test_a_reports_status_is_said_in_words(when: dict[str, object], phrase: str) -> None:
+    trigger = Trigger.model_validate(
+        {"on": "set_finished", "role": "tests-reviewer", "when": {"set": "slow", **when}}
+    )
+    described = describe_checks((), None, (SLOW,), {"report": trigger})
+    assert described.endswith(f"\nReport report: slow → tests-reviewer {phrase}")
+
+
+def test_a_report_on_several_sets_is_named_under_each_with_its_roles() -> None:
+    trigger = Trigger(
+        on="set_finished",
+        role=("tests-reviewer", "scaling-reviewer"),
+        when={"set": ("slow", "perf")},
+        enabled=False,
+    )
+    described = describe_checks((), None, (SLOW, PERF), {"both": trigger})
+    assert (
+        "- mutation: mutmut run\nReport both: slow → tests-reviewer, scaling-reviewer" in described
+    )
+    assert described.endswith(
+        "- bench: pytest benchmarks\n"
+        "Report both: perf → tests-reviewer, scaling-reviewer when it finishes (off)"
+    )
+
+
+def test_reports_on_other_sets_other_events_or_without_a_role_are_not_listed() -> None:
+    triggers = {
+        "elsewhere": report_trigger("perf"),
+        "landed": Trigger(on="task_landed", role="tests-reviewer", prompt="Look"),
+        "rerun": Trigger(on="set_finished", checks="perf", when={"set": "slow"}),
+    }
+    described = describe_checks((LINT,), None, (SLOW,), triggers)
+    assert "Report" not in described

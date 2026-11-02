@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.agent.domain.roles import Role, finding_roles
 from orbit.agent.domain.triggers import (
+    SET_FINISHED,
     ChecksTrigger,
     ReportTargets,
     ReportTrigger,
@@ -221,6 +222,13 @@ def merge_proposed_triggers(
 _EFFECT_PHRASES: Mapping[SetEffect, str] = {"holds_merges": "holds merges", "reports": "reports"}
 """What the failure of a set with each effect does, in words."""
 
+_REPORT_PHRASES: Mapping[tuple[str, ...], str] = {
+    ("failed",): "when it fails",
+    ("passed",): "when it passes",
+}
+"""When a report taking each ``status``, alone, queues its lens's task, in words; a report taking
+any other, or none, does when its set finishes."""
+
 
 def describe_checks(
     steps: Sequence[VerificationStep],
@@ -231,7 +239,8 @@ def describe_checks(
     """``steps``, the task checks, one per line, then ``setup``; each part only if there is
     one. With named ``sets``, the task checks come under a line saying when they run, then each
     set with its steps, under a line saying when those of ``triggers`` that run it fire and
-    whether it holds merges, as the proposal window groups them."""
+    whether it holds merges, then the ``set_finished`` triggers reporting it to a lens, as the
+    proposal window groups them."""
     groups = _describe_groups(steps, sets, triggers) if sets else _describe_steps(steps)
     return "\n\n".join([*groups, *_describe_setup(setup)])
 
@@ -252,10 +261,11 @@ def _describe_groups(
 
 def _describe_set(check_set: CheckSet, triggers: Mapping[str, Trigger]) -> str:
     """``check_set``'s steps under a line saying when ``triggers`` run it and whether it holds
-    merges."""
+    merges, then each of ``triggers`` reporting it to a lens, on a line of its own."""
     runs = _runs(triggers, check_set.name) or ["no trigger"]
     effect = _EFFECT_PHRASES[check_set.effect]
-    return _group(f"Set {check_set.name}", [*runs, effect], check_set.steps)
+    group = _group(f"Set {check_set.name}", [*runs, effect], check_set.steps)
+    return "\n".join([group, *_reports(triggers, check_set.name)])
 
 
 def _group(title: str, notes: Sequence[str], steps: Sequence[VerificationStep]) -> str:
@@ -266,6 +276,35 @@ def _group(title: str, notes: Sequence[str], steps: Sequence[VerificationStep]) 
 def _runs(triggers: Mapping[str, Trigger], checks: str) -> list[str]:
     """When each of ``triggers`` that runs ``checks`` fires, in order, in words."""
     return [describe_firing(trigger) for trigger in triggers.values() if trigger.checks == checks]
+
+
+def _reports(triggers: Mapping[str, Trigger], name: str) -> list[str]:
+    """The line of each of ``triggers`` reporting set ``name`` to a lens, in order, as in
+    ``Report mutation-report: mutation → tests-reviewer when it fails``."""
+    return [
+        _report_line(trigger_name, trigger, name)
+        for trigger_name, trigger in triggers.items()
+        if _reports_on(trigger, name)
+    ]
+
+
+def _reports_on(trigger: Trigger, name: str) -> bool:
+    """Whether ``trigger`` queues a role's task when a run of set ``name`` finishes."""
+    return trigger.on == SET_FINISHED and bool(trigger.roles) and name in _values(trigger, "set")
+
+
+def _report_line(trigger_name: str, trigger: Trigger, name: str) -> str:
+    """``trigger``'s line, named ``trigger_name``, reporting set ``name`` to its roles, and when,
+    and that it's off if it isn't enabled."""
+    phrase = _REPORT_PHRASES.get(_values(trigger, "status"), "when it finishes")
+    off = "" if trigger.enabled else " (off)"
+    return f"Report {trigger_name}: {name} → {', '.join(trigger.roles)} {phrase}{off}"
+
+
+def _values(trigger: Trigger, field: str) -> tuple[str, ...]:
+    """The values ``trigger``'s ``when`` field ``field`` takes, if it has one."""
+    value = trigger.when.get(field, ())
+    return (value,) if isinstance(value, str) else value
 
 
 def _step_lines(steps: Sequence[VerificationStep]) -> str:
@@ -303,8 +342,9 @@ def configured_checks(
     triggers: Mapping[str, Trigger] = _NO_TRIGGERS,
 ) -> str:
     """What a configurator is told is configured now, the task checks ``steps``, the named
-    ``sets`` with when ``triggers`` run them, and ``setup`` (see :func:`describe_checks`), or
-    that nothing is: the ``{checks}`` a trigger's template uses."""
+    ``sets`` with when ``triggers`` run them and those reporting them to lenses, and ``setup``
+    (see :func:`describe_checks`), or that nothing is: the ``{checks}`` a trigger's template
+    uses."""
     current = describe_checks(steps, setup, sets, triggers)
     if not current:
         return "Nothing is configured yet."
