@@ -1727,16 +1727,17 @@ call, waits at most the server's `timeout_seconds`.
 
 On first connecting to a server, orbit gives a notice for each tool a role's list names that the
 server doesn't offer (`github offers no tool create_isue, which roles.coder.tools.mcp names.`);
-agents never see that tool. A server that fails to start, crashes, doesn't answer in time or
-drops the connection fails the call with the reason, and its connection is dropped, so the next
-call starts it afresh. So does a server at a `url` that refuses the connection, fails the TLS
+agents never see that tool. A server that fails to start, crashes, doesn't answer in time,
+drops the connection or sends a reply orbit can't read fails the call with the reason, and its
+connection is dropped, so the next call starts it afresh. So does a server at a `url` that refuses the connection, fails the TLS
 handshake or answers with an HTTP error status; one answering 401 or 403 says so (`MCP server
 semgrep refused orbit's credentials (HTTP 401).`). The first failure gives a notice (`MCP server github failed: it exited
 with status 1. Agents' calls to it return errors until it starts.`), and the failures after it
 none, until a call it answers ends the streak. When an agent's run ends, its calls in flight are
 cancelled; when the workspace closes or orbit exits, every connection is closed, the servers
 orbit started are stopped (terminated, then killed), and the calls in flight are answered with
-an error.
+an error. If listing the proxied tools fails unexpectedly, orbit reports the error and the agent
+still gets its orbit tools, with none proxied.
 
 #### Approving calls
 

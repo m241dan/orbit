@@ -5,10 +5,12 @@ It speaks newline-delimited JSON-RPC on stdin and stdout, offering its tools two
 ``whoami`` (its process id, directory and the environment it started with, as JSON), ``oops``
 (the tool's own error), ``slow`` (never answers) and ``fail`` (exits with status 3 without
 answering), and, unlisted,
-``picture`` (text and an image) and ``hang up`` (closes its stdout and waits).
+``picture`` (text and an image), ``hang up`` (closes its stdout and waits) and ``malformed`` (a
+result that isn't one).
 
 Its first argument, if any, is its mode: ``hang-up`` closes its stdout before reading anything,
-``refuse-list`` answers ``tools/list`` with an error, ``garbage`` writes a line that isn't a
+``refuse-list`` answers ``tools/list`` with an error, ``malformed-list`` answers it with a tool
+whose input schema isn't an object, ``garbage`` writes a line that isn't a
 message first, and ``silent`` writes its process id to the file its second argument names and
 never answers.
 """
@@ -54,7 +56,10 @@ def text(value: str, error: bool = False) -> dict[str, Any]:
 
 
 def listed(params: dict[str, Any]) -> dict[str, Any]:
-    """The page of tools ``params``' cursor asks for."""
+    """The page of tools ``params``' cursor asks for; a tool whose input schema isn't an object
+    if the mode is ``malformed-list``."""
+    if MODE == "malformed-list":
+        return {"tools": [{"name": "broken", "inputSchema": "not an object"}]}
     start = int(params.get("cursor") or 0)
     page = TOOLS[start : start + PAGE_SIZE]
     following = start + PAGE_SIZE
@@ -93,6 +98,11 @@ def picture(arguments: dict[str, Any]) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": "A picture:"}, image]}
 
 
+def malformed(arguments: dict[str, Any]) -> dict[str, Any]:
+    """A result whose content isn't a list."""
+    return {"content": "not a list"}
+
+
 def hang_up(arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     """Nothing: it closes stdout and waits, never to answer again."""
     sys.stdout.close()
@@ -110,6 +120,7 @@ HANDLERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "fail": fail,
     "picture": picture,
     "hang up": hang_up,
+    "malformed": malformed,
 }
 
 

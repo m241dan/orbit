@@ -38,7 +38,7 @@ from orbit.agent.application.tool_call_approvals import ToolCallApprovals
 from orbit.agent.application.tool_proxy import Caller, McpProxying, ToolProxy
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.agents import Agent, AgentRegistry
-from orbit.agent.domain.mcp_proxy import is_proxied, refusal
+from orbit.agent.domain.mcp_proxy import ProxiedTool, is_proxied, refusal
 from orbit.agent.domain.merge_pass import Dismissal, ReviewSuggestion
 from orbit.agent.domain.refusals import failed_to
 from orbit.agent.domain.reviews import FindingReport, ReviewLimits
@@ -451,8 +451,19 @@ class AgentDesk:
         if agent is None:
             return ToolListing(ORBIT_TOOLS)
         role = self.agents.roles[agent.role]
-        proxied = () if self._proxy is None else await self._proxy.list_tools(self._caller(agent))
-        return ToolListing(role.granted_tools, proxied)
+        return ToolListing(role.granted_tools, await self._proxied_tools(agent))
+
+    async def _proxied_tools(self, agent: Agent) -> tuple[ProxiedTool, ...]:
+        """The proxied tools ``agent``'s role allows; none without a proxy, or if listing them
+        fails unexpectedly, which is reported."""
+        if self._proxy is None:
+            return ()
+        try:
+            return await self._proxy.list_tools(self._caller(agent))
+        except Exception as exc:
+            message = unexpected(failed_to("list the proxied tools", exc), exc)
+            await self.publish(ErrorOccurred(agent_id=agent.id, code=INTERNAL, message=message))
+            return ()
 
     def _caller(self, agent: Agent) -> Caller:
         """``agent`` as it calls proxied tools: in its role as it stands, working where it was

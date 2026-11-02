@@ -3,7 +3,8 @@ messages travel: a task the connection owns runs the transport and the session u
 stops serving, or the connection is closed, and requests go on the session meanwhile.
 
 Every request waits at most the server's ``timeout_seconds``; a server that stops serving fails
-the requests in flight at once, saying why it stopped.
+the requests in flight at once, saying why it stopped. A reply the client can't validate fails
+its request too, as the server's failure.
 """
 
 import asyncio
@@ -21,6 +22,7 @@ from mcp.types import (
     TextContent,
     Tool,
 )
+from pydantic import ValidationError
 
 from orbit.agent.application.ports import Reply, UpstreamFailed
 from orbit.agent.domain.mcp_proxy import UpstreamTool
@@ -31,6 +33,9 @@ PAGE_LIMIT = 100
 """The most pages of tools read from a server."""
 
 CLOSED = "the connection to it was closed"
+
+UNREADABLE = "it sent a reply orbit can't read"
+"""Why a request whose reply the client can't validate failed."""
 
 EXIT_GRACE_SECONDS = 1.0
 """How long a server whose connection dropped has to stop serving, so why it stopped is what's
@@ -64,17 +69,20 @@ class ClientConnection(ABC):
 
     async def list_tools(self) -> tuple[UpstreamTool, ...]:
         """The tools the server offers, every page of them, up to :data:`PAGE_LIMIT`. Raises
-        :class:`UpstreamFailed` if the server fails or answers with an error."""
+        :class:`UpstreamFailed` if the server fails, answers with an error, or answers with a
+        list that can't be read."""
         try:
             tools = await self._pages(None, PAGE_LIMIT)
         except MCPError as exc:
             raise await self._failure(exc, self._served) from None
+        except ValidationError:
+            raise UpstreamFailed(UNREADABLE) from None
         return tuple(_upstream(tool) for tool in tools)
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Reply:
         """The server's answer to a call to ``name`` with ``arguments``, an error if the tool,
         or the server, says the call is one. Raises :class:`UpstreamFailed` if the server
-        fails."""
+        fails, or answers with a result that can't be read."""
         session = self._ready.result()
         try:
             result = await session.call_tool(name, arguments)
@@ -82,6 +90,8 @@ class ClientConnection(ABC):
             if exc.code not in (REQUEST_TIMEOUT, CONNECTION_CLOSED):
                 return Reply(exc.message, is_error=True)
             raise await self._failure(exc, self._served) from None
+        except ValidationError:
+            raise UpstreamFailed(UNREADABLE) from None
         return Reply(_text(result.content), is_error=bool(result.is_error))
 
     async def close(self) -> None:

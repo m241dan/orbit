@@ -271,6 +271,24 @@ async def test_a_server_refusing_to_list_its_tools_fails_with_its_message(tmp_pa
         await session.close()
 
 
+async def test_a_tool_list_orbit_cant_read_fails_the_listing(tmp_path: Path) -> None:
+    session = await open_stand_in(stand_in("malformed-list"), tmp_path)
+    try:
+        with pytest.raises(UpstreamFailed, match=r"^it sent a reply orbit can't read$"):
+            await session.list_tools()
+    finally:
+        await session.close()
+
+
+async def test_a_call_result_orbit_cant_read_fails_the_call(tmp_path: Path) -> None:
+    session = await open_stand_in(stand_in(), tmp_path)
+    try:
+        with pytest.raises(UpstreamFailed, match=r"^it sent a reply orbit can't read$"):
+            await session.call_tool("malformed", {})
+    finally:
+        await session.close()
+
+
 async def test_a_call_to_a_tool_the_server_lacks_is_an_error_reply(tmp_path: Path) -> None:
     session = await open_stand_in(stand_in(), tmp_path)
     try:

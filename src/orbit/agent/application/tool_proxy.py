@@ -9,8 +9,8 @@ Either is closed once idle for its ``idle_minutes``.
 A server is started by its command, or reached at its URL with its headers; the variables in
 its environment and headers are filled in from the credentials as it connects. A server that
 fails to start, can't be reached, refuses orbit's credentials, answers with an HTTP error,
-crashes, times out or drops the connection fails the call with the reason, and its connection
-is discarded, so the next call starts it afresh; the first
+crashes, times out, drops the connection or sends a reply orbit can't read fails the call with
+the reason, and its connection is discarded, so the next call starts it afresh; the first
 failure of a streak publishes a notice, and a call it answers ends the streak. Each proxied call
 is traced in an ``orbit.mcp.call`` span, linked to the calling agent's span, with the server,
 orbit's name for the tool and the outcome, never the arguments or the result.

@@ -28,7 +28,15 @@ from orbit.agent.external.environment_credentials import EnvironmentCredentials
 from orbit.agent.external.mcp_host import McpHost
 from orbit.agent.external.mcp_stdio import StdioConnector
 from orbit.agent.external.processes import process_alive
-from orbit.protocol import DecideToolCall, Event, Settings, ToolCallDecided, ToolCallHeld
+from orbit.protocol import (
+    INTERNAL,
+    DecideToolCall,
+    ErrorOccurred,
+    Event,
+    Settings,
+    ToolCallDecided,
+    ToolCallHeld,
+)
 from orbit.tracing import NoSpan
 from tests.agent_fakes import FakeHost, FakeTempDirs
 from tests.mcp_fakes import FakeConnector
@@ -217,6 +225,21 @@ async def test_an_agent_lists_its_roles_orbit_tools_and_the_proxied_ones(tmp_pat
     assert await host.list_tools(reviewer.token) == ToolListing(
         ("get_task", "report_finding", "read_skill")
     )
+
+
+async def test_a_bug_listing_proxied_tools_is_reported_and_orbits_tools_still_listed(
+    tmp_path: Path,
+) -> None:
+    connector = FakeConnector()
+    connector.crash = RuntimeError("bug")
+    recorded = Recorded()
+    desk = AgentDesk(desk_with(FakeHost(), connector, tmp_path).agents, recorded)
+    coder = desk.open(Answering(), "coder", "1")
+    assert await desk.list_tools(coder.token) == ToolListing(ROLES["coder"].granted_tools)
+    [error] = [event for event in recorded.events if isinstance(event, ErrorOccurred)]
+    assert error.code == INTERNAL
+    assert error.agent_id == coder.id
+    assert error.message == "Orbit failed to list the proxied tools: bug"
 
 
 async def test_without_servers_an_agent_lists_none_and_its_calls_to_them_are_refused(
