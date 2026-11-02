@@ -706,11 +706,18 @@
       "type": "object"
     },
     "ChecksProposed": {
-      "description": "Agent ``agent_id`` proposed these checks for task ``task_id``, and they all passed on\nthe current code; the user decides on them with ``DecideProposal``. ``sets`` says whether\neach named set the steps are in holds merges, by name, and ``triggers`` are those it\nproposed to run the checks, by name.",
+      "description": "Agent ``agent_id`` proposed these checks for task ``task_id``, and they all passed on\nthe current code; the user decides on them with ``DecideProposal``. ``sets`` says whether\neach named set the steps are in holds merges, by name, ``triggers`` are those it\nproposed to run the checks, by name, and ``reports`` the sets' runs it proposed to route to\nlens roles, by name.",
       "properties": {
         "agent_id": {
           "title": "Agent Id",
           "type": "string"
+        },
+        "reports": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ProposedReport"
+          },
+          "title": "Reports",
+          "type": "object"
         },
         "sets": {
           "additionalProperties": {
@@ -2169,6 +2176,39 @@
         "type"
       ],
       "title": "ProposalDecided",
+      "type": "object"
+    },
+    "ProposedReport": {
+      "description": "A report an agent proposed, a trigger queuing a task for the lens ``role`` when a run of\nthe named ``set`` finishes with the ``status`` it takes, with the inline ``prompt``, which\nmay use ``{set}``, ``{status}``, ``{commit}`` and ``{output}``.",
+      "properties": {
+        "prompt": {
+          "title": "Prompt",
+          "type": "string"
+        },
+        "role": {
+          "title": "Role",
+          "type": "string"
+        },
+        "set": {
+          "title": "Set",
+          "type": "string"
+        },
+        "status": {
+          "default": "failed",
+          "enum": [
+            "failed",
+            "any"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "set",
+        "role",
+        "prompt"
+      ],
+      "title": "ProposedReport",
       "type": "object"
     },
     "ProposedSetup": {

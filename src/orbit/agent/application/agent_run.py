@@ -487,6 +487,7 @@ class AgentRun:
                 arguments,
                 self._desk.agents.built_in_triggers,
                 self._verifier.verification.configured_steps,
+                self._desk.agents.roles,
             )
         except ConfigError as exc:
             return Reply(invalid_proposal(str(exc)), is_error=True)

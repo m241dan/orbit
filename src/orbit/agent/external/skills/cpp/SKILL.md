@@ -34,7 +34,8 @@ Suggestions for the project's verification: the configurator proposes these, and
 .orbit/config.toml decides what runs. Warnings as errors, clang-tidy, formatting, function limits
 of complexity 6, 100 lines and 5 parameters, the include checker, the tests under AddressSanitizer
 and UBSan, and 100% line and branch coverage fit every task's checks; ThreadSanitizer, mutation
-testing, fuzzing and benchmarks fit named sets.
+testing, fuzzing and benchmarks fit named sets. Mutation testing reports its failures to the lens
+`tests-reviewer`, and benchmarks to `scaling-reviewer`.
 
 Read `cpp`'s `checks.md`.
 

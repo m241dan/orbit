@@ -1,9 +1,10 @@
 """Triggers, which turn an event into a task for a role or a run of checks, the task checks or a
 named set: the events and guards orbit knows, a trigger's fields, the package's triggers merged
-with a project's and checked against its roles and sets, the sets no trigger runs, which of them
-fire on an event and which guards hold one back, which of them a landing's changed paths let
-fire, when one fires in words, the tab a task's agent shows under, what a named set's run
-ending raises, and the rendering of a trigger's prompt template.
+with a project's and checked against its roles and sets, the reports a configurator proposes
+routing a set's runs to a lens role, the sets no trigger runs, which of them fire on an event
+and which guards hold one back, which of them a landing's changed paths let fire, when one fires
+in words, the tab a task's agent shows under, what a named set's run ending raises, and the
+rendering of a trigger's prompt template.
 
 The package's triggers aren't kept here: whoever builds them passes in the contents of their
 ``triggers.toml`` and the templates it names. ``manual`` isn't raised yet, but a trigger fired by
@@ -15,7 +16,7 @@ import re
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
-from typing import Annotated, Any, Literal, get_args
+from typing import Annotated, Any, Final, Literal, get_args
 
 from pydantic import (
     AfterValidator,
@@ -33,7 +34,7 @@ from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
 from orbit.agent.domain.reviews import ReviewJob, ReviewKind
 from orbit.agent.domain.roles import PLAIN_NAME
 from orbit.agent.domain.verification import VerificationStep, set_report
-from orbit.protocol import TASK_CHECKS, TaskState, is_orbit_review
+from orbit.protocol import TASK_CHECKS, ReportStatus, TaskState, is_orbit_review
 
 EventName = Literal[
     "session_started",
@@ -72,7 +73,7 @@ REVIEWS_FINISHED = "reviews_finished"
 """The event of a review's lenses having ended: every task of a finding role, one granted
 ``report_finding``, that one review queued."""
 
-SET_FINISHED = "set_finished"
+SET_FINISHED: Final = "set_finished"
 """The event of a named set's run ending, passed or failed; neither a run cancelled or one git
 couldn't start, nor the task checks, raise it."""
 
@@ -329,6 +330,24 @@ class ChecksTrigger(_Config):
         return Trigger.model_validate(self.model_dump())
 
 
+class ReportTrigger(_Config):
+    """A report, as an agent proposes it: a trigger queuing a task for the lens ``role`` when a
+    run of the named ``set`` finishes, one that failed or, with ``status`` ``any``, any run,
+    with the inline ``prompt``, a template of ``set_finished``'s variables."""
+
+    set: str
+    role: str
+    status: ReportStatus = "failed"
+    prompt: str = Field(min_length=1)
+
+    def as_trigger(self) -> Trigger:
+        """The ``set_finished`` :class:`Trigger` it is, as the config would read it."""
+        status = {"status": "failed"} if self.status == "failed" else {}
+        return Trigger(
+            on=SET_FINISHED, role=self.role, prompt=self.prompt, when={"set": self.set, **status}
+        )
+
+
 def _refuse_unknown_event(on: object) -> object:
     """``on``, a trigger's event, refused if it's a name that isn't among :data:`EVENT_NAMES`."""
     if isinstance(on, str) and on not in EVENT_NAMES:
@@ -437,6 +456,72 @@ def check_free_names(package: Mapping[str, Trigger], names: Iterable[str]) -> No
     ]
     if problems:
         raise ConfigError("\n".join(problems))
+
+
+@dataclass(frozen=True)
+class ReportTargets:
+    """What a proposed report may name: the ``lenses``, the enabled roles granted
+    ``report_finding``, it may queue a task for, the ``sets`` it may report on, and the names
+    ``taken`` by other triggers, each with whose it is, such as ``a built-in trigger``."""
+
+    lenses: Collection[str]
+    sets: Collection[str]
+    taken: Mapping[str, str]
+
+
+def check_reports(reports: Mapping[str, ReportTrigger], targets: ReportTargets) -> None:
+    """Raise :class:`ConfigError` naming each problem of each of ``reports``, on a line of its
+    own, if any, each at ``reports.<name>``, or ``reports.<name>.<field>``: a name among the
+    ``targets``' taken ones, a role not among their lenses, a set not among their sets, or a
+    prompt using a variable ``set_finished`` doesn't give."""
+    problems = [
+        f"reports.{name}{field}: {why}"
+        for name, report in reports.items()
+        for field, why in _report_problems(name, report, targets)
+    ]
+    if problems:
+        raise ConfigError("\n".join(problems))
+
+
+def _report_problems(
+    name: str, report: ReportTrigger, targets: ReportTargets
+) -> list[tuple[str, str]]:
+    """Each problem of ``report``, named ``name``, by the field it's in after a dot, or none
+    for its name, as :func:`check_reports` finds them against the ``targets`` it may name."""
+    prompt = _variable_problems(SET_FINISHED, report.prompt)
+    return [
+        *_report_name_problems(name, targets.taken),
+        *_lens_problems(report.role, targets.lenses),
+        *_report_set_problems(report.set, targets.sets),
+        *((f".{field}", why) for field, why in prompt),
+    ]
+
+
+def _report_name_problems(name: str, taken: Mapping[str, str]) -> list[tuple[str, str]]:
+    """Why a report's ``name`` is refused, if it is: it's among the ``taken`` names, as another
+    trigger's."""
+    owner = taken.get(name)
+    if owner is None:
+        return []
+    return [("", f"{name} is taken by {owner}; give this report another name.")]
+
+
+def _lens_problems(role: str, lenses: Collection[str]) -> list[tuple[str, str]]:
+    """Why the ``role`` a report queues a task for is refused, if it is: it isn't among the
+    ``lenses``, the enabled roles granted ``report_finding``."""
+    if role in lenses:
+        return []
+    known = f"those are {', '.join(lenses)}" if lenses else "none is"
+    return [(".role", f"{role} isn't an enabled role granted report_finding; {known}.")]
+
+
+def _report_set_problems(name: str, sets: Collection[str]) -> list[tuple[str, str]]:
+    """Why the set ``name`` a report names is refused, if it is: it isn't among ``sets``, those
+    a step is in, in the proposal or the project."""
+    if name in sets:
+        return []
+    known = f"the sets are {', '.join(sets)}" if sets else "no step is in a set"
+    return [(".set", f"{name} isn't a set in the proposal or the project; {known}.")]
 
 
 def _tasks_of(roles: Sequence[str]) -> str:

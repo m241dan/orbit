@@ -552,13 +552,16 @@ close the offer they show.
 ## The user's messages and decisions
 
 A configurator's proposal reaches the frontend as `ChecksProposed(agent_id, task_id, steps,
-setup, sets, triggers)`, once its checks all passed: each `ProposedStep` has its `name`, its
-`command` and the named `set` it's in, null for one of the task checks; `sets` says whether each
-set the steps are in holds merges, by name; and `triggers` holds the `ProposedTrigger`s that
+setup, sets, triggers, reports)`, once its checks all passed: each `ProposedStep` has its `name`,
+its `command` and the named `set` it's in, null for one of the task checks; `sets` says whether
+each set the steps are in holds merges, by name; `triggers` holds the `ProposedTrigger`s that
 would run the checks, by name, each with the event it fires `on`, the `checks` it runs
 (`task-checks` or a set), `every`, `manual`, `label` and `enabled`, as a trigger's table has
-them. `set`, `sets` and `triggers` are additive, so an older peer's proposal reads as one of task
-checks only. The user decides on it with `DecideProposal`.
+them; and `reports` holds the `ProposedReport`s that would route a set's runs to a lens role, by
+name, each with its `set`, the `role` it queues, the `status` it takes (`ReportStatus`: `failed`,
+the default, or `any`) and its inline `prompt`, written once accepted as a `set_finished`
+trigger. `set`, `sets`, `triggers` and `reports` are additive, so an older peer's proposal reads
+as one of task checks only, and an older frontend shows a proposal without its reports. The user decides on it with `DecideProposal`.
 
 When the backend accepts a `SendMessage`, it publishes `MessageSent(command_id, agent, text)`
 before the agent's turn on it, and when it records a `DecideProposal`, it publishes

@@ -9,6 +9,7 @@ from orbit.agent.domain.checks import ChecksProposal
 from orbit.protocol import (
     ChecksProposed,
     DecideProposal,
+    ProposedReport,
     ProposedSetup,
     ProposedStep,
     ProposedTrigger,
@@ -17,7 +18,8 @@ from orbit.protocol import (
 
 def proposed(agent_id: str, task_id: str, proposal: ChecksProposal) -> ChecksProposed:
     """``proposal`` as the event that shows it, saying whether each of its sets holds merges,
-    those its steps are in and then the kept ones its ``sets`` name."""
+    those its steps are in and then the kept ones its ``sets`` name, with its triggers and its
+    reports."""
     setup = proposal.setup
     return ChecksProposed(
         agent_id=agent_id,
@@ -30,6 +32,10 @@ def proposed(agent_id: str, task_id: str, proposal: ChecksProposal) -> ChecksPro
         triggers={
             name: ProposedTrigger.model_validate(trigger.model_dump())
             for name, trigger in proposal.triggers.items()
+        },
+        reports={
+            name: ProposedReport.model_validate(report.model_dump())
+            for name, report in proposal.reports.items()
         },
     )
 

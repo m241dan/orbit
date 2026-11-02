@@ -12,7 +12,9 @@ from orbit.protocol import (
     Event,
     ProposalAction,
     ProposalDecided,
+    ProposedReport,
     ProposedTrigger,
+    ReportStatus,
 )
 from orbit.tui.view.common import EntryKind
 
@@ -31,6 +33,9 @@ EVENT_PHRASES = {
 }
 """When a proposed trigger on each event, by name, fires, in words; ``commits`` counts."""
 
+REPORT_PHRASES: dict[ReportStatus, str] = {"failed": "when it fails", "any": "when it finishes"}
+"""When a proposed report on each status queues its lens's task, in words."""
+
 DECISION_NOTES: dict[ProposalAction, str] = {
     "accept": "proposal accepted",
     "revise": "changes asked for: ",
@@ -45,9 +50,10 @@ def proposal_title(agent_id: str) -> str:
 
 def proposal_text(event: ChecksProposed) -> str:
     """The proposed setup, then each step in order, and that they all passed. With steps in
-    named sets, sets' tables or any triggers, the steps come as the task checks, then each set,
-    each step keeping its number, each group saying when it runs and each set whether it holds
-    merges; a set none of the steps is in keeps its steps as configured."""
+    named sets, sets' tables, any triggers or reports, the steps come as the task checks, then
+    each set, each step keeping its number, each group saying when it runs and each set whether
+    it holds merges, followed by the lens each of its reports queues; a set none of the steps is
+    in keeps its steps as configured."""
     setup = event.setup
     lines = [f"Setup: {'none' if setup is None else shlex.join(setup.command)}"]
     if setup is not None and setup.watch:
@@ -61,9 +67,10 @@ def proposal_text(event: ChecksProposed) -> str:
 
 
 def _is_grouped(event: ChecksProposed) -> bool:
-    """Whether ``event``'s steps come grouped, as some are in a set, or it proposes sets' tables
-    or triggers."""
-    return bool(event.triggers or event.sets) or any(step.set is not None for step in event.steps)
+    """Whether ``event``'s steps come grouped, as some are in a set, or it proposes sets'
+    tables, triggers or reports."""
+    proposes = event.triggers or event.sets or event.reports
+    return bool(proposes) or any(step.set is not None for step in event.steps)
 
 
 def _grouped_steps(event: ChecksProposed) -> list[str]:
@@ -76,11 +83,15 @@ def _grouped_steps(event: ChecksProposed) -> list[str]:
 
 def _set_names(event: ChecksProposed) -> tuple[str, ...]:
     """The names of the sets ``event``'s steps are in, each once, in the order they first
-    appear, then those only its sets' tables or its triggers name."""
-    steps = (s.set for s in event.steps)
-    triggered = (t.checks for t in event.triggers.values() if t.checks != TASK_CHECKS)
-    names = (name for name in (*steps, *event.sets, *triggered) if name is not None)
-    return tuple(dict.fromkeys(names))
+    appear, then those only its sets' tables, its triggers or its reports name."""
+    steps = (s.set for s in event.steps if s.set is not None)
+    return tuple(dict.fromkeys((*steps, *event.sets, *_triggered_sets(event))))
+
+
+def _triggered_sets(event: ChecksProposed) -> list[str]:
+    """The sets ``event``'s triggers run, then those its reports report on, in order."""
+    triggered = [t.checks for t in event.triggers.values() if t.checks != TASK_CHECKS]
+    return [*triggered, *(r.set for r in event.reports.values())]
 
 
 KEPT_STEPS = "  steps kept as configured"
@@ -89,13 +100,25 @@ KEPT_SET = "  steps and whether it holds merges kept as configured"
 
 def _set_lines(event: ChecksProposed, name: str) -> list[str]:
     """The set ``name`` of ``event``'s, under a line saying when it runs and whether it holds
-    merges, after a blank line; a set none of its steps is in keeps its steps, and without a
-    table, whether it holds merges, as configured."""
+    merges, after a blank line, followed by its reports; a set none of its steps is in keeps
+    its steps, and without a table, whether it holds merges, as configured."""
     steps = _step_lines(event, name)
+    reports = _report_lines(event, name)
     if not steps and name not in event.sets:
-        return [*_set_heading(event, name, ()), KEPT_SET]
+        return [*_set_heading(event, name, ()), KEPT_SET, *reports]
     effect = "holds merges" if event.sets.get(name, False) else "reports"
-    return [*_set_heading(event, name, (effect,)), *(steps or [KEPT_STEPS])]
+    return [*_set_heading(event, name, (effect,)), *(steps or [KEPT_STEPS]), *reports]
+
+
+def _report_lines(event: ChecksProposed, name: str) -> list[str]:
+    """The line of each of ``event``'s reports on the set ``name``, saying which lens it queues
+    and when, in order."""
+    return [_report_line(report) for report in event.reports.values() if report.set == name]
+
+
+def _report_line(report: ProposedReport) -> str:
+    """``report``'s line, as in ``mutation → tests-reviewer when it fails``."""
+    return f"  {report.set} → {report.role} {REPORT_PHRASES[report.status]}"
 
 
 def _set_heading(event: ChecksProposed, name: str, notes: Sequence[str]) -> list[str]:

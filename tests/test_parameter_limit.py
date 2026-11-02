@@ -19,6 +19,10 @@ ENTRY = Path("src/orbit/cli")
 MAIN = Path("src/orbit/__main__.py")
 """The ``python -m orbit`` shim, whose functions the marker may forgive too."""
 
+MCP_TOOLS = Path("src/orbit/agent/external/mcp_host.py")
+"""The MCP host, whose tools the marker may forgive too: the SDK takes each of a tool's arguments,
+and the caller's context, as a parameter of its function."""
+
 FORGIVES = re.compile(r"#\s*#lizard forgives\(parameter_count\):\s*\S")
 """A comment forgiving a function its parameter count, with a reason after the colon."""
 
@@ -78,8 +82,8 @@ def _forgiven_lines(source: str) -> set[int]:
 
 def _may_be_forgiven(relative: Path) -> bool:
     """Whether the module at ``relative`` holds Entry code, a CLI command or the ``python -m``
-    shim, whose functions the marker may forgive."""
-    return relative.is_relative_to(ENTRY) or relative == MAIN
+    shim, or the MCP host's tools, whose functions the marker may forgive."""
+    return relative.is_relative_to(ENTRY) or relative in (MAIN, MCP_TOOLS)
 
 
 def _offenders(root: Path, path: Path) -> list[str]:
@@ -186,6 +190,11 @@ def test_a_cli_function_with_the_marker_and_a_reason_passes(tmp_path: Path) -> N
 def test_the_python_m_shim_may_carry_the_marker(tmp_path: Path) -> None:
     source = f"def main(a, b, c, d, e, f) -> None:  {REASON}\n    pass\n"
     assert _offenders_in(tmp_path, "src/orbit/__main__.py", source) == []
+
+
+def test_the_mcp_hosts_tools_may_carry_the_marker(tmp_path: Path) -> None:
+    source = SIX.format(marker=REASON)
+    assert _offenders_in(tmp_path, str(MCP_TOOLS), source) == []
 
 
 def test_the_marker_without_a_reason_doesn_t_forgive(tmp_path: Path) -> None:

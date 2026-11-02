@@ -192,6 +192,14 @@ async def test_passes_calls_with_the_token_to_the_handler_and_returns_its_text()
                         "enabled": False,
                     }
                 },
+                "reports": {
+                    "mutation-report": {
+                        "set": "mutation",
+                        "role": "tests-reviewer",
+                        "status": "any",
+                        "prompt": "Report {output}.",
+                    }
+                },
             },
         ),
     ],

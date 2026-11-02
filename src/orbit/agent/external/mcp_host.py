@@ -103,6 +103,18 @@ class ProposedTrigger(TypedDict):
     enabled: NotRequired[bool]
 
 
+class ProposedReport(TypedDict):
+    """A report routing a named set's runs to a lens role: the set, the role (one granted
+    report_finding) whose task it queues, whether it takes only failed runs ("failed", the
+    default) or "any", and the task's prompt, which may use {set}, {status}, {commit} and
+    {output}."""
+
+    set: str
+    role: str
+    status: NotRequired[Literal["failed", "any"]]
+    prompt: str
+
+
 class ProposedSetup(TypedDict):
     """The command that readies a fresh checkout, and the files whose changes rerun it."""
 
@@ -233,23 +245,26 @@ def _add_checks_tool(server: MCPServer, call: ToolCall) -> None:
 
     @server.tool(structured_output=False)
     async def propose_checks(
+        # #lizard forgives(parameter_count): the SDK takes each of the tool's arguments as one.
         steps: list[ProposedStep],
         ctx: Context,
         setup: ProposedSetup | None = None,
         sets: dict[str, bool] | None = None,
         triggers: dict[str, ProposedTrigger] | None = None,
+        reports: dict[str, ProposedReport] | None = None,
     ) -> str:
         """Propose the project's verification steps, quick ones first, and optionally the
         setup command that readies a fresh checkout with the files that should rerun it.
         Steps in no set are the task checks every task runs; a slower step joins a named set.
-        Optionally say, in sets, whether each set holds merges when it fails (by name), and
-        propose the triggers that run sets (by name).
+        Optionally say, in sets, whether each set holds merges when it fails (by name),
+        propose the triggers that run sets (by name), and propose reports (by name) that hand
+        a set's output to a lens role when it finishes.
 
         Orbit runs the setup and each step, which can take minutes, then the user decides:
         wait for the reply. It says what failed, what the user wants changed, or that
         they accepted or ended it.
         """
-        given = {"sets": sets, "triggers": triggers}
+        given = {"sets": sets, "triggers": triggers, "reports": reports}
         extras = {key: value for key, value in given.items() if value is not None}
         return await call(ctx, PROPOSE_CHECKS, {"steps": steps, "setup": setup, **extras})
 

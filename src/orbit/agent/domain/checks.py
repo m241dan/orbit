@@ -1,7 +1,7 @@
 """The checks a project is verified and set up with: its verification steps, the task checks
 among them and the named sets the others are in, the setup that makes a fresh worktree ready, and
-the checks an agent proposes, with the triggers that would run them, and what a configurator is
-told is configured now."""
+the checks an agent proposes, with the triggers that would run them and the reports routing its
+sets' runs to lens roles, and what a configurator is told is configured now."""
 
 import shlex
 from collections.abc import Collection, Mapping, Sequence
@@ -12,11 +12,15 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
+from orbit.agent.domain.roles import Role, finding_roles
 from orbit.agent.domain.triggers import (
     ChecksTrigger,
+    ReportTargets,
+    ReportTrigger,
     Trigger,
     TriggerName,
     check_free_names,
+    check_reports,
     check_triggers,
     describe_firing,
     merge_proposed,
@@ -144,12 +148,13 @@ def setup_step(setup: Setup) -> VerificationStep:
 
 class ChecksProposal(VerificationConfig):
     """Verification steps, at least one, a setup, the named sets' tables, each given as a table
-    or as whether it holds merges, and the ``triggers`` that run the checks, by name, as an agent
-    proposes them."""
+    or as whether it holds merges, the ``triggers`` that run the checks, by name, and the
+    ``reports`` routing a set's runs to a lens role, by name, as an agent proposes them."""
 
     steps: tuple[VerificationStep, ...] = Field(min_length=1)
     setup: Setup | None = None
     triggers: dict[TriggerName, ChecksTrigger] = Field(default_factory=dict)
+    reports: dict[TriggerName, ReportTrigger] = Field(default_factory=dict)
 
     @field_validator("sets", mode="before")
     @classmethod
@@ -174,8 +179,14 @@ class ChecksProposal(VerificationConfig):
         """The ``triggers``, by name, as the config would read them."""
         return {name: trigger.as_trigger() for name, trigger in self.triggers.items()}
 
+    @property
+    def report_settings(self) -> dict[str, Trigger]:
+        """The ``reports``, by name, as the config would read them: ``set_finished`` triggers."""
+        return {name: report.as_trigger() for name, report in self.reports.items()}
+
 
 _NO_TRIGGERS: Mapping[str, Trigger] = MappingProxyType({})
+_NO_ROLES: Mapping[str, Role] = MappingProxyType({})
 
 
 def merge_proposed_sets(
@@ -201,8 +212,10 @@ def merge_proposed_triggers(
     config reads them then: each of the ``configured`` in its order, but that one of the
     proposal's of its name takes its place, then the proposal's new ones, each merged over the
     ``built_in`` trigger of its name, if any (see
-    :func:`~orbit.agent.domain.triggers.merge_proposed`)."""
-    return {**configured, **merge_proposed(built_in, proposal.triggers)}
+    :func:`~orbit.agent.domain.triggers.merge_proposed`), then its reports, the ``set_finished``
+    triggers they are."""
+    proposed = merge_proposed(built_in, proposal.triggers)
+    return {**configured, **proposed, **proposal.report_settings}
 
 
 _EFFECT_PHRASES: Mapping[SetEffect, str] = {"holds_merges": "holds merges", "reports": "reports"}
@@ -342,6 +355,7 @@ def parse_proposal(
     data: dict[str, Any],
     built_in: Mapping[str, Trigger] = _NO_TRIGGERS,
     configured: Sequence[VerificationStep] = (),
+    roles: Mapping[str, Role] = _NO_ROLES,
 ) -> ChecksProposal:
     """The proposal ``data`` (an agent's arguments) describes; raises :class:`ConfigError` if
     it's invalid, as the config would be once it's written over the ``built_in`` triggers and
@@ -349,15 +363,29 @@ def parse_proposal(
     the ``configured`` steps it leaves as they are (see :func:`find_clashes`), a trigger named
     like a built-in one with a role, or a trigger, merged over the built-in one of its name,
     whose ``checks`` name neither the task checks nor a set a step is in, among the rest. Its
-    triggers and sets' tables may name a set only the ``configured`` steps it keeps are in (see
-    :func:`find_kept_sets`), as the file keeps that set."""
+    triggers, reports and sets' tables may name a set only the ``configured`` steps it keeps are
+    in (see :func:`find_kept_sets`), as the file keeps that set. A report is refused when it's
+    named like a built-in or proposed trigger, its role isn't one of the enabled ``roles``
+    granted ``report_finding``, its set is neither proposed nor kept, or its prompt uses a
+    variable ``set_finished`` doesn't give."""
     try:
         proposal = ChecksProposal.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(validation_problems(exc)) from None
     kept = find_kept_sets(configured, proposal)
+    sets = (*proposal.set_names, *kept)
     check_sets(proposal, kept)
     check_clashes(configured, proposal)
     check_free_names(built_in, proposal.triggers)
-    check_triggers(merge_proposed(built_in, proposal.triggers), (), (*proposal.set_names, *kept))
+    check_triggers(merge_proposed(built_in, proposal.triggers), (), sets)
+    targets = ReportTargets(finding_roles(roles), sets, _taken(proposal, built_in))
+    check_reports(proposal.reports, targets)
     return proposal
+
+
+def _taken(proposal: ChecksProposal, built_in: Mapping[str, Trigger]) -> dict[str, str]:
+    """The trigger names a report of ``proposal``'s can't take, each with whose it is: the
+    ``built_in`` triggers' and ``proposal``'s own triggers'."""
+    return dict.fromkeys(built_in, "a built-in trigger") | dict.fromkeys(
+        proposal.triggers, "a proposed trigger"
+    )

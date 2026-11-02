@@ -304,6 +304,21 @@ class ProposedTrigger(_Message):
     enabled: bool = True
 
 
+ReportStatus = Literal["failed", "any"]
+"""Which runs of its set a proposed report takes: those that failed, or any, passed or failed."""
+
+
+class ProposedReport(_Message):
+    """A report an agent proposed, a trigger queuing a task for the lens ``role`` when a run of
+    the named ``set`` finishes with the ``status`` it takes, with the inline ``prompt``, which
+    may use ``{set}``, ``{status}``, ``{commit}`` and ``{output}``."""
+
+    set: str
+    role: str
+    status: ReportStatus = "failed"
+    prompt: str
+
+
 class ProposedSetup(_Message):
     """The setup an agent proposed: its ``command``, and the files whose changes rerun it."""
 

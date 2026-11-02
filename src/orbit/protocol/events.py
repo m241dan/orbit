@@ -22,6 +22,7 @@ from orbit.protocol.models import (
     Activity,
     Effort,
     MergeHold,
+    ProposedReport,
     ProposedSetup,
     ProposedStep,
     ProposedTrigger,
@@ -321,8 +322,9 @@ class AgentExited(_Message):
 class ChecksProposed(_Message):
     """Agent ``agent_id`` proposed these checks for task ``task_id``, and they all passed on
     the current code; the user decides on them with ``DecideProposal``. ``sets`` says whether
-    each named set the steps are in holds merges, by name, and ``triggers`` are those it
-    proposed to run the checks, by name."""
+    each named set the steps are in holds merges, by name, ``triggers`` are those it
+    proposed to run the checks, by name, and ``reports`` the sets' runs it proposed to route to
+    lens roles, by name."""
 
     type: Literal["checks_proposed"] = "checks_proposed"
     agent_id: str
@@ -331,6 +333,7 @@ class ChecksProposed(_Message):
     setup: ProposedSetup | None = None
     sets: dict[str, bool] = Field(default_factory=dict)
     triggers: dict[str, ProposedTrigger] = Field(default_factory=dict)
+    reports: dict[str, ProposedReport] = Field(default_factory=dict)
 
 
 class ProposalDecided(_Message):

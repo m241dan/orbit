@@ -28,7 +28,8 @@ Adds Python's tools and idioms to `code-style`.
 Suggestions for the project's verification: the configurator proposes these, and the project's
 .orbit/config.toml decides what runs. Lint, format, types, import contracts, function limits and
 the tests with full branch coverage fit every task's checks; mutation testing and benchmarks fit
-named sets.
+named sets, each reporting its failures to a lens: mutation testing to `tests-reviewer`, and
+benchmarks to `scaling-reviewer`.
 
 Read `python`'s `checks.md`.
 

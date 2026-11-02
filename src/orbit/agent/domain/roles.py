@@ -42,6 +42,7 @@ from orbit.agent.domain.tools import (
     PROPOSE_CHECKS,
     PROPOSE_TASK,
     READ_SKILL,
+    REPORT_FINDING,
     REPORT_PROGRESS,
     RUN_CHECK,
 )
@@ -347,6 +348,14 @@ def enabled_roles(roles: Mapping[str, Role]) -> dict[str, Role]:
     """The roles among ``roles`` that aren't disabled, by name, in their order."""
     disabled = disabled_roles(roles)
     return {name: role for name, role in roles.items() if name not in disabled}
+
+
+def finding_roles(roles: Mapping[str, Role]) -> tuple[str, ...]:
+    """The names of the enabled roles among ``roles`` granted ``report_finding``, the lenses, in
+    their order."""
+    return tuple(
+        name for name, role in enabled_roles(roles).items() if REPORT_FINDING in role.granted_tools
+    )
 
 
 def disabled_note(name: str) -> str:

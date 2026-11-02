@@ -20,7 +20,7 @@ from tomlkit.items import AoT, InlineTable, Table
 
 from orbit.agent.domain.checks import ChecksProposal, Setup, check_clashes
 from orbit.agent.domain.config_errors import ConfigError
-from orbit.agent.domain.triggers import ChecksTrigger
+from orbit.agent.domain.triggers import ChecksTrigger, ReportTrigger
 from orbit.agent.domain.verification import VerificationStep
 
 ADDED_NOTE = "# Added by orbit init --update on {date}: settings this file didn't mention."
@@ -763,8 +763,9 @@ def _rewritten(document: TOMLDocument, checks: ChecksProposal, unused: Sequence[
         document.pop("setup", None)
     else:
         document["setup"] = _setup(checks.setup)
-    if checks.triggers:
-        document["triggers"] = _with_tables(document.get("triggers"), _trigger_tables(checks))
+    triggers = _trigger_tables(checks)
+    if triggers:
+        document["triggers"] = _with_tables(document.get("triggers"), triggers)
     return tomlkit.dumps(document)
 
 
@@ -857,8 +858,11 @@ def _set_table() -> Table:
 
 
 def _trigger_tables(checks: ChecksProposal) -> dict[str, Table | None]:
-    """The table of each of ``checks``' triggers, by name."""
-    return {name: _trigger(trigger) for name, trigger in checks.triggers.items()}
+    """The table of each of ``checks``' triggers, then of each of its reports, by name."""
+    triggers: dict[str, Table | None] = {
+        name: _trigger(trigger) for name, trigger in checks.triggers.items()
+    }
+    return triggers | {name: _report(report) for name, report in checks.reports.items()}
 
 
 def _trigger(trigger: ChecksTrigger) -> Table:
@@ -869,6 +873,20 @@ def _trigger(trigger: ChecksTrigger) -> Table:
     for key, value in trigger.model_dump(exclude={"on", "checks"}).items():
         if value != ChecksTrigger.model_fields[key].default:
             table[key] = value
+    return table
+
+
+def _report(report: ReportTrigger) -> Table:
+    """The table of the ``set_finished`` trigger ``report`` is: its event, role, ``when`` inline
+    and its prompt, a multi-line string if it has more than one line."""
+    trigger = report.as_trigger()
+    when = tomlkit.inline_table()
+    when.update(trigger.when)
+    table = tomlkit.table()
+    table["on"] = trigger.on
+    table["role"] = trigger.role
+    table["when"] = when
+    table["prompt"] = tomlkit.string(report.prompt, multiline="\n" in report.prompt)
     return table
 
 

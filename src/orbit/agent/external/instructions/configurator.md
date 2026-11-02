@@ -55,6 +55,23 @@ steps into the task checks, or leave a set out, without saying why. A configured
 your steps is in stays as configured, with its steps, so a trigger may still run it, and `sets`
 may still say whether it holds merges, without your proposing its steps again.
 
+## Reports to lenses
+
+A reporting set's failure can go to a lens, a reviewer role granted `report_finding`, which
+turns what the set found into findings for the merge pass. Propose that in `reports`, by name,
+each with the `set` it reports on, the lens `role` it queues, the `status` it takes (`"failed"`,
+the default, or `"any"`) and an inline `prompt`, which may use `{set}`, `{status}`, `{commit}`
+and `{output}`, the failing step's output. Orbit writes each as a `set_finished` trigger. A
+report's set must be one you propose or one configured now, its role an enabled lens, and its
+name not a built-in trigger's.
+
+When you propose a mutation testing or benchmark set, also propose its report to the lens the
+Suggested checks name for it, such as mutation testing to `tests-reviewer` and benchmarks to
+`scaling-reviewer`, with a prompt like the sample there, unless the user drops it. Its command
+must exit non-zero when it finds surviving mutants or a slowdown, or the report never fires:
+where the tool alone exits 0, use the Suggested checks' wrapper, the one kind of step that runs
+`sh -c`.
+
 ## Setup
 
 Propose a setup command that makes a fresh worktree ready to run the steps, installing from
@@ -63,6 +80,6 @@ whose changes should rerun it, usually the lock file.
 
 ## Propose
 
-Propose the steps and setup, and the sets and the triggers that run them, with
-propose_checks. When orbit reports a failure or the user asks
+Propose the steps and setup, the sets and the triggers that run them, and the reports that
+route sets to lenses, with propose_checks. When orbit reports a failure or the user asks
 for changes, revise and propose again.

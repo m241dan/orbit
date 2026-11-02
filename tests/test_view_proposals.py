@@ -6,6 +6,7 @@ from orbit.protocol import (
     ChecksProposed,
     DecideProposal,
     ProposalDecided,
+    ProposedReport,
     ProposedStep,
     ProposedTrigger,
 )
@@ -220,6 +221,42 @@ def test_a_kept_set_only_a_trigger_runs_keeps_its_steps_and_effect() -> None:
     assert proposal_text(proposal).endswith(
         "Set mutation: by hand\n"
         "  steps and whether it holds merges kept as configured\n"
+        "\n"
+        "✅ All passed on the current code."
+    )
+
+
+TESTS_REPORT = ProposedReport(set="mutation", role="tests-reviewer", prompt="Report {output}.")
+
+
+def test_a_report_is_listed_under_its_set_saying_when_it_queues_its_lens() -> None:
+    proposal = WITH_SET.model_copy(update={"reports": {"mutation-report": TESTS_REPORT}})
+    assert proposal_text(proposal).endswith(
+        "Set mutation: every 10 commits, reports\n"
+        "  3. C: c\n"
+        "  mutation → tests-reviewer when it fails\n"
+        "\n"
+        "✅ All passed on the current code."
+    )
+
+
+def test_a_report_on_any_status_queues_its_lens_when_the_set_finishes() -> None:
+    report = TESTS_REPORT.model_copy(update={"status": "any"})
+    proposal = WITH_SET.model_copy(update={"reports": {"mutation-report": report}})
+    assert "  mutation → tests-reviewer when it finishes\n" in proposal_text(proposal)
+
+
+def test_a_report_on_a_kept_set_groups_the_steps_and_shows_the_set() -> None:
+    proposal = PROPOSAL.model_copy(update={"reports": {"mutation-report": TESTS_REPORT}})
+    assert proposal_text(proposal) == (
+        "Setup: none\n"
+        "\n"
+        "Task checks: every task\n"
+        "  1. Lint: ruff\n"
+        "\n"
+        "Set mutation: no trigger\n"
+        "  steps and whether it holds merges kept as configured\n"
+        "  mutation → tests-reviewer when it fails\n"
         "\n"
         "✅ All passed on the current code."
     )

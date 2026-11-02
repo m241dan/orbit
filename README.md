@@ -875,8 +875,10 @@ each with a Suggested checks table of what a check catches, its tool and command
 fits), quick ones first, plus a setup command and the files whose changes should rerun it. Quick
 checks it proposes as task checks; slower ones, such as mutation testing or benchmarks, in named
 sets, each with the triggers that would run it (such as every 10 commits, or by hand) and whether
-it holds merges when it fails (see [Verification steps](#verification-steps)). It doesn't edit
-files.
+it holds merges when it fails (see [Verification steps](#verification-steps)). With a mutation
+testing or benchmark set it also proposes a report, routing the set's failures to the lens the
+Suggested checks name, `tests-reviewer` or `scaling-reviewer`, with a prompt of its own, unless
+you drop it. It doesn't edit files.
 
 Orbit starts one by itself when it opens a workspace with verification on and no steps, or runs
 the one the session it opens has queued already instead of adding another (see
@@ -901,7 +903,9 @@ command and the files it watches, then the steps in order, each with its name an
 line saying they all passed on the current code. A proposal with sets shows the task checks
 first, under `Task checks: every task`, then each set under a line saying when its triggers run
 it and whether it holds merges, such as `Set mutation: every 10 commits, reports` (or `by hand`,
-`no trigger`, `holds merges`), each step keeping its number. Then:
+`no trigger`, `holds merges`), each step keeping its number, and after its steps the lens each of
+its reports queues, such as `mutation → tests-reviewer when it fails` (or `when it finishes`).
+Then:
 
 | Key | Action |
 |---|---|
@@ -930,10 +934,31 @@ table with `holds_merges = true`, in place of the file's table for it, and a set
 whether the proposal says so or leaves it out of its sets, loses the table it had. A set's table
 that no step is in once the checks are written goes too, so the file still loads. Each trigger
 proposed gets its `[triggers.<name>]` table, in place of the file's for it, appended if the file
-has none. Sets and triggers the proposal doesn't affect stay as they are. Without a file,
+has none. Sets and triggers the proposal doesn't affect stay as they are.
+
+A report, proposed in `reports` by name, routes a set's runs to a lens role: its `set`, the
+`role` it queues, the `status` it takes (`failed`, the default, or `any`) and an inline `prompt`
+using `{set}`, `{status}`, `{commit}` and `{output}`. Accepted, it's written as a trigger table
+beside the others, such as:
+
+```toml
+[triggers.mutation-report]
+on = "set_finished"
+role = "tests-reviewer"
+when = {set = "mutation", status = "failed"}
+prompt = """Mutation testing failed at {commit}: report the surviving mutants that matter as findings.
+
+{output}"""
+```
+
+with no `status` in `when` for one on `any`. Orbit refuses a proposal, naming the report and why,
+when a report's role isn't an enabled role granted `report_finding` (`reports.mutation-report.role:
+coder isn't an enabled role granted report_finding; those are …`), its set is neither proposed nor
+configured, its prompt uses another variable (`{diff} isn't a variable of set_finished`), or its
+name is a built-in or proposed trigger's. Without a file,
 it starts one from the reference config (see [Starting from the reference config](#starting-from-the-reference-config)),
 with the steps, setup and the tables of the sets that hold merges in place of its commented-out
-examples of them, under the lines saying what they are, and the triggers at the end; without a
+examples of them, under the lines saying what they are, and the triggers and reports at the end; without a
 setup, or a set that holds merges, the example of one stays. In the worktree the change is committed as
 "Configure verification steps", with the steps listed in the body, and lands on the base like any
 task's work; with `--no-worktree` the file is written in the workspace's directory and not
@@ -1973,7 +1998,9 @@ every = 2
 checks = "mutation"
 ```
 
-No shipped trigger listens on `set_finished`. This one hands a failing `mutation` run to the
+No shipped trigger listens on `set_finished`; the configurator proposes such triggers as
+reports (see [Setting up verification](#setting-up-verification)). This one hands a failing
+`mutation` run to the
 `tests-reviewer`, whose findings go through the merge pass as a set report (see
 [Reviews](#reviews)), in place of the notice:
 
