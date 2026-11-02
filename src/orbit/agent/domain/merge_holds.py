@@ -83,13 +83,19 @@ class HoldDecision:
 @dataclass(frozen=True)
 class BlockingTask:
     """A task a merge pass filed as blocking, titled ``title``: the lens ``lens`` raised the
-    first finding it files, in the review of ``commit``, which reviewed the batch ``reviewed``,
-    none for a review of no batch."""
+    first blocking finding it files, and the ``other_lenses`` the rest, in order, in the review
+    of ``commit``, which reviewed the batch ``reviewed``, none for a review of no batch."""
 
     lens: str
     commit: str
     title: str
     reviewed: str | None
+    other_lenses: tuple[str, ...] = ()
+
+    @property
+    def lenses(self) -> tuple[str, ...]:
+        """The lenses that raised the blocking findings it files, each once, in order."""
+        return tuple(dict.fromkeys((self.lens, *self.other_lenses)))
 
 
 type FindingFiling = Literal["held", "fixed_again", "stepped_in"]
@@ -232,12 +238,13 @@ def lift_hold(holds: Sequence[AnyHold], key: str) -> tuple[AnyHold, ...]:
 
 def refiled_hold(holds: Sequence[AnyHold], filed: BlockingTask) -> FindingHold | None:
     """The hold among ``holds`` whose latest fix the review that filed ``filed`` checked, if
-    the hold's lens raised it; none if ``filed`` starts a hold of its own."""
+    the hold's lens raised one of its blocking findings; none if ``filed`` starts a hold of its
+    own."""
     return next(
         (
             hold
             for hold in finding_holds(holds)
-            if hold.lens == filed.lens and hold.batch is not None and hold.batch == filed.reviewed
+            if hold.lens in filed.lenses and hold.batch is not None and hold.batch == filed.reviewed
         ),
         None,
     )

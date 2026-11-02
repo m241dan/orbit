@@ -1506,7 +1506,7 @@ so is a `blocking` severity. The outcomes are counted on spans (see
 **Blocking findings.** A task a merge pass files as `blocking` holds merges into your branch, as a
 failing set that holds merges does (see *Merge holds* under
 [Verification steps](#verification-steps)), with a notice: `Merges held: a blocking finding from bugs-reviewer in 1a2b3c4: <title>. Its fix is
-queued first.`, naming the lens that raised the first finding it files and the commit reviewed. The
+queued first.`, naming the lens that raised the first blocking finding it files and the commit reviewed. The
 task goes to the front of the queue, in a batch of its own at the review's next round, so the work
 waiting to merge meanwhile can't keep that batch from closing, and it lands despite the hold, with
 the work stacked beneath it, while work that finishes after it waits. Its tasks count toward the

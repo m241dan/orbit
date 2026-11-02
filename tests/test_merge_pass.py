@@ -146,11 +146,26 @@ def test_filing_as_blocking_with_no_finding_named_is_refused() -> None:
     assert severity_refusal((), "normal") is None
 
 
-def test_a_blocking_task_is_raised_by_the_lens_of_its_first_finding() -> None:
+def test_a_blocking_task_names_the_lens_of_its_blocking_finding_named_first() -> None:
     batch_group = replace(BLOCKING_GROUP, job=replace(JOB, commits=("c1", "c2"), batch="batch-3"))
     suggestion = ReviewSuggestion("Fix it", "", ("F2", "F1"), "blocking")
     assert blocking_task(batch_group, suggestion) == BlockingTask(
         "security-reviewer", "c2", "Fix it", "batch-3"
+    )
+
+
+def test_a_blocking_task_is_raised_by_the_lens_of_its_first_blocking_finding() -> None:
+    group = replace(
+        BLOCKING_GROUP,
+        findings=(
+            replace(finding(1), role="tests-reviewer"),
+            replace(finding(2), severity="blocking"),
+            replace(finding(3), role="security-reviewer", severity="blocking"),
+        ),
+    )
+    suggestion = ReviewSuggestion("Fix it", "", ("F1", "F3", "F2"), "blocking")
+    assert blocking_task(group, suggestion) == BlockingTask(
+        "security-reviewer", "c1", "Fix it", None, ("bugs-reviewer",)
     )
 
 
@@ -160,9 +175,10 @@ def test_a_blocking_task_is_raised_by_the_lens_of_its_first_finding() -> None:
         ReviewSuggestion("Fix it", "", ("F2",), "normal"),
         ReviewSuggestion("Fix it", "", (), "blocking"),
         ReviewSuggestion("Fix it", "", ("F9",), "blocking"),
+        ReviewSuggestion("Fix it", "", ("F1", "F3"), "blocking"),
     ],
 )
-def test_a_normal_task_or_one_naming_no_finding_known_is_no_blocking_task(
+def test_a_normal_task_or_one_naming_no_blocking_finding_known_is_no_blocking_task(
     suggestion: ReviewSuggestion,
 ) -> None:
     assert blocking_task(BLOCKING_GROUP, suggestion) is None

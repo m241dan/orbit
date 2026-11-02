@@ -146,13 +146,22 @@ def severity_refusal(findings: Sequence[Finding], severity: Severity) -> str | N
 
 def blocking_task(group: ReviewGroup, suggestion: ReviewSuggestion) -> BlockingTask | None:
     """The blocking task ``suggestion``, which a merge pass of ``group`` may file, is: raised
-    by the lens of the first finding it names, in the review of ``group``'s last commit; none
-    unless it's blocking."""
-    first = _finding(group, suggestion.findings[0]) if suggestion.findings else None
-    if suggestion.severity != "blocking" or first is None:
+    by the lenses of the blocking findings it names, the first named first, in the review of
+    ``group``'s last commit; none unless it's blocking and names a blocking finding."""
+    roles = _blocking_roles(group, suggestion.findings)
+    if suggestion.severity != "blocking" or not roles:
         return None
     job = group.job
-    return BlockingTask(first.role, job.commits[-1], suggestion.title, job.batch)
+    return BlockingTask(roles[0], job.commits[-1], suggestion.title, job.batch, roles[1:])
+
+
+def _blocking_roles(group: ReviewGroup, finding_ids: Sequence[str]) -> tuple[str, ...]:
+    """The roles that raised the blocking findings among ``group``'s findings ``finding_ids``,
+    in the order named."""
+    named = (_finding(group, finding_id) for finding_id in finding_ids)
+    return tuple(
+        finding.role for finding in named if finding is not None and finding.severity == "blocking"
+    )
 
 
 def with_filed(group: ReviewGroup, finding_ids: Sequence[str], task_id: str) -> ReviewGroup:

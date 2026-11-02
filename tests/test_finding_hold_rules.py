@@ -90,9 +90,36 @@ def test_a_blocking_task_from_its_fixs_review_by_its_lens_fixes_the_hold_again()
     )
 
 
+BOTH = BlockingTask("security-reviewer", "c9", "Escape and fix", "batch-2", (BUGS_REVIEWER,))
+"""A blocking task filed by the review of :data:`HELD`'s fix, listing the security lens's blocking
+finding first and the bugs lens's second."""
+
+
+def test_a_blocking_task_listing_its_lens_after_another_fixes_the_hold_again() -> None:
+    assert BOTH.lenses == ("security-reviewer", BUGS_REVIEWER)
+    assert decide_filing((HELD,), BOTH, 3) == "fixed_again"
+    again = replace(HELD, task="12", batch="batch-4", fixes=2)
+    assert decide_blocking((HELD,), BOTH, "12", "batch-4", 3) == HoldDecision((again,))
+
+
+def test_a_blocking_task_listing_its_lens_after_another_past_the_limit_steps_in() -> None:
+    spent = replace(HELD, fixes=3)
+    assert decide_filing((spent,), BOTH, 3) == "stepped_in"
+    assert decide_blocking((spent,), BOTH, "12", "batch-4", 3) == HoldDecision(
+        (replace(spent, batch=None),), (finding_step_in_note(BUGS_REVIEWER, 3),)
+    )
+
+
+def test_the_review_of_the_batch_fixed_again_afterwards_doesnt_lift_the_hold() -> None:
+    again = decide_blocking((HELD,), BOTH, "12", "batch-4", 3)
+    lenses = frozenset({BUGS_REVIEWER, "security-reviewer"})
+    review = FixReview("batch-2", lenses, lenses, "completed")
+    assert decide_fix_review(again.holds, review) == HoldDecision(again.holds)
+
+
 def test_a_blocking_task_from_another_lens_or_review_starts_a_hold_of_its_own() -> None:
     security = replace(AGAIN, lens="security-reviewer")
-    elsewhere = replace(AGAIN, reviewed="batch-7")
+    elsewhere = replace(BOTH, reviewed="batch-7")
     unchecked = (replace(HELD, batch=None),)
     assert decide_filing((HELD,), security, 3) == "held"
     assert decide_filing((HELD,), elsewhere, 3) == "held"
