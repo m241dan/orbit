@@ -1591,13 +1591,14 @@ merges, whether it's enabled, whether it may report blocking findings, how hard 
 and what they run on:
 
 - `lane`: the lane that runs the role's agents, a plain name of letters, digits, `-` and `_`. Each
-  lane of the enabled roles that aren't conversational runs one task at a time, the next on the
-  task list whose role is in it, beside the others. The lane whose roles merge (`work` for the
+  lane of the enabled roles that aren't conversational runs the next task on the task list whose
+  role is in it, beside the others: one at a time, but for the review lane, which runs up to
+  `review_slots` at once (see [Reviews](#reviews)). The lane whose roles merge (`work` for the
   built-in roles; `work` too if none does) runs its tasks when you press `ctrl+r`, and `ctrl+s`
   holds it. Every other lane, such as `review`, starts a task as soon as one is queued for it
-  (added, accepted or edited), and `ctrl+r` runs what waits there too; stopping it, with `c` in
-  the agents pane or the protocol's `CancelTurn`, stops just its task, and the lane goes on with
-  the next. While the work lane waits out a runtime's usage limit or outage, no lane starts a
+  (added, accepted or edited), and `ctrl+r` runs what waits there too; `c` on one of its agents
+  in the agents pane stops just that agent's task, the protocol's `CancelTurn` for the lane stops
+  every task running in it, and either way the lane goes on with the tasks still waiting. While the work lane waits out a runtime's usage limit or outage, no lane starts a
   task whose role runs on that runtime; each runs its tasks on other runtimes meanwhile, and the
   ones it skipped once the pause ends or `ctrl+s` cancels its wait (see **Pauses per runtime**
   under [Tasks](#tasks)). Each lane shows in the

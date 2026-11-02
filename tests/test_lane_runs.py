@@ -484,6 +484,31 @@ async def test_stopping_another_roles_task_in_the_review_lane_stops_it_as_a_task
     assert traced.spans(REVIEW_SPAN) == []
 
 
+async def test_stopping_the_review_lane_ends_all_three_running_and_the_waiting_one_starts() -> None:
+    held = Held()
+    names = ("first", "second", "third", "fourth")
+    session, _, _ = session_for(
+        *(held.script(name) for name in names), roles=WITH_AUDITOR, tree=FakeTree(), review=True
+    )
+    for _ in names:
+        await send(session, AddTask(task=AUDIT))
+    for name in names[:3]:
+        await held.until_started(name)
+    assert not held.started["fourth"].is_set()
+
+    await send(session, CancelTurn(lane="review"))
+    await held.until_started("fourth")
+    stopped = [
+        (state_of(session, task_id).status, state_of(session, task_id).reason) for task_id in "123"
+    ]
+    assert stopped == [("cancelled", STOPPED_BY_YOU)] * 3
+    assert state_of(session, "4").status == "running"
+    held.let("fourth")
+    await events_until(session, idle("review"))
+    assert state_of(session, "4").status == "completed"
+    await session.close()
+
+
 async def test_a_takeover_ending_as_the_session_closes_starts_no_lane(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

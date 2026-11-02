@@ -362,9 +362,9 @@ class WorkCommands:
             await self._parts.lane.removed(task_id, state)
 
     async def _cancel_turn(self, lane: str) -> None:
-        """Stop the work in ``lane``: the work lane's run, holding it; the task running in a lane
-        that starts by itself, which carries on; or the turn of the conversational role
-        answering in it. Refused for a lane there's none of."""
+        """Stop the work in ``lane``: the work lane's run, holding it; every task running in a lane
+        that starts by itself, which carries on with those waiting; or the turn of the
+        conversational role answering in it. Refused for a lane there's none of."""
         lanes = self._parts.lanes
         if lane not in lanes.names:
             raise unknown(f"No lane {lane!r}", "the lanes are", lanes.names)

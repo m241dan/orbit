@@ -654,7 +654,8 @@ both are.
 whose roles merge their work, `work` for the built-in roles), the task run, or its wait to start
 again, which holds the lane until the user asks for work again; in a conversational role's lane
 (`planner` for the planner), the turn of the role answering there; in any other lane of the roles' (such as `review`), whose tasks start by
-themselves, the task running there, and the lane goes on with its next. Stopping a lane with
+themselves, every task running there (the review lane runs up to `review_slots` at once), and the
+lane goes on with the tasks still waiting; `CancelAgent` stops just one of them. Stopping a lane with
 nothing running is accepted and does nothing more. It's refused with `unknown` for a lane there's
 none of, naming those there are: it accepts the lanes the Catalog lists, so a disabled planner's
 only while an enabled conversational role shares it.
