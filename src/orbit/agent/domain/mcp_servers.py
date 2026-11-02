@@ -57,13 +57,26 @@ LOOPBACK_NAME = "localhost"
 """The host name that's this machine, besides the loopback addresses."""
 
 
+SERVER_NAME_LIMIT = 64
+"""The longest name a server may have, so a tool name cut to fit MCP's limit keeps it whole."""
+
+
 def _server_name(name: str) -> str:
-    """The server's ``name``, refused unless it's a plain name without ``__``, which parts a
-    server's name from its tools' in the names agents see, and isn't one of orbit's tools."""
-    if not PLAIN_NAME.fullmatch(name) or "__" in name:
+    """The server's ``name``, refused unless it's a plain name of at most
+    :data:`SERVER_NAME_LIMIT` characters without ``__``, which parts a server's name from its
+    tools' in the names agents see, nor a trailing ``_``, which would blur where that ``__`` is,
+    and isn't one of orbit's tools."""
+    if (
+        not PLAIN_NAME.fullmatch(name)
+        or "__" in name
+        or name.endswith("_")
+        or len(name) > SERVER_NAME_LIMIT
+    ):
         raise PydanticCustomError(
             "server_name",
-            "a server's name is a plain name: letters, digits, - and _, without __",
+            "a server's name is a plain name of at most {limit} characters: letters, digits,"
+            " - and _, without __ and not ending in _",
+            {"limit": SERVER_NAME_LIMIT},
         )
     if name in ORBIT_TOOLS:
         raise PydanticCustomError(

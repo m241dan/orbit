@@ -1,10 +1,11 @@
 """The rules of proxying external MCP servers' tools to agents: the names agents see them by,
-``<server>__<tool>``, which of a server's tools a role allows, the variables a server's
-environment and headers are filled from, which calls wait for the user's approval, and the
-wording of refusals and notices."""
+``<server>__<tool>``, made safe and unique among the server's, which of a server's tools a role
+allows, the variables a server's environment and headers are filled from, which calls wait for
+the user's approval, and the wording of refusals and notices."""
 
 import hashlib
 import re
+from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -81,11 +82,29 @@ def proxied_name(server: str, tool: str) -> str:
     """The name agents see ``server``'s tool ``tool`` by: ``<server>__<tool>``, each character an
     MCP tool name can't have replaced by ``_``, and cut to :data:`NAME_LIMIT` with a short hash
     of the whole name at its end if it's longer."""
-    name = _UNSAFE.sub("_", f"{server}{SEPARATOR}{tool}")
-    if len(name) <= NAME_LIMIT:
-        return name
-    digest = hashlib.sha256(f"{server}{SEPARATOR}{tool}".encode()).hexdigest()[:HASH_LENGTH]
+    whole = f"{server}{SEPARATOR}{tool}"
+    name = _UNSAFE.sub("_", whole)
+    return name if len(name) <= NAME_LIMIT else _hashed(name, whole)
+
+
+def _hashed(name: str, whole: str) -> str:
+    """``name`` ending in a short hash of ``whole``, the name it stands for, cut so the two fit
+    in :data:`NAME_LIMIT`."""
+    digest = hashlib.sha256(whole.encode()).hexdigest()[:HASH_LENGTH]
     return f"{name[: NAME_LIMIT - HASH_LENGTH - 1]}-{digest}"
+
+
+def unique_names(server: str, offered: Sequence[UpstreamTool]) -> tuple[str, ...]:
+    """The names agents see the tools ``server`` ``offered`` by, in its order, each naming one
+    tool: a tool's :func:`proxied_name`, unless it had characters replaced and another tool has
+    it too, when it ends in a short hash of ``<server>__<tool>`` instead."""
+    wholes = [f"{server}{SEPARATOR}{tool.name}" for tool in offered]
+    names = [proxied_name(server, tool.name) for tool in offered]
+    counts = Counter(names)
+    return tuple(
+        _hashed(name, whole) if counts[name] > 1 and name != whole else name
+        for name, whole in zip(names, wholes, strict=True)
+    )
 
 
 def is_proxied(name: str) -> bool:
@@ -101,11 +120,11 @@ def grant_for(role: Role, server: str) -> ServerGrant | None:
 def proxied_tools(
     server: str, grant: ServerGrant, offered: Sequence[UpstreamTool]
 ) -> tuple[ProxiedTool, ...]:
-    """The tools ``server`` ``offered`` that ``grant`` allows, in its order, as agents see them:
-    all of them, if it lists none."""
+    """The tools ``server`` ``offered`` that ``grant`` allows, in its order, as agents see them,
+    by their :func:`unique_names`: all of them, if it lists none."""
     return tuple(
-        ProxiedTool(proxied_name(server, tool.name), server, tool)
-        for tool in offered
+        ProxiedTool(name, server, tool)
+        for name, tool in zip(unique_names(server, offered), offered, strict=True)
         if grant.tools is None or tool.name in grant.tools
     )
 

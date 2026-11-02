@@ -275,12 +275,19 @@ def test_a_projects_server_that_isnt_a_table_is_left_for_validation() -> None:
 
 # A server's name
 
+SERVER_NAME_RULE = (
+    "a server's name is a plain name of at most 64 characters: letters, digits, - and _,"
+    " without __ and not ending in _"
+)
+
 
 @pytest.mark.parametrize(
     ("name", "message"),
     [
-        ("a__b", "a server's name is a plain name: letters, digits, - and _, without __"),
-        ("git.hub", "a server's name is a plain name: letters, digits, - and _, without __"),
+        ("a__b", SERVER_NAME_RULE),
+        ("git.hub", SERVER_NAME_RULE),
+        ("git_", SERVER_NAME_RULE),
+        ("g" * 65, SERVER_NAME_RULE),
         ("get_task", "get_task is one of orbit's tools; give the server another name"),
     ],
 )
@@ -290,6 +297,11 @@ def test_a_server_name_is_plain_without_a_double_underscore_or_an_orbit_tools(
     with pytest.raises(ConfigError) as raised:
         load_config({"mcp": {name: SEMGREP}}, {})
     assert str(raised.value) == f"mcp.{name}: {message}"
+
+
+def test_a_server_name_of_64_characters_ending_in_a_letter_is_kept() -> None:
+    name = "g_" * 31 + "it"
+    assert set(load_config({"mcp": {name: SEMGREP}}, {}).mcp) == {name}
 
 
 @pytest.mark.parametrize("tool", ORBIT_TOOLS)

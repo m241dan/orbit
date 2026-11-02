@@ -1675,9 +1675,9 @@ doesn't set, saying both why (`MCP server github failed: GITHUB_TOKEN isn't set 
 environment or credentials.toml. /home/you/.config/orbit/credentials.toml must be private: chmod
 600 it.`), with a notice to the workspace once per failure streak, like other server failures.
 
-A server's name is a plain name of letters, digits, `-` and `_`, without `__`, which parts a
-server's name from its tools' in the names agents see, and isn't the name of one of orbit's
-tools. Anything else is refused as the configuration loads, naming the server and the file: a
+A server's name is a plain name of at most 64 letters, digits, `-` and `_`, without `__`, which
+parts a server's name from its tools' in the names agents see, not ending in `_`, which would blur
+where that `__` is, and isn't the name of one of orbit's tools. Anything else is refused as the configuration loads, naming the server and the file: a
 name that breaks those rules (`mcp.get_task: get_task is one of orbit's tools; give the server
 another name`), both `command` and `url` or neither (`mcp.github: a server has either a command
 or a url`), plain `http` to another machine (`mcp.semgrep: url must use https unless it's on
@@ -1701,8 +1701,11 @@ others, and then each tool its role allows from the servers it names, by the nam
 `<server>__<tool>`, with the server's own description and input schema. A tool name may have
 only letters, digits, `.`, `_` and `-`, at most 128 characters in all, so a server's tool named
 otherwise is offered with each other character turned into `_` (`get issue!` becomes
-`github__get_issue_`), and a name too long is cut and ends in a short hash of the whole; a call
-to it goes to the server by its own name. A call to a proxied tool the agent's role doesn't
+`github__get_issue_`), and a name too long is cut and ends in a short hash of the whole. So does
+a name that had characters replaced and is then the same as another of the server's tools'
+(`get issue` beside `get_issue` is offered as `github__get_issue-` and eight hex digits, while
+`get_issue` keeps `github__get_issue`), so each name stands for one tool. A call to it goes to
+the server by its own name. A call to a proxied tool the agent's role doesn't
 allow, or to one of orbit's tools it lacks, is refused (`roles.coder doesn't allow
 github__create_issue.`), and the refusal is recorded on the agent's span. A role without `mcp`
 sees orbit's tools for its role, and nothing is connected to for it.

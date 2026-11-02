@@ -2,9 +2,12 @@
 allows, the variables a server's environment is filled from, which calls wait for the user's
 approval, and the wording of refusals and notices."""
 
+import hashlib
+
 import pytest
 
 from orbit.agent.domain.mcp_proxy import (
+    HASH_LENGTH,
     NAME_LIMIT,
     FilledServer,
     ProxiedTool,
@@ -108,6 +111,57 @@ def test_a_proxied_tool_is_found_by_its_proxied_name() -> None:
     tools = (ProxiedTool("github__get_issue_", "github", UpstreamTool("get issue!", None, {})),)
     assert find_proxied(tools, "github__get_issue_") == tools[0]
     assert find_proxied(tools, "github__get_issue") is None
+
+
+def hashed(name: str, whole: str) -> str:
+    """``name`` ending in the short hash of ``whole``, as a colliding name is given."""
+    return f"{name}-{hashlib.sha256(whole.encode()).hexdigest()[:HASH_LENGTH]}"
+
+
+def test_an_unsafe_tool_colliding_with_a_safe_one_ends_in_a_hash_and_the_safe_one_doesnt() -> None:
+    odd = UpstreamTool("get issue", None, {})
+    grant = grant_for(role("github"), "github")
+    assert grant is not None
+    tools = proxied_tools("github", grant, (odd, GET_ISSUE))
+    assert tools == (
+        ProxiedTool(hashed("github__get_issue", "github__get issue"), "github", odd),
+        ProxiedTool("github__get_issue", "github", GET_ISSUE),
+    )
+    assert find_proxied(tools, tools[0].name) == tools[0]
+    assert find_proxied(tools, "github__get_issue") == tools[1]
+
+
+def test_unsafe_tools_colliding_with_each_other_each_end_in_their_own_hash() -> None:
+    first = UpstreamTool("get issue", None, {})
+    second = UpstreamTool("get/issue", None, {})
+    grant = grant_for(role("github"), "github")
+    assert grant is not None
+    tools = proxied_tools("github", grant, (first, second))
+    assert [tool.name for tool in tools] == [
+        hashed("github__get_issue", "github__get issue"),
+        hashed("github__get_issue", "github__get/issue"),
+    ]
+    assert find_proxied(tools, tools[1].name) == tools[1]
+
+
+def test_a_tool_keeps_its_hashed_name_when_the_role_doesnt_list_the_one_it_collides_with() -> None:
+    odd = UpstreamTool("get issue", None, {})
+    grant = grant_for(role({"server": "github", "tools": ["get issue"]}), "github")
+    assert grant is not None
+    assert proxied_tools("github", grant, (odd, GET_ISSUE)) == (
+        ProxiedTool(hashed("github__get_issue", "github__get issue"), "github", odd),
+    )
+
+
+def test_an_over_long_colliding_name_is_cut_to_the_limit() -> None:
+    long = "t" * (NAME_LIMIT - len("github__") - 1) + "_"
+    odd = UpstreamTool(f"{long[:-1]} ", None, {})
+    grant = grant_for(role("github"), "github")
+    assert grant is not None
+    tools = proxied_tools("github", grant, (UpstreamTool(long, None, {}), odd))
+    assert tools[0].name == f"github__{long}"
+    assert len(tools[1].name) == NAME_LIMIT
+    assert tools[1].name != tools[0].name
 
 
 def test_each_tool_a_role_names_that_the_server_lacks_gives_one_notice() -> None:

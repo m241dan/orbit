@@ -16,11 +16,12 @@ from orbit.agent.application.tool_proxy import (
     McpProxying,
     ToolProxy,
 )
+from orbit.agent.domain.mcp_proxy import UpstreamTool
 from orbit.agent.domain.mcp_servers import McpServer
 from orbit.agent.domain.roles import Role, RoleTools
 from orbit.protocol import INTERNAL, ErrorOccurred, Event, Notice
 from orbit.tracing import NoSpan, Span
-from tests.mcp_fakes import FakeConnector, FakeCredentials
+from tests.mcp_fakes import STAND_IN_TOOLS, FakeConnector, FakeCredentials
 from tests.telemetry_helpers import Traced
 from tests.waiting import eventually
 
@@ -175,6 +176,22 @@ async def test_a_call_goes_upstream_by_the_servers_name_for_the_tool() -> None:
     assert reply == Reply("Issue 7: it's broken.")
     [session] = proxied.connector.sessions
     assert session.calls == [("get issue!", {"number": 7})]
+
+
+async def test_tools_whose_names_collide_are_listed_apart_and_each_call_reaches_its_own() -> None:
+    proxied = Proxied()
+    proxied.connector.tools = (*STAND_IN_TOOLS, UpstreamTool("get issue", None, {}))
+    planner = caller("p1", "planner")
+    tools = await proxied.proxy.list_tools(planner)
+    github = [tool for tool in tools if tool.server == "github"]
+    names = {tool.tool.name: tool.name for tool in github}
+    assert len(set(names.values())) == len(github)
+    odd = names["get issue"]
+    assert odd.startswith("github__get_issue-")
+    await proxied.call("github__get_issue", planner, number=1)
+    await proxied.call(odd, planner, number=2)
+    [session] = [session for session in proxied.connector.sessions if session.calls]
+    assert session.calls == [("get_issue", {"number": 1}), ("get issue", {"number": 2})]
 
 
 async def test_a_call_to_a_server_the_role_doesnt_allow_is_refused_on_its_span() -> None:
