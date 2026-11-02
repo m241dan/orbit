@@ -10,7 +10,7 @@ from typing import Any
 
 from opentelemetry.sdk.trace import ReadableSpan
 
-from orbit.agent import HostParts, WorkspaceHost
+from orbit.agent import HostParts, Verification, WorkspaceHost
 from orbit.agent.application.ports import Reply
 from orbit.agent.application.review_trace import REVIEW_SPAN
 from orbit.agent.application.task_trace import TASK_SPAN
@@ -54,6 +54,7 @@ from orbit.protocol import (
     TurnEndReason,
 )
 from tests.agent_fakes import (
+    LINT,
     ROLES,
     TRIGGERS,
     Call,
@@ -64,6 +65,7 @@ from tests.agent_fakes import (
     Ticks,
     agents_for,
     board,
+    board_of,
     claims_done,
     gives_up,
     send,
@@ -72,6 +74,7 @@ from tests.agent_fakes import (
     start,
 )
 from tests.loop_quiet import quiet_within
+from tests.merge_hold_helpers import STRESS, LandingTree, SetSteps, parts_of, status, waits_for
 from tests.session_builders import last_of, opened, saved, store_with
 from tests.telemetry_helpers import Traced
 from tests.waiting import eventually
@@ -208,11 +211,14 @@ async def _decide(call: Call, decision: Decision) -> Reply:
 def lensing(*scripts: Script, reviewers: tuple[Script, ...] = (), **options: Any) -> WorkspaceHost:
     """A session landing work in a tree and reviewing it by lens, with the triggers of
     :func:`lens_triggers` unless ``options`` give others, its tasks played by ``scripts`` and
-    its reviews by ``reviewers``; the other ``options`` go to :func:`session_for`."""
-    defaults: dict[str, Any] = {"roles": LENS_ROLES, "triggers": lens_triggers()}
-    session, _, _ = session_for(
-        *scripts, reviewers=reviewers, tree=FakeTree(), review=True, **(defaults | options)
-    )
+    its reviews by ``reviewers``, in a :class:`FakeTree` unless ``options`` give a ``tree``;
+    the other ``options`` go to :func:`session_for`."""
+    defaults: dict[str, Any] = {
+        "roles": LENS_ROLES,
+        "triggers": lens_triggers(),
+        "tree": FakeTree(),
+    }
+    session, _, _ = session_for(*scripts, reviewers=reviewers, review=True, **(defaults | options))
     return session
 
 
@@ -773,6 +779,46 @@ async def test_a_filed_task_giving_up_counts_its_findings_given_up_on_its_span()
         span_attributes(s)["orbit.task.id"]: span_attributes(s) for s in traced.spans(TASK_SPAN)
     }
     assert tasks["5"]["orbit.findings.given_up"] == 3
+
+
+async def test_a_filed_task_landing_stacked_after_a_hold_counts_nothing_on_the_later_task() -> None:
+    traced, store, seen = Traced(), FakeStore(), list[LaneSnapshot]()
+    filed_done = asyncio.Event()
+    merge = merges(("Fix the crash", ("F1", "F3")), ("Add a test", ("F2",)))
+    later = [watching(store, seen) for _ in range(6)]
+    session = merging(
+        waits_for(filed_done),
+        claims_done,
+        *later,
+        merge=merge,
+        verification=Verification((LINT,), SetSteps(stress=[False, True]), sets=(STRESS,)),
+        tree=LandingTree(),
+        store=store,
+        telemetry=traced.telemetry,
+    )
+    sets, holds = parts_of(session)
+    await start(session)
+    await eventually(
+        lambda: len(board_of(session).tasks) > 4 and status(session, "5")() == "running"
+    )
+    sets.run("stress", "nightly")
+    await eventually(lambda: holds.held and len(board_of(session).tasks) == 7)
+    filed_done.set()
+    await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert outcomes(seen[0]) == [
+        ("F1", "fixed", "5", None),
+        ("F2", "filed", "6", None),
+        ("F3", "fixed", "5", None),
+    ]
+    tasks = {
+        span_attributes(s)["orbit.task.id"]: span_attributes(s) for s in traced.spans(TASK_SPAN)
+    }
+    fix = board_of(session).get("7")
+    assert (fix.origin, fix.status) == ("nightly", "completed")
+    assert "orbit.findings.fixed" not in tasks["7"]
+    assert "orbit.findings.fixed" not in tasks["5"]
 
 
 async def test_a_merge_pass_ending_unanswered_counts_them_on_its_span() -> None:

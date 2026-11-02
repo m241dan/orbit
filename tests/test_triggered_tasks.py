@@ -17,6 +17,7 @@ from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.reviews import ReviewLimits, ReviewPlanner, commit_review, review_prompt
 from orbit.agent.domain.triggers import Trigger
 from orbit.protocol import CODER, REVIEWER, AgentStarted, Event, TaskSpec, TaskState
+from orbit.tracing import NoSpan
 from tests.agent_fakes import (
     TRIGGERS,
     FakeTree,
@@ -141,7 +142,7 @@ async def test_a_review_lane_firing_its_agents_triggers_leaves_other_lanes_tasks
     planner = ReviewPlanner(ReviewLimits())
     lane = ReviewLane(desk, tasks, planner, ReviewHooks(no_work, no_work, OPEN_GATE))
     landed = TaskState(id="1", task=TaskSpec(prompt="Add a flag."), status="completed")
-    await lane.landed(landed, "c1")
+    await lane.landed(landed, "c1", NoSpan("none"))
     assert shown(tasks.board.tasks) == [(CODER, "document", "Document c1")]
     assert not lane.running  # The coder's task waits for the work lane.
     await lane.close()

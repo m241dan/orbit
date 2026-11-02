@@ -74,7 +74,7 @@ from orbit.protocol import (
     TaskStarted,
     TaskState,
 )
-from orbit.tracing import Span, current_span
+from orbit.tracing import NoSpan, Span, current_span
 
 RunEnd = Literal["finished", "cancelled", "limited", "api_unavailable", "fix_failed"]
 """Why a run ended: no task was left to run, one was cancelled, an agent hit its runtime's usage
@@ -496,7 +496,7 @@ class WorkLane:
         self._fixes_landed.discard(state.id)
         if outcome is None:  # Cut short: only work that landed is told of, to be reviewed.
             if commit is not None:
-                await self._report_landed(state, commit)
+                await self._report_landed(state, commit, current_span())
             return
         ended = state.model_copy(update={"status": outcome.status})
         await self._report_end(ended, commit, self._failure(state.task.role, outcome))
@@ -517,17 +517,18 @@ class WorkLane:
         did, or else that it ended, stopped by its runtime's limit or an outage, ``stop``, if
         one did, which leaves it for a run to start with; and the triggers that it finished."""
         if commit is not None:
-            await self._report_landed(state, commit)
+            await self._report_landed(state, commit, current_span())
         elif self._review is not None and state.id not in self.waiting_to_merge:
             await self._review.ended(state, stop)
         if self._triggers is not None:
             self._triggers.run(await self._triggers.finished(state))
 
-    async def _report_landed(self, state: TaskState, commit: str) -> None:
+    async def _report_landed(self, state: TaskState, commit: str, span: Span) -> None:
         """Tell the review lane, which raises ``task_landed``, that the task that ended as
-        ``state`` landed ``commit``, or the triggers themselves while there's no review lane."""
+        ``state`` landed ``commit``, counting the findings it fixed on ``span``, or the triggers
+        themselves while there's no review lane."""
         if self._review is not None:
-            await self._review.landed(state, commit)
+            await self._review.landed(state, commit, span)
         elif self._triggers is not None:
             self._triggers.run(await self._triggers.landed(state, commit))
 
@@ -702,13 +703,15 @@ class WorkLane:
     async def _report_stacked(self) -> None:
         """Tell of each piece of work that landed stacked beneath another, in order: as landed,
         with its last commit, as :meth:`_report_landed` does, or, its commits dropped as a
-        rebase left them empty, as ended with nothing landed."""
+        rebase left them empty, as ended with nothing landed. Each finished in an earlier run,
+        so the span current, another task's or none, isn't its own, and nothing is counted on
+        it."""
         stacked, self._stacked = self._stacked, []
         for state, commit in stacked:
             if commit is None:
                 await self._report_unlanded(state)
             else:
-                await self._report_landed(state, commit)
+                await self._report_landed(state, commit, NoSpan("none"))
         if stacked:
             await self._waiting_changed()
 

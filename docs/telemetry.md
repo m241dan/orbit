@@ -45,7 +45,7 @@ verification fails has its own.
 | `orbit.merge.result` | string | What came of merging the task's work: `merged`, `rebased`, `conflict`, `blocked` or `detached`; absent when it wasn't merged. |
 | `orbit.task.status` | string | The task's final status, such as `completed`, `unverified`, `gave_up`, `error` or `cancelled`; `pending` if the run stopped before it started. |
 | `orbit.task.reason` | string | Why the task ended badly, in one line, such as `Gave up: …` or `Unit tests failed`; absent when it didn't. |
-| `orbit.findings.fixed` | int | For a task a merge pass filed with findings, or a fix of one, how many of them its landing marked `fixed`; absent for any other task, or one that didn't land. |
+| `orbit.findings.fixed` | int | For a task a merge pass filed with findings, or a fix of one, how many of them its landing marked `fixed`; absent for any other task, one that didn't land, or one whose work waited under a merge hold and landed after its run ended, stacked beneath a later task's or released: its findings are still marked `fixed`, but neither its span, ended already, nor the span current then, another task's or none, carries the count. |
 | `orbit.findings.given_up` | int | For such a task, how many of them its giving up marked `given_up`; absent for any other task, or one that didn't give up. |
 
 The usage, status and reason are those the task list holds as the span ends; a task removed from

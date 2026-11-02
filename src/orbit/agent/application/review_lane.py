@@ -326,15 +326,17 @@ class ReviewLane:
             return
         await self._settle(batch, ended_in(group, task_id), "quiet")
 
-    async def landed(self, state: TaskState, commit: str) -> None:
+    async def landed(self, state: TaskState, commit: str, span: Span) -> None:
         """The task that ended as ``state`` landed ``commit``: raise ``task_landed``, its own
         review, if due, the one ``review-rounds`` finds, queue the review of the batch it
         finished, if it did, and count it toward the ``commits`` triggers, those that fire
         reviewing the codebase at it, or running the set they name; then end the batch it
         suggested into, if the lane booked it, as :meth:`_ended` says. The findings filed in it,
-        or in a task it fixes, are fixed. The task isn't looked up: it may have been removed
-        since it finished, and its work is reviewed all the same."""
-        self._end_filed(state, "fixed")
+        or in a task it fixes, are fixed, counted on ``span``: the task's own while its run
+        reports it, or a :class:`~orbit.tracing.NoSpan` for work that landed after waiting, as
+        the span current then is another task's or none. The task isn't looked up: it may have
+        been removed since it finished, and its work is reviewed all the same."""
+        self._end_filed(state, "fixed", span)
         job = self.planner.landed(state, commit)
         # Counted before the commit's own review is queued, which would hold a due super review;
         # one due is taken at once, so the count saved as that review is queued has its commit.
@@ -417,18 +419,19 @@ class ReviewLane:
         by ``stop``, its runtime's usage limit or an outage, which leaves it to run again. The
         batch it suggested into, if the lane booked it, ends as :meth:`_ended` says, unless it's
         left to run again. The findings filed in a task that gave up, or in a task it fixes,
-        are given up; those of a task that ended otherwise stay filed. The task isn't looked
-        up: it may have been removed since it finished."""
+        are given up, counted on the span current, the task's own, as only its own run gives
+        up; those of a task that ended otherwise stay filed. The task isn't looked up: it may
+        have been removed since it finished."""
         if stop is None and state.status == "gave_up":
-            self._end_filed(state, "given_up")
+            self._end_filed(state, "given_up", current_span())
         job = self.planner.ended(state)
         await self._queue(job)
         if stop is None:
             await self._ended(state.id)
 
-    def _end_filed(self, state: TaskState, ending: TaskEnding) -> None:
+    def _end_filed(self, state: TaskState, ending: TaskEnding, span: Span) -> None:
         """Mark the findings filed in the task that ended as ``state``, or in a task it fixes,
-        as ``ending`` says, counting them on the span current, the task's."""
+        as ``ending`` says, counting them on ``span``, the task's."""
         fixed = self._board.list_fixed(state)
         count = sum(len(filed_in(group, fixed)) for group in self._groups.values())
         if not count:
@@ -436,7 +439,7 @@ class ReviewLane:
         self._groups = {
             batch: with_task_ended(group, fixed, ending) for batch, group in self._groups.items()
         }
-        current_span().set_attributes({_ENDED_FINDINGS[ending]: count})
+        span.set_attributes({_ENDED_FINDINGS[ending]: count})
 
     def _prune(self) -> None:
         """Forget the groups of the batches that closed, reviewed or not, unless they filed a

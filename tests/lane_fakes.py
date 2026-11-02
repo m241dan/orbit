@@ -13,6 +13,7 @@ from orbit.agent.domain.reviews import ReviewLimits, ReviewPlanner
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.usage_limits import RuntimeStop
 from orbit.protocol import Event, TasksChanged, TaskSpec, TaskState
+from orbit.tracing import Span
 from tests.agent_fakes import ROLES
 
 SECURITY = Role(instructions="Audit the code.", verify=False, lane="security", workspace="snapshot")
@@ -44,7 +45,7 @@ class Hearing(ReviewLane):
         self.tasks = tasks
         self.heard: list[tuple[str, ...]] = []
 
-    async def landed(self, state: TaskState, commit: str) -> None:
+    async def landed(self, state: TaskState, commit: str, span: Span) -> None:
         self.heard.append(("landed", state.id, commit))
 
     async def ended(self, state: TaskState, stop: RuntimeStop | None = None) -> None:
