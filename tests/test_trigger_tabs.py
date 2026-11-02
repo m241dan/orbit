@@ -14,7 +14,12 @@ from orbit.protocol import (
     Event,
     EventEnvelope,
     RunningAgent,
+    TasksChanged,
+    TaskSpec,
+    TaskStarted,
+    TaskState,
     TriggerEntry,
+    VerificationSkipped,
 )
 from orbit.tui import OrbitApp
 from orbit.tui.view.tabs import (
@@ -27,6 +32,8 @@ from orbit.tui.view.tabs import (
     running_roles,
     running_speakers,
     tabbed_roles,
+    tabs_by_trigger,
+    task_tab_key,
     track_roles,
     track_speakers,
     track_tabs,
@@ -81,6 +88,10 @@ def said(agent: str, text: str = "hmm") -> AssistantMessage:
 
 def exited(agent: str) -> AgentExited:
     return AgentExited(agent_id=agent, reason="finished")
+
+
+def task(role: str, origin: str, task_id: str = "1") -> TaskState:
+    return TaskState(id=task_id, task=TaskSpec(prompt=f"do {task_id}", role=role), origin=origin)
 
 
 def grouped(*triggers: TriggerEntry) -> tuple[ConversationTab, ...]:
@@ -182,6 +193,45 @@ def test_an_agent_given_a_name_is_spoken_by_it_but_the_planner_by_none() -> None
     assert speaker("agent-2", {"agent-2": PLANNER}, {"agent-2": "lens"}) is None
 
 
+# Which tab a task's notes go under
+
+
+SHIPPED_TABS = tabs_by_trigger(SHIPPED)
+"""The shipped triggers' tabs, by trigger name."""
+
+SHIPPED_PINNED = frozenset(tab.key for tab in grouped(*SHIPPED))
+"""The pinned tabs' keys with the shipped triggers."""
+
+
+def test_the_tabbed_triggers_tabs_are_mapped_by_name() -> None:
+    assert tabs_by_trigger((LENS, UNTABBED, SUPER)) == {"bugs-review": "review", "super": "super"}
+
+
+def test_a_tasks_notes_go_under_the_tab_its_agent_writes_into() -> None:
+    cases = [
+        (task("bugs-reviewer", "bugs-review"), REVIEW),
+        (task("reviewer", "merge-pass"), REVIEW),
+        (task("reviewer", "super-merge-pass"), trigger_tab_key("super-review")),
+        (task("coder", "manual"), "coder"),
+        (task("coder", "startup-fix"), "coder"),
+        (task("configurator", "configure-checks"), "configurator"),
+        (task("reviewer", "manual"), None),
+        (task("bugs-reviewer", "nowhere"), None),
+        (None, None),
+    ]
+    for state, key in cases:
+        assert task_tab_key(state, SHIPPED_TABS, SHIPPED_PINNED) == key, state
+
+
+def test_a_task_whose_triggers_tab_isnt_pinned_goes_under_its_roles_tab_or_all() -> None:
+    cases = [
+        (task("reviewer", "merge-pass"), "reviewer"),
+        (task("bugs-reviewer", "bugs-review"), None),
+    ]
+    for state, key in cases:
+        assert task_tab_key(state, SHIPPED_TABS, {"reviewer", "coder"}) == key, state
+
+
 # The strip, with the shipped catalog
 
 
@@ -216,6 +266,19 @@ async def test_two_lens_agents_running_at_once_both_write_into_the_review_tab() 
     assert shell.tab_strip[5] == "● review"
     await shell.feed(exited("agent-2"))
     assert shell.tab_strip[5] == "review"
+
+
+async def test_a_merge_pass_tasks_notes_go_under_the_review_tab_marking_it() -> None:
+    shell = Shell()
+    tasks = TasksChanged(tasks=(task("reviewer", "merge-pass", "5"),))
+    skipped = VerificationSkipped(task_id="5", reason="no_changes")
+    await shell.feed(CATALOG, tasks, TaskStarted(task_id="5"), skipped)
+    assert shell.tab_strip == [*STRIP[:5], "review *", "super-review"]
+    entries = shell.window.conversation.entries(REVIEW)
+    assert [entry.text for entry in entries] == [
+        "Task 1: do 5",
+        "⏩ Verification skipped: no files changed",
+    ]
 
 
 async def test_an_agent_whose_trigger_has_no_tab_gets_its_own_tab() -> None:

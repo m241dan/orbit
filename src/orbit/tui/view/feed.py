@@ -39,7 +39,7 @@ from orbit.tui.view.events import (
     in_group,
 )
 from orbit.tui.view.log import Entry
-from orbit.tui.view.progress import TaskProgress, task_note
+from orbit.tui.view.progress import TaskProgress, progress_entry
 from orbit.tui.view.proposals import decision_entry
 from orbit.tui.view.rules import exit_rule, reset_entry, turn_rule_entry
 from orbit.tui.view.tabs import stopped_callers
@@ -128,6 +128,11 @@ class Tabs(Protocol):
 
     def key_of(self, agent: str | None) -> str | None:
         """The key of the tab ``agent``'s entries belong to."""
+        ...
+
+    def task_key(self, state: TaskState | None) -> str | None:
+        """The key of the tab the notes on the task ``state`` belong to, the one its agent
+        writes into; None for All only."""
         ...
 
     def speaker_of(self, agent: str | None) -> str | None:
@@ -304,11 +309,13 @@ class ConversationFeed:
             self.append(*decision_entry(event.agent_id, event), event.agent_id)
 
     def _render_progress(self, event: TaskProgress) -> None:
-        """Note a task run's progress in the transcript: under its role's tab, and All,
-        marking that tab unread when it isn't being shown, unless it was logged before."""
+        """Note a task run's progress in the transcript: under the tab its agent writes into,
+        its trigger's or its role's, and All, marking that tab unread when it isn't being shown,
+        unless it was logged before."""
         state = self.task_list.find(event.task_id)
         number = self.task_list.numbers_by_id.get(event.task_id)
-        (text, kind), key = task_note(event, state, number, self.verification.steps)
+        text, kind = progress_entry(event, state, number, self.verification.steps)
+        key = self.tabs.task_key(state)
         if not self._replaying:
             self.tabs.mark_unread(key)
         self.transcript.add_entry(Entry(text, kind), key)

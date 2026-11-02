@@ -20,7 +20,7 @@ from orbit.tui.view.detail_views import Detail
 from orbit.tui.view.events import FEED_EVENTS, in_group
 from orbit.tui.view.feed import ConversationFeed
 from orbit.tui.view.log import EntryLog, EntryRow
-from orbit.tui.view.tabs import running_roles, tab_key, track_roles
+from orbit.tui.view.tabs import ROLE_TABS, running_roles, tab_key, task_tab_key, track_roles
 from orbit.tui.view.transcript import speaker
 from orbit.tui.view.working import WorkingLines
 
@@ -246,6 +246,9 @@ class Tabs:
 
     def key_of(self, agent: str | None) -> str | None:
         return tab_key(agent, self.roles)
+
+    def task_key(self, state: TaskState | None) -> str | None:
+        return task_tab_key(state, {}, ROLE_TABS)
 
     def speaker_of(self, agent: str | None) -> str | None:
         return speaker(agent, self.roles)

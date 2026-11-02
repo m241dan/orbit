@@ -342,15 +342,17 @@ def test_the_running_marker_leads_and_the_unread_marker_trails() -> None:
 
 def test_a_tasks_notes_are_keyed_to_its_roles_pinned_tab() -> None:
     for role in ROLE_TABS:
-        assert task_tab_key(TaskState(id="1", task=TaskSpec(prompt="p", role=role))) == role
+        state = TaskState(id="1", task=TaskSpec(prompt="p", role=role))
+        assert task_tab_key(state, {}, ROLE_TABS) == role
 
 
 def test_a_task_in_a_role_with_no_pinned_tab_has_no_tab_key() -> None:
-    assert task_tab_key(TaskState(id="1", task=TaskSpec(prompt="p", role="checker"))) is None
+    state = TaskState(id="1", task=TaskSpec(prompt="p", role="checker"))
+    assert task_tab_key(state, {}, ROLE_TABS) is None
 
 
 def test_an_unknown_task_has_no_tab_key() -> None:
-    assert task_tab_key(None) is None
+    assert task_tab_key(None, {}, ROLE_TABS) is None
 
 
 def test_marking_a_tab_unread_skips_the_shown_tab_and_all() -> None:

@@ -9,7 +9,7 @@ from orbit.protocol import (
     VerificationStarted,
 )
 from orbit.tui.view.progress import (
-    task_note,
+    progress_entry,
     task_started_entry,
     verification_finished_entry,
     verification_skipped_entry,
@@ -20,63 +20,49 @@ CODER_TASK = TaskState(id="7", task=TaskSpec(prompt="do it"))
 STEPS = (StepState(name="Lint"), StepState(name="Tests"))
 
 
-def test_a_started_task_is_headed_by_its_number_under_its_roles_tab() -> None:
-    note = task_note(TaskStarted(task_id="7"), CODER_TASK, "1.2", STEPS)
-    assert note == (("Task 1.2: do it", "user"), "coder")
+def test_a_started_task_is_headed_by_its_number() -> None:
+    note = progress_entry(TaskStarted(task_id="7"), CODER_TASK, "1.2", STEPS)
+    assert note == ("Task 1.2: do it", "user")
 
 
-def test_a_task_off_the_list_is_headed_by_its_id_under_all_only() -> None:
-    assert task_note(TaskStarted(task_id="9"), None, None, STEPS) == (("Task 9", "user"), None)
-
-
-def test_a_task_whose_role_has_no_tab_is_noted_under_all_only() -> None:
-    state = TaskState(id="7", task=TaskSpec(prompt="do it", role="translator"))
-    assert task_note(TaskStarted(task_id="7"), state, "1", STEPS) == (
-        ("Task 1: do it", "user"),
-        None,
-    )
+def test_a_task_off_the_list_is_headed_by_its_id() -> None:
+    assert progress_entry(TaskStarted(task_id="9"), None, None, STEPS) == ("Task 9", "user")
 
 
 def test_verification_notes_name_the_step_they_index() -> None:
     started = VerificationStarted(task_id="7", step=1)
-    assert task_note(started, CODER_TASK, "1", STEPS) == (
-        ("🔍 Verifying: Tests…", "verify"),
-        "coder",
-    )
+    assert progress_entry(started, CODER_TASK, "1", STEPS) == ("🔍 Verifying: Tests…", "verify")
     failed = VerificationFinished(task_id="7", step=0, passed=False)
-    assert task_note(failed, CODER_TASK, "1", STEPS) == (
-        ("❌ Verification failed: Lint", "error"),
-        "coder",
+    assert progress_entry(failed, CODER_TASK, "1", STEPS) == (
+        "❌ Verification failed: Lint",
+        "error",
     )
 
 
 def test_verification_notes_of_steps_not_shown_name_them_by_number() -> None:
     # A viewed session's log, or one from before the steps changed, indexes steps not shown.
     started = VerificationStarted(task_id="7", step=0)
-    assert task_note(started, CODER_TASK, "1", ()) == (
-        ("🔍 Verifying: step 1…", "verify"),
-        "coder",
-    )
+    assert progress_entry(started, CODER_TASK, "1", ()) == ("🔍 Verifying: step 1…", "verify")
     passed = VerificationFinished(task_id="7", step=2, passed=True)
-    assert task_note(passed, CODER_TASK, "1", STEPS) == (
-        ("✅ Verification passed: step 3", "verify"),
-        "coder",
+    assert progress_entry(passed, CODER_TASK, "1", STEPS) == (
+        "✅ Verification passed: step 3",
+        "verify",
     )
 
 
 def test_a_skipped_verification_says_why() -> None:
     skipped = VerificationSkipped(task_id="7", reason="no_changes")
-    assert task_note(skipped, None, None, ()) == (
-        ("⏩ Verification skipped: no files changed", "verify"),
-        None,
+    assert progress_entry(skipped, None, None, ()) == (
+        "⏩ Verification skipped: no files changed",
+        "verify",
     )
 
 
-def test_a_merge_is_noted_under_the_tasks_tab() -> None:
+def test_a_merge_is_noted() -> None:
     merged = TaskMerged(task_id="7", result="merged")
-    assert task_note(merged, CODER_TASK, "1", STEPS) == (
-        ("⇢ Merged into the base branch.", "verify"),
-        "coder",
+    assert progress_entry(merged, CODER_TASK, "1", STEPS) == (
+        "⇢ Merged into the base branch.",
+        "verify",
     )
 
 

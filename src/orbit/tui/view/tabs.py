@@ -318,13 +318,22 @@ def tab_key(agent: str | None, roles: Mapping[str, str]) -> str | None:
     return None if agent is None else roles.get(agent, agent)
 
 
-def task_tab_key(state: TaskState | None) -> str | None:
-    """Which pinned tab the notes on a task (its header, verification results and merge
-    notes) belong to: its role's, when the role has one. None, for All only, when the role
-    has no pinned tab or the task isn't on the list (``state`` None)."""
-    if state is None or state.task.role not in ROLE_TABS:
+def tabs_by_trigger(triggers: Iterable[TriggerEntry]) -> Mapping[str, str]:
+    """The tabs of the tabbed ones of ``triggers``, by trigger name."""
+    return {trigger.name: trigger.tab for trigger in triggers if trigger.tab is not None}
+
+
+def task_tab_key(
+    state: TaskState | None, triggers: Mapping[str, str], pinned: Collection[str]
+) -> str | None:
+    """Which of the ``pinned`` tabs the notes on a task (its header, verification results and
+    merge notes) belong to: the one its agent writes into (see :func:`pinned_key`), its
+    trigger's tab's, by its origin among the tabs of ``triggers`` by name, or its role's. None,
+    for All only, when it writes into neither or the task isn't on the list (``state``
+    None)."""
+    if state is None:
         return None
-    return state.task.role
+    return pinned_key(state.task.role, triggers.get(state.origin), pinned)
 
 
 def track_tabs(

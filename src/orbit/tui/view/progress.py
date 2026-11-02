@@ -1,4 +1,4 @@
-"""Notes on a task's run: what each reads as, and which tab it goes under."""
+"""Notes on a task's run: what each reads as. The tab strip says which tab each goes under."""
 
 from typing import assert_never
 
@@ -13,7 +13,6 @@ from orbit.protocol import (
     VerificationStarted,
 )
 from orbit.tui.view.common import EntryKind
-from orbit.tui.view.tabs import task_tab_key
 from orbit.tui.view.transcript import note_entry
 
 SKIP_REASONS: dict[SkipReason, str] = {
@@ -29,29 +28,18 @@ TaskProgress = (
 """Events noted in the transcript as a task runs: its header, verification results and merge."""
 
 
-def task_note(
-    event: TaskProgress,
-    state: TaskState | None,
-    number: str | None,
-    steps: tuple[StepState, ...],
-) -> tuple[tuple[str, EntryKind], str | None]:
-    """``event``'s transcript entry and the tab key it goes under, besides All.
-
-    ``state`` is the event's task and ``number`` the number the list shows for it, both None
-    when the task isn't on the list (removed meanwhile, or the startup check's): it's then
-    headed by its id and noted under All only. ``steps`` are the verification steps the
-    event's step indexes.
-    """
-    return progress_entry(event, state, number, steps), task_tab_key(state)
-
-
 def progress_entry(
     event: TaskProgress,
     state: TaskState | None,
     number: str | None,
     steps: tuple[StepState, ...],
 ) -> tuple[str, EntryKind]:
-    """``event`` as a transcript entry; see ``task_note`` for the other parameters."""
+    """``event`` as a transcript entry.
+
+    ``state`` is the event's task and ``number`` the number the list shows for it, both None
+    when the task isn't on the list (removed meanwhile, or the startup check's): it's then
+    headed by its id. ``steps`` are the verification steps the event's step indexes.
+    """
     if isinstance(event, TaskStarted):
         return task_started_entry(event.task_id if number is None else number, state)
     if isinstance(event, TaskMerged):

@@ -4,7 +4,7 @@ marked, in order, and how the user moves between them."""
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Protocol
 
-from orbit.protocol import PLANNER, BusyLane, Event, RunningAgent, TriggerEntry
+from orbit.protocol import PLANNER, BusyLane, Event, RunningAgent, TaskState, TriggerEntry
 from orbit.tui.view.tabs import (
     ALL_TAB_LABEL,
     PINNED_TABS,
@@ -22,6 +22,8 @@ from orbit.tui.view.tabs import (
     running_speakers,
     tab_key,
     tab_labels,
+    tabs_by_trigger,
+    task_tab_key,
     track_roles,
     track_speakers,
     track_tabs,
@@ -79,6 +81,9 @@ class TabStrip:
         # Agents that ran writing into a trigger's tab, to their role, which labels their
         # entries.
         self.speakers: Mapping[str, str] = {}
+        # The catalog's tabbed triggers' tabs, by trigger name, which their tasks' notes go
+        # under.
+        self._trigger_tabs: Mapping[str, str] = {}
         # Tab key (an agent id, a pinned role's or a trigger's tab's) to its tab's id.
         self._tab_ids: dict[str, str] = {tab.key: f"tab-{tab.key}" for tab in PINNED_TABS}
         self._labels: dict[str, str] = dict(OPENING)  # Each tab's label, by its id.
@@ -99,6 +104,11 @@ class TabStrip:
     def key_of(self, agent: str | None) -> str | None:
         """The key of the tab ``agent``'s entries belong to."""
         return tab_key(agent, self.roles)
+
+    def task_key(self, state: TaskState | None) -> str | None:
+        """The key of the tab the notes on the task ``state`` belong to, the one its agent
+        writes into; None for All only (see :func:`task_tab_key`)."""
+        return task_tab_key(state, self._trigger_tabs, pinned_roles(self.tabs))
 
     def speaker_of(self, agent: str | None) -> str | None:
         """Who ``agent``'s entries are spoken by: its role, for an agent in a trigger's tab, or
@@ -141,6 +151,7 @@ class TabStrip:
         """Pin a tab for each tab the catalog's ``triggers`` name, after the built-in roles'
         tabs, closing those of built-in roles whose agents start only from tabbed triggers, and
         those of tabs no longer named."""
+        self._trigger_tabs = tabs_by_trigger(triggers)
         self._update(pin_trigger_tabs(self.tabs, triggers))
 
     def track(self, event: Event) -> None:
