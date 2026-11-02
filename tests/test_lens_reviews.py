@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
+import pytest
 from opentelemetry.sdk.trace import ReadableSpan
 
 from orbit.agent import HostParts, Verification, WorkspaceHost
@@ -1262,3 +1263,52 @@ async def test_a_review_saved_with_a_lens_pending_stays_open_on_load() -> None:
     assert len(snapshot.tasks) == 3
     assert snapshot.review == ReviewStatus(paused=False, open_batches=1)
     assert reviews_of(store).groups["batch-1"].stage == "reviewing"
+
+
+@pytest.mark.parametrize("status", ["completed", "unverified", "gave_up", "cancelled", "error"])
+async def test_a_review_saved_with_its_last_lens_finished_on_the_board_fans_in_on_load(
+    status: TaskStatus,
+) -> None:
+    tasks, lane = mid_review(status)
+    store = store_with(saved("auth", *tasks, reviews=lane))
+    session, launcher = reopening(store, triggers=lens_triggers(merge=MERGE))
+    events = await opened(session, ActivateSession(session="auth"))
+    await quiet_within(0.05)
+    await session.close()
+
+    snapshot = last_of(Snapshot, events)
+    assert shown(snapshot.tasks)[3:] == [(REVIEWER, "merge", None, "pending")]
+    assert snapshot.review == ReviewStatus(paused=False, open_batches=1)
+    assert reviews_of(store).groups["batch-1"].ended == ("2", "3")
+    assert reviews_of(store).groups["batch-1"].merges == ("4",)
+    assert launcher.launches == []
+
+
+async def test_a_review_saved_with_its_lenses_finished_but_no_findings_closes_on_load() -> None:
+    tasks, lane = mid_review("completed")
+    group = replace(lane.groups["batch-1"], findings=())
+    quiet = lane.model_copy(update={"groups": {"batch-1": group}})
+    store = store_with(saved("auth", *tasks, reviews=quiet))
+    session, launcher = reopening(store, triggers=lens_triggers())
+    events = await opened(session, ActivateSession(session="auth"))
+    await session.close()
+
+    snapshot = last_of(Snapshot, events)
+    assert len(snapshot.tasks) == 3
+    assert snapshot.review == ReviewStatus(paused=False, open_batches=0)
+    assert launcher.launches == []
+
+
+async def test_a_review_saved_after_its_batch_stopped_filling_is_left_as_saved_on_load() -> None:
+    tasks, lane = mid_review("completed")
+    closing = PlannerSnapshot(
+        next_batch=2, batches={"batch-1": BatchSnapshot(round=1, cap=5, filling=False)}
+    )
+    store = store_with(saved("auth", *tasks, reviews=lane.model_copy(update={"planner": closing})))
+    session, launcher = reopening(store, triggers=lens_triggers(merge=MERGE))
+    events = await opened(session, ActivateSession(session="auth"))
+    await session.close()
+
+    assert len(last_of(Snapshot, events).tasks) == 3
+    assert reviews_of(store).groups["batch-1"] == lane.groups["batch-1"]
+    assert launcher.launches == []

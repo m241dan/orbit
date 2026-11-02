@@ -32,7 +32,7 @@ import random
 from collections.abc import Awaitable, Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
-from functools import partial
+from functools import partial, reduce
 from typing import Literal
 
 from orbit.agent.application.agent_run import AgentRun
@@ -56,7 +56,7 @@ from orbit.agent.application.snapshots import snapshot_of
 from orbit.agent.application.task_trace import FINDINGS_FIXED, FINDINGS_GIVEN_UP
 from orbit.agent.application.tasks import Changed, Tasks
 from orbit.agent.application.triggers import ReviewRound, TriggerEngine, TriggerHooks
-from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.board import WAITING, TaskBoard
 from orbit.agent.domain.endings import REVIEW_STOPPED_BY_YOU
 from orbit.agent.domain.merge_holds import BlockingTask, FindingFiling, FixReview, MergePassEnding
 from orbit.agent.domain.merge_pass import (
@@ -307,22 +307,36 @@ class ReviewLane:
 
     async def _settle_restored(self) -> None:
         """Settle quietly each review restored whose batch still fills though its tasks ended
-        before the crash, as one saved as it fanned in did: ``reviews_finished`` is raised for
-        one whose lenses have all ended, if it wasn't yet, or again if it may not have finished
-        being raised, as :func:`fan_in_due_again` says, and one that's over ends."""
+        before the crash, as one saved as it fanned in did: its tasks the board shows finished
+        are ended in it first, as :meth:`_with_finished` says; then ``reviews_finished`` is
+        raised for one whose lenses have all ended, if it wasn't yet, or again if it may not
+        have finished being raised, as :func:`fan_in_due_again` says, and one that's over
+        ends."""
         # Settling one changes no other group; it may only prune those whose batch closed.
-        for batch, group in tuple(self._groups.items()):
-            if self._settling_due(batch, group):
-                again = fan_in_due_again(group)  # Back to reviewing, so _settle raises it again.
-                restored = replace(group, stage="reviewing") if again else group
-                await self._settle(batch, restored, "quiet")
-                await self._hooks.changed()
+        for batch, saved_group in tuple(self._groups.items()):
+            if self.planner.filling(batch):
+                await self._settle_filling(batch, self._with_finished(batch, saved_group))
 
-    def _settling_due(self, batch: str, group: ReviewGroup) -> bool:
-        """Whether ``group``, the review behind ``batch``, still fills and is due to fan in or
-        to end."""
-        due = fan_in_due(group) or review_over(group, self._members(batch))
-        return self.planner.filling(batch) and due
+    async def _settle_filling(self, batch: str, group: ReviewGroup) -> None:
+        """Keep ``group`` as the review behind ``batch``, which still fills, and settle it
+        quietly if it's due to fan in or to end."""
+        self._groups[batch] = group
+        if not (fan_in_due(group) or review_over(group, self._members(batch))):
+            return
+        again = fan_in_due_again(group)  # Back to reviewing, so _settle raises it again.
+        restored = replace(group, stage="reviewing") if again else group
+        await self._settle(batch, restored, "quiet")
+        await self._hooks.changed()
+
+    def _with_finished(self, batch: str, group: ReviewGroup) -> ReviewGroup:
+        """``group``, the review behind ``batch``, with each of its tasks that the board shows
+        finished ended in it, as one saved after its task was marked finished but before the
+        lane ended it there was not. A task has finished once it's no longer waiting, however
+        it ended, as the lane ends it on any end that doesn't leave it pending to run again;
+        one taken off the board has ended too."""
+        waiting = {state.id for state in self._board.tasks if state.status in WAITING}
+        finished = (t for t in self._members(batch) if t not in waiting and t not in group.ended)
+        return reduce(ended_in, finished, group)
 
     async def _end_quietly(self, task_id: str, batch: str) -> None:
         """End task ``task_id``, booked into the review behind open ``batch``, as a crash
