@@ -94,7 +94,7 @@ its commands carry none.
 
 | Attribute | Type | Meaning |
 | --- | --- | --- |
-| `orbit.action` | string | What the user did, by the TUI's own name for it: `run_tasks`, `cancel_turn`, `stop_planner`, `reset_planner`, `super_review`, `configure_checks`, `pick_model`, `pick_tool_access`, `cancel_agent`, `submit_prompt`, `add_task`, `edit_task`, `accept_task`, `remove_task`, `decide_proposal`, `decide_approval`, `pick_session`, `rename_session`, `delete_session`, `activate_session`, `pick_workspace`, `add_workspace`, `remove_workspace`, `browse`, `page_history`, `resume_storage` or `take_ownership`. |
+| `orbit.action` | string | What the user did, by the TUI's own name for it: `run_tasks`, `cancel_turn`, `stop_planner`, `reset_planner`, `super_review`, `configure_checks`, `pick_model`, `pick_tool_access`, `cancel_agent`, `submit_prompt`, `add_task`, `edit_task`, `accept_task`, `remove_task`, `decide_proposal`, `decide_approval`, `decide_tool_call`, `pick_session`, `rename_session`, `delete_session`, `activate_session`, `pick_workspace`, `add_workspace`, `remove_workspace`, `browse`, `page_history`, `resume_storage` or `take_ownership`. |
 
 An error escaping an action, a bug, gives its span the error status with the error's message, and
 an `exception` event.
@@ -311,7 +311,9 @@ refused without one. Neither the call's arguments nor its result are recorded.
 | --- | --- | --- |
 | `orbit.mcp.server` | string | The server, by its name in `[mcp.<name>]`, such as `github`. |
 | `orbit.mcp.tool` | string | The tool, by orbit's name for it, such as `github__get_issue`. |
-| `orbit.mcp.outcome` | string | How the call came out: `ok`, `tool_error` (the tool answered with an error), `failed` (the server failed to start, crashed, didn't answer in time or dropped the connection), `refused` (the role doesn't allow the tool) or `stopped` (the agent's run ended, or orbit closed, before it was answered). |
+| `orbit.mcp.outcome` | string | How the call came out: `ok`, `tool_error` (the tool answered with an error), `failed` (the server failed to start, crashed, didn't answer in time or dropped the connection), `refused` (the role doesn't allow the tool), `declined` (held for approval, the user declined it or it expired) or `stopped` (the agent's run ended, or orbit closed, before it was answered). |
+| `orbit.mcp.approval` | string | For a call held for the user's approval (see **Approving calls** in the README), how it was settled: `allowed`, `declined`, `expired` (no frontend was connected for an hour) or `withdrawn` (the agent's run ended while it was held); absent for a call that wasn't held. |
+| `orbit.mcp.approval_wait_ms` | int | For a call held for approval, how long it was held, in milliseconds; absent for a call that wasn't held. |
 
 A `failed` or `refused` call has the span's error status with the reason; a `tool_error` call
 doesn't, as its message is the tool's result.

@@ -169,7 +169,8 @@ class McpServer(_Config):
     approve: bool | tuple[str, ...] = Field(
         default=False,
         description=(
-            "Which of its tools' calls wait for your approval: none, all (true), or a list."
+            "Which of its tools' calls wait for you to allow or deny them: none, all (true),"
+            " or a list."
         ),
     )
 

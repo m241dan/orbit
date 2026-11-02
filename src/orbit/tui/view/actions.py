@@ -33,6 +33,7 @@ type ActionName = Literal[
     "remove_task",
     "decide_proposal",
     "decide_approval",
+    "decide_tool_call",
     "pick_session",
     "rename_session",
     "delete_session",

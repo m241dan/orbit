@@ -1,12 +1,22 @@
-"""The modal asking whether a consultation past its asker's hourly limit may run: its text, the
-app opening it and sending the user's decision, and closing it when another frontend decides."""
+"""The modal asking whether a consultation past its asker's hourly limit, or an agent's call
+held for approval, may run: its text, the app opening it and sending the user's decision, and
+closing it when another frontend decides."""
 
 from textual.widgets import Static
 
-from orbit.protocol import PLANNER, ApprovalDecided, ApprovalRequested, DecideApproval
+from orbit.protocol import (
+    PLANNER,
+    ApprovalDecided,
+    ApprovalRequested,
+    DecideApproval,
+    DecideToolCall,
+    Event,
+    ToolCallDecided,
+    ToolCallHeld,
+)
 from orbit.tui import OrbitApp
 from orbit.tui.approvals import ApprovalScreen
-from orbit.tui.view.approvals import approval_text
+from orbit.tui.view.approvals import TOOL_CALL_TITLE, approval_text, tool_call_text
 from tests.tui_fakes import FakeSession, feed_events
 
 REQUEST = ApprovalRequested(
@@ -42,12 +52,23 @@ async def test_a_request_opens_the_modal_showing_it() -> None:
         assert session.commands == []
 
 
-async def decides(key: str) -> list[object]:
-    """The commands the app sends as the user presses ``key`` on the modal."""
+CALL = ToolCallHeld(
+    call=3,
+    agent_id="agent-1",
+    role="coder",
+    server="github",
+    tool="github__create_issue",
+    arguments={"title": "Flaky test"},
+)
+
+
+async def decides(key: str, request: Event = REQUEST) -> list[object]:
+    """The commands the app sends as the user presses ``key`` on the modal asking about
+    ``request``."""
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, REQUEST)
+        await feed_events(session, pilot, request)
         await pilot.press(key)
         await pilot.pause()
         assert not isinstance(app.screen, ApprovalScreen)
@@ -82,5 +103,46 @@ async def test_another_frontends_decision_closes_it_sending_nothing() -> None:
     async with app.run_test() as pilot:
         await feed_events(session, pilot, REQUEST)
         await feed_events(session, pilot, ApprovalDecided(consultation=7, decision="deny"))
+        assert not isinstance(app.screen, ApprovalScreen)
+        assert session.commands == []
+
+
+async def test_a_held_call_opens_the_modal_asking_about_it() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CALL)
+        screen = app.screen
+        assert isinstance(screen, ApprovalScreen)
+        body = screen.query_one("#approval-body", Static)
+        assert str(body.render()) == tool_call_text(CALL)
+        assert body.border_title == TOOL_CALL_TITLE
+
+
+async def test_a_allows_a_held_call() -> None:
+    assert await decides("a", CALL) == [DecideToolCall(call=3, decision="allow")]
+
+
+async def test_d_denies_a_held_call() -> None:
+    assert await decides("d", CALL) == [DecideToolCall(call=3, decision="deny")]
+
+
+async def test_h_isnt_a_choice_for_a_held_call() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CALL)
+        await pilot.press("h")
+        await pilot.pause()
+        assert isinstance(app.screen, ApprovalScreen)
+        assert session.commands == []
+
+
+async def test_a_held_call_settled_elsewhere_closes_it() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CALL)
+        await feed_events(session, pilot, ToolCallDecided(call=3, decision="expired"))
         assert not isinstance(app.screen, ApprovalScreen)
         assert session.commands == []

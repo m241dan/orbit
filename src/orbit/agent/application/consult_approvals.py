@@ -1,70 +1,90 @@
-"""The consultations held past their asker's hourly limit, each until the user decides on it or,
-after an hour with no frontend connected, it expires."""
+"""The requests held for the user's approval, such as consultations past their asker's hourly
+limit, each until the user decides on it or, after an hour with no frontend connected, it
+expires."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from orbit.agent.application.planner_seat import Timer
 from orbit.agent.domain.consult_limits import expires_at
-from orbit.protocol import ApprovalRequested, Event
+from orbit.protocol import ApprovalRequested
 
 
 @dataclass(frozen=True)
-class Held[T]:
-    """A consultation, ``held`` at that time, that ``request`` asks the user about, with what
-    starts it once allowed (``work``)."""
+class Held[R, T]:
+    """A request, ``held`` at that time, that ``request`` asks the user about, with what carries
+    it on once decided (``work``)."""
 
-    request: ApprovalRequested
+    request: R
     held: float
     work: T
 
 
-class Approvals[T]:
-    """The consultations held for approval, published through ``post`` as they're held; timed by
-    ``timer``, each still held after an hour with no frontend connected is passed
-    to ``expire``. Until told otherwise, no frontend is connected."""
+def loop_time() -> float:
+    """The running loop's clock."""
+    return asyncio.get_running_loop().time()
+
+
+@dataclass(frozen=True)
+class Timer:
+    """A ``clock``, in seconds, and what ``sleep``s for so many of them."""
+
+    clock: Callable[[], float] = loop_time
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+
+
+def consultation_of(request: ApprovalRequested) -> int:
+    """The number of the consultation ``request`` asks about."""
+    return request.consultation
+
+
+class Approvals[R, T]:
+    """The requests held for approval, each by the ``number`` it gives its request, published
+    through ``post`` as they're held; timed by ``timer``, each still held after an hour with no
+    frontend connected is passed to ``expire``. Until told otherwise, no frontend is
+    connected."""
 
     def __init__(
         self,
-        post: Callable[[Event], None],
-        expire: Callable[[Held[T]], Awaitable[None]],
+        post: Callable[[R], None],
+        expire: Callable[[Held[R, T]], Awaitable[None]],
         timer: Timer,
+        number: Callable[[R], int],
     ) -> None:
         self._post = post
         self._expire = expire
         self._clock = timer.clock
         self._sleep = timer.sleep
-        self._held: dict[int, Held[T]] = {}  # By consultation.
+        self._number = number
+        self._held: dict[int, Held[R, T]] = {}  # By number.
         self._alone_since: float | None = float("-inf")  # None while a frontend is connected.
         self._timer: asyncio.Task[None] | None = None
         self._timing = 0  # Bumped by each stop, ending any expiry in flight.
         self._paused = False
 
     @property
-    def waiting(self) -> tuple[ApprovalRequested, ...]:
-        """What the user is asked about the consultations held, in the order they were held."""
+    def waiting(self) -> tuple[R, ...]:
+        """What the user is asked about the requests held, in the order they were held."""
         return tuple(held.request for held in self._held.values())
 
-    def hold(self, request: ApprovalRequested, work: T) -> None:
-        """Hold the consultation ``request`` asks about, with its ``work``, and publish
-        ``request``."""
-        self._held[request.consultation] = Held(request, self._clock(), work)
+    def hold(self, request: R, work: T) -> None:
+        """Hold what ``request`` asks about, with its ``work``, and publish ``request``."""
+        self._held[self._number(request)] = Held(request, self._clock(), work)
         self._post(request)
         self._arm()
 
-    def take(self, consultation: int) -> Held[T] | None:
-        """Stop holding consultation ``consultation``, returning it; none if it isn't held."""
-        held = self._held.pop(consultation, None)
+    def take(self, number: int) -> Held[R, T] | None:
+        """Stop holding request ``number``, returning it; none if it isn't held."""
+        held = self._held.pop(number, None)
         self._arm()
         return held
 
-    def take_from(self, asker: str) -> list[Held[T]]:
-        """Stop holding the consultations from the role ``asker``, returning them in the order
-        they were held."""
-        taken = [held for held in self._held.values() if held.request.asker == asker]
+    def take_where(self, test: Callable[[R], bool]) -> list[Held[R, T]]:
+        """Stop holding the requests that pass ``test``, returning them in the order they were
+        held."""
+        taken = [held for held in self._held.values() if test(held.request)]
         for held in taken:
-            del self._held[held.request.consultation]
+            del self._held[self._number(held.request)]
         self._arm()
         return taken
 
@@ -77,30 +97,30 @@ class Approvals[T]:
         self._arm()
 
     def clear(self) -> None:
-        """Forget the consultations held, as the session holding them is left."""
+        """Forget the requests held, as the session holding them is left."""
         self._held = {}
         self.stop()
 
     def stop(self) -> None:
-        """Stop timing the consultations held, until one is next held or frontends come or go."""
+        """Stop timing the requests held, until one is next held or frontends come or go."""
         self._timing += 1
         if self._timer is not None:
             self._timer.cancel()
             self._timer = None
 
     def pause(self) -> None:
-        """Stop timing the consultations held, holding or deciding on them meanwhile timing
-        none, until :meth:`unpause`."""
+        """Stop timing the requests held, holding or deciding on them meanwhile timing none,
+        until :meth:`unpause`."""
         self._paused = True
         self.stop()
 
     def unpause(self) -> None:
-        """Time the consultations held to expire again, after :meth:`pause`."""
+        """Time the requests held to expire again, after :meth:`pause`."""
         self._paused = False
         self._arm()
 
     def _arm(self) -> None:
-        """Time the next consultation held to expire, if any will, unless paused."""
+        """Time the next request held to expire, if any will, unless paused."""
         self.stop()
         if self._paused:
             return
@@ -110,8 +130,8 @@ class Approvals[T]:
             self._timer = asyncio.get_running_loop().create_task(self._expiring(min(times)))
 
     async def _expiring(self, due: float) -> None:
-        """Expire the consultations due by ``due``, once it comes, one at a time, then time the
-        next; a stop while one expires ends it there, leaving the rest held."""
+        """Expire the requests due by ``due``, once it comes, one at a time, then time the next;
+        a stop while one expires ends it there, leaving the rest held."""
         await self._sleep(max(0.0, due - self._clock()))
         self._timer = None
         timing = self._timing
@@ -122,13 +142,13 @@ class Approvals[T]:
             if timing == self._timing:
                 self._arm()
 
-    def _next_due(self, now: float) -> Held[T] | None:
-        """Stop holding the first consultation that expires by ``now``, returning it; none if
-        none does."""
+    def _next_due(self, now: float) -> Held[R, T] | None:
+        """Stop holding the first request that expires by ``now``, returning it; none if none
+        does."""
         due = [number for number, held in self._held.items() if self._expires(held, now)]
         return self._held.pop(due[0]) if due else None
 
-    def _expires(self, held: Held[T], now: float) -> bool:
+    def _expires(self, held: Held[R, T], now: float) -> bool:
         """Whether ``held`` expires by ``now``."""
         ends = expires_at(held.held, self._alone_since)
         return ends is not None and ends <= now

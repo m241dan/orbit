@@ -1,6 +1,6 @@
 """The rules of proxying external MCP servers' tools: the names agents see them by, which a role
-allows, the variables a server's environment is filled from, and the wording of refusals and
-notices."""
+allows, the variables a server's environment is filled from, which calls wait for the user's
+approval, and the wording of refusals and notices."""
 
 import pytest
 
@@ -12,6 +12,7 @@ from orbit.agent.domain.mcp_proxy import (
     UnsetVariable,
     UpstreamTool,
     call_failure,
+    declined,
     failure_notice,
     filled_env,
     filled_server,
@@ -19,6 +20,7 @@ from orbit.agent.domain.mcp_proxy import (
     grant_for,
     is_proxied,
     missing_tool_notices,
+    needs_approval,
     proxied_name,
     proxied_tools,
     refusal,
@@ -172,6 +174,31 @@ def test_a_server_missing_a_variable_names_it(values: dict[str, str], unset: str
 
 
 # Wording
+
+
+# Approval
+
+
+@pytest.mark.parametrize(
+    ("approve", "tool", "held"),
+    [
+        (False, "create_issue", False),
+        (True, "create_issue", True),
+        (True, "get_issue", True),
+        (("create_issue",), "create_issue", True),
+        (("create_issue",), "get_issue", False),
+        ((), "create_issue", False),
+    ],
+)
+def test_a_call_waits_for_approval_when_its_server_approves_all_or_lists_the_tool(
+    approve: bool | tuple[str, ...], tool: str, held: bool
+) -> None:
+    server = McpServer(command=("github-mcp-server",), approve=approve)
+    assert needs_approval(server, tool) is held
+
+
+def test_a_declined_call_names_the_tool() -> None:
+    assert declined("github__create_issue") == "The user declined github__create_issue."
 
 
 def test_a_refusal_names_the_role_and_the_tool() -> None:

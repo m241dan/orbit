@@ -8,7 +8,6 @@ from rich.text import Text
 
 from orbit.protocol import (
     ApprovalDecision,
-    ApprovalRequested,
     ChecksProposed,
     DecideProposal,
     ReportShown,
@@ -16,6 +15,7 @@ from orbit.protocol import (
     TaskState,
 )
 from orbit.tui.view.approvals import Decided as ApprovalDecided_
+from orbit.tui.view.approvals import HeldRequest
 from orbit.tui.view.common import kept_highlight
 from orbit.tui.view.proposals import Decided
 from orbit.tui.view.settings import Chosen
@@ -227,17 +227,17 @@ class ProposalModal:
 
 
 class ApprovalModal:
-    """Where an :class:`ApprovalQueue` asks about consultations, as the app's modal slot does:
-    what it opened, in turn, what it closed and the one shown. Only the one shown can be
-    decided."""
+    """Where an :class:`ApprovalQueue` asks about consultations and agents' calls, as the app's
+    modal slot does: what it opened, in turn, what it closed and the one shown. Only the one
+    shown can be decided."""
 
     def __init__(self) -> None:
-        self.opened: list[ApprovalRequested] = []
-        self.closed: list[ApprovalRequested] = []
-        self.shown: ApprovalRequested | None = None
+        self.opened: list[HeldRequest] = []
+        self.closed: list[HeldRequest] = []
+        self.shown: HeldRequest | None = None
         self._decided: ApprovalDecided_ | None = None
 
-    def open(self, request: ApprovalRequested, decided: ApprovalDecided_) -> None:
+    def open(self, request: HeldRequest, decided: ApprovalDecided_) -> None:
         self.opened.append(request)
         self.shown, self._decided = request, decided
 
@@ -247,7 +247,7 @@ class ApprovalModal:
         self.shown = self._decided = None
 
     async def decide(self, decision: ApprovalDecision | None) -> None:
-        """Have the user decide on the consultation shown, or close it undecided."""
+        """Have the user decide on the request shown, or close it undecided."""
         decided = self._decided
         assert decided is not None
         self.shown = self._decided = None

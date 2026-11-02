@@ -1,6 +1,7 @@
 """The rules of proxying external MCP servers' tools to agents: the names agents see them by,
 ``<server>__<tool>``, which of a server's tools a role allows, the variables a server's
-environment and headers are filled from, and the wording of refusals and notices."""
+environment and headers are filled from, which calls wait for the user's approval, and the
+wording of refusals and notices."""
 
 import hashlib
 import re
@@ -174,6 +175,19 @@ def filled_server(server: McpServer, values: Mapping[str, str]) -> FilledServer 
     if isinstance(headers, UnsetVariable):
         return headers
     return FilledServer(env, headers)
+
+
+def needs_approval(server: McpServer, tool: str) -> bool:
+    """Whether a call to ``server``'s tool ``tool``, by its name on the server, waits for the
+    user's approval: the server's ``approve`` is ``true``, or lists the tool."""
+    return server.approve is True or (
+        not isinstance(server.approve, bool) and tool in server.approve
+    )
+
+
+def declined(name: str) -> str:
+    """The answer to a call to the tool ``name`` that the user declined, or that expired."""
+    return f"The user declined {name}."
 
 
 def refusal(role: str, name: str) -> str:

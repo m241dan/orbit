@@ -1646,7 +1646,7 @@ A server's fields:
 - `idle_minutes`: how long a connection it's idle on is kept, `10` by default.
 - `timeout_seconds`: how long a call to one of its tools may take, `300` by default.
 - `approve`: which of its tools' calls wait for your approval: none (`false`, the default), all
-  (`true`), or those a list names.
+  (`true`), or those a list names (see [Approving calls](#approving-calls)).
 
 A value in `env` or `headers` may reference a variable as `$NAME` or `${NAME}`, which orbit fills
 in from its own environment when it starts or connects to the server, else from
@@ -1732,6 +1732,22 @@ none, until a call it answers ends the streak. When an agent's run ends, its cal
 cancelled; when the workspace closes or orbit exits, every connection is closed, the servers
 orbit started are stopped (terminated, then killed), and the calls in flight are answered with
 an error.
+
+#### Approving calls
+
+A call to a tool whose server has `approve = true`, or whose name is in the server's `approve`
+list, is held before it goes to the server, and every frontend viewing the session asks, in the
+same modal as consultations past their limit (and queued with them): `The coder wants to call
+github__create_issue with {"title": "Flaky test"}.`, its arguments as JSON, each long value cut
+short, with **a** Allow and **d** Deny. Allowed, the call goes to the server and the agent gets
+its answer as usual; denied, the agent is told `The user declined github__create_issue.` and the
+server never sees the call. The first answer from any frontend applies and closes the others';
+a read-only view of another session shows nothing to decide. A call held for an hour with no
+frontend connected expires, declined, with the same answer to the agent. When the agent's run
+ends, or you cancel the agent, while its call is held, the call is withdrawn and answered, and
+the question closes; leaving the session, or orbit closing, declines every call held. Each held
+call's `orbit.mcp.call` span records how it was settled and how long it waited (see
+[docs/telemetry.md](docs/telemetry.md)). Calls to a server's other tools are never held.
 
 The `experimenter` is a conversational role the planner consults (see `consults` below) and you
 can talk to on its own tab: it runs what it's asked to learn, such as how a library behaves, in a
@@ -4195,8 +4211,10 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `SkillDelivery` (in `skill_delivery`), tracing each agent's process as an `orbit.agent.process` span and each of its calls as an
     `orbit.agent.request` child of it with `AgentTracing` (in `agent_trace`), and passing calls
     to MCP servers' tools to a `ToolProxy` (in `tool_proxy`), which owns the workspace's
-    connections to the servers, lazy, shared or the agent's own, closed when idle, and traces
-    each call as an `orbit.mcp.call` span, filling the servers' variables from
+    connections to the servers, lazy, shared or the agent's own, closed when idle, holds the
+    calls that need the user's approval in the session's `ToolCallApprovals` (in
+    `tool_call_approvals`), and traces each call as an `orbit.mcp.call` span, filling the
+    servers' variables from
     `LayeredCredentials` (in `credentials`), orbit's environment first, then `credentials.toml`;
     `Verifier` (in `verifier`) runs the steps, each run for an agent's call timed as an
     `orbit.verify.step` child of the call's span; `Lander` (in `landing`) commits and merges

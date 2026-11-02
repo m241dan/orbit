@@ -46,7 +46,6 @@ from orbit.agent.application.ports import (
     CoderTree,
     Fallback,
     ProposalReview,
-    Publish,
     RepositoryLock,
     SessionStore,
     UsageLedger,
@@ -85,6 +84,7 @@ from orbit.agent.application.takeover import (
 )
 from orbit.agent.application.task_trace import TaskTracing
 from orbit.agent.application.tasks import Tasks
+from orbit.agent.application.tool_call_approvals import ToolCallApprovals
 from orbit.agent.application.triggers import TriggerEngine, TriggerHooks
 from orbit.agent.application.usage_accounting import AccountParts, UsageAccounting
 from orbit.agent.application.usage_recorder import UsageRecorder
@@ -164,23 +164,6 @@ def _reviewed(agents: Agents | None, review: ProposalReview) -> Agents | None:
     if agents is None or agents.proposal_review is not None:
         return agents
     return replace(agents, proposal_review=review)
-
-
-def _desk(
-    agents: Agents | None,
-    publish: Publish,
-    telemetry: Telemetry,
-    workspace_id: str,
-    session: Callable[[], str],
-) -> AgentDesk | None:
-    """The desk launching ``agents`` for the workspace ``workspace_id``, in the session
-    ``session`` says is open, publishing with ``publish`` and tracing with ``telemetry``; none
-    without agents."""
-    if agents is None:
-        return None
-    desk = AgentDesk(agents, publish, telemetry, workspace_id)
-    desk.session = session
-    return desk
 
 
 _DEFAULT_STORAGE = StorageSettings()
@@ -420,13 +403,8 @@ class WorkspaceHost:
         )
         if self._verifier is not None:  # Accepted checks let the tasks waiting for them run.
             self._verifier.steps_changed = self._kick_lanes
-        self._desk = _desk(
-            agents,
-            self._publish_agents,
-            parts.telemetry,
-            parts.workspace_id,
-            lambda: self._keeper.id,
-        )
+        self._tool_calls = ToolCallApprovals(self._events.put_nowait, self._save)
+        self._desk = self._agent_desk(agents, parts)
         self._reports = self._kept_reports(parts.store, parts.clock)
         self._workspace = parts.workspace
         self._managed = parts.managed
@@ -476,10 +454,24 @@ class WorkspaceHost:
         return Schedules(ScheduleParts(times, clock, self._fire_scheduled, self._events.put))
 
     def _connections_changed(self) -> None:
-        """Publish the sessions' states, and tell the seats how many frontends view the open
-        session, as connections come, go or move."""
+        """Publish the sessions' states, and tell the seats and the agents' calls held for
+        approval how many frontends view the open session, as connections come, go or move."""
         self._states.check()
-        self._seats.viewers(self._connections.viewed()[self._keeper.id])
+        viewers = self._connections.viewed()[self._keeper.id]
+        self._seats.viewers(viewers)
+        self._tool_calls.viewers(viewers)
+
+    def _agent_desk(self, agents: Agents | None, parts: HostParts) -> AgentDesk | None:
+        """The desk launching ``agents`` for the ``parts``' workspace, in the session open,
+        publishing as :meth:`_publish_agents` does, tracing with their telemetry and holding the
+        agents' calls that need approval among the session's; none without agents."""
+        if agents is None:
+            return None
+        desk = AgentDesk(
+            agents, self._publish_agents, parts.telemetry, parts.workspace_id, self._tool_calls
+        )
+        desk.session = lambda: self._keeper.id
+        return desk
 
     def _conversation_seats(self) -> ConversationSeats:
         """The conversational roles' seats in this session, their turns traced with
@@ -615,6 +607,7 @@ class WorkspaceHost:
             self._desk,
             self._states,
             self._views,
+            self._tool_calls,
             self._sets,
         )
         return SessionSnapshots(parts)
@@ -668,6 +661,7 @@ class WorkspaceHost:
             lambda sessions: self._entries.entry(sessions),
             lambda entry: self.catalog_changed(entry),
             self._switching,
+            self._tool_calls,
         )
         return SessionSwitcher(parts, self._settings, self._events, picking)
 
@@ -696,6 +690,7 @@ class WorkspaceHost:
             self._startup,
             self._save,
             self._reviews_changed,
+            self._tool_calls,
             self._gate,
             self._lanes,
             self._sets,
@@ -1211,11 +1206,11 @@ class WorkspaceHost:
         """Start the tasks waiting in the lanes that start by themselves, the reviews among them,
         the startup check and the sets' runs triggers asked for that the halt kept from
         starting, and the conversational roles' turns waiting, such as those hearing of the
-        consultations the halt cancelled, and times the consultations held for approval to
-        expire again, as the halt lifts. A startup check the halt cancelled stays cancelled, as
-        one the user cancelled does: it runs once as orbit starts, the conversation has said it
-        was cancelled, and the first task's verification runs the same steps; so do the sets'
-        runs the halt cancelled, until their triggers fire again."""
+        consultations the halt cancelled, and times the consultations and the agents' calls held
+        for approval to expire again, as the halt lifts. A startup check the halt cancelled stays
+        cancelled, as one the user cancelled does: it runs once as orbit starts, the conversation
+        has said it was cancelled, and the first task's verification runs the same steps; so do
+        the sets' runs the halt cancelled, until their triggers fire again."""
         self._lanes.kick()
         self._start_startup_check()
         if self._sets is not None:
@@ -1223,6 +1218,7 @@ class WorkspaceHost:
         self._release_waiting()
         self._seats.start_waiting()
         self._seats.restart_expiry()
+        self._tool_calls.unpause()
 
     def _agent_on(self, task_id: str) -> str:
         """The agent working on task ``task_id``; only asked while one is."""
@@ -1353,13 +1349,13 @@ class WorkspaceHost:
     async def close(self) -> None:
         """Stop a storage halt under way, the tries of the repository's lock, the loading of
         the super review count, the raising of ``session_started``, the schedules and the
-        keeping of the copies, then the work, as :meth:`_stop_work` does: the review lane, the
-        other lanes that start by themselves, the startup check and the sets' runs, so that
-        nothing wakes the work lane, then the work in progress, which stops its agent, and the
-        conversational roles' turns; then stop their retired conversations, their conversations,
-        the agents' host, the recording of turns' usage, the saving of the session, releasing its
-        lock, and the writing of its events to the store, then end every connection's stream, in
-        that order.
+        keeping of the copies, then decline the agents' calls held for approval, then the work,
+        as :meth:`_stop_work` does: the review lane, the other lanes that start by themselves,
+        the startup check and the sets' runs, so that nothing wakes the work lane, then the work
+        in progress, which stops its agent, and the conversational roles' turns; then stop their
+        retired conversations, their conversations, the agents' host, the recording of turns'
+        usage, the saving of the session, releasing its lock, and the writing of its events to
+        the store, then end every connection's stream, in that order.
         Each is stopped even if one before it fails or the close is cancelled, as
         :func:`close_all` does."""
         self._closing = True
@@ -1376,12 +1372,17 @@ class WorkspaceHost:
             self._schedules.close,
             self._copy_keeper.close,
         ]
+        stops.append(self._decline_tool_calls)
         stops += self._work_stops(self._stop_turns, final=True)
         stops += [self._seats.close_retired, self._seats.close]
         if self._desk is not None:
             stops.append(self._desk.stop)
         stops += [self._usage.close, self._keeper.close, self._events.close, self._end_connections]
         return stops
+
+    async def _decline_tool_calls(self) -> None:
+        """Decline the agents' calls held for approval, as orbit closes."""
+        self._tool_calls.decline_all()
 
     async def _end_connections(self) -> None:
         """End every connection's stream once what it has queued is read."""
@@ -1395,7 +1396,9 @@ class WorkspaceHost:
 
     async def _halt_turns(self) -> None:
         """Cancel the work lane's and the conversational roles' turns as the session halts, and
-        wait for them to end; a run the usage limit stopped still starts again."""
+        wait for them to end; a run the usage limit stopped still starts again. The agents' calls
+        held for approval stop expiring until the halt lifts."""
+        self._tool_calls.pause()
         await self._turns.stop_turn()
         await self._seats.stop_turns(final=False)
 

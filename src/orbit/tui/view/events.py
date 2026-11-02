@@ -37,7 +37,9 @@ from orbit.protocol import (
     TaskMerged,
     TasksChanged,
     TaskStarted,
+    ToolCallDecided,
     ToolCallFinished,
+    ToolCallHeld,
     ToolCallStarted,
     TurnFinished,
     TurnStarted,
@@ -76,8 +78,9 @@ message."""
 ReportEvent = ReportsListed | ReportShown
 """The workspace's reports, or one of them, which the reports list asked for."""
 
-ApprovalEvent = ApprovalRequested | ApprovalDecided
-"""A consultation held for the user's approval, and its settling."""
+ApprovalEvent = ApprovalRequested | ApprovalDecided | ToolCallHeld | ToolCallDecided
+"""A consultation, or an agent's call to an MCP tool, held for the user's approval, and its
+settling."""
 
 StateEvent = (
     SettingsChanged

@@ -27,6 +27,7 @@ from orbit.protocol import (
     SessionStateChanged,
     SessionSummary,
     Snapshot,
+    ToolCallHeld,
     VerificationChanged,
     WorkspaceEntry,
 )
@@ -147,6 +148,13 @@ class States(Protocol):
     def of(self, session_id: str) -> SessionStateChanged: ...
 
 
+class HeldCalls(Protocol):
+    """The agents' calls held for approval, as what's shown reads them."""
+
+    @property
+    def waiting(self) -> tuple[ToolCallHeld, ...]: ...
+
+
 class Snapshotting(Protocol):
     """The views, as they make a snapshot of a session's own parts and the workspace's."""
 
@@ -230,8 +238,8 @@ class SnapshotParts:
     spent, its ``settings``, the conversational roles' ``seats``, the task ``board``, the
     ``proposals`` waiting, the work lane's ``turns``, the ``lanes``, the review ``lane``, the
     ``startup`` check, the ``verifier`` and the agent ``desk``, each of these four if there is
-    one, the sessions' ``states``, the ``views`` that make the snapshot, and the named ``sets``'
-    runs, if any."""
+    one, the sessions' ``states``, the ``views`` that make the snapshot, the agents' calls held
+    for approval (``tool_calls``), and the named ``sets``' runs, if any."""
 
     session: Callable[[], str]
     transcript: Callable[[str], Awaitable[Transcript]]
@@ -248,6 +256,7 @@ class SnapshotParts:
     desk: Launching | None
     states: States
     views: Snapshotting
+    tool_calls: HeldCalls
     sets: SetPanels | None = None
 
 
@@ -278,6 +287,7 @@ class SessionSnapshots:
             proposals=parts.proposals.waiting,
             agents=self._running_agents(),
             approvals=parts.seats.approvals,
+            tool_calls=parts.tool_calls.waiting,
             transcript=transcript.events,
             viewers=state.viewers,
             role_spent=parts.switcher.spend.by_role,

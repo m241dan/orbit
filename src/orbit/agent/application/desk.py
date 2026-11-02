@@ -34,6 +34,7 @@ from orbit.agent.application.ports import (
     ToolListing,
 )
 from orbit.agent.application.skill_delivery import SkillDelivery
+from orbit.agent.application.tool_call_approvals import ToolCallApprovals
 from orbit.agent.application.tool_proxy import Caller, McpProxying, ToolProxy
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.agents import Agent, AgentRegistry
@@ -225,7 +226,9 @@ class AgentDesk:
     is open.
 
     Each call is traced with ``telemetry`` under the span of its agent's process, while that's
-    traced (see :meth:`traced`), and otherwise under the span current."""
+    traced (see :meth:`traced`), and otherwise under the span current. The calls to proxied
+    tools that need the user's approval are held in ``tool_calls``; without them, they're
+    declined."""
 
     def __init__(
         self,
@@ -233,6 +236,7 @@ class AgentDesk:
         publish: Publish,
         telemetry: Telemetry = _NO_TELEMETRY,
         workspace_id: str = "",
+        tool_calls: ToolCallApprovals | None = None,
     ) -> None:
         self.agents = agents
         self._workspace_id = workspace_id
@@ -268,12 +272,17 @@ class AgentDesk:
             agents.skill_library, agents.skill_mappings, self._processes.get
         )
         # What proxies MCP servers' tools to the agents; none without servers to proxy.
-        self._proxy = None if agents.mcp is None else self._proxying(agents.mcp, telemetry)
+        self._proxy = (
+            None if agents.mcp is None else self._proxying(agents.mcp, telemetry, tool_calls)
+        )
 
-    def _proxying(self, mcp: McpProxying, telemetry: Telemetry) -> ToolProxy:
+    def _proxying(
+        self, mcp: McpProxying, telemetry: Telemetry, tool_calls: ToolCallApprovals | None
+    ) -> ToolProxy:
         """What proxies ``mcp``'s servers to the agents, as their roles stand at each call,
-        publishing its notices and tracing its calls with ``telemetry``."""
-        return ToolProxy(mcp, lambda: self.agents.roles, self.publish, telemetry)
+        publishing its notices, tracing its calls with ``telemetry`` and holding those that need
+        the user's approval in ``tool_calls``."""
+        return ToolProxy(mcp, lambda: self.agents.roles, self.publish, telemetry, tool_calls)
 
     async def publish(self, event: Event) -> None:
         """Publish ``event``, noting the agents it announces as started or exited and what the

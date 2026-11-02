@@ -7,6 +7,7 @@ import json
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ from mcp.types import TextContent
 
 from orbit.agent.application.desk import UNKNOWN_AGENT, AgentDesk, Agents
 from orbit.agent.application.ports import AgentHost, McpConnector, Reply, ToolListing
+from orbit.agent.application.tool_call_approvals import ToolCallApprovals
 from orbit.agent.application.tool_proxy import CALL_SPAN, STOPPED, McpProxying
 from orbit.agent.domain.mcp_servers import McpServer
 from orbit.agent.domain.roles import Role, RoleTools
@@ -26,7 +28,7 @@ from orbit.agent.external.environment_credentials import EnvironmentCredentials
 from orbit.agent.external.mcp_host import McpHost
 from orbit.agent.external.mcp_stdio import StdioConnector
 from orbit.agent.external.processes import process_alive
-from orbit.protocol import Event, Settings
+from orbit.protocol import DecideToolCall, Event, Settings, ToolCallDecided, ToolCallHeld
 from orbit.tracing import NoSpan
 from tests.agent_fakes import FakeHost, FakeTempDirs
 from tests.mcp_fakes import FakeConnector
@@ -60,13 +62,17 @@ class Answering:
 
 
 class Recorded:
-    """Notes what's published."""
+    """Notes what's published, and how many times it was saved."""
 
     def __init__(self) -> None:
         self.events: list[Event] = []
+        self.saves = 0
 
     async def __call__(self, event: Event) -> None:
         self.events.append(event)
+
+    async def saved(self) -> None:
+        self.saves += 1
 
 
 def desk_with(
@@ -135,6 +141,34 @@ async def test_each_agent_lists_and_calls_the_tools_its_role_allows(tmp_path: Pa
     assert (text(issue), issue.is_error) == ("Issue 7: it's broken.", False)
     assert hidden.is_error and text(hidden) == "roles.coder doesn't allow github__oops."
     assert refused.is_error and text(refused) == "roles.reviewer doesn't allow github__get_issue."
+
+
+async def test_a_call_held_for_approval_reaches_the_stand_in_only_once_allowed(
+    tmp_path: Path,
+) -> None:
+    posted: list[Event] = []
+    approvals = ToolCallApprovals(posted.append, Recorded().saved)
+    approvals.viewers(1)
+    plain = desk_with(McpHost(), StdioConnector(), tmp_path / "mcp")
+    mcp = plain.agents.mcp
+    assert mcp is not None
+    github = mcp.servers["github"].model_copy(update={"approve": ("get_issue",)})
+    proxying = replace(mcp, servers={**mcp.servers, "github": github})
+    desk = AgentDesk(replace(plain.agents, mcp=proxying), Recorded(), tool_calls=approvals)
+    coder = desk.open(Answering(), "coder", "1")
+    url = await desk.url()
+    try:
+        async with connected(url, coder.token) as client:
+            calling = asyncio.ensure_future(client.call_tool("github__get_issue", {"number": 7}))
+            await eventually(lambda: approvals.waiting)
+            whoami = await client.call_tool("github__whoami", {})
+            approvals.decide(DecideToolCall(call=1, decision="allow"))
+            issue = await asyncio.wait_for(calling, 5)
+    finally:
+        await desk.stop()
+    assert approvals.waiting == () and not whoami.is_error
+    assert [type(event) for event in posted] == [ToolCallHeld, ToolCallDecided]
+    assert (text(issue), issue.is_error) == ("Issue 7: it's broken.", False)
 
 
 async def test_a_shared_server_runs_in_the_state_directory_and_an_unshared_one_in_the_agents(

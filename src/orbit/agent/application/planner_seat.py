@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from functools import partial
 
 from orbit.agent.application.closing import close_all
+from orbit.agent.application.consult_approvals import Timer
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import TurnSlot
 from orbit.agent.application.outbox import EventSink
@@ -104,19 +105,6 @@ class WaitingTurn:
     placed: Callable[[int], None] = _unplaced
     links: tuple[Span, ...] = ()
     root: bool = False
-
-
-def loop_time() -> float:
-    """The running loop's clock."""
-    return asyncio.get_running_loop().time()
-
-
-@dataclass(frozen=True)
-class Timer:
-    """A ``clock``, in seconds, and what ``sleep``s for so many of them."""
-
-    clock: Callable[[], float] = loop_time
-    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
 
 
 @dataclass(frozen=True)

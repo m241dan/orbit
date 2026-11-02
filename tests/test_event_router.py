@@ -4,8 +4,11 @@ from datetime import UTC, datetime
 from unittest.mock import Mock
 
 from orbit.protocol import (
+    PLANNER,
     STORAGE_FAILED,
     AgentsChanged,
+    ApprovalDecided,
+    ApprovalRequested,
     Catalog,
     CommandRefused,
     ConsultationAnswered,
@@ -21,6 +24,8 @@ from orbit.protocol import (
     ReportSummary,
     SessionStateChanged,
     StepState,
+    ToolCallDecided,
+    ToolCallHeld,
     TriggerEntry,
     Usage,
     UsageTotal,
@@ -210,6 +215,34 @@ def test_consultations_reach_the_feed() -> None:
 
     assert routed(asked) == [*TRACKED, "feed.render"]
     assert routed(answered) == [*TRACKED, "feed.render"]
+
+
+CONSULTATION = ApprovalRequested(
+    consultation=7, asker=PLANNER, consultant="experimenter", title="Check X", asked=6
+)
+CALL = ToolCallHeld(
+    call=3,
+    agent_id="agent-1",
+    role="coder",
+    server="github",
+    tool="github__create_issue",
+    arguments={"title": "Flaky test"},
+)
+
+
+def test_consultations_and_calls_held_and_settled_reach_the_approvals() -> None:
+    assert routed(CONSULTATION) == [*TRACKED, "approvals.show"]
+    assert routed(CALL) == [*TRACKED, "approvals.show"]
+    assert routed(ApprovalDecided(consultation=7, decision="deny")) == [
+        *TRACKED,
+        "approvals.settle",
+    ]
+    assert routed(ToolCallDecided(call=3, decision="withdrawn")) == [*TRACKED, "approvals.settle"]
+
+
+def test_a_snapshot_asks_about_the_consultations_then_the_calls_held() -> None:
+    snapshot = SNAPSHOT.model_copy(update={"approvals": (CONSULTATION,), "tool_calls": (CALL,)})
+    calls_of(snapshot).approvals.follow.assert_called_once_with((CONSULTATION, CALL))
 
 
 def test_reports_reach_the_reports_list() -> None:

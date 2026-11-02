@@ -828,6 +828,7 @@
               "cancel_turn": "#/$defs/CancelTurn",
               "decide_approval": "#/$defs/DecideApproval",
               "decide_proposal": "#/$defs/DecideProposal",
+              "decide_tool_call": "#/$defs/DecideToolCall",
               "delete_report": "#/$defs/DeleteReport",
               "delete_session": "#/$defs/DeleteSession",
               "edit_task": "#/$defs/EditTask",
@@ -894,6 +895,9 @@
             },
             {
               "$ref": "#/$defs/DecideApproval"
+            },
+            {
+              "$ref": "#/$defs/DecideToolCall"
             },
             {
               "$ref": "#/$defs/Attach"
@@ -1217,6 +1221,37 @@
       "title": "DecideProposal",
       "type": "object"
     },
+    "DecideToolCall": {
+      "description": "The user's ``decision`` on the agent's call ``call`` to an MCP tool, held for approval as\n``ToolCallHeld`` said. The first decision applies; refused with ``unknown`` once it's decided,\nor for a call that isn't held.",
+      "properties": {
+        "call": {
+          "minimum": 1,
+          "title": "Call",
+          "type": "integer"
+        },
+        "decision": {
+          "enum": [
+            "allow",
+            "deny"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "type": {
+          "const": "decide_tool_call",
+          "default": "decide_tool_call",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "call",
+        "decision",
+        "type"
+      ],
+      "title": "DecideToolCall",
+      "type": "object"
+    },
     "DeleteReport": {
       "description": "Delete the workspace's report ``id``; reports are deleted only so, by the user. Refused\nwith ``unknown`` for a report there's none of.",
       "properties": {
@@ -1492,7 +1527,9 @@
               "task_merged": "#/$defs/TaskMerged",
               "task_started": "#/$defs/TaskStarted",
               "tasks_changed": "#/$defs/TasksChanged",
+              "tool_call_decided": "#/$defs/ToolCallDecided",
               "tool_call_finished": "#/$defs/ToolCallFinished",
+              "tool_call_held": "#/$defs/ToolCallHeld",
               "tool_call_started": "#/$defs/ToolCallStarted",
               "turn_finished": "#/$defs/TurnFinished",
               "turn_started": "#/$defs/TurnStarted",
@@ -1606,6 +1643,12 @@
             },
             {
               "$ref": "#/$defs/ApprovalDecided"
+            },
+            {
+              "$ref": "#/$defs/ToolCallHeld"
+            },
+            {
+              "$ref": "#/$defs/ToolCallDecided"
             },
             {
               "$ref": "#/$defs/LogGap"
@@ -3116,7 +3159,7 @@
       "type": "object"
     },
     "Snapshot": {
-      "description": "The session a connection views as it stands, sent in answer to ``Attach`` and after every\nswitch; its envelope's ``seq`` is the point it's current to.\n\nIt holds the ``session``'s summary, its ``settings`` (the planner's), each conversational role's\nsettings by role (``role_settings``, the planner's among them) and the planner's\n``model_choices``, with the id each resolves to (``model_ids``, by alias), whether each lane\nis ``busy``, its ``tasks``, the verification ``steps``, the ``steps_title`` they show\nunder and the ``steps_output`` of a named set's failed run, as ``VerificationChanged`` has\nthem, the ``review`` status (none when reviews are off), the checks ``proposals``\nwaiting for a decision, the ``agents`` running, the consultations held for ``approvals``, the\n``transcript``: the session's last logged\nevents, at most 500, oldest first, in the envelopes they were sent in, and, while the session is\nhalted because storage failed, ``storage_halt``: why, and how to resume; ``read_only`` says\nanother orbit owns the repository, so the work this one is asked to run waits, and\n``ownership_offered`` that the repository is offered, as ``OwnershipOffered`` said, until the\noffer is settled. ``active`` says whether the session is the workspace's open one, which runs\nwork; one that isn't is a read-only view, from its saved record and its last logged events.\n``open_session`` names the workspace's open session, and ``viewers`` counts the connections\nviewing this one. ``role_spent`` is what the session spent by role, and ``caused_spent`` what\neach role caused its consultants to spend, by asker then consultant. ``merge_holds`` are the\nnamed sets holding merges into the user's branch, and ``waiting_to_merge`` the ids of the\ntasks whose verified work waits in the coder's tree for them to lift, in the order it lands.",
+      "description": "The session a connection views as it stands, sent in answer to ``Attach`` and after every\nswitch; its envelope's ``seq`` is the point it's current to.\n\nIt holds the ``session``'s summary, its ``settings`` (the planner's), each conversational role's\nsettings by role (``role_settings``, the planner's among them) and the planner's\n``model_choices``, with the id each resolves to (``model_ids``, by alias), whether each lane\nis ``busy``, its ``tasks``, the verification ``steps``, the ``steps_title`` they show\nunder and the ``steps_output`` of a named set's failed run, as ``VerificationChanged`` has\nthem, the ``review`` status (none when reviews are off), the checks ``proposals``\nwaiting for a decision, the ``agents`` running, the consultations held for ``approvals``, the\nagents' calls to MCP tools held for approval (``tool_calls``), the ``transcript``: the\nsession's last logged events, at most 500, oldest first, in the envelopes they were sent in,\nand, while the session is halted because storage failed, ``storage_halt``: why, and how to\nresume; ``read_only`` says another orbit owns the repository, so the work this one is asked\nto run waits, and\n``ownership_offered`` that the repository is offered, as ``OwnershipOffered`` said, until the\noffer is settled. ``active`` says whether the session is the workspace's open one, which runs\nwork; one that isn't is a read-only view, from its saved record and its last logged events.\n``open_session`` names the workspace's open session, and ``viewers`` counts the connections\nviewing this one. ``role_spent`` is what the session spent by role, and ``caused_spent`` what\neach role caused its consultants to spend, by asker then consultant. ``merge_holds`` are the\nnamed sets holding merges into the user's branch, and ``waiting_to_merge`` the ids of the\ntasks whose verified work waits in the coder's tree for them to lift, in the order it lands.",
       "properties": {
         "active": {
           "default": true,
@@ -3269,6 +3312,14 @@
             "$ref": "#/$defs/TaskState"
           },
           "title": "Tasks",
+          "type": "array"
+        },
+        "tool_calls": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ToolCallHeld"
+          },
+          "title": "Tool Calls",
           "type": "array"
         },
         "transcript": {
@@ -3682,6 +3733,39 @@
       "title": "TasksChanged",
       "type": "object"
     },
+    "ToolCallDecided": {
+      "description": "The agent's call ``call``, held for approval, was settled with ``decision``; a frontend\nstill asking about it stops.",
+      "properties": {
+        "call": {
+          "minimum": 1,
+          "title": "Call",
+          "type": "integer"
+        },
+        "decision": {
+          "enum": [
+            "allowed",
+            "declined",
+            "expired",
+            "withdrawn"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "type": {
+          "const": "tool_call_decided",
+          "default": "tool_call_decided",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "call",
+        "decision",
+        "type"
+      ],
+      "title": "ToolCallDecided",
+      "type": "object"
+    },
     "ToolCallFinished": {
       "properties": {
         "agent_id": {
@@ -3727,6 +3811,54 @@
         "type"
       ],
       "title": "ToolCallFinished",
+      "type": "object"
+    },
+    "ToolCallHeld": {
+      "description": "Agent ``agent_id``, in the role ``role``, called the tool ``tool``, by orbit's name for it,\nof the MCP server ``server``, with ``arguments``: the server's ``approve`` holds the call\nuntil the user answers with ``DecideToolCall``, or it expires, declined, after an hour with no\nfrontend connected. ``call`` numbers it in the session, from 1.",
+      "properties": {
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "arguments": {
+          "additionalProperties": true,
+          "title": "Arguments",
+          "type": "object"
+        },
+        "call": {
+          "minimum": 1,
+          "title": "Call",
+          "type": "integer"
+        },
+        "role": {
+          "title": "Role",
+          "type": "string"
+        },
+        "server": {
+          "title": "Server",
+          "type": "string"
+        },
+        "tool": {
+          "title": "Tool",
+          "type": "string"
+        },
+        "type": {
+          "const": "tool_call_held",
+          "default": "tool_call_held",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "call",
+        "agent_id",
+        "role",
+        "server",
+        "tool",
+        "arguments",
+        "type"
+      ],
+      "title": "ToolCallHeld",
       "type": "object"
     },
     "ToolCallStarted": {

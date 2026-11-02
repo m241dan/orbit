@@ -145,6 +145,21 @@ class DecideApproval(_Message):
     decision: ApprovalDecision
 
 
+ToolCallAnswer = Literal["allow", "deny"]
+"""What the user made of an agent's call to an MCP tool held for their approval: let it run, or
+decline it."""
+
+
+class DecideToolCall(_Message):
+    """The user's ``decision`` on the agent's call ``call`` to an MCP tool, held for approval as
+    ``ToolCallHeld`` said. The first decision applies; refused with ``unknown`` once it's decided,
+    or for a call that isn't held."""
+
+    type: Literal["decide_tool_call"] = "decide_tool_call"
+    call: int = Field(ge=1)
+    decision: ToolCallAnswer
+
+
 class Attach(_Message):
     """View the session ``session`` of the workspace ``workspace``: the connection gets its
     ``Snapshot``, then its events from then on, in place of those of the session it viewed. A
@@ -344,6 +359,7 @@ Command = Annotated[
     | CancelAgent
     | DecideProposal
     | DecideApproval
+    | DecideToolCall
     | Attach
     | ActivateSession
     | NewSession

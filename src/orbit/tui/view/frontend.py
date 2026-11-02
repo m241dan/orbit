@@ -24,6 +24,7 @@ from orbit.protocol import (
     Command,
     DecideApproval,
     DecideProposal,
+    DecideToolCall,
     EditTask,
     ErrorOccurred,
     Event,
@@ -438,9 +439,13 @@ class Frontend:
         with action("decide_proposal"):
             await self._show_and_send(shown, proposal.agent_id, decision, Awaited(code=undecide))
 
-    async def decide_approval(self, decision: DecideApproval) -> None:
-        """Send the user's ``decision`` on a consultation held for approval."""
-        await self._act("decide_approval", decision)
+    async def decide_approval(self, decision: DecideApproval | DecideToolCall) -> None:
+        """Send the user's ``decision`` on a consultation, or an agent's call, held for
+        approval."""
+        name: ActionName = (
+            "decide_tool_call" if isinstance(decision, DecideToolCall) else "decide_approval"
+        )
+        await self._act(name, decision)
 
     # Moving between windows, which only applies with nothing focused.
 

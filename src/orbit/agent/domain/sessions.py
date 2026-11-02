@@ -48,7 +48,7 @@ from orbit.protocol import (
     levels_of_tool_access,
 )
 
-FORMAT_VERSION = 28
+FORMAT_VERSION = 29
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _OLD_SUPER_REVIEW_ORIGIN = "super_review"
@@ -334,7 +334,8 @@ def _leveled(settings: object) -> object:
 # reviews, which an older record's reviews, of commits or the codebase, review none of.
 # Version 28 added the workspace level and web access of each setting, in place of the tool
 # access it keeps for older peers: its migration gives each the level and web access its tool
-# access maps to.
+# access maps to. Version 29 added the number of the last agent's call held for approval, which
+# an older record held none of.
 _MIGRATIONS: dict[int, Migration] = {
     1: _spent_by_tasks,
     2: _without_rounds,
@@ -363,6 +364,7 @@ _MIGRATIONS: dict[int, Migration] = {
     25: _old_reviews_cancelled,
     26: _unchanged,
     27: _levels_from_tool_access,
+    28: _unchanged,
 }
 
 EMPTY_NAME = "A session needs a name."
@@ -422,7 +424,8 @@ class SessionRecord(BaseModel):
     uses, by role (``role_settings``), the planner's for new tasks too, each one's conversation
     (``conversations``), the copies those working in one work in (``copies``), the consultations
     pending (``consultations``) and the number of the last asked
-    (``last_consultation``), the ``planner_notes`` the planner is still to hear, its
+    (``last_consultation``), the number of the last agent's call held for approval
+    (``last_tool_call``), the ``planner_notes`` the planner is still to hear, its
     ``tasks``, the work of theirs ``waiting`` in the coder's tree for merges to resume, in the
     order it lands, and, when reviews are on, its ``reviews``' state, and what its agents have
     ``spent`` in all, the planner and tasks since removed included: by role (``role_spent``),
@@ -441,6 +444,7 @@ class SessionRecord(BaseModel):
     copies: dict[str, SavedCopy] = Field(default={})
     consultations: tuple[SavedConsultation, ...] = ()
     last_consultation: int = Field(default=0, ge=0)
+    last_tool_call: int = Field(default=0, ge=0)
     planner_notes: tuple[str, ...] = ()
     tasks: tuple[TaskState, ...] = ()
     waiting: tuple[SavedWaiting, ...] = ()

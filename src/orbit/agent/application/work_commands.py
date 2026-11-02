@@ -19,6 +19,7 @@ from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.startup_check import AGENT_ID as STARTUP_AGENT
 from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.tasks import Tasks
+from orbit.agent.application.tool_call_approvals import ToolCallApprovals
 from orbit.agent.application.work_turns import WorkTurns
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import TaskBoard
@@ -41,6 +42,7 @@ from orbit.protocol import (
     CancelTurn,
     DecideApproval,
     DecideProposal,
+    DecideToolCall,
     EditTask,
     ErrorOccurred,
     FireTrigger,
@@ -73,6 +75,7 @@ WorkCommand = (
     | CancelAgent
     | DecideProposal
     | DecideApproval
+    | DecideToolCall
 )
 
 QueuedWork = RunTasks | FireTrigger | ReleaseHold
@@ -85,7 +88,8 @@ class CommandParts:
     into, its ``tasks``, its conversational roles' ``seats``, the work lane's ``turns``, its
     review ``lane``, if any, the ``proposals`` waiting for the user, the ``desk`` running its
     agents and the ``startup`` check, if any; ``save`` saves the session and ``reviews_changed``
-    saves its review state; the session's ``gate`` says whether another orbit owns the
+    saves its review state; the agents' calls held for approval are in ``tool_calls``; the
+    session's ``gate`` says whether another orbit owns the
     repository; its ``lanes`` are the lanes work runs in, by name; the named ``sets``' runs,
     if any, are cancelled as agents are; and the ``holds`` on merges, if any, are released by
     hand."""
@@ -101,6 +105,7 @@ class CommandParts:
     startup: StartupCheck | None
     save: Callable[[], Awaitable[None]]
     reviews_changed: Callable[[], Awaitable[None]]
+    tool_calls: ToolCallApprovals
     gate: SessionGate = OPEN_GATE
     lanes: Lanes = field(default_factory=Lanes)
     sets: SetRuns | None = None
@@ -197,7 +202,13 @@ class WorkCommands:
 
     async def _dispatch(self, command: WorkCommand, command_id: str) -> None:
         match command:
-            case SendMessage() | CancelTurn() | UpdateSettings() | DecideApproval():
+            case (
+                SendMessage()
+                | CancelTurn()
+                | UpdateSettings()
+                | DecideApproval()
+                | DecideToolCall()
+            ):
                 await self._handle_prompts(command, command_id)
             case AddTask() | RunTasks() | ReleaseHold():
                 await self._handle_tasks(command)
@@ -210,12 +221,12 @@ class WorkCommands:
 
     async def _handle_prompts(
         self,
-        command: SendMessage | CancelTurn | UpdateSettings | DecideApproval,
+        command: SendMessage | CancelTurn | UpdateSettings | DecideApproval | DecideToolCall,
         command_id: str,
     ) -> None:
         match command:
-            case DecideApproval():
-                await self._parts.seats.decide(command)
+            case DecideApproval() | DecideToolCall():
+                await self._decide_held(command)
             case SendMessage():
                 await self._send_message(command, command_id)
             case CancelTurn(lane=lane):
@@ -224,6 +235,14 @@ class WorkCommands:
                 await self._update_settings(settings, role)
             case _:
                 assert_never(command)
+
+    async def _decide_held(self, command: DecideApproval | DecideToolCall) -> None:
+        """Settle the consultation, or the agent's call, held for approval that ``command``
+        decides on; refused for one that isn't held."""
+        if isinstance(command, DecideToolCall):
+            self._parts.tool_calls.decide(command)
+        else:
+            await self._parts.seats.decide(command)
 
     async def _update_settings(self, settings: Settings, role: str) -> None:
         """Have the conversational role ``role`` use ``settings``, publishing them, then save;

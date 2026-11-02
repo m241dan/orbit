@@ -14,11 +14,17 @@ is discarded, so the next call starts it afresh; the first
 failure of a streak publishes a notice, and a call it answers ends the streak. Each proxied call
 is traced in an ``orbit.mcp.call`` span, linked to the calling agent's span, with the server,
 orbit's name for the tool and the outcome, never the arguments or the result.
+
+A call to a tool whose server's ``approve`` names it, or is ``true``, is held for the user's
+approval before it goes upstream: allowed, it runs; declined, or expired, the agent is told the
+user declined it; withdrawn as the agent's run ends, it's stopped. Its span records how it was
+settled and how long it was held.
 """
 
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import PurePath
 from typing import Any, Literal
 
@@ -33,6 +39,7 @@ from orbit.agent.application.ports import (
     UpstreamFailed,
     UpstreamSession,
 )
+from orbit.agent.application.tool_call_approvals import Ruling, ToolCall, ToolCallApprovals
 from orbit.agent.domain.mcp_proxy import (
     SEPARATOR,
     FailureReason,
@@ -42,11 +49,13 @@ from orbit.agent.domain.mcp_proxy import (
     UnsetVariable,
     UpstreamTool,
     call_failure,
+    declined,
     failure_notice,
     filled_server,
     find_proxied,
     grant_for,
     missing_tool_notices,
+    needs_approval,
     proxied_tools,
     refusal,
     server_variables,
@@ -56,19 +65,22 @@ from orbit.agent.domain.refusals import failed_to
 from orbit.agent.domain.roles import Role, ServerGrant
 from orbit.execution.background import Background
 from orbit.execution.cancelling import stop_all
-from orbit.protocol import INTERNAL, ErrorOccurred, Notice
+from orbit.protocol import INTERNAL, ErrorOccurred, Notice, ToolCallDecision
 from orbit.tracing import NoTelemetry, Span, Telemetry, no_span
 
 CALL_SPAN = "orbit.mcp.call"
 SERVER = "orbit.mcp.server"
 TOOL = "orbit.mcp.tool"
 OUTCOME = "orbit.mcp.outcome"
+APPROVAL = "orbit.mcp.approval"
+APPROVAL_WAIT = "orbit.mcp.approval_wait_ms"
 REFUSED = "orbit.mcp.refused"
 """The event recorded on an agent's span when a call it makes to a proxied tool is refused."""
 
-type Outcome = Literal["ok", "tool_error", "failed", "refused", "stopped"]
+type Outcome = Literal["ok", "tool_error", "failed", "refused", "declined", "stopped"]
 """How a proxied call came out: answered, answered with the tool's error, failed by the server,
-refused, or stopped before it was answered."""
+refused, declined by the user or expired waiting for them, or stopped before it was
+answered."""
 
 STOPPED = Reply("Orbit stopped this call: the agent's run ended or orbit is closing.", True)
 CLOSING = "orbit is closing"
@@ -142,10 +154,23 @@ class _Opened:
     connection: _Connection
 
 
+@dataclass(frozen=True)
+class _Found:
+    """The proxied ``tool`` called, offered on ``opened``."""
+
+    opened: _Opened
+    tool: ProxiedTool
+
+
+type _Answered = tuple[Reply, Outcome]
+"""A call's answer, and how it came out."""
+
+
 class ToolProxy:
     """Proxies the MCP servers of ``proxying`` to the agents whose roles, among those ``roles``
-    gives as they stand, allow them, publishing notices with ``publish`` and tracing calls with
-    ``telemetry``."""
+    gives as they stand, allow them, publishing notices with ``publish``, tracing calls with
+    ``telemetry`` and holding those that need it for the user's approval in ``approvals``;
+    without them, those calls are declined."""
 
     def __init__(
         self,
@@ -153,11 +178,13 @@ class ToolProxy:
         roles: Callable[[], Mapping[str, Role]],
         publish: Publish,
         telemetry: Telemetry = _NO_TELEMETRY,
+        approvals: ToolCallApprovals | None = None,
     ) -> None:
         self._proxying = proxying
         self._roles = roles
         self._publish = publish
         self._telemetry = telemetry
+        self._approvals = approvals
         self._links: dict[_Key, _Link] = {}
         self._calls: dict[str, set[asyncio.Task[Reply]]] = {}  # In flight, by agent.
         self._closing: set[asyncio.Task[None]] = set()  # Connections being closed.
@@ -224,7 +251,7 @@ class ToolProxy:
         attributes = {SERVER: server, TOOL: name}
         with self._telemetry.span(CALL_SPAN, attributes, links=[caller.span]) as span:
             try:
-                reply, outcome = await self._answer(caller, grant, name, arguments)
+                reply, outcome = await self._answer(caller, grant, name, arguments, span)
             except asyncio.CancelledError:
                 span.set_attributes({OUTCOME: "stopped"})
                 raise
@@ -234,10 +261,26 @@ class ToolProxy:
             return reply
 
     async def _answer(
-        self, caller: Caller, grant: ServerGrant, name: str, arguments: dict[str, Any]
-    ) -> tuple[Reply, Outcome]:
+        self, caller: Caller, grant: ServerGrant, name: str, arguments: dict[str, Any], span: Span
+    ) -> _Answered:
         """The answer to ``caller``'s call to ``name`` on the server ``grant`` allows it, and how
-        it came out."""
+        it came out, held first for the user's approval if it needs it, which ``span``
+        records."""
+        found = await self._found(caller, grant, name)
+        if not isinstance(found, _Found):
+            return found
+        if not needs_approval(self._proxying.servers[grant.server], found.tool.tool.name):
+            return await self._run(found.opened, found.tool, arguments)
+        if await self._held(caller, found.tool, arguments, span) != "allowed":
+            return Reply(declined(name), is_error=True), "declined"
+        again = await self._found(caller, grant, name)  # The connection may have closed meanwhile.
+        if not isinstance(again, _Found):
+            return again
+        return await self._run(again.opened, again.tool, arguments)
+
+    async def _found(self, caller: Caller, grant: ServerGrant, name: str) -> _Found | _Answered:
+        """The tool ``name`` that ``caller`` calls on the server ``grant`` allows it, on its
+        connection, or the answer saying why it can't be called."""
         server = grant.server
         opened = await self._opened(caller, server)
         if isinstance(opened, _Failure):
@@ -245,11 +288,27 @@ class ToolProxy:
         tool = find_proxied(proxied_tools(server, grant, opened.connection.tools), name)
         if tool is None:
             return self._refuse(caller, name), "refused"
-        return await self._run(opened, tool, arguments)
+        return _Found(opened, tool)
+
+    async def _held(
+        self, caller: Caller, tool: ProxiedTool, arguments: dict[str, Any], span: Span
+    ) -> ToolCallDecision:
+        """How ``caller``'s call to ``tool`` with ``arguments``, held for the user's approval,
+        was settled, recorded on ``span``; declined at once without approvals to hold it in."""
+
+        def noted(ruling: Ruling) -> None:
+            wait = round(ruling.held / timedelta(milliseconds=1))
+            span.set_attributes({APPROVAL: ruling.decision, APPROVAL_WAIT: wait})
+
+        if self._approvals is None:
+            noted(Ruling("declined", timedelta(0)))
+            return "declined"
+        call = ToolCall(caller.agent_id, caller.role_name, tool.server, tool.name, arguments)
+        return await self._approvals.ask(call, noted)
 
     async def _run(
         self, opened: _Opened, tool: ProxiedTool, arguments: dict[str, Any]
-    ) -> tuple[Reply, Outcome]:
+    ) -> _Answered:
         """The server's answer to a call to ``tool`` with ``arguments`` on ``opened``, and how it
         came out; a failure discards the connection."""
         connection = opened.connection

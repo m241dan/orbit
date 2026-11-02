@@ -15,6 +15,7 @@ from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
 from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.tasks import Tasks
+from orbit.agent.application.tool_call_approvals import ToolCall, ToolCallApprovals
 from orbit.agent.application.work_commands import CommandParts, WorkCommand, WorkCommands
 from orbit.agent.application.work_turns import WorkParts, WorkTurns
 from orbit.agent.domain.board import TaskBoard
@@ -32,6 +33,7 @@ from orbit.protocol import (
     CancelAgent,
     CancelTurn,
     DecideProposal,
+    DecideToolCall,
     EditTask,
     ErrorOccurred,
     Event,
@@ -44,6 +46,7 @@ from orbit.protocol import (
     SettingsChanged,
     TasksChanged,
     TaskSpec,
+    ToolCallDecided,
     UpdateSettings,
 )
 from orbit.tracing import NoSpan, Span, current_span, use_span
@@ -52,6 +55,7 @@ from tests.agent_fakes import (
     desk_for,
     logged_with_traceback,
 )
+from tests.waiting import eventually
 
 COMMAND_ID = "c1"
 """The id every command is handled under."""
@@ -68,6 +72,10 @@ class Recorded:
     effects: list[Event | str] = field(default_factory=list)
     meanwhile: Callable[[], None] | None = None
     causes: list[Span] = field(default_factory=list)  # The span current as each run was asked.
+    tool_calls: ToolCallApprovals = field(init=False)  # The agents' calls held, publishing here.
+
+    def __post_init__(self) -> None:
+        self.tool_calls = ToolCallApprovals(self.put_nowait, self.save)
 
     async def put(self, event: Event) -> None:
         self.effects.append(event)
@@ -150,6 +158,7 @@ def commands_for(
         None,
         recorded.save,
         recorded.save_reviews,
+        recorded.tool_calls,
         SessionGate(read_only=read_only or (lambda: outcomes is not None)),
     )
     return WorkCommands(parts), tasks
@@ -195,6 +204,25 @@ async def test_a_message_without_a_planner_is_refused_and_not_published_as_sent(
     code, _ = await refusal(commands, SendMessage(text="hi", agent=PLANNER))
     assert code == NOT_CONFIGURED
     assert recorded.effects == [BusyChanged(busy=False, lane="planner")]
+
+
+async def test_a_decision_on_an_agents_call_held_settles_it() -> None:
+    recorded = Recorded()
+    commands, _ = commands_for(recorded)
+    call = ToolCall("agent-1", "coder", "github", "github__create_issue", {})
+    asked = asyncio.ensure_future(recorded.tool_calls.ask(call, lambda ruling: None))
+    await eventually(lambda: recorded.tool_calls.waiting)
+    await commands.handle(DecideToolCall(call=1, decision="allow"), COMMAND_ID)
+    assert await asked == "allowed"
+    assert recorded.effects[-1] == ToolCallDecided(call=1, decision="allowed")
+
+
+async def test_a_decision_on_a_call_not_held_is_refused_as_unknown() -> None:
+    commands, _ = commands_for(Recorded())
+    assert await refusal(commands, DecideToolCall(call=4, decision="deny")) == (
+        UNKNOWN,
+        "No tool call 4 is waiting for approval.",
+    )
 
 
 async def test_cancelling_an_unknown_lane_is_refused() -> None:

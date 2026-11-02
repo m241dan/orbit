@@ -52,6 +52,7 @@ from orbit.protocol import (
     Snapshot,
     StepState,
     TaskState,
+    ToolCallHeld,
     Usage,
 )
 
@@ -89,6 +90,7 @@ class SessionParts(TypedDict):
     proposals: tuple[ChecksProposed, ...]
     agents: tuple[RunningAgent, ...]
     approvals: NotRequired[tuple[ApprovalRequested, ...]]
+    tool_calls: NotRequired[tuple[ToolCallHeld, ...]]
     transcript: tuple[EventEnvelope, ...]
     active: NotRequired[bool]
     viewers: int

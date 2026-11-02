@@ -13,6 +13,7 @@ from orbit.agent.application.planner_seat import SeatHooks
 from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.switcher import SessionSwitcher, SwitchParts
 from orbit.agent.application.tasks import Tasks
+from orbit.agent.application.tool_call_approvals import ToolCall, ToolCallApprovals
 from orbit.agent.domain.activity import TASKS_RUNNING, Activity
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.refusals import Refused
@@ -32,12 +33,14 @@ from orbit.protocol import (
     Snapshot,
     TaskSpec,
     TaskState,
+    ToolCallDecided,
     Usage,
     WorkspaceEntry,
 )
 from tests.agent_fakes import FakeHalt, FakeStore, Ticks
 from tests.connection_helpers import emptied
 from tests.session_builders import on_claude
+from tests.waiting import eventually
 
 EARLIER = datetime(2026, 10, 15, 9, 0, tzinfo=UTC)
 REVIEWS = LaneSnapshot(planner=PlannerSnapshot(paused=True))
@@ -54,6 +57,8 @@ class Held:
         self.switches: list[bool] = []
         self.snapshots: list[datetime | None] = []
         self.catalogs: list[tuple[SessionSummary, ...]] = []
+        self.decided: list[Event] = []
+        self.tool_calls = ToolCallApprovals(self.decided.append, nothing)
 
     @property
     def settings(self) -> Settings:
@@ -108,6 +113,7 @@ def switcher_for(
         held.entry,
         lambda entry: events.put(in_catalog(entry)),
         held.switches.append,
+        held.tool_calls,
     )
     held.owned = SessionSettings(held.owned.given, pinned)
     return SessionSwitcher(parts, held.owned, events, picking), events, tasks
@@ -299,6 +305,28 @@ async def test_once_the_user_stays_added_tasks_dont_carry_over() -> None:
     switcher.stay()
     await switcher.handle(ActivateSession(session="auth"))
     assert tasks.board.tasks == ()
+
+
+async def test_an_opened_session_numbers_its_agents_calls_on_from_its_own() -> None:
+    store = FakeStore()
+    store.saved = [saved(last_tool_call=5)]
+    held = Held(Settings())
+    switcher, _, _ = switcher_for(store, held)
+    await switcher.handle(ActivateSession(session="auth"))
+    assert switcher.contents().last_tool_call == 5
+    await switcher.handle(NewSession(name="other"))
+    assert switcher.contents().last_tool_call == 0
+
+
+async def test_switching_declines_the_agents_calls_held() -> None:
+    held = Held(Settings())
+    switcher, _, _ = switcher_for(FakeStore(), held)
+    call = ToolCall("agent-1", "coder", "github", "github__create_issue", {})
+    asked = asyncio.ensure_future(held.tool_calls.ask(call, lambda ruling: None))
+    await eventually(lambda: held.tool_calls.waiting)
+    await switcher.handle(NewSession(name="other"))
+    assert await asked == "declined"
+    assert held.decided[-1] == ToolCallDecided(call=1, decision="declined")
 
 
 async def test_contents_hold_the_board_and_settings() -> None:

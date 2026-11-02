@@ -443,6 +443,36 @@ class ApprovalDecided(_Message):
     decision: ApprovalDecision
 
 
+ToolCallDecision = Literal["allowed", "declined", "expired", "withdrawn"]
+"""How an agent's call held for approval was settled: the user allowed or declined it, it
+expired, declined, with no frontend connected for an hour, or it was withdrawn as the agent's
+run ended."""
+
+
+class ToolCallHeld(_Message):
+    """Agent ``agent_id``, in the role ``role``, called the tool ``tool``, by orbit's name for it,
+    of the MCP server ``server``, with ``arguments``: the server's ``approve`` holds the call
+    until the user answers with ``DecideToolCall``, or it expires, declined, after an hour with no
+    frontend connected. ``call`` numbers it in the session, from 1."""
+
+    type: Literal["tool_call_held"] = "tool_call_held"
+    call: int = Field(ge=1)
+    agent_id: str
+    role: str
+    server: str
+    tool: str
+    arguments: dict[str, Any]
+
+
+class ToolCallDecided(_Message):
+    """The agent's call ``call``, held for approval, was settled with ``decision``; a frontend
+    still asking about it stops."""
+
+    type: Literal["tool_call_decided"] = "tool_call_decided"
+    call: int = Field(ge=1)
+    decision: ToolCallDecision
+
+
 class OpenRequest(_Message):
     """A call ``request_id`` to orbit's ``tool`` that an agent made and orbit hasn't answered."""
 
@@ -474,10 +504,11 @@ class Snapshot(_Message):
     under and the ``steps_output`` of a named set's failed run, as ``VerificationChanged`` has
     them, the ``review`` status (none when reviews are off), the checks ``proposals``
     waiting for a decision, the ``agents`` running, the consultations held for ``approvals``, the
-    ``transcript``: the session's last logged
-    events, at most 500, oldest first, in the envelopes they were sent in, and, while the session is
-    halted because storage failed, ``storage_halt``: why, and how to resume; ``read_only`` says
-    another orbit owns the repository, so the work this one is asked to run waits, and
+    agents' calls to MCP tools held for approval (``tool_calls``), the ``transcript``: the
+    session's last logged events, at most 500, oldest first, in the envelopes they were sent in,
+    and, while the session is halted because storage failed, ``storage_halt``: why, and how to
+    resume; ``read_only`` says another orbit owns the repository, so the work this one is asked
+    to run waits, and
     ``ownership_offered`` that the repository is offered, as ``OwnershipOffered`` said, until the
     offer is settled. ``active`` says whether the session is the workspace's open one, which runs
     work; one that isn't is a read-only view, from its saved record and its last logged events.
@@ -503,6 +534,7 @@ class Snapshot(_Message):
     proposals: tuple[ChecksProposed, ...]
     agents: tuple[RunningAgent, ...]
     approvals: tuple[ApprovalRequested, ...] = ()
+    tool_calls: tuple[ToolCallHeld, ...] = ()
     transcript: tuple[EventEnvelope, ...] = ()
     storage_halt: str | None = None
     read_only: bool = False
@@ -877,6 +909,8 @@ Event = Annotated[
     | ConsultationAnswered
     | ApprovalRequested
     | ApprovalDecided
+    | ToolCallHeld
+    | ToolCallDecided
     | LogGap
     | OwnershipOffered
     | OwnershipTaken

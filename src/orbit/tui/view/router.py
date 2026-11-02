@@ -37,6 +37,8 @@ from orbit.protocol import (
     StepState,
     TasksChanged,
     TaskState,
+    ToolCallDecided,
+    ToolCallHeld,
     TriggerEntry,
     Usage,
     UsageChanged,
@@ -44,6 +46,7 @@ from orbit.protocol import (
     VerificationChanged,
     WorkspaceCloning,
 )
+from orbit.tui.view.approvals import HeldDecision, HeldRequest
 from orbit.tui.view.commands import CommandDesk
 from orbit.tui.view.events import (
     ANSWER_EVENTS,
@@ -173,13 +176,14 @@ class Proposals(Protocol):
 
 
 class Approvals(Protocol):
-    """The consultations held for the user's approval, as the router follows them."""
+    """The consultations and the agents' calls held for the user's approval, as the router
+    follows them."""
 
-    def show(self, request: ApprovalRequested) -> None: ...
+    def show(self, request: HeldRequest) -> None: ...
 
-    def settle(self, event: ApprovalDecided) -> None: ...
+    def settle(self, event: HeldDecision) -> None: ...
 
-    def follow(self, requests: tuple[ApprovalRequested, ...]) -> None: ...
+    def follow(self, requests: tuple[HeldRequest, ...]) -> None: ...
 
 
 class ModelChoices(Protocol):
@@ -392,7 +396,7 @@ class EventRouter:
         panes.verification.show(snapshot.steps, snapshot.steps_title, snapshot.steps_output)
         panes.agents.show_review(snapshot.review)
         handlers.proposals.follow(snapshot.proposals)
-        handlers.approvals.follow(snapshot.approvals)
+        handlers.approvals.follow((*snapshot.approvals, *snapshot.tool_calls))
         # Its tasks shown first, as the transcript's notes on them read them, and its usage
         # set after, as the transcript's turns count theirs.
         handlers.feed.replace(
@@ -428,14 +432,17 @@ class EventRouter:
                 | ReportShown()
                 | ApprovalRequested()
                 | ApprovalDecided()
+                | ToolCallHeld()
+                | ToolCallDecided()
             ):
                 self._follow_stream(event)
             case _:
                 self._show_progress(event)
 
-    def _follow_approval(self, event: ApprovalRequested | ApprovalDecided) -> None:
-        """Ask about a consultation held for approval, or stop asking once it's settled."""
-        if isinstance(event, ApprovalRequested):
+    def _follow_approval(self, event: ApprovalEvent) -> None:
+        """Ask about a consultation, or an agent's call, held for approval, or stop asking once
+        it's settled."""
+        if isinstance(event, ApprovalRequested | ToolCallHeld):
             self._handlers.approvals.show(event)
         else:
             self._handlers.approvals.settle(event)
@@ -452,14 +459,15 @@ class EventRouter:
     ) -> None:
         """Show the agents running across workspaces in the workspace picker, the server's
         directories in its explorer, the reports asked for in their list, and the consultations
-        held for approval in their modal; nothing shows what turns cost across them."""
+        and the agents' calls held for approval in their modal; nothing shows what turns cost
+        across them."""
         if isinstance(event, AgentsChanged):
             self._handlers.navigation.follow_agents(event)
         elif isinstance(event, DirectoryListing):
             self._handlers.navigation.follow_listing(event)
         elif isinstance(event, ReportsListed | ReportShown):
             self._handlers.reports.follow(event)
-        elif isinstance(event, ApprovalRequested | ApprovalDecided):
+        elif isinstance(event, ApprovalEvent):
             self._follow_approval(event)
 
     def _follow_agents(self, event: Event) -> None:

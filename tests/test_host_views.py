@@ -46,6 +46,7 @@ from orbit.protocol import (
     Snapshot,
     StepState,
     TaskSpec,
+    ToolCallHeld,
     Usage,
     VerificationChanged,
     WorkspaceEntry,
@@ -62,6 +63,14 @@ STARTUP_AGENT = RunningAgent(agent_id="startup", role="startup", task_id="startu
 CODER_AGENT = RunningAgent(agent_id="agent-1", role=CODER, task_id="1")
 APPROVAL = ApprovalRequested(
     consultation=1, asker=PLANNER, consultant=EXPERIMENTER, title="Try it.", asked=6
+)
+CALL = ToolCallHeld(
+    call=1,
+    agent_id="agent-1",
+    role="coder",
+    server="github",
+    tool="github__create_issue",
+    arguments={"title": "Flaky test"},
 )
 OPEN_STATE = SessionStateChanged(session=OPEN, active=True, state="idle", viewers=2)
 
@@ -90,6 +99,13 @@ class FakeReviews:
 class FakeRunner:
     running: bool = False
     current: str | None = None
+
+
+@dataclass(frozen=True)
+class FakeHeldCalls:
+    """The agents' calls held for approval, ``waiting``."""
+
+    waiting: tuple[ToolCallHeld, ...] = ()
 
 
 @dataclass
@@ -188,6 +204,7 @@ class Held:
     read_only: bool = False
     managed: bool = False
     roster: FakeRoster | None = None
+    tool_calls: FakeHeldCalls = field(default_factory=lambda: FakeHeldCalls())
 
     def activity(self) -> Activity:
         """What's in progress now."""
@@ -225,6 +242,7 @@ class Held:
             self.desk,
             self.states,
             FakeViews(),
+            self.tool_calls,
         )
 
     def entry(self, *sessions: SessionSummary) -> WorkspaceEntry:
@@ -324,7 +342,10 @@ async def test_the_snapshot_shows_the_review_status_only_with_a_review_lane() ->
 
 
 async def test_the_snapshot_holds_the_open_sessions_own_parts() -> None:
-    held = Held(seats=FakeSeats(names=(PLANNER, EXPERIMENTER), approvals=(APPROVAL,)))
+    held = Held(
+        seats=FakeSeats(names=(PLANNER, EXPERIMENTER), approvals=(APPROVAL,)),
+        tool_calls=FakeHeldCalls((CALL,)),
+    )
     held.settings.update(Settings(model="sonnet"), EXPERIMENTER)
     held.board.add(TaskSpec(prompt="Add a flag.", settings=Settings()))
     snapshot = await held.snapshot()
@@ -332,6 +353,7 @@ async def test_the_snapshot_holds_the_open_sessions_own_parts() -> None:
     assert held.switcher.asked == [LAST_ACTIVE]
     assert snapshot.role_settings == {PLANNER: Settings(), EXPERIMENTER: Settings(model="sonnet")}
     assert (snapshot.tasks, snapshot.approvals) == (held.board.tasks, (APPROVAL,))
+    assert snapshot.tool_calls == (CALL,)
     assert (snapshot.proposals, snapshot.viewers) == ((), 2)
 
 

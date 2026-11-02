@@ -45,9 +45,10 @@ class Opened:
 class FakeSession:
     """A connection to a server offering ``tools``, started as ``opened`` says, playing the
     stand-in's tools: ``fail`` crashes it, ``slow`` waits until :attr:`release` is set, and
-    ``whoami`` answers with its directory, environment and headers. ``list_failure``, if given,
-    fails listing, and ``list_gate``, if given, holds it until set. Notes the calls made on it,
-    by the server's names, and whether it's closed."""
+    ``whoami`` answers with its directory, environment and headers; ``create_issue``, which only
+    a session offering it is called with, creates the issue its ``title`` names.
+    ``list_failure``, if given, fails listing, and ``list_gate``, if given, holds it until set.
+    Notes the calls made on it, by the server's names, and whether it's closed."""
 
     def __init__(
         self,
@@ -117,6 +118,8 @@ def _answer(name: str, arguments: dict[str, Any], opened: Opened) -> Reply:
         return Reply(json.dumps(seen))
     if name == "oops":
         return Reply("it went wrong", is_error=True)
+    if name == "create_issue":
+        return Reply(f"Created issue '{arguments.get('title')}'.")
     return Reply(f"no such tool {name}", is_error=True)
 
 

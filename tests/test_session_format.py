@@ -55,8 +55,8 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit these for a format change: they're what orbits at versions 1 to 28 wrote, and
-# they still need to read. A new version gets its own fixture (session-v29.json) and a
+# Never edit these for a format change: they're what orbits at versions 1 to 29 wrote, and
+# they still need to read. A new version gets its own fixture (session-v30.json) and a
 # migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
 SESSION_V2 = FIXTURES / "session-v2.json"
@@ -86,6 +86,7 @@ SESSION_V25 = FIXTURES / "session-v25.json"
 SESSION_V26 = FIXTURES / "session-v26.json"
 SESSION_V27 = FIXTURES / "session-v27.json"
 SESSION_V28 = FIXTURES / "session-v28.json"
+SESSION_V29 = FIXTURES / "session-v29.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -200,7 +201,7 @@ def expected(
     lane: LaneSnapshot | None = None,
 ) -> SessionRecord:
     return SessionRecord(
-        version=28,
+        version=29,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
@@ -750,14 +751,25 @@ def test_a_version_27_task_saved_without_settings_has_the_default_ones() -> None
     assert record.tasks[0].task.settings == Settings()
 
 
-def test_a_version_28_session_file_reads_as_its_record() -> None:
-    assert parse_record(SESSION_V28.read_text(encoding="utf-8")) == merging()
+def test_a_version_28_session_file_migrates_to_having_held_no_tool_calls() -> None:
+    record = parse_record(SESSION_V28.read_text(encoding="utf-8"))
+    assert record == merging()
+    assert isinstance(record, SessionRecord) and record.last_tool_call == 0
 
 
-def test_a_session_record_is_written_in_the_version_28_format() -> None:
-    written = json.loads(record_json(merging()))
-    golden = json.loads(SESSION_V28.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V28.name)
+def holding_calls() -> SessionRecord:
+    """The golden record as version 29 keeps it, having held three of its agents' calls."""
+    return merging().model_copy(update={"last_tool_call": 3})
+
+
+def test_a_version_29_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V29.read_text(encoding="utf-8")) == holding_calls()
+
+
+def test_a_session_record_is_written_in_the_version_29_format() -> None:
+    written = json.loads(record_json(holding_calls()))
+    golden = json.loads(SESSION_V29.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V29.name)
 
 
 def test_a_review_of_a_sets_report_reads_back_as_it_was_written() -> None:
@@ -770,7 +782,7 @@ def test_a_review_of_a_sets_report_reads_back_as_it_was_written() -> None:
 
 
 def test_a_record_with_work_waiting_of_no_commits_is_unreadable() -> None:
-    golden = json.loads(SESSION_V28.read_text(encoding="utf-8"))
+    golden = json.loads(SESSION_V29.read_text(encoding="utf-8"))
     golden["waiting"][0]["count"] = 0
     record = parse_record(json.dumps(golden))
     assert isinstance(record, Unreadable) and record.reason.startswith("waiting.0.count:")

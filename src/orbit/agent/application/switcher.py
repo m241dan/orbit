@@ -22,6 +22,7 @@ from orbit.agent.application.outbox import EventSink, Shown
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.tasks import Tasks
+from orbit.agent.application.tool_call_approvals import ToolCallApprovals
 from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.domain.activity import Activity, switch_refusal
 from orbit.agent.domain.board import interrupted
@@ -67,7 +68,8 @@ def _stopped(saved: Sequence[TaskState], now: Sequence[TaskState]) -> list[str]:
 class SwitchParts:
     """What a switch replaces the contents of: the ``keeper`` saving the session, its ``tasks``,
     its conversational roles' ``seats``, its review ``lane`` and ``work`` lane, if any, and the
-    ``activity`` now in progress there; the ``snapshot`` of the session
+    ``activity`` now in progress there; the agents' calls held for approval (``tool_calls``);
+    the ``snapshot`` of the session
     open, last active then, that follows a switch; the workspace's ``entry`` in the catalog,
     holding the sessions given, which ``broadcast`` sends every listening connection, in the
     catalog, whenever they change; and
@@ -84,6 +86,7 @@ class SwitchParts:
     entry: Callable[[tuple[SessionSummary, ...]], WorkspaceEntry]
     broadcast: Callable[[WorkspaceEntry], Awaitable[None]]
     switching: Callable[[bool], None]
+    tool_calls: ToolCallApprovals
 
 
 class SessionSwitcher:
@@ -200,6 +203,7 @@ class SessionSwitcher:
             copies=self._parts.seats.copies,
             consultations=self._parts.seats.consultations,
             last_consultation=self._parts.seats.last_consultation,
+            last_tool_call=self._parts.tool_calls.last,
             spend=self.spend,
         )
 
@@ -271,7 +275,8 @@ class SessionSwitcher:
         """Save the session with its consultations pending as interrupted by a switch, to
         answer as it opens again, while the switch is made; a switch refused or failing then
         leaves them to run on, answered, and saved as interrupted by a restart again, as does
-        one cancelled."""
+        one cancelled. The agents' calls held for approval are declined."""
+        self._parts.tool_calls.decline_all()
         self._parts.seats.leave()
         try:
             await self.save()
@@ -319,13 +324,16 @@ class SessionSwitcher:
     def _hold(self, tasks: tuple[TaskState, ...], record: SessionRecord | None) -> None:
         """Hold a session's ``tasks`` and what else its ``record`` holds, if it has one: its
         roles' conversations, reviews, the work waiting in the tree, the notes its planner is
-        still to hear, its roles' copies and its consultations pending; with no fix counts."""
+        still to hear, its roles' copies and its consultations pending, numbering its agents' calls
+        held for approval on from its own; with no fix counts."""
         parts = self._parts
         self._replace_board(tasks)
         self._hold_waiting(record.waiting if record else ())
         if record is None:
             parts.seats.replace({})
+            parts.tool_calls.replace(0)
         else:
+            parts.tool_calls.replace(record.last_tool_call)
             parts.seats.replace(
                 record.conversations,
                 record.planner_notes,

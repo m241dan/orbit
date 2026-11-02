@@ -179,7 +179,8 @@ class Contents:
     coder's tree for merges to resume, in the order it lands, its ``reviews``' state, if any, what
     its agents have ``spent`` in all, the ``planner_notes`` its planner is still to hear, the
     ``copies`` its conversational roles work in, by role, the ``consultations`` pending,
-    the number of the last asked (``last_consultation``), and what its agents spent by role
+    the number of the last asked (``last_consultation``), the number of the last of its agents'
+    calls held for approval (``last_tool_call``), and what its agents spent by role
     (``spend``)."""
 
     role_settings: Mapping[str, Settings]
@@ -191,6 +192,7 @@ class Contents:
     copies: Mapping[str, SavedCopy] = field(default_factory=dict)
     consultations: tuple[SavedConsultation, ...] = ()
     last_consultation: int = 0
+    last_tool_call: int = 0
     spend: RoleSpend = field(default_factory=RoleSpend)
     waiting: tuple[SavedWaiting, ...] = ()
 
@@ -341,6 +343,7 @@ class SessionKeeper:
             copies=dict(contents.copies),
             consultations=contents.consultations,
             last_consultation=contents.last_consultation,
+            last_tool_call=contents.last_tool_call,
             planner_notes=contents.planner_notes,
             tasks=contents.tasks,
             waiting=contents.waiting,

@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
-from orbit.agent.application.consult_approvals import Approvals, Held
+from orbit.agent.application.consult_approvals import Approvals, Held, consultation_of
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks, WaitingTurn
 from orbit.agent.application.ports import Reply
 from orbit.agent.domain.consult_limits import ConsultCount
@@ -142,7 +142,9 @@ class Consultations:
         self._leaving = False  # Those held are settled as deny until the switch ends.
         self._clock = hooks.timer.clock
         self._counts: dict[str, ConsultCount] = {}  # Each asking role's, by role.
-        self.approvals = Approvals[PlannerSeat](post, self._expired, hooks.timer)
+        self.approvals = Approvals[ApprovalRequested, PlannerSeat](
+            post, self._expired, hooks.timer, consultation_of
+        )
 
     @property
     def saved(self) -> tuple[SavedConsultation, ...]:
@@ -273,11 +275,11 @@ class Consultations:
     def _free(self, asker: str) -> None:
         """Start each other consultation held from the role ``asker``, now free of its limit,
         publishing that each was allowed for the hour."""
-        for held in self.approvals.take_from(asker):
+        for held in self.approvals.take_where(lambda request: request.asker == asker):
             self._post(_decided(held.request.consultation, "allow_hour"))
             self._start(self._pending[held.request.consultation], held.work)
 
-    async def _expired(self, held: Held[PlannerSeat]) -> None:
+    async def _expired(self, held: Held[ApprovalRequested, PlannerSeat]) -> None:
         """Answer the consultation ``held`` as expired, denied, and publish that."""
         self._post(_decided(held.request.consultation, "deny"))
         self._drop(self._pending[held.request.consultation], EXPIRED)

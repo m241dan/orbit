@@ -3,8 +3,7 @@ denied, after an hour with no frontend connected."""
 
 import asyncio
 
-from orbit.agent.application.consult_approvals import Approvals, Held
-from orbit.agent.application.planner_seat import Timer
+from orbit.agent.application.consult_approvals import Approvals, Held, Timer, consultation_of
 from orbit.agent.domain.consult_limits import HOUR
 from orbit.protocol import PLANNER, ApprovalRequested, Event
 from tests.waiting import eventually
@@ -38,12 +37,12 @@ class Holding:
     def __init__(self) -> None:
         self.clock = Clock()
         self.posted: list[Event] = []
-        self.expired: list[Held[str]] = []
-        self.approvals = Approvals[str](
-            self.posted.append, self._expire, Timer(self.clock, self.clock.sleep)
+        self.expired: list[Held[ApprovalRequested, str]] = []
+        self.approvals = Approvals[ApprovalRequested, str](
+            self.posted.append, self._expire, Timer(self.clock, self.clock.sleep), consultation_of
         )
 
-    async def _expire(self, held: Held[str]) -> None:
+    async def _expire(self, held: Held[ApprovalRequested, str]) -> None:
         self.expired.append(held)
 
 
@@ -63,6 +62,16 @@ async def test_a_consultation_is_taken_once() -> None:
     assert taken is not None and (taken.request, taken.work) == (request(1), "work")
     assert held.approvals.take(1) is None
     assert held.approvals.waiting == ()
+
+
+async def test_those_passing_a_test_are_taken_in_the_order_they_were_held() -> None:
+    held = Holding()
+    held.approvals.viewers(1)
+    for number in (1, 2, 3):
+        held.approvals.hold(request(number), f"work {number}")
+    taken = held.approvals.take_where(lambda asked: asked.consultation != 2)
+    assert [h.work for h in taken] == ["work 1", "work 3"]
+    assert held.approvals.waiting == (request(2),)
 
 
 async def test_one_held_with_no_frontend_ever_connected_expires_after_an_hour() -> None:
@@ -141,7 +150,7 @@ class Gated(Holding):
         self.started = asyncio.Event()
         self.gate = asyncio.Event()
 
-    async def _expire(self, held: Held[str]) -> None:
+    async def _expire(self, held: Held[ApprovalRequested, str]) -> None:
         self.expired.append(held)
         self.started.set()
         await self.gate.wait()
@@ -150,7 +159,7 @@ class Gated(Holding):
 class Failing(Holding):
     """Holding whose first expiry fails."""
 
-    async def _expire(self, held: Held[str]) -> None:
+    async def _expire(self, held: Held[ApprovalRequested, str]) -> None:
         self.expired.append(held)
         if len(self.expired) == 1:
             raise RuntimeError("save failed")

@@ -8,10 +8,11 @@ from collections.abc import Callable
 import pytest
 
 from orbit.agent import HostParts, WorkspaceHost
+from orbit.agent.application.consult_approvals import Timer
 from orbit.agent.application.consultations import held_note
 from orbit.agent.application.conversation_seats import ConversationSeats
 from orbit.agent.application.desk import AgentDesk
-from orbit.agent.application.planner_seat import SeatHooks, Timer
+from orbit.agent.application.planner_seat import SeatHooks
 from orbit.agent.application.planner_trace import TURN_SPAN, PlannerTracing
 from orbit.agent.application.ports import Reply, StoreFailed
 from orbit.agent.application.tasks import Tasks

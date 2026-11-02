@@ -132,7 +132,9 @@ with `invalid`. The first `Attach` is answered in this order:
    trimmed, as `VerificationChanged`'s `output` carries it; empty otherwise, and for an older
    peer), review status, checks proposals waiting for a decision, running
    agents (each `RunningAgent` with the `tab` its `AgentStarted` carried; see
-   [Trigger tabs](#trigger-tabs)), the consultations held for approval (`approvals`) and its `transcript`: the session's last 500 logged events, oldest first, in the
+   [Trigger tabs](#trigger-tabs)), the consultations held for approval (`approvals`), the agents'
+   calls to MCP tools held for approval (`tool_calls`; see [Held tool calls](#held-tool-calls))
+   and its `transcript`: the session's last 500 logged events, oldest first, in the
    envelopes they were sent in, their `seq`s included (none without a store), and, while the
    session is halted because a write to the store failed, its `storage_halt`: the explanation
    the halting `ErrorOccurred` carried (see `storage_failed` under [Codes](#codes)), and
@@ -772,6 +774,27 @@ each consultation held, so every frontend still viewing it stops asking; each is
 interrupted by the switch, and its asker is told `the session was switched` as the session opens
 again. The session switched to starts with no `approvals`. If the switch fails and the session
 stays open, each consultation held is asked about again with its `ApprovalRequested`.
+
+## Held tool calls
+
+A call an agent makes to an MCP tool whose server's `approve` is `true`, or names the tool, is
+held before it goes to the server, and the backend publishes `ToolCallHeld(call, agent_id, role,
+server, tool, arguments)`: `call` numbers it in the session, from 1, never reused, as the session
+record keeps the last (`last_tool_call`); `tool` is orbit's name for it, such as
+`github__create_issue`, and `arguments` the call's, as JSON, whole (a frontend cuts long values
+short for display). A frontend asks the user about it, in the same queue as consultations held,
+and answers with `DecideToolCall(call, decision)`: `allow` sends the call to the server, whose
+answer goes to the agent as usual; `deny` answers the agent with an error, `The user declined
+github__create_issue.` The first decision applies: the backend publishes `ToolCallDecided(call,
+decision)`, `decision` being `allowed` or `declined`, at which every frontend still asking about
+it stops, and refuses any later one, or one for a call that isn't held, with `unknown`. A call
+held for an hour with no frontend viewing the session expires: the agent gets the same error,
+and `ToolCallDecided` says `expired`. When the agent's run ends, or it's cancelled, while its call
+is held, `ToolCallDecided` says `withdrawn` and the call is answered with an error. Leaving the
+session, or orbit closing, settles every call held as `declined`. The calls held are in the
+`Snapshot`'s `tool_calls`; a read-only view refuses `DecideToolCall` with `not_active`, as it does
+every command that would change the session. All three are additive: an older peer drops the
+events and doesn't send the command, and an older backend's `Snapshot` has no `tool_calls`.
 
 ## Reports
 

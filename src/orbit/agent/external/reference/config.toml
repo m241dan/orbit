@@ -1129,7 +1129,7 @@
 # idle_minutes = 10
 # How long a call to one of its tools may take, in seconds.
 # timeout_seconds = 300
-# Which of its tools' calls wait for your approval: none, all (true), or a list.
+# Which of its tools' calls wait for you to allow or deny them: none, all (true), or a list.
 # approve = ["create_issue"]
 
 # An MCP server that's already running. For example:
