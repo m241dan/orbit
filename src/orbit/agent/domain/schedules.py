@@ -11,6 +11,7 @@ which every time it came due has been dealt with.
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, tzinfo
+from typing import assert_never
 
 from orbit.agent.domain.triggers import falls_due, next_due
 
@@ -21,34 +22,94 @@ waking."""
 
 
 @dataclass(frozen=True)
-class Opened:
-    """What opening a workspace makes of its schedules: the triggers ``due`` to fire once now, by
-    name, in order, as each came due while it was closed, and the time each trigger last
-    ``fired``, by name, after."""
+class TimesRead:
+    """The times kept have been read: ``fired`` is the time each trigger last fired, or was first
+    seen, by name, to keep."""
 
-    due: tuple[str, ...]
     fired: dict[str, datetime]
 
 
+@dataclass(frozen=True)
+class TimesUnread:
+    """The times kept are yet to be read: ``fired`` is the time each trigger last fired since
+    opening, or was first seen, by name, and ``since`` names those that fired, whose times replace
+    those kept once they're read; until then nothing is kept, so a failed read never loses
+    them."""
+
+    fired: dict[str, datetime]
+    since: frozenset[str]
+
+
+ScheduleTimes = TimesRead | TimesUnread
+"""The time each schedule trigger last fired, as far as the schedules know it."""
+
+
+@dataclass(frozen=True)
+class Firing:
+    """What a look at the time makes of the schedules: the triggers ``due`` to fire now, by name,
+    in order, and the ``times`` each last fired, after."""
+
+    due: tuple[str, ...]
+    times: ScheduleTimes
+
+
 def open_schedules(
-    crons: Mapping[str, str], kept: Mapping[str, datetime], now: datetime, zone: tzinfo
-) -> Opened:
+    crons: Mapping[str, str], kept: Mapping[str, datetime] | None, now: datetime, zone: tzinfo
+) -> Firing:
     """What opening a workspace at ``now`` makes of the schedule triggers' ``crons``, their cron
-    expressions read in ``zone``, by name, from the times ``kept`` that each last fired: each
-    that came due since its time fires once, its time ``now``; each with no time is first seen,
-    its time ``now``, firing nothing; the others keep theirs. Times of triggers no longer among
-    ``crons`` are dropped."""
-    known = _known_times(crons, kept)
-    due = tuple(name for name, last in known.items() if falls_due(crons[name], last, now, zone))
-    fired = dict.fromkeys(crons, now) | {
-        name: last for name, last in known.items() if name not in due
+    expressions read in ``zone``, by name, from the times ``kept`` that each last fired, if they
+    could be read: each that came due since its time fires once, its time ``now``; each with no
+    time is first seen, its time ``now``, firing nothing; the others keep theirs. Times of
+    triggers no longer among ``crons`` are dropped. Times that couldn't be read leave every
+    trigger first seen, and the times unread."""
+    return wake_schedules(
+        crons, TimesUnread(dict.fromkeys(crons, now), frozenset()), kept, now, zone
+    )
+
+
+def wake_schedules(
+    crons: Mapping[str, str],
+    times: ScheduleTimes,
+    kept: Mapping[str, datetime] | None,
+    now: datetime,
+    zone: tzinfo,
+) -> Firing:
+    """What a look at the time at ``now`` makes of the schedule triggers' ``crons``, their cron
+    expressions read in ``zone``, by name, from the ``times`` each last fired: those come due
+    since fire, their time ``now``. While the times are unread, the times ``kept``, once read,
+    are merged in first, as opening does, each kept time standing for a trigger unfired since
+    opening, and the times are read after; ``kept`` is otherwise ignored."""
+    match times:
+        case TimesUnread() if kept is not None:
+            return _fire_read(crons, _merge_kept(crons, times, kept), now, zone)
+        case TimesUnread():
+            due = due_triggers(crons, times.fired, now, zone)
+            fired = fire_due(times.fired, due, now)
+            return Firing(due, TimesUnread(fired, times.since | frozenset(due)))
+        case TimesRead():
+            return _fire_read(crons, times.fired, now, zone)
+        case _:
+            assert_never(times)
+
+
+def _fire_read(
+    crons: Mapping[str, str], fired: Mapping[str, datetime], now: datetime, zone: tzinfo
+) -> Firing:
+    """The triggers among ``crons`` come due by ``now`` since each last ``fired``, and the times
+    after they fire, read."""
+    due = due_triggers(crons, fired, now, zone)
+    return Firing(due, TimesRead(fire_due(fired, due, now)))
+
+
+def _merge_kept(
+    crons: Mapping[str, str], times: TimesUnread, kept: Mapping[str, datetime]
+) -> dict[str, datetime]:
+    """The time each trigger among ``crons`` last fired, by name, in their order: the time
+    ``kept`` for each that has one and hasn't fired since opening, else its time in ``times``."""
+    return {
+        name: kept[name] if name in kept and name not in times.since else times.fired[name]
+        for name in crons
     }
-    return Opened(due, fired)
-
-
-def _known_times(crons: Mapping[str, str], kept: Mapping[str, datetime]) -> dict[str, datetime]:
-    """The times ``kept`` of the triggers among ``crons``, by name, in their order."""
-    return {name: kept[name] for name in crons if name in kept}
 
 
 def due_triggers(

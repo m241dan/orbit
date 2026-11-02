@@ -140,16 +140,57 @@ async def test_closing_stops_the_schedules_and_nothing_fires_after() -> None:
     assert scheduled.store.fired_saved == [{"nightly": TUESDAY_MORNING}]
 
 
-async def test_times_that_cant_be_read_are_reported_and_the_triggers_seen_afresh() -> None:
+async def test_times_that_cant_be_read_are_reported_once_and_never_saved_over() -> None:
     store = kept({"nightly": MONDAY_EVENING})
     store.fired_load_failure = "database is locked"
     scheduled = Scheduled(store=store)
     await scheduled.opened()
+    await scheduled.clock.go_to(day(3, days=1))
     await scheduled.schedules.close()
 
     assert scheduled.events == [ErrorOccurred(code=INTERNAL, message="database is locked")]
-    assert scheduled.fired == []
-    assert store.fired == {"nightly": TUESDAY_MORNING}
+    assert scheduled.fired == [(("nightly",), day(3, days=1))]  # As first seen, at its time.
+    assert store.fired_saved == []
+    assert store.fired == {"nightly": MONDAY_EVENING}
+
+
+async def test_a_trigger_that_came_due_while_closed_fires_once_when_its_time_can_be_read() -> None:
+    store = kept({"nightly": MONDAY_EVENING})
+    store.fired_load_failure = "database is locked"
+    scheduled = Scheduled(store=store)
+    await scheduled.opened()
+    store.fired_load_failure = None
+    read = TUESDAY_MORNING + timedelta(minutes=5)
+    await scheduled.clock.go_to(read + timedelta(minutes=10))
+    await scheduled.schedules.close()
+
+    assert scheduled.fired == [(("nightly",), read)]
+    assert store.fired == {"nightly": read}
+
+
+async def test_a_trigger_fired_while_its_time_was_unread_keeps_that_time_once_read() -> None:
+    store = kept({"nightly": MONDAY_EVENING})
+    store.fired_load_failure = "database is locked"
+    scheduled = Scheduled(store=store)
+    await scheduled.opened()
+    await scheduled.clock.go_to(day(3, days=1))
+    store.fired_load_failure = None
+    await scheduled.clock.go_to(day(3, days=1) + timedelta(minutes=10))
+    await scheduled.schedules.close()
+
+    assert scheduled.fired == [(("nightly",), day(3, days=1))]
+    assert store.fired_saved == [{"nightly": day(3, days=1)}]
+
+
+async def test_times_are_never_saved_before_a_read_of_them_works() -> None:
+    store = kept({"nightly": MONDAY_EVENING})
+    store.fired_load_failure = "database is locked"
+    scheduled = Scheduled(store=store)
+    assert await scheduled.times.load() is None
+    await scheduled.times.save({"nightly": TUESDAY_MORNING})
+    assert await scheduled.times.retry() is None
+
+    assert store.fired_saved == []
 
 
 async def test_a_failing_save_halts_the_session_and_retrying_saves_the_times() -> None:

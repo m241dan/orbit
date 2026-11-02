@@ -10,11 +10,14 @@ import pytest
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.schedules import (
     LONGEST_WAIT,
-    Opened,
+    Firing,
+    TimesRead,
+    TimesUnread,
     due_triggers,
     fire_due,
     open_schedules,
     wait_for_due,
+    wake_schedules,
 )
 from orbit.agent.domain.triggers import (
     Trigger,
@@ -173,7 +176,7 @@ def test_a_schedule_trigger_fires_on_schedule_in_words() -> None:
 
 def test_a_trigger_that_came_due_while_closed_fires_once_on_opening() -> None:
     opened = open_schedules({"nightly": NIGHTLY}, {"nightly": MONDAY_EVENING}, TUESDAY_MORNING, UTC)
-    assert opened == Opened(("nightly",), {"nightly": TUESDAY_MORNING})
+    assert opened == Firing(("nightly",), TimesRead({"nightly": TUESDAY_MORNING}))
 
 
 def test_a_trigger_that_came_due_many_times_while_closed_fires_once_on_opening() -> None:
@@ -184,18 +187,23 @@ def test_a_trigger_that_came_due_many_times_while_closed_fires_once_on_opening()
 
 def test_a_trigger_that_didnt_come_due_while_closed_keeps_its_time() -> None:
     opened = open_schedules({"noon": NOON}, {"noon": MONDAY_EVENING}, TUESDAY_MORNING, UTC)
-    assert opened == Opened((), {"noon": MONDAY_EVENING})
+    assert opened == Firing((), TimesRead({"noon": MONDAY_EVENING}))
 
 
 def test_a_trigger_first_seen_doesnt_fire_and_takes_the_time_of_opening() -> None:
     opened = open_schedules({"nightly": NIGHTLY}, {}, TUESDAY_MORNING, UTC)
-    assert opened == Opened((), {"nightly": TUESDAY_MORNING})
+    assert opened == Firing((), TimesRead({"nightly": TUESDAY_MORNING}))
 
 
 def test_the_times_of_triggers_no_longer_scheduled_are_dropped() -> None:
     kept = {"gone": MONDAY_EVENING, "noon": MONDAY_EVENING}
     opened = open_schedules({"noon": NOON}, kept, TUESDAY_MORNING, UTC)
-    assert opened.fired == {"noon": MONDAY_EVENING}
+    assert opened.times == TimesRead({"noon": MONDAY_EVENING})
+
+
+def test_times_that_cant_be_read_leave_the_triggers_first_seen_and_unread() -> None:
+    opened = open_schedules({"nightly": NIGHTLY}, None, TUESDAY_MORNING, UTC)
+    assert opened == Firing((), TimesUnread({"nightly": TUESDAY_MORNING}, frozenset()))
 
 
 # As the times come
@@ -211,6 +219,36 @@ def test_the_triggers_due_are_those_come_due_since_each_last_fired_in_order() ->
 def test_the_triggers_fired_take_the_time_they_fired() -> None:
     fired = {"noon": at(8), "nightly": at(3)}
     assert fire_due(fired, ("noon",), at(12)) == {"noon": at(12), "nightly": at(3)}
+
+
+def test_with_the_times_read_the_triggers_due_fire_and_take_the_time_they_fired() -> None:
+    times = TimesRead({"noon": at(8), "nightly": at(3)})
+    woken = wake_schedules({"noon": NOON, "nightly": NIGHTLY}, times, None, at(12), UTC)
+    assert woken == Firing(("noon",), TimesRead({"noon": at(12), "nightly": at(3)}))
+
+
+def test_with_the_times_still_unread_the_triggers_due_fire_and_stay_unread() -> None:
+    times = TimesUnread({"noon": at(8), "nightly": at(8)}, frozenset())
+    woken = wake_schedules({"noon": NOON, "nightly": NIGHTLY}, times, None, at(12), UTC)
+    assert woken == Firing(
+        ("noon",), TimesUnread({"noon": at(12), "nightly": at(8)}, frozenset({"noon"}))
+    )
+
+
+def test_times_read_at_last_catch_up_the_triggers_unfired_since_opening_as_opening_does() -> None:
+    crons = {"noon": NOON, "nightly": NIGHTLY, "new": NIGHTLY}
+    times = TimesUnread({"noon": at(12), "nightly": at(8), "new": at(8)}, frozenset({"noon"}))
+    kept = {"noon": MONDAY_EVENING, "nightly": MONDAY_EVENING, "gone": MONDAY_EVENING}
+    woken = wake_schedules(crons, times, kept, at(12, 5), UTC)
+    assert woken == Firing(
+        ("nightly",), TimesRead({"noon": at(12), "nightly": at(12, 5), "new": at(8)})
+    )
+
+
+def test_times_read_while_they_are_known_already_change_nothing() -> None:
+    times = TimesRead({"nightly": at(3)})
+    woken = wake_schedules({"nightly": NIGHTLY}, times, {"nightly": MONDAY_EVENING}, at(4), UTC)
+    assert woken == Firing((), times)
 
 
 def test_the_wait_lasts_until_the_first_trigger_comes_due() -> None:
