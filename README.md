@@ -2086,10 +2086,11 @@ A trigger's fields:
   [Usage](#usage)).
 - `paths`: with `on = "task_landed"`, the globs of the paths a commit must change for the trigger
   to fire; left out, every commit. Each is matched against the repository-relative paths the
-  commit changed, or any of a batch's commits did, with `fnmatch`, directory by directory, so `*`
-  stays within one directory while a part that's just `**` stands for any number of them, none
-  included (`src/**/external/*.py`, `**/conftest.py`), and a plain name matches that path alone
-  (`pyproject.toml`). On another event, or as an empty list, it's refused, naming the trigger.
+  commit changed, or any of a batch's commits did (a moved file changed both its old path and its
+  new one), with `fnmatch`, directory by directory, so `*` stays within one directory while a
+  part that's just `**` stands for any number of them, none included (`src/**/external/*.py`,
+  `**/conftest.py`), and a plain name matches that path alone (`pyproject.toml`). On another
+  event, or as an empty list, it's refused, naming the trigger.
   So is a glob no git path can match, one with a leading or trailing `/`, a `//`, or a `.` or
   `..` part, such as `src/external/` or `./src/**`, naming the glob: a directory is written
   `dir/**`, as `src/external/**`.

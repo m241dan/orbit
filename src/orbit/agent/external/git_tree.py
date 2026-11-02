@@ -198,8 +198,21 @@ class GitCoderTree:
         return listed.splitlines()
 
     async def changed_files(self, start: str, end: str) -> list[str]:
-        # From where the two meet, as ``landed_since`` lists the commits after ``start``.
-        listed = await self._git(self._root, "diff", "--name-only", "-z", f"{start}...{end}")
+        # From where the two meet, as ``landed_since`` lists the commits after ``start``. The
+        # options pin what the user's config could change: a move lists both its paths, rather
+        # than only its new one, every path is from the repository's root, even from a
+        # workspace in a subdirectory, and a submodule's change is listed even if set to be
+        # ignored.
+        listed = await self._git(
+            self._root,
+            "diff",
+            "--name-only",
+            "-z",
+            "--no-renames",
+            "--no-relative",
+            "--ignore-submodules=none",
+            f"{start}...{end}",
+        )
         return [path for path in listed.split("\0") if path]
 
     async def list_commits(self, start: str, end: str) -> list[Commit]:

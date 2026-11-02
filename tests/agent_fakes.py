@@ -908,6 +908,11 @@ class FakeTree:
         self._fail("changed_files")
         return self.changed.get(start, [])
 
+    def move(self, start: str, old: str, new: str) -> None:
+        """Have the commits after ``start`` move ``old`` to ``new``: as git lists them, that
+        changed both paths."""
+        self.changed[start] = [*self.changed.get(start, []), old, new]
+
     async def list_commits(self, start: str, end: str) -> list[Commit]:
         self._fail("list_commits")
         ids = [f"c{n}" for n in range(_commit_number(start) + 1, _commit_number(end) + 1)]

@@ -913,6 +913,45 @@ async def test_changed_files_leaves_out_what_changed_only_on_the_starts_side(rep
     assert await tree.changed_files(start, git(repo, "rev-parse", "HEAD")) == ["b.txt"]
 
 
+async def test_changed_files_lists_both_paths_of_a_move_whatever_renames_git_detects(
+    repo: Path,
+) -> None:
+    git(repo, "config", "diff.renames", "copies")
+    tree = GitCoderTree(str(repo))
+    start = git(repo, "rev-parse", "HEAD")
+    git(repo, "mv", "a.txt", "b.txt")
+    git(repo, "commit", "-q", "-m", "Move A")
+    assert sorted(await tree.changed_files(start, git(repo, "rev-parse", "HEAD"))) == [
+        "a.txt",
+        "b.txt",
+    ]
+
+
+async def test_changed_files_lists_a_submodule_git_is_set_to_ignore(repo: Path) -> None:
+    git(repo, "config", "diff.ignoreSubmodules", "all")
+    tree = GitCoderTree(str(repo))
+    start = git(repo, "rev-parse", "HEAD")
+    git(repo, "update-index", "--add", "--cacheinfo", f"160000,{start},sub")
+    git(repo, "commit", "-q", "-m", "Add a submodule")
+    assert await tree.changed_files(start, git(repo, "rev-parse", "HEAD")) == ["sub"]
+
+
+async def test_changed_files_lists_paths_from_the_root_from_a_tree_in_a_subdirectory(
+    repo: Path,
+) -> None:
+    git(repo, "config", "diff.relative", "true")
+    (repo / "docs").mkdir()
+    commit_file(repo, "docs/plan.md", "plan\n", "Add the plan")
+    tree = GitCoderTree(str(repo / "docs"))
+    start = git(repo, "rev-parse", "HEAD")
+    commit_file(repo, "docs/plan.md", "plan again\n", "Change the plan")
+    commit_file(repo, "b.txt", "two\n", "Add B")
+    assert sorted(await tree.changed_files(start, git(repo, "rev-parse", "HEAD"))) == [
+        "b.txt",
+        "docs/plan.md",
+    ]
+
+
 async def test_changed_files_from_an_unknown_commit_fails(repo: Path) -> None:
     tree = GitCoderTree(str(repo))
     with pytest.raises(TreeFailed, match="git diff failed"):

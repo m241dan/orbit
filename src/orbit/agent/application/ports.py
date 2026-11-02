@@ -360,7 +360,8 @@ class CoderTree(Protocol):
         ...
 
     async def changed_files(self, start: str, end: str) -> list[str]:
-        """The paths of the files the commits after ``start`` up to ``end`` changed."""
+        """The paths of the files the commits after ``start`` up to ``end`` changed; a moved
+        file changed both its old path and its new one."""
         ...
 
     async def list_commits(self, start: str, end: str) -> list[Commit]:

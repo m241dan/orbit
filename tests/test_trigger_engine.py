@@ -390,6 +390,12 @@ async def test_a_trigger_with_paths_fires_only_for_a_commit_changing_one(
     assert engine.tree.asked_changed == [(f"{COMMIT}^", COMMIT)]
 
 
+async def test_a_trigger_with_paths_fires_for_a_commit_moving_a_file_out_of_them() -> None:
+    engine = Engine({"security-review": security()})
+    engine.tree.move(f"{COMMIT}^", "src/x/external/auth.py", "src/x/auth.py")
+    assert len(await engine.engine.landed(ended(), COMMIT)) == 1
+
+
 async def test_a_trigger_with_paths_leaves_the_others_on_the_landing_firing() -> None:
     engine = Engine({"look": look(), "security-review": security()})
     engine.tree.changed[f"{COMMIT}^"] = ["README.md"]
