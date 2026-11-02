@@ -39,8 +39,9 @@ class HandoverParts:
     owning, the ``events`` it publishes into, ``owned``, called as the repository is taken,
     ``publish_catalog``, which sends every listening connection the catalog, ``recover``, which
     imports the fallback files the owner left and returns notes on them, ``recount``, which
-    reads the repository's super review count and the holds on merges kept again, and ``kick``,
-    which starts the reviews waiting."""
+    reads the repository's super review count and the holds on merges kept again, ``kick``,
+    which starts the reviews waiting, and ``start_schedules``, which starts firing the
+    ``schedule`` triggers, as the owner's opening would."""
 
     offer: Offer
     queue: Queue
@@ -50,6 +51,7 @@ class HandoverParts:
     recover: Callable[[], Awaitable[Sequence[str]]]
     recount: Callable[[], Awaitable[None]]
     kick: Callable[[], None]
+    start_schedules: Callable[[], None]
 
 
 class Handover:
@@ -63,8 +65,9 @@ class Handover:
     left for the next owner's start, and the takeover goes on. It then reads the super review
     count and the holds on merges the owner left again, so the work queued acts on them;
     announcing failing otherwise is reported the same way, the rest
-    of the announcement skipped. It then runs the work queued, in order, and kicks the reviews
-    waiting, even if announcing the ownership or running the queued work fails.
+    of the announcement skipped. It then runs the work queued, in order, kicks the reviews
+    waiting and starts the schedules, even if announcing the ownership or running the queued
+    work fails.
     """
 
     def __init__(self, parts: HandoverParts) -> None:
@@ -89,12 +92,13 @@ class Handover:
                 self._parts.queue.taken()
 
     async def _run_queued(self, command_id: str) -> None:
-        """Run the work queued for ``command_id``, then kick the reviews waiting, even if
-        running the queued work fails."""
+        """Run the work queued for ``command_id``, then kick the reviews waiting and start the
+        schedules, even if running the queued work fails."""
         try:
             await self._parts.queue.own(command_id)
         finally:  # After the queued work, so its tasks get agents first, even if it fails.
             self._parts.kick()
+            self._parts.start_schedules()
 
     async def _announce_reporting(self) -> None:
         """Announce the ownership, reporting a failure as an ``ErrorOccurred`` coded

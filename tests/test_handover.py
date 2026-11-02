@@ -79,6 +79,9 @@ class Effects:
     def kick(self) -> None:
         self.log.append("kick")
 
+    def start_schedules(self) -> None:
+        self.log.append("schedules")
+
 
 def handover_on(effects: Effects) -> Handover:
     parts = HandoverParts(
@@ -90,6 +93,7 @@ def handover_on(effects: Effects) -> Handover:
         effects.recover,
         effects.recount,
         effects.kick,
+        effects.start_schedules,
     )
     return Handover(parts)
 
@@ -112,6 +116,7 @@ async def test_taking_the_repository_announces_recovers_recounts_then_runs_the_q
         "recount",
         ("own", COMMAND_ID),
         "kick",
+        "schedules",
         "taken",
     ]
 
@@ -147,6 +152,7 @@ async def test_a_failed_recovery_is_reported_as_internal_and_the_takeover_goes_o
         "recount",
         ("own", COMMAND_ID),
         "kick",
+        "schedules",
         "taken",
     ]
 
@@ -161,6 +167,7 @@ async def test_a_failed_catalog_publish_is_reported_and_the_queue_still_runs() -
         ErrorOccurred(code=INTERNAL, message="store gone"),
         ("own", COMMAND_ID),
         "kick",
+        "schedules",
         "taken",
     ]
 
@@ -175,6 +182,7 @@ async def test_a_failed_recount_is_reported_and_the_queue_still_runs() -> None:
         ErrorOccurred(code=INTERNAL, message="count unreadable"),
         ("own", COMMAND_ID),
         "kick",
+        "schedules",
         "taken",
     ]
 
@@ -190,6 +198,7 @@ async def test_an_unexpected_recovery_failure_is_reported_and_the_takeover_goes_
         "recount",
         ("own", COMMAND_ID),
         "kick",
+        "schedules",
         "taken",
     ]
 
@@ -204,11 +213,11 @@ async def test_a_cancelled_announcement_ends_the_takeover_and_propagates() -> No
     assert effects.log[-1] == "taken"
 
 
-async def test_reviews_are_kicked_even_when_running_the_queue_fails() -> None:
+async def test_reviews_are_kicked_and_schedules_started_even_when_running_the_queue_fails() -> None:
     effects = Effects()
     effects.own_failure = RuntimeError("outbox closed")
 
     with pytest.raises(RuntimeError, match="outbox closed"):
         await handover_on(effects).answer(TakeOwnership(take=True), COMMAND_ID)
 
-    assert effects.log[-3:] == [("own", COMMAND_ID), "kick", "taken"]
+    assert effects.log[-4:] == [("own", COMMAND_ID), "kick", "schedules", "taken"]

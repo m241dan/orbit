@@ -2151,7 +2151,9 @@ once more if it's running already, and under `--no-verify`, where no set runs, i
 Each workspace open runs its own schedules, from the triggers it opened with, so a changed `cron`
 takes effect as the workspace next opens, and closing the workspace stops them. The time each last
 fired is kept per repository, beside the super review count, so it carries on across sessions and
-restarts. As orbit opens a workspace, after the `session_started` triggers, a `schedule` trigger
+restarts. A read-only orbit fires none, and keeps no times, until it takes the repository over
+(see [Owning the repository](#owning-the-repository)), when its schedules start as on opening.
+As orbit opens a workspace, after the `session_started` triggers, a `schedule` trigger
 that came due since it last fired, while orbit was closed or the machine slept, fires once, however
 many times it was missed, then keeps its schedule; one orbit sees for the first time fires first
 at its next time, never for times before orbit knew it. This one runs the set `mutation` every
@@ -3645,7 +3647,7 @@ until this orbit owns it.", and the prompt's title carries a "read-only" mark. `
 first line says so too, for each workspace it's read-only in, and the workspace's entry in its
 catalog is marked read-only. Running
 tasks (`ctrl+r`) and the triggers (`ctrl+g`, `ctrl+e`) are accepted and queued, in order, but
-nothing runs: no task, review or startup check. Those an owning orbit would refuse, such as a super
+nothing runs: no task, review, startup check or `schedule` trigger. Those an owning orbit would refuse, such as a super
 review with reviews off, are refused just the same. It notes no work left in `.git/orbit` by
 earlier runs, since what's there may be the owner's running work. The planner, the sessions, drafts
 and settings work as usual. The queue is dropped when the orbit exits, and when you switch
@@ -3655,7 +3657,9 @@ the session you want them run in.
 A read-only orbit tries the lock every 5 seconds. Once the owner has gone, it takes the lock and
 asks, once, in a modal: "The repository is free". `y` takes it over: the orbit owns the
 repository from then on, the "read-only" mark goes, `orbit serve` names its URL in the lock, a
-note says "This orbit now owns the repository; queued work is running." and the work queued runs, in order. `n` or `esc` stays
+note says "This orbit now owns the repository; queued work is running." and the work queued runs, in order, then the
+`schedule` triggers start as they would on opening, those that came due while no orbit fired them
+firing once; the `session_started` triggers don't fire again. `n` or `esc` stays
 read-only: the orbit lets the lock go again, so another orbit can take it, and asks again once
 another orbit has owned the repository and gone, or after 5 minutes if it's still free. Under `orbit serve`, every frontend connected asks, as does
 one that connects while the question is open; once one answers, the others close the modal. An
@@ -4023,7 +4027,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     repository is free, and holds the offer of it until the user answers;
     `ReviewCount` (in `review_count`) keeps the repository's super review count apart from
     any one session; `Schedules` (in `schedules`) fires the `schedule` triggers once the
-    workspace opens, on a `ScheduleClock` the CLI gives the machine's local time zone, and
+    workspace opens, or once a read-only orbit takes the repository over, on a `ScheduleClock` the CLI gives the machine's local time zone, and
     `FiredTimes` keeps the time each last fired; `RecordMoves` (in `record_moves`) moves a record a task names whose
     number another record took, keeping each move in the store and telling the planner; `SessionSettings` (in `settings`) holds the open session's settings, at
     first those given at startup (a session opened brings its saved ones, but for the pinned

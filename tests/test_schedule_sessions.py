@@ -1,17 +1,23 @@
 """``schedule`` triggers in a session: opening fires once, after the ``session_started``
 triggers, each that came due since it last fired, however often, a trigger first seen not at
 all; then each fires at its time, queuing its role's task or running its set; each workspace
-open runs its own schedules, and closing one stops them."""
+open runs its own schedules, and closing one stops them. A read-only orbit fires none until it
+takes the repository over, then opens them as an owner would."""
 
+import asyncio
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from orbit.agent import Verification, VerificationStep, WorkspaceHost
 from orbit.agent.domain.triggers import Trigger
 from orbit.agent.domain.verification import CheckSet
-from orbit.protocol import CODER, TasksChanged
+from orbit.protocol import CODER, OwnershipOffered, TakeOwnership, TasksChanged
 from tests.agent_fakes import (
+    ACCEPTED,
+    OWNER,
     TRIGGERS,
+    FakeLock,
     FakeStore,
     FakeTree,
     Steps,
@@ -20,9 +26,11 @@ from tests.agent_fakes import (
     events_until,
     greeted,
     schedules_of,
+    send,
     session_for,
 )
 from tests.schedule_clock import FakeScheduleClock
+from tests.waiting import eventually
 
 TUESDAY_MORNING = datetime(2026, 3, 3, 8, tzinfo=UTC)
 WEDNESDAY_NIGHT = datetime(2026, 3, 4, 3, tzinfo=UTC)
@@ -61,6 +69,42 @@ def scheduled(clock: FakeScheduleClock, store: FakeStore, **options: Any) -> Wor
         **options,
     )
     return session
+
+
+async def read_only(clock: FakeScheduleClock, store: FakeStore, **options: Any) -> WorkspaceHost:
+    """A session opening a workspace in a tree read-only, as another orbit owns the repository,
+    with the shipped triggers and :data:`TIDY`, keeping its sessions and schedules in ``store``,
+    its schedules on ``clock``, once it's offered the repository; ``options`` go to
+    :func:`session_for`."""
+    session = scheduled(
+        clock,
+        store,
+        triggers={**TRIGGERS, "tidy": TIDY},
+        owner=OWNER,
+        lock=FakeLock(free=True),
+        **options,
+    )
+    await events_until(session, lambda event: isinstance(event, OwnershipOffered))
+    return session
+
+
+async def take_over(session: WorkspaceHost) -> None:
+    """Have ``session`` take the repository over, and wait until that's accepted."""
+    await send(session, TakeOwnership(take=True))
+    await events_until(session, lambda event: event == ACCEPTED)
+
+
+class BlockedRecovery:
+    """Recovers nothing, but only once ``release`` is set; ``started`` is set once it's run."""
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def __call__(self) -> Sequence[str]:
+        self.started.set()
+        await self.release.wait()
+        return ()
 
 
 def kept(fired: dict[str, datetime]) -> FakeStore:
@@ -165,3 +209,68 @@ async def test_two_workspaces_fire_their_own_schedules_and_closing_one_stops_its
     assert shown(second) == [("late", "Tidy up after late")]
     assert second_store.fired == {"late": WEDNESDAY_NIGHT + timedelta(hours=1)}
     await second.close()
+
+
+async def test_a_read_only_session_fires_nothing_until_taking_over_then_at_the_next_time() -> None:
+    clock = FakeScheduleClock(TUESDAY_MORNING)
+    store = FakeStore()
+    session = await read_only(clock, store)
+    clock.now = WEDNESDAY_NIGHT  # The trigger's time comes while read-only.
+    assert not schedules_of(session).running
+    assert clock.sleeps == [] and store.fired == {}
+
+    await take_over(session)
+    await clock.parked()
+    assert shown(session) == []
+    assert store.fired == {"tidy": WEDNESDAY_NIGHT}
+
+    await clock.go_to(THURSDAY_NIGHT)
+    await session.close()
+    assert shown(session) == [("tidy", "Tidy up after tidy")]
+    assert store.fired == {"tidy": THURSDAY_NIGHT}
+
+
+async def test_taking_over_fires_a_schedule_missed_while_closed_once() -> None:
+    clock = FakeScheduleClock(TUESDAY_MORNING)
+    store = kept({"tidy": A_WEEK_AGO})
+    session = await read_only(clock, store)
+    assert shown(session) == []
+    assert store.fired == {"tidy": A_WEEK_AGO}
+
+    await take_over(session)
+    await clock.parked()
+    await session.close()
+    assert shown(session) == [("tidy", "Tidy up after tidy")]
+    assert store.fired == {"tidy": TUESDAY_MORNING}
+
+
+async def test_taking_over_with_the_schedules_running_fires_once_per_time() -> None:
+    clock = FakeScheduleClock(TUESDAY_MORNING)
+    store = FakeStore()
+    session = await read_only(clock, store)
+    schedules_of(session).start({"tidy": "0 3 * * *"})
+    await clock.parked()
+
+    await take_over(session)
+    await clock.go_to(WEDNESDAY_NIGHT)
+    await clock.go_to(THURSDAY_NIGHT - timedelta(seconds=1))
+    await session.close()
+    assert shown(session) == [("tidy", "Tidy up after tidy")]
+    assert store.fired == {"tidy": WEDNESDAY_NIGHT}
+
+
+async def test_taking_over_as_the_session_closes_starts_no_schedules() -> None:
+    clock = FakeScheduleClock(TUESDAY_MORNING)
+    store, recovery = kept({"tidy": A_WEEK_AGO}), BlockedRecovery()
+    session = await read_only(clock, store, recover=recovery)
+    taking = asyncio.create_task(send(session, TakeOwnership(take=True)))
+    await recovery.started.wait()
+
+    closing = asyncio.create_task(session.close())
+    await eventually(lambda: session.closing)
+    recovery.release.set()
+    await closing
+    await taking
+    assert not schedules_of(session).running
+    assert clock.sleeps == [] and shown(session) == []
+    assert store.fired == {"tidy": A_WEEK_AGO}

@@ -3,7 +3,8 @@ while it was closed, then at each time one comes due, with the time each last fi
 repository beside the review count.
 
 Each open workspace runs its own schedules, in the background, from the triggers it opened
-with, so a changed ``cron`` takes effect as the workspace next opens; closing it stops them.
+with, or had as a read-only orbit took the repository over, so a changed ``cron`` takes effect
+as the workspace next opens; closing it stops them.
 """
 
 import asyncio

@@ -296,7 +296,9 @@ class WorkspaceHost:
     stand then, fire on the ``schedule_clock``: once each that came due since it last fired,
     then each time it comes due, until the host closes, the time each last fired kept in
     ``store``, per repository. They raise ``schedule`` as any event is raised, so their tasks
-    wait in their lanes as other triggers' do, and a set already running runs once more.
+    wait in their lanes as other triggers' do, and a set already running runs once more. A
+    read-only host starts them only as it takes the repository over, after the work queued,
+    without raising ``session_started``.
 
     Until verification has a step, while it's on, the session's gate holds back every task but
     the configurator's, and the user's runs are refused, saying why; accepted checks start the
@@ -456,7 +458,7 @@ class WorkspaceHost:
         self._switcher = self._session_switcher(parts.pick_session)
         self._resume = self._storage_resume()
         self._commands = self._work_commands()
-        self._handover = self._make_handover()
+        self._handover = self._make_handover(parts.check_at_startup)
         self._greeting = self._host_greeting()
         self._history = SessionHistory(self._keeper, self._events)
         self._states = self._session_states()
@@ -701,8 +703,9 @@ class WorkspaceHost:
         )
         return WorkCommands(parts)
 
-    def _make_handover(self) -> Handover:
-        """What answers the offer of the repository."""
+    def _make_handover(self, check_at_startup: bool) -> Handover:
+        """What answers the offer of the repository, starting the schedules once it's taken if
+        ``check_at_startup``, as opening the workspace would have."""
         parts = HandoverParts(
             self._takeover,
             self._commands,
@@ -712,6 +715,7 @@ class WorkspaceHost:
             self._recover,
             self._reread_saved,
             self._kick_lanes,
+            self._start_schedules if check_at_startup else lambda: None,
         )
         return Handover(parts)
 
@@ -878,8 +882,16 @@ class WorkspaceHost:
         queued = await self._switcher.between_switches(lambda: engine.started(steps, sets))
         engine.run(queued)
         await self._turns.set_up()
-        assert self._desk is not None  # The engine fires the desk's agents' triggers.
-        self._schedules.start(scheduled_crons(self._desk.agents.triggers))
+        self._start_schedules()
+
+    def _start_schedules(self) -> None:
+        """Start firing the enabled ``schedule`` triggers, as they stand now, first those that
+        came due while closed, as the workspace opens or this orbit takes the repository over;
+        not while closing, nor once started, nor without agents, whose triggers they'd be."""
+        desk = self._desk
+        if self._closing or desk is None:
+            return
+        self._schedules.start(scheduled_crons(desk.agents.triggers))
 
     async def _fire_scheduled(self, names: tuple[str, ...]) -> None:
         """Raise ``schedule`` for the triggers ``names``, come due, in the session open once no
