@@ -5,8 +5,8 @@ commits triggers, and those that fire, or one fired by hand, review the whole co
 workspace fires the session_started triggers, those running the checks running them, and a step
 of the startup check failing the startup_check_failed ones; one fired by hand on manual queues its
 task, a configurator's first; a trigger naming a set runs it, on any event, counted or by hand;
-and a task queued while verification is missing waits, with a notice naming its trigger, but the
-configurator's."""
+a schedule come due fires its trigger alone; and a task queued while verification is missing
+waits, with a notice naming its trigger, but the configurator's."""
 
 import pytest
 
@@ -915,3 +915,43 @@ async def test_a_task_queued_with_verification_set_up_or_off_has_no_notice(
     await engine.engine.landed(ended(), COMMIT)
     assert len(engine.board.tasks) == 1
     assert not any(isinstance(event, Notice) for event in engine.events)
+
+
+def nightly(**fields: object) -> Trigger:
+    """A trigger running the set ``slow`` at 3 every night, with ``fields`` over that."""
+    return Trigger.model_validate(
+        {"on": "schedule", "cron": "0 3 * * *", "checks": "slow", **fields}
+    )
+
+
+async def test_a_schedule_come_due_runs_the_set_its_trigger_names_queuing_nothing() -> None:
+    engine = Engine({"nightly": nightly(), "weekly": nightly(checks="weekly")})
+    assert await engine.engine.scheduled(("nightly",)) == ()
+    assert engine.checks_run == ["slow"]
+    assert engine.events == []
+
+
+async def test_a_schedule_come_due_queues_its_roles_task_named_after_its_trigger() -> None:
+    tidy = nightly(checks=None, role=CODER, prompt="Tidy up after {trigger}")
+    engine = Engine(
+        {"tidy": tidy, "slow": look(), "off": tidy.model_copy(update={"enabled": False})}
+    )
+    [task_id] = await engine.engine.scheduled(("tidy", "off", "slow"))
+    assert engine.shown() == [(CODER, "tidy", "pending", "Tidy up after tidy")]
+    assert engine.board.get(task_id).queued_as == "task"
+    assert engine.events == [TasksChanged(tasks=engine.board.tasks)]
+
+
+async def test_a_guard_holds_back_a_schedules_task_while_its_last_still_waits() -> None:
+    tidy = nightly(checks=None, role=CODER, prompt="Tidy up", guards=("not-queued",))
+    engine = Engine({"tidy": tidy})
+    await engine.engine.scheduled(("tidy",))
+    assert await engine.engine.scheduled(("tidy",)) == ()
+    assert len(engine.board.tasks) == 1
+
+
+async def test_a_schedules_task_waits_for_verification_to_be_set_up_with_a_notice() -> None:
+    tidy = nightly(checks=None, role=CODER, prompt="Tidy up")
+    engine = Engine({"tidy": tidy}, verification="missing")
+    await engine.engine.scheduled(("tidy",))
+    assert engine.events[-1] == Notice(message="tidy's task waits: set up verification first.")

@@ -36,6 +36,7 @@ from orbit.agent.application.ports import (
 )
 from orbit.agent.application.review_count import ReviewCount
 from orbit.agent.application.review_lane import ReviewLane
+from orbit.agent.application.schedules import Schedules
 from orbit.agent.application.set_runs import SetRuns
 from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.storage_halt import Retry, StorageHalt
@@ -525,7 +526,10 @@ class FakeStore:
     The reports kept are ``reports_kept``, by id, and the highest id ever given
     ``last_report_id``. The merge holds kept are ``holds``, each save in ``holds_saved``;
     ``holds_failure``, while set, is the error saving them raises, and ``holds_load_failure``
-    the error reading them raises, as :class:`ReadFailed`.
+    the error reading them raises, as :class:`ReadFailed`. The schedules' last-fired times kept
+    are ``fired``, each save in ``fired_saved``; ``fired_failure``, while set, is the error
+    saving them raises, and ``fired_load_failure`` the error reading them raises, as
+    :class:`ReadFailed`.
     """
 
     def __init__(self, count: int = 0) -> None:
@@ -575,6 +579,10 @@ class FakeStore:
         self.holds_load_failure: str | None = None
         self.reports_kept: dict[int, NewReport] = {}
         self.last_report_id = 0
+        self.fired: dict[str, datetime] = {}
+        self.fired_saved: list[dict[str, datetime]] = []  # Each save of the last-fired times.
+        self.fired_failure: str | None = None
+        self.fired_load_failure: str | None = None
 
     @property
     def last(self) -> SessionRecord:
@@ -727,6 +735,17 @@ class FakeStore:
             await asyncio.sleep(0)  # Saving takes a while, as writing a file does.
         self.count = count
         self.counts.append(count)
+
+    async def fired_times(self) -> dict[str, datetime]:
+        await self._read(self.fired_load_failure)
+        return dict(self.fired)
+
+    async def save_fired_times(self, fired: Mapping[str, datetime]) -> None:
+        if self.fired_failure is not None:
+            raise StoreFailed(self.fired_failure)
+        await asyncio.sleep(0)  # Saving takes a while, as writing a file does.
+        self.fired = dict(fired)
+        self.fired_saved.append(self.fired)
 
     async def merge_holds(self) -> tuple[AnyHold, ...]:
         await self._read(self.holds_load_failure)
@@ -1420,6 +1439,11 @@ def install_greeting(session: WorkspaceHost, greeting: HostGreeting) -> None:
 def review_count_of(session: WorkspaceHost) -> ReviewCount:
     """The session's review count, which loads and saves the super review count."""
     return session._review_count
+
+
+def schedules_of(session: WorkspaceHost) -> Schedules:
+    """``session``'s schedules, which fire its ``schedule`` triggers."""
+    return session._schedules
 
 
 def count_loader_of(session: WorkspaceHost) -> Background:

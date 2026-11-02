@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
+    "cronsim>=2.7",
     "cryptography>=50.0.2",
     "httpx>=0.28.1",
     "mcp>=2.3.0",
@@ -161,6 +162,9 @@ forbidden_modules = [
     "orbit.execution",
     "orbit.__main__",
     "pydantic",
+    # Cron expressions are read by the domain, with cronsim, which has neither effects nor
+    # control, so any layer may use it; the tracing port stays on the standard library.
+    "cronsim",
 ]
 
 [[tool.importlinter.contracts]]

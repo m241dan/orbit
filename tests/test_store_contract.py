@@ -10,7 +10,7 @@ import pytest
 from orbit.agent.application.ports import ReadFailed, SessionStore
 from orbit.agent.domain.sessions import Unreadable
 from tests.agent_fakes import FakeStore, notice
-from tests.store_views import Opener, database, record
+from tests.store_views import WHEN, Opener, database, record
 
 
 @dataclass(frozen=True)
@@ -132,6 +132,14 @@ async def test_events_after_a_seq_that_cant_be_read_raise(subject: Subject) -> N
     await subject.break_down()
     with pytest.raises(ReadFailed):
         await subject.store.after("a", 0)
+
+
+async def test_saved_last_fired_times_replace_those_saved_before(subject: Subject) -> None:
+    store = subject.store
+    assert await store.fired_times() == {}
+    await store.save_fired_times({"nightly": WHEN, "weekly": WHEN})
+    await store.save_fired_times({"nightly": WHEN})
+    assert await store.fired_times() == {"nightly": WHEN}
 
 
 async def test_bounds_that_cant_be_read_raise(subject: Subject) -> None:

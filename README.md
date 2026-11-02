@@ -1024,7 +1024,7 @@ your checkout out of its way, it doesn't sandbox it.
 | The repository | your checkout | your code, which agents change only through commits orbit lands |
 | `.git/orbit` | the repository's git directory | the coder's worktree, the snapshots reviews and roles working on a `snapshot` run in, what earlier runs left there and `workspace.lock`, which says which orbit owns the repository (`.orbit/workspace.lock` outside git; see [Owning the repository](#owning-the-repository)) |
 | Temporary directories | the system's temporary directory | `orbit-agent-…`, the empty directory each run of a role whose `workspace` is `none` works in, removed after it (see [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)) |
-| The store | the state directory | `orbit.db`, the saved sessions, their event logs, the super review count and the record moves of every repository, `locks/`, and `fallback/` for events a failed write left unsaved (see [Storage failures](#storage-failures)) |
+| The store | the state directory | `orbit.db`, the saved sessions, their event logs, the super review count, the record moves and the schedules' last-fired times of every repository, `locks/`, and `fallback/` for events a failed write left unsaved (see [Storage failures](#storage-failures)) |
 | Config files | `.orbit/config.toml` in the repository | the verification steps, setup, roles and limits, committed with your code |
 | User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]`, `[server]`, `[remotes]`, `[telemetry]`, and in `[roles]` your machine's model, effort and runtime for roles and your personal roles, with the instructions files they name, and in `[runtimes]` the aliases of each runtime's models |
 | The token | `token` in the config directory | what frontends show `orbit serve` to connect (see [Serving the control plane](#serving-the-control-plane)) |
@@ -1122,7 +1122,7 @@ does.
 ### Storage failures
 
 When a write to the store fails, whether the event log, the session record (taking its lock on
-the first save included), the super review count or the record moves, orbit halts the session instead of carrying on with work it can't record: the running
+the first save included), the super review count, the record moves or the schedules' last-fired times, orbit halts the session instead of carrying on with work it can't record: the running
 agents, the planner's turn, the reviews, the startup check and the sets' runs are cancelled, and every command
 but quitting and "Try again" is refused with `storage_failed` and the same explanation. Nothing more is written
 to `orbit.db` until storage is resumed.
@@ -1984,6 +1984,8 @@ triggers, whose `startup-fix` adds the draft fixing it; with verification on and
 `set-up-verification` queues the configurator's task first and runs it, as a confirmed `ctrl+e`
 does, which fires `configure-checks` by hand, unless one is queued or running already, as the
 session was saved with it, which runs instead (see [Verification steps](#verification-steps)).
+Once those have fired, the `schedule` triggers fire on their `cron`, as long as the workspace is
+open (below).
 `task_landed` and `task_finished` are
 the work lane's tasks' (a review's end isn't one), landings count toward the `commits` triggers
 only while reviews are on, as the review lane counts them, and a trigger with
@@ -2086,6 +2088,15 @@ A trigger's fields:
   [triggers.security-review]
   paths = ["src/**/external/**", "pyproject.toml"]
   ```
+- `cron`: with `on = "schedule"`, when the trigger fires, as a five-field cron expression (minute,
+  hour, day of month, month and day of week, such as `"0 3 * * *"` for 3 every night or
+  `"*/30 9-17 * * mon-fri"` for every half hour of a working day), read in the machine's local
+  time zone, daylight saving included: a time the clocks skip comes due as they go forward, and
+  one they repeat comes due once. A `schedule` trigger needs it (`a schedule trigger needs
+  cron.`), any other trigger is refused one (`cron needs on = "schedule".`), and an expression
+  that isn't one is refused quoting why, as [cronsim](https://github.com/cuu508/cronsim) reads
+  it (`cron = "nope" isn't a cron expression: Wrong number of fields.`), each naming the
+  trigger. No shipped trigger is scheduled.
 
 The events, the fields their `when` can match, and the variables their templates can use, each
 its name in braces:
@@ -2100,6 +2111,7 @@ its name in braces:
 | `manual` | you fire it | none | `{checks}` |
 | `reviews_finished` | every finding role's task of a review has ended (see [Reviews](#reviews)) | `findings`: `some` or `none`; `review`: `commit`, `batch`, `super` or `set` | `{title}`, `{commit}`, `{findings}`, `{cap}`, `{queued}`, `{landed_since}` |
 | `set_finished` | a run of a named set ends, passed or failed (not one cancelled, nor the task checks) | `set`: any set's name; `status`: `passed` or `failed` | `{set}`, `{status}`, `{commit}`, `{output}` |
+| `schedule` | its `cron` comes due while the workspace is open, or came due while it was closed | none | none |
 
 When an event fires, each enabled trigger on it fires in turn, in configuration order (the
 shipped ones, then the project's), if its role, or one of its list's, is enabled, its `when` takes the event, its `paths`, if it has
@@ -2114,6 +2126,26 @@ waits until checks are accepted, the conversation naming its trigger (`bugs-revi
 verification first.`), but a configurator's. A trigger never fires on an event caused by a task it queued itself, one
 whose origin is its name: a `task_finished` trigger queuing `coder` tasks doesn't fire again as
 its own tasks finish, though another trigger may.
+
+A `schedule` trigger fires at each time its `cron` comes due while its workspace is open, as any
+event fires its triggers: its tasks wait in their lanes, as while the lane is busy or a runtime is
+paused, and wait for verification to be set up while it's missing; a set it names runs, or runs
+once more if it's running already, and under `--no-verify`, where no set runs, it does nothing.
+Each workspace open runs its own schedules, from the triggers it opened with, so a changed `cron`
+takes effect as the workspace next opens, and closing the workspace stops them. The time each last
+fired is kept per repository, beside the super review count, so it carries on across sessions and
+restarts. As orbit opens a workspace, after the `session_started` triggers, a `schedule` trigger
+that came due since it last fired, while orbit was closed or the machine slept, fires once, however
+many times it was missed, then keeps its schedule; one orbit sees for the first time fires first
+at its next time, never for times before orbit knew it. This one runs the set `mutation` every
+night, and once as orbit opens the morning after a night the laptop was shut:
+
+```toml
+[triggers.nightly-mutation]
+on = "schedule"
+cron = "0 3 * * *"
+checks = "mutation"
+```
 
 A `commits` trigger counts each landing its `when` takes, and once its count reaches its `every`
 it's due: it fires unless one of its guards holds it back, judged as the landing is counted,
@@ -3858,9 +3890,11 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     runs a verification step as a process (`run_step`); `processes` runs a program to completion
     without leaving it behind; `workspace`
     fingerprints the git working tree; `usage_api` fetches the Claude subscription's usage
-    limits (`UsageApi`) with the token in `~/.claude/.credentials.json`; `sqlite_store` is the
+    limits (`UsageApi`) with the token in `~/.claude/.credentials.json`; `local_zone` is the
+    machine's local time zone as the C library tells it (`LocalZone`), which the `schedule`
+    triggers' cron expressions are read in; `sqlite_store` is the
     `SessionStore` port's adapter (`SqliteStore`): saved sessions and each repository's super
-    review count and record moves in `orbit.db` in the state directory, with `session_locks`' lock files while
+    review count, record moves and schedules' last-fired times in `orbit.db` in the state directory, with `session_locks`' lock files while
     an orbit has a session open, `sqlite_schema` creating, migrating and opening the database,
     `sqlite_log` holding the events' log's statements, `sqlite_backup` copying it to a backup and `sqlite_errors` telling its errors apart;
     `directories` picks the state and config directories (`resolve_state_dir`,
@@ -3956,7 +3990,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     read-only session's workspace lock, through the `RepositoryLock` port, until the
     repository is free, and holds the offer of it until the user answers;
     `ReviewCount` (in `review_count`) keeps the repository's super review count apart from
-    any one session; `RecordMoves` (in `record_moves`) moves a record a task names whose
+    any one session; `Schedules` (in `schedules`) fires the `schedule` triggers once the
+    workspace opens, on a `ScheduleClock` the CLI gives the machine's local time zone, and
+    `FiredTimes` keeps the time each last fired; `RecordMoves` (in `record_moves`) moves a record a task names whose
     number another record took, keeping each move in the store and telling the planner; `SessionSettings` (in `settings`) holds the open session's settings, at
     first those given at startup (a session opened brings its saved ones, but for the pinned
     ones, which keep the given), and the models they may choose from; `outcome` and

@@ -60,6 +60,7 @@ def test_the_events_are_the_records_with_their_when_fields() -> None:
         "manual",
         "reviews_finished",
         "set_finished",
+        "schedule",
     )
     assert {name: event.fields for name, event in EVENTS.items()} == {
         "session_started": ("verification",),
@@ -70,6 +71,7 @@ def test_the_events_are_the_records_with_their_when_fields() -> None:
         "manual": (),
         "reviews_finished": ("findings", "review"),
         "set_finished": ("set", "status"),
+        "schedule": (),
     }
 
 
@@ -122,6 +124,7 @@ def test_every_event_gives_its_trigger_and_its_own_variables() -> None:
             "landed_since",
         ),
         "set_finished": ("trigger", "set", "status", "commit", "output"),
+        "schedule": ("trigger",),
     }
 
 
@@ -200,7 +203,7 @@ def test_every_field_has_a_description() -> None:
             {"on": "landed"},
             "triggers.x.on: landed isn't an event; the events are session_started, task_landed,"
             " task_finished, commits, startup_check_failed, manual, reviews_finished,"
-            " set_finished.",
+            " set_finished, schedule.",
         ),
         (
             {"on": "commits", "guards": ["review-rounds", "nightly"]},

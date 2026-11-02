@@ -259,6 +259,7 @@ def test_a_shipped_triggers_key_lists_its_fields_in_the_package_layer(project: P
         "triggers.bugs-review.enabled = true   default",
         'triggers.bugs-review.tab = "review"   package',
         "triggers.bugs-review.paths = null   default",
+        "triggers.bugs-review.cron = null   default",
     ]
 
 
@@ -302,6 +303,14 @@ def test_a_projects_paths_for_the_security_review_show_in_its_layer(project: Pat
     assert result.stdout == (
         'triggers.security-review.paths = ["src/**/external/**"]   project .orbit/config.toml\n'
     )
+
+
+def test_a_projects_schedule_trigger_shows_its_cron_in_its_layer(project: Path) -> None:
+    nightly = 'on = "schedule"\ncron = "0 3 * * *"\nrole = "coder"\nprompt = "Tidy up"\n'
+    project_file(project, f"[triggers.nightly]\n{nightly}")
+    result = show(project, "triggers.nightly.cron")
+    assert result.exit_code == 0, result.output
+    assert result.stdout == 'triggers.nightly.cron = "0 3 * * *"   project .orbit/config.toml\n'
 
 
 def test_a_trigger_listing_roles_shows_them_as_a_list(project: Path) -> None:

@@ -16,6 +16,7 @@ class FailedWrite(StrEnum):
     USAGE = "the turns' usage"
     RECORD_MOVES = "the record moves"
     MERGE_HOLDS = "the merge holds"
+    FIRED_TIMES = "the schedules' last-fired times"
 
 
 class StorageErrorKind(StrEnum):

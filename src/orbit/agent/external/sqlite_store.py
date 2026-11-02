@@ -6,8 +6,8 @@ by a single thread: every database call runs there, a statement or a transaction
 caller that's cancelled while awaiting one never leaves the connection mid-transaction. The schema
 and opening it are :mod:`sqlite_schema`'s, the events' log's statements :mod:`sqlite_log`'s, the
 turns' usage :mod:`sqlite_usage`'s, the reports :mod:`sqlite_reports`'s, and copying it to a
-backup :mod:`sqlite_backup`'s; this module holds the sessions', review counts' and merge holds'
-statements, and runs them all on the database's thread.
+backup :mod:`sqlite_backup`'s; this module holds the sessions', review counts', merge holds' and
+schedules' last-fired times' statements, and runs them all on the database's thread.
 
 Session locks are :class:`SessionLocks` lock files in ``locks/<workspace id>`` in the state
 directory, so that a crash leaves no stale lock behind.
@@ -39,7 +39,9 @@ from orbit.agent.domain.reviews import SuperReviewCount
 from orbit.agent.domain.sessions import (
     SessionRecord,
     Unreadable,
+    fired_json,
     merge_holds_json,
+    parse_fired,
     parse_merge_holds,
     parse_record,
     parse_sampled,
@@ -338,6 +340,14 @@ class SqliteStore:
     async def save_review_count(self, workspace: str, count: SuperReviewCount) -> None:
         message = "Couldn't save the review count to"
         await self._or_raise(message, self._save_review_count, workspace, count, write=True)
+
+    async def fired_times(self, workspace: str) -> dict[str, datetime]:
+        message = "Couldn't read the schedules' last-fired times from"
+        return await self._or_raise(message, self._fired_times, workspace)
+
+    async def save_fired_times(self, workspace: str, fired: Mapping[str, datetime]) -> None:
+        message = "Couldn't save the schedules' last-fired times to"
+        await self._or_raise(message, self._save_fired_times, workspace, fired, write=True)
 
     async def merge_holds(self, workspace: str) -> tuple[AnyHold, ...]:
         message = "Couldn't read the merge holds from"
@@ -658,6 +668,20 @@ class SqliteStore:
             (workspace, merge_holds_json(holds)),
         )
 
+    def _fired_times(self, workspace: str) -> dict[str, datetime]:
+        row = self._db.execute(
+            "SELECT fired FROM reviews WHERE workspace_id = ?", (workspace,)
+        ).fetchone()
+        return {} if row is None else parse_fired(str(row[0]))
+
+    def _save_fired_times(self, workspace: str, fired: Mapping[str, datetime]) -> None:
+        # Beside the review count, which starts at none if this saves the row first.
+        self._db.execute(
+            """INSERT INTO reviews (workspace_id, since_super, fired) VALUES (?, 0, ?)
+            ON CONFLICT (workspace_id) DO UPDATE SET fired = excluded.fired""",
+            (workspace, fired_json(fired)),
+        )
+
     def _record_moves(self, workspace: str) -> dict[str, str]:
         rows = self._db.execute(
             "SELECT old_path, new_path FROM record_moves WHERE workspace_id = ?", (workspace,)
@@ -775,6 +799,12 @@ class WorkspaceStore:
 
     async def save_review_count(self, count: SuperReviewCount) -> None:
         await self._store.save_review_count(self._id, count)
+
+    async def fired_times(self) -> dict[str, datetime]:
+        return await self._store.fired_times(self._id)
+
+    async def save_fired_times(self, fired: Mapping[str, datetime]) -> None:
+        await self._store.save_fired_times(self._id, fired)
 
     async def merge_holds(self) -> tuple[AnyHold, ...]:
         return await self._store.merge_holds(self._id)

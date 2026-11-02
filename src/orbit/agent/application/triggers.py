@@ -24,8 +24,9 @@ review the whole codebase at the commit, each task booked into that review's bat
 The host raises ``session_started`` as it opens the workspace with its session, whose triggers
 with ``checks = "task-checks"`` run the startup check, and the startup check raises
 ``startup_check_failed`` for the step that failed. ctrl+e fires ``configure-checks`` by hand, on
-``manual``. A trigger with ``checks`` naming a set has it run, in the background, on whatever
-event it fires, or by hand. A named set's run ending raises ``set_finished``: each task of a
+``manual``. The schedules raise ``schedule`` for the triggers whose cron expressions came due.
+A trigger with ``checks`` naming a set has it run, in the background, on whatever event it
+fires, or by hand. A named set's run ending raises ``set_finished``: each task of a
 finding role its triggers queue is booked into one review of the set's report, as the review
 lane asks, and any other role's is an ordinary task.
 
@@ -59,6 +60,7 @@ from orbit.agent.domain.triggers import (
     COMMITS,
     REVIEW_FIELD,
     REVIEW_ROUNDS,
+    SCHEDULE,
     SESSION_STARTED,
     STARTUP_CHECK_FAILED,
     TASK_FINISHED,
@@ -330,6 +332,18 @@ class TriggerEngine:
         values = partial(_given, set_finished_values(outcome))
         firing = await self._firing(self._desk.agents.triggers, event, values, review)
         return () if firing is None else await self._queue(replace(firing, books="lenses"))
+
+    async def scheduled(self, names: Collection[str]) -> tuple[str, ...]:
+        """Raise ``schedule`` for the triggers ``names``, whose cron expressions came due: each
+        of them that listens for it, as :func:`~orbit.agent.domain.triggers.listening` says, and
+        that no guard holds back queues its tasks, rendered from its name, or runs the set it
+        names. The board is published if any task was queued. Returns their ids, for
+        :meth:`run`."""
+        triggers = {
+            name: trigger for name, trigger in self._desk.agents.triggers.items() if name in names
+        }
+        firing = await self._firing(triggers, TriggerEvent(SCHEDULE, {}), _no_values, None)
+        return () if firing is None else await self._queue(firing)
 
     async def fire(
         self, event: TriggerEvent, values: Values, review: ReviewRound | None = None

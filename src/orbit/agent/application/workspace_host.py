@@ -58,6 +58,12 @@ from orbit.agent.application.review_count import ReviewCount
 from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
 from orbit.agent.application.review_trace import ReviewTracing
 from orbit.agent.application.role_copies import RoleCopies, copy_ttls, saved_copies
+from orbit.agent.application.schedules import (
+    FiredTimes,
+    ScheduleClock,
+    ScheduleParts,
+    Schedules,
+)
 from orbit.agent.application.session_state import SessionStates, StateParts
 from orbit.agent.application.set_runs import SetRuns, SetSite
 from orbit.agent.application.set_trace import SetTracing
@@ -107,6 +113,7 @@ from orbit.agent.domain.triggers import (
     SetOutcome,
     VerificationState,
     can_queue_reviews,
+    scheduled_crons,
     set_finished_event,
     verification_state,
 )
@@ -179,6 +186,7 @@ def _desk(
 
 _DEFAULT_STORAGE = StorageSettings()
 _NO_TELEMETRY = NoTelemetry()
+_UTC_SCHEDULES = ScheduleClock()
 
 UNREGISTERED_WORKSPACE = "unregistered"
 """The id of a host's workspace when it's given none, as one with no store isn't registered."""
@@ -217,8 +225,8 @@ class HostParts:
     the ``clock``, ``new_id``, ``pinned``, ``pick_session``, ``name``, ``startup_notes`` and
     ``storage`` of its sessions, the ``fallback`` and ``recover`` of a halt, the ``owner``,
     ``lock``, ``lock_retry`` and ``lock_declined_retry`` of a takeover, whether it's
-    ``managed``, the ``ledger`` its usage is recorded in and the ``telemetry`` it's traced
-    with."""
+    ``managed``, the ``ledger`` its usage is recorded in, the ``telemetry`` it's traced with
+    and the ``schedule_clock`` its ``schedule`` triggers tell the time by."""
 
     settings: Settings | None = None
     verification: Verification | None = None
@@ -243,6 +251,7 @@ class HostParts:
     managed: bool = False
     ledger: UsageLedger | None = None
     telemetry: Telemetry = _NO_TELEMETRY
+    schedule_clock: ScheduleClock = _UTC_SCHEDULES
 
 
 _NO_PARTS = HostParts()
@@ -283,6 +292,12 @@ class WorkspaceHost:
     runs that set in the background, in a snapshot of the base's latest commit, while the agents
     work in a tree; one more run is queued if it fires while the set runs, and a halt cancels the
     runs as it does the startup check. A host without agents fires no triggers.
+
+    Once ``session_started``'s triggers have fired, the enabled ``schedule`` triggers, as they
+    stand then, fire on the ``schedule_clock``: once each that came due since it last fired,
+    then each time it comes due, until the host closes, the time each last fired kept in
+    ``store``, per repository. They raise ``schedule`` as any event is raised, so their tasks
+    wait in their lanes as other triggers' do, and a set already running runs once more.
 
     Until verification has a step, while it's on, the session's gate holds back every task but
     the configurator's, and the user's runs are refused, saying why; accepted checks start the
@@ -367,9 +382,8 @@ class WorkspaceHost:
             lambda event: self._events.put(event),
             RetryTimes(parts.lock_retry, parts.lock_declined_retry),
         )
-        self._settings = SessionSettings(
-            parts.settings or Settings(), parts.pinned, self._model_aliases
-        )
+        settings = parts.settings or Settings()
+        self._settings = SessionSettings(settings, parts.pinned, self._model_aliases)
         self._storage = parts.storage
         self._halt = self._storage_halt()
         self._gate = SessionGate(
@@ -391,6 +405,7 @@ class WorkspaceHost:
         self._keeper = SessionKeeper(parts.store, self._events.put, self._halt, new_sessions)
         self._keeper.rename(parts.name)
         self._review_count = ReviewCount(parts.store, self._halt, self._events.put)
+        self._schedules = self._make_schedules(parts)
         self._usage = UsageRecorder(parts.ledger, self._halt, self._events.put, parts.clock)
         self._usage.recorded = lambda: self.usage_recorded()
         self._count_loader = Background("review count", self._events.put)
@@ -451,6 +466,13 @@ class WorkspaceHost:
         self._entries = self._catalog_entries()
         self._accounting = self._usage_accounting()
         self._watch_background()
+
+    def _make_schedules(self, parts: HostParts) -> Schedules:
+        """What fires the ``schedule`` triggers on the ``parts``' ``schedule_clock`` once the
+        workspace opens, keeping the time each last fired in their ``store``."""
+        times = FiredTimes(parts.store, self._halt, self._events.put)
+        clock = parts.schedule_clock
+        return Schedules(ScheduleParts(times, clock, self._fire_scheduled, self._events.put))
 
     def _connections_changed(self) -> None:
         """Publish the sessions' states, and tell the seats how many frontends view the open
@@ -515,12 +537,18 @@ class WorkspaceHost:
 
     def _storage_resume(self) -> StorageResume:
         """What resumes the session once storage works again: it retries the session record,
-        the review count, the usage and the record moves, then appends to the event log
-        again."""
+        the review count, the usage, the record moves, the schedules' last-fired times and the
+        holds on merges, then appends to the event log again."""
         parts = ResumeParts(
             self._keeper,
             self._switcher.contents,
-            (self._review_count, self._usage, self._record_moves, *self._kept_holds()),
+            (
+                self._review_count,
+                self._usage,
+                self._record_moves,
+                self._schedules.times,
+                *self._kept_holds(),
+            ),
             self._events,
             self._turns,
             self._restart_background,
@@ -840,7 +868,8 @@ class WorkspaceHost:
         workspace opens with it, verifying tasks with the steps configured now, none while
         verification is off, with the named sets configured, and run the tasks its triggers
         queued, and a configurator's waiting while verification is missing, queued then or saved
-        with the session, as ctrl+e would; without agents, there are no triggers to fire."""
+        with the session, as ctrl+e would, then start the schedules of the enabled ``schedule``
+        triggers; without agents, there are no triggers to fire."""
         engine = self._triggers
         if engine is None:
             return
@@ -850,6 +879,16 @@ class WorkspaceHost:
         queued = await self._switcher.between_switches(lambda: engine.started(steps, sets))
         engine.run(queued)
         await self._turns.set_up()
+        assert self._desk is not None  # The engine fires the desk's agents' triggers.
+        self._schedules.start(scheduled_crons(self._desk.agents.triggers))
+
+    async def _fire_scheduled(self, names: tuple[str, ...]) -> None:
+        """Raise ``schedule`` for the triggers ``names``, come due, in the session open once no
+        switch is under way, and run the tasks they queued."""
+        engine = self._triggers
+        assert engine is not None  # Only agents' triggers are scheduled.
+        queued = await self._switcher.between_switches(lambda: engine.scheduled(names))
+        engine.run(queued)
 
     async def _startup_failed(self, step: VerificationStep, output: str) -> bool:
         """Raise ``startup_check_failed`` for ``step``, which failed at startup with ``output``,
@@ -1303,14 +1342,14 @@ class WorkspaceHost:
 
     async def close(self) -> None:
         """Stop a storage halt under way, the tries of the repository's lock, the loading of
-        the super review count, the raising of ``session_started`` and the keeping of the
-        copies, then the work, as :meth:`_stop_work` does: the review lane, the other lanes
-        that start by themselves, the startup check and the sets' runs, so that nothing wakes
-        the work lane, then the work in progress, which stops its agent, and the conversational
-        roles' turns; then stop their retired conversations, their conversations, the agents'
-        host, the recording of turns' usage, the saving of the session, releasing its lock, and
-        the writing of its events to the store, then end every connection's stream, in that
-        order.
+        the super review count, the raising of ``session_started``, the schedules and the
+        keeping of the copies, then the work, as :meth:`_stop_work` does: the review lane, the
+        other lanes that start by themselves, the startup check and the sets' runs, so that
+        nothing wakes the work lane, then the work in progress, which stops its agent, and the
+        conversational roles' turns; then stop their retired conversations, their conversations,
+        the agents' host, the recording of turns' usage, the saving of the session, releasing its
+        lock, and the writing of its events to the store, then end every connection's stream, in
+        that order.
         Each is stopped even if one before it fails or the close is cancelled, as
         :func:`close_all` does."""
         self._closing = True
@@ -1324,6 +1363,7 @@ class WorkspaceHost:
             self._takeover.close,
             self._count_loader.close,
             self._opening.close,
+            self._schedules.close,
             self._copy_keeper.close,
         ]
         stops += self._work_stops(self._stop_turns, final=True)

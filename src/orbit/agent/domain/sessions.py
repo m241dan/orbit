@@ -398,6 +398,9 @@ class SessionRecord(BaseModel):
 _SAMPLED: TypeAdapter[dict[str, int]] = TypeAdapter(dict[str, NonNegativeInt])
 """The number of the super review that last sampled each file, by path."""
 
+_FIRED: TypeAdapter[dict[str, datetime]] = TypeAdapter(dict[str, AwareDatetime])
+"""The time each ``schedule`` trigger last fired, by name."""
+
 
 class _ReviewCount(BaseModel):
     """The commits since the last super review, and the commit it reviewed (none before the
@@ -794,6 +797,20 @@ def sampled_json(sampled: Mapping[str, int]) -> str:
     """``sampled``, the number of the super review that last sampled each file, by path, as
     JSON."""
     return _SAMPLED.dump_json(dict(sampled)).decode()
+
+
+def fired_json(fired: Mapping[str, datetime]) -> str:
+    """``fired``, the time each ``schedule`` trigger last fired, by name, as JSON."""
+    return _FIRED.dump_json(dict(fired)).decode()
+
+
+def parse_fired(text: str) -> dict[str, datetime]:
+    """The time each ``schedule`` trigger last fired, by name, in JSON ``text``; none when it's
+    unreadable, so each trigger is seen afresh and fires at its next time."""
+    try:
+        return _FIRED.validate_json(text)
+    except ValidationError:
+        return {}
 
 
 def parse_sampled(text: str) -> dict[str, int]:

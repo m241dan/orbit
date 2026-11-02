@@ -626,6 +626,17 @@ class SessionStore(EventLog, Protocol):
         can't."""
         ...
 
+    async def fired_times(self) -> dict[str, datetime]:
+        """The time each ``schedule`` trigger last fired, by name; none when none is saved.
+        Raises :class:`ReadFailed` when they can't be read."""
+        ...
+
+    async def save_fired_times(self, fired: Mapping[str, datetime]) -> None:
+        """Save ``fired`` as the time each ``schedule`` trigger last fired, by name, replacing
+        those saved; raises :class:`StoreFailed`, a :class:`StorageFailed` when the database
+        failed, when they can't be saved."""
+        ...
+
     async def merge_holds(self) -> tuple[AnyHold, ...]:
         """The holds on merges into the user's branch, the named sets' and the blocking
         findings', in the order they started; none when none is saved. Raises

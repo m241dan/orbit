@@ -3,8 +3,8 @@ named set: the events and guards orbit knows, a trigger's fields, the package's 
 with a project's and checked against its roles and sets, the reports a configurator proposes
 routing a set's runs to a lens role, the sets no trigger runs, which of them fire on an event
 and which guards hold one back, which of them a landing's changed paths let fire, when one fires
-in words, the tab a task's agent shows under, what a named set's run ending raises, and the
-rendering of a trigger's prompt template.
+in words, when a ``schedule`` trigger's cron expression comes due, the tab a task's agent shows
+under, what a named set's run ending raises, and the rendering of a trigger's prompt template.
 
 The package's triggers aren't kept here: whoever builds them passes in the contents of their
 ``triggers.toml`` and the templates it names. ``manual`` isn't raised yet, but a trigger fired by
@@ -15,9 +15,11 @@ runs the task checks only on ``session_started``, as the startup check.
 import re
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, tzinfo
 from fnmatch import fnmatchcase
 from typing import Annotated, Any, Final, Literal, get_args
 
+from cronsim import CronSim, CronSimError
 from pydantic import (
     AfterValidator,
     BaseModel,
@@ -45,11 +47,12 @@ EventName = Literal[
     "manual",
     "reviews_finished",
     "set_finished",
+    "schedule",
 ]
 """What a trigger fires on: orbit opening a workspace with its session, a task's work landing, a
 task finishing, landings counted up to a trigger's ``every``, a step of the startup check
-failing, the user firing it, every finding role's task of a review having ended, or a run of a
-named set ending."""
+failing, the user firing it, every finding role's task of a review having ended, a run of a
+named set ending, or its ``cron`` expression coming due."""
 
 GuardName = Literal[
     "review-rounds", "raised-finding", "suggestions-pending", "not-queued", "dedupe"
@@ -76,6 +79,16 @@ REVIEWS_FINISHED = "reviews_finished"
 SET_FINISHED: Final = "set_finished"
 """The event of a named set's run ending, passed or failed; neither a run cancelled or one git
 couldn't start, nor the task checks, raise it."""
+
+SCHEDULE: Final = "schedule"
+"""The event of a trigger's ``cron`` expression coming due while its workspace is open, or
+having come due while it was closed, the only event ``cron`` goes with."""
+
+CRON_FIELDS = 5
+"""The fields of a trigger's ``cron``: minute, hour, day of month, month and day of week."""
+
+_ANY_TIME = datetime(2000, 1, 1)
+"""A time to read a cron expression from as it's checked, which any time would do for."""
 
 SetStatus = Literal["passed", "failed"]
 """What ``set_finished``'s ``status`` field says: the set's run passed, or failed."""
@@ -171,6 +184,7 @@ EVENTS: Mapping[str, Event] = {
         (TRIGGER_VARIABLE, "title", "commit", "findings", "cap", "queued", "landed_since"),
     ),
     SET_FINISHED: Event(("set", "status"), (TRIGGER_VARIABLE, "set", "status", "commit", "output")),
+    SCHEDULE: Event((), (TRIGGER_VARIABLE,)),
 }
 """Each event, by name, with what it gives. A trigger fired by hand gives the variables of its
 event, as the super review does those of ``commits``."""
@@ -226,8 +240,9 @@ class Trigger(_Config):
     named set, as ``checks`` (``gate`` read as the task checks), the events it takes ``when`` they
     match, the ``guards`` that may hold it back, how many landings it fires after, ``every``,
     whether it's ``manual``, under its ``label``, whether its task is a ``draft``, whether it's
-    ``enabled``, the ``tab`` its agents share, if any, and the ``paths`` a landing must change
-    for it to fire, if any."""
+    ``enabled``, the ``tab`` its agents share, if any, the ``paths`` a landing must change for
+    it to fire, if any, and, on ``schedule``, the ``cron`` expression saying when it comes
+    due."""
 
     on: EventName = Field(
         description='The event it fires on, such as "task_landed", "commits" or "manual".'
@@ -277,6 +292,10 @@ class Trigger(_Config):
     paths: tuple[str, ...] | None = Field(
         default=None,
         description='With on = "task_landed", globs of the paths a commit must change to fire.',
+    )
+    cron: str | None = Field(
+        default=None,
+        description='With on = "schedule", when it fires: five cron fields, in local time.',
     )
 
     @field_validator("on", mode="before")
@@ -543,7 +562,8 @@ def check_triggers(
     field never takes on its event, a role not among ``roles`` or a value :data:`WHEN_VALUES`
     doesn't give, ``review-rounds`` on a trigger on another event than ``task_landed``,
     ``every`` on another event than ``commits``, ``paths`` on another event than
-    ``task_landed``, or naming no glob, and ``manual`` without a ``label``."""
+    ``task_landed``, or naming no glob, ``cron`` missing on ``schedule``, on another event, or
+    not a five-field cron expression, and ``manual`` without a ``label``."""
     problems = [
         f"triggers.{name}.{field}: {why}"
         for name, trigger in triggers.items()
@@ -572,6 +592,7 @@ def _problems(trigger: Trigger, targets: _Targets) -> list[tuple[str, str]]:
         *_guard_problems(trigger),
         *_every_problems(trigger),
         *_paths_problems(trigger),
+        *_cron_problems(trigger),
         *_label_problems(trigger),
     ]
 
@@ -700,6 +721,52 @@ def _paths_problems(trigger: Trigger) -> list[tuple[str, str]]:
     return [*event, *empty]
 
 
+def _cron_problems(trigger: Trigger) -> list[tuple[str, str]]:
+    """Why ``trigger``'s ``cron`` is refused, or missing, if it is: a ``schedule`` trigger needs
+    one, no other takes one, and it's a five-field cron expression."""
+    if trigger.cron is None:
+        return [("cron", "a schedule trigger needs cron.")] if trigger.on == SCHEDULE else []
+    if trigger.on != SCHEDULE:
+        return [("cron", f'cron needs on = "{SCHEDULE}".')]
+    problem = cron_problem(trigger.cron)
+    return [] if problem is None else [("cron", f'cron = "{trigger.cron}" {problem}')]
+
+
+def cron_problem(cron: str) -> str | None:
+    """Why ``cron`` isn't a five-field cron expression, quoting cronsim's reason, if it isn't;
+    none if it is. Cronsim reads six fields too, the first seconds, which orbit doesn't take."""
+    try:
+        CronSim(cron, _ANY_TIME)
+    except CronSimError as exc:
+        return f"isn't a cron expression: {exc}."
+    if len(cron.split()) != CRON_FIELDS:
+        return "has six fields; cron takes five: minute, hour, day of month, month, day of week."
+    return None
+
+
+def next_due(cron: str, after: datetime, zone: tzinfo) -> datetime:
+    """The first time after ``after`` that ``cron``, a valid cron expression, comes due, read in
+    ``zone``, as cronsim reads it: a time daylight saving skips comes due as the clocks go
+    forward, and one it repeats comes due once."""
+    return next(CronSim(cron, after.astimezone(zone)))
+
+
+def falls_due(cron: str, since: datetime, until: datetime, zone: tzinfo) -> bool:
+    """Whether ``cron``, a valid cron expression read in ``zone``, comes due after ``since`` and
+    by ``until``."""
+    return next_due(cron, since, zone) <= until
+
+
+def scheduled_crons(triggers: Mapping[str, Trigger]) -> dict[str, str]:
+    """The cron expressions of the enabled ``schedule`` triggers among ``triggers``, by name, in
+    their order."""
+    return {
+        name: trigger.cron
+        for name, trigger in triggers.items()
+        if trigger.enabled and trigger.on == SCHEDULE and trigger.cron is not None
+    }
+
+
 def _label_problems(trigger: Trigger) -> list[tuple[str, str]]:
     """Why ``trigger`` lacks a label, if it does: a manual one needs it."""
     return (
@@ -723,8 +790,10 @@ FIRING_PHRASES: Mapping[str, str] = {
     "manual": "by hand",
     REVIEWS_FINISHED: "when a review's lenses have finished",
     SET_FINISHED: "when a set finishes",
+    SCHEDULE: "on schedule",
 }
-"""When a trigger on each event but ``commits``, which counts, fires, in words, by name."""
+"""When a trigger on each event but ``commits``, which counts, fires, in words, by name; a
+``schedule`` trigger's is followed by its cron expression."""
 
 
 def describe_firing(trigger: Trigger) -> str:
@@ -738,6 +807,8 @@ def describe_firing(trigger: Trigger) -> str:
 
 def _describe_event(trigger: Trigger) -> str:
     """When ``trigger``'s event happens, in words."""
+    if trigger.on == SCHEDULE:
+        return f"{FIRING_PHRASES[SCHEDULE]} {trigger.cron}"
     if trigger.on != COMMITS:
         return FIRING_PHRASES[trigger.on]
     every = trigger.every or 1

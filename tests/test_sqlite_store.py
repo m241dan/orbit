@@ -5,6 +5,7 @@ import logging
 import sqlite3
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractContextManager, closing, nullcontext
+from datetime import timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -99,6 +100,61 @@ async def test_merge_holds_survive_closing_beside_the_review_count(
     await reopened.save_merge_holds(())
     assert await reopened.merge_holds() == ()
     assert await reopened.review_count() == SuperReviewCount(2)
+
+
+async def test_schedules_last_fired_times_survive_closing_beside_the_review_count(
+    open_store: Opener, workspace: Path
+) -> None:
+    fired = {"nightly": WHEN, "weekly": WHEN.astimezone(timezone(timedelta(hours=-4)))}
+    store = await open_store(workspace)
+    assert await store.fired_times() == {}
+    await store.save_fired_times(fired)
+    await store.save_review_count(SuperReviewCount(2))
+    await store.close()
+    reopened = await open_store(workspace)
+    assert await reopened.fired_times() == fired
+    assert await reopened.review_count() == SuperReviewCount(2)
+    await reopened.save_fired_times({"nightly": WHEN})
+    assert await reopened.fired_times() == {"nightly": WHEN}
+    assert await reopened.review_count() == SuperReviewCount(2)
+
+
+async def test_the_migration_keeping_last_fired_times_keeps_the_review_count_and_holds(
+    monkeypatch: pytest.MonkeyPatch, open_store: Opener, workspace: Path
+) -> None:
+    with monkeypatch.context() as patched:
+        patched.setattr(sqlite_schema, "MIGRATIONS", sqlite_schema.MIGRATIONS[:-1])
+        older = await open_store(workspace)
+        await older.save_review_count(SuperReviewCount(2, "abc", 3, {"a.py": 1}))
+        await older.save_merge_holds((HOLD,))
+        await older.close()
+    store = await open_store(workspace)
+    assert await store.review_count() == SuperReviewCount(2, "abc", 3, {"a.py": 1})
+    assert await store.merge_holds() == (HOLD,)
+    assert await store.fired_times() == {}
+
+
+async def test_last_fired_times_that_cant_be_parsed_are_read_as_none(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.save_fired_times({"nightly": WHEN})
+    with database(state) as connection:
+        connection.execute("""UPDATE reviews SET fired = '{"nightly": "yesterday"}'""")
+    assert await store.fired_times() == {}
+
+
+async def test_a_failed_save_of_last_fired_times_says_what_the_database_reported(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    with database(state) as connection:
+        connection.execute("DROP TABLE reviews")
+    with pytest.raises(StorageFailed) as failed:
+        await store.save_fired_times({"nightly": WHEN})
+    assert failed.value.error == "no such table: reviews"
+    with pytest.raises(ReadFailed):
+        await store.fired_times()
 
 
 async def test_finding_holds_survive_closing_beside_set_holds(

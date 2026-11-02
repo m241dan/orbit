@@ -146,7 +146,7 @@ def test_a_trigger_for_a_projects_own_role_is_valid() -> None:
             NIGHTLY | {"on": "someday"},
             "triggers.nightly.on: someday isn't an event; the events are session_started,"
             " task_landed, task_finished, commits, startup_check_failed, manual, reviews_finished,"
-            " set_finished.",
+            " set_finished, schedule.",
         ),
         (
             NIGHTLY | {"role": "tidier"},
@@ -198,6 +198,16 @@ def test_a_trigger_for_a_projects_own_role_is_valid() -> None:
         (
             NIGHTLY | {"on": "task_landed", "paths": []},
             "triggers.nightly.paths: a list of paths names at least one glob.",
+        ),
+        (NIGHTLY | {"on": "schedule"}, "triggers.nightly.cron: a schedule trigger needs cron."),
+        (
+            NIGHTLY | {"on": "task_landed", "cron": "0 3 * * *"},
+            'triggers.nightly.cron: cron needs on = "schedule".',
+        ),
+        (
+            NIGHTLY | {"on": "schedule", "cron": "nope"},
+            'triggers.nightly.cron: cron = "nope" isn\'t a cron expression: Wrong number of'
+            " fields.",
         ),
     ],
 )
@@ -303,6 +313,16 @@ def test_the_reviews_share_the_review_tab_and_the_super_review_its_own() -> None
         "super-review": "super-review",
         "super-fix-review": "review",
     }
+
+
+def test_no_shipped_trigger_fires_on_a_schedule() -> None:
+    assert [name for name, trigger in SHIPPED.items() if trigger.on == "schedule"] == []
+
+
+def test_a_projects_nightly_schedule_loads_with_its_cron() -> None:
+    nightly = NIGHTLY | {"on": "schedule", "cron": "0 3 * * *"}
+    config = loaded({"triggers": {"nightly": nightly}})
+    assert config.triggers["nightly"].cron == "0 3 * * *"
 
 
 def test_no_shipped_trigger_narrows_itself_by_paths() -> None:

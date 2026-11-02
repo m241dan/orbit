@@ -20,6 +20,7 @@ from orbit.agent import (
     GitCoderTree,
     HostMaker,
     HostParts,
+    LocalZone,
     McpHost,
     OpenedStore,
     OpenedWorkspace,
@@ -27,6 +28,7 @@ from orbit.agent import (
     OrbitConfig,
     PlaneParts,
     Role,
+    ScheduleClock,
     ServedWorkspace,
     SqliteStore,
     StorageSettings,
@@ -60,6 +62,8 @@ from orbit.tracing import Gauges, NoGauges, NoTelemetry, Telemetry
 _NO_TELEMETRY = NoTelemetry()
 _NO_GAUGES = NoGauges()
 _NO_COLLECTOR = AgentCollector()
+_LOCAL_SCHEDULES = ScheduleClock(zone=LocalZone())
+"""How the schedules tell the time: the machine's, in its local time zone."""
 
 
 def _workspace(path: Path) -> Path:
@@ -268,6 +272,7 @@ def _host_maker(
                 managed=opened.managed,
                 ledger=opened.store.ledger,
                 telemetry=backend.telemetry,
+                schedule_clock=_LOCAL_SCHEDULES,
             )
         )
 

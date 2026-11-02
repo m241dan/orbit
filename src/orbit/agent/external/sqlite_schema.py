@@ -154,6 +154,11 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         # started; none for the counts saved before holds were kept.
         "ALTER TABLE reviews ADD COLUMN merge_holds TEXT NOT NULL DEFAULT '[]'",
     ),
+    (
+        # The time each schedule trigger in each workspace last fired, as a JSON object by
+        # trigger name of ISO times; none for the counts saved before schedules were kept.
+        "ALTER TABLE reviews ADD COLUMN fired TEXT NOT NULL DEFAULT '{}'",
+    ),
 )
 
 

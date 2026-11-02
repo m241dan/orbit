@@ -619,6 +619,8 @@
 # tab = "review"
 # With on = "task_landed", globs of the paths a commit must change to fire.
 # paths: unset
+# With on = "schedule", when it fires: five cron fields, in local time.
+# cron: unset
 
 # [triggers.bugs-review]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -647,6 +649,8 @@
 # tab = "review"
 # With on = "task_landed", globs of the paths a commit must change to fire.
 # paths: unset
+# With on = "schedule", when it fires: five cron fields, in local time.
+# cron: unset
 
 # [triggers.tests-review]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -675,6 +679,8 @@
 # tab = "review"
 # With on = "task_landed", globs of the paths a commit must change to fire.
 # paths: unset
+# With on = "schedule", when it fires: five cron fields, in local time.
+# cron: unset
 
 # [triggers.logic-review]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -703,6 +709,8 @@
 # tab = "review"
 # With on = "task_landed", globs of the paths a commit must change to fire.
 # paths: unset
+# With on = "schedule", when it fires: five cron fields, in local time.
+# cron: unset
 
 # [triggers.security-review]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -731,6 +739,8 @@
 # tab = "review"
 # With on = "task_landed", globs of the paths a commit must change to fire.
 # paths: unset
+# With on = "schedule", when it fires: five cron fields, in local time.
+# cron: unset
 
 # [triggers.performance-review]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -759,6 +769,8 @@
 # tab = "review"
 # With on = "task_landed", globs of the paths a commit must change to fire.
 # paths: unset
+# With on = "schedule", when it fires: five cron fields, in local time.
+# cron: unset
 
 # [triggers.merge-pass]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -787,6 +799,8 @@
 # tab = "review"
 # With on = "task_landed", globs of the paths a commit must change to fire.
 # paths: unset
+# With on = "schedule", when it fires: five cron fields, in local time.
+# cron: unset
 
 # [triggers.super-review]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -815,6 +829,8 @@
 # tab = "super-review"
 # With on = "task_landed", globs of the paths a commit must change to fire.
 # paths: unset
+# With on = "schedule", when it fires: five cron fields, in local time.
+# cron: unset
 
 # [triggers.super-fix-review]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -843,6 +859,8 @@
 # tab = "review"
 # With on = "task_landed", globs of the paths a commit must change to fire.
 # paths: unset
+# With on = "schedule", when it fires: five cron fields, in local time.
+# cron: unset
 
 # [triggers.configure-checks]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -871,6 +889,8 @@
 # tab: unset
 # With on = "task_landed", globs of the paths a commit must change to fire.
 # paths: unset
+# With on = "schedule", when it fires: five cron fields, in local time.
+# cron: unset
 
 # [triggers.set-up-verification]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -899,6 +919,8 @@
 # tab: unset
 # With on = "task_landed", globs of the paths a commit must change to fire.
 # paths: unset
+# With on = "schedule", when it fires: five cron fields, in local time.
+# cron: unset
 
 # [triggers.startup-check]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -927,6 +949,8 @@
 # tab: unset
 # With on = "task_landed", globs of the paths a commit must change to fire.
 # paths: unset
+# With on = "schedule", when it fires: five cron fields, in local time.
+# cron: unset
 
 # [triggers.startup-fix]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -955,6 +979,8 @@
 # tab: unset
 # With on = "task_landed", globs of the paths a commit must change to fire.
 # paths: unset
+# With on = "schedule", when it fires: five cron fields, in local time.
+# cron: unset
 
 # Skills for the code under some paths, given to every agent along with its role's. For example:
 # [[skills]]
