@@ -89,7 +89,8 @@ CRON_FIELDS = 5
 """The fields of a trigger's ``cron``: minute, hour, day of month, month and day of week."""
 
 _ANY_TIME = datetime(2000, 1, 1)
-"""A time to read a cron expression from as it's checked, which any time would do for."""
+"""A time to read a cron expression from as it's checked, and to look for its first time after,
+which cronsim gives up on finding after 50 years."""
 
 SetStatus = Literal["passed", "failed"]
 """What ``set_finished``'s ``status`` field says: the set's run passed, or failed."""
@@ -574,7 +575,7 @@ def check_triggers(
     ``raised-finding`` without ``review-rounds`` and ``task_landed``, or on a trigger running
     checks, ``every`` on another event than ``commits``, ``paths`` on another event than
     ``task_landed``, or naming no glob, ``cron`` missing on ``schedule``, on another event, or
-    not a five-field cron expression, and ``manual`` without a ``label``."""
+    not a five-field cron expression that comes due, and ``manual`` without a ``label``."""
     problems = [
         f"triggers.{name}.{field}: {why}"
         for name, trigger in triggers.items()
@@ -792,7 +793,7 @@ def _unmatchable_glob(glob: str) -> str:
 
 def _cron_problems(trigger: Trigger) -> list[tuple[str, str]]:
     """Why ``trigger``'s ``cron`` is refused, or missing, if it is: a ``schedule`` trigger needs
-    one, no other takes one, and it's a five-field cron expression."""
+    one, no other takes one, and it's a five-field cron expression that comes due."""
     if trigger.cron is None:
         return [("cron", "a schedule trigger needs cron.")] if trigger.on == SCHEDULE else []
     if trigger.on != SCHEDULE:
@@ -802,15 +803,18 @@ def _cron_problems(trigger: Trigger) -> list[tuple[str, str]]:
 
 
 def cron_problem(cron: str) -> str | None:
-    """Why ``cron`` isn't a five-field cron expression, quoting cronsim's reason, if it isn't;
-    none if it is. Cronsim reads six fields too, the first seconds, which orbit doesn't take."""
+    """Why ``cron`` isn't a five-field cron expression that comes due, quoting cronsim's reason,
+    if it isn't; none if it is. Cronsim reads six fields too, the first seconds, which orbit
+    doesn't take. Cronsim refuses a day of month no month it names has, but not every
+    expression that never matches, such as ``0 0 */30 2 1#5``, the 1st or 31st of February
+    that's its fifth Monday; looking for one's next time would end the schedules."""
     try:
-        CronSim(cron, _ANY_TIME)
+        times = CronSim(cron, _ANY_TIME)
     except CronSimError as exc:
         return f"isn't a cron expression: {exc}."
     if len(cron.split()) != CRON_FIELDS:
         return "has six fields; cron takes five: minute, hour, day of month, month, day of week."
-    return None
+    return None if next(times, None) is not None else "never comes due."
 
 
 def next_due(cron: str, after: datetime, zone: tzinfo) -> datetime:

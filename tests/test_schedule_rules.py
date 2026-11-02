@@ -82,7 +82,9 @@ def test_cron_on_another_event_is_refused_naming_the_trigger() -> None:
     [
         ("nope", "isn't a cron expression: Wrong number of fields."),
         ("61 3 * * *", "isn't a cron expression: Bad minute."),
+        ("0 0 30 2 *", "isn't a cron expression: Bad day-of-month."),
         ("0 0 31 2 *", "isn't a cron expression: Bad day-of-month."),
+        ("0 0 */30 2 1#5", "never comes due."),
         (
             "0 0 3 * * *",
             "has six fields; cron takes five: minute, hour, day of month, month, day of week.",
@@ -94,7 +96,9 @@ def test_an_invalid_cron_expression_is_refused_quoting_why(cron: str, problem: s
     assert problems(nightly(cron=cron)) == f'triggers.nightly.cron: cron = "{cron}" {problem}'
 
 
-@pytest.mark.parametrize("cron", [NIGHTLY, "*/15 9-17 * * mon-fri", "0 0 1 1 *", "0 3 L * *"])
+@pytest.mark.parametrize(
+    "cron", [NIGHTLY, "*/15 9-17 * * mon-fri", "0 0 1 1 *", "0 3 L * *", "0 0 29 2 *"]
+)
 def test_a_five_field_cron_expression_has_no_problem(cron: str) -> None:
     assert cron_problem(cron) is None
 

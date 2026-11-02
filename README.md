@@ -2112,8 +2112,9 @@ A trigger's fields:
   one they repeat comes due once. A `schedule` trigger needs it (`a schedule trigger needs
   cron.`), any other trigger is refused one (`cron needs on = "schedule".`), and an expression
   that isn't one is refused quoting why, as [cronsim](https://github.com/cuu508/cronsim) reads
-  it (`cron = "nope" isn't a cron expression: Wrong number of fields.`), each naming the
-  trigger. No shipped trigger is scheduled.
+  it (`cron = "nope" isn't a cron expression: Wrong number of fields.`), as is one that never
+  comes due (`cron = "0 0 */30 2 1#5" never comes due.`), each naming the trigger. No shipped
+  trigger is scheduled.
 
 The events, the fields their `when` can match, and the variables their templates can use, each
 its name in braces:
