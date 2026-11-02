@@ -56,7 +56,7 @@ from orbit.agent.application.snapshots import snapshot_of
 from orbit.agent.application.task_trace import FINDINGS_FIXED, FINDINGS_GIVEN_UP
 from orbit.agent.application.tasks import Changed, Tasks
 from orbit.agent.application.triggers import ReviewRound, TriggerEngine, TriggerHooks
-from orbit.agent.domain.board import WAITING, TaskBoard
+from orbit.agent.domain.board import FINAL, TaskBoard
 from orbit.agent.domain.endings import REVIEW_STOPPED_BY_YOU
 from orbit.agent.domain.merge_holds import BlockingTask, FindingFiling, FixReview, MergePassEnding
 from orbit.agent.domain.merge_pass import (
@@ -331,11 +331,11 @@ class ReviewLane:
     def _with_finished(self, batch: str, group: ReviewGroup) -> ReviewGroup:
         """``group``, the review behind ``batch``, with each of its tasks that the board shows
         finished ended in it, as one saved after its task was marked finished but before the
-        lane ended it there was not. A task has finished once it's no longer waiting, however
-        it ended, as the lane ends it on any end that doesn't leave it pending to run again;
-        one taken off the board has ended too."""
-        waiting = {state.id for state in self._board.tasks if state.status in WAITING}
-        finished = (t for t in self._members(batch) if t not in waiting and t not in group.ended)
+        lane ended it there was not. A task has finished once its status is final, however it
+        ended, as the lane ends only a task that ran; a draft still to be accepted hasn't, nor
+        has one pending, running or verifying. One taken off the board has ended too."""
+        unfinished = {state.id for state in self._board.tasks if state.status not in FINAL}
+        finished = (t for t in self._members(batch) if t not in unfinished and t not in group.ended)
         return reduce(ended_in, finished, group)
 
     async def _end_quietly(self, task_id: str, batch: str) -> None:

@@ -32,6 +32,8 @@ SETTLED: frozenset[TaskStatus] = ACTIVE_STATUSES | {"draft", "completed", "unver
 # Statuses of a fix that stopped short, whose work is still in the tree: it runs before any other
 # task puts that work aside.
 CUT_SHORT: frozenset[TaskStatus] = frozenset({"error", "cancelled"})
+# Statuses of a task whose run has ended, however it ended: not one still to run, nor a draft.
+FINAL: frozenset[TaskStatus] = CUT_SHORT | {"completed", "unverified", "gave_up"}
 
 # What clears a task's reason for ending badly.
 _NO_REASON = {"reason": "", "reason_detail": ""}

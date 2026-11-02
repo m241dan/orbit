@@ -1284,6 +1284,22 @@ async def test_a_review_saved_with_its_last_lens_finished_on_the_board_fans_in_o
     assert launcher.launches == []
 
 
+async def test_a_review_saved_with_its_last_lens_a_draft_stays_open_on_load() -> None:
+    tasks, lane = mid_review("draft")
+    store = store_with(saved("auth", *tasks, reviews=lane))
+    session, launcher = reopening(store, triggers=lens_triggers(merge=MERGE))
+    events = await opened(session, ActivateSession(session="auth"))
+    await quiet_within(0.05)
+    await session.close()
+
+    snapshot = last_of(Snapshot, events)
+    assert len(snapshot.tasks) == 3
+    assert snapshot.review == ReviewStatus(paused=False, open_batches=1)
+    assert reviews_of(store).groups["batch-1"].ended == ("2",)
+    assert reviews_of(store).groups["batch-1"].merges == ()
+    assert launcher.launches == []
+
+
 async def test_a_review_saved_with_its_lenses_finished_but_no_findings_closes_on_load() -> None:
     tasks, lane = mid_review("completed")
     group = replace(lane.groups["batch-1"], findings=())

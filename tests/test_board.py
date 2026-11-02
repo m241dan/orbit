@@ -3,6 +3,7 @@ import re
 import pytest
 
 from orbit.agent.domain.board import (
+    FINAL,
     SETTLED,
     WAITING,
     TaskBoard,
@@ -40,6 +41,11 @@ def prompts(board: TaskBoard) -> list[str]:
 def test_active_tasks_are_waiting_and_settled() -> None:
     assert ACTIVE_STATUSES <= WAITING
     assert ACTIVE_STATUSES <= SETTLED
+
+
+def test_final_statuses_are_the_ends_of_a_run_alone() -> None:
+    assert {"completed", "unverified", "gave_up", "cancelled", "error"} == FINAL
+    assert not FINAL & (WAITING | {"draft"})
 
 
 def test_starts_empty() -> None:
