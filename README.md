@@ -1667,7 +1667,7 @@ environment doesn't set. Orbit reads the file afresh each time it starts or conn
 that needs it, so an edit applies to the next start without restarting orbit, keeps nothing of it
 past that start, and puts its values in no log, span or agent's environment. The file must be
 readable and writable by you alone (`chmod 600`), in a directory others can't write to; a missing
-file is no error. A file your group or others can read or write is refused, and nothing is read
+file is no error, whoever can write to its directory. A file your group or others can read or write is refused, and nothing is read
 from it (`/home/you/.config/orbit/credentials.toml must be private: chmod 600 it.`), as is one
 that isn't valid TOML, naming the file and the line, or that holds a value that isn't a string,
 naming its key. A refused file fails the start of each server needing a variable the environment

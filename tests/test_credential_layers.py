@@ -149,6 +149,16 @@ async def test_a_missing_file_fails_the_start_with_the_missing_variable(tmp_path
     ]
 
 
+async def test_a_group_writable_directory_without_a_file_fails_with_the_missing_variable(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "config"
+    config.mkdir()
+    config.chmod(0o775)
+    started = Started(config)
+    assert await started.call() == f"MCP server github failed: {UNSET}"
+
+
 async def test_malformed_toml_fails_the_start_naming_the_file(tmp_path: Path) -> None:
     path = write_credentials(tmp_path, "GITHUB_TOKEN from-file\n")
     started = Started(tmp_path)

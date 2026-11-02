@@ -35,6 +35,16 @@ def test_a_missing_config_directory_sets_nothing(tmp_path: Path) -> None:
     assert CredentialsFile(tmp_path / "config")("GITHUB_TOKEN") is None
 
 
+@pytest.mark.parametrize("mode", [0o777, 0o775])
+def test_a_missing_file_in_a_directory_others_can_write_sets_nothing(
+    tmp_path: Path, mode: int
+) -> None:
+    config = tmp_path / "config"
+    config.mkdir()
+    config.chmod(mode)
+    assert CredentialsFile(config)("GITHUB_TOKEN") is None
+
+
 def test_the_file_is_read_afresh_at_each_lookup(tmp_path: Path) -> None:
     credentials = CredentialsFile(tmp_path)
     write_credentials(tmp_path, 'GITHUB_TOKEN = "old"\n')

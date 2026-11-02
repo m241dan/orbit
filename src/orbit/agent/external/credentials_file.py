@@ -47,7 +47,7 @@ class CredentialsFile:
 
     def _text(self) -> str | None:
         """What the file holds, checked private before it's read; ``None`` if there's none."""
-        data = self._bytes() if self._directory_exists() else None
+        data = self._bytes()
         if data is None:
             return None
         try:
@@ -56,27 +56,22 @@ class CredentialsFile:
             raise CredentialsUnreadable(unreadable(str(self.path), "it isn't UTF-8")) from None
 
     def _bytes(self) -> bytes | None:
-        """The file's bytes, checked private before they're read; ``None`` if there's no file."""
+        """The file's bytes, checked private before they're read; ``None`` if there's no file,
+        or no directory to hold it."""
         try:
             with self.path.open("rb") as file:
-                if stat.S_IMODE(os.fstat(file.fileno()).st_mode) & _OTHERS_IN:
-                    raise CredentialsUnreadable(too_open(str(self.path)))
+                self._check_private(os.fstat(file.fileno()).st_mode)
                 return file.read()
         except FileNotFoundError:
             return None
         except OSError as exc:
             raise CredentialsUnreadable(unreadable(str(self.path), exc.strerror or "")) from None
 
-    def _directory_exists(self) -> bool:
-        """Whether the file's directory exists. Raises :class:`CredentialsUnreadable` if others
-        could replace the file, by writing to it, or it can't be looked at."""
+    def _check_private(self, file_mode: int) -> None:
+        """Raise :class:`CredentialsUnreadable` if others could replace the open file, by
+        writing to its directory, or could read or write it, its mode being ``file_mode``."""
         directory = self.path.parent
-        try:
-            mode = directory.stat().st_mode
-        except FileNotFoundError:
-            return False
-        except OSError as exc:
-            raise CredentialsUnreadable(unreadable(str(self.path), exc.strerror or "")) from None
-        if stat.S_IMODE(mode) & _OTHERS_WRITE:
+        if stat.S_IMODE(directory.stat().st_mode) & _OTHERS_WRITE:
             raise CredentialsUnreadable(directory_too_open(str(directory)))
-        return True
+        if stat.S_IMODE(file_mode) & _OTHERS_IN:
+            raise CredentialsUnreadable(too_open(str(self.path)))
