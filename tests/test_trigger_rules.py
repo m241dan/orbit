@@ -16,9 +16,12 @@ from orbit.agent.domain.triggers import (
     fires_by_hand,
     held_back,
     listening,
+    matches_path,
+    needs_paths,
     restart_counts,
     takes,
     verification_state,
+    within_paths,
 )
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import TaskSpec, TaskState, TaskStatus
@@ -196,6 +199,53 @@ def test_when_takes_an_event_whose_fields_each_match_its_value_or_one_of_its_val
     when: dict[str, object], taken: bool
 ) -> None:
     assert takes(trigger(when=when).when, LANDED.fields) is taken
+
+
+# Paths a landing changed
+
+
+@pytest.mark.parametrize(
+    ("pattern", "path", "matched"),
+    [
+        ("pyproject.toml", "pyproject.toml", True),
+        ("pyproject.toml", "sub/pyproject.toml", False),
+        ("*.md", "README.md", True),
+        ("*.md", "docs/plan.md", False),
+        ("src/*.py", "src/a.py", True),
+        ("src/*.py", "src/pkg/a.py", False),
+        ("**/git.py", "git.py", True),
+        ("**/git.py", "src/orbit/git.py", True),
+        ("**/git.py", "src/orbit/git.pyc", False),
+        ("src/**/external/*.py", "src/external/git.py", True),
+        ("src/**/external/*.py", "src/orbit/agent/external/git.py", True),
+        ("src/**/external/*.py", "src/orbit/external/sub/git.py", False),
+        ("src/**/external/*.py", "tests/external/git.py", False),
+        ("src/**", "src/orbit/agent/external/git.py", True),
+        ("src/**", "tests/test_git.py", False),
+        ("src/**/external/**", "src/orbit/agent/external/git.py", True),
+        ("src/**/external/**", "src/orbit/agent/domain/git.py", False),
+    ],
+)
+def test_a_path_matches_a_glob_whose_star_stays_in_a_directory_and_double_star_crosses_them(
+    pattern: str, path: str, matched: bool
+) -> None:
+    assert matches_path(pattern, path) is matched
+
+
+SECURITY = trigger(paths=("src/**/external/**", "pyproject.toml"))
+
+
+def test_paths_are_needed_only_while_a_trigger_listening_has_them() -> None:
+    assert needs_paths([("plain", trigger()), ("security", SECURITY)])
+    assert not needs_paths([("plain", trigger())])
+
+
+def test_a_trigger_with_paths_keeps_listening_only_if_a_changed_path_matches_one() -> None:
+    found = [("plain", trigger()), ("security", SECURITY)]
+    assert within_paths(found, ["src/orbit/agent/external/git.py"]) == found
+    assert within_paths(found, ["README.md", "pyproject.toml"]) == found
+    assert within_paths(found, ["README.md"]) == [("plain", trigger())]
+    assert within_paths(found, []) == [("plain", trigger())]
 
 
 # Guards held on the board

@@ -397,6 +397,24 @@ def test_a_manual_trigger_needs_a_label() -> None:
     )
 
 
+def test_paths_need_the_task_landed_event() -> None:
+    assert problems(on="commits", role="coder", prompt="Go", paths=("src/**",)) == (
+        'triggers.x.paths: paths needs on = "task_landed".'
+    )
+
+
+def test_paths_name_at_least_one_glob() -> None:
+    assert problems(on="task_landed", role="coder", prompt="Go", paths=()) == (
+        "triggers.x.paths: a list of paths names at least one glob."
+    )
+
+
+def test_paths_on_a_landing_pass() -> None:
+    landing = Trigger(on="task_landed", role="coder", prompt="Go", paths=("pyproject.toml",))
+    check_triggers({"x": landing}, ROLES)
+    assert landing.paths == ("pyproject.toml",)
+
+
 def test_every_problem_of_every_trigger_is_named_on_a_line_of_its_own() -> None:
     triggers = {
         "a": Trigger(on="task_landed", role="nope", prompt="Go"),

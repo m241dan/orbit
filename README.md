@@ -2019,6 +2019,22 @@ A trigger's fields:
   reviews', `merge-pass`'s and `super-fix-review`'s `review` and `super-review`'s own; left out,
   each agent shows under its role's tab or a tab of its own (see the conversation's tabs under
   [Usage](#usage)).
+- `paths`: with `on = "task_landed"`, the globs of the paths a commit must change for the trigger
+  to fire; left out, every commit. Each is matched against the repository-relative paths the
+  commit changed, or any of a batch's commits did, with `fnmatch`, directory by directory, so `*`
+  stays within one directory while a part that's just `**` stands for any number of them, none
+  included (`src/**/external/*.py`, `**/conftest.py`), and a plain name matches that path alone
+  (`pyproject.toml`). On another event, or as an empty list, it's refused, naming the trigger.
+  Git is asked what changed only while a trigger with `paths` listens, and if it can't say, the
+  trigger fires all the same, the failure an `orbit.trigger.paths_failed` event on the span
+  current (see [Telemetry](#telemetry)), so no review is skipped unseen. No shipped trigger sets
+  `paths`: `security-review` reviews every commit until a project narrows it, as this does to
+  commits changing an adapter or the dependencies:
+
+  ```toml
+  [triggers.security-review]
+  paths = ["src/**/external/**", "pyproject.toml"]
+  ```
 
 The events, the fields their `when` can match, and the variables their templates can use, each
 its name in braces:
@@ -2034,8 +2050,8 @@ its name in braces:
 | `reviews_finished` | every finding role's task of a review has ended (see [Reviews](#reviews)) | `findings`: `some` or `none`; `review`: `commit`, `batch` or `super` | `{title}`, `{commit}`, `{findings}`, `{cap}`, `{queued}`, `{landed_since}` |
 
 When an event fires, each enabled trigger on it fires in turn, in configuration order (the
-shipped ones, then the project's), if its role, or one of its list's, is enabled, its `when` takes the event and none of
-its guards holds it back. Its prompt is rendered from its template, and its task added at the end
+shipped ones, then the project's), if its role, or one of its list's, is enabled, its `when` takes the event, its `paths`, if it has
+them, match a path the landing changed, and none of its guards holds it back. Its prompt is rendered from its template, and its task added at the end
 of the task list for its role (a `configurator`'s at the front, as the checks it sets up verify the
 rest), with that role's settings, or as a draft for you to accept with `draft = true`; the task's origin is the trigger's name, so the task list and the task's span
 (`orbit.trigger`; see [Telemetry](#telemetry)) say which trigger queued it, and a review's

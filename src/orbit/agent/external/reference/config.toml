@@ -617,6 +617,8 @@
 # enabled = true
 # The tab its agents share, a plain name; without one, their role's or their own.
 # tab = "review"
+# With on = "task_landed", globs of the paths a commit must change to fire.
+# paths: unset
 
 # [triggers.bugs-review]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -643,6 +645,8 @@
 # enabled = true
 # The tab its agents share, a plain name; without one, their role's or their own.
 # tab = "review"
+# With on = "task_landed", globs of the paths a commit must change to fire.
+# paths: unset
 
 # [triggers.tests-review]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -669,6 +673,8 @@
 # enabled = true
 # The tab its agents share, a plain name; without one, their role's or their own.
 # tab = "review"
+# With on = "task_landed", globs of the paths a commit must change to fire.
+# paths: unset
 
 # [triggers.logic-review]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -695,6 +701,8 @@
 # enabled = true
 # The tab its agents share, a plain name; without one, their role's or their own.
 # tab = "review"
+# With on = "task_landed", globs of the paths a commit must change to fire.
+# paths: unset
 
 # [triggers.security-review]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -721,6 +729,8 @@
 # enabled = true
 # The tab its agents share, a plain name; without one, their role's or their own.
 # tab = "review"
+# With on = "task_landed", globs of the paths a commit must change to fire.
+# paths: unset
 
 # [triggers.performance-review]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -747,6 +757,8 @@
 # enabled = true
 # The tab its agents share, a plain name; without one, their role's or their own.
 # tab = "review"
+# With on = "task_landed", globs of the paths a commit must change to fire.
+# paths: unset
 
 # [triggers.merge-pass]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -773,6 +785,8 @@
 # enabled = true
 # The tab its agents share, a plain name; without one, their role's or their own.
 # tab = "review"
+# With on = "task_landed", globs of the paths a commit must change to fire.
+# paths: unset
 
 # [triggers.super-review]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -799,6 +813,8 @@
 # enabled = true
 # The tab its agents share, a plain name; without one, their role's or their own.
 # tab = "super-review"
+# With on = "task_landed", globs of the paths a commit must change to fire.
+# paths: unset
 
 # [triggers.super-fix-review]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -825,6 +841,8 @@
 # enabled = true
 # The tab its agents share, a plain name; without one, their role's or their own.
 # tab = "review"
+# With on = "task_landed", globs of the paths a commit must change to fire.
+# paths: unset
 
 # [triggers.configure-checks]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -851,6 +869,8 @@
 # enabled = true
 # The tab its agents share, a plain name; without one, their role's or their own.
 # tab: unset
+# With on = "task_landed", globs of the paths a commit must change to fire.
+# paths: unset
 
 # [triggers.set-up-verification]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -877,6 +897,8 @@
 # enabled = true
 # The tab its agents share, a plain name; without one, their role's or their own.
 # tab: unset
+# With on = "task_landed", globs of the paths a commit must change to fire.
+# paths: unset
 
 # [triggers.startup-check]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -903,6 +925,8 @@
 # enabled = true
 # The tab its agents share, a plain name; without one, their role's or their own.
 # tab: unset
+# With on = "task_landed", globs of the paths a commit must change to fire.
+# paths: unset
 
 # [triggers.startup-fix]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -929,6 +953,8 @@
 # enabled = true
 # The tab its agents share, a plain name; without one, their role's or their own.
 # tab: unset
+# With on = "task_landed", globs of the paths a commit must change to fire.
+# paths: unset
 
 # Skills for the code under some paths, given to every agent along with its role's. For example:
 # [[skills]]

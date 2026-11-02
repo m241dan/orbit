@@ -34,6 +34,7 @@ from orbit.protocol import (
     GIT_FAILED,
     REVIEWER,
     SCALING_REVIEWER,
+    SECURITY_REVIEWER,
     STYLE_REVIEWER,
     SUPER_LENS_REVIEWERS,
     SUPER_REVIEW,
@@ -47,6 +48,7 @@ from orbit.protocol import (
     TaskStatus,
 )
 from tests.agent_fakes import ROLES, TRIGGERS, FakeTree, desk_for
+from tests.telemetry_helpers import Traced
 
 COMMIT = "c1abcdef99"
 
@@ -355,6 +357,81 @@ async def test_a_trigger_takes_a_finished_task_by_its_status() -> None:
     engine = Engine({"tidy": tidy().model_copy(update={"when": {"status": ("gave_up",)}})})
     assert await engine.engine.finished(ended(status="completed")) == ()
     assert len(await engine.engine.finished(ended(status="gave_up"))) == 1
+
+
+# Paths a landing changed
+
+
+SECURITY_PATHS = ("src/**/external/**", "pyproject.toml")
+"""The paths a project narrows the security review to."""
+
+
+def security(**fields: object) -> Trigger:
+    """A security-reviewer's look at each landed coder commit changing one of
+    :data:`SECURITY_PATHS`, with ``fields`` over that."""
+    return look(role=SECURITY_REVIEWER, paths=SECURITY_PATHS, **fields)
+
+
+@pytest.mark.parametrize(
+    ("changed", "fired"),
+    [
+        (["src/orbit/agent/external/git.py"], True),
+        (["README.md", "pyproject.toml"], True),
+        (["README.md"], False),
+    ],
+)
+async def test_a_trigger_with_paths_fires_only_for_a_commit_changing_one(
+    changed: list[str], fired: bool
+) -> None:
+    engine = Engine({"security-review": security()})
+    engine.tree.changed[f"{COMMIT}^"] = changed
+    queued = await engine.engine.landed(ended(), COMMIT)
+    assert bool(queued) is fired
+    assert engine.tree.asked_changed == [(f"{COMMIT}^", COMMIT)]
+
+
+async def test_a_trigger_with_paths_leaves_the_others_on_the_landing_firing() -> None:
+    engine = Engine({"look": look(), "security-review": security()})
+    engine.tree.changed[f"{COMMIT}^"] = ["README.md"]
+    await engine.engine.landed(ended(), COMMIT)
+    assert [origin for _, origin, _, _ in engine.shown()] == ["look"]
+
+
+async def test_a_batchs_review_fires_a_trigger_with_paths_one_of_its_commits_matches() -> None:
+    engine = Engine({"security-review": security(guards=("review-rounds",), when={})})
+    engine.tree.changed |= {"c2^": ["README.md"], "c3^": ["pyproject.toml"]}
+    queued = await engine.engine.reviewed(ReviewRound(BATCH, unbooked))
+    assert [engine.board.get(task_id).origin for task_id in queued] == ["security-review"]
+    assert engine.tree.asked_changed == [("c2^", "c2"), ("c3^", "c3")]
+
+
+async def test_a_batchs_review_holds_back_a_trigger_with_paths_none_of_its_commits_match() -> None:
+    engine = Engine({"security-review": security(guards=("review-rounds",), when={})})
+    engine.tree.changed |= {"c2^": ["README.md"], "c3^": ["docs/plan.md"]}
+    assert await engine.engine.reviewed(ReviewRound(BATCH, unbooked)) == ()
+
+
+async def test_no_changed_paths_are_asked_for_while_no_trigger_listening_has_paths() -> None:
+    engine = Engine({"look": look(), "security-review": security(when={"role": REVIEWER})})
+    await engine.engine.landed(ended(), COMMIT)
+    await engine.engine.reviewed(ReviewRound(BATCH, unbooked))
+    assert engine.tree.asked_changed == []
+
+
+async def test_changed_paths_git_cannot_list_fire_the_trigger_and_go_on_its_span() -> None:
+    traced = Traced()
+    engine = Engine({"look": look(), "security-review": security()})
+    engine.tree.failures["changed_files"] = TreeFailed("git diff failed: bad revision")
+    with traced.telemetry.span("landing"):
+        queued = await engine.engine.landed(ended(), COMMIT)
+    assert [engine.board.get(task_id).origin for task_id in queued] == ["look", "security-review"]
+    [span] = traced.spans("landing")
+    assert [(event.name, dict(event.attributes or {})) for event in span.events] == [
+        (
+            "orbit.trigger.paths_failed",
+            {"orbit.trigger": "security-review", "error": "git diff failed: bad revision"},
+        )
+    ]
 
 
 # A batch's review

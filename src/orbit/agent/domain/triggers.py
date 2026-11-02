@@ -1,8 +1,9 @@
 """Triggers, which turn an event into a task for a role or a run of checks, the task checks or a
 named set: the events and guards orbit knows, a trigger's fields, the package's triggers merged
 with a project's and checked against its roles and sets, the sets no trigger runs, which of them
-fire on an event and which guards hold one back, when one fires in words, the tab a task's
-agent shows under, and the rendering of a trigger's prompt template.
+fire on an event and which guards hold one back, which of them a landing's changed paths let
+fire, when one fires in words, the tab a task's agent shows under, and the rendering of a
+trigger's prompt template.
 
 The package's triggers aren't kept here: whoever builds them passes in the contents of their
 ``triggers.toml`` and the templates it names. ``manual`` isn't raised yet, but a trigger fired by
@@ -13,6 +14,7 @@ runs the task checks only on ``session_started``, as the startup check.
 import re
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from fnmatch import fnmatchcase
 from typing import Annotated, Any, Literal, get_args
 
 from pydantic import (
@@ -114,6 +116,9 @@ VARIABLE = re.compile(r"\{([a-z_]+)\}")
 PARAGRAPH_BREAK = "\n\n"
 """What parts a template's paragraphs."""
 
+ANY_DIRECTORIES = "**"
+"""The part of a ``paths`` glob that stands for any number of directories, none included."""
+
 
 @dataclass(frozen=True)
 class Event:
@@ -205,7 +210,8 @@ class Trigger(_Config):
     named set, as ``checks`` (``gate`` read as the task checks), the events it takes ``when`` they
     match, the ``guards`` that may hold it back, how many landings it fires after, ``every``,
     whether it's ``manual``, under its ``label``, whether its task is a ``draft``, whether it's
-    ``enabled``, and the ``tab`` its agents share, if any."""
+    ``enabled``, the ``tab`` its agents share, if any, and the ``paths`` a landing must change
+    for it to fire, if any."""
 
     on: EventName = Field(
         description='The event it fires on, such as "task_landed", "commits" or "manual".'
@@ -251,6 +257,10 @@ class Trigger(_Config):
         description=(
             "The tab its agents share, a plain name; without one, their role's or their own."
         ),
+    )
+    paths: tuple[str, ...] | None = Field(
+        default=None,
+        description='With on = "task_landed", globs of the paths a commit must change to fire.',
     )
 
     @field_validator("on", mode="before")
@@ -432,7 +442,8 @@ def check_triggers(
     one, a ``when`` field or a template variable its event doesn't give, a ``when`` value its
     field never takes on its event, a role not among ``roles`` or a value :data:`WHEN_VALUES`
     doesn't give, ``review-rounds`` on a trigger on another event than ``task_landed``,
-    ``every`` on another event than ``commits``, and ``manual`` without a ``label``."""
+    ``every`` on another event than ``commits``, ``paths`` on another event than
+    ``task_landed``, or naming no glob, and ``manual`` without a ``label``."""
     problems = [
         f"triggers.{name}.{field}: {why}"
         for name, trigger in triggers.items()
@@ -460,6 +471,7 @@ def _problems(trigger: Trigger, targets: _Targets) -> list[tuple[str, str]]:
         *_when_problems(trigger, targets.roles),
         *_guard_problems(trigger),
         *_every_problems(trigger),
+        *_paths_problems(trigger),
         *_label_problems(trigger),
     ]
 
@@ -578,6 +590,16 @@ def _every_problems(trigger: Trigger) -> list[tuple[str, str]]:
     return [("every", f'every = {trigger.every} needs on = "{COMMITS}".')]
 
 
+def _paths_problems(trigger: Trigger) -> list[tuple[str, str]]:
+    """Why ``trigger``'s ``paths`` are refused, if they are: they're matched against what a
+    commit changed, which only ``task_landed`` gives, and an empty list would never match."""
+    if trigger.paths is None:
+        return []
+    event = [] if trigger.on == TASK_LANDED else [("paths", f'paths needs on = "{TASK_LANDED}".')]
+    empty = [] if trigger.paths else [("paths", "a list of paths names at least one glob.")]
+    return [*event, *empty]
+
+
 def _label_problems(trigger: Trigger) -> list[tuple[str, str]]:
     """Why ``trigger`` lacks a label, if it does: a manual one needs it."""
     return (
@@ -640,12 +662,14 @@ def render_template(template: str, values: Mapping[str, str]) -> str:
 
 @dataclass(frozen=True)
 class TriggerEvent:
-    """An event as it's raised: its ``name``, the ``fields`` a trigger's ``when`` matches, and
-    its ``cause``, the task that caused it, if one did."""
+    """An event as it's raised: its ``name``, the ``fields`` a trigger's ``when`` matches, its
+    ``cause``, the task that caused it, if one did, and the ``commits`` it's of, a landing's own
+    or a batch's, whose changed paths a trigger's ``paths`` match."""
 
     name: str
     fields: Mapping[str, str]
     cause: TaskState | None = None
+    commits: tuple[str, ...] = ()
 
 
 def listening(
@@ -688,6 +712,47 @@ def _narrowed(trigger: Trigger, event: TriggerEvent | None) -> bool:
         and event.fields.get(REVIEW_FIELD) == "batch"
     )
     return batch and RAISED_FINDING in trigger.guards
+
+
+def needs_paths(found: Iterable[tuple[str, Trigger]]) -> bool:
+    """Whether one of the triggers ``found`` listening, by name, has ``paths``, so the paths
+    their event's commits changed are needed to decide whether it fires."""
+    return any(trigger.paths is not None for _, trigger in found)
+
+
+def within_paths(
+    found: Sequence[tuple[str, Trigger]], changed: Collection[str]
+) -> list[tuple[str, Trigger]]:
+    """The triggers ``found`` listening, by name, in order, that the paths ``changed`` let fire:
+    those without ``paths``, and those one of whose globs matches one of them."""
+    return [
+        (name, trigger)
+        for name, trigger in found
+        if trigger.paths is None or _changes_any(trigger.paths, changed)
+    ]
+
+
+def _changes_any(patterns: Sequence[str], changed: Collection[str]) -> bool:
+    """Whether one of the paths ``changed`` matches one of the globs ``patterns``."""
+    return any(matches_path(pattern, path) for pattern in patterns for path in changed)
+
+
+def matches_path(pattern: str, path: str) -> bool:
+    """Whether ``path``, a repository-relative git path, matches ``pattern``, a glob matched
+    with :func:`~fnmatch.fnmatchcase` directory by directory, so ``*`` stays within one, but for
+    a part that's just ``**``, which stands for any number of directories, none included."""
+    return _matches_parts(tuple(pattern.split("/")), tuple(path.split("/")))
+
+
+def _matches_parts(patterns: tuple[str, ...], parts: tuple[str, ...]) -> bool:
+    """Whether the ``parts`` of a path, split at its slashes, match those of a glob,
+    ``patterns``, as :func:`matches_path` says."""
+    if not patterns:
+        return not parts
+    first, rest = patterns[0], patterns[1:]
+    if first == ANY_DIRECTORIES:
+        return any(_matches_parts(rest, parts[skipped:]) for skipped in range(len(parts) + 1))
+    return bool(parts) and fnmatchcase(parts[0], first) and _matches_parts(rest, parts[1:])
 
 
 def firing_roles(

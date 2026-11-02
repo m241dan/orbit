@@ -258,6 +258,7 @@ def test_a_shipped_triggers_key_lists_its_fields_in_the_package_layer(project: P
         "triggers.bugs-review.draft = false   default",
         "triggers.bugs-review.enabled = true   default",
         'triggers.bugs-review.tab = "review"   package',
+        "triggers.bugs-review.paths = null   default",
     ]
 
 
@@ -292,6 +293,15 @@ def test_a_trigger_the_project_overrides_shows_its_fields_from_the_file(project:
     lines = result.stdout.splitlines()
     assert "triggers.super-review.every = 5   project .orbit/config.toml" in lines
     assert 'triggers.super-review.when = {"origin": ["manual", "planner"]}   package' in lines
+
+
+def test_a_projects_paths_for_the_security_review_show_in_its_layer(project: Path) -> None:
+    project_file(project, '[triggers.security-review]\npaths = ["src/**/external/**"]\n')
+    result = show(project, "triggers.security-review.paths")
+    assert result.exit_code == 0, result.output
+    assert result.stdout == (
+        'triggers.security-review.paths = ["src/**/external/**"]   project .orbit/config.toml\n'
+    )
 
 
 def test_a_trigger_listing_roles_shows_them_as_a_list(project: Path) -> None:

@@ -12,7 +12,10 @@ triggers ``review-rounds`` guards on ``task_landed`` with no task causing it, it
 field ``batch`` where a landing's is ``commit``. Of them, those ``raised-finding`` guards fire
 only if their role raised one of the batch's findings, so a batch of fixes is reviewed narrowly
 by the lenses whose findings it fixes; a trigger listing roles queues only for those of them
-that raised one.
+that raised one. A trigger with ``paths`` fires on a landing only if its commit, or one of the
+batch's, changed a path one of them matches; those paths are asked of git only while such a
+trigger listens, and if git can't list them it fires all the same, the failure on the span
+current.
 
 The review lane counts each landing toward the ``commits`` triggers too, as their guards see the
 board before the landing's own review is queued, and has those that fire, or one fired by hand,
@@ -66,8 +69,10 @@ from orbit.agent.domain.triggers import (
     firing_roles,
     held_back,
     listening,
+    needs_paths,
     render_template,
     verification_state,
+    within_paths,
 )
 from orbit.agent.domain.verification import CheckSet, VerificationStep, failure_report
 from orbit.protocol import (
@@ -79,6 +84,7 @@ from orbit.protocol import (
     TaskSpec,
     TaskState,
 )
+from orbit.tracing import current_span
 
 Values = Callable[[], Awaitable[Mapping[str, str] | None]]
 """What gathers an event's template values, but the trigger's name, once a trigger may fire on
@@ -92,6 +98,10 @@ RunChecks = Callable[[str, str], None]
 """What runs the checks a trigger's ``checks`` names, by that name, as the trigger named second
 fired: the task checks, as the startup check, for ``"task-checks"``, or else the named set, in
 the background."""
+
+PATHS_FAILED_EVENT = "orbit.trigger.paths_failed"
+"""The event on the span current when git can't list the paths a landing changed, for each
+trigger with ``paths`` that fires all the same."""
 
 REVIEW_SKIPPED = "Review skipped"
 TRIGGERS_SKIPPED = "Triggers skipped"
@@ -233,7 +243,7 @@ class TriggerEngine:
         """Raise ``task_landed``: the task that ended as ``state`` landed ``commit``, whose own
         review, if due, is ``review``. Returns the ids of the tasks queued."""
         fields = {"role": state.task.role, "origin": state.origin, REVIEW_FIELD: "commit"}
-        event = TriggerEvent(TASK_LANDED, fields, state)
+        event = TriggerEvent(TASK_LANDED, fields, state, (commit,))
         skipped = TRIGGERS_SKIPPED if review is None else REVIEW_SKIPPED
         job = commit_review(state.id, commit)
         values = partial(self._values, job, state.task.skills, skipped)
@@ -355,7 +365,7 @@ class TriggerEngine:
             if REVIEW_ROUNDS in trigger.guards
         }
         fields = {"role": CODER, "origin": job.origin, REVIEW_FIELD: "batch"}
-        event = TriggerEvent(TASK_LANDED, fields)
+        event = TriggerEvent(TASK_LANDED, fields, commits=job.commits)
         skills = review_skills(job, self._tasks.board.tasks)
         return await self._firing(
             triggers, event, partial(self._values, job, skills, REVIEW_SKIPPED), review
@@ -369,13 +379,36 @@ class TriggerEngine:
         review: ReviewRound | None,
     ) -> _Firing | None:
         """The ``triggers`` that may fire on ``event``, with ``review`` the review due, if any,
-        and the roles that raised its batch's findings, and the ``values`` they render from,
-        gathered only if one may; none if none may, or the values can't be gathered."""
+        and the roles that raised its batch's findings, and that the paths its commits changed
+        let fire, and the ``values`` they render from, gathered only if one may; none if none
+        may, or the values can't be gathered."""
         roles = enabled_roles(self._desk.agents.roles)
         job, raised = (None, frozenset[str]()) if review is None else (review.job, review.raised)
-        found = listening(triggers, event, roles, job, raised)
+        found = await self._within_paths(listening(triggers, event, roles, job, raised), event)
         given = await values() if found else None
         return None if given is None else _Firing(found, given, review, event=event)
+
+    async def _within_paths(
+        self, found: list[tuple[str, Trigger]], event: TriggerEvent
+    ) -> list[tuple[str, Trigger]]:
+        """The triggers ``found`` listening for ``event``, by name, in order, that the paths its
+        commits changed let fire, those paths asked of git only if one of them has ``paths``.
+        If git can't list them, every one of them fires, the failure noted on the span current
+        for each with ``paths``."""
+        if not needs_paths(found):
+            return found
+        tree = self._desk.agents.tree
+        assert tree is not None  # Only work in a tree lands, and only a landing takes paths.
+        try:
+            changed = [
+                path
+                for commit in event.commits
+                for path in await tree.changed_files(f"{commit}^", commit)
+            ]
+        except TreeFailed as exc:  # Git failed; reviews fire rather than be skipped unseen.
+            _note_paths_failed(found, exc)
+            return found
+        return within_paths(found, changed)
 
     async def _queue(self, firing: _Firing) -> tuple[str, ...]:
         """Queue the tasks of the triggers ``firing`` that no guard holds back, publishing the
@@ -483,6 +516,15 @@ class _Queued:
     trigger: Trigger
     prompt: str
     template: ReviewTemplate
+
+
+def _note_paths_failed(found: Sequence[tuple[str, Trigger]], error: TreeFailed) -> None:
+    """Note on the span current, for each of the triggers ``found``, by name, that has
+    ``paths``, that it fires though git failed, as ``error`` says, to list what changed."""
+    span = current_span()
+    for name, trigger in found:
+        if trigger.paths is not None:
+            span.event(PATHS_FAILED_EVENT, {"orbit.trigger": name, "error": str(error)})
 
 
 def _added(

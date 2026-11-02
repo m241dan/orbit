@@ -190,6 +190,14 @@ def test_a_trigger_for_a_projects_own_role_is_valid() -> None:
         ),
         (NIGHTLY | {"every": 3}, 'triggers.nightly.every: every = 3 needs on = "commits".'),
         (NIGHTLY | {"manual": True}, "triggers.nightly.label: manual = true needs a label."),
+        (
+            NIGHTLY | {"on": "commits", "paths": ["src/**"]},
+            'triggers.nightly.paths: paths needs on = "task_landed".',
+        ),
+        (
+            NIGHTLY | {"on": "task_landed", "paths": []},
+            "triggers.nightly.paths: a list of paths names at least one glob.",
+        ),
     ],
 )
 def test_an_invalid_trigger_is_refused_naming_it_its_field_and_the_value(
@@ -294,6 +302,16 @@ def test_the_reviews_share_the_review_tab_and_the_super_review_its_own() -> None
         "super-review": "super-review",
         "super-fix-review": "review",
     }
+
+
+def test_no_shipped_trigger_narrows_itself_by_paths() -> None:
+    assert [name for name, trigger in SHIPPED.items() if trigger.paths is not None] == []
+
+
+def test_a_project_narrows_the_security_review_by_paths() -> None:
+    paths = ["src/**/external/**", "pyproject.toml"]
+    config = loaded({"triggers": {"security-review": {"paths": paths}}})
+    assert config.triggers["security-review"].paths == tuple(paths)
 
 
 def test_the_user_config_cant_set_triggers() -> None:

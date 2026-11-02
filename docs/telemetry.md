@@ -61,6 +61,7 @@ Events:
 | `orbit.verify.step` | `name` (string), `result` (string: `passed` or `failed`), `duration_ms` (double) | A verification step of the task's ran, for that long. The steps an agent runs itself aren't events. |
 | `orbit.task.gave_up` | | The agent gave up; `orbit.task.reason` says why. |
 | `orbit.merge.conflict` | | The task's work conflicted with the base branch. |
+| `orbit.trigger.paths_failed` | `orbit.trigger` (string), `error` (string) | Git couldn't list the paths the task's commit changed, so the trigger named, which has `paths`, fired all the same; `error` is git's. A batch's review notes it on the span current as the batch is done. |
 | `exception` | `exception.type`, `exception.message` | The task ended in error. |
 
 ### `orbit.task.wait`
