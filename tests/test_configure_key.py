@@ -18,7 +18,6 @@ from orbit.protocol import (
     UNKNOWN,
     AddTask,
     CancelTurn,
-    CommandAccepted,
     CommandRefused,
     ErrorOccurred,
     Event,
@@ -52,6 +51,7 @@ from tests.agent_fakes import (
     send,
     session_for,
     settled,
+    turns_of,
     until_idle,
     verified,
 )
@@ -134,7 +134,7 @@ async def test_a_second_request_is_refused_while_one_is_queued_or_running() -> N
     assert [t.task.role for t in board(events)] == ["configurator"]
 
 
-async def test_with_the_configure_checks_trigger_disabled_it_queues_nothing() -> None:
+async def test_with_the_configure_checks_trigger_disabled_it_is_refused_as_unknown() -> None:
     off = TRIGGERS[CONFIGURE_CHECKS].model_copy(update={"enabled": False})
     session, _, launcher = session_for(
         Configurator(),
@@ -142,7 +142,23 @@ async def test_with_the_configure_checks_trigger_disabled_it_queues_nothing() ->
         triggers={**TRIGGERS, CONFIGURE_CHECKS: off},
     )
     await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
-    await events_until(session, of_type(CommandAccepted))
+    events = await events_until(session, of_type(CommandRefused))
+    await settled()
+    message = "No trigger 'configure-checks'; the triggers are super-review."
+    assert events[-1] == refused(UNKNOWN, message)
+    await session.close()
+    assert board_of(session).tasks == ()
+    assert launcher.launches == []
+
+
+async def test_set_up_checks_asked_of_the_turns_with_its_trigger_disabled_queues_nothing() -> None:
+    off = TRIGGERS[CONFIGURE_CHECKS].model_copy(update={"enabled": False})
+    session, _, launcher = session_for(
+        Configurator(),
+        verification=verified(Steps()),
+        triggers={**TRIGGERS, CONFIGURE_CHECKS: off},
+    )
+    await turns_of(session).configure_checks()
     await settled()
     await session.close()
     assert board_of(session).tasks == ()
@@ -205,11 +221,11 @@ async def test_after_ctrl_s_holds_the_work_it_still_runs_straight_away() -> None
     assert [t.task.role for t in board(events)] == ["configurator", "coder"]
 
 
-async def test_without_agents_it_is_refused() -> None:
+async def test_without_agents_it_is_refused_as_unknown() -> None:
     session = WorkspaceHost()
     await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
     events = await until_refused(session)
-    assert events[-1] == refused(NOT_CONFIGURED, "Tasks need agents, and none are set up.")
+    assert events[-1] == refused(UNKNOWN, "No trigger 'configure-checks'; there are none.")
 
 
 async def test_without_verification_it_is_refused_and_nothing_starts() -> None:

@@ -891,8 +891,8 @@ next). It works whether or not steps are configured: its prompt
 lists the steps and setup configured now, if any, so the agent builds on them, which makes `ctrl+e`
 the way to reconfigure too. While a configurator task is queued or running, a confirmed `ctrl+e`
 doesn't add another; the conversation says `A configurator task is already queued or running.`,
-and the one queued runs if no run is going. With `[triggers.configure-checks] enabled = false`, a
-confirmed `ctrl+e` adds none.
+and the one queued runs if no run is going. With `[triggers.configure-checks] enabled = false`,
+the trigger leaves the Catalog, hiding `ctrl+e`, and firing it is refused as an unknown trigger.
 With `--no-verify` there's nothing to set up checks for, so a confirmed `ctrl+e` adds no task and
 the conversation says `Setting up checks needs verification on; orbit was started with --no-verify.`
 
@@ -2161,7 +2161,13 @@ into one review, whose suggestions form a batch at round 1, and the super review
 and its sample. Its suggestions take its name as their origin, as its task does: those of a
 project's `[triggers.audit]` say `audit`, and, as a trigger never fires on its own tasks, their
 landings don't count toward it. Fired by hand, a trigger fires at once, whatever its `when` and
-guards, if it and its role are enabled, and its count starts again.
+guards, if it and its role are enabled, and its count starts again. So `super-review` and
+`configure-checks` are in the Catalog, with `ctrl+g` and `ctrl+e`, and can be fired, only while
+their triggers, as configured, would fire: a disabled trigger is left out, and one whose `role` a
+project sets is offered while that role is enabled, whatever the roles it replaced
+(`[triggers.super-review] role = ["arch-reviewer"]` keeps `ctrl+g` while `arch-reviewer` is
+enabled, with the three super-review lenses disabled, and hides it while `arch-reviewer` is
+disabled, with them enabled).
 
 The guards:
 

@@ -28,6 +28,7 @@ from orbit.agent.domain.refusals import Refused, unknown
 from orbit.agent.domain.role_runtimes import check_model, check_settings
 from orbit.agent.domain.roles import Role, check_enabled
 from orbit.agent.domain.skills import check_task_skills
+from orbit.agent.domain.triggers import Trigger
 from orbit.protocol import (
     CONFIGURE_CHECKS,
     INVALID,
@@ -251,6 +252,11 @@ class WorkCommands:
         desk = self._parts.desk
         return desk.agents.roles if desk else {}
 
+    def _triggers(self) -> Mapping[str, Trigger]:
+        """The session's triggers, by name; none without agents."""
+        desk = self._parts.desk
+        return desk.agents.triggers if desk else {}
+
     def _check_model(self, role: str, settings: Settings) -> None:
         """Refuse ``settings`` for role ``role`` unless its runtime takes their model, as
         :func:`~orbit.agent.domain.role_runtimes.check_model` says; nothing is refused without
@@ -401,17 +407,18 @@ class WorkCommands:
         await seat.reset()
 
     async def _fire_trigger(self, command: FireTrigger) -> None:
-        """Run the built-in trigger ``command`` names; refused for any other name, one whose role
-        is disabled, or any input, since the built-ins take none."""
+        """Run the built-in trigger ``command`` names; refused for any other name, one that
+        wouldn't fire by hand, or any input, since the built-ins take none."""
         self._check_trigger(command)
         configure = self._parts.turns.configure_checks
         runs = {SUPER_REVIEW: self._super_review, CONFIGURE_CHECKS: configure}
         await runs[command.trigger]()
 
     def _check_trigger(self, command: FireTrigger) -> None:
-        """Refuse a trigger that isn't built in, or whose role is disabled, as there's none of
-        it; one given input; or one that couldn't run here."""
-        names = trigger_names(self._roles())
+        """Refuse a trigger that isn't built in, or whose configured trigger wouldn't fire by
+        hand, being disabled or its roles, as configured, disabled, as there's none of it; one
+        given input; or one that couldn't run here."""
+        names = trigger_names(self._triggers(), self._roles())
         if command.trigger not in names:
             raise unknown(f"No trigger {command.trigger!r}", "the triggers are", names)
         if command.input:

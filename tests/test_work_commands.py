@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from orbit.agent.application.conversation_seats import ConversationSeats
+from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import OPEN_GATE, SessionGate
 from orbit.agent.application.outbox import EventSink
 from orbit.agent.application.planner_seat import SeatHooks
@@ -126,10 +127,11 @@ def commands_for(
     outcomes: list[BaseException | None] | None = None,
     read_only: Callable[[], bool] | None = None,
     review: bool = False,
+    desk: AgentDesk | None = None,
 ) -> tuple[WorkCommands, Tasks]:
-    """The work commands of a session without agents, its effects ``recorded``, with a review
-    lane if ``review``; given ``outcomes``, it's read-only, unless ``read_only`` says otherwise,
-    and its runs are scripted by them."""
+    """The work commands of a session with agents on ``desk``, none unless given, its effects
+    ``recorded``, with a review lane if ``review``; given ``outcomes``, it's read-only, unless
+    ``read_only`` says otherwise, and its runs are scripted by them."""
     events: EventSink = recorded
     tasks = Tasks(TaskBoard(), recorded.put)
     hooks = SeatHooks(recorded.save, lambda: None, tuple)
@@ -144,7 +146,7 @@ def commands_for(
         turns,
         review_lane_for(tasks) if review else None,
         FrontendReview(recorded.put, str),
-        None,
+        desk,
         None,
         recorded.save,
         recorded.save_reviews,
@@ -232,21 +234,34 @@ async def test_editing_a_task_removed_as_the_edit_is_awaited_still_saves_the_rev
     assert recorded.effects[-1] == "reviews saved"
 
 
+def with_agents(recorded: Recorded) -> WorkCommands:
+    """The work commands of a session with agents and the shipped triggers, without a review
+    lane, its effects ``recorded``."""
+    commands, _ = commands_for(recorded, desk=desk_for(recorded.put))
+    return commands
+
+
 async def test_an_unknown_trigger_is_refused() -> None:
-    commands, _ = commands_for(Recorded())
+    commands = with_agents(Recorded())
     code, message = await refusal(commands, FireTrigger(trigger="nope"))
     assert code == UNKNOWN
     assert message.startswith("No trigger 'nope'; the triggers are")
 
 
-async def test_a_trigger_given_input_is_refused() -> None:
+async def test_without_agents_no_trigger_is_offered() -> None:
     commands, _ = commands_for(Recorded())
+    code, message = await refusal(commands, FireTrigger(trigger=SUPER_REVIEW))
+    assert (code, message) == (UNKNOWN, "No trigger 'super-review'; there are none.")
+
+
+async def test_a_trigger_given_input_is_refused() -> None:
+    commands = with_agents(Recorded())
     code, message = await refusal(commands, FireTrigger(trigger=SUPER_REVIEW, input={"a": "b"}))
     assert (code, message) == (INVALID, f"The {SUPER_REVIEW} trigger takes no input.")
 
 
 async def test_a_super_review_without_reviews_is_refused() -> None:
-    commands, _ = commands_for(Recorded())
+    commands = with_agents(Recorded())
     code, message = await refusal(commands, FireTrigger(trigger=SUPER_REVIEW))
     assert (code, message) == (
         NOT_CONFIGURED,

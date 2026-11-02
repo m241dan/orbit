@@ -11,13 +11,17 @@ from typing import Any
 from orbit.agent import WorkspaceHost
 from orbit.agent.domain.config import SUPER_REVIEW_EVERY_MOVING, Package, load_layered
 from orbit.agent.domain.reviews import ReviewJob, SuperReviewCount, review_prompt
+from orbit.agent.domain.roles import Role
 from orbit.agent.domain.triggers import Trigger
 from orbit.protocol import (
     CODER,
+    DRIFT_REVIEWER,
     REVIEWER,
     SUPER_LENS_REVIEWERS,
     SUPER_REVIEW,
+    UNKNOWN,
     CommandAccepted,
+    CommandRefused,
     FireTrigger,
     TaskSpec,
     TaskState,
@@ -30,6 +34,7 @@ from tests.agent_fakes import (
     claims_done,
     events_until,
     lane_of,
+    refused,
     send,
     session_for,
     settle,
@@ -51,6 +56,22 @@ def configured(data: dict[str, Any]) -> tuple[dict[str, Trigger], tuple[str, ...
     loading it gives."""
     config = load_layered(data, Package(ROLES, TRIGGERS), path="/repo/.orbit/config.toml").config
     return dict(config.triggers), config.notices
+
+
+ARCH = "arch-reviewer"
+"""A project's own reviewer, which a project may give the super review instead of its lenses."""
+
+ARCH_SUPER = {**TRIGGERS, SUPER_REVIEW: TRIGGERS[SUPER_REVIEW].model_copy(update={"role": ARCH})}
+""":data:`TRIGGERS` with the super review overridden to queue a task for :data:`ARCH` alone."""
+
+
+def arch_roles(*disabled: str) -> dict[str, Role]:
+    """The built-in roles and :data:`ARCH`, with those ``disabled``."""
+    roles = {**ROLES, ARCH: ROLES[DRIFT_REVIEWER]}
+    return {
+        name: role.model_copy(update={"enabled": name not in disabled})
+        for name, role in roles.items()
+    }
 
 
 LENSES = (claims_done,) * len(SUPER_LENS_REVIEWERS)
@@ -180,13 +201,47 @@ async def test_ctrl_g_queues_a_super_review_at_once_and_starts_the_count_again()
     assert lane_of(session).planner.super_count.since_super == 1
 
 
-async def test_ctrl_g_with_the_super_review_trigger_disabled_queues_nothing() -> None:
+async def test_ctrl_g_with_the_super_review_trigger_disabled_is_refused_queuing_nothing() -> None:
     off = TRIGGERS[SUPER_REVIEW].model_copy(update={"enabled": False})
     session = reviewing(triggers={**TRIGGERS, SUPER_REVIEW: off})
     lane_of(session).planner.counts = {SUPER_REVIEW: 4}
     await send(session, FireTrigger(trigger=SUPER_REVIEW))
-    await events_until(session, lambda event: isinstance(event, CommandAccepted))
+    events = await events_until(session, lambda event: isinstance(event, CommandRefused))
+    await settled()
+    message = "No trigger 'super-review'; the triggers are configure-checks."
+    assert events[-1] == refused(UNKNOWN, message)
+    await session.close()
+    assert session._board.tasks == ()
+    assert lane_of(session).planner.super_count == SuperReviewCount(4)
+
+
+async def test_a_super_review_asked_of_the_lane_with_its_trigger_disabled_queues_nothing() -> None:
+    off = TRIGGERS[SUPER_REVIEW].model_copy(update={"enabled": False})
+    session = reviewing(triggers={**TRIGGERS, SUPER_REVIEW: off})
+    lane_of(session).planner.counts = {SUPER_REVIEW: 4}
+    await lane_of(session).super_review()
     await settled()
     await session.close()
     assert session._board.tasks == ()
     assert lane_of(session).planner.super_count == SuperReviewCount(4)
+
+
+async def test_ctrl_g_with_the_super_review_given_an_enabled_role_queues_that_roles_task() -> None:
+    roles = arch_roles(*SUPER_LENS_REVIEWERS)
+    session = reviewing(triggers=unreviewed(ARCH_SUPER), roles=roles)
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
+    events = await events_until(session, lambda event: isinstance(event, CommandAccepted))
+    events = await asyncio.wait_for(settle(session, events), 10)
+    await session.close()
+    assert [(t.task.role, t.origin) for t in board(events)] == [(ARCH, SUPER_REVIEW)]
+
+
+async def test_ctrl_g_with_the_super_review_given_a_disabled_role_is_refused() -> None:
+    session = reviewing(triggers=unreviewed(ARCH_SUPER), roles=arch_roles(ARCH))
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
+    events = await events_until(session, lambda event: isinstance(event, CommandRefused))
+    await settled()
+    await session.close()
+    message = "No trigger 'super-review'; the triggers are configure-checks."
+    assert events[-1] == refused(UNKNOWN, message)
+    assert session._board.tasks == ()

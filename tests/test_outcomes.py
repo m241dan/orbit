@@ -107,7 +107,7 @@ async def test_an_accepted_command_is_answered_after_the_events_it_published() -
 
 
 async def test_an_unknown_trigger_is_refused_as_unknown_with_its_message() -> None:
-    session = WorkspaceHost()
+    session, _, _ = session_for()
     refused = await refusal(session, "c2", FireTrigger(trigger="nope"))
     await session.close()
 
@@ -124,7 +124,7 @@ async def test_running_tasks_without_agents_is_refused_as_not_configured() -> No
 
 
 async def test_input_to_a_trigger_is_refused_as_invalid() -> None:
-    session = WorkspaceHost()
+    session, _, _ = session_for()
     refused = await refusal(session, "c4", FireTrigger(trigger=SUPER_REVIEW, input={"x": "1"}))
     await session.close()
 
@@ -344,11 +344,12 @@ async def test_a_cancelled_handler_is_cancelled_with_no_outcome() -> None:
 
 @pytest.mark.parametrize("trigger", [entry.name for entry in TRIGGERS])
 async def test_every_catalogued_trigger_is_run_by_fire_trigger(trigger: str) -> None:
-    session = WorkspaceHost()
+    session, _, _ = session_for()
     refused = await refusal(session, "c1", FireTrigger(trigger=trigger))
     await session.close()
 
-    # With no agents every trigger's run refuses; one without a run would be INTERNAL.
+    # Without reviews or verification every trigger's run refuses; one without a run would be
+    # INTERNAL.
     assert refused.code == NOT_CONFIGURED
 
 

@@ -3,8 +3,8 @@ triggers and the lanes."""
 
 from collections.abc import Collection, Iterable, Mapping, Sequence
 
-from orbit.agent.domain.roles import Role, disabled_roles
-from orbit.agent.domain.triggers import Trigger
+from orbit.agent.domain.roles import Role, disabled_roles, enabled_roles
+from orbit.agent.domain.triggers import Trigger, fires_by_hand
 from orbit.protocol import (
     BUGS_REVIEWER,
     CODER,
@@ -20,7 +20,6 @@ from orbit.protocol import (
     SCALING_REVIEWER,
     SECURITY_REVIEWER,
     STYLE_REVIEWER,
-    SUPER_LENS_REVIEWERS,
     SUPER_REVIEW,
     TESTS_REVIEWER,
     AgentEntry,
@@ -61,9 +60,6 @@ TRIGGER_NAMES = tuple(trigger.name for trigger in TRIGGERS)
 
 _BUILT_IN_LABELS = {trigger.name: trigger.label for trigger in TRIGGERS}
 """The built-in triggers' labels, by name."""
-
-TRIGGER_ROLES = {SUPER_REVIEW: SUPER_LENS_REVIEWERS, CONFIGURE_CHECKS: (CONFIGURATOR,)}
-"""The roles of the tasks each built-in trigger queues."""
 
 NO_WORKSPACE_LABEL = "default"
 """The workspace's label outside a repository."""
@@ -135,12 +131,14 @@ def workspace_entry(
     )
 
 
-def trigger_names(roles: Mapping[str, Role]) -> tuple[str, ...]:
-    """The names of the built-in triggers but those whose roles are all disabled among
-    ``roles``."""
-    disabled = disabled_roles(roles)
+def trigger_names(triggers: Mapping[str, Trigger], roles: Mapping[str, Role]) -> tuple[str, ...]:
+    """The names of the built-in triggers the user can fire: those among a workspace's
+    ``triggers``, by name, that fire by hand with the enabled roles among ``roles``."""
+    enabled = enabled_roles(roles)
     return tuple(
-        name for name in TRIGGER_NAMES if any(role not in disabled for role in TRIGGER_ROLES[name])
+        name
+        for name in TRIGGER_NAMES
+        if name in triggers and fires_by_hand(triggers[name], enabled)
     )
 
 
@@ -149,10 +147,11 @@ def trigger_entries(
 ) -> tuple[TriggerEntry, ...]:
     """The catalog's entries for a workspace's ``triggers``, by name, with its agents' ``roles``:
     each trigger that's enabled and queues a task for a role that isn't disabled, in order, with
-    its tab and roles, then each built-in trigger that can be fired there but isn't among them.
-    An entry is ``manual`` if it's a built-in trigger that can be fired there, and labelled as
+    its tab and roles, then each built-in trigger that can be fired there but isn't among them,
+    such as one running a named set. An entry is ``manual`` if it's a built-in trigger that its
+    trigger lets fire by hand there, and labelled as
     the built-in one is, else as its trigger is, else by its name."""
-    fireable = trigger_names(roles)
+    fireable = trigger_names(triggers, roles)
     listed = _listed_triggers(triggers, disabled_roles(roles))
     rest = (entry for entry in TRIGGERS if entry.name in fireable and entry.name not in listed)
     return (
