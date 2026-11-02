@@ -4,6 +4,7 @@ the agent registry and the host they reach orbit through.
 Whatever answers an agent's calls, a task's :class:`AgentRun` or the planner's conversation, is
 a :class:`CallTarget` opened on the desk; :func:`dispatch` answers a call with the tools the
 agent's role allows, among them those the desk answers for every target (:meth:`AgentDesk.tools`).
+A call to a proxied tool, one of an MCP server's, goes to the desk's :class:`ToolProxy` instead.
 """
 
 import asyncio
@@ -30,10 +31,13 @@ from orbit.agent.application.ports import (
     Reply,
     TempDirs,
     Tool,
+    ToolListing,
 )
 from orbit.agent.application.skill_delivery import SkillDelivery
+from orbit.agent.application.tool_proxy import Caller, McpProxying, ToolProxy
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.agents import Agent, AgentRegistry
+from orbit.agent.domain.mcp_proxy import is_proxied, refusal
 from orbit.agent.domain.merge_pass import Dismissal, ReviewSuggestion
 from orbit.agent.domain.refusals import failed_to
 from orbit.agent.domain.reviews import FindingReport, ReviewLimits
@@ -140,7 +144,8 @@ class Agents:
     ``triggers`` turn events into tasks, by name, in order, each prompt its template's text;
     without them, nothing is queued on events, reviews included. ``built_in_triggers`` are those
     orbit ships, which the project's are merged over, and proposed checks' triggers checked
-    against; without them, proposed triggers are checked alone.
+    against; without them, proposed triggers are checked alone. ``mcp`` proxies the MCP servers
+    roles allow to their agents; without it, agents are offered none.
     """
 
     host: AgentHost
@@ -166,6 +171,7 @@ class Agents:
     skill_mappings: tuple[SkillMapping, ...] = field(default=(), kw_only=True)
     triggers: Mapping[str, Trigger] = field(default_factory=dict, kw_only=True)
     built_in_triggers: Mapping[str, Trigger] = field(default_factory=dict, kw_only=True)
+    mcp: McpProxying | None = field(default=None, kw_only=True)
 
     def runtime(self, role: str) -> str | None:
         """The runtime role ``role``'s agents run on; none for a role they don't have."""
@@ -261,6 +267,13 @@ class AgentDesk:
         self._delivery = SkillDelivery(
             agents.skill_library, agents.skill_mappings, self._processes.get
         )
+        # What proxies MCP servers' tools to the agents; none without servers to proxy.
+        self._proxy = None if agents.mcp is None else self._proxying(agents.mcp, telemetry)
+
+    def _proxying(self, mcp: McpProxying, telemetry: Telemetry) -> ToolProxy:
+        """What proxies ``mcp``'s servers to the agents, as their roles stand at each call,
+        publishing its notices and tracing its calls with ``telemetry``."""
+        return ToolProxy(mcp, lambda: self.agents.roles, self.publish, telemetry)
 
     async def publish(self, event: Event) -> None:
         """Publish ``event``, noting the agents it announces as started or exited and what the
@@ -278,7 +291,9 @@ class AgentDesk:
         if self._starting is None:
             # Detached: the host serves every later agent, not the task whose launch started it.
             with no_span():
-                self._starting = asyncio.ensure_future(self.agents.host.start(self.handle))
+                self._starting = asyncio.ensure_future(
+                    self.agents.host.start(self.handle, self.list_tools)
+                )
             self._starting.add_done_callback(self._started)
         # Shielded: one caller giving up doesn't cancel the start the others wait on.
         return await asyncio.shield(self._starting)
@@ -290,8 +305,11 @@ class AgentDesk:
             self._starting = None
 
     async def stop(self) -> None:
-        """Stop the host, if it was started, cancelling a start that's under way; a host whose
-        start failed is left alone."""
+        """Stop proxying MCP servers, answering the calls to them in flight, then the host, if it
+        was started, cancelling a start that's under way; a host whose start failed is left
+        alone."""
+        if self._proxy is not None:
+            await self._proxy.close()
         starting, self._starting = self._starting, None
         if starting is None:
             return
@@ -393,6 +411,8 @@ class AgentDesk:
 
     def close(self, agent: Agent) -> None:
         self.registry.revoke(agent.id)
+        if self._proxy is not None:
+            self._proxy.release(agent.id)
         self._runs.pop(agent.id, None)
         self._launches.pop(agent.id, None)
         self._delivery.close(agent.id)
@@ -413,6 +433,31 @@ class AgentDesk:
                 yield process
             finally:
                 del self._processes[agent.id]
+
+    async def list_tools(self, token: str) -> ToolListing:
+        """The tools the agent with ``token`` is offered: the orbit tools its role allows and
+        the proxied tools of the MCP servers it allows; for a token no agent running has,
+        orbit's tools as they are, and no proxied ones."""
+        agent = self.registry.by_token(token)
+        if agent is None:
+            return ToolListing(ORBIT_TOOLS)
+        role = self.agents.roles[agent.role]
+        proxied = () if self._proxy is None else await self._proxy.list_tools(self._caller(agent))
+        return ToolListing(role.granted_tools, proxied)
+
+    def _caller(self, agent: Agent) -> Caller:
+        """``agent`` as it calls proxied tools: in its role as it stands, working where it was
+        launched, else in the workspace's directory, and traced in its process's span, else the
+        current one."""
+        launch = self._launches.get(agent.id)
+        process = self._processes.get(agent.id)
+        return Caller(
+            agent.id,
+            agent.role,
+            self.agents.roles[agent.role],
+            self.agents.root if launch is None else launch.cwd,
+            current_span() if process is None else process.span,
+        )
 
     async def handle(self, token: str, tool: str, arguments: dict[str, Any]) -> Reply:
         agent = self.registry.by_token(token)
@@ -462,8 +507,19 @@ class AgentDesk:
         """``run``'s answer to ``agent``'s call; if handling it fails, the failure is reported
         and is the answer."""
         try:
-            return await run.handle(tool, arguments)
+            return await self._route(agent, run, tool, arguments)
         except Exception as exc:
             message = unexpected(failed_to(f"handle {tool}", exc), exc)
             await self.publish(ErrorOccurred(agent_id=agent.id, code=INTERNAL, message=message))
             return Reply(message, is_error=True)
+
+    async def _route(
+        self, agent: Agent, run: CallTarget, tool: str, arguments: dict[str, Any]
+    ) -> Reply:
+        """The answer to ``agent``'s call: the proxy's to a proxied tool, refused without one,
+        else ``run``'s."""
+        if not is_proxied(tool):
+            return await run.handle(tool, arguments)
+        if self._proxy is None:
+            return Reply(refusal(agent.role, tool), is_error=True)
+        return await self._proxy.call(self._caller(agent), tool, arguments)

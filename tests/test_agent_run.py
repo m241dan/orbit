@@ -17,6 +17,7 @@ from orbit.agent.application.ports import (
     HostFailed,
     ProposalDecision,
     Reply,
+    ToolLister,
     TreeFailed,
 )
 from orbit.agent.application.tasks import Tasks
@@ -26,6 +27,7 @@ from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import ChecksProposal
 from orbit.agent.domain.endings import BUG, STOPPED_BY_YOU
 from orbit.agent.domain.verification import failure_report
+from orbit.agent.external.mcp_host import list_every_tool
 from orbit.protocol import (
     AGENT_FAILED,
     CHECKS_EXHAUSTED,
@@ -873,9 +875,9 @@ class SpanSeeingHost(FakeHost):
         super().__init__()
         self.span: Span | None = None
 
-    async def start(self, handler: CallHandler) -> str:
+    async def start(self, handler: CallHandler, lister: ToolLister = list_every_tool) -> str:
         self.span = current_span()
-        return await super().start(handler)
+        return await super().start(handler, lister)
 
 
 async def test_the_host_started_inside_a_span_runs_with_no_span_current() -> None:
@@ -914,10 +916,10 @@ class StoppedAsItFailsHost(FailingHost):
         self.desk: AgentDesk | None = None
         self.stopping: list[asyncio.Task[None]] = []
 
-    async def start(self, handler: CallHandler) -> str:
+    async def start(self, handler: CallHandler, lister: ToolLister = list_every_tool) -> str:
         assert self.desk is not None
         self.stopping.append(asyncio.ensure_future(self.desk.stop()))
-        return await super().start(handler)
+        return await super().start(handler, lister)
 
 
 async def test_stopping_as_a_start_fails_stops_nothing() -> None:

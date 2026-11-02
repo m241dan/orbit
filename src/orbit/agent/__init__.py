@@ -28,6 +28,7 @@ from orbit.agent.application.purge import purge
 from orbit.agent.application.recovery import RecoveryFailed
 from orbit.agent.application.role_copies import TreeCopies
 from orbit.agent.application.schedules import ScheduleClock
+from orbit.agent.application.tool_proxy import McpProxying
 from orbit.agent.application.verifier import Verification
 from orbit.agent.application.workspace_host import HostParts, WorkspaceHost
 from orbit.agent.application.workspace_source import WorkspaceSource, WorkspaceUnavailable
@@ -110,12 +111,14 @@ from orbit.agent.external.control_plane import ControlPlaneServer, ListenFailed
 from orbit.agent.external.directories import resolve_config_dir, resolve_state_dir
 from orbit.agent.external.directory_copies import DirectoryCopies, copies_folder
 from orbit.agent.external.directory_lister import DirectoryLister
+from orbit.agent.external.environment_credentials import EnvironmentCredentials
 from orbit.agent.external.fallback_files import FallbackFiles
 from orbit.agent.external.file_names import file_names
 from orbit.agent.external.git_tree import GitCoderTree
 from orbit.agent.external.kiro_cli import KiroCliRunner
 from orbit.agent.external.local_zone import LocalZone
 from orbit.agent.external.mcp_host import McpHost
+from orbit.agent.external.mcp_stdio import StdioConnector, mcp_folder
 from orbit.agent.external.repository import (
     RepositoryUnreadable,
     git_top_level,
@@ -189,6 +192,7 @@ __all__ = [
     "ControlPlaneServer",
     "DirectoryCopies",
     "DirectoryLister",
+    "EnvironmentCredentials",
     "FallbackFiles",
     "GitCoderTree",
     "HostMaker",
@@ -206,6 +210,7 @@ __all__ = [
     "LocalTls",
     "LocalZone",
     "McpHost",
+    "McpProxying",
     "OpenedStore",
     "OpenedWorkspace",
     "Opening",
@@ -237,6 +242,7 @@ __all__ = [
     "SkillFileText",
     "SkillMap",
     "SqliteStore",
+    "StdioConnector",
     "StepRunner",
     "StorageSettings",
     "StoreError",
@@ -289,6 +295,7 @@ __all__ = [
     "knows_runtime",
     "local_tls",
     "make_ca",
+    "mcp_folder",
     "not_on_path",
     "open_workspace",
     "open_workspace_store",

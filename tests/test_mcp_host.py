@@ -10,10 +10,11 @@ import httpx2
 import pytest
 from mcp.client.client import Client
 from mcp.client.streamable_http import streamable_http_client
-from mcp.types import TextContent
+from mcp.types import CallToolRequest, CallToolRequestParams, CallToolResult, TextContent
 
-from orbit.agent.application.ports import HostFailed, Reply
-from orbit.agent.domain.tools import ORBIT_TOOLS
+from orbit.agent.application.ports import HostFailed, Reply, ToolListing
+from orbit.agent.domain.mcp_proxy import ProxiedTool, UpstreamTool
+from orbit.agent.domain.tools import COMPLETE_TASK, GET_TASK, ORBIT_TOOLS
 from orbit.agent.external import mcp_host
 from orbit.agent.external.mcp_host import PROMPT_RECIPE, McpHost
 from tests.waiting import eventually
@@ -43,10 +44,34 @@ class RecordingHandler:
         return self.reply
 
 
+GET_ISSUE = ProxiedTool(
+    "github__get_issue_",
+    "github",
+    UpstreamTool(
+        "get issue!",
+        "Get an issue.",
+        {"type": "object", "properties": {"number": {"type": "integer"}}, "required": ["number"]},
+    ),
+)
+
+
+class Lister:
+    """Lists each token's tools as ``listings`` say, by token, and every orbit tool for others,
+    noting the tokens asked for."""
+
+    def __init__(self, listings: dict[str, ToolListing]) -> None:
+        self.listings = listings
+        self.asked: list[str] = []
+
+    async def __call__(self, token: str) -> ToolListing:
+        self.asked.append(token)
+        return self.listings.get(token, ToolListing(ORBIT_TOOLS))
+
+
 @asynccontextmanager
-async def serving(handler: RecordingHandler) -> AsyncIterator[str]:
+async def serving(handler: RecordingHandler, lister: Lister | None = None) -> AsyncIterator[str]:
     host = McpHost()
-    url = await host.start(handler)
+    url = await (host.start(handler) if lister is None else host.start(handler, lister))
     try:
         yield url
     finally:
@@ -298,7 +323,7 @@ async def test_a_server_that_fails_to_start_closes_its_socket(
 async def test_a_server_that_cant_be_built_closes_its_socket(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def unbuildable(handler: object) -> None:
+    def unbuildable(handler: object, lister: object) -> None:
         raise ValueError("no server for you")
 
     sockets = Sockets()
@@ -330,3 +355,66 @@ async def test_starting_cancelled_leaves_nothing_serving(monkeypatch: pytest.Mon
     [made] = sockets.made
     assert made.fileno() == -1
     await host.stop()
+
+
+# Each agent's own tools
+
+
+LISTINGS = {
+    "tok-1": ToolListing((GET_TASK, COMPLETE_TASK), (GET_ISSUE,)),
+    "tok-2": ToolListing((GET_TASK,)),
+}
+
+
+async def test_each_token_lists_its_own_orbit_tools_and_proxied_ones() -> None:
+    lister = Lister(LISTINGS)
+    async with serving(RecordingHandler(), lister) as url:
+        async with connected(url, "tok-1") as client:
+            first = {tool.name: tool for tool in (await client.list_tools()).tools}
+        async with connected(url, "tok-2") as client:
+            second = [tool.name for tool in (await client.list_tools()).tools]
+    assert list(first) == [GET_TASK, COMPLETE_TASK, "github__get_issue_"]
+    assert first["github__get_issue_"].description == "Get an issue."
+    assert first["github__get_issue_"].input_schema == GET_ISSUE.tool.input_schema
+    assert second == [GET_TASK]
+    assert lister.asked == ["tok-1", "tok-2"]
+
+
+async def test_a_call_to_a_proxied_name_goes_to_the_handler_with_the_token() -> None:
+    handler = RecordingHandler(Reply("Issue 7: it's broken."))
+    async with serving(handler, Lister(LISTINGS)) as url, connected(url) as client:
+        result = await client.call_tool("github__get_issue_", {"number": 7})
+    assert handler.calls == [("tok-1", "github__get_issue_", {"number": 7})]
+    assert not result.is_error
+    assert text(result) == "Issue 7: it's broken."
+
+
+async def test_a_proxied_call_the_handler_refuses_is_an_error() -> None:
+    handler = RecordingHandler(Reply("roles.coder doesn't allow github__create_issue.", True))
+    async with serving(handler, Lister(LISTINGS)) as url, connected(url, "tok-2") as client:
+        result = await client.call_tool("github__create_issue", None)
+    assert handler.calls == [("tok-2", "github__create_issue", {})]
+    assert result.is_error
+    assert text(result) == "roles.coder doesn't allow github__create_issue."
+
+
+async def test_a_proxied_call_whose_arguments_arent_an_object_is_refused() -> None:
+    handler = RecordingHandler()
+    async with serving(handler, Lister(LISTINGS)) as url, connected(url) as client:
+        # Built unchecked, as an agent's CLI could send it; serializing it warns.
+        params = CallToolRequestParams.model_construct(name="github__x", arguments=[1])
+        with pytest.warns(UserWarning, match="serialized value may not be as expected"):
+            result = await client.session.send_request(
+                CallToolRequest(params=params), CallToolResult
+            )
+    assert handler.calls == []
+    assert result.is_error
+    assert text(result) == "A tool's arguments are an object."
+
+
+async def test_a_call_to_an_orbit_tool_still_reaches_orbits_tool() -> None:
+    handler = RecordingHandler()
+    async with serving(handler, Lister(LISTINGS)) as url, connected(url) as client:
+        result = await client.call_tool("complete_task", {"summary": "done"})
+    assert handler.calls == [("tok-1", "complete_task", {"summary": "done"})]
+    assert text(result) == "ok"

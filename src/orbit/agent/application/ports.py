@@ -13,6 +13,8 @@ from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.commits import Commit
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.listings import FoundDirectory
+from orbit.agent.domain.mcp_proxy import ProxiedTool, UpstreamTool
+from orbit.agent.domain.mcp_servers import McpServer
 from orbit.agent.domain.merge_holds import AnyHold
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.purging import Purged
@@ -193,12 +195,26 @@ Tool = Callable[[dict[str, Any]], Awaitable[Reply]]
 """Answers a call to one of orbit's tools, given its arguments."""
 
 
-class AgentHost(Protocol):
-    """Where agents reach orbit: a server that passes their tool calls to a handler."""
+@dataclass(frozen=True)
+class ToolListing:
+    """The tools an agent's ``tools/list`` shows: the ``orbit`` tools it may call, by name, and
+    the ``proxied`` tools of MCP servers its role allows."""
 
-    async def start(self, handler: CallHandler) -> str:
-        """Start serving calls to ``handler``; returns the URL agents connect to. Raises
-        :class:`HostFailed` when it can't serve."""
+    orbit: tuple[str, ...]
+    proxied: tuple[ProxiedTool, ...] = ()
+
+
+ToolLister = Callable[[str], Awaitable[ToolListing]]
+"""Lists the tools an agent may call, by its token."""
+
+
+class AgentHost(Protocol):
+    """Where agents reach orbit: a server that passes their tool calls to a handler, and lists
+    each agent's tools as a lister says."""
+
+    async def start(self, handler: CallHandler, lister: ToolLister) -> str:
+        """Start serving calls to ``handler``, listing each agent's tools as ``lister`` says;
+        returns the URL agents connect to. Raises :class:`HostFailed` when it can't serve."""
         ...
 
     async def stop(self) -> None:
@@ -703,3 +719,45 @@ class UsageLedger(Protocol):
         recorded, as :func:`usage_totals` adds them up. Raises :class:`ReadFailed` when they
         can't be read."""
         ...
+
+
+class UpstreamFailed(Exception):
+    """An external MCP server failed: it couldn't start, it crashed, a call to it timed out, or
+    the connection to it dropped. The message says why, without the server's name."""
+
+
+class UpstreamSession(Protocol):
+    """A connection to an external MCP server, open until closed."""
+
+    async def list_tools(self) -> tuple[UpstreamTool, ...]:
+        """The tools the server offers, every page of them, in its order. Raises
+        :class:`UpstreamFailed` when the server fails."""
+        ...
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Reply:
+        """The server's answer to a call to its tool ``name`` with ``arguments``, an error if the
+        tool says so. Raises :class:`UpstreamFailed` when the server fails."""
+        ...
+
+    async def close(self) -> None:
+        """Close the connection, stopping the server if it was started for it."""
+        ...
+
+
+class McpConnector(Protocol):
+    """Connects to external MCP servers."""
+
+    async def open(self, server: McpServer, cwd: str, env: Mapping[str, str]) -> UpstreamSession:
+        """A connection to ``server``, started in the directory ``cwd``, made if it's missing,
+        with ``env`` as its environment's own variables. Raises :class:`UpstreamFailed` when it
+        can't connect."""
+        ...
+
+
+class CredentialsUnreadable(Exception):
+    """The credentials can't be read; the message says why."""
+
+
+Credentials = Callable[[str], str | None]
+"""The value of the variable named, for a server's environment; ``None`` when it isn't set.
+Raises :class:`CredentialsUnreadable` when they can't be read."""

@@ -298,6 +298,28 @@ recorded.
 A `complete_task` call's span lasts until its claim is verified, as the agent waits that long
 for the reply.
 
+### `orbit.mcp.call`
+
+One span for each call an agent makes to a proxied tool, one of an external MCP server's (see
+**Proxied tools** in the README), from when orbit takes it on until it's answered: connecting to
+the server, if that's needed, and the call itself. It's a child of the call's
+`orbit.agent.request` span, and linked to the calling agent's `orbit.agent.process` span (or the
+span current, once its process has ended). A call to a server the agent's role doesn't allow is
+refused without one. Neither the call's arguments nor its result are recorded.
+
+| Attribute | Type | Meaning |
+| --- | --- | --- |
+| `orbit.mcp.server` | string | The server, by its name in `[mcp.<name>]`, such as `github`. |
+| `orbit.mcp.tool` | string | The tool, by orbit's name for it, such as `github__get_issue`. |
+| `orbit.mcp.outcome` | string | How the call came out: `ok`, `tool_error` (the tool answered with an error), `failed` (the server failed to start, crashed, didn't answer in time or dropped the connection), `refused` (the role doesn't allow the tool) or `stopped` (the agent's run ended, or orbit closed, before it was answered). |
+
+A `failed` or `refused` call has the span's error status with the reason; a `tool_error` call
+doesn't, as its message is the tool's result.
+
+A refused call to a proxied tool, with a span or without, is recorded as an `orbit.mcp.refused`
+event on the calling agent's `orbit.agent.process` span, with `orbit.mcp.tool`, orbit's name for
+the tool.
+
 ### `orbit.verify.step`
 
 One span for each verification step run for an agent's call, a child of that call's
@@ -386,6 +408,9 @@ so no trace stays open for hours while each can still be followed back to its ca
 
 - Each `orbit.consultation` span links to the `orbit.planner.turn` span of the turn that asked
   for the consultation.
+
+- Each `orbit.mcp.call` span links to the `orbit.agent.process` span of the agent making the
+  call.
 
 - Each `orbit.planner.turn` span of a turn hearing delivered replies links to the
   `orbit.consultation` span of each consultation whose reply it hears. For a consultation

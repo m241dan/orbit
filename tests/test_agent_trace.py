@@ -20,9 +20,10 @@ from orbit.agent.application.agent_trace import (
 )
 from orbit.agent.application.desk import STOPPED_HANDLING, UNKNOWN_AGENT, AgentDesk
 from orbit.agent.application.planner_trace import TURN_SPAN
-from orbit.agent.application.ports import CallHandler, Reply, ResumeFailed
+from orbit.agent.application.ports import CallHandler, Reply, ResumeFailed, ToolLister
 from orbit.agent.application.review_trace import REVIEW_SPAN
 from orbit.agent.application.task_trace import RUN_SPAN
+from orbit.agent.external.mcp_host import list_every_tool
 from orbit.protocol import (
     CODER,
     PLANNER,
@@ -77,9 +78,9 @@ class ServerHost(FakeHost):
         super().__init__()
         self._context = contextvars.Context()
 
-    async def start(self, handler: CallHandler) -> str:
+    async def start(self, handler: CallHandler, lister: ToolLister = list_every_tool) -> str:
         self._context = contextvars.copy_context()
-        return await super().start(handler)
+        return await super().start(handler, lister)
 
     async def call(self, token: str, tool: str, **arguments: Any) -> Reply:
         return await asyncio.create_task(

@@ -31,6 +31,8 @@ from orbit.agent.application.ports import (
     StoredSession,
     StoreFailed,
     TempDirFailed,
+    ToolLister,
+    ToolListing,
     TreeFailed,
     UsageSource,
 )
@@ -75,6 +77,7 @@ from orbit.agent.domain.usage_totals import UsageRow, UsageTotalsData, usage_tot
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.agent.external.built_in_triggers import read_built_in_triggers
 from orbit.agent.external.kiro_cli import KiroCliRunner
+from orbit.agent.external.mcp_host import list_every_tool
 from orbit.protocol import (
     AGENT_FAILED,
     BUILT_IN_ROLE_NAMES,
@@ -203,12 +206,14 @@ Script = Callable[[Call], Awaitable[TurnEndReason]]
 class FakeHost:
     def __init__(self) -> None:
         self.handler: CallHandler | None = None
+        self.lister: ToolLister = list_every_tool
         self.starts = 0
         self.stops = 0
 
-    async def start(self, handler: CallHandler) -> str:
+    async def start(self, handler: CallHandler, lister: ToolLister = list_every_tool) -> str:
         self.starts += 1
         self.handler = handler
+        self.lister = lister
         return URL
 
     async def stop(self) -> None:
@@ -217,6 +222,10 @@ class FakeHost:
     async def call(self, token: str, tool: str, **arguments: Any) -> Reply:
         assert self.handler is not None
         return await self.handler(token, tool, arguments)
+
+    async def list_tools(self, token: str) -> ToolListing:
+        """The tools the agent with ``token`` is listed."""
+        return await self.lister(token)
 
 
 class GatedHost(FakeHost):
@@ -227,10 +236,10 @@ class GatedHost(FakeHost):
         self.gate = asyncio.Event()
         self.entered = asyncio.Event()
 
-    async def start(self, handler: CallHandler) -> str:
+    async def start(self, handler: CallHandler, lister: ToolLister = list_every_tool) -> str:
         self.entered.set()
         await self.gate.wait()
-        return await super().start(handler)
+        return await super().start(handler, lister)
 
 
 class FailingHost(FakeHost):
@@ -240,11 +249,11 @@ class FailingHost(FakeHost):
         super().__init__()
         self.failures = failures
 
-    async def start(self, handler: CallHandler) -> str:
+    async def start(self, handler: CallHandler, lister: ToolLister = list_every_tool) -> str:
         if self.failures:
             self.failures -= 1
             raise HostFailed("Orbit's MCP server failed to start.")
-        return await super().start(handler)
+        return await super().start(handler, lister)
 
 
 EVERYTHING = Capabilities(

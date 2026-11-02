@@ -1614,9 +1614,10 @@ is now a table; write [roles.coder.tools] orbit = ["get_task", "complete_task"].
 
 A project declares the external MCP servers its roles may use in `.orbit/config.toml`, an
 `[mcp.<name>]` table each, and a role's `[roles.<name>.tools]` names those its agents may use.
-Orbit will connect to them itself and offer the allowed tools as its own, so every runtime is
-held to the same list; this version reads and checks the declarations, and connects to nothing
-yet.
+Orbit connects to them itself and offers the allowed tools as its own, so every runtime is held
+to the same list and every call is traced (see [Proxied tools](#proxied-tools)). This version
+proxies servers started by a `command`; those reached by a `url` are read and checked, and
+offered to no one yet.
 
 ```toml
 [mcp.github]
@@ -1666,6 +1667,42 @@ may set a declared server's `command`, `url`, `env` and `headers` for your machi
 [Your machine's model, effort and runtime](#your-machines-model-effort-and-runtime)). Orbit reads
 the servers as it opens the workspace, so a change takes effect the next time it opens, as the
 rest of the configuration does.
+
+#### Proxied tools
+
+An agent's tool list, from orbit's MCP server, holds orbit's tools for its role, none of the
+others, and then each tool its role allows from the servers it names, by the name
+`<server>__<tool>`, with the server's own description and input schema. A tool name may have
+only letters, digits, `.`, `_` and `-`, at most 128 characters in all, so a server's tool named
+otherwise is offered with each other character turned into `_` (`get issue!` becomes
+`github__get_issue_`), and a name too long is cut and ends in a short hash of the whole; a call
+to it goes to the server by its own name. A call to a proxied tool the agent's role doesn't
+allow, or to one of orbit's tools it lacks, is refused (`roles.coder doesn't allow
+github__create_issue.`), and the refusal is recorded on the agent's span. A role without `mcp`
+sees orbit's tools for its role, and nothing is connected to for it.
+
+Orbit connects to a server the first time an agent's tool list or call needs it, keeps the tools
+it offers for as long as the connection lasts, and closes the connection once it has gone
+`idle_minutes` without calls; the next call connects again. A `shared` server has one connection
+for the workspace, started in a neutral directory of its own in the state directory
+(`mcp/<workspace id>/<server>`), so no agent's server edits your checkout. With `shared = false`,
+each agent gets its own, started in the agent's own workspace directory, and stopped when the
+agent's run ends. A server started by a `command` is a process of orbit's, given only `PATH` and
+`HOME` from orbit's environment and then its `env`, its `$NAME` and `${NAME}` references filled
+in from orbit's environment as it starts; a variable that isn't set fails the start
+(`GITHUB_TOKEN isn't set in orbit's environment or credentials.toml.`). Agents never see these
+values. A call waits at most the server's `timeout_seconds`.
+
+On first connecting to a server, orbit gives a notice for each tool a role's list names that the
+server doesn't offer (`github offers no tool create_isue, which roles.coder.tools.mcp names.`);
+agents never see that tool. A server that fails to start, crashes, doesn't answer in time or
+drops the connection fails the call with the reason, and its connection is dropped, so the next
+call starts it afresh. The first failure gives a notice (`MCP server github failed: it exited
+with status 1. Agents' calls to it return errors until it starts.`), and the failures after it
+none, until a call it answers ends the streak. When an agent's run ends, its calls in flight are
+cancelled; when the workspace closes or orbit exits, every connection is closed, the servers
+orbit started are stopped (terminated, then killed), and the calls in flight are answered with
+an error.
 
 The `experimenter` is a conversational role the planner consults (see `consults` below) and you
 can talk to on its own tab: it runs what it's asked to learn, such as how a library behaves, in a
@@ -3895,7 +3932,9 @@ sorted names with their counts, and the skills' files it read with `read_skill`;
 call it makes to orbit's tools is a child span, `orbit.agent.request`, with the tool and whether
 the reply was an error (a `read_skill` call's with the skill and file asked for,
 `orbit.skill.name` and `orbit.skill.file`, refused or not), and each verification step a call
-runs, verifying a `complete_task` claim or for `run_check`, is a child of that call, `orbit.verify.step`, with its name and result. Each
+runs, verifying a `complete_task` claim or for `run_check`, is a child of that call, `orbit.verify.step`, with its name and result; a
+call to a proxied MCP tool is a child `orbit.mcp.call`, linked to the agent's process, with the
+server, the tool and how it came out, never its arguments or result. Each
 run of the startup check is one span, `orbit.startup_check`, starting its own trace: the
 workspace, how it came out (`passed`, `failed` or `cancelled`), the step that failed and whether
 it added a draft task to fix it, with each step it ran a child `orbit.verify.step`. Each run of
@@ -4036,7 +4075,10 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   - `external`: adapters that reach outside the backend. `ClaudeCliRunner` launches agents as
     `claude -p --output-format stream-json` runs connected to orbit (`run_agent`, and `converse`
     for the planner, which resumes its Claude session turn after turn); `McpHost` is orbit's
-    MCP server; `GitCoderTree` is the coder's worktree and its snapshots; `repository` finds the
+    MCP server, whose middleware lists each agent's own tools and passes its calls to proxied
+    ones on; `StdioConnector` (in `mcp_stdio`) starts an external MCP server's command as a child
+    process and speaks MCP with it, and `EnvironmentCredentials` (in `environment_credentials`)
+    fills its variables in from orbit's environment; `GitCoderTree` is the coder's worktree and its snapshots; `repository` finds the
     git repository a workspace is in, fingerprints it, and places orbit's directory in it
     (`orbit_dir`: `.git/orbit`, or `.orbit` outside git); `config_file` reads
     `.orbit/config.toml`, checking the skills its roles name, naming the file that named them,
@@ -4121,7 +4163,10 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     user decide on them; `AgentDesk` (in `desk`) launches agents and routes their calls by token,
     delivering each the skills it's given, in its instructions and through `read_skill`, with
     `SkillDelivery` (in `skill_delivery`), tracing each agent's process as an `orbit.agent.process` span and each of its calls as an
-    `orbit.agent.request` child of it with `AgentTracing` (in `agent_trace`);
+    `orbit.agent.request` child of it with `AgentTracing` (in `agent_trace`), and passing calls
+    to MCP servers' tools to a `ToolProxy` (in `tool_proxy`), which owns the workspace's
+    connections to the servers, lazy, shared or the agent's own, closed when idle, and traces
+    each call as an `orbit.mcp.call` span;
     `Verifier` (in `verifier`) runs the steps, each run for an agent's call timed as an
     `orbit.verify.step` child of the call's span; `Lander` (in `landing`) commits and merges
     verified work; every lane of the roles' but the one whose roles merge runs on a `LaneRunner`

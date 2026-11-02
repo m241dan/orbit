@@ -3,18 +3,27 @@
 It serves streamable HTTP on a random port on 127.0.0.1, inside the app's event loop. Each
 agent sends ``Authorization: Bearer <token>``; every tool call goes to the handler with that
 token, which decides who is asking.
+
+A middleware, ``MCPServer``'s provisional ``middleware=`` hook, makes each agent's ``tools/list``
+its own: orbit's tools its role lacks are dropped, and the proxied tools of the MCP servers its
+role allows are added, as the lister says. A call to a proxied name goes to the handler as any
+call does, and its reply comes back as the tool's result; every other call reaches orbit's tools.
 """
 
 import asyncio
 import socket
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Literal, NotRequired, TypedDict
 
 import uvicorn
+from mcp.server.context import CallNext, HandlerResult, ServerMiddleware, ServerRequestContext
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import CallToolResult, ListToolsResult, TextContent
+from mcp.types import Tool as McpTool
 
-from orbit.agent.application.ports import CallHandler
+from orbit.agent.application.ports import CallHandler, Reply, ToolLister, ToolListing
+from orbit.agent.domain.mcp_proxy import ProxiedTool, is_proxied
 from orbit.agent.domain.tools import (
     COMPLETE_TASK,
     CONSULT,
@@ -25,6 +34,7 @@ from orbit.agent.domain.tools import (
     LIST_DRAFTS,
     LIST_REPORTS,
     MOVE_DRAFT,
+    ORBIT_TOOLS,
     PROPOSE_CHECKS,
     PROPOSE_TASK,
     READ_DRAFT,
@@ -126,9 +136,18 @@ ToolCall = Callable[[Context, str, dict[str, Any]], Awaitable[str]]
 """How a tool passes a call on: with its context, the tool's name and its arguments."""
 
 
-def build_server(handler: CallHandler) -> MCPServer:
-    """An MCP server whose tools pass each call, with the caller's token, to ``handler``."""
-    server = MCPServer("orbit", instructions=INSTRUCTIONS)
+ARGUMENTS_NOT_AN_OBJECT = Reply("A tool's arguments are an object.", is_error=True)
+
+
+async def list_every_tool(token: str) -> ToolListing:
+    """Every one of orbit's tools and no proxied ones, whoever asks."""
+    return ToolListing(ORBIT_TOOLS)
+
+
+def build_server(handler: CallHandler, lister: ToolLister = list_every_tool) -> MCPServer:
+    """An MCP server whose tools pass each call, with the caller's token, to ``handler``, and
+    whose ``tools/list`` shows each caller the tools ``lister`` gives for its token."""
+    server = MCPServer("orbit", instructions=INSTRUCTIONS, middleware=[_proxying(handler, lister)])
 
     async def call(ctx: Context, tool: str, arguments: dict[str, Any]) -> str:
         reply = await handler(bearer_token(ctx.headers), tool, arguments)
@@ -299,6 +318,51 @@ def _add_draft_tools(server: MCPServer, call: ToolCall) -> None:
         return await call(ctx, MOVE_DRAFT, {"task_id": task_id, "before": before})
 
 
+def _proxying(handler: CallHandler, lister: ToolLister) -> ServerMiddleware[Any]:
+    """The middleware making each caller's ``tools/list`` what ``lister`` gives for its token,
+    and passing its calls to proxied names to ``handler``."""
+
+    async def proxy(ctx: ServerRequestContext[Any, Any], call_next: CallNext) -> HandlerResult:
+        token = bearer_token(getattr(ctx.request, "headers", None))
+        params = ctx.params or {}
+        if ctx.method == "tools/list":
+            return _listed(await call_next(ctx), await lister(token))
+        if ctx.method == "tools/call" and is_proxied(str(params.get("name", ""))):
+            reply = await _proxied(handler, token, params)
+            return CallToolResult(
+                content=[TextContent(type="text", text=reply.text)], is_error=reply.is_error
+            )
+        return await call_next(ctx)
+
+    return proxy
+
+
+def _listed(result: HandlerResult, listing: ToolListing) -> dict[str, Any]:
+    """The ``tools/list`` ``result`` with only the orbit tools ``listing`` names, and then its
+    proxied tools."""
+    listed = ListToolsResult.model_validate(result).model_dump(by_alias=True, exclude_unset=True)
+    orbit = [tool for tool in listed["tools"] if tool["name"] in listing.orbit]
+    return {**listed, "tools": [*orbit, *map(_tool_entry, listing.proxied)]}
+
+
+def _tool_entry(tool: ProxiedTool) -> dict[str, Any]:
+    """``tool`` as ``tools/list`` gives it: by its proxied name, with the server's description
+    and input schema."""
+    entry = McpTool(
+        name=tool.name, description=tool.tool.description, input_schema=dict(tool.tool.input_schema)
+    )
+    return entry.model_dump(by_alias=True, exclude_none=True)
+
+
+async def _proxied(handler: CallHandler, token: str, params: Mapping[str, Any]) -> Reply:
+    """``handler``'s answer to the call ``params`` give, from the agent with ``token``, refused
+    if its arguments aren't an object."""
+    arguments = params.get("arguments") or {}
+    if not isinstance(arguments, dict):
+        return ARGUMENTS_NOT_AN_OBJECT
+    return await handler(token, str(params["name"]), arguments)
+
+
 class McpHost:
     """Serves orbit's MCP tools to agents until stopped."""
 
@@ -306,12 +370,12 @@ class McpHost:
         self._server: uvicorn.Server | None = None
         self._serving: asyncio.Task[None] | None = None
 
-    async def start(self, handler: CallHandler) -> str:
+    async def start(self, handler: CallHandler, lister: ToolLister = list_every_tool) -> str:
         sock = socket.socket()
         try:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
-            app = build_server(handler).streamable_http_app()
+            app = build_server(handler, lister).streamable_http_app()
             server = EmbeddedServer(uvicorn.Config(app, log_level="warning", lifespan="on"))
         except BaseException:
             sock.close()

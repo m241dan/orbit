@@ -17,11 +17,13 @@ from orbit.agent import (
     Configuring,
     ControlPlane,
     DirectoryCopies,
+    EnvironmentCredentials,
     GitCoderTree,
     HostMaker,
     HostParts,
     LocalZone,
     McpHost,
+    McpProxying,
     OpenedStore,
     OpenedWorkspace,
     Opening,
@@ -31,6 +33,7 @@ from orbit.agent import (
     ScheduleClock,
     ServedWorkspace,
     SqliteStore,
+    StdioConnector,
     StorageSettings,
     StoreError,
     SystemTempDirs,
@@ -44,6 +47,7 @@ from orbit.agent import (
     copies_folder,
     file_names,
     in_git_work_tree,
+    mcp_folder,
     open_workspace,
     read_built_in_triggers,
     read_config,
@@ -257,7 +261,7 @@ def _host_maker(
             HostParts(
                 settings=settings,
                 verification=verification,
-                agents=_with_copies(agents, opened, config),
+                agents=_with_mcp(_with_copies(agents, opened, config), opened, config),
                 workspace=str(root),
                 check_at_startup=True,
                 workspace_id=opened.store.workspace_id,
@@ -368,6 +372,16 @@ def _with_copies(agents: Agents, opened: OpenedStore, config: OrbitConfig) -> Ag
     store = opened.store
     folder = copies_folder(store.ledger.state_dir, store.workspace_id)
     return replace(agents, copies=DirectoryCopies(agents.root, folder, config.setup))
+
+
+def _with_mcp(agents: Agents, opened: OpenedStore, config: OrbitConfig) -> Agents:
+    """``agents`` offered the MCP servers ``config`` declares, as their roles allow: started as
+    processes of orbit's, the shared ones in neutral directories in the state directory of the
+    store ``opened`` for their workspace, with their variables from orbit's environment."""
+    store = opened.store
+    folder = mcp_folder(store.ledger.state_dir, store.workspace_id)
+    proxying = McpProxying(config.mcp, StdioConnector(), EnvironmentCredentials(), str(folder))
+    return replace(agents, mcp=proxying)
 
 
 def _planner_role(root: str, config_dir: Path, runtime: str | None) -> Role | ConfigError:
