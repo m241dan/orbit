@@ -503,6 +503,37 @@ def test_paths_name_at_least_one_glob() -> None:
     )
 
 
+def unmatchable(glob: str) -> str:
+    """The problem a ``paths`` glob that can never match a git path makes on the trigger ``x``."""
+    return (
+        f'triggers.x.paths: "{glob}" can never match a git path, which neither starts nor ends'
+        ' with "/" and has no empty, "." or ".." part; write a directory as "dir/**".'
+    )
+
+
+@pytest.mark.parametrize(
+    "glob", ["src/external/", "/pyproject.toml", "./src/**", "src//a.py", "src/../x"]
+)
+def test_paths_globs_that_can_never_match_a_git_path_are_refused(glob: str) -> None:
+    assert problems(on="task_landed", role="coder", prompt="Go", paths=(glob,)) == (
+        unmatchable(glob)
+    )
+
+
+def test_paths_globs_git_paths_can_match_pass() -> None:
+    globs = ("src/**/external/**", "pyproject.toml", "**/conftest.py")
+    landing = Trigger(on="task_landed", role="coder", prompt="Go", paths=globs)
+    check_triggers({"x": landing}, ROLES)
+    assert landing.paths == globs
+
+
+def test_only_the_paths_globs_that_can_never_match_are_refused() -> None:
+    paths = ("src/**", "src/external/")
+    assert problems(on="task_landed", role="coder", prompt="Go", paths=paths) == (
+        unmatchable("src/external/")
+    )
+
+
 def test_paths_on_a_landing_pass() -> None:
     landing = Trigger(on="task_landed", role="coder", prompt="Go", paths=("pyproject.toml",))
     check_triggers({"x": landing}, ROLES)

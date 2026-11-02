@@ -2090,6 +2090,9 @@ A trigger's fields:
   stays within one directory while a part that's just `**` stands for any number of them, none
   included (`src/**/external/*.py`, `**/conftest.py`), and a plain name matches that path alone
   (`pyproject.toml`). On another event, or as an empty list, it's refused, naming the trigger.
+  So is a glob no git path can match, one with a leading or trailing `/`, a `//`, or a `.` or
+  `..` part, such as `src/external/` or `./src/**`, naming the glob: a directory is written
+  `dir/**`, as `src/external/**`.
   Git is asked what changed only while a trigger with `paths` listens, and if it can't say, the
   trigger fires all the same, the failure an `orbit.trigger.paths_failed` event on the span
   current (see [Telemetry](#telemetry)), so no review is skipped unseen. No shipped trigger sets

@@ -759,12 +759,35 @@ def _every_problems(trigger: Trigger) -> list[tuple[str, str]]:
 
 def _paths_problems(trigger: Trigger) -> list[tuple[str, str]]:
     """Why ``trigger``'s ``paths`` are refused, if they are: they're matched against what a
-    commit changed, which only ``task_landed`` gives, and an empty list would never match."""
+    commit changed, which only ``task_landed`` gives, and an empty list, or a glob no git path
+    can match, would never match."""
     if trigger.paths is None:
         return []
     event = [] if trigger.on == TASK_LANDED else [("paths", f'paths needs on = "{TASK_LANDED}".')]
     empty = [] if trigger.paths else [("paths", "a list of paths names at least one glob.")]
-    return [*event, *empty]
+    unmatchable = [
+        ("paths", _unmatchable_glob(glob)) for glob in trigger.paths if not _matchable(glob)
+    ]
+    return [*event, *empty, *unmatchable]
+
+
+_GIT_PATH_NON_PARTS = frozenset({"", ".", ".."})
+"""The parts, between slashes, that a repository-relative git path never has."""
+
+
+def _matchable(glob: str) -> bool:
+    """Whether ``glob`` can match a git path at all: none of its parts, split at its slashes,
+    is one a git path never has, as a leading or trailing ``/``, ``//``, ``.`` or ``..`` make."""
+    return _GIT_PATH_NON_PARTS.isdisjoint(glob.split("/"))
+
+
+def _unmatchable_glob(glob: str) -> str:
+    """Why ``glob``, a ``paths`` glob :func:`_matchable` refuses, is refused, and how to write a
+    directory instead."""
+    return (
+        f'"{glob}" can never match a git path, which neither starts nor ends with "/" and has'
+        ' no empty, "." or ".." part; write a directory as "dir/**".'
+    )
 
 
 def _cron_problems(trigger: Trigger) -> list[tuple[str, str]]:
