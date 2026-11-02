@@ -1,9 +1,11 @@
 """Reviews by lens in a session: the tasks the triggers ``review-rounds`` guards queue for one
 landing booked into one review, the findings its lenses report with ``report_finding``, and
 ``reviews_finished`` raised once they have all ended, however they did, its tasks filing into
-the review's batch; in a session as it runs, and in one read back from a save."""
+the review's batch, the reviews of two landings fanning in apart as they run side by side; in a
+session as it runs, and in one read back from a save."""
 
 import asyncio
+import re
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
@@ -424,6 +426,112 @@ async def test_a_lens_taken_off_the_board_counts_as_ended() -> None:
     assert (
         board(events)[2].task.prompt.split("\n\n")[1] == "F1 · bugs-reviewer · normal: Off by one"
     )
+
+
+class HeldLenses:
+    """Agents that claim their tasks done at once, but for lenses, each of which, once it has its
+    task, reports a finding titled by its commit and role, such as ``c1 bugs-reviewer``, then
+    waits for :meth:`gate` of that title before claiming done; :attr:`running` holds the titles
+    of the lenses waiting."""
+
+    def __init__(self) -> None:
+        self.gates: dict[str, asyncio.Event] = {}
+        self.running: set[str] = set()
+
+    def gate(self, look: str) -> asyncio.Event:
+        """The gate the lens titled ``look`` waits for."""
+        return self.gates.setdefault(look, asyncio.Event())
+
+    async def play(self, call: Call) -> TurnEndReason:
+        """Play a task: a lens's as the class says, any other's by claiming it done."""
+        task = await call("get_task")
+        found = LOOK.search(task.text)
+        if found is not None:
+            await self._look(call, f"{found[1]} {found[2]}")
+        await call("complete_task", summary="Done")
+        return "completed"
+
+    async def _look(self, call: Call, look: str) -> None:
+        """Report a finding titled ``look``, then wait for its gate."""
+        await call("report_finding", title=look, body=f"Details of {look}.", severity="normal")
+        self.running.add(look)
+        await self.gate(look).wait()
+        self.running.discard(look)
+
+
+LOOK = re.compile(r"Look at (c\d+) as ([\w-]+)\.")
+"""A lens's prompt, as :func:`lens_trigger` words it, with the commit and the role."""
+
+
+def merges_beside(lenses: HeldLenses, seen: list[tuple[str, frozenset[str]]]) -> Script:
+    """A merge pass recording in ``seen`` its task and the ``lenses`` running as it got it, then
+    claiming done."""
+
+    async def merge(call: Call) -> TurnEndReason:
+        task = await call("get_task")
+        seen.append(
+            (task.text.split("\n\nWhen you have finished", 1)[0], frozenset(lenses.running))
+        )
+        await call("complete_task", summary="Merged")
+        return "completed"
+
+    return merge
+
+
+def merge_prompt(commit: str) -> str:
+    """The merge pass's prompt for a review of ``commit`` whose bugs and tests lenses each
+    reported one finding as :class:`HeldLenses` titles it."""
+    findings = "\n\n".join(
+        f"F{n} · {role} · normal: {commit} {role}\nDetails of {commit} {role}."
+        for n, role in enumerate((BUGS, TESTS), start=1)
+    )
+    return (
+        f"Merge the findings of the review of commit {commit}\n\n{findings}\n\nAt most 5, a merge."
+    )
+
+
+def open_batches(events: list[Event]) -> list[int]:
+    """The open batches each review status in ``events`` counted, in order."""
+    return [event.open_batches for event in events if isinstance(event, ReviewStatus)]
+
+
+async def test_reviews_of_two_commits_side_by_side_each_fan_in_on_their_own_lenses() -> None:
+    lenses = HeldLenses()
+    merged: list[tuple[str, frozenset[str]]] = []
+    store = FakeStore()
+    session = lensing(
+        *(lenses.play for _ in range(6)),
+        reviewers=(merges_beside(lenses, merged), merges_beside(lenses, merged)),
+        triggers=lens_triggers(merge=MERGE),
+        store=store,
+    )
+    await start(session, "one", "two")
+    events: list[Event] = []
+    collecting = asyncio.ensure_future(settle(session, events))
+    c1_bugs, c1_tests = f"c1 {BUGS}", f"c1 {TESTS}"
+    c2_bugs, c2_tests = f"c2 {BUGS}", f"c2 {TESTS}"
+    await eventually(lambda: lenses.running == {c1_bugs, c1_tests, c2_bugs})  # Three slots.
+    lenses.gate(c1_bugs).set()
+    await eventually(lambda: lenses.running == {c1_tests, c2_bugs, c2_tests})
+    lenses.gate(c2_bugs).set()
+    lenses.gate(c2_tests).set()
+    await eventually(lambda: open_batches(events) == [1, 2, 1])  # c2's batch closed.
+    assert merged == [(merge_prompt("c2"), frozenset({c1_tests}))]
+    lenses.gate(c1_tests).set()
+    await asyncio.wait_for(collecting, 10)
+    await session.close()
+
+    assert merged[1:] == [(merge_prompt("c1"), frozenset())]
+    assert [t.task.prompt for t in board(events) if t.task.role == REVIEWER] == [
+        merge_prompt("c2"),
+        merge_prompt("c1"),
+    ]
+    assert open_batches(events) == [1, 2, 1, 0]
+    reviews = reviews_of(store)
+    c1_review = {"3": "batch-1", "4": "batch-1", "8": "batch-1"}
+    c2_review = {"5": "batch-2", "6": "batch-2", "7": "batch-2"}
+    assert reviews.batches == c1_review | c2_review
+    assert (reviews.groups, reviews.planner.batches) == ({}, {})
 
 
 # Refusals
