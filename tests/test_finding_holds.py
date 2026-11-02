@@ -10,6 +10,7 @@ from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.merge_holds import (
     BlockingTask,
     FindingHold,
+    FixReview,
     finding_held_note,
     finding_resumed_note,
     unchecked_note,
@@ -103,7 +104,9 @@ async def test_a_blocking_task_filed_again_from_its_fixs_review_is_filed_as_its_
 async def test_its_fixs_review_by_its_lens_lifts_the_hold_with_its_notice_and_releases() -> None:
     store = FakeStore()
     holds = await held(store)
-    await holds.holds.hear_fix_review("batch-2", {BUGS_REVIEWER, "tests-reviewer"})
+    await holds.holds.hear_fix_review(
+        FixReview("batch-2", frozenset({BUGS_REVIEWER, "tests-reviewer"}))
+    )
     assert not holds.holds.held and store.holds == ()
     assert holds.notices()[-1] == finding_resumed_note(BUGS_REVIEWER)
     assert holds.releases == 2  # Once as no hold kept was read.
@@ -111,7 +114,7 @@ async def test_its_fixs_review_by_its_lens_lifts_the_hold_with_its_notice_and_re
 
 async def test_its_fixs_review_without_its_lens_leaves_the_hold_unchecked() -> None:
     holds = await held()
-    await holds.holds.hear_fix_review("batch-2", {"tests-reviewer"})
+    await holds.holds.hear_fix_review(FixReview("batch-2", frozenset({"tests-reviewer"})))
     assert holds.holds.held and holds.holds.checking == ()
     assert holds.notices()[-1] == unchecked_note(BUGS_REVIEWER)
     assert holds.releases == 0
@@ -127,7 +130,7 @@ async def test_its_fixs_batch_closing_unreviewed_leaves_the_hold_unchecked() -> 
 async def test_merges_wait_for_a_sets_hold_and_a_findings_and_a_release_lifts_both() -> None:
     holds = await held()
     await holds.holds.heard(SetResult(STRESS, "c4", "nightly", (STEP, "2 failed")))
-    await holds.holds.hear_fix_review("batch-2", {BUGS_REVIEWER})
+    await holds.holds.hear_fix_review(FixReview("batch-2", frozenset({BUGS_REVIEWER})))
     assert holds.holds.held and holds.releases == 0
     await holds.holds.hold_finding(CRASH, "7", "batch-3")
     await holds.holds.heard(SetResult(STRESS, "c5", "nightly", None))
@@ -168,7 +171,7 @@ async def test_a_finding_hold_lifted_while_the_store_cant_be_read_stays_lifted_o
     holds = await held(store)
     store.holds_load_failure = "disk gone"
     await holds.holds.restore()
-    await holds.holds.hear_fix_review("batch-2", {BUGS_REVIEWER})
+    await holds.holds.hear_fix_review(FixReview("batch-2", frozenset({BUGS_REVIEWER})))
     store.holds_load_failure = None
     await holds.holds.restore()
     assert not holds.holds.held and store.holds == ()

@@ -4,8 +4,9 @@ again, and passing lifts its hold, as the user releasing every hold by hand does
 fixes that ends without its work merging counts as the set failing again, as it last did; a fix
 that ends in error hasn't ended its chain, as it's left to run again. A merge pass filing a
 blocking task holds them too: the review lane puts the task first, in a batch of its own, and
-the hold lifts once the review of that batch ends with the raising lens's task completed and no
-blocking task filed from its findings again, as :func:`decide_fix_review` says. Holds are kept
+the hold lifts once the review of that batch ends with the raising lens's task completed,
+finding nothing blocking or with a merge pass completing that files no blocking task from its
+findings again, as :func:`decide_fix_review` says. Holds are kept
 per repository, beside the review count, so they outlive a restart.
 
 While any hold is on, the work lane commits each task's verified work in the coder's tree and
@@ -31,6 +32,7 @@ from orbit.agent.domain.merge_holds import (
     BlockingTask,
     FindingFiling,
     FindingHold,
+    FixReview,
     Hold,
     HoldDecision,
     Lifted,
@@ -253,11 +255,11 @@ class MergeHolds:
         :func:`~orbit.agent.domain.merge_holds.decide_blocking` says."""
         await self._settle(decide_blocking(self._holds, filed, task, batch, self._limit))
 
-    async def hear_fix_review(self, batch: str, completed: Collection[str]) -> None:
-        """Act on the end of the review of ``batch``, in which the tasks of the roles
-        ``completed`` completed: the hold whose latest fix is ``batch``'s lifts, or stays, as
-        :func:`~orbit.agent.domain.merge_holds.decide_fix_review` says."""
-        await self._settle(decide_fix_review(self._holds, batch, completed))
+    async def hear_fix_review(self, review: FixReview) -> None:
+        """Act on ``review``, the end of the review of a batch: the hold whose latest fix is that
+        batch's lifts, or stays, as :func:`~orbit.agent.domain.merge_holds.decide_fix_review`
+        says."""
+        await self._settle(decide_fix_review(self._holds, review))
 
     async def hear_unreviewed(self, unreviewed: Collection[FindingHold]) -> None:
         """Act on the batches of the latest fixes of the ``unreviewed`` holds closing with no

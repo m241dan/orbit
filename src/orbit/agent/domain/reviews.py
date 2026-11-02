@@ -269,6 +269,11 @@ def with_finding(
     return replace(group, findings=(*group.findings, finding)), finding
 
 
+def blocking_roles(group: ReviewGroup) -> frozenset[str]:
+    """The roles whose tasks reported a blocking finding in ``group``."""
+    return frozenset(finding.role for finding in group.findings if finding.severity == "blocking")
+
+
 def fan_in_due(group: ReviewGroup) -> bool:
     """Whether ``reviews_finished`` is due for ``group``: it has lenses, all of them have
     ended, and it wasn't raised for it yet."""

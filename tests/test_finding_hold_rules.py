@@ -9,6 +9,7 @@ from orbit.agent.domain.merge_holds import (
     NONE_LIFTED,
     BlockingTask,
     FindingHold,
+    FixReview,
     Hold,
     HoldDecision,
     decide_blocking,
@@ -108,19 +109,39 @@ def test_a_blocking_task_filed_again_once_the_fixes_ran_out_asks_the_user_to_ste
 
 def test_its_fixs_review_with_its_lens_completed_lifts_the_hold_with_its_notice() -> None:
     other = replace(HELD, lens="security-reviewer", title="Escape it", batch="batch-5")
-    decision = decide_fix_review((STRESS, HELD, other), "batch-2", {BUGS_REVIEWER, "tests"})
+    review = FixReview("batch-2", frozenset({BUGS_REVIEWER, "tests"}))
+    decision = decide_fix_review((STRESS, HELD, other), review)
     assert decision == HoldDecision((STRESS, other), (finding_resumed_note(BUGS_REVIEWER),))
 
 
 def test_its_fixs_review_without_its_lens_completed_leaves_the_hold_unchecked() -> None:
-    decision = decide_fix_review((HELD, STRESS), "batch-2", {"tests-reviewer"})
+    decision = decide_fix_review((HELD, STRESS), FixReview("batch-2", frozenset({"tests"})))
     assert decision == HoldDecision(
         (replace(HELD, batch=None), STRESS), (unchecked_note(BUGS_REVIEWER),)
     )
 
 
+def test_a_blocking_finding_its_merge_pass_didnt_decide_leaves_the_hold_unchecked() -> None:
+    lens = frozenset({BUGS_REVIEWER})
+    decision = decide_fix_review((HELD,), FixReview("batch-2", lens, lens, "incomplete"))
+    assert decision == HoldDecision((replace(HELD, batch=None),), (unchecked_note(BUGS_REVIEWER),))
+
+
+def test_a_blocking_finding_from_its_lens_decided_by_a_completed_merge_pass_lifts_it() -> None:
+    lens = frozenset({BUGS_REVIEWER})
+    decision = decide_fix_review((HELD,), FixReview("batch-2", lens, lens, "completed"))
+    assert decision == HoldDecision((), (finding_resumed_note(BUGS_REVIEWER),))
+
+
+def test_only_normal_findings_from_its_lens_lift_it_though_the_merge_pass_failed() -> None:
+    review = FixReview("batch-2", frozenset({BUGS_REVIEWER}), frozenset({"security"}))
+    decision = decide_fix_review((HELD,), review)
+    assert decision == HoldDecision((), (finding_resumed_note(BUGS_REVIEWER),))
+
+
 def test_a_review_of_another_batch_changes_no_hold() -> None:
-    assert decide_fix_review((HELD,), "batch-3", {BUGS_REVIEWER}) == HoldDecision((HELD,))
+    review = FixReview("batch-3", frozenset({BUGS_REVIEWER}))
+    assert decide_fix_review((HELD,), review) == HoldDecision((HELD,))
 
 
 def test_its_fixs_batch_closing_unreviewed_leaves_the_hold_unchecked() -> None:

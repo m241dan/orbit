@@ -38,6 +38,7 @@ from tests.agent_fakes import (
     Call,
     Script,
     board_of,
+    gives_up,
     holds_of,
     session_for,
     snapshot_of,
@@ -242,6 +243,33 @@ async def test_a_blocking_task_holds_merges_runs_first_and_its_clean_review_lift
     assert seen.merged()[2] == (later.id, "c3")
     assert seen.notices() == [HELD, finding_resumed_note(BUGS_REVIEWER)]
     assert (shown.merge_holds, shown.waiting_to_merge) == ((), ())
+
+
+async def test_a_blocking_finding_its_fixs_merge_pass_gives_up_on_keeps_merges_held() -> None:
+    cast = Cast(
+        {
+            "Add A": [works],
+            "as bugs-reviewer": [finds(CRASH), finds(CRASH), finds()],
+            "as tests-reviewer": [finds(NO_TEST), finds(), finds()],
+            "Please fix the crash": [works],
+            "Please add a test": [works],
+        }
+    )
+    merge = files(("Fix the crash", "F1", "blocking"), ("Add a test", "F2", "normal"))
+    session = held_session(cast, merge, gives_up)
+    seen = Seen(session)
+    await run(session, seen)
+    await eventually(lambda: unchecked_note(BUGS_REVIEWER) in seen.notices())
+    [fix], [later] = titled(session, "Fix the crash"), titled(session, "Add a test")
+    holds = holds_of(session)
+    shown = await snapshot_of(session)
+    seen.close()
+    await session.close()
+
+    assert holds is not None and holds.held and holds.checking == ()
+    assert seen.notices() == [HELD, unchecked_note(BUGS_REVIEWER)]
+    assert seen.merged() == [("1", "c1"), (fix.id, "c2")]
+    assert (shown.merge_holds, shown.waiting_to_merge) == ((VIEW,), (later.id,))
 
 
 async def test_a_blocking_task_filed_again_is_the_next_fix_then_past_the_limit_a_normal_one() -> (

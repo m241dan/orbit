@@ -272,14 +272,30 @@ def decide_blocking(
     return HoldDecision(merge_holds(holds, (again,)))
 
 
-def decide_fix_review(
-    holds: Sequence[AnyHold], batch: str, completed: Collection[str]
-) -> HoldDecision:
-    """What the end of the review of ``batch``, given the ``holds`` on, comes to, the roles
-    whose tasks completed in it being ``completed``: each hold whose latest fix is ``batch``'s
-    lifts, told of, if its lens completed, or else stays, told no review can check it."""
-    checked = _fixed_in(holds, batch)
-    fixed = _by_lens(checked, completed)
+type MergePassEnding = Literal["completed", "incomplete"]
+"""How a review's merge passes ended: one completed, deciding every finding, or none did, as when
+it failed, gave up or was cancelled, or none ran."""
+
+
+@dataclass(frozen=True)
+class FixReview:
+    """The end of the review of ``batch``: the roles whose tasks completed in it ``completed``,
+    those whose tasks reported a blocking finding in it ``blocking``, and how its merge passes
+    ended, ``merged``."""
+
+    batch: str
+    completed: frozenset[str]
+    blocking: frozenset[str] = frozenset()
+    merged: MergePassEnding = "incomplete"
+
+
+def decide_fix_review(holds: Sequence[AnyHold], review: FixReview) -> HoldDecision:
+    """What ``review``, the end of the review of a batch, given the ``holds`` on, comes to: each
+    hold whose latest fix is that batch's lifts, told of, if its lens completed and either
+    reported no blocking finding or a merge pass completed, deciding them; else it stays, told no
+    review can check it."""
+    checked = _fixed_in(holds, review.batch)
+    fixed = tuple(hold for hold in checked if _is_cleared(hold, review))
     unchecked = tuple(hold for hold in checked if hold not in fixed)
     notes = tuple(finding_resumed_note(hold.lens) for hold in fixed)
     return _with_unchecked(HoldDecision(_without(holds, fixed), notes), unchecked)
@@ -290,9 +306,11 @@ def _fixed_in(holds: Sequence[AnyHold], batch: str) -> tuple[FindingHold, ...]:
     return tuple(hold for hold in finding_holds(holds) if hold.batch == batch)
 
 
-def _by_lens(holds: Sequence[FindingHold], lenses: Collection[str]) -> tuple[FindingHold, ...]:
-    """The ``holds`` raised by one of the ``lenses``."""
-    return tuple(hold for hold in holds if hold.lens in lenses)
+def _is_cleared(hold: FindingHold, review: FixReview) -> bool:
+    """Whether ``review`` clears ``hold``: its lens completed in it, and reported no blocking
+    finding or a merge pass completed, dismissing each or filing it as normal."""
+    decided = hold.lens not in review.blocking or review.merged == "completed"
+    return hold.lens in review.completed and decided
 
 
 def _without(holds: Sequence[AnyHold], dropped: Collection[AnyHold]) -> tuple[AnyHold, ...]:

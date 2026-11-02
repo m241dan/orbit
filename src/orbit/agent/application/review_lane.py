@@ -29,7 +29,7 @@ merge passes as any review does, its batch at round 1.
 """
 
 import random
-from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
 from functools import partial
@@ -58,7 +58,7 @@ from orbit.agent.application.tasks import Changed, Tasks
 from orbit.agent.application.triggers import ReviewRound, TriggerEngine, TriggerHooks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.endings import REVIEW_STOPPED_BY_YOU
-from orbit.agent.domain.merge_holds import BlockingTask, FindingFiling
+from orbit.agent.domain.merge_holds import BlockingTask, FindingFiling, FixReview, MergePassEnding
 from orbit.agent.domain.merge_pass import (
     NOT_A_MERGE_PASS,
     NOT_MERGING,
@@ -88,6 +88,7 @@ from orbit.agent.domain.reviews import (
     ReviewPlanner,
     ReviewTemplate,
     Severity,
+    blocking_roles,
     fan_in_due,
     finding_refusal,
     finished_fields,
@@ -1072,18 +1073,29 @@ class ReviewLane:
             await self._hooks.wake_work()
 
     async def _hear_fix_review(self, batch: str) -> None:
-        """Tell the holds that the review behind ``batch`` ended, if it reviewed a batch, with
-        the roles whose tasks completed in it."""
+        """Tell the holds that the review behind ``batch`` ended, if it reviewed a batch, as
+        :meth:`_fix_review` says."""
         holds = self.holds
         job = self._job_of(batch)
         if holds is None or job is None or job.batch is None:
             return
-        await holds.hear_fix_review(job.batch, self._completed_in(batch))
+        await holds.hear_fix_review(self._fix_review(batch, job.batch))
 
-    def _completed_in(self, batch: str) -> frozenset[str]:
-        """The roles of the tasks booked into the review behind ``batch`` that completed."""
-        members = (self._board.find(task_id) for task_id in self._members(batch))
-        return frozenset(s.task.role for s in members if s is not None and s.status == "completed")
+    def _fix_review(self, batch: str, reviewed: str) -> FixReview:
+        """The end of the review behind ``batch``, of the batch ``reviewed``: the roles of its
+        tasks that completed, those that reported a blocking finding in it, and whether one of
+        its merge passes completed."""
+        completed = self._completed_in(self._members(batch))
+        group = self._groups.get(batch)
+        if group is None:
+            return FixReview(reviewed, completed)
+        merged: MergePassEnding = "completed" if self._completed_in(group.merges) else "incomplete"
+        return FixReview(reviewed, completed, blocking_roles(group), merged)
+
+    def _completed_in(self, tasks: Iterable[str]) -> frozenset[str]:
+        """The roles of those of ``tasks`` on the board that completed."""
+        states = (self._board.find(task_id) for task_id in tasks)
+        return frozenset(s.task.role for s in states if s is not None and s.status == "completed")
 
     def _job_of(self, batch: str) -> ReviewJob | None:
         """What the review behind ``batch`` reviews; none if none of its tasks is on the

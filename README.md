@@ -1520,8 +1520,9 @@ batch of its own, up to `fallback_fixes` fixes in all; past that it's filed as a
 at the end of the review's batch, and the hold stays: `The finding from bugs-reviewer still holds
 after 3 fixes; merges stay held. Release with ctrl+f or fix it yourself.` If no review by that lens
 can check the fix, as when its batch is at `review_rounds`, that lens's triggers are disabled or
-don't fire on a batch, that lens's task in the review doesn't complete, or the fix ends without
-landing (it gives up, or its chain of fixes runs out), the hold stays too: `The finding from
+don't fire on a batch, that lens's task in the review doesn't complete, that lens finds something
+blocking and no merge pass completes to decide it (it fails, gives up or is cancelled), or the fix
+ends without landing (it gives up, or its chain of fixes runs out), the hold stays too: `The finding from
 bugs-reviewer can't be checked by a review; merges stay held. Release with ctrl+f or fix it
 yourself.` A blocking finding the merge pass dismisses, or files as `normal`, holds nothing, and
 normal findings never hold merges. Finding holds sit beside the sets': merges wait until every hold
