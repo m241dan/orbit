@@ -423,6 +423,10 @@ once both show under **coder**), each message headed and every other entry prefi
 agent's id, so you can tell them apart. Every agent of a trigger with a `tab` writes into that
 tab instead, its messages headed by its role rather than its id, under All too
 (`bugs-reviewer`, `tests-reviewer`, …, two lenses running at once both show under **review**).
+Agents of one role at work in the same trigger's tab at once, such as the bugs lenses of two
+landed commits reviewed side by side, are numbered in the order they started: `bugs-reviewer`,
+then `bugs-reviewer 2`, which heads its messages and prefixes its other entries; once the first
+exits, the next takes the bare role.
 Whether the speaker changed is judged within the tab: under
 All, where agents interleave, messages are headed more often. The planner's messages are never
 headed. Agents in any other role, such as the startup check (`checker`), a lens reviewer from a

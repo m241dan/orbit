@@ -262,6 +262,9 @@ class Tabs:
     def follow(self, running: Sequence[RunningAgent]) -> None:
         self.roles = {**self.roles, **running_roles(running)}
 
+    def begin_page(self) -> None:
+        pass
+
     def learn_roles(self, event: Event) -> None:
         self.track(event)
 

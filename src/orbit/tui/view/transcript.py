@@ -105,8 +105,9 @@ def hanging_indent(kind: EntryKind, text: str) -> tuple[str, str]:
 def speaker(
     agent: str | None, roles: Mapping[str, str], named: Mapping[str, str] = MappingProxyType({})
 ) -> str | None:
-    """Who ``agent``'s entries are spoken by: the agent, by the role ``named`` gives it if it
-    gives one (an agent in a trigger's tab), or None for the planner's, which are those of an
+    """Who ``agent``'s entries are spoken by: the agent, by the name ``named`` gives it if it
+    gives one (an agent in a trigger's tab, by its role, numbered after the first at work in it
+    there), or None for the planner's, which are those of an
     agent ``roles`` has pinned in the planner role, the user's prompts to it (agent
     ``PLANNER``) and those with no agent, all one speaker of their own."""
     if agent is None or roles.get(agent, agent) == PLANNER:
@@ -168,7 +169,8 @@ def prompt_title(busy: bool, read_only: bool = False, role: str = PLANNER) -> st
 def speaker_label(kind: EntryKind, current: str | None, previous: str | None) -> str | None:
     """The label heading an entry of ``kind`` spoken by ``current`` (see :func:`speaker`): the
     speaker, for an agent's message when the ``previous`` entry in its log was spoken by
-    someone else; None otherwise."""
+    someone else, two agents of a role in a trigger's tab being two speakers by their numbered
+    names; None otherwise."""
     if kind != "assistant" or current is None or current == previous:
         return None
     return current

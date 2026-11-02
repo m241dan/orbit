@@ -9,6 +9,7 @@ from orbit.tui.view.tabs import (
     ALL_TAB_LABEL,
     PINNED_TABS,
     ConversationTab,
+    Speakers,
     follow_running,
     mark_lane_busy,
     mark_tab_read,
@@ -16,6 +17,7 @@ from orbit.tui.view.tabs import (
     pin_conversations,
     pin_trigger_tabs,
     pinned_roles,
+    recall_speakers,
     replay_tabs,
     reset_tabs,
     running_roles,
@@ -78,9 +80,12 @@ class TabStrip:
         # Agents that ran writing into a pinned tab, to its key: their trigger's tab's, or
         # their role's.
         self.roles: Mapping[str, str] = {}
-        # Agents that ran writing into a trigger's tab, to their role, which labels their
-        # entries.
-        self.speakers: Mapping[str, str] = {}
+        # Agents writing into a trigger's tab, and the names labelling the entries of every
+        # one that has.
+        self.speakers = Speakers()
+        # The agents writing into a trigger's tab on the earlier page of the log being shown,
+        # numbered among themselves.
+        self._earlier = Speakers()
         # The catalog's tabbed triggers' tabs, by trigger name, which their tasks' notes go
         # under.
         self._trigger_tabs: Mapping[str, str] = {}
@@ -111,9 +116,10 @@ class TabStrip:
         return task_tab_key(state, self._trigger_tabs, pinned_roles(self.tabs))
 
     def speaker_of(self, agent: str | None) -> str | None:
-        """Who ``agent``'s entries are spoken by: its role, for an agent in a trigger's tab, or
-        the agent, but None for the planner (see :func:`speaker`)."""
-        return speaker(agent, self.roles, self.speakers)
+        """Who ``agent``'s entries are spoken by: its role, numbered after the first at work in
+        it, for an agent in a trigger's tab (see :func:`name_speakers`), or the agent, but None
+        for the planner (see :func:`speaker`)."""
+        return speaker(agent, self.roles, self.speakers.names)
 
     def cycle_conversations(self) -> None:
         """Show the first conversational role's tab (the planner's), from there each next one,
@@ -157,21 +163,37 @@ class TabStrip:
     def track(self, event: Event) -> None:
         """Add a tab for an agent that started writing into no pinned tab, remove it when that
         agent exits, and mark a tab not being shown when one of its agents has new output."""
-        self.learn_roles(event)
+        self._follow_agent(event)
         self._update(track_tabs(self.tabs, event, self.agent_of(self._view.active), self.roles))
 
     def replay(self, event: Event) -> None:
         """Add and remove agents' tabs as :meth:`track` does for ``event``, one replayed from
         the session's log, marking none unread."""
-        self.learn_roles(event)
+        self._follow_agent(event)
         self._update(replay_tabs(self.tabs, event, self.roles))
 
-    def learn_roles(self, event: Event) -> None:
-        """Note the pinned tab an agent started writing into by ``event``, an earlier one, and
-        its role if that's a trigger's tab, leaving the tabs as they are."""
+    def _follow_agent(self, event: Event) -> None:
+        """Note the pinned tab an agent started writing into by ``event``, and, if that's a
+        trigger's tab, that it's at work there until it exits."""
         pinned = pinned_roles(self.tabs)
         self.roles = track_roles(self.roles, event, pinned)
         self.speakers = track_speakers(self.speakers, event, pinned)
+
+    def begin_page(self) -> None:
+        """Start learning the agents of an earlier page of the session's log, numbering those
+        in a trigger's tab apart from the pages after it."""
+        self._earlier = Speakers()
+
+    def learn_roles(self, event: Event) -> None:
+        """Note the pinned tab an agent started writing into by ``event``, one on the earlier
+        page begun (see :meth:`begin_page`), and its name if that's a trigger's tab, leaving
+        the tabs and the agents at work as they are."""
+        pinned = pinned_roles(self.tabs)
+        self.roles = track_roles(self.roles, event, pinned)
+        earlier = track_speakers(self._earlier, event, pinned)
+        if earlier is not self._earlier:
+            self._earlier = earlier
+            self.speakers = recall_speakers(self.speakers, earlier.names)
 
     def reset(self, running: Sequence[RunningAgent]) -> None:
         """Close every agent's own tab and forget the agents that wrote into the pinned tabs,
@@ -186,7 +208,7 @@ class TabStrip:
         pinned tab, and each pinned tab marked while its agents run."""
         pinned = pinned_roles(self.tabs)
         self.roles = {**self.roles, **running_roles(running, pinned)}
-        self.speakers = {**self.speakers, **running_speakers(running, pinned)}
+        self.speakers = running_speakers(running, pinned, self.speakers.names)
         self._update(follow_running(self.tabs, running))
 
     def mark_read(self, agent: str | None) -> None:

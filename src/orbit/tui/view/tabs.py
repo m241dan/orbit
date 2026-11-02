@@ -2,7 +2,7 @@
 
 from collections import Counter
 from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import TypeGuard, get_args
 
@@ -219,14 +219,73 @@ def running_roles(
     return {agent: key for agent, key in keys.items() if key is not None}
 
 
-def running_speakers(agents: Iterable[RunningAgent], pinned: Collection[str]) -> Mapping[str, str]:
-    """The role of each of the running ``agents`` that writes into a trigger's tab among the
-    ``pinned`` ones, by agent id, which labels its entries."""
-    return {
-        agent.agent_id: agent.role
-        for agent in agents
-        if is_trigger_tab(pinned_key(agent.role, agent.tab, pinned))
-    }
+@dataclass(frozen=True)
+class TabbedAgent:
+    """An agent at work in a trigger's tab: the tab's ``key`` and the agent's ``role``."""
+
+    key: str
+    role: str
+
+
+@dataclass(frozen=True)
+class Speakers:
+    """The agents writing into the triggers' tabs: those ``at_work``, by agent id in the order
+    they started, and the ``names`` labelling the entries of every one that has, by agent id,
+    the last each had (see :func:`name_speakers`), so a late entry, such as its exit rule, keeps
+    it."""
+
+    at_work: Mapping[str, TabbedAgent] = field(default_factory=dict)
+    names: Mapping[str, str] = field(default_factory=dict)
+
+
+def name_speakers(at_work: Mapping[str, TabbedAgent]) -> dict[str, str]:
+    """The name of each of the agents ``at_work``, by agent id in the order they started: its
+    role, numbered from the second at work in that role in the same trigger's tab, as
+    "bugs-reviewer 2", ….
+    """
+    seen: Counter[TabbedAgent] = Counter()
+    names: dict[str, str] = {}
+    for agent, tabbed in at_work.items():
+        seen[tabbed] += 1
+        count = seen[tabbed]
+        names[agent] = tabbed.role if count == 1 else f"{tabbed.role} {count}"
+    return names
+
+
+def _seat_speakers(at_work: Mapping[str, TabbedAgent], names: Mapping[str, str]) -> Speakers:
+    """The speakers with the agents ``at_work``, named afresh, and the ``names`` of the others."""
+    return Speakers(at_work, {**names, **name_speakers(at_work)})
+
+
+def recall_speakers(speakers: Speakers, names: Mapping[str, str]) -> Speakers:
+    """``speakers`` naming agents by ``names`` too, those learnt from an earlier page of the
+    log, but those at work by their own names."""
+    return _seat_speakers(speakers.at_work, {**speakers.names, **names})
+
+
+def running_speakers(
+    agents: Iterable[RunningAgent],
+    pinned: Collection[str],
+    names: Mapping[str, str] = MappingProxyType({}),
+) -> Speakers:
+    """The speakers with the running ``agents`` writing into a trigger's tab among the
+    ``pinned`` ones at work, in their order, keeping the ``names`` of those that wrote into one
+    before."""
+    at_work = {agent.agent_id: _tabbed(agent.role, agent.tab, pinned) for agent in agents}
+    return _seat_speakers(_present(at_work), names)
+
+
+def _tabbed(role: str, tab: str | None, pinned: Collection[str]) -> TabbedAgent | None:
+    """An agent in ``role``, started by a trigger of the tab named ``tab``, at work in that
+    trigger's tab, when it's among the ``pinned`` ones; None when it writes into no trigger's
+    tab."""
+    key = pinned_key(role, tab, pinned)
+    return TabbedAgent(key, role) if key is not None and is_trigger_tab(key) else None
+
+
+def _present(agents: Mapping[str, TabbedAgent | None]) -> dict[str, TabbedAgent]:
+    """``agents`` but those at work in no trigger's tab."""
+    return {agent: tabbed for agent, tabbed in agents.items() if tabbed is not None}
 
 
 def follow_running(
@@ -289,6 +348,14 @@ def stopped_callers(
     return tuple(dict.fromkeys(agent for agent in callers if agent not in running))
 
 
+def unlogged_agents(
+    agents: Iterable[RunningAgent], events: Iterable[Event]
+) -> tuple[RunningAgent, ...]:
+    """The running ``agents`` whose start isn't among ``events``, in their order."""
+    logged = {event.agent_id for event in events if isinstance(event, AgentStarted)}
+    return tuple(agent for agent in agents if agent.agent_id not in logged)
+
+
 def track_roles(
     roles: Mapping[str, str], event: Event, pinned: Collection[str] = ROLE_TABS
 ) -> Mapping[str, str]:
@@ -300,16 +367,30 @@ def track_roles(
     return roles if key is None else {**roles, event.agent_id: key}
 
 
-def track_speakers(
-    speakers: Mapping[str, str], event: Event, pinned: Collection[str]
-) -> Mapping[str, str]:
-    """The role of each agent that started writing into a trigger's tab among the ``pinned``
-    ones, by agent id, after ``event``, which labels its entries."""
-    if isinstance(event, AgentStarted) and is_trigger_tab(
-        pinned_key(event.role, event.tab, pinned)
-    ):
-        return {**speakers, event.agent_id: event.role}
+def track_speakers(speakers: Speakers, event: Event, pinned: Collection[str]) -> Speakers:
+    """``speakers`` after ``event``: an agent starting to write into a trigger's tab among the
+    ``pinned`` ones at work after the others, one starting anywhere else nameless, and one
+    exiting no longer at work, keeping its name."""
+    if isinstance(event, AgentStarted):
+        return _start_speaker(speakers, event, pinned)
+    if isinstance(event, AgentExited) and event.agent_id in speakers.at_work:
+        return _seat_speakers(_without(speakers.at_work, event.agent_id), speakers.names)
     return speakers
+
+
+def _start_speaker(speakers: Speakers, event: AgentStarted, pinned: Collection[str]) -> Speakers:
+    """``speakers`` with ``event``'s agent at work after the others if it writes into a
+    trigger's tab among the ``pinned`` ones, else neither at work nor named."""
+    agent = event.agent_id
+    at_work = _present(
+        {**_without(speakers.at_work, agent), agent: _tabbed(event.role, event.tab, pinned)}
+    )
+    return _seat_speakers(at_work, _without(speakers.names, agent))
+
+
+def _without[T](mapping: Mapping[str, T], key: str) -> dict[str, T]:
+    """``mapping`` without ``key``."""
+    return {other: value for other, value in mapping.items() if other != key}
 
 
 def tab_key(agent: str | None, roles: Mapping[str, str]) -> str | None:

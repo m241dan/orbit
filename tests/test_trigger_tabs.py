@@ -2,6 +2,8 @@
 tabs they replace, the agents writing into them, labelled by role, and their markers, live and
 replayed."""
 
+from functools import reduce
+
 from orbit.agent.domain.catalog import trigger_entries
 from orbit.protocol import (
     BUGS_REVIEWER,
@@ -25,6 +27,7 @@ from orbit.tui import OrbitApp
 from orbit.tui.view.tabs import (
     PINNED_TABS,
     ConversationTab,
+    Speakers,
     follow_running,
     pin_conversations,
     pin_trigger_tabs,
@@ -40,7 +43,7 @@ from orbit.tui.view.tabs import (
     trigger_tab_key,
     trigger_tabs,
 )
-from orbit.tui.view.transcript import speaker
+from orbit.tui.view.transcript import speaker, speaker_label
 from tests.agent_fakes import ROLES, SHIPPED_TRIGGERS
 from tests.frontend_fakes import Shell
 from tests.tui_fakes import SNAPSHOT, FakeSession, feed_events, tab_strip
@@ -183,9 +186,91 @@ def test_following_the_running_agents_counts_those_in_trigger_tabs() -> None:
 
 def test_only_agents_in_trigger_tabs_are_labelled_by_role() -> None:
     agents = [running("agent-1", "lens", "review"), running("agent-2", "coder")]
-    assert running_speakers(agents, {REVIEW, "coder"}) == {"agent-1": "lens"}
-    learnt = track_speakers({}, started("agent-3", "lens", "review"), {REVIEW})
-    assert track_speakers(learnt, started("agent-4", "coder"), {"coder"}) == {"agent-3": "lens"}
+    assert running_speakers(agents, {REVIEW, "coder"}).names == {"agent-1": "lens"}
+    learnt = track_speakers(Speakers(), started("agent-3", "lens", "review"), {REVIEW})
+    after = track_speakers(learnt, started("agent-4", "coder"), {"coder"})
+    assert after.names == {"agent-3": "lens"}
+
+
+def learn_speakers(*events: Event, pinned: frozenset[str] = frozenset({REVIEW})) -> Speakers:
+    """The speakers learnt from ``events``, with the ``pinned`` tabs."""
+    return reduce(
+        lambda speakers, event: track_speakers(speakers, event, pinned), events, Speakers()
+    )
+
+
+def test_a_second_agent_of_a_role_in_a_trigger_tab_is_numbered_live_and_from_a_snapshot() -> None:
+    two = {"agent-1": BUGS_REVIEWER, "agent-2": f"{BUGS_REVIEWER} 2"}
+    live = learn_speakers(
+        started("agent-1", BUGS_REVIEWER, "review"), started("agent-2", BUGS_REVIEWER, "review")
+    )
+    agents = [
+        running("agent-1", BUGS_REVIEWER, "review"),
+        running("agent-2", BUGS_REVIEWER, "review"),
+    ]
+    assert live.names == two
+    assert running_speakers(agents, {REVIEW}).names == two
+
+
+def test_agents_of_different_roles_or_tabs_keep_their_bare_roles() -> None:
+    speakers = learn_speakers(
+        started("agent-1", BUGS_REVIEWER, "review"),
+        started("agent-2", TESTS_REVIEWER, "review"),
+        started("agent-3", BUGS_REVIEWER, "super"),
+        pinned=frozenset({REVIEW, trigger_tab_key("super")}),
+    )
+    assert speakers.names == {
+        "agent-1": BUGS_REVIEWER,
+        "agent-2": TESTS_REVIEWER,
+        "agent-3": BUGS_REVIEWER,
+    }
+
+
+def test_once_the_first_exits_the_second_takes_the_bare_role_and_the_first_keeps_its_name() -> None:
+    speakers = learn_speakers(
+        started("agent-1", BUGS_REVIEWER, "review"),
+        started("agent-2", BUGS_REVIEWER, "review"),
+        started("agent-3", BUGS_REVIEWER, "review"),
+        exited("agent-1"),
+    )
+    assert speakers.names == {
+        "agent-1": BUGS_REVIEWER,
+        "agent-2": BUGS_REVIEWER,
+        "agent-3": f"{BUGS_REVIEWER} 2",
+    }
+    agents = [
+        running("agent-2", BUGS_REVIEWER, "review"),
+        running("agent-3", BUGS_REVIEWER, "review"),
+    ]
+    assert running_speakers(agents, {REVIEW}).names == {
+        "agent-2": BUGS_REVIEWER,
+        "agent-3": f"{BUGS_REVIEWER} 2",
+    }
+
+
+def test_an_agent_started_again_is_numbered_after_those_at_work() -> None:
+    speakers = learn_speakers(
+        started("agent-1", BUGS_REVIEWER, "review"),
+        started("agent-2", BUGS_REVIEWER, "review"),
+        started("agent-1", BUGS_REVIEWER, "review"),
+    )
+    assert speakers.names == {"agent-1": f"{BUGS_REVIEWER} 2", "agent-2": BUGS_REVIEWER}
+
+
+def test_an_agent_started_again_outside_a_trigger_tab_loses_its_name() -> None:
+    speakers = learn_speakers(
+        started("agent-1", BUGS_REVIEWER, "review"), started("agent-1", "coder", None)
+    )
+    assert speakers == Speakers()
+
+
+def test_following_a_snapshot_keeps_the_names_of_agents_no_longer_at_work() -> None:
+    speakers = learn_speakers(started("agent-1", BUGS_REVIEWER, "review"))
+    agents = [running("agent-2", BUGS_REVIEWER, "review")]
+    assert running_speakers(agents, {REVIEW}, speakers.names).names == {
+        "agent-1": BUGS_REVIEWER,
+        "agent-2": BUGS_REVIEWER,
+    }
 
 
 def test_an_agent_given_a_name_is_spoken_by_it_but_the_planner_by_none() -> None:
@@ -268,6 +353,49 @@ async def test_two_lens_agents_running_at_once_both_write_into_the_review_tab() 
     assert shell.tab_strip[5] == "review"
 
 
+async def test_a_second_lens_agent_of_a_role_is_numbered_and_headed_when_it_speaks() -> None:
+    shell = Shell()
+    await shell.feed(
+        CATALOG,
+        started("agent-1", BUGS_REVIEWER, "review"),
+        started("agent-2", BUGS_REVIEWER, "review"),
+        said("agent-1", "one"),
+        said("agent-2", "two"),
+    )
+    entries = shell.window.conversation.entries(REVIEW)
+    first, second = entries[-2:]
+    assert (first.speaker, second.speaker) == (BUGS_REVIEWER, f"{BUGS_REVIEWER} 2")
+    assert speaker_label(second.kind, second.speaker, first.speaker) == f"{BUGS_REVIEWER} 2"
+
+
+async def test_an_earlier_page_numbers_its_agents_apart_from_those_at_work() -> None:
+    shell = Shell()
+    lens = (
+        started("agent-5", BUGS_REVIEWER, "review"),
+        started("agent-6", BUGS_REVIEWER, "review"),
+    )
+    await shell.feed(CATALOG, *lens)
+    shell.tabs.begin_page()
+    for event in (
+        started("agent-1", BUGS_REVIEWER, "review"),
+        started("agent-2", BUGS_REVIEWER, "review"),
+        said("agent-1"),
+    ):
+        shell.tabs.learn_roles(event)
+    shell.tabs.begin_page()
+    shell.tabs.learn_roles(started("agent-0", BUGS_REVIEWER, "review"))
+    names = [shell.tabs.speaker_of(f"agent-{n}") for n in (0, 1, 2, 5, 6)]
+    assert names == [
+        BUGS_REVIEWER,
+        BUGS_REVIEWER,
+        f"{BUGS_REVIEWER} 2",
+        BUGS_REVIEWER,
+        f"{BUGS_REVIEWER} 2",
+    ]
+    await shell.feed(exited("agent-5"))
+    assert shell.tabs.speaker_of("agent-6") == BUGS_REVIEWER
+
+
 async def test_a_merge_pass_tasks_notes_go_under_the_review_tab_marking_it() -> None:
     shell = Shell()
     tasks = TasksChanged(tasks=(task("reviewer", "merge-pass", "5"),))
@@ -306,6 +434,27 @@ async def test_replaying_the_log_puts_past_lens_agents_in_the_review_tab() -> No
     assert shell.tab_strip == STRIP
     entries = shell.window.conversation.entries(REVIEW)
     assert [(entry.text, entry.speaker) for entry in entries][-1] == ("found one", BUGS_REVIEWER)
+
+
+async def test_replaying_the_log_names_agents_as_they_were_named_live() -> None:
+    shell = Shell()
+    events: tuple[Event, ...] = (
+        started("agent-1", BUGS_REVIEWER, "review"),
+        said("agent-1", "one"),
+        started("agent-2", BUGS_REVIEWER, "review"),
+        said("agent-2", "two"),
+        exited("agent-1"),
+    )
+    logged = tuple(
+        EventEnvelope(seq=seq, session="s1", payload=event)
+        for seq, event in enumerate(events, start=1)
+    )
+    agents = (running("agent-2", BUGS_REVIEWER, "review"),)
+    await shell.feed(CATALOG, EMPTY.model_copy(update={"transcript": logged, "agents": agents}))
+    spoken = [(e.text, e.speaker) for e in shell.window.conversation.entries(REVIEW)]
+    assert ("one", BUGS_REVIEWER) in spoken
+    assert ("two", f"{BUGS_REVIEWER} 2") in spoken
+    assert shell.tabs.speaker_of("agent-2") == BUGS_REVIEWER
 
 
 async def test_a_lens_agent_running_from_before_the_log_writes_into_the_review_tab() -> None:

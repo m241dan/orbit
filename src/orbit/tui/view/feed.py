@@ -42,7 +42,7 @@ from orbit.tui.view.log import Entry
 from orbit.tui.view.progress import TaskProgress, progress_entry
 from orbit.tui.view.proposals import decision_entry
 from orbit.tui.view.rules import exit_rule, reset_entry, turn_rule_entry
-from orbit.tui.view.tabs import stopped_callers
+from orbit.tui.view.tabs import stopped_callers, unlogged_agents
 from orbit.tui.view.transcript import (
     activity_entry,
     answered_entry,
@@ -136,8 +136,8 @@ class Tabs(Protocol):
         ...
 
     def speaker_of(self, agent: str | None) -> str | None:
-        """Who ``agent``'s entries are spoken by: its role, for an agent in a trigger's tab, or
-        the agent, but None for the planner."""
+        """Who ``agent``'s entries are spoken by: its role, numbered after the first at work in
+        it, for an agent in a trigger's tab, or the agent, but None for the planner."""
         ...
 
     def reset(self, running: Sequence[RunningAgent]) -> None:
@@ -152,8 +152,13 @@ class Tabs(Protocol):
         """Make the tabs agree with the agents ``running``."""
         ...
 
+    def begin_page(self) -> None:
+        """Start learning the agents of an earlier page of the session's log."""
+        ...
+
     def learn_roles(self, event: Event) -> None:
-        """Note the pinned tab an agent started writing into by ``event``, an earlier one."""
+        """Note the pinned tab an agent started writing into by ``event``, one on the earlier
+        page begun."""
         ...
 
     def mark_unread(self, key: str | None) -> None:
@@ -233,9 +238,10 @@ class ConversationFeed:
         requests of agents not ``running``, and of runs a later start under the same id
         ended, show as having no result. The notes shown so far follow them."""
         self.transcript.clear()
-        self.tabs.reset(running)
-        self._turns, self._asked, self._answered = Turns(), {}, set()
         logged = tuple(events)
+        # Those whose start is logged are learnt from it, in the order they started.
+        self.tabs.reset(unlogged_agents(running, logged))
+        self._turns, self._asked, self._answered = Turns(), {}, set()
         self._replaying = True
         for event in logged:
             self.tabs.replay(event)
@@ -263,6 +269,7 @@ class ConversationFeed:
 
     def _show_earlier(self, events: Iterable[Event]) -> None:
         """Show ``events``, earlier ones, placing their agents in the pinned roles' tabs."""
+        self.tabs.begin_page()
         for event in events:
             self.tabs.learn_roles(event)
             self._show_logged(event)
@@ -408,8 +415,8 @@ class ConversationFeed:
         )
 
     def _speaker(self, agent: str | None) -> str | None:
-        """Who ``agent``'s entries are spoken by: its role in a trigger's tab, else the agent,
-        but not the planner."""
+        """Who ``agent``'s entries are spoken by: its role, numbered, in a trigger's tab, else
+        the agent, but not the planner."""
         return self.tabs.speaker_of(agent)
 
     def _think(self, event: AssistantMessage) -> None:
