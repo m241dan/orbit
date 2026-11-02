@@ -410,9 +410,10 @@ colour. The tabs above it narrow it: **All** shows everything,
 then come a pinned tab for each built-in role, labelled by its name: **planner**,
 **experimenter**, **coder**, **reviewer** and **configurator**, but that of a role whose agents
 start only from triggers with a `tab` (see [Triggers](#triggers)), which with the shipped
-triggers leaves out **reviewer**, as only `merge-pass` queues its tasks; then one for each tab the
-triggers name, labelled by it, with the shipped ones **review**, which the lens reviews,
-the merge passes and the fix reviews share, and **super-review**; then one for each other
+triggers leaves out **reviewer**, as only `merge-pass` and `super-merge-pass` queue its tasks; then
+one for each tab the triggers name, labelled by it, with the shipped ones **review**, which the
+lens reviews, their merge passes and the fix reviews share, and **super-review**, which the super
+review's lenses and its merge pass share; then one for each other
 conversational role the workspace you're on configures (see `conversation` under
 [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)), such as **architect**, pinned
 again as you move to another workspace; the task list tags each task with the lane its role runs
@@ -1317,7 +1318,7 @@ others report every finding as `normal`.
 Once all six have ended, the `merge-pass` trigger queues the **merge pass**, a `reviewer` task
 handed every finding of the review and the reviewed commits' messages, whose bodies are the
 prompts their coders were given (`merge-pass.md`), but only if they reported at least one
-(`when = { findings = "some" }`): a review whose lenses all came back clean queues no merge pass
+(`when = { findings = "some", review = ["commit", "batch", "set"] }`): a review whose lenses all came back clean queues no merge pass
 and files nothing. The reviewer checks each finding against the code, what the task asked, the
 tasks queued and the commits landed since, groups related ones, such as a bug and the test that would have caught it,
 into one task, ranks them by severity, and files the most severe within the cap with
@@ -1397,8 +1398,9 @@ the last super review and a rotating sample of other code files (below) through 
 `review-style`, `review-drift` or `review-scaling`, each asking what has built up across commits
 (see [Skills](#skills)), and reports findings with `report_finding`, as a per-commit lens does,
 rather than filing tasks. The three tasks form one review, of kind `super`: once they have all
-ended, the merge pass checks and groups their findings and files up to `super_review_suggestions`
-tasks (default 10) from them, its `{cap}`, dismissing the rest. Those form a batch at round 1 and
+ended, the `super-merge-pass` trigger queues the merge pass, from the same `merge-pass.md` and
+under the **super-review** tab beside them, which checks and groups their findings and files up
+to `super_review_suggestions` tasks (default 10) from them, its `{cap}`, dismissing the rest. Those form a batch at round 1 and
 carry on like any other review's. A disabled lens reviewer is left out, so with the
 `drift-reviewer` disabled a super review queues two tasks. `ctrl+g` fires the trigger by hand,
 queuing them straight away, and restarts the count. A super review's task lists,
@@ -1977,7 +1979,8 @@ Orbit ships triggers that describe what it does, and a project changes them, or 
 with `[triggers.<name>]` tables in `.orbit/config.toml`. A task's work landing fires the
 `task_landed` triggers and counts toward the `commits` ones, and a task finishing, however it
 ended, fires the `task_finished` ones, so the lens reviews' triggers (`fit-review` and the rest),
-`merge-pass` and `super-review` start the reviews, their merge passes and the super reviews
+`merge-pass`, `super-review` and `super-merge-pass` start the reviews, their merge passes and the
+super reviews
 [Reviews](#reviews) describes, and a project's own triggers on those
 events queue their tasks. Orbit opening a workspace fires the `session_started` triggers, once,
 not as you switch sessions, nor while another orbit owns the repository: `startup-check` runs the
@@ -2032,7 +2035,8 @@ The shipped triggers are data in
 | `logic-review` | `task_landed` | every one | a `logic-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding`, `tab = "review"` |
 | `security-review` | `task_landed` | every one | a `security-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding`, `tab = "review"` |
 | `performance-review` | `task_landed` | every one | a `performance-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding`, `tab = "review"` |
-| `merge-pass` | `reviews_finished` | `findings = "some"` | a `reviewer` task, from `merge-pass.md` | `tab = "review"` |
+| `merge-pass` | `reviews_finished` | `findings = "some"`, `review = ["commit", "batch", "set"]` | a `reviewer` task, from `merge-pass.md` | `tab = "review"` |
+| `super-merge-pass` | `reviews_finished` | `findings = "some"`, `review = "super"` | a `reviewer` task, from `merge-pass.md` | `tab = "super-review"` |
 | `super-review` | `commits` | `origin = ["manual", "planner"]` | a `style-reviewer`, `drift-reviewer` and `scaling-reviewer` task, from `super-review.md` | `every = 10`, guard `suggestions-pending`, manual as `Super review`, `tab = "super-review"` |
 | `super-fix-review` | `task_landed` | `review = "batch"` | a `style-reviewer`, `drift-reviewer` and `scaling-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding`, `tab = "review"` |
 | `configure-checks` | `manual` | every one | a `configurator` task, from `configure-checks.md` | manual as `Set up checks` |
@@ -2071,7 +2075,8 @@ A trigger's fields:
 - `enabled`: whether it fires at all.
 - `tab`: the conversation tab its agents share, a plain name (letters, digits, `-` and `_`; one
   such as `"a b"` is refused, naming the trigger), labelled with it, such as the shipped lens
-  reviews', `merge-pass`'s and `super-fix-review`'s `review` and `super-review`'s own; left out,
+  reviews', `merge-pass`'s and `super-fix-review`'s `review`, and `super-review`'s and
+  `super-merge-pass`'s `super-review`; left out,
   each agent shows under its role's tab or a tab of its own (see the conversation's tabs under
   [Usage](#usage)).
 - `paths`: with `on = "task_landed"`, the globs of the paths a commit must change for the trigger

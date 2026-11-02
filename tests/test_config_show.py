@@ -48,6 +48,7 @@ TRIGGER_NAMES = (
     "security-review",
     "performance-review",
     "merge-pass",
+    "super-merge-pass",
     "super-review",
     "super-fix-review",
     "configure-checks",
@@ -269,7 +270,10 @@ def test_the_merge_pass_trigger_shows_its_event_role_and_findings(project: Path)
     lines = result.stdout.splitlines()
     assert 'triggers.merge-pass.on = "reviews_finished"   package' in lines
     assert 'triggers.merge-pass.role = "reviewer"   package' in lines
-    assert 'triggers.merge-pass.when = {"findings": "some"}   package' in lines
+    assert (
+        'triggers.merge-pass.when = {"findings": "some", "review": ["commit", "batch", "set"]}'
+        "   package"
+    ) in lines
 
 
 def test_the_review_trigger_is_no_longer_shipped(project: Path) -> None:

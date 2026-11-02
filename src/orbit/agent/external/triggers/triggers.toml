@@ -4,7 +4,8 @@
 # Every lens reviews each commit; a batch of fixes is reviewed by Bugs and Tests, and by the
 # lenses guarded by raised-finding only if they raised one of its findings. The super review's
 # three lenses review the whole codebase every ten commits, and the fixes of their own findings.
-# The reviews' agents share the review tab, and the super review's its own.
+# The reviews' agents share the review tab, and the super review's, its merge pass included, its
+# own.
 
 [triggers.fit-review]
 on = "task_landed"
@@ -52,8 +53,15 @@ tab = "review"
 on = "reviews_finished"
 role = "reviewer"
 prompt = "merge-pass.md"
-when = { findings = "some" }
+when = { findings = "some", review = ["commit", "batch", "set"] }
 tab = "review"
+
+[triggers.super-merge-pass]
+on = "reviews_finished"
+role = "reviewer"
+prompt = "merge-pass.md"
+when = { findings = "some", review = "super" }
+tab = "super-review"
 
 [triggers.super-review]
 on = "commits"

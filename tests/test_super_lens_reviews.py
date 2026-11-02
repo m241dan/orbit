@@ -100,8 +100,8 @@ async def test_ctrl_g_queues_the_three_lenses_whose_findings_one_merge_pass_file
 
     assert shown(tasks) == [
         *SUPER_TASKS,
-        (REVIEWER, "merge-pass", None, "completed"),
-        (CODER, "merge-pass", "batch-1", "completed"),
+        (REVIEWER, "super-merge-pass", None, "completed"),
+        (CODER, "super-merge-pass", "batch-1", "completed"),
     ]
     assert {t.queued_as for t in tasks[:3]} == {"review"}
     assert len({t.task.prompt for t in tasks[:3]}) == 1  # One rendering, one prompt.
@@ -135,8 +135,8 @@ async def test_a_batch_filed_from_a_drift_finding_is_reviewed_by_drift_bugs_and_
 
     assert shown(tasks) == [
         *SUPER_TASKS,
-        (REVIEWER, "merge-pass", None, "completed"),
-        (CODER, "merge-pass", "batch-1", "completed"),
+        (REVIEWER, "super-merge-pass", None, "completed"),
+        (CODER, "super-merge-pass", "batch-1", "completed"),
         (BUGS_REVIEWER, "bugs-review", None, "completed"),
         (TESTS_REVIEWER, "tests-review", None, "completed"),
         (DRIFT_REVIEWER, "super-fix-review", None, "completed"),

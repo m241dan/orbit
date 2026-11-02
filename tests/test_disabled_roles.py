@@ -132,6 +132,7 @@ async def test_with_every_role_enabled_the_catalog_lists_them_their_triggers_and
     assert [(trigger.name, trigger.tab) for trigger in listed.triggers] == [
         ("review", None),
         ("merge-pass", "review"),
+        ("super-merge-pass", "super-review"),
         (SUPER_REVIEW, "super-review"),
         ("super-fix-review", "review"),
         (CONFIGURE_CHECKS, None),

@@ -211,6 +211,7 @@ def test_update_says_what_it_added_where(tmp_path: Path) -> None:
                 "[roles.license-reviewer]",
                 *(f"[triggers.{lens}-review]" for lens in LENSES),
                 "[triggers.merge-pass]",
+                "[triggers.super-merge-pass]",
                 "[triggers.super-review]",
                 "[triggers.super-fix-review]",
                 "[triggers.configure-checks]",

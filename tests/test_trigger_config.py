@@ -72,6 +72,7 @@ def test_without_a_projects_triggers_they_are_the_packages_from_the_package() ->
     assert list(result.config.triggers) == [
         *LENS_TRIGGERS,
         "merge-pass",
+        "super-merge-pass",
         "super-review",
         "super-fix-review",
         "configure-checks",
@@ -317,6 +318,7 @@ def test_the_reviews_share_the_review_tab_and_the_super_review_its_own() -> None
     assert tabs == {
         **dict.fromkeys(LENS_TRIGGERS, "review"),
         "merge-pass": "review",
+        "super-merge-pass": "super-review",
         "super-review": "super-review",
         "super-fix-review": "review",
     }

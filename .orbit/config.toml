@@ -803,7 +803,7 @@ watch = ["uv.lock"]
 # The task's prompt: the text, or a Markdown file under .orbit/ it names.
 # prompt: orbit's own merge-pass.md
 # The events it takes, by their fields, each a value or a list of values.
-# when = {findings = "some"}
+# when = {findings = "some", review = ["commit", "batch", "set"]}
 # What may hold it back: review-rounds, raised-finding, suggestions-pending, not-queued or dedupe.
 # guards = []
 # With on = "commits", how many matching landings it fires after.
@@ -818,6 +818,36 @@ watch = ["uv.lock"]
 # enabled = true
 # The tab its agents share, a plain name; without one, their role's or their own.
 # tab = "review"
+# With on = "task_landed", globs of the paths a commit must change to fire.
+# paths: unset
+# With on = "schedule", when it fires: five cron fields, in local time.
+# cron: unset
+
+# [triggers.super-merge-pass]
+# The event it fires on, such as "task_landed", "commits" or "manual".
+# on = "reviews_finished"
+# The role of the task it queues, or a list of roles, queuing one task each.
+# role = "reviewer"
+# Instead of a role, the checks it runs: "task-checks", or a named set.
+# checks: unset
+# The task's prompt: the text, or a Markdown file under .orbit/ it names.
+# prompt: orbit's own merge-pass.md
+# The events it takes, by their fields, each a value or a list of values.
+# when = {findings = "some", review = "super"}
+# What may hold it back: review-rounds, raised-finding, suggestions-pending, not-queued or dedupe.
+# guards = []
+# With on = "commits", how many matching landings it fires after.
+# every: unset
+# Whether you can fire it yourself.
+# manual = false
+# What it's called where you fire it; a manual trigger needs one.
+# label: unset
+# Whether its task is added as a draft, for you to accept.
+# draft = false
+# Whether it fires at all.
+# enabled = true
+# The tab its agents share, a plain name; without one, their role's or their own.
+# tab = "super-review"
 # With on = "task_landed", globs of the paths a commit must change to fire.
 # paths: unset
 # With on = "schedule", when it fires: five cron fields, in local time.

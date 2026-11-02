@@ -171,7 +171,7 @@ def test_update_adds_what_the_file_doesnt_mention_and_says_what(project: Path) -
         " [roles.scaling-reviewer], [roles.license-reviewer], [triggers.fit-review],"
         " [triggers.bugs-review], [triggers.tests-review], [triggers.logic-review],"
         " [triggers.security-review], [triggers.performance-review], [triggers.merge-pass],"
-        " [triggers.super-review], [triggers.super-fix-review],"
+        " [triggers.super-merge-pass], [triggers.super-review], [triggers.super-fix-review],"
         " [triggers.configure-checks], [triggers.set-up-verification], [triggers.startup-check],"
         " [triggers.startup-fix], [[skills]], [mcp.github], [mcp.semgrep],"
         " [roles.license-reviewer.tools], [models.local-coder]",

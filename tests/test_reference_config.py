@@ -350,7 +350,11 @@ def test_shipped_trigger_tables_show_shipped_values() -> None:
     assert {"# manual = true", '# label = "Super review"'} <= set(super_review)
     assert '# role = ["style-reviewer", "drift-reviewer", "scaling-reviewer"]' in super_review
     assert "# draft = true" in trigger_table("startup-fix")
-    assert '# when = {findings = "some"}' in trigger_table("merge-pass")
+    assert '# when = {findings = "some", review = ["commit", "batch", "set"]}' in trigger_table(
+        "merge-pass"
+    )
+    assert '# when = {findings = "some", review = "super"}' in trigger_table("super-merge-pass")
+    assert '# tab = "super-review"' in trigger_table("super-merge-pass")
 
 
 def test_shipped_prompts_name_the_template_shipped_with_orbit() -> None:

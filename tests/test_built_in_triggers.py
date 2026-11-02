@@ -18,13 +18,21 @@ from orbit.agent.domain.reviews import (
     review_values,
     tell_landed_since,
 )
-from orbit.agent.domain.triggers import GuardName, Trigger, render_template
+from orbit.agent.domain.triggers import (
+    REVIEWS_FINISHED,
+    GuardName,
+    Trigger,
+    TriggerEvent,
+    listening,
+    render_template,
+)
 from orbit.agent.domain.verification import VerificationStep, failure_report, startup_fix_prompt
 from orbit.agent.external.built_in_triggers import (
     TRIGGER_DIRECTORY,
     read_built_in_triggers,
     read_template_files,
 )
+from orbit.protocol import BUILT_IN_ROLE_NAMES
 
 FOLDER = files("orbit.agent.external") / "triggers"
 README = Path(__file__).parent.parent / "README.md"
@@ -79,7 +87,16 @@ def test_the_shipped_triggers_are_the_records_in_order() -> None:
             for lens in LENSES
         },
         "merge-pass": Trigger(
-            on="reviews_finished", role="reviewer", when={"findings": "some"}, tab="review"
+            on="reviews_finished",
+            role="reviewer",
+            when={"findings": "some", "review": ("commit", "batch", "set")},
+            tab="review",
+        ),
+        "super-merge-pass": Trigger(
+            on="reviews_finished",
+            role="reviewer",
+            when={"findings": "some", "review": "super"},
+            tab="super-review",
         ),
         "super-review": Trigger(
             on="commits",
@@ -118,6 +135,7 @@ def test_each_prompt_is_the_text_of_the_template_beside_triggers_toml_it_names()
     assert {
         **{f"{lens}-review": "lens-review.md" for lens in LENSES},
         "merge-pass": "merge-pass.md",
+        "super-merge-pass": "merge-pass.md",
         "super-review": "super-review.md",
         "super-fix-review": "lens-review.md",
         "configure-checks": "configure-checks.md",
@@ -132,6 +150,24 @@ def test_each_prompt_is_the_text_of_the_template_beside_triggers_toml_it_names()
 def test_every_template_beside_triggers_toml_is_one_a_trigger_names() -> None:
     names = {entry.name for entry in FOLDER.iterdir() if entry.name.endswith(".md")}
     assert names == set(TEMPLATES.values())
+
+
+@pytest.mark.parametrize(
+    ("review", "tab"),
+    [("commit", "review"), ("batch", "review"), ("set", "review"), ("super", "super-review")],
+)
+def test_a_finished_review_with_findings_queues_one_merge_pass_in_its_kinds_tab(
+    review: str, tab: str
+) -> None:
+    event = TriggerEvent(REVIEWS_FINISHED, {"findings": "some", "review": review})
+    fired = listening(SHIPPED, event, BUILT_IN_ROLE_NAMES, None)
+    assert [(trigger.roles, trigger.tab) for _, trigger in fired] == [(("reviewer",), tab)]
+
+
+@pytest.mark.parametrize("review", ["commit", "batch", "set", "super"])
+def test_a_finished_review_without_findings_queues_nothing(review: str) -> None:
+    event = TriggerEvent(REVIEWS_FINISHED, {"findings": "none", "review": review})
+    assert listening(SHIPPED, event, BUILT_IN_ROLE_NAMES, None) == []
 
 
 def test_the_readme_lists_every_shipped_trigger() -> None:

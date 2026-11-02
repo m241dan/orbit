@@ -956,6 +956,7 @@ def test_without_a_file_the_triggers_are_those_orbit_ships(tmp_path: Path) -> No
         "security-review",
         "performance-review",
         "merge-pass",
+        "super-merge-pass",
         "super-review",
         "super-fix-review",
         "configure-checks",

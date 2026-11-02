@@ -546,7 +546,7 @@ async def test_every_so_many_of_the_users_commits_the_whole_codebase_is_super_re
         (role, "Super review of the codebase at c3", "opus") for role in SUPER_LENS_REVIEWERS
     ]
     [suggestion] = [t for t in tasks if t.batch]
-    assert (suggestion.origin, suggestion.round) == ("merge-pass", 1)
+    assert (suggestion.origin, suggestion.round) == ("super-merge-pass", 1)
     assert "c3" in tree.snapshots
 
 
