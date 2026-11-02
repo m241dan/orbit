@@ -14,6 +14,7 @@ from orbit.agent import HostParts, Verification, WorkspaceHost
 from orbit.agent.application.ports import Reply
 from orbit.agent.application.review_trace import REVIEW_SPAN
 from orbit.agent.application.task_trace import TASK_SPAN
+from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.merge_pass import COUNTED_OUTCOMES
 from orbit.agent.domain.reviews import (
     BatchSnapshot,
@@ -68,6 +69,7 @@ from tests.agent_fakes import (
     board_of,
     claims_done,
     gives_up,
+    keeps_claiming,
     send,
     session_for,
     settle,
@@ -779,6 +781,70 @@ async def test_a_filed_task_giving_up_counts_its_findings_given_up_on_its_span()
         span_attributes(s)["orbit.task.id"]: span_attributes(s) for s in traced.spans(TASK_SPAN)
     }
     assert tasks["5"]["orbit.findings.given_up"] == 3
+
+
+def fixing(
+    fix: Script, store: FakeStore, seen: list[LaneSnapshot], traced: Traced
+) -> WorkspaceHost:
+    """A session whose merge pass files task 5 for F1 and F3, and task 6 for F2, whose task 5
+    fails verification after its one fix, falling back to fix task 7, played by ``fix``, and
+    whose task 6 notes the review state saved in ``store`` in ``seen`` as it starts; traced by
+    ``traced``."""
+    steps = SetSteps()
+    steps.task_results = [True, False, False]  # Task 1 passes, task 5 fails twice, then all pass.
+    return merging(
+        keeps_claiming,
+        fix,
+        watching(store, seen),
+        reports(),
+        reports(),
+        merge=merges(("Fix the crash", ("F1", "F3")), ("Add a test", ("F2",))),
+        verification=Verification((LINT,), steps),
+        limits=Limits(max_attempts=1),
+        store=store,
+        telemetry=traced.telemetry,
+    )
+
+
+async def test_a_fix_of_a_filed_task_landing_fixes_the_findings_filed_in_it() -> None:
+    traced, store, seen = Traced(), FakeStore(), list[LaneSnapshot]()
+    session = fixing(claims_done, store, seen, traced)
+    await start(session)
+    await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    fix = board_of(session).get("7")
+    assert (fix.fixes, fix.status) == ("5", "completed")
+    assert outcomes(seen[0]) == [
+        ("F1", "fixed", "5", None),
+        ("F2", "filed", "6", None),
+        ("F3", "fixed", "5", None),
+    ]
+    tasks = {
+        span_attributes(s)["orbit.task.id"]: span_attributes(s) for s in traced.spans(TASK_SPAN)
+    }
+    assert tasks["7"]["orbit.findings.fixed"] == 2
+    assert "orbit.findings.fixed" not in tasks["5"]
+
+
+async def test_a_fix_of_a_filed_task_giving_up_gives_up_the_findings_filed_in_it() -> None:
+    traced, store, seen = Traced(), FakeStore(), list[LaneSnapshot]()
+    session = fixing(gives_up, store, seen, traced)
+    await start(session)
+    await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    fix = board_of(session).get("7")
+    assert (fix.fixes, fix.status) == ("5", "gave_up")
+    assert outcomes(seen[0]) == [
+        ("F1", "given_up", "5", None),
+        ("F2", "filed", "6", None),
+        ("F3", "given_up", "5", None),
+    ]
+    tasks = {
+        span_attributes(s)["orbit.task.id"]: span_attributes(s) for s in traced.spans(TASK_SPAN)
+    }
+    assert tasks["7"]["orbit.findings.given_up"] == 2
 
 
 async def test_a_filed_task_landing_stacked_after_a_hold_counts_nothing_on_the_later_task() -> None:
