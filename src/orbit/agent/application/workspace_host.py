@@ -94,7 +94,7 @@ from orbit.agent.application.work_lane import Beside, WorkLane
 from orbit.agent.application.work_turns import WorkParts, WorkTurns
 from orbit.agent.domain.activity import Activity
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.catalog import trigger_names
+from orbit.agent.domain.catalog import trigger_entries
 from orbit.agent.domain.merge_holds import holding_sets
 from orbit.agent.domain.ownership import WorkspaceOwner, queued_dropped_note, read_only_note
 from orbit.agent.domain.refusals import STOPPING, Refused
@@ -128,6 +128,7 @@ from orbit.protocol import (
     Settings,
     ShowReport,
     TakeOwnership,
+    TriggerEntry,
     UsageChanged,
     WorkspaceEntry,
 )
@@ -977,10 +978,12 @@ class WorkspaceHost:
         return self._desk.agents.usage_unknown if self._desk else frozenset()
 
     @property
-    def triggers(self) -> tuple[str, ...]:
-        """The names of the built-in triggers that can be fired here: those whose role isn't
-        disabled."""
-        return trigger_names(self._roles())
+    def triggers(self) -> tuple[TriggerEntry, ...]:
+        """The catalog's entries for this workspace's triggers: those enabled whose roles aren't
+        all disabled, with their tabs, then the built-in triggers that can be fired here but
+        aren't among them."""
+        triggers = self._desk.agents.triggers if self._desk else {}
+        return trigger_entries(triggers, self._roles())
 
     @property
     def lanes(self) -> tuple[str, ...]:

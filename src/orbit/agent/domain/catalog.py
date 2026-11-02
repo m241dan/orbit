@@ -1,9 +1,10 @@
 """The catalog of what exists: the workspaces served and their sessions, the agents' roles, the
 triggers and the lanes."""
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 
 from orbit.agent.domain.roles import Role, disabled_roles
+from orbit.agent.domain.triggers import Trigger
 from orbit.protocol import (
     BUGS_REVIEWER,
     CODER,
@@ -57,6 +58,9 @@ TRIGGERS = (
 
 TRIGGER_NAMES = tuple(trigger.name for trigger in TRIGGERS)
 """The built-in triggers' names."""
+
+_BUILT_IN_LABELS = {trigger.name: trigger.label for trigger in TRIGGERS}
+"""The built-in triggers' labels, by name."""
 
 TRIGGER_ROLES = {SUPER_REVIEW: SUPER_LENS_REVIEWERS, CONFIGURE_CHECKS: (CONFIGURATOR,)}
 """The roles of the tasks each built-in trigger queues."""
@@ -140,18 +144,57 @@ def trigger_names(roles: Mapping[str, Role]) -> tuple[str, ...]:
     )
 
 
+def trigger_entries(
+    triggers: Mapping[str, Trigger], roles: Mapping[str, Role]
+) -> tuple[TriggerEntry, ...]:
+    """The catalog's entries for a workspace's ``triggers``, by name, with its agents' ``roles``:
+    each trigger that's enabled and queues a task for a role that isn't disabled, in order, with
+    its tab and roles, then each built-in trigger that can be fired there but isn't among them.
+    An entry is ``manual`` if it's a built-in trigger that can be fired there, and labelled as
+    the built-in one is, else as its trigger is, else by its name."""
+    fireable = trigger_names(roles)
+    listed = _listed_triggers(triggers, disabled_roles(roles))
+    rest = (entry for entry in TRIGGERS if entry.name in fireable and entry.name not in listed)
+    return (
+        *(_trigger_entry(name, trigger, name in fireable) for name, trigger in listed.items()),
+        *rest,
+    )
+
+
+def _listed_triggers(
+    triggers: Mapping[str, Trigger], disabled: Collection[str]
+) -> dict[str, Trigger]:
+    """The ``triggers`` the catalog lists, by name, in order: those enabled that queue a task for
+    a role not among the ``disabled``."""
+    return {
+        name: trigger
+        for name, trigger in triggers.items()
+        if trigger.enabled and any(role not in disabled for role in trigger.roles)
+    }
+
+
+def _trigger_entry(name: str, trigger: Trigger, manual: bool) -> TriggerEntry:
+    """The catalog's entry for ``trigger``, named ``name``, ``manual`` if the user can fire
+    it."""
+    label = _BUILT_IN_LABELS.get(name) or trigger.label or name
+    return TriggerEntry(name=name, label=label, manual=manual, tab=trigger.tab, roles=trigger.roles)
+
+
 def catalog(
     workspaces: Sequence[WorkspaceEntry],
     roles: Iterable[tuple[str, Role, bool, bool]],
-    triggers: Iterable[str],
+    triggers: Iterable[TriggerEntry],
     lanes: Iterable[str],
     conversational: Iterable[str],
 ) -> Catalog:
     """The catalog of the ``workspaces`` served, with agents in ``roles``, each given with its
     name, whether it's personal and whether its agents' usage is known, and named once, as the
     first of that name is, those among them in ``conversational`` ones the user can message, the
-    built-in ``triggers`` named, in their order, and ``lanes``, each listed once."""
-    named = frozenset(triggers)
+    ``triggers``, each named once, as the first of that name is, and ``lanes``, each listed
+    once."""
+    named: dict[str, TriggerEntry] = {}
+    for trigger in triggers:
+        named.setdefault(trigger.name, trigger)
     talking = frozenset(conversational)
     first: dict[str, tuple[Role, bool, bool]] = {}
     for name, role, personal, usage_known in roles:
@@ -162,6 +205,6 @@ def catalog(
             agent_entry(name, role, name in talking, personal, usage_known)
             for name, (role, personal, usage_known) in first.items()
         ),
-        triggers=tuple(trigger for trigger in TRIGGERS if trigger.name in named),
+        triggers=tuple(named.values()),
         lanes=tuple(dict.fromkeys(lanes)),
     )

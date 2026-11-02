@@ -120,11 +120,25 @@ async def refusal_of(session: WorkspaceHost, command: Command) -> list[Event]:
     return await events_until(session, of_type(CommandRefused))
 
 
+def fireable(listed: Catalog) -> list[str]:
+    """The names of the triggers ``listed`` that the user can fire, in order."""
+    return [trigger.name for trigger in listed.triggers if trigger.manual]
+
+
 async def test_with_every_role_enabled_the_catalog_lists_them_their_triggers_and_lanes() -> None:
     session, _, _ = session_for(tree=FakeTree(), review=True)
     listed = await catalog_of(session)
     assert tuple(agent.name for agent in listed.agents) == BUILT_IN_ROLE_NAMES
-    assert [trigger.name for trigger in listed.triggers] == [SUPER_REVIEW, CONFIGURE_CHECKS]
+    assert [(trigger.name, trigger.tab) for trigger in listed.triggers] == [
+        ("review", None),
+        ("merge-pass", "review"),
+        (SUPER_REVIEW, "super-review"),
+        ("super-fix-review", "review"),
+        (CONFIGURE_CHECKS, None),
+        ("set-up-verification", None),
+        ("startup-fix", None),
+    ]
+    assert fireable(listed) == [SUPER_REVIEW, CONFIGURE_CHECKS]
     assert listed.lanes == ("work", "planner", "experimenter", "review")
 
 
@@ -140,7 +154,8 @@ async def test_disabled_super_lenses_leave_the_catalog_with_their_trigger_and_ke
         CONFIGURATOR,
         *LENS_REVIEWERS,
     ]
-    assert [trigger.name for trigger in listed.triggers] == [CONFIGURE_CHECKS]
+    assert fireable(listed) == [CONFIGURE_CHECKS]
+    assert SUPER_REVIEW not in [trigger.name for trigger in listed.triggers]
     assert trigger_key_labels(listed.triggers) == {"ctrl+g": None, "ctrl+e": "Set up checks"}
     assert listed.lanes == ("work", "planner", "experimenter", "review")
 
@@ -148,14 +163,14 @@ async def test_disabled_super_lenses_leave_the_catalog_with_their_trigger_and_ke
 async def test_one_disabled_super_lens_leaves_the_super_review_in_the_catalog() -> None:
     session, _, _ = session_for(tree=FakeTree(), review=True, roles=disabling(DRIFT_REVIEWER))
     listed = await catalog_of(session)
-    assert [trigger.name for trigger in listed.triggers] == [SUPER_REVIEW, CONFIGURE_CHECKS]
+    assert fireable(listed) == [SUPER_REVIEW, CONFIGURE_CHECKS]
     assert DRIFT_REVIEWER not in [agent.name for agent in listed.agents]
 
 
 async def test_a_disabled_configurator_takes_its_trigger_and_key_out_of_the_catalog() -> None:
     session, _, _ = session_for(roles=disabling(CONFIGURATOR))
     listed = await catalog_of(session)
-    assert [trigger.name for trigger in listed.triggers] == [SUPER_REVIEW]
+    assert fireable(listed) == [SUPER_REVIEW]
     assert trigger_key_labels(listed.triggers) == {"ctrl+g": "Super review", "ctrl+e": None}
 
 

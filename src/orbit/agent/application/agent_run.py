@@ -54,6 +54,7 @@ from orbit.agent.domain.tools import (
     RUN_CHECK,
     SUGGEST_TASK,
 )
+from orbit.agent.domain.triggers import trigger_tab
 from orbit.agent.domain.verification import (
     VerificationStep,
     check_reply,
@@ -134,8 +135,10 @@ class AgentRun:
         self._publish = self._noting
         self._error: str | None = None  # The first error published while the agent ran.
         self._given_up = ""  # Why the agent gave up, if it did.
-        self._work = AgentTask(self._board.get(task_id).task, desk.agents.limits)
+        state = self._board.get(task_id)
+        self._work = AgentTask(state.task, desk.agents.limits)
         self._role: Role | None = desk.agents.roles.get(self._work.task.role)
+        self._tab = trigger_tab(desk.agents.triggers, state.origin)  # Its trigger's, if any.
         self._stream_task: asyncio.Task[None] | None = None  # The agent's process, once launched.
         self._inbox: asyncio.Queue[_Claim | _Proposal | Wake] = asyncio.Queue()
         self._checking = asyncio.Lock()  # One verification step at a time.
@@ -181,7 +184,7 @@ class AgentRun:
             await self._publish(ErrorOccurred(code=NOT_CONFIGURED, message=message))
             return ended("error", error(message))
         self._root = root
-        self._agent = self._desk.open(self, task.role, self._task_id, task.skills)
+        self._agent = self._desk.open(self, task.role, self._task_id, task.skills, self._tab)
         try:
             await self._see_through(before)
         finally:
@@ -213,7 +216,9 @@ class AgentRun:
     async def _launch(self) -> asyncio.Task[None]:
         await self._desk.url()  # Started before the agent is announced.
         role = self._work.task.role
-        await self._publish(AgentStarted(agent_id=self.agent.id, role=role, task_id=self._task_id))
+        agent = self.agent
+        started = AgentStarted(agent_id=agent.id, role=role, task_id=self._task_id, tab=agent.tab)
+        await self._publish(started)
         return asyncio.create_task(self._stream())
 
     async def _serve_in_time(self, before: object) -> None:

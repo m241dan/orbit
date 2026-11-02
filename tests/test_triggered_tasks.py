@@ -1,6 +1,7 @@
 """Triggers firing in a session: the review trigger queues today's reviews as work lands, a
 project's triggers queue their own tasks as tasks land or finish, never on their own tasks'
-ends, and each triggered task's span names its trigger."""
+ends, each triggered task's agent starts in its trigger's tab, and each triggered task's span
+names its trigger."""
 
 import asyncio
 from typing import Any
@@ -15,7 +16,7 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.reviews import ReviewLimits, ReviewPlanner, commit_review, review_prompt
 from orbit.agent.domain.triggers import Trigger
-from orbit.protocol import CODER, REVIEWER, Event, TaskSpec, TaskState
+from orbit.protocol import CODER, REVIEWER, AgentStarted, Event, TaskSpec, TaskState
 from tests.agent_fakes import (
     TRIGGERS,
     FakeTree,
@@ -87,6 +88,16 @@ async def test_a_project_trigger_on_finished_tasks_does_not_fire_on_its_own_task
     tasks = await ran("Add a flag.", triggers={**TRIGGERS, "tidy": TIDY}, review=False)
     assert shown(tuple(tasks)) == [(CODER, "manual", "Add a flag."), (CODER, "tidy", "Tidy up")]
     assert all(t.status == "completed" for t in tasks)
+
+
+async def test_a_triggered_tasks_agent_starts_in_its_triggers_tab_and_others_in_none() -> None:
+    tidy = TIDY.model_copy(update={"tab": "tidying"})
+    session, _, _ = session_for(claims_done, claims_done, triggers={**TRIGGERS, "tidy": tidy})
+    await start(session, "Add a flag.")
+    events = await asyncio.wait_for(settle(session), 10)
+    await session.close()
+    started = [(e.task_id, e.tab) for e in events if isinstance(e, AgentStarted)]
+    assert started == [("1", None), ("2", "tidying")]
 
 
 async def test_without_a_review_lane_a_landing_still_fires_the_projects_triggers() -> None:

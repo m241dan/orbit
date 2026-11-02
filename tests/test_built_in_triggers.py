@@ -73,10 +73,13 @@ def test_the_shipped_triggers_are_the_records_in_order() -> None:
                 on="task_landed",
                 role=f"{lens}-reviewer",
                 guards=("review-rounds",) if lens in EVERY_BATCH else NARROW,
+                tab="review",
             )
             for lens in LENSES
         },
-        "merge-pass": Trigger(on="reviews_finished", role="reviewer", when={"findings": "some"}),
+        "merge-pass": Trigger(
+            on="reviews_finished", role="reviewer", when={"findings": "some"}, tab="review"
+        ),
         "super-review": Trigger(
             on="commits",
             role=SUPER_LENSES,
@@ -85,9 +88,14 @@ def test_the_shipped_triggers_are_the_records_in_order() -> None:
             every=10,
             manual=True,
             label="Super review",
+            tab="super-review",
         ),
         "super-fix-review": Trigger(
-            on="task_landed", role=SUPER_LENSES, when={"review": "batch"}, guards=NARROW
+            on="task_landed",
+            role=SUPER_LENSES,
+            when={"review": "batch"},
+            guards=NARROW,
+            tab="review",
         ),
         "configure-checks": Trigger(
             on="manual", role="configurator", manual=True, label="Set up checks"

@@ -4,48 +4,56 @@
 # Every lens reviews each commit; a batch of fixes is reviewed by Bugs and Tests, and by the
 # lenses guarded by raised-finding only if they raised one of its findings. The super review's
 # three lenses review the whole codebase every ten commits, and the fixes of their own findings.
+# The reviews' agents share the review tab, and the super review's its own.
 
 [triggers.fit-review]
 on = "task_landed"
 role = "fit-reviewer"
 prompt = "lens-review.md"
 guards = ["review-rounds", "raised-finding"]
+tab = "review"
 
 [triggers.bugs-review]
 on = "task_landed"
 role = "bugs-reviewer"
 prompt = "lens-review.md"
 guards = ["review-rounds"]
+tab = "review"
 
 [triggers.tests-review]
 on = "task_landed"
 role = "tests-reviewer"
 prompt = "lens-review.md"
 guards = ["review-rounds"]
+tab = "review"
 
 [triggers.logic-review]
 on = "task_landed"
 role = "logic-reviewer"
 prompt = "lens-review.md"
 guards = ["review-rounds", "raised-finding"]
+tab = "review"
 
 [triggers.security-review]
 on = "task_landed"
 role = "security-reviewer"
 prompt = "lens-review.md"
 guards = ["review-rounds", "raised-finding"]
+tab = "review"
 
 [triggers.performance-review]
 on = "task_landed"
 role = "performance-reviewer"
 prompt = "lens-review.md"
 guards = ["review-rounds", "raised-finding"]
+tab = "review"
 
 [triggers.merge-pass]
 on = "reviews_finished"
 role = "reviewer"
 prompt = "merge-pass.md"
 when = { findings = "some" }
+tab = "review"
 
 [triggers.super-review]
 on = "commits"
@@ -56,6 +64,7 @@ guards = ["suggestions-pending"]
 every = 10
 manual = true
 label = "Super review"
+tab = "super-review"
 
 [triggers.super-fix-review]
 on = "task_landed"
@@ -63,6 +72,7 @@ role = ["style-reviewer", "drift-reviewer", "scaling-reviewer"]
 prompt = "lens-review.md"
 when = { review = "batch" }
 guards = ["review-rounds", "raised-finding"]
+tab = "review"
 
 [triggers.configure-checks]
 on = "manual"

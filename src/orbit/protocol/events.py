@@ -261,12 +261,14 @@ AgentExitReason = Literal["finished", "crashed", "killed"]
 
 
 class AgentStarted(_Message):
-    """Agent ``agent_id`` was started in the ``role`` to work on task ``task_id``."""
+    """Agent ``agent_id`` was started in the ``role`` to work on task ``task_id``, showing under
+    the ``tab`` of the trigger that queued its task, if it has one."""
 
     type: Literal["agent_started"] = "agent_started"
     agent_id: str
     role: str
     task_id: str
+    tab: str | None = None
 
 
 class AgentRequest(_Message):
@@ -443,13 +445,15 @@ class OpenRequest(_Message):
 
 class RunningAgent(_Message):
     """Agent ``agent_id``, running in the ``role`` on task ``task_id``, with its
-    ``open_requests``, oldest first, and what its finished turns cost so far (``spent``)."""
+    ``open_requests``, oldest first, what its finished turns cost so far (``spent``), and the
+    ``tab`` it shows under, as its ``AgentStarted`` has it."""
 
     agent_id: str
     role: str
     task_id: str
     open_requests: tuple[OpenRequest, ...] = ()
     spent: Usage = Field(default_factory=Usage)
+    tab: str | None = None
 
 
 class Snapshot(_Message):
@@ -696,11 +700,14 @@ class WorkspaceEntry(_Message):
 
 
 class TriggerEntry(_Message):
-    """A trigger ``name``, shown as ``label``; ``manual`` if the user fires it."""
+    """A trigger ``name``, shown as ``label``; ``manual`` if the user fires it, the ``tab`` its
+    agents share, if any, and the ``roles`` of the tasks it queues."""
 
     name: str
     label: str
     manual: bool
+    tab: str | None = None
+    roles: tuple[str, ...] = ()
 
 
 class Catalog(_Message):

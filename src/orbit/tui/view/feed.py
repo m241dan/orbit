@@ -51,7 +51,6 @@ from orbit.tui.view.transcript import (
     error_entry,
     output_entry,
     reply_call,
-    speaker,
 )
 from orbit.tui.view.turns import (
     Turns,
@@ -127,17 +126,17 @@ class Entries(Protocol):
 class Tabs(Protocol):
     """The conversation's tabs, as the feed places entries under them."""
 
-    @property
-    def roles(self) -> Mapping[str, str]:
-        """Agents that ran in a pinned role, to the role."""
-        ...
-
     def key_of(self, agent: str | None) -> str | None:
         """The key of the tab ``agent``'s entries belong to."""
         ...
 
+    def speaker_of(self, agent: str | None) -> str | None:
+        """Who ``agent``'s entries are spoken by: its role, for an agent in a trigger's tab, or
+        the agent, but None for the planner."""
+        ...
+
     def reset(self, running: Sequence[RunningAgent]) -> None:
-        """Close every agent's own tab and forget the agents' roles, but those ``running``."""
+        """Close every agent's own tab and forget the agents' tabs, but those ``running``."""
         ...
 
     def replay(self, event: Event) -> None:
@@ -149,7 +148,7 @@ class Tabs(Protocol):
         ...
 
     def learn_roles(self, event: Event) -> None:
-        """Note the pinned role an agent started in by ``event``, an earlier one."""
+        """Note the pinned tab an agent started writing into by ``event``, an earlier one."""
         ...
 
     def mark_unread(self, key: str | None) -> None:
@@ -402,8 +401,9 @@ class ConversationFeed:
         )
 
     def _speaker(self, agent: str | None) -> str | None:
-        """Who ``agent``'s entries are spoken by: the agent, but not the planner."""
-        return speaker(agent, self.tabs.roles)
+        """Who ``agent``'s entries are spoken by: its role in a trigger's tab, else the agent,
+        but not the planner."""
+        return self.tabs.speaker_of(agent)
 
     def _think(self, event: AssistantMessage) -> None:
         """Show ``event``'s message dim, as thinking out loud until its turn ends."""

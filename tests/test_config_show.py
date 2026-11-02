@@ -257,6 +257,7 @@ def test_a_shipped_triggers_key_lists_its_fields_in_the_package_layer(project: P
         "triggers.bugs-review.label = null   default",
         "triggers.bugs-review.draft = false   default",
         "triggers.bugs-review.enabled = true   default",
+        'triggers.bugs-review.tab = "review"   package',
     ]
 
 

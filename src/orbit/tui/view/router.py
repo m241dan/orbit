@@ -37,6 +37,7 @@ from orbit.protocol import (
     StepState,
     TasksChanged,
     TaskState,
+    TriggerEntry,
     Usage,
     UsageChanged,
     UsageTotals,
@@ -89,6 +90,8 @@ class TabsPane(Protocol):
     def track(self, event: Event) -> None: ...
 
     def pin(self, lanes: Mapping[str, BusyLane]) -> None: ...
+
+    def group(self, triggers: Sequence[TriggerEntry]) -> None: ...
 
     def set_busy(self, lane: BusyLane, busy: bool) -> None: ...
 
@@ -348,12 +351,14 @@ class EventRouter:
             self._handlers.feed.append(*reset_entry(event.agent), event.agent)
 
     def _render_catalog(self, catalog: Catalog) -> None:
-        """Label the trigger keys from ``catalog``, list its workspaces and sessions, titling
+        """Label the trigger keys from ``catalog``, pin a tab for each tab its triggers name,
+        list its workspaces and sessions, titling
         the conversation with the name of the session viewed, renamed perhaps, and follow the
         roles of the workspace the app is on; one that no longer lists the workspace the app is
         on opens the workspace picker. In process, the first catalog opens the session picker,
         if the app picks one."""
         self._hooks.label_triggers(trigger_key_labels(catalog.triggers))
+        self._panes.tabs.group(catalog.triggers)
         navigation = self._handlers.navigation
         navigation.follow_catalog(catalog)
         attached = navigation.place.attached_session

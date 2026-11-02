@@ -92,8 +92,8 @@ and the backend's `server_version`. `Welcome` is Hello's outcome: it takes the p
 `CommandAccepted`. A `Catalog` follows it: what exists, namely the workspaces served, each with
 its id, label, path, sessions and `read_only`, true when another orbit owns its repository (see
 [Read-only orbits](#read-only-orbits)) and `managed`, true for a clone the server made from a
-URL, whose directory purging it deletes, then the agents' roles, the triggers and the lanes, each
-listed if any workspace served has it: a role that's disabled (`enabled = false`) is left out, as
+URL, whose directory purging it deletes, then the agents' roles, the triggers (see
+[Trigger tabs](#trigger-tabs)) and the lanes, each listed if any workspace served has it: a role that's disabled (`enabled = false`) is left out, as
 are the triggers that queue only disabled roles' tasks (`super-review` once its three lens
 reviewers are, `configure-checks` the configurator's) and its lane, unless an enabled role shares it. An agent role is `conversational`
 when the user can message it: the planner, and any other enabled role with `conversation = true`,
@@ -130,7 +130,8 @@ with `invalid`. The first `Attach` is answered in this order:
    `steps_output`: while a named set's failed run has the panel, the failing step's output,
    trimmed, as `VerificationChanged`'s `output` carries it; empty otherwise, and for an older
    peer), review status, checks proposals waiting for a decision, running
-   agents, the consultations held for approval (`approvals`) and its `transcript`: the session's last 500 logged events, oldest first, in the
+   agents (each `RunningAgent` with the `tab` its `AgentStarted` carried; see
+   [Trigger tabs](#trigger-tabs)), the consultations held for approval (`approvals`) and its `transcript`: the session's last 500 logged events, oldest first, in the
    envelopes they were sent in, their `seq`s included (none without a store), and, while the
    session is halted because a write to the store failed, its `storage_halt`: the explanation
    the halting `ErrorOccurred` carried (see `storage_failed` under [Codes](#codes)), and
@@ -180,6 +181,20 @@ A frontend replaces the conversation it shows with every Snapshot's transcript, 
 shows where the session left off and a switch shows the session switched to.
 When the log can't be read, the transcript is empty and an `ErrorOccurred` coded `internal`
 follows the Snapshot, saying the conversation's events couldn't be read and why.
+
+### Trigger tabs
+
+The Catalog's `triggers` list each workspace's enabled triggers that queue a task for an enabled
+role, in their order, named once across the workspaces served as the first workspace has each,
+then the built-in triggers the user can fire there that aren't among them. Each `TriggerEntry`
+has its `name` and `label`; `manual`, true only for a built-in trigger the user can fire with
+`FireTrigger`; `tab`, the conversation tab its agents share, a plain name, or null for none; and
+`roles`, the roles of the tasks it queues. `AgentStarted` and `RunningAgent` carry `tab` too: the
+`tab` of the trigger the agent's task's `origin` names, when there's such a trigger and it has
+one, else null. A frontend can pin a tab for each `tab` of the Catalog's triggers, keyed apart
+from roles and agents, and place each agent whose `tab` the Catalog lists there, leaving out the
+tab of a role only tabbed triggers queue. `tab` and `roles` were added to version 2, defaulting to
+null and none, so an older frontend ignores them and an older backend's agents show as before.
 
 ## Attaching
 

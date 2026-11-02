@@ -1,8 +1,8 @@
 """Triggers, which turn an event into a task for a role or a run of checks, the task checks or a
 named set: the events and guards orbit knows, a trigger's fields, the package's triggers merged
 with a project's and checked against its roles and sets, the sets no trigger runs, which of them
-fire on an event and which guards hold one back, when one fires in words, and the rendering of
-a trigger's prompt template.
+fire on an event and which guards hold one back, when one fires in words, the tab a task's
+agent shows under, and the rendering of a trigger's prompt template.
 
 The package's triggers aren't kept here: whoever builds them passes in the contents of their
 ``triggers.toml`` and the templates it names. ``manual`` isn't raised yet, but a trigger fired by
@@ -184,6 +184,17 @@ TriggerName = Annotated[str, AfterValidator(_plain_trigger_name)]
 dots, as in ``triggers.bugs-review.role``."""
 
 
+def _plain_tab(tab: str) -> str:
+    """The trigger's ``tab``, refused unless it's a plain name."""
+    if not PLAIN_NAME.fullmatch(tab):
+        raise PydanticCustomError("trigger_tab", "a tab is a plain name: letters, digits, - and _")
+    return tab
+
+
+TabName = Annotated[str, AfterValidator(_plain_tab)]
+"""The name of the tab a trigger's agents share, a plain name as a trigger's is."""
+
+
 class _Config(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -193,8 +204,8 @@ class Trigger(_Config):
     its ``prompt``, or a list of roles, one task each, or the checks it runs, the task checks or a
     named set, as ``checks`` (``gate`` read as the task checks), the events it takes ``when`` they
     match, the ``guards`` that may hold it back, how many landings it fires after, ``every``,
-    whether it's ``manual``, under its ``label``, whether its task is a ``draft``, and whether it's
-    ``enabled``."""
+    whether it's ``manual``, under its ``label``, whether its task is a ``draft``, whether it's
+    ``enabled``, and the ``tab`` its agents share, if any."""
 
     on: EventName = Field(
         description='The event it fires on, such as "task_landed", "commits" or "manual".'
@@ -235,6 +246,12 @@ class Trigger(_Config):
         default=False, description="Whether its task is added as a draft, for you to accept."
     )
     enabled: bool = Field(default=True, description="Whether it fires at all.")
+    tab: TabName | None = Field(
+        default=None,
+        description=(
+            "The tab its agents share, a plain name; without one, their role's or their own."
+        ),
+    )
 
     @field_validator("on", mode="before")
     @classmethod
@@ -843,6 +860,13 @@ def fires_by_hand(trigger: Trigger, roles: Collection[str]) -> bool:
     and guards. The task checks run only as the startup check, so not by hand."""
     acts = _queues_for(trigger, roles) or trigger.checks not in (None, TASK_CHECKS)
     return trigger.enabled and acts
+
+
+def trigger_tab(triggers: Mapping[str, Trigger], origin: str) -> str | None:
+    """The tab of the trigger among ``triggers`` named ``origin``, a task's origin, which its
+    agent shows under; none if no trigger has that name or it has no tab."""
+    trigger = triggers.get(origin)
+    return None if trigger is None else trigger.tab
 
 
 def verification_state(steps: Sequence[VerificationStep] | None) -> VerificationState:

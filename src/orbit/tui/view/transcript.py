@@ -1,6 +1,7 @@
 """Transcript entries: what each piece of a conversation reads as."""
 
 from collections.abc import Iterable, Mapping
+from types import MappingProxyType
 from typing import assert_never
 
 from orbit.protocol import (
@@ -101,11 +102,16 @@ def hanging_indent(kind: EntryKind, text: str) -> tuple[str, str]:
     return first, " " * len(first)
 
 
-def speaker(agent: str | None, roles: Mapping[str, str]) -> str | None:
-    """Who ``agent``'s entries are spoken by: the agent, or None for the planner's, which are
-    those of an agent ``roles`` has pinned in the planner role, the user's prompts to it
-    (agent ``PLANNER``) and those with no agent, all one speaker of their own."""
-    return None if agent is None or roles.get(agent, agent) == PLANNER else agent
+def speaker(
+    agent: str | None, roles: Mapping[str, str], named: Mapping[str, str] = MappingProxyType({})
+) -> str | None:
+    """Who ``agent``'s entries are spoken by: the agent, by the role ``named`` gives it if it
+    gives one (an agent in a trigger's tab), or None for the planner's, which are those of an
+    agent ``roles`` has pinned in the planner role, the user's prompts to it (agent
+    ``PLANNER``) and those with no agent, all one speaker of their own."""
+    if agent is None or roles.get(agent, agent) == PLANNER:
+        return None
+    return named.get(agent, agent)
 
 
 CONVERSATION_TITLE = "Conversation"

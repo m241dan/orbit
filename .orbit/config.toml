@@ -636,6 +636,8 @@ watch = ["uv.lock"]
 # draft = false
 # Whether it fires at all.
 # enabled = true
+# The tab its agents share, a plain name; without one, their role's or their own.
+# tab = "review"
 
 # [triggers.bugs-review]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -660,6 +662,8 @@ watch = ["uv.lock"]
 # draft = false
 # Whether it fires at all.
 # enabled = true
+# The tab its agents share, a plain name; without one, their role's or their own.
+# tab = "review"
 
 # [triggers.tests-review]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -684,6 +688,8 @@ watch = ["uv.lock"]
 # draft = false
 # Whether it fires at all.
 # enabled = true
+# The tab its agents share, a plain name; without one, their role's or their own.
+# tab = "review"
 
 # [triggers.logic-review]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -708,6 +714,8 @@ watch = ["uv.lock"]
 # draft = false
 # Whether it fires at all.
 # enabled = true
+# The tab its agents share, a plain name; without one, their role's or their own.
+# tab = "review"
 
 # [triggers.security-review]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -732,6 +740,8 @@ watch = ["uv.lock"]
 # draft = false
 # Whether it fires at all.
 # enabled = true
+# The tab its agents share, a plain name; without one, their role's or their own.
+# tab = "review"
 
 # [triggers.performance-review]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -756,6 +766,8 @@ watch = ["uv.lock"]
 # draft = false
 # Whether it fires at all.
 # enabled = true
+# The tab its agents share, a plain name; without one, their role's or their own.
+# tab = "review"
 
 # [triggers.merge-pass]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -780,6 +792,8 @@ watch = ["uv.lock"]
 # draft = false
 # Whether it fires at all.
 # enabled = true
+# The tab its agents share, a plain name; without one, their role's or their own.
+# tab = "review"
 
 # [triggers.super-review]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -804,6 +818,8 @@ watch = ["uv.lock"]
 # draft = false
 # Whether it fires at all.
 # enabled = true
+# The tab its agents share, a plain name; without one, their role's or their own.
+# tab = "super-review"
 
 # [triggers.super-fix-review]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -828,6 +844,8 @@ watch = ["uv.lock"]
 # draft = false
 # Whether it fires at all.
 # enabled = true
+# The tab its agents share, a plain name; without one, their role's or their own.
+# tab = "review"
 
 # [triggers.configure-checks]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -852,6 +870,8 @@ watch = ["uv.lock"]
 # draft = false
 # Whether it fires at all.
 # enabled = true
+# The tab its agents share, a plain name; without one, their role's or their own.
+# tab: unset
 
 # [triggers.set-up-verification]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -876,6 +896,8 @@ watch = ["uv.lock"]
 # draft = false
 # Whether it fires at all.
 # enabled = true
+# The tab its agents share, a plain name; without one, their role's or their own.
+# tab: unset
 
 # [triggers.startup-check]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -900,6 +922,8 @@ watch = ["uv.lock"]
 # draft = false
 # Whether it fires at all.
 # enabled = true
+# The tab its agents share, a plain name; without one, their role's or their own.
+# tab: unset
 
 # [triggers.startup-fix]
 # The event it fires on, such as "task_landed", "commits" or "manual".
@@ -924,6 +948,8 @@ watch = ["uv.lock"]
 # draft = true
 # Whether it fires at all.
 # enabled = true
+# The tab its agents share, a plain name; without one, their role's or their own.
+# tab: unset
 
 # Skills for the code under some paths, given to every agent along with its role's.
 [[skills]]

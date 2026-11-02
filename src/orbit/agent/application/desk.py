@@ -346,11 +346,18 @@ class AgentDesk:
         """Have ``triggers`` as the triggers, by name, in order, from now on."""
         self.agents = replace(self.agents, triggers=triggers)
 
-    def open(self, run: CallTarget, role: str, task_id: str, skills: Sequence[str] = ()) -> Agent:
+    def open(
+        self,
+        run: CallTarget,
+        role: str,
+        task_id: str,
+        skills: Sequence[str] = (),
+        tab: str | None = None,
+    ) -> Agent:
         """A new agent in the role ``role``, working on task ``task_id``, whose calls ``run``
         answers, given the ``skills`` its task names beyond its role's, none for a conversational
-        agent."""
-        agent = self.registry.register(role, task_id)
+        agent, and showing under ``tab``, that of the trigger that queued its task, if any."""
+        agent = self.registry.register(role, task_id, tab)
         self._runs[agent.id] = run
         self._delivery.open(agent.id, skills)
         return agent
@@ -362,7 +369,7 @@ class AgentDesk:
     @property
     def running(self) -> tuple[RunningAgent, ...]:
         """The agents running whose start was published and exit wasn't, oldest first, each
-        with its calls not yet answered and what its finished turns cost."""
+        with its calls not yet answered, what its finished turns cost and its tab."""
         return tuple(
             RunningAgent(
                 agent_id=agent.id,
@@ -370,6 +377,7 @@ class AgentDesk:
                 task_id=agent.task_id,
                 open_requests=self._open_requests(agent.id),
                 spent=self._spent.get(agent.id, Usage()),
+                tab=agent.tab,
             )
             for agent in self.registry.live
             if agent.id in self._announced

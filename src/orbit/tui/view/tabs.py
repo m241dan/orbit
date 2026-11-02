@@ -24,6 +24,7 @@ from orbit.protocol import (
     TaskState,
     ToolCallFinished,
     ToolCallStarted,
+    TriggerEntry,
     TurnFinished,
 )
 
@@ -36,14 +37,19 @@ agents; a pinned tab's key and label are its role's name. A conversational role'
 planner's, ``PLANNER``, and any other the catalog lists) also keys the user's prompts to it."""
 
 
+TRIGGER_TAB_PREFIX = "tab:"
+"""Leads the key of a trigger's tab, shared by the agents of every trigger naming it, so the key
+can't be taken for an agent's id or a role's name."""
+
+
 RUNNING_MARK = "●"
 """Leads a tab's label while its role is at work."""
 
 
 @dataclass(frozen=True)
 class ConversationTab:
-    """A conversation tab, by ``key`` (a pinned role's name, or a running agent's id),
-    whether it has output not yet looked at, how many of its role's agents are at work
+    """A conversation tab, by ``key`` (a pinned role's name, a trigger's tab's, or a running
+    agent's id), whether it has output not yet looked at, how many of its agents are at work
     (``running``), whether it's ``pinned``, there whether or not its role's agents run, and,
     for a conversational role's, the ``lane`` its role answers in. Only a pinned tab counts
     its agents: a temporary tab is there only while its agent runs, and a conversational
@@ -84,8 +90,86 @@ conversational role's, answering in its own lane until a catalog says otherwise.
 
 
 def pinned_roles(tabs: Iterable[ConversationTab]) -> frozenset[str]:
-    """The roles with a pinned tab among ``tabs``."""
+    """The keys of the pinned tabs among ``tabs``: the roles with one, and the triggers' tabs."""
     return frozenset(tab.key for tab in tabs if tab.pinned)
+
+
+def trigger_tab_key(tab: str) -> str:
+    """The key of the trigger's tab named ``tab``."""
+    return f"{TRIGGER_TAB_PREFIX}{tab}"
+
+
+def is_trigger_tab(key: str | None) -> bool:
+    """Whether ``key`` is a trigger's tab's."""
+    return key is not None and key.startswith(TRIGGER_TAB_PREFIX)
+
+
+def pinned_key(role: str, tab: str | None, pinned: Collection[str]) -> str | None:
+    """The key of the pinned tab an agent in ``role`` writes into, started by a trigger of the
+    tab named ``tab``, if any: that tab's, when it's among the ``pinned`` keys, else its role's,
+    when that is; None when it has a tab of its own."""
+    shared = None if tab is None else trigger_tab_key(tab)
+    if shared in pinned:
+        return shared
+    return role if role in pinned else None
+
+
+def trigger_tabs(triggers: Iterable[TriggerEntry]) -> tuple[str, ...]:
+    """The tabs the ``triggers`` name, each once, in their order."""
+    return tuple(dict.fromkeys(trigger.tab for trigger in triggers if trigger.tab is not None))
+
+
+def tabbed_roles(triggers: Iterable[TriggerEntry]) -> frozenset[str]:
+    """The roles whose agents start only from the tabbed ones of ``triggers``: those a trigger
+    with a tab queues and none without one does."""
+    listed = tuple(triggers)
+    tabbed = _queued_roles(trigger for trigger in listed if trigger.tab is not None)
+    untabbed = _queued_roles(trigger for trigger in listed if trigger.tab is None)
+    return frozenset(tabbed - untabbed)
+
+
+def _queued_roles(triggers: Iterable[TriggerEntry]) -> frozenset[str]:
+    """The roles the ``triggers`` queue tasks for."""
+    return frozenset(role for trigger in triggers for role in trigger.roles)
+
+
+def pin_trigger_tabs(
+    tabs: tuple[ConversationTab, ...], triggers: Sequence[TriggerEntry]
+) -> tuple[ConversationTab, ...]:
+    """``tabs`` with a pinned tab for each tab the catalog's ``triggers`` name: the built-in
+    roles' tabs first, but those of roles whose agents start only from tabbed triggers, unless
+    they're conversational; then the triggers' tabs, in their order, those already pinned kept
+    as they are; then the other conversational roles' and the agents' own tabs, as they are."""
+    kept = {tab.key: tab for tab in tabs if tab.pinned}
+    shared = (_trigger_tab(kept, name) for name in trigger_tabs(triggers))
+    built_in = _built_in_tabs(kept, tabbed_roles(triggers))
+    return (*built_in, *shared, *_other_conversations(tabs), *_unpinned(tabs))
+
+
+def _built_in_tabs(
+    kept: Mapping[str, ConversationTab], dropped: Collection[str]
+) -> Iterator[ConversationTab]:
+    """The built-in roles' pinned tabs, in order, each the one ``kept``, if any, but those of
+    the ``dropped`` roles that aren't conversational."""
+    built_in = (kept.get(tab.key, tab) for tab in PINNED_TABS)
+    return (tab for tab in built_in if tab.lane is not None or tab.key not in dropped)
+
+
+def _trigger_tab(kept: Mapping[str, ConversationTab], name: str) -> ConversationTab:
+    """The pinned tab of the trigger's tab ``name``: the one ``kept``, if any, else a new one,
+    labelled ``name``."""
+    key = trigger_tab_key(name)
+    return kept.get(key, ConversationTab(key, name, pinned=True))
+
+
+def _other_conversations(tabs: Iterable[ConversationTab]) -> Iterator[ConversationTab]:
+    """The pinned tabs among ``tabs`` of the conversational roles outside the built-in ones:
+    those neither a built-in role's nor a trigger's tab."""
+    return (
+        tab
+        for tab in tabs
+        if tab.pinned and tab.key not in ROLE_TABS and not is_trigger_tab(tab.key)
+    )
 
 
 def pin_conversations(
@@ -93,12 +177,13 @@ def pin_conversations(
 ) -> tuple[ConversationTab, ...]:
     """``tabs`` with a pinned tab for each conversational role in ``lanes``, by role to the lane
     it answers in: the built-in roles' tabs first, each following its role's lane if it's among
-    them, and the planner's its own lane if it isn't; then the other roles', in their order,
-    those already pinned kept as they are and those no longer listed gone; then the agents' own
-    tabs."""
+    them, and the planner's its own lane if it isn't; then the triggers' tabs, as they are; then
+    the other roles', in their order, those already pinned kept as they are and those no longer
+    listed gone; then the agents' own tabs."""
     lanes = {PLANNER: PLANNER_LANE, **lanes}
     built_in = (replace(tab, lane=lanes.get(tab.key)) for tab in tabs if tab.key in ROLE_TABS)
-    return (*built_in, *_pinned_others(tabs, lanes), *_unpinned(tabs))
+    shared = (tab for tab in tabs if is_trigger_tab(tab.key))
+    return (*built_in, *shared, *_pinned_others(tabs, lanes), *_unpinned(tabs))
 
 
 def _pinned_others(
@@ -128,26 +213,38 @@ def reset_tabs(tabs: tuple[ConversationTab, ...]) -> tuple[ConversationTab, ...]
 def running_roles(
     agents: Iterable[RunningAgent], pinned: Collection[str] = ROLE_TABS
 ) -> Mapping[str, str]:
-    """Which of the ``pinned`` roles each of the running ``agents`` is in, by agent id, for
-    those in one."""
-    return {agent.agent_id: agent.role for agent in agents if agent.role in pinned}
+    """Which of the ``pinned`` tabs each of the running ``agents`` writes into, by agent id, for
+    those writing into one: its trigger's tab's, or its role's (see :func:`pinned_key`)."""
+    keys = {agent.agent_id: pinned_key(agent.role, agent.tab, pinned) for agent in agents}
+    return {agent: key for agent, key in keys.items() if key is not None}
+
+
+def running_speakers(agents: Iterable[RunningAgent], pinned: Collection[str]) -> Mapping[str, str]:
+    """The role of each of the running ``agents`` that writes into a trigger's tab among the
+    ``pinned`` ones, by agent id, which labels its entries."""
+    return {
+        agent.agent_id: agent.role
+        for agent in agents
+        if is_trigger_tab(pinned_key(agent.role, agent.tab, pinned))
+    }
 
 
 def follow_running(
     tabs: tuple[ConversationTab, ...], agents: Sequence[RunningAgent]
 ) -> tuple[ConversationTab, ...]:
-    """``tabs`` agreeing with the ``agents`` running: each pinned tab counting its role's
-    agents (a conversational role's following its busy lane), then an own tab for each agent
-    outside the pinned roles, keeping those already open as they are."""
+    """``tabs`` agreeing with the ``agents`` running: each pinned tab counting the agents
+    writing into it (a conversational role's following its busy lane), then an own tab for each
+    agent writing into none, keeping those already open as they are."""
     return (*_count_pinned(tabs, agents), *_own_tabs(tabs, agents))
 
 
 def _count_pinned(
     tabs: tuple[ConversationTab, ...], agents: Sequence[RunningAgent]
 ) -> tuple[ConversationTab, ...]:
-    """``tabs``' pinned tabs, each counting its role's running ``agents`` but the
+    """``tabs``' pinned tabs, each counting the running ``agents`` writing into it but the
     conversational roles'."""
-    counts = Counter(agent.role for agent in agents)
+    keys = pinned_roles(tabs)
+    counts = Counter(pinned_key(agent.role, agent.tab, keys) for agent in agents)
     pinned = (tab for tab in tabs if tab.pinned)
     return tuple(
         tab if tab.lane is not None else replace(tab, running=counts[tab.key]) for tab in pinned
@@ -157,8 +254,8 @@ def _count_pinned(
 def _own_tabs(
     tabs: tuple[ConversationTab, ...], agents: Sequence[RunningAgent]
 ) -> tuple[ConversationTab, ...]:
-    """The own tabs of the running ``agents`` outside the pinned roles: those open in ``tabs``,
-    then one for each of the rest."""
+    """The own tabs of the running ``agents`` writing into no pinned tab: those open in
+    ``tabs``, then one for each of the rest."""
     own = _own_roles(agents, pinned_roles(tabs))
     kept = tuple(tab for tab in _unpinned(tabs) if tab.key in own)
     open_keys = {tab.key for tab in kept}
@@ -172,8 +269,13 @@ def _unpinned(tabs: Iterable[ConversationTab]) -> Iterable[ConversationTab]:
 
 
 def _own_roles(agents: Iterable[RunningAgent], pinned: Collection[str]) -> dict[str, str]:
-    """The role of each of the running ``agents`` outside the ``pinned`` roles, by agent id."""
-    return {agent.agent_id: agent.role for agent in agents if agent.role not in pinned}
+    """The role of each of the running ``agents`` writing into none of the ``pinned`` tabs, by
+    agent id."""
+    return {
+        agent.agent_id: agent.role
+        for agent in agents
+        if pinned_key(agent.role, agent.tab, pinned) is None
+    }
 
 
 def stopped_callers(
@@ -190,14 +292,29 @@ def stopped_callers(
 def track_roles(
     roles: Mapping[str, str], event: Event, pinned: Collection[str] = ROLE_TABS
 ) -> Mapping[str, str]:
-    """Which of the ``pinned`` roles each agent started in, by agent id, after ``event``."""
-    if isinstance(event, AgentStarted) and event.role in pinned:
-        return {**roles, event.agent_id: event.role}
-    return roles
+    """Which of the ``pinned`` tabs each agent started writing into, by agent id, after
+    ``event``: its trigger's tab's, or its role's (see :func:`pinned_key`)."""
+    if not isinstance(event, AgentStarted):
+        return roles
+    key = pinned_key(event.role, event.tab, pinned)
+    return roles if key is None else {**roles, event.agent_id: key}
+
+
+def track_speakers(
+    speakers: Mapping[str, str], event: Event, pinned: Collection[str]
+) -> Mapping[str, str]:
+    """The role of each agent that started writing into a trigger's tab among the ``pinned``
+    ones, by agent id, after ``event``, which labels its entries."""
+    if isinstance(event, AgentStarted) and is_trigger_tab(
+        pinned_key(event.role, event.tab, pinned)
+    ):
+        return {**speakers, event.agent_id: event.role}
+    return speakers
 
 
 def tab_key(agent: str | None, roles: Mapping[str, str]) -> str | None:
-    """Which tab ``agent``'s entries belong to: its role's, when ``roles`` has it pinned."""
+    """Which tab ``agent``'s entries belong to: the pinned one ``roles`` has it writing into,
+    its trigger's tab or its role's, else its own."""
     return None if agent is None else roles.get(agent, agent)
 
 
@@ -217,8 +334,8 @@ def track_tabs(
     roles: Mapping[str, str] = MappingProxyType({}),
 ) -> tuple[ConversationTab, ...]:
     """The open conversation tabs after ``event``; output for a tab other than ``active``,
-    the one being shown, marks it unread. Agents in a pinned role share its tab, and
-    ``roles`` says which role those agents are in."""
+    the one being shown, marks it unread. Agents in a pinned role or a trigger's tab share it,
+    and ``roles`` says which tab those agents write into."""
     if _is_tab_output(event):
         return mark_tab_unread(tabs, tab_key(event.agent_id, roles), active)
     return replay_tabs(tabs, event, roles)
@@ -243,7 +360,7 @@ def _close_tab(
     tabs: tuple[ConversationTab, ...], agent: str, roles: Mapping[str, str]
 ) -> tuple[ConversationTab, ...]:
     """``tabs`` without ``agent``'s own tab; the pinned tabs stay, with one agent fewer at
-    work on the tab of ``agent``'s role when ``roles`` has it pinned."""
+    work on the pinned tab ``roles`` has ``agent`` writing into, if any."""
     tabs = tuple(tab for tab in tabs if tab.pinned or tab.key != agent)
     return _count_running(tabs, roles.get(agent), -1)
 
@@ -256,19 +373,20 @@ def _is_tab_output(event: Event) -> TypeGuard[_TabOutput]:
 def _open_tab(
     tabs: tuple[ConversationTab, ...], event: AgentStarted
 ) -> tuple[ConversationTab, ...]:
-    """``tabs`` with one for the started agent, unless its role has a pinned tab, which
-    counts one more agent at work instead."""
-    if event.role in pinned_roles(tabs):
-        return _count_running(tabs, event.role, 1)
+    """``tabs`` with one for the started agent, unless its trigger's tab or its role has a
+    pinned tab, which counts one more agent at work instead."""
+    key = pinned_key(event.role, event.tab, pinned_roles(tabs))
+    if key is not None:
+        return _count_running(tabs, key, 1)
     return (*tabs, ConversationTab(event.agent_id, event.role))
 
 
 def _count_running(
     tabs: tuple[ConversationTab, ...], role: str | None, change: int
 ) -> tuple[ConversationTab, ...]:
-    """``tabs`` with ``change`` more agents at work on the pinned tab of ``role``, which is
-    None for a role with no pinned tab. A conversational role's tab is left to
-    ``mark_lane_busy``."""
+    """``tabs`` with ``change`` more agents at work on the pinned tab keyed ``role``, a role's or
+    a trigger's tab's, which is None for an agent with no pinned tab. A conversational role's tab
+    is left to ``mark_lane_busy``."""
     return tuple(
         replace(tab, running=tab.running + change) if _counts(tab, role) else tab for tab in tabs
     )

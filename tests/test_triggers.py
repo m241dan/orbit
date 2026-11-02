@@ -18,6 +18,7 @@ from orbit.agent.domain.triggers import (
     merge_triggers,
     render_template,
     template_variables,
+    trigger_tab,
 )
 
 PROJECT = Layer("project", "/src/app/.orbit/config.toml")
@@ -181,6 +182,18 @@ def test_a_triggers_name_is_a_plain_name() -> None:
         load_built_in_triggers({"triggers": {"a.b": {"on": "manual"}}})
     assert str(raised.value) == (
         "triggers.a.b: a trigger's name is a plain name: letters, digits, - and _"
+    )
+
+
+def test_a_tasks_tab_is_that_of_the_trigger_its_origin_names() -> None:
+    tabbed = {"review": REVIEW.model_copy(update={"tab": "review"}), "check": CHECK}
+    assert trigger_tab(tabbed, "review") == "review"
+
+
+def test_a_task_has_no_tab_when_its_origin_names_no_trigger_or_one_without() -> None:
+    assert (trigger_tab(PACKAGE_TRIGGERS, "planner"), trigger_tab(PACKAGE_TRIGGERS, "check")) == (
+        None,
+        None,
     )
 
 

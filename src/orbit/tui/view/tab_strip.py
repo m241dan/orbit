@@ -4,7 +4,7 @@ marked, in order, and how the user moves between them."""
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Protocol
 
-from orbit.protocol import PLANNER, BusyLane, Event, RunningAgent
+from orbit.protocol import PLANNER, BusyLane, Event, RunningAgent, TriggerEntry
 from orbit.tui.view.tabs import (
     ALL_TAB_LABEL,
     PINNED_TABS,
@@ -14,15 +14,19 @@ from orbit.tui.view.tabs import (
     mark_tab_read,
     mark_tab_unread,
     pin_conversations,
+    pin_trigger_tabs,
     pinned_roles,
     replay_tabs,
     reset_tabs,
     running_roles,
+    running_speakers,
     tab_key,
     tab_labels,
     track_roles,
+    track_speakers,
     track_tabs,
 )
+from orbit.tui.view.transcript import speaker
 
 ALL_TAB_ID = "tab-all"
 PLANNER_TAB_ID = f"tab-{PLANNER}"
@@ -30,7 +34,8 @@ OPENING: tuple[tuple[str, str], ...] = (
     (ALL_TAB_ID, ALL_TAB_LABEL),
     *((f"tab-{tab.key}", tab.role) for tab in PINNED_TABS),
 )
-"""The tabs the strip starts with, by id and label: All, then a pinned tab per built-in role."""
+"""The tabs the strip starts with, by id and label: All, then a pinned tab per built-in role,
+until the catalog's triggers group some roles' agents under their tabs."""
 
 
 class TabStripView(Protocol):
@@ -61,14 +66,20 @@ class TabStripView(Protocol):
 
 class TabStrip:
     """The tabs above the conversation, shown in ``view``: "All", a pinned tab per built-in
-    role, then one per other conversational role the catalog lists, then one per running agent
-    in any other role."""
+    role but those whose agents start only from tabbed triggers, then one per tab the catalog's
+    triggers name, then one per other conversational role the catalog lists, then one per
+    running agent writing into none of them."""
 
     def __init__(self, view: TabStripView) -> None:
         self._view = view
         self.tabs: tuple[ConversationTab, ...] = PINNED_TABS
-        self.roles: Mapping[str, str] = {}  # Agents that ran in a pinned role, to the role.
-        # Tab key (an agent id, or a pinned role's) to its tab's id.
+        # Agents that ran writing into a pinned tab, to its key: their trigger's tab's, or
+        # their role's.
+        self.roles: Mapping[str, str] = {}
+        # Agents that ran writing into a trigger's tab, to their role, which labels their
+        # entries.
+        self.speakers: Mapping[str, str] = {}
+        # Tab key (an agent id, a pinned role's or a trigger's tab's) to its tab's id.
         self._tab_ids: dict[str, str] = {tab.key: f"tab-{tab.key}" for tab in PINNED_TABS}
         self._labels: dict[str, str] = dict(OPENING)  # Each tab's label, by its id.
         self._order = [tab_id for tab_id, _ in OPENING]  # The tabs' ids, as the strip has them.
@@ -88,6 +99,11 @@ class TabStrip:
     def key_of(self, agent: str | None) -> str | None:
         """The key of the tab ``agent``'s entries belong to."""
         return tab_key(agent, self.roles)
+
+    def speaker_of(self, agent: str | None) -> str | None:
+        """Who ``agent``'s entries are spoken by: its role, for an agent in a trigger's tab, or
+        the agent, but None for the planner (see :func:`speaker`)."""
+        return speaker(agent, self.roles, self.speakers)
 
     def cycle_conversations(self) -> None:
         """Show the first conversational role's tab (the planner's), from there each next one,
@@ -121,8 +137,14 @@ class TabStrip:
         in, after the built-in roles' tabs, closing those of roles no longer listed."""
         self._update(pin_conversations(self.tabs, lanes))
 
+    def group(self, triggers: Sequence[TriggerEntry]) -> None:
+        """Pin a tab for each tab the catalog's ``triggers`` name, after the built-in roles'
+        tabs, closing those of built-in roles whose agents start only from tabbed triggers, and
+        those of tabs no longer named."""
+        self._update(pin_trigger_tabs(self.tabs, triggers))
+
     def track(self, event: Event) -> None:
-        """Add a tab for an agent that started outside the pinned roles, remove it when that
+        """Add a tab for an agent that started writing into no pinned tab, remove it when that
         agent exits, and mark a tab not being shown when one of its agents has new output."""
         self.learn_roles(event)
         self._update(track_tabs(self.tabs, event, self.agent_of(self._view.active), self.roles))
@@ -134,20 +156,26 @@ class TabStrip:
         self._update(replay_tabs(self.tabs, event, self.roles))
 
     def learn_roles(self, event: Event) -> None:
-        """Note the pinned role an agent started in by ``event``, an earlier one, leaving the
-        tabs as they are."""
-        self.roles = track_roles(self.roles, event, pinned_roles(self.tabs))
+        """Note the pinned tab an agent started writing into by ``event``, an earlier one, and
+        its role if that's a trigger's tab, leaving the tabs as they are."""
+        pinned = pinned_roles(self.tabs)
+        self.roles = track_roles(self.roles, event, pinned)
+        self.speakers = track_speakers(self.speakers, event, pinned)
 
     def reset(self, running: Sequence[RunningAgent]) -> None:
-        """Close every agent's own tab and forget the agents that ran in the pinned roles,
-        as before any agent ran, but those ``running`` in one."""
-        self.roles = running_roles(running, pinned_roles(self.tabs))
+        """Close every agent's own tab and forget the agents that wrote into the pinned tabs,
+        as before any agent ran, but those ``running`` writing into one."""
+        pinned = pinned_roles(self.tabs)
+        self.roles = running_roles(running, pinned)
+        self.speakers = running_speakers(running, pinned)
         self._update(reset_tabs(self.tabs))
 
     def follow(self, running: Sequence[RunningAgent]) -> None:
-        """Make the tabs agree with the agents ``running``: an own tab for each outside the
-        pinned roles, and each pinned tab marked while its role's agents run."""
-        self.roles = {**self.roles, **running_roles(running, pinned_roles(self.tabs))}
+        """Make the tabs agree with the agents ``running``: an own tab for each writing into no
+        pinned tab, and each pinned tab marked while its agents run."""
+        pinned = pinned_roles(self.tabs)
+        self.roles = {**self.roles, **running_roles(running, pinned)}
+        self.speakers = {**self.speakers, **running_speakers(running, pinned)}
         self._update(follow_running(self.tabs, running))
 
     def mark_read(self, agent: str | None) -> None:

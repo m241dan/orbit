@@ -846,6 +846,13 @@ async def test_a_cancelled_call_is_answered_with_an_error_reply() -> None:
     assert running.open_requests == ()
 
 
+async def test_a_running_agent_shows_under_the_tab_it_was_opened_with() -> None:
+    desk = desk_for(ignore)
+    agent = desk.open(HangingTarget(), "bugs-reviewer", "1", (), "review")
+    await desk.publish(AgentStarted(agent_id=agent.id, role="bugs-reviewer", task_id="1"))
+    assert [running.tab for running in desk.running] == ["review"]
+
+
 async def test_concurrent_callers_start_the_host_once_and_share_its_url() -> None:
     host = GatedHost()
     desk = desk_for(ignore, host=host)

@@ -408,24 +408,31 @@ agent's id in a muted row whenever the speaker changes, its tool calls, prefixed
 its requests to orbit and orbit's replies (`agent-1 → orbit complete_task … ✓ …`) in their own
 colour. The tabs above it narrow it: **All** shows everything,
 then come a pinned tab for each built-in role, labelled by its name: **planner**,
-**experimenter**, **coder**, **reviewer** and **configurator**, and one for each other conversational role
-the workspace you're on configures (see `conversation` under
+**experimenter**, **coder**, **reviewer** and **configurator**, but that of a role whose agents
+start only from triggers with a `tab` (see [Triggers](#triggers)), which with the shipped
+triggers leaves out **reviewer**, as only `merge-pass` queues its tasks; then one for each tab the
+triggers name, labelled by it, with the shipped ones **review**, which the lens reviews,
+the merge passes and the fix reviews share, and **super-review**; then one for each other
+conversational role the workspace you're on configures (see `conversation` under
 [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)), such as **architect**, pinned
 again as you move to another workspace; the task list tags each task with the lane its role runs
 in there. The pinned
-tabs are there from the start and keep the whole session's history; every agent in a role shares its tab (two reviewers running at
-once both show under **reviewer**), each message headed and every other entry prefixed with its
-agent's id, so you can tell them apart. Whether the speaker changed is judged within the tab: under
+tabs are there from the start and keep the whole session's history; every agent in a role shares its tab (two coders running at
+once both show under **coder**), each message headed and every other entry prefixed with its
+agent's id, so you can tell them apart. Every agent of a trigger with a `tab` writes into that
+tab instead, its messages headed by its role rather than its id, under All too
+(`bugs-reviewer`, `tests-reviewer`, …, two lenses running at once both show under **review**).
+Whether the speaker changed is judged within the tab: under
 All, where agents interleave, messages are headed more often. The planner's messages are never
-headed. Agents in any other role, such as the startup check (`checker`), the lens reviewers
-(`bugs-reviewer` and the rest; see [Reviews](#reviews)) or a custom role from
+headed. Agents in any other role, such as the startup check (`checker`), a lens reviewer from a
+trigger with no `tab`, or a custom role from
 `.orbit/config.toml`, get a temporary tab of their own after the pinned ones, labelled by role
 (`checker`, `checker 2`, …), which closes when the agent exits; their entries stay under All. A
 role's tab also shows its tasks' headers (`Task 2: …`), verification results and merge notes, so a
 coder task's whole run reads under **coder**; those of a task in a role without a pinned tab, and
 the startup check's, show only under All, as do notices. Click a tab to switch, cycle with
 `tab`/`shift+tab`, or jump to the planner tab with `ctrl+t` (again goes to each other
-conversational role's tab in turn, then back). A role's tab starts with `●` while one of its agents
+conversational role's tab in turn, then back). A role's or a trigger's tab starts with `●` while one of its agents
 is running (a conversational role's while it's answering), and a tab with output you haven't seen,
 a task note included, ends in `*`. The prompt talks to the conversational role whose tab is shown,
 and to the planner on any other tab: its placeholder names the role (`Press i to talk to
@@ -1931,15 +1938,15 @@ The shipped triggers are data in
 
 | Trigger | Event | When | Does | Also |
 |---|---|---|---|---|
-| `fit-review` | `task_landed` | every one | a `fit-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding` |
-| `bugs-review` | `task_landed` | every one | a `bugs-reviewer` task, from `lens-review.md` | guard `review-rounds` |
-| `tests-review` | `task_landed` | every one | a `tests-reviewer` task, from `lens-review.md` | guard `review-rounds` |
-| `logic-review` | `task_landed` | every one | a `logic-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding` |
-| `security-review` | `task_landed` | every one | a `security-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding` |
-| `performance-review` | `task_landed` | every one | a `performance-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding` |
-| `merge-pass` | `reviews_finished` | `findings = "some"` | a `reviewer` task, from `merge-pass.md` | |
-| `super-review` | `commits` | `origin = ["manual", "planner"]` | a `style-reviewer`, `drift-reviewer` and `scaling-reviewer` task, from `super-review.md` | `every = 10`, guard `suggestions-pending`, manual as `Super review` |
-| `super-fix-review` | `task_landed` | `review = "batch"` | a `style-reviewer`, `drift-reviewer` and `scaling-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding` |
+| `fit-review` | `task_landed` | every one | a `fit-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding`, `tab = "review"` |
+| `bugs-review` | `task_landed` | every one | a `bugs-reviewer` task, from `lens-review.md` | guard `review-rounds`, `tab = "review"` |
+| `tests-review` | `task_landed` | every one | a `tests-reviewer` task, from `lens-review.md` | guard `review-rounds`, `tab = "review"` |
+| `logic-review` | `task_landed` | every one | a `logic-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding`, `tab = "review"` |
+| `security-review` | `task_landed` | every one | a `security-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding`, `tab = "review"` |
+| `performance-review` | `task_landed` | every one | a `performance-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding`, `tab = "review"` |
+| `merge-pass` | `reviews_finished` | `findings = "some"` | a `reviewer` task, from `merge-pass.md` | `tab = "review"` |
+| `super-review` | `commits` | `origin = ["manual", "planner"]` | a `style-reviewer`, `drift-reviewer` and `scaling-reviewer` task, from `super-review.md` | `every = 10`, guard `suggestions-pending`, manual as `Super review`, `tab = "super-review"` |
+| `super-fix-review` | `task_landed` | `review = "batch"` | a `style-reviewer`, `drift-reviewer` and `scaling-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding`, `tab = "review"` |
 | `configure-checks` | `manual` | every one | a `configurator` task, from `configure-checks.md` | manual as `Set up checks` |
 | `set-up-verification` | `session_started` | `verification = "missing"` | a `configurator` task, from `configure-checks.md` | guard `not-queued`, runs at once, as `ctrl+e`'s does |
 | `startup-check` | `session_started` | `verification = "configured"` | runs the task checks, `checks = "task-checks"` | |
@@ -1974,6 +1981,11 @@ A trigger's fields:
   manual trigger needs a label.
 - `draft`: whether its task is added as a draft, for you to accept.
 - `enabled`: whether it fires at all.
+- `tab`: the conversation tab its agents share, a plain name (letters, digits, `-` and `_`; one
+  such as `"a b"` is refused, naming the trigger), labelled with it, such as the shipped lens
+  reviews', `merge-pass`'s and `super-fix-review`'s `review` and `super-review`'s own; left out,
+  each agent shows under its role's tab or a tab of its own (see the conversation's tabs under
+  [Usage](#usage)).
 
 The events, the fields their `when` can match, and the variables their templates can use, each
 its name in braces:

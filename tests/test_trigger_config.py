@@ -273,6 +273,29 @@ def test_a_triggers_name_is_a_plain_name() -> None:
     )
 
 
+def test_a_triggers_tab_is_a_plain_name() -> None:
+    assert refusal({"nightly": {**NIGHTLY, "tab": "a b"}}) == (
+        "triggers.nightly.tab: a tab is a plain name: letters, digits, - and _"
+    )
+
+
+def test_a_project_sets_a_triggers_tab() -> None:
+    assert (
+        loaded({"triggers": {"nightly": {**NIGHTLY, "tab": "tidy"}}}).triggers["nightly"].tab
+        == "tidy"
+    )
+
+
+def test_the_reviews_share_the_review_tab_and_the_super_review_its_own() -> None:
+    tabs = {name: trigger.tab for name, trigger in SHIPPED.items() if trigger.tab is not None}
+    assert tabs == {
+        **dict.fromkeys(LENS_TRIGGERS, "review"),
+        "merge-pass": "review",
+        "super-review": "super-review",
+        "super-fix-review": "review",
+    }
+
+
 def test_the_user_config_cant_set_triggers() -> None:
     with pytest.raises(ConfigError) as raised:
         load_user_roles({"triggers": {"x": NIGHTLY}}, Layer("user"), ROLES)

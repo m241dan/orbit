@@ -387,7 +387,7 @@
       "type": "object"
     },
     "AgentStarted": {
-      "description": "Agent ``agent_id`` was started in the ``role`` to work on task ``task_id``.",
+      "description": "Agent ``agent_id`` was started in the ``role`` to work on task ``task_id``, showing under\nthe ``tab`` of the trigger that queued its task, if it has one.",
       "properties": {
         "agent_id": {
           "title": "Agent Id",
@@ -396,6 +396,18 @@
         "role": {
           "title": "Role",
           "type": "string"
+        },
+        "tab": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tab"
         },
         "task_id": {
           "title": "Task Id",
@@ -2527,7 +2539,7 @@
       "type": "object"
     },
     "RunningAgent": {
-      "description": "Agent ``agent_id``, running in the ``role`` on task ``task_id``, with its\n``open_requests``, oldest first, and what its finished turns cost so far (``spent``).",
+      "description": "Agent ``agent_id``, running in the ``role`` on task ``task_id``, with its\n``open_requests``, oldest first, what its finished turns cost so far (``spent``), and the\n``tab`` it shows under, as its ``AgentStarted`` has it.",
       "properties": {
         "agent_id": {
           "title": "Agent Id",
@@ -2547,6 +2559,18 @@
         },
         "spent": {
           "$ref": "#/$defs/Usage"
+        },
+        "tab": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tab"
         },
         "task_id": {
           "title": "Task Id",
@@ -3668,7 +3692,7 @@
       "type": "object"
     },
     "TriggerEntry": {
-      "description": "A trigger ``name``, shown as ``label``; ``manual`` if the user fires it.",
+      "description": "A trigger ``name``, shown as ``label``; ``manual`` if the user fires it, the ``tab`` its\nagents share, if any, and the ``roles`` of the tasks it queues.",
       "properties": {
         "label": {
           "title": "Label",
@@ -3681,6 +3705,26 @@
         "name": {
           "title": "Name",
           "type": "string"
+        },
+        "roles": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Roles",
+          "type": "array"
+        },
+        "tab": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tab"
         }
       },
       "required": [

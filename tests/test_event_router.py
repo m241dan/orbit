@@ -21,6 +21,7 @@ from orbit.protocol import (
     ReportSummary,
     SessionStateChanged,
     StepState,
+    TriggerEntry,
     Usage,
     UsageTotal,
     UsageTotals,
@@ -133,12 +134,19 @@ def test_a_catalog_labels_triggers_pins_conversations_tags_lanes_then_follows_wo
     assert routed(catalog) == [
         *TRACKED,
         "label_triggers",
+        "tabs.group",
         "navigation.follow_catalog",
         "transcript.show_session",
         "viewing.show",
         "paused.show",
         "task_list.show_waiting",
     ]
+
+
+def test_a_catalogs_triggers_group_the_tabs() -> None:
+    triggers = (TriggerEntry(name="bugs-review", label="b", manual=False, tab="review"),)
+    catalog = Catalog(workspaces=(), agents=(), triggers=triggers, lanes=())
+    calls_of(catalog).tabs.group.assert_called_once_with(triggers)
 
 
 def test_a_sessions_state_reaches_the_catalog_then_the_pickers_and_the_prompt_lines() -> None:

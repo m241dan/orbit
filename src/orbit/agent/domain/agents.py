@@ -7,7 +7,8 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Agent:
-    """An agent started in ``role`` to work on task ``task_id``.
+    """An agent started in ``role`` to work on task ``task_id``, showing under ``tab``, that of
+    the trigger that queued its task, if it has one.
 
     It sends ``token`` with every request, so orbit knows who's asking without trusting
     anything the model says about itself.
@@ -17,6 +18,7 @@ class Agent:
     role: str
     task_id: str
     token: str
+    tab: str | None = None
 
 
 class AgentRegistry:
@@ -37,12 +39,15 @@ class AgentRegistry:
         """Agents whose tokens still resolve, oldest first."""
         return tuple(self._by_token.values())
 
-    def register(self, role: str, task_id: str) -> Agent:
+    def register(self, role: str, task_id: str, tab: str | None = None) -> Agent:
+        """A new agent in ``role`` working on task ``task_id``, showing under ``tab``, if any,
+        with a fresh id and token."""
         token = self._new_token()
         if token in self._used:
             raise RuntimeError("The token factory repeated a token.")
         self._used.add(token)
-        agent = Agent(id=f"agent-{next(self._ids)}", role=role, task_id=task_id, token=token)
+        agent_id = f"agent-{next(self._ids)}"
+        agent = Agent(id=agent_id, role=role, task_id=task_id, token=token, tab=tab)
         self._by_token[token] = agent
         return agent
 
