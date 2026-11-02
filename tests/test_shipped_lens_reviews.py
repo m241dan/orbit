@@ -8,7 +8,7 @@ import json
 from typing import Any
 
 from orbit.agent import WorkspaceHost
-from orbit.agent.application.ports import Reply
+from orbit.agent.application.ports import Reply, TreeFailed
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.endings import INTERRUPTED, QUEUED_BEFORE_LENSES
 from orbit.agent.domain.reviews import (
@@ -65,10 +65,9 @@ def shipped(*scripts: Script, reviewers: tuple[Script, ...] = (), **options: Any
     defaults: dict[str, Any] = {
         "triggers": SHIPPED_TRIGGERS,
         "review_limits": ReviewLimits(rounds=1),
+        "tree": FakeTree(),
     }
-    session, _, _ = session_for(
-        *scripts, reviewers=reviewers, tree=FakeTree(), review=True, **(defaults | options)
-    )
+    session, _, _ = session_for(*scripts, reviewers=reviewers, review=True, **(defaults | options))
     return session
 
 
@@ -132,6 +131,34 @@ async def test_a_lens_finding_queues_one_merge_pass_that_files_into_the_reviews_
     assert f"F1 · {BUGS_REVIEWER} · blocking: Crash on empty input" in merge
     assert "F2 · tests-reviewer · normal: No test for it" in merge
     assert board(events)[8].task.prompt.startswith("Fix the crash")
+
+
+async def merge_prompt(tree: FakeTree, task: str) -> str:
+    """The prompt of the merge pass of the review of the commit of ``task``, landed in
+    ``tree``, whose Bugs lens reports one finding."""
+    lenses = lenses_finding(bugs=("Crash on empty input", "blocking"))
+    session = shipped(claims_done, *lenses, reviewers=(dismisses("F1"),), tree=tree)
+    await start(session, task)
+    events = await asyncio.wait_for(settle(session), 10)
+    await session.close()
+    merge = board(events)[7]
+    assert (merge.task.role, merge.status) == (REVIEWER, "completed")
+    return merge.task.prompt
+
+
+async def test_the_merge_pass_is_given_the_reviewed_commits_message_with_its_plan_line() -> None:
+    merge = await merge_prompt(FakeTree(), "Plan: docs/x.md\n\nRead the flag.")
+    assert "Reviewed commit c1:\n" in merge
+    assert "\n    Plan: docs/x.md\n" in merge
+    assert "\n    Read the flag." in merge
+
+
+async def test_the_merge_pass_runs_without_messages_git_cannot_show() -> None:
+    tree = FakeTree()
+    tree.failures["messages"] = TreeFailed("git show failed: bad object c1")
+    merge = await merge_prompt(tree, "Plan: docs/x.md\n\nRead the flag.")
+    assert "Reviewed commit" not in merge and "Plan: docs/x.md" not in merge
+    assert "F1 · bugs-reviewer · blocking: Crash on empty input" in merge
 
 
 async def test_the_bugs_reviewer_may_report_a_blocking_finding_and_the_fit_reviewer_may_not() -> (

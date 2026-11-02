@@ -502,8 +502,11 @@ MERGE_PASS_FILES_AND_DISMISSES = (
     " them.",
     "Rank the tasks by severity and file the most severe within your cap. For each, call"
     " `suggest_task` with:",
-    "**Where**: the reviewed task's `Plan: <path>` line when it had one, then the files and"
-    " functions involved.",
+    "it quotes each reviewed commit's message under `Reviewed commit <id>:`; the message's body"
+    " is the prompt the coder was given, so you know what was asked. A super review or a set"
+    " report reviews no task's commit, so its task quotes none.",
+    "**Where**: the `Plan: <path>` line of the reviewed commit's message when it has one, then"
+    " the files and functions involved.",
     "**Change**: what to do, with the input or scenario that shows the problem.",
     "**Keep**: what must stay as it is.",
     "**Done**: the behaviours tests must pin down.",

@@ -82,6 +82,7 @@ from orbit.agent.domain.reviews import (
     FindingReport,
     LandedSince,
     LaneSnapshot,
+    MergeBriefing,
     ReviewGroup,
     ReviewJob,
     ReviewPlanner,
@@ -94,6 +95,7 @@ from orbit.agent.domain.reviews import (
     kept_groups,
     pause_notice,
     pending_titles,
+    quotes_messages,
     raised_roles,
     review_kind,
     review_over,
@@ -1035,12 +1037,24 @@ class ReviewLane:
 
     async def _finished_values(self, batch: str, group: ReviewGroup) -> Mapping[str, str]:
         """The variables of ``reviews_finished`` for ``group``, the review behind ``batch``,
-        told what landed after the last commit it reviews as it stands now."""
+        told what landed after the last commit it reviews as it stands now, and the messages of
+        the commits it reviews."""
         job = group.job
         landed = await self._landed_after(job.commits[-1])
+        messages = await self._messages_of(job)
         pending = pending_titles(self._board.tasks)
-        cap = self.planner.cap_of(batch)
-        return finished_values(job, group.findings, cap, pending, landed)
+        briefing = MergeBriefing(pending, landed, messages)
+        return finished_values(job, group.findings, self.planner.cap_of(batch), briefing)
+
+    async def _messages_of(self, job: ReviewJob) -> tuple[str, ...]:
+        """The messages of ``job``'s commits, in order, if its merge pass quotes them; none
+        if it doesn't, or if git can't show them."""
+        if not quotes_messages(job):
+            return ()
+        try:
+            return tuple(await self._tree.messages(job.commits))
+        except TreeFailed:
+            return ()
 
     async def _close_review(self, batch: str, publishing: Publishing) -> None:
         """End the review behind ``batch``: its batch no longer fills, and is reviewed if

@@ -886,6 +886,18 @@ class FakeTree:
         self._fail("show")
         return "\n".join(f"diff of {commit}" for commit in commits)
 
+    async def messages(self, commits: Sequence[str]) -> list[str]:
+        self._fail("messages")
+        return [self._message(commit) for commit in commits]
+
+    def _message(self, commit: str) -> str:
+        """The message of ``commit``: that the tree committed as it, or one made up for a commit
+        an agent made itself."""
+        number = _commit_number(commit)
+        return (
+            self.commits[number - 1] if 0 < number <= len(self.commits) else f"Message of {commit}"
+        )
+
     async def landed_since(self, commit: str, until: str | None = None) -> list[str]:
         self.asked_since.append((commit, until))
         self._fail("landed_since")

@@ -122,6 +122,7 @@ def test_every_event_gives_its_trigger_and_its_own_variables() -> None:
             "cap",
             "queued",
             "landed_since",
+            "messages",
         ),
         "set_finished": ("trigger", "set", "status", "commit", "output"),
         "schedule": ("trigger",),

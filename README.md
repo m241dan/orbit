@@ -1315,10 +1315,11 @@ report a finding as `blocking`, as their lens skills define it (`blocking_findin
 others report every finding as `normal`.
 
 Once all six have ended, the `merge-pass` trigger queues the **merge pass**, a `reviewer` task
-handed every finding of the review (`merge-pass.md`), but only if they reported at least one
+handed every finding of the review and the reviewed commits' messages, whose bodies are the
+prompts their coders were given (`merge-pass.md`), but only if they reported at least one
 (`when = { findings = "some" }`): a review whose lenses all came back clean queues no merge pass
-and files nothing. The reviewer checks each finding against the code, the tasks queued and the
-commits landed since, groups related ones, such as a bug and the test that would have caught it,
+and files nothing. The reviewer checks each finding against the code, what the task asked, the
+tasks queued and the commits landed since, groups related ones, such as a bug and the test that would have caught it,
 into one task, ranks them by severity, and files the most severe within the cap with
 `suggest_task` (a title, kept to one line, and a prompt in four parts: Where, with the reviewed
 task's `Plan:` line, Change, Keep and Done), naming the findings each covers and its severity,
@@ -2109,7 +2110,7 @@ its name in braces:
 | `commits` | every `every` landings matching its `when` on `role` and `origin` | `role`, `origin` | `{commit}`, `{cap}`, `{queued}`, `{since_commits}`, `{changed_files}`, `{sample}` |
 | `startup_check_failed` | a step of the startup check fails, once for each | `step` | `{step}`, `{output}` |
 | `manual` | you fire it | none | `{checks}` |
-| `reviews_finished` | every finding role's task of a review has ended (see [Reviews](#reviews)) | `findings`: `some` or `none`; `review`: `commit`, `batch`, `super` or `set` | `{title}`, `{commit}`, `{findings}`, `{cap}`, `{queued}`, `{landed_since}` |
+| `reviews_finished` | every finding role's task of a review has ended (see [Reviews](#reviews)) | `findings`: `some` or `none`; `review`: `commit`, `batch`, `super` or `set` | `{title}`, `{commit}`, `{findings}`, `{cap}`, `{queued}`, `{landed_since}`, `{messages}` |
 | `set_finished` | a run of a named set ends, passed or failed (not one cancelled, nor the task checks) | `set`: any set's name; `status`: `passed` or `failed` | `{set}`, `{status}`, `{commit}`, `{output}` |
 | `schedule` | its `cron` comes due while the workspace is open, or came due while it was closed | none | none |
 
@@ -2210,7 +2211,10 @@ findings of the super review at 1a2b3c4`, or, for a set report, `Merge the findi
 mutation report at 1a2b3c4`), `{commit}` the review's last commit, `{findings}` a
 paragraph for each finding in id order, `F1 · bugs-reviewer · blocking: <title>` then its body,
 `{cap}` the suggestions its batch takes (`review_suggestions`, or `super_review_suggestions` for
-a super review), and `{queued}` and `{landed_since}` as a review's are; on `startup_check_failed`,
+a super review), `{queued}` and `{landed_since}` as a review's are, and `{messages}` the reviewed
+commits' messages in order, each under `Reviewed commit 1a2b3c4:` and indented, trimmed past 30000
+characters, empty for a super review or a set report, which review no task's commits; on
+`startup_check_failed`,
 `{step}` the failed step's name and `{output}` the command that failed with its output, trimmed;
 on `set_finished`, `{set}` the set's name, `{status}` `passed` or `failed`, `{commit}` the commit
 it ran on, and `{output}` the failing step's name and its output, trimmed as the verification

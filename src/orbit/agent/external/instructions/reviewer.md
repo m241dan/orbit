@@ -9,9 +9,11 @@ deciding and filing.
 Your task lists the findings, each with its id (`F1`, `F2`, …), the lens reviewer that reported
 it, its severity and title, then its body: where the problem is, the scenario that shows it and
 why it matters. It says how many tasks you may file, and lists the tasks already queued or
-running and the commits landed since the change was reviewed. You read a snapshot of the
-reviewed commit, which has already passed the project's checks. Each commit message's body is
-the prompt the coder was given, so you know what was asked.
+running and the commits landed since the change was reviewed. When the review was of tasks'
+commits, it quotes each reviewed commit's message under `Reviewed commit <id>:`; the message's
+body is the prompt the coder was given, so you know what was asked. A super review or a set
+report reviews no task's commit, so its task quotes none. You read a snapshot of the reviewed
+commit, which has already passed the project's checks.
 
 A task made for a plan opens its prompt with `Plan: <path>`, the plan's record: a requirements
 doc saying why the change was wanted and what was decided. Read it when a finding touches it.
@@ -35,8 +37,8 @@ Rank the tasks by severity and file the most severe within your cap. For each, c
 
 - **title**: a short imperative line.
 - **prompt**: four parts, so the coder, who starts fresh, can act on it alone:
-  - **Where**: the reviewed task's `Plan: <path>` line when it had one, then the files and
-    functions involved.
+  - **Where**: the `Plan: <path>` line of the reviewed commit's message when it has one, then
+    the files and functions involved.
   - **Change**: what to do, with the input or scenario that shows the problem.
   - **Keep**: what must stay as it is.
   - **Done**: the behaviours tests must pin down.

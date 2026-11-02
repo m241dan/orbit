@@ -6,4 +6,6 @@ You may file at most {cap} tasks.
 
 {landed_since}
 
+{messages}
+
 {findings}

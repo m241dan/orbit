@@ -11,6 +11,7 @@ from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.reviews import (
     Finding,
     LandedSince,
+    MergeBriefing,
     ReviewJob,
     finished_values,
     review_prompt,
@@ -255,15 +256,17 @@ FINDINGS = (
 """Findings two lenses reported."""
 
 
-def test_the_merge_pass_template_renders_the_cap_lists_and_findings() -> None:
+def test_the_merge_pass_template_renders_the_cap_lists_messages_and_findings() -> None:
     job = ReviewJob(commits=(COMMIT,), round=0, batch=None)
-    values = finished_values(job, FINDINGS, 5, PENDING, LANDED.subjects) | {"trigger": "merge-pass"}
+    briefing = MergeBriefing(PENDING, LANDED.subjects, ("Add it\n\nPlan: docs/x.md",))
+    values = finished_values(job, FINDINGS, 5, briefing) | {"trigger": "merge-pass"}
     assert render_template(template("merge-pass"), values) == "\n\n".join(
         [
             "Merge the findings of the review of commit 0123456",
             "You may file at most 5 tasks.",
             "Tasks already queued (don't suggest these):\n- Tidy the parser\n- Speed up the tests",
             f"{LANDED_HEADING}\n- Fix the lexer\n- Name the tokens",
+            "Reviewed commit 0123456:\n    Add it\n\n    Plan: docs/x.md",
             "F1 · bugs-reviewer · blocking: Off by one\nIn parse(), the last line is lost.",
             "F2 · tests-reviewer · normal: No test of the last line",
         ]
@@ -272,7 +275,7 @@ def test_the_merge_pass_template_renders_the_cap_lists_and_findings() -> None:
 
 def test_the_merge_pass_template_leaves_out_empty_lists() -> None:
     job = ReviewJob(commits=(COMMIT,), round=1, batch="batch-2")
-    values = finished_values(job, FINDINGS[1:], 3, (), ()) | {"trigger": "merge-pass"}
+    values = finished_values(job, FINDINGS[1:], 3, MergeBriefing()) | {"trigger": "merge-pass"}
     assert render_template(template("merge-pass"), values) == "\n\n".join(
         [
             "Merge the findings of the review of the 1 commits made for review batch-2",

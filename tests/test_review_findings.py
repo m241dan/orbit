@@ -8,8 +8,10 @@ import pytest
 
 from orbit.agent.domain.reviews import (
     BLOCKING_REFUSED,
+    MESSAGES_LIMIT,
     Finding,
     FindingReport,
+    MergeBriefing,
     ReviewGroup,
     ReviewJob,
     fan_in_due,
@@ -17,6 +19,7 @@ from orbit.agent.domain.reviews import (
     finding_report,
     finished_fields,
     finished_values,
+    quotes_messages,
     review_over,
     set_review,
     with_ended,
@@ -213,21 +216,21 @@ def test_reviews_finished_says_whether_there_were_findings() -> None:
 def test_reviews_finished_titles_the_merge_by_what_was_reviewed(
     job: ReviewJob, title: str, commit: str
 ) -> None:
-    values = finished_values(job, (), 5, (), ())
+    values = finished_values(job, (), 5, MergeBriefing())
     assert (values["title"], values["commit"]) == (title, commit)
 
 
 def test_reviews_finished_lists_each_finding_as_a_paragraph_in_id_order() -> None:
     group = reported(ReviewGroup(COMMIT), "bugs-reviewer", BLOCKING)
     group = reported(group, "tests-reviewer", FindingReport("No test for it", "", "normal"))
-    assert finished_values(COMMIT, group.findings, 5, (), ())["findings"] == (
+    assert finished_values(COMMIT, group.findings, 5, MergeBriefing())["findings"] == (
         "F1 · bugs-reviewer · blocking: Crash on empty input\nparse('') raises.\n\n"
         "F2 · tests-reviewer · normal: No test for it"
     )
 
 
 def test_reviews_finished_gives_the_cap_and_lists_as_the_review_templates_do() -> None:
-    values = finished_values(COMMIT, (), 7, ("Add tests",), ("Add B",))
+    values = finished_values(COMMIT, (), 7, MergeBriefing(("Add tests",), ("Add B",)))
     assert values == {
         "title": "Merge the findings of the review of commit 1a2b3c4",
         "commit": "1a2b3c4",
@@ -235,9 +238,46 @@ def test_reviews_finished_gives_the_cap_and_lists_as_the_review_templates_do() -
         "cap": "7",
         "queued": "Tasks already queued (don't suggest these):\n- Add tests",
         "landed_since": "Landed since (check your findings against these):\n- Add B",
+        "messages": "",
     }
 
 
 def test_reviews_finished_gives_empty_lists_when_nothing_is_queued_or_landed() -> None:
-    values = finished_values(SUPER, (), 10, (), ())
+    values = finished_values(SUPER, (), 10, MergeBriefing())
     assert (values["queued"], values["landed_since"]) == ("", "")
+
+
+def test_reviews_finished_quotes_a_reviewed_commits_message_indented_under_its_commit() -> None:
+    briefing = MergeBriefing(messages=("Add the flag\n\nOrbit task:\n\nPlan: docs/x.md",))
+    assert finished_values(COMMIT, (), 5, briefing)["messages"] == (
+        "Reviewed commit 1a2b3c4:\n    Add the flag\n\n    Orbit task:\n\n    Plan: docs/x.md"
+    )
+
+
+def test_reviews_finished_quotes_each_of_a_batchs_messages_in_commit_order() -> None:
+    briefing = MergeBriefing(messages=("Add a", "Add b", "Add c"))
+    assert finished_values(BATCH, (), 5, briefing)["messages"] == (
+        "Reviewed commit c1:\n    Add a\n\n"
+        "Reviewed commit c2:\n    Add b\n\n"
+        "Reviewed commit 9f8e7d6:\n    Add c"
+    )
+
+
+def test_reviews_finished_trims_the_messages_past_their_limit() -> None:
+    briefing = MergeBriefing(messages=("x" * MESSAGES_LIMIT,))
+    messages = finished_values(COMMIT, (), 5, briefing)["messages"]
+    assert len(messages) == MESSAGES_LIMIT + len("\n… (messages trimmed)")
+    assert messages.endswith("x\n… (messages trimmed)")
+
+
+@pytest.mark.parametrize("job", [SUPER, SET])
+def test_reviews_finished_quotes_no_messages_for_a_review_of_no_task(job: ReviewJob) -> None:
+    briefing = MergeBriefing(messages=("Add it",))
+    assert finished_values(job, (), 5, briefing)["messages"] == ""
+
+
+@pytest.mark.parametrize(
+    ("job", "quoted"), [(COMMIT, True), (BATCH, True), (SUPER, False), (SET, False)]
+)
+def test_only_a_review_of_tasks_commits_quotes_their_messages(job: ReviewJob, quoted: bool) -> None:
+    assert quotes_messages(job) is quoted

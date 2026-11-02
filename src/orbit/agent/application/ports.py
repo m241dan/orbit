@@ -350,6 +350,10 @@ class CoderTree(Protocol):
         """Each of ``commits``' message and diff."""
         ...
 
+    async def messages(self, commits: Sequence[str]) -> list[str]:
+        """Each of ``commits``' whole message, subject and body, in the order given."""
+        ...
+
     async def landed_since(self, commit: str, until: str | None = None) -> list[str]:
         """The subjects of the commits after ``commit``, up to ``until`` or, without it, on the
         base, oldest first."""

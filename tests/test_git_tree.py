@@ -797,6 +797,31 @@ async def test_show_gives_each_commits_message_and_diff(repo: Path) -> None:
     assert shown.index("Add b") < shown.index("+two") < shown.index("Add c") < shown.index("+three")
 
 
+async def test_messages_gives_each_commits_whole_message_in_the_order_asked(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.prepare(keep=False))
+    (path / "b.txt").write_text("two\n")
+    await tree.commit("Add b\n\nPlan: docs/x.md\n\nAdd it.")
+    first = await tree.head()
+    (path / "c.txt").write_text("three\n")
+    await tree.commit("Add c")
+    messages = await tree.messages([await tree.head(), first])
+    assert messages == ["Add c", "Add b\n\nPlan: docs/x.md\n\nAdd it."]
+
+
+async def test_messages_of_no_commits_is_nothing(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    await tree.prepare(keep=False)
+    assert await tree.messages([]) == []
+
+
+async def test_messages_of_an_unknown_commit_fails(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    await tree.prepare(keep=False)
+    with pytest.raises(TreeFailed, match="git show failed"):
+        await tree.messages(["0" * 40])
+
+
 async def test_landed_since_gives_the_subjects_on_the_base_after_a_commit_oldest_first(
     repo: Path,
 ) -> None:

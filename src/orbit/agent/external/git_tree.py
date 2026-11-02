@@ -185,6 +185,13 @@ class GitCoderTree:
     async def show(self, commits: Sequence[str]) -> str:
         return await self._git(self._root, "show", "--stat", "--patch", "--format=medium", *commits)
 
+    async def messages(self, commits: Sequence[str]) -> list[str]:
+        if not commits:  # Shown no commit, git shows HEAD.
+            return []
+        listed = await self._git(self._root, "show", "--no-patch", "-z", "--format=%B", *commits)
+        # Each message ends in a NUL, so the last part is empty.
+        return [message.strip() for message in listed.split("\0")[:-1]]
+
     async def landed_since(self, commit: str, until: str | None = None) -> list[str]:
         end = until if until is not None else await self._base_ref()
         listed = await self._git(self._root, "log", "--format=%s", "--reverse", f"{commit}..{end}")

@@ -10,6 +10,7 @@ generate by themselves. A named set's run reported to finding roles, through a t
 
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from textwrap import indent
 from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict
@@ -30,6 +31,9 @@ from orbit.protocol import (
 
 # Characters of diff quoted in a review task; a reviewer can read files for more.
 DIFF_LIMIT = 30000
+# Characters of the reviewed commits' messages quoted in a merge pass's task; each body is a
+# coder's prompt, and the plan it names holds the rest.
+MESSAGES_LIMIT = 30000
 # Roles of the tasks orbit queues for itself, which no reviewer would suggest.
 _ORBITS_ROLES = REVIEW_ROLES | {CONFIGURATOR}
 # Queued tasks named in a review task, so the reviewer doesn't suggest them; the rest are counted.
@@ -350,25 +354,50 @@ def finished_fields(job: ReviewJob, findings: Sequence[Finding]) -> dict[str, st
     return {"findings": "some" if findings else "none", "review": review_kind(job)}
 
 
+@dataclass(frozen=True)
+class MergeBriefing:
+    """What a merge pass is told beside its findings: the titles of the tasks ``pending``, the
+    subjects of the commits ``landed_since`` the last one reviewed, and the ``messages`` of the
+    reviewed commits, in their order."""
+
+    pending: Sequence[str] = ()
+    landed_since: Sequence[str] = ()
+    messages: Sequence[str] = ()
+
+
+def quotes_messages(job: ReviewJob) -> bool:
+    """Whether the merge pass of ``job``'s review quotes the reviewed commits' messages: a
+    review of the commits of tasks does, a super review or a set report, of no task, doesn't."""
+    return review_kind(job) in ("commit", "batch")
+
+
 def finished_values(
-    job: ReviewJob,
-    findings: Sequence[Finding],
-    cap: int,
-    pending: Sequence[str],
-    landed_since: Sequence[str],
+    job: ReviewJob, findings: Sequence[Finding], cap: int, briefing: MergeBriefing
 ) -> dict[str, str]:
     """The variables of ``reviews_finished`` for the review of ``job`` whose lenses reported
-    ``findings``, its batch taking ``cap`` suggestions, told the tasks titled ``pending`` are
-    queued already and that the commits whose subjects are ``landed_since`` landed after the
-    last it reviews, as the review templates render them. ``{trigger}`` is the caller's."""
+    ``findings``, its batch taking ``cap`` suggestions, told what ``briefing`` says, the lists
+    as the review templates render them. ``{messages}`` quotes the reviewed commits' messages,
+    each indented under its commit, if :func:`quotes_messages` says so, and is empty otherwise.
+    ``{trigger}`` is the caller's."""
     return {
         "title": _merge_title(job),
         "commit": job.commits[-1][:7],
         "findings": _paragraphs([_finding_paragraph(finding) for finding in findings]),
         "cap": str(cap),
-        "queued": _paragraphs(_pending(pending)),
-        "landed_since": _paragraphs(_landed(landed_since)),
+        "queued": _paragraphs(_pending(briefing.pending)),
+        "landed_since": _paragraphs(_landed(briefing.landed_since)),
+        "messages": _quoted_messages(job, briefing.messages) if quotes_messages(job) else "",
     }
+
+
+def _quoted_messages(job: ReviewJob, messages: Sequence[str]) -> str:
+    """Each of ``messages``, those of ``job``'s commits in order, indented under the line
+    naming its commit, trimmed past :data:`MESSAGES_LIMIT` characters."""
+    quoted = [
+        f"Reviewed commit {commit[:7]}:\n{indent(message, '    ')}"
+        for commit, message in zip(job.commits, messages, strict=False)
+    ]
+    return _cut(_paragraphs(quoted), MESSAGES_LIMIT, "messages")
 
 
 def _merge_title(job: ReviewJob) -> str:
@@ -904,9 +933,14 @@ def _sampled(paths: Sequence[str]) -> list[str]:
 
 def _trimmed(diff: str) -> str:
     """``diff``, its end trimmed past :data:`DIFF_LIMIT` characters."""
-    if len(diff) > DIFF_LIMIT:
-        return diff[:DIFF_LIMIT] + "\n… (diff trimmed)"
-    return diff
+    return _cut(diff, DIFF_LIMIT, "diff")
+
+
+def _cut(text: str, limit: int, noun: str) -> str:
+    """``text``, its end trimmed past ``limit`` characters, saying its ``noun`` was."""
+    if len(text) > limit:
+        return f"{text[:limit]}\n… ({noun} trimmed)"
+    return text
 
 
 def _review_title(job: ReviewJob) -> str:

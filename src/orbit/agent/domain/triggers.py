@@ -181,7 +181,16 @@ EVENTS: Mapping[str, Event] = {
     "manual": Event((), (TRIGGER_VARIABLE, "checks")),
     REVIEWS_FINISHED: Event(
         ("findings", "review"),
-        (TRIGGER_VARIABLE, "title", "commit", "findings", "cap", "queued", "landed_since"),
+        (
+            TRIGGER_VARIABLE,
+            "title",
+            "commit",
+            "findings",
+            "cap",
+            "queued",
+            "landed_since",
+            "messages",
+        ),
     ),
     SET_FINISHED: Event(("set", "status"), (TRIGGER_VARIABLE, "set", "status", "commit", "output")),
     SCHEDULE: Event((), (TRIGGER_VARIABLE,)),
