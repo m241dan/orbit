@@ -319,12 +319,14 @@ class ReviewLane:
 
     async def _settle_filling(self, batch: str, group: ReviewGroup) -> None:
         """Keep ``group`` as the review behind ``batch``, which still fills, and settle it
-        quietly if it's due to fan in or to end."""
-        self._groups[batch] = group
-        if not (fan_in_due(group) or review_over(group, self._members(batch))):
-            return
-        again = fan_in_due_again(group)  # Back to reviewing, so _settle raises it again.
+        quietly if it's due to fan in or to end. One due to fan in again, as
+        :func:`fan_in_due_again` says, goes back to reviewing first, so it fans in whatever its
+        other tasks are doing."""
+        again = fan_in_due_again(group)
         restored = replace(group, stage="reviewing") if again else group
+        self._groups[batch] = restored
+        if not (fan_in_due(restored) or review_over(restored, self._members(batch))):
+            return
         await self._settle(batch, restored, "quiet")
         await self._hooks.changed()
 

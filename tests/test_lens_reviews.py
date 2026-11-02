@@ -1208,6 +1208,48 @@ async def test_a_review_saved_merging_with_findings_and_no_merge_pass_books_one_
     assert launcher.launches == []
 
 
+def merging_beside_booked() -> tuple[tuple[TaskState, ...], LaneSnapshot]:
+    """A board and review lane saved as the review of task 1's commit was raising
+    ``reviews_finished``: its one lens, bugs, ended having found :data:`FOUND`, and task 3,
+    booked into it without being a lens, is still pending, with no merge pass booked."""
+    tasks, lane = mid_review("pending")
+    group = ReviewGroup(JOB, lenses=("2",), ended=("2",), findings=(FOUND,), stage="merging")
+    return tasks, lane.model_copy(update={"groups": {"batch-1": group}})
+
+
+async def test_a_review_saved_merging_beside_a_pending_booked_task_books_a_merge_on_load() -> None:
+    tasks, lane = merging_beside_booked()
+    store = store_with(saved("auth", *tasks, reviews=lane))
+    session, launcher = reopening(store, triggers=lens_triggers(merge=MERGE))
+    events = await opened(session, ActivateSession(session="auth"))
+    await quiet_within(0.05)
+    await session.close()
+
+    snapshot = last_of(Snapshot, events)
+    assert shown(snapshot.tasks)[3:] == [(REVIEWER, "merge", None, "pending")]
+    assert snapshot.review == ReviewStatus(paused=False, open_batches=1)
+    assert reviews_of(store).groups["batch-1"].merges == ("4",)
+    assert reviews_of(store).batches["4"] == "batch-1"
+    assert launcher.launches == []
+
+
+async def test_a_booked_task_ending_after_a_merge_booked_on_load_raises_no_second_merge() -> None:
+    tasks, lane = merging_beside_booked()
+    store = store_with(saved("auth", *tasks, reviews=lane))
+    session, launcher = reopening(store, claims_done, triggers=lens_triggers(merge=MERGE))
+    launcher.reviewers.append(claims_done)
+    await opened(session, ActivateSession(session="auth"))
+    await send(session, RunTasks())
+    events = await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert shown(board(events))[2:] == [
+        (TESTS, "tests", None, "completed"),
+        (REVIEWER, "merge", None, "completed"),
+    ]
+    assert reviews_of(store).groups == {}
+
+
 async def test_a_review_saved_merging_with_findings_and_no_merge_trigger_closes_on_load() -> None:
     tasks, lane = lenses_ended("merging")
     store = store_with(saved("auth", *tasks, reviews=lane))
