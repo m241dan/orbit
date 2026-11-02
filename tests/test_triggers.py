@@ -540,6 +540,41 @@ def test_review_rounds_may_guard_several_enabled_triggers() -> None:
     check_triggers({"review": REVIEW, "check": CHECK, "again": REVIEW, "more": coder}, ROLES)
 
 
+# raised-finding, which narrows only a batch's review, by the roles a trigger queues for
+
+NEEDS_ROUNDS = 'triggers.x.guards: raised-finding needs review-rounds and on = "task_landed".'
+NEEDS_ROLE = "triggers.x.guards: raised-finding needs a role; a trigger running a set has none."
+
+
+def test_raised_finding_without_review_rounds_on_a_landing_is_refused() -> None:
+    message = problems(on="task_landed", role="reviewer", prompt="Go", guards=("raised-finding",))
+    assert message == NEEDS_ROUNDS
+
+
+def test_raised_finding_off_a_landing_is_refused_besides_review_rounds() -> None:
+    message = problems(
+        on="task_finished", role="reviewer", prompt="Go", guards=("review-rounds", "raised-finding")
+    )
+    assert message.splitlines() == [
+        'triggers.x.guards: review-rounds needs on = "task_landed".',
+        NEEDS_ROUNDS,
+    ]
+
+
+def test_raised_finding_on_a_trigger_running_a_set_is_refused() -> None:
+    trigger = Trigger(
+        on="task_landed", checks="mutation", guards=("review-rounds", "raised-finding")
+    )
+    with pytest.raises(ConfigError) as raised:
+        check_triggers({"x": trigger}, ROLES, sets=("mutation",))
+    assert str(raised.value) == NEEDS_ROLE
+
+
+def test_raised_finding_with_review_rounds_on_a_landing_role_trigger_loads() -> None:
+    narrowed = REVIEW.model_copy(update={"guards": ("review-rounds", "raised-finding")})
+    check_triggers({"x": narrowed}, ROLES)
+
+
 # Merging the package's triggers with the project's
 
 

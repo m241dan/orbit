@@ -570,7 +570,8 @@ def check_triggers(
     one, a ``when`` field or a template variable its event doesn't give, a ``when`` value its
     field never takes on its event, a role not among ``roles`` or a value :data:`WHEN_VALUES`
     doesn't give, ``review-rounds`` on a trigger on another event than ``task_landed``,
-    ``every`` on another event than ``commits``, ``paths`` on another event than
+    ``raised-finding`` without ``review-rounds`` and ``task_landed``, or on a trigger running
+    checks, ``every`` on another event than ``commits``, ``paths`` on another event than
     ``task_landed``, or naming no glob, ``cron`` missing on ``schedule``, on another event, or
     not a five-field cron expression, and ``manual`` without a ``label``."""
     problems = [
@@ -599,6 +600,7 @@ def _problems(trigger: Trigger, targets: _Targets) -> list[tuple[str, str]]:
         *_prompt_problems(trigger),
         *_when_problems(trigger, targets.roles),
         *_guard_problems(trigger),
+        *_raised_problems(trigger),
         *_every_problems(trigger),
         *_paths_problems(trigger),
         *_cron_problems(trigger),
@@ -710,6 +712,27 @@ def _guard_problems(trigger: Trigger) -> list[tuple[str, str]]:
     if REVIEW_ROUNDS not in trigger.guards or trigger.on == TASK_LANDED:
         return []
     return [("guards", f'{REVIEW_ROUNDS} needs on = "{TASK_LANDED}".')]
+
+
+_NEEDS_ROUNDS = f'{RAISED_FINDING} needs {REVIEW_ROUNDS} and on = "{TASK_LANDED}".'
+_NEEDS_ROLE = f"{RAISED_FINDING} needs a role; a trigger running a set has none."
+
+
+def _raised_problems(trigger: Trigger) -> list[tuple[str, str]]:
+    """Why ``raised-finding`` can't guard ``trigger``, if it does: it only narrows a batch's
+    review, which fires only the triggers on ``task_landed`` that ``review-rounds`` guards, and
+    only by the roles a trigger queues for, which one running a set has none of."""
+    if RAISED_FINDING not in trigger.guards:
+        return []
+    rounds = [] if _hears_batches(trigger) else [_NEEDS_ROUNDS]
+    role = [_NEEDS_ROLE] if trigger.role is None and trigger.checks is not None else []
+    return [("guards", why) for why in (*rounds, *role)]
+
+
+def _hears_batches(trigger: Trigger) -> bool:
+    """Whether ``trigger`` can hear a batch's review: it's on ``task_landed`` and
+    ``review-rounds`` guards it."""
+    return trigger.on == TASK_LANDED and REVIEW_ROUNDS in trigger.guards
 
 
 def _every_problems(trigger: Trigger) -> list[tuple[str, str]]:

@@ -250,6 +250,13 @@ def test_review_rounds_off_a_landing_is_refused() -> None:
     )
 
 
+def test_raised_finding_without_review_rounds_is_refused() -> None:
+    mine = REVIEWS | {"guards": ["raised-finding"]}
+    assert refusal({**LENSES_OFF, "mine": mine}) == (
+        'triggers.mine.guards: raised-finding needs review-rounds and on = "task_landed".'
+    )
+
+
 def test_review_rounds_on_two_enabled_triggers_of_other_roles_loads() -> None:
     bugs = NIGHTLY | {"on": "task_landed", "guards": ["review-rounds"]}
     tests = bugs | {"prompt": "Test {commit}."}

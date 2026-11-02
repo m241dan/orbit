@@ -2251,7 +2251,11 @@ task_finished; its variables are {trigger}.`), `every` without `on = "commits"`,
 without a `label`, neither a role nor `checks` or both, a role without a prompt, or `checks` with
 one. A list of roles names each one that isn't a role on a line of its own, and an empty one is
 refused (`triggers.tidy-up.role: a list of roles names at least one.`). So is `review-rounds` on a trigger that isn't on `task_landed`
-(`triggers.tidy-up.guards: review-rounds needs on = "task_landed".`), and a `when` value its
+(`triggers.tidy-up.guards: review-rounds needs on = "task_landed".`), and `raised-finding` on a
+trigger that isn't guarded by `review-rounds` and on `task_landed`, since only those hear a batch's
+review (`triggers.tidy-up.guards: raised-finding needs review-rounds and on = "task_landed".`), or
+on one running a set, which has no role to narrow (`triggers.tidy-up.guards: raised-finding needs
+a role; a trigger running a set has none.`). So is a `when` value its
 field never takes, alone or in a list: a `role` that isn't one (a disabled one is), a
 `verification` other than `configured`, `missing` or `off` (`triggers.tidy-up.when: missng isn't
 a value of verification; its values are configured, missing, off.`), a `findings` other than
