@@ -74,12 +74,15 @@ MERGING_NEEDS = frozenset({"verify", "workspace"})
 @dataclass(frozen=True)
 class UserRoles:
     """The role fields the user config in ``layer`` sets: those for ``every`` role, and those
-    for each role it ``named``; and the ``personal`` roles it defines whole, by name."""
+    for each role it ``named``; the ``personal`` roles it defines whole, by name; and the
+    ``servers`` it overrides, its ``[mcp]`` table as it gives it, which merging the servers
+    validates (see :func:`~orbit.agent.domain.mcp_servers.merge_servers`)."""
 
     layer: Layer
     every: RoleFields = field(default_factory=RoleFields)
     named: Mapping[str, RoleFields] = field(default_factory=dict)
     personal: Mapping[str, Role] = field(default_factory=dict)
+    servers: object = field(default_factory=dict)
 
 
 NO_USER_ROLES = UserRoles(Layer("user"))
@@ -153,9 +156,9 @@ class _UserRoles(BaseModel):
 def load_user_roles(data: dict[str, Any], layer: Layer, built_in: Collection[str]) -> UserRoles:
     """The role fields ``data``, the contents of the user config in ``layer``, sets: ``[roles]``'s
     ``model``, ``effort`` and ``runtime`` for every role, and its ``[roles.<name>]`` tables' for
-    each; and the personal roles it defines, each a table that names a role that isn't
-    ``built_in`` and sets more than those. Its tables but ``[roles]``, ``[[skills]]`` and
-    ``[triggers]`` are ignored.
+    each; the personal roles it defines, each a table that names a role that isn't
+    ``built_in`` and sets more than those; and its ``[mcp]`` table as it gives it. Its tables but
+    ``[roles]``, ``[mcp]``, ``[[skills]]`` and ``[triggers]`` are ignored.
 
     Raises :class:`ConfigError` naming ``skills`` or ``triggers`` if it sets ``[[skills]]`` or
     ``[triggers.<name>]``, which belong in the project file, then each role's tools it gives the
@@ -174,7 +177,8 @@ def load_user_roles(data: dict[str, Any], layer: Layer, built_in: Collection[str
         raise ConfigError(_user_role_problems(exc)) from None
     if problems := _unknown_runtimes(roles):
         raise ConfigError("\n".join(problems))
-    return UserRoles(layer, roles.every, roles.named, roles.personal)
+    servers = data.get("mcp", {})
+    return UserRoles(layer, roles.every, roles.named, roles.personal, servers)
 
 
 def _refuse_project_tables(data: dict[str, Any]) -> None:

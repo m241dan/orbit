@@ -9,6 +9,7 @@ from orbit.agent.domain.roles import (
     ROLE_KEYS,
     Role,
     RoleTools,
+    ServerGrant,
     built_in_roles,
     check_enabled,
     disabled_roles,
@@ -267,7 +268,7 @@ def test_each_built_in_roles_settings_keep_the_level_and_web_it_had(
 
 
 def test_a_roles_keys_split_its_tools_table_into_its_fields() -> None:
-    assert ROLE_KEYS[-3:] == ("tools.orbit", "tools.workspace", "tools.web")
+    assert ROLE_KEYS[-4:] == ("tools.orbit", "tools.workspace", "tools.web", "tools.mcp")
     assert "tools" not in ROLE_KEYS and ROLE_KEYS[0] == "instructions"
 
 
@@ -501,3 +502,43 @@ def test_a_planners_orbit_tool_grant_gives_its_draft_tools_and_withholds_none_of
     grant = orbit_tool_grant(BUILT_IN_ROLES["planner"].granted_tools)
     drafts = {"list_drafts", "read_draft"}
     assert drafts <= set(grant.granted) and not drafts & set(grant.withheld)
+
+
+# A role's MCP servers
+
+
+def test_a_role_uses_no_mcp_servers_by_default() -> None:
+    assert RoleTools().mcp == ()
+
+
+def test_a_servers_name_alone_allows_all_its_tools() -> None:
+    tools = RoleTools.model_validate({"mcp": ["semgrep"]})
+    assert tools.mcp == (ServerGrant(server="semgrep"),)
+    assert tools.mcp[0].tools is None
+
+
+def test_a_servers_table_allows_the_tools_it_lists() -> None:
+    tools = RoleTools.model_validate({"mcp": [{"server": "github", "tools": ["get_issue"]}]})
+    assert tools.mcp == (ServerGrant(server="github", tools=("get_issue",)),)
+
+
+def test_a_roles_servers_are_written_back_as_a_file_gives_them() -> None:
+    given = ["semgrep", {"server": "github", "tools": ["get_issue", "list_issues"]}]
+    tools = RoleTools.model_validate({"mcp": given})
+    assert tools.model_dump(mode="json")["mcp"] == given
+    assert RoleTools.model_validate(tools.model_dump()) == tools
+
+
+def test_a_server_listed_twice_is_refused() -> None:
+    with pytest.raises(ValidationError, match="github is listed more than once"):
+        RoleTools.model_validate({"mcp": ["github", {"server": "github", "tools": ["get_issue"]}]})
+
+
+def test_a_servers_empty_tools_list_is_refused() -> None:
+    with pytest.raises(ValidationError, match="a server's tools name at least one"):
+        RoleTools.model_validate({"mcp": [{"server": "github", "tools": []}]})
+
+
+def test_a_servers_table_refuses_fields_it_doesnt_have() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        RoleTools.model_validate({"mcp": [{"server": "github", "approve": True}]})

@@ -100,7 +100,7 @@ watch = ["uv.lock"]
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["code-style"]
 
-# What its agents may use: orbit's tools, their workspace and the web.
+# What its agents may use: orbit's tools, their workspace, the web and MCP servers.
 # [roles.planner.tools]
 # The orbit tools its agents may call.
 # orbit = ["propose_task", "report_progress", "save_report", "list_reports", "read_report"]
@@ -108,6 +108,8 @@ watch = ["uv.lock"]
 # workspace = "read"
 # Whether its agents may search and fetch the web.
 # web = true
+# The MCP servers its agents may use: a name for all its tools, or { server, tools }.
+# mcp = []
 
 # [roles.experimenter]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -143,7 +145,7 @@ watch = ["uv.lock"]
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = []
 
-# What its agents may use: orbit's tools, their workspace and the web.
+# What its agents may use: orbit's tools, their workspace, the web and MCP servers.
 # [roles.experimenter.tools]
 # The orbit tools its agents may call.
 # orbit = ["report_progress", "save_report", "list_reports", "read_report"]
@@ -151,6 +153,8 @@ watch = ["uv.lock"]
 # workspace = "shell"
 # Whether its agents may search and fetch the web.
 # web = true
+# The MCP servers its agents may use: a name for all its tools, or { server, tools }.
+# mcp = []
 
 # [roles.coder]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -186,7 +190,7 @@ watch = ["uv.lock"]
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["code-style", "security"]
 
-# What its agents may use: orbit's tools, their workspace and the web.
+# What its agents may use: orbit's tools, their workspace, the web and MCP servers.
 # [roles.coder.tools]
 # The orbit tools its agents may call.
 # orbit = ["get_task", "complete_task", "run_check", "report_progress", "give_up"]
@@ -194,6 +198,8 @@ watch = ["uv.lock"]
 # workspace = "shell"
 # Whether its agents may search and fetch the web.
 # web = true
+# The MCP servers its agents may use: a name for all its tools, or { server, tools }.
+# mcp = []
 
 # [roles.reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -229,7 +235,7 @@ watch = ["uv.lock"]
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills: 11 of orbit's own; orbit config show roles.reviewer.skills lists them
 
-# What its agents may use: orbit's tools, their workspace and the web.
+# What its agents may use: orbit's tools, their workspace, the web and MCP servers.
 # [roles.reviewer.tools]
 # The orbit tools its agents may call.
 # orbit: 6 of orbit's own; orbit config show roles.reviewer.tools.orbit lists them
@@ -237,6 +243,8 @@ watch = ["uv.lock"]
 # workspace = "read"
 # Whether its agents may search and fetch the web.
 # web = true
+# The MCP servers its agents may use: a name for all its tools, or { server, tools }.
+# mcp = []
 
 # [roles.configurator]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -272,7 +280,7 @@ watch = ["uv.lock"]
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["python", "cpp"]
 
-# What its agents may use: orbit's tools, their workspace and the web.
+# What its agents may use: orbit's tools, their workspace, the web and MCP servers.
 # [roles.configurator.tools]
 # The orbit tools its agents may call.
 # orbit = ["get_task", "propose_checks", "report_progress", "give_up"]
@@ -280,6 +288,8 @@ watch = ["uv.lock"]
 # workspace = "read"
 # Whether its agents may search and fetch the web.
 # web = true
+# The MCP servers its agents may use: a name for all its tools, or { server, tools }.
+# mcp = []
 
 # [roles.fit-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -315,7 +325,7 @@ watch = ["uv.lock"]
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["code-style", "review-fit"]
 
-# What its agents may use: orbit's tools, their workspace and the web.
+# What its agents may use: orbit's tools, their workspace, the web and MCP servers.
 # [roles.fit-reviewer.tools]
 # The orbit tools its agents may call.
 # orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
@@ -323,6 +333,8 @@ watch = ["uv.lock"]
 # workspace = "read"
 # Whether its agents may search and fetch the web.
 # web = true
+# The MCP servers its agents may use: a name for all its tools, or { server, tools }.
+# mcp = []
 
 # [roles.bugs-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -358,7 +370,7 @@ watch = ["uv.lock"]
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["code-style", "review-bugs"]
 
-# What its agents may use: orbit's tools, their workspace and the web.
+# What its agents may use: orbit's tools, their workspace, the web and MCP servers.
 # [roles.bugs-reviewer.tools]
 # The orbit tools its agents may call.
 # orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
@@ -366,6 +378,8 @@ watch = ["uv.lock"]
 # workspace = "read"
 # Whether its agents may search and fetch the web.
 # web = true
+# The MCP servers its agents may use: a name for all its tools, or { server, tools }.
+# mcp = []
 
 # [roles.tests-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -401,7 +415,7 @@ watch = ["uv.lock"]
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["code-style", "review-tests"]
 
-# What its agents may use: orbit's tools, their workspace and the web.
+# What its agents may use: orbit's tools, their workspace, the web and MCP servers.
 # [roles.tests-reviewer.tools]
 # The orbit tools its agents may call.
 # orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
@@ -409,6 +423,8 @@ watch = ["uv.lock"]
 # workspace = "read"
 # Whether its agents may search and fetch the web.
 # web = true
+# The MCP servers its agents may use: a name for all its tools, or { server, tools }.
+# mcp = []
 
 # [roles.logic-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -444,7 +460,7 @@ watch = ["uv.lock"]
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["code-style", "review-logic"]
 
-# What its agents may use: orbit's tools, their workspace and the web.
+# What its agents may use: orbit's tools, their workspace, the web and MCP servers.
 # [roles.logic-reviewer.tools]
 # The orbit tools its agents may call.
 # orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
@@ -452,6 +468,8 @@ watch = ["uv.lock"]
 # workspace = "read"
 # Whether its agents may search and fetch the web.
 # web = true
+# The MCP servers its agents may use: a name for all its tools, or { server, tools }.
+# mcp = []
 
 # [roles.security-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -487,7 +505,7 @@ watch = ["uv.lock"]
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["code-style", "security", "review-security"]
 
-# What its agents may use: orbit's tools, their workspace and the web.
+# What its agents may use: orbit's tools, their workspace, the web and MCP servers.
 # [roles.security-reviewer.tools]
 # The orbit tools its agents may call.
 # orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
@@ -495,6 +513,8 @@ watch = ["uv.lock"]
 # workspace = "read"
 # Whether its agents may search and fetch the web.
 # web = true
+# The MCP servers its agents may use: a name for all its tools, or { server, tools }.
+# mcp = []
 
 # [roles.performance-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -530,7 +550,7 @@ watch = ["uv.lock"]
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["code-style", "review-performance"]
 
-# What its agents may use: orbit's tools, their workspace and the web.
+# What its agents may use: orbit's tools, their workspace, the web and MCP servers.
 # [roles.performance-reviewer.tools]
 # The orbit tools its agents may call.
 # orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
@@ -538,6 +558,8 @@ watch = ["uv.lock"]
 # workspace = "read"
 # Whether its agents may search and fetch the web.
 # web = true
+# The MCP servers its agents may use: a name for all its tools, or { server, tools }.
+# mcp = []
 
 # [roles.style-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -573,7 +595,7 @@ watch = ["uv.lock"]
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["code-style", "review-style"]
 
-# What its agents may use: orbit's tools, their workspace and the web.
+# What its agents may use: orbit's tools, their workspace, the web and MCP servers.
 # [roles.style-reviewer.tools]
 # The orbit tools its agents may call.
 # orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
@@ -581,6 +603,8 @@ watch = ["uv.lock"]
 # workspace = "read"
 # Whether its agents may search and fetch the web.
 # web = true
+# The MCP servers its agents may use: a name for all its tools, or { server, tools }.
+# mcp = []
 
 # [roles.drift-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -616,7 +640,7 @@ watch = ["uv.lock"]
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["code-style", "review-drift"]
 
-# What its agents may use: orbit's tools, their workspace and the web.
+# What its agents may use: orbit's tools, their workspace, the web and MCP servers.
 # [roles.drift-reviewer.tools]
 # The orbit tools its agents may call.
 # orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
@@ -624,6 +648,8 @@ watch = ["uv.lock"]
 # workspace = "read"
 # Whether its agents may search and fetch the web.
 # web = true
+# The MCP servers its agents may use: a name for all its tools, or { server, tools }.
+# mcp = []
 
 # [roles.scaling-reviewer]
 # What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
@@ -659,7 +685,7 @@ watch = ["uv.lock"]
 # The skills its agents get, by name: orbit's own, or the project's in .orbit/skills/.
 # skills = ["code-style", "review-scaling"]
 
-# What its agents may use: orbit's tools, their workspace and the web.
+# What its agents may use: orbit's tools, their workspace, the web and MCP servers.
 # [roles.scaling-reviewer.tools]
 # The orbit tools its agents may call.
 # orbit = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
@@ -667,6 +693,8 @@ watch = ["uv.lock"]
 # workspace = "read"
 # Whether its agents may search and fetch the web.
 # web = true
+# The MCP servers its agents may use: a name for all its tools, or { server, tools }.
+# mcp = []
 
 # A role of your own, which must set its instructions. For example:
 # [roles.license-reviewer]
@@ -1108,26 +1136,34 @@ watch = ["uv.lock"]
 paths = ["src", "tests"]
 use = ["application", "python", "layers", "orbit"]
 
-# Coming in a later version of orbit; leave commented out until then.
-
-# An MCP server roles may use by name, which orbit proxies through its own.
+# The MCP servers roles may use, by name, which orbit proxies through its own. For example:
 # [mcp.github]
-# The command that starts it, as a process of orbit's.
+# The command that starts it, as a process of orbit's: its program and arguments.
 # command = ["github-mcp-server", "stdio"]
-# Its environment, naming variables whose values come from the control plane, never here.
-# env = { GITHUB_TOKEN = "$GITHUB_TOKEN" }
+# Its environment variables; $NAME or ${NAME} in a value is filled in from orbit's.
+# env = {GITHUB_TOKEN = "$GITHUB_TOKEN"}
 # Whether the agents share one connection to it, rather than each having its own.
 # shared = true
+# How long a connection it's idle on is kept, in minutes.
+# idle_minutes = 10
+# How long a call to one of its tools may take, in seconds.
+# timeout_seconds = 300
+# Which of its tools' calls wait for your approval: none, all (true), or a list.
+# approve = ["create_issue"]
 
-# An MCP server that's already running.
+# An MCP server that's already running. For example:
 # [mcp.semgrep]
-# The URL it serves MCP at.
+# The URL it serves MCP at, if orbit doesn't start it.
 # url = "http://127.0.0.1:3010/mcp"
+# With a url, its HTTP headers; $NAME or ${NAME} in a value is filled in from orbit's.
+# headers = {Authorization = "Bearer ${SEMGREP_TOKEN}"}
 
-# The MCP servers a role's agents may use, in its tools table.
+# The MCP servers a role's agents may use, in its tools table. For example:
 # [roles.license-reviewer.tools]
-# The MCP servers its agents may use, each declared in an [mcp.<name>] table.
-# mcp = ["semgrep"]
+# The MCP servers its agents may use: a name for all its tools, or { server, tools }.
+# mcp = ["semgrep", {server = "github", tools = ["get_issue", "list_issues", "create_issue"]}]
+
+# Coming in a later version of orbit; leave commented out until then.
 
 # A model endpoint for the built-in harness, which a role's model names.
 # [models.local-coder]

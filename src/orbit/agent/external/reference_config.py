@@ -17,7 +17,8 @@ from pydantic import BaseModel, TypeAdapter
 from orbit.agent.domain.checks import Setup, VerificationConfig, VerificationSet
 from orbit.agent.domain.config import LIMIT_KEYS, OrbitConfig, load_config
 from orbit.agent.domain.config_update import FOR_EXAMPLE
-from orbit.agent.domain.roles import ROLE_TABLES, Role
+from orbit.agent.domain.mcp_servers import McpServer
+from orbit.agent.domain.roles import ROLE_TABLES, Role, RoleTools, ServerGrant
 from orbit.agent.domain.skills import SkillMapping
 from orbit.agent.domain.triggers import Trigger
 from orbit.agent.domain.verification import VerificationStep
@@ -52,32 +53,29 @@ EXAMPLE_ROLE_FIELDS = Role(
 """The example of a role of a project's own: just the fields it sets."""
 EXAMPLE_SKILLS = SkillMapping(paths=("src",), use=("application", "python"))
 """The example of skills for the code under some paths."""
+EXAMPLE_COMMAND_SERVER = McpServer(
+    command=("github-mcp-server", "stdio"),
+    env={"GITHUB_TOKEN": "$GITHUB_TOKEN"},
+    shared=True,
+    idle_minutes=10,
+    timeout_seconds=300,
+    approve=("create_issue",),
+)
+EXAMPLE_URL_SERVER = McpServer(
+    url="http://127.0.0.1:3010/mcp", headers={"Authorization": "Bearer ${SEMGREP_TOKEN}"}
+)
+EXAMPLE_ROLE_SERVERS = RoleTools(
+    mcp=(
+        ServerGrant(server="semgrep"),
+        ServerGrant(server="github", tools=("get_issue", "list_issues", "create_issue")),
+    )
+)
+"""The examples of an MCP server orbit starts, of one already running at a URL, and of the role
+of a project's own using them: all of one's tools, and some of the other's."""
 
 LATER_HEADING = "Coming in a later version of orbit; leave commented out until then."
 
 LATER = (
-    (
-        "An MCP server roles may use by name, which orbit proxies through its own.",
-        "[mcp.github]",
-        "The command that starts it, as a process of orbit's.",
-        'command = ["github-mcp-server", "stdio"]',
-        "Its environment, naming variables whose values come from the control plane, never here.",
-        'env = { GITHUB_TOKEN = "$GITHUB_TOKEN" }',
-        "Whether the agents share one connection to it, rather than each having its own.",
-        "shared = true",
-    ),
-    (
-        "An MCP server that's already running.",
-        "[mcp.semgrep]",
-        "The URL it serves MCP at.",
-        'url = "http://127.0.0.1:3010/mcp"',
-    ),
-    (
-        "The MCP servers a role's agents may use, in its tools table.",
-        "[roles.license-reviewer.tools]",
-        "The MCP servers its agents may use, each declared in an [mcp.<name>] table.",
-        'mcp = ["semgrep"]',
-    ),
     (
         "A model endpoint for the built-in harness, which a role's model names.",
         "[models.local-coder]",
@@ -99,8 +97,9 @@ def reference_config() -> str:
     table with every field at its shipped value, a list too long for a line in short, followed by
     its tools table; an example of a role of a project's own; each
     shipped trigger's table with every field at its shipped value; an example of skills by path;
-    and the settings of a later version of orbit under :data:`LATER_HEADING`. Everything is
-    commented out, each key under its description.
+    examples of an MCP server orbit starts, of one at a URL, and of the example role's tools
+    using them; and the settings of a later version of orbit under :data:`LATER_HEADING`.
+    Everything is commented out, each key under its description.
     """
     roles = read_built_in_roles()
     files = read_instruction_files()
@@ -130,6 +129,13 @@ def reference_config() -> str:
             for name, trigger in read_built_in_triggers().items()
         ),
         _example(config["skills"], "[[skills]]", EXAMPLE_SKILLS),
+        _example(config["mcp"], "[mcp.github]", EXAMPLE_COMMAND_SERVER),
+        _example("An MCP server that's already running.", "[mcp.semgrep]", EXAMPLE_URL_SERVER),
+        _example(
+            "The MCP servers a role's agents may use, in its tools table.",
+            f"[roles.{EXAMPLE_ROLE}.tools]",
+            EXAMPLE_ROLE_SERVERS,
+        ),
         _comments([LATER_HEADING]),
         *map(_comments, LATER),
     ]

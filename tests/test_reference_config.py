@@ -20,7 +20,8 @@ from orbit.agent.domain.config import (
     Package,
     load_layered,
 )
-from orbit.agent.domain.roles import ROLE_TABLES, Role, RoleTools, old_tools_problems
+from orbit.agent.domain.mcp_servers import McpServer
+from orbit.agent.domain.roles import ROLE_TABLES, Role, RoleTools, ServerGrant, old_tools_problems
 from orbit.agent.domain.skills import SkillMapping
 from orbit.agent.domain.triggers import Trigger
 from orbit.agent.domain.verification import VerificationStep
@@ -39,6 +40,9 @@ EXAMPLE_HEADERS = {
     "# [verification.sets.mutation]",
     "# [setup]",
     "# [[skills]]",
+    "# [mcp.github]",
+    "# [mcp.semgrep]",
+    "# [roles.license-reviewer.tools]",
 }
 EXAMPLE_ROLE = "license-reviewer"
 BUILT_IN = read_built_in_roles()
@@ -70,7 +74,8 @@ def later() -> str:
 
 def limits_roles_and_triggers() -> str:
     """The reference's blocks of limits, roles and triggers: those before the later-version
-    heading but the examples of verification steps, their sets, setup and skills by path."""
+    heading but the examples of verification steps, their sets, setup, skills by path, MCP
+    servers and a role's MCP servers."""
     return "\n\n".join(
         block for block in blocks(current()) if not EXAMPLE_HEADERS & set(block.splitlines())
     )
@@ -221,6 +226,32 @@ def test_uncommented_examples_set_a_step_in_a_set_its_table_and_a_setup() -> Non
     assert config.verification.steps == (mutation,)
     assert config.verification.sets == {"mutation": VerificationSet(holds_merges=True)}
     assert config.setup == Setup(command=("uv", "sync"), watch=("uv.lock",))
+
+
+def test_uncommented_mcp_examples_declare_two_servers_a_role_uses() -> None:
+    config = load(loaded(current()))
+
+    assert config.mcp == {
+        "github": McpServer(
+            command=("github-mcp-server", "stdio"),
+            env={"GITHUB_TOKEN": "$GITHUB_TOKEN"},
+            approve=("create_issue",),
+        ),
+        "semgrep": McpServer(
+            url="http://127.0.0.1:3010/mcp", headers={"Authorization": "Bearer ${SEMGREP_TOKEN}"}
+        ),
+    }
+    assert config.roles[EXAMPLE_ROLE].tools.mcp == (
+        ServerGrant(server="semgrep"),
+        ServerGrant(server="github", tools=("get_issue", "list_issues", "create_issue")),
+    )
+
+
+def test_the_mcp_examples_follow_the_skills_example_before_the_later_heading() -> None:
+    markers = ["# [[skills]]", "# [mcp.github]", "# [mcp.semgrep]", LATER]
+    first = [next(i for i, line in enumerate(lines()) if line.startswith(m)) for m in markers]
+
+    assert first == sorted(first)
 
 
 def test_the_step_example_shows_its_set_under_its_description() -> None:
@@ -413,10 +444,10 @@ def test_every_key_is_under_a_line_explaining_it() -> None:
 def test_later_version_settings_follow_their_heading_commented_out() -> None:
     settings = later()
 
-    for section in ("# [mcp.", "# [models."):
-        assert section in settings
+    assert "# [models." in settings
     assert "triggers" not in settings
-    assert re.search(r"^# \[roles\.[a-z-]+\.tools\]$", settings, re.MULTILINE)
+    assert "mcp" not in settings
+    assert "roles" not in settings
     assert all(line.startswith("# ") for line in settings.splitlines() if line)
 
 
@@ -454,8 +485,8 @@ def test_the_uncommented_reference_and_the_built_in_roles_give_tools_only_as_tab
 def test_later_version_settings_are_valid_toml_uncommented() -> None:
     data = loaded(current() + later())
 
-    assert {"mcp", "models"} <= data.keys()
-    assert "tools" in data["roles"][EXAMPLE_ROLE]
+    assert "models" in data
+    assert "mcp" not in loaded(later())
 
 
 def test_module_writes_the_reference_to_the_given_path(

@@ -27,9 +27,9 @@ from orbit.tui.view.common import counted
 type Text = Instructions | SkillFileText
 """A value shown by its length, or with ``full`` as its text."""
 
-GROUPED = frozenset({"roles", "triggers", "skill_files"})
-"""The sections listed in a group for each of their tables: each role, each trigger, and each
-skill."""
+GROUPED = frozenset({"roles", "triggers", "mcp", "skill_files"})
+"""The sections listed in a group for each of their tables: each role, each trigger, each MCP
+server, and each skill."""
 
 COLUMN_GAP = "   "
 """What parts the skill map's columns."""
@@ -47,7 +47,8 @@ SKILL_MAP_LEGEND = (
 
 def config_text(report: ConfigReport, *, full: bool, root: Path, home: Path) -> str:
     """``report`` as text: a line per setting, ``<key> = <value>   <layer>``, the limits, each
-    role, each trigger, each skill's files and each other section in a group of their own, apart
+    role, each trigger, each MCP server, each skill's files and each other section in a group of
+    their own, apart
     from the next by a blank line; each value as JSON but roles' instructions and triggers'
     prompts, which show as the file they're in and their length, and skill files, which show
     their length, or any with ``full`` their text. A layer's file shows relative to the
@@ -98,11 +99,11 @@ def skill_map_json(skills: SkillMap) -> str:
 
 def _group(key: str) -> str:
     """The group the setting at ``key`` is listed in: the limits', its role's, its trigger's, its
-    skill's, or its section's."""
+    MCP server's, its skill's, or its section's."""
     if key in LIMIT_KEYS:
         return ""
     section, *rest = key.split(".")
-    return f"{section}.{rest[0]}" if section in GROUPED else section
+    return f"{section}.{rest[0]}" if section in GROUPED and rest else section
 
 
 def _line(key: str, setting: Setting, full: bool, root: Path, home: Path) -> str:

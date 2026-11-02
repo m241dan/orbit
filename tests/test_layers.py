@@ -600,3 +600,9 @@ def test_resolving_leaves_a_disabled_consulted_task_role_out() -> None:
     roles = {"talker": {**TALKER, "consults": ["coder"]}, "coder": {"enabled": False}}
     resolved = resolve_roles(PACKAGE_ROLES, NO_USER_ROLES, project(roles))
     assert resolved.roles["talker"].consults == ()
+
+
+def test_the_user_configs_mcp_table_is_kept_as_given_for_merging_the_servers() -> None:
+    servers = {"github": {"command": ["/opt/bin/github-mcp"]}}
+    assert load_user_roles({"mcp": servers}, USER, PACKAGE_ROLES).servers == servers
+    assert load_user_roles({}, USER, PACKAGE_ROLES).servers == {}

@@ -1,6 +1,6 @@
-"""Orbit's configuration: the limits, roles, triggers, verification steps and their sets, setup
-and skills by path a project file sets over the user config's role fields and personal roles and
-the package's roles and triggers."""
+"""Orbit's configuration: the limits, roles, triggers, verification steps and their sets, setup,
+skills by path and MCP servers a project file sets over the user config's role fields, personal
+roles and server overrides and the package's roles and triggers."""
 
 from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass, field
@@ -25,6 +25,12 @@ from orbit.agent.domain.layers import (
     merge_roles,
     replaced_note,
     runs_on_shared_runtime,
+)
+from orbit.agent.domain.mcp_servers import (
+    McpServer,
+    ServerName,
+    check_role_servers,
+    merge_servers,
 )
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.role_lanes import role_clashes, with_enabled_consults
@@ -141,6 +147,12 @@ class _FileConfig(_Config):
             "Skills for the code under some paths, given to every agent along with its role's."
         ),
     )
+    mcp: dict[ServerName, McpServer] = Field(
+        default_factory=dict,
+        description=(
+            "The MCP servers roles may use, by name, which orbit proxies through its own."
+        ),
+    )
 
     @field_validator("roles")
     @classmethod
@@ -166,7 +178,7 @@ class _FileConfig(_Config):
         )
 
 
-LATER_TABLES = ("mcp", "models")
+LATER_TABLES = ("models",)
 """The top-level tables of a later version of orbit's settings."""
 
 LATER_VERSION = (
@@ -178,7 +190,7 @@ LATER_VERSION = (
 LIMIT_KEYS = tuple(
     key
     for key in _FileConfig.model_fields
-    if key not in {"roles", "triggers", "verification", "setup", "skills"}
+    if key not in {"roles", "triggers", "verification", "setup", "skills", "mcp"}
 )
 """The keys of the limits a project file sets, in order."""
 
@@ -229,12 +241,14 @@ def load_config(
 @dataclass(frozen=True)
 class LayeredConfig:
     """Orbit's ``config`` in effect, with the layer each of its roles' fields came from,
-    ``role_layers``, by role and field name, and each of its triggers' fields, ``trigger_layers``,
-    by trigger and field name."""
+    ``role_layers``, by role and field name, each of its triggers' fields, ``trigger_layers``,
+    by trigger and field name, and each of its MCP servers' fields, ``server_layers``, by server
+    and field name."""
 
     config: OrbitConfig
     role_layers: Mapping[str, Mapping[str, Layer]]
     trigger_layers: Mapping[str, Mapping[str, Layer]] = field(default_factory=dict)
+    server_layers: Mapping[str, Mapping[str, Layer]] = field(default_factory=dict)
 
 
 def load_layered(
@@ -257,7 +271,9 @@ def load_layered(
     the fields it doesn't set; any other trigger is new, after the package's (see
     :func:`~orbit.agent.domain.triggers.merge_triggers`). ``super_review_every``, if it sets it,
     is the super-review trigger's ``every`` unless that trigger sets its own, with a notice that
-    it's moving there. Each set a step is in that no enabled trigger runs has a notice too.
+    it's moving there. Each set a step is in that no enabled trigger runs has a notice too. Each
+    MCP server it declares takes the fields the user config overrides (see
+    :func:`~orbit.agent.domain.mcp_servers.merge_servers`).
 
     Raises :class:`ConfigError` naming the first setting of a later version of orbit ``data`` sets,
     if any, ahead of anything else, then saying what became of a built-in role it sets that orbit no
@@ -266,11 +282,15 @@ def load_layered(
     :func:`~orbit.agent.domain.roles.old_tools_problems`); otherwise naming each
     problem if it's invalid, as it is when a set's table is for a set no step is in (see
     :func:`~orbit.agent.domain.checks.check_sets`), a trigger breaks a rule of
-    :func:`~orbit.agent.domain.triggers.check_triggers`, its sets those a step is in, or a role's
+    :func:`~orbit.agent.domain.triggers.check_triggers`, its sets those a step is in, a role's
     runtime is one this version of orbit doesn't know, doesn't take its model or can't do what the
-    role asks (see :func:`~orbit.agent.domain.role_runtimes.runtime_problems`), a
-    :class:`PersonalRoleError` if the personal roles are at fault, and a :class:`UserConfigError` if
-    a model the user config sets isn't one its role's runtime takes, after the project's problems.
+    role asks (see :func:`~orbit.agent.domain.role_runtimes.runtime_problems`), or a role names an
+    MCP server it doesn't declare (see
+    :func:`~orbit.agent.domain.mcp_servers.check_role_servers`), a :class:`PersonalRoleError` if
+    the personal roles are at fault, and a :class:`UserConfigError` if a model the user config
+    sets isn't one its role's runtime takes, a personal role names an MCP server the project
+    doesn't declare, or its server overrides are invalid or add a server, after the project's
+    problems but for those of its server overrides.
     """
     _refuse_later_settings(data)
     roles = data.get("roles", {})
@@ -283,14 +303,24 @@ def load_layered(
     merged = merge_roles(package.roles, user, ProjectRoles(project, roles))
     check_personal(merged)
     triggers = merge_triggers(package.triggers, project, data.get("triggers", {}))
+    servers = merge_servers(data.get("mcp", {}), project, user)
     notices = tuple(replaced_note(name) for name in merged.replaced) + _alias_notices(data)
-    tables = {**data, "roles": merged.tables, "triggers": triggers.tables}
+    tables = {**data, "roles": merged.tables, "triggers": triggers.tables, "mcp": servers.tables}
     validated = _validated(tables, merged.personal, notices, rules.models)
     config, trigger_layers = _with_alias(validated, data, triggers.layers, project)
     check_sets(config.verification)
     check_triggers(config.triggers, config.roles, config.verification.set_names)
     _check_runtimes(config, merged, user, rules)
-    return LayeredConfig(_with_set_notices(config), merged.layers, trigger_layers)
+    check_role_servers(config.mcp, config.roles, _users_servers(merged, user))
+    return LayeredConfig(_with_set_notices(config), merged.layers, trigger_layers, servers.layers)
+
+
+def _users_servers(merged: MergedRoles, user: UserRoles) -> frozenset[str]:
+    """The names of the ``merged`` roles whose MCP servers the ``user`` config gives: personal
+    roles' that the project doesn't change."""
+    return frozenset(
+        name for name, layers in merged.layers.items() if layers.get("tools.mcp") == user.layer
+    )
 
 
 def _with_set_notices(config: OrbitConfig) -> OrbitConfig:
@@ -502,20 +532,8 @@ def _refuse_retired_roles(roles: Mapping[str, object]) -> None:
 
 def _later_settings(data: dict[str, Any]) -> Iterator[str]:
     """The settings of a later version of orbit ``data`` sets, in order, each named as the
-    reference config names it: its :data:`LATER_TABLES`, and its roles' MCP servers."""
-    for key, value in data.items():
-        if key in LATER_TABLES:
-            yield _table_name(key, value)
-        elif key == "roles":
-            yield from _later_roles_settings(value)
-
-
-def _later_roles_settings(roles: object) -> Iterator[str]:
-    """The settings of a later version of orbit the ``roles`` table sets, role by role."""
-    if not isinstance(roles, dict):
-        return
-    for name, fields in roles.items():
-        yield from _later_role_settings(name, fields)
+    reference config names it: its :data:`LATER_TABLES`."""
+    return (_table_name(key, value) for key, value in data.items() if key in LATER_TABLES)
 
 
 def _table_name(key: str, value: object) -> str:
@@ -525,14 +543,6 @@ def _table_name(key: str, value: object) -> str:
         return f"[{key}]"
     names = [name for name, table in value.items() if isinstance(table, dict)]
     return f"[{key}.{names[0]}]" if names else f"[{key}]"
-
-
-def _later_role_settings(name: str, fields: object) -> Iterator[str]:
-    """The settings of a later version of orbit the ``fields`` of role ``name`` set: the MCP
-    servers in its ``tools`` table."""
-    tools = fields.get("tools") if isinstance(fields, dict) else None
-    if isinstance(tools, dict) and "mcp" in tools:
-        yield f"roles.{name}.tools.mcp"
 
 
 def _validated(

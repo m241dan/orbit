@@ -65,9 +65,9 @@ def read_config(root: str, config_dir: Path, runtime: str | None = None) -> Orbi
 
 def read_config_sources(root: str, config_dir: Path) -> ConfigSources:
     """What the configuration in effect in ``root`` is resolved from: the configuration
-    :func:`read_config` reads, with the layer each of its roles' and triggers' fields came from,
-    ``root``'s file and the user config in ``config_dir`` as written, and the files the built-in
-    roles' instructions and the shipped triggers' prompts are in.
+    :func:`read_config` reads, with the layer each of its roles', triggers' and MCP servers'
+    fields came from, ``root``'s file and the user config in ``config_dir`` as written, and the
+    files the built-in roles' instructions and the shipped triggers' prompts are in.
 
     Raises :class:`ConfigError` as :func:`read_config` does.
     """
@@ -82,6 +82,7 @@ def read_config_sources(root: str, config_dir: Path) -> ConfigSources:
         read_instruction_files(),
         layered.trigger_layers,
         read_template_files(),
+        layered.server_layers,
     )
 
 

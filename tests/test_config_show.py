@@ -182,6 +182,60 @@ def test_roles_lists_each_role_field_with_the_layer_it_came_from(
     assert all(line.startswith("roles.") for line in lines if line)
 
 
+MCP_PROJECT = """\
+[mcp.github]
+command = ["github-mcp-server", "stdio"]
+env = { GITHUB_TOKEN = "$GITHUB_TOKEN" }
+
+[mcp.semgrep]
+url = "http://127.0.0.1:3010/mcp"
+
+[roles.coder.tools]
+mcp = ["semgrep", { server = "github", tools = ["get_issue"] }]
+"""
+"""A project declaring two MCP servers, the coder using all of one's tools and one of the
+other's."""
+
+
+def test_mcp_lists_each_servers_fields_in_a_group_with_their_layers(
+    project: Path, config_dir: Path
+) -> None:
+    project_file(project, MCP_PROJECT)
+    user_path = user_file(config_dir, '[mcp.github]\ncommand = ["/opt/bin/github-mcp", "stdio"]\n')
+    result = show(project, "mcp")
+    assert result.exit_code == 0, result.output
+    github, semgrep = result.stdout.rstrip("\n").split("\n\n")
+    assert github.splitlines() == [
+        f'mcp.github.command = ["/opt/bin/github-mcp", "stdio"]   user {user_path}',
+        f"mcp.github.url = null   user {user_path}",
+        'mcp.github.env = {"GITHUB_TOKEN": "$GITHUB_TOKEN"}   project .orbit/config.toml',
+        "mcp.github.headers = {}   default",
+        "mcp.github.shared = true   default",
+        "mcp.github.idle_minutes = 10   default",
+        "mcp.github.timeout_seconds = 300   default",
+        "mcp.github.approve = false   default",
+    ]
+    assert semgrep.splitlines()[1] == (
+        'mcp.semgrep.url = "http://127.0.0.1:3010/mcp"   project .orbit/config.toml'
+    )
+
+
+def test_a_roles_mcp_servers_show_as_the_file_gives_them(project: Path) -> None:
+    project_file(project, MCP_PROJECT)
+    result = show(project, "roles.coder.tools.mcp")
+    assert result.exit_code == 0, result.output
+    assert result.stdout == (
+        'roles.coder.tools.mcp = ["semgrep", {"server": "github", "tools": ["get_issue"]}]'
+        "   project .orbit/config.toml\n"
+    )
+
+
+def test_without_mcp_servers_there_are_none_by_default(project: Path) -> None:
+    result = show(project, "mcp")
+    assert result.exit_code == 0, result.output
+    assert result.stdout == "mcp = {}   default\n"
+
+
 def test_a_user_config_under_home_shows_from_there(project: Path, home: Path) -> None:
     config_dir = home / ".config" / "orbit"
     user_file(config_dir, '[roles.planner]\nmodel = "opus"\n')
@@ -237,6 +291,7 @@ def test_without_a_key_every_section_is_listed_in_groups_in_order(project: Path)
         "verification.steps",
         "setup",
         "skills",
+        "mcp",
         *(f"skill_files.{name}.SKILL.md" for name in SKILL_NAMES),
         "storage.tool_output_kb",
         "server.tls",

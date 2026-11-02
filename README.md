@@ -1590,6 +1590,9 @@ What a role's agents may use is its `[roles.<name>.tools]` table:
   `coder` and the `experimenter` have `shell`, every other built-in role `read`.
 - `web`: whether its agents may search and fetch the web, `true` by default, as it is for every
   built-in role.
+- `mcp`: the external MCP servers its agents may use, none by default, each declared in an
+  `[mcp.<name>]` table (see [MCP servers](#mcp-servers)): a server's name for all its tools, or
+  `{ server = "github", tools = ["get_issue", "list_issues"] }` for the tools it lists.
 
 Each is merged across the layers on its own, as a role's other fields are, so a project can set
 one and keep the rest: this keeps the reviewer's orbit tools and web access, and takes away its
@@ -1606,6 +1609,63 @@ each showing the new form: `roles.coder.tool_access is gone; write [roles.coder.
 = "shell", web = true.` (`off` was `workspace = "none", web = false`, `restricted` was `workspace
 = "read", web = true` and `full` was `workspace = "shell", web = true`), and `roles.coder.tools
 is now a table; write [roles.coder.tools] orbit = ["get_task", "complete_task"].`
+
+#### MCP servers
+
+A project declares the external MCP servers its roles may use in `.orbit/config.toml`, an
+`[mcp.<name>]` table each, and a role's `[roles.<name>.tools]` names those its agents may use.
+Orbit will connect to them itself and offer the allowed tools as its own, so every runtime is
+held to the same list; this version reads and checks the declarations, and connects to nothing
+yet.
+
+```toml
+[mcp.github]
+command = ["github-mcp-server", "stdio"]
+env = { GITHUB_TOKEN = "$GITHUB_TOKEN" }
+approve = ["create_issue"]
+
+[mcp.semgrep]
+url = "http://127.0.0.1:3010/mcp"
+headers = { Authorization = "Bearer ${SEMGREP_TOKEN}" }
+
+[roles.coder.tools]
+mcp = ["semgrep", { server = "github", tools = ["get_issue", "list_issues", "create_issue"] }]
+```
+
+A server's fields:
+
+- `command`, the program that starts it and its arguments, as a list, or `url`, the HTTP or
+  HTTPS URL of one already running: exactly one of them.
+- `env`: its environment variables, a table.
+- `headers`: the HTTP headers it's sent, a table; only with `url`.
+- `shared`: whether the agents share one connection to it, rather than each having its own;
+  `true` by default.
+- `idle_minutes`: how long a connection it's idle on is kept, `10` by default.
+- `timeout_seconds`: how long a call to one of its tools may take, `300` by default.
+- `approve`: which of its tools' calls wait for your approval: none (`false`, the default), all
+  (`true`), or those a list names.
+
+A value in `env` or `headers` may reference a variable as `$NAME` or `${NAME}`, which orbit fills
+in from its own environment when it starts the server; text without a reference is passed as it
+is. So the file names a secret rather than holding its value.
+
+A server's name is a plain name of letters, digits, `-` and `_`, without `__`, which parts a
+server's name from its tools' in the names agents see, and isn't the name of one of orbit's
+tools. Anything else is refused as the configuration loads, naming the server and the file: a
+name that breaks those rules (`mcp.get_task: get_task is one of orbit's tools; give the server
+another name`), both `command` and `url` or neither (`mcp.github: a server has either a command
+or a url`), `headers` with a `command`, or a field a server doesn't have. So is a role naming a
+server that isn't declared (`roles.coder.tools.mcp: nope isn't a declared MCP server; the declared
+ones are github, semgrep.`), the same server twice, or an empty `tools` list. A tool `approve`
+lists must be one some role allowing the server can call: when every role allowing it lists its
+tools and none lists that one, it's refused (`mcp.github.approve: create_issue isn't a tool any
+role allowing github lists; they list get_issue.`).
+
+`tools.mcp` is merged across the layers as one field, as a role's others are. Your `config.toml`
+may set a declared server's `command`, `url`, `env` and `headers` for your machine (see
+[Your machine's model, effort and runtime](#your-machines-model-effort-and-runtime)). Orbit reads
+the servers as it opens the workspace, so a change takes effect the next time it opens, as the
+rest of the configuration does.
 
 The `experimenter` is a conversational role the planner consults (see `consults` below) and you
 can talk to on its own tab: it runs what it's asked to learn, such as how a library behaves, in a
@@ -1873,10 +1933,9 @@ counted from 1 as in `orbit config show` (for example
 `roles.coder.tools.workspace: Input should be 'none', 'read', 'write' or 'shell'`, or
 `verification.steps.1.command: Field required` for a first step without a command). The
 settings of a later version of orbit, which the reference config shows commented out, are
-refused while uncommented, naming the first: an `[mcp.<name>]` or `[models.<name>]` table or a
-role's MCP servers, `mcp` in its `[roles.<name>.tools]` table (`roles.coder.tools.mcp`), as in
-`[mcp.github] isn't supported by this version of orbit yet; it's in the reference config for a
-later version. Leave it commented out.`
+refused while uncommented, naming the first: a `[models.<name>]` table, as in `[models.local]
+isn't supported by this version of orbit yet; it's in the reference config for a later version.
+Leave it commented out.`
 
 #### Your machine's model, effort and runtime
 
@@ -1923,7 +1982,23 @@ knows, and any other is refused, naming the key (`roles.runtime = "nope": this v
 knows the runtimes claude, kiro.`). A `[roles.<name>]` table names its role as a project's does, with
 a plain name of letters, digits, `-` and `_`, and one that doesn't is refused, naming the file and
 the key. `[[skills]]` and `[triggers.<name>]` belong in the project's `.orbit/config.toml` too,
-and are refused as a role's field is (see [Skills](#skills) and [Triggers](#triggers)). `orbit chat` reads
+and are refused as a role's field is (see [Skills](#skills) and [Triggers](#triggers)).
+
+An MCP server the project declares (see [MCP servers](#mcp-servers)) may be pointed at your
+machine's copy: an `[mcp.<name>]` table in your `config.toml` sets its `command`, `url`, `env`
+and `headers`, each replacing the project's value; setting `command` or `url` replaces how the
+server is reached, so the project's other one is dropped:
+
+```toml
+[mcp.github]
+command = ["/opt/bin/github-mcp", "stdio"]
+```
+
+It sets nothing else of a server: any other field is refused, naming it and that it belongs in
+the project's `.orbit/config.toml`. Nor can it add a server: one the project doesn't declare is
+refused (`mcp.other: the user config can't add servers; declare it in .orbit/config.toml.`), after
+your `config.toml`'s path. A personal role naming a server the project doesn't declare is refused
+the same way, naming the role. `orbit chat` reads
 your `config.toml`'s roles as it opens its workspace, and `orbit serve`, with the config directory
 of the account it runs as, as it opens each workspace it serves; both read them again, with the
 project's, when the planner is reset. An invalid one is refused as an invalid
@@ -2579,7 +2654,7 @@ touch `.orbit/config.toml`, and writes no reference config by itself; with `--up
 directory's, or the one `-C PATH` names, picked as `orbit chat` picks it) from this machine's
 files, each value with the layer it came from: the limits, each role field by field, each
 trigger field by field, the verification steps and their sets' tables, the setup, the
-`[[skills]]` entries, every skill file, and your `config.toml`'s `[storage]`, `[server]` and `[telemetry]` (the config directory is
+`[[skills]]` entries, each MCP server field by field, every skill file, and your `config.toml`'s `[storage]`, `[server]` and `[telemetry]` (the config directory is
 `--config-dir`, as for `orbit chat`). It needs no running `orbit serve`, and writes nothing. Each
 value is a line, `<key> = <value>   <layer>`, the value as JSON, with the limits, each role, each
 trigger, each skill's files and each other section in groups of their own:
@@ -2597,8 +2672,11 @@ roles.reviewer.tools.workspace = "none"   project .orbit/config.toml
 roles.reviewer.tools.web = true   package
 ```
 
-A role's `[roles.<name>.tools]` is listed field by field, `orbit`, `workspace` and `web`, each with
-the layer it came from.
+A role's `[roles.<name>.tools]` is listed field by field, `orbit`, `workspace`, `web` and `mcp`,
+each with the layer it came from, its MCP servers as a file gives them. Each MCP server is listed
+field by field as `mcp.<name>.<field>`, a group each, a field your `config.toml` overrides from
+`user`, one the project's `.orbit/config.toml` sets from `project`, and the rest from `default`;
+without servers, `mcp = {}   default`.
 
 The layers, least specific first:
 

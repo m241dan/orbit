@@ -22,6 +22,7 @@ from orbit.agent.domain.config_report import (
     subtree,
 )
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer, load_user_roles
+from orbit.agent.domain.mcp_servers import McpServer
 from orbit.agent.domain.roles import ROLE_KEYS, built_in_roles
 from orbit.agent.domain.server import ServerSettings
 from orbit.agent.domain.skills import Skill, SkillFile, SkillLibrary, SkillMapping
@@ -73,6 +74,7 @@ def sources(
         PACKAGE_FILES,
         layered.trigger_layers,
         TEMPLATE_FILES,
+        layered.server_layers,
     )
 
 
@@ -339,8 +341,38 @@ def test_the_project_files_sections_come_in_order() -> None:
         "verification",
         "setup",
         "skills",
+        "mcp",
         "skill_files",
     ]
+
+
+# The MCP servers
+
+
+def test_without_servers_there_are_none_by_default() -> None:
+    assert report()["mcp"] == Setting({}, DEFAULT)
+
+
+def test_an_empty_mcp_table_the_project_file_gives_is_the_projects() -> None:
+    assert report({"mcp": {}})["mcp"] == Setting({}, PROJECT)
+
+
+def test_each_server_is_listed_field_by_field_from_the_layer_that_set_it() -> None:
+    project = {"mcp": {"semgrep": {"url": "http://127.0.0.1:3010/mcp", "env": {"A": "$A"}}}}
+    user = {"mcp": {"semgrep": {"env": {"A": "$B"}}}}
+    settings = subtree(report(project, user), "mcp.semgrep")
+    assert list(settings) == [f"mcp.semgrep.{key}" for key in McpServer.model_fields]
+    assert settings["mcp.semgrep.url"] == Setting("http://127.0.0.1:3010/mcp", PROJECT)
+    assert settings["mcp.semgrep.env"] == Setting({"A": "$B"}, USER)
+    assert settings["mcp.semgrep.idle_minutes"] == Setting(10, DEFAULT)
+
+
+def test_a_roles_mcp_servers_are_reported_as_a_file_gives_them() -> None:
+    mcp = ["semgrep", {"server": "github", "tools": ["get_issue"]}]
+    servers = {"semgrep": {"url": "http://127.0.0.1:3010/mcp"}, "github": {"command": ["gh"]}}
+    project = {"mcp": servers, "roles": {"coder": {"tools": {"mcp": mcp}}}}
+    assert report(project)["roles.coder.tools.mcp"] == Setting(mcp, PROJECT)
+    assert report()["roles.coder.tools.mcp"] == Setting([], DEFAULT)
 
 
 # The skills

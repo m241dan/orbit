@@ -6,7 +6,8 @@ The built-in roles aren't kept here: whoever builds them passes in the contents 
 
 A role says what an agent is told about its job, the skills it gets, what it may use (its
 ``[roles.<name>.tools]`` table: which of orbit's tools it may call, what it may do in its
-workspace and whether it has the web), whether its claims of being done are verified, how long it
+workspace, whether it has the web and the MCP servers it may use, whose declarations are checked
+once they're read), whether its claims of being done are verified, how long it
 may take and the runtime it runs on; whether the skills it names exist is checked once they're
 read. Its model, workspace level, web access and effort are the defaults for tasks orbit queues in
 that role; a task the user
@@ -17,6 +18,7 @@ take a coder's slot, and the work asked of a disabled role is refused.
 """
 
 import re
+from collections import Counter
 from collections.abc import Iterator, Mapping
 from datetime import timedelta
 from typing import Annotated, Any, Literal, Self
@@ -25,10 +27,12 @@ import tomlkit
 from pydantic import (
     AfterValidator,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     ValidationError,
     field_validator,
+    model_serializer,
     model_validator,
 )
 from pydantic_core import PydanticCustomError
@@ -129,10 +133,43 @@ def _refuse_granted(tools: tuple[str, ...]) -> None:
         raise ValueError(f"{drafts[0]} comes with {PROPOSE_TASK}; list that instead.")
 
 
+def _grant_table(item: object) -> object:
+    """A role's ``tools.mcp`` entry ``item`` as a table: a server's name alone is all its
+    tools."""
+    return {"server": item} if isinstance(item, str) else item
+
+
+class ServerGrant(_Config):
+    """An MCP server a role's agents may use: the ``server``, by its name in ``[mcp.<name>]``,
+    and the ``tools`` of its they may call, by the server's names for them; all of them if
+    ``None``. Written back, it's the server's name alone if it allows every tool, as a file may
+    give it."""
+
+    server: str
+    tools: tuple[str, ...] | None = None
+
+    @field_validator("tools")
+    @classmethod
+    def _names_a_tool(cls, tools: tuple[str, ...] | None) -> tuple[str, ...] | None:
+        if tools == ():
+            raise ValueError("a server's tools name at least one; leave tools out for all of them")
+        return tools
+
+    @model_serializer
+    def _as_written(self) -> str | dict[str, Any]:
+        if self.tools is None:
+            return self.server
+        return {"server": self.server, "tools": self.tools}
+
+
+RoleServer = Annotated[ServerGrant, BeforeValidator(_grant_table)]
+"""A role's ``tools.mcp`` entry: a server's name, or a table of its ``server`` and ``tools``."""
+
+
 class RoleTools(_Config):
     """What a role's agents may use: the ``orbit`` tools they may call, what they may do in their
-    ``workspace``, and whether they have the ``web``. Each field is merged across the layers on
-    its own, as a role's other fields are."""
+    ``workspace``, whether they have the ``web``, and the ``mcp`` servers they may use. Each field
+    is merged across the layers on its own, as a role's other fields are."""
 
     orbit: tuple[str, ...] = Field(
         default=(GET_TASK, COMPLETE_TASK, REPORT_PROGRESS, GIVE_UP),
@@ -145,6 +182,21 @@ class RoleTools(_Config):
         ),
     )
     web: bool = Field(default=True, description="Whether its agents may search and fetch the web.")
+    mcp: tuple[RoleServer, ...] = Field(
+        default=(),
+        description=(
+            "The MCP servers its agents may use: a name for all its tools, or { server, tools }."
+        ),
+    )
+
+    @field_validator("mcp")
+    @classmethod
+    def _servers_once(cls, grants: tuple[ServerGrant, ...]) -> tuple[ServerGrant, ...]:
+        listed = Counter(grant.server for grant in grants)
+        repeated = [server for server, count in listed.items() if count > 1]
+        if repeated:
+            raise ValueError(f"{repeated[0]} is listed more than once; list each server once.")
+        return grants
 
     @field_validator("orbit")
     @classmethod
@@ -236,7 +288,9 @@ class Role(_Config):
     )
     tools: RoleTools = Field(
         default=RoleTools(),
-        description="What its agents may use: orbit's tools, their workspace and the web.",
+        description=(
+            "What its agents may use: orbit's tools, their workspace, the web and MCP servers."
+        ),
     )
 
     @field_validator("lane")

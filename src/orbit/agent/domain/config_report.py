@@ -11,11 +11,16 @@ from pydantic import BaseModel
 from orbit.agent.domain.checks import VerificationSet
 from orbit.agent.domain.config import LIMIT_KEYS, OrbitConfig
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
+from orbit.agent.domain.mcp_servers import McpServer
 from orbit.agent.domain.roles import ROLE_KEYS, Role, names_file, role_setting
 from orbit.agent.domain.skills import SkillLibrary, SkillMapping
 from orbit.agent.domain.triggers import Trigger
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import REVIEW_ROLES
+
+MCP_KEY = "tools.mcp"
+"""The key of a role's MCP servers, reported as a file gives them: a server's name, or a table of
+its server and tools."""
 
 ROLE_CELL = "role"
 TASK_CELL = "task"
@@ -41,8 +46,9 @@ class ConfigSources:
     layer each of its roles' fields came from, ``role_layers``, by role and field name; its
     ``project`` file and the ``user`` config as written; the files the package's roles'
     instructions are in, ``package_files``, by role; the layer each of its triggers' fields came
-    from, ``trigger_layers``, by trigger and field name; and the files the package's triggers'
-    prompts are in, ``template_files``, by trigger, for those that name one."""
+    from, ``trigger_layers``, by trigger and field name; the files the package's triggers'
+    prompts are in, ``template_files``, by trigger, for those that name one; and the layer each
+    of its MCP servers' fields came from, ``server_layers``, by server and field name."""
 
     config: OrbitConfig
     role_layers: Mapping[str, Mapping[str, Layer]]
@@ -51,6 +57,7 @@ class ConfigSources:
     package_files: Mapping[str, str]
     trigger_layers: Mapping[str, Mapping[str, Layer]] = field(default_factory=dict)
     template_files: Mapping[str, str] = field(default_factory=dict)
+    server_layers: Mapping[str, Mapping[str, Layer]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -108,13 +115,14 @@ class UnknownKey(LookupError):
 def config_report(sources: ConfigSources, tables: Mapping[str, BaseModel]) -> ConfigReport:
     """The settings in effect that ``sources`` give, each with the layer it came from: the
     limits, each role field by field, each trigger field by field, the verification steps and
-    their sets' tables, the setup, the skills by path and every skill file, then each of the user
-    config's ``tables``, by name, as read, field by field."""
+    their sets' tables, the setup, the skills by path, each MCP server field by field and every
+    skill file, then each of the user config's ``tables``, by name, as read, field by field."""
     config, project = sources.config, sources.project
     report = _limits(config, project) | _roles(sources) | _triggers(sources)
     report |= _steps(config.verification.steps, project)
     report |= _verification_sets(config.verification.sets, project) | _setup(config, project)
-    report |= _skills(config.skills, project) | _skill_files(config.skill_library)
+    report |= _skills(config.skills, project) | _servers(sources)
+    report |= _skill_files(config.skill_library)
     for name, table in tables.items():
         report |= _table(name, table, sources.user)
     return report
@@ -167,6 +175,8 @@ def _role_field(name: str, key: str, sources: ConfigSources) -> Any:
     """The value of role ``name``'s setting ``key``; its instructions with the file they're
     in."""
     role = sources.config.roles[name]
+    if key == MCP_KEY:
+        return [grant.model_dump(mode="json") for grant in role.tools.mcp]
     if key != "instructions":
         return role_setting(role, key)
     given = _given_instructions(name, sources.role_layers[name][key], sources)
@@ -261,6 +271,19 @@ def _skills(mappings: tuple[SkillMapping, ...], project: Written) -> ConfigRepor
         report[f"skills.{number}.paths"] = Setting(mapping.paths, layer)
         report[f"skills.{number}.use"] = Setting(mapping.use, layer)
     return report
+
+
+def _servers(sources: ConfigSources) -> ConfigReport:
+    """Each MCP server in effect, field by field, each from the layer it came from; no servers
+    as one setting, the ``project`` file's if it gives an empty ``[mcp]``."""
+    servers = sources.config.mcp
+    if not servers:
+        return {"mcp": Setting({}, _layer("mcp" in sources.project.data, sources.project))}
+    return {
+        f"mcp.{name}.{key}": Setting(getattr(server, key), sources.server_layers[name][key])
+        for name, server in servers.items()
+        for key in McpServer.model_fields
+    }
 
 
 def _skill_files(library: SkillLibrary) -> ConfigReport:

@@ -58,6 +58,7 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
             "orbit": ("get_task", "complete_task", "run_check", "report_progress", "give_up"),
             "workspace": "shell",
             "web": True,
+            "mcp": (),
         },
         "blocking_findings": False,
         "verify": True,
@@ -76,7 +77,7 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
     },
     "reviewer": {
         "model": None,
-        "tools": {"orbit": MERGE_PASS_TOOLS, "workspace": "read", "web": True},
+        "tools": {"orbit": MERGE_PASS_TOOLS, "workspace": "read", "web": True, "mcp": ()},
         "blocking_findings": False,
         "verify": False,
         "timeout_minutes": None,
@@ -104,6 +105,7 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
             ),
             "workspace": "read",
             "web": True,
+            "mcp": (),
         },
         "blocking_findings": False,
         "verify": False,
@@ -126,6 +128,7 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
             "orbit": ("report_progress", "save_report", "list_reports", "read_report"),
             "workspace": "shell",
             "web": True,
+            "mcp": (),
         },
         "blocking_findings": False,
         "verify": False,
@@ -148,6 +151,7 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
             "orbit": ("get_task", "propose_checks", "report_progress", "give_up"),
             "workspace": "read",
             "web": True,
+            "mcp": (),
         },
         "blocking_findings": False,
         "verify": False,
@@ -185,7 +189,7 @@ BLOCKING_LENSES = frozenset({"bugs-reviewer", "security-reviewer"})
 BUILT_IN_FIELDS |= {
     name: BUILT_IN_FIELDS["reviewer"]
     | {
-        "tools": {"orbit": LENS_TOOLS, "workspace": "read", "web": True},
+        "tools": {"orbit": LENS_TOOLS, "workspace": "read", "web": True, "mcp": ()},
         "skills": skills,
         "blocking_findings": name in BLOCKING_LENSES,
     }

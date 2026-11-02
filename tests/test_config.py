@@ -7,7 +7,13 @@ import pytest
 
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.checks import Setup
-from orbit.agent.domain.config import OrbitConfig, Package, load_config, load_layered
+from orbit.agent.domain.config import (
+    LayeredConfig,
+    OrbitConfig,
+    Package,
+    load_config,
+    load_layered,
+)
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.copies import expired
 from orbit.agent.domain.layers import (
@@ -16,11 +22,18 @@ from orbit.agent.domain.layers import (
     PACKAGE,
     Layer,
     PersonalRoleError,
+    UserConfigError,
     UserRoles,
     load_user_roles,
 )
 from orbit.agent.domain.reviews import ReviewLimits
-from orbit.agent.domain.roles import MAX_COPY_TTL_HOURS, Role, RoleTools, built_in_roles
+from orbit.agent.domain.roles import (
+    MAX_COPY_TTL_HOURS,
+    Role,
+    RoleTools,
+    ServerGrant,
+    built_in_roles,
+)
 from orbit.agent.domain.runtimes import CLAUDE, RuntimeRules
 from orbit.agent.domain.sessions import SavedCopy
 from orbit.agent.domain.skills import SkillMapping
@@ -804,10 +817,7 @@ LATER_VERSION = (
 @pytest.mark.parametrize(
     ("toml", "setting"),
     [
-        ('[roles.coder.tools]\nmcp = ["semgrep"]', "roles.coder.tools.mcp"),
-        ('[mcp.github]\ncommand = ["github-mcp-server", "stdio"]', "[mcp.github]"),
         ('[models.local]\nmodel = "openai:qwen3-coder"', "[models.local]"),
-        ("[mcp]\nshared = true\n\n[mcp.github]\nshared = false", "[mcp.github]"),
         ('models = "local"', "[models]"),
     ],
 )
@@ -817,15 +827,108 @@ def test_a_later_versions_setting_is_refused_naming_it(toml: str, setting: str) 
     assert str(raised.value) == f"{setting} {LATER_VERSION}"
 
 
-def test_the_first_later_versions_setting_in_the_file_is_the_one_named() -> None:
-    toml = '[roles.coder.tools]\nmcp = []\n\n[mcp.github]\nurl = "http://127.0.0.1:3010/mcp"'
-    with pytest.raises(ConfigError, match=r"^roles\.coder\.tools\.mcp isn't supported"):
+def test_a_later_versions_setting_is_refused_ahead_of_anything_else() -> None:
+    toml = '[roles.coder.tools]\nmcp = ["nope"]\n\n[models.local]\nmodel = "openai:qwen3-coder"'
+    with pytest.raises(ConfigError, match=r"^\[models\.local\] isn't supported"):
         load_config(tomllib.loads(toml), BUILT_IN_ROLES)
 
 
 def test_a_layered_config_refuses_a_later_versions_setting_too() -> None:
-    with pytest.raises(ConfigError, match=r"^\[mcp\.github\] isn't supported"):
-        load_layered({"mcp": {"github": {"shared": True}}}, Package(BUILT_IN_ROLES))
+    with pytest.raises(ConfigError, match=r"^\[models\.local\] isn't supported"):
+        load_layered({"models": {"local": {"context_window": 1}}}, Package(BUILT_IN_ROLES))
+
+
+# MCP servers
+
+GITHUB_PROJECT = """\
+[mcp.github]
+command = ["github-mcp-server", "stdio"]
+env = { GITHUB_TOKEN = "$GITHUB_TOKEN" }
+
+[mcp.semgrep]
+url = "http://127.0.0.1:3010/mcp"
+
+[roles.coder.tools]
+mcp = [{ server = "github", tools = ["get_issue"] }]
+"""
+"""A project declaring github and semgrep, with the coder allowed github's get_issue."""
+PROJECT_PATH = "/src/app/.orbit/config.toml"
+
+
+def with_servers(project: str, user: str = "") -> LayeredConfig:
+    """The configuration of the project file holding ``project`` over a user config holding
+    ``user``."""
+    user_roles = load_user_roles(tomllib.loads(user), USER, BUILT_IN_ROLES)
+    return load_layered(tomllib.loads(project), Package(BUILT_IN_ROLES), user_roles, PROJECT_PATH)
+
+
+def test_a_projects_mcp_servers_and_a_roles_use_of_them_load() -> None:
+    layered = with_servers(GITHUB_PROJECT)
+    github = layered.config.mcp["github"]
+    assert github.command == ("github-mcp-server", "stdio")
+    assert github.env == {"GITHUB_TOKEN": "$GITHUB_TOKEN"}
+    assert layered.config.roles["coder"].tools.mcp == (
+        ServerGrant(server="github", tools=("get_issue",)),
+    )
+    assert layered.server_layers["github"]["command"] == Layer("project", PROJECT_PATH)
+    assert layered.role_layers["coder"]["tools.mcp"] == Layer("project", PROJECT_PATH)
+
+
+def test_a_role_without_mcp_servers_is_as_it_was() -> None:
+    config = with_servers(GITHUB_PROJECT).config
+    assert config.roles["reviewer"] == BUILT_IN_ROLES["reviewer"]
+    assert load_config({}, BUILT_IN_ROLES).mcp == {}
+
+
+def test_a_role_naming_a_server_alone_may_use_all_its_tools() -> None:
+    project = GITHUB_PROJECT.replace(
+        '[{ server = "github", tools = ["get_issue"] }]', '["semgrep"]'
+    )
+    assert with_servers(project).config.roles["coder"].tools.mcp == (ServerGrant(server="semgrep"),)
+
+
+@pytest.mark.parametrize(
+    ("mcp", "message"),
+    [
+        ('["nope"]', "roles.coder.tools.mcp: nope isn't a declared MCP server"),
+        ('["github", "github"]', "roles.coder.tools.mcp: Value error, github is listed more"),
+        ('[{ server = "github", tools = [] }]', "roles.coder.tools.mcp.1.tools: Value error"),
+    ],
+)
+def test_a_roles_wrong_mcp_servers_are_refused_naming_the_role(mcp: str, message: str) -> None:
+    project = GITHUB_PROJECT.replace('[{ server = "github", tools = ["get_issue"] }]', mcp)
+    with pytest.raises(ConfigError) as raised:
+        with_servers(project)
+    assert str(raised.value).startswith(message)
+
+
+def test_approving_a_tool_the_only_role_allowing_its_server_doesnt_list_is_refused() -> None:
+    project = GITHUB_PROJECT.replace("[mcp.semgrep]", 'approve = ["create_issue"]\n\n[mcp.semgrep]')
+    with pytest.raises(ConfigError, match=r"^mcp\.github\.approve: create_issue isn't"):
+        with_servers(project)
+
+
+def test_the_users_command_replaces_the_projects_from_the_user_layer() -> None:
+    user = '[mcp.github]\ncommand = ["/opt/bin/github-mcp", "stdio"]'
+    layered = with_servers(GITHUB_PROJECT, user)
+    assert layered.config.mcp["github"].command == ("/opt/bin/github-mcp", "stdio")
+    assert layered.server_layers["github"]["command"] == USER
+    assert layered.server_layers["github"]["env"] == Layer("project", PROJECT_PATH)
+
+
+def test_the_user_config_adding_a_server_is_its_fault() -> None:
+    with pytest.raises(UserConfigError) as raised:
+        with_servers(GITHUB_PROJECT, '[mcp.other]\ncommand = ["other-mcp"]')
+    assert str(raised.value) == (
+        "mcp.other: the user config can't add servers; declare it in .orbit/config.toml."
+    )
+
+
+def test_a_personal_role_naming_a_server_the_project_lacks_is_the_user_configs_fault() -> None:
+    user = '[roles.helper]\ninstructions = "Help."\nlane = "helper"\nworkspace = "snapshot"\n'
+    user += 'merge = false\nverify = false\n\n[roles.helper.tools]\nmcp = ["jira"]'
+    with pytest.raises(UserConfigError, match=r"^roles\.helper\.tools\.mcp: jira isn't"):
+        with_servers(GITHUB_PROJECT, user)
 
 
 def test_a_roles_tools_table_loads() -> None:
