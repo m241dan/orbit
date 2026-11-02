@@ -722,8 +722,18 @@ class UsageLedger(Protocol):
 
 
 class UpstreamFailed(Exception):
-    """An external MCP server failed: it couldn't start, it crashed, a call to it timed out, or
-    the connection to it dropped. The message says why, without the server's name."""
+    """An external MCP server failed: it couldn't start or be reached, it crashed, a call to it
+    timed out, or the connection to it dropped. The message says why, without the server's
+    name."""
+
+
+class CredentialsRefused(UpstreamFailed):
+    """An external MCP server refused orbit's credentials, answering with HTTP ``status``, 401
+    or 403."""
+
+    def __init__(self, status: int) -> None:
+        super().__init__(f"it refused orbit's credentials (HTTP {status})")
+        self.status = status
 
 
 class UpstreamSession(Protocol):
@@ -747,9 +757,12 @@ class UpstreamSession(Protocol):
 class McpConnector(Protocol):
     """Connects to external MCP servers."""
 
-    async def open(self, server: McpServer, cwd: str, env: Mapping[str, str]) -> UpstreamSession:
-        """A connection to ``server``, started in the directory ``cwd``, made if it's missing,
-        with ``env`` as its environment's own variables. Raises :class:`UpstreamFailed` when it
+    async def open(
+        self, server: McpServer, cwd: str, env: Mapping[str, str], headers: Mapping[str, str]
+    ) -> UpstreamSession:
+        """A connection to ``server``: started in the directory ``cwd``, made if it's missing,
+        with ``env`` as its environment's own variables, if it has a command; sending
+        ``headers`` with every request, if it has a URL. Raises :class:`UpstreamFailed` when it
         can't connect."""
         ...
 
@@ -759,5 +772,6 @@ class CredentialsUnreadable(Exception):
 
 
 Credentials = Callable[[str], str | None]
-"""The value of the variable named, for a server's environment; ``None`` when it isn't set.
+"""The value of the variable named, for a server's environment or headers; ``None`` when it isn't
+set.
 Raises :class:`CredentialsUnreadable` when they can't be read."""

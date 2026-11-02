@@ -262,7 +262,7 @@ source_modules = [
     "orbit.client",
     "orbit.cli",
 ]
-forbidden_modules = ["mcp", "uvicorn", "starlette", "httpx"]
+forbidden_modules = ["mcp", "uvicorn", "starlette", "httpx", "httpx2"]
 allow_indirect_imports = true
 
 # The frontend's presentation rules are plain functions; the widgets are what touch Textual.

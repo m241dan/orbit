@@ -1615,9 +1615,8 @@ is now a table; write [roles.coder.tools] orbit = ["get_task", "complete_task"].
 A project declares the external MCP servers its roles may use in `.orbit/config.toml`, an
 `[mcp.<name>]` table each, and a role's `[roles.<name>.tools]` names those its agents may use.
 Orbit connects to them itself and offers the allowed tools as its own, so every runtime is held
-to the same list and every call is traced (see [Proxied tools](#proxied-tools)). This version
-proxies servers started by a `command`; those reached by a `url` are read and checked, and
-offered to no one yet.
+to the same list and every call is traced (see [Proxied tools](#proxied-tools)). A server is
+started by its `command`, or reached at its `url` over streamable HTTP.
 
 ```toml
 [mcp.github]
@@ -1636,9 +1635,11 @@ mcp = ["semgrep", { server = "github", tools = ["get_issue", "list_issues", "cre
 A server's fields:
 
 - `command`, the program that starts it and its arguments, as a list, or `url`, the HTTP or
-  HTTPS URL of one already running: exactly one of them.
+  HTTPS URL of one already running: exactly one of them. A `url` is `https`, or plain `http` only
+  to this machine (`localhost` or a loopback address such as `127.0.0.1`), so credentials never
+  cross the network in the clear.
 - `env`: its environment variables, a table.
-- `headers`: the HTTP headers it's sent, a table; only with `url`.
+- `headers`: the HTTP headers sent with every request to it, a table; only with `url`.
 - `shared`: whether the agents share one connection to it, rather than each having its own;
   `true` by default.
 - `idle_minutes`: how long a connection it's idle on is kept, `10` by default.
@@ -1647,15 +1648,16 @@ A server's fields:
   (`true`), or those a list names.
 
 A value in `env` or `headers` may reference a variable as `$NAME` or `${NAME}`, which orbit fills
-in from its own environment when it starts the server; text without a reference is passed as it
-is. So the file names a secret rather than holding its value.
+in from its own environment when it starts or connects to the server; text without a reference
+is passed as it is. So the file names a secret rather than holding its value.
 
 A server's name is a plain name of letters, digits, `-` and `_`, without `__`, which parts a
 server's name from its tools' in the names agents see, and isn't the name of one of orbit's
 tools. Anything else is refused as the configuration loads, naming the server and the file: a
 name that breaks those rules (`mcp.get_task: get_task is one of orbit's tools; give the server
 another name`), both `command` and `url` or neither (`mcp.github: a server has either a command
-or a url`), `headers` with a `command`, or a field a server doesn't have. So is a role naming a
+or a url`), plain `http` to another machine (`mcp.semgrep: url must use https unless it's on
+this machine.`), `headers` with a `command`, or a field a server doesn't have. So is a role naming a
 server that isn't declared (`roles.coder.tools.mcp: nope isn't a declared MCP server; the declared
 ones are github, semgrep.`), the same server twice, or an empty `tools` list. A tool `approve`
 lists must be one some role allowing the server can call: when every role allowing it lists its
@@ -1690,14 +1692,19 @@ each agent gets its own, started in the agent's own workspace directory, and sto
 agent's run ends. A server started by a `command` is a process of orbit's, given only `PATH` and
 `HOME` from orbit's environment and then its `env`, its `$NAME` and `${NAME}` references filled
 in from orbit's environment as it starts; a variable that isn't set fails the start
-(`GITHUB_TOKEN isn't set in orbit's environment or credentials.toml.`). Agents never see these
-values. A call waits at most the server's `timeout_seconds`.
+(`GITHUB_TOKEN isn't set in orbit's environment or credentials.toml.`). A server at a `url` is
+reached over streamable HTTP and sent its `headers` with every request, their references filled
+in the same way as orbit connects, a variable that isn't set failing the connection with the same
+message. Agents never see these values, and orbit puts them in no log or span. Connecting, and a
+call, waits at most the server's `timeout_seconds`.
 
 On first connecting to a server, orbit gives a notice for each tool a role's list names that the
 server doesn't offer (`github offers no tool create_isue, which roles.coder.tools.mcp names.`);
 agents never see that tool. A server that fails to start, crashes, doesn't answer in time or
 drops the connection fails the call with the reason, and its connection is dropped, so the next
-call starts it afresh. The first failure gives a notice (`MCP server github failed: it exited
+call starts it afresh. So does a server at a `url` that refuses the connection, fails the TLS
+handshake or answers with an HTTP error status; one answering 401 or 403 says so (`MCP server
+semgrep refused orbit's credentials (HTTP 401).`). The first failure gives a notice (`MCP server github failed: it exited
 with status 1. Agents' calls to it return errors until it starts.`), and the failures after it
 none, until a call it answers ends the streak. When an agent's run ends, its calls in flight are
 cancelled; when the workspace closes or orbit exits, every connection is closed, the servers

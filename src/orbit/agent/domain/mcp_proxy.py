@@ -1,6 +1,6 @@
 """The rules of proxying external MCP servers' tools to agents: the names agents see them by,
 ``<server>__<tool>``, which of a server's tools a role allows, the variables a server's
-environment is filled from, and the wording of refusals and notices."""
+environment and headers are filled from, and the wording of refusals and notices."""
 
 import hashlib
 import re
@@ -8,6 +8,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from orbit.agent.domain.mcp_servers import McpServer
 from orbit.agent.domain.roles import Role, ServerGrant
 
 SEPARATOR = "__"
@@ -54,6 +55,25 @@ class UnsetVariable:
     def message(self) -> str:
         """Why the server can't start, in words."""
         return f"{self.name} isn't set in orbit's environment or credentials.toml."
+
+
+@dataclass(frozen=True)
+class FilledServer:
+    """A server's ``env`` and ``headers``, their variables filled in."""
+
+    env: dict[str, str]
+    headers: dict[str, str]
+
+
+@dataclass(frozen=True)
+class RefusedCredentials:
+    """Why a server failed: it refused orbit's credentials, answering with HTTP ``status``."""
+
+    status: int
+
+
+type FailureReason = str | RefusedCredentials
+"""Why a server failed: in words, a sentence or not, or its refusal of orbit's credentials."""
 
 
 def proxied_name(server: str, tool: str) -> str:
@@ -138,18 +158,36 @@ def filled_env(env: Mapping[str, str], values: Mapping[str, str]) -> dict[str, s
     }
 
 
+def server_variables(server: McpServer) -> tuple[str, ...]:
+    """The variables ``server``'s ``env``, then its ``headers``, reference, each once, in
+    order."""
+    return tuple(dict.fromkeys((*variables_in(server.env), *variables_in(server.headers))))
+
+
+def filled_server(server: McpServer, values: Mapping[str, str]) -> FilledServer | UnsetVariable:
+    """``server``'s ``env`` and ``headers`` with each variable they reference filled in from
+    ``values``, or the first variable ``values`` lacks."""
+    env = filled_env(server.env, values)
+    if isinstance(env, UnsetVariable):
+        return env
+    headers = filled_env(server.headers, values)
+    if isinstance(headers, UnsetVariable):
+        return headers
+    return FilledServer(env, headers)
+
+
 def refusal(role: str, name: str) -> str:
     """Why a call from an agent in role ``role`` to the tool ``name`` is refused."""
     return f"roles.{role} doesn't allow {name}."
 
 
-def call_failure(server: str, reason: str) -> str:
-    """The answer to a call to a tool of ``server``, which failed for ``reason``, a sentence
-    or not."""
+def call_failure(server: str, reason: FailureReason) -> str:
+    """The answer to a call to a tool of ``server``, which failed for ``reason``."""
+    if isinstance(reason, RefusedCredentials):
+        return f"MCP server {server} refused orbit's credentials (HTTP {reason.status})."
     return f"MCP server {server} failed: {reason.rstrip('.')}."
 
 
-def failure_notice(server: str, reason: str) -> str:
-    """The notice that ``server`` failed, for ``reason``, a sentence or not, starting a streak
-    of failures."""
+def failure_notice(server: str, reason: FailureReason) -> str:
+    """The notice that ``server`` failed, for ``reason``, starting a streak of failures."""
     return f"{call_failure(server, reason)} Agents' calls to it return errors until it starts."

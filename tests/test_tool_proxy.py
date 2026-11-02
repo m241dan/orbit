@@ -29,7 +29,9 @@ GITHUB = McpServer(command=("github-mcp-server", "stdio"), env={"TOKEN": "$GITHU
 SERVERS = {
     "github": GITHUB,
     "own": McpServer(command=("own-server",), shared=False),
-    "semgrep": McpServer(url="http://127.0.0.1:3010/mcp"),
+    "semgrep": McpServer(
+        url="http://127.0.0.1:3010/mcp", headers={"Authorization": "Bearer ${SEMGREP_TOKEN}"}
+    ),
 }
 CODER_TOOLS = ["get_issue", "get issue!", "oops", "slow", "fail", "create_isue"]
 CREATE_ISUE = "github offers no tool create_isue, which roles.coder.tools.mcp names."
@@ -84,7 +86,9 @@ class Proxied:
     def __init__(self, credentials: Mapping[str, str] | None = None) -> None:
         self.connector = FakeConnector()
         self.credentials = FakeCredentials(
-            {"GITHUB_TOKEN": "secret"} if credentials is None else credentials
+            {"GITHUB_TOKEN": "secret", "SEMGREP_TOKEN": "s3"}
+            if credentials is None
+            else credentials
         )
         self.timers = Timers()
         self.published: list[Event] = []
@@ -144,12 +148,14 @@ async def test_a_role_without_servers_lists_none_and_connects_to_nothing() -> No
     assert proxied.connector.opened == []
 
 
-async def test_servers_reached_by_a_url_are_left_out() -> None:
+async def test_a_server_reached_by_a_url_is_listed_and_called() -> None:
     proxied = Proxied()
-    assert await proxied.proxy.list_tools(caller("s1", "scanner")) == ()
-    assert proxied.connector.opened == []
-    reply = await proxied.call("semgrep__scan", caller("s1", "scanner"))
-    assert reply == Reply("roles.scanner doesn't allow semgrep__scan.", is_error=True)
+    tools = await proxied.proxy.list_tools(caller("s1", "scanner"))
+    assert tools[0].name == "semgrep__get_issue"
+    reply = await proxied.call("semgrep__get_issue", caller("s1", "scanner"), number=4)
+    assert reply == Reply("Issue 4: it's broken.")
+    [opened] = proxied.connector.opened
+    assert opened.server == SERVERS["semgrep"]
 
 
 async def test_tools_a_role_lists_that_the_server_lacks_are_noticed_once() -> None:
@@ -294,6 +300,35 @@ async def test_the_servers_environment_is_filled_from_the_credentials() -> None:
     await proxied.proxy.list_tools(coder())
     [opened] = proxied.connector.opened
     assert opened.env == {"TOKEN": "secret"}
+
+
+async def test_the_servers_headers_are_filled_from_the_credentials() -> None:
+    proxied = Proxied()
+    await proxied.proxy.list_tools(caller("s1", "scanner"))
+    [opened] = proxied.connector.opened
+    assert opened.headers == {"Authorization": "Bearer s3"}
+    assert opened.env == {}
+
+
+async def test_a_header_variable_set_nowhere_fails_the_connection() -> None:
+    proxied = Proxied(credentials={"GITHUB_TOKEN": "secret"})
+    reply = await proxied.call("semgrep__get_issue", caller("s1", "scanner"))
+    assert reply == Reply(
+        "MCP server semgrep failed: SEMGREP_TOKEN isn't set in orbit's environment or"
+        " credentials.toml.",
+        is_error=True,
+    )
+    assert proxied.connector.opened == []
+
+
+async def test_a_server_refusing_orbits_credentials_says_so_once_per_streak() -> None:
+    proxied = Proxied()
+    proxied.connector.refused = 401
+    first = await proxied.call("semgrep__get_issue", caller("s1", "scanner"))
+    second = await proxied.call("semgrep__get_issue", caller("s1", "scanner"))
+    message = "MCP server semgrep refused orbit's credentials (HTTP 401)."
+    assert first == second == Reply(message, is_error=True)
+    assert proxied.notices == [f"{message} Agents' calls to it return errors until it starts."]
 
 
 async def test_a_variable_set_nowhere_fails_the_start() -> None:

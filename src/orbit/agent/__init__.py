@@ -117,7 +117,9 @@ from orbit.agent.external.file_names import file_names
 from orbit.agent.external.git_tree import GitCoderTree
 from orbit.agent.external.kiro_cli import KiroCliRunner
 from orbit.agent.external.local_zone import LocalZone
+from orbit.agent.external.mcp_connectors import TransportConnector
 from orbit.agent.external.mcp_host import McpHost
+from orbit.agent.external.mcp_http import HttpConnector
 from orbit.agent.external.mcp_stdio import StdioConnector, mcp_folder
 from orbit.agent.external.repository import (
     RepositoryUnreadable,
@@ -197,6 +199,7 @@ __all__ = [
     "GitCoderTree",
     "HostMaker",
     "HostParts",
+    "HttpConnector",
     "ImportBlocked",
     "InitResult",
     "InstructionLines",
@@ -254,6 +257,7 @@ __all__ = [
     "TlsMode",
     "TokenError",
     "TokenFile",
+    "TransportConnector",
     "TreeCopies",
     "UnknownKey",
     "UnknownSkill",

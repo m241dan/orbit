@@ -6,12 +6,15 @@ import pytest
 
 from orbit.agent.domain.mcp_proxy import (
     NAME_LIMIT,
+    FilledServer,
     ProxiedTool,
+    RefusedCredentials,
     UnsetVariable,
     UpstreamTool,
     call_failure,
     failure_notice,
     filled_env,
+    filled_server,
     find_proxied,
     grant_for,
     is_proxied,
@@ -19,8 +22,10 @@ from orbit.agent.domain.mcp_proxy import (
     proxied_name,
     proxied_tools,
     refusal,
+    server_variables,
     variables_in,
 )
+from orbit.agent.domain.mcp_servers import McpServer
 from orbit.agent.domain.roles import Role, RoleTools
 
 SCHEMA = {"type": "object", "properties": {"number": {"type": "integer"}}}
@@ -141,6 +146,31 @@ def test_an_environment_missing_a_variable_names_it() -> None:
     assert unset.message == "GITHUB_TOKEN isn't set in orbit's environment or credentials.toml."
 
 
+SEMGREP = McpServer(
+    url="https://semgrep.example.com/mcp",
+    env={"MODE": "$MODE"},
+    headers={"Authorization": "Bearer ${SEMGREP_TOKEN}", "X-Mode": "$MODE"},
+)
+
+
+def test_a_servers_variables_are_those_its_env_and_headers_reference_each_once() -> None:
+    assert server_variables(SEMGREP) == ("MODE", "SEMGREP_TOKEN")
+
+
+def test_a_servers_env_and_headers_are_filled_from_the_values_of_its_variables() -> None:
+    filled = filled_server(SEMGREP, {"SEMGREP_TOKEN": "secret", "MODE": "ci"})
+    assert filled == FilledServer(
+        env={"MODE": "ci"}, headers={"Authorization": "Bearer secret", "X-Mode": "ci"}
+    )
+
+
+@pytest.mark.parametrize(
+    ("values", "unset"), [({"MODE": "ci"}, "SEMGREP_TOKEN"), ({"SEMGREP_TOKEN": "s"}, "MODE")]
+)
+def test_a_server_missing_a_variable_names_it(values: dict[str, str], unset: str) -> None:
+    assert filled_server(SEMGREP, values) == UnsetVariable(unset)
+
+
 # Wording
 
 
@@ -158,6 +188,16 @@ def test_a_failure_notice_names_the_server_and_why() -> None:
 
 def test_a_failed_call_names_the_server_and_why() -> None:
     assert call_failure("github", "it exited") == "MCP server github failed: it exited."
+
+
+def test_a_server_refusing_orbits_credentials_says_so() -> None:
+    assert call_failure("semgrep", RefusedCredentials(401)) == (
+        "MCP server semgrep refused orbit's credentials (HTTP 401)."
+    )
+    assert failure_notice("semgrep", RefusedCredentials(403)) == (
+        "MCP server semgrep refused orbit's credentials (HTTP 403). Agents' calls to it return"
+        " errors until it starts."
+    )
 
 
 def test_a_reason_ending_a_sentence_doesnt_end_it_twice() -> None:

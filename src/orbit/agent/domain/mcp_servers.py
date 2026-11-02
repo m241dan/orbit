@@ -7,6 +7,7 @@ A value in ``env`` or ``headers`` may reference a variable as ``$NAME`` or ``${N
 filled in when the server starts, so the file never holds a secret's value.
 """
 
+import ipaddress
 from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, Self
@@ -44,6 +45,13 @@ SERVER_FIELD_BELONGS_IN_PROJECT = (
 
 URL_SCHEMES = frozenset({"http", "https"})
 """The schemes a server's URL may have."""
+
+PLAIN_HTTP_RULE = "url must use https unless it's on this machine."
+"""Why a server at a plain ``http`` URL on another machine is refused: its headers, which may
+hold credentials, would cross the network in the clear."""
+
+LOOPBACK_NAME = "localhost"
+"""The host name that's this machine, besides the loopback addresses."""
 
 
 def _server_name(name: str) -> str:
@@ -88,6 +96,29 @@ def _checked_url(url: str) -> str:
 
 Url = Annotated[str, AfterValidator(_checked_url)]
 """The URL a running server serves MCP at."""
+
+
+def _is_in_the_clear(url: str) -> bool:
+    """Whether ``url`` is plain ``http`` to another machine, so what's sent to it could be read
+    on the way."""
+    parts = urlsplit(url)
+    return parts.scheme == "http" and not _is_loopback(parts.hostname or "")
+
+
+def _is_loopback(host: str) -> bool:
+    """Whether ``host`` is this machine: ``localhost`` or a loopback address."""
+    if host.lower() == LOOPBACK_NAME:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _refuse_in_the_clear(url: str | None) -> None:
+    """Refuse ``url``, if given, when it's plain ``http`` to another machine."""
+    if url is not None and _is_in_the_clear(url):
+        raise PydanticCustomError("server_url", PLAIN_HTTP_RULE)
 
 
 class _Config(BaseModel):
@@ -148,6 +179,7 @@ class McpServer(_Config):
             raise PydanticCustomError("server_transport", TRANSPORT_RULE)
         if self.headers and self.url is None:
             raise PydanticCustomError("server_headers", "headers go with a url, not a command")
+        _refuse_in_the_clear(self.url)
         return self
 
 
@@ -164,6 +196,7 @@ class ServerFields(_Config):
     def _reached_one_way(self) -> Self:
         if self.command is not None and self.url is not None:
             raise PydanticCustomError("server_transport", TRANSPORT_RULE)
+        _refuse_in_the_clear(self.url)
         return self
 
 

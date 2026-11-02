@@ -63,7 +63,7 @@ def test_a_server_at_a_url_takes_headers() -> None:
 
 @pytest.mark.parametrize("approve", [True, ("create_issue",), ()])
 def test_approve_is_a_bool_or_a_list_of_tools(approve: bool | tuple[str, ...]) -> None:
-    assert McpServer(url="http://h/mcp", approve=approve).approve == approve
+    assert McpServer(url="https://h/mcp", approve=approve).approve == approve
 
 
 @pytest.mark.parametrize(
@@ -97,6 +97,30 @@ def test_a_command_without_a_program_is_refused(command: list[str]) -> None:
 def test_a_url_that_isnt_http_with_a_host_is_refused(url: str) -> None:
     with pytest.raises(ValidationError, match="isn't an http:// or https:// URL"):
         McpServer(url=url)
+
+
+@pytest.mark.parametrize(
+    "url", ["http://example.com/mcp", "http://10.0.0.5:3010/mcp", "http://127.0.0.1.example/mcp"]
+)
+def test_plain_http_to_another_machine_is_refused(url: str) -> None:
+    with pytest.raises(ValidationError) as raised:
+        McpServer(url=url)
+    assert problems(raised.value) == ["url must use https unless it's on this machine."]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1:3010/mcp",
+        "http://127.8.0.1/mcp",
+        "http://localhost:3010/mcp",
+        "http://LocalHost/mcp",
+        "http://[::1]:3010/mcp",
+        "https://example.com/mcp",
+    ],
+)
+def test_https_or_plain_http_on_this_machine_is_allowed(url: str) -> None:
+    assert McpServer(url=url).url == url
 
 
 @pytest.mark.parametrize("field", ["idle_minutes", "timeout_seconds"])
@@ -174,6 +198,10 @@ def test_a_field_the_user_config_cant_override_belongs_in_the_project() -> None:
         ({"github": {**GITHUB, **SEMGREP}}, "mcp.github: a server has either a command or a url"),
         ({"github": {"command": "github-mcp"}}, "mcp.github.command: Input should be a valid"),
         ({"github": {"url": "ftp://h"}}, "mcp.github.url: Value error, ftp://h isn't"),
+        (
+            {"github": {"url": "http://example.com/mcp"}},
+            "mcp.github: url must use https unless it's on this machine.",
+        ),
         ({"github": "github-mcp"}, "mcp.github: Input should be a valid dictionary"),
         (["github"], "mcp: Input should be a valid dictionary"),
     ],

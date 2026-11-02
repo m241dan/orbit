@@ -21,6 +21,7 @@ from orbit.agent import (
     GitCoderTree,
     HostMaker,
     HostParts,
+    HttpConnector,
     LocalZone,
     McpHost,
     McpProxying,
@@ -37,6 +38,7 @@ from orbit.agent import (
     StorageSettings,
     StoreError,
     SystemTempDirs,
+    TransportConnector,
     TreeCopies,
     UsageApi,
     Verification,
@@ -375,12 +377,14 @@ def _with_copies(agents: Agents, opened: OpenedStore, config: OrbitConfig) -> Ag
 
 
 def _with_mcp(agents: Agents, opened: OpenedStore, config: OrbitConfig) -> Agents:
-    """``agents`` offered the MCP servers ``config`` declares, as their roles allow: started as
-    processes of orbit's, the shared ones in neutral directories in the state directory of the
-    store ``opened`` for their workspace, with their variables from orbit's environment."""
+    """``agents`` offered the MCP servers ``config`` declares, as their roles allow: those with a
+    command started as processes of orbit's, the shared ones in neutral directories in the state
+    directory of the store ``opened`` for their workspace, and those with a URL reached over
+    HTTP, their variables and headers filled from orbit's environment."""
     store = opened.store
     folder = mcp_folder(store.ledger.state_dir, store.workspace_id)
-    proxying = McpProxying(config.mcp, StdioConnector(), EnvironmentCredentials(), str(folder))
+    connector = TransportConnector(StdioConnector(), HttpConnector())
+    proxying = McpProxying(config.mcp, connector, EnvironmentCredentials(), str(folder))
     return replace(agents, mcp=proxying)
 
 

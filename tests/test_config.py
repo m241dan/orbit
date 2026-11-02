@@ -916,6 +916,19 @@ def test_the_users_command_replaces_the_projects_from_the_user_layer() -> None:
     assert layered.server_layers["github"]["env"] == Layer("project", PROJECT_PATH)
 
 
+def test_a_project_server_at_a_plain_http_url_elsewhere_fails_to_load() -> None:
+    project = GITHUB_PROJECT.replace("http://127.0.0.1:3010/mcp", "http://example.com/mcp")
+    with pytest.raises(ConfigError) as raised:
+        with_servers(project)
+    assert str(raised.value).startswith(
+        "mcp.semgrep: url must use https unless it's on this machine."
+    )
+
+
+def test_a_project_server_at_a_plain_http_url_on_this_machine_loads() -> None:
+    assert with_servers(GITHUB_PROJECT).config.mcp["semgrep"].url == "http://127.0.0.1:3010/mcp"
+
+
 def test_the_user_config_adding_a_server_is_its_fault() -> None:
     with pytest.raises(UserConfigError) as raised:
         with_servers(GITHUB_PROJECT, '[mcp.other]\ncommand = ["other-mcp"]')

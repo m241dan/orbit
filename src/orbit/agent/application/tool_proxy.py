@@ -6,8 +6,11 @@ has one connection for the workspace, started in a neutral directory of its own;
 one has one per agent, started in the agent's own directory and closed when its run ends.
 Either is closed once idle for its ``idle_minutes``.
 
-A server that fails to start, crashes, times out or drops the connection fails the call with
-the reason, and its connection is discarded, so the next call starts it afresh; the first
+A server is started by its command, or reached at its URL with its headers; the variables in
+its environment and headers are filled in from the credentials as it connects. A server that
+fails to start, can't be reached, refuses orbit's credentials, answers with an HTTP error,
+crashes, times out or drops the connection fails the call with the reason, and its connection
+is discarded, so the next call starts it afresh; the first
 failure of a streak publishes a notice, and a call it answers ends the streak. Each proxied call
 is traced in an ``orbit.mcp.call`` span, linked to the calling agent's span, with the server,
 orbit's name for the tool and the outcome, never the arguments or the result.
@@ -22,6 +25,7 @@ from typing import Any, Literal
 from orbit.agent.application.failures import unexpected
 from orbit.agent.application.ports import (
     Credentials,
+    CredentialsRefused,
     CredentialsUnreadable,
     McpConnector,
     Publish,
@@ -31,18 +35,21 @@ from orbit.agent.application.ports import (
 )
 from orbit.agent.domain.mcp_proxy import (
     SEPARATOR,
+    FailureReason,
+    FilledServer,
     ProxiedTool,
+    RefusedCredentials,
     UnsetVariable,
     UpstreamTool,
     call_failure,
     failure_notice,
-    filled_env,
+    filled_server,
     find_proxied,
     grant_for,
     missing_tool_notices,
     proxied_tools,
     refusal,
-    variables_in,
+    server_variables,
 )
 from orbit.agent.domain.mcp_servers import McpServer
 from orbit.agent.domain.refusals import failed_to
@@ -100,7 +107,7 @@ class Caller:
 class _Failure:
     """Why a server couldn't be connected to: the ``reason``."""
 
-    reason: str
+    reason: FailureReason
 
 
 class _Connection:
@@ -205,10 +212,8 @@ class ToolProxy:
         await asyncio.gather(*list(self._closing), return_exceptions=True)
 
     def _proxied(self, server: str) -> bool:
-        """Whether ``server`` is declared, and proxied: started by a command, as URL servers
-        aren't proxied yet."""
-        settings = self._proxying.servers.get(server)
-        return settings is not None and settings.command is not None
+        """Whether ``server`` is declared, and so proxied."""
+        return server in self._proxying.servers
 
     async def _call(self, caller: Caller, name: str, arguments: dict[str, Any]) -> Reply:
         """The answer to ``caller``'s call to ``name``, traced unless refused out of hand."""
@@ -254,7 +259,7 @@ class ToolProxy:
             reply = await connection.session.call_tool(tool.tool.name, arguments)
         except UpstreamFailed as exc:
             self._forget(opened.key, opened.link)
-            return await self._failed(tool.server, str(exc)), "failed"
+            return await self._failed(tool.server, _reason(exc)), "failed"
         finally:
             connection.calls -= 1
             self._rest(opened)
@@ -266,7 +271,7 @@ class ToolProxy:
         caller.span.event(REFUSED, {TOOL: name})
         return Reply(refusal(caller.role_name, name), is_error=True)
 
-    async def _failed(self, server: str, reason: str) -> Reply:
+    async def _failed(self, server: str, reason: FailureReason) -> Reply:
         """The answer to a call ``server`` failed for ``reason``, noticed if it starts a
         streak."""
         if server not in self._failing:
@@ -314,28 +319,28 @@ class ToolProxy:
         the agent's own, else in the server's neutral directory, or why it couldn't be."""
         server = key[0]
         settings = self._proxying.servers[server]
-        env = self._environment(settings)
-        if isinstance(env, _Failure):
-            return env
+        filled = self._filled(settings)
+        if isinstance(filled, _Failure):
+            return filled
         cwd = caller.cwd if key[1] is not None else str(PurePath(self._proxying.folder, server))
         try:
-            session = await self._proxying.connector.open(settings, cwd, env)
+            session = await self._proxying.connector.open(settings, cwd, filled.env, filled.headers)
         except UpstreamFailed as exc:
-            return _Failure(str(exc))
+            return _Failure(_reason(exc))
         return await self._listed(server, session)
 
-    def _environment(self, settings: McpServer) -> dict[str, str] | _Failure:
-        """The environment ``settings`` give their server, its variables filled in from the
-        credentials, or why it can't be."""
+    def _filled(self, settings: McpServer) -> FilledServer | _Failure:
+        """The environment and headers ``settings`` give their server, their variables filled in
+        from the credentials, or why they can't be."""
         try:
             values = {
                 name: value
-                for name in variables_in(settings.env)
+                for name in server_variables(settings)
                 if (value := self._proxying.credentials(name)) is not None
             }
         except CredentialsUnreadable as exc:
             return _Failure(str(exc))
-        filled = filled_env(settings.env, values)
+        filled = filled_server(settings, values)
         return _Failure(filled.message) if isinstance(filled, UnsetVariable) else filled
 
     async def _listed(self, server: str, session: UpstreamSession) -> _Connection | _Failure:
@@ -345,7 +350,7 @@ class ToolProxy:
             tools = await session.list_tools()
         except UpstreamFailed as exc:
             await session.close()
-            return _Failure(str(exc))
+            return _Failure(_reason(exc))
         except BaseException:
             await session.close()
             raise
@@ -388,6 +393,13 @@ class ToolProxy:
         """Report ``exc``, which escaped waiting for a connection to idle."""
         message = unexpected(failed_to("close an idle MCP connection", exc), exc)
         await self._publish(ErrorOccurred(code=INTERNAL, message=message))
+
+
+def _reason(failure: UpstreamFailed) -> FailureReason:
+    """Why the server failed, as ``failure`` says."""
+    if isinstance(failure, CredentialsRefused):
+        return RefusedCredentials(failure.status)
+    return str(failure)
 
 
 def _allowed(grant: ServerGrant, opened: _Opened | _Failure) -> tuple[ProxiedTool, ...]:
