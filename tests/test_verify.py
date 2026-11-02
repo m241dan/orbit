@@ -1,3 +1,5 @@
+import pytest
+
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Verification, Verifier, first_failure
 from orbit.agent.domain.board import TaskBoard
@@ -27,22 +29,35 @@ from orbit.protocol import (
     StepStatus,
     TaskSpec,
     VerificationChanged,
+    WorkspaceLevel,
 )
 from tests.agent_fakes import python_step
 
 
-def task(tool_access: str = "restricted") -> TaskSpec:
-    return TaskSpec(prompt="go", settings=Settings(tool_access=tool_access))  # type: ignore[arg-type]
+def task(level: WorkspaceLevel = "read") -> TaskSpec:
+    return TaskSpec(prompt="go", settings=Settings(workspace_level=level))
 
 
-def test_only_tasks_with_tools_can_change_files() -> None:
-    assert may_change_files(task("restricted"))
-    assert may_change_files(task("full"))
-    assert not may_change_files(task("off"))
+@pytest.mark.parametrize("level", ["read", "write", "shell"])
+def test_tasks_at_any_level_but_none_can_change_files(level: WorkspaceLevel) -> None:
+    assert may_change_files(task(level))
 
 
-def test_tasks_with_tools_off_skip_verification() -> None:
-    assert skip_reason(task("off"), None, None) == "tools_off"
+def test_tasks_at_no_level_cant_change_files() -> None:
+    assert not may_change_files(task("none"))
+
+
+def test_tasks_at_no_level_skip_verification() -> None:
+    assert skip_reason(task("none"), None, None) == "tools_off"
+
+
+def test_a_write_task_is_verified() -> None:
+    assert skip_reason(task("write"), "before", "after") is None
+
+
+def test_a_task_with_tool_access_off_from_an_older_peer_skips_verification() -> None:
+    older = TaskSpec(prompt="go", settings=Settings(tool_access="off"))
+    assert skip_reason(older, None, None) == "tools_off"
 
 
 def test_tasks_that_leave_the_tree_alone_skip_verification() -> None:
@@ -62,7 +77,7 @@ def test_a_fix_that_leaves_the_tree_alone_is_still_verified() -> None:
 
 
 def test_a_fix_with_tools_off_skips_verification() -> None:
-    assert skip_reason(task("off"), None, None, fixing=True) == "tools_off"
+    assert skip_reason(task("none"), None, None, fixing=True) == "tools_off"
 
 
 def test_tasks_without_steps_skip_verification() -> None:
@@ -74,7 +89,7 @@ def test_a_fix_without_steps_skips_verification() -> None:
 
 
 def test_other_skip_reasons_win_over_having_no_steps() -> None:
-    assert skip_reason(task("off"), None, None, has_steps=False) == "tools_off"
+    assert skip_reason(task("none"), None, None, has_steps=False) == "tools_off"
     assert skip_reason(task(), "tree", "tree", has_steps=False) == "no_changes"
 
 

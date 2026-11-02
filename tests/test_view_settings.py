@@ -4,7 +4,7 @@ from rich.text import Text
 from orbit.protocol import (
     AgentEntry,
     Settings,
-    ToolAccess,
+    WorkspaceLevel,
 )
 from orbit.tui.view.settings import (
     EFFORT_TITLE,
@@ -14,26 +14,25 @@ from orbit.tui.view.settings import (
     effort_choices,
     effort_label,
     effort_labels,
+    level_choices,
+    level_labels,
     model_choice_label,
     model_choices,
     model_options,
     picked_effort,
+    picked_level,
     picked_model,
-    picked_tool_access,
     role_label,
     settings_fields,
     settings_summary,
-    tool_access_choices,
-    tool_access_labels,
+    tools_label,
 )
 
 
 def test_settings_summary_names_the_model_and_new_tasks_tool_access() -> None:
-    assert settings_summary(Settings()) == "planner's model: default · new tasks' tools: restricted"
+    assert settings_summary(Settings()) == "planner's model: default · new tasks' tools: read + web"
     full = Settings(model="opus", tool_access="full")
-    assert (
-        settings_summary(full) == "planner's model: opus · new tasks' tools: full (auto-approved)"
-    )
+    assert settings_summary(full) == "planner's model: opus · new tasks' tools: shell + web"
 
 
 def test_the_settings_are_titled_model_and_tool_access() -> None:
@@ -68,11 +67,12 @@ def test_an_alias_shows_alone_when_it_is_its_own_id_or_its_id_isnt_known() -> No
     assert model_choice_label("opus", None) == "opus"
 
 
-def test_tool_access_labels_describe_each_option_in_order() -> None:
-    assert tool_access_labels() == [
-        "off: no tools",
-        "restricted: read-only; anything needing approval is refused",
-        "full: auto-approve everything",
+def test_level_labels_describe_each_workspace_level_in_order() -> None:
+    assert level_labels() == [
+        "none: orbit's tools only",
+        "read: read and search the workspace",
+        "write: also edit files, but run no commands",
+        "shell: also run commands",
     ]
 
 
@@ -99,15 +99,16 @@ def test_model_choices_mark_nothing_when_the_model_is_not_offered() -> None:
     assert current is None
 
 
-def test_tool_access_choices_offer_each_access_in_order_and_mark_the_current_one() -> None:
-    settings = Settings(model="opus", tool_access="off")
-    assert tool_access_choices(settings) == (
+def test_level_choices_offer_each_level_in_order_keeping_web_and_mark_the_current_one() -> None:
+    settings = Settings(model="opus", workspace_level="write", web=False)
+    assert level_choices(settings) == (
         [
-            Settings(model="opus", tool_access="off"),
-            Settings(model="opus", tool_access="restricted"),
-            Settings(model="opus", tool_access="full"),
+            Settings(model="opus", workspace_level="none", web=False),
+            Settings(model="opus", workspace_level="read", web=False),
+            Settings(model="opus", workspace_level="write", web=False),
+            Settings(model="opus", workspace_level="shell", web=False),
         ],
-        0,
+        2,
     )
 
 
@@ -119,19 +120,29 @@ def test_picked_model_changes_only_the_model() -> None:
     assert picked_model(("opus",), settings, 0) == Settings(tool_access="off")
 
 
-def test_picked_tool_access_changes_only_the_tool_access() -> None:
-    settings = Settings(model="opus", tool_access="off")
-    assert picked_tool_access(settings, 2) == Settings(model="opus", tool_access="full")
+def test_picked_level_changes_only_the_workspace_level() -> None:
+    settings = Settings(model="opus", workspace_level="none", web=False)
+    picked = picked_level(settings, 2)
+    assert picked == Settings(model="opus", workspace_level="write", web=False)
+    assert picked.tool_access == "full"
 
 
 @pytest.mark.parametrize(
-    ("access", "tools"),
-    [("off", "off"), ("restricted", "restricted"), ("full", "full (auto-approved)")],
+    ("level", "web", "tools"),
+    [
+        ("none", False, "none"),
+        ("none", True, "none + web"),
+        ("read", True, "read + web"),
+        ("write", False, "write"),
+        ("shell", True, "shell + web"),
+    ],
 )
-def test_settings_fields_show_the_model_and_the_tool_access_label(
-    access: ToolAccess, tools: str
+def test_settings_fields_show_the_model_and_the_level_with_web_if_on(
+    level: WorkspaceLevel, web: bool, tools: str
 ) -> None:
-    assert settings_fields(Settings(model="opus", tool_access=access)) == ("opus", tools)
+    settings = Settings(model="opus", workspace_level=level, web=web)
+    assert settings_fields(settings) == ("opus", tools)
+    assert tools_label(settings) == tools
 
 
 def test_settings_fields_call_no_model_the_default() -> None:

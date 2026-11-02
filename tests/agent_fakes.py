@@ -118,7 +118,6 @@ from orbit.protocol import (
     TasksChanged,
     TaskSpec,
     TaskState,
-    ToolAccess,
     ToolCallStarted,
     TurnEndReason,
     TurnFinished,
@@ -127,6 +126,7 @@ from orbit.protocol import (
     UsageLimit,
     VerificationChanged,
     Welcome,
+    WorkspaceLevel,
     encode,
 )
 from tests.loop_quiet import quiet_within
@@ -243,7 +243,8 @@ EVERYTHING = Capabilities(
     resume=True,
     usage=True,
     max_turns=True,
-    tool_access=frozenset(get_args(ToolAccess)),
+    workspace_levels=frozenset(get_args(WorkspaceLevel)),
+    web=True,
     effort=frozenset(get_args(Effort)),
 )
 """What a runtime that can do everything orbit asks, at every level, can do."""
@@ -255,11 +256,13 @@ LIMITED = Capabilities(
     resume=False,
     usage=False,
     max_turns=False,
-    tool_access=frozenset({"restricted"}),
+    workspace_levels=frozenset({"read"}),
+    web=True,
     effort=frozenset(),
 )
-"""What :data:`LIMITED_RUNTIME` can do: run an agent with restricted tool access, and nothing
-more; it carries no conversation on, reports no usage and takes no effort."""
+"""What :data:`LIMITED_RUNTIME` can do: run an agent at the workspace level ``read``, with web
+access, and nothing more; it carries no conversation on, reports no usage and takes no
+effort."""
 
 KNOWN_CAPABILITIES = {CLAUDE: EVERYTHING, LIMITED_RUNTIME: LIMITED}
 """What Claude Code and :data:`LIMITED_RUNTIME` can do, by runtime."""

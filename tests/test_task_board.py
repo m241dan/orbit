@@ -84,9 +84,9 @@ def test_the_board_shows_each_task_numbered_with_fixes_under_their_task() -> Non
     fix = TaskState(id="3", task=TaskSpec(prompt="fix one"), fixes="1")
     tasks.show((one, fix, two))
     assert view.rows == [
-        "1. ✅ one\n      default · restricted",
-        "   1.1 ⏳ fix one\n          default · restricted",
-        "2. ✅ two\n      default · restricted",
+        "1. ✅ one\n      default · read + web",
+        "   1.1 ⏳ fix one\n          default · read + web",
+        "2. ✅ two\n      default · read + web",
         "+ new task",
     ]
     assert view.keys == ["1", "3", "2", None]
@@ -465,7 +465,7 @@ def test_each_turn_counts_towards_the_sessions_total() -> None:
         id="1", task=TaskSpec(prompt="one"), usage=Usage(input_tokens=1_500, cost_usd=0.2)
     )
     tasks.show((spent,))
-    assert view.rows[0].endswith("default · restricted · 1.5k tok · $0.20")
+    assert view.rows[0].endswith("default · read + web · 1.5k tok · $0.20")
     tasks.count(Usage(input_tokens=1_000))
     tasks.count(Usage(output_tokens=500, cost_usd=0.3))
     assert view.usage == "session: 1.5k tok · $0.30"
@@ -511,14 +511,14 @@ def test_the_next_task_shows_the_wait_for_a_coder_until_it_stops_waiting() -> No
     tasks.show(tuple(TaskState(id=f"t{n}", task=TaskSpec(prompt=f"task {n}")) for n in (1, 2)))
     tasks.show_waiting(("t1", "⏳ waiting: 2 coders busy"))
     assert view.rows[:2] == [
-        "1. ⏳ task 1\n      default · restricted · ⏳ waiting: 2 coders busy",
-        "2. ⏳ task 2\n      default · restricted",
+        "1. ⏳ task 1\n      default · read + web · ⏳ waiting: 2 coders busy",
+        "2. ⏳ task 2\n      default · read + web",
     ]
     redraws = view.redraws
     tasks.show_waiting(("t1", "⏳ waiting: 2 coders busy"))
     assert view.redraws == redraws
     tasks.show_waiting(None)
-    assert view.rows[0] == "1. ⏳ task 1\n      default · restricted"
+    assert view.rows[0] == "1. ⏳ task 1\n      default · read + web"
 
 
 STRESS_HOLD = MergeHold(set="stress", commit="1a2b3c4", reason="Stress tests failed")
@@ -530,8 +530,8 @@ def test_holds_on_merges_title_the_list_and_mark_the_work_waiting_until_they_lif
     tasks.show_merge_holds((STRESS_HOLD,), ("1",))
     assert view.title == "Task list · merges held: stress failed"
     assert view.rows[:2] == [
-        "1. ✅ one\n      default · restricted · waiting to merge",
-        "2. ✅ two\n      default · restricted",
+        "1. ✅ one\n      default · read + web · waiting to merge",
+        "2. ✅ two\n      default · read + web",
     ]
     assert tasks.held_sets == ("stress",)
     redraws = view.redraws
@@ -539,7 +539,7 @@ def test_holds_on_merges_title_the_list_and_mark_the_work_waiting_until_they_lif
     assert view.redraws == redraws
     tasks.show_merge_holds((), ())
     assert view.title == "Task list"
-    assert view.rows[0] == "1. ✅ one\n      default · restricted"
+    assert view.rows[0] == "1. ✅ one\n      default · read + web"
 
 
 def test_a_finding_holding_merges_titles_the_list_beside_the_sets() -> None:
@@ -592,11 +592,11 @@ def narrowed(*roles: str, lanes: int = 1) -> tuple[TaskBoard, TaskView]:
 def test_a_review_task_shows_its_lane_once_the_lanes_are_known_and_a_coder_task_none() -> None:
     tasks, view = started()
     tasks.show(in_roles("coder", "reviewer"))
-    assert view.rows[1] == "2. ⏳ reviewer\n      default · restricted"
+    assert view.rows[1] == "2. ⏳ reviewer\n      default · read + web"
     tasks.show_lanes(LANES)
     assert view.rows[:2] == [
-        "1. ⏳ coder\n      default · restricted",
-        "2. ⏳ reviewer  review\n      default · restricted",
+        "1. ⏳ coder\n      default · read + web",
+        "2. ⏳ reviewer  review\n      default · read + web",
     ]
 
 
@@ -612,11 +612,11 @@ def test_the_same_lanes_again_leave_the_board_alone() -> None:
 def test_a_task_in_a_role_whose_usage_is_unknown_says_so_once_that_is_known() -> None:
     tasks, view = started()
     tasks.show(in_roles("coder", "reviewer"))
-    assert view.rows[1] == "2. ⏳ reviewer\n      default · restricted"
+    assert view.rows[1] == "2. ⏳ reviewer\n      default · read + web"
     tasks.show_usage_unknown(frozenset({"reviewer"}))
     assert view.rows[:2] == [
-        "1. ⏳ coder\n      default · restricted",
-        "2. ⏳ reviewer\n      default · restricted · usage unknown",
+        "1. ⏳ coder\n      default · read + web",
+        "2. ⏳ reviewer\n      default · read + web · usage unknown",
     ]
 
 
@@ -665,7 +665,7 @@ def test_a_narrowed_list_held_says_both() -> None:
 
 def test_a_narrowed_list_keeps_the_numbers_of_the_whole_list() -> None:
     tasks, view = narrowed("coder", "reviewer", lanes=2)
-    assert view.rows == ["2. ⏳ reviewer  review\n      default · restricted", "+ new task"]
+    assert view.rows == ["2. ⏳ reviewer  review\n      default · read + web", "+ new task"]
     assert tasks.numbers_by_id == {"1": "1", "2": "2"}
     assert tasks.find("1") is not None
 
@@ -718,7 +718,7 @@ def test_lanes_changing_on_a_narrowed_list_narrow_it_afresh() -> None:
     tasks, view = narrowed("reviewer", "security")
     tasks.show_lanes({**LANES, "security": "review"})
     assert view.keys == ["1", "2", None]
-    assert view.rows[1] == "2. ⏳ security  review\n      default · restricted"
+    assert view.rows[1] == "2. ⏳ security  review\n      default · read + web"
 
 
 def test_widening_a_narrowed_list_shows_all_its_tasks_under_its_title() -> None:

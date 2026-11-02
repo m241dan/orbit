@@ -164,7 +164,7 @@
       "type": "object"
     },
     "AgentEntry": {
-      "description": "An agent role ``name``, shown as ``label``; ``conversational`` if the user can message\nit. It runs in ``lane``, and its ``model``, ``tool_access`` and ``effort`` are the defaults\nof a task in it, as ``Settings`` hold them. It's ``personal`` if the user's own config\ndefines it, rather than orbit or the project. Its agents run on ``runtime``, such as\n``claude``; ``usage_known`` is false when that runtime doesn't report what their turns cost,\nso their usage is unknown.",
+      "description": "An agent role ``name``, shown as ``label``; ``conversational`` if the user can message\nit. It runs in ``lane``, and its ``model``, ``workspace_level``, ``web`` and ``effort`` are\nthe defaults of a task in it, as ``Settings`` hold them, with the ``tool_access`` older\npeers know them by. It's ``personal`` if the user's own config defines it, rather than orbit\nor the project. Its agents run on ``runtime``, such as ``claude``; ``usage_known`` is false\nwhen that runtime doesn't report what their turns cost, so their usage is unknown.",
       "properties": {
         "conversational": {
           "title": "Conversational",
@@ -238,6 +238,22 @@
           "default": true,
           "title": "Usage Known",
           "type": "boolean"
+        },
+        "web": {
+          "default": true,
+          "title": "Web",
+          "type": "boolean"
+        },
+        "workspace_level": {
+          "default": "read",
+          "enum": [
+            "none",
+            "read",
+            "write",
+            "shell"
+          ],
+          "title": "Workspace Level",
+          "type": "string"
         }
       },
       "required": [
@@ -2973,7 +2989,7 @@
       "type": "object"
     },
     "Settings": {
-      "description": "Per-session agent configuration. ``model=None`` means the backend's default, and\n``effort=None`` the CLI's.",
+      "description": "Per-session agent configuration. ``model=None`` means the backend's default, and\n``effort=None`` the CLI's. The agent works in its workspace at ``workspace_level``, with\nweb access if ``web``; ``tool_access`` says as much to older peers, and agrees with them\n(see :func:`agreeing_tool_access`).",
       "properties": {
         "effort": {
           "anyOf": [
@@ -3014,6 +3030,22 @@
             "full"
           ],
           "title": "Tool Access",
+          "type": "string"
+        },
+        "web": {
+          "default": true,
+          "title": "Web",
+          "type": "boolean"
+        },
+        "workspace_level": {
+          "default": "read",
+          "enum": [
+            "none",
+            "read",
+            "write",
+            "shell"
+          ],
+          "title": "Workspace Level",
           "type": "string"
         }
       },
@@ -3455,7 +3487,9 @@
           "default": {
             "effort": null,
             "model": null,
-            "tool_access": "restricted"
+            "tool_access": "restricted",
+            "web": true,
+            "workspace_level": "read"
           }
         },
         "skills": {

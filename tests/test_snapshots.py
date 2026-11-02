@@ -96,7 +96,7 @@ async def test_a_snapshot_shows_its_tasks_busy_planner_agents_and_steps() -> Non
     assert shell.tasks.tasks == TASKS
     assert shell.task_view.usage == "session: 2k tok · $2.00"
     assert shell.marks.title == "Prompt · planner · busy"
-    assert shell.marks.subtitle == "planner's model: opus · new tasks' tools: restricted"
+    assert shell.marks.subtitle == "planner's model: opus · new tasks' tools: read + web"
     assert shell.agents.rows == (AgentRow("agent-3", "coder", "1", (("r1", "propose_checks"),)),)
     assert shell.agents_view.review == "review: paused"
     assert (shell.steps.steps, shell.steps.title) == (SNAPSHOT.steps, "Startup check")

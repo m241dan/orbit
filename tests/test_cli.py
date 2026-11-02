@@ -64,6 +64,7 @@ from orbit.protocol import (
     TaskSpec,
     decode_event,
 )
+from orbit.tui.view.settings import tools_label
 from tests.agent_fakes import CLAUDE_MODELS, greeted, queued, send, sole, startup_of, store_of
 from tests.cli_fakes import LocalApp
 from tests.conftest import OFFLINE
@@ -728,26 +729,46 @@ def test_chat_name_starts_a_new_session_with_that_name(
     assert session.saved_session.name == "auth rework"
 
 
-def test_chat_accepts_model_and_tool_access(launched: list[WorkspaceHost]) -> None:
-    result = runner.invoke(app, ["chat", "--model", "opus", "--tools", "full"])
+def test_chat_accepts_model_and_workspace_level(launched: list[WorkspaceHost]) -> None:
+    result = runner.invoke(app, ["chat", "--model", "opus", "--tools", "shell"])
 
     assert result.exit_code == 0
     [session] = launched
-    assert session.settings == Settings(model="opus", tool_access="full")
-    assert session.pinned == ("model", "tool_access")
+    assert session.settings == Settings(model="opus", workspace_level="shell")
+    assert session.pinned == ("model", "workspace_level")
 
 
 def test_chat_pins_only_the_settings_given(launched: list[WorkspaceHost]) -> None:
-    result = runner.invoke(app, ["chat", "--tools", "off"])
+    result = runner.invoke(app, ["chat", "--tools", "none"])
 
     assert result.exit_code == 0
     [session] = launched
-    assert session.settings == Settings(tool_access="off")
-    assert session.pinned == ("tool_access",)
+    assert session.settings == Settings(workspace_level="none")
+    assert session.pinned == ("workspace_level",)
 
 
-def test_chat_rejects_unknown_tool_access(launched: list[WorkspaceHost]) -> None:
-    result = runner.invoke(app, ["chat", "--tools", "sometimes"])
+def test_chat_takes_a_level_without_web(launched: list[WorkspaceHost]) -> None:
+    result = runner.invoke(app, ["chat", "--tools", "write", "--no-web"])
+
+    assert result.exit_code == 0
+    [session] = launched
+    assert session.settings == Settings(workspace_level="write", web=False)
+    assert session.pinned == ("workspace_level", "web")
+    assert tools_label(session.settings) == "write"
+
+
+def test_chat_with_web_pins_only_web(launched: list[WorkspaceHost]) -> None:
+    result = runner.invoke(app, ["chat", "--web"])
+
+    assert result.exit_code == 0
+    [session] = launched
+    assert session.settings == Settings(web=True)
+    assert session.pinned == ("web",)
+
+
+@pytest.mark.parametrize("tools", ["sometimes", "full"])
+def test_chat_rejects_unknown_workspace_levels(launched: list[WorkspaceHost], tools: str) -> None:
+    result = runner.invoke(app, ["chat", "--tools", tools])
 
     assert result.exit_code == 2
     assert launched == []
@@ -1130,8 +1151,8 @@ def test_chat_stops_naming_a_role_that_asks_for_what_its_runtime_cant_do(
 
     assert result.exit_code == 2
     assert result.stderr == (
-        f'Invalid orbit configuration: {path}: roles.coder asks for tool_access "full", but its'
-        ' runtime lite accepts only tool_access "restricted".\n'
+        f'Invalid orbit configuration: {path}: roles.coder asks for workspace_level "shell",'
+        ' but its runtime lite accepts only workspace_level "read".\n'
     )
     assert launched == []
 
@@ -1569,7 +1590,7 @@ def directories(tmp_path: Path) -> _Directories:
     return _Directories(tmp_path, tmp_path / "state", tmp_path / "config")
 
 
-FLAGS = _Backend("opus", None, True, True, True, True, False, None)
+FLAGS = _Backend("opus", None, None, True, True, True, True, False, None)
 
 
 def test_the_in_process_setup_holds_the_workspace_lock_while_its_block_runs(

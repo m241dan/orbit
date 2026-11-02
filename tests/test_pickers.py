@@ -41,7 +41,7 @@ async def test_choosing_tools_opens_on_the_tool_access_and_passes_on_the_one_pic
     screens.pickers.choose_tools(lambda: Settings(model="opus", tool_access="restricted"), pick)
     assert [opened[:2] for opened in screens.opened] == [("tools", 1)]
     await screens.pick(2)
-    assert picked == [Settings(model="opus", tool_access="full")]
+    assert picked == [Settings(model="opus", workspace_level="write")]
 
 
 async def test_a_pick_applies_to_the_settings_and_choices_current_when_picked() -> None:
@@ -58,7 +58,7 @@ async def test_a_pick_applies_to_the_settings_and_choices_current_when_picked() 
     await screens.pick(0)
     assert picked == [
         Settings(model="fable", tool_access="full"),
-        Settings(model="haiku", tool_access="off"),
+        Settings(model="haiku", workspace_level="none"),
     ]
 
 

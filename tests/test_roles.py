@@ -10,6 +10,7 @@ from orbit.agent.domain.roles import (
     built_in_roles,
     check_enabled,
     disabled_roles,
+    edits_files,
     enabled_roles,
     load_built_in_roles,
     names_file,
@@ -26,6 +27,8 @@ from orbit.protocol import (
     Effort,
     Settings,
     TaskSpec,
+    ToolAccess,
+    WorkspaceLevel,
 )
 
 INSTRUCTIONS = {name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES}
@@ -215,6 +218,33 @@ def test_a_roles_settings_are_its_model_tool_access_and_effort() -> None:
     role = Role(instructions="Do it.", model="opus", tool_access="full", effort="high")
     assert role.settings == Settings(model="opus", tool_access="full", effort="high")
     assert BUILT_IN_ROLES["reviewer"].settings == Settings()
+
+
+@pytest.mark.parametrize(
+    ("access", "level", "web"),
+    [("off", "none", False), ("restricted", "read", True), ("full", "shell", True)],
+)
+def test_a_roles_tool_access_gives_its_agents_a_level_and_web(
+    access: ToolAccess, level: WorkspaceLevel, web: bool
+) -> None:
+    role = Role(instructions="Do it.", tool_access=access)
+    assert (role.workspace_level, role.web) == (level, web)
+    assert (role.settings.workspace_level, role.settings.web) == (level, web)
+
+
+def test_every_built_in_role_reads_or_runs_commands_with_web_as_before() -> None:
+    levels = {
+        (role.tool_access, role.workspace_level, role.web) for role in BUILT_IN_ROLES.values()
+    }
+    assert levels == {("restricted", "read", True), ("full", "shell", True)}
+
+
+@pytest.mark.parametrize(
+    ("level", "edits"),
+    [("none", False), ("read", False), ("write", True), ("shell", True)],
+)
+def test_only_the_write_and_shell_levels_edit_files(level: WorkspaceLevel, edits: bool) -> None:
+    assert edits_files(level) is edits
 
 
 def test_a_role_leaving_out_effort_has_none() -> None:

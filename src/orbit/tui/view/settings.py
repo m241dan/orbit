@@ -6,7 +6,7 @@ from typing import Protocol, get_args
 
 from rich.text import Text
 
-from orbit.protocol import PLANNER, AgentEntry, Effort, Settings, ToolAccess
+from orbit.protocol import PLANNER, AgentEntry, Effort, Settings, WorkspaceLevel
 from orbit.tui.view.common import model_label
 
 MODEL_TITLE = "Model"
@@ -16,17 +16,16 @@ ROLE_TITLE = "Role"
 EFFORT_OPTIONS: tuple[Effort | None, ...] = (None, *get_args(Effort))
 """The efforts a picker offers, none (unset) first."""
 UNSET_EFFORT = "unset"
-TOOL_ACCESS_OPTIONS: tuple[ToolAccess, ...] = get_args(ToolAccess)
-TOOL_ACCESS_LABELS: dict[ToolAccess, str] = {
-    "off": "off",
-    "restricted": "restricted",
-    "full": "full (auto-approved)",
+LEVEL_OPTIONS: tuple[WorkspaceLevel, ...] = get_args(WorkspaceLevel)
+"""The workspace levels the tool access picker offers, in order."""
+LEVEL_DESCRIPTIONS: dict[WorkspaceLevel, str] = {
+    "none": "none: orbit's tools only",
+    "read": "read: read and search the workspace",
+    "write": "write: also edit files, but run no commands",
+    "shell": "shell: also run commands",
 }
-TOOL_ACCESS_DESCRIPTIONS: dict[ToolAccess, str] = {
-    "off": "off: no tools",
-    "restricted": "restricted: read-only; anything needing approval is refused",
-    "full": "full: auto-approve everything",
-}
+WEB_LABEL = " + web"
+"""What follows a workspace level shown with web access."""
 
 
 NO_MODEL_IDS: Mapping[str, str] = MappingProxyType({})
@@ -61,10 +60,10 @@ def model_choices(choices: Sequence[str], settings: Settings) -> tuple[list[Sett
     return _with_current([settings.model_copy(update={"model": m}) for m in models], settings)
 
 
-def tool_access_choices(settings: Settings) -> tuple[list[Settings], int | None]:
-    """The settings each option of the tool access picker gives, ``settings`` with each of
-    ``TOOL_ACCESS_OPTIONS``, and the index of ``settings`` among them."""
-    options = [settings.model_copy(update={"tool_access": a}) for a in TOOL_ACCESS_OPTIONS]
+def level_choices(settings: Settings) -> tuple[list[Settings], int | None]:
+    """The settings each option of the tool access picker gives, ``settings`` at each of
+    ``LEVEL_OPTIONS``, their web access kept, and the index of ``settings`` among them."""
+    options = [settings.updated({"workspace_level": level}) for level in LEVEL_OPTIONS]
     return _with_current(options, settings)
 
 
@@ -81,9 +80,9 @@ def picked_model(choices: Sequence[str], settings: Settings, index: int) -> Sett
     return model_choices(choices, settings)[0][index]
 
 
-def picked_tool_access(settings: Settings, index: int) -> Settings:
-    """``settings`` with the tool access of option ``index`` of the tool access picker."""
-    return tool_access_choices(settings)[0][index]
+def picked_level(settings: Settings, index: int) -> Settings:
+    """``settings`` at the workspace level of option ``index`` of the tool access picker."""
+    return level_choices(settings)[0][index]
 
 
 def picked_effort(settings: Settings, index: int) -> Settings:
@@ -96,14 +95,15 @@ def _with_current(options: list[Settings], settings: Settings) -> tuple[list[Set
     return options, options.index(settings) if settings in options else None
 
 
-def tool_access_labels() -> list[str]:
-    """The labels a picker shows for ``TOOL_ACCESS_OPTIONS``, in the same order."""
-    return [TOOL_ACCESS_DESCRIPTIONS[a] for a in TOOL_ACCESS_OPTIONS]
+def level_labels() -> list[str]:
+    """The labels a picker shows for ``LEVEL_OPTIONS``, in the same order."""
+    return [LEVEL_DESCRIPTIONS[level] for level in LEVEL_OPTIONS]
 
 
-def tool_access_label(access: ToolAccess) -> str:
-    """How ``access`` is shown beside a model: ``full (auto-approved)``."""
-    return TOOL_ACCESS_LABELS[access]
+def tools_label(settings: Settings) -> str:
+    """How the workspace level and web access of ``settings`` show beside a model: the level,
+    followed by `` + web`` with web access, as in ``read + web``."""
+    return f"{settings.workspace_level}{WEB_LABEL if settings.web else ''}"
 
 
 def effort_label(effort: Effort | None) -> str:
@@ -124,9 +124,9 @@ def role_label(role: AgentEntry) -> str:
 
 
 def settings_fields(settings: Settings) -> tuple[str, str]:
-    """How ``settings`` show their model and their tool access, as a task and its editor show
-    them: ``("default", "restricted")``."""
-    return model_label(settings), tool_access_label(settings.tool_access)
+    """How ``settings`` show their model and their tools, as a task and its editor show them:
+    ``("default", "read + web")``."""
+    return model_label(settings), tools_label(settings)
 
 
 def settings_summary(settings: Settings, role: str = PLANNER) -> str:
@@ -202,12 +202,10 @@ class Pickers:
         )
 
     def choose_tools(self, settings: Callable[[], Settings], then: Picked) -> None:
-        """Open the tool access picker on the tool access of ``settings``, the settings now, and
-        call ``then`` with them, as they are when picked, with the tool access picked."""
-        _, current = tool_access_choices(settings())
-        self._view.pick_tool_access(
-            current, lambda index: then(picked_tool_access(settings(), index))
-        )
+        """Open the tool access picker on the workspace level of ``settings``, the settings now,
+        and call ``then`` with them, as they are when picked, at the workspace level picked."""
+        _, current = level_choices(settings())
+        self._view.pick_tool_access(current, lambda index: then(picked_level(settings(), index)))
 
     def choose_effort(self, settings: Callable[[], Settings], then: Picked) -> None:
         """Open the effort picker on the effort of ``settings``, the settings now, and call

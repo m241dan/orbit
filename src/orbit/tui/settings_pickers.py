@@ -14,8 +14,8 @@ from orbit.tui.view.settings import (
     Chosen,
     Pickers,
     effort_labels,
+    level_labels,
     model_options,
-    tool_access_labels,
 )
 from orbit.tui.widgets import PickerScreen
 
@@ -26,7 +26,7 @@ class SettingsPickers:
 
     def __init__(self) -> None:
         self.model_picker = PickerScreen(MODEL_TITLE, model_options(())[1])
-        self.tool_picker = PickerScreen(TOOL_ACCESS_TITLE, tool_access_labels())
+        self.tool_picker = PickerScreen(TOOL_ACCESS_TITLE, level_labels())
         self.effort_picker = PickerScreen(EFFORT_TITLE, effort_labels())
         self.role_picker = PickerScreen(ROLE_TITLE, ())
         self.model = Pickers(self)

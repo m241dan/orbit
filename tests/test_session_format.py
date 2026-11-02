@@ -2,6 +2,7 @@
 older orbit wrote them still read the same, and this orbit still writes them so."""
 
 import json
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
@@ -39,7 +40,9 @@ from orbit.protocol import (
     Settings,
     TaskSpec,
     TaskState,
+    ToolAccess,
     Usage,
+    WorkspaceLevel,
     edit_refusal,
 )
 from tests.session_builders import review_count_json
@@ -52,8 +55,8 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit these for a format change: they're what orbits at versions 1 to 27 wrote, and
-# they still need to read. A new version gets its own fixture (session-v28.json) and a
+# Never edit these for a format change: they're what orbits at versions 1 to 28 wrote, and
+# they still need to read. A new version gets its own fixture (session-v29.json) and a
 # migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
 SESSION_V2 = FIXTURES / "session-v2.json"
@@ -82,6 +85,7 @@ SESSION_V24 = FIXTURES / "session-v24.json"
 SESSION_V25 = FIXTURES / "session-v25.json"
 SESSION_V26 = FIXTURES / "session-v26.json"
 SESSION_V27 = FIXTURES / "session-v27.json"
+SESSION_V28 = FIXTURES / "session-v28.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -196,7 +200,7 @@ def expected(
     lane: LaneSnapshot | None = None,
 ) -> SessionRecord:
     return SessionRecord(
-        version=27,
+        version=28,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
@@ -681,14 +685,79 @@ def test_a_version_26_session_file_migrates_with_its_reviews_of_no_set() -> None
     assert parse_record(SESSION_V26.read_text(encoding="utf-8")) == merging()
 
 
-def test_a_version_27_session_file_reads_as_its_record() -> None:
+def test_a_version_27_session_file_migrates_to_the_levels_its_tool_access_gives() -> None:
     assert parse_record(SESSION_V27.read_text(encoding="utf-8")) == merging()
 
 
-def test_a_session_record_is_written_in_the_version_27_format() -> None:
-    written = json.loads(record_json(merging()))
+def test_a_version_27_setting_with_tool_access_off_loads_at_no_level_without_web() -> None:
+    record = parse_record(SESSION_V27.read_text(encoding="utf-8"))
+    assert isinstance(record, SessionRecord)
+    settings = record.tasks[0].task.settings
+    assert (settings.workspace_level, settings.web) == ("none", False)
+
+
+@pytest.mark.parametrize(
+    ("access", "level", "web"),
+    [("off", "none", False), ("restricted", "read", True), ("full", "shell", True)],
+)
+def test_a_version_27_roles_settings_migrate_to_the_level_and_web_their_tool_access_gives(
+    access: ToolAccess, level: WorkspaceLevel, web: bool
+) -> None:
     golden = json.loads(SESSION_V27.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V27.name)
+    golden["role_settings"]["planner"]["tool_access"] = access
+    record = parse_record(json.dumps(golden))
+    assert isinstance(record, SessionRecord)
+    planner = record.role_settings["planner"]
+    assert (planner.workspace_level, planner.web, planner.tool_access) == (level, web, access)
+
+
+@pytest.mark.parametrize(
+    ("part", "value"),
+    [("role_settings", []), ("tasks", {}), ("waiting", {})],
+)
+def test_a_version_27_record_whose_settings_cant_be_found_is_left_to_validation(
+    part: str, value: object
+) -> None:
+    golden = json.loads(SESSION_V27.read_text(encoding="utf-8"))
+    golden[part] = value
+    record = parse_record(json.dumps(golden))
+    assert isinstance(record, Unreadable) and record.reason.startswith(f"{part}:")
+
+
+@pytest.mark.parametrize(
+    "mangle",
+    [
+        lambda golden: golden["tasks"].__setitem__(0, "a task"),
+        lambda golden: golden["tasks"][0].__setitem__("task", "a spec"),
+        lambda golden: golden["waiting"].__setitem__(0, "work"),
+        lambda golden: golden["waiting"][0].pop("state"),
+        lambda golden: golden["role_settings"].__setitem__("planner", "settings"),
+    ],
+)
+def test_a_version_27_part_that_isnt_an_object_is_left_to_validation(
+    mangle: Callable[[dict[str, Any]], None],
+) -> None:
+    golden = json.loads(SESSION_V27.read_text(encoding="utf-8"))
+    mangle(golden)
+    assert isinstance(parse_record(json.dumps(golden)), Unreadable)
+
+
+def test_a_version_27_task_saved_without_settings_has_the_default_ones() -> None:
+    golden = json.loads(SESSION_V27.read_text(encoding="utf-8"))
+    del golden["tasks"][0]["task"]["settings"]
+    record = parse_record(json.dumps(golden))
+    assert isinstance(record, SessionRecord)
+    assert record.tasks[0].task.settings == Settings()
+
+
+def test_a_version_28_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V28.read_text(encoding="utf-8")) == merging()
+
+
+def test_a_session_record_is_written_in_the_version_28_format() -> None:
+    written = json.loads(record_json(merging()))
+    golden = json.loads(SESSION_V28.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V28.name)
 
 
 def test_a_review_of_a_sets_report_reads_back_as_it_was_written() -> None:
@@ -701,7 +770,7 @@ def test_a_review_of_a_sets_report_reads_back_as_it_was_written() -> None:
 
 
 def test_a_record_with_work_waiting_of_no_commits_is_unreadable() -> None:
-    golden = json.loads(SESSION_V27.read_text(encoding="utf-8"))
+    golden = json.loads(SESSION_V28.read_text(encoding="utf-8"))
     golden["waiting"][0]["count"] = 0
     record = parse_record(json.dumps(golden))
     assert isinstance(record, Unreadable) and record.reason.startswith("waiting.0.count:")

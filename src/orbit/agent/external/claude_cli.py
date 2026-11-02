@@ -42,34 +42,71 @@ from orbit.protocol import (
     Effort,
     ErrorOccurred,
     Event,
-    ToolAccess,
+    Settings,
     ToolCallFinished,
     ToolCallStarted,
     TurnFinished,
     TurnStarted,
     Usage,
+    WorkspaceLevel,
 )
 
 STREAM_ARGS = ("-p", "--output-format", "stream-json", "--verbose")
 # What a full model id starts with, such as claude-sonnet-5-5; the aliases are the package's.
 MODEL_ID_PREFIX = "claude-"
-READ_ONLY_TOOLS = ("Read", "Glob", "Grep", "WebSearch")
-"""What a restricted agent may use besides orbit's tools: reading and searching its tree and the
-web, never running code or writing files. WebFetch is read-only too, but restricting the CLI
-disables it unless the built-in tool set is replaced to name it."""
+
+
+@dataclass(frozen=True)
+class ToolRules:
+    """The tools an agent may use, and those it's denied, by the names agents see them by."""
+
+    allowed: tuple[str, ...]
+    denied: tuple[str, ...]
+
+
+READ_TOOLS = ("Read", "Glob", "Grep")
+"""What an agent at the workspace level ``read`` may use besides orbit's tools: reading and
+searching its tree, never running code or writing files."""
+WEB_TOOLS = ("WebSearch", "WebFetch")
+"""The tools that reach the web, which an agent without web access is denied at every level."""
 WRITE_TOOLS = ("Edit", "Write", "NotebookEdit")
-"""The tools a restricted agent is denied, which write files."""
-TOOL_ACCESS_ARGS: dict[ToolAccess, tuple[str, ...]] = {
-    "off": ("--tools", ""),
-    "restricted": (),
-    "full": ("--permission-mode", "bypassPermissions"),
+"""The tools that write files: denied at the workspace level ``read``, allowed at ``write``."""
+RUN_TOOLS = ("Bash", "PowerShell", "Monitor")
+"""The tools that run commands, denied at the workspace level ``write``; ``--restricted``
+removes them too, as its ``--help`` says, Bash, PowerShell and the other code-running tools."""
+LEVEL_TOOLS: dict[WorkspaceLevel, ToolRules] = {
+    "none": ToolRules((), ()),
+    "read": ToolRules(READ_TOOLS, WRITE_TOOLS),
+    "write": ToolRules(READ_TOOLS + WRITE_TOOLS, RUN_TOOLS),
+    "shell": ToolRules((), ()),
 }
-# The CLI resumes sessions, reports usage, caps turns, and takes every tool access and effort.
+"""The built-in tools an agent at each workspace level may use, and those it's denied, besides
+the web's; at ``none`` it has none to use, and at ``shell`` every one is approved."""
+WEB_ALLOWED: dict[WorkspaceLevel, tuple[str, ...]] = {
+    "none": WEB_TOOLS,
+    # Restricting the CLI disables WebFetch unless the built-in tool set is replaced to name it.
+    "read": ("WebSearch",),
+    "write": ("WebSearch",),
+    "shell": (),
+}
+"""The web tools an agent with web access at each workspace level is allowed by name."""
+RESTRICTED_LEVELS: frozenset[WorkspaceLevel] = frozenset({"read", "write"})
+"""The workspace levels whose agents run the CLI restricted, so they can't run code."""
+LEVEL_ARGS: dict[WorkspaceLevel, tuple[str, ...]] = {
+    "none": (),
+    "read": (),
+    "write": ("--permission-mode", "acceptEdits"),
+    "shell": ("--permission-mode", "bypassPermissions"),
+}
+"""The flags giving an agent each workspace level, besides the tools it may use."""
+# The CLI resumes sessions, reports usage, caps turns, and takes every workspace level, web
+# access and effort.
 CAPABILITIES = Capabilities(
     resume=True,
     usage=True,
     max_turns=True,
-    tool_access=frozenset(get_args(ToolAccess)),
+    workspace_levels=frozenset(get_args(WorkspaceLevel)),
+    web=True,
     effort=frozenset(get_args(Effort)),
 )
 # What a ``result`` message reports about the turn's cost: token counts under ``usage``, and
@@ -99,41 +136,43 @@ AGENT_RULES = (
 )
 
 
-@dataclass(frozen=True)
-class ToolRules:
-    """The tools an agent may use, and those it's denied, by the names agents see them by."""
-
-    allowed: tuple[str, ...]
-    denied: tuple[str, ...]
-
-
 def orbit_tool_name(tool: str) -> str:
     """The name an agent sees orbit's ``tool`` by."""
     return f"mcp__orbit__{tool}"
 
 
-def tool_rules(tool_access: ToolAccess, tools: Sequence[str]) -> ToolRules:
-    """The tools an agent with ``tool_access`` may use: orbit's ``tools``, and with restricted
-    access the read-only ones; and those it's denied: orbit's others, and with restricted access
-    the ones that write files."""
+def tool_rules(settings: Settings, tools: Sequence[str]) -> ToolRules:
+    """The tools an agent with ``settings`` may use: orbit's ``tools``, those its workspace
+    level allows, and the web's it's allowed by name if it has web access; and those it's
+    denied: orbit's others, those its workspace level denies, and the web's without web
+    access."""
     grant = orbit_tool_grant(tools)
-    allowed = tuple(orbit_tool_name(tool) for tool in grant.granted)
-    denied = tuple(orbit_tool_name(tool) for tool in grant.withheld)
-    if tool_access == "restricted":
-        return ToolRules(allowed + READ_ONLY_TOOLS, denied + WRITE_TOOLS)
-    return ToolRules(allowed, denied)
+    level = LEVEL_TOOLS[settings.workspace_level]
+    web = WEB_ALLOWED[settings.workspace_level] if settings.web else ()
+    allowed = (*(orbit_tool_name(tool) for tool in grant.granted), *level.allowed, *web)
+    denied = (*(orbit_tool_name(tool) for tool in grant.withheld), *level.denied)
+    return ToolRules(allowed, denied if settings.web else (*denied, *WEB_TOOLS))
+
+
+def level_args(settings: Settings) -> tuple[str, ...]:
+    """The flags giving an agent with ``settings`` its workspace level: at ``none``, only the
+    web's tools if it has web access, and no tools otherwise."""
+    if settings.workspace_level == "none":
+        return ("--tools", ",".join(WEB_TOOLS) if settings.web else "")
+    return LEVEL_ARGS[settings.workspace_level]
 
 
 def agent_args(launch: AgentLaunch) -> list[str]:
     """Flags connecting a CLI to orbit's MCP server, and only to it, allowing the role's tools
-    (and hiding orbit's others) and telling it the rules and its role. A restricted agent can
-    read and search its tree and the web, and nothing more."""
+    (and hiding orbit's others) and telling it the rules and its role. An agent at the
+    workspace level ``read`` or ``write`` can read and search its tree, and at ``write`` edit
+    it, but run nothing."""
     headers = {"Authorization": f"Bearer ${{{TOKEN_VARIABLE}}}"}
     config = {"mcpServers": {"orbit": {"type": "http", "url": launch.url, "headers": headers}}}
-    tools = tool_rules(launch.settings.tool_access, launch.tools)
+    tools = tool_rules(launch.settings, launch.tools)
     rules = f"{AGENT_RULES}\n\n{launch.instructions}"
     args = [*("--mcp-config", json.dumps(config), "--strict-mcp-config")]
-    if launch.settings.tool_access == "restricted":
+    if launch.settings.workspace_level in RESTRICTED_LEVELS:
         # --restricted removes Bash and its kin, so the agent can't run code.
         # --restricted skips CLAUDE.md discovery; naming the tree (with the variable agent_env
         # sets) brings the project's CLAUDE.md back.
@@ -366,7 +405,7 @@ class ClaudeCliRunner(Conversations):
             args += ["--model", launch.settings.model]
         if launch.settings.effort:
             args += ["--effort", launch.settings.effort]
-        args += TOOL_ACCESS_ARGS[launch.settings.tool_access]
+        args += level_args(launch.settings)
         if resume:
             args += ["--resume", resume]
         args += agent_args(launch)

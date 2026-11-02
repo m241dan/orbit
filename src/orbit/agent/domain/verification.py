@@ -138,8 +138,9 @@ CUT = "\n\n[… output cut …]\n\n"
 
 
 def may_change_files(task: TaskSpec) -> bool:
-    """Whether ``task`` can touch the working tree at all; with tools off it can't."""
-    return task.settings.tool_access != "off"
+    """Whether ``task`` can touch the working tree at all; at the workspace level ``none`` it
+    can't."""
+    return task.settings.workspace_level != "none"
 
 
 def skip_reason(

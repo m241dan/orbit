@@ -38,7 +38,8 @@ uv run orbit chat                              # interactive agent session
 uv run orbit chat -C ~/code/other              # work on another project
 uv run orbit chat --new                        # start a new session rather than picking one
 uv run orbit chat --name "auth rework"         # start a new session with that name
-uv run orbit chat --model opus --tools full    # planner's model, new tasks' access (over saved)
+uv run orbit chat --model opus --tools shell   # planner's model, new tasks' level (over saved)
+uv run orbit chat --tools write --no-web       # new tasks edit files, without the web
 uv run orbit chat --runtime kiro               # run roles not naming their own runtime on kiro
 uv run orbit chat --no-verify                  # don't verify tasks (ctrl+e is refused)
 uv run orbit chat --no-review                  # don't review landed work
@@ -103,7 +104,7 @@ In the app:
 | `ctrl+e` | Set up (or redo) the verification steps: after you confirm (`y` to go ahead, `n`/`esc` to cancel), queue a configurator task first and run it (see [Setting up verification](#setting-up-verification); hidden while the `configurator` is disabled) |
 | `ctrl+f` | Release the merge hold by hand, though the sets holding it haven't passed: after you confirm (`y` to release, `n`/`esc` to cancel), the work waiting lands (see [Verification steps](#verification-steps); shown only while merges are held) |
 | `ctrl+o` | Pick the model of the conversational role whose tab is shown, or the planner's on any other tab (default, then its runtime's aliases: fable, opus, sonnet, haiku and those your `config.toml` adds, each with the id it resolves to muted beside it when that's another; see [Models and their aliases](#models-and-their-aliases); new tasks opened there default to it too) |
-| `ctrl+l` | Pick the tool access level new tasks start with in the task editor (off, restricted, full), kept with the conversational role whose tab is shown, or the planner's on any other tab |
+| `ctrl+l` | Pick the workspace level new tasks start with in the task editor (none, read, write, shell; see [How agents reach orbit](#how-agents-reach-orbit)), keeping their web access, kept with the conversational role whose tab is shown, or the planner's on any other tab |
 | `ctrl+y` | Pick the effort of the conversational role whose tab is shown, or the planner's on any other tab (unset, low, medium, high, xhigh, max; it's that role's own, so new tasks still start with effort unset); not while typing, where it's the prompt's redo |
 | `ctrl+p` | Session picker: view or switch to a saved session, or start a new one (see [Sessions](#sessions)) |
 | `ctrl+w` | Workspace picker, connected to an `orbit serve`: move to another workspace it serves, add one or remove one (see [Workspaces](#workspaces)); not while typing |
@@ -189,7 +190,7 @@ several complete as far as they agree, listed under the field. `esc` returns to 
 ### Sessions
 
 A session is what orbit is working on: its task list, its review batches and rounds (see
-[Reviews](#reviews)), the planner's conversation, the planner's model and new tasks' tool access,
+[Reviews](#reviews)), the planner's conversation, the planner's model and new tasks' workspace level and web access,
 and its name and when it was created and last active. The count of commits towards the next super
 review isn't a session's: it belongs to the repository, kept in the store beside its sessions, and
 carries on across sessions and restarts.
@@ -284,8 +285,10 @@ names the commits they leave unreviewed (`Reviews queued before lens reviewers w
 unreviewed: 1a2b3c4, 5d6e7f8.`); a review that was running comes back interrupted, as any task
 does, and one that had ended stays as it was. A task waiting for the `super-reviewer`, which the
 super review's three lens reviewers replaced, is cancelled the same way, with the same notice
-naming the commit its super review left unreviewed, whichever orbit saved the session. The planner carries on its saved conversation, and the session's saved model and tool
-access come back, unless `--model` or `--tools` was given, which hold for this run.
+naming the commit its super review left unreviewed, whichever orbit saved the session. The planner carries on its saved conversation, and the session's saved model, workspace level
+and web access come back, unless `--model`, `--tools` or `--web`/`--no-web` was given, which hold
+for this run. A session saved before workspace levels has its tool access mapped: `off` comes back
+as `none` without web, `restricted` as `read` with web and `full` as `shell` with web.
 
 Each session is locked while an orbit has it open: in another orbit's list it shows `open in
 another orbit`, dimmed, and can't be opened. The lock is an OS lock on a `.lock` file in the state
@@ -319,11 +322,11 @@ typed on one line as comma-separated names (`python, application`), where the sp
 are ignored, a name typed twice counts once and an empty field names none, as a new task starts;
 **Model**, picked as `ctrl+o` picks one (see
 [Models and their aliases](#models-and-their-aliases));
-**Tool access**; and **Effort**: unset, `low`, `medium`, `high`, `xhigh` or `max`, where unset
+**Tool access**, the workspace level, as `ctrl+l` picks it, keeping the task's web access; and **Effort**: unset, `low`, `medium`, `high`, `xhigh` or `max`, where unset
 leaves it to the role's (see `effort` under
-[Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)). A new task starts with the model
-and tool access of the conversational role whose tab is shown (or the planner's), but effort
-unset, whatever that role's effort. Picking a role sets the model, tool
+[Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)). A new task starts with the model,
+workspace level and web access of the conversational role whose tab is shown (or the planner's),
+but effort unset, whatever that role's effort. Picking a role sets the model, workspace level, web
 access and effort to that role's defaults, as the session's workspace configures it, except those
 you've already picked in this edit. `j`/`k`
 pick a field, `J`/`K` scroll the prompt box one line at a time (whichever field is selected), `i`
@@ -334,7 +337,7 @@ Its model must be one its role's runtime takes, or saving it is refused, naming 
 aliases, and each of its skills must be a skill, or saving it is refused, naming the first that
 isn't and listing the skills (`Task skills names pyton, which isn't a skill; the skills are
 application, code-style, …`). A refused save changes nothing: the conversation says why, and the
-editor opens again on what you saved, to fix and save again, with the model, tool access and effort
+editor opens again on what you saved, to fix and save again, with the model, workspace level and effort
 you'd picked still counting as picked in this edit, unless the task has since left the list or can
 no longer be edited. `enter` on a running or verifying task, or on a review orbit
 queued, only shows why it can't be edited.
@@ -349,9 +352,10 @@ selected, lets go: the list scrolls to the running task at once and follows it a
 sessions lets go too, leaving list mode if the list was active.
 [docs/task-list.md](docs/task-list.md) records the requirements.
 
-Under a task's title, its row's dim details line shows its model and tool access, then what else
-applies, and ends with its skills, if it names any, in order (`opus · full (auto-approved) · skills:
-python, application`); a task without skills shows nothing for them.
+Under a task's title, its row's dim details line shows its model and workspace level, followed by
+` + web` with web access, then what else applies, and ends with its skills, if it names any, in
+order (`opus · shell + web · skills: python, application`); a task without skills shows nothing for
+them.
 
 A task whose role runs in a lane other than `work` shows the lane as a dim tag after its title
 (`2. ⏳ Review the change  review`); a coder task shows none (see `lane` under
@@ -853,7 +857,7 @@ again. `--no-verify` turns verification off whatever the file says, and nothing 
 Failures go back to the same agent, which keeps the context of what it just did. After
 `fix_attempts` in-session fixes (default 5, set in `.orbit/config.toml`), or if the agent has exited, the task
 **falls back**: it is marked ❗ and a fix task is inserted right after it, indented and numbered under
-it (`1.1`, `1.2`, …), with the same model and tool access, for a fresh agent. A task's chain of
+it (`1.1`, `1.2`, …), with the same model, workspace level and web access, for a fresh agent. A task's chain of
 fallbacks gets up to `fallback_fixes` per step (default 3, also set in `.orbit/config.toml`); once a
 step has used them, orbit reports the failure and moves on to the next task. Once a fix passes, the task it fixed turns ✅, along with any earlier fixes in the
 chain. A fix carries on in the tree the task it fixes left; if that work is gone from the tree (no
@@ -861,15 +865,16 @@ changes, and no commits the base branch lacks, as when it was put aside), the fi
 an agent starts (`Gave up: The work it fixes isn't in the coder's tree any more; look for it in git
 stash list.`) and the task it fixes stays ❗.
 
-Verification is skipped for tasks run with tools `off`, for tasks that changed no files (but for a
+Verification is skipped for tasks run at the workspace level `none`, for tasks that changed no files (but for a
 fix task, whose passing completes the task it fixes, so it's always verified), and for an
 agent that stopped without changing anything since its last failed check (that one falls back
 instead). Orbit compares the files git sees (tracked, plus untracked ones that aren't ignored, by
 size and modification time). Outside a git work tree it can't tell, so it verifies. A skipped task
 still counts as done; the panel shows ⏩ for each step and the conversation says why.
 
-Fixes need to edit files, so give tasks `full` tool access when you want them fixed automatically.
-With `restricted` access, an agent can explain the failure but can't fix it.
+Fixes need to edit files, so give tasks the workspace level `write` or `shell` when you want them
+fixed automatically; checks that run commands need `shell` to be run again by the agent. At `read`,
+an agent can explain the failure but can't fix it.
 
 ### Setting up verification
 
@@ -1020,7 +1025,7 @@ mid-review, say). It leaves those for you to remove with `git worktree remove`, 
 session on the repository may still be reading them. Outside a git repository, or with `--no-worktree`, agents work in the current
 directory and nothing is committed.
 
-With `full` tool access an agent can still run commands outside its worktree; the worktree keeps
+At the workspace level `shell` an agent can still run commands outside its worktree; the worktree keeps
 your checkout out of its way, it doesn't sandbox it.
 
 ### Where orbit keeps things
@@ -1681,7 +1686,7 @@ and what they run on:
   agents add coder tasks then: a reviewer's `suggest_task` and a conversational role's
   `propose_task` get an error reply naming the `coder` as disabled, adding nothing to the task
   list or the review's batch. A disabled `planner`'s settings can still be picked with `ctrl+o`,
-  `ctrl+l` and `ctrl+y`, as new tasks start with its model and tool access.
+  `ctrl+l` and `ctrl+y`, as new tasks start with its model, workspace level and web access.
 - `blocking_findings`: whether its agents may report a finding as `blocking` with
   `report_finding` (see [Reviews](#reviews)); left out, they may report only `normal` ones.
 - `effort`: how hard its agents think: `low`, `medium`, `high`, `xhigh` or `max`, the levels
@@ -1707,15 +1712,17 @@ and what they run on:
   the runtime claude, but claude isn't on PATH. Install Claude Code, or set those roles' runtime
   to one you have.`), and makes a workspace `orbit serve` can't open. The Catalog lists each
   role's `runtime`, and telemetry's `orbit.runtime` is it. Each runtime says what it can do:
-  carry a conversation on (resume), report what its agents' turns cost (usage), and which
-  levels of `tool_access` and `effort` it takes; Claude Code and Kiro can do all of it, at every
-  level.
+  carry a conversation on (resume), report what its agents' turns cost (usage), give its agents
+  web access, and which workspace levels and levels of `effort` it takes; Claude Code and Kiro can
+  do all of it, at every level.
   Each runtime also takes its own models (see [Models and their aliases](#models-and-their-aliases)).
   An enabled role asking for more than its runtime can do is refused as the configuration
   loads, before anything runs, naming the role, the runtime, what it asks for and what the
-  runtime takes. For a runtime `lite` that took only restricted tool access, no effort and
-  couldn't resume, that's a `tool_access` level it doesn't take (`roles.coder asks for
-  tool_access "full", but its runtime lite accepts only tool_access "restricted".`), an `effort`
+  runtime takes. For a runtime `lite` that took only the workspace level `read`, no effort and
+  couldn't resume, that's a workspace level its `tool_access` gives that it doesn't take
+  (`roles.coder asks for workspace_level "shell", but its runtime lite accepts only
+  workspace_level "read".`), web access, for a runtime without it (`roles.reviewer asks for web =
+  true, but its runtime lite doesn't support web access.`), an `effort`
   it doesn't take, the role's own or the one your `config.toml` sets for every role
   (`roles.reviewer asks for effort "max", but its runtime lite accepts no effort setting.`, or,
   for a runtime taking some, listing those), and `conversation = true` (`roles.planner asks for
@@ -1780,7 +1787,7 @@ session's workspace that aren't conversational, each shown with its lane (`Coder
 personal role marked `personal` (`helper · helper · personal`), and fills in the role's model,
 tool access and effort as that workspace configures them; its **Effort** field sets the task's own effort, or leaves it unset for the
 role's (see [Tasks](#tasks)). `ctrl+y` picks the effort of the conversational role whose tab is
-shown, or the planner's elsewhere, as `ctrl+o` and `ctrl+l` pick its model and tool access.
+shown, or the planner's elsewhere, as `ctrl+o` and `ctrl+l` pick its model and workspace level.
 
 The `coder` works in lane `work` in a `worktree` and merges; the `configurator` works in `work` in
 a `worktree` and doesn't merge; the `reviewer` and the lens reviewers work in `review` on a
@@ -1789,7 +1796,8 @@ and run on `claude`, and none sets an effort.
 A role whose fields don't go together is refused, naming the role and the rule: `merge = true`
 needs `workspace = "worktree"` and `verify = true`; `verify = true` needs `merge = true`, as checked
 work that doesn't merge would vanish once put aside; `workspace = "checkout"` can't have
-`tool_access = "full"`, as the agent could edit your tree; `conversation = true` needs
+the workspace level `write` or `shell` (`tool_access = "full"` gives `shell`), as the agent could
+edit your tree (`workspace = "checkout" can't have the workspace level "shell"`); `conversation = true` needs
 `get_task` left out of its tools, `merge = false`, `verify = false` and a
 workspace other than `worktree`; and no role that isn't conversational may share a conversational
 role's lane; a role that isn't conversational needs `get_task` in its tools to fetch its task.
@@ -2650,24 +2658,36 @@ is orbit's `--effort`, from its task, session or role as `.orbit/config.toml` an
 
 A model picked with `ctrl+o` applies from the planner's next prompt and keeps its conversation
 (with `default` picked, the planner uses `[roles.planner] model` if the config sets one), as does
-an effort picked with `ctrl+y`; the tool access picked with `ctrl+l` is what new tasks start with
-in the task editor. On another conversational role's tab, the three pick that role's settings
-instead, leaving the planner's as they were. All are saved with the session. `ctrl+l` does not
-change the planner's own tool access, which is the planner role's (`[roles.planner] tool_access` in
-`.orbit/config.toml`, `restricted` by default).
+an effort picked with `ctrl+y`; the workspace level picked with `ctrl+l` is what new tasks start
+with in the task editor, keeping their web access. On another conversational role's tab, the three
+pick that role's settings instead, leaving the planner's as they were. All are saved with the
+session. `ctrl+l` does not change the planner's own level, which its role's `tool_access` gives
+(`[roles.planner] tool_access` in `.orbit/config.toml`, `restricted` by default).
 
-Tool access levels:
+What an agent may use is its **workspace level** and whether it has **web access**, set apart, so
+an agent at any level may have the web or not. The levels, each allowing what the one before it
+does:
 
-- `off`: no built-in tools; agents have only orbit's tools.
-- `restricted` (default): read-only. Agents start in Claude Code's `--restricted` mode, which
-  removes Bash and the other tools that run code and ignores your user, project and local
-  settings files; `Read`, `Glob`, `Grep` and `WebSearch` are allowed (read-only, including looking
-  things up on the web), and `Edit`, `Write` and `NotebookEdit` are disallowed. `WebFetch` isn't
-  allowed, as `--restricted` disables it. The project's `CLAUDE.md` still loads: `--restricted`
-  skips it, so orbit names the agent's directory with `--add-dir` and sets
+- `none`: no built-in tools for the workspace; agents have only orbit's tools (`--tools ""`), or
+  only `WebSearch` and `WebFetch` with web access (`--tools "WebSearch,WebFetch"`, both allowed).
+- `read` (default): read and search the workspace. Agents start in Claude Code's `--restricted`
+  mode, which removes Bash and the other tools that run code and ignores your user, project and
+  local settings files; `Read`, `Glob` and `Grep` are allowed, with `WebSearch` with web access,
+  and `Edit`, `Write` and `NotebookEdit` are disallowed. `WebFetch` isn't allowed, as
+  `--restricted` disables it. The project's `CLAUDE.md` still loads: `--restricted` skips it, so
+  orbit names the agent's directory with `--add-dir` and sets
   `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`.
-- `full`: every tool call is auto-approved (`--permission-mode bypassPermissions`). Claude can
-  edit files and run commands without asking.
+- `write`: also edit files, but run no commands. As at `read`, under `--restricted`, with `Edit`,
+  `Write` and `NotebookEdit` allowed too and approved as they come (`--permission-mode
+  acceptEdits`), and `Bash`, `PowerShell` and `Monitor`, which run commands, disallowed.
+- `shell`: also run commands. Every tool call is auto-approved (`--permission-mode
+  bypassPermissions`), so Claude can edit files and run commands without asking.
+
+Without web access, `WebSearch` and `WebFetch` are disallowed at every level. Older frontends
+and saved sessions speak of **tool access** instead, which orbit maps both ways: `off` is `none`
+without web, `restricted` is `read` with web and `full` is `shell` with web; `write` reads as
+`full` to them. A role's `tool_access` in its config maps the same way, so every shipped role
+keeps what it had: web, and `read` or `shell`.
 
 ### Running agents on Kiro
 
@@ -2707,13 +2727,17 @@ instructions with the agent's skills (see [Skills](#skills)), as Claude's agents
 agent's token (`includeMcpJson` is off, so no `mcp.json` of yours or the workspace's adds
 others); and its tools are the orbit tools the role is granted, each named `@orbit/<tool>` (such
 as `@orbit/get_task`), so, as on Claude, the agent isn't offered orbit's others, and the built-ins
-the role's `tool_access` allows, all trusted up front:
+the agent's workspace level and web access allow, all trusted up front:
 
-- `off`: the role's orbit tools alone.
-- `restricted`: the role's orbit tools and Kiro's read-only built-ins, `read`, `glob` and `grep`,
+- `none`: the role's orbit tools alone.
+- `read`: the role's orbit tools and Kiro's read-only built-ins, `read`, `glob` and `grep`,
   which read and search files but neither write them nor run commands.
-- `full`: the role's orbit tools and every built-in (`@builtin`), which edit files and run
-  commands without asking.
+- `write`: those and `write`, which creates and edits files.
+- `shell`: the role's orbit tools and every built-in (`@builtin`), which edit files and run
+  commands without asking; without web access, every built-in but the web's and the experimental
+  ones, named one by one.
+
+With web access, `web_search` and `web_fetch` are added at `none`, `read` and `write`.
 
 **Credits.** Kiro charges in credits, not tokens or dollars: a Kiro turn's cost is the credits it
 reports, counted apart from dollars and never converted, so a task row shows `0.62 credits` and a

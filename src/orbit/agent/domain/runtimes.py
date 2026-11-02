@@ -16,7 +16,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
 
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
-from orbit.protocol import Effort, ToolAccess
+from orbit.protocol import Effort, WorkspaceLevel
 
 CLAUDE = "claude"
 """Claude Code, the runtime a role runs on unless it says otherwise, as it's the protocol's
@@ -82,13 +82,15 @@ FailureKind = Literal["usage_limit", "api_unavailable"]
 @dataclass(frozen=True)
 class Capabilities:
     """What a runtime can do: carry a conversation on (``resume``), report what its agents'
-    turns cost and its usage limits (``usage``) and cap an agent's turns (``max_turns``), and the
-    levels of ``tool_access`` and ``effort`` it can run an agent at."""
+    turns cost and its usage limits (``usage``), cap an agent's turns (``max_turns``) and give an
+    agent web access (``web``), and the ``workspace_levels`` and levels of ``effort`` it can run
+    an agent at."""
 
     resume: bool
     usage: bool
     max_turns: bool
-    tool_access: frozenset[ToolAccess]
+    workspace_levels: frozenset[WorkspaceLevel]
+    web: bool
     effort: frozenset[Effort]
 
 

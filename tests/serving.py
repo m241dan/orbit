@@ -13,7 +13,7 @@ from tests.connection_helpers import taken
 from tests.plane_fakes import payloads
 from tests.waiting import eventually
 
-FLAGS = _Backend(None, None, False, False, False, False, new=False, name=None)
+FLAGS = _Backend(None, None, None, False, False, False, False, new=False, name=None)
 NO_USER_CONFIG = _UserConfig(Path("/nonexistent/config"), StorageSettings())
 """The user config of a server without one."""
 

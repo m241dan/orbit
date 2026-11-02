@@ -38,8 +38,8 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     Notice,
-    ToolAccess,
     TurnStarted,
+    WorkspaceLevel,
 )
 
 CHAT_ARGS = ("chat", "--output-format", "stream-json")
@@ -54,13 +54,14 @@ DEFAULT_MODEL = "auto"
 """The model Kiro picks when given none."""
 MISSING_HINT = "Is the Kiro CLI (kiro-cli) installed and on PATH?"
 
-# Kiro resumes sessions, reports credits, and takes every tool access and effort, though a model
-# may ignore the effort; it caps no turns.
+# Kiro resumes sessions, reports credits, and takes every workspace level, web access and
+# effort, though a model may ignore the effort; it caps no turns.
 CAPABILITIES = Capabilities(
     resume=True,
     usage=True,
     max_turns=False,
-    tool_access=frozenset(get_args(ToolAccess)),
+    workspace_levels=frozenset(get_args(WorkspaceLevel)),
+    web=True,
     effort=frozenset(get_args(Effort)),
 )
 # Kiro's model ids, such as glm-5 and claude-sonnet-4.5; a bare word, such as opus, is more

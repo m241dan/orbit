@@ -58,6 +58,7 @@ from orbit.cli.options import (
     ToolsOption,
     UsageOption,
     VerifyOption,
+    WebOption,
     WorktreeOption,
 )
 from orbit.cli.runtimes import given_runtime
@@ -76,6 +77,7 @@ def serve(
     add: AddOption = None,
     model: ModelOption = None,
     tools: ToolsOption = None,
+    web: WebOption = None,
     runtime: RuntimeOption = None,
     verify: VerifyOption = True,
     worktree: WorktreeOption = True,
@@ -115,7 +117,7 @@ def serve(
         token_file = TokenFile(user_config)
         token = _frontend_token(token_file, settings)
         runtime = given_runtime(runtime)
-        flags = _Backend(model, tools, verify, worktree, review, usage, False, None, runtime)
+        flags = _Backend(model, tools, web, verify, worktree, review, usage, False, None, runtime)
         clone_dir = _clone_dir(settings, state)
         run = TelemetryRun("orbit-serve", user_config, state, os.environ)
         collector = _agent_collector(run)

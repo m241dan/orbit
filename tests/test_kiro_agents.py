@@ -1,5 +1,6 @@
-"""Kiro's agent configs: what one holds for each tool access, and the owner-only files they're
-written to under ``~/.kiro/agents``, removed after their run or, left over, a day later."""
+"""Kiro's agent configs: what one holds for each workspace level and web access, and the
+owner-only files they're written to under ``~/.kiro/agents``, removed after their run or, left
+over, a day later."""
 
 import json
 import os
@@ -18,7 +19,7 @@ from orbit.agent.external.kiro_agents import (
     KiroAgentFiles,
     kiro_agent_config,
 )
-from orbit.protocol import Settings, ToolAccess
+from orbit.protocol import Settings, WorkspaceLevel
 
 URL = "http://127.0.0.1:4321/mcp"
 NOW = datetime(2026, 10, 25, 12, tzinfo=UTC)
@@ -28,9 +29,12 @@ ORBIT = ["@orbit/get_task", "@orbit/report_progress", "@orbit/complete_task"]
 """The ``GRANTED`` tools, as a Kiro config names them."""
 
 
-def config(tool_access: ToolAccess = "off", tools: tuple[str, ...] = GRANTED) -> dict[str, Any]:
-    """The config of a Kiro agent with ``tool_access`` whose role is granted orbit's ``tools``."""
-    settings = Settings(tool_access=tool_access)
+def config(
+    level: WorkspaceLevel = "none", web: bool = False, tools: tuple[str, ...] = GRANTED
+) -> dict[str, Any]:
+    """The config of a Kiro agent at workspace ``level``, with ``web`` access or not, whose role
+    is granted orbit's ``tools``."""
+    settings = Settings(workspace_level=level, web=web)
     instructions = "The role's instructions."
     launch = AgentLaunch(AGENT, URL, "Go.", settings, ".", instructions, tools, "workspace-1")
     return kiro_agent_config("The rules.", launch)
@@ -44,8 +48,8 @@ def aged(path: Path, age: timedelta) -> Path:
     return path
 
 
-def test_a_config_gives_only_the_roles_orbit_tools_with_tool_access_off() -> None:
-    assert config("off") == {
+def test_a_config_gives_only_the_roles_orbit_tools_at_no_level_without_web() -> None:
+    assert config("none") == {
         "prompt": "The rules.\n\nThe role's instructions.",
         "mcpServers": {"orbit": {"url": URL, "headers": {"Authorization": "Bearer secret"}}},
         "includeMcpJson": False,
@@ -54,29 +58,49 @@ def test_a_config_gives_only_the_roles_orbit_tools_with_tool_access_off() -> Non
     }
 
 
-@pytest.mark.parametrize("access", get_args(ToolAccess))
-def test_a_config_lists_exactly_the_orbit_tools_its_role_is_granted(access: ToolAccess) -> None:
-    tools = config(access, ("complete_task", "get_task"))["tools"]
+@pytest.mark.parametrize("level", get_args(WorkspaceLevel))
+def test_a_config_lists_exactly_the_orbit_tools_its_role_is_granted(level: WorkspaceLevel) -> None:
+    tools = config(level, True, ("complete_task", "get_task"))["tools"]
     assert [tool for tool in tools if tool.startswith("@orbit")] == [
         "@orbit/complete_task",
         "@orbit/get_task",
     ]
 
 
-def test_restricted_access_adds_the_read_only_built_ins_pre_trusted() -> None:
-    restricted = config("restricted")
-    assert restricted["tools"] == [*ORBIT, *READ_ONLY_BUILTINS]
-    assert restricted["allowedTools"] == restricted["tools"]
+SHELL_WITHOUT_WEB = [
+    *("read", "glob", "grep", "write", "shell", "aws", "code", "introspect", "delegate"),
+    "subagent",
+]
+"""The built-ins an agent at the workspace level ``shell`` without web access is given."""
+
+
+@pytest.mark.parametrize(
+    ("level", "web", "builtins"),
+    [
+        ("none", False, []),
+        ("none", True, ["web_search", "web_fetch"]),
+        ("read", False, ["read", "glob", "grep"]),
+        ("read", True, ["read", "glob", "grep", "web_search", "web_fetch"]),
+        ("write", False, ["read", "glob", "grep", "write"]),
+        ("write", True, ["read", "glob", "grep", "write", "web_search", "web_fetch"]),
+        ("shell", False, SHELL_WITHOUT_WEB),
+        ("shell", True, ["@builtin"]),
+    ],
+)
+def test_a_config_adds_the_built_ins_its_level_and_web_access_give_pre_trusted(
+    level: WorkspaceLevel, web: bool, builtins: list[str]
+) -> None:
+    given = config(level, web)
+    assert given["tools"] == [*ORBIT, *builtins]
+    assert given["allowedTools"] == given["tools"]
 
 
 def test_the_read_only_built_ins_neither_write_nor_run_commands() -> None:
     assert READ_ONLY_BUILTINS == ("read", "glob", "grep")
 
 
-def test_full_access_adds_every_built_in_pre_trusted() -> None:
-    full = config("full")
-    assert full["tools"] == [*ORBIT, "@builtin"]
-    assert full["allowedTools"] == full["tools"]
+def test_shell_without_web_gives_every_stable_built_in_but_the_webs() -> None:
+    assert not {"web_search", "web_fetch", "@builtin"} & set(config("shell")["tools"])
 
 
 def test_the_agents_live_in_kiros_home_directory() -> None:

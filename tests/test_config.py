@@ -349,7 +349,7 @@ def test_conversational_roles_can_share_a_lane() -> None:
         (custom(verify=True, merge=False), "verify = true needs merge = true"),
         (
             custom(workspace="checkout", tool_access="full"),
-            'workspace = "checkout" can\'t have tool_access = "full"',
+            'workspace = "checkout" can\'t have the workspace level "shell"',
         ),
         (
             talker(tools=["get_task", "propose_task"]),
@@ -692,8 +692,8 @@ def test_a_role_asking_for_effort_its_runtime_takes_none_of_is_refused() -> None
 @pytest.mark.usefixtures("limited_runtime")
 def test_a_role_asking_for_tool_access_its_runtime_doesnt_take_is_refused_listing_it() -> None:
     assert refusal(on_lite("coder")) == (
-        'roles.coder asks for tool_access "full", but its runtime lite accepts only tool_access'
-        ' "restricted".'
+        'roles.coder asks for workspace_level "shell", but its runtime lite accepts only'
+        ' workspace_level "read".'
     )
 
 

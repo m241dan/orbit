@@ -73,7 +73,7 @@ async def test_choosing_tools_passes_on_the_tool_access_picked() -> None:
         assert shown(app)[0::2] == ("Tool access", 0)
         assert app.screen is app.get_screen("pick-tool-access")
         await pilot.press("end", "enter")
-        assert app.picked == [Settings(model="opus", tool_access="full")]
+        assert app.picked == [Settings(model="opus", workspace_level="shell", web=False)]
 
 
 async def test_escape_picks_nothing() -> None:

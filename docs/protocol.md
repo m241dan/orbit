@@ -98,9 +98,10 @@ are the triggers that queue only disabled roles' tasks (`super-review` once its 
 reviewers are, `configure-checks` the configurator's) and its lane, unless an enabled role shares it. An agent role is `conversational`
 when the user can message it: the planner, and any other enabled role with `conversation = true`,
 whose lane is listed too. Each agent role also carries its `lane` and the defaults of a task in
-it, its `model`, `tool_access` and `effort`, as a `Settings` holds them, from the first workspace
-served that has a role of that name; these were added to version 2, defaulting to the `work`
-lane, the backend's model, `restricted` and no effort. It's `personal` when the user's own config
+it, its `model`, `workspace_level`, `web`, `tool_access` and `effort`, as a `Settings` holds
+them, from the first workspace served that has a role of that name; these were added to version
+2, defaulting to the `work` lane, the backend's model, `restricted` and no effort, and
+`workspace_level` and `web` later, mapped to and from `tool_access` as a `Settings`' are. It's `personal` when the user's own config
 defines it, rather than orbit or the project (a personal role), in that first workspace; this was
 added to version 2 too, defaulting to false. It carries the `runtime` its agents run on, such as
 `claude`, in that first workspace; this was added to version 2 too, defaulting to `claude`
@@ -643,9 +644,27 @@ agent is launched with the id its model resolves to. `model_ids` was added to ve
 defaulting to none, so an older peer's choices show without their ids.
 
 A `Settings`, the session's or a task's, holds the `model` (`null` for the backend's default), the
-`tool_access` (`off`, `restricted` or `full`) and the `effort` (`low`, `medium`, `high`, `xhigh`
-or `max`, the levels the Claude CLI offers, or `null` for its default). `effort` was added to
-version 2, defaulting to `null`, so an older peer's settings read as having none. Orbit saves it
+`workspace_level`, the `web` access, the `tool_access` and the `effort` (`low`, `medium`, `high`,
+`xhigh` or `max`, the levels the Claude CLI offers, or `null` for its default). `effort` was added
+to version 2, defaulting to `null`, so an older peer's settings read as having none.
+
+The `workspace_level` says what the agent may do in its workspace, each level allowing what the
+one before it does: `none`, nothing (orbit's tools only); `read`, read and search it (the
+default); `write`, also edit files, but run no commands; `shell`, also run commands. `web` (`true`
+by default) gives it web access, apart from its level, so `none` with `web` is allowed. Both were
+added to version 2 in place of `tool_access` (`off`, `restricted` or `full`), which a `Settings`
+still carries for older peers, mapped both ways:
+
+| `tool_access` | `workspace_level` | `web` |
+|---|---|---|
+| `off` | `none` | `false` |
+| `restricted` | `read` | `true` |
+| `full` | `shell` | `true` |
+
+A `Settings` given `tool_access` alone, as an older peer sends it, reads as the level and web
+access the table gives it (a `web` given beside it is kept). A `Settings` given a
+`workspace_level` takes its `tool_access` from it, whatever `tool_access` says, and is sent with
+it, `write` as `full`, so an older peer reads it. A task at the level `none` isn't verified. Orbit saves it
 with the session and its tasks, and the tasks it queues in a role carry the role's. An agent runs
 with it as `--effort`, or with its role's effort when it's `null`, and with the CLI's default when
 both are.

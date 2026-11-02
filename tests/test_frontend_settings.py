@@ -24,18 +24,18 @@ async def test_the_settings_show_under_the_prompt_as_reported() -> None:
     shell = Shell()
     assert shell.marks.subtitle == ""
     await shown(shell, Settings())
-    assert shell.marks.subtitle == "planner's model: default · new tasks' tools: restricted"
+    assert shell.marks.subtitle == "planner's model: default · new tasks' tools: read + web"
     await shown(shell, Settings(model="opus", tool_access="full"))
-    assert shell.marks.subtitle == "planner's model: opus · new tasks' tools: full (auto-approved)"
+    assert shell.marks.subtitle == "planner's model: opus · new tasks' tools: shell + web"
     await shown(shell, Settings(tool_access="off"))
-    assert shell.marks.subtitle == "planner's model: default · new tasks' tools: off"
+    assert shell.marks.subtitle == "planner's model: default · new tasks' tools: none"
 
 
 async def test_another_roles_settings_leave_the_planners_shown() -> None:
     shell = Shell()
     await shown(shell, Settings(model="opus"))
     await shell.feed(SettingsChanged(role="architect", settings=Settings(model="haiku")))
-    assert shell.marks.subtitle == "planner's model: opus · new tasks' tools: restricted"
+    assert shell.marks.subtitle == "planner's model: opus · new tasks' tools: read + web"
 
 
 async def test_the_pickers_open_only_once_the_backend_has_reported_settings() -> None:
@@ -51,12 +51,10 @@ async def test_a_pick_is_shown_only_once_the_backend_confirms_it() -> None:
     await shown(shell, Settings())
     shell.frontend.pick_tool_access()
     await shell.pickers.pick(2)
-    assert shell.marks.subtitle == "planner's model: default · new tasks' tools: restricted"
-    assert shell.wire.commands == [UpdateSettings(settings=Settings(tool_access="full"))]
-    await shown(shell, Settings(tool_access="full"))
-    assert (
-        shell.marks.subtitle == "planner's model: default · new tasks' tools: full (auto-approved)"
-    )
+    assert shell.marks.subtitle == "planner's model: default · new tasks' tools: read + web"
+    assert shell.wire.commands == [UpdateSettings(settings=Settings(workspace_level="write"))]
+    await shown(shell, Settings(workspace_level="write"))
+    assert shell.marks.subtitle == "planner's model: default · new tasks' tools: write + web"
 
 
 async def test_the_model_picker_offers_the_choices_and_opens_on_the_model() -> None:
@@ -115,7 +113,7 @@ async def test_a_tool_access_pick_keeps_the_model_changed_while_the_picker_is_op
     await shown(shell, Settings(model="sonnet", tool_access="off"))
     await shell.pickers.pick(1)
     assert shell.wire.commands == [
-        UpdateSettings(settings=Settings(model="sonnet", tool_access="restricted"))
+        UpdateSettings(settings=Settings(model="sonnet", workspace_level="read", web=False))
     ]
 
 
@@ -143,7 +141,7 @@ async def test_the_tool_access_picker_opens_on_the_tool_access_and_picks() -> No
     assert opened(shell) == [("tools", 0)]
     await shell.pickers.pick(2)
     assert shell.wire.commands == [
-        UpdateSettings(settings=Settings(model="opus", tool_access="full"))
+        UpdateSettings(settings=Settings(model="opus", workspace_level="write", web=False))
     ]
 
 

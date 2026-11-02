@@ -55,7 +55,7 @@ from orbit.agent import (
 )
 from orbit.cli.errors import _configured, _exit_on
 from orbit.cli.runtimes import build_runtimes
-from orbit.protocol import PLANNER, Settings, ToolAccess
+from orbit.protocol import PLANNER, Settings, WorkspaceLevel
 from orbit.telemetry import AgentCollector
 from orbit.tracing import Gauges, NoGauges, NoTelemetry, Telemetry
 
@@ -83,7 +83,8 @@ def _workspace(path: Path) -> Path:
 
 @dataclass(frozen=True)
 class _Backend:
-    """What the backend flags ask for: the planner's ``model``, new tasks' ``tools``, and
+    """What the backend flags ask for: the planner's ``model``, new tasks' workspace level
+    (``tools``) and ``web`` access, each if given, and
     whether to ``verify``, run tasks in a ``worktree``, ``review`` landed work and show the
     ``usage`` limits; a ``new`` session, perhaps with a ``name``; the ``runtime``, if any, of
     every role that doesn't name its own; the ``owner`` of the repository, if another orbit
@@ -92,7 +93,8 @@ class _Backend:
     values through, and the ``collector`` its agents send their own telemetry to."""
 
     model: str | None
-    tools: ToolAccess | None
+    tools: WorkspaceLevel | None
+    web: bool | None
     verify: bool
     worktree: bool
     review: bool
@@ -248,7 +250,7 @@ def _host_maker(
     again over it, listing the saved sessions to pick from if ``pick_session``."""
     verification = _verification(config) if backend.verify else None
     agents = _agents(config, root, backend, user.directory)
-    settings, pinned = _settings(backend.model, backend.tools)
+    settings, pinned = _settings(backend.model, backend.tools, backend.web)
 
     def make(opened: OpenedStore) -> WorkspaceHost:
         return WorkspaceHost(
@@ -310,11 +312,14 @@ def _verification(config: OrbitConfig) -> Verification:
     )
 
 
-def _settings(model: str | None, tools: ToolAccess | None) -> tuple[Settings, list[str]]:
-    """The settings ``model`` and ``tools`` ask for, and the names of those given, which hold
-    even in a session saved with other settings."""
-    settings = Settings(model=model, tool_access=tools or "restricted")
-    return settings, [name for name, given in (("model", model), ("tool_access", tools)) if given]
+def _settings(
+    model: str | None, level: WorkspaceLevel | None, web: bool | None
+) -> tuple[Settings, list[str]]:
+    """The settings ``model``, the workspace ``level`` and ``web`` access ask for, and the names
+    of those given, which hold even in a session saved with other settings."""
+    asked = {"model": model, "workspace_level": level, "web": web}
+    given = {name: value for name, value in asked.items() if value is not None}
+    return Settings.model_validate(given), list(given)
 
 
 def _agents(config: OrbitConfig, root: Path, backend: _Backend, config_dir: Path) -> Agents:

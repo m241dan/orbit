@@ -336,7 +336,10 @@ class PlannerChat:
         assert self._agent is not None
         role = self._desk.agents.roles[self._role]
         own = Settings(
-            model=self.model(settings), tool_access=role.tool_access, effort=settings.effort
+            model=self.model(settings),
+            workspace_level=role.workspace_level,
+            web=role.web,
+            effort=settings.effort,
         )
         steps, notes = self._step_names(), tuple(self._notes)
         launch = await self._desk.launch(

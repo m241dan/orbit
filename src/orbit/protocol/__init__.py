@@ -157,6 +157,8 @@ from orbit.protocol.link import (
 )
 from orbit.protocol.models import (
     ACTIVE_STATUSES,
+    LEVEL_OF_TOOL_ACCESS,
+    TOOL_ACCESS_OF_LEVEL,
     Activity,
     ActivityKind,
     Effort,
@@ -179,6 +181,8 @@ from orbit.protocol.models import (
     ToolAccess,
     Usage,
     UsageLimit,
+    WorkspaceLevel,
+    levels_of_tool_access,
 )
 from orbit.protocol.names import (
     BUGS_REVIEWER,
@@ -266,6 +270,7 @@ __all__ = [
     "INVALID",
     "LARGEST_REPORT_ID",
     "LENS_REVIEWERS",
+    "LEVEL_OF_TOOL_ACCESS",
     "LOCKED",
     "LOGIC_REVIEWER",
     "MANUAL_ORIGIN",
@@ -303,6 +308,7 @@ __all__ = [
     "TASK_CHECKS",
     "TESTS_REVIEWER",
     "TIMED_OUT",
+    "TOOL_ACCESS_OF_LEVEL",
     "UNAUTHORIZED",
     "UNAVAILABLE",
     "UNKNOWN",
@@ -446,6 +452,7 @@ __all__ = [
     "Welcome",
     "WorkspaceCloning",
     "WorkspaceEntry",
+    "WorkspaceLevel",
     "WorkspaceUsage",
     "bearer_header",
     "bearer_token",
@@ -458,6 +465,7 @@ __all__ = [
     "encode",
     "event_adapter",
     "is_orbit_review",
+    "levels_of_tool_access",
     "looks_like_url",
     "output_tail",
     "text_lines",

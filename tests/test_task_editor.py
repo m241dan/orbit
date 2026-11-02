@@ -109,7 +109,7 @@ async def test_new_task_editor_defaults_to_session_settings() -> None:
         await open_task_list(pilot)
         await pilot.press("enter")
         assert editor_screen(app).title_text == "New task"
-        assert editor_fields(app) == ("", "", "opus", "off")
+        assert editor_fields(app) == ("", "", "opus", "none")
         assert app.focused is None
         assert editor_screen(app).query_one(PromptInput).border_title == "Title"
         assert editor_screen(app).query_one(PromptBox).border_title == "Prompt"
@@ -150,9 +150,9 @@ async def test_editor_builds_a_task_with_vim_keys() -> None:
 
         await pilot.press("j", "enter")
         assert picker(app)[0] == "Tool access"
-        assert picker(app)[2] == 1  # restricted
+        assert picker(app)[2] == 1  # read
         await pilot.press("j", "enter")
-        assert editor_fields(app) == ("fix it", "", "opus", "full (auto-approved)")
+        assert editor_fields(app) == ("fix it", "", "opus", "write + web")
 
         # i jumps back to the title field from the model or tools field.
         await pilot.press("i", "!", "enter")
@@ -168,7 +168,7 @@ async def test_editor_builds_a_task_with_vim_keys() -> None:
         # A title alone saves a single-line prompt, from whichever field is selected.
         await pilot.press("k", "k", "j", "j", "j", "ctrl+s")
         assert not isinstance(app.screen, TaskEditorScreen)
-        task = TaskSpec(prompt="fix it!", settings=Settings(model="opus", tool_access="full"))
+        task = TaskSpec(prompt="fix it!", settings=Settings(model="opus", workspace_level="write"))
         assert session.commands == [AddTask(task=task)]
         assert task.role == "coder"
         # The row appears once the backend reports it.
@@ -205,7 +205,7 @@ async def test_editor_shows_a_prompts_title_and_body_and_edits_the_body() -> Non
         await pilot.press("enter")
         screen = editor_screen(app)
         body = "Put it in widgets.py.\nTest it."
-        assert editor_fields(app) == ("Add a widget", body, "default", "restricted")
+        assert editor_fields(app) == ("Add a widget", body, "default", "read + web")
 
         # j selects the prompt box; i types there, where enter adds a line.
         await pilot.press("j")
@@ -469,7 +469,7 @@ async def test_a_new_tasks_role_is_the_coder_and_picking_a_role_fills_its_defaul
         assert picker(app) == ("Role", ["Coder · work", "security · security"], 0)
         await pilot.press("j", "enter")
         assert role_and_effort(app) == ("security · security", "high")
-        assert editor_fields(app)[2:] == ("default", "restricted")
+        assert editor_fields(app)[2:] == ("default", "read + web")
         await pilot.press("ctrl+s")
         task = TaskSpec(prompt="Audit it", settings=Settings(effort="high"), role="security")
         assert session.commands == [AddTask(task=task)]
@@ -486,7 +486,7 @@ async def test_picking_a_role_keeps_a_model_changed_first() -> None:
         await pilot.press("j", "j", "j", "j", "enter", "j", "enter")  # opus
         await pilot.press("k", "k", "enter", "j", "enter")  # the security role
         assert role_and_effort(app) == ("security · security", "high")
-        assert editor_fields(app)[2:] == ("opus", "restricted")
+        assert editor_fields(app)[2:] == ("opus", "read + web")
         await pilot.press("ctrl+s")
         settings = Settings(model="opus", effort="high")
         task = TaskSpec(prompt="Audit it", settings=settings, role="security")
@@ -595,7 +595,7 @@ async def test_a_role_picked_after_a_refused_save_keeps_the_model_picked_before_
             command_id=session.envelopes[-1].command_id, code=UNKNOWN, message=message
         )
         await feed_events(session, pilot, refusal)
-        assert editor_fields(app)[2:] == ("opus", "full (auto-approved)")
+        assert editor_fields(app)[2:] == ("opus", "shell + web")
         await pilot.press("j", "j", "enter", "j", "enter")  # the security role
         assert role_and_effort(app) == ("security · security", "high")
-        assert editor_fields(app)[2:] == ("opus", "restricted")
+        assert editor_fields(app)[2:] == ("opus", "read + web")

@@ -26,10 +26,10 @@ from orbit.agent.domain.runtimes import (
     unknown_model,
     unknown_runtime,
 )
-from orbit.protocol import INVALID, Effort, Settings, ToolAccess
+from orbit.protocol import INVALID, Effort, Settings, WorkspaceLevel
 
-TOOL_ACCESSES: tuple[ToolAccess, ...] = get_args(ToolAccess)
-"""Every level of tool access, in order."""
+WORKSPACE_LEVELS: tuple[WorkspaceLevel, ...] = get_args(WorkspaceLevel)
+"""Every workspace level, in order."""
 
 EFFORTS: tuple[Effort, ...] = get_args(Effort)
 """Every level of effort, in order."""
@@ -86,12 +86,10 @@ def capability_problems(
 ) -> list[str]:
     """What role ``name``, ``role``, asks for in its ``fields`` that its runtime can't do, as
     its ``capabilities`` say, in order, each naming the role, the runtime, the request and what
-    the runtime does: a level of tool access or effort it doesn't accept, and a conversation it
-    can't carry on."""
+    the runtime does: the workspace level or web access its tool access gives that it doesn't
+    accept, a level of effort it doesn't accept, and a conversation it can't carry on."""
     found = {
-        "tool_access": _level_ask(
-            "tool_access", role.tool_access, capabilities.tool_access, TOOL_ACCESSES
-        ),
+        "tool_access": _tools_asks(role.workspace_level, role.web, capabilities),
         "effort": _level_ask("effort", role.effort, capabilities.effort, EFFORTS),
         "conversation": _conversation_ask(role.conversation, capabilities.resume),
     }
@@ -105,6 +103,17 @@ def _conversation_ask(conversation: bool, resume: bool) -> list[tuple[str, str]]
     return (
         [("conversation = true", "doesn't support resume")] if conversation and not resume else []
     )
+
+
+def _tools_asks(
+    level: WorkspaceLevel, web: bool, capabilities: Capabilities
+) -> list[tuple[str, str]]:
+    """The workspace ``level`` and ``web`` access asked for that a runtime's ``capabilities``
+    don't accept, each with what says what it does accept; nothing for those it does."""
+    asks = _level_ask("workspace_level", level, capabilities.workspace_levels, WORKSPACE_LEVELS)
+    if web and not capabilities.web:
+        return [*asks, ("web = true", "doesn't support web access")]
+    return asks
 
 
 def _level_ask(
@@ -139,13 +148,13 @@ def check_model(name: str, model: str | None, models: ModelAliases | None) -> No
 
 def check_settings(name: str, runtime: str, settings: Settings, capabilities: Capabilities) -> None:
     """Refuse ``settings``, a task's or a conversation's in role ``name`` on ``runtime``, if
-    they ask for a level of tool access or effort its ``capabilities`` don't accept; a level
-    left unset isn't refused.
+    they ask for a workspace level, web access or a level of effort its ``capabilities`` don't
+    accept; an effort left unset isn't refused.
 
     Raises :class:`Refused`, coded ``invalid``, naming the role, the runtime, the request and
     what the runtime accepts.
     """
-    asks = _level_ask("tool_access", settings.tool_access, capabilities.tool_access, TOOL_ACCESSES)
+    asks = _tools_asks(settings.workspace_level, settings.web, capabilities)
     asks += _level_ask("effort", settings.effort, capabilities.effort, EFFORTS)
     if asks:
         request, supported = asks[0]

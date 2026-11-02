@@ -28,12 +28,12 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     Settings,
-    ToolAccess,
     ToolCallFinished,
     ToolCallStarted,
     TurnFinished,
     TurnStarted,
     Usage,
+    WorkspaceLevel,
 )
 from tests.process_checks import gone
 from tests.waiting import eventually
@@ -296,15 +296,19 @@ async def test_runner_streams_a_turn(tmp_path: Path) -> None:
     [
         (Settings(), []),
         (Settings(model="opus"), ["--model", "opus"]),
+        (Settings(workspace_level="none", web=False), ["--tools", ""]),
+        (Settings(workspace_level="none"), ["--tools", "WebSearch,WebFetch"]),
+        (Settings(workspace_level="write"), ["--permission-mode", "acceptEdits"]),
+        (Settings(workspace_level="shell"), ["--permission-mode", "bypassPermissions"]),
         (Settings(tool_access="off"), ["--tools", ""]),
         (Settings(tool_access="full"), ["--permission-mode", "bypassPermissions"]),
         (Settings(effort="high"), ["--effort", "high"]),
         (
-            Settings(model="claude-sonnet-5-5", tool_access="full"),
+            Settings(model="claude-sonnet-5-5", workspace_level="shell"),
             ["--model", "claude-sonnet-5-5", "--permission-mode", "bypassPermissions"],
         ),
         (
-            Settings(model="opus", tool_access="off", effort="max"),
+            Settings(model="opus", workspace_level="none", web=False, effort="max"),
             ["--model", "opus", "--effort", "max", "--tools", ""],
         ),
     ],
@@ -680,85 +684,106 @@ async def test_restricted_agents_name_their_tree_by_its_full_path(tmp_path: Path
     assert argv[argv.index("--add-dir") + 1] == os.path.abspath(".")
 
 
-@pytest.mark.parametrize("access", ["off", "full"])
-async def test_only_restricted_agents_get_the_read_only_flags(
-    tmp_path: Path, access: ToolAccess
+@pytest.mark.parametrize("level", ["none", "shell"])
+async def test_only_read_and_write_agents_get_the_restricted_flags(
+    tmp_path: Path, level: WorkspaceLevel
 ) -> None:
     runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
-    await run_agent(runner, Settings(tool_access=access))
+    await run_agent(runner, Settings(workspace_level=level))
     argv = calls(scenario)[0]["argv"]
     assert not {"--restricted", "--add-dir"} & set(argv)
     assert "Read" not in argv[argv.index("--allowedTools") + 1]
-    assert "WebSearch" not in argv[argv.index("--allowedTools") + 1]
     assert "Edit" not in argv[argv.index("--disallowedTools") + 1]
 
 
-@pytest.mark.parametrize("access", ["off", "full"])
-def test_unrestricted_tool_rules_allow_the_roles_orbit_tools_and_deny_its_others(
-    access: ToolAccess,
+async def test_write_agents_can_edit_their_tree_but_not_run_commands(tmp_path: Path) -> None:
+    (tmp_path / "tree").mkdir()
+    runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
+    await run_agent(runner, Settings(workspace_level="write"), cwd=str(tmp_path / "tree"))
+    argv = calls(scenario)[0]["argv"]
+    assert argv[argv.index("--permission-mode") + 1] == "acceptEdits"
+    assert "--restricted" in argv
+    assert argv[argv.index("--add-dir") + 1] == str(tmp_path / "tree")
+    allowed = argv[argv.index("--allowedTools") + 1]
+    assert allowed.endswith(",Read,Glob,Grep,Edit,Write,NotebookEdit,WebSearch")
+    assert argv[argv.index("--disallowedTools") + 1].endswith(",Bash,PowerShell,Monitor")
+
+
+ORBIT_ALLOWED = ("mcp__orbit__get_task", "mcp__orbit__complete_task")
+"""Orbit's tools, as an agent of a role granted get_task and complete_task is allowed them."""
+
+ORBIT_DENIED = (
+    "mcp__orbit__run_check",
+    "mcp__orbit__report_progress",
+    "mcp__orbit__give_up",
+    "mcp__orbit__suggest_task",
+    "mcp__orbit__report_finding",
+    "mcp__orbit__dismiss_finding",
+    "mcp__orbit__propose_task",
+    "mcp__orbit__propose_checks",
+    "mcp__orbit__consult",
+    "mcp__orbit__save_report",
+    "mcp__orbit__list_reports",
+    "mcp__orbit__read_report",
+    "mcp__orbit__list_drafts",
+    "mcp__orbit__read_draft",
+    "mcp__orbit__edit_draft",
+    "mcp__orbit__remove_draft",
+    "mcp__orbit__move_draft",
+    "mcp__orbit__read_skill",
+)
+"""Orbit's other tools, which that agent is denied."""
+
+READING = ("Read", "Glob", "Grep")
+WRITING = ("Edit", "Write", "NotebookEdit")
+RUNNING = ("Bash", "PowerShell", "Monitor")
+WEB = ("WebSearch", "WebFetch")
+
+
+@pytest.mark.parametrize(
+    ("level", "web", "allowed", "denied"),
+    [
+        ("none", True, WEB, ()),
+        ("none", False, (), WEB),
+        ("read", True, (*READING, "WebSearch"), WRITING),
+        ("read", False, READING, (*WRITING, *WEB)),
+        ("write", True, (*READING, *WRITING, "WebSearch"), RUNNING),
+        ("write", False, (*READING, *WRITING), (*RUNNING, *WEB)),
+        ("shell", True, (), ()),
+        ("shell", False, (), WEB),
+    ],
+)
+def test_tool_rules_allow_and_deny_what_each_level_and_web_access_say(
+    level: WorkspaceLevel, web: bool, allowed: tuple[str, ...], denied: tuple[str, ...]
 ) -> None:
-    rules = tool_rules(access, ("get_task", "complete_task"))
-    assert rules.allowed == ("mcp__orbit__get_task", "mcp__orbit__complete_task")
-    assert rules.denied == (
-        "mcp__orbit__run_check",
-        "mcp__orbit__report_progress",
-        "mcp__orbit__give_up",
-        "mcp__orbit__suggest_task",
-        "mcp__orbit__report_finding",
-        "mcp__orbit__dismiss_finding",
-        "mcp__orbit__propose_task",
-        "mcp__orbit__propose_checks",
-        "mcp__orbit__consult",
-        "mcp__orbit__save_report",
-        "mcp__orbit__list_reports",
-        "mcp__orbit__read_report",
-        "mcp__orbit__list_drafts",
-        "mcp__orbit__read_draft",
-        "mcp__orbit__edit_draft",
-        "mcp__orbit__remove_draft",
-        "mcp__orbit__move_draft",
-        "mcp__orbit__read_skill",
-    )
+    rules = tool_rules(Settings(workspace_level=level, web=web), ("get_task", "complete_task"))
+    assert rules.allowed == (*ORBIT_ALLOWED, *allowed)
+    assert rules.denied == (*ORBIT_DENIED, *denied)
 
 
-def test_restricted_tool_rules_add_reading_and_searching_and_deny_writing() -> None:
-    rules = tool_rules("restricted", ("propose_task", "report_progress"))
-    assert rules.allowed == (
-        "mcp__orbit__propose_task",
-        "mcp__orbit__report_progress",
-        "Read",
-        "Glob",
-        "Grep",
-        "WebSearch",
-    )
-    assert rules.denied == (
-        "mcp__orbit__get_task",
-        "mcp__orbit__complete_task",
-        "mcp__orbit__run_check",
-        "mcp__orbit__give_up",
-        "mcp__orbit__suggest_task",
-        "mcp__orbit__report_finding",
-        "mcp__orbit__dismiss_finding",
-        "mcp__orbit__propose_checks",
-        "mcp__orbit__consult",
-        "mcp__orbit__save_report",
-        "mcp__orbit__list_reports",
-        "mcp__orbit__read_report",
-        "mcp__orbit__list_drafts",
-        "mcp__orbit__read_draft",
-        "mcp__orbit__edit_draft",
-        "mcp__orbit__remove_draft",
-        "mcp__orbit__move_draft",
-        "mcp__orbit__read_skill",
-        "Edit",
-        "Write",
-        "NotebookEdit",
-    )
+def test_tool_rules_for_every_orbit_tool_deny_only_what_the_level_denies() -> None:
+    assert tool_rules(Settings(workspace_level="shell"), ORBIT_TOOLS).denied == ()
+    assert tool_rules(Settings(workspace_level="read"), ORBIT_TOOLS).denied == WRITING
 
 
-def test_tool_rules_for_every_orbit_tool_deny_none_unless_restricted() -> None:
-    assert tool_rules("full", ORBIT_TOOLS).denied == ()
-    assert tool_rules("restricted", ORBIT_TOOLS).denied == ("Edit", "Write", "NotebookEdit")
+@pytest.mark.parametrize("level", ["none", "read", "write", "shell"])
+async def test_an_agent_without_web_is_denied_the_web_tools_at_every_level(
+    tmp_path: Path, level: WorkspaceLevel
+) -> None:
+    runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
+    await run_agent(runner, Settings(workspace_level=level, web=False))
+    argv = calls(scenario)[0]["argv"]
+    assert argv[argv.index("--disallowedTools") + 1].endswith(",WebSearch,WebFetch")
+    assert "Web" not in argv[argv.index("--allowedTools") + 1]
+
+
+async def test_an_agent_at_no_level_with_web_is_given_only_the_web_tools(tmp_path: Path) -> None:
+    runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
+    await run_agent(runner, Settings(workspace_level="none"))
+    argv = calls(scenario)[0]["argv"]
+    assert argv[argv.index("--tools") + 1] == "WebSearch,WebFetch"
+    assert argv[argv.index("--allowedTools") + 1].endswith(",WebSearch,WebFetch")
+    assert "--permission-mode" not in argv
 
 
 async def test_orbit_tools_the_role_lacks_are_hidden_from_the_agent(tmp_path: Path) -> None:
@@ -981,7 +1006,8 @@ def test_the_cli_can_do_everything_orbit_asks_of_a_runtime_at_every_level() -> N
     capabilities = ClaudeCliRunner().capabilities
 
     assert (capabilities.resume, capabilities.usage, capabilities.max_turns) == (True, True, True)
-    assert capabilities.tool_access == frozenset(get_args(ToolAccess))
+    assert capabilities.workspace_levels == frozenset(get_args(WorkspaceLevel))
+    assert capabilities.web
     assert capabilities.effort == frozenset(get_args(Effort))
 
 

@@ -6,17 +6,18 @@ from collections.abc import Callable, Sequence
 from orbit.protocol import AgentEntry, Settings, TaskSpec, TaskState
 from orbit.tui.view.settings import (
     effort_choices,
+    level_choices,
     model_choices,
     picked_effort,
+    picked_level,
     picked_model,
-    picked_tool_access,
     role_label,
-    tool_access_choices,
 )
 from orbit.tui.view.task_editor import (
     SavedTask,
     TaskChoices,
     TaskEditor,
+    role_defaults,
     skill_names,
     task_roles,
 )
@@ -102,8 +103,8 @@ class Pickers:
         self, settings: Callable[[], Settings], then: Callable[[Settings], None]
     ) -> None:
         self.opened.append("tools")
-        _, self.current = tool_access_choices(settings())
-        self._pick = lambda index: then(picked_tool_access(settings(), index))
+        _, self.current = level_choices(settings())
+        self._pick = lambda index: then(picked_level(settings(), index))
 
     def choose_effort(
         self, settings: Callable[[], Settings], then: Callable[[Settings], None]
@@ -150,7 +151,7 @@ def editing(
 def test_a_new_task_starts_blank_with_the_sessions_settings_and_its_title_selected() -> None:
     editor, view, _ = editing(None, Settings(model="opus", tool_access="off"))
     assert editor.heading == "New task"
-    assert (*editor.text, *editor.settings_shown) == ("", "", "opus", "off", "unset")
+    assert (*editor.text, *editor.settings_shown) == ("", "", "opus", "none", "unset")
     assert editor.role_shown == "Coder · work"
     assert editor.selected == "task-title"
     assert (view.selections, view.typing, view.dismissed) == ([], [], [])
@@ -158,7 +159,7 @@ def test_a_new_task_starts_blank_with_the_sessions_settings_and_its_title_select
 
 def test_a_new_task_starts_with_effort_unset_whatever_the_sessions_effort() -> None:
     editor, view, _ = editing(None, Settings(model="opus", tool_access="full", effort="max"))
-    assert editor.settings_shown == ("opus", "full (auto-approved)", "unset")
+    assert editor.settings_shown == ("opus", "shell + web", "unset")
     view.typed_title = "fix it"
     editor.save()
     task = TaskSpec(prompt="fix it", settings=Settings(model="opus", tool_access="full"))
@@ -194,13 +195,13 @@ def test_the_editor_builds_a_task_field_by_field() -> None:
     editor.choose()
     assert (pickers.opened, pickers.current) == (["model"], 0)
     pickers.pick(1)
-    assert view.settings == ("opus", "restricted", "unset")
+    assert view.settings == ("opus", "read + web", "unset")
 
     editor.move(1)
     editor.choose()
-    assert (pickers.opened[-1], pickers.current) == ("tools", 1)  # restricted
+    assert (pickers.opened[-1], pickers.current) == ("tools", 1)  # read
     pickers.pick(2)
-    assert view.settings == ("opus", "full (auto-approved)", "unset")
+    assert view.settings == ("opus", "write + web", "unset")
 
     # i jumps back to the title field from the model or tools field.
     editor.insert()
@@ -217,7 +218,7 @@ def test_the_editor_builds_a_task_field_by_field() -> None:
     for step in (-1, -1, 1, 1, 1):
         editor.move(step)
     editor.save()
-    task = TaskSpec(prompt="fix it!", settings=Settings(model="opus", tool_access="full"))
+    task = TaskSpec(prompt="fix it!", settings=Settings(model="opus", workspace_level="write"))
     assert view.dismissed == [task]
     assert task.role == "coder"
 
@@ -266,7 +267,7 @@ def test_the_editor_shows_a_tasks_model_and_tools_as_its_row_does() -> None:
     task = TaskSpec(prompt="Add a widget", settings=Settings(model="opus", tool_access="full"))
     editor, _, _ = editing(task)
     row_details = str(task_label(TaskState(id="1", task=task), "1", "")).split("\n")[1].strip()
-    assert row_details == "opus · full (auto-approved)"
+    assert row_details == "opus · shell + web"
     assert " · ".join(editor.settings_shown[:2]) == row_details
 
 
@@ -278,7 +279,7 @@ def test_the_editor_starts_with_a_prompts_title_and_body_and_saves_the_body_type
         "Add a widget",
         body,
         "default",
-        "restricted",
+        "read + web",
     )
 
     # j selects the prompt box, where there's nothing to choose; i types there.
@@ -362,7 +363,7 @@ def test_a_model_pick_takes_the_model_labelled_when_choices_change_while_open() 
     assert view.dismissed == [task]
 
 
-def test_a_tool_access_pick_changes_only_the_tool_access() -> None:
+def test_a_level_pick_changes_only_the_workspace_level() -> None:
     editor, view, pickers = editing(None, Settings(model="opus", tool_access="off"))
     view.typed_title = "Add a widget"
     editor.move(4)
@@ -374,7 +375,8 @@ def test_a_tool_access_pick_changes_only_the_tool_access() -> None:
     assert pickers.current == 0
     pickers.pick(2)
     editor.save()
-    task = TaskSpec(prompt="Add a widget", settings=Settings(model="sonnet", tool_access="full"))
+    settings = Settings(model="sonnet", workspace_level="write", web=False)
+    task = TaskSpec(prompt="Add a widget", settings=settings)
     assert view.dismissed == [task]
 
 
@@ -399,7 +401,7 @@ def test_editing_a_task_changes_what_is_typed_and_picked() -> None:
     editor.choose()
     pickers.pick(0)
     editor.save()
-    assert view.dismissed == [TaskSpec(prompt="two!", settings=Settings(tool_access="off"))]
+    assert view.dismissed == [TaskSpec(prompt="two!", settings=Settings(workspace_level="none"))]
 
 
 def test_editing_a_task_keeps_its_role() -> None:
@@ -423,7 +425,7 @@ def test_picking_a_role_fills_its_defaults_and_saves_it() -> None:
     assert (pickers.roles, pickers.current) == (["Coder · work", "security · security"], 0)
     pickers.pick(1)
     assert view.role == editor.role_shown == "security · security"
-    assert view.settings == editor.settings_shown == ("default", "restricted", "high")
+    assert view.settings == editor.settings_shown == ("default", "read + web", "high")
     editor.save()
     task = TaskSpec(prompt="Audit it", settings=Settings(effort="high"), role="security")
     assert view.dismissed == [task]
@@ -438,18 +440,18 @@ def test_picking_a_role_keeps_the_fields_picked_in_this_edit() -> None:
     editor.move(-2)
     editor.choose()
     pickers.pick(1)  # security
-    assert view.settings == ("opus", "restricted", "high")
+    assert view.settings == ("opus", "read + web", "high")
 
     # The fields the last role filled take the next one's defaults.
     editor.move(3)
     editor.choose()
-    pickers.pick(0)  # off
+    pickers.pick(0)  # none
     editor.move(-3)
     editor.choose()
     pickers.pick(0)  # coder
-    assert view.settings == ("opus", "off", "unset")
+    assert view.settings == ("opus", "none + web", "unset")
     editor.save()
-    task = TaskSpec(prompt="Audit it", settings=Settings(model="opus", tool_access="off"))
+    task = TaskSpec(prompt="Audit it", settings=Settings(model="opus", workspace_level="none"))
     assert view.dismissed == [task]
 
 
@@ -461,7 +463,7 @@ def test_a_role_keeps_a_picked_effort() -> None:
     editor.move(-4)
     editor.choose()
     pickers.pick(1)  # security
-    assert view.settings == ("default", "restricted", "low")
+    assert view.settings == ("default", "read + web", "low")
 
 
 def test_an_effort_picked_is_saved_and_unset_saves_none() -> None:
@@ -472,7 +474,7 @@ def test_an_effort_picked_is_saved_and_unset_saves_none() -> None:
     editor.choose()
     assert (pickers.opened, pickers.current) == (["effort"], 0)
     pickers.pick(5)
-    assert view.settings == ("default", "restricted", "max")
+    assert view.settings == ("default", "read + web", "max")
     editor.save()
     editor.choose()
     assert pickers.current == 5
@@ -573,7 +575,7 @@ def test_an_editor_opened_again_on_a_new_task_whose_save_was_refused_starts_from
         "pyton",
         "security · security",
     )
-    assert editor.settings_shown == ("opus", "restricted", "high")
+    assert editor.settings_shown == ("opus", "read + web", "high")
     view.typed_title, view.typed_body = editor.text
     view.typed_skills = editor.skills_text
     editor.save()
@@ -615,7 +617,7 @@ def test_a_role_picked_after_a_refused_save_keeps_the_fields_picked_before_it() 
     editor.move(2)
     editor.choose()
     pickers.pick(1)  # security
-    assert view.settings == ("opus", "restricted", "high")
+    assert view.settings == ("opus", "read + web", "high")
 
     # Saved again, the model still counts as picked, should that save be refused too.
     view.typed_title = "Audit it"
@@ -632,4 +634,13 @@ def test_a_role_picked_after_a_refused_save_where_nothing_was_picked_takes_its_d
     editor.move(2)
     editor.choose()
     pickers.pick(1)  # security
-    assert view.settings == ("default", "restricted", "high")
+    assert view.settings == ("default", "read + web", "high")
+
+
+def test_a_roles_defaults_set_its_web_access_beside_a_level_picked_in_this_edit() -> None:
+    reader = AgentEntry(
+        name="reader", label="Reader", conversational=False, workspace_level="read", web=False
+    )
+    settings = role_defaults(Settings(workspace_level="write"), reader, ("workspace_level",))
+    assert settings == Settings(workspace_level="write", web=False)
+    assert role_defaults(Settings(), reader, ()) == Settings(workspace_level="read", web=False)

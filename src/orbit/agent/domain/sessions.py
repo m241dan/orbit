@@ -45,9 +45,10 @@ from orbit.protocol import (
     Settings,
     TaskState,
     Usage,
+    levels_of_tool_access,
 )
 
-FORMAT_VERSION = 27
+FORMAT_VERSION = 28
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _OLD_SUPER_REVIEW_ORIGIN = "super_review"
@@ -239,6 +240,59 @@ def _booked(task: object, booked: tuple[str, ...]) -> object:
     return task
 
 
+def _levels_from_tool_access(record: dict[str, Any]) -> dict[str, Any]:
+    """Version 27 ``record`` with the settings of each conversational role, and of each task,
+    those waiting included, at the workspace level and with the web access their tool access
+    gives. Parts that can't be read are left for the record's validation to say why."""
+    return record | {
+        "role_settings": _with_roles_levels(record.get("role_settings", {})),
+        "tasks": _with_each_leveled(record.get("tasks", []), _with_task_levels),
+        "waiting": _with_each_leveled(record.get("waiting", []), _with_waiting_levels),
+    }
+
+
+def _with_roles_levels(role_settings: object) -> object:
+    """``role_settings``, saved settings by role, each leveled, if they're an object."""
+    if not isinstance(role_settings, dict):
+        return role_settings
+    return {role: _leveled(each) for role, each in role_settings.items()}
+
+
+def _with_each_leveled(saved: object, leveled: Callable[[object], object]) -> object:
+    """``saved``, a saved list, with each of its items as ``leveled`` gives it, if it's a
+    list."""
+    if not isinstance(saved, list):
+        return saved
+    return [leveled(item) for item in saved]
+
+
+def _with_waiting_levels(waiting: object) -> object:
+    """``waiting``, saved work waiting for merges, with its task's settings leveled."""
+    if not isinstance(waiting, dict) or "state" not in waiting:
+        return waiting
+    return waiting | {"state": _with_task_levels(waiting["state"])}
+
+
+def _with_task_levels(task: object) -> object:
+    """``task``, a saved task, with its settings leveled."""
+    spec = task.get("task") if isinstance(task, dict) else None
+    if not isinstance(task, dict) or not isinstance(spec, dict) or "settings" not in spec:
+        return task
+    return task | {"task": spec | {"settings": _leveled(spec["settings"])}}
+
+
+def _leveled(settings: object) -> object:
+    """``settings``, saved settings, at the workspace level and with the web access their tool
+    access gives, if it's one there is."""
+    levels = (
+        levels_of_tool_access(settings.get("tool_access")) if isinstance(settings, dict) else None
+    )
+    if not isinstance(settings, dict) or levels is None:
+        return settings
+    level, web = levels
+    return settings | {"workspace_level": level, "web": web}
+
+
 # By version N: what takes a record of version N and returns its fields in version N+1's shape.
 # The upgrade sets the version for it. Version 3 dropped the planner's rounds through a migration
 # rather than by having the snapshot ignore them, so that the format stays pinned by its fixtures
@@ -278,6 +332,9 @@ def _booked(task: object, booked: tuple[str, ...]) -> object:
 # for the reviewer as it was, and the session opened ends them (see
 # :func:`reviews_cancelled_at_upgrade`). Version 27 added the named set whose report a review
 # reviews, which an older record's reviews, of commits or the codebase, review none of.
+# Version 28 added the workspace level and web access of each setting, in place of the tool
+# access it keeps for older peers: its migration gives each the level and web access its tool
+# access maps to.
 _MIGRATIONS: dict[int, Migration] = {
     1: _spent_by_tasks,
     2: _without_rounds,
@@ -305,6 +362,7 @@ _MIGRATIONS: dict[int, Migration] = {
     24: _merges_as_booked,
     25: _old_reviews_cancelled,
     26: _unchanged,
+    27: _levels_from_tool_access,
 }
 
 EMPTY_NAME = "A session needs a name."
@@ -656,7 +714,7 @@ def runtime_changed_message(role: str, saved: str, runtime: str) -> str:
 def resumed_settings(saved: Settings, given: Settings, pinned: Collection[str]) -> Settings:
     """The settings to resume a session ``saved`` with: those settings, except the ones
     ``pinned``, by field name, which are as ``given``."""
-    return saved.model_copy(update={name: getattr(given, name) for name in pinned})
+    return saved.updated({name: getattr(given, name) for name in pinned})
 
 
 def imported_note(count: int, sessions: str, folder: str) -> str:

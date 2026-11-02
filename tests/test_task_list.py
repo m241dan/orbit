@@ -55,18 +55,18 @@ def test_label_shows_status_title_and_settings() -> None:
         # Long prompts (like fix tasks) are titled by their first line; settings line up
         # under the title.
         label = task_label(state, "1", "◠ ")
-        assert str(label) == f"1. {icon} Fix it\n      opus · restricted"
+        assert str(label) == f"1. {icon} Fix it\n      opus · read + web"
     assert str(task_label(TaskState(id="1", task=TaskSpec(prompt="x")), "12", "◠ ")) == (
-        "12. ⏳ x\n       default · restricted"
+        "12. ⏳ x\n       default · read + web"
     )
 
 
 def test_running_tasks_show_the_spinner_frame() -> None:
     running = TaskState(id="1", task=TaskSpec(prompt="go"), status="running")
-    assert str(task_label(running, "1", "◠ ")) == "1. ◠  go\n      default · restricted"
+    assert str(task_label(running, "1", "◠ ")) == "1. ◠  go\n      default · read + web"
     # Verifying shows the magnifying glass without a spinner; the verification panel spins.
     verifying = running.model_copy(update={"status": "verifying"})
-    assert str(task_label(verifying, "1", "◠ ")) == "1. 🔍 go\n      default · restricted"
+    assert str(task_label(verifying, "1", "◠ ")) == "1. 🔍 go\n      default · read + web"
 
 
 def test_usage_reads_as_tokens_and_cost() -> None:
@@ -85,7 +85,7 @@ def test_label_shows_what_a_task_spent_once_it_spent_anything() -> None:
     usage = Usage(cache_read_input_tokens=1_200_000, cost_usd=0.84)
     state = TaskState(id="1", task=TaskSpec(prompt="go"), status="completed", usage=usage)
     assert str(task_label(state, "1", "◠ ")) == (
-        "1. ✅ go\n      default · restricted · 1.2M tok · $0.84"
+        "1. ✅ go\n      default · read + web · 1.2M tok · $0.84"
     )
 
 
@@ -93,13 +93,13 @@ def test_label_shows_what_a_task_spent_in_credits() -> None:
     usage = Usage(credits=0.62, turns=1)
     state = TaskState(id="1", task=TaskSpec(prompt="go"), status="completed", usage=usage)
     assert str(task_label(state, "1", "◠ ")) == (
-        "1. ✅ go\n      default · restricted · 0.62 credits"
+        "1. ✅ go\n      default · read + web · 0.62 credits"
     )
 
 
 def test_fix_tasks_are_indented_under_their_task() -> None:
     fix = TaskState(id="2", task=TaskSpec(prompt="Fix it"), fixes="1")
-    assert str(task_label(fix, "1.1", "◠ ")) == "   1.1 ⏳ Fix it\n          default · restricted"
+    assert str(task_label(fix, "1.1", "◠ ")) == "   1.1 ⏳ Fix it\n          default · read + web"
 
 
 def test_a_task_with_a_reason_shows_it_on_a_dim_red_line_under_the_details() -> None:
@@ -107,7 +107,7 @@ def test_a_task_with_a_reason_shows_it_on_a_dim_red_line_under_the_details() -> 
         id="1", task=TaskSpec(prompt="go"), status="unverified", reason="Unit tests failed"
     )
     label = task_label(state, "1", "◠ ", width=80)
-    assert str(label) == "1. ❗ go\n      default · restricted\n      ↳ Unit tests failed"
+    assert str(label) == "1. ❗ go\n      default · read + web\n      ↳ Unit tests failed"
     reason_start = str(label).index("↳")
     assert any(
         span.style == "dim red" and span.start <= reason_start < span.end for span in label.spans
@@ -116,7 +116,7 @@ def test_a_task_with_a_reason_shows_it_on_a_dim_red_line_under_the_details() -> 
 
 def test_a_task_without_a_reason_keeps_its_two_lines() -> None:
     state = TaskState(id="1", task=TaskSpec(prompt="go"), status="completed")
-    assert str(task_label(state, "1", "◠ ", width=80)) == "1. ✅ go\n      default · restricted"
+    assert str(task_label(state, "1", "◠ ", width=80)) == "1. ✅ go\n      default · read + web"
 
 
 def test_a_fix_tasks_reason_lines_up_under_its_details() -> None:
@@ -124,7 +124,7 @@ def test_a_fix_tasks_reason_lines_up_under_its_details() -> None:
         id="2", task=TaskSpec(prompt="Fix it"), fixes="1", status="error", reason="boom"
     )
     assert str(task_label(fix, "1.1", "◠ ", width=80)) == (
-        "   1.1 ❌ Fix it\n          default · restricted\n          ↳ boom"
+        "   1.1 ❌ Fix it\n          default · read + web\n          ↳ boom"
     )
 
 
@@ -143,19 +143,19 @@ def test_a_long_reason_is_cut_to_the_width_with_an_ellipsis() -> None:
 def test_a_pending_task_waiting_for_a_coder_says_so_after_its_settings() -> None:
     state = TaskState(id="1", task=TaskSpec(prompt="go"))
     label = task_label(state, "2", "◠ ", notes=RowNotes(waiting="⏳ waiting: 3 coders busy"))
-    assert str(label) == "2. ⏳ go\n      default · restricted · ⏳ waiting: 3 coders busy"
+    assert str(label) == "2. ⏳ go\n      default · read + web · ⏳ waiting: 3 coders busy"
 
 
 def test_a_task_that_started_no_longer_says_it_waits() -> None:
     state = TaskState(id="1", task=TaskSpec(prompt="go"), status="running")
     label = task_label(state, "2", "◠ ", notes=RowNotes(waiting="⏳ waiting: 3 coders busy"))
-    assert str(label) == "2. ◠  go\n      default · restricted"
+    assert str(label) == "2. ◠  go\n      default · read + web"
 
 
 def test_a_task_in_a_lane_other_than_work_shows_it_as_a_dim_tag_after_its_title() -> None:
     state = TaskState(id="1", task=TaskSpec(prompt="Review it", role="reviewer"))
     label = task_label(state, "1", "◠ ", notes=RowNotes(lane="review"))
-    assert str(label) == "1. ⏳ Review it  review\n      default · restricted"
+    assert str(label) == "1. ⏳ Review it  review\n      default · read + web"
     tag_start = str(label).index("review\n")
     assert any(span.style == "dim" and span.start <= tag_start < span.end for span in label.spans)
 
@@ -164,17 +164,17 @@ def test_a_task_in_the_work_lane_or_an_unknown_one_shows_no_tag() -> None:
     state = TaskState(id="1", task=TaskSpec(prompt="go"))
     for lane in ("work", None):
         label = task_label(state, "1", "◠ ", notes=RowNotes(lane=lane))
-        assert str(label) == "1. ⏳ go\n      default · restricted"
+        assert str(label) == "1. ⏳ go\n      default · read + web"
 
 
 def test_a_task_whose_roles_usage_is_unknown_says_so_in_place_of_what_it_spent() -> None:
     usage = Usage(input_tokens=1_500, cost_usd=0.2)
     state = TaskState(id="1", task=TaskSpec(prompt="go"), status="completed", usage=usage)
     label = task_label(state, "1", "◠ ", notes=RowNotes(usage_unknown=True))
-    assert str(label) == "1. ✅ go\n      default · restricted · usage unknown"
+    assert str(label) == "1. ✅ go\n      default · read + web · usage unknown"
     pending = TaskState(id="1", task=TaskSpec(prompt="go"))
     label = task_label(pending, "1", "◠ ", notes=RowNotes(usage_unknown=True))
-    assert str(label) == "1. ⏳ go\n      default · restricted · usage unknown"
+    assert str(label) == "1. ⏳ go\n      default · read + web · usage unknown"
 
 
 def waiting(busy: int | None) -> tuple[Activity, ...]:
@@ -308,7 +308,7 @@ def test_tasks_being_fixed_show_which_fix_they_are_on() -> None:
     state = TaskState(
         id="1", task=TaskSpec(prompt="go"), status="running", attempt=2, max_attempts=5
     )
-    assert str(task_label(state, "1", "◠ ")) == "1. ◠  go\n      default · restricted · fix 2/5"
+    assert str(task_label(state, "1", "◠ ")) == "1. ◠  go\n      default · read + web · fix 2/5"
 
 
 async def test_a_accepts_the_highlighted_draft_and_x_removes_a_task() -> None:
@@ -662,8 +662,8 @@ async def test_a_review_tasks_row_shows_its_lane_and_a_coder_tasks_none() -> Non
     async with app.run_test() as pilot:
         await feed_events(session, pilot, LANED, in_roles(CODER, REVIEWER))
         assert shown_rows(app.query_one(TaskList))[:2] == [
-            "1. ⏳ coder\n      default · restricted",
-            "2. ⏳ reviewer  review\n      default · restricted",
+            "1. ⏳ coder\n      default · read + web",
+            "2. ⏳ reviewer  review\n      default · read + web",
         ]
 
 
@@ -675,8 +675,8 @@ async def test_a_task_rows_usage_is_unknown_when_its_roles_runtime_doesnt_report
     async with app.run_test() as pilot:
         await feed_events(session, pilot, catalog, in_roles(CODER, REVIEWER))
         assert shown_rows(app.query_one(TaskList))[:2] == [
-            "1. ⏳ coder\n      default · restricted",
-            "2. ⏳ reviewer\n      default · restricted · usage unknown",
+            "1. ⏳ coder\n      default · read + web",
+            "2. ⏳ reviewer\n      default · read + web · usage unknown",
         ]
 
 
@@ -719,8 +719,8 @@ async def test_opening_another_session_shows_its_tasks_unfiltered() -> None:
 def test_a_draft_a_role_edited_ends_its_details_with_who_edited_it() -> None:
     draft = TaskState(id="5", task=TaskSpec(prompt="x"), status="draft", proposed_by="planner")
     edited = draft.model_copy(update={"edited": True})
-    assert str(task_label(edited, "5", "◠ ")).endswith("default · restricted · edited by planner")
-    assert str(task_label(draft, "5", "◠ ")).endswith("default · restricted")
+    assert str(task_label(edited, "5", "◠ ")).endswith("default · read + web · edited by planner")
+    assert str(task_label(draft, "5", "◠ ")).endswith("default · read + web")
     accepted = edited.model_copy(update={"status": "pending"})
     assert "edited" not in str(task_label(accepted, "5", "◠ "))
 
@@ -728,7 +728,7 @@ def test_a_draft_a_role_edited_ends_its_details_with_who_edited_it() -> None:
 def test_a_task_with_skills_ends_its_details_with_them_in_order() -> None:
     task = TaskSpec(prompt="x", skills=("python", "application"))
     row = str(task_label(TaskState(id="1", task=task), "1", "◠ "))
-    assert row == "1. ⏳ x\n      default · restricted · skills: python, application"
+    assert row == "1. ⏳ x\n      default · read + web · skills: python, application"
 
 
 def test_a_tasks_skills_come_after_the_rest_of_its_details() -> None:
@@ -742,7 +742,7 @@ def test_a_tasks_skills_come_after_the_rest_of_its_details() -> None:
         usage=Usage(input_tokens=1_000, cost_usd=0.5),
     )
     assert str(task_label(draft, "5", "◠ ")).endswith(
-        "default · restricted · 1k tok · $0.50 · edited by planner · skills: python"
+        "default · read + web · 1k tok · $0.50 · edited by planner · skills: python"
     )
 
 

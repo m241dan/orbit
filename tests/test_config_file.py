@@ -461,8 +461,8 @@ def test_a_role_asking_for_what_its_runtime_cant_do_is_refused_naming_the_file(
     with pytest.raises(ConfigError) as raised:
         read_config(str(tmp_path), config_dir)
     assert str(raised.value) == (
-        f'{path}: roles.coder asks for tool_access "full", but its runtime lite accepts only'
-        ' tool_access "restricted".'
+        f'{path}: roles.coder asks for workspace_level "shell", but its runtime lite accepts'
+        ' only workspace_level "read".'
     )
 
 
@@ -540,8 +540,8 @@ def test_a_users_runtime_refusing_what_a_role_asks_names_the_user_config(
     with pytest.raises(ConfigError) as raised:
         read_config(str(tmp_path), config_dir)
     assert str(raised.value) == (
-        f'{path}: roles.coder asks for tool_access "full", but its runtime lite accepts only'
-        ' tool_access "restricted".'
+        f'{path}: roles.coder asks for workspace_level "shell", but its runtime lite accepts'
+        ' only workspace_level "read".'
     )
 
 
@@ -1514,8 +1514,8 @@ def test_a_users_runtime_refusing_a_package_ask_names_the_user_config_beside_a_p
     with pytest.raises(ConfigError) as raised:
         read_config(str(tmp_path), config_dir)
     assert str(raised.value) == (
-        f'{path}: roles.coder asks for tool_access "full", but its runtime lite accepts only'
-        ' tool_access "restricted".'
+        f'{path}: roles.coder asks for workspace_level "shell", but its runtime lite accepts'
+        ' only workspace_level "read".'
     )
 
 

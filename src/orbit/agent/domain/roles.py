@@ -49,17 +49,28 @@ from orbit.agent.domain.tools import (
 from orbit.protocol import (
     BUILT_IN_ROLE_NAMES,
     DEFAULT_RUNTIME,
+    LEVEL_OF_TOOL_ACCESS,
     NOT_CONFIGURED,
     Effort,
     Settings,
     TaskSpec,
     ToolAccess,
+    WorkspaceLevel,
 )
 
 Workspace = Literal["worktree", "snapshot", "checkout", "none", "copy"]
 """Where an agent in a role works: the coder's separate worktree, which can merge; a read-only
 snapshot of the base commit; the user's checkout, read in place; an empty temporary directory;
 or a writable copy of the base commit, set up, which never merges."""
+
+EDITING_LEVELS: frozenset[WorkspaceLevel] = frozenset({"write", "shell"})
+"""The workspace levels at which an agent can edit its workspace's files."""
+
+
+def edits_files(level: WorkspaceLevel) -> bool:
+    """Whether an agent at workspace ``level`` can edit its workspace's files."""
+    return level in EDITING_LEVELS
+
 
 DEFAULT_COPY_TTL_HOURS = 24.0
 """How long a role's copy is kept since its conversation's last turn, in hours, unless the role
@@ -272,9 +283,24 @@ class Role(_Config):
         return None if self.timeout_minutes is None else self.timeout_minutes * 60
 
     @property
+    def workspace_level(self) -> WorkspaceLevel:
+        """The workspace level its tool access gives its agents."""
+        return LEVEL_OF_TOOL_ACCESS[self.tool_access][0]
+
+    @property
+    def web(self) -> bool:
+        """Whether its tool access gives its agents web access."""
+        return LEVEL_OF_TOOL_ACCESS[self.tool_access][1]
+
+    @property
     def settings(self) -> Settings:
         """The settings of a task orbit queues in this role."""
-        return Settings(model=self.model, tool_access=self.tool_access, effort=self.effort)
+        return Settings(
+            model=self.model,
+            workspace_level=self.workspace_level,
+            web=self.web,
+            effort=self.effort,
+        )
 
     def launch_settings(self, settings: Settings) -> Settings:
         """``settings`` as an agent in this role runs with them: with the role's effort when they
@@ -304,10 +330,11 @@ def _verify_problems(role: Role) -> list[str]:
 
 
 def _checkout_problems(role: Role) -> list[str]:
-    """Why ``role`` can't work in the user's checkout, if it can't: with full tool access it
-    could edit the user's tree."""
-    if role.workspace == "checkout" and role.tool_access == "full":
-        return ['workspace = "checkout" can\'t have tool_access = "full"']
+    """Why ``role`` can't work in the user's checkout, if it can't: at a workspace level that
+    edits files it could edit the user's tree."""
+    if role.workspace == "checkout" and edits_files(role.workspace_level):
+        level = role.workspace_level
+        return [f'workspace = "checkout" can\'t have the workspace level "{level}"']
     return []
 
 

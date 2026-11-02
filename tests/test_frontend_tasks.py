@@ -40,9 +40,9 @@ async def test_the_list_shows_the_board_the_backend_reports() -> None:
     fix = TaskState(id="3", task=TaskSpec(prompt="fix one"), fixes="1")
     await shell.feed(TasksChanged(tasks=(one, fix, two)))
     assert shell.task_view.rows == [
-        "1. ✅ one\n      default · restricted",
-        "   1.1 ⏳ fix one\n          default · restricted",
-        "2. ✅ two\n      default · restricted",
+        "1. ✅ one\n      default · read + web",
+        "   1.1 ⏳ fix one\n          default · read + web",
+        "2. ✅ two\n      default · read + web",
         "+ new task",
     ]
 
@@ -87,7 +87,7 @@ async def test_the_list_shows_each_tasks_usage_and_the_sessions_total() -> None:
         id="1", task=TaskSpec(prompt="one"), usage=Usage(input_tokens=1_500, cost_usd=0.2)
     )
     await shell.feed(TasksChanged(tasks=(spent,)))
-    assert shell.task_view.rows[0].endswith("default · restricted · 1.5k tok · $0.20")
+    assert shell.task_view.rows[0].endswith("default · read + web · 1.5k tok · $0.20")
     # Every metered turn counts towards the session, whether or not a task ran it.
     await shell.feed(
         TurnFinished(turn_id="a", reason="completed", usage=Usage(input_tokens=1_000)),
@@ -139,11 +139,11 @@ async def test_the_next_task_shows_the_wait_for_a_coder_until_it_starts() -> Non
     wait = Activity(kind="waiting_for_coder", position=1, busy=2)
     await shell.feed(CATALOG, tasks, waiting_state(run, wait))
     assert shell.task_view.rows[:2] == [
-        "1. ⏳ task 1\n      default · restricted · ⏳ waiting: 2 coders busy",
-        "2. ⏳ task 2\n      default · restricted",
+        "1. ⏳ task 1\n      default · read + web · ⏳ waiting: 2 coders busy",
+        "2. ⏳ task 2\n      default · read + web",
     ]
     await shell.feed(waiting_state(run))
-    assert shell.task_view.rows[0] == "1. ⏳ task 1\n      default · restricted"
+    assert shell.task_view.rows[0] == "1. ⏳ task 1\n      default · read + web"
 
 
 async def test_a_running_task_cant_be_edited_and_the_user_is_told() -> None:
@@ -255,7 +255,9 @@ async def test_the_editor_opens_with_the_default_settings_before_any_are_reporte
 SECURITY = AgentEntry(name="security", label="security", conversational=False, lane="security")
 AUDITOR = AgentEntry(name="auditor", label="auditor", conversational=False)
 IN_A = SECURITY.model_copy(update={"effort": "high", "model": "opus"})
-IN_B = SECURITY.model_copy(update={"effort": "low", "tool_access": "full"})
+IN_B = SECURITY.model_copy(
+    update={"effort": "low", "workspace_level": "shell", "tool_access": "full"}
+)
 TWO = Catalog(
     workspaces=(
         WorkspaceEntry(id="a", label="a", path="/src/a", sessions=(), agents=(IN_A, AUDITOR)),

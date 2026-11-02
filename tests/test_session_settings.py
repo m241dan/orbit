@@ -84,7 +84,7 @@ def test_resume_keeps_a_pinned_field_as_given() -> None:
 
 
 def test_resume_with_both_fields_pinned_keeps_the_given_settings() -> None:
-    settings = SessionSettings(GIVEN, ("model", "tool_access"))
+    settings = SessionSettings(GIVEN, ("model", "workspace_level", "web"))
     settings.resume({PLANNER: SAVED})
     assert settings.current == GIVEN
 

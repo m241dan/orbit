@@ -42,7 +42,7 @@ def test_the_title_marks_the_planner_busy_and_the_orbit_read_only_each_until_it_
 def test_the_settings_show_under_the_prompt() -> None:
     prompt = Prompt()
     prompt.marks.show_settings(Settings(model="opus", tool_access="restricted"))
-    assert prompt.subtitle == "planner's model: opus · new tasks' tools: restricted"
+    assert prompt.subtitle == "planner's model: opus · new tasks' tools: read + web"
 
 
 def test_the_title_and_placeholder_name_the_role_talked_to_keeping_the_marks() -> None:
@@ -53,5 +53,5 @@ def test_the_title_and_placeholder_name_the_role_talked_to_keeping_the_marks() -
     assert prompt.placeholder == "Press i to talk to Architect, esc to stop typing"
     prompt.marks.show_settings(Settings(effort="max"))
     assert prompt.subtitle == (
-        "architect's model: default · effort: max · new tasks' tools: restricted"
+        "architect's model: default · effort: max · new tasks' tools: read + web"
     )

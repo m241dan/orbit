@@ -1,8 +1,17 @@
 """The state models commands and events share, and the base every message is built on."""
 
+from collections.abc import Mapping
 from typing import Any, Literal, get_args
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationInfo, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_serializer,
+    model_validator,
+)
 
 from orbit.protocol.names import CODER, MANUAL_ORIGIN, PauseReason, TaskOrigin
 
@@ -67,12 +76,69 @@ class _Message(WireTolerant):
 
 
 ToolAccess = Literal["off", "restricted", "full"]
-"""How much the agent may use tools.
+"""How much the agent may use tools, as older peers say it; a :data:`WorkspaceLevel` and web
+access say it now, and messages carry both, mapped as :data:`LEVEL_OF_TOOL_ACCESS` and
+:data:`TOOL_ACCESS_OF_LEVEL` say.
 
 - ``off``: no tools at all.
 - ``restricted``: anything that would need approval is refused; read-only actions still work.
 - ``full``: every tool call is approved automatically.
 """
+
+WorkspaceLevel = Literal["none", "read", "write", "shell"]
+"""What an agent may do in its workspace, each level allowing what the one before it does.
+
+- ``none``: nothing; it has orbit's tools only.
+- ``read``: read and search the workspace.
+- ``write``: also edit files, but run no commands.
+- ``shell``: also run commands.
+
+Web access is apart from it, so an agent at any level may have it or not.
+"""
+
+LEVEL_OF_TOOL_ACCESS: Mapping[ToolAccess, tuple[WorkspaceLevel, bool]] = {
+    "off": ("none", False),
+    "restricted": ("read", True),
+    "full": ("shell", True),
+}
+"""The workspace level and web access an older peer's tool access means."""
+
+TOOL_ACCESS_OF_LEVEL: Mapping[WorkspaceLevel, ToolAccess] = {
+    "none": "off",
+    "read": "restricted",
+    "write": "full",
+    "shell": "full",
+}
+"""The tool access an older peer knows each workspace level by."""
+
+
+def levels_of_tool_access(access: object) -> tuple[WorkspaceLevel, bool] | None:
+    """The workspace level and web access ``access`` means, if it's tool access; none
+    otherwise."""
+    return next((levels for known, levels in LEVEL_OF_TOOL_ACCESS.items() if known == access), None)
+
+
+def tool_access_of_level(level: object) -> ToolAccess | None:
+    """The tool access an older peer knows ``level`` by, if it's a workspace level; none
+    otherwise."""
+    return next((access for known, access in TOOL_ACCESS_OF_LEVEL.items() if known == level), None)
+
+
+def agreeing_tool_access(data: Any) -> Any:
+    """``data``, a message holding tool access, a workspace level and web access, as given, with
+    them agreeing: a workspace level given sets the tool access, and tool access given alone,
+    as an older peer gives it, sets the workspace level and, unless it's given, web access.
+    Values that aren't among them are left for validation to refuse."""
+    if not isinstance(data, dict):
+        return data
+    if "workspace_level" in data:
+        access = tool_access_of_level(data["workspace_level"])
+        return data if access is None else data | {"tool_access": access}
+    levels = levels_of_tool_access(data.get("tool_access"))
+    if levels is None:
+        return data
+    level, web = levels
+    return {"workspace_level": level, "web": web} | data
 
 
 Effort = Literal["low", "medium", "high", "xhigh", "max"]
@@ -81,11 +147,29 @@ Effort = Literal["low", "medium", "high", "xhigh", "max"]
 
 class Settings(_Message):
     """Per-session agent configuration. ``model=None`` means the backend's default, and
-    ``effort=None`` the CLI's."""
+    ``effort=None`` the CLI's. The agent works in its workspace at ``workspace_level``, with
+    web access if ``web``; ``tool_access`` says as much to older peers, and agrees with them
+    (see :func:`agreeing_tool_access`)."""
 
     model: str | None = None
     tool_access: ToolAccess = "restricted"
     effort: Effort | None = None
+    workspace_level: WorkspaceLevel = "read"
+    web: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def _agree_on_tool_access(cls, data: Any) -> Any:
+        return agreeing_tool_access(data)
+
+    @field_serializer("tool_access")
+    def _tool_access_of_level(self, _: ToolAccess) -> ToolAccess:
+        return TOOL_ACCESS_OF_LEVEL[self.workspace_level]
+
+    def updated(self, changes: Mapping[str, Any]) -> Settings:
+        """These settings with ``changes``, by field name, the tool access agreeing with the
+        workspace level."""
+        return Settings.model_validate(self.model_dump(exclude={"tool_access"}) | dict(changes))
 
 
 class TaskSpec(_Message):

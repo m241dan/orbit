@@ -6,7 +6,7 @@ from typing import Annotated
 import typer
 
 from orbit.agent import CLAUDE, TlsMode, known_runtimes, read_package_models
-from orbit.protocol import ToolAccess
+from orbit.protocol import WorkspaceLevel
 
 # Options declared apart, so chat stays short.
 WorkspaceOption = Annotated[
@@ -77,10 +77,18 @@ ModelOption = Annotated[
     ),
 ]
 ToolsOption = Annotated[
-    ToolAccess | None,
+    WorkspaceLevel | None,
     typer.Option(
-        help="Default tool access for new tasks: off (none), restricted (read-only; anything"
-        " needing approval is refused; the default), full (auto-approve everything)."
+        help="Default workspace level for new tasks: none (orbit's tools only), read (read and"
+        " search the workspace; the default), write (also edit files, but run no commands),"
+        " shell (also run commands)."
+    ),
+]
+WebOption = Annotated[
+    bool | None,
+    typer.Option(
+        "--web/--no-web",
+        help="Whether new tasks have web access, at any workspace level (default: they do).",
     ),
 ]
 RuntimeOption = Annotated[
@@ -225,7 +233,17 @@ SkillsOption = Annotated[
 ]
 
 # The chat flags that configure the control plane, which a connected chat doesn't run.
-_SERVE_FLAGS = ("model", "tools", "runtime", "verify", "worktree", "review", "usage", "profile")
+_SERVE_FLAGS = (
+    "model",
+    "tools",
+    "web",
+    "runtime",
+    "verify",
+    "worktree",
+    "review",
+    "usage",
+    "profile",
+)
 
 
 HostOption = Annotated[

@@ -388,7 +388,7 @@ async def test_pickers_move_with_j_and_k() -> None:
 
         await pilot.press("ctrl+l", "j", "j", "k", "enter")
         assert session.commands == [
-            UpdateSettings(settings=Settings(model="opus", tool_access="restricted"))
+            UpdateSettings(settings=Settings(model="opus", workspace_level="read", web=False))
         ]
 
 

@@ -16,7 +16,7 @@ from typing import Any
 from orbit.agent.application.ports import AgentLaunch
 from orbit.agent.domain.tools import orbit_tool_grant
 from orbit.agent.external.whole_files import write_private
-from orbit.protocol import ToolAccess
+from orbit.protocol import Settings, WorkspaceLevel
 
 AGENTS_DIR = Path("~/.kiro/agents")
 PREFIX = "orbit-"
@@ -26,14 +26,39 @@ SERVER = "orbit"
 MAX_AGE = timedelta(days=1)
 """How old a config file gets before a sweep takes it for a leftover."""
 
-# Kiro's V2 built-ins that read and search files, and neither write them nor run commands, from
-# https://kiro.dev/docs/reference/built-in-tools/. Its code tool searches too, but also rewrites.
+# Kiro's V2 built-ins, from https://kiro.dev/docs/reference/built-in-tools/. Those that read and
+# search files, and neither write them nor run commands; its code tool searches too, but also
+# rewrites.
 READ_ONLY_BUILTINS = ("read", "glob", "grep")
-BUILTINS: dict[ToolAccess, tuple[str, ...]] = {
-    "off": (),
-    "restricted": READ_ONLY_BUILTINS,
-    "full": ("@builtin",),
+WRITE_BUILTIN = "write"
+"""The built-in that creates and edits files."""
+WEB_BUILTINS = ("web_search", "web_fetch")
+"""The built-ins that search the web and fetch from it."""
+EVERY_BUILTIN = "@builtin"
+"""What names every built-in, the web's included."""
+NON_WEB_BUILTINS = (
+    *READ_ONLY_BUILTINS,
+    WRITE_BUILTIN,
+    *("shell", "aws", "code", "introspect", "delegate", "subagent"),
+)
+"""The built-ins, apart from the web's and the experimental ones, that an agent at the workspace
+level ``shell`` without web access is given in place of every built-in."""
+LEVEL_BUILTINS: dict[WorkspaceLevel, tuple[str, ...]] = {
+    "none": (),
+    "read": READ_ONLY_BUILTINS,
+    "write": (*READ_ONLY_BUILTINS, WRITE_BUILTIN),
+    "shell": NON_WEB_BUILTINS,
 }
+"""The built-ins an agent at each workspace level is given, without the web's."""
+
+
+def builtins(settings: Settings) -> tuple[str, ...]:
+    """The built-ins an agent with ``settings`` is given: its workspace level's, and the web's
+    if it has web access; at ``shell`` with web access, every one."""
+    if settings.workspace_level == "shell" and settings.web:
+        return (EVERY_BUILTIN,)
+    level = LEVEL_BUILTINS[settings.workspace_level]
+    return (*level, *WEB_BUILTINS) if settings.web else level
 
 
 def kiro_tool_name(tool: str) -> str:
@@ -46,10 +71,10 @@ def kiro_tool_name(tool: str) -> str:
 def kiro_agent_config(rules: str, launch: AgentLaunch) -> dict[str, Any]:
     """The config of ``launch``'s Kiro agent, told orbit's ``rules`` and then its role's
     instructions, connected to orbit's MCP server at the launch's URL with its agent's token, and
-    to no other, allowed the orbit tools its role is granted and the built-ins its tool access
-    gives, all trusted up front."""
+    to no other, allowed the orbit tools its role is granted and the built-ins its workspace
+    level and web access give, all trusted up front."""
     orbit = [kiro_tool_name(tool) for tool in orbit_tool_grant(launch.tools).granted]
-    tools = [*orbit, *BUILTINS[launch.settings.tool_access]]
+    tools = [*orbit, *builtins(launch.settings)]
     headers = {"Authorization": f"Bearer {launch.agent.token}"}
     return {
         "prompt": f"{rules}\n\n{launch.instructions}",

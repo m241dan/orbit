@@ -45,6 +45,7 @@ from orbit.cli.options import (
     ToolsOption,
     UsageOption,
     VerifyOption,
+    WebOption,
     WorkspaceOption,
     WorktreeOption,
 )
@@ -66,6 +67,7 @@ def chat(
     workspace: WorkspaceOption = Path("."),
     model: ModelOption = None,
     tools: ToolsOption = None,
+    web: WebOption = None,
     runtime: RuntimeOption = None,
     verify: VerifyOption = True,
     worktree: WorktreeOption = True,
@@ -96,7 +98,7 @@ def chat(
 
     In the app: h/j/k/l move between windows; i jumps to the prompt, which talks to
     the planner, whose proposals wait on the task list as drafts, and ctrl+s stops the run;
-    ctrl+o / ctrl+l open a picker for the planner's model / new tasks' tool access; enter
+    ctrl+o / ctrl+l open a picker for the planner's model / new tasks' workspace level; enter
     on the task list edits queued tasks and ctrl+r runs them, each in a fresh agent
     that fetches it from orbit over MCP; verification steps run when it says it's done,
     and failures go back to it to fix.
@@ -105,7 +107,7 @@ def chat(
     _refuse_console(user_config)
     given = ClientFiles(token_file, ca, cert, key)
     flags = _Backend(
-        model, tools, verify, worktree, review, usage, new, name, given_runtime(runtime)
+        model, tools, web, verify, worktree, review, usage, new, name, given_runtime(runtime)
     )
     target = named_target(connect, remote, user_config, given)
     state = resolve_state_dir(state, os.environ)

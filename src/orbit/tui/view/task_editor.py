@@ -101,17 +101,22 @@ def task_roles(agents: Iterable[AgentEntry]) -> tuple[AgentEntry, ...]:
 
 
 def new_task_settings(settings: Settings) -> Settings:
-    """The settings a new task starts with: ``settings``' model and tool access, with effort
-    unset, as the session's effort is its conversational role's own."""
+    """The settings a new task starts with: ``settings``' model, workspace level and web access,
+    with effort unset, as the session's effort is its conversational role's own."""
     return settings.model_copy(update={"effort": None})
 
 
 def role_defaults(settings: Settings, role: AgentEntry, picked: Iterable[str]) -> Settings:
-    """``settings`` with ``role``'s model, tool access and effort, but in the fields
+    """``settings`` with ``role``'s model, workspace level, web access and effort, but in the fields
     ``picked``, which keep their own."""
-    defaults = {"model": role.model, "tool_access": role.tool_access, "effort": role.effort}
+    defaults = {
+        "model": role.model,
+        "workspace_level": role.workspace_level,
+        "web": role.web,
+        "effort": role.effort,
+    }
     kept = frozenset(picked)
-    return settings.model_copy(update={k: v for k, v in defaults.items() if k not in kept})
+    return settings.updated({k: v for k, v in defaults.items() if k not in kept})
 
 
 class SettingsChooser(Protocol):
@@ -293,7 +298,7 @@ class TaskEditor:
             case "task-model":
                 self._pickers.choose_model(self._now, partial(self._pick, "model"))
             case "task-tools":
-                self._pickers.choose_tools(self._now, partial(self._pick, "tool_access"))
+                self._pickers.choose_tools(self._now, partial(self._pick, "workspace_level"))
             case "task-effort":
                 self._pickers.choose_effort(self._now, partial(self._pick, "effort"))
 

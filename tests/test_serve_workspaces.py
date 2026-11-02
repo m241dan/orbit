@@ -41,7 +41,7 @@ from orbit.protocol import INTERNAL, INVALID, PLANNER, StartupChecked
 from tests.agent_fakes import agent_exited, events_until, logged_with_traceback
 from tests.waiting import eventually
 
-FLAGS = _Backend(None, None, False, False, False, False, new=False, name=None)
+FLAGS = _Backend(None, None, None, False, False, False, False, new=False, name=None)
 CLONES = Path("/nonexistent/clones")
 """A clone directory for serving that clones nothing."""
 NO_USER_CONFIG = Path("/nonexistent/config")
@@ -280,7 +280,7 @@ async def test_a_repository_git_has_no_identity_for_is_unavailable_with_a_worktr
     root = directory(tmp_path)
     subprocess.run(["git", "init", "-q", str(root)], check=True)
     monkeypatch.setattr(served_workspaces, "has_git_identity", lambda path: False)
-    flags = _Backend(None, None, False, True, False, False, new=False, name=None)
+    flags = _Backend(None, None, None, False, True, False, False, new=False, name=None)
 
     with pytest.raises(
         WorkspaceUnavailable, match=f"^{re.escape(f'Git has no identity for commits in {root}')}"
@@ -302,7 +302,7 @@ async def test_a_slow_identity_check_leaves_the_event_loop_running(
         return False
 
     monkeypatch.setattr(served_workspaces, "has_git_identity", waits)
-    flags = _Backend(None, None, False, True, False, False, new=False, name=None)
+    flags = _Backend(None, None, None, False, True, False, False, new=False, name=None)
     opening = asyncio.create_task(workspaces(stack, store, flags).open(str(root)))
     # Let the identity check finish once it's under way, running meanwhile.
     await eventually(checking.is_set)
@@ -419,7 +419,7 @@ async def test_a_workspace_elsewhere_is_configured_verified_and_worked_in_at_its
     (root / ".orbit" / "config.toml").write_text(
         f"[[verification.steps]]\nname = 'Where'\ncommand = [{sys.executable!r}, '-c', {code!r}]\n"
     )
-    verifying = _Backend(None, None, True, False, False, False, new=False, name=None)
+    verifying = _Backend(None, None, None, True, False, False, False, new=False, name=None)
 
     host = await workspaces(stack, store, verifying).open(str(root))
     events = await events_until(host, agent_exited("startup-check"))
@@ -753,7 +753,7 @@ def invalid_config(root: Path, monkeypatch: pytest.MonkeyPatch) -> _Backend:
 def missing_identity(root: Path, monkeypatch: pytest.MonkeyPatch) -> _Backend:
     subprocess.run(["git", "init", "-q", str(root)], check=True)
     monkeypatch.setattr(served_workspaces, "has_git_identity", lambda path: False)
-    return _Backend(None, None, False, True, False, False, new=False, name=None)
+    return _Backend(None, None, None, False, True, False, False, new=False, name=None)
 
 
 def unmakeable_lock(root: Path, monkeypatch: pytest.MonkeyPatch) -> _Backend:

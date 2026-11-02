@@ -85,7 +85,8 @@ def test_name_opens_a_new_session_with_that_name() -> None:
     ("args", "named"),
     [
         (["--model", "opus"], "--model"),
-        (["--tools", "full"], "--tools"),
+        (["--tools", "write"], "--tools"),
+        (["--no-web"], "--web"),
         (["--runtime", "claude"], "--runtime"),
         (["--no-verify"], "--verify"),
         (["--verify"], "--verify"),

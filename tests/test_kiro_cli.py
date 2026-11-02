@@ -29,10 +29,10 @@ from orbit.protocol import (
     Event,
     Notice,
     Settings,
-    ToolAccess,
     ToolCallStarted,
     TurnFinished,
     TurnStarted,
+    WorkspaceLevel,
 )
 from tests.process_checks import gone
 from tests.waiting import eventually
@@ -177,7 +177,7 @@ async def test_the_agent_runs_with_its_own_config_removed_once_it_ends(
     home: Path, tmp_path: Path
 ) -> None:
     runner, scenario = make_runner(tmp_path, fixture="orbit-tools.jsonl")
-    launch = launch_of(CODER, Settings(tool_access="restricted"))
+    launch = launch_of(CODER, Settings(workspace_level="read", web=False))
     await run_agent(runner, launch)
 
     [call] = calls(scenario)
@@ -475,7 +475,8 @@ async def test_effort_is_noted_only_when_set_and_reported_unavailable(
 def test_kiro_resumes_and_reports_usage_at_every_level_but_caps_no_turns() -> None:
     can = KiroCliRunner.capabilities
     assert (can.resume, can.usage, can.max_turns) == (True, True, False)
-    assert can.tool_access == frozenset(get_args(ToolAccess))
+    assert can.workspace_levels == frozenset(get_args(WorkspaceLevel))
+    assert can.web
     assert can.effort == frozenset(get_args(Effort))
 
 

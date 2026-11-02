@@ -315,18 +315,18 @@ async def test_the_roles_agent_talks_under_its_tab_marked_only_while_it_answers(
 
 async def test_the_prompt_shows_the_shown_roles_settings() -> None:
     shell = await talking()
-    assert shell.marks.subtitle == "planner's model: opus · new tasks' tools: restricted"
+    assert shell.marks.subtitle == "planner's model: opus · new tasks' tools: read + web"
     await shell.click_tab(ARCHITECT)
-    assert shell.marks.subtitle == "architect's model: haiku · new tasks' tools: restricted"
+    assert shell.marks.subtitle == "architect's model: haiku · new tasks' tools: read + web"
     await shell.feed(SettingsChanged(settings=Settings(model="sonnet")))
-    assert shell.marks.subtitle == "architect's model: haiku · new tasks' tools: restricted"
+    assert shell.marks.subtitle == "architect's model: haiku · new tasks' tools: read + web"
 
 
 async def test_a_role_with_no_settings_reported_shows_the_planners() -> None:
     shell = Shell()
     await shell.feed(TALKING, SettingsChanged(settings=Settings(model="opus")))
     await shell.click_tab(ARCHITECT)
-    assert shell.marks.subtitle == "architect's model: opus · new tasks' tools: restricted"
+    assert shell.marks.subtitle == "architect's model: opus · new tasks' tools: read + web"
 
 
 async def test_a_snapshot_reports_each_roles_settings() -> None:
@@ -334,10 +334,10 @@ async def test_a_snapshot_reports_each_roles_settings() -> None:
     architects = Settings(model="haiku", effort="max")
     snapshot = SNAPSHOT.model_copy(update={"role_settings": {ARCHITECT: architects}})
     await shell.feed(TALKING, snapshot)
-    assert shell.marks.subtitle == "planner's model: opus · new tasks' tools: restricted"
+    assert shell.marks.subtitle == "planner's model: opus · new tasks' tools: read + web"
     await shell.click_tab(ARCHITECT)
     assert shell.marks.subtitle == (
-        "architect's model: haiku · effort: max · new tasks' tools: restricted"
+        "architect's model: haiku · effort: max · new tasks' tools: read + web"
     )
 
 
@@ -351,7 +351,7 @@ async def test_picking_an_effort_on_a_roles_tab_sets_that_roles_settings_alone()
     ]
     await shell.feed(SettingsChanged(role=ARCHITECT, settings=Settings(effort="high")))
     await shell.click_tab("All")
-    assert shell.marks.subtitle == "planner's model: opus · new tasks' tools: restricted"
+    assert shell.marks.subtitle == "planner's model: opus · new tasks' tools: read + web"
 
 
 async def test_the_model_and_tool_pickers_set_the_shown_roles_settings() -> None:
@@ -366,7 +366,7 @@ async def test_the_model_and_tool_pickers_set_the_shown_roles_settings() -> None
     await shell.pickers.pick(5)
     assert shell.wire.changes == [
         UpdateSettings(role=ARCHITECT, settings=Settings()),
-        UpdateSettings(role=ARCHITECT, settings=Settings(model="haiku", tool_access="full")),
+        UpdateSettings(role=ARCHITECT, settings=Settings(model="haiku", workspace_level="write")),
         UpdateSettings(role=PLANNER, settings=Settings(model="opus", effort="max")),
     ]
 

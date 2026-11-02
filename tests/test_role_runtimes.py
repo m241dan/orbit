@@ -119,20 +119,36 @@ def test_a_role_asking_for_an_effort_its_runtime_doesnt_take_is_refused_listing_
 
 
 @pytest.mark.usefixtures("limited_runtime")
-def test_a_role_asking_for_tool_access_its_runtime_doesnt_take_is_refused_listing_it() -> None:
+def test_a_role_whose_tool_access_gives_a_level_its_runtime_doesnt_take_is_refused() -> None:
     assert runtime_problems(lite(tool_access="full"), KNOWN_RULES) == [
-        'roles.x asks for tool_access "full", but its runtime lite accepts only tool_access'
-        ' "restricted".'
+        'roles.x asks for workspace_level "shell", but its runtime lite accepts only'
+        ' workspace_level "read".'
     ]
 
 
 @pytest.mark.usefixtures("limited_runtime")
-def test_a_role_asking_for_tool_access_from_a_runtime_taking_none_is_refused() -> None:
-    capabilities = {LIMITED_RUNTIME: replace(LIMITED, tool_access=frozenset())}
+def test_a_role_asking_for_a_level_from_a_runtime_taking_none_is_refused() -> None:
+    capabilities = {LIMITED_RUNTIME: replace(LIMITED, workspace_levels=frozenset())}
     assert runtime_problems(lite(), RuntimeRules(capabilities)) == [
-        'roles.x asks for tool_access "restricted", but its runtime lite accepts no tool_access'
-        " setting."
+        'roles.x asks for workspace_level "read", but its runtime lite accepts no'
+        " workspace_level setting."
     ]
+
+
+@pytest.mark.usefixtures("limited_runtime")
+def test_a_role_whose_tool_access_gives_web_its_runtime_cant_give_is_refused() -> None:
+    capabilities = {LIMITED_RUNTIME: replace(LIMITED, web=False)}
+    assert runtime_problems(lite(), RuntimeRules(capabilities)) == [
+        "roles.x asks for web = true, but its runtime lite doesn't support web access."
+    ]
+
+
+@pytest.mark.usefixtures("limited_runtime")
+def test_a_role_without_web_isnt_refused_by_a_runtime_without_it() -> None:
+    capabilities = {
+        LIMITED_RUNTIME: replace(LIMITED, web=False, workspace_levels=frozenset({"none"}))
+    }
+    assert runtime_problems(lite(tool_access="off"), RuntimeRules(capabilities)) == []
 
 
 @pytest.mark.usefixtures("limited_runtime")
@@ -150,10 +166,10 @@ def test_everything_a_role_asks_beyond_its_runtime_is_named_in_order() -> None:
     }
     problems = runtime_problems(roles, KNOWN_RULES)
     assert [problem.split(", but")[0] for problem in problems] == [
-        'roles.x asks for tool_access "off"',
+        'roles.x asks for workspace_level "none"',
         'roles.x asks for effort "low"',
         "roles.x asks for conversation = true",
-        'roles.coder asks for tool_access "full"',
+        'roles.coder asks for workspace_level "shell"',
     ]
 
 
@@ -161,7 +177,7 @@ def test_a_roles_asks_in_only_the_fields_given_are_named_in_their_usual_order() 
     role = lite(tool_access="off", effort="low", **TALKER)["x"]
     problems = capability_problems("x", role, LIMITED, ("conversation", "tool_access"))
     assert [problem.split(", but")[0] for problem in problems] == [
-        'roles.x asks for tool_access "off"',
+        'roles.x asks for workspace_level "none"',
         "roles.x asks for conversation = true",
     ]
 
@@ -263,9 +279,15 @@ def test_a_tasks_model_isnt_refused_without_its_runtimes_models() -> None:
             id="effort",
         ),
         pytest.param(
+            Settings(workspace_level="write"),
+            "Role coder's runtime lite accepts only workspace_level \"read\", so it can't take"
+            ' workspace_level "write".',
+            id="workspace_level",
+        ),
+        pytest.param(
             Settings(tool_access="full"),
-            "Role coder's runtime lite accepts only tool_access \"restricted\", so it can't take"
-            ' tool_access "full".',
+            "Role coder's runtime lite accepts only workspace_level \"read\", so it can't take"
+            ' workspace_level "shell".',
             id="tool_access",
         ),
     ],
@@ -278,11 +300,28 @@ def test_a_tasks_level_its_roles_runtime_doesnt_accept_is_refused_as_invalid(
     assert (refused.value.code, refused.value.message) == (INVALID, message)
 
 
-def test_a_task_asking_beyond_its_runtime_for_both_levels_is_refused_for_its_tool_access() -> None:
-    settings = Settings(tool_access="full", effort="high")
-    with pytest.raises(Refused, match='tool_access "full"'):
+def test_a_task_asking_beyond_its_runtime_for_both_levels_is_refused_for_its_workspace() -> None:
+    settings = Settings(workspace_level="shell", effort="high")
+    with pytest.raises(Refused, match='workspace_level "shell"'):
         check_settings("coder", LIMITED_RUNTIME, settings, LIMITED)
 
 
-def test_a_tasks_unset_effort_and_accepted_tool_access_are_not_refused() -> None:
-    check_settings("coder", LIMITED_RUNTIME, Settings(tool_access="restricted"), LIMITED)
+def test_a_task_asking_for_web_its_runtime_cant_give_is_refused_as_invalid() -> None:
+    capabilities = replace(LIMITED, web=False)
+    with pytest.raises(Refused) as refused:
+        check_settings("coder", LIMITED_RUNTIME, Settings(workspace_level="read"), capabilities)
+    assert (refused.value.code, refused.value.message) == (
+        INVALID,
+        "Role coder's runtime lite doesn't support web access, so it can't take web = true.",
+    )
+
+
+def test_a_task_without_web_isnt_refused_by_a_runtime_without_it() -> None:
+    capabilities = replace(LIMITED, web=False)
+    check_settings(
+        "coder", LIMITED_RUNTIME, Settings(workspace_level="read", web=False), capabilities
+    )
+
+
+def test_a_tasks_unset_effort_and_accepted_level_are_not_refused() -> None:
+    check_settings("coder", LIMITED_RUNTIME, Settings(workspace_level="read"), LIMITED)

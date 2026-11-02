@@ -13,12 +13,14 @@ from pydantic import (
     PrivateAttr,
     TypeAdapter,
     ValidationInfo,
+    field_serializer,
     field_validator,
     model_validator,
 )
 
 from orbit.protocol.commands import ApprovalDecision, ProposalAction
 from orbit.protocol.models import (
+    TOOL_ACCESS_OF_LEVEL,
     Activity,
     Effort,
     MergeHold,
@@ -35,7 +37,9 @@ from orbit.protocol.models import (
     ToolAccess,
     Usage,
     UsageLimit,
+    WorkspaceLevel,
     _Message,
+    agreeing_tool_access,
     drop_unknown_types_on_wire,
     message_types,
     oldest_seq_if_dropped,
@@ -668,11 +672,11 @@ class WorkspaceCloning(_Message):
 
 class AgentEntry(_Message):
     """An agent role ``name``, shown as ``label``; ``conversational`` if the user can message
-    it. It runs in ``lane``, and its ``model``, ``tool_access`` and ``effort`` are the defaults
-    of a task in it, as ``Settings`` hold them. It's ``personal`` if the user's own config
-    defines it, rather than orbit or the project. Its agents run on ``runtime``, such as
-    ``claude``; ``usage_known`` is false when that runtime doesn't report what their turns cost,
-    so their usage is unknown."""
+    it. It runs in ``lane``, and its ``model``, ``workspace_level``, ``web`` and ``effort`` are
+    the defaults of a task in it, as ``Settings`` hold them, with the ``tool_access`` older
+    peers know them by. It's ``personal`` if the user's own config defines it, rather than orbit
+    or the project. Its agents run on ``runtime``, such as ``claude``; ``usage_known`` is false
+    when that runtime doesn't report what their turns cost, so their usage is unknown."""
 
     name: str
     label: str
@@ -684,6 +688,17 @@ class AgentEntry(_Message):
     personal: bool = False
     runtime: str = DEFAULT_RUNTIME
     usage_known: bool = True
+    workspace_level: WorkspaceLevel = "read"
+    web: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def _agree_on_tool_access(cls, data: Any) -> Any:
+        return agreeing_tool_access(data)
+
+    @field_serializer("tool_access")
+    def _tool_access_of_level(self, _: ToolAccess) -> ToolAccess:
+        return TOOL_ACCESS_OF_LEVEL[self.workspace_level]
 
 
 class WorkspaceEntry(_Message):

@@ -26,15 +26,16 @@ NO_EFFORT = (
 )
 """Why a coder task asking for high effort is refused on a runtime taking none."""
 
-NOT_FULL = (
-    "Role coder's runtime claude accepts only tool_access \"restricted\", so it can't take"
-    ' tool_access "full".'
+NOT_WRITE = (
+    "Role coder's runtime claude accepts only workspace_level \"read\", so it can't take"
+    ' workspace_level "write".'
 )
-"""Why a coder task asking for full tool access is refused on a runtime taking only restricted."""
+"""Why a coder task at the workspace level ``write`` is refused on a runtime taking only
+``read``, naming the levels it takes."""
 
 BEYOND = [
     pytest.param(Settings(effort="high"), NO_EFFORT, id="effort"),
-    pytest.param(Settings(tool_access="full"), NOT_FULL, id="tool_access"),
+    pytest.param(Settings(workspace_level="write"), NOT_WRITE, id="workspace_level"),
 ]
 
 
