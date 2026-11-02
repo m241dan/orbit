@@ -15,6 +15,7 @@ from orbit.agent.domain.reviews import (
     ReviewGroup,
     ReviewJob,
     fan_in_due,
+    fan_in_due_again,
     finding_refusal,
     finding_report,
     finished_fields,
@@ -158,6 +159,31 @@ def test_a_review_without_lenses_never_fans_in() -> None:
 def test_a_review_fans_in_once() -> None:
     group = ReviewGroup(COMMIT, lenses=("2",), ended=("2",), stage="merging")
     assert not fan_in_due(group)
+
+
+FOUND = Finding("F1", "bugs", "Crash on empty input", "parse('') raises.", "blocking")
+
+
+def test_a_review_saved_merging_with_findings_and_no_merge_pass_is_due_to_fan_in_again() -> None:
+    group = ReviewGroup(COMMIT, lenses=("2",), ended=("2",), findings=(FOUND,), stage="merging")
+    assert fan_in_due_again(group)
+
+
+def test_a_review_still_reviewing_isnt_due_to_fan_in_again() -> None:
+    group = ReviewGroup(COMMIT, lenses=("2",), ended=("2",), findings=(FOUND,))
+    assert not fan_in_due_again(group)
+
+
+def test_a_review_merging_with_no_findings_isnt_due_to_fan_in_again() -> None:
+    group = ReviewGroup(COMMIT, lenses=("2",), ended=("2",), stage="merging")
+    assert not fan_in_due_again(group)
+
+
+def test_a_review_whose_merge_pass_was_booked_isnt_due_to_fan_in_again() -> None:
+    group = ReviewGroup(
+        COMMIT, lenses=("2",), ended=("2",), findings=(FOUND,), stage="merging", merges=("3",)
+    )
+    assert not fan_in_due_again(group)
 
 
 def test_a_task_ended_or_booked_twice_is_kept_once_in_order() -> None:

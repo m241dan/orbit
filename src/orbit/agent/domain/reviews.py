@@ -281,6 +281,13 @@ def fan_in_due(group: ReviewGroup) -> bool:
     return group.stage == "reviewing" and bool(group.lenses) and ended
 
 
+def fan_in_due_again(group: ReviewGroup) -> bool:
+    """Whether ``reviews_finished`` is due again for ``group``, restored from a save: it was
+    raised for it, but it has findings and no merge pass was booked, as when the session was
+    saved while it was being raised, so it may never have queued its merge pass."""
+    return group.stage == "merging" and bool(group.findings) and not group.merges
+
+
 def review_over(group: ReviewGroup, members: Collection[str]) -> bool:
     """Whether ``group``'s review is over, its tasks being ``members``: they have all ended, and
     ``reviews_finished`` was raised for it if it has lenses."""

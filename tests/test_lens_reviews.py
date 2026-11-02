@@ -1191,9 +1191,40 @@ def lenses_ended(stage: ReviewStage) -> tuple[tuple[TaskState, ...], LaneSnapsho
     return tasks, lane.model_copy(update={"groups": {"batch-1": group}})
 
 
-async def test_a_review_saved_merging_with_no_merge_pass_booked_closes_on_load() -> None:
+async def test_a_review_saved_merging_with_findings_and_no_merge_pass_books_one_on_load() -> None:
     tasks, lane = lenses_ended("merging")
     store = store_with(saved("auth", *tasks, reviews=lane))
+    session, launcher = reopening(store, triggers=lens_triggers(merge=MERGE))
+    events = await opened(session, ActivateSession(session="auth"))
+    await quiet_within(0.05)
+    await session.close()
+
+    snapshot = last_of(Snapshot, events)
+    assert shown(snapshot.tasks)[3:] == [(REVIEWER, "merge", None, "pending")]
+    assert snapshot.review == ReviewStatus(paused=False, open_batches=1)
+    assert reviews_of(store).groups["batch-1"].merges == ("4",)
+    assert reviews_of(store).batches["4"] == "batch-1"
+    assert launcher.launches == []
+
+
+async def test_a_review_saved_merging_with_findings_and_no_merge_trigger_closes_on_load() -> None:
+    tasks, lane = lenses_ended("merging")
+    store = store_with(saved("auth", *tasks, reviews=lane))
+    session, launcher = reopening(store, triggers=lens_triggers())
+    events = await opened(session, ActivateSession(session="auth"))
+    await session.close()
+
+    snapshot = last_of(Snapshot, events)
+    assert len(snapshot.tasks) == 3
+    assert snapshot.review == ReviewStatus(paused=False, open_batches=0)
+    assert launcher.launches == []
+
+
+async def test_a_review_saved_merging_with_no_findings_closes_on_load() -> None:
+    tasks, lane = lenses_ended("merging")
+    group = replace(lane.groups["batch-1"], findings=())
+    quiet = lane.model_copy(update={"groups": {"batch-1": group}})
+    store = store_with(saved("auth", *tasks, reviews=quiet))
     session, launcher = reopening(store, triggers=lens_triggers(merge=MERGE))
     events = await opened(session, ActivateSession(session="auth"))
     await session.close()

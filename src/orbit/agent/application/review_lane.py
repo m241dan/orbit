@@ -90,6 +90,7 @@ from orbit.agent.domain.reviews import (
     Severity,
     blocking_roles,
     fan_in_due,
+    fan_in_due_again,
     finding_refusal,
     finished_fields,
     finished_values,
@@ -307,11 +308,14 @@ class ReviewLane:
     async def _settle_restored(self) -> None:
         """Settle quietly each review restored whose batch still fills though its tasks ended
         before the crash, as one saved as it fanned in did: ``reviews_finished`` is raised for
-        one whose lenses have all ended, if it wasn't yet, and one that's over ends."""
+        one whose lenses have all ended, if it wasn't yet, or again if it may not have finished
+        being raised, as :func:`fan_in_due_again` says, and one that's over ends."""
         # Settling one changes no other group; it may only prune those whose batch closed.
         for batch, group in tuple(self._groups.items()):
             if self._settling_due(batch, group):
-                await self._settle(batch, group, "quiet")
+                again = fan_in_due_again(group)  # Back to reviewing, so _settle raises it again.
+                restored = replace(group, stage="reviewing") if again else group
+                await self._settle(batch, restored, "quiet")
                 await self._hooks.changed()
 
     def _settling_due(self, batch: str, group: ReviewGroup) -> bool:
