@@ -95,3 +95,49 @@ def test_a_proposals_reports_are_listed_under_their_sets() -> None:
         "Set slow: every 10 commits, reports\n- mutation: mutmut run\n"
         "Report mutation-report: slow → tests-reviewer when it fails"
     )
+
+
+def test_a_report_on_a_kept_set_is_listed_under_the_kept_set_before_the_setup() -> None:
+    checks = ChecksProposal.model_validate(
+        {
+            "steps": [{"name": "Lint", "command": ["ruff"]}],
+            "setup": {"command": ["make"]},
+            "reports": {
+                "mutation-report": {"set": "mutation", "role": "tests-reviewer", "prompt": "Look"}
+            },
+        }
+    )
+    assert configure_message(checks) == (
+        "Configure verification steps\n\n"
+        "Steps:\n- Lint: ruff\n\n"
+        "Set mutation: kept\n"
+        "Report mutation-report: mutation → tests-reviewer when it fails\n\n"
+        "Setup: make"
+    )
+
+
+def test_reports_on_proposed_and_kept_sets_are_each_listed_once() -> None:
+    checks = ChecksProposal.model_validate(
+        {
+            "steps": [{"name": "mutation", "command": ["mutmut", "run"], "set": "slow"}],
+            "reports": {
+                "slow-report": {"set": "slow", "role": "tests-reviewer", "prompt": "Look"},
+                "perf-report": {"set": "perf", "role": "tests-reviewer", "prompt": "Look"},
+                "perf-passed": {
+                    "set": "perf",
+                    "role": "tests-reviewer",
+                    "status": "any",
+                    "prompt": "Look",
+                },
+            },
+        }
+    )
+    assert configure_message(checks) == (
+        "Configure verification steps\n\n"
+        "Task checks: every task\nnone\n\n"
+        "Set slow: no trigger, reports\n- mutation: mutmut run\n"
+        "Report slow-report: slow → tests-reviewer when it fails\n\n"
+        "Set perf: kept\n"
+        "Report perf-report: perf → tests-reviewer when it fails\n"
+        "Report perf-passed: perf → tests-reviewer when it finishes"
+    )

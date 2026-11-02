@@ -7,7 +7,7 @@ import shlex
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import replace
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -230,19 +230,27 @@ _REPORT_PHRASES: Mapping[tuple[str, ...], str] = {
 any other, or none, does when its set finishes."""
 
 
+ReportScope = Literal["sets", "all"]
+"""Which reports a description lists: ``sets``, only those on the sets it describes, or
+``all``, also those on sets kept as configured, each under its set's name."""
+
+
 def describe_checks(
     steps: Sequence[VerificationStep],
     setup: Setup | None,
     sets: Sequence[CheckSet] = (),
     triggers: Mapping[str, Trigger] = _NO_TRIGGERS,
+    reports: ReportScope = "sets",
 ) -> str:
     """``steps``, the task checks, one per line, then ``setup``; each part only if there is
     one. With named ``sets``, the task checks come under a line saying when they run, then each
     set with its steps, under a line saying when those of ``triggers`` that run it fire and
     whether it holds merges, then the ``set_finished`` triggers reporting it to a lens, as the
-    proposal window groups them."""
+    proposal window groups them. With ``reports`` ``all``, the triggers reporting a set none of
+    ``sets`` is come before the setup, under a line naming their set, kept as configured."""
     groups = _describe_groups(steps, sets, triggers) if sets else _describe_steps(steps)
-    return "\n\n".join([*groups, *_describe_setup(setup)])
+    kept = _describe_kept(sets, triggers) if reports == "all" else []
+    return "\n\n".join([*groups, *kept, *_describe_setup(setup)])
 
 
 def _describe_steps(steps: Sequence[VerificationStep]) -> list[str]:
@@ -266,6 +274,25 @@ def _describe_set(check_set: CheckSet, triggers: Mapping[str, Trigger]) -> str:
     effect = _EFFECT_PHRASES[check_set.effect]
     group = _group(f"Set {check_set.name}", [*runs, effect], check_set.steps)
     return "\n".join([group, *_reports(triggers, check_set.name)])
+
+
+def _describe_kept(sets: Sequence[CheckSet], triggers: Mapping[str, Trigger]) -> list[str]:
+    """Each set that ``triggers`` report but none of ``sets`` is, in order, under a line saying
+    it's kept, with the line of each of ``triggers`` reporting it."""
+    named = {check_set.name for check_set in sets}
+    kept = [name for name in _reported_sets(triggers) if name not in named]
+    return ["\n".join([f"Set {name}: kept", *_reports(triggers, name)]) for name in kept]
+
+
+def _reported_sets(triggers: Mapping[str, Trigger]) -> list[str]:
+    """The sets ``triggers`` report to a lens, each once, in order."""
+    named = (name for trigger in triggers.values() for name in _values(trigger, "set"))
+    return list(dict.fromkeys(name for name in named if _reports_on_any(triggers, name)))
+
+
+def _reports_on_any(triggers: Mapping[str, Trigger], name: str) -> bool:
+    """Whether any of ``triggers`` reports set ``name`` to a lens."""
+    return any(_reports_on(trigger, name) for trigger in triggers.values())
 
 
 def _group(title: str, notes: Sequence[str], steps: Sequence[VerificationStep]) -> str:
