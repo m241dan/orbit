@@ -90,6 +90,7 @@ from tests.agent_fakes import (
     tasks_of,
     verified,
 )
+from tests.loop_quiet import quiet_within
 
 
 async def idle(session: WorkspaceHost) -> list[Event]:
@@ -157,7 +158,7 @@ async def test_running_does_nothing_when_nothing_is_runnable() -> None:
     stream = payloads(session)
     await anext(stream)  # The snapshot.
     await send(session, RunTasks())
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     counted = SessionStateChanged(
         session="session-1", active=True, state="idle", viewers=1, role_spent={}, caused_spent={}
     )

@@ -1,6 +1,5 @@
 """The session's own business: settings, prompts to the planner, and the task list."""
 
-import asyncio
 import sys
 from collections.abc import Sequence
 
@@ -70,6 +69,7 @@ from tests.agent_fakes import (
     send,
     session_for,
 )
+from tests.loop_quiet import quiet_within
 from tests.waiting import eventually
 
 PLANNER_IDLE = BusyChanged(busy=False, lane="planner")
@@ -282,7 +282,7 @@ async def test_planner_turns_are_not_verified() -> None:
     events = await collect_run(session)
 
     assert not any(isinstance(e, VerificationChanged | VerificationFinished) for e in events[1:])
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     assert only_state_queued(session)
 
 

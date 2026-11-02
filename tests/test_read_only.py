@@ -1,7 +1,5 @@
 """A read-only session: another orbit owns the repository, so the work asked for is queued."""
 
-import asyncio
-
 import pytest
 
 from orbit.agent import HostParts, WorkspaceHost
@@ -41,6 +39,7 @@ from tests.agent_fakes import (
     startup_of,
     verified,
 )
+from tests.loop_quiet import quiet_within
 
 OWNER = WorkspaceOwner(pid=42)
 
@@ -78,7 +77,7 @@ LEFTOVER = "1 snapshot worktree left in .git/orbit by earlier runs."
 async def greeting_notes(session: WorkspaceHost) -> list[str]:
     """The notices ``session`` greets its frontend with, once its startup work has settled."""
     await greeted(session)
-    await asyncio.sleep(0.05)
+    await quiet_within(0.05)
     notes = [e.message for e in queued(session) if isinstance(e, Notice)]
     await session.close()
     return notes
@@ -99,7 +98,7 @@ async def test_work_asked_of_a_read_only_session_is_accepted_and_queued_not_run(
     await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
     await send(session, RunTasks())
     await send(session, FireTrigger(trigger=SUPER_REVIEW))
-    await asyncio.sleep(0.05)
+    await quiet_within(0.05)
 
     events = queued(session)
     assert events.count(ACCEPTED) == 3

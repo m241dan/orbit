@@ -59,6 +59,7 @@ from orbit.protocol import (
 )
 from orbit.tracing import NoTelemetry, Telemetry
 from tests.agent_fakes import board_of, claims_done, control_plane, session_for
+from tests.loop_quiet import quiet_within
 from tests.server_fakes import LOOPBACK, TASK, TOKEN, Lines, serving_plane
 from tests.telemetry_helpers import Traced
 from tests.waiting import eventually
@@ -398,7 +399,7 @@ async def test_starting_cancelled_leaves_nothing_serving(monkeypatch: pytest.Mon
     session = ControlPlane([WorkspaceHost()])
     server = ControlPlaneServer(session, lambda: TOKEN, LOOPBACK, Lines())
     starting = asyncio.create_task(server.start())
-    await asyncio.sleep(0.05)
+    await quiet_within(0.05)
     starting.cancel()
     with pytest.raises(asyncio.CancelledError):
         await starting

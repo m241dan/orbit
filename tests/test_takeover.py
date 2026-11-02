@@ -68,6 +68,7 @@ from tests.agent_fakes import (
 )
 from tests.attach_fakes import EARLIER, stored
 from tests.connection_helpers import views_on_joining
+from tests.loop_quiet import quiet_within
 from tests.waiting import eventually
 
 
@@ -94,13 +95,13 @@ async def test_a_read_only_session_offers_the_repository_once_its_owner_goes() -
     lock = FakeLock()
     session, _, _ = session_for(owner=OWNER, lock=lock)
     await greeted(session)
-    await asyncio.sleep(0.05)
+    await eventually(lambda: lock.tries >= 3, poll=LOCK_RETRY)
     assert not any(offered(event) for event in queued(session))
 
     lock.free = True
     await events_until(session, offered)
     assert lock.held
-    await asyncio.sleep(0.05)
+    await quiet_within(0.05)
     assert not any(offered(event) for event in queued(session))  # Once, until answered.
     await session.close()
 
@@ -291,7 +292,7 @@ async def test_a_declined_repository_left_free_is_not_offered_again_soon() -> No
     await declined(session)
     tries = lock.tries
 
-    await asyncio.sleep(LOCK_RETRY * 20)
+    await eventually(lambda: lock.tries > tries + 5, poll=LOCK_RETRY)
     assert lock.tries > tries + 5
     assert not any(offered(event) for event in queued(session))
     assert lock.free and not lock.held
@@ -327,7 +328,7 @@ async def test_a_lock_that_cant_be_taken_is_tried_again() -> None:
     lock.failing = True
     session, _, _ = session_for(owner=OWNER, lock=lock)
     await greeted(session)
-    await asyncio.sleep(0.05)
+    await eventually(lambda: lock.tries > 1, poll=LOCK_RETRY)
     assert lock.tries > 1
 
     lock.failing = False
@@ -348,7 +349,7 @@ async def test_an_owner_never_tries_the_lock_or_offers_it() -> None:
     lock = FakeLock(free=True)
     session, _, _ = session_for(lock=lock)
     await greeted(session)
-    await asyncio.sleep(0.05)
+    await quiet_within(0.05)
     assert lock.tries == 0
     assert not any(offered(event) for event in queued(session))
     await send(session, TakeOwnership(take=True))
@@ -394,7 +395,7 @@ async def test_a_takeover_without_an_owner_is_not_read_only_and_never_tries_the_
     lock = FakeLock(free=True)
     takeover = Takeover(False, lock, publish, RetryTimes(LOCK_RETRY))
     takeover.start()
-    await asyncio.sleep(LOCK_RETRY * 5)
+    await quiet_within(LOCK_RETRY * 5)
     assert not takeover.read_only and lock.tries == 0
     await takeover.close()
 
@@ -753,7 +754,7 @@ async def switched_with_work_queued(switch: ActivateSession | NewSession) -> lis
 
     await send(session, TakeOwnership(take=True))
     events += await events_until(session, lambda event: event == Notice(message=OWNED_NOTE))
-    await asyncio.sleep(0.05)
+    await quiet_within(0.05)
     assert launcher.launches == [] and session.queued_work == ()
     await session.close()
     return events
@@ -774,7 +775,7 @@ async def test_switching_with_nothing_queued_says_nothing_dropped() -> None:
     await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
     await send(session, ActivateSession(session=EARLIER))
     events = await events_until(session, lambda event: isinstance(event, Snapshot))
-    await asyncio.sleep(0.05)
+    await quiet_within(0.05)
     events += queued(session)
     await session.close()
     assert dropped_notes(events) == []

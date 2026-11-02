@@ -5,6 +5,7 @@ from pathlib import Path
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.checks import run_step
 from tests.agent_fakes import python_step
+from tests.waiting import eventually
 
 
 async def test_step_passes_on_zero_exit_and_captures_both_streams() -> None:
@@ -59,10 +60,11 @@ async def test_non_executable_command_fails_the_step(tmp_path: Path) -> None:
     assert output == f"Could not start {str(script)!r} in .: Permission denied."
 
 
-async def test_cancelling_a_step_kills_its_process() -> None:
-    marker = "import time; time.sleep(60)"
+async def test_cancelling_a_step_kills_its_process(tmp_path: Path) -> None:
+    started = tmp_path / "started"
+    marker = f"import pathlib, time; pathlib.Path({str(started)!r}).touch(); time.sleep(60)"
     task = asyncio.create_task(run_step(python_step(marker), "."))
-    await asyncio.sleep(0.2)
+    await eventually(started.exists)
     task.cancel()
     await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5)
     assert task.cancelled()

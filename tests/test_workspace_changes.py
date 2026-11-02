@@ -48,6 +48,7 @@ from tests.agent_fakes import (
     logged_with_traceback,
 )
 from tests.connection_helpers import joined, say, taken
+from tests.loop_quiet import quiet_within
 from tests.plane_fakes import (
     FakeSource,
     idle,
@@ -333,9 +334,9 @@ async def test_a_workspace_viewed_as_its_flag_is_cleared_is_restored_and_refused
     plane = ControlPlane([host], workspaces=source)
     connection = await welcomed(plane)
     removing = asyncio.create_task(say(connection, "remove", RemoveWorkspace(workspace="c")))
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     viewer = asyncio.create_task(joined(plane, host=host))
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
 
     source.flag_gate.set()
     await asyncio.gather(removing, viewer)
@@ -445,7 +446,7 @@ async def test_a_workspace_being_added_as_the_control_plane_closes_is_closed_wit
     await eventually(lambda: source.opened)
 
     closing = asyncio.create_task(plane.close())
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     source.gate.set()
     await asyncio.gather(adding, closing)
 
@@ -497,7 +498,7 @@ async def test_an_add_cancelled_as_its_latest_session_opens_lets_the_workspace_g
     connection = await welcomed(plane)
     adding = asyncio.create_task(say(connection, "add", AddWorkspace(path="/src/c")))
     await eventually(lambda: source.hosts)
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
 
     adding.cancel()
     await asyncio.gather(adding, return_exceptions=True)
@@ -517,7 +518,7 @@ async def test_a_workspace_added_is_not_served_until_its_latest_session_is_open(
     connection = await welcomed(plane)
     adding = asyncio.create_task(say(connection, "add", AddWorkspace(path="/src/c")))
     await eventually(lambda: source.hosts)
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
 
     served = plane.hosts
     gate.set()
@@ -619,7 +620,7 @@ async def test_an_add_cancelled_stays_cancelled_when_unflagging_fails(
     connection = await welcomed(plane)
     adding = asyncio.create_task(say(connection, "add", AddWorkspace(path="/src/c")))
     await eventually(lambda: source.hosts)
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
 
     with caplog.at_level(logging.ERROR):
         adding.cancel()
@@ -642,9 +643,9 @@ async def test_a_remove_gone_busy_is_refused_as_busy_when_flagging_again_fails(
     plane = ControlPlane([host], workspaces=source)
     connection = await welcomed(plane)
     removing = asyncio.create_task(say(connection, "remove", RemoveWorkspace(workspace="c")))
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     viewer = asyncio.create_task(joined(plane, host=host))
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
 
     with caplog.at_level(logging.ERROR):
         source.flag_gate.set()

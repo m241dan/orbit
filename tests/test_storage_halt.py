@@ -97,6 +97,7 @@ from tests.agent_fakes import (
     tasks_of,
     turns_of,
 )
+from tests.loop_quiet import quiet_within
 from tests.server_fakes import TASK
 from tests.store_views import fill_up, open_view
 from tests.waiting import eventually
@@ -346,7 +347,7 @@ async def test_a_halt_during_an_append_that_then_fails_counts_its_events_unsaved
     await store.waiting.wait()
     store.failure = "Couldn't save the session: disk full"
     await send(session, AddTask(task=TASK))
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     store.append_failure = "disk full"
     store.gate.set()
     error = await halt_error(session)
@@ -477,7 +478,7 @@ async def test_a_review_ending_while_halted_starts_no_work_on_its_fixes() -> Non
     await eventually(
         lambda: any(t.task.role == "reviewer" and t.status == "completed" for t in board.tasks)
     )
-    await asyncio.sleep(0.05)
+    await quiet_within(0.05)
     store.gate.set()
     await halt_error(session)
     await session.close()
@@ -504,7 +505,7 @@ async def test_a_fix_cancelled_by_the_halt_leaves_its_batch_waiting_for_it() -> 
     planned = lane_of(session).planner.snapshot()
     halt_of(session).fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))
     await envelopes_until(session, work_stopped_after_halt)
-    await asyncio.sleep(0.05)
+    await quiet_within(0.05)
     reviewers = [la for la in launcher.launches if la.agent.role == "reviewer"]
     board = tasks_of(session).board
     after = lane_of(session).planner.snapshot()
@@ -579,7 +580,7 @@ async def test_once_closed_a_failure_only_marks_the_session_halted() -> None:
     halt = StorageHalt(record)
     await halt.close()
     halt.fail(FailedWrite.EVENT_LOG, StoreFailed("late"))
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
 
     assert halt.halted and published == []
 
@@ -1000,7 +1001,7 @@ async def test_a_resumed_halt_halts_again_on_the_next_failure() -> None:
     halt = StorageHalt(record, HaltHooks())
     halt.fail(FailedWrite.EVENT_LOG, StoreFailed("first"))
     await explained(halt)
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     await halt.resume()
     assert not halt.halted
     halt.fail(FailedWrite.EVENT_LOG, StoreFailed("second"))
@@ -1055,7 +1056,7 @@ async def test_a_halt_lifted_despite_failures_halts_again_on_the_first() -> None
     halt = StorageHalt(record, HaltHooks(retry=retry))
     halt.fail(FailedWrite.EVENT_LOG, StoreFailed("first"))
     await explained(halt)
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     await halt.resume()
     assert halt.halted
     await explained(halt)
@@ -1090,7 +1091,7 @@ async def halted_on_retry(
     halt = StorageHalt(record, HaltHooks(retry=retry))
     halt.fail(FailedWrite.EVENT_LOG, StoreFailed("first"))
     await explained(halt)
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     return halt, retry
 
 
@@ -1162,7 +1163,7 @@ async def test_a_resume_while_one_is_explaining_its_failed_retry_is_refused() ->
     halt = StorageHalt(lambda event: asyncio.sleep(0), HaltHooks(divert=divert, retry=retry))
     halt.fail(FailedWrite.EVENT_LOG, StoreFailed("first"))
     await explained(halt)
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     first = asyncio.create_task(halt.resume())
     await divert.started.wait()
     with pytest.raises(Refused) as second:

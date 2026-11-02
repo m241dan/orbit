@@ -1,7 +1,6 @@
 """Resetting the planner: its conversation ends, so the next prompt starts a fresh one, and its
 role is read again from the project's config."""
 
-import asyncio
 from dataclasses import replace
 
 from orbit.agent import ConfigError, Role, WorkspaceHost
@@ -52,6 +51,7 @@ from tests.agent_fakes import (
     session_for,
     steps_chat,
 )
+from tests.loop_quiet import quiet_within
 from tests.session_builders import on_claude, opened, saved, store_with, switching
 from tests.waiting import eventually
 
@@ -108,7 +108,7 @@ async def test_a_reset_saves_the_cleared_conversation() -> None:
     await plan(session, "Plan.")
     assert store.last.conversations == {PLANNER: on_claude("conversation-agent-1")}
     await reset(session)
-    await asyncio.sleep(0.01)  # Saving takes a while.
+    await eventually(lambda: store.last.conversations == {}, poll=0)  # Saving takes a while.
     assert store.last.conversations == {}
     await session.close()
 
@@ -199,7 +199,7 @@ async def test_resetting_a_restored_conversation_starts_the_next_prompt_afresh()
     await opened(session, ActivateSession(session="auth"))
     events = await reset(session)
     assert not any(isinstance(e, AgentExited | Notice) for e in events)
-    await asyncio.sleep(0.01)  # Saving takes a while.
+    await eventually(lambda: store.last.conversations == {}, poll=0)  # Saving takes a while.
     assert store.last.conversations == {}
     launcher.planner_turns = [chats]
     await plan(session, "Plan.")
@@ -222,7 +222,7 @@ async def test_only_the_planners_conversation_can_be_reset() -> None:
         )
         assert events[-1] == refused(UNKNOWN, message)
         assert not any(isinstance(e, ConversationReset | AgentExited) for e in events)
-    await asyncio.sleep(0.01)  # Saving takes a while.
+    await quiet_within(0.01)  # Saving takes a while.
     assert store.last.conversations == {PLANNER: on_claude("conversation-agent-1")}
     await session.close()
 

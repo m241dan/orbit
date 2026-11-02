@@ -14,6 +14,7 @@ from orbit.agent.application.storage_resume import ResumeParts, StorageResume
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.storage_halt import FailedWrite, SeqSpan
 from orbit.protocol import PLANNER, Event, LogGap, Settings, Usage
+from tests.loop_quiet import quiet_within
 
 CONTENTS = Contents({PLANNER: Settings()}, {}, (), None, Usage())
 
@@ -107,7 +108,7 @@ def resuming(
 async def halted(subject: Resuming) -> None:
     """Halt ``subject``'s session, its halting done."""
     subject.halt.fail(FailedWrite.EVENT_LOG, StoreFailed("full"))
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
 
 
 async def test_a_retry_saves_the_record_then_the_other_saves_in_order_then_the_log() -> None:

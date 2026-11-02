@@ -21,6 +21,7 @@ from orbit.agent.application.role_copies import (
 from orbit.agent.domain.sessions import SavedCopy, SessionRecord
 from orbit.protocol import GIT_FAILED, ErrorOccurred, Event
 from tests.agent_fakes import ROLES, FakeCopies, FakeStore, FakeTree
+from tests.waiting import eventually
 
 START = datetime(2026, 10, 25, 12, 0, tzinfo=UTC)
 
@@ -222,8 +223,7 @@ async def test_keeping_sweeps_at_once_then_expires_the_sessions_copies_every_per
     keeping = asyncio.create_task(ledger.copies.keep(others, lambda: ttls, every=0.01))
     await swept.wait()
     ledger.clock.move(2)
-    while path not in ledger.made.removed:
-        await asyncio.sleep(0.01)
+    await eventually(lambda: path in ledger.made.removed)
     keeping.cancel()
     with pytest.raises(asyncio.CancelledError):
         await keeping

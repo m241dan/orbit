@@ -76,6 +76,7 @@ from tests.agent_fakes import (
     super_every,
     verified,
 )
+from tests.loop_quiet import quiet_within
 from tests.waiting import eventually
 
 
@@ -918,7 +919,7 @@ async def test_a_review_ending_as_the_session_closes_starts_no_work(
     async def close_then_release(turns: WorkTurns) -> None:
         await close_turns(turns)
         release.set()
-        await asyncio.sleep(0.05)
+        await quiet_within(0.05)
 
     monkeypatch.setattr(WorkTurns, "close", close_then_release)
     session, _, launcher = session_for(
@@ -1017,7 +1018,7 @@ async def test_a_cancelled_reviewer_that_suggested_is_not_run_again() -> None:
     await send(session, CancelAgent(agent_id=reviewer))
     await events_until(session, task_is("2", "cancelled"))
     await send(session, RunTasks())
-    await asyncio.sleep(0.05)
+    await quiet_within(0.05)
     release.set()
     events = await asyncio.wait_for(settle(session), 10)
     assert reviewers_of(launcher)[0] == reviewer
@@ -1078,7 +1079,7 @@ async def test_a_review_can_suggest_after_its_first_suggestion_landed() -> None:
         replies.append(await call("suggest_task", title="Add tests", prompt="Please."))
         suggested.set()
         await eventually(lambda: board_of(sessions[0]).get("4").status == "completed")
-        await asyncio.sleep(0.1)  # Let the work lane tell the review lane it landed.
+        await quiet_within(0.1)  # Let the work lane tell the review lane it landed.
         replies.append(await call("suggest_task", title="Rename x", prompt="Please."))
         await call("complete_task", summary="Reviewed")
         return "completed"

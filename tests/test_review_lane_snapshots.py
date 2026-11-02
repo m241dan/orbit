@@ -47,6 +47,7 @@ from tests.agent_fakes import (
     start,
     suggests,
 )
+from tests.loop_quiet import quiet_within
 from tests.session_builders import last_of, messages, opened, saved, store_with, switching
 from tests.telemetry_helpers import Traced, linked_to
 from tests.waiting import eventually
@@ -203,7 +204,7 @@ async def test_an_interrupted_review_that_suggested_nothing_closes_its_batch() -
 async def test_an_interrupted_review_whose_batch_closed_is_not_run_again() -> None:
     session, launcher, store, _ = await reopened(crashed(), reviewing())
     await send(session, RunTasks())
-    await asyncio.sleep(0.05)
+    await quiet_within(0.05)
     assert launcher.launches == []
     assert [t.status for t in store.last.tasks] == ["completed", "cancelled"]
     await session.close()
@@ -213,7 +214,7 @@ async def test_an_interrupted_reviews_batch_waits_for_its_work_without_running_i
     session, launcher, store, events = await reopened(crashed("pending"), reviewing("3"))
     assert reviews_of(store).planner.batches["batch-1"].filling is False
     assert last_of(Snapshot, events).review == ReviewStatus(paused=False, open_batches=1)
-    await asyncio.sleep(0.05)
+    await quiet_within(0.05)
     assert launcher.launches == []
     assert snapshot_statuses(events) == ["completed", "cancelled", "pending"]
     await session.close()
@@ -222,7 +223,7 @@ async def test_an_interrupted_reviews_batch_waits_for_its_work_without_running_i
 async def test_an_interrupted_reviews_finished_batch_is_queued_for_review_but_not_run() -> None:
     snapshot = reviewing("3", finished=frozenset({"3"}))
     session, launcher, store, events = await reopened(crashed("completed"), snapshot)
-    await asyncio.sleep(0.05)
+    await quiet_within(0.05)
     assert launcher.launches == []
     added = last_of(Snapshot, events).tasks[-1]
     assert (added.id, added.task.role, added.status) == ("4", "reviewer", "pending")

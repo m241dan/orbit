@@ -23,6 +23,8 @@ from orbit.agent.application.seq_mark import MarkReservations
 from orbit.protocol import AddWorkspace, WorkspaceCloning
 from tests.agent_fakes import HELLO, FakeStore
 from tests.connection_helpers import say, taken
+from tests.loop_quiet import quiet_within
+from tests.waiting import eventually
 
 
 async def greeted(plane: ControlPlane) -> list[int]:
@@ -208,9 +210,9 @@ async def test_a_seq_asked_for_once_reserving_is_done_is_reserved() -> None:
     reservations = MarkReservations(mark)
 
     reservations.reserve(100)
-    await asyncio.sleep(0.01)
+    await eventually(lambda: mark.reservations == [100], poll=0)
     reservations.reserve(200)
-    await asyncio.sleep(0.01)
+    await eventually(lambda: mark.reservations == [100, 200], poll=0)
 
     assert mark.reservations == [100, 200]
     await reservations.close()
@@ -222,7 +224,7 @@ async def test_a_failed_reservation_is_made_again_as_it_closes() -> None:
     reservations = MarkReservations(mark)
 
     reservations.reserve(100)
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     mark.reserve_failure = None
     await reservations.close()
 
@@ -235,7 +237,7 @@ async def test_nothing_is_reserved_once_closed() -> None:
     await reservations.close()
 
     reservations.reserve(100)
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
 
     assert mark.reservations == []
 
@@ -259,9 +261,9 @@ async def test_an_unexpected_failure_reserving_is_raised_as_it_closes() -> None:
     reservations = MarkReservations(mark)
 
     reservations.reserve(100)
-    await asyncio.sleep(0.01)
+    await eventually(lambda: not mark.bug_pending, poll=0)
     reservations.reserve(200)
-    await asyncio.sleep(0.01)
+    await eventually(lambda: mark.reservations == [200], poll=0)
 
     with pytest.raises(RuntimeError, match="a bug"):
         await reservations.close()

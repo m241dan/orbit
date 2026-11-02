@@ -71,6 +71,7 @@ from tests.agent_fakes import (
 )
 from tests.attach_fakes import EARLIER, stored, workspace
 from tests.connection_helpers import envelopes, joined, received, say
+from tests.loop_quiet import quiet_within
 from tests.session_builders import OPEN, store_logging
 
 TASK = TaskSpec(prompt="Add a flag.", settings=Settings(model="opus"))
@@ -547,7 +548,7 @@ async def test_a_connection_not_yet_welcomed_gets_only_its_greetings_catalog() -
     session.entry = slow  # type: ignore[method-assign]
     joining = connect(session)
     greeting = asyncio.create_task(say(joining, "joining", HELLO))
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     await say(asker, "rename", RenameSession(session_id=session.saved_session.id, name="Kept"))
     go.set()
     await greeting

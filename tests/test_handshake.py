@@ -59,6 +59,8 @@ from tests.agent_fakes import (
     session_for,
 )
 from tests.connection_helpers import published
+from tests.loop_quiet import quiet_within
+from tests.waiting import eventually
 
 
 async def send_as(
@@ -247,11 +249,11 @@ async def test_the_startup_check_and_usage_monitor_wait_for_the_first_attach() -
         verification=Verification((STEP,), steps), check_at_startup=True, usage=source
     )
     await send_as(session, HELLO_ID, HELLO)
-    await asyncio.sleep(0.05)
+    await quiet_within(0.05)
     assert (steps.runs, source.calls) == ([], 0)
 
     await send_as(session, ATTACH_ID, attach_to(session))
-    await asyncio.sleep(0.05)
+    await eventually(lambda: (steps.runs, source.calls) == ([STEP.name], 1))
     await session.close()
     assert (steps.runs, source.calls) == ([STEP.name], 1)
 

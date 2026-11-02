@@ -59,8 +59,10 @@ from tests.agent_fakes import (
     send,
 )
 from tests.keeper_fakes import Published
+from tests.loop_quiet import quiet_within
 from tests.session_builders import failing_startup, opened, saved, store_with, switching
 from tests.store_views import OwnView, big, database, open_view
+from tests.waiting import eventually
 
 
 class FailsFor(FakeStore):
@@ -169,7 +171,7 @@ async def test_a_failed_append_stops_the_appending_and_is_told_once() -> None:
         log, Published(), overflow=Overflow(failed=lambda error: failures.append(str(error)))
     )
     writer.add("a", notice(1))
-    await asyncio.sleep(0.01)
+    await eventually(lambda: failures, poll=0)
     log.append_failure = None
     writer.add("a", notice(2))
     await writer.close()
@@ -184,7 +186,7 @@ async def test_after_a_failed_append_the_envelopes_go_to_the_fallback() -> None:
     writer = LogWriter(log, Published(), overflow=Overflow(fallback))
     writer.add("a", notice(1))
     writer.add("b", notice(2, "b"))
-    await asyncio.sleep(0.01)
+    await eventually(lambda: set(fallback.files) == {"a", "b"}, poll=0)
     writer.add("a", notice(3))
     await writer.close()
 
@@ -208,7 +210,7 @@ async def test_an_unexpected_append_error_stops_the_appending_and_diverts_the_ba
     writer = LogWriter(log, Published(), overflow=Overflow(fallback, failures.append))
     writer.add("a", notice(1))
     writer.add("b", notice(2, "b"))
-    await asyncio.sleep(0.01)
+    await eventually(lambda: fallback.files, poll=0)
 
     message = "The event log writer stopped on an unexpected error: a bug"
     assert [str(error) for error in failures] == [message]
@@ -221,12 +223,12 @@ async def test_after_an_unexpected_append_error_resuming_writes_later_events() -
     log, fallback = BuggyFor("a"), FakeFallback()
     writer = LogWriter(log, Published(), overflow=Overflow(fallback))
     writer.add("a", notice(1))
-    await asyncio.sleep(0.01)
+    await eventually(lambda: fallback.files, poll=0)
     log.buggy = False
 
     assert await writer.resume() == []
     writer.add("a", notice(2))
-    await asyncio.sleep(0.01)
+    await eventually(lambda: log.logged == [notice(1), notice(2)], poll=0)
     assert log.logged == [notice(1), notice(2)]
     await writer.close()
 
@@ -235,7 +237,7 @@ async def test_closing_after_an_unexpected_append_error_returns() -> None:
     log, fallback = BuggyFor("a"), FakeFallback()
     writer = LogWriter(log, Published(), overflow=Overflow(fallback))
     writer.add("a", notice(1))
-    await asyncio.sleep(0.01)
+    await eventually(lambda: fallback.files, poll=0)
     writer.add("a", notice(2))
     await writer.close()
 
@@ -249,7 +251,7 @@ async def test_a_forget_pending_at_an_unexpected_append_error_runs_once_resumed(
     writer = LogWriter(log, Published(), overflow=Overflow(FakeFallback()))
     writer.add("b", notice(2, "b"))
     writer.forget("a")
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
 
     assert log.logged == [notice(1)] and log.forgotten == []
     log.buggy, log.forget_failure = False, None
@@ -264,7 +266,7 @@ async def test_an_unexpected_forget_error_stops_the_writer_but_loses_no_forget()
     writer = LogWriter(log, Published(), overflow=Overflow(FakeFallback(), failures.append))
     for session in ["a", "b", "c"]:
         writer.forget(session)
-    await asyncio.sleep(0.01)
+    await eventually(lambda: log.forgotten == ["a", "c"], poll=0)
 
     message = "The event log writer stopped on an unexpected error: a bug"
     assert [str(error) for error in failures] == [message]
@@ -282,7 +284,7 @@ async def test_stopping_sends_what_queued_and_what_follows_to_the_fallback() -> 
     await log.waiting.wait()
     writer.add("a", notice(2))
     stopping = asyncio.create_task(writer.stop("a"))
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     writer.add("a", notice(3))
     log.gate.set()
     stopped = await stopping
@@ -299,7 +301,7 @@ async def test_stopping_waits_for_the_append_in_flight_and_diverts_it_when_it_fa
     await log.waiting.wait()
     writer.add("a", notice(2))
     stopping = asyncio.create_task(writer.stop("a"))
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     assert not stopping.done()
     log.append_failure = "disk full"
     log.gate.set()
@@ -316,7 +318,7 @@ async def test_stopping_during_an_append_leaves_the_batchs_other_sessions_unwrit
     writer.add("b", notice(2, "b"))
     await log.waiting.wait()
     stopping = asyncio.create_task(writer.stop("a"))
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     log.gate.set()
 
     assert await stopping == ([notice(2, "b")], FakeFallback.path("a"))
@@ -369,7 +371,7 @@ async def test_resuming_appends_the_parked_events_then_those_queued_and_removes_
     writer = LogWriter(log, Published(), overflow=Overflow(fallback))
     writer.add("a", notice(2))
     writer.add("a", notice(1))
-    await asyncio.sleep(0.01)
+    await eventually(lambda: fallback.files, poll=0)
     log.append_failure = None
     writer.add("a", notice(3))
 
@@ -388,10 +390,10 @@ async def test_resuming_reports_the_spans_of_events_that_reached_no_fallback() -
     fallback.broken = True
     for seq in (1, 2):
         writer.add("a", notice(seq))
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     fallback.broken = False
     writer.add("a", notice(3))
-    await asyncio.sleep(0.01)
+    await eventually(lambda: fallback.files, poll=0)
     writer.add("a", notice(4))
 
     assert await writer.resume() == [(1, 2)]
@@ -416,7 +418,7 @@ async def test_resuming_while_the_log_still_fails_keeps_diverting() -> None:
     log.append_failure = "still full"
     writer = LogWriter(log, Published(), overflow=Overflow(fallback))
     writer.add("a", notice(1))
-    await asyncio.sleep(0.01)
+    await eventually(lambda: fallback.files, poll=0)
     writer.add("a", notice(2))
 
     error = await writer.resume()
@@ -432,7 +434,7 @@ async def test_a_cancelled_resume_keeps_the_queued_events_and_stays_stopped() ->
     writer = LogWriter(log, Published(), overflow=Overflow(fallback))
     await writer.stop("a")
     writer.add("a", notice(1))
-    await asyncio.sleep(0.01)
+    await eventually(lambda: fallback.files, poll=0)
     resuming = asyncio.create_task(writer.resume())
     writer.add("a", notice(2))  # Queued as the resume starts, so it takes it to append.
     await log.waiting.wait()
@@ -441,7 +443,7 @@ async def test_a_cancelled_resume_keeps_the_queued_events_and_stays_stopped() ->
     with pytest.raises(asyncio.CancelledError):
         await resuming
     assert await writer.recent("a", 10) == [notice(1), notice(2)]
-    await asyncio.sleep(0.01)
+    await eventually(lambda: fallback.files == {"a": [notice(1), notice(2)]}, poll=0)
     assert fallback.files == {"a": [notice(1), notice(2)]}
     log.gate.set()
     assert await writer.resume() == []
@@ -462,11 +464,11 @@ async def test_events_on_their_way_to_the_fallback_as_it_resumes_are_appended_in
     writer = LogWriter(log, Published(), overflow=Overflow(fallback))
     await writer.stop("a")
     writer.add("a", notice(1))
-    await asyncio.sleep(0.01)
+    await eventually(lambda: fallback.files, poll=0)
     resuming = asyncio.create_task(writer.resume())
     await log.waiting.wait()
     writer.add("a", notice(2))
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     log.gate.set()
 
     assert await resuming == []
@@ -478,7 +480,7 @@ async def test_a_failing_trim_is_reported_once_and_later_events_are_still_writte
     log, published = FailingTrims(), Published()
     writer = LogWriter(log, published, log_bytes=1000)
     writer.add("a", notice(1))
-    await asyncio.sleep(0.01)
+    await eventually(lambda: published.events, poll=0)
     writer.add("a", notice(2))
     await writer.close()
 
@@ -517,7 +519,7 @@ async def test_a_failing_forget_is_reported_once_and_later_events_are_still_writ
     log.forget_failure = "read-only"
     writer = LogWriter(log, published)
     writer.forget("a")
-    await asyncio.sleep(0.01)
+    await eventually(lambda: published.events, poll=0)
     writer.forget("b")
     writer.add("c", notice(1, "c"))
     await writer.close()
@@ -532,10 +534,10 @@ async def test_a_session_forgotten_while_stopped_isnt_appended_on_resuming() -> 
     await writer.stop("a")
     writer.add("a", notice(1))
     writer.add("b", notice(2, "b"))
-    await asyncio.sleep(0.01)
+    await eventually(lambda: set(fallback.files) == {"a", "b"}, poll=0)
     writer.add("a", notice(3))
     writer.forget("a")
-    await asyncio.sleep(0.01)
+    await eventually(lambda: set(fallback.files) == {"b"}, poll=0)
 
     assert fallback.files == {"b": [notice(2, "b")]}
     assert await writer.recent("a", 10) == []
@@ -551,7 +553,7 @@ async def test_a_session_forgotten_with_a_failing_append_isnt_appended_on_resumi
     writer.add("a", notice(1))
     writer.add("b", notice(2, "b"))
     writer.forget("a")
-    await asyncio.sleep(0.01)
+    await eventually(lambda: log.forgotten == ["a"], poll=0)
 
     assert fallback.files == {"b": [notice(2, "b")]} and log.forgotten == ["a"]
     log.append_failure = None
@@ -567,7 +569,7 @@ async def test_a_session_forgotten_while_stopped_loses_no_span_on_resuming() -> 
     writer.add("b", notice(2, "b"))
     await writer.stop("a")
     writer.forget("a")
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
 
     assert await writer.resume() == [(2, 2)]
     await writer.close()
@@ -579,7 +581,7 @@ async def test_a_forget_made_while_stopped_deletes_the_logged_events_at_once() -
     writer = LogWriter(log, Published(), overflow=Overflow(FakeFallback()))
     await writer.stop("a")
     writer.forget("a")
-    await asyncio.sleep(0.01)
+    await eventually(lambda: log.forgotten == ["a"], poll=0)
 
     assert log.logged == [] and log.forgotten == ["a"]
     assert await writer.resume() == []
@@ -606,7 +608,7 @@ async def test_a_failed_forget_while_stopped_is_unreported_and_runs_once_resumed
     writer = LogWriter(log, published, overflow=Overflow(FakeFallback()))
     writer.add("b", notice(2, "b"))
     writer.forget("a")
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
 
     assert log.logged == [notice(1)] and log.forgotten == [] and published.events == []
     log.append_failure = log.forget_failure = None
@@ -621,7 +623,7 @@ async def test_closing_a_stopped_writer_after_a_forget_leaves_no_fallback_file_f
     writer = LogWriter(log, Published(), overflow=Overflow(fallback))
     writer.add("a", notice(1))
     writer.add("b", notice(2, "b"))
-    await asyncio.sleep(0.01)
+    await eventually(lambda: set(fallback.files) == {"a", "b"}, poll=0)
     assert set(fallback.files) == {"a", "b"}
 
     writer.forget("a")
@@ -636,11 +638,11 @@ async def test_resuming_after_a_forget_appends_the_other_sessions_parked_envelop
     writer = LogWriter(log, Published(), overflow=Overflow(fallback))
     writer.add("a", notice(1))
     writer.add("b", notice(2, "b"))
-    await asyncio.sleep(0.01)
+    await eventually(lambda: set(fallback.files) == {"a", "b"}, poll=0)
     writer.add("b", notice(3, "b"))
     writer.add("a", notice(4))
     writer.forget("a")
-    await asyncio.sleep(0.01)
+    await eventually(lambda: set(fallback.files) == {"b"}, poll=0)
     log.append_failure = None
 
     assert await writer.resume() == []
@@ -655,7 +657,7 @@ async def test_a_writer_closed_forgets_nothing() -> None:
     writer = LogWriter(log, Published())
     await writer.close()
     writer.forget("a")
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
 
     assert log.forgotten == []
 
@@ -666,7 +668,7 @@ async def test_a_writer_closed_writes_nothing_more() -> None:
     await writer.close()
     writer.add("a", notice(1))
     await writer.close()
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
 
     assert log.appends == []
 
@@ -683,7 +685,7 @@ async def test_a_cancelled_close_stops_the_writer_at_once() -> None:
         await closing
     writer.add("a", notice(2))
     log.gate.set()
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
 
     assert log.appends == []
     assert asyncio.all_tasks() == {asyncio.current_task()}
@@ -750,7 +752,7 @@ async def test_a_writer_closed_reserves_nothing() -> None:
     writer = LogWriter(log, Published())
     await writer.close()
     writer.reserve(100)
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
 
     assert log.reservations == []
 
@@ -760,11 +762,11 @@ async def test_a_stopped_writer_reserves_nothing_until_it_resumes() -> None:
     writer = LogWriter(log, Published(), overflow=Overflow(FakeFallback()))
     await writer.stop("a")
     writer.reserve(100)
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     assert log.reservations == []
 
     assert await writer.resume() == []
-    await asyncio.sleep(0.01)
+    await eventually(lambda: log.reservations == [100], poll=0)
     assert log.reservations == [100]
     await writer.close()
 
@@ -785,10 +787,10 @@ async def test_a_failed_reservation_stops_the_appending_and_is_reserved_once_res
     overflow = Overflow(fallback, lambda error: failures.append(str(error)))
     writer = LogWriter(log, Published(), overflow=overflow)
     writer.reserve(100)
-    await asyncio.sleep(0.01)
+    await eventually(lambda: failures, poll=0)
     log.reserve_failure = None
     writer.add("a", notice(1))
-    await asyncio.sleep(0.01)
+    await eventually(lambda: fallback.files, poll=0)
 
     assert failures == ["disk full"]
     assert (log.logged, fallback.files) == ([], {"a": [notice(1)]})
@@ -1224,7 +1226,7 @@ async def test_an_unexpected_log_error_halts_the_session_as_a_failing_log_does()
     session = stored_session(store)
     await greet(session)
     await publish(session, Notice(message="n0"))
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     await session.close()
 
     sent = delivered(session)
@@ -1240,7 +1242,7 @@ async def test_a_failing_log_halts_the_session_and_the_frontend_gets_every_event
     await greet(session)
     for n in range(3):
         await publish(session, Notice(message=f"n{n}"))
-        await asyncio.sleep(0.01)
+        await quiet_within(0.01)
     await session.close()
 
     sent = delivered(session)

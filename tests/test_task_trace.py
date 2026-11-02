@@ -51,6 +51,7 @@ from tests.agent_fakes import (
     start,
     verified,
 )
+from tests.loop_quiet import quiet_within
 from tests.telemetry_helpers import Traced
 from tests.waiting import eventually
 
@@ -170,7 +171,7 @@ async def test_a_task_that_waited_for_a_coder_has_its_wait_as_a_child() -> None:
     await send(session, AddTask(task=TaskSpec(prompt="a")))
     await send(session, RunTasks())
     await eventually(lambda: slots.waiting > 0)
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     slots.release()
     await events_until(session, idle())
 

@@ -41,6 +41,7 @@ from tests.agent_fakes import (
     statuses,
     verified,
 )
+from tests.loop_quiet import quiet_within
 
 adds_the_flag = partial(claims_done, summary="Add the --fast flag")
 
@@ -166,7 +167,7 @@ async def test_leftovers_from_earlier_runs_are_announced_once_at_the_start() -> 
     assert first[1] == Notice(message="2 commits on orbit/coder not yet merged into main.")
     # A second listener isn't told again.
     waiting = asyncio.ensure_future(anext(payloads(session)))
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     assert not waiting.done()
     waiting.cancel()
 
@@ -218,7 +219,7 @@ async def test_a_listener_cancelled_while_leftovers_are_found_still_starts_the_b
     tree.found.set()
     seen: list[Event] = []
     listening = asyncio.ensure_future(listen(payloads(session), seen))
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     listening.cancel()
     await asyncio.gather(listening, return_exceptions=True)
     # The startup check starts as session_started's triggers fire, after the usage monitor.
@@ -256,7 +257,7 @@ async def test_listening_first_after_close_doesnt_start_the_background(
     )
     await session.close()
     listening = asyncio.ensure_future(listen(payloads(session), []))
-    await asyncio.sleep(0.01)
+    await quiet_within(0.01)
     listening.cancel()
     await asyncio.gather(listening, return_exceptions=True)
     assert started == []
