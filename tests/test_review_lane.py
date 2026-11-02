@@ -2,6 +2,7 @@
 
 import asyncio
 import itertools
+from collections.abc import Sequence
 from typing import Any
 
 import pytest
@@ -22,6 +23,7 @@ from orbit.protocol import (
     INTERNAL,
     INVALID,
     NOT_CONFIGURED,
+    SUPER_LENS_REVIEWERS,
     SUPER_REVIEW,
     UNKNOWN,
     Activity,
@@ -58,12 +60,14 @@ from tests.agent_fakes import (
     board_of,
     claims_done,
     events_until,
+    files,
     gives_up,
     keeps_claiming,
     lane_of,
     of_type,
     queued,
     refused,
+    reports,
     send,
     session_for,
     settle,
@@ -485,46 +489,74 @@ async def test_a_review_queued_while_another_waits_is_not_told_of_that_review() 
     assert "Review commit" not in reviews[1].split("\n", 1)[1]
 
 
-async def test_every_so_many_of_the_users_commits_the_whole_codebase_is_super_reviewed() -> None:
-    gate = asyncio.Event()
+def super_reviewing_every_two(gate: asyncio.Event, tree: FakeTree) -> WorkspaceHost:
+    """A session in ``tree`` whose super review is due every two of the user's commits, whose
+    first commit's review waits for ``gate``, and whose super review's Style lens raises a
+    finding its merge pass files, that suggestion's batch then reviewed by Style."""
 
     async def waits_then_reviews(call: Call) -> TurnEndReason:
         await gate.wait()
         return await suggests()(call)
 
-    tree = FakeTree()
     session, _, _ = session_for(
-        *([claims_done] * 4),
-        reviewers=(waits_then_reviews, suggests(), suggests(), suggests("Split the parser")),
+        *([claims_done] * 3),
+        reports(("The parser is too big", "normal")),
+        claims_done,
+        claims_done,
+        claims_done,  # The suggestion,
+        claims_done,  # whose batch the style lens, which raised its finding, reviews.
+        reviewers=(
+            waits_then_reviews,
+            suggests(),
+            suggests(),
+            files("Split the parser", ["F1"], []),
+            suggests(),
+        ),
         tree=tree,
         review=True,
         triggers=super_every(2),
     )
+    return session
+
+
+def lenses_of(tasks: Sequence[TaskState]) -> list[tuple[str, str, str | None]]:
+    """Each of the super review's tasks among ``tasks``: its role, first line and model."""
+    return [
+        (t.task.role, t.task.prompt.split("\n", 1)[0], t.task.settings.model)
+        for t in tasks
+        if t.origin == SUPER_REVIEW
+    ]
+
+
+async def test_every_so_many_of_the_users_commits_the_whole_codebase_is_super_reviewed() -> None:
+    gate = asyncio.Event()
+    tree = FakeTree()
+    session = super_reviewing_every_two(gate, tree)
     events = await _landed_two_while_the_first_review_waited(session, gate)
-    assert "super-reviewer" not in _roles_seen(events)  # Due at c2, but a review was pending.
+    seen = _roles_seen(events)
+    assert not seen & set(SUPER_LENS_REVIEWERS)  # Due at c2, but a review was pending.
 
     await send(session, AddTask(task=TaskSpec(prompt="three")))
     await send(session, RunTasks())
     events = await asyncio.wait_for(settle(session, events), 10)
     tasks = board(events)
-    supers = [t for t in tasks if t.task.role == "super-reviewer"]
-    assert len(supers) == 1
-    assert supers[0].task.prompt.startswith("Super review of the codebase at c3")
-    assert supers[0].origin == SUPER_REVIEW  # From its trigger.
-    assert supers[0].task.settings.model == "opus"  # The super reviewer's default.
+    # From its trigger, on the super lenses' default model.
+    assert lenses_of(tasks) == [
+        (role, "Super review of the codebase at c3", "opus") for role in SUPER_LENS_REVIEWERS
+    ]
     [suggestion] = [t for t in tasks if t.batch]
-    assert (suggestion.origin, suggestion.round) == ("super-review", 1)
+    assert (suggestion.origin, suggestion.round) == ("merge-pass", 1)
     assert "c3" in tree.snapshots
 
 
 async def test_a_super_review_can_be_asked_for_before_any_task_ran() -> None:
     # The coder's tree doesn't exist yet, so its head can't be read; the base's commit can.
     tree = FakeTree()
-    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
+    session, _, _ = session_for(*LENSES, tree=tree, review=True)
     await send(session, FireTrigger(trigger=SUPER_REVIEW))
     events = await asyncio.wait_for(settle(session), 10)
-    assert [t.task.role for t in board(events)] == ["super-reviewer"]
-    assert tree.snapshots == [tree.base] and tree.prepared == []
+    assert [t.task.role for t in board(events)] == list(SUPER_LENS_REVIEWERS)
+    assert tree.snapshots == [tree.base] * len(SUPER_LENS_REVIEWERS) and tree.prepared == []
     assert not any(isinstance(e, ErrorOccurred) for e in events)
 
 
@@ -532,16 +564,21 @@ SINCE_SUPER = "Commits since the last super review:"
 FILES = "Files they changed:"
 
 
+LENSES = (claims_done,) * len(SUPER_LENS_REVIEWERS)
+"""The scripts of one super review's lenses, each finding nothing."""
+
+
 def super_task(events: list[Event]) -> TaskState:
-    """The last super review task published in ``events``."""
-    return [t for t in board(events) if t.task.role == "super-reviewer"][-1]
+    """The last super review lens task published in ``events``, whose prompt the other lenses
+    of its review share."""
+    return [t for t in board(events) if t.task.role in SUPER_LENS_REVIEWERS][-1]
 
 
 async def test_the_first_super_review_lists_no_commits_and_the_next_starts_from_its_own() -> None:
     tree = FakeTree()
     tree.since[tree.base] = ["Add B"]
     tree.changed[tree.base] = ["b.py"]
-    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
+    session, _, _ = session_for(*LENSES, tree=tree, review=True)
     await send(session, FireTrigger(trigger=SUPER_REVIEW))
     events = await asyncio.wait_for(settle(session), 10)
     review = super_task(events)
@@ -556,7 +593,7 @@ async def test_the_next_super_review_lists_the_commits_since_the_last_and_their_
     tree = FakeTree()
     tree.since[tree.base] = ["Add D", "Add E"]
     tree.changed[tree.base] = ["src/e.py", "README.md", "src/d.py"]
-    session, _, _ = session_for(reviewers=(suggests(), suggests()), tree=tree, review=True)
+    session, _, _ = session_for(*LENSES * 2, tree=tree, review=True)
     await send(session, FireTrigger(trigger=SUPER_REVIEW))
     events = await asyncio.wait_for(settle(session), 10)
     tree.base = "e"
@@ -576,7 +613,8 @@ async def test_a_super_review_due_lists_the_commits_since_the_last() -> None:
     tree.changed["s0"] = ["d.py"]
     session, _, _ = session_for(
         claims_done,
-        reviewers=(suggests(), suggests()),
+        *LENSES,
+        reviewers=(suggests(),),
         tree=tree,
         review=True,
         triggers=super_every(1),
@@ -593,7 +631,7 @@ async def test_a_super_review_due_lists_the_commits_since_the_last() -> None:
 
 async def test_a_super_review_with_nothing_landed_since_the_last_lists_no_commits() -> None:
     tree = FakeTree()
-    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
+    session, _, _ = session_for(*LENSES, tree=tree, review=True)
     lane_of(session).planner.last_super_commit = "s1"
     await send(session, FireTrigger(trigger=SUPER_REVIEW))
     events = await asyncio.wait_for(settle(session), 10)
@@ -611,7 +649,7 @@ async def test_a_super_review_whose_commits_since_cannot_be_listed_is_queued_wit
     tree.since["s1"] = ["Add D"]
     tree.changed["s1"] = ["d.py"]
     tree.failures[method] = TreeFailed("git failed: bad revision")
-    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
+    session, _, _ = session_for(*LENSES, tree=tree, review=True)
     lane_of(session).planner.last_super_commit = "s1"
     await send(session, FireTrigger(trigger=SUPER_REVIEW))
     events = await asyncio.wait_for(settle(session), 10)
@@ -630,7 +668,7 @@ SRC = (SkillMapping(paths=("src",), use=("python",)),)
 async def super_review_prompt(tree: FakeTree, **options: Any) -> str:
     """The task of the super review the user asks for in a session on ``tree``, whose other
     ``options`` go to :func:`session_for`."""
-    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True, **options)
+    session, _, _ = session_for(*LENSES, tree=tree, review=True, **options)
     await send(session, FireTrigger(trigger=SUPER_REVIEW))
     events = await asyncio.wait_for(settle(session), 10)
     return super_task(events).task.prompt
@@ -640,7 +678,7 @@ async def test_a_super_review_samples_the_code_files_under_the_mapped_paths() ->
     tree = FakeTree()
     tree.tracked[tree.base] = TRACKED
     prompt = await super_review_prompt(tree, skill_mappings=SRC)
-    assert prompt.endswith(f"10 suggestions.\n\n{SAMPLED}\n- src/a.py\n- src/b.cpp")
+    assert prompt.endswith(f"at base\n\n{SAMPLED}\n- src/a.py\n- src/b.cpp")
 
 
 async def test_a_super_review_without_mapped_paths_samples_every_code_file() -> None:
@@ -655,7 +693,7 @@ async def test_a_super_review_samples_no_file_changed_since_the_last() -> None:
     tree.since["s1"] = ["Add A"]
     tree.changed["s1"] = ["src/a.py"]
     tree.tracked[tree.base] = TRACKED
-    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True, skill_mappings=SRC)
+    session, _, _ = session_for(*LENSES, tree=tree, review=True, skill_mappings=SRC)
     lane_of(session).planner.last_super_commit = "s1"
     await send(session, FireTrigger(trigger=SUPER_REVIEW))
     events = await asyncio.wait_for(settle(session), 10)
@@ -685,7 +723,7 @@ async def test_a_super_review_whose_tracked_files_cannot_be_listed_has_no_sample
     tree.since["s1"] = ["Add D"]
     tree.tracked[tree.base] = TRACKED
     tree.failures["tracked_files"] = TreeFailed("git ls-tree failed: bad revision")
-    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
+    session, _, _ = session_for(*LENSES, tree=tree, review=True)
     lane_of(session).planner.last_super_commit = "s1"
     await send(session, FireTrigger(trigger=SUPER_REVIEW))
     events = await asyncio.wait_for(settle(session), 10)
@@ -700,19 +738,19 @@ async def test_a_super_review_whose_commits_since_cannot_be_listed_still_samples
     tree.since["s1"] = ["Add D"]
     tree.tracked[tree.base] = ["src/a.py"]
     tree.failures["landed_since"] = TreeFailed("git log failed: bad revision")
-    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
+    session, _, _ = session_for(*LENSES, tree=tree, review=True)
     lane_of(session).planner.last_super_commit = "s1"
     await send(session, FireTrigger(trigger=SUPER_REVIEW))
     events = await asyncio.wait_for(settle(session), 10)
     prompt = super_task(events).task.prompt
-    assert prompt.endswith(f"10 suggestions.\n\n{SAMPLED}\n- src/a.py")
+    assert prompt.endswith(f"at base\n\n{SAMPLED}\n- src/a.py")
 
 
 async def test_successive_super_reviews_sample_the_files_sampled_longest_ago() -> None:
     tree = FakeTree()
     tree.tracked[tree.base] = TRACKED
     session, _, _ = session_for(
-        reviewers=(suggests(), suggests(), suggests()),
+        *LENSES * 3,
         tree=tree,
         review=True,
         review_limits=ReviewLimits(super_sample=1),
@@ -734,7 +772,7 @@ async def test_successive_super_reviews_sample_the_files_sampled_longest_ago() -
 async def test_a_super_review_forgets_the_sampled_files_no_longer_tracked() -> None:
     tree = FakeTree()
     tree.tracked[tree.base] = ["src/a.py"]
-    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
+    session, _, _ = session_for(*LENSES, tree=tree, review=True)
     lane_of(session).planner.super_count = SuperReviewCount(super_reviews=1, sampled={"gone.py": 1})
     await send(session, FireTrigger(trigger=SUPER_REVIEW))
     await asyncio.wait_for(settle(session), 10)
@@ -744,7 +782,7 @@ async def test_a_super_review_forgets_the_sampled_files_no_longer_tracked() -> N
 async def test_a_super_review_whose_tracked_files_cannot_be_listed_keeps_the_record() -> None:
     tree = FakeTree()
     tree.failures["tracked_files"] = TreeFailed("git ls-tree failed: bad revision")
-    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
+    session, _, _ = session_for(*LENSES, tree=tree, review=True)
     lane_of(session).planner.super_count = SuperReviewCount(super_reviews=1, sampled={"a.py": 1})
     await send(session, FireTrigger(trigger=SUPER_REVIEW))
     await asyncio.wait_for(settle(session), 10)
@@ -755,23 +793,23 @@ async def test_a_super_review_whose_tracked_files_cannot_be_listed_keeps_the_rec
 async def test_a_super_review_is_skipped_when_the_base_commit_cannot_be_read() -> None:
     tree = FakeTree()
     tree.failures["base_commit"] = TreeFailed("git rev-parse failed: unknown revision")
-    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
+    session, _, _ = session_for(*LENSES, tree=tree, review=True)
     await send(session, FireTrigger(trigger=SUPER_REVIEW))
     events = await asyncio.wait_for(settle(session, until=_errored), 10)
     message = "Super review skipped: git rev-parse failed: unknown revision"
     assert ErrorOccurred(code=GIT_FAILED, message=message) in events
-    assert "super-reviewer" not in _roles_seen(events)
+    assert not _roles_seen(events) & set(SUPER_LENS_REVIEWERS)
     assert tree.snapshots == []
 
 
 async def test_a_super_review_given_input_is_refused_and_none_starts() -> None:
     tree = FakeTree()
-    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
+    session, _, _ = session_for(*LENSES, tree=tree, review=True)
     await send(session, FireTrigger(trigger=SUPER_REVIEW, input={"x": "1"}))
     events = await asyncio.wait_for(settle(session, until=_refused), 10)
     assert _refusals(events) == [refused(INVALID, "The super-review trigger takes no input.")]
     assert not _error_messages(events)
-    assert "super-reviewer" not in _roles_seen(events)
+    assert not _roles_seen(events) & set(SUPER_LENS_REVIEWERS)
     assert tree.snapshots == []
 
 

@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from orbit.agent.domain import sessions
-from orbit.agent.domain.endings import QUEUED_BEFORE_LENSES
+from orbit.agent.domain.endings import QUEUED_BEFORE_LENSES, QUEUED_FOR_RETIRED_ROLE
 from orbit.agent.domain.merge_holds import Hold
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import (
@@ -598,6 +598,51 @@ def test_the_unreviewed_notes_name_each_commit_of_the_cancelled_reviews_once() -
 
 def test_with_no_review_cancelled_at_upgrade_there_is_no_note() -> None:
     assert unreviewed_notes(upgraded(), ()) == ()
+
+
+def in_role(task_id: str, role: str, status: TaskStatus) -> TaskState:
+    """Task ``task_id``, ``role``'s, at ``status``."""
+    return TaskState(id=task_id, task=TaskSpec(prompt="x", role=role), status=status)
+
+
+def test_a_task_waiting_for_the_super_reviewer_is_cancelled_as_its_record_is_read() -> None:
+    tasks = (
+        in_role("1", "super-reviewer", "pending"),
+        in_role("2", "super-reviewer", "running"),
+        in_role("3", "super-reviewer", "completed"),
+        in_role("4", "drift-reviewer", "pending"),
+    )
+    read = parse_record(record_json(record(tasks)))
+    assert isinstance(read, SessionRecord)
+    assert [(t.id, t.status, t.reason) for t in read.tasks] == [
+        ("1", "cancelled", QUEUED_FOR_RETIRED_ROLE),
+        ("2", "running", ""),
+        ("3", "completed", ""),
+        ("4", "pending", ""),
+    ]
+
+
+def test_a_super_reviewer_task_cancelled_as_its_record_is_read_is_one_cancelled_at_upgrade() -> (
+    None
+):
+    reviews = LaneSnapshot(
+        planner=PlannerSnapshot(batches={"b1": BatchSnapshot(round=1, cap=10)}),
+        jobs={"1": ReviewJob(commits=("5555555abc",), round=0, batch=None, whole=True)},
+        batches={"1": "b1"},
+    )
+    read = parse_record(record_json(record((in_role("1", "super-reviewer", "pending"),), reviews)))
+    assert isinstance(read, SessionRecord)
+    assert reviews_cancelled_at_upgrade(read) == ("1",)
+    assert unreviewed_notes(read, ("1",)) == (
+        "Reviews queued before lens reviewers were cancelled; unreviewed: 5555555.",
+    )
+
+
+def test_a_record_whose_tasks_cannot_be_read_is_left_for_validation_to_refuse() -> None:
+    data = json.loads(record_json(record()))
+    assert isinstance(parse_record(json.dumps(data | {"tasks": "none"})), Unreadable)
+    odd = data | {"tasks": ["odd", {"id": "1", "task": "odd", "status": "pending"}]}
+    assert isinstance(parse_record(json.dumps(odd)), Unreadable)
     assert unreviewed_notes(record(), ("2",)) == ()
 
 

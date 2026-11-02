@@ -83,7 +83,6 @@ from orbit.protocol import (
     REVIEWER,
     STORAGE_FAILED,
     SUPER_REVIEW,
-    SUPER_REVIEWER,
     AddTask,
     AgentExited,
     AgentReply,
@@ -184,7 +183,7 @@ def super_every(every: int) -> dict[str, Trigger]:
     return {**TRIGGERS, SUPER_REVIEW: shipped.model_copy(update={"every": every})}
 
 
-SCRIPTED_REVIEWERS = frozenset({REVIEWER, SUPER_REVIEWER})
+SCRIPTED_REVIEWERS = frozenset({REVIEWER})
 """The roles whose agents play the ``reviewers`` scripts of :class:`ScriptedLauncher`."""
 
 URL = "http://orbit.test/mcp"
@@ -285,9 +284,9 @@ runtime."""
 
 class ScriptedLauncher:
     """Each launch plays the next script as the agent, calling orbit through the host: of
-    ``reviewers`` for the reviewer's and super-reviewer's agents, else of ``scripts``, the lens
-    reviewers' included. It can do what ``capabilities`` say, everything at first, and tells the
-    failure each error message in ``failures`` is, and any other as Claude Code's."""
+    ``reviewers`` for the reviewer's agents, else of ``scripts``, the lens reviewers' included,
+    per-commit and the super review's. It can do what ``capabilities`` say, everything at first, and
+    tells the failure each error message in ``failures`` is, and any other as Claude Code's."""
 
     def __init__(self, host: FakeHost, *scripts: Script, reviewers: Sequence[Script] = ()) -> None:
         self.host = host
@@ -1671,6 +1670,44 @@ def suggests(
         return "completed"
 
     return review
+
+
+def reports(*findings: tuple[str, str], replies: list[Reply] | None = None) -> Script:
+    """A lens that reports ``findings``, each a title and severity, recording orbit's replies
+    in ``replies``, if given, then claims done."""
+
+    async def look(call: Call) -> TurnEndReason:
+        await call("get_task")
+        for title, severity in findings:
+            reply = await call("report_finding", title=title, body="Why.", severity=severity)
+            if replies is not None:
+                replies.append(reply)
+        await call("complete_task", summary=f"{len(findings)} findings")
+        return "completed"
+
+    return look
+
+
+def files(
+    title: str,
+    findings: list[str],
+    dismissed: list[str],
+    replies: list[Reply] | None = None,
+) -> Script:
+    """A merge pass filing ``findings`` as a task titled ``title``, dismissing ``dismissed``,
+    recording orbit's reply to the filing in ``replies``, if given."""
+
+    async def merge(call: Call) -> TurnEndReason:
+        await call("get_task")
+        reply = await call("suggest_task", title=title, prompt="Fix it.", findings=findings)
+        if replies is not None:
+            replies.append(reply)
+        for finding in dismissed:
+            await call("dismiss_finding", finding=finding, reason="over the cap")
+        await call("complete_task", summary="1 task from 2 findings, 1 dismissed")
+        return "completed"
+
+    return merge
 
 
 async def settled() -> None:

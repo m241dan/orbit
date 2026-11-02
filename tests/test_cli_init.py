@@ -164,13 +164,14 @@ def test_update_adds_what_the_file_doesnt_mention_and_says_what(project: Path) -
         f"  in the top level: {', '.join(LIMIT_KEYS)}",
         f"  in [roles.coder]: {fields}",
         "  at the end: [[verification.steps]], [verification.sets.mutation], [setup],"
-        " [roles.planner], [roles.experimenter], [roles.reviewer], [roles.super-reviewer],"
+        " [roles.planner], [roles.experimenter], [roles.reviewer],"
         " [roles.configurator], [roles.fit-reviewer], [roles.bugs-reviewer],"
         " [roles.tests-reviewer], [roles.logic-reviewer], [roles.security-reviewer],"
-        " [roles.performance-reviewer], [roles.license-reviewer], [triggers.fit-review],"
+        " [roles.performance-reviewer], [roles.style-reviewer], [roles.drift-reviewer],"
+        " [roles.scaling-reviewer], [roles.license-reviewer], [triggers.fit-review],"
         " [triggers.bugs-review], [triggers.tests-review], [triggers.logic-review],"
         " [triggers.security-review], [triggers.performance-review], [triggers.merge-pass],"
-        " [triggers.super-review],"
+        " [triggers.super-review], [triggers.super-fix-review],"
         " [triggers.configure-checks], [triggers.set-up-verification], [triggers.startup-check],"
         " [triggers.startup-fix], [[skills]], [mcp.github], [mcp.semgrep],"
         " [roles.license-reviewer.tools], [models.local-coder]",

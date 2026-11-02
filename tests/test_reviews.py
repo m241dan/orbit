@@ -33,8 +33,8 @@ from orbit.protocol import (
     CONFIGURATOR,
     REVIEW_ORIGIN,
     REVIEWER,
+    STYLE_REVIEWER,
     SUPER_REVIEW,
-    SUPER_REVIEWER,
     TaskSpec,
     TaskState,
     TaskStatus,
@@ -471,7 +471,7 @@ def orbits(task_id: str, status: TaskStatus, role: str) -> TaskState:
 def test_the_tasks_orbit_queued_for_itself_are_not_listed() -> None:
     tasks = (
         orbits("1", "pending", REVIEWER),
-        orbits("2", "running", SUPER_REVIEWER),
+        orbits("2", "running", STYLE_REVIEWER),
         orbits("3", "pending", CONFIGURATOR),
         state("4", status="pending", prompt="Add tests"),
         state("5", status="running", prompt="Rename x"),

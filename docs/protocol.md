@@ -94,8 +94,8 @@ its id, label, path, sessions and `read_only`, true when another orbit owns its 
 [Read-only orbits](#read-only-orbits)) and `managed`, true for a clone the server made from a
 URL, whose directory purging it deletes, then the agents' roles, the triggers and the lanes, each
 listed if any workspace served has it: a role that's disabled (`enabled = false`) is left out, as
-are the triggers that queue its tasks (`super-review` the super reviewer's, `configure-checks` the
-configurator's) and its lane, unless an enabled role shares it. An agent role is `conversational`
+are the triggers that queue only disabled roles' tasks (`super-review` once its three lens
+reviewers are, `configure-checks` the configurator's) and its lane, unless an enabled role shares it. An agent role is `conversational`
 when the user can message it: the planner, and any other enabled role with `conversation = true`,
 whose lane is listed too. Each agent role also carries its `lane` and the defaults of a task in
 it, its `model`, `tool_access` and `effort`, as a `Settings` holds them, from the first workspace

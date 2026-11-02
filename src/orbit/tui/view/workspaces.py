@@ -10,7 +10,6 @@ from orbit.protocol import (
     CONFIGURATOR,
     PLANNER,
     REVIEWER,
-    SUPER_REVIEWER,
     Activity,
     AddWorkspace,
     AgentRef,
@@ -44,7 +43,7 @@ LIST_HINT = "j/k move · enter open · x remove · esc close"
 STARTUP_HINT = "j/k move · enter open · x remove · esc quit"
 PATH_HINT = "enter add · esc back"
 WORKSPACES_HINTS = ListHints(closing=LIST_HINT, quitting=STARTUP_HINT)
-ROLE_ORDER = (CODER, CONFIGURATOR, REVIEWER, SUPER_REVIEWER, PLANNER)
+ROLE_ORDER = (CODER, CONFIGURATOR, REVIEWER, PLANNER)
 """The order the agents summary counts the built-in roles in, before any others."""
 
 WorkspaceRow = WorkspaceEntry | AddWorkspace | WorkspaceCloning | Literal["add_path"]

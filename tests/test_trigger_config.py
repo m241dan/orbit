@@ -73,6 +73,7 @@ def test_without_a_projects_triggers_they_are_the_packages_from_the_package() ->
         *LENS_TRIGGERS,
         "merge-pass",
         "super-review",
+        "super-fix-review",
         "configure-checks",
         "set-up-verification",
         "startup-check",
@@ -151,6 +152,19 @@ def test_a_trigger_for_a_projects_own_role_is_valid() -> None:
             f"triggers.nightly.role: tidier isn't a role; the roles are {ROLE_NAMES}.",
         ),
         (
+            NIGHTLY | {"role": []},
+            "triggers.nightly.role: a list of roles names at least one.",
+        ),
+        (
+            NIGHTLY | {"role": ["nobody"]},
+            f"triggers.nightly.role: nobody isn't a role; the roles are {ROLE_NAMES}.",
+        ),
+        (
+            NIGHTLY | {"role": ["coder", "nobody", "tidier"]},
+            f"triggers.nightly.role: nobody isn't a role; the roles are {ROLE_NAMES}.\n"
+            f"triggers.nightly.role: tidier isn't a role; the roles are {ROLE_NAMES}.",
+        ),
+        (
             NIGHTLY | {"guards": ["weekly"]},
             "triggers.nightly.guards: weekly isn't a guard; the guards are review-rounds,"
             " raised-finding, suggestions-pending, not-queued, dedupe.",
@@ -184,6 +198,16 @@ def test_an_invalid_trigger_is_refused_naming_it_its_field_and_the_value(
     assert refusal({"nightly": trigger}) == problem
 
 
+def test_a_trigger_listing_roles_loads_with_them_in_order() -> None:
+    config = loaded({"triggers": {"nightly": NIGHTLY | {"role": ["reviewer", "coder"]}}})
+    assert config.triggers["nightly"].roles == ("reviewer", "coder")
+
+
+def test_a_shipped_super_review_overridden_with_one_role_queues_for_it_alone() -> None:
+    config = loaded({"triggers": {SUPER_REVIEW: {"role": "drift-reviewer"}}})
+    assert config.triggers[SUPER_REVIEW].roles == ("drift-reviewer",)
+
+
 def test_an_override_that_breaks_a_shipped_trigger_is_refused() -> None:
     assert refusal({"bugs-review": {"on": "task_finished"}}) == (
         "triggers.bugs-review.prompt: {title} isn't a variable of task_finished; its variables"
@@ -212,7 +236,7 @@ def test_review_rounds_on_two_enabled_triggers_of_other_roles_loads() -> None:
     tests = bugs | {"prompt": "Test {commit}."}
     config = loaded({"triggers": {"bugs": bugs, "tests": tests}})
     guarded = [name for name, t in config.triggers.items() if "review-rounds" in t.guards]
-    assert guarded == [*LENS_TRIGGERS, "bugs", "tests"]
+    assert guarded == [*LENS_TRIGGERS, "super-fix-review", "bugs", "tests"]
 
 
 def test_review_rounds_moves_to_a_trigger_of_your_own_with_the_lens_reviews_disabled() -> None:

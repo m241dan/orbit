@@ -30,10 +30,13 @@ from orbit.protocol import (
     CODER,
     CONFIGURATOR,
     CONFIGURE_CHECKS,
+    DRIFT_REVIEWER,
     GIT_FAILED,
     REVIEWER,
+    SCALING_REVIEWER,
+    STYLE_REVIEWER,
+    SUPER_LENS_REVIEWERS,
     SUPER_REVIEW,
-    SUPER_REVIEWER,
     TASK_CHECKS,
     ErrorOccurred,
     Event,
@@ -115,9 +118,9 @@ def unbooked(task_id: str, template: ReviewTemplate) -> None:
     """Books no review task."""
 
 
-def disabled(name: str) -> dict[str, Role]:
-    """The built-in roles, ``name`` disabled."""
-    return {**ROLES, name: ROLES[name].model_copy(update={"enabled": False})}
+def disabled(*names: str) -> dict[str, Role]:
+    """The built-in roles, ``names`` disabled."""
+    return {**ROLES, **{name: ROLES[name].model_copy(update={"enabled": False}) for name in names}}
 
 
 # Firing on a landing
@@ -201,6 +204,66 @@ async def test_a_trigger_reviewing_nothing_queues_its_reviewers_task_as_a_task()
     await engine.engine.landed(ended(), COMMIT)
     [state] = engine.board.tasks
     assert (state.task.role, state.origin, state.queued_as) == (REVIEWER, "look", "task")
+
+
+# A list of roles
+
+
+def looks(**fields: object) -> Trigger:
+    """A trigger queuing a look by each of the super review's lenses at each landed coder
+    commit, with ``fields`` over that."""
+    return look(role=list(SUPER_LENS_REVIEWERS), **fields)
+
+
+async def test_a_trigger_listing_roles_queues_one_task_per_role_from_one_rendering() -> None:
+    engine = Engine({"look": looks()})
+    queued = await engine.engine.landed(ended(), COMMIT)
+    assert engine.shown() == [
+        (role, "look", "pending", "Look at c1abcde") for role in SUPER_LENS_REVIEWERS
+    ]
+    assert queued == tuple(state.id for state in engine.board.tasks)
+
+
+async def test_a_trigger_listing_roles_queues_none_for_a_disabled_one() -> None:
+    engine = Engine({"look": looks()}, roles=disabled(DRIFT_REVIEWER))
+    await engine.engine.landed(ended(), COMMIT)
+    assert [role for role, _, _, _ in engine.shown()] == [STYLE_REVIEWER, SCALING_REVIEWER]
+
+
+async def test_a_trigger_listing_only_disabled_roles_queues_nothing() -> None:
+    engine = Engine({"look": looks()}, roles=disabled(*SUPER_LENS_REVIEWERS))
+    assert await engine.engine.landed(ended(), COMMIT) == ()
+
+
+async def test_not_queued_holds_a_list_back_while_a_task_of_any_of_its_roles_waits() -> None:
+    engine = Engine({"look": looks(guards=["not-queued"])})
+    waiting = engine.board.add(TaskSpec(prompt="Look again.", role=SCALING_REVIEWER))
+    assert await engine.engine.landed(ended(), COMMIT) == ()
+    engine.board.remove(waiting)
+    assert len(await engine.engine.landed(ended(), COMMIT)) == 3
+
+
+async def test_dedupe_holds_a_list_back_by_the_tasks_waiting_before_it_fired() -> None:
+    engine = Engine({"look": looks(prompt="Look at the code", guards=["dedupe"])})
+    assert len(await engine.engine.landed(ended("1"), COMMIT)) == 3
+    assert await engine.engine.landed(ended("2"), "c2") == ()
+
+
+async def test_a_list_reviewing_a_batch_queues_only_the_roles_that_raised_its_findings() -> None:
+    booked: dict[str, ReviewTemplate] = {}
+    guards = ["review-rounds", "raised-finding"]
+    engine = Engine({"look": looks(when={}, guards=guards)})
+    raised = frozenset({DRIFT_REVIEWER, CODER})
+    queued = await engine.engine.reviewed(ReviewRound(BATCH, booked.__setitem__, raised))
+    assert [role for role, _, _, _ in engine.shown()] == [DRIFT_REVIEWER]
+    assert list(booked) == list(queued)
+
+
+async def test_a_list_guarded_by_raised_finding_queues_every_role_on_a_landing() -> None:
+    guards = ["review-rounds", "raised-finding"]
+    engine = Engine({"look": looks(guards=guards)})
+    review = ReviewRound(commit_review("1", COMMIT), unbooked)
+    assert len(await engine.engine.landed(ended(), COMMIT, review)) == 3
 
 
 # Guards
@@ -365,7 +428,7 @@ async def test_a_due_super_review_waits_while_a_review_on_the_board_waits() -> N
     assert (counted.counts, counted.fires) == ({SUPER_REVIEW: 1}, [])
 
 
-@pytest.mark.parametrize("role", [SUPER_REVIEWER, CODER])
+@pytest.mark.parametrize("role", [STYLE_REVIEWER, CODER])
 async def test_a_due_super_review_waits_while_a_project_triggers_review_waits(role: str) -> None:
     engine = Engine(super_every(1))
     audit = TaskSpec(prompt="Audit the codebase at c0", role=role)
@@ -390,9 +453,14 @@ async def test_a_due_super_review_waits_while_a_project_triggers_suggestion_runs
     assert (counted.counts, counted.fires) == ({SUPER_REVIEW: 1}, [])
 
 
-async def test_a_landing_counts_toward_no_trigger_whose_role_is_disabled() -> None:
-    engine = Engine(super_every(1), roles=disabled(SUPER_REVIEWER))
+async def test_a_landing_counts_toward_no_trigger_whose_roles_are_all_disabled() -> None:
+    engine = Engine(super_every(1), roles=disabled(*SUPER_LENS_REVIEWERS))
     assert engine.engine.count(ended(), {}).counts == {}
+
+
+async def test_a_landing_counts_toward_a_trigger_with_one_of_its_roles_enabled() -> None:
+    engine = Engine(super_every(1), roles=disabled(STYLE_REVIEWER, DRIFT_REVIEWER))
+    assert [name for name, _ in engine.engine.count(ended(), {}).fires] == [SUPER_REVIEW]
 
 
 async def test_a_trigger_fired_by_hand_is_found_by_its_name() -> None:
@@ -404,8 +472,10 @@ async def test_a_trigger_fired_by_hand_is_found_by_its_name() -> None:
 async def test_a_disabled_trigger_or_one_whose_role_is_disabled_does_not_fire_by_hand() -> None:
     off = Engine({SUPER_REVIEW: SUPER.model_copy(update={"enabled": False})})
     assert off.engine.by_hand(SUPER_REVIEW) == []
-    unrolled = Engine({SUPER_REVIEW: SUPER}, roles=disabled(SUPER_REVIEWER))
+    unrolled = Engine({SUPER_REVIEW: SUPER}, roles=disabled(*SUPER_LENS_REVIEWERS))
     assert unrolled.engine.by_hand(SUPER_REVIEW) == []
+    partly = Engine({SUPER_REVIEW: SUPER}, roles=disabled(DRIFT_REVIEWER))
+    assert partly.engine.by_hand(SUPER_REVIEW) == [(SUPER_REVIEW, SUPER)]
 
 
 async def test_counted_triggers_queue_their_tasks_reviewing_the_codebase_and_booked() -> None:
@@ -414,15 +484,19 @@ async def test_counted_triggers_queue_their_tasks_reviewing_the_codebase_and_boo
     engine.board.add(TaskSpec(prompt="Make it faster.", skills=("python",)))
     values = review_values(WHOLE, "", 10, ["Make it faster."])
     fired = [(SUPER_REVIEW, SUPER)]
-    [task_id] = await engine.engine.fire_counted(
-        fired, values, ReviewRound(WHOLE, booked.__setitem__)
+    queued = await engine.engine.fire_counted(fired, values, ReviewRound(WHOLE, booked.__setitem__))
+    reviews = [engine.board.get(task_id) for task_id in queued]
+    assert [(t.task.role, t.origin, t.queued_as) for t in reviews] == [
+        (role, SUPER_REVIEW, "review") for role in SUPER_LENS_REVIEWERS
+    ]
+    uncapped = review_prompt(WHOLE, "", 10, ["Make it faster."]).replace(
+        "\n\nYou may make at most 10 suggestions.", "", 1
     )
-    review = engine.board.get(task_id)
-    assert (review.task.role, review.origin) == (SUPER_REVIEWER, SUPER_REVIEW)
-    assert review.queued_as == "review"
-    assert review.task.prompt == review_prompt(WHOLE, "", 10, ["Make it faster."])
-    assert review.task.skills == ()  # It reviews no particular task.
-    assert list(booked) == [task_id]
+    assert {review.task.prompt for review in reviews} == {uncapped}
+    assert {review.task.skills for review in reviews} == {()}  # They review no particular task.
+    assert list(booked) == list(queued)
+    first, *others = booked.values()
+    assert others == [first, first]  # One rendering, booked with each.
     assert isinstance(engine.events[-1], TasksChanged)
     assert engine.kicked == []
 
@@ -447,18 +521,19 @@ async def test_counted_triggers_are_not_held_back_again_as_they_are_queued() -> 
     engine.board.add_triggered(review_task, "review", "review")
     values = review_values(WHOLE, "", 10, [])
     review = ReviewRound(WHOLE, unbooked)
-    assert len(await engine.engine.fire_counted([(SUPER_REVIEW, SUPER)], values, review)) == 1
+    queued = await engine.engine.fire_counted([(SUPER_REVIEW, SUPER)], values, review)
+    assert len(queued) == len(SUPER_LENS_REVIEWERS)
 
 
 async def test_each_counted_trigger_renders_its_own_name_and_is_booked_apart() -> None:
     booked: dict[str, ReviewTemplate] = {}
-    other = SUPER.model_copy(update={"prompt": "{trigger} at {commit}"})
+    other = SUPER.model_copy(update={"prompt": "{trigger} at {commit}", "role": STYLE_REVIEWER})
     engine = Engine({SUPER_REVIEW: SUPER, "drift": other})
     fired = [(SUPER_REVIEW, SUPER), ("drift", other)]
     values = review_values(WHOLE, "", 10, [])
     queued = await engine.engine.fire_counted(fired, values, ReviewRound(WHOLE, booked.__setitem__))
     assert [(origin, prompt.split("\n", 1)[0]) for _, origin, _, prompt in engine.shown()] == [
-        (SUPER_REVIEW, "Super review of the codebase at c1abcde"),
+        *[(SUPER_REVIEW, "Super review of the codebase at c1abcde")] * 3,
         ("drift", "drift at c1abcde"),
     ]
     assert list(booked) == list(queued)

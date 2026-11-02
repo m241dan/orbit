@@ -13,23 +13,31 @@ from orbit.agent.application.skill_delivery import SkillDelivery
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.external.built_in_roles import read_built_in_roles, read_instruction_files
 from orbit.agent.external.skill_files import SKILL_DIRECTORY, read_skill_library, skill_names
-from orbit.protocol import BUILT_IN_ROLE_NAMES, LENS_REVIEWERS, PINNED_ROLE_NAMES
+from orbit.protocol import (
+    BUILT_IN_ROLE_NAMES,
+    LENS_REVIEWERS,
+    PINNED_ROLE_NAMES,
+    SUPER_LENS_REVIEWERS,
+)
 
 FOLDER = files("orbit.agent.external") / "instructions"
 README = Path(__file__).parent.parent / "README.md"
 INSTRUCTION_FILES = {
     **{name: f"{name}.md" for name in PINNED_ROLE_NAMES},
     **dict.fromkeys(LENS_REVIEWERS, "lens-reviewer.md"),
+    **dict.fromkeys(SUPER_LENS_REVIEWERS, "super-lens-reviewer.md"),
 }
-"""The Markdown file each built-in role's instructions are in: its own, or the lens reviewers'
-shared one."""
+"""The Markdown file each built-in role's instructions are in: its own, the per-commit lens
+reviewers' shared one, or the super review's lens reviewers' shared one."""
 ROLES_TOML = (FOLDER / "roles.toml").read_text(encoding="utf-8")
 
 REVIEW_TOOLS = ("get_task", "complete_task", "report_progress", "give_up", "suggest_task")
 MERGE_PASS_TOOLS = (*REVIEW_TOOLS, "dismiss_finding")
 LENS_TOOLS = ("get_task", "complete_task", "report_progress", "give_up", "report_finding")
 LENS_FILE = "lens-reviewer.md"
-"""The instructions file every lens reviewer shares."""
+"""The instructions file every per-commit lens reviewer shares."""
+SUPER_LENS_FILE = "super-lens-reviewer.md"
+"""The instructions file every lens reviewer of the super review shares."""
 REVIEWER_SKILLS = (
     "code-style",
     "security",
@@ -39,6 +47,9 @@ REVIEWER_SKILLS = (
     "review-logic",
     "review-security",
     "review-performance",
+    "review-style",
+    "review-drift",
+    "review-scaling",
 )
 BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
     "coder": {
@@ -78,25 +89,6 @@ BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
         "consult_limit_per_hour": 6,
         "copy_ttl_hours": 24,
         "skills": REVIEWER_SKILLS,
-    },
-    "super-reviewer": {
-        "model": "opus",
-        "tool_access": "restricted",
-        "tools": REVIEW_TOOLS,
-        "blocking_findings": False,
-        "verify": False,
-        "timeout_minutes": None,
-        "lane": "review",
-        "workspace": "snapshot",
-        "conversation": False,
-        "merge": False,
-        "enabled": True,
-        "effort": None,
-        "runtime": "claude",
-        "consults": (),
-        "consult_limit_per_hour": 6,
-        "copy_ttl_hours": 24,
-        "skills": ("code-style", "review-style", "review-drift", "review-scaling"),
     },
     "planner": {
         "model": None,
@@ -179,6 +171,18 @@ BUILT_IN_FIELDS |= {
     for name, skills in LENS_SKILLS.items()
 }
 
+SUPER_LENS_SKILLS = {
+    "style-reviewer": ("code-style", "review-style"),
+    "drift-reviewer": ("code-style", "review-drift"),
+    "scaling-reviewer": ("code-style", "review-scaling"),
+}
+"""Each lens reviewer of the super review's skills: code-style and its lens."""
+
+BUILT_IN_FIELDS |= {
+    name: BUILT_IN_FIELDS["fit-reviewer"] | {"model": "opus", "skills": skills}
+    for name, skills in SUPER_LENS_SKILLS.items()
+}
+
 
 def role_directory(tmp_path: Path, roles_toml: str, leave_out: Collection[str] = ()) -> Path:
     """``tmp_path`` holding ``roles_toml`` and the shipped Markdown files but those named in
@@ -201,9 +205,9 @@ def readme_column(name: str, column: int) -> tuple[str, ...]:
     return tuple(re.findall(r"`([^`]+)`", row.split("|")[column]))
 
 
-def test_there_is_one_markdown_file_per_pinned_role_and_one_the_lens_reviewers_share() -> None:
+def test_there_is_one_markdown_file_per_pinned_role_and_one_each_kind_of_lens_shares() -> None:
     names = {entry.name for entry in FOLDER.iterdir() if entry.name.endswith(".md")}
-    assert names == {f"{name}.md" for name in PINNED_ROLE_NAMES} | {LENS_FILE}
+    assert names == {f"{name}.md" for name in PINNED_ROLE_NAMES} | {LENS_FILE, SUPER_LENS_FILE}
 
 
 def test_each_built_in_role_is_told_its_file() -> None:
@@ -235,7 +239,7 @@ def test_each_built_in_role_has_its_fields(name: str) -> None:
 def test_the_built_in_roles_are_read_from_the_directory_given(tmp_path: Path) -> None:
     roles_toml = ROLES_TOML.replace('model = "opus"', 'model = "haiku"')
     roles = read_built_in_roles(role_directory(tmp_path, roles_toml))
-    assert roles["super-reviewer"].model == "haiku"
+    assert roles["drift-reviewer"].model == "haiku"
     assert roles["coder"] == read_built_in_roles()["coder"]
 
 
@@ -280,7 +284,7 @@ def test_the_coder_leaves_committing_to_orbit() -> None:
 
 def test_the_review_roles_and_planner_read_but_leave_changes_to_the_coder() -> None:
     roles = read_built_in_roles()
-    for name in ("reviewer", "super-reviewer", "planner"):
+    for name in ("reviewer", "style-reviewer", "planner"):
         assert "read and search the code" in roles[name].instructions
 
 
@@ -544,11 +548,12 @@ def test_the_reviewer_no_longer_has_a_built_in_clarity_lens() -> None:
         assert phrase not in text, phrase
 
 
-SUPER_REVIEWER_LOOKS_THROUGH_ITS_LENSES = (
-    "A read-only snapshot of the codebase at its latest commit, which has passed the project's"
-    " checks; orbit asks for this every few commits, or when the user does. The task lists the"
-    " commits landed since the last super review, the files they changed, and a sample of other"
-    " code files orbit chose so that, review by review, every code file gets read.",
+SUPER_LENS_LOOKS_THROUGH_ITS_LENS = (
+    "A super review hands you a read-only snapshot of the codebase at its latest commit, which has"
+    " passed the project's checks; orbit asks for one every few commits, or when the user does."
+    " The task lists the commits landed since the last super review, the files they changed, and"
+    " a sample of other code files orbit chose so that, review by review, every code file gets"
+    " read.",
     "Start with the shape of the project: its README, its configuration, its package layout and"
     " its own guidance (CLAUDE.md and the like), which says what structure the project means to"
     " keep. Then read the files changed since the last super review and the sampled ones, and"
@@ -556,18 +561,26 @@ SUPER_REVIEWER_LOOKS_THROUGH_ITS_LENSES = (
     "The project's plans are recorded in numbered requirements docs, under `docs/` or wherever"
     " the project keeps them. Take one search over their titles and Goal lines to learn what each"
     " covers, and read a record in full only when a finding touches the code it covers, before"
-    " you suggest anything about it. Code that no longer does what its record agreed, with no"
+    " you report anything about it. Code that no longer does what its record agreed, with no"
     " later record explaining the change, is drift: the record is what was agreed, so the code is"
     " the suspect, unless the user-facing docs say the behaviour changed on purpose.",
-    "Your lenses are your `review-*` skills. Each owns one question and says what to look for and"
-    " what it measures against. The checks pass and every commit has had its own review, so look"
-    " through each lens for what only shows across commits and across the codebase. A lens that"
-    " finds nothing reports nothing.",
-    "Before suggesting, drop a finding that a queued task already covers. Confirm how a framework"
-    " behaves before asking for a test that must fail without the fix, and write Done items that"
-    " can all hold at once.",
+    "Look only through your `review-*` lens skill. It owns one question and says what to look for"
+    " and what it measures against. A problem another lens owns is that lens's to report: leave"
+    " it. The checks pass and every commit has had its own review, so look for what only shows"
+    " across commits and across the codebase.",
+    "When the task is a review of fixes, check whether the findings your lens raised are fixed",
+    "Report what still isn't fixed",
+    "Don't file tasks: you report findings, and the merge pass files them.",
+    "favouring those that remove a whole class of problems, such as one shared implementation in"
+    " place of several copies, over those that fix a single instance.",
+    "Report each with `report_finding`:",
 )
-SUPER_REVIEWER_RETIRED_PHRASES = ("**Latent bugs**", "**Structure that no longer fits**")
+SUPER_LENS_RETIRED_PHRASES = (
+    "**Latent bugs**",
+    "**Structure that no longer fits**",
+    "call suggest_task",
+    "Your lenses are your `review-*` skills.",
+)
 LENS_QUESTIONS = {
     "review-style": "**Your question:** across the commits since the last super review and the"
     " sampled files, do names, docs, comments and function shape follow the conventions, beyond"
@@ -588,15 +601,17 @@ def role_text(name: str) -> str:
     return " ".join(read_built_in_roles()[name].instructions.split())
 
 
-def test_the_super_reviewer_looks_through_its_lens_skills_at_what_landed_and_the_sample() -> None:
-    text = role_text("super-reviewer")
-    for passage in SUPER_REVIEWER_LOOKS_THROUGH_ITS_LENSES:
+@pytest.mark.parametrize("name", SUPER_LENS_REVIEWERS)
+def test_each_super_lens_looks_through_its_one_lens_at_what_landed_and_reports(name: str) -> None:
+    text = role_text(name)
+    for passage in SUPER_LENS_LOOKS_THROUGH_ITS_LENS:
         assert passage in text, passage
 
 
-def test_the_super_reviewer_no_longer_has_a_built_in_list_of_lenses() -> None:
-    text = role_text("super-reviewer")
-    for phrase in SUPER_REVIEWER_RETIRED_PHRASES:
+@pytest.mark.parametrize("name", SUPER_LENS_REVIEWERS)
+def test_a_super_lens_neither_files_tasks_nor_looks_through_every_lens(name: str) -> None:
+    text = role_text(name)
+    for phrase in SUPER_LENS_RETIRED_PHRASES:
         assert phrase not in text, phrase
 
 

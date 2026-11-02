@@ -25,7 +25,7 @@ from orbit.protocol import (
     CODER,
     PAUSED_FOR_USAGE_LIMIT,
     REVIEWER,
-    SUPER_REVIEWER,
+    STYLE_REVIEWER,
     AddTask,
     CancelTurn,
     Event,
@@ -154,16 +154,16 @@ async def test_the_work_lane_waits_out_claudes_pause_with_a_task_on_another_runt
 
 async def test_the_review_lane_runs_another_runtimes_review_in_a_pause_and_claudes_after() -> None:
     waits = Waits()
-    fake = ScriptedLauncher(FakeHost(), reviewers=(claims_done,))
-    roles = {**ROLES, SUPER_REVIEWER: ROLES[SUPER_REVIEWER].model_copy(update={"runtime": FAKE})}
+    fake = ScriptedLauncher(FakeHost(), claims_done)
+    roles = {**ROLES, STYLE_REVIEWER: ROLES[STYLE_REVIEWER].model_copy(update={"runtime": FAKE})}
     reviewers = (claims_done, claims_done)  # The skipped review, then the restarted coder's.
     options = {"reviewers": reviewers, "tree": FakeTree(), "review": True, "roles": roles}
     session, claude = limited(fake, waits, claims_done, **options)
     await run(session, TaskSpec(prompt="Code it."))
     await send(session, AddTask(task=TaskSpec(prompt="Review it.", role=REVIEWER)))
-    await send(session, AddTask(task=TaskSpec(prompt="Review it all.", role=SUPER_REVIEWER)))
+    await send(session, AddTask(task=TaskSpec(prompt="Review it all.", role=STYLE_REVIEWER)))
     await events_until(session, idle("review"))
-    assert (roles_of(claude), roles_of(fake)) == ([CODER], [SUPER_REVIEWER])
+    assert (roles_of(claude), roles_of(fake)) == ([CODER], [STYLE_REVIEWER])
     assert statuses_of(session) == ["error", "pending", "completed"]
 
     waits.release.set()
@@ -329,15 +329,15 @@ async def test_a_queued_review_run_again_after_an_outage_is_told_what_landed_by_
 
 async def test_a_lane_runs_another_runtimes_task_while_its_review_paused_claude() -> None:
     waits = Waits()
-    fake = ScriptedLauncher(FakeHost(), reviewers=(claims_done,))
-    roles = {**ROLES, SUPER_REVIEWER: ROLES[SUPER_REVIEWER].model_copy(update={"runtime": FAKE})}
+    fake = ScriptedLauncher(FakeHost(), claims_done)
+    roles = {**ROLES, STYLE_REVIEWER: ROLES[STYLE_REVIEWER].model_copy(update={"runtime": FAKE})}
     options: dict[str, Any] = {"host": fake.host, "launchers": {FAKE: fake}, "roles": roles}
     session, claude = reviewing(waits, errs, claims_done, **options)
     claude.turn_errors.append(LIMIT)
-    await review(session, REVIEWER, SUPER_REVIEWER)
+    await review(session, REVIEWER, STYLE_REVIEWER)
     await until(session, paused)
     await events_until(session, idle("review"))
-    assert (roles_of(fake), statuses_of(session)) == ([SUPER_REVIEWER], ["pending", "completed"])
+    assert (roles_of(fake), statuses_of(session)) == ([STYLE_REVIEWER], ["pending", "completed"])
 
     waits.release.set()
     await events_until(session, idle("review"))
@@ -378,18 +378,18 @@ async def test_a_run_for_the_user_replaces_a_lanes_pause_and_runs_the_review_it_
 
 async def test_a_second_runtime_hitting_its_limit_keeps_the_first_pause_and_waits_it_out() -> None:
     waits = Waits()
-    fake = ScriptedLauncher(FakeHost(), reviewers=(errs, claims_done, claims_done))
+    fake = ScriptedLauncher(FakeHost(), errs, claims_done, claims_done)
     fake.turn_errors.append(QUOTA)
     fake.failures[QUOTA] = Failure("usage_limit")
-    roles = {**ROLES, SUPER_REVIEWER: ROLES[SUPER_REVIEWER].model_copy(update={"runtime": FAKE})}
+    roles = {**ROLES, STYLE_REVIEWER: ROLES[STYLE_REVIEWER].model_copy(update={"runtime": FAKE})}
     options: dict[str, Any] = {"host": fake.host, "launchers": {FAKE: fake}, "roles": roles}
     session, claude = reviewing(waits, errs, claims_done, review_limits=ONE_AT_A_TIME, **options)
     claude.turn_errors.append(LIMIT)
-    await review(session, REVIEWER, SUPER_REVIEWER, SUPER_REVIEWER)
+    await review(session, REVIEWER, STYLE_REVIEWER, STYLE_REVIEWER)
     events = await until(session, paused)
     await events_until(session, idle("review"))
     assert statuses_of(session) == ["pending", "pending", "pending"]
-    assert roles_of(fake) == [SUPER_REVIEWER]
+    assert roles_of(fake) == [STYLE_REVIEWER]
 
     waits.release.set()
     await events_until(session, idle("review"))

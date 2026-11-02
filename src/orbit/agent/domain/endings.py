@@ -27,6 +27,11 @@ INTERRUPTED = "Interrupted: orbit stopped while it ran"
 QUEUED_BEFORE_LENSES = "Cancelled: queued for the reviewer before lens reviewers"
 """Why a review that was waiting in a session saved before lens reviewers is cancelled as the
 session opens: its prompt is for the reviewer as it was."""
+QUEUED_FOR_RETIRED_ROLE = "Cancelled: queued for a role orbit no longer ships"
+"""Why a task that was waiting for a built-in role orbit no longer ships, such as the
+super-reviewer, is cancelled as its session opens: no agent can take it."""
+CANCELLED_AT_UPGRADE = frozenset({QUEUED_BEFORE_LENSES, QUEUED_FOR_RETIRED_ROLE})
+"""Why the tasks an upgrade cancels as their session opens are cancelled."""
 WORK_GONE = "The work it fixes isn't in the coder's tree any more; look for it in git stash list."
 """Why a fix whose tree no longer holds the work it fixes gives up before an agent starts."""
 NO_PROPOSAL = "Ended without an accepted proposal"

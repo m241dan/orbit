@@ -67,6 +67,12 @@ says otherwise."""
 MAX_COPY_TTL_HOURS = float(timedelta.max // timedelta(hours=1))
 """The longest copy TTL a role may set, in hours: the whole hours a timedelta can hold."""
 
+RETIRED_ROLES: Mapping[str, str] = {
+    "super-reviewer": "super-reviewer is now style-reviewer, drift-reviewer and scaling-reviewer."
+}
+"""The built-in roles orbit no longer ships, by name, each with what a project file that sets
+anything under its table is told, and the roles it became."""
+
 PLAIN_NAME = re.compile(r"[A-Za-z0-9_-]+")
 """What a lane's or a role's name is made of."""
 

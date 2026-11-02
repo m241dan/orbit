@@ -26,10 +26,15 @@ from pydantic import (
 from pydantic_core import from_json
 
 from orbit.agent.domain.consultations import RESTARTED
-from orbit.agent.domain.endings import QUEUED_BEFORE_LENSES
+from orbit.agent.domain.endings import (
+    CANCELLED_AT_UPGRADE,
+    QUEUED_BEFORE_LENSES,
+    QUEUED_FOR_RETIRED_ROLE,
+)
 from orbit.agent.domain.merge_holds import Hold
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot, SuperReviewCount
+from orbit.agent.domain.roles import RETIRED_ROLES
 from orbit.agent.domain.runtimes import CLAUDE
 from orbit.agent.domain.wording import noun
 from orbit.protocol import (
@@ -185,12 +190,49 @@ def _cancelled_if_waiting(task: object) -> object:
     """``task``, a saved task, cancelled if it's a review still to start."""
     if not isinstance(task, dict) or not _review_to_start(task):
         return task
-    return task | {"status": "cancelled", "reason": QUEUED_BEFORE_LENSES, "reason_detail": ""}
+    return _cancelled(task, QUEUED_BEFORE_LENSES)
+
+
+def _cancelled(task: dict[str, Any], reason: str) -> dict[str, Any]:
+    """``task``, a saved task, cancelled for ``reason``."""
+    return task | {"status": "cancelled", "reason": reason, "reason_detail": ""}
 
 
 def _review_to_start(task: dict[str, Any]) -> bool:
     """Whether ``task``, a saved task, is a review orbit queued that hasn't started."""
-    return task.get("queued_as") == "review" and task.get("status", "pending") == "pending"
+    return task.get("queued_as") == "review" and _to_start(task)
+
+
+def _to_start(task: dict[str, Any]) -> bool:
+    """Whether ``task``, a saved task, hasn't started."""
+    status: object = task.get("status", "pending")
+    return status == "pending"
+
+
+def _retired_cancelled(record: dict[str, Any]) -> dict[str, Any]:
+    """``record``, of the current version, with each task still to start for a role of
+    :data:`~orbit.agent.domain.roles.RETIRED_ROLES` cancelled, for
+    :data:`~orbit.agent.domain.endings.QUEUED_FOR_RETIRED_ROLE`: no agent can take it. Whatever
+    version saved it, a record of the current one may hold such a task, so it isn't a
+    migration. Tasks that aren't a list are left for the record's validation to say why, as is
+    a task that isn't an object."""
+    tasks = record.get("tasks", [])
+    if not isinstance(tasks, list):
+        return record
+    return record | {"tasks": [_cancelled_if_retired(task) for task in tasks]}
+
+
+def _cancelled_if_retired(task: object) -> object:
+    """``task``, a saved task, cancelled if it's still to start for a retired role."""
+    if not isinstance(task, dict) or not _to_start(task) or _role_of(task) not in RETIRED_ROLES:
+        return task
+    return _cancelled(task, QUEUED_FOR_RETIRED_ROLE)
+
+
+def _role_of(task: dict[str, Any]) -> object:
+    """The role of ``task``, a saved task, as it was saved; none if it can't be read."""
+    spec = task.get("task")
+    return spec.get("role") if isinstance(spec, dict) else None
 
 
 def _booked(task: object, booked: tuple[str, ...]) -> object:
@@ -409,8 +451,8 @@ def record_json(record: SessionRecord) -> str:
 
 
 def parse_record(text: str) -> SessionRecord | Unreadable:
-    """The record in JSON ``text``, upgraded from an older format if need be, or why it's
-    unreadable."""
+    """The record in JSON ``text``, upgraded from an older format if need be, its tasks still to
+    start for a retired role cancelled, or why it's unreadable."""
     try:
         data = from_json(text)
     except ValueError as error:
@@ -427,7 +469,8 @@ def parse_record(text: str) -> SessionRecord | Unreadable:
 
 
 def _upgraded(data: dict[str, Any]) -> dict[str, Any] | Unreadable:
-    """``data`` in the current format, or why its version can't be read."""
+    """``data`` in the current format, its tasks still to start for a retired role cancelled,
+    or why its version can't be read."""
     version = data.get("version")
     if type(version) is not int:
         return Unreadable(f"its version isn't a whole number: {version!r}")
@@ -438,7 +481,7 @@ def _upgraded(data: dict[str, Any]) -> dict[str, Any] | Unreadable:
         )
     if version < 1:
         return Unreadable(f"its version is unknown: {version}")
-    return reduce(_migrated, range(version, FORMAT_VERSION), data)
+    return _retired_cancelled(reduce(_migrated, range(version, FORMAT_VERSION), data))
 
 
 def _migrated(record: dict[str, Any], old: int) -> dict[str, Any]:
@@ -603,16 +646,17 @@ def resumed_notes(record: SessionRecord, interrupted: int) -> tuple[str, ...]:
 
 
 def reviews_cancelled_at_upgrade(record: SessionRecord) -> tuple[str, ...]:
-    """The ids of ``record``'s reviews that the upgrade to lens reviewers cancelled and that
-    haven't ended in its review lane yet, as their batches are still open: those the session
-    opened still has to end, as if they suggested nothing."""
+    """The ids of ``record``'s reviews that an upgrade cancelled, to lens reviewers or past a
+    retired role such as the super-reviewer, and that haven't ended in its review lane yet, as
+    their batches are still open: those the session opened still has to end, as if they
+    suggested nothing."""
     reviews = record.reviews
     if reviews is None:
         return ()
     return tuple(
         state.id
         for state in record.tasks
-        if state.reason == QUEUED_BEFORE_LENSES
+        if state.reason in CANCELLED_AT_UPGRADE
         and reviews.batches.get(state.id) in reviews.planner.batches
     )
 

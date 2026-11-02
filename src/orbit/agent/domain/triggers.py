@@ -189,16 +189,20 @@ class _Config(BaseModel):
 
 
 class Trigger(_Config):
-    """A trigger, as a file sets it: what it fires ``on``, the ``role`` of the task it queues
-    with its ``prompt``, or the checks it runs, the task checks or a named set, as ``checks``
-    (``gate`` read as the task checks), the events it takes ``when`` they match, the ``guards``
-    that may hold it back, how many landings it fires after, ``every``, whether it's ``manual``,
-    under its ``label``, whether its task is a ``draft``, and whether it's ``enabled``."""
+    """A trigger, as a file sets it: what it fires ``on``, the ``role`` of the task it queues with
+    its ``prompt``, or a list of roles, one task each, or the checks it runs, the task checks or a
+    named set, as ``checks`` (``gate`` read as the task checks), the events it takes ``when`` they
+    match, the ``guards`` that may hold it back, how many landings it fires after, ``every``,
+    whether it's ``manual``, under its ``label``, whether its task is a ``draft``, and whether it's
+    ``enabled``."""
 
     on: EventName = Field(
         description='The event it fires on, such as "task_landed", "commits" or "manual".'
     )
-    role: str | None = Field(default=None, description="The role of the task it queues.")
+    role: str | tuple[str, ...] | None = Field(
+        default=None,
+        description="The role of the task it queues, or a list of roles, queuing one task each.",
+    )
     checks: str | None = Field(
         default=None,
         description='Instead of a role, the checks it runs: "task-checks", or a named set.',
@@ -252,6 +256,14 @@ class Trigger(_Config):
                 f"{unknown[0]} isn't a guard; the guards are {', '.join(GUARD_NAMES)}.",
             )
         return guards
+
+    @property
+    def roles(self) -> tuple[str, ...]:
+        """The roles it queues a task for, in order: its ``role``, or each of its list; none if
+        it runs checks."""
+        if self.role is None:
+            return ()
+        return (self.role,) if isinstance(self.role, str) else self.role
 
 
 class ChecksTrigger(_Config):
@@ -376,13 +388,21 @@ def check_free_names(package: Mapping[str, Trigger], names: Iterable[str]) -> No
     checks, that a trigger of the ``package`` with a role has, on a line of its own, if any, each
     at ``triggers.<name>.checks``: merged over that trigger, it would have a role and checks."""
     problems = [
-        f"triggers.{name}.checks: {name} is taken by a built-in trigger, which queues a"
-        f" {role}'s task; give this trigger another name."
+        f"triggers.{name}.checks: {name} is taken by a built-in trigger, which queues"
+        f" {_tasks_of(roles)}; give this trigger another name."
         for name in names
-        if name in package and (role := package[name].role) is not None
+        if name in package and (roles := package[name].roles)
     ]
     if problems:
         raise ConfigError("\n".join(problems))
+
+
+def _tasks_of(roles: Sequence[str]) -> str:
+    """The tasks a trigger listing ``roles`` queues, in words: ``a coder's task``, or ``tasks
+    for style-reviewer, drift-reviewer and scaling-reviewer``."""
+    if len(roles) == 1:
+        return f"a {roles[0]}'s task"
+    return f"tasks for {', '.join(roles[:-1])} and {roles[-1]}"
 
 
 def check_triggers(
@@ -428,15 +448,20 @@ def _problems(trigger: Trigger, targets: _Targets) -> list[tuple[str, str]]:
 
 
 def _target_problems(trigger: Trigger, targets: _Targets) -> list[tuple[str, str]]:
-    """What's wrong with what ``trigger`` does: it needs a role among the ``targets``' roles or
-    ``checks`` naming the task checks or one of their sets, and not both."""
+    """What's wrong with what ``trigger`` does: it needs a role among the ``targets``' roles, or
+    a list of at least one, each among them, or ``checks`` naming the task checks or one of
+    their sets, and not both."""
     if trigger.role is None:
         return _checks_problems(trigger.checks, targets.sets)
     if trigger.checks is not None:
         return [("checks", "a trigger has a role or checks, not both.")]
-    if trigger.role not in targets.roles:
-        return [("role", _not_a_role(trigger.role, targets.roles))]
-    return []
+    if not trigger.roles:
+        return [("role", "a list of roles names at least one.")]
+    return [
+        ("role", _not_a_role(role, targets.roles))
+        for role in trigger.roles
+        if role not in targets.roles
+    ]
 
 
 def _checks_problems(checks: str | None, sets: Collection[str]) -> list[tuple[str, str]]:
@@ -614,12 +639,13 @@ def listening(
     raised: Collection[str] = (),
 ) -> list[tuple[str, Trigger]]:
     """The ``triggers`` that may fire on ``event``, by name, in their order: the enabled ones on
-    it that queue a task for one of ``roles``, the enabled roles, run a named set, or run the task
-    checks, on ``session_started`` only, whose ``when`` takes it and that didn't queue the task
-    that caused it, if any, as its origin says (decision 9). One guarded by ``review-rounds``
-    only listens while today's rounds and batches find a ``review`` due, and one guarded by
-    ``raised-finding``, on a batch's review, only if its role is among those that ``raised``
-    the batch's findings."""
+    it that queue a task for one of ``roles``, the enabled roles, by their role or one of their
+    list, run a named set, or run the task checks, on ``session_started`` only, whose ``when``
+    takes it and that didn't queue the task that caused it, if any, as its origin says (decision
+    9). One guarded by ``review-rounds`` only listens while today's rounds and batches find a
+    ``review`` due, and one guarded by ``raised-finding``, on a batch's review, only if one of
+    its roles is among those that ``raised`` the batch's findings (see :func:`firing_roles` for
+    the roles it then queues for)."""
     return [
         (name, trigger)
         for name, trigger in triggers.items()
@@ -631,10 +657,37 @@ def listening(
 
 def _raised_in(trigger: Trigger, event: TriggerEvent, raised: Collection[str]) -> bool:
     """Whether ``raised-finding`` lets ``trigger`` hear ``event``: it doesn't guard it, the
-    event isn't a batch's review, or the trigger's role is among those that ``raised`` the
-    batch's findings."""
-    batch = event.name == TASK_LANDED and event.fields.get(REVIEW_FIELD) == "batch"
-    return RAISED_FINDING not in trigger.guards or not batch or trigger.role in raised
+    event isn't a batch's review, or one of the trigger's roles is among those that ``raised``
+    the batch's findings."""
+    return not _narrowed(trigger, event) or _queues_for(trigger, raised)
+
+
+def _narrowed(trigger: Trigger, event: TriggerEvent | None) -> bool:
+    """Whether ``raised-finding`` narrows the roles ``trigger`` queues for on ``event``: it
+    guards it, and the event is a batch's review."""
+    batch = (
+        event is not None
+        and event.name == TASK_LANDED
+        and event.fields.get(REVIEW_FIELD) == "batch"
+    )
+    return batch and RAISED_FINDING in trigger.guards
+
+
+def firing_roles(
+    trigger: Trigger,
+    roles: Collection[str],
+    event: TriggerEvent | None = None,
+    raised: Collection[str] = (),
+) -> tuple[str, ...]:
+    """The roles ``trigger`` queues a task for as it fires, in its order: those it lists among
+    ``roles``, the enabled roles, and, on ``event``, if it's a batch's review that
+    ``raised-finding`` guards it on, only those among the roles that ``raised`` the batch's
+    findings, so each lens of a list reviews only the fixes of its own findings. Without an
+    ``event``, as on a landing counted or by hand, none is narrowed."""
+    narrowed = _narrowed(trigger, event)
+    return tuple(
+        role for role in trigger.roles if role in roles and (not narrowed or role in raised)
+    )
 
 
 def can_queue_reviews(triggers: Mapping[str, Trigger], roles: Collection[str]) -> bool:
@@ -672,8 +725,14 @@ def _acts(trigger: Trigger, event: str, roles: Collection[str]) -> bool:
     ``roles``, runs a named set, on any event, or runs the task checks, only on
     ``session_started``, as the startup check."""
     if trigger.checks is None:
-        return trigger.role in roles
+        return _queues_for(trigger, roles)
     return trigger.checks != TASK_CHECKS or event == SESSION_STARTED
+
+
+def _queues_for(trigger: Trigger, roles: Collection[str]) -> bool:
+    """Whether ``trigger`` queues a task for one of ``roles``: its role, or one of its list, is
+    among them."""
+    return any(role in roles for role in trigger.roles)
 
 
 def _values(wanted: str | tuple[str, ...]) -> tuple[str, ...]:
@@ -683,7 +742,7 @@ def _values(wanted: str | tuple[str, ...]) -> tuple[str, ...]:
 
 def held_back(trigger: Trigger, prompt: str | None, tasks: Sequence[TaskState]) -> bool:
     """Whether a guard of ``trigger`` holds back its task, rendered as ``prompt``, with ``tasks``
-    on the board: ``not-queued`` while a task of its role is still to run or running,
+    on the board: ``not-queued`` while a task of one of its roles is still to run or running,
     ``dedupe`` while such a task's prompt has the same first line, and ``suggestions-pending``
     while a task the reviews queued is: a task orbit queued as a review, booked into its review
     lane, whatever its role, or a task in a review's batch. ``review-rounds`` and
@@ -700,7 +759,7 @@ def _holds(
     tasks ``waiting``."""
     match guard:
         case "not-queued":
-            return _queued(trigger.role, waiting)
+            return _queued(trigger.roles, waiting)
         case "dedupe":
             return prompt is not None and _repeats(prompt, waiting)
         case "suggestions-pending":
@@ -709,9 +768,9 @@ def _holds(
             return False
 
 
-def _queued(role: str | None, waiting: Sequence[TaskState]) -> bool:
-    """Whether one of the tasks ``waiting`` is ``role``'s."""
-    return any(state.task.role == role for state in waiting)
+def _queued(roles: Collection[str], waiting: Sequence[TaskState]) -> bool:
+    """Whether one of the tasks ``waiting`` is one of ``roles``'."""
+    return any(state.task.role in roles for state in waiting)
 
 
 def _reviews_queued(waiting: Sequence[TaskState]) -> bool:
@@ -782,7 +841,7 @@ def fires_by_hand(trigger: Trigger, roles: Collection[str]) -> bool:
     """Whether ``trigger`` fires when it's fired by hand, with ``roles`` the enabled roles: if
     it's enabled and queues a task for one of them or runs a named set, whatever its ``when``
     and guards. The task checks run only as the startup check, so not by hand."""
-    acts = trigger.role in roles or trigger.checks not in (None, TASK_CHECKS)
+    acts = _queues_for(trigger, roles) or trigger.checks not in (None, TASK_CHECKS)
     return trigger.enabled and acts
 
 

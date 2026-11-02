@@ -5,7 +5,7 @@ from orbit.protocol import PLANNER, AgentExited, AgentStarted, AssistantMessage,
 from orbit.tui.view.tab_strip import ALL_TAB_ID, OPENING, PLANNER_TAB_ID, TabStrip
 from tests.frontend_fakes import opened_before
 
-STRIP = ["All", "planner", "experimenter", "coder", "reviewer", "super-reviewer", "configurator"]
+STRIP = ["All", "planner", "experimenter", "coder", "reviewer", "configurator"]
 
 
 class Strip:

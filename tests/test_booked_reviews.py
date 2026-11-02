@@ -22,8 +22,8 @@ from orbit.protocol import (
     INTERNAL,
     INVALID,
     REVIEWER,
+    SUPER_LENS_REVIEWERS,
     SUPER_REVIEW,
-    SUPER_REVIEWER,
     ActivateSession,
     CancelTurn,
     CommandRefused,
@@ -118,8 +118,15 @@ def latest_board(events: list[Event]) -> tuple[TaskState, ...]:
 
 
 def super_reviews(events: list[Event]) -> bool:
-    """Whether the last board in ``events`` has a super review on it."""
-    return any(state.task.role == SUPER_REVIEWER for state in latest_board(events))
+    """Whether the last board in ``events`` has a super review's lens task on it."""
+    return any(state.task.role in SUPER_LENS_REVIEWERS for state in latest_board(events))
+
+
+LENSES = (claims_done,) * len(SUPER_LENS_REVIEWERS)
+"""The scripts of one super review's lenses, each finding nothing."""
+
+LENS_TASKS = [(role, SUPER_REVIEW, "review") for role in SUPER_LENS_REVIEWERS]
+"""Each of a super review's lens tasks' role, origin and what it was queued as."""
 
 
 async def super_review_queued(
@@ -173,7 +180,8 @@ async def test_a_reviewer_task_from_a_trigger_booking_no_review_holds_back_nothi
     session, _, _ = session_for(
         claims_done,
         claims_done,
-        reviewers=(gated(gate), suggests()),
+        *LENSES,
+        reviewers=(gated(gate),),
         tree=FakeTree(),
         review=True,
         triggers=triggers_with(2, look=looks()),
@@ -186,7 +194,7 @@ async def test_a_reviewer_task_from_a_trigger_booking_no_review_holds_back_nothi
         (CODER, "manual", "task"),
         (CODER, "manual", "task"),
         (REVIEWER, LOOK, "task"),
-        (SUPER_REVIEWER, SUPER_REVIEW, "review"),
+        *LENS_TASKS,
     ]
 
 
@@ -526,7 +534,7 @@ async def test_a_saved_review_of_another_role_still_cant_be_edited() -> None:
 async def test_a_saved_reviewer_task_booking_no_review_still_holds_back_nothing() -> None:
     gate = asyncio.Event()
     record = read_back(*LOOKING[:2])
-    session, events = await opening(record, claims_done, reviewers=(gated(gate), suggests()))
+    session, events = await opening(record, claims_done, *LENSES, reviewers=(gated(gate),))
     await send(session, RunTasks())
     events = await super_review_queued(session, gate, events)
     await session.close()
@@ -534,7 +542,7 @@ async def test_a_saved_reviewer_task_booking_no_review_still_holds_back_nothing(
     assert shown(board(events)) == [
         (CODER, "manual", "task"),
         (REVIEWER, LOOK, "task"),
-        (SUPER_REVIEWER, SUPER_REVIEW, "review"),
+        *LENS_TASKS,
     ]
 
 

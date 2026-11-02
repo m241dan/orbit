@@ -19,8 +19,8 @@ from orbit.protocol import (
     BUSY,
     LENS_REVIEWERS,
     REVIEWER,
+    SUPER_LENS_REVIEWERS,
     SUPER_REVIEW,
-    SUPER_REVIEWER,
     UNKNOWN,
     AcceptTask,
     Activity,
@@ -67,7 +67,6 @@ from tests.agent_fakes import (
     settle,
     settled,
     snapshot_of,
-    suggests,
     turns_of,
 )
 from tests.lane_fakes import SECURITY, WITH_SECURITY, audit
@@ -379,14 +378,14 @@ async def test_the_merging_lane_is_named_by_its_roles() -> None:
 
 
 def with_review_roles(
-    reviewer: dict[str, object], super_reviewer: dict[str, object]
+    reviewer: dict[str, object], super_lenses: dict[str, object]
 ) -> dict[str, Role]:
-    """The built-in roles, with the ``reviewer`` and ``super_reviewer`` fields changed and the
-    lens reviewers disabled."""
+    """The built-in roles, with the ``reviewer``'s fields and the super review's lenses' fields
+    changed, as ``super_lenses`` says, and the per-commit lens reviewers disabled."""
     return {
         **ROLES,
         REVIEWER: ROLES[REVIEWER].model_copy(update=reviewer),
-        SUPER_REVIEWER: ROLES[SUPER_REVIEWER].model_copy(update=super_reviewer),
+        **{name: ROLES[name].model_copy(update=super_lenses) for name in SUPER_LENS_REVIEWERS},
         **{name: ROLES[name].model_copy(update={"enabled": False}) for name in LENS_REVIEWERS},
     }
 
@@ -403,22 +402,23 @@ async def test_reviews_are_off_while_the_reviewer_shares_the_merging_lane() -> N
     await session.close()
 
 
-async def test_reviews_are_off_while_the_super_reviewer_alone_is_in_the_merging_lane() -> None:
+async def test_reviews_are_off_while_the_super_lenses_alone_are_in_the_merging_lane() -> None:
     roles = with_review_roles({"enabled": False}, {"lane": "work"})
     session, _, _ = session_for(roles=roles, tree=FakeTree(), review=True)
     assert session._lane is None
     await session.close()
 
 
-async def test_with_the_reviewer_disabled_super_reviews_run_in_the_super_reviewers_lane() -> None:
+async def test_with_the_reviewer_disabled_super_reviews_run_in_the_super_lenses_lane() -> None:
     roles = with_review_roles({"enabled": False}, {"lane": "audit"})
-    session, _, _ = session_for(reviewers=(suggests(),), tree=FakeTree(), review=True, roles=roles)
+    lenses = (claims_done,) * len(SUPER_LENS_REVIEWERS)
+    session, _, _ = session_for(*lenses, tree=FakeTree(), review=True, roles=roles)
     lane = lane_of(session)
-    assert (lane.runner.lane, lane.roles) == ("audit", frozenset({SUPER_REVIEWER}))
+    assert (lane.runner.lane, lane.roles) == ("audit", frozenset(SUPER_LENS_REVIEWERS))
     await send(session, FireTrigger(trigger=SUPER_REVIEW))
     events = await asyncio.wait_for(settle(session), 10)
     await session.close()
-    assert [t.task.role for t in board(events)] == [SUPER_REVIEWER]
+    assert [t.task.role for t in board(events)] == list(SUPER_LENS_REVIEWERS)
     assert [e for e in events if isinstance(e, ReviewStatus)][-1].open_batches == 0
 
 
@@ -434,7 +434,7 @@ async def test_the_review_lane_runs_the_other_roles_in_its_lane() -> None:
         claims_done, roles=WITH_AUDITOR, tree=FakeTree(), review=True
     )
     assert lane_of(session).roles == frozenset(
-        {"reviewer", "super-reviewer", *LENS_REVIEWERS, "auditor"}
+        {"reviewer", *LENS_REVIEWERS, *SUPER_LENS_REVIEWERS, "auditor"}
     )
     await send(session, AddTask(task=AUDIT))
     await events_until(session, idle("review"))

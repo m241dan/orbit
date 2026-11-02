@@ -2,7 +2,8 @@
 # checks. A trigger's prompt names its template, a Markdown file beside this one.
 #
 # Every lens reviews each commit; a batch of fixes is reviewed by Bugs and Tests, and by the
-# lenses guarded by raised-finding only if they raised one of its findings.
+# lenses guarded by raised-finding only if they raised one of its findings. The super review's
+# three lenses review the whole codebase every ten commits, and the fixes of their own findings.
 
 [triggers.fit-review]
 on = "task_landed"
@@ -48,13 +49,20 @@ when = { findings = "some" }
 
 [triggers.super-review]
 on = "commits"
-role = "super-reviewer"
+role = ["style-reviewer", "drift-reviewer", "scaling-reviewer"]
 prompt = "super-review.md"
 when = { origin = ["manual", "planner"] }
 guards = ["suggestions-pending"]
 every = 10
 manual = true
 label = "Super review"
+
+[triggers.super-fix-review]
+on = "task_landed"
+role = ["style-reviewer", "drift-reviewer", "scaling-reviewer"]
+prompt = "lens-review.md"
+when = { review = "batch" }
+guards = ["review-rounds", "raised-finding"]
 
 [triggers.configure-checks]
 on = "manual"

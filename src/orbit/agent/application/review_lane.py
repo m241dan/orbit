@@ -655,11 +655,11 @@ class ReviewLane:
         return tuple(task_id for task_id, booked in self._batches.items() if booked == batch)
 
     async def _landed(self, job: ReviewJob, since: str | None) -> LandedSince:
-        """What landed that ``job``'s reviewer, a super reviewer, is told as it's queued: the
-        commits after ``since`` up to its commit, oldest first, with the files they changed and
-        the sample of other code files it reads too. (A review of commits is told what landed by
-        :meth:`_tell_landed`, as it starts.) What git can't list is left out: the review goes
-        ahead without it, as it's only a hint."""
+        """What landed that ``job``'s reviewers, a super review's lenses, are told as they're
+        queued: the commits after ``since`` up to its commit, oldest first, with the files they
+        changed and the sample of other code files it reads too. (A review of commits is told what
+        landed by :meth:`_tell_landed`, as it starts.) What git can't list is left out: the review
+        goes ahead without it, as it's only a hint."""
         commit = job.commits[0]
         landed = await self._since_super(since, commit)
         return replace(landed, sampled=await self._sample(commit, landed.files))

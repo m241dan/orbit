@@ -34,7 +34,7 @@ from orbit.agent.domain.role_runtimes import (
     model_problems,
     runtime_problems,
 )
-from orbit.agent.domain.roles import Role, RoleName
+from orbit.agent.domain.roles import RETIRED_ROLES, Role, RoleName
 from orbit.agent.domain.runtimes import (
     UNCHECKED,
     ModelAliases,
@@ -259,21 +259,22 @@ def load_layered(
     is the super-review trigger's ``every`` unless that trigger sets its own, with a notice that
     it's moving there. Each set a step is in that no enabled trigger runs has a notice too.
 
-    Raises :class:`ConfigError` naming the first setting of a later version of orbit ``data``
-    sets, if any, ahead of anything else; otherwise naming each problem if it's invalid, as it is
-    when a set's table is for a set no step is in (see
+    Raises :class:`ConfigError` naming the first setting of a later version of orbit ``data`` sets,
+    if any, ahead of anything else, then saying what became of a built-in role it sets that orbit no
+    longer ships (see :data:`~orbit.agent.domain.roles.RETIRED_ROLES`); otherwise naming each
+    problem if it's invalid, as it is when a set's table is for a set no step is in (see
     :func:`~orbit.agent.domain.checks.check_sets`), a trigger breaks a rule of
-    :func:`~orbit.agent.domain.triggers.check_triggers`, its sets those a step is in, or a
-    role's runtime is one this version of orbit doesn't know, doesn't take its model or can't do
-    what the role asks (see :func:`~orbit.agent.domain.role_runtimes.runtime_problems`), a
-    :class:`PersonalRoleError` if the personal roles are at fault, and a
-    :class:`UserConfigError` if a model the user config sets isn't one its role's runtime takes,
-    after the project's problems.
+    :func:`~orbit.agent.domain.triggers.check_triggers`, its sets those a step is in, or a role's
+    runtime is one this version of orbit doesn't know, doesn't take its model or can't do what the
+    role asks (see :func:`~orbit.agent.domain.role_runtimes.runtime_problems`), a
+    :class:`PersonalRoleError` if the personal roles are at fault, and a :class:`UserConfigError` if
+    a model the user config sets isn't one its role's runtime takes, after the project's problems.
     """
     _refuse_later_settings(data)
     roles = data.get("roles", {})
     if not isinstance(roles, dict):
         return LayeredConfig(_validated(data), {})  # Refused: the roles aren't a table.
+    _refuse_retired_roles(roles)
     project = Layer("project", path)
     merged = merge_roles(package.roles, user, ProjectRoles(project, roles))
     check_personal(merged)
@@ -485,6 +486,14 @@ def _refuse_later_settings(data: dict[str, Any]) -> None:
     setting = next(_later_settings(data), None)
     if setting is not None:
         raise ConfigError(f"{setting} {LATER_VERSION}")
+
+
+def _refuse_retired_roles(roles: Mapping[str, object]) -> None:
+    """Raise :class:`ConfigError` saying what became of each role of :data:`RETIRED_ROLES` the
+    project file's ``roles`` table sets anything for, on a line of its own, if it sets one."""
+    retired = [why for name, why in RETIRED_ROLES.items() if name in roles]
+    if retired:
+        raise ConfigError("\n".join(retired))
 
 
 def _later_settings(data: dict[str, Any]) -> Iterator[str]:

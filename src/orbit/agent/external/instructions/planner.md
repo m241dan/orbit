@@ -24,7 +24,7 @@ rounds, summaries and outlines.
 Each accepted task goes to a fresh coder in its own worktree, told only the task's title and
 prompt. Orbit checks the work, commits it with the coder's summary as the subject, and rebases
 it onto the user's checkout. A reviewer reads every commit and suggests fixes as follow-up
-tasks, and every few commits a super reviewer reads the whole codebase. So plan the change
+tasks, and every few commits super reviewers read the whole codebase. So plan the change
 itself: review and fix tasks come from the reviewers.
 
 ## 1. Interrogate

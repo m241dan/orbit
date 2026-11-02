@@ -205,7 +205,7 @@ starts its own trace: it's a root span, linked to the asking turn's `orbit.plann
 
 ### `orbit.review`
 
-One span for each review the review lane runs, a reviewer's or a super reviewer's, and each
+One span for each review the review lane runs, a reviewer's or a super review lens's, and each
 finding role's (a lens's) task booked into a review that runs there, from when it starts until
 it's followed up: its batch's review queued, if that's due, or the work lane asked to run its
 suggestions. Each starts its own trace: it's a root span, linked to what queued it (see
@@ -216,7 +216,7 @@ suggestions. Each starts its own trace: it's a root span, linked to what queued 
 | --- | --- | --- |
 | `orbit.workspace.id` | string | The workspace's id (`unregistered` for one no store registers). |
 | `orbit.session.id` | string | The id of the session open as the review started. |
-| `orbit.role` | string | The review's role: `reviewer`, `super-reviewer` for a super review, or a lens's role, such as `bugs-reviewer`. |
+| `orbit.role` | string | The review's role: `reviewer`, or a lens's role, such as `bugs-reviewer`, or `drift-reviewer` for a lens of a super review. |
 | `orbit.lens` | string | For a lens's task, its role, such as `bugs-reviewer`; absent for any other review. |
 | `orbit.trigger` | string | Who queued the review, its origin: the trigger that queued it, by name, `review` or `super-review` for those of orbit's shipped triggers and a project's trigger, such as a `commits` one, for its own; or `manual` or `planner`. |
 | `gen_ai.request.model` | string | The model the review's agent is launched with; absent when the task names none (the CLI's default). |

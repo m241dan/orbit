@@ -9,6 +9,7 @@ from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import (
     PLANNER,
     STORAGE_FAILED,
+    SUPER_LENS_REVIEWERS,
     SUPER_REVIEW,
     AddTask,
     CommandEnvelope,
@@ -168,11 +169,16 @@ async def test_a_save_that_fails_halts_the_session_and_nothing_more_is_saved() -
     await session.close()
 
 
+LENSES = (claims_done,) * len(SUPER_LENS_REVIEWERS)
+"""The scripts of one super review's lenses, each finding nothing."""
+
+
 async def test_the_review_state_and_the_repositorys_super_count_are_saved() -> None:
     store = FakeStore(count=1)
     session, _, _ = session_for(
         claims_done,
-        reviewers=(suggests(), suggests()),
+        *LENSES,
+        reviewers=(suggests(),),
         tree=FakeTree(),
         review=True,
         triggers=super_every(2),
@@ -182,7 +188,7 @@ async def test_the_review_state_and_the_repositorys_super_count_are_saved() -> N
     events = await asyncio.wait_for(settle(session), 10)
 
     # Counting on from the saved 1, the first landing made a super review due, of its commit.
-    assert "super-reviewer" in [t.task.role for t in board(events)]
+    assert set(SUPER_LENS_REVIEWERS) <= {t.task.role for t in board(events)}
     assert store.counts == [SuperReviewCount(0, "c1", 1)]
     assert store.last.reviews == lane_of(session).snapshot()
     assert store.last.reviews is not None and store.last.reviews.jobs
@@ -195,7 +201,8 @@ async def test_the_files_a_super_review_samples_are_saved_with_the_count() -> No
     tree.tracked["c1"] = ["a.py", "README.md"]
     session, _, _ = session_for(
         claims_done,
-        reviewers=(suggests(), suggests()),
+        *LENSES,
+        reviewers=(suggests(),),
         tree=tree,
         review=True,
         triggers=super_every(2),
@@ -213,7 +220,8 @@ async def test_a_super_count_that_cannot_be_read_is_not_overwritten_by_a_landing
     store.count_load_failure = "Couldn't read the review count from orbit.db: busy"
     session, _, _ = session_for(
         claims_done,
-        reviewers=(suggests(), suggests()),
+        *LENSES,
+        reviewers=(suggests(),),
         tree=FakeTree(),
         review=True,
         triggers=super_every(2),
@@ -222,7 +230,7 @@ async def test_a_super_count_that_cannot_be_read_is_not_overwritten_by_a_landing
     await start(session)
     events = await asyncio.wait_for(settle(session), 10)
 
-    assert "super-reviewer" not in [t.task.role for t in board(events)]
+    assert not set(SUPER_LENS_REVIEWERS) & {t.task.role for t in board(events)}
     assert store.counts == [] and store.count == SuperReviewCount(7)
     assert store.last.reviews is not None and store.last.reviews.jobs
     await session.close()

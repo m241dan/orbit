@@ -55,7 +55,7 @@ BUSY_CRITIC = f"● {CRITIC}"
 SHARING = with_agents(*TALKING.agents, CRITIC_ENTRY)
 """A catalog listing the planner, the coder, and the architect and the critic in one lane."""
 
-STRIP = ["All", "planner", "experimenter", "coder", "reviewer", "super-reviewer", "configurator"]
+STRIP = ["All", "planner", "experimenter", "coder", "reviewer", "configurator"]
 
 TALK_TO_PLANNER = "Press i to talk to Planner, esc to stop typing"
 TALK_TO_ARCHITECT = "Press i to talk to Architect, esc to stop typing"

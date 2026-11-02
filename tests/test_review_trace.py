@@ -16,8 +16,8 @@ from orbit.agent.application.task_trace import TASK_SPAN
 from orbit.agent.domain.board import TaskBoard
 from orbit.protocol import (
     REVIEWER,
+    SUPER_LENS_REVIEWERS,
     SUPER_REVIEW,
-    SUPER_REVIEWER,
     AddTask,
     FireTrigger,
     RunTasks,
@@ -276,20 +276,27 @@ async def test_a_review_stopped_with_the_lane_and_run_again_still_links_to_what_
     assert linked_to(again, task_span(traced, "1"))
 
 
+LENSES = (claims_done,) * len(SUPER_LENS_REVIEWERS)
+"""The scripts of one super review's lenses, each finding nothing."""
+
+
 async def test_a_super_review_asked_for_links_to_its_fire_trigger_command() -> None:
     traced = Traced()
-    plane, _ = traced_plane(traced, reviewers=(suggests(),))
+    plane, _ = traced_plane(traced, *LENSES, reviewers=())
     await send(plane, FireTrigger(trigger=SUPER_REVIEW))
     await asyncio.wait_for(settle(plane), 10)
     await close(plane)
 
-    [review] = traced.spans(REVIEW_SPAN)
+    lenses = traced.spans(REVIEW_SPAN)
     fire_trigger = traced.command("fire_trigger")
-    assert linked_to(review, fire_trigger)
-    assert trace_id(review) != trace_id(fire_trigger)
-    assert attributes(review)["orbit.role"] == SUPER_REVIEWER
-    assert attributes(review)["orbit.trigger"] == SUPER_REVIEW
-    assert attributes(review)["orbit.review.cap"] == 10
+    assert sorted(attributes(review)["orbit.role"] for review in lenses) == sorted(
+        SUPER_LENS_REVIEWERS
+    )
+    for review in lenses:
+        assert linked_to(review, fire_trigger)
+        assert trace_id(review) != trace_id(fire_trigger)
+        assert attributes(review)["orbit.trigger"] == SUPER_REVIEW
+        assert attributes(review)["orbit.review.cap"] == 10
 
 
 async def test_a_super_review_due_on_count_links_to_the_landing_that_reached_it() -> None:
@@ -297,16 +304,19 @@ async def test_a_super_review_due_on_count_links_to_the_landing_that_reached_it(
     plane, _ = traced_plane(
         traced,
         claims_done,
-        reviewers=(suggests(), suggests()),
+        *LENSES,
+        reviewers=(suggests(),),
         triggers=super_every(1),
     )
     await reviewed(plane, FLAG)
     await close(plane)
 
     spans = traced.spans(REVIEW_SPAN)
-    [whole] = [span for span in spans if attributes(span)["orbit.role"] == SUPER_REVIEWER]
-    assert linked_to(whole, task_span(traced, "1"))
-    assert attributes(whole)["orbit.trigger"] == SUPER_REVIEW
+    lenses = [span for span in spans if attributes(span)["orbit.role"] in SUPER_LENS_REVIEWERS]
+    assert len(lenses) == len(SUPER_LENS_REVIEWERS)
+    for whole in lenses:
+        assert linked_to(whole, task_span(traced, "1"))
+        assert attributes(whole)["orbit.trigger"] == SUPER_REVIEW
 
 
 async def test_a_review_the_user_queued_records_no_job_and_links_to_nothing() -> None:

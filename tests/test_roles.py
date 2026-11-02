@@ -157,11 +157,13 @@ def test_built_in_roles_cover_coding_reviewing_and_planning() -> None:
     assert set(BUILT_IN_ROLES) == {
         "coder",
         "reviewer",
-        "super-reviewer",
         "planner",
         "experimenter",
         "configurator",
         *LENS_REVIEWERS,
+        "style-reviewer",
+        "drift-reviewer",
+        "scaling-reviewer",
     }
     coder = BUILT_IN_ROLES["coder"]
     assert coder.verify and coder.tool_access == "full"
@@ -176,7 +178,8 @@ def test_built_in_roles_cover_coding_reviewing_and_planning() -> None:
     assert not reviewer.verify and reviewer.tool_access == "restricted"
     assert "run_check" not in reviewer.tools
     assert "suggest_task" in reviewer.tools
-    assert "suggest_task" in BUILT_IN_ROLES["super-reviewer"].tools
+    assert "report_finding" in BUILT_IN_ROLES["drift-reviewer"].tools
+    assert "suggest_task" not in BUILT_IN_ROLES["drift-reviewer"].tools
     assert "suggest_task" not in coder.tools
     planner = BUILT_IN_ROLES["planner"]
     assert set(planner.tools) == {
@@ -187,7 +190,7 @@ def test_built_in_roles_cover_coding_reviewing_and_planning() -> None:
         "read_report",
     }
     assert planner.consults == ("experimenter",)
-    assert BUILT_IN_ROLES["super-reviewer"].model == "opus"
+    assert BUILT_IN_ROLES["drift-reviewer"].model == "opus"
     assert all(role.instructions == INSTRUCTIONS[name] for name, role in BUILT_IN_ROLES.items())
     assert all(set(role.tools) <= set(ORBIT_TOOLS) for role in BUILT_IN_ROLES.values())
 
@@ -238,9 +241,9 @@ def test_a_roles_timeout_in_seconds_is_its_minutes_or_no_limit(
 
 
 def test_a_role_task_runs_in_the_role_with_its_settings() -> None:
-    reviewer = BUILT_IN_ROLES["super-reviewer"]
-    assert role_task("super-reviewer", reviewer, "Review.") == TaskSpec(
-        prompt="Review.", settings=Settings(model="opus"), role="super-reviewer"
+    reviewer = BUILT_IN_ROLES["drift-reviewer"]
+    assert role_task("drift-reviewer", reviewer, "Review.") == TaskSpec(
+        prompt="Review.", settings=Settings(model="opus"), role="drift-reviewer"
     )
 
 

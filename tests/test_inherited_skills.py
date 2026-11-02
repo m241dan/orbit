@@ -12,7 +12,7 @@ from orbit.agent.domain.triggers import Trigger
 from orbit.protocol import (
     CODER,
     REVIEWER,
-    SUPER_REVIEWER,
+    SUPER_LENS_REVIEWERS,
     AddTask,
     RunTasks,
     TaskSpec,
@@ -108,8 +108,8 @@ async def test_the_review_of_a_batch_names_the_skills_of_its_suggestions() -> No
 
 async def test_a_super_review_names_no_skills_after_a_task_naming_some_lands() -> None:
     tasks, _ = await reviewed(suggests(), suggests(), triggers=super_every(1))
-    [super_review] = [t for t in tasks if t.task.role == SUPER_REVIEWER]
-    assert super_review.task.skills == ()
+    lenses = [t for t in tasks if t.task.role in SUPER_LENS_REVIEWERS]
+    assert [t.task.skills for t in lenses] == [()] * len(SUPER_LENS_REVIEWERS)
 
 
 async def test_a_fallback_fix_names_the_skills_of_the_task_it_fixes() -> None:

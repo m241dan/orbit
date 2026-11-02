@@ -1,7 +1,8 @@
 """The super review fired from its trigger in a session: due every so many landings of the
 user's and the planner's tasks, as the trigger's ``every`` says (or ``super_review_every``, its
 alias), not counting review-suggested work, fired by hand with ctrl+g, its count starting again
-either way, and queued from the trigger's template with the trigger's name as its origin."""
+either way, and queued from the trigger's template with the trigger's name as its origin, one
+task for each of the super review's lenses."""
 
 import asyncio
 from collections.abc import Mapping
@@ -14,8 +15,8 @@ from orbit.agent.domain.triggers import Trigger
 from orbit.protocol import (
     CODER,
     REVIEWER,
+    SUPER_LENS_REVIEWERS,
     SUPER_REVIEW,
-    SUPER_REVIEWER,
     CommandAccepted,
     FireTrigger,
     TaskSpec,
@@ -52,12 +53,17 @@ def configured(data: dict[str, Any]) -> tuple[dict[str, Trigger], tuple[str, ...
     return dict(config.triggers), config.notices
 
 
+LENSES = (claims_done,) * len(SUPER_LENS_REVIEWERS)
+"""The scripts of one super review's lenses, each finding nothing."""
+
+
 def reviewing(*scripts: Any, **options: Any) -> WorkspaceHost:
-    """A session landing work in a tree and reviewing it, its tasks played by ``scripts`` and its
-    reviews by super reviewers claiming done; ``options`` go to :func:`session_for`."""
+    """A session landing work in a tree and reviewing it, its tasks played by ``scripts``, then
+    the lenses of a super review by :data:`LENSES`, and its reviews by reviewers claiming done;
+    ``options`` go to :func:`session_for`."""
     reviewers = options.pop("reviewers", (suggests(),) * 3)
     session, _, _ = session_for(
-        *scripts, reviewers=reviewers, tree=FakeTree(), review=True, **options
+        *scripts, *LENSES, reviewers=reviewers, tree=FakeTree(), review=True, **options
     )
     return session
 
@@ -73,13 +79,27 @@ async def landed(count: int, triggers: Mapping[str, Trigger]) -> list[TaskState]
 
 
 def supers(tasks: list[TaskState]) -> list[TaskState]:
-    """The super reviews among ``tasks``."""
-    return [state for state in tasks if state.task.role == SUPER_REVIEWER]
+    """The super review's lens tasks among ``tasks``."""
+    return [state for state in tasks if state.task.role in SUPER_LENS_REVIEWERS]
 
 
 def whole(commit: str) -> ReviewJob:
     """The super review of the codebase at ``commit``."""
     return ReviewJob(commits=(commit,), round=0, batch=None, whole=True)
+
+
+def lens_prompt(commit: str) -> str:
+    """Today's super review prompt of the codebase at ``commit`` without its cap on
+    suggestions, as a lens files none."""
+    prompt = review_prompt(whole(commit), "", 10, ())
+    return prompt.replace("\n\nYou may make at most 10 suggestions.", "", 1)
+
+
+def described(tasks: list[TaskState]) -> list[tuple[str, str, str, str | None, str]]:
+    """Each of ``tasks``' role, origin, what it was queued as, model and prompt."""
+    return [
+        (t.task.role, t.origin, t.queued_as, t.task.settings.model, t.task.prompt) for t in tasks
+    ]
 
 
 async def test_ten_landings_of_the_users_and_the_planners_tasks_queue_todays_super_review() -> None:
@@ -93,10 +113,12 @@ async def test_ten_landings_of_the_users_and_the_planners_tasks_queue_todays_sup
 
     tasks = list(board(events))
     assert [state.origin for state in tasks[:10]] == ["planner"] * 5 + ["manual"] * 5
-    [review] = supers(tasks)
-    assert tasks[-1] == review
-    assert (review.origin, review.task.settings.model) == (SUPER_REVIEW, "opus")
-    assert review.task.prompt == review_prompt(whole("c10"), "", 10, ())
+    lenses = supers(tasks)
+    assert tasks[10:] == lenses
+    prompt = lens_prompt("c10")
+    assert described(lenses) == [
+        (role, SUPER_REVIEW, "review", "opus", prompt) for role in SUPER_LENS_REVIEWERS
+    ]
     assert lane_of(session).planner.super_count == SuperReviewCount(0, "c10", 1)
 
 
@@ -124,16 +146,17 @@ async def test_review_suggested_work_landing_does_not_count_toward_the_super_rev
 async def test_the_triggers_every_decides_how_many_landings_a_super_review_waits_for() -> None:
     triggers, notices = configured({"triggers": {SUPER_REVIEW: {"every": 3}}})
     assert notices == ()
-    [review] = supers(await landed(3, unreviewed(triggers)))
-    assert review.task.prompt == review_prompt(whole("c3"), "", 10, ())
+    lenses = supers(await landed(3, unreviewed(triggers)))
+    assert [state.task.prompt for state in lenses] == [lens_prompt("c3")] * 3
 
 
 async def test_super_review_every_alone_decides_it_through_the_trigger_with_its_notice() -> None:
     triggers, notices = configured({"super_review_every": 4})
     assert notices == (SUPER_REVIEW_EVERY_MOVING,)
     assert supers(await landed(3, unreviewed(triggers))) == []
-    [review] = supers(await landed(4, unreviewed(triggers)))
-    assert review.task.prompt.startswith("Super review of the codebase at c4")
+    lenses = supers(await landed(4, unreviewed(triggers)))
+    assert len(lenses) == 3
+    assert lenses[0].task.prompt.startswith("Super review of the codebase at c4")
 
 
 async def test_ctrl_g_queues_a_super_review_at_once_and_starts_the_count_again() -> None:
@@ -144,14 +167,16 @@ async def test_ctrl_g_queues_a_super_review_at_once_and_starts_the_count_again()
 
     await send(session, FireTrigger(trigger=SUPER_REVIEW))
     events = await asyncio.wait_for(settle(session, events), 10)
-    [review] = supers(list(board(events)))
-    assert (review.origin, review.status) == (SUPER_REVIEW, "completed")
+    lenses = supers(list(board(events)))
+    assert [(t.task.role, t.origin, t.status) for t in lenses] == [
+        (role, SUPER_REVIEW, "completed") for role in SUPER_LENS_REVIEWERS
+    ]
     assert lane_of(session).planner.super_count == SuperReviewCount(0, "base", 1)
 
     await start(session, "Two")  # One landing since: not yet due again.
     events = await asyncio.wait_for(settle(session, events), 10)
     await session.close()
-    assert len(supers(list(board(events)))) == 1
+    assert len(supers(list(board(events)))) == 3
     assert lane_of(session).planner.super_count.since_super == 1
 
 

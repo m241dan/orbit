@@ -1,6 +1,6 @@
 """Firing triggers: the events of a task's end raised, and each trigger listening for one queuing
-its role's task on the board, its prompt rendered from its template, unless a guard holds it
-back.
+its role's task on the board, or a task for each enabled role of its list, its prompt rendered
+once from its template, unless a guard holds it back.
 
 The ``review-rounds`` guard is today's review planner: the review lane finds the review due on a
 landing, which the triggers it guards review, and books each task they queue into that review,
@@ -11,7 +11,8 @@ A batch's review falls due as the batch is done rather than as one task lands, s
 triggers ``review-rounds`` guards on ``task_landed`` with no task causing it, its ``review``
 field ``batch`` where a landing's is ``commit``. Of them, those ``raised-finding`` guards fire
 only if their role raised one of the batch's findings, so a batch of fixes is reviewed narrowly
-by the lenses whose findings it fixes.
+by the lenses whose findings it fixes; a trigger listing roles queues only for those of them
+that raised one.
 
 The review lane counts each landing toward the ``commits`` triggers too, as their guards see the
 board before the landing's own review is queued, and has those that fire, or one fired by hand,
@@ -62,6 +63,7 @@ from orbit.agent.domain.triggers import (
     TriggerEvent,
     count_landing,
     fires_by_hand,
+    firing_roles,
     held_back,
     listening,
     render_template,
@@ -115,13 +117,16 @@ class _Firing:
     """The triggers ``listening`` for an event, by name, in order, with what they render their
     tasks from: its ``values`` and the review due, ``review``, if any. On a landing ``counted``
     toward the ``commits`` triggers, or fired by hand, their guards were decided already, and
-    each of them reviews ``review``; otherwise only those ``review-rounds`` guards do."""
+    each of them reviews ``review``; otherwise only those ``review-rounds`` guards do. The
+    ``event`` raised, if any, narrows the roles each queues for, as
+    :func:`~orbit.agent.domain.triggers.firing_roles` says."""
 
     listening: list[tuple[str, Trigger]]
     values: Mapping[str, str]
     review: ReviewRound | None
     counted: bool = False
     books: Literal["guarded", "every"] = "guarded"
+    event: TriggerEvent | None = None
 
     def review_of(self, trigger: Trigger) -> ReviewRound | None:
         """The review ``trigger``'s task reviews, if any: every trigger's, on a landing counted,
@@ -370,7 +375,7 @@ class TriggerEngine:
         job, raised = (None, frozenset[str]()) if review is None else (review.job, review.raised)
         found = listening(triggers, event, roles, job, raised)
         given = await values() if found else None
-        return None if given is None else _Firing(found, given, review)
+        return None if given is None else _Firing(found, given, review, event=event)
 
     async def _queue(self, firing: _Firing) -> tuple[str, ...]:
         """Queue the tasks of the triggers ``firing`` that no guard holds back, publishing the
@@ -394,48 +399,60 @@ class TriggerEngine:
                 await self._desk.publish(Notice(message=waiting_note(state.origin)))
 
     def _add(self, board: TaskBoard, firing: _Firing) -> tuple[str, ...]:
-        """Add to ``board`` the task of each of the triggers ``firing`` that no guard holds
+        """Add to ``board`` the tasks of each of the triggers ``firing`` that no guard holds
         back, in order, each seeing those before it, running the checks for each with
         ``checks``; returns their ids."""
         return tuple(
             task_id
             for name, trigger in firing.listening
-            if (task_id := self._fire_one(board, name, trigger, firing)) is not None
+            for task_id in self._fire_one(board, name, trigger, firing)
         )
 
     def _fire_one(
         self, board: TaskBoard, name: str, trigger: Trigger, firing: _Firing
-    ) -> str | None:
+    ) -> tuple[str, ...]:
         """Fire ``trigger``, named ``name``, as ``firing`` says: with ``checks``, run them
         unless a guard holds it back, with ``board``'s tasks, if they're still to decide, adding
-        none; otherwise add its task to ``board`` as :meth:`_add_one` does, returning its id if
-        it's added."""
+        none; otherwise add its tasks to ``board`` as :meth:`_add_tasks` does, returning their
+        ids."""
         if trigger.checks is None:
-            return self._add_one(board, name, trigger, firing)
+            return self._add_tasks(board, name, trigger, firing)
         if firing.counted or not held_back(trigger, None, board.tasks):
             self._run_checks(trigger.checks, name)
-        return None
+        return ()
 
-    def _add_one(
+    def _add_tasks(
         self, board: TaskBoard, name: str, trigger: Trigger, firing: _Firing
-    ) -> str | None:
-        """Add to ``board`` the task ``trigger``, named ``name``, queues as it fires as
-        ``firing`` says, unless a guard holds it back, if they're still to decide; returns its
-        id if it's added. One reviewing the review due does so with the skills of what it
-        reviews, whatever its role, and is queued as a review, booked into its batches with what
-        its prompt was rendered from."""
-        assert trigger.role is not None  # It listened without checks, so it queues a role's task,
-        assert trigger.prompt is not None  # with a prompt.
+    ) -> tuple[str, ...]:
+        """Add to ``board`` the tasks ``trigger``, named ``name``, queues as it fires as
+        ``firing`` says, one for each of its roles that fires, from one rendering of its
+        prompt, unless a guard holds it back, if they're still to decide, seeing the board as
+        it was before any of them; returns their ids. Each reviewing the review due does so
+        with the skills of what it reviews, whatever its role, and is queued as a review, booked
+        into its batches with what its prompt was rendered from."""
+        assert trigger.prompt is not None  # It listened without checks, so it has a prompt.
         values = {**firing.values, TRIGGER_VARIABLE: name}
         prompt = render_template(trigger.prompt, values)
         if not firing.counted and held_back(trigger, prompt, board.tasks):
-            return None
-        review = firing.review_of(trigger)
+            return ()
+        enabled = enabled_roles(self._desk.agents.roles)
+        raised = () if firing.review is None else firing.review.raised
+        roles = firing_roles(trigger, enabled, firing.event, raised)
+        queued = _Queued(name, trigger, prompt, ReviewTemplate(trigger.prompt, values))
+        return tuple(self._add_one(board, queued, role, firing) for role in roles)
+
+    def _add_one(self, board: TaskBoard, queued: _Queued, role: str, firing: _Firing) -> str:
+        """Add to ``board`` ``role``'s task of the trigger ``queued`` says, as it fires as
+        ``firing`` says; returns its id. One reviewing the review due does so with the skills of
+        what it reviews, and is queued as a review, booked into its batches with what its
+        prompt was rendered from."""
+        review = firing.review_of(queued.trigger)
         skills = () if review is None else review_skills(review.job, board.tasks)
-        task = role_task(trigger.role, self._desk.agents.roles[trigger.role], prompt, skills)
-        task_id = _added(board, task, name, trigger, "task" if review is None else "review")
+        task = role_task(role, self._desk.agents.roles[role], queued.prompt, skills)
+        queued_as: QueuedAs = "task" if review is None else "review"
+        task_id = _added(board, task, queued.name, queued.trigger, queued_as)
         if review is not None:
-            review.book(task_id, ReviewTemplate(trigger.prompt, values))
+            review.book(task_id, queued.template)
         return task_id
 
     async def _values(
@@ -455,6 +472,17 @@ class TriggerEngine:
         pending = pending_titles(self._tasks.board.tasks)
         landing = {"task": ", ".join(job.reviewed), "task_skills": ", ".join(skills)}
         return review_values(job, diff, cap, pending) | landing
+
+
+@dataclass(frozen=True)
+class _Queued:
+    """What a trigger fires its tasks from: its ``name``, the ``trigger``, its ``prompt``, as
+    rendered, and the ``template`` it was rendered from, with its values."""
+
+    name: str
+    trigger: Trigger
+    prompt: str
+    template: ReviewTemplate
 
 
 def _added(

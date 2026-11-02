@@ -10,7 +10,7 @@ import pytest
 from orbit.agent import ClaudeCliRunner, KiroCliRunner, Role, WorkspaceUnavailable
 from orbit.agent.domain.runtimes import CLAUDE, KIRO, RUNTIME_NAMES
 from orbit.cli.runtimes import RUNTIMES, build_runtimes
-from orbit.protocol import BUILT_IN_ROLE_NAMES, CODER, LENS_REVIEWERS, PLANNER
+from orbit.protocol import BUILT_IN_ROLE_NAMES, CODER, LENS_REVIEWERS, PLANNER, SUPER_LENS_REVIEWERS
 from orbit.telemetry import AgentCollector
 from tests.agent_fakes import ROLES
 from tests.cli_fakes import FAKE_RUNTIME, FakeRuntimeLauncher
@@ -106,7 +106,7 @@ def test_only_the_enabled_roles_using_a_missing_runtime_are_named(
 ) -> None:
     monkeypatch.setenv("PATH", str(tmp_path))
     roles = disabled(
-        ROLES, "experimenter", "reviewer", "super-reviewer", "configurator", *LENS_REVIEWERS
+        ROLES, "experimenter", "reviewer", "configurator", *LENS_REVIEWERS, *SUPER_LENS_REVIEWERS
     )
     with pytest.raises(WorkspaceUnavailable, match=r"^Roles planner, coder use the runtime"):
         build_runtimes(roles)

@@ -225,7 +225,7 @@ def test_a_field_the_package_sets_comes_from_it_and_any_other_from_the_defaults(
     layers = resolve_roles(PACKAGE_ROLES, NO_USER_ROLES, NO_PROJECT_ROLES).layers
     assert set(layers) == set(PACKAGE_ROLES)
     assert set(layers["coder"]) == set(Role.model_fields)
-    assert layers["super-reviewer"]["model"] == PACKAGE
+    assert layers["drift-reviewer"]["model"] == PACKAGE
     assert (layers["coder"]["model"], layers["coder"]["effort"]) == (DEFAULT, DEFAULT)
     assert layers["coder"]["tools"] == PACKAGE
 
@@ -313,9 +313,9 @@ def test_the_users_value_for_every_role_wins_over_the_packages() -> None:
 
 
 def test_the_users_value_for_one_role_wins_over_the_users_value_for_every_role() -> None:
-    roles = {"model": "haiku", "effort": "low", "super-reviewer": {"model": "opus"}}
+    roles = {"model": "haiku", "effort": "low", "drift-reviewer": {"model": "opus"}}
     resolved = resolve_roles(PACKAGE_ROLES, user({"roles": roles}), NO_PROJECT_ROLES)
-    reviewer = resolved.roles["super-reviewer"]
+    reviewer = resolved.roles["drift-reviewer"]
     assert (reviewer.model, reviewer.effort) == ("opus", "low")
     assert resolved.roles["reviewer"].model == "haiku"
 
@@ -324,10 +324,10 @@ def test_the_projects_role_value_wins_over_the_users_value_for_every_role() -> N
     resolved = resolve_roles(
         PACKAGE_ROLES,
         user({"roles": {"model": "haiku"}}),
-        project({"super-reviewer": {"model": "opus"}}),
+        project({"drift-reviewer": {"model": "opus"}}),
     )
-    assert resolved.roles["super-reviewer"].model == "opus"
-    assert resolved.layers["super-reviewer"]["model"] == PROJECT
+    assert resolved.roles["drift-reviewer"].model == "opus"
+    assert resolved.layers["drift-reviewer"]["model"] == PROJECT
     assert resolved.roles["coder"].model == "haiku"
 
 

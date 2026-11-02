@@ -12,8 +12,9 @@ from orbit.agent.domain.triggers import Trigger
 from orbit.protocol import (
     CODER,
     INVALID,
+    REVIEWER,
+    SUPER_LENS_REVIEWERS,
     SUPER_REVIEW,
-    SUPER_REVIEWER,
     EditTask,
     TaskSpec,
     TaskState,
@@ -39,8 +40,9 @@ AUDIT = "audit"
 def with_audit(super_every: int | None = None, **fields: Any) -> dict[str, Trigger]:
     """The triggers a project file makes that disables the review, sets the super review's
     ``every`` to ``super_every``, if given, and adds ``audit``, a ``commits`` trigger queuing a
-    super reviewer's task on every landing, with ``fields`` over that."""
-    audit = {"on": "commits", "role": SUPER_REVIEWER, "prompt": "Audit at {commit}.", "every": 1}
+    reviewer's task on every landing, which files its suggestions itself, with ``fields`` over
+    that."""
+    audit = {"on": "commits", "role": REVIEWER, "prompt": "Audit at {commit}.", "every": 1}
     supers = {} if super_every is None else {SUPER_REVIEW: {"every": super_every}}
     project = {"review": {"enabled": False}, AUDIT: audit | fields, **supers}
     package = Package(ROLES, TRIGGERS)
@@ -62,11 +64,15 @@ def shown(tasks: tuple[TaskState, ...]) -> list[tuple[str, str, str | None]]:
     return [(state.task.role, state.origin, state.batch) for state in tasks]
 
 
-async def test_one_commits_firings_reviews_share_a_batch_each_suggesting_from_its_trigger() -> None:
+async def test_one_commits_firings_reviews_share_a_batch_a_suggestion_from_its_trigger() -> None:
     triggers = with_audit(when={"origin": ["manual", "planner"]}, super_every=1)
-    reviewers = (suggests("Tidy the parser"), suggests("Split the lexer"))
+    lenses = (claims_done,) * len(SUPER_LENS_REVIEWERS)
     session = reviewing(
-        claims_done, claims_done, claims_done, triggers=triggers, reviewers=reviewers
+        claims_done,
+        *lenses,
+        claims_done,
+        triggers=triggers,
+        reviewers=(suggests("Split the lexer"),),
     )
     await start(session)
     events = await asyncio.wait_for(settle(session), 10)
@@ -74,9 +80,8 @@ async def test_one_commits_firings_reviews_share_a_batch_each_suggesting_from_it
 
     assert shown(board(events)) == [
         (CODER, "manual", None),
-        (SUPER_REVIEWER, SUPER_REVIEW, None),
-        (SUPER_REVIEWER, AUDIT, None),
-        (CODER, SUPER_REVIEW, "batch-1"),
+        *((role, SUPER_REVIEW, None) for role in SUPER_LENS_REVIEWERS),
+        (REVIEWER, AUDIT, None),
         (CODER, AUDIT, "batch-1"),
     ]
 
@@ -90,7 +95,7 @@ async def test_a_commits_triggers_suggestion_landing_does_not_count_toward_it() 
 
     assert shown(board(events)) == [
         (CODER, "manual", None),
-        (SUPER_REVIEWER, AUDIT, None),
+        (REVIEWER, AUDIT, None),
         (CODER, AUDIT, "batch-1"),
     ]
     assert [state.status for state in board(events)] == ["completed"] * 3
@@ -101,7 +106,7 @@ async def test_a_commits_triggers_review_cant_be_edited() -> None:
     session = reviewing(claims_done, triggers=with_audit(), reviewers=(suggests(),))
     await start(session)
     events = await asyncio.wait_for(settle(session), 10)
-    audit = TaskSpec(prompt="Audit again.", role=SUPER_REVIEWER)
+    audit = TaskSpec(prompt="Audit again.", role=REVIEWER)
     await send(session, EditTask(task_id="2", task=audit))
     events = await asyncio.wait_for(settle(session, events), 10)
     await session.close()

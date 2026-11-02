@@ -133,6 +133,19 @@ def test_a_proposed_trigger_named_like_a_built_in_role_trigger_is_refused() -> N
     )
 
 
+def test_a_proposed_trigger_named_like_a_built_in_trigger_listing_roles_names_them() -> None:
+    lenses = ("style-reviewer", "drift-reviewer", "scaling-reviewer")
+    built_in = {"super-review": Trigger(on="commits", role=lenses, prompt="Review {commit}.")}
+    trigger = {"on": "commits", "every": 10, "checks": "mutation"}
+    with pytest.raises(ConfigError) as refused:
+        parse_proposal(SET_PROPOSAL | {"triggers": {"super-review": trigger}}, built_in)
+    assert str(refused.value) == (
+        "triggers.super-review.checks: super-review is taken by a built-in trigger, which queues"
+        " tasks for style-reviewer, drift-reviewer and scaling-reviewer; give this trigger"
+        " another name."
+    )
+
+
 def test_a_proposed_trigger_may_override_a_built_in_checks_trigger() -> None:
     trigger = {"on": "session_started", "checks": "task-checks"}
     proposal = parse_proposal(SET_PROPOSAL | {"triggers": {"startup-check": trigger}}, BUILT_IN)

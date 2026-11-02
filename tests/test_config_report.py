@@ -29,7 +29,7 @@ from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.domain.triggers import Trigger
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.agent.external.built_in_triggers import read_built_in_triggers, read_template_files
-from orbit.protocol import BUILT_IN_ROLE_NAMES, LENS_REVIEWERS
+from orbit.protocol import BUILT_IN_ROLE_NAMES, LENS_REVIEWERS, SUPER_LENS_REVIEWERS
 
 type Data = dict[str, Any]
 
@@ -497,8 +497,13 @@ ANALYST = {
 
 
 def lens_cells(cell: str) -> tuple[str, ...]:
-    """The lens reviewers' cells for a skill, each ``cell``."""
+    """The per-commit lens reviewers' cells for a skill, each ``cell``."""
     return (cell,) * len(LENS_REVIEWERS)
+
+
+def super_cells(cell: str) -> tuple[str, ...]:
+    """The super review's lens reviewers' cells for a skill, each ``cell``."""
+    return (cell,) * len(SUPER_LENS_REVIEWERS)
 
 
 def mapped(project: Data | None = None) -> SkillMap:
@@ -523,7 +528,7 @@ def test_the_skill_map_has_a_row_per_skill_of_the_library_in_name_order() -> Non
     [
         (
             "code-style",
-            ("role", "—", "role", "role", "role", "task", *lens_cells("role")),
+            ("role", "—", "role", "role", "task", *lens_cells("role"), *super_cells("role")),
         ),
         (
             "python",
@@ -532,15 +537,36 @@ def test_the_skill_map_has_a_row_per_skill_of_the_library_in_name_order() -> Non
                 "mapped",
                 "task / mapped",
                 "reviewed task / mapped",
-                "mapped",
                 "role",
                 *lens_cells("reviewed task / mapped"),
+                *super_cells("reviewed task / mapped"),
             ),
         ),
-        ("cpp", ("—", "—", "task", "reviewed task", "—", "role", *lens_cells("reviewed task"))),
+        (
+            "cpp",
+            (
+                "—",
+                "—",
+                "task",
+                "reviewed task",
+                "role",
+                *lens_cells("reviewed task"),
+                *super_cells("reviewed task"),
+            ),
+        ),
         (
             "review-style",
-            ("—", "—", "task", "reviewed task", "role", "task", *lens_cells("reviewed task")),
+            (
+                "—",
+                "—",
+                "task",
+                "role",
+                "task",
+                *lens_cells("reviewed task"),
+                "role",
+                "reviewed task",
+                "reviewed task",
+            ),
         ),
     ],
 )

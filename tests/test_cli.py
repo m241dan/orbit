@@ -53,6 +53,7 @@ from orbit.protocol import (
     BUILT_IN_ROLE_NAMES,
     LENS_REVIEWERS,
     PLANNER,
+    SUPER_LENS_REVIEWERS,
     SUPER_REVIEW,
     AddTask,
     Catalog,
@@ -1047,9 +1048,9 @@ def test_chat_runs_each_role_that_doesnt_name_its_own_runtime_on_the_one_given(
         "experimenter": "claude",
         "coder": "claude",
         "reviewer": "fake",
-        "super-reviewer": "claude",
         "configurator": "claude",
         **dict.fromkeys(LENS_REVIEWERS, "claude"),
+        **dict.fromkeys(SUPER_LENS_REVIEWERS, "claude"),
     }
     assert session.agents is not None
     assert set(session.agents.launchers) == {"claude", "fake"}

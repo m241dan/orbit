@@ -15,7 +15,7 @@ from orbit.agent.domain.roles import Role, names_file
 from orbit.agent.domain.skills import SkillLibrary, SkillMapping
 from orbit.agent.domain.triggers import Trigger
 from orbit.agent.domain.verification import VerificationStep
-from orbit.protocol import REVIEW_ROLES, SUPER_REVIEWER
+from orbit.protocol import REVIEW_ROLES
 
 ROLE_CELL = "role"
 TASK_CELL = "task"
@@ -310,12 +310,12 @@ def skill_map(config: OrbitConfig) -> SkillMap:
 
 def skill_cell(name: str, role: Role, skill: str, *, mapped: bool) -> str:
     """Where the agents of ``role``, called ``name``, get ``skill``, which the ``[[skills]]``
-    entries use if ``mapped``: from its skills if they name it; else, for the super reviewer and
-    a conversational role, which have no task's list, from the entries, or never; and for the
-    other roles as :func:`_task_cell` says."""
+    entries use if ``mapped``: from its skills if they name it; else, for a conversational role,
+    which has no task's list, from the entries, or never; and for the other roles as
+    :func:`_task_cell` says."""
     if skill in role.skills:
         return ROLE_CELL
-    if name == SUPER_REVIEWER or role.conversation:
+    if role.conversation:
         return MAPPED_CELL if mapped else NEVER_CELL
     return _task_cell(name, mapped=mapped)
 

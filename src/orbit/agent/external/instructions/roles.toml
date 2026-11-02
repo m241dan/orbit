@@ -62,21 +62,10 @@ skills = [
     "review-logic",
     "review-security",
     "review-performance",
+    "review-style",
+    "review-drift",
+    "review-scaling",
 ]
-verify = false
-lane = "review"
-workspace = "snapshot"
-conversation = false
-merge = false
-enabled = true
-runtime = "claude"
-
-[roles.super-reviewer]
-instructions = "super-reviewer.md"
-model = "opus"
-tool_access = "restricted"
-tools = ["get_task", "complete_task", "report_progress", "give_up", "suggest_task"]
-skills = ["code-style", "review-style", "review-drift", "review-scaling"]
 verify = false
 lane = "review"
 workspace = "snapshot"
@@ -173,6 +162,51 @@ instructions = "lens-reviewer.md"
 tool_access = "restricted"
 tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
 skills = ["code-style", "review-performance"]
+verify = false
+lane = "review"
+workspace = "snapshot"
+conversation = false
+merge = false
+enabled = true
+runtime = "claude"
+
+# The super review's lens reviewers: now and then each reviews the whole codebase through one
+# review lens, and later the fixes of the findings it raised, reporting findings for the merge pass.
+
+[roles.style-reviewer]
+instructions = "super-lens-reviewer.md"
+model = "opus"
+tool_access = "restricted"
+tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+skills = ["code-style", "review-style"]
+verify = false
+lane = "review"
+workspace = "snapshot"
+conversation = false
+merge = false
+enabled = true
+runtime = "claude"
+
+[roles.drift-reviewer]
+instructions = "super-lens-reviewer.md"
+model = "opus"
+tool_access = "restricted"
+tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+skills = ["code-style", "review-drift"]
+verify = false
+lane = "review"
+workspace = "snapshot"
+conversation = false
+merge = false
+enabled = true
+runtime = "claude"
+
+[roles.scaling-reviewer]
+instructions = "super-lens-reviewer.md"
+model = "opus"
+tool_access = "restricted"
+tools = ["get_task", "complete_task", "report_progress", "give_up", "report_finding"]
+skills = ["code-style", "review-scaling"]
 verify = false
 lane = "review"
 workspace = "snapshot"

@@ -29,7 +29,7 @@ from orbit.protocol import (
 )
 from tests.frontend_fakes import Shell
 
-PINNED = ["planner", "experimenter", "coder", "reviewer", "super-reviewer", "configurator"]
+PINNED = ["planner", "experimenter", "coder", "reviewer", "configurator"]
 STRIP = ["All", *PINNED]
 LINT_STEP = VerificationChanged(steps=(StepState(name="Lint"),))
 NOTES_AFTER_HEADER = [
@@ -174,7 +174,7 @@ async def test_concurrent_reviewers_share_the_reviewer_tab() -> None:
     await shell.feed(
         started("agent-1", "reviewer"),
         started("agent-2", "reviewer"),
-        started("agent-3", "super-reviewer"),
+        started("agent-3", "style-reviewer"),
         ErrorOccurred(agent_id="agent-1", code=AGENT_FAILED, message="boom"),
         TurnFinished(turn_id="t", agent_id="agent-2", reason="cancelled"),
         ErrorOccurred(code=TIMED_OUT, message="lost"),
@@ -185,8 +185,8 @@ async def test_concurrent_reviewers_share_the_reviewer_tab() -> None:
         "experimenter",
         "coder",
         "● reviewer *",
-        "● super-reviewer",
         "configurator",
+        "style-reviewer",
     ]
     await shell.click_tab("● reviewer *")
     assert shell.shown() == [
@@ -242,7 +242,7 @@ async def test_tab_and_shift_tab_cycle_the_tabs_and_wrap() -> None:
     assert shell.active_tab == "checker"
     await shell.cycle(-1)
     assert shell.active_tab == "configurator"
-    await shell.cycle(-1, 6)
+    await shell.cycle(-1, 5)
     assert shell.active_tab == "All"
 
 
@@ -250,10 +250,10 @@ async def test_tab_with_no_agents_cycles_all_and_the_pinned_tabs() -> None:
     shell = Shell()
     await shell.cycle(1)
     assert shell.active_tab == "planner"
-    await shell.cycle(1, 6)
+    await shell.cycle(1, 5)
     assert shell.active_tab == "All"
     await shell.cycle(-1, 2)
-    assert shell.active_tab == "super-reviewer"
+    assert shell.active_tab == "reviewer"
     await shell.cycle(1, 2)
     assert shell.active_tab == "All"
     assert shell.window.conversation.only is None

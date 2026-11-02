@@ -45,7 +45,7 @@ from orbit.agent.external.runtimes import (
     read_runtime_rules,
 )
 from orbit.agent.external.skill_files import PROJECT_SKILLS, SKILL_DIRECTORY, read_skill_library
-from orbit.protocol import BUILT_IN_ROLE_NAMES, LENS_REVIEWERS, PLANNER
+from orbit.protocol import BUILT_IN_ROLE_NAMES, LENS_REVIEWERS, PLANNER, SUPER_LENS_REVIEWERS
 from tests.agent_fakes import CLAUDE_MODELS, KIRO_MODELS, LIMITED_RUNTIME
 
 BUILT_IN_ROLES = read_built_in_roles()
@@ -467,7 +467,7 @@ def test_a_role_asking_for_what_its_runtime_cant_do_is_refused_naming_the_file(
 
 
 KIROS_OPUS = (
-    'roles.super-reviewer.model = "opus": the runtime kiro takes the aliases auto, sonnet,'
+    'roles.style-reviewer.model = "opus": the runtime kiro takes the aliases auto, sonnet,'
     " haiku or a full id of lowercase letters, digits, dots and dashes, with at least one dash."
 )
 
@@ -485,10 +485,21 @@ def test_a_users_runtime_refusing_a_package_model_names_the_user_config(
 def test_a_projects_runtime_refusing_a_package_model_names_the_project_file(
     tmp_path: Path, config_dir: Path
 ) -> None:
-    path = write(tmp_path, '[roles.super-reviewer]\nruntime = "kiro"\n')
+    path = write(tmp_path, '[roles.style-reviewer]\nruntime = "kiro"\n')
     with pytest.raises(ConfigError) as raised:
         read_config(str(tmp_path), config_dir)
     assert str(raised.value) == f"{path}: {KIROS_OPUS}"
+
+
+def test_a_project_file_setting_the_super_reviewer_fails_to_load_saying_what_it_became(
+    tmp_path: Path, config_dir: Path
+) -> None:
+    path = write(tmp_path, '[roles.super-reviewer]\nmodel = "sonnet"\n')
+    with pytest.raises(ConfigError) as raised:
+        read_config(str(tmp_path), config_dir)
+    assert str(raised.value) == (
+        f"{path}: super-reviewer is now style-reviewer, drift-reviewer and scaling-reviewer."
+    )
 
 
 def test_a_runs_runtime_refusing_a_package_model_names_the_user_config_and_the_runtime(
@@ -783,7 +794,13 @@ def test_the_sources_hold_the_files_as_written_and_where_each_role_field_came_fr
     assert sources.role_layers["reviewer"]["model"] == project
     assert sources.role_layers["planner"]["model"] == user
     assert sources.package_files == {
-        name: "lens-reviewer.md" if name in LENS_REVIEWERS else f"{name}.md"
+        name: (
+            "lens-reviewer.md"
+            if name in LENS_REVIEWERS
+            else "super-lens-reviewer.md"
+            if name in SUPER_LENS_REVIEWERS
+            else f"{name}.md"
+        )
         for name in BUILT_IN_ROLE_NAMES
     }
 
@@ -940,6 +957,7 @@ def test_without_a_file_the_triggers_are_those_orbit_ships(tmp_path: Path) -> No
         "performance-review",
         "merge-pass",
         "super-review",
+        "super-fix-review",
         "configure-checks",
         "set-up-verification",
         "startup-check",

@@ -15,8 +15,8 @@ from orbit.protocol import (
     CONFIGURE_CHECKS,
     NOT_CONFIGURED,
     PLANNER,
+    SUPER_LENS_REVIEWERS,
     SUPER_REVIEW,
-    SUPER_REVIEWER,
     AddTask,
     CommandRefused,
     FireTrigger,
@@ -51,7 +51,6 @@ from tests.agent_fakes import (
     settle,
     settled,
     statuses,
-    suggests,
     until_idle,
 )
 from tests.lane_fakes import running
@@ -185,7 +184,7 @@ async def test_a_super_review_fired_while_refused_waits_with_a_notice_until_step
     replies: list[str] = []
     session, _, _ = session_for(
         proposes({"steps": [LINT]}, replies=replies),
-        reviewers=(suggests(),),
+        *(claims_done,) * len(SUPER_LENS_REVIEWERS),
         tree=FakeTree(),
         review=True,
         verification=Verification((), Steps(True)),
@@ -201,9 +200,12 @@ async def test_a_super_review_fired_while_refused_waits_with_a_notice_until_step
     await session.close()
 
     assert Notice(message=NO_STEPS_NOTE) in waiting
-    assert held == [(SUPER_REVIEWER, "pending")]
+    assert held == [(role, "pending") for role in SUPER_LENS_REVIEWERS]
     shown = [(t.task.role, t.status) for t in board(events)]
-    assert shown == [(CONFIGURATOR, "completed"), (SUPER_REVIEWER, "completed")]
+    assert shown == [
+        (CONFIGURATOR, "completed"),
+        *((role, "completed") for role in SUPER_LENS_REVIEWERS),
+    ]
 
 
 async def test_with_no_verify_opening_starts_no_configurator_and_runs_are_not_refused() -> None:

@@ -246,7 +246,7 @@ async def test_a_workspace_takes_the_role_fields_the_user_config_sets(
 
     roles = await roles_of(workspaces(stack, store, config_dir=config_dir), root)
 
-    assert (roles["coder"].model, roles["super-reviewer"].model) == ("sonnet", "haiku")
+    assert (roles["coder"].model, roles["drift-reviewer"].model) == ("sonnet", "haiku")
 
 
 async def test_an_invalid_user_config_makes_a_workspace_unavailable_naming_it(

@@ -44,7 +44,9 @@ from tests.agent_fakes import (
     Steps,
     board,
     claims_done,
+    files,
     keeps_claiming,
+    reports,
     session_for,
     settle,
     start,
@@ -54,36 +56,6 @@ from tests.session_builders import last_of, messages, opened, saved, store_with,
 
 LENS_TRIGGERS = tuple(f"{role.removesuffix('-reviewer')}-review" for role in LENS_REVIEWERS)
 """The shipped lens triggers, each named for its lens, in the order they fire."""
-
-
-def reports(*findings: tuple[str, str], replies: list[Reply] | None = None) -> Script:
-    """A lens that reports ``findings``, each a title and severity, recording orbit's replies
-    in ``replies``, if given, then claims done."""
-
-    async def look(call: Call) -> TurnEndReason:
-        await call("get_task")
-        for title, severity in findings:
-            reply = await call("report_finding", title=title, body="Why.", severity=severity)
-            if replies is not None:
-                replies.append(reply)
-        await call("complete_task", summary=f"{len(findings)} findings")
-        return "completed"
-
-    return look
-
-
-def files(title: str, findings: list[str], dismissed: list[str]) -> Script:
-    """A merge pass filing ``findings`` as a task titled ``title``, dismissing ``dismissed``."""
-
-    async def merge(call: Call) -> TurnEndReason:
-        await call("get_task")
-        await call("suggest_task", title=title, prompt="Fix it.", findings=findings)
-        for finding in dismissed:
-            await call("dismiss_finding", finding=finding, reason="over the cap")
-        await call("complete_task", summary="1 task from 2 findings, 1 dismissed")
-        return "completed"
-
-    return merge
 
 
 def shipped(*scripts: Script, reviewers: tuple[Script, ...] = (), **options: Any) -> WorkspaceHost:

@@ -9,15 +9,18 @@ from orbit.protocol import (
     CODER,
     CONFIGURATOR,
     CONFIGURE_CHECKS,
+    DRIFT_REVIEWER,
     EXPERIMENTER,
     FIT_REVIEWER,
     LOGIC_REVIEWER,
     PERFORMANCE_REVIEWER,
     PLANNER,
     REVIEWER,
+    SCALING_REVIEWER,
     SECURITY_REVIEWER,
+    STYLE_REVIEWER,
+    SUPER_LENS_REVIEWERS,
     SUPER_REVIEW,
-    SUPER_REVIEWER,
     TESTS_REVIEWER,
     AgentEntry,
     Catalog,
@@ -33,7 +36,6 @@ ROLE_LABELS = {
     EXPERIMENTER: "Experimenter",
     CODER: "Coder",
     REVIEWER: "Reviewer",
-    SUPER_REVIEWER: "Super reviewer",
     CONFIGURATOR: "Configurator",
     FIT_REVIEWER: "Fit reviewer",
     BUGS_REVIEWER: "Bugs reviewer",
@@ -41,6 +43,9 @@ ROLE_LABELS = {
     LOGIC_REVIEWER: "Logic reviewer",
     SECURITY_REVIEWER: "Security reviewer",
     PERFORMANCE_REVIEWER: "Performance reviewer",
+    STYLE_REVIEWER: "Style reviewer",
+    DRIFT_REVIEWER: "Drift reviewer",
+    SCALING_REVIEWER: "Scaling reviewer",
 }
 """The built-in roles' labels; a custom role is labelled by its name."""
 
@@ -53,8 +58,8 @@ TRIGGERS = (
 TRIGGER_NAMES = tuple(trigger.name for trigger in TRIGGERS)
 """The built-in triggers' names."""
 
-TRIGGER_ROLES = {SUPER_REVIEW: SUPER_REVIEWER, CONFIGURE_CHECKS: CONFIGURATOR}
-"""The role of the task each built-in trigger queues."""
+TRIGGER_ROLES = {SUPER_REVIEW: SUPER_LENS_REVIEWERS, CONFIGURE_CHECKS: (CONFIGURATOR,)}
+"""The roles of the tasks each built-in trigger queues."""
 
 NO_WORKSPACE_LABEL = "default"
 """The workspace's label outside a repository."""
@@ -127,9 +132,12 @@ def workspace_entry(
 
 
 def trigger_names(roles: Mapping[str, Role]) -> tuple[str, ...]:
-    """The names of the built-in triggers but those whose role is disabled among ``roles``."""
+    """The names of the built-in triggers but those whose roles are all disabled among
+    ``roles``."""
     disabled = disabled_roles(roles)
-    return tuple(name for name in TRIGGER_NAMES if TRIGGER_ROLES[name] not in disabled)
+    return tuple(
+        name for name in TRIGGER_NAMES if any(role not in disabled for role in TRIGGER_ROLES[name])
+    )
 
 
 def catalog(

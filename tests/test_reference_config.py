@@ -186,7 +186,7 @@ def test_uncommented_built_in_tables_set_each_field_with_a_value() -> None:
         "timeout_minutes",
         "effort",
     }
-    assert roles["super-reviewer"]["model"] == "opus"
+    assert roles["drift-reviewer"]["model"] == "opus"
 
 
 def test_uncommented_example_role_is_a_license_reviewer() -> None:
@@ -280,7 +280,7 @@ def test_built_in_tables_show_shipped_values() -> None:
     )
     assert "# merge = true" in coder
     assert '# runtime = "claude"' in coder
-    assert '# model = "opus"' in table("super-reviewer")
+    assert '# model = "opus"' in table("drift-reviewer")
     assert '# workspace = "checkout"' in table("planner")
 
 
@@ -299,7 +299,7 @@ def test_the_skills_field_says_whose_skills_a_role_names() -> None:
 def test_a_list_too_long_for_a_line_says_how_many_and_where_to_see_them() -> None:
     reviewer = table("reviewer")
 
-    assert "# skills: 8 of orbit's own; orbit config show roles.reviewer.skills lists them" in (
+    assert "# skills: 11 of orbit's own; orbit config show roles.reviewer.skills lists them" in (
         reviewer
     )
     assert described("skills", reviewer) == f"# {Role.model_fields['skills'].description}"
@@ -318,7 +318,7 @@ def test_machine_fields_say_the_user_config_sets_them(key: str) -> None:
 
 def test_built_in_instructions_name_the_file_shipped_with_orbit() -> None:
     assert "# instructions: orbit's own coder.md" in table("coder")
-    assert "# instructions: orbit's own super-reviewer.md" in table("super-reviewer")
+    assert "# instructions: orbit's own super-lens-reviewer.md" in table("drift-reviewer")
 
 
 def test_the_triggers_follow_the_line_introducing_them() -> None:
@@ -348,6 +348,7 @@ def test_shipped_trigger_tables_show_shipped_values() -> None:
     assert '# when = {origin = ["manual", "planner"]}' in super_review
     assert "# every = 10" in super_review
     assert {"# manual = true", '# label = "Super review"'} <= set(super_review)
+    assert '# role = ["style-reviewer", "drift-reviewer", "scaling-reviewer"]' in super_review
     assert "# draft = true" in trigger_table("startup-fix")
     assert '# when = {findings = "some"}' in trigger_table("merge-pass")
 

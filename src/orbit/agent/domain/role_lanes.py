@@ -1,19 +1,25 @@
 """The rules across roles: how they share lanes and consult one another, and the lanes they make.
 
-A conversational role can't share its lane with a task role; the enabled roles in the worktree
-share one lane, as do the enabled review roles (the lens reviewers, the reviewer and the
-super-reviewer); and an enabled role may consult only other conversational roles, none round in a
+A conversational role can't share its lane with a task role; the enabled roles in the worktree share
+one lane, as do the enabled review roles (the lens reviewers, per-commit and the super review's, and
+the reviewer); and an enabled role may consult only other conversational roles, none round in a
 cycle, the disabled ones it names left out. The enabled task roles' lanes are the session's lanes,
-the one whose roles merge running on the user's asking; the enabled conversational roles each have
-a conversation of their own; and orbit's reviews run in the enabled review roles' lane.
+the one whose roles merge running on the user's asking; the enabled conversational roles each have a
+conversation of their own; and orbit's reviews run in the enabled review roles' lane.
 """
 
 from collections.abc import Mapping
 
 from orbit.agent.domain.roles import Role
-from orbit.protocol import LENS_REVIEWERS, REVIEW_ROLES, REVIEWER, SUPER_REVIEWER, WORK_LANE
+from orbit.protocol import (
+    LENS_REVIEWERS,
+    REVIEW_ROLES,
+    REVIEWER,
+    SUPER_LENS_REVIEWERS,
+    WORK_LANE,
+)
 
-_REVIEW_LANE_ORDER = (REVIEWER, SUPER_REVIEWER, *LENS_REVIEWERS)
+_REVIEW_LANE_ORDER = (REVIEWER, *LENS_REVIEWERS, *SUPER_LENS_REVIEWERS)
 """The review roles, in the order :func:`review_lane` looks for an enabled one."""
 
 
@@ -46,9 +52,10 @@ def worktree_lane_clashes(roles: Mapping[str, Role]) -> list[str]:
 
 
 def review_lane_clashes(roles: Mapping[str, Role]) -> list[str]:
-    """Why the enabled review roles among ``roles`` (the lens reviewers, the reviewer and the
-    super-reviewer) can't be where they are, if they're in different lanes, naming them by lane:
-    orbit's reviews keep their rules only in the review lane, which runs one lane's roles."""
+    """Why the enabled review roles among ``roles`` (the lens reviewers, per-commit and the super
+    review's, and the reviewer) can't be where they are, if they're in different lanes, naming
+    them by lane: orbit's reviews keep their rules only in the review lane, which runs one lane's
+    roles."""
     reviewers = {
         name: role for name, role in roles.items() if role.enabled and name in REVIEW_ROLES
     }
@@ -169,8 +176,8 @@ def merging_lane(roles: Mapping[str, Role]) -> str:
 
 def review_lane(roles: Mapping[str, Role]) -> str:
     """The lane that runs orbit's reviews among ``roles``: that of the enabled review roles, as
-    they share a lane, the reviewer's first, then the super-reviewer's, then each lens
-    reviewer's in turn. It's the reviewer's if they're all disabled, when none is queued."""
+    they share a lane, the reviewer's first, then each lens reviewer's in turn, per-commit then
+    the super review's. It's the reviewer's if they're all disabled, when none is queued."""
     enabled = (
         roles[name].lane for name in _REVIEW_LANE_ORDER if name in roles and roles[name].enabled
     )

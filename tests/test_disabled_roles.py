@@ -12,14 +12,15 @@ from orbit.protocol import (
     CODER,
     CONFIGURATOR,
     CONFIGURE_CHECKS,
+    DRIFT_REVIEWER,
     EXPERIMENTER,
     INVALID,
     LENS_REVIEWERS,
     NOT_CONFIGURED,
     PLANNER,
     REVIEWER,
+    SUPER_LENS_REVIEWERS,
     SUPER_REVIEW,
-    SUPER_REVIEWER,
     UNKNOWN,
     AcceptTask,
     AddTask,
@@ -63,11 +64,13 @@ from tests.agent_fakes import (
     checked,
     claims_done,
     events_until,
+    files,
     lane_of,
     of_type,
     plan,
     put_on_board,
     refused,
+    reports,
     send,
     session_for,
     settle,
@@ -125,8 +128,9 @@ async def test_with_every_role_enabled_the_catalog_lists_them_their_triggers_and
     assert listed.lanes == ("work", "planner", "experimenter", "review")
 
 
-async def test_a_disabled_super_reviewer_leaves_the_catalog_with_its_trigger_and_key() -> None:
-    session, _, _ = session_for(tree=FakeTree(), review=True, roles=disabling(SUPER_REVIEWER))
+async def test_disabled_super_lenses_leave_the_catalog_with_their_trigger_and_key() -> None:
+    roles = disabling(*SUPER_LENS_REVIEWERS)
+    session, _, _ = session_for(tree=FakeTree(), review=True, roles=roles)
     listed = await catalog_of(session)
     assert [agent.name for agent in listed.agents] == [
         PLANNER,
@@ -141,6 +145,13 @@ async def test_a_disabled_super_reviewer_leaves_the_catalog_with_its_trigger_and
     assert listed.lanes == ("work", "planner", "experimenter", "review")
 
 
+async def test_one_disabled_super_lens_leaves_the_super_review_in_the_catalog() -> None:
+    session, _, _ = session_for(tree=FakeTree(), review=True, roles=disabling(DRIFT_REVIEWER))
+    listed = await catalog_of(session)
+    assert [trigger.name for trigger in listed.triggers] == [SUPER_REVIEW, CONFIGURE_CHECKS]
+    assert DRIFT_REVIEWER not in [agent.name for agent in listed.agents]
+
+
 async def test_a_disabled_configurator_takes_its_trigger_and_key_out_of_the_catalog() -> None:
     session, _, _ = session_for(roles=disabling(CONFIGURATOR))
     listed = await catalog_of(session)
@@ -149,15 +160,16 @@ async def test_a_disabled_configurator_takes_its_trigger_and_key_out_of_the_cata
 
 
 async def test_disabled_reviewers_and_planner_take_their_lanes_out_of_the_catalog() -> None:
-    roles = disabling(PLANNER, REVIEWER, SUPER_REVIEWER, *LENS_REVIEWERS)
+    roles = disabling(PLANNER, REVIEWER, *LENS_REVIEWERS, *SUPER_LENS_REVIEWERS)
     session, _, _ = session_for(tree=FakeTree(), review=True, roles=roles)
     listed = await catalog_of(session)
     assert [agent.name for agent in listed.agents] == [EXPERIMENTER, CODER, CONFIGURATOR]
     assert listed.lanes == ("work", "experimenter")
 
 
-async def test_firing_a_disabled_super_reviewers_trigger_is_refused_as_unknown() -> None:
-    session, _, _ = session_for(tree=FakeTree(), review=True, roles=disabling(SUPER_REVIEWER))
+async def test_firing_the_super_review_with_its_lenses_disabled_is_refused_as_unknown() -> None:
+    roles = disabling(*SUPER_LENS_REVIEWERS)
+    session, _, _ = session_for(tree=FakeTree(), review=True, roles=roles)
     events = await refusal_of(session, FireTrigger(trigger=SUPER_REVIEW))
     await session.close()
     message = "No trigger 'super-review'; the triggers are configure-checks."
@@ -174,7 +186,7 @@ async def test_firing_a_disabled_configurators_trigger_is_refused_as_unknown() -
 
 
 async def test_with_both_triggers_roles_disabled_a_trigger_is_refused_as_there_are_none() -> None:
-    session, _, _ = session_for(roles=disabling(SUPER_REVIEWER, CONFIGURATOR))
+    session, _, _ = session_for(roles=disabling(*SUPER_LENS_REVIEWERS, CONFIGURATOR))
     events = await refusal_of(session, FireTrigger(trigger=SUPER_REVIEW))
     await session.close()
     assert events[-1] == refused(UNKNOWN, "No trigger 'super-review'; there are none.")
@@ -195,14 +207,14 @@ async def test_a_disabled_reviewer_queues_no_review_as_work_lands() -> None:
     assert [launch.agent.role for launch in launcher.launches] == [CODER]
 
 
-async def test_a_disabled_super_reviewer_queues_no_super_review_however_many_commits_land() -> None:
+async def test_disabled_super_lenses_queue_no_super_review_however_many_commits_land() -> None:
     session, _, _ = session_for(
         claims_done,
         reviewers=(suggests(),),
         tree=FakeTree(),
         review=True,
         triggers=super_every(1),
-        roles=disabling(SUPER_REVIEWER),
+        roles=disabling(*SUPER_LENS_REVIEWERS),
     )
     await start(session)
     events = await asyncio.wait_for(settle(session), 10)
@@ -364,18 +376,24 @@ async def test_a_failing_startup_check_adds_no_draft_while_the_coder_is_disabled
 
 
 def super_reviewed(events: list[Event]) -> bool:
-    """Whether the board ``events`` last showed has a finished super review."""
+    """Whether the board ``events`` last showed has a finished merge pass of a super review."""
     shown = [event.tasks for event in events if isinstance(event, TasksChanged)]
-    return bool(shown) and any(
-        t.task.role == SUPER_REVIEWER and t.status in SETTLED for t in shown[-1]
-    )
+    return bool(shown) and any(t.task.role == REVIEWER and t.status in SETTLED for t in shown[-1])
+
+
+LENS_TASKS = list(SUPER_LENS_REVIEWERS)
+"""The roles of the tasks a super review queues, one per lens."""
 
 
 async def super_review_suggesting(roles: dict[str, Role], replies: list[Reply]) -> list[Event]:
-    """The events until a super review, with ``roles``, suggests a task and finishes, its replies
-    going to ``replies``; the session is closed after."""
+    """The events until a super review, with ``roles``, has a finding that its merge pass files
+    as a task, then finishes, the filing's replies going to ``replies``; the session is closed
+    after."""
     session, _, _ = session_for(
-        reviewers=(suggests("Add tests", replies=replies),),
+        reports(("No tests", "normal")),
+        claims_done,
+        claims_done,
+        reviewers=(files("Add tests", ["F1"], [], replies=replies),),
         tree=FakeTree(),
         review=True,
         roles=roles,
@@ -391,19 +409,14 @@ async def test_a_reviewers_suggestion_is_refused_while_the_coder_is_disabled() -
     replies: list[Reply] = []
     events = await super_review_suggesting(disabling(CODER), replies)
     assert replies == [CODER_DISABLED]
-    assert [t.task.role for t in board(events)] == [SUPER_REVIEWER]
+    assert [t.task.role for t in board(events)] == [*LENS_TASKS, REVIEWER]
 
 
 async def test_with_every_role_enabled_a_reviewers_suggestion_is_queued() -> None:
     replies: list[Reply] = []
-    session, _, _ = session_for(
-        reviewers=(suggests("Add tests", replies=replies),), tree=FakeTree(), review=True
-    )
-    await send(session, FireTrigger(trigger=SUPER_REVIEW))
-    events = await asyncio.wait_for(settle(session, until=super_reviewed), 10)
-    await session.close()
-    assert replies == [Reply("Queued as task 2.")]
-    assert [t.task.role for t in board(events)] == [SUPER_REVIEWER, CODER]
+    events = await super_review_suggesting(ROLES, replies)
+    assert replies == [Reply("Queued as task 5.")]
+    assert [t.task.role for t in board(events)] == [*LENS_TASKS, REVIEWER, CODER]
 
 
 def proposes_the_flag(replies: list[Reply]) -> Script:

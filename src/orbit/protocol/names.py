@@ -30,7 +30,6 @@ The super review's tasks, and those it suggests, take its name as their origin."
 PLANNER = "planner"
 CODER = "coder"
 REVIEWER = "reviewer"
-SUPER_REVIEWER = "super-reviewer"
 CONFIGURATOR = "configurator"
 EXPERIMENTER = "experimenter"
 FIT_REVIEWER = "fit-reviewer"
@@ -39,6 +38,9 @@ TESTS_REVIEWER = "tests-reviewer"
 LOGIC_REVIEWER = "logic-reviewer"
 SECURITY_REVIEWER = "security-reviewer"
 PERFORMANCE_REVIEWER = "performance-reviewer"
+STYLE_REVIEWER = "style-reviewer"
+DRIFT_REVIEWER = "drift-reviewer"
+SCALING_REVIEWER = "scaling-reviewer"
 """The built-in roles' names."""
 
 LENS_REVIEWERS = (
@@ -52,16 +54,22 @@ LENS_REVIEWERS = (
 """The per-commit lens reviewers' names, in order: each reviews a landed commit through one
 review lens, reporting findings for the ``reviewer``, the merge pass, to file."""
 
-PINNED_ROLE_NAMES = (PLANNER, EXPERIMENTER, CODER, REVIEWER, SUPER_REVIEWER, CONFIGURATOR)
+SUPER_LENS_REVIEWERS = (STYLE_REVIEWER, DRIFT_REVIEWER, SCALING_REVIEWER)
+"""The super review's lens reviewers' names, in order: each reviews the whole codebase now and
+then through one review lens, and the fixes of the findings it raised, reporting findings for
+the merge pass to file."""
+
+PINNED_ROLE_NAMES = (PLANNER, EXPERIMENTER, CODER, REVIEWER, CONFIGURATOR)
 """The built-in roles with a pinned tab, in the order the TUI's strip shows them; a lens
 reviewer's agents each get a tab of their own, as other roles' do."""
 
-BUILT_IN_ROLE_NAMES = (*PINNED_ROLE_NAMES, *LENS_REVIEWERS)
-"""The built-in roles' names, in order: those with a pinned tab, then the lens reviewers."""
+BUILT_IN_ROLE_NAMES = (*PINNED_ROLE_NAMES, *LENS_REVIEWERS, *SUPER_LENS_REVIEWERS)
+"""The built-in roles' names, in order: those with a pinned tab, then the per-commit lens
+reviewers, then the super review's."""
 
-REVIEW_ROLES = frozenset({REVIEWER, SUPER_REVIEWER, *LENS_REVIEWERS})
-"""The roles that review work rather than do it: the lens reviewers, the merge pass and the
-super reviewer, whose tasks orbit queues as reviews in the review lane."""
+REVIEW_ROLES = frozenset({REVIEWER, *LENS_REVIEWERS, *SUPER_LENS_REVIEWERS})
+"""The roles that review work rather than do it: the lens reviewers, per-commit and the super
+review's, and the merge pass, whose tasks orbit queues as reviews in the review lane."""
 
 
 BusyLane = str

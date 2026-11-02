@@ -59,6 +59,9 @@ EVERY_BATCH = ("bugs", "tests")
 NARROW: tuple[GuardName, ...] = ("review-rounds", "raised-finding")
 """The guards of a lens that reviews only the batches whose findings it raised."""
 
+SUPER_LENSES = ("style-reviewer", "drift-reviewer", "scaling-reviewer")
+"""The super review's lens reviewers, in the order its triggers list them."""
+
 
 def test_the_shipped_triggers_are_the_records_in_order() -> None:
     fields = {
@@ -76,12 +79,15 @@ def test_the_shipped_triggers_are_the_records_in_order() -> None:
         "merge-pass": Trigger(on="reviews_finished", role="reviewer", when={"findings": "some"}),
         "super-review": Trigger(
             on="commits",
-            role="super-reviewer",
+            role=SUPER_LENSES,
             when={"origin": ("manual", "planner")},
             guards=("suggestions-pending",),
             every=10,
             manual=True,
             label="Super review",
+        ),
+        "super-fix-review": Trigger(
+            on="task_landed", role=SUPER_LENSES, when={"review": "batch"}, guards=NARROW
         ),
         "configure-checks": Trigger(
             on="manual", role="configurator", manual=True, label="Set up checks"
@@ -104,6 +110,7 @@ def test_each_prompt_is_the_text_of_the_template_beside_triggers_toml_it_names()
         **{f"{lens}-review": "lens-review.md" for lens in LENSES},
         "merge-pass": "merge-pass.md",
         "super-review": "super-review.md",
+        "super-fix-review": "lens-review.md",
         "configure-checks": "configure-checks.md",
         "set-up-verification": "configure-checks.md",
         "startup-fix": "startup-fix.md",
@@ -285,12 +292,15 @@ SUPER_REVIEWS = {
 
 
 @pytest.mark.parametrize("case", list(SUPER_REVIEWS))
-def test_the_super_review_template_renders_todays_super_review_prompt(case: str) -> None:
+def test_the_super_review_template_renders_todays_super_review_prompt_without_a_cap(
+    case: str,
+) -> None:
     pending, landed = SUPER_REVIEWS[case]
     values = review_values(SUPER, "", 10, pending, landed) | {"trigger": "super-review"}
-    assert render_template(template("super-review"), values) == review_prompt(
-        SUPER, "", 10, pending, landed
-    )
+    rendered = render_template(template("super-review"), values)
+    prompt = review_prompt(SUPER, "", 10, pending, landed)
+    assert rendered == prompt.replace("\n\nYou may make at most 10 suggestions.", "", 1)
+    assert "suggestions" not in rendered
 
 
 LINT = VerificationStep("Lint", ("ruff", "check"))

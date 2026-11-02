@@ -17,7 +17,7 @@ from orbit.agent.external.built_in_triggers import TRIGGER_DIRECTORY
 from orbit.agent.external.skill_files import SKILL_DIRECTORY
 from orbit.cli import app
 from orbit.cli.config_text import config_json, config_text, skill_map_json, skill_map_text
-from orbit.protocol import BUILT_IN_ROLE_NAMES, LENS_REVIEWERS
+from orbit.protocol import BUILT_IN_ROLE_NAMES, LENS_REVIEWERS, SUPER_LENS_REVIEWERS
 
 runner = CliRunner()
 
@@ -49,6 +49,7 @@ TRIGGER_NAMES = (
     "performance-review",
     "merge-pass",
     "super-review",
+    "super-fix-review",
     "configure-checks",
     "set-up-verification",
     "startup-check",
@@ -202,7 +203,8 @@ def test_a_roles_skills_show_in_the_package_layer(project: Path) -> None:
     assert result.exit_code == 0, result.output
     skills = (
         '["code-style", "security", "review-fit", "review-bugs", "review-tests", "review-logic",'
-        ' "review-security", "review-performance"]'
+        ' "review-security", "review-performance", "review-style", "review-drift",'
+        ' "review-scaling"]'
     )
     assert result.stdout == f"roles.reviewer.skills = {skills}   package\n"
 
@@ -289,6 +291,15 @@ def test_a_trigger_the_project_overrides_shows_its_fields_from_the_file(project:
     lines = result.stdout.splitlines()
     assert "triggers.super-review.every = 5   project .orbit/config.toml" in lines
     assert 'triggers.super-review.when = {"origin": ["manual", "planner"]}   package' in lines
+
+
+def test_a_trigger_listing_roles_shows_them_as_a_list(project: Path) -> None:
+    result = show(project, "triggers.super-review.role")
+    assert result.exit_code == 0, result.output
+    assert result.stdout == (
+        'triggers.super-review.role = ["style-reviewer", "drift-reviewer", "scaling-reviewer"]'
+        "   package\n"
+    )
 
 
 def test_full_prints_a_triggers_prompt_text(project: Path) -> None:
@@ -554,13 +565,12 @@ def test_skills_maps_each_skill_to_where_each_role_gets_it(project: Path) -> Non
     assert re.split(r" {2,}", table.splitlines()[0]) == ["skill", *BUILT_IN_ROLE_NAMES]
     rows = map_rows(table)
     assert list(rows) == SKILL_NAMES
-    lenses = len(LENS_REVIEWERS)
+    lenses = len(LENS_REVIEWERS) + len(SUPER_LENS_REVIEWERS)
     assert list(rows["python"].values()) == [
         "mapped",
         "mapped",
         "task / mapped",
         "reviewed task / mapped",
-        "mapped",
         "role",
         *["reviewed task / mapped"] * lenses,
     ]
@@ -569,16 +579,17 @@ def test_skills_maps_each_skill_to_where_each_role_gets_it(project: Path) -> Non
         "—",
         "task",
         "reviewed task",
-        "—",
         "role",
         *["reviewed task"] * lenses,
     ]
     assert rows["code-style"]["configurator"] == "task"
     assert rows["code-style"]["experimenter"] == "—"
-    assert (rows["review-style"]["super-reviewer"], rows["review-style"]["reviewer"]) == (
+    review_style = rows["review-style"]
+    assert (review_style["style-reviewer"], review_style["drift-reviewer"]) == (
         "role",
         "reviewed task",
     )
+    assert (review_style["reviewer"], review_style["bugs-reviewer"]) == ("role", "reviewed task")
 
 
 def test_skills_lines_up_each_column_under_its_role(project: Path) -> None:
@@ -607,9 +618,9 @@ def test_skills_with_json_gives_each_skills_cells_by_role(project: Path) -> None
         "experimenter": "—",
         "coder": "task",
         "reviewer": "reviewed task",
-        "super-reviewer": "—",
         "configurator": "role",
         **dict.fromkeys(LENS_REVIEWERS, "reviewed task"),
+        **dict.fromkeys(SUPER_LENS_REVIEWERS, "reviewed task"),
     }
     assert skills["python"]["reviewer"] == "reviewed task / mapped"
 

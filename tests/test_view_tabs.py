@@ -141,19 +141,17 @@ def test_the_pinned_tabs_are_the_built_in_roles_in_order() -> None:
         "experimenter",
         "coder",
         "reviewer",
-        "super-reviewer",
         "configurator",
     )
     assert PLANNER == "planner"
     assert [tab.key for tab in PINNED_TABS] == list(ROLE_TABS)
     assert pinned_roles(PINNED_TABS) == frozenset(ROLE_TABS)
-    assert [tab.lane for tab in PINNED_TABS] == ["planner", None, None, None, None, None]
+    assert [tab.lane for tab in PINNED_TABS] == ["planner", None, None, None, None]
     assert tab_labels(PINNED_TABS) == [
         "planner",
         "experimenter",
         "coder",
         "reviewer",
-        "super-reviewer",
         "configurator",
     ]
 
@@ -187,12 +185,14 @@ def test_each_pinned_roles_agents_are_keyed_to_its_tab() -> None:
     assert tab_key(None, roles) is None
 
 
-def test_concurrent_reviewers_share_a_tab_and_the_super_reviewer_has_its_own() -> None:
+def test_concurrent_reviewers_share_a_tab_and_each_super_lens_reviewer_has_its_own() -> None:
     roles: Mapping[str, str] = {}
-    for agent, role in (("a1", "reviewer"), ("a2", "reviewer"), ("a3", "super-reviewer")):
+    agents = (("a1", "reviewer"), ("a2", "reviewer"), ("a3", "style-reviewer"))
+    for agent, role in (*agents, ("a4", "style-reviewer")):
         roles = track_roles(roles, AgentStarted(agent_id=agent, role=role, task_id="1"))
     assert tab_key("a1", roles) == tab_key("a2", roles) == "reviewer"
-    assert tab_key("a3", roles) == "super-reviewer"
+    assert tab_key("a3", roles) == "a3"
+    assert tab_key("a4", roles) == "a4"
 
 
 def test_other_roles_are_not_tracked() -> None:
@@ -220,7 +220,6 @@ def test_pinned_role_output_marks_its_tab_unless_shown() -> None:
         "experimenter",
         "coder",
         "reviewer *",
-        "super-reviewer",
         "configurator",
     ]
     assert track_tabs(PINNED_TABS, said, active="reviewer", roles=roles) == PINNED_TABS
@@ -246,7 +245,6 @@ def test_a_pinned_roles_tab_is_marked_running_from_its_agents_start_to_its_exit(
         "experimenter",
         "● coder",
         "reviewer",
-        "super-reviewer",
         "configurator",
     ]
     assert track_tabs(tabs, exited, roles=roles) == PINNED_TABS
@@ -287,7 +285,7 @@ def test_only_the_tabs_of_the_roles_answering_in_a_lane_follow_it() -> None:
     tabs = pin_conversations(PINNED_TABS, {"architect": "design", "critic": "design"})
     busy = mark_lane_busy(tabs, "design", True)
     assert tab_labels(busy)[-2:] == ["● architect", "● critic"]
-    assert busy[:6] == PINNED_TABS
+    assert busy[: len(PINNED_TABS)] == PINNED_TABS
     assert mark_lane_busy(tabs, "work", True) == tabs
 
 
@@ -312,7 +310,7 @@ def test_pinning_again_keeps_the_tabs_still_listed_and_drops_the_others() -> Non
     tabs = pin_conversations(PINNED_TABS, {"architect": "design", "critic": "review"})
     tabs = mark_tab_unread(mark_lane_busy(tabs, "design", True), "architect", None)
     kept = pin_conversations(tabs, {"architect": "design"})
-    assert kept == (*PINNED_TABS, replace(tabs[6], running=1, unread=True))
+    assert kept == (*PINNED_TABS, replace(tabs[len(PINNED_TABS)], running=1, unread=True))
 
 
 def test_a_conversational_roles_agents_share_its_tab_without_counting() -> None:
@@ -397,7 +395,6 @@ def test_following_running_agents_counts_each_pinned_roles_agents() -> None:
         "experimenter",
         "coder",
         "● reviewer",
-        "super-reviewer",
         "configurator",
     ]
     assert tabs[3].running == 2

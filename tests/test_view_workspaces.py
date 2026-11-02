@@ -145,8 +145,8 @@ def test_the_agents_summary_lists_roles_in_their_order() -> None:
 
 
 def test_the_agents_summary_lists_every_built_in_role_then_others() -> None:
-    roles = ("auditor", "planner", "super-reviewer", "reviewer", "configurator", "coder")
-    summary = "1 coder · 1 configurator · 1 reviewer · 1 super reviewer · 1 planner · 1 auditor"
+    roles = ("auditor", "planner", "style-reviewer", "reviewer", "configurator", "coder")
+    summary = "1 coder · 1 configurator · 1 reviewer · 1 planner · 1 auditor · 1 style reviewer"
     assert agents_summary(roles) == summary
 
 

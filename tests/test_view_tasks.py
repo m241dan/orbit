@@ -286,7 +286,7 @@ def test_edit_refusal_says_a_running_or_verifying_task_cant_be_edited() -> None:
 
 
 def test_edit_refusal_says_a_review_orbit_queued_cant_be_edited() -> None:
-    for role in ("reviewer", "super-reviewer", "coder"):
+    for role in ("reviewer", "style-reviewer", "coder"):
         task = TaskSpec(prompt="check", role=role)
         state = TaskState(id="1", task=task, origin=REVIEW_ORIGIN, queued_as="review")
         assert edit_refusal(state) == "Reviews can't be edited; remove it instead."
@@ -317,7 +317,7 @@ def test_edit_refusal_answers_as_the_backend_does() -> None:
         TaskState(id="3", task=TaskSpec(prompt="go"), status="verifying"),
         TaskState(
             id="1",
-            task=TaskSpec(prompt="check", role="super-reviewer"),
+            task=TaskSpec(prompt="check", role="style-reviewer"),
             origin="review",
             queued_as="review",
         ),

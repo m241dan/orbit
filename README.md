@@ -99,7 +99,7 @@ In the app:
 | `ctrl+b` | Hide the sidebar so the conversation takes the full width (`h`/`j`/`k`/`l` skip its windows meanwhile); again, show it as it was (not while typing) |
 | `ctrl+t` | Jump to the **planner** tab; again, to each other conversational role's tab in turn, and from the last, back to the tab you were on (with the built-in roles alone, the planner tab, the experimenter's, and back) |
 | `ctrl+r` | Run the tasks that haven't completed yet (refused until verification is set up, if it's on with no steps; see [Verification steps](#verification-steps)) |
-| `ctrl+g` | Ask for a super review of the whole codebase now (works while tasks run; hidden while the `super-reviewer` is disabled) |
+| `ctrl+g` | Ask for a super review of the whole codebase now (works while tasks run; hidden while the `style-reviewer`, `drift-reviewer` and `scaling-reviewer` are all disabled) |
 | `ctrl+e` | Set up (or redo) the verification steps: after you confirm (`y` to go ahead, `n`/`esc` to cancel), queue a configurator task first and run it (see [Setting up verification](#setting-up-verification); hidden while the `configurator` is disabled) |
 | `ctrl+f` | Release the merge hold by hand, though the sets holding it haven't passed: after you confirm (`y` to release, `n`/`esc` to cancel), the work waiting lands (see [Verification steps](#verification-steps); shown only while merges are held) |
 | `ctrl+o` | Pick the model of the conversational role whose tab is shown, or the planner's on any other tab (default, then its runtime's aliases: fable, opus, sonnet, haiku and those your `config.toml` adds, each with the id it resolves to muted beside it when that's another; see [Models and their aliases](#models-and-their-aliases); new tasks opened there default to it too) |
@@ -282,7 +282,9 @@ review, one is queued for the next run. A session saved by an orbit from before 
 are for the reviewer as it was: each ends as if it suggested nothing, closing its batch, and orbit
 names the commits they leave unreviewed (`Reviews queued before lens reviewers were cancelled;
 unreviewed: 1a2b3c4, 5d6e7f8.`); a review that was running comes back interrupted, as any task
-does, and one that had ended stays as it was. The planner carries on its saved conversation, and the session's saved model and tool
+does, and one that had ended stays as it was. A task waiting for the `super-reviewer`, which the
+super review's three lens reviewers replaced, is cancelled the same way, with the same notice
+naming the commit its super review left unreviewed, whichever orbit saved the session. The planner carries on its saved conversation, and the session's saved model and tool
 access come back, unless `--model` or `--tools` was given, which hold for this run.
 
 Each session is locked while an orbit has it open: in another orbit's list it shows `open in
@@ -406,7 +408,7 @@ agent's id in a muted row whenever the speaker changes, its tool calls, prefixed
 its requests to orbit and orbit's replies (`agent-1 → orbit complete_task … ✓ …`) in their own
 colour. The tabs above it narrow it: **All** shows everything,
 then come a pinned tab for each built-in role, labelled by its name: **planner**,
-**experimenter**, **coder**, **reviewer**, **super-reviewer** and **configurator**, and one for each other conversational role
+**experimenter**, **coder**, **reviewer** and **configurator**, and one for each other conversational role
 the workspace you're on configures (see `conversation` under
 [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)), such as **architect**, pinned
 again as you move to another workspace; the task list tags each task with the lane its role runs
@@ -1325,7 +1327,11 @@ the `bugs-review` and `tests-review` triggers review every batch, while `fit-rev
 filed, or merged, into one of the batch's tasks. A fix that joined the batch because a task in it
 failed verification carries the findings of the task it fixes. So a batch filed from a Fit and a
 Bugs finding is reviewed by Fit, Bugs and Tests, then by the merge pass if they found anything,
-and one filed only from a Tests finding by Bugs and Tests. To keep this from going on forever,
+and one filed only from a Tests finding by Bugs and Tests. A batch filed from a super review's
+findings is reviewed the same way: `super-fix-review` queues the super review's lens reviewers that
+raised one of its findings (below), reading the batch's diff, so a batch filed from a Drift finding
+is reviewed by the `drift-reviewer`, Bugs and Tests, and not by the `style-reviewer` or
+`scaling-reviewer`. To keep this from going on forever,
 each batch is a round further from your own work, whichever lenses reviewed the batch before it,
 and once the batches reach `review_rounds` (default 3) review pauses, with a note in the conversation (given again when you open a session whose review
 is paused); it resumes with the next commit from one of your tasks. A review may suggest at most `review_suggestions` tasks (default 5), and a suggestion is
@@ -1345,17 +1351,20 @@ have suggested into.
 
 Every 10 commits by default (the `super-review` trigger's `every`, or `super_review_every`, its
 alias for this version; see [Triggers](#triggers)), counting your own and the planner's commits,
-not those of suggested tasks, the `super-review` trigger queues a `super-reviewer` task (Opus by
-default; its origin `super-review`, as is that of the tasks it suggests) from its template, which
-reviews the **whole codebase** at
-the latest commit: starting from the project's shape, it reads the commits since the last super
-review and a rotating sample of other code files (below) through the lens skills its role gives it
-(by default `review-style`, `review-drift` and `review-scaling`, each asking what has built up
-across commits; see [Skills](#skills)), and may suggest up to `super_review_suggestions` tasks
-(default 10). Those form a batch at round 1 and carry on like any other review's. Each review ends
-with a one-line verdict that also counts the findings its cap left out, so
-`5 suggestions, 2 more left out` tells you a second pass would find more. `ctrl+g` fires the
-trigger by hand, queuing one straight away, and restarts the count. A super review's task lists,
+not those of suggested tasks, the `super-review` trigger reviews the **whole codebase** at the
+latest commit through three **super-review lenses**, one agent each: from one firing and one
+rendering of its template, it queues a task for each of the roles it lists, the `style-reviewer`,
+`drift-reviewer` and `scaling-reviewer` (Opus by default; their origin `super-review`), each in a
+read-only snapshot of that commit. Starting from the project's shape, each reads the commits since
+the last super review and a rotating sample of other code files (below) through its one lens skill,
+`review-style`, `review-drift` or `review-scaling`, each asking what has built up across commits
+(see [Skills](#skills)), and reports findings with `report_finding`, as a per-commit lens does,
+rather than filing tasks. The three tasks form one review, of kind `super`: once they have all
+ended, the merge pass checks and groups their findings and files up to `super_review_suggestions`
+tasks (default 10) from them, its `{cap}`, dismissing the rest. Those form a batch at round 1 and
+carry on like any other review's. A disabled lens reviewer is left out, so with the
+`drift-reviewer` disabled a super review queues two tasks. `ctrl+g` fires the trigger by hand,
+queuing them straight away, and restarts the count. A super review's task lists,
 after the tasks still queued, the
 subjects of the commits since the last super review (every one, oldest first, after the commit that
 review reviewed up to its own) under `Commits since the last super review:`, then the files they
@@ -1455,8 +1464,7 @@ you queue keeps its own settings. Built in:
 | Role | Tools | Verified | Default model / access | Skills |
 |---|---|---|---|---|
 | `coder` | `get_task`, `complete_task`, `run_check`, `report_progress`, `give_up` | yes | default / `full` | `code-style`, `security` |
-| `reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `suggest_task`, `dismiss_finding` | no | default / `restricted` | `code-style`, `security`, `review-fit`, `review-bugs`, `review-tests`, `review-logic`, `review-security`, `review-performance` |
-| `super-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `suggest_task` | no | `opus` / `restricted` | `code-style`, `review-style`, `review-drift`, `review-scaling` |
+| `reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `suggest_task`, `dismiss_finding` | no | default / `restricted` | `code-style`, `security`, `review-fit`, `review-bugs`, `review-tests`, `review-logic`, `review-security`, `review-performance`, `review-style`, `review-drift`, `review-scaling` |
 | `planner` | `propose_task`, `report_progress`, `save_report`, `list_reports`, `read_report` | no | default / `restricted` | `code-style` |
 | `experimenter` | `report_progress`, `save_report`, `list_reports`, `read_report` | no | `sonnet` / `full` | none |
 | `configurator` | `get_task`, `propose_checks`, `report_progress`, `give_up` | no | default / `restricted` | `python`, `cpp` |
@@ -1466,11 +1474,19 @@ you queue keeps its own settings. Built in:
 | `logic-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | default / `restricted` | `code-style`, `review-logic` |
 | `security-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | default / `restricted` | `code-style`, `security`, `review-security` |
 | `performance-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | default / `restricted` | `code-style`, `review-performance` |
+| `style-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | `opus` / `restricted` | `code-style`, `review-style` |
+| `drift-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | `opus` / `restricted` | `code-style`, `review-drift` |
+| `scaling-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `report_finding` | no | `opus` / `restricted` | `code-style`, `review-scaling` |
 
-The `reviewer` is the merge pass of each review, and the six lens reviewers its lenses (see
-[Reviews](#reviews)); they share one instructions file, `lens-reviewer.md`, each looking through
-its own lens skill, and only the `bugs-reviewer` and the `security-reviewer` have
-`blocking_findings = true`.
+The `reviewer` is the merge pass of each review, and the six per-commit lens reviewers its lenses
+(see [Reviews](#reviews)); they share one instructions file, `lens-reviewer.md`, each looking
+through its own lens skill, and only the `bugs-reviewer` and the `security-reviewer` have
+`blocking_findings = true`. The `style-reviewer`, `drift-reviewer` and `scaling-reviewer` are the
+super review's lenses, sharing `super-lens-reviewer.md`: each reviews the whole codebase through
+its one lens, and later the fixes of the findings it raised, reporting findings for the merge pass.
+They replace the `super-reviewer` of earlier versions: a project file that sets anything under
+`[roles.super-reviewer]` is refused at load (`super-reviewer is now style-reviewer, drift-reviewer
+and scaling-reviewer.`).
 
 Every role also has `read_skill`, which reads the files of its agents' skills (see
 [Skills](#skills)); a role's `tools` naming it is refused (`read_skill comes with every role;
@@ -1513,11 +1529,11 @@ and what they run on:
   under [Tasks](#tasks)). Each lane shows in the
   Snapshot's `busy`, by name. On the task list, a task in a lane other than `work` is tagged with
   its lane, and `L` narrows the list to each lane in turn (see [Tasks](#tasks)). Orbit's reviews
-  run in one lane, the one the enabled review roles (the lens reviewers, the `reviewer` and the
-  `super-reviewer`) share, so the config is refused, naming them and their lanes, if they're in
-  different lanes, the merging lane included; a disabled one can be in any lane. With the
-  `reviewer` disabled, reviews run in the `super-reviewer`'s lane, or, with both disabled, in the
-  first enabled lens reviewer's.
+  run in one lane, the one the enabled review roles (the lens reviewers, per-commit and the super
+  review's, and the `reviewer`) share, so the config is refused, naming them and their lanes, if
+  they're in different lanes, the merging lane included; a disabled one can be in any lane. With
+  the `reviewer` disabled, reviews run in the first enabled lens reviewer's lane, the per-commit
+  ones first.
 - `workspace`: where its agent works, in whichever lane runs it: `worktree` (the coder's separate
   worktree, readied for each task as
   [Where tasks run, and how their work lands](#where-tasks-run-and-how-their-work-lands) says),
@@ -1569,10 +1585,11 @@ and what they run on:
   disabled lens reviewer's trigger queues nothing, so the review waits only for the lenses
   queued; reviews of the work that lands are queued only while some enabled trigger guarded by
   `review-rounds` can fire, so with every lens reviewer disabled (and no trigger of your own)
-  none is. A disabled `reviewer` queues no merge pass, and a disabled `super-reviewer` no super
-  reviews, however many commits land; a disabled `super-reviewer` also takes the `super-review`
-  trigger out of the Catalog, hiding `ctrl+g`, as a disabled `configurator` does `configure-checks`
-  and `ctrl+e`, and firing either is then refused as an unknown trigger. A message to a disabled
+  none is. A disabled `reviewer` queues no merge pass, and a disabled super-review lens is left
+  out of each super review, which queues the others; with all three disabled there are no super
+  reviews, however many commits land, and the `super-review` trigger leaves the Catalog, hiding
+  `ctrl+g`, as a disabled `configurator` does `configure-checks` and `ctrl+e`, and firing either
+  is then refused as an unknown trigger. A message to a disabled
   `planner`, or resetting its
   conversation, is refused (`planner is disabled in this project's configuration.`), as are adding
   a task in a disabled role, editing one into it or accepting a draft in it, naming the role, and
@@ -1603,7 +1620,7 @@ and what they run on:
   `--runtime NAME` on `orbit chat` or `orbit serve` sets it for a run. Orbit starts agents only on
   the runtimes its enabled roles run on, once it finds each one's executable on your `PATH`; one
   that's missing stops `orbit chat` with status 2 before anything runs, naming the roles, the
-  runtime and what to install (`Roles planner, coder, reviewer, super-reviewer, configurator use
+  runtime and what to install (`Roles planner, coder, reviewer, configurator use
   the runtime claude, but claude isn't on PATH. Install Claude Code, or set those roles' runtime
   to one you have.`), and makes a workspace `orbit serve` can't open. The Catalog lists each
   role's `runtime`, and telemetry's `orbit.runtime` is it. Each runtime says what it can do:
@@ -1683,7 +1700,7 @@ role's (see [Tasks](#tasks)). `ctrl+y` picks the effort of the conversational ro
 shown, or the planner's elsewhere, as `ctrl+o` and `ctrl+l` pick its model and tool access.
 
 The `coder` works in lane `work` in a `worktree` and merges; the `configurator` works in `work` in
-a `worktree` and doesn't merge; the `reviewer` and `super-reviewer` work in `review` on a
+a `worktree` and doesn't merge; the `reviewer` and the lens reviewers work in `review` on a
 `snapshot`; the `planner` works in `planner` in your `checkout`, in conversation; all are enabled
 and run on `claude`, and none sets an effort.
 A role whose fields don't go together is refused, naming the role and the rule: `merge = true`
@@ -1763,7 +1780,7 @@ model = "opus"      # the planner's
 Each of a role's fields comes from the most specific place that sets it: the project's
 `.orbit/config.toml` for that role, then your `[roles.<name>]`, then your `[roles]`, then the
 roles shipped with orbit, then orbit's defaults. So above, every role runs on `haiku`, the
-`super-reviewer`'s `opus` from the package included, unless the project sets a role's model; the
+super-review lenses' `opus` from the package included, unless the project sets a role's model; the
 planner runs on `opus` unless the project sets the planner's; and a project's
 `[roles.planner] model = "sonnet"` wins over both. Without a `[roles]` table, roles are just the
 project's over orbit's. A `[roles.<name>]` table that sets only `model`, `effort` and `runtime`
@@ -1921,7 +1938,8 @@ The shipped triggers are data in
 | `security-review` | `task_landed` | every one | a `security-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding` |
 | `performance-review` | `task_landed` | every one | a `performance-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding` |
 | `merge-pass` | `reviews_finished` | `findings = "some"` | a `reviewer` task, from `merge-pass.md` | |
-| `super-review` | `commits` | `origin = ["manual", "planner"]` | a `super-reviewer` task, from `super-review.md` | `every = 10`, guard `suggestions-pending`, manual as `Super review` |
+| `super-review` | `commits` | `origin = ["manual", "planner"]` | a `style-reviewer`, `drift-reviewer` and `scaling-reviewer` task, from `super-review.md` | `every = 10`, guard `suggestions-pending`, manual as `Super review` |
+| `super-fix-review` | `task_landed` | `review = "batch"` | a `style-reviewer`, `drift-reviewer` and `scaling-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding` |
 | `configure-checks` | `manual` | every one | a `configurator` task, from `configure-checks.md` | manual as `Set up checks` |
 | `set-up-verification` | `session_started` | `verification = "missing"` | a `configurator` task, from `configure-checks.md` | guard `not-queued`, runs at once, as `ctrl+e`'s does |
 | `startup-check` | `session_started` | `verification = "configured"` | runs the task checks, `checks = "task-checks"` | |
@@ -1934,6 +1952,12 @@ A trigger's fields:
   `.md` is the path of a Markdown file under `.orbit/` whose text is the prompt
   (`prompt = "triggers/tidy.md"` reads `.orbit/triggers/tidy.md`), and anything else is the text
   itself, as a role's `instructions` are. A project's `prompt` replaces a shipped template whole.
+  `role` may be a list of roles, as `super-review`'s is
+  (`role = ["style-reviewer", "drift-reviewer", "scaling-reviewer"]`): one firing then queues a
+  task for each enabled role in it, in its order, all from one rendering of the prompt and judged
+  by its guards once, as the board stood before any of them; `not-queued` holds it back while a
+  task of any of its roles waits, and `raised-finding` lets through only the roles that raised one
+  of the batch's findings. `orbit config show` and the reference config show a list as a list.
 - `checks`: in place of a role, the checks it runs rather than queue a task: `"task-checks"`, or a
   named set (see [Verification steps](#verification-steps)). The task checks run as the startup
   check, once, and a set each time the trigger fires, or as you fire it by hand, each shown in the
@@ -1965,7 +1989,7 @@ its name in braces:
 | `reviews_finished` | every finding role's task of a review has ended (see [Reviews](#reviews)) | `findings`: `some` or `none`; `review`: `commit`, `batch` or `super` | `{title}`, `{commit}`, `{findings}`, `{cap}`, `{queued}`, `{landed_since}` |
 
 When an event fires, each enabled trigger on it fires in turn, in configuration order (the
-shipped ones, then the project's), if its role is enabled, its `when` takes the event and none of
+shipped ones, then the project's), if its role, or one of its list's, is enabled, its `when` takes the event and none of
 its guards holds it back. Its prompt is rendered from its template, and its task added at the end
 of the task list for its role (a `configurator`'s at the front, as the checks it sets up verify the
 rest), with that role's settings, or as a draft for you to accept with `draft = true`; the task's origin is the trigger's name, so the task list and the task's span
@@ -1985,8 +2009,8 @@ and fires on the first landing it counts once none holds it. The `super-review` 
 is the repository's super review count, which carries on across sessions and restarts; a
 project's own `commits` trigger counts from when orbit opens the workspace. Each `commits`
 trigger that fires, or that you fire yourself (`ctrl+g` fires `super-review`), reviews the
-codebase at the commit: it renders the super review's variables, its task is booked as a review
-whose suggestions form a batch at round 1, and the super review's record moves on to that commit
+codebase at the commit: it renders the super review's variables, each task it queues is booked
+into one review, whose suggestions form a batch at round 1, and the super review's record moves on to that commit
 and its sample. Its suggestions take its name as their origin, as its task does: those of a
 project's `[triggers.audit]` say `audit`, and, as a trigger never fires on its own tasks, their
 landings don't count toward it. Fired by hand, a trigger fires at once, whatever its `when` and
@@ -2006,9 +2030,11 @@ The guards:
 - `raised-finding`: on a batch's review, holds the trigger back unless its role raised a finding
   that the merge pass filed, or merged, into one of the batch's tasks, a fix that joined the batch
   carrying the findings of the task it fixes; it holds nothing back on a landing's own review, or
-  on any other event. A trigger of your own without it hears every batch's review, as
-  `bugs-review` and `tests-review` do.
-- `not-queued`: holds the trigger back while a task of its role is still to run or running.
+  on any other event. A trigger listing roles queues, on a batch's review, only for those of them
+  that raised one, as `super-fix-review` does for the super review's lenses. A trigger of your own
+  without it hears every batch's review, as `bugs-review` and `tests-review` do.
+- `not-queued`: holds the trigger back while a task of its role, or of any role of its list, is
+  still to run or running.
 - `dedupe`: holds the trigger back while a task still to run or running has the first line its
   task would have.
 - `suggestions-pending`: holds the trigger back while a task the reviews queued is pending or
@@ -2068,7 +2094,8 @@ the field and the value, for an unknown event, role, guard or `when` field
 variable its event doesn't give (`triggers.tidy-up.prompt: {diff} isn't a variable of
 task_finished; its variables are {trigger}.`), `every` without `on = "commits"`, `manual = true`
 without a `label`, neither a role nor `checks` or both, a role without a prompt, or `checks` with
-one. So is `review-rounds` on a trigger that isn't on `task_landed`
+one. A list of roles names each one that isn't a role on a line of its own, and an empty one is
+refused (`triggers.tidy-up.role: a list of roles names at least one.`). So is `review-rounds` on a trigger that isn't on `task_landed`
 (`triggers.tidy-up.guards: review-rounds needs on = "task_landed".`), and a `when` value its
 field never takes, alone or in a list: a `role` that isn't one (a disabled one is), a
 `verification` other than `configured`, `missing` or `off` (`triggers.tidy-up.when: missng isn't
@@ -2076,7 +2103,8 @@ a value of verification; its values are configured, missing, off.`), a `findings
 `some` or `none`, or a `review` other than `commit`, `batch` or `super` on `reviews_finished`,
 or other than `commit` or `batch` on `task_landed` (`triggers.tidy-up.when: nothing isn't a value
 of review; its values are commit, batch.`), while `origin`, `status` and `step` take any value.
-A trigger whose role is disabled loads, and never fires. When git can't show the diff of what
+A trigger whose role is disabled loads, and never fires; one listing roles fires while any of them
+is enabled. When git can't show the diff of what
 landed, the triggers on the landing are skipped with an error (`Review skipped: …` when a review
 was due, `Triggers skipped: …` otherwise), and the run goes on. The reference config shows each shipped
 trigger's table commented out after the roles, every field under its description, and
@@ -2121,8 +2149,9 @@ files with `read_skill` (see below).
 Each role names the skills its agents get in its `skills` (see
 [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)): the `planner` gets `code-style`,
 the `coder` `code-style` and `security`, the `reviewer` those and the review lenses `review-fit`,
-`review-bugs`, `review-tests`, `review-logic`, `review-security` and `review-performance`, the
-`super-reviewer` `code-style`, `review-style`, `review-drift` and `review-scaling`, the
+`review-bugs`, `review-tests`, `review-logic`, `review-security`, `review-performance`,
+`review-style`, `review-drift` and `review-scaling`, each lens reviewer `code-style` and its own
+lens (the `security-reviewer` `security` too), the
 `configurator` the languages `python` and `cpp`, for their suggested checks, and the
 `experimenter` none. A project's `skills` for a role replaces orbit's list
 whole, so it can drop a default as well as add a skill, orbit's or its own. The reference config
@@ -2386,21 +2415,22 @@ message `orbit chat` gives.
 `--skills` prints the workspace's skill map instead of the settings: a column for each role, in
 the configuration's order, and a row for each skill in name order, each cell saying where that
 role's agents get the skill, then a line saying what each value means. A role's cell is `role`
-when its `skills` names the skill. Otherwise the `super-reviewer` and the conversational roles,
-which have no task, get it only from the `[[skills]]` entries, `mapped`, or never, `—`; the
-`reviewer` gets it from the reviewed task's list, `reviewed task`, and every other role, your own
+when its `skills` names the skill. Otherwise the conversational roles, which have no task, get it
+only from the `[[skills]]` entries, `mapped`, or never, `—`; the `reviewer` and the lens reviewers
+get it from the reviewed task's list, `reviewed task` (a super review, reviewing no particular
+task, gets the mapped skills), and every other role, your own
 task roles included, from its task's list, `task`, each with ` / mapped` added when the entries
 use it, as a task without a list gets every mapped skill. With
 `use = ["python", "application"]`:
 
 ```
 $ orbit config show --skills
-skill                planner   experimenter   coder           reviewer                 super-reviewer   configurator
-application          mapped    mapped         task / mapped   reviewed task / mapped   mapped           task / mapped
-code-style           role      —              role            role                     role             task
-cpp                  —         —              task            reviewed task            —                role
+skill                planner   experimenter   coder           reviewer                 configurator    …
+application          mapped    mapped         task / mapped   reviewed task / mapped   task / mapped   …
+code-style           role      —              role            role                     task            …
+cpp                  —         —              task            reviewed task            role            …
 ...
-review-style         —         —              task            reviewed task            role             task
+review-style         —         —              task            role                     task            …
 
 role: in the role's skills.
 task: when the task's list names it.
@@ -2509,8 +2539,8 @@ lowercase letters, digits, dots and dashes with at least one dash, such as `glm-
 as `opus`, is taken for a mistyped alias and refused as the configuration loads:
 `roles.coder.model = "opus": the runtime kiro takes the aliases auto, sonnet, haiku or a full id
 of lowercase letters, digits, dots and dashes, with at least one dash.`. That includes the built-in
-`super-reviewer`'s `opus`, so a super-reviewer on Kiro needs a model of Kiro's
-(`[roles.super-reviewer] model = "sonnet"`). Your `config.toml`'s `[runtimes.kiro.models]` adds
+super-review lenses' `opus`, so a `drift-reviewer` on Kiro needs a model of Kiro's
+(`[roles.drift-reviewer] model = "sonnet"`). Your `config.toml`'s `[runtimes.kiro.models]` adds
 aliases (see [Models and their aliases](#models-and-their-aliases)).
 
 **Effort.** Kiro takes every effort level, but whether it's used is up to the model, and Kiro says

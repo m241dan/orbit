@@ -26,7 +26,7 @@ from orbit.agent.domain.sessions import SavedCopy
 from orbit.agent.domain.skills import SkillMapping
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
-from orbit.protocol import BUILT_IN_ROLE_NAMES, LENS_REVIEWERS
+from orbit.protocol import BUILT_IN_ROLE_NAMES, LENS_REVIEWERS, SUPER_LENS_REVIEWERS
 from tests.agent_fakes import CLAUDE_MODELS, EVERYTHING, KNOWN_RULES, LIMITED_RUNTIME
 
 INSTRUCTIONS = {name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES}
@@ -419,7 +419,7 @@ def test_a_conversational_role_sharing_its_lane_with_task_roles_is_refused_namin
         load_config(talker(lane="review"), BUILT_IN_ROLES)
     assert str(raised.value) == (
         "roles: the conversational role 'x' can't share its lane 'review' with the task roles"
-        f" {['reviewer', 'super-reviewer', *LENS_REVIEWERS]}"
+        f" {['reviewer', *LENS_REVIEWERS, *SUPER_LENS_REVIEWERS]}"
     )
 
 
@@ -462,27 +462,33 @@ def test_worktree_roles_sharing_a_lane_other_than_work_load() -> None:
 
 
 LENSES = list(LENS_REVIEWERS)
-"""The lens reviewers' names, in order, as a lane's roles are listed."""
+"""The per-commit lens reviewers' names, in order, as a lane's roles are listed."""
+
+SUPERS = list(SUPER_LENS_REVIEWERS)
+"""The super review's lens reviewers' names, in order, as a lane's roles are listed."""
+
+BUT_DRIFT = ["reviewer", *LENSES, SUPERS[0], SUPERS[2]]
+"""The review roles but the drift reviewer, in order, as a lane's roles are listed."""
 
 
 @pytest.mark.parametrize(
     ("roles", "lanes"),
     [
         (
-            {"super-reviewer": {"lane": "audit"}},
-            f"lane 'review' has {['reviewer', *LENSES]} and lane 'audit' has ['super-reviewer']",
+            {"drift-reviewer": {"lane": "audit"}},
+            f"lane 'review' has {BUT_DRIFT} and lane 'audit' has ['drift-reviewer']",
         ),
         (
-            {"super-reviewer": {"lane": "work"}},
-            f"lane 'review' has {['reviewer', *LENSES]} and lane 'work' has ['super-reviewer']",
+            {"drift-reviewer": {"lane": "work"}},
+            f"lane 'review' has {BUT_DRIFT} and lane 'work' has ['drift-reviewer']",
         ),
         (
             {"reviewer": {"lane": "work"}},
-            f"lane 'work' has ['reviewer'] and lane 'review' has {['super-reviewer', *LENSES]}",
+            f"lane 'work' has ['reviewer'] and lane 'review' has {[*LENSES, *SUPERS]}",
         ),
         (
             {"bugs-reviewer": {"lane": "audit"}},
-            f"lane 'review' has {['reviewer', 'super-reviewer', *LENSES[:1], *LENSES[2:]]}"
+            f"lane 'review' has {['reviewer', *LENSES[:1], *LENSES[2:], *SUPERS]}"
             " and lane 'audit' has ['bugs-reviewer']",
         ),
     ],
@@ -495,7 +501,7 @@ def test_review_roles_in_different_lanes_are_refused_naming_them_and_their_lanes
     assert str(raised.value) == f"roles: the enabled review roles must share one lane, but {lanes}"
 
 
-@pytest.mark.parametrize("disabled", ["reviewer", "super-reviewer", "bugs-reviewer"])
+@pytest.mark.parametrize("disabled", ["reviewer", "drift-reviewer", "bugs-reviewer"])
 @pytest.mark.parametrize("lane", ["audit", "work"])
 def test_a_disabled_review_role_can_be_in_another_lane_than_the_others(
     disabled: str, lane: str
@@ -508,8 +514,19 @@ def test_a_disabled_review_role_can_be_in_another_lane_than_the_others(
 
 @pytest.mark.parametrize("lane", ["audit", "work"])
 def test_review_roles_sharing_a_lane_other_than_review_load(lane: str) -> None:
-    roles = {name: {"lane": lane} for name in ("reviewer", "super-reviewer", *LENSES)}
+    roles = {name: {"lane": lane} for name in ("reviewer", *LENSES, *SUPERS)}
     assert load_config({"roles": roles}, BUILT_IN_ROLES).roles["reviewer"].lane == lane
+
+
+@pytest.mark.parametrize("fields", [{"model": "sonnet"}, {}])
+def test_a_project_setting_anything_for_the_super_reviewer_is_told_what_it_became(
+    fields: dict[str, object],
+) -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_config({"roles": {"super-reviewer": fields}}, BUILT_IN_ROLES)
+    assert str(raised.value) == (
+        "super-reviewer is now style-reviewer, drift-reviewer and scaling-reviewer."
+    )
 
 
 def test_an_invalid_field_isnt_also_reported_as_the_merge_default_it_stopped() -> None:

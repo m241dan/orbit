@@ -14,8 +14,8 @@ from orbit.protocol import (
     REVIEW_ORIGIN,
     REVIEW_ROLES,
     REVIEWER,
+    SUPER_LENS_REVIEWERS,
     SUPER_REVIEW,
-    SUPER_REVIEWER,
     EditRefusal,
     TaskSpec,
     TaskState,
@@ -25,14 +25,14 @@ from orbit.protocol import (
 )
 
 AUDIT = "audit"
-"""A project's own trigger, such as a ``commits`` one queuing a super reviewer's task."""
+"""A project's own trigger, such as a ``commits`` one queuing a reviewer's task."""
 
 RUNNING = EditRefusal(code=BUSY, message="Task '3' can't be edited while it runs.")
 REVIEW = EditRefusal(code=INVALID, message="Reviews can't be edited; remove it instead.")
 
 
-def test_the_review_roles_are_the_lens_reviewers_the_reviewer_and_the_super_reviewer() -> None:
-    assert {REVIEWER, SUPER_REVIEWER, *LENS_REVIEWERS} == REVIEW_ROLES
+def test_the_review_roles_are_the_lens_reviewers_and_the_reviewer() -> None:
+    assert {REVIEWER, *LENS_REVIEWERS, *SUPER_LENS_REVIEWERS} == REVIEW_ROLES
 
 
 @pytest.mark.parametrize("status", ["running", "verifying"])
