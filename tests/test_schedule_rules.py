@@ -14,11 +14,11 @@ from orbit.agent.domain.schedules import (
     Firing,
     TimesRead,
     TimesUnread,
-    due_triggers,
-    fire_due,
-    open_schedules,
-    wait_for_due,
-    wake_schedules,
+    decide_opening_firing,
+    decide_wake_firing,
+    find_due_triggers,
+    measure_wait,
+    stamp_fired,
 )
 from orbit.agent.domain.triggers import (
     Trigger,
@@ -177,34 +177,38 @@ def test_a_schedule_trigger_fires_on_schedule_in_words() -> None:
 
 
 def test_a_trigger_that_came_due_while_closed_fires_once_on_opening() -> None:
-    opened = open_schedules({"nightly": NIGHTLY}, {"nightly": MONDAY_EVENING}, TUESDAY_MORNING, UTC)
+    opened = decide_opening_firing(
+        {"nightly": NIGHTLY}, {"nightly": MONDAY_EVENING}, TUESDAY_MORNING, UTC
+    )
     assert opened == Firing(("nightly",), TimesRead({"nightly": TUESDAY_MORNING}))
 
 
 def test_a_trigger_that_came_due_many_times_while_closed_fires_once_on_opening() -> None:
     week_ago = MONDAY_EVENING - timedelta(days=7)
-    opened = open_schedules({"nightly": NIGHTLY}, {"nightly": week_ago}, TUESDAY_MORNING, UTC)
+    opened = decide_opening_firing(
+        {"nightly": NIGHTLY}, {"nightly": week_ago}, TUESDAY_MORNING, UTC
+    )
     assert opened.due == ("nightly",)
 
 
 def test_a_trigger_that_didnt_come_due_while_closed_keeps_its_time() -> None:
-    opened = open_schedules({"noon": NOON}, {"noon": MONDAY_EVENING}, TUESDAY_MORNING, UTC)
+    opened = decide_opening_firing({"noon": NOON}, {"noon": MONDAY_EVENING}, TUESDAY_MORNING, UTC)
     assert opened == Firing((), TimesRead({"noon": MONDAY_EVENING}))
 
 
 def test_a_trigger_first_seen_doesnt_fire_and_takes_the_time_of_opening() -> None:
-    opened = open_schedules({"nightly": NIGHTLY}, {}, TUESDAY_MORNING, UTC)
+    opened = decide_opening_firing({"nightly": NIGHTLY}, {}, TUESDAY_MORNING, UTC)
     assert opened == Firing((), TimesRead({"nightly": TUESDAY_MORNING}))
 
 
 def test_the_times_of_triggers_no_longer_scheduled_are_dropped() -> None:
     kept = {"gone": MONDAY_EVENING, "noon": MONDAY_EVENING}
-    opened = open_schedules({"noon": NOON}, kept, TUESDAY_MORNING, UTC)
+    opened = decide_opening_firing({"noon": NOON}, kept, TUESDAY_MORNING, UTC)
     assert opened.times == TimesRead({"noon": MONDAY_EVENING})
 
 
 def test_times_that_cant_be_read_leave_the_triggers_first_seen_and_unread() -> None:
-    opened = open_schedules({"nightly": NIGHTLY}, None, TUESDAY_MORNING, UTC)
+    opened = decide_opening_firing({"nightly": NIGHTLY}, None, TUESDAY_MORNING, UTC)
     assert opened == Firing((), TimesUnread({"nightly": TUESDAY_MORNING}, frozenset()))
 
 
@@ -214,24 +218,24 @@ def test_times_that_cant_be_read_leave_the_triggers_first_seen_and_unread() -> N
 def test_the_triggers_due_are_those_come_due_since_each_last_fired_in_order() -> None:
     crons = {"noon": NOON, "nightly": NIGHTLY, "hourly": "0 * * * *"}
     fired = {"noon": at(8), "nightly": at(3), "hourly": at(12)}
-    assert due_triggers(crons, fired, at(12, 30), UTC) == ("noon",)
-    assert due_triggers(crons, fired, at(13), UTC) == ("noon", "hourly")
+    assert find_due_triggers(crons, fired, at(12, 30), UTC) == ("noon",)
+    assert find_due_triggers(crons, fired, at(13), UTC) == ("noon", "hourly")
 
 
 def test_the_triggers_fired_take_the_time_they_fired() -> None:
     fired = {"noon": at(8), "nightly": at(3)}
-    assert fire_due(fired, ("noon",), at(12)) == {"noon": at(12), "nightly": at(3)}
+    assert stamp_fired(fired, ("noon",), at(12)) == {"noon": at(12), "nightly": at(3)}
 
 
 def test_with_the_times_read_the_triggers_due_fire_and_take_the_time_they_fired() -> None:
     times = TimesRead({"noon": at(8), "nightly": at(3)})
-    woken = wake_schedules({"noon": NOON, "nightly": NIGHTLY}, times, None, at(12), UTC)
+    woken = decide_wake_firing({"noon": NOON, "nightly": NIGHTLY}, times, None, at(12), UTC)
     assert woken == Firing(("noon",), TimesRead({"noon": at(12), "nightly": at(3)}))
 
 
 def test_with_the_times_still_unread_the_triggers_due_fire_and_stay_unread() -> None:
     times = TimesUnread({"noon": at(8), "nightly": at(8)}, frozenset())
-    woken = wake_schedules({"noon": NOON, "nightly": NIGHTLY}, times, None, at(12), UTC)
+    woken = decide_wake_firing({"noon": NOON, "nightly": NIGHTLY}, times, None, at(12), UTC)
     assert woken == Firing(
         ("noon",), TimesUnread({"noon": at(12), "nightly": at(8)}, frozenset({"noon"}))
     )
@@ -241,7 +245,7 @@ def test_times_read_at_last_catch_up_the_triggers_unfired_since_opening_as_openi
     crons = {"noon": NOON, "nightly": NIGHTLY, "new": NIGHTLY}
     times = TimesUnread({"noon": at(12), "nightly": at(8), "new": at(8)}, frozenset({"noon"}))
     kept = {"noon": MONDAY_EVENING, "nightly": MONDAY_EVENING, "gone": MONDAY_EVENING}
-    woken = wake_schedules(crons, times, kept, at(12, 5), UTC)
+    woken = decide_wake_firing(crons, times, kept, at(12, 5), UTC)
     assert woken == Firing(
         ("nightly",), TimesRead({"noon": at(12), "nightly": at(12, 5), "new": at(8)})
     )
@@ -249,19 +253,19 @@ def test_times_read_at_last_catch_up_the_triggers_unfired_since_opening_as_openi
 
 def test_times_read_while_they_are_known_already_change_nothing() -> None:
     times = TimesRead({"nightly": at(3)})
-    woken = wake_schedules({"nightly": NIGHTLY}, times, {"nightly": MONDAY_EVENING}, at(4), UTC)
+    woken = decide_wake_firing({"nightly": NIGHTLY}, times, {"nightly": MONDAY_EVENING}, at(4), UTC)
     assert woken == Firing((), times)
 
 
 def test_the_wait_lasts_until_the_first_trigger_comes_due() -> None:
     crons = {"noon": NOON, "quarter": "*/15 * * * *"}
     fired = {"noon": at(8), "quarter": at(11, 50)}
-    assert wait_for_due(crons, fired, at(11, 58), UTC) == timedelta(minutes=2)
+    assert measure_wait(crons, fired, at(11, 58), UTC) == timedelta(minutes=2)
 
 
 def test_the_wait_lasts_no_longer_than_the_longest() -> None:
-    assert wait_for_due({"nightly": NIGHTLY}, {"nightly": at(3)}, at(4), UTC) == LONGEST_WAIT
+    assert measure_wait({"nightly": NIGHTLY}, {"nightly": at(3)}, at(4), UTC) == LONGEST_WAIT
 
 
 def test_a_trigger_already_due_is_waited_for_not_at_all() -> None:
-    assert wait_for_due({"nightly": NIGHTLY}, {"nightly": at(2)}, at(4), UTC) == timedelta()
+    assert measure_wait({"nightly": NIGHTLY}, {"nightly": at(2)}, at(4), UTC) == timedelta()

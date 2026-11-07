@@ -20,9 +20,9 @@ from orbit.agent.domain.schedules import (
     Firing,
     ScheduleTimes,
     TimesRead,
-    open_schedules,
-    wait_for_due,
-    wake_schedules,
+    decide_opening_firing,
+    decide_wake_firing,
+    measure_wait,
 )
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.execution.sleeping import Sleep, sleep_for
@@ -163,17 +163,17 @@ class Schedules:
         keep the time each fired or was first seen, if the times kept could be read."""
         kept = await self._parts.times.load()
         clock = self._parts.clock
-        await self._fire(open_schedules(crons, kept, clock.now(), clock.zone))
+        await self._fire(decide_opening_firing(crons, kept, clock.now(), clock.zone))
 
     async def _wake(self, crons: Mapping[str, str]) -> None:
         """Wait until the first of ``crons`` comes due, or for as long as a wait lasts, then fire
         those come due since they last fired, reading the times kept first if they're unread."""
         clock = self._parts.clock
-        wait = wait_for_due(crons, self._times.fired, clock.now(), clock.zone)
+        wait = measure_wait(crons, self._times.fired, clock.now(), clock.zone)
         await clock.sleep(wait)
         kept = await self._read_unread()
         now = clock.now()  # The time after the wait, which may have ended late, and the read.
-        await self._fire(wake_schedules(crons, self._times, kept, now, clock.zone))
+        await self._fire(decide_wake_firing(crons, self._times, kept, now, clock.zone))
 
     async def _read_unread(self) -> Mapping[str, datetime] | None:
         """The times kept, read afresh while they're unread; none once they're read, or when

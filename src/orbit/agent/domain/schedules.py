@@ -53,7 +53,7 @@ class Firing:
     times: ScheduleTimes
 
 
-def open_schedules(
+def decide_opening_firing(
     crons: Mapping[str, str], kept: Mapping[str, datetime] | None, now: datetime, zone: tzinfo
 ) -> Firing:
     """What opening a workspace at ``now`` makes of the schedule triggers' ``crons``, their cron
@@ -62,12 +62,12 @@ def open_schedules(
     time is first seen, its time ``now``, firing nothing; the others keep theirs. Times of
     triggers no longer among ``crons`` are dropped. Times that couldn't be read leave every
     trigger first seen, and the times unread."""
-    return wake_schedules(
+    return decide_wake_firing(
         crons, TimesUnread(dict.fromkeys(crons, now), frozenset()), kept, now, zone
     )
 
 
-def wake_schedules(
+def decide_wake_firing(
     crons: Mapping[str, str],
     times: ScheduleTimes,
     kept: Mapping[str, datetime] | None,
@@ -81,27 +81,27 @@ def wake_schedules(
     opening, and the times are read after; ``kept`` is otherwise ignored."""
     match times:
         case TimesUnread() if kept is not None:
-            return _fire_read(crons, _merge_kept(crons, times, kept), now, zone)
+            return _decide_read_firing(crons, _merge_kept_times(crons, times, kept), now, zone)
         case TimesUnread():
-            due = due_triggers(crons, times.fired, now, zone)
-            fired = fire_due(times.fired, due, now)
+            due = find_due_triggers(crons, times.fired, now, zone)
+            fired = stamp_fired(times.fired, due, now)
             return Firing(due, TimesUnread(fired, times.since | frozenset(due)))
         case TimesRead():
-            return _fire_read(crons, times.fired, now, zone)
+            return _decide_read_firing(crons, times.fired, now, zone)
         case _:
             assert_never(times)
 
 
-def _fire_read(
+def _decide_read_firing(
     crons: Mapping[str, str], fired: Mapping[str, datetime], now: datetime, zone: tzinfo
 ) -> Firing:
     """The triggers among ``crons`` come due by ``now`` since each last ``fired``, and the times
     after they fire, read."""
-    due = due_triggers(crons, fired, now, zone)
-    return Firing(due, TimesRead(fire_due(fired, due, now)))
+    due = find_due_triggers(crons, fired, now, zone)
+    return Firing(due, TimesRead(stamp_fired(fired, due, now)))
 
 
-def _merge_kept(
+def _merge_kept_times(
     crons: Mapping[str, str], times: TimesUnread, kept: Mapping[str, datetime]
 ) -> dict[str, datetime]:
     """The time each trigger among ``crons`` last fired, by name, in their order: the time
@@ -112,7 +112,7 @@ def _merge_kept(
     }
 
 
-def due_triggers(
+def find_due_triggers(
     crons: Mapping[str, str], fired: Mapping[str, datetime], now: datetime, zone: tzinfo
 ) -> tuple[str, ...]:
     """The schedule triggers among ``crons``, their cron expressions read in ``zone``, by name,
@@ -120,7 +120,7 @@ def due_triggers(
     return tuple(name for name, cron in crons.items() if falls_due(cron, fired[name], now, zone))
 
 
-def fire_due(
+def stamp_fired(
     fired: Mapping[str, datetime], due: tuple[str, ...], now: datetime
 ) -> dict[str, datetime]:
     """``fired``, the time each schedule trigger last fired, by name, with those ``due`` firing
@@ -128,7 +128,7 @@ def fire_due(
     return {**fired, **dict.fromkeys(due, now)}
 
 
-def wait_for_due(
+def measure_wait(
     crons: Mapping[str, str], fired: Mapping[str, datetime], now: datetime, zone: tzinfo
 ) -> timedelta:
     """How long after ``now`` to look at the time again: until the first of ``crons``, the

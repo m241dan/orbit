@@ -7,7 +7,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 from orbit.agent.application.schedules import FiredTimes, ScheduleClock, ScheduleParts, Schedules
-from orbit.agent.domain.schedules import wait_for_due
+from orbit.agent.domain.schedules import measure_wait
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import INTERNAL, ErrorOccurred, Event
 from tests.agent_fakes import FakeHalt, FakeStore
@@ -116,7 +116,7 @@ async def test_a_wait_reaches_the_clock_as_exactly_the_time_until_the_trigger_is
     await scheduled.opened()
     await scheduled.schedules.close()
 
-    expected = wait_for_due(NIGHTLY, {"nightly": opening}, opening, UTC)
+    expected = measure_wait(NIGHTLY, {"nightly": opening}, opening, UTC)
     assert scheduled.clock.sleeps[0] == expected == timedelta(minutes=2, microseconds=1500)
 
 
