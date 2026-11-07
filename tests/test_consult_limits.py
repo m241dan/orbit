@@ -1,7 +1,7 @@
-"""The hourly limit on a role's consultations: counted over a rolling hour, lifted by 0, waived
-for an hour by the user, and a held one expiring after an hour with no frontend connected."""
+"""The hourly limit on a role's consultations: counted over a rolling hour, lifted by 0, and waived
+for an hour by the user."""
 
-from orbit.agent.domain.consult_limits import HOUR, ConsultCount, expires_at
+from orbit.agent.domain.consult_limits import HOUR, ConsultCount
 
 
 def asked_at(*times: float) -> ConsultCount:
@@ -48,15 +48,3 @@ def test_a_role_freed_consults_without_approval_for_an_hour() -> None:
 def test_being_freed_lapses_after_an_hour() -> None:
     count = asked_at(0, 10).freed(20).counted(HOUR).counted(HOUR + 10)
     assert count.needs_approval(2, HOUR + 20)
-
-
-def test_a_held_consultation_expires_an_hour_after_its_hold_with_no_frontend_since() -> None:
-    assert expires_at(100, 50) == 100 + HOUR
-
-
-def test_it_expires_an_hour_after_the_last_frontend_left() -> None:
-    assert expires_at(100, 500) == 500 + HOUR
-
-
-def test_it_doesnt_expire_while_a_frontend_is_connected() -> None:
-    assert expires_at(100, None) is None

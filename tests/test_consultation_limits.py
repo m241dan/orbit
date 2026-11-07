@@ -8,7 +8,7 @@ from collections.abc import Callable
 import pytest
 
 from orbit.agent import HostParts, WorkspaceHost
-from orbit.agent.application.consult_approvals import Timer
+from orbit.agent.application.approvals import Timer
 from orbit.agent.application.consultations import held_note
 from orbit.agent.application.conversation_seats import ConversationSeats
 from orbit.agent.application.desk import AgentDesk
@@ -16,8 +16,8 @@ from orbit.agent.application.planner_seat import SeatHooks
 from orbit.agent.application.planner_trace import TURN_SPAN, PlannerTracing
 from orbit.agent.application.ports import Reply, StoreFailed
 from orbit.agent.application.tasks import Tasks
+from orbit.agent.domain.approvals import EXPIRY
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.consult_limits import HOUR
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.agent.domain.storage_halt import FailedWrite
@@ -244,7 +244,7 @@ async def test_one_held_with_no_frontend_connected_expires_denied_after_an_hour(
     await seats.close()
 
     assert heard == [Reply(ASKED.format(1)), held(2)]
-    assert clock.now == HOUR
+    assert clock.now == EXPIRY
     assert ApprovalDecided(consultation=2, decision="deny") in taken
     answer = sole([e for e in taken if answering(2)(e)], ConsultationAnswered)
     assert answer.interrupted == "it expired waiting for approval"
@@ -298,7 +298,7 @@ async def test_one_held_as_storage_halts_expires_only_once_the_halt_lifts() -> N
 
     assert not any(isinstance(e, ApprovalDecided) for e in halted)
     assert ApprovalDecided(consultation=2, decision="deny") in taken
-    assert clock.now == HOUR
+    assert clock.now == EXPIRY
 
 
 def asking(heard: list[Reply], consultant: str, *messages: str) -> Script:

@@ -1,7 +1,6 @@
 """The hourly limit on a role's consultations: those it asked in a rolling hour count against its
 ``consult_limit_per_hour``, and past it each needs the user's approval, unless they let it consult
-freely for an hour; one held while no frontend is connected for an hour expires, denied. Times are
-seconds on the caller's clock."""
+freely for an hour. Times are seconds on the caller's clock."""
 
 from dataclasses import dataclass, replace
 
@@ -33,11 +32,3 @@ class ConsultCount:
     def freed(self, now: float) -> ConsultCount:
         """The count with the role consulting freely for an hour from ``now``."""
         return replace(self, free_until=now + HOUR)
-
-
-def expires_at(held: float, alone_since: float | None) -> float | None:
-    """When a consultation held at ``held`` expires, no frontend having been connected since
-    ``alone_since``; none while one is."""
-    if alone_since is None:
-        return None
-    return max(held, alone_since) + HOUR

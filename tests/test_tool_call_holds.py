@@ -8,11 +8,11 @@ from typing import Any
 
 import pytest
 
-from orbit.agent.application.consult_approvals import Timer
+from orbit.agent.application.approvals import Timer
 from orbit.agent.application.ports import Reply
 from orbit.agent.application.tool_call_approvals import ToolCallApprovals
 from orbit.agent.application.tool_proxy import CALL_SPAN, STOPPED, Caller, McpProxying, ToolProxy
-from orbit.agent.domain.consult_limits import HOUR
+from orbit.agent.domain.approvals import EXPIRY
 from orbit.agent.domain.mcp_proxy import UpstreamTool
 from orbit.agent.domain.mcp_servers import McpServer
 from orbit.agent.domain.roles import Role, RoleTools
@@ -249,4 +249,4 @@ async def test_an_expired_calls_span_says_so_after_an_hour() -> None:
     [span] = holding.traced.spans(CALL_SPAN)
     assert span.attributes is not None
     assert span.attributes["orbit.mcp.approval"] == "expired"
-    assert span.attributes["orbit.mcp.approval_wait_ms"] == HOUR * 1000
+    assert span.attributes["orbit.mcp.approval_wait_ms"] == EXPIRY * 1000

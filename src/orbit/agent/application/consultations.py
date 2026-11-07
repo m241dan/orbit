@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
-from orbit.agent.application.consult_approvals import Approvals, Held, consultation_of
+from orbit.agent.application.approvals import Approvals, Held
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks, WaitingTurn
 from orbit.agent.application.ports import Reply
 from orbit.agent.domain.consult_limits import ConsultCount
@@ -71,6 +71,11 @@ def held_note(consultant: str, number: int) -> str:
 def reply_message(consultant: str, title: str, number: int, reply: str) -> str:
     """The message delivering ``consultant``'s ``reply`` to consultation ``number``, ``title``."""
     return f"{label(consultant)}'s reply to '{title}' (consultation {number}):\n{reply}"
+
+
+def consultation_of(request: ApprovalRequested) -> int:
+    """The number of the consultation ``request`` asks about."""
+    return request.consultation
 
 
 def refusal(asker: str, role: Role, consultant: str) -> str | None:

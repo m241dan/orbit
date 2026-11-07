@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
-from orbit.agent.application.consult_approvals import Approvals, Held, Timer
+from orbit.agent.application.approvals import Approvals, Held, Timer
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import (
     UNKNOWN,

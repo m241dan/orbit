@@ -3,8 +3,9 @@ denied, after an hour with no frontend connected."""
 
 import asyncio
 
-from orbit.agent.application.consult_approvals import Approvals, Held, Timer, consultation_of
-from orbit.agent.domain.consult_limits import HOUR
+from orbit.agent.application.approvals import Approvals, Held, Timer
+from orbit.agent.application.consultations import consultation_of
+from orbit.agent.domain.approvals import EXPIRY
 from orbit.protocol import PLANNER, ApprovalRequested, Event
 from tests.waiting import eventually
 
@@ -79,7 +80,7 @@ async def test_one_held_with_no_frontend_ever_connected_expires_after_an_hour() 
     held.clock.now = 50
     held.approvals.hold(request(1), "work")
     await eventually(lambda: held.expired, poll=0)
-    assert held.clock.slept == [HOUR]
+    assert held.clock.slept == [EXPIRY]
     assert [h.request for h in held.expired] == [request(1)]
     assert held.approvals.waiting == ()
 
@@ -99,7 +100,7 @@ async def test_one_held_expires_an_hour_after_the_last_frontend_leaves() -> None
     held.clock.now = 100
     held.approvals.viewers(0)
     await eventually(lambda: held.expired, poll=0)
-    assert held.clock.now == 100 + HOUR
+    assert held.clock.now == 100 + EXPIRY
 
 
 async def test_a_frontend_connecting_stops_the_hour_running() -> None:
@@ -131,7 +132,7 @@ async def test_those_held_expire_in_turn_each_an_hour_after_its_hold() -> None:
     held.approvals.viewers(0)
     await eventually(lambda: len(held.expired) == 2, poll=0)
     assert [h.work for h in held.expired] == ["first", "second"]
-    assert held.clock.slept == [HOUR, 600]
+    assert held.clock.slept == [EXPIRY, 600]
 
 
 async def test_clearing_forgets_those_held_and_stops_their_hour() -> None:
@@ -182,7 +183,7 @@ async def test_stopping_mid_expiry_expires_no_more_and_arms_nothing() -> None:
         await asyncio.sleep(0)
     assert [h.work for h in held.expired] == ["first"]
     assert held.approvals.waiting == (request(2),)
-    assert held.clock.slept == [HOUR]
+    assert held.clock.slept == [EXPIRY]
 
 
 async def test_clearing_mid_expiry_expires_no_more() -> None:
@@ -194,7 +195,7 @@ async def test_clearing_mid_expiry_expires_no_more() -> None:
     for _ in range(5):
         await asyncio.sleep(0)
     assert [h.work for h in held.expired] == ["first"]
-    assert (held.approvals.waiting, held.clock.slept) == ((), [HOUR])
+    assert (held.approvals.waiting, held.clock.slept) == ((), [EXPIRY])
 
 
 async def test_those_due_together_expire_and_the_next_is_timed() -> None:
@@ -205,7 +206,7 @@ async def test_those_due_together_expire_and_the_next_is_timed() -> None:
     held.clock.now = 0
     await eventually(lambda: len(held.expired) == 3, poll=0)
     assert [h.work for h in held.expired] == ["first", "second", "third"]
-    assert held.clock.slept == [HOUR, 600]
+    assert held.clock.slept == [EXPIRY, 600]
 
 
 async def test_a_failed_expiry_leaves_the_rest_held_and_timed() -> None:

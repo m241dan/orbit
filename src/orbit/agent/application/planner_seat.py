@@ -7,8 +7,8 @@ from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from functools import partial
 
+from orbit.agent.application.approvals import Timer
 from orbit.agent.application.closing import close_all
-from orbit.agent.application.consult_approvals import Timer
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import TurnSlot
 from orbit.agent.application.outbox import EventSink

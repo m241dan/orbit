@@ -1,13 +1,12 @@
 """The requests held for the user's approval, such as consultations past their asker's hourly
-limit, each until the user decides on it or, after an hour with no frontend connected, it
-expires."""
+limit and tool calls, each until the user decides on it or, after an hour with no frontend
+connected, it expires."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from orbit.agent.domain.consult_limits import expires_at
-from orbit.protocol import ApprovalRequested
+from orbit.agent.domain.approvals import expires_at
 
 
 @dataclass(frozen=True)
@@ -31,11 +30,6 @@ class Timer:
 
     clock: Callable[[], float] = loop_time
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
-
-
-def consultation_of(request: ApprovalRequested) -> int:
-    """The number of the consultation ``request`` asks about."""
-    return request.consultation
 
 
 class Approvals[R, T]:

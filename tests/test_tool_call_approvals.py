@@ -7,9 +7,9 @@ from datetime import timedelta
 
 import pytest
 
-from orbit.agent.application.consult_approvals import Timer
+from orbit.agent.application.approvals import Timer
 from orbit.agent.application.tool_call_approvals import Ruling, ToolCall, ToolCallApprovals
-from orbit.agent.domain.consult_limits import HOUR
+from orbit.agent.domain.approvals import EXPIRY
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import (
     UNKNOWN,
@@ -131,9 +131,9 @@ async def test_one_held_with_no_frontend_connected_expires_after_an_hour() -> No
     holding = Holding()
     task = (await holding.asked())[0]
     assert await task == "expired"
-    assert holding.clock.slept == [HOUR]
+    assert holding.clock.slept == [EXPIRY]
     assert holding.posted[-1] == ToolCallDecided(call=1, decision="expired")
-    assert holding.rulings == [Ruling("expired", timedelta(seconds=HOUR))]
+    assert holding.rulings == [Ruling("expired", timedelta(seconds=EXPIRY))]
 
 
 async def test_one_held_doesnt_expire_while_a_frontend_is_connected() -> None:
