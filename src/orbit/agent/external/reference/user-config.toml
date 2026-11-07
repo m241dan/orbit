@@ -1,0 +1,99 @@
+# Your own orbit configuration, every setting commented out at its default.
+# Uncomment the settings you change; the others keep their defaults.
+
+# [storage]
+# The longest text field, in KB, a stored event keeps whole; 0 keeps every one.
+# tool_output_kb = 64
+# The most of a session's event log kept, in MB; 0 keeps all of it.
+# session_log_mb = 200
+
+# [server]
+# How orbit serve serves: off (plaintext), tls, or mtls (mutual TLS).
+# tls = "off"
+# The server certificate's file.
+# cert: unset
+# The server certificate's private key.
+# key: unset
+# The CA certificate that signs client certificates under mtls.
+# client_ca: unset
+# The CA certificate that signed the server certificate.
+# ca: unset
+# The host orbit serve listens on.
+# host = "127.0.0.1"
+# The port orbit serve listens on; 0 lets the system choose one.
+# port = 7433
+# The largest message, in MB, either way between orbit serve and a frontend.
+# max_message_mb = 64
+# The SHA-256 fingerprints of the client certificates refused under mtls.
+# revoked = []
+# The client certificate frontends on this machine show under mtls.
+# local_client_cert: unset
+# The private key of the local client certificate.
+# local_client_key: unset
+# Where repositories served by URL are cloned; workspaces in the state dir if unset.
+# clone_dir: unset
+# How many coders run at once across the workspaces served; 0 for any number.
+# max_coders = 4
+# The absolute directory frontends may browse and add workspaces within.
+# browse_root: unset
+
+# [telemetry]
+# Where spans and metrics go: none, otlp, console (stderr) or file.
+# exporter = "none"
+# The OTLP collector's base URL; the exporter's default if unset.
+# endpoint: unset
+# How OTLP reaches the collector: http/protobuf or grpc.
+# protocol = "http/protobuf"
+# The file holding the headers sent over OTLP.
+# headers_file: unset
+# How large, in MB, each file the file exporter writes grows.
+# file_max_mb = 50
+# How many of the file exporter's files are kept.
+# file_keep = 5
+# How often, in seconds, metrics are exported.
+# metrics_interval_s = 60
+# The name orbit goes by to the collector.
+# service_name = "orbit"
+
+# [roles]
+# The model the role's agents run, an alias or a full id.
+# model: unset
+# How hard the role's agents think, as its runtime takes it.
+# effort: unset
+# The runtime the role's agents run on, such as claude or kiro.
+# runtime: unset
+
+# A built-in role's model, effort or runtime, for that role alone. For example:
+# [roles.planner]
+# The model the role's agents run, an alias or a full id.
+# model = "opus"
+
+# A personal role, its instructions a file beside this one or the text. For example:
+# [roles.helper]
+# What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
+# instructions = "roles/helper.md"
+# Whether its agents' claims of being done are verified.
+# verify = false
+# The lane that runs its agents, a plain name; a lane runs one task at a time.
+# lane = "helper"
+# Where its agents work: "worktree", "snapshot", "checkout", "none" or "copy".
+# workspace = "snapshot"
+# Whether its finished work is committed and merged.
+# merge = false
+
+# Your own aliases of a runtime's models, or what one resolves to. For example:
+# [runtimes.claude.models]
+# An alias, giving the model id it resolves to.
+# fast = "claude-haiku-5-5"
+
+# A control plane orbit chat --remote work joins. For example:
+# [remotes.work]
+# The control plane's ws:// or wss:// URL.
+# url = "wss://orbit.example.com:7433"
+# The CA certificate that verifies the control plane.
+# ca = "certs/ca.pem"
+
+# A project's MCP server pointed at this machine's copy. For example:
+# [mcp.github]
+# The command that starts it, as a process of orbit's: its program and arguments.
+# command = ["/opt/bin/github-mcp", "stdio"]

@@ -104,40 +104,42 @@ def reference_config() -> str:
     roles = read_built_in_roles()
     files = read_instruction_files()
     templates = read_template_files()
-    config = _descriptions(OrbitConfig)
-    verification = _descriptions(VerificationConfig)
+    config = field_descriptions(OrbitConfig)
+    verification = field_descriptions(VerificationConfig)
     sections = [
-        _comments(HEADER),
+        comments(HEADER),
         _limits(load_config({}, roles), config),
-        _example(verification["steps"], "[[verification.steps]]", EXAMPLE_STEP),
-        _example(verification["sets"], f"[verification.sets.{EXAMPLE_SET}]", EXAMPLE_SET_FIELDS),
-        _example(config["setup"], "[setup]", EXAMPLE_SETUP),
-        _comments([config["roles"]]),
+        example_table(verification["steps"], "[[verification.steps]]", EXAMPLE_STEP),
+        example_table(
+            verification["sets"], f"[verification.sets.{EXAMPLE_SET}]", EXAMPLE_SET_FIELDS
+        ),
+        example_table(config["setup"], "[setup]", EXAMPLE_SETUP),
+        comments([config["roles"]]),
         *(
             section
             for name, role in roles.items()
             for section in _built_in(name, role, files[name])
         ),
-        _example(
+        example_table(
             "A role of your own, which must set its instructions.",
             f"[roles.{EXAMPLE_ROLE}]",
             EXAMPLE_ROLE_FIELDS,
         ),
-        _comments([config["triggers"]]),
+        comments([config["triggers"]]),
         *(
             _shipped_trigger(name, trigger, templates.get(name))
             for name, trigger in read_built_in_triggers().items()
         ),
-        _example(config["skills"], "[[skills]]", EXAMPLE_SKILLS),
-        _example(config["mcp"], "[mcp.github]", EXAMPLE_COMMAND_SERVER),
-        _example("An MCP server that's already running.", "[mcp.semgrep]", EXAMPLE_URL_SERVER),
-        _example(
+        example_table(config["skills"], "[[skills]]", EXAMPLE_SKILLS),
+        example_table(config["mcp"], "[mcp.github]", EXAMPLE_COMMAND_SERVER),
+        example_table("An MCP server that's already running.", "[mcp.semgrep]", EXAMPLE_URL_SERVER),
+        example_table(
             "The MCP servers a role's agents may use, in its tools table.",
             f"[roles.{EXAMPLE_ROLE}.tools]",
             EXAMPLE_ROLE_SERVERS,
         ),
-        _comments([LATER_HEADING]),
-        *map(_comments, LATER),
+        comments([LATER_HEADING]),
+        *map(comments, LATER),
     ]
     return "\n\n".join("\n".join(section) for section in sections) + "\n"
 
@@ -148,7 +150,7 @@ def write_reference(path: Path) -> None:
     path.write_text(reference_config(), encoding="utf-8")
 
 
-def _descriptions(model: type[Any]) -> dict[str, str]:
+def field_descriptions(model: type[Any]) -> dict[str, str]:
     """The description of each of ``model``'s fields that has one, by name, in order."""
     properties: dict[str, dict[str, Any]] = TypeAdapter(model).json_schema()["properties"]
     return {
@@ -156,12 +158,12 @@ def _descriptions(model: type[Any]) -> dict[str, str]:
     }
 
 
-def _comments(lines: Iterable[str]) -> list[str]:
+def comments(lines: Iterable[str]) -> list[str]:
     """``lines``, each commented out."""
     return [f"# {line}" for line in lines]
 
 
-def _key(key: str, value: Any) -> str:
+def key_line(key: str, value: Any) -> str:
     """The commented-out line giving ``key`` its ``value``, as TOML, a table inline."""
     return f"# {key} = {_inline(value).as_string()}"
 
@@ -175,27 +177,29 @@ def _inline(value: Any) -> Any:
     return table
 
 
-def _described(values: Mapping[str, Any], descriptions: Mapping[str, str]) -> list[str]:
+def described(values: Mapping[str, Any], descriptions: Mapping[str, str]) -> list[str]:
     """Each of ``values``, by key, commented out under its line of ``descriptions``."""
     return [
         line
         for key, value in values.items()
-        for line in (f"# {descriptions[key]}", _key(key, value))
+        for line in (f"# {descriptions[key]}", key_line(key, value))
     ]
 
 
 def _limits(defaults: OrbitConfig, descriptions: Mapping[str, str]) -> list[str]:
     """The limits at their ``defaults``, each under its line of ``descriptions``."""
-    return _described({key: getattr(defaults, key) for key in LIMIT_KEYS}, descriptions)
+    return described({key: getattr(defaults, key) for key in LIMIT_KEYS}, descriptions)
 
 
-def _example(description: str, header: str, example: BaseModel | VerificationStep) -> list[str]:
+def example_table(
+    description: str, header: str, example: BaseModel | VerificationStep
+) -> list[str]:
     """The table under ``header`` that sets the fields ``example`` does, under ``description``."""
     values = TypeAdapter(type(example)).dump_python(example, mode="json", exclude_unset=True)
     return [
         f"# {description} {FOR_EXAMPLE}",
         f"# {header}",
-        *_described(values, _descriptions(type(example))),
+        *described(values, field_descriptions(type(example))),
     ]
 
 
@@ -203,7 +207,7 @@ def _built_in(name: str, role: Role, file: str) -> list[list[str]]:
     """Built-in role ``name``'s tables: its own, each of ``role``'s fields under its description,
     its instructions being orbit's own ``file``; then each of its fields that's a table of its
     own, under its description, its fields under theirs."""
-    descriptions = _descriptions(Role)
+    descriptions = field_descriptions(Role)
     values = role.model_dump(mode="json")
     own = [
         line
@@ -225,7 +229,7 @@ def _built_in(name: str, role: Role, file: str) -> list[list[str]]:
 def _role_table(table: str, model: type[BaseModel], values: Mapping[str, Any]) -> list[str]:
     """The lines of a built-in role's ``table``, a ``model``, at its ``values``: each field under
     its description."""
-    descriptions = _descriptions(model)
+    descriptions = field_descriptions(model)
     return [
         line
         for key, value in values.items()
@@ -248,7 +252,7 @@ def _role_field(table: str, key: str, value: Any, file: str) -> str:
 def _shipped_trigger(name: str, trigger: Trigger, file: str | None) -> list[str]:
     """Shipped trigger ``name``'s table: each of ``trigger``'s fields under its description, its
     prompt being orbit's own ``file``, if it names one, and a field it leaves unset as unset."""
-    descriptions = _descriptions(Trigger)
+    descriptions = field_descriptions(Trigger)
     lines = [f"# [triggers.{name}]"]
     for key, value in trigger.model_dump(mode="json").items():
         lines += [f"# {descriptions[key]}", _trigger_field(key, value, file)]
@@ -262,14 +266,14 @@ def _trigger_field(key: str, value: Any, file: str | None) -> str:
         return f"# prompt: orbit's own {file}"
     if value is None:
         return f"# {key}: unset"
-    return _key(key, value)
+    return key_line(key, value)
 
 
 def _fitted(table: str, key: str, value: Any) -> str:
     """The commented-out line giving the field ``key`` of a built-in role's ``table`` its
     ``value``, if it fits in :data:`REFERENCE_WIDTH` columns or isn't a list; otherwise how many
     the list holds, and the command that lists them."""
-    line = _key(key, value)
+    line = key_line(key, value)
     if len(line) <= REFERENCE_WIDTH or not isinstance(value, list):
         return line
     show = f"orbit config show {table}.{key}"

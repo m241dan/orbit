@@ -40,14 +40,34 @@ class TelemetrySettings(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
-    exporter: Exporter = "none"
-    endpoint: str | None = Field(default=None, min_length=1)
-    protocol: OtlpProtocol = "http/protobuf"
-    headers_file: str | None = Field(default=None, min_length=1)
-    file_max_mb: int = Field(default=50, ge=1)
-    file_keep: int = Field(default=5, ge=1)
-    metrics_interval_s: int = Field(default=60, ge=1)
-    service_name: str = Field(default="orbit", min_length=1)
+    exporter: Exporter = Field(
+        default="none",
+        description="Where spans and metrics go: none, otlp, console (stderr) or file.",
+    )
+    endpoint: str | None = Field(
+        default=None,
+        min_length=1,
+        description="The OTLP collector's base URL; the exporter's default if unset.",
+    )
+    protocol: OtlpProtocol = Field(
+        default="http/protobuf",
+        description="How OTLP reaches the collector: http/protobuf or grpc.",
+    )
+    headers_file: str | None = Field(
+        default=None, min_length=1, description="The file holding the headers sent over OTLP."
+    )
+    file_max_mb: int = Field(
+        default=50, ge=1, description="How large, in MB, each file the file exporter writes grows."
+    )
+    file_keep: int = Field(
+        default=5, ge=1, description="How many of the file exporter's files are kept."
+    )
+    metrics_interval_s: int = Field(
+        default=60, ge=1, description="How often, in seconds, metrics are exported."
+    )
+    service_name: str = Field(
+        default="orbit", min_length=1, description="The name orbit goes by to the collector."
+    )
 
     @property
     def extra(self) -> str:

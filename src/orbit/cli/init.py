@@ -2,6 +2,7 @@
 up to date with it, or given copies of the built-in roles' instructions to edit; and the
 workspace given copies of orbit's skills to edit."""
 
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
@@ -21,17 +22,34 @@ from orbit.agent import (
     add_roles,
     add_skills,
     init_config,
+    init_user_config,
     instructions_setting,
+    resolve_config_dir,
     update_config,
 )
 from orbit.cli.backend import _workspace
 from orbit.cli.errors import _exit_on
-from orbit.cli.options import WorkspaceOption
+from orbit.cli.options import ConfigDirOption
 
 CONFIG_EXISTS = (
     "{path} already exists. Use orbit init --update to add the settings it doesn't mention, or"
     " --force to replace it (the old file is kept as a backup)."
 )
+
+USER_CONFIG_EXISTS = (
+    "{path} already exists. Use orbit init --user --update to add the settings it doesn't"
+    " mention, or --force to replace it (the old file is kept as a backup)."
+)
+
+WITH_USER = "--user writes your own config.toml, so it can't go with {option}."
+
+USER_UPDATE_LATER = "--user --update isn't available yet."
+
+CONFIG_DIR_WITHOUT_USER = (
+    "--config-dir names your own config.toml's directory, so it goes with --user."
+)
+
+USER_WRITE_FAILED = "Couldn't write orbit's user reference config: "
 
 WITH_FORCE = "{option} keeps the file and --force replaces it, so they can't go together."
 
@@ -61,6 +79,17 @@ INLINE = (
 )
 
 NO_LINES = "Each role's table already has an instructions line."
+
+InitWorkspaceOption = Annotated[
+    Path | None,
+    typer.Option(
+        "-C",
+        "--workspace",
+        help="The project to work on (default: the current directory). Inside a git"
+        " repository, its top level.",
+    ),
+]
+"""The workspace option, ``None`` when it isn't given, so that ``--user`` can refuse it."""
 
 InitUpdateOption = Annotated[
     bool,
@@ -103,13 +132,25 @@ InitSkillOption = Annotated[
     ),
 ]
 
+InitUserOption = Annotated[
+    bool,
+    typer.Option(
+        "--user",
+        help="Write your own config.toml in the config directory, every user setting commented"
+        " out at its default.",
+    ),
+]
+
 
 def init(
-    workspace: WorkspaceOption = Path("."),
+    # #lizard forgives(parameter_count): Typer takes each of the command's options as a parameter.
+    workspace: InitWorkspaceOption = None,
     update: InitUpdateOption = False,
     force: InitForceOption = False,
     roles: InitRolesOption = False,
     skill: InitSkillOption = None,
+    user: InitUserOption = False,
+    config_dir: ConfigDirOption = None,
 ) -> None:
     """Write orbit's reference config to the workspace's .orbit/config.toml: every setting a
     project can change, commented out at its default under what it does.
@@ -130,8 +171,25 @@ def init(
     orbit's own to .orbit/skills/<name>/, keeping a file already there, without touching the
     config; a copied file replaces orbit's and no longer gets its updates. A name that isn't one
     of orbit's skills exits with status 2, copying nothing.
+
+    --user writes orbit's user reference config to your own config.toml in the config directory
+    instead (--config-dir, else as orbit serve resolves it), making the directory if it has to:
+    every user setting commented out at its default. An existing file is left as it is, exiting
+    with status 2, unless --force replaces it, keeping it as a numbered backup as above.
     """
     skills = tuple(skill or ())
+    if user:
+        _refuse_with_user(roles=roles, skills=bool(skills), workspace=workspace is not None)
+        _init_user(config_dir, update=update, force=force)
+        return
+    _refuse_config_dir(config_dir)
+    _init_project(workspace or Path("."), update=update, force=force, roles=roles, skills=skills)
+
+
+def _init_project(
+    workspace: Path, update: bool, force: bool, roles: bool, skills: tuple[str, ...]
+) -> None:
+    """Do what ``orbit init`` does to the workspace at ``workspace`` without ``--user``."""
     _refuse_with_force(force, update=update, roles=roles, skills=bool(skills))
     root = _workspace(workspace)
     with (
@@ -147,6 +205,37 @@ def init(
             _say(SKILLS_FAILED, lambda: _skills_copied(add_skills(root, skills), root))
         if not any((update, roles, skills)):
             _say(WRITE_FAILED, lambda: _written(init_config(root, force)))
+
+
+def _refuse_with_user(roles: bool, skills: bool, workspace: bool) -> None:
+    """Exit with status 2 if ``--user`` is given with ``roles``, ``skills`` or ``workspace``,
+    which work on a project."""
+    for given, option in ((roles, "--roles"), (skills, "--skill"), (workspace, "-C")):
+        if given:
+            typer.echo(WITH_USER.format(option=option), err=True)
+            raise typer.Exit(2)
+
+
+def _refuse_config_dir(config_dir: Path | None) -> None:
+    """Exit with status 2 if ``config_dir`` is given without ``--user``."""
+    if config_dir is not None:
+        typer.echo(CONFIG_DIR_WITHOUT_USER, err=True)
+        raise typer.Exit(2)
+
+
+def _init_user(config_dir: Path | None, update: bool, force: bool) -> None:
+    """Write the user reference config to the user config in ``config_dir``, resolved as
+    ``orbit serve`` resolves it, replacing a file there if ``force``; exit with status 2 if
+    ``update`` is given, which isn't available yet."""
+    if update:
+        typer.echo(USER_UPDATE_LATER, err=True)
+        raise typer.Exit(2)
+    directory = resolve_config_dir(config_dir, os.environ)
+    with _exit_on(ConfigExists, message=lambda exc: USER_CONFIG_EXISTS.format(path=exc.path)):
+        _say(
+            USER_WRITE_FAILED,
+            lambda: _written(init_user_config(directory, force), "orbit's user reference config"),
+        )
 
 
 def _refuse_with_force(force: bool, update: bool, roles: bool, skills: bool) -> None:
@@ -166,10 +255,10 @@ def _say(failed: str, step: Callable[[], str]) -> None:
     typer.echo(said)
 
 
-def _written(result: InitResult) -> str:
-    """What's said once ``result`` is written: where, where the old file was kept, and that
-    every setting is commented out."""
-    written = f"orbit's reference config to {result.path}."
+def _written(result: InitResult, what: str = "orbit's reference config") -> str:
+    """What's said once ``result``, ``what`` was written, is written: where, where the old file
+    was kept, and that every setting is commented out."""
+    written = f"{what} to {result.path}."
     if result.backup is None:
         return f"Wrote {written}\n{WRITTEN}"
     return f"Kept the old file as {result.backup} and wrote {written}\n{WRITTEN}"

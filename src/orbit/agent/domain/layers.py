@@ -12,7 +12,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from pydantic_core import ErrorDetails
 
 from orbit.agent.domain.config_errors import ConfigError, dotted, validation_problems
@@ -59,9 +59,15 @@ class RoleFields(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    model: str | None = None
-    effort: Effort | None = None
-    runtime: str | None = None
+    model: str | None = Field(
+        default=None, description="The model the role's agents run, an alias or a full id."
+    )
+    effort: Effort | None = Field(
+        default=None, description="How hard the role's agents think, as its runtime takes it."
+    )
+    runtime: str | None = Field(
+        default=None, description="The runtime the role's agents run on, such as claude or kiro."
+    )
 
 
 MACHINE_FIELDS = frozenset(RoleFields.model_fields)

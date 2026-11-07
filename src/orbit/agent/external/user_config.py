@@ -1,6 +1,7 @@
 """The user's own orbit configuration, ``config.toml`` in the config directory."""
 
 from collections.abc import Callable, Collection
+from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,10 @@ from orbit.agent.external.role_instructions import with_instructions
 from orbit.agent.external.toml_files import read_toml
 
 USER_CONFIG_FILE = "config.toml"
+
+USER_REFERENCE = files(__package__) / "reference" / "user-config.toml"
+"""The user reference config shipped with orbit, as
+:func:`~orbit.agent.external.user_reference.user_reference` generates it."""
 
 
 def read_storage(config_dir: Path) -> StorageSettings:

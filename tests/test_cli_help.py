@@ -35,7 +35,19 @@ _BACKEND = (
         ),
         (["serve"], (*_BACKEND, "--add", "--host", "--port")),
         (["status"], (*_CONNECTION, "--json", "--state-dir", "--config-dir")),
-        (["init"], ("--workspace", "-C", "--update", "--force", "--roles", "--skill")),
+        (
+            ["init"],
+            (
+                "--workspace",
+                "-C",
+                "--update",
+                "--force",
+                "--roles",
+                "--skill",
+                "--user",
+                "--config-dir",
+            ),
+        ),
         (["config"], ("show",)),
         (
             ["config", "show"],

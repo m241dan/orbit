@@ -64,6 +64,7 @@ uv run orbit init --update                     # add the settings it doesn't men
 uv run orbit init --force                      # replace it, keeping the old one as a backup
 uv run orbit init --roles                      # copy the built-in roles' instructions to edit
 uv run orbit init --skill python               # copy orbit's python skill to .orbit/skills/ to edit
+uv run orbit init --user                       # start your own config.toml from the user reference
 uv run orbit config show                       # every setting in effect here, and where it's from
 uv run orbit config show roles.reviewer --full # one role's, with its instructions whole
 uv run orbit config show --skills              # which agents get each skill, and from where
@@ -1080,8 +1081,11 @@ having imported nothing; fix that and start orbit again. Likewise a database tha
 or whose schema is newer than this orbit, stops it with a message naming the file and the versions.
 
 The config directory is `--config-dir`, else `$ORBIT_CONFIG_DIR`, else `$XDG_CONFIG_HOME/orbit`,
-else `~/.config/orbit`. Its `config.toml` is optional; its `[storage]` table sets how much of each
-session the store keeps:
+else `~/.config/orbit`. Its `config.toml` is optional; `orbit init --user` starts one from
+[`reference/user-config.toml`](src/orbit/agent/external/reference/user-config.toml), shipped with
+orbit, every setting commented out at its default (see
+[Starting from the reference config](#starting-from-the-reference-config)). Its `[storage]` table
+sets how much of each session the store keeps:
 
 ```toml
 [storage]
@@ -2737,6 +2741,20 @@ them all (`No skill named pyton; orbit's skills are application, code-style, …
 touch `.orbit/config.toml`, and writes no reference config by itself; with `--update` or
 `--roles`, those run first.
 
+`--user` works on your own `config.toml` in the config directory instead (see
+[Where orbit keeps things](#where-orbit-keeps-things)): `--config-dir DIR`, else the one
+`orbit serve` resolves. It writes orbit's user reference config there, making the directory
+readable by you alone if it has to: every user setting, `[storage]`, `[server]`, `[telemetry]`
+and `[roles]`, commented out at its default under a line saying what it does (a setting unset by
+default as `# clone_dir: unset`), then commented-out examples of a built-in role's model, a
+personal role, an alias of a runtime's models, a remote and an MCP server override, as in
+[`reference/user-config.toml`](src/orbit/agent/external/reference/user-config.toml), the copy
+shipped with orbit. It prints where it wrote it. A file that's already there is left as it is,
+and it stops with status 2, naming it; `--user --force` replaces it after keeping it as the next
+free `config.toml.bak.N`, as `--force` does the project file. `--user` can't go with `--roles`,
+`--skill` or `-C`, which work on a project, nor `--config-dir` without `--user`; each stops with
+status 2 before writing anything.
+
 ### Seeing the configuration in effect
 
 `orbit config show` prints the configuration orbit resolves for a workspace (the current
@@ -4155,7 +4173,10 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `orbit init --roles` copies the built-in roles' instructions beside it and adds the
     commented-out lines that switch the roles to their copies (`add_roles`), and for
     `orbit init --skill` copies orbit's skills into the project's `.orbit/skills/`
-    (`add_skills`); `checks`
+    (`add_skills`), and for `orbit init --user` writes the user reference config,
+    `reference/user-config.toml`, which `user_reference` generates from the user settings'
+    models (`user_reference()`) and `uv run python -m orbit.agent.external.user_reference`
+    writes, to your own `config.toml` (`init_user_config`); `checks`
     runs a verification step as a process (`run_step`); `processes` runs a program to completion
     without leaving it behind; `workspace`
     fingerprints the git working tree; `usage_api` fetches the Claude subscription's usage

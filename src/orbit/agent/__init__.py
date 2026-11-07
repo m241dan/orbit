@@ -106,6 +106,7 @@ from orbit.agent.external.config_init import (
     add_roles,
     add_skills,
     init_config,
+    init_user_config,
     update_config,
 )
 from orbit.agent.external.control_plane import ControlPlaneServer, ListenFailed
@@ -293,6 +294,7 @@ __all__ = [
     "has_git_identity",
     "in_git_work_tree",
     "init_config",
+    "init_user_config",
     "instructions_setting",
     "is_bundle_url",
     "issue_client",

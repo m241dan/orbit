@@ -19,11 +19,17 @@ class RemoteSettings(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
-    url: str = Field(pattern=r"^wss?://")
-    ca: str | None = None
-    token_file: str | None = None
-    cert: str | None = None
-    key: str | None = None
+    url: str = Field(pattern=r"^wss?://", description="The control plane's ws:// or wss:// URL.")
+    ca: str | None = Field(
+        default=None, description="The CA certificate that verifies the control plane."
+    )
+    token_file: str | None = Field(
+        default=None, description="The file holding the token shown to the control plane."
+    )
+    cert: str | None = Field(
+        default=None, description="The client certificate shown to the control plane."
+    )
+    key: str | None = Field(default=None, description="The client certificate's private key.")
 
     @model_validator(mode="after")
     def _one_credential(self) -> Self:

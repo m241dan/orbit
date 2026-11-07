@@ -27,11 +27,12 @@ from orbit.agent.external.skill_files import (
     skill_names,
     skill_paths,
 )
+from orbit.agent.external.user_config import USER_CONFIG_FILE, USER_REFERENCE
 from orbit.agent.external.whole_files import create_whole, write_whole
 
 
 class ConfigExists(Exception):
-    """There's already a project file at ``path``, which only ``force`` replaces."""
+    """There's already a config file at ``path``, which only ``force`` replaces."""
 
     def __init__(self, path: Path) -> None:
         super().__init__(f"{path} already exists.")
@@ -100,6 +101,31 @@ def init_config(root: Path, force: bool) -> InitResult:
     path = root / CONFIG_PATH
     reference = REFERENCE.read_text(encoding="utf-8")
     path.parent.mkdir(parents=True, exist_ok=True)
+    return _write_reference(path, reference, force)
+
+
+def init_user_config(config_dir: Path, force: bool) -> InitResult:
+    """Write the user reference config to the user config in ``config_dir``, making
+    ``config_dir``, and its parents, if it's missing, readable by its owner alone. With
+    ``force``, a file already there is first kept as the next free ``config.toml.bak.N`` beside
+    it, ``N`` counting from 1, and then replaced.
+
+    Raises :class:`ConfigExists` if there's a file already there and not ``force``, leaving it
+    as it was, and ``OSError`` when it can't read the reference or write the file.
+    """
+    path = config_dir / USER_CONFIG_FILE
+    reference = USER_REFERENCE.read_text(encoding="utf-8")
+    config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return _write_reference(path, reference, force)
+
+
+def _write_reference(path: Path, reference: str, force: bool) -> InitResult:
+    """Write ``reference`` to ``path``, its directory being there; with ``force``, after keeping
+    a file already there as :func:`_back_up` does.
+
+    Raises :class:`ConfigExists` if there's a file already there and not ``force``, leaving it
+    as it was, and ``OSError`` when it can't write the file.
+    """
     if not force:
         try:
             create_whole(path, reference)

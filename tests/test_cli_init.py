@@ -2,9 +2,11 @@
 existing one refused, ``--update`` adding to it what it doesn't mention, ``--force`` replacing it
 after keeping numbered backups, ``--roles`` copying the built-in roles' instructions beside it
 with a commented-out line pointing each role at its copy, and ``--skill`` copying orbit's skills
-into ``.orbit/skills/``."""
+into ``.orbit/skills/``; and ``--user`` writing the user reference config to your own
+``config.toml``, refusing an existing one unless ``--force``."""
 
 import re
+import stat
 import tomllib
 from pathlib import Path
 
@@ -17,6 +19,7 @@ from orbit.agent.external.built_in_roles import read_built_in_roles, read_instru
 from orbit.agent.external.config_file import read_config
 from orbit.agent.external.reference_config import reference_config
 from orbit.agent.external.skill_files import SKILL_DIRECTORY, skill_names, skill_paths
+from orbit.agent.external.user_reference import user_reference
 from orbit.cli import app
 from orbit.protocol import BUILT_IN_ROLE_NAMES
 from tests.git_repo import init_repo
@@ -551,3 +554,99 @@ def test_the_written_config_loads_and_a_tools_table_uncommented_changes_only_its
     assert reviewer == shipped.model_copy(
         update={"tools": shipped.tools.model_copy(update={"workspace": "none"})}
     )
+
+
+USER_REFERENCE = user_reference()
+
+
+def init_user(*args: str, env: dict[str, str] | None = None) -> Result:
+    """``orbit init --user`` run with ``args``, in ``env``'s environment over the current."""
+    return runner.invoke(app, ["init", "--user", *args], env=env)
+
+
+def test_user_writes_the_user_reference_in_a_new_private_config_dir(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    result = init_user("--config-dir", str(config_dir))
+    assert result.exit_code == 0, result.output
+    path = config_dir / "config.toml"
+    assert path.read_text(encoding="utf-8") == USER_REFERENCE
+    assert stat.S_IMODE(config_dir.stat().st_mode) == 0o700
+    assert result.stdout.splitlines() == [
+        f"Wrote orbit's user reference config to {path}.",
+        WRITTEN,
+    ]
+
+
+def test_user_writes_in_the_config_dir_the_environment_names(tmp_path: Path) -> None:
+    result = init_user(env={"ORBIT_CONFIG_DIR": str(tmp_path)})
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "config.toml").read_text(encoding="utf-8") == USER_REFERENCE
+
+
+def test_user_refuses_an_existing_file_and_leaves_it(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("[server]\nport = 8000\n")
+    result = init_user("--config-dir", str(tmp_path))
+    assert result.exit_code == 2
+    assert result.stderr.strip() == (
+        f"{path} already exists. Use orbit init --user --update to add the settings it doesn't"
+        " mention, or --force to replace it (the old file is kept as a backup)."
+    )
+    assert path.read_text() == "[server]\nport = 8000\n"
+    assert [p.name for p in tmp_path.iterdir()] == ["config.toml"]
+
+
+def test_user_force_keeps_the_old_file_as_a_backup_and_writes_the_reference(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("[server]\nport = 8000\n")
+    result = init_user("--force", "--config-dir", str(tmp_path))
+    assert result.exit_code == 0, result.output
+    backup = tmp_path / "config.toml.bak.1"
+    assert backup.read_text() == "[server]\nport = 8000\n"
+    assert path.read_text(encoding="utf-8") == USER_REFERENCE
+    assert result.stdout.splitlines()[0] == (
+        f"Kept the old file as {backup} and wrote orbit's user reference config to {path}."
+    )
+
+
+@pytest.mark.parametrize(
+    ("args", "option"),
+    [(("--roles",), "--roles"), (("--skill", "python"), "--skill"), (("-C", "."), "-C")],
+)
+def test_user_refuses_the_project_options(
+    tmp_path: Path, args: tuple[str, ...], option: str
+) -> None:
+    result = init_user(*args, "--config-dir", str(tmp_path / "config"))
+    assert result.exit_code == 2
+    assert result.stderr.strip() == (
+        f"--user writes your own config.toml, so it can't go with {option}."
+    )
+    assert not (tmp_path / "config").exists()
+
+
+def test_user_update_is_not_available_yet(tmp_path: Path) -> None:
+    result = init_user("--update", "--config-dir", str(tmp_path / "config"))
+    assert result.exit_code == 2
+    assert result.stderr.strip() == "--user --update isn't available yet."
+    assert not (tmp_path / "config").exists()
+
+
+def test_config_dir_without_user_is_refused(project: Path, tmp_path: Path) -> None:
+    result = init(project, "--config-dir", str(tmp_path / "config"))
+    assert result.exit_code == 2
+    assert result.stderr.strip() == (
+        "--config-dir names your own config.toml's directory, so it goes with --user."
+    )
+    assert not (project / ".orbit").exists()
+    assert not (tmp_path / "config").exists()
+
+
+def test_user_with_an_unwritable_config_dir_exits_with_status_2(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.write_text("")
+    result = init_user("--config-dir", str(config_dir))
+    assert result.exit_code == 2
+    assert result.stderr.startswith("Couldn't write orbit's user reference config: ")
+    assert result.stdout == ""

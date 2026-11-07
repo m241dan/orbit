@@ -2,9 +2,11 @@
 none, refused over one, and with ``force`` replacing it after keeping it as a numbered backup;
 bringing one up to date with it, adding what it doesn't mention; copying the built-in roles'
 instructions beside it, with a commented-out line pointing each role at its copy; and copying
-orbit's skills into the project's ``.orbit/skills/``."""
+orbit's skills into the project's ``.orbit/skills/``; and starting the user's own
+``config.toml`` from the user reference config, likewise."""
 
 import re
+import stat
 from datetime import date
 from pathlib import Path
 
@@ -30,10 +32,13 @@ from orbit.agent.external.config_init import (
     add_roles,
     add_skills,
     init_config,
+    init_user_config,
     update_config,
 )
 from orbit.agent.external.reference_config import LATER_HEADING, reference_config
 from orbit.agent.external.skill_files import SKILL_DIRECTORY, skill_names, skill_paths
+from orbit.agent.external.user_config import USER_CONFIG_FILE, USER_REFERENCE
+from orbit.agent.external.user_reference import user_reference
 from orbit.protocol import BUILT_IN_ROLE_NAMES
 
 TODAY = date(2026, 10, 25)
@@ -581,3 +586,45 @@ def test_skills_raise_when_they_cant_be_copied(tmp_path: Path) -> None:
     (tmp_path / ".orbit").write_text("")
     with pytest.raises(OSError):
         add_skills(tmp_path, ["python"])
+
+
+def test_the_shipped_user_reference_is_the_user_reference_config() -> None:
+    assert USER_REFERENCE.read_text(encoding="utf-8") == user_reference()
+
+
+def test_without_a_config_dir_the_user_reference_is_written_in_a_private_new_one(
+    tmp_path: Path,
+) -> None:
+    config_dir = tmp_path / "config" / "orbit"
+    result = init_user_config(config_dir, force=False)
+    path = config_dir / USER_CONFIG_FILE
+    assert result == InitResult(path)
+    assert path.read_text(encoding="utf-8") == user_reference()
+    assert stat.S_IMODE(config_dir.stat().st_mode) == 0o700
+
+
+def test_an_existing_user_config_is_refused_and_left_as_it_was(tmp_path: Path) -> None:
+    path = tmp_path / USER_CONFIG_FILE
+    path.write_text("[server]\nport = 8000\n")
+    with pytest.raises(ConfigExists) as raised:
+        init_user_config(tmp_path, force=False)
+    assert raised.value.path == path
+    assert path.read_text() == "[server]\nport = 8000\n"
+    assert [p.name for p in tmp_path.iterdir()] == [USER_CONFIG_FILE]
+
+
+def test_force_keeps_the_existing_user_config_as_the_first_backup(tmp_path: Path) -> None:
+    path = tmp_path / USER_CONFIG_FILE
+    path.write_text("[server]\nport = 8000\n")
+    result = init_user_config(tmp_path, force=True)
+    backup = path.with_name("config.toml.bak.1")
+    assert result == InitResult(path, backup)
+    assert backup.read_text() == "[server]\nport = 8000\n"
+    assert path.read_text(encoding="utf-8") == user_reference()
+
+
+def test_a_config_dir_that_is_a_file_raises_os_error(tmp_path: Path) -> None:
+    config_dir = tmp_path / "orbit"
+    config_dir.write_text("")
+    with pytest.raises(OSError):
+        init_user_config(config_dir, force=False)

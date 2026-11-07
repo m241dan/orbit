@@ -40,11 +40,18 @@ class TlsSettings(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
-    tls: TlsMode = "off"
-    cert: str | None = None
-    key: str | None = None
-    client_ca: str | None = None
-    ca: str | None = None
+    tls: TlsMode = Field(
+        default="off",
+        description="How orbit serve serves: off (plaintext), tls, or mtls (mutual TLS).",
+    )
+    cert: str | None = Field(default=None, description="The server certificate's file.")
+    key: str | None = Field(default=None, description="The server certificate's private key.")
+    client_ca: str | None = Field(
+        default=None, description="The CA certificate that signs client certificates under mtls."
+    )
+    ca: str | None = Field(
+        default=None, description="The CA certificate that signed the server certificate."
+    )
 
 
 def missing_tls_key(settings: TlsSettings) -> str | None:
@@ -96,15 +103,46 @@ class ServerSettings(TlsSettings):
     any number if 0, and ``browse_root``, the absolute directory frontends may browse and add
     workspaces within, anywhere the server's account can read if ``None``."""
 
-    host: str = Field(default="127.0.0.1", min_length=1)
-    port: int = Field(default=7433, ge=0, le=65535)
-    max_message_mb: int = Field(default=DEFAULT_MAX_MESSAGE_MB, ge=1)
-    revoked: tuple[str, ...] = Field(default=(), strict=False)  # A TOML array is a list.
-    local_client_cert: str | None = None
-    local_client_key: str | None = None
-    clone_dir: str | None = None
-    max_coders: int = Field(default=DEFAULT_MAX_CODERS, ge=0)
-    browse_root: str | None = None
+    host: str = Field(
+        default="127.0.0.1", min_length=1, description="The host orbit serve listens on."
+    )
+    port: int = Field(
+        default=7433,
+        ge=0,
+        le=65535,
+        description="The port orbit serve listens on; 0 lets the system choose one.",
+    )
+    max_message_mb: int = Field(
+        default=DEFAULT_MAX_MESSAGE_MB,
+        ge=1,
+        description="The largest message, in MB, either way between orbit serve and a frontend.",
+    )
+    revoked: tuple[str, ...] = Field(
+        default=(),
+        strict=False,  # A TOML array is a list.
+        description="The SHA-256 fingerprints of the client certificates refused under mtls.",
+    )
+    local_client_cert: str | None = Field(
+        default=None,
+        description="The client certificate frontends on this machine show under mtls.",
+    )
+    local_client_key: str | None = Field(
+        default=None, description="The private key of the local client certificate."
+    )
+    clone_dir: str | None = Field(
+        default=None,
+        description="Where repositories served by URL are cloned; workspaces in the state dir if"
+        " unset.",
+    )
+    max_coders: int = Field(
+        default=DEFAULT_MAX_CODERS,
+        ge=0,
+        description="How many coders run at once across the workspaces served; 0 for any number.",
+    )
+    browse_root: str | None = Field(
+        default=None,
+        description="The absolute directory frontends may browse and add workspaces within.",
+    )
 
     @field_validator("revoked")
     @classmethod

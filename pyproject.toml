@@ -211,6 +211,9 @@ source_modules = [
     "orbit.execution",
 ]
 forbidden_modules = ["orbit.telemetry"]
+# The user reference generator describes [telemetry] from its model; settings.py is plain
+# pydantic, without OpenTelemetry.
+ignore_imports = ["orbit.agent.external.user_reference -> orbit.telemetry.settings"]
 
 [[tool.importlinter.contracts]]
 name = "Telemetry knows neither the backend nor the frontends"

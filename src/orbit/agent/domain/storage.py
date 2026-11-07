@@ -15,8 +15,16 @@ class StorageSettings(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
-    tool_output_kb: int = Field(default=64, ge=0)
-    session_log_mb: int = Field(default=200, ge=0)
+    tool_output_kb: int = Field(
+        default=64,
+        ge=0,
+        description="The longest text field, in KB, a stored event keeps whole; 0 keeps every one.",
+    )
+    session_log_mb: int = Field(
+        default=200,
+        ge=0,
+        description="The most of a session's event log kept, in MB; 0 keeps all of it.",
+    )
 
     @property
     def tool_output_bytes(self) -> int:
