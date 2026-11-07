@@ -70,20 +70,20 @@ def task_label(
     width: int | None = None,
     notes: RowNotes = NO_NOTES,
 ) -> Text:
-    """A row: number, status, title and its lane's tag, with the settings lined up under the
+    """A row: number, status, title and its role's tag, with the settings lined up under the
     title, and under them why the task ended, if it has a reason.
 
     Fix tasks are indented under the task they belong to. A running task shows the
     spinner ``frame``. A pending task about to run says it's waiting for a coder, if
-    ``notes`` say so, and they give the lane and whether its usage is unknown. The reason's line
-    is cut to ``width`` cells with an ellipsis, if given.
+    ``notes`` say so, and they give its role's lane and whether its usage is unknown. The
+    reason's line is cut to ``width`` cells with an ellipsis, if given.
     """
     head = f"{number}. " if state.fixes is None else f"   {number} "
     icon = frame if state.status == "running" else STATUS_ICONS[state.status]
     # Long prompts (like fix tasks) are titled by their first line.
     title = state.task.prompt.partition("\n")[0]
     label = Text(f"{head}{icon} {title}")
-    label.append_text(lane_tag(notes.lane))
+    label.append_text(role_tag(state.task.role, notes.lane))
     label.append("\n")
     indent = " " * (len(head) + cell_len(icon) + 1)
     label.append(indent + _details(state, notes), style="dim")
@@ -93,12 +93,11 @@ def task_label(
     return label
 
 
-def lane_tag(lane: str | None) -> Text:
-    """The dim tag after a row's title naming ``lane``, its role's; none for the work lane, or
-    a lane not known."""
-    if lane is None or lane == WORK_LANE:
-        return Text()
-    return Text(f"  {lane}", style="dim")
+def role_tag(role: str, lane: str | None) -> Text:
+    """The dim tag after a row's title naming its ``role`` and the ``lane`` that role runs in;
+    just the role for the work lane, or a lane not known."""
+    lane_part = "" if lane is None or lane == WORK_LANE else f" · {lane}"
+    return Text(f"  {role}{lane_part}", style="dim")
 
 
 def role_lanes(agents: Iterable[AgentEntry]) -> dict[str, str]:

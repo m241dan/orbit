@@ -359,8 +359,9 @@ Under a task's title, its row's dim details line shows its model and workspace l
 order (`opus · shell + web · skills: python, application`); a task without skills shows nothing for
 them.
 
-A task whose role runs in a lane other than `work` shows the lane as a dim tag after its title
-(`2. ⏳ Review the change  review`); a coder task shows none (see `lane` under
+Each task shows its role as a dim tag after its title, then the lane the role runs in when that
+isn't `work` (`2. ⏳ Review the change  bugs-reviewer · review`); a coder task shows `coder`, and a
+task whose role is no longer in the workspace shows just the role's name (see `lane` under
 [Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)). With the list active, `L` narrows
 it to one lane: all tasks, then each lane its tasks run in, in the order the roles are listed,
 then all again. While narrowed, only that lane's tasks show, still numbered as on the whole list,
@@ -1799,8 +1800,8 @@ and what they run on:
   task whose role runs on that runtime; each runs its tasks on other runtimes meanwhile, and the
   ones it skipped once the pause ends or `ctrl+s` cancels its wait (see **Pauses per runtime**
   under [Tasks](#tasks)). Each lane shows in the
-  Snapshot's `busy`, by name. On the task list, a task in a lane other than `work` is tagged with
-  its lane, and `L` narrows the list to each lane in turn (see [Tasks](#tasks)). Orbit's reviews
+  Snapshot's `busy`, by name. On the task list, each task is tagged with its role, then its lane
+  when that isn't `work`, and `L` narrows the list to each lane in turn (see [Tasks](#tasks)). Orbit's reviews
   run in one lane, the one the enabled review roles (the lens reviewers, per-commit and the super
   review's, and the `reviewer`) share, so the config is refused, naming them and their lanes, if
   they're in different lanes, the merging lane included; a disabled one can be in any lane. With

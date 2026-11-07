@@ -40,9 +40,9 @@ async def test_the_list_shows_the_board_the_backend_reports() -> None:
     fix = TaskState(id="3", task=TaskSpec(prompt="fix one"), fixes="1")
     await shell.feed(TasksChanged(tasks=(one, fix, two)))
     assert shell.task_view.rows == [
-        "1. ✅ one\n      default · read + web",
-        "   1.1 ⏳ fix one\n          default · read + web",
-        "2. ✅ two\n      default · read + web",
+        "1. ✅ one  coder\n      default · read + web",
+        "   1.1 ⏳ fix one  coder\n          default · read + web",
+        "2. ✅ two  coder\n      default · read + web",
         "+ new task",
     ]
 
@@ -139,11 +139,11 @@ async def test_the_next_task_shows_the_wait_for_a_coder_until_it_starts() -> Non
     wait = Activity(kind="waiting_for_coder", position=1, busy=2)
     await shell.feed(CATALOG, tasks, waiting_state(run, wait))
     assert shell.task_view.rows[:2] == [
-        "1. ⏳ task 1\n      default · read + web · ⏳ waiting: 2 coders busy",
-        "2. ⏳ task 2\n      default · read + web",
+        "1. ⏳ task 1  coder\n      default · read + web · ⏳ waiting: 2 coders busy",
+        "2. ⏳ task 2  coder\n      default · read + web",
     ]
     await shell.feed(waiting_state(run))
-    assert shell.task_view.rows[0] == "1. ⏳ task 1\n      default · read + web"
+    assert shell.task_view.rows[0] == "1. ⏳ task 1  coder\n      default · read + web"
 
 
 async def test_a_running_task_cant_be_edited_and_the_user_is_told() -> None:

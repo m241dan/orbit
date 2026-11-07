@@ -28,11 +28,11 @@ from orbit.tui.view.tasks import (
     edit_refusal,
     follow_top,
     in_lane,
-    lane_tag,
     lanes_present,
     new_task_row,
     next_lane,
     role_lanes,
+    role_tag,
     session_usage_subtitle,
     task_list_title,
     task_numbers,
@@ -202,15 +202,22 @@ def test_a_task_list_narrowed_to_a_lane_names_it_in_its_title() -> None:
     assert task_list_title(held=True, lane="review") == "Task list · held · review"
 
 
-def test_a_lane_other_than_work_is_a_dim_tag() -> None:
-    tag = lane_tag("review")
-    assert str(tag) == "  review"
+def test_a_role_in_a_lane_other_than_work_is_tagged_with_role_and_lane_dim() -> None:
+    tag = role_tag("bugs-reviewer", "review")
+    assert str(tag) == "  bugs-reviewer · review"
     assert tag.style == "dim"
 
 
-def test_the_work_lane_and_an_unknown_one_have_no_tag() -> None:
-    assert str(lane_tag("work")) == ""
-    assert str(lane_tag(None)) == ""
+def test_a_role_in_its_own_custom_lane_is_tagged_with_that_lane() -> None:
+    assert str(role_tag("license-reviewer", "licenses")) == "  license-reviewer · licenses"
+
+
+def test_a_role_in_the_work_lane_is_tagged_with_just_its_name() -> None:
+    assert str(role_tag(CODER, "work")) == "  coder"
+
+
+def test_a_role_the_list_does_not_know_is_tagged_with_just_its_name() -> None:
+    assert str(role_tag("gone", None)) == "  gone"
 
 
 def test_each_roles_lane_comes_from_the_catalogs_agents() -> None:
