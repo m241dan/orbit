@@ -2432,7 +2432,9 @@ or reviewed, its first 7 characters; `{task}` the task whose work landed (for a 
 the tasks it reviews), and `{task_skills}` the skills its list names, apart by commas; `{title}`
 the review task's first line (`Review commit 0123abc`, or
 `Review the 2 commits made for review batch-1`); `{diff}` the commits' messages and diffs,
-trimmed past 30000 characters; `{missing}` a line for each task of the reviewed batch that ended
+trimmed past 30000 characters, which a review role's task booked into a review is given as it
+starts, read from git then, while the task list and the saved session keep `(The diff of the
+reviewed commits is quoted here as the review starts.)` in their place; `{missing}` a line for each task of the reviewed batch that ended
 without landing a commit; `{cap}` the suggestions the review may make; `{queued}` the tasks still
 queued or running, `{landed_since}` the commits landed since the reviewed one, as they stand when
 the review starts (its task is rendered again from its template then, the other variables as

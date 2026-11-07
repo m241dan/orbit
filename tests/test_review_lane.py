@@ -15,7 +15,7 @@ from orbit.agent.domain.activity import reported
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.config import load_config
 from orbit.agent.domain.endings import BUG, CANCELLED, REVIEW_STOPPED_BY_YOU, STOPPED_BY_YOU
-from orbit.agent.domain.reviews import ReviewLimits, SuperReviewCount
+from orbit.agent.domain.reviews import DIFF_HELD, ReviewLimits, SuperReviewCount
 from orbit.agent.domain.skills import SkillMapping
 from orbit.agent.domain.triggers import Trigger
 from orbit.protocol import (
@@ -148,7 +148,7 @@ async def test_landed_work_is_reviewed_and_suggestions_run_and_are_reviewed_in_t
     ]
     _, first_review, suggestion, _, batch_review = board(events)
     assert first_review.task.prompt.startswith("Review commit c1")
-    assert "diff of c1" in first_review.task.prompt
+    assert DIFF_HELD in first_review.task.prompt
     assert suggestion.task.prompt == "Add tests\n\nPlease add tests."
     assert suggestion.task.settings.tool_access == "full"  # The coder role's default.
     assert batch_review.task.prompt.startswith("Review the 2 commits made for review batch-1")
@@ -1146,7 +1146,7 @@ async def test_a_diff_that_cannot_be_shown_skips_the_review_and_the_run_goes_on(
         ErrorOccurred(code=GIT_FAILED, message="Review skipped: git show failed: bad object c1")
         in events
     )
-    assert "diff of c2" in board(events)[2].task.prompt
+    assert board(events)[2].task.prompt.startswith("Review commit c2")
 
 
 LANDED = "Landed since (check your findings against these):"
@@ -1215,7 +1215,8 @@ async def test_a_review_is_told_the_subjects_that_landed_before_it_started_oldes
     second = [t for t in board(events) if t.task.role == "reviewer"][1]
     prompts = prompts_of(second.id, events)
     assert LANDED not in prompts[0]  # As it was queued, before C and D landed.
-    assert prompts[-1] == brief.split("\n\nWhen you have finished", 1)[0]
+    told = brief.split("\n\nWhen you have finished", 1)[0]
+    assert prompts[-1] == told.replace("diff of c2", DIFF_HELD)
 
 
 async def test_a_review_with_nothing_landed_before_it_started_is_told_of_none() -> None:
@@ -1271,7 +1272,7 @@ async def test_a_review_whose_landed_commits_cannot_be_listed_as_it_starts_runs_
     await start(session)
     events = await asyncio.wait_for(settle(session), 10)
     review = review_task(events)
-    assert review.status == "completed" and "diff of c1" in review.task.prompt
+    assert review.status == "completed" and DIFF_HELD in review.task.prompt
     assert "Landed since" not in review.task.prompt
     [brief] = briefs
     assert "diff of c1" in brief and "Landed since" not in brief
@@ -1313,8 +1314,11 @@ async def test_a_project_review_template_of_one_paragraph_starts_and_keeps_its_t
 async def test_a_project_review_template_in_another_order_is_not_spliced_into() -> None:
     template = "{diff}\n\nYou may make at most {cap} suggestions.\n\n{title}"
     review, brief = await reviewed_from(template, "Add B")
-    expected = "diff of c1\n\nYou may make at most 5 suggestions.\n\nReview commit c1"
-    assert (review.task.prompt, brief) == (expected, expected)
+    expected = "{}\n\nYou may make at most 5 suggestions.\n\nReview commit c1"
+    assert (review.task.prompt, brief) == (
+        expected.format(DIFF_HELD),
+        expected.format("diff of c1"),
+    )
 
 
 async def test_a_project_review_template_lists_what_landed_since_as_the_review_starts() -> None:

@@ -14,7 +14,13 @@ from orbit.agent.application.review_trace import REVIEW_SPAN
 from orbit.agent.application.task_trace import TASK_SPAN
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.reviews import ReviewLimits, ReviewPlanner, commit_review, review_prompt
+from orbit.agent.domain.reviews import (
+    DIFF_HELD,
+    ReviewLimits,
+    ReviewPlanner,
+    commit_review,
+    review_prompt,
+)
 from orbit.agent.domain.triggers import Trigger
 from orbit.protocol import CODER, REVIEWER, AgentStarted, Event, TaskSpec, TaskState
 from orbit.tracing import NoSpan
@@ -63,7 +69,7 @@ async def test_a_coder_task_landing_queues_the_review_it_always_had_from_the_rev
     tasks = await ran("Add a flag.", reviewers=1)
     coder, review = tasks
     assert (review.task.role, review.origin, review.task.skills) == (REVIEWER, "review", ())
-    assert review.task.prompt == review_prompt(commit_review(coder.id, "c1"), "diff of c1", 5, ())
+    assert review.task.prompt == review_prompt(commit_review(coder.id, "c1"), DIFF_HELD, 5, ())
 
 
 async def test_with_the_review_trigger_disabled_landed_work_is_not_reviewed() -> None:

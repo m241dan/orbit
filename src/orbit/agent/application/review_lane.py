@@ -94,9 +94,12 @@ from orbit.agent.domain.reviews import (
     finding_refusal,
     finished_fields,
     finished_values,
+    held_values,
     kept_groups,
+    kept_values,
     pause_notice,
     pending_titles,
+    quotes_diff,
     quotes_messages,
     raised_roles,
     review_kind,
@@ -104,6 +107,8 @@ from orbit.agent.domain.reviews import (
     review_values,
     set_review,
     tell_landed_since,
+    unshown_diff,
+    with_diff,
     with_finding,
     with_lens,
     with_task,
@@ -279,10 +284,14 @@ class ReviewLane:
         self.runner.on_stopped(stopped)
 
     def load(self, snapshot: LaneSnapshot) -> None:
-        """Replace the lane's state with ``snapshot``'s; :meth:`end_interrupted` follows."""
+        """Replace the lane's state with ``snapshot``'s; :meth:`end_interrupted` follows. The
+        templates an older orbit kept with their diffs keep them no longer."""
         self.planner.restore(snapshot.planner)
         self._jobs, self._batches = dict(snapshot.jobs), dict(snapshot.batches)
-        self._templates = dict(snapshot.templates)
+        self._templates = {
+            task_id: replace(template, values=kept_values(template.values))
+            for task_id, template in snapshot.templates.items()
+        }
         self._groups = dict(snapshot.groups)
         self._severities = dict(snapshot.severities)
         self._causes.clear()  # The session's task ids are reused by the next.
@@ -818,19 +827,34 @@ class ReviewLane:
         landed = await self._since_super(since, commit)
         return replace(landed, sampled=await self._sample(commit, landed.files))
 
-    async def _tell_landed(self, task_id: str, job: ReviewJob) -> None:
+    async def _tell_landed(self, task_id: str, job: ReviewJob) -> str:
         """Have review ``task_id``'s task, of ``job``, list the commits on the base after the
         last one it reviews as they stand now, as it starts, rendering it again from its
-        template, which lists them where it says, in place of those it listed as it last ran.
-        One with no template kept keeps its prompt: a super review, told what landed as it was
-        queued, or one an older orbit saved."""
+        template, which lists them where it says, in place of those it listed as it last ran;
+        returns the prompt its agent gets, the same quoting the diff of ``job``'s commits in
+        place of :data:`~orbit.agent.domain.reviews.DIFF_HELD`, which the board keeps. One with
+        no template kept keeps its prompt, and its agent gets it: a super review, told what
+        landed as it was queued, or one an older orbit saved."""
         template = self._templates.get(task_id)
         if template is None:
-            return
+            return self._board.get(task_id).task.prompt
         subjects = await self._landed_after(job.commits[-1])
-        told = render_template(template.template, tell_landed_since(template.values, subjects))
-        if told != self._board.get(task_id).task.prompt:
-            await self._tasks.change(lambda board: board.set_prompt(task_id, told))
+        told = tell_landed_since(template.values, subjects)
+        stored = render_template(template.template, held_values(told))
+        if stored != self._board.get(task_id).task.prompt:
+            await self._tasks.change(lambda board: board.set_prompt(task_id, stored))
+        diff = await self._diff_of(template, job)
+        return render_template(template.template, with_diff(told, diff))
+
+    async def _diff_of(self, template: ReviewTemplate, job: ReviewJob) -> str:
+        """The messages and diffs of ``job``'s commits, if ``template`` quotes them, or what
+        says git couldn't show them; nothing if it doesn't quote them."""
+        if not quotes_diff(template.template):
+            return ""
+        try:
+            return await self._tree.show(job.commits)
+        except TreeFailed as exc:  # The review goes ahead; its agent can read the commits.
+            return unshown_diff(str(exc))
 
     async def _landed_after(self, commit: str) -> tuple[str, ...]:
         """The subjects of the commits on the base after ``commit``, oldest first; none if git
@@ -987,15 +1011,16 @@ class ReviewLane:
         return await self.runner.alone(task_id, partial(self._run_reviewer, task_id, job))
 
     async def _run_reviewer(self, task_id: str, job: ReviewJob | None) -> Outcome:
-        """Run the reviewer of ``job``, told what landed since as it starts, in a snapshot of the
+        """Run the reviewer of ``job``, told what landed since and given the diff of its commits
+        as it starts, in a snapshot of the
         last commit it reviews; a review the user queued, of no job, works in its role's
         workspace, as :func:`run_in_role_workspace` says."""
         if job is None:
             return await run_in_role_workspace(task_id, self._tasks, self._desk)
-        await self._tell_landed(task_id, job)
-        run = AgentRun(task_id, self._tasks, None, self._desk).run
+        agent_run = AgentRun(task_id, self._tasks, None, self._desk)
+        agent_run.deliver(await self._tell_landed(task_id, job))
         async with snapshot_of(self._tree, job.commits[-1], self._publish) as root:
-            return await run(None, root)
+            return await agent_run.run(None, root)
 
     async def _after(self, task_id: str, batch: str | None) -> None:
         """A review, or another task the lane booked, ``task_id``, ended: its review goes on as

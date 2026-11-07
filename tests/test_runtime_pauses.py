@@ -11,6 +11,7 @@ from typing import Any
 
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.limit_pause import LimitPause
+from orbit.agent.domain.reviews import DIFF_HELD
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.runtimes import CLAUDE, Failure
 from orbit.agent.domain.usage import UsageReport
@@ -321,7 +322,7 @@ async def test_a_queued_review_run_again_after_an_outage_is_told_what_landed_by_
 
     [prompt], [again] = first, briefs
     landed = "Landed since (check your findings against these):"
-    assert prompt.endswith(f"{landed}\n- Add B\n\ndiff of c1")
+    assert prompt.endswith(f"{landed}\n- Add B\n\n{DIFF_HELD}")
     assert f"{landed}\n- Add B\n- Add C\n\ndiff of c1" in again and again.count(landed) == 1
     assert tree.asked_since == [("c1", None), ("c1", None)]
     assert statuses_of(session) == ["completed", "completed"]

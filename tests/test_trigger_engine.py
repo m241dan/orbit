@@ -17,6 +17,7 @@ from orbit.agent.application.triggers import ReviewRound, TriggerEngine, Trigger
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import Setup, configure_prompt, configured_checks
 from orbit.agent.domain.reviews import (
+    DIFF_HELD,
     ReviewJob,
     ReviewTemplate,
     commit_review,
@@ -304,9 +305,10 @@ async def test_review_rounds_reviews_the_review_due_and_books_its_task() -> None
     [task_id] = await engine.engine.landed(ended(), COMMIT, ReviewRound(job, booked.__setitem__))
     review = engine.board.get(task_id)
     assert (review.task.role, review.origin, review.queued_as) == (REVIEWER, "review", "review")
-    assert review.task.prompt == review_prompt(job, f"diff of {COMMIT}", 5, ["Make it faster."])
+    assert review.task.prompt == review_prompt(job, DIFF_HELD, 5, ["Make it faster."])
     assert review.task.skills == ("python",)  # Those of the task it reviews.
     assert list(booked) == [task_id]
+    assert "diff" not in booked[task_id].values
 
 
 async def test_a_review_due_is_booked_with_the_template_and_values_its_prompt_renders_from() -> (
@@ -454,7 +456,7 @@ async def test_a_batchs_review_fires_only_the_triggers_review_rounds_guards() ->
     [task_id] = await engine.engine.reviewed(ReviewRound(BATCH, booked.__setitem__))
     review = engine.board.get(task_id)
     assert review.origin == "review"
-    assert review.task.prompt == review_prompt(BATCH, "diff of c2\ndiff of c3", 5, ["Add tests"])
+    assert review.task.prompt == review_prompt(BATCH, DIFF_HELD, 5, ["Add tests"])
     assert list(booked) == [task_id]
     assert isinstance(engine.events[-1], TasksChanged)
 

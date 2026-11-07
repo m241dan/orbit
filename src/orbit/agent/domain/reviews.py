@@ -903,6 +903,39 @@ def tell_landed_since(values: Mapping[str, str], subjects: Sequence[str]) -> dic
     return {**values, "landed_since": _paragraphs(_landed(subjects))}
 
 
+DIFF_HELD = "(The diff of the reviewed commits is quoted here as the review starts.)"
+"""What a review task of commits quotes in place of its diff until it starts: the diff is read
+from git again then, rather than kept in the task, the session's record and every board sent."""
+
+
+def kept_values(values: Mapping[str, str]) -> dict[str, str]:
+    """``values``, those a review task of commits is rendered from, without ``{diff}``, which is
+    read from git again as it starts rather than kept."""
+    return {name: value for name, value in values.items() if name != "diff"}
+
+
+def held_values(values: Mapping[str, str]) -> dict[str, str]:
+    """``values`` with ``{diff}`` quoting :data:`DIFF_HELD`, as a review task of commits is
+    kept until it starts."""
+    return {**values, "diff": DIFF_HELD}
+
+
+def with_diff(values: Mapping[str, str], diff: str) -> dict[str, str]:
+    """``values`` with ``{diff}`` quoting ``diff``, trimmed as :func:`review_values` trims it,
+    as a review task of commits is given to its agent."""
+    return {**values, "diff": _trimmed(diff)}
+
+
+def quotes_diff(template: str) -> bool:
+    """Whether ``template``, a review task's, quotes the diff of the commits it reviews."""
+    return "{diff}" in template
+
+
+def unshown_diff(error: str) -> str:
+    """What a review task quotes in place of the diff git couldn't show, as ``error`` says."""
+    return f"(Git couldn't show the diff of the reviewed commits: {error})"
+
+
 def _landed(subjects: Sequence[str]) -> list[str]:
     """The part of a review's task listing the commits whose ``subjects`` landed since the last
     one it reviews, the first :data:`LANDED_LIMIT` named and the rest counted; none when none

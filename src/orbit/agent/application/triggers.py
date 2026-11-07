@@ -49,6 +49,8 @@ from orbit.agent.domain.reviews import (
     ReviewJob,
     ReviewTemplate,
     commit_review,
+    held_values,
+    kept_values,
     pending_titles,
     review_skills,
     review_values,
@@ -86,6 +88,7 @@ from orbit.agent.domain.verification import CheckSet, VerificationStep, failure_
 from orbit.protocol import (
     CODER,
     GIT_FAILED,
+    REVIEW_ROLES,
     ErrorOccurred,
     Notice,
     QueuedAs,
@@ -503,7 +506,7 @@ class TriggerEngine:
         prompt, unless a guard holds it back, if they're still to decide, seeing the board as
         it was before any of them; returns their ids. Each reviewing the review due does so
         with the skills of what it reviews, whatever its role, and is queued as a review, booked
-        into its batches with what its prompt was rendered from."""
+        into its batches with what its prompt was rendered from, but the diff it quotes."""
         assert trigger.prompt is not None  # It listened without checks, so it has a prompt.
         values = {**firing.values, TRIGGER_VARIABLE: name}
         prompt = render_template(trigger.prompt, values)
@@ -512,18 +515,23 @@ class TriggerEngine:
         enabled = enabled_roles(self._desk.agents.roles)
         raised = () if firing.review is None else firing.review.raised
         roles = firing_roles(trigger, enabled, firing.event, raised)
-        queued = _Queued(name, trigger, prompt, ReviewTemplate(trigger.prompt, values))
+        kept = kept_values(values)
+        held = render_template(trigger.prompt, held_values(kept))
+        queued = _Queued(name, trigger, prompt, held, ReviewTemplate(trigger.prompt, kept))
         return tuple(self._add_one(board, queued, role, firing) for role in roles)
 
     def _add_one(self, board: TaskBoard, queued: _Queued, role: str, firing: _Firing) -> str:
         """Add to ``board`` ``role``'s task of the trigger ``queued`` says, as it fires as
         ``firing`` says; returns its id. One reviewing the review due does so with the skills of
         what it reviews, and is queued as a review, booked into its batches with what its
-        prompt was rendered from."""
+        prompt was rendered from. A review role's task booked so quotes
+        :data:`~orbit.agent.domain.reviews.DIFF_HELD` in place of the diff, which the review
+        lane reads from git again as it starts it."""
         spec = self._desk.agents.roles[role]
         review = firing.review_of(queued.trigger, spec)
         skills = () if review is None else review_skills(review.job, board.tasks)
-        task = role_task(role, spec, queued.prompt, skills)
+        prompt = queued.held if review is not None and role in REVIEW_ROLES else queued.prompt
+        task = role_task(role, spec, prompt, skills)
         queued_as: QueuedAs = "task" if review is None else "review"
         task_id = _added(board, task, queued.name, queued.trigger, queued_as)
         if review is not None:
@@ -552,11 +560,14 @@ class TriggerEngine:
 @dataclass(frozen=True)
 class _Queued:
     """What a trigger fires its tasks from: its ``name``, the ``trigger``, its ``prompt``, as
-    rendered, and the ``template`` it was rendered from, with its values."""
+    rendered, the same ``held`` back, quoting :data:`~orbit.agent.domain.reviews.DIFF_HELD` in
+    place of the diff, and the ``template`` it was rendered from, with its values but the
+    diff."""
 
     name: str
     trigger: Trigger
     prompt: str
+    held: str
     template: ReviewTemplate
 
 

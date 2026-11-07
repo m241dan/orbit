@@ -5,6 +5,7 @@ session saved before them, cancelled as it opens."""
 
 import asyncio
 import json
+from collections.abc import Sequence
 from typing import Any
 
 from orbit.agent import WorkspaceHost
@@ -13,6 +14,8 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.endings import INTERRUPTED, QUEUED_BEFORE_LENSES
 from orbit.agent.domain.reviews import (
     BLOCKING_REFUSED,
+    DIFF_HELD,
+    DIFF_LIMIT,
     BatchSnapshot,
     LaneSnapshot,
     PlannerSnapshot,
@@ -27,9 +30,11 @@ from orbit.protocol import (
     LENS_REVIEWERS,
     REVIEWER,
     ActivateSession,
+    Event,
     Notice,
     ReviewStatus,
     Snapshot,
+    TasksChanged,
     TaskSpec,
     TaskState,
     TaskStatus,
@@ -100,6 +105,58 @@ async def test_a_landing_queues_the_six_lens_tasks_and_nothing_else_when_they_fi
 
     assert shown(board(events)) == [(CODER, "manual", None, "completed"), *LENS_TASKS]
     assert all(t.queued_as == "review" for t in board(events)[1:])
+
+
+LONG_DIFF = "+ a changed line\n" * (DIFF_LIMIT // 10)
+"""A diff of a commit past the length a review quotes."""
+
+
+class LongDiffTree(FakeTree):
+    """A coder tree each of whose commits' messages and diffs are :data:`LONG_DIFF`."""
+
+    async def show(self, commits: Sequence[str]) -> str:
+        await super().show(commits)
+        return LONG_DIFF
+
+
+def briefed(briefs: list[str]) -> Script:
+    """A lens that records the task it was given in ``briefs``, then claims done, finding
+    nothing."""
+
+    async def look(call: Call) -> TurnEndReason:
+        briefs.append((await call("get_task")).text)
+        await call("complete_task", summary="0 findings")
+        return "completed"
+
+    return look
+
+
+def quoting_diff(events: list[Event], store: FakeStore) -> list[str]:
+    """The boards published in ``events`` and the records saved in ``store``, as JSON, that
+    quote :data:`LONG_DIFF`."""
+    boards = [e.model_dump_json() for e in events if isinstance(e, TasksChanged | Snapshot)]
+    return [text for text in [*boards, *map(record_json, store.saved)] if "a changed line" in text]
+
+
+def given_diff(brief: str) -> bool:
+    """Whether ``brief``, a lens's task, quotes :data:`LONG_DIFF` trimmed, as its task's diff."""
+    trimmed = f"{LONG_DIFF[:DIFF_LIMIT]}\n… (diff trimmed)\n\nWhen you have finished"
+    return trimmed in brief and DIFF_HELD not in brief
+
+
+async def test_a_lens_tasks_stored_prompt_holds_no_diff_but_its_agent_is_given_it_trimmed() -> None:
+    briefs: list[str] = []
+    store = FakeStore()
+    lenses = [briefed(briefs) for _ in LENS_REVIEWERS]
+    session = shipped(claims_done, *lenses, tree=LongDiffTree(), store=store)
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    await session.close()
+
+    assert [t.task.prompt.endswith(DIFF_HELD) for t in board(events)[1:]] == [True] * 6
+    assert any(isinstance(e, TasksChanged) for e in events)
+    assert quoting_diff(events, store) == []
+    assert [given_diff(brief) for brief in briefs] == [True] * len(LENS_REVIEWERS)
 
 
 async def test_a_lens_finding_queues_one_merge_pass_that_files_into_the_reviews_batch() -> None:

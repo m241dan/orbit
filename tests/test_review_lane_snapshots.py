@@ -4,14 +4,16 @@ the reviews its crash interrupted ended."""
 import asyncio
 
 from orbit.agent import ControlPlane, PlaneParts, WorkspaceHost
-from orbit.agent.application.ports import Reply
+from orbit.agent.application.ports import Reply, TreeFailed
 from orbit.agent.application.review_trace import REVIEW_SPAN
 from orbit.agent.domain.reviews import (
+    DIFF_HELD,
     BatchSnapshot,
     LaneSnapshot,
     PlannerSnapshot,
     ReviewJob,
     ReviewTemplate,
+    unshown_diff,
 )
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
@@ -294,6 +296,43 @@ async def test_an_opened_sessions_queued_review_is_rendered_from_its_template_as
     snapshot = queued_review({"2": ReviewTemplate("Review {commit}.\n\n{landed_since}", values)})
     expected = f"Review c1.\n\n{LANDED}\n- Add B"
     assert await run_queued_review(snapshot, tree) == (expected, expected)
+
+
+DIFF_TEMPLATE = "Review {commit}.\n\n{diff}"
+"""A review's template quoting the diff of the commit it reviews."""
+
+KEPT = {"trigger": "review", "commit": "c1"}
+"""The values :data:`DIFF_TEMPLATE` is kept with, the diff left out."""
+
+
+async def test_an_opened_sessions_queued_review_is_given_its_commits_diff_as_it_runs() -> None:
+    snapshot = queued_review({"2": ReviewTemplate(DIFF_TEMPLATE, KEPT)})
+    prompt, brief = await run_queued_review(snapshot, FakeTree())
+    assert (prompt, brief) == (f"Review c1.\n\n{DIFF_HELD}", "Review c1.\n\ndiff of c1")
+
+
+async def test_an_opened_sessions_queued_review_whose_diff_git_cant_show_runs_told_so() -> None:
+    tree = FakeTree()
+    tree.failures["show"] = TreeFailed("git show failed: bad object c1")
+    snapshot = queued_review({"2": ReviewTemplate(DIFF_TEMPLATE, KEPT)})
+    _, brief = await run_queued_review(snapshot, tree)
+    assert brief == f"Review c1.\n\n{unshown_diff('git show failed: bad object c1')}"
+
+
+async def test_an_older_orbits_review_kept_with_its_diff_drops_it_and_gets_it_afresh() -> None:
+    old = ReviewTemplate(DIFF_TEMPLATE, {**KEPT, "diff": "diff of c1 as it was queued"})
+    store = store_with(saved("auth", *QUEUED, reviews=queued_review({"2": old})))
+    session, launcher = switching(store)
+    briefs: list[str] = []
+    launcher.reviewers.append(suggests(briefs=briefs))
+    await opened(session, ActivateSession(session="auth"))
+    assert reviews_of(store).templates == {"2": ReviewTemplate(DIFF_TEMPLATE, KEPT)}
+
+    await send(session, RunTasks())
+    await asyncio.wait_for(settle(session, until=last_review_completed), 10)
+    await session.close()
+    [brief] = briefs
+    assert brief.startswith("Review c1.\n\ndiff of c1\n\nWhen you have finished")
 
 
 async def test_an_opened_sessions_queued_review_kept_without_a_template_keeps_its_prompt() -> None:
