@@ -9,7 +9,7 @@ import pytest
 
 from orbit.agent import HostParts, WorkspaceHost
 from orbit.agent.application.approvals import Timer
-from orbit.agent.application.consultations import held_note
+from orbit.agent.application.consultations import note_held
 from orbit.agent.application.conversation_seats import ConversationSeats
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.planner_seat import SeatHooks
@@ -88,7 +88,7 @@ def requested(number: int, title: str, asked: int = 1) -> ApprovalRequested:
 
 
 def held(number: int) -> Reply:
-    return Reply(held_note(EXPERIMENTER, number))
+    return Reply(note_held(EXPERIMENTER, number))
 
 
 def consulting(heard: list[Reply], gate: asyncio.Event, *after: str) -> Script:
@@ -281,11 +281,11 @@ async def test_one_held_as_storage_halts_expires_only_once_the_halt_lifts() -> N
         AgentDesk(agents, events.put), Tasks(TaskBoard(), events.put), events, hooks
     )
     launcher.planner_turns = [consulting([], asyncio.Event()), chats, chats, chats]
-    seats.viewers(1)  # Kept from expiring until the frontend leaves, as the session halts.
+    seats.note_viewers(1)  # Kept from expiring until the frontend leaves, as the session halts.
     await seats.planner.submit("Plan.", Settings())
     await eventually(lambda: seats.approvals != ())
     await seats.stop_turns(final=False)
-    seats.viewers(0)
+    seats.note_viewers(0)
     for _ in range(10):
         await asyncio.sleep(0)
     halted = drained(events)
@@ -461,7 +461,7 @@ async def halted_holding(store: FakeStore) -> WorkspaceHost:
     halt = halt_of(session)
     halt.fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))
     await eventually(lambda: not halt._halting)  # The turns stopped.
-    session._seats.viewers(0)  # The frontend left as the session halted.
+    session._seats.note_viewers(0)  # The frontend left as the session halted.
     return session
 
 

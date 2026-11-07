@@ -80,7 +80,7 @@ class Holding:
 
 async def test_a_call_held_is_numbered_published_saved_and_waits() -> None:
     holding = Holding()
-    holding.approvals.viewers(1)
+    holding.approvals.note_viewers(1)
     task = (await holding.asked())[0]
     assert holding.posted == [held(1)]
     assert holding.approvals.waiting == (held(1),)
@@ -99,7 +99,7 @@ async def test_the_users_decision_settles_the_call_and_is_published(
     answer: str, decision: ToolCallDecision
 ) -> None:
     holding = Holding()
-    holding.approvals.viewers(1)
+    holding.approvals.note_viewers(1)
     task = (await holding.asked())[0]
     holding.clock.now = 30
     holding.approvals.decide(DecideToolCall.model_validate({"call": 1, "decision": answer}))
@@ -138,7 +138,7 @@ async def test_one_held_with_no_frontend_connected_expires_after_an_hour() -> No
 
 async def test_one_held_doesnt_expire_while_a_frontend_is_connected() -> None:
     holding = Holding()
-    holding.approvals.viewers(1)
+    holding.approvals.note_viewers(1)
     task = (await holding.asked())[0]
     await asyncio.sleep(0)
     assert (holding.clock.slept, task.done()) == ([], False)
@@ -157,7 +157,7 @@ async def test_one_held_doesnt_expire_while_paused_and_does_once_unpaused() -> N
 
 async def test_a_call_whose_caller_stops_waiting_is_withdrawn() -> None:
     holding = Holding()
-    holding.approvals.viewers(1)
+    holding.approvals.note_viewers(1)
     task = (await holding.asked())[0]
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -169,7 +169,7 @@ async def test_a_call_whose_caller_stops_waiting_is_withdrawn() -> None:
 
 async def test_declining_all_settles_every_call_held_as_declined() -> None:
     holding = Holding()
-    holding.approvals.viewers(1)
+    holding.approvals.note_viewers(1)
     tasks = await holding.asked(2)
     holding.approvals.decline_all()
     assert [await task for task in tasks] == ["declined", "declined"]
@@ -181,7 +181,7 @@ async def test_declining_all_settles_every_call_held_as_declined() -> None:
 
 async def test_another_session_opening_declines_those_still_held() -> None:
     holding = Holding()
-    holding.approvals.viewers(1)
+    holding.approvals.note_viewers(1)
     task = (await holding.asked())[0]
     holding.approvals.replace(0)
     assert await task == "declined"

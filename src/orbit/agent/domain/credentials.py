@@ -17,7 +17,7 @@ class NonStringCredential:
     key: str
 
 
-def credential_values(table: Mapping[str, object]) -> dict[str, str] | NonStringCredential:
+def parse_credentials(table: Mapping[str, object]) -> dict[str, str] | NonStringCredential:
     """The variables ``table``, the file's TOML, sets, by name, or the first of its keys whose
     value isn't a string."""
     values = {key: value for key, value in table.items() if isinstance(value, str)}
@@ -25,32 +25,32 @@ def credential_values(table: Mapping[str, object]) -> dict[str, str] | NonString
     return values if wrong is None else NonStringCredential(wrong)
 
 
-def too_open(path: str) -> str:
+def word_too_open(path: str) -> str:
     """Why the file at ``path``, which its group or others can read or write, is refused."""
     return f"{path} must be private: chmod 600 it."
 
 
-def directory_too_open(directory: str) -> str:
+def word_directory_too_open(directory: str) -> str:
     """Why the file in ``directory``, which others can write, is refused."""
     return f"{directory} holds {CREDENTIALS_FILE}, so others mustn't write to it: chmod 700 it."
 
 
-def invalid_toml(path: str, detail: str) -> str:
+def word_invalid_toml(path: str, detail: str) -> str:
     """Why the file at ``path``, which isn't valid TOML as ``detail`` says, is refused."""
     return f"{path} isn't valid TOML: {detail}."
 
 
-def not_a_string(path: str, wrong: NonStringCredential) -> str:
+def word_not_a_string(path: str, wrong: NonStringCredential) -> str:
     """Why the file at ``path``, whose value for ``wrong``'s key isn't a string, is refused."""
     return f"{wrong.key} in {path} isn't a string."
 
 
-def unreadable(path: str, detail: str) -> str:
+def word_unreadable(path: str, detail: str) -> str:
     """Why the file at ``path``, which can't be read as ``detail`` says, is refused."""
     return f"Can't read {path}: {detail}."
 
 
-def unset_because(name: str, reason: str) -> str:
+def word_unset_because(name: str, reason: str) -> str:
     """Why a server needing the variable ``name``, which orbit's environment doesn't set, can't
     start, the file being refused for ``reason``."""
     return f"{UnsetVariable(name).message} {reason}"

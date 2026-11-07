@@ -51,7 +51,7 @@ class Ruling:
     held: timedelta
 
 
-def call_of(request: ToolCallHeld) -> int:
+def number_call(request: ToolCallHeld) -> int:
     """The number of the call ``request`` holds."""
     return request.call
 
@@ -71,7 +71,7 @@ class ToolCallApprovals:
         self._post = post
         self._save = save
         self._clock = timer.clock
-        self._approvals = Approvals[ToolCallHeld, Answer](post, self._expired, timer, call_of)
+        self._approvals = Approvals[ToolCallHeld, Answer](post, self._expired, timer, number_call)
         self._last = 0
 
     @property
@@ -128,10 +128,10 @@ class ToolCallApprovals:
         self.decline_all()
         self._last = last
 
-    def viewers(self, count: int) -> None:
+    def note_viewers(self, count: int) -> None:
         """Note that ``count`` frontends view the session, as held calls expire only with
         none."""
-        self._approvals.viewers(count)
+        self._approvals.note_viewers(count)
 
     def pause(self) -> None:
         """Stop timing the calls held, until :meth:`unpause`, as the session halts."""

@@ -156,7 +156,7 @@ async def test_a_call_held_for_approval_reaches_the_stand_in_only_once_allowed(
 ) -> None:
     posted: list[Event] = []
     approvals = ToolCallApprovals(posted.append, Recorded().saved)
-    approvals.viewers(1)
+    approvals.note_viewers(1)
     plain = desk_with(McpHost(), StdioConnector(), tmp_path / "mcp")
     mcp = plain.agents.mcp
     assert mcp is not None

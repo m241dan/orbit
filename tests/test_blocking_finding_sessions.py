@@ -12,9 +12,9 @@ from orbit.agent import Verification, WorkspaceHost
 from orbit.agent.application.ports import Reply
 from orbit.agent.domain.merge_holds import (
     FindingHold,
-    finding_held_note,
     finding_resumed_note,
     finding_step_in_note,
+    note_finding_held,
     unchecked_note,
 )
 from orbit.agent.domain.merge_pass import NOT_BLOCKING
@@ -188,7 +188,7 @@ def held_session(
 
 CRASH = ("Crash on empty input", "blocking")
 NO_TEST = ("No test for it", "normal")
-HELD = finding_held_note(FindingHold(BUGS_REVIEWER, "c1", "Fix the crash", "", None))
+HELD = note_finding_held(FindingHold(BUGS_REVIEWER, "c1", "Fix the crash", "", None))
 VIEW = MergeHold(set=BUGS_REVIEWER, commit="c1", reason="blocking finding", finding="Fix the crash")
 
 

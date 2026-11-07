@@ -49,7 +49,7 @@ class Holding:
 
 async def test_a_consultation_held_is_published_and_waits() -> None:
     held = Holding()
-    held.approvals.viewers(1)
+    held.approvals.note_viewers(1)
     held.approvals.hold(request(1), "work")
     assert held.posted == [request(1)]
     assert held.approvals.waiting == (request(1),)
@@ -57,7 +57,7 @@ async def test_a_consultation_held_is_published_and_waits() -> None:
 
 async def test_a_consultation_is_taken_once() -> None:
     held = Holding()
-    held.approvals.viewers(1)
+    held.approvals.note_viewers(1)
     held.approvals.hold(request(1), "work")
     taken = held.approvals.take(1)
     assert taken is not None and (taken.request, taken.work) == (request(1), "work")
@@ -67,7 +67,7 @@ async def test_a_consultation_is_taken_once() -> None:
 
 async def test_those_passing_a_test_are_taken_in_the_order_they_were_held() -> None:
     held = Holding()
-    held.approvals.viewers(1)
+    held.approvals.note_viewers(1)
     for number in (1, 2, 3):
         held.approvals.hold(request(number), f"work {number}")
     taken = held.approvals.take_where(lambda asked: asked.consultation != 2)
@@ -87,7 +87,7 @@ async def test_one_held_with_no_frontend_ever_connected_expires_after_an_hour() 
 
 async def test_one_held_doesnt_expire_while_a_frontend_is_connected() -> None:
     held = Holding()
-    held.approvals.viewers(2)
+    held.approvals.note_viewers(2)
     held.approvals.hold(request(1), "work")
     await asyncio.sleep(0)
     assert (held.clock.slept, held.expired) == ([], [])
@@ -95,10 +95,10 @@ async def test_one_held_doesnt_expire_while_a_frontend_is_connected() -> None:
 
 async def test_one_held_expires_an_hour_after_the_last_frontend_leaves() -> None:
     held = Holding()
-    held.approvals.viewers(1)
+    held.approvals.note_viewers(1)
     held.approvals.hold(request(1), "work")
     held.clock.now = 100
-    held.approvals.viewers(0)
+    held.approvals.note_viewers(0)
     await eventually(lambda: held.expired, poll=0)
     assert held.clock.now == 100 + EXPIRY
 
@@ -106,7 +106,7 @@ async def test_one_held_expires_an_hour_after_the_last_frontend_leaves() -> None
 async def test_a_frontend_connecting_stops_the_hour_running() -> None:
     held = Holding()
     held.approvals.hold(request(1), "work")
-    held.approvals.viewers(1)
+    held.approvals.note_viewers(1)
     await asyncio.sleep(0)
     assert held.expired == []
     assert held.approvals.waiting == (request(1),)
@@ -114,9 +114,9 @@ async def test_a_frontend_connecting_stops_the_hour_running() -> None:
 
 async def test_frontends_leaving_again_dont_restart_the_hour() -> None:
     held = Holding()
-    held.approvals.viewers(0)
+    held.approvals.note_viewers(0)
     held.clock.now = 100
-    held.approvals.viewers(0)
+    held.approvals.note_viewers(0)
     held.approvals.hold(request(1), "work")
     held.approvals.stop()
     assert held.approvals.waiting == (request(1),)
@@ -124,12 +124,12 @@ async def test_frontends_leaving_again_dont_restart_the_hour() -> None:
 
 async def test_those_held_expire_in_turn_each_an_hour_after_its_hold() -> None:
     held = Holding()
-    held.approvals.viewers(1)
+    held.approvals.note_viewers(1)
     held.approvals.hold(request(1), "first")
     held.clock.now = 600
     held.approvals.hold(request(2), "second")
     held.clock.now = 0
-    held.approvals.viewers(0)
+    held.approvals.note_viewers(0)
     await eventually(lambda: len(held.expired) == 2, poll=0)
     assert [h.work for h in held.expired] == ["first", "second"]
     assert held.clock.slept == [EXPIRY, 600]
@@ -167,10 +167,10 @@ class Failing(Holding):
 
 
 def two_due_together(held: Holding) -> None:
-    held.approvals.viewers(1)
+    held.approvals.note_viewers(1)
     held.approvals.hold(request(1), "first")
     held.approvals.hold(request(2), "second")
-    held.approvals.viewers(0)
+    held.approvals.note_viewers(0)
 
 
 async def test_stopping_mid_expiry_expires_no_more_and_arms_nothing() -> None:

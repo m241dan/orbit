@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 from orbit.agent.application.ports import Credentials, CredentialsUnreadable
-from orbit.agent.domain.credentials import unset_because
+from orbit.agent.domain.credentials import word_unset_because
 
 
 @dataclass(frozen=True)
@@ -24,4 +24,4 @@ class LayeredCredentials:
         try:
             return self.fallback(name)
         except CredentialsUnreadable as exc:
-            raise CredentialsUnreadable(unset_because(name, str(exc))) from None
+            raise CredentialsUnreadable(word_unset_because(name, str(exc))) from None

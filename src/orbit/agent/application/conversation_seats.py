@@ -153,10 +153,10 @@ class ConversationSeats:
         """What the user is asked about the consultations held for approval."""
         return self._consultations.approvals.waiting
 
-    def viewers(self, count: int) -> None:
+    def note_viewers(self, count: int) -> None:
         """Note that ``count`` frontends view the session, as held consultations expire only
         with none."""
-        self._consultations.approvals.viewers(count)
+        self._consultations.approvals.note_viewers(count)
 
     async def decide(self, command: DecideApproval) -> None:
         """Settle the consultation held that ``command`` decides on; refused for one not held."""

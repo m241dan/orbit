@@ -5,7 +5,7 @@ repository over, on the holds the owner left."""
 
 from orbit.agent import Verification, WorkspaceHost
 from orbit.agent.application.merge_holds import MergeHolds
-from orbit.agent.domain.merge_holds import NOT_HELD, Hold, released_note, unpassed
+from orbit.agent.domain.merge_holds import NOT_HELD, Hold, released_note, word_unpassed
 from orbit.protocol import (
     INVALID,
     Command,
@@ -102,7 +102,7 @@ def views_shown(holds: MergeHolds) -> list[tuple[MergeHold, ...]]:
 def test_the_wording_of_a_release_by_hand() -> None:
     assert NOT_HELD == "Merges aren't held."
     assert released_note(("stress",)) == "Merges resumed by hand; stress hasn't passed."
-    assert unpassed(("stress", "soak")) == "stress, soak haven't passed"
+    assert word_unpassed(("stress", "soak")) == "stress, soak haven't passed"
 
 
 def test_release_hold_round_trips() -> None:

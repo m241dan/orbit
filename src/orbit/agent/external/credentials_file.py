@@ -11,12 +11,12 @@ from orbit.agent.application.ports import CredentialsUnreadable
 from orbit.agent.domain.credentials import (
     CREDENTIALS_FILE,
     NonStringCredential,
-    credential_values,
-    directory_too_open,
-    invalid_toml,
-    not_a_string,
-    too_open,
-    unreadable,
+    parse_credentials,
+    word_directory_too_open,
+    word_invalid_toml,
+    word_not_a_string,
+    word_too_open,
+    word_unreadable,
 )
 
 _OTHERS_IN = 0o066  # Readable or writable by the group or others.
@@ -39,10 +39,10 @@ class CredentialsFile:
         try:
             table = tomllib.loads(text)
         except tomllib.TOMLDecodeError as exc:
-            raise CredentialsUnreadable(invalid_toml(str(self.path), str(exc))) from None
-        values = credential_values(table)
+            raise CredentialsUnreadable(word_invalid_toml(str(self.path), str(exc))) from None
+        values = parse_credentials(table)
         if isinstance(values, NonStringCredential):
-            raise CredentialsUnreadable(not_a_string(str(self.path), values))
+            raise CredentialsUnreadable(word_not_a_string(str(self.path), values))
         return values.get(name)
 
     def _text(self) -> str | None:
@@ -53,7 +53,7 @@ class CredentialsFile:
         try:
             return data.decode("utf-8")
         except UnicodeDecodeError:
-            raise CredentialsUnreadable(unreadable(str(self.path), "it isn't UTF-8")) from None
+            raise CredentialsUnreadable(word_unreadable(str(self.path), "it isn't UTF-8")) from None
 
     def _bytes(self) -> bytes | None:
         """The file's bytes, checked private before they're read; ``None`` if there's no file,
@@ -65,13 +65,15 @@ class CredentialsFile:
         except FileNotFoundError:
             return None
         except OSError as exc:
-            raise CredentialsUnreadable(unreadable(str(self.path), exc.strerror or "")) from None
+            raise CredentialsUnreadable(
+                word_unreadable(str(self.path), exc.strerror or "")
+            ) from None
 
     def _check_private(self, file_mode: int) -> None:
         """Raise :class:`CredentialsUnreadable` if others could replace the open file, by
         writing to its directory, or could read or write it, its mode being ``file_mode``."""
         directory = self.path.parent
         if stat.S_IMODE(directory.stat().st_mode) & _OTHERS_WRITE:
-            raise CredentialsUnreadable(directory_too_open(str(directory)))
+            raise CredentialsUnreadable(word_directory_too_open(str(directory)))
         if stat.S_IMODE(file_mode) & _OTHERS_IN:
-            raise CredentialsUnreadable(too_open(str(self.path)))
+            raise CredentialsUnreadable(word_too_open(str(self.path)))

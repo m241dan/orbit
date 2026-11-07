@@ -48,17 +48,17 @@ from orbit.agent.domain.mcp_proxy import (
     RefusedCredentials,
     UnsetVariable,
     UpstreamTool,
-    call_failure,
-    declined,
-    failure_notice,
-    filled_server,
+    fill_server,
+    find_grant,
     find_proxied,
-    grant_for,
-    missing_tool_notices,
+    find_server_variables,
+    list_proxied_tools,
     needs_approval,
-    proxied_tools,
-    refusal,
-    server_variables,
+    word_call_failure,
+    word_declined,
+    word_failure_notice,
+    word_missing_tool_notices,
+    word_refusal,
 )
 from orbit.agent.domain.mcp_servers import McpServer
 from orbit.agent.domain.refusals import failed_to
@@ -197,11 +197,11 @@ class ToolProxy:
         """The proxied tools ``caller``'s role allows, connecting to the servers it names; a
         server that can't be connected to gives none."""
         grants = [grant for grant in caller.role.tools.mcp if self._proxied(grant.server)]
-        found = await asyncio.gather(*(self._opened(caller, grant.server) for grant in grants))
+        found = await asyncio.gather(*(self._connect(caller, grant.server) for grant in grants))
         return tuple(
             tool
             for grant, opened in zip(grants, found, strict=True)
-            for tool in _allowed(grant, opened)
+            for tool in _select_allowed(grant, opened)
         )
 
     async def call(self, caller: Caller, name: str, arguments: dict[str, Any]) -> Reply:
@@ -209,7 +209,7 @@ class ToolProxy:
         server's, or why it's refused or failed. Cancelled, the call upstream is cancelled too;
         stopped by :meth:`release` or :meth:`close`, it's answered with an error."""
         if self._closed:
-            return Reply(call_failure(name.partition(SEPARATOR)[0], CLOSING), is_error=True)
+            return Reply(word_call_failure(name.partition(SEPARATOR)[0], CLOSING), is_error=True)
         task = asyncio.ensure_future(self._call(caller, name, arguments))
         calls = self._calls.setdefault(caller.agent_id, set())
         calls.add(task)
@@ -246,7 +246,7 @@ class ToolProxy:
     async def _call(self, caller: Caller, name: str, arguments: dict[str, Any]) -> Reply:
         """The answer to ``caller``'s call to ``name``, traced unless refused out of hand."""
         server = name.partition(SEPARATOR)[0]
-        grant = grant_for(caller.role, server)
+        grant = find_grant(caller.role, server)
         if grant is None or not self._proxied(server):
             return self._refuse(caller, name)
         attributes = {SERVER: server, TOOL: name}
@@ -267,31 +267,33 @@ class ToolProxy:
         """The answer to ``caller``'s call to ``name`` on the server ``grant`` allows it, and how
         it came out, held first for the user's approval if it needs it, which ``span``
         records."""
-        found = await self._found(caller, grant, name)
+        found = await self._find_tool(caller, grant, name)
         if not isinstance(found, _Found):
             return found
         if not needs_approval(self._proxying.servers[grant.server], found.tool.tool.name):
             return await self._run(found.opened, found.tool, arguments)
-        if await self._held(caller, found.tool, arguments, span) != "allowed":
-            return Reply(declined(name), is_error=True), "declined"
-        again = await self._found(caller, grant, name)  # The connection may have closed meanwhile.
+        if await self._hold_call(caller, found.tool, arguments, span) != "allowed":
+            return Reply(word_declined(name), is_error=True), "declined"
+        again = await self._find_tool(
+            caller, grant, name
+        )  # The connection may have closed meanwhile.
         if not isinstance(again, _Found):
             return again
         return await self._run(again.opened, again.tool, arguments)
 
-    async def _found(self, caller: Caller, grant: ServerGrant, name: str) -> _Found | _Answered:
+    async def _find_tool(self, caller: Caller, grant: ServerGrant, name: str) -> _Found | _Answered:
         """The tool ``name`` that ``caller`` calls on the server ``grant`` allows it, on its
         connection, or the answer saying why it can't be called."""
         server = grant.server
-        opened = await self._opened(caller, server)
+        opened = await self._connect(caller, server)
         if isinstance(opened, _Failure):
-            return Reply(call_failure(server, opened.reason), is_error=True), "failed"
-        tool = find_proxied(proxied_tools(server, grant, opened.connection.tools), name)
+            return Reply(word_call_failure(server, opened.reason), is_error=True), "failed"
+        tool = find_proxied(list_proxied_tools(server, grant, opened.connection.tools), name)
         if tool is None:
             return self._refuse(caller, name), "refused"
         return _Found(opened, tool)
 
-    async def _held(
+    async def _hold_call(
         self, caller: Caller, tool: ProxiedTool, arguments: dict[str, Any], span: Span
     ) -> ToolCallDecision:
         """How ``caller``'s call to ``tool`` with ``arguments``, held for the user's approval,
@@ -319,7 +321,7 @@ class ToolProxy:
             reply = await connection.session.call_tool(tool.tool.name, arguments)
         except UpstreamFailed as exc:
             self._forget(opened.key, opened.link)
-            return await self._failed(tool.server, _reason(exc)), "failed"
+            return await self._failed(tool.server, _explain_failure(exc)), "failed"
         finally:
             connection.calls -= 1
             self._rest(opened)
@@ -329,17 +331,17 @@ class ToolProxy:
     def _refuse(self, caller: Caller, name: str) -> Reply:
         """The refusal of ``caller``'s call to ``name``, recorded on its span."""
         caller.span.event(REFUSED, {TOOL: name})
-        return Reply(refusal(caller.role_name, name), is_error=True)
+        return Reply(word_refusal(caller.role_name, name), is_error=True)
 
     async def _failed(self, server: str, reason: FailureReason) -> Reply:
         """The answer to a call ``server`` failed for ``reason``, noticed if it starts a
         streak."""
         if server not in self._failing:
             self._failing.add(server)
-            await self._publish(Notice(message=failure_notice(server, reason)))
-        return Reply(call_failure(server, reason), is_error=True)
+            await self._publish(Notice(message=word_failure_notice(server, reason)))
+        return Reply(word_call_failure(server, reason), is_error=True)
 
-    async def _opened(self, caller: Caller, server: str) -> _Opened | _Failure:
+    async def _connect(self, caller: Caller, server: str) -> _Opened | _Failure:
         """``caller``'s connection to ``server``, opened if there's none, or why it couldn't be;
         the first failure of a streak is noticed."""
         if self._closed:
@@ -347,9 +349,9 @@ class ToolProxy:
         key: _Key = (server, None if self._proxying.servers[server].shared else caller.agent_id)
         link = self._links.get(key) or self._open_link(key, caller)
         await asyncio.wait({link})
-        return await self._resolved(key, link)
+        return await self._resolve_link(key, link)
 
-    async def _resolved(self, key: _Key, link: _Link) -> _Opened | _Failure:
+    async def _resolve_link(self, key: _Key, link: _Link) -> _Opened | _Failure:
         """The connection ``link``, done, opened for ``key``, or why it wasn't; a failure is
         forgotten, and noticed if it starts a streak."""
         if link.cancelled():
@@ -379,38 +381,38 @@ class ToolProxy:
         the agent's own, else in the server's neutral directory, or why it couldn't be."""
         server = key[0]
         settings = self._proxying.servers[server]
-        filled = self._filled(settings)
+        filled = self._fill_settings(settings)
         if isinstance(filled, _Failure):
             return filled
         cwd = caller.cwd if key[1] is not None else str(PurePath(self._proxying.folder, server))
         try:
             session = await self._proxying.connector.open(settings, cwd, filled.env, filled.headers)
         except UpstreamFailed as exc:
-            return _Failure(_reason(exc))
-        return await self._listed(server, session)
+            return _Failure(_explain_failure(exc))
+        return await self._list_upstream(server, session)
 
-    def _filled(self, settings: McpServer) -> FilledServer | _Failure:
+    def _fill_settings(self, settings: McpServer) -> FilledServer | _Failure:
         """The environment and headers ``settings`` give their server, their variables filled in
         from the credentials, or why they can't be."""
         try:
             values = {
                 name: value
-                for name in server_variables(settings)
+                for name in find_server_variables(settings)
                 if (value := self._proxying.credentials(name)) is not None
             }
         except CredentialsUnreadable as exc:
             return _Failure(str(exc))
-        filled = filled_server(settings, values)
+        filled = fill_server(settings, values)
         return _Failure(filled.message) if isinstance(filled, UnsetVariable) else filled
 
-    async def _listed(self, server: str, session: UpstreamSession) -> _Connection | _Failure:
+    async def _list_upstream(self, server: str, session: UpstreamSession) -> _Connection | _Failure:
         """``session`` to ``server`` as a connection with the tools it offers, checked against
         the roles' lists, or why they couldn't be listed, the session closed."""
         try:
             tools = await session.list_tools()
         except UpstreamFailed as exc:
             await session.close()
-            return _Failure(_reason(exc))
+            return _Failure(_explain_failure(exc))
         except BaseException:
             await session.close()
             raise
@@ -423,7 +425,7 @@ class ToolProxy:
         if server in self._checked:
             return
         self._checked.add(server)
-        for notice in missing_tool_notices(server, self._roles(), tools):
+        for notice in word_missing_tool_notices(server, self._roles(), tools):
             await self._publish(Notice(message=notice))
 
     def _rest(self, opened: _Opened) -> None:
@@ -454,19 +456,19 @@ class ToolProxy:
         await self._publish(ErrorOccurred(code=INTERNAL, message=message))
 
 
-def _reason(failure: UpstreamFailed) -> FailureReason:
+def _explain_failure(failure: UpstreamFailed) -> FailureReason:
     """Why the server failed, as ``failure`` says."""
     if isinstance(failure, CredentialsRefused):
         return RefusedCredentials(failure.status)
     return str(failure)
 
 
-def _allowed(grant: ServerGrant, opened: _Opened | _Failure) -> tuple[ProxiedTool, ...]:
+def _select_allowed(grant: ServerGrant, opened: _Opened | _Failure) -> tuple[ProxiedTool, ...]:
     """The tools ``grant`` allows of those its server offers on ``opened``; none if it couldn't
     be connected to."""
     if isinstance(opened, _Failure):
         return ()
-    return proxied_tools(grant.server, grant, opened.connection.tools)
+    return list_proxied_tools(grant.server, grant, opened.connection.tools)
 
 
 async def _end(link: _Link) -> None:

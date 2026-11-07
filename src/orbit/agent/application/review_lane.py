@@ -65,13 +65,13 @@ from orbit.agent.domain.merge_pass import (
     Dismissal,
     ReviewSuggestion,
     TaskEnding,
-    blocking_task,
-    decision_refusal,
-    ended_in,
-    filed_in,
-    filing_refusal,
-    outcome_counts,
-    severity_refusal,
+    build_blocking_task,
+    count_outcomes,
+    end_task_in,
+    find_filed_in,
+    refuse_decision,
+    refuse_filing,
+    refuse_severity,
     undecided_refusal,
     with_dismissed,
     with_filed,
@@ -352,7 +352,7 @@ class ReviewLane:
         has one pending, running or verifying. One taken off the board has ended too."""
         unfinished = {state.id for state in self._board.tasks if state.status not in FINAL}
         finished = (t for t in self._members(batch) if t not in unfinished and t not in group.ended)
-        return reduce(ended_in, finished, group)
+        return reduce(end_task_in, finished, group)
 
     async def _end_quietly(self, task_id: str, batch: str) -> None:
         """End task ``task_id``, booked into the review behind open ``batch``, as a crash
@@ -361,7 +361,7 @@ class ReviewLane:
         if group is None or not self.planner.filling(batch):
             await self._queue_quietly(self.planner.review_ended(batch))
             return
-        await self._settle(batch, ended_in(group, task_id), "quiet")
+        await self._settle(batch, end_task_in(group, task_id), "quiet")
 
     async def landed(self, state: TaskState, commit: str, span: Span) -> None:
         """The task that ended as ``state`` landed ``commit``: raise ``task_landed``, its own
@@ -472,7 +472,7 @@ class ReviewLane:
         """Mark the findings filed in the task that ended as ``state``, or in a task it fixes,
         as ``ending`` says, counting them on ``span``, the task's."""
         fixed = self._board.list_fixed(state)
-        count = sum(len(filed_in(group, fixed)) for group in self._groups.values())
+        count = sum(len(find_filed_in(group, fixed)) for group in self._groups.values())
         if not count:
             return
         self._groups = {
@@ -524,7 +524,7 @@ class ReviewLane:
         self._templates.pop(task_id, None)
         group = self._groups.get(batch)
         if group is not None and self.planner.filling(batch):
-            await self._settle(batch, ended_in(group, task_id), "published")
+            await self._settle(batch, end_task_in(group, task_id), "published")
             return
         open_batch = batch in self.planner.open_batches
         await self._queue(self.planner.review_ended(batch) if open_batch else None)
@@ -619,7 +619,7 @@ class ReviewLane:
         """The blocking task ``suggestion``, accepted from the merge pass of the review behind
         ``batch``, is; none if it isn't one."""
         group = self._groups.get(batch)
-        return None if group is None else blocking_task(group, suggestion)
+        return None if group is None else build_blocking_task(group, suggestion)
 
     def _filed_elsewhere(self, batch: str) -> int:
         """How many tasks the review behind ``batch`` filed findings into outside it, as a
@@ -636,8 +636,8 @@ class ReviewLane:
         group = self._groups.get(batch)
         findings, severity = suggestion.findings, suggestion.severity
         if group is None or task_id not in group.merges:
-            return NOT_A_MERGE_PASS if findings else severity_refusal((), severity)
-        return filing_refusal(group, findings, severity)
+            return NOT_A_MERGE_PASS if findings else refuse_severity((), severity)
+        return refuse_filing(group, findings, severity)
 
     def _file(self, batch: str, findings: Sequence[str], task_id: str, severity: Severity) -> None:
         """Record ``findings``, if any, of the review behind ``batch``, as filed in task
@@ -654,7 +654,7 @@ class ReviewLane:
         if batch is None:
             return Reply(NOT_MERGING, is_error=True)
         group = self._groups[batch]
-        refusal = decision_refusal(group, dismissed.finding)
+        refusal = refuse_decision(group, dismissed.finding)
         if refusal is not None:
             return Reply(refusal, is_error=True)
         self._groups[batch] = with_dismissed(group, dismissed)
@@ -1061,7 +1061,7 @@ class ReviewLane:
         if group is None:
             await self._close_review(batch, "published")
             return
-        ended = ended_in(group, task_id)
+        ended = end_task_in(group, task_id)
         self._count_outcomes(task_id, ended)
         await self._settle(batch, ended, "published")
 
@@ -1070,7 +1070,7 @@ class ReviewLane:
         a merge pass of it traced as it runs."""
         tally = self._tallies.get(task_id)
         if tally is not None and task_id in group.merges:
-            tally.outcomes = outcome_counts(group)
+            tally.outcomes = count_outcomes(group)
 
     async def _settle(self, batch: str, group: ReviewGroup, publishing: Publishing) -> None:
         """Keep ``group`` as the review behind ``batch``, one of its tasks having just ended,

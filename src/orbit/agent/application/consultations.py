@@ -59,7 +59,7 @@ def asked_note(consultant: str, number: int) -> str:
     return f"Asked the {consultant} (consultation {number}); its reply will arrive as a message."
 
 
-def held_note(consultant: str, number: int) -> str:
+def note_held(consultant: str, number: int) -> str:
     """What the asking agent is told as consultation ``number`` of ``consultant`` is held for the
     user's approval."""
     return (
@@ -245,7 +245,7 @@ class Consultations:
         if count.needs_approval(self._roles()[asker].consult_limit_per_hour, now):
             self.approvals.hold(_request(asked, count.recent(now)), seat)
             await self._save()
-            return Reply(held_note(consultant, asked.number))
+            return Reply(note_held(consultant, asked.number))
         self._start(asked, seat)
         await self._save()
         return Reply(asked_note(consultant, asked.number))

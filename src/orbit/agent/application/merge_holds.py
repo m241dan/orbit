@@ -42,14 +42,13 @@ from orbit.agent.domain.merge_holds import (
     decide_fix_review,
     decide_unlanded_fix,
     decide_unreviewed,
+    find_fix_root,
+    find_fixed_set,
     find_hold,
     finding_holds,
-    fix_root,
-    fixed_set,
     fold_holds,
     held_step,
-    hold_view,
-    kept_holds,
+    keep_holds,
     lift_hold,
     note_lift,
     released_note,
@@ -57,6 +56,7 @@ from orbit.agent.domain.merge_holds import (
     set_fix_prompt,
     set_holds,
     unlifted_sets,
+    view_hold,
 )
 from orbit.agent.domain.roles import Role, role_task
 from orbit.agent.domain.storage_halt import FailedWrite
@@ -151,7 +151,7 @@ class MergeHolds:
     @property
     def views(self) -> tuple[MergeHold, ...]:
         """The holds on, as frontends see them."""
-        return tuple(hold_view(hold) for hold in self._holds)
+        return tuple(view_hold(hold) for hold in self._holds)
 
     async def restore(self) -> None:
         """Take on the holds kept, read afresh, as another orbit may have changed them since
@@ -189,7 +189,7 @@ class MergeHolds:
         would never lift, telling :attr:`released` if no hold is left. Findings' holds stay."""
         self._sets = tuple(holding)
         self._holding = frozenset(check_set.name for check_set in holding)
-        kept = kept_holds(self._holds, self._holding)
+        kept = keep_holds(self._holds, self._holding)
         if kept == self._holds:
             return
         await self._replace(kept)
@@ -240,7 +240,7 @@ class MergeHolds:
     def is_fix(self, state: TaskState) -> bool:
         """Whether the task that is ``state`` is, or carries on from, a fix for a hold on, a
         set's or a blocking finding's latest, whose work lands despite the holds."""
-        root = fix_root(state, self._board.find).id
+        root = find_fix_root(state, self._board.find).id
         fixing = any(hold.task == root for hold in finding_holds(self._holds))
         return fixing or self.fix_of(state) is not None
 
@@ -346,7 +346,7 @@ class MergeHolds:
 
     def _fixes(self, state: TaskState) -> str | None:
         """The set the task that is ``state`` fixes, or carries on fixing; none if none."""
-        return fixed_set(fix_root(state, self._board.find).task.prompt)
+        return find_fixed_set(find_fix_root(state, self._board.find).task.prompt)
 
     async def _queue_fix(self, hold: Hold, step: VerificationStep, trigger: str) -> None:
         """Queue a coder's task fixing ``hold``'s set, which failed at ``step``, at the front of

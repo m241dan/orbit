@@ -11,8 +11,8 @@ from orbit.agent.domain.merge_holds import (
     BlockingTask,
     FindingHold,
     FixReview,
-    finding_held_note,
     finding_resumed_note,
+    note_finding_held,
     unchecked_note,
 )
 from orbit.agent.domain.verification import CheckSet, VerificationStep
@@ -69,7 +69,7 @@ async def test_a_blocking_task_filed_holds_merges_with_its_notice_saved_and_show
     store = FakeStore()
     holds = await held(store)
     assert holds.holds.held and holds.holds.holds == (HELD,)
-    assert holds.notices() == [finding_held_note(HELD)]
+    assert holds.notices() == [note_finding_held(HELD)]
     assert store.holds == (HELD,)
     assert holds.holds.views == (
         MergeHold(
@@ -98,7 +98,7 @@ async def test_a_blocking_task_filed_again_from_its_fixs_review_is_filed_as_its_
     await holds.holds.hold_finding(again, "4", "batch-5")
     [hold] = holds.holds.checking
     assert (hold.task, hold.batch, hold.fixes) == ("4", "batch-5", 2)
-    assert holds.notices() == [finding_held_note(HELD)]
+    assert holds.notices() == [note_finding_held(HELD)]
 
 
 async def test_its_fixs_review_by_its_lens_lifts_the_hold_with_its_notice_and_releases() -> None:

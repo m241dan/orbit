@@ -78,7 +78,7 @@ type FailureReason = str | RefusedCredentials
 """Why a server failed: in words, a sentence or not, or its refusal of orbit's credentials."""
 
 
-def proxied_name(server: str, tool: str) -> str:
+def name_proxied_tool(server: str, tool: str) -> str:
     """The name agents see ``server``'s tool ``tool`` by: ``<server>__<tool>``, each character an
     MCP tool name can't have replaced by ``_``, and cut to :data:`NAME_LIMIT` with a short hash
     of the whole name at its end if it's longer."""
@@ -94,12 +94,12 @@ def _hashed(name: str, whole: str) -> str:
     return f"{name[: NAME_LIMIT - HASH_LENGTH - 1]}-{digest}"
 
 
-def unique_names(server: str, offered: Sequence[UpstreamTool]) -> tuple[str, ...]:
+def name_unique_tools(server: str, offered: Sequence[UpstreamTool]) -> tuple[str, ...]:
     """The names agents see the tools ``server`` ``offered`` by, in its order, each naming one
-    tool: a tool's :func:`proxied_name`, unless it had characters replaced and another tool has
+    tool: a tool's :func:`name_proxied_tool`, unless it had characters replaced and another tool has
     it too, when it ends in a short hash of ``<server>__<tool>`` instead."""
     wholes = [f"{server}{SEPARATOR}{tool.name}" for tool in offered]
-    names = [proxied_name(server, tool.name) for tool in offered]
+    names = [name_proxied_tool(server, tool.name) for tool in offered]
     counts = Counter(names)
     return tuple(
         _hashed(name, whole) if counts[name] > 1 and name != whole else name
@@ -112,19 +112,19 @@ def is_proxied(name: str) -> bool:
     return SEPARATOR in name
 
 
-def grant_for(role: Role, server: str) -> ServerGrant | None:
+def find_grant(role: Role, server: str) -> ServerGrant | None:
     """``role``'s grant of ``server``, if it allows it."""
     return next((grant for grant in role.tools.mcp if grant.server == server), None)
 
 
-def proxied_tools(
+def list_proxied_tools(
     server: str, grant: ServerGrant, offered: Sequence[UpstreamTool]
 ) -> tuple[ProxiedTool, ...]:
     """The tools ``server`` ``offered`` that ``grant`` allows, in its order, as agents see them,
-    by their :func:`unique_names`: all of them, if it lists none."""
+    by their :func:`name_unique_tools`: all of them, if it lists none."""
     return tuple(
         ProxiedTool(name, server, tool)
-        for name, tool in zip(unique_names(server, offered), offered, strict=True)
+        for name, tool in zip(name_unique_tools(server, offered), offered, strict=True)
         if grant.tools is None or tool.name in grant.tools
     )
 
@@ -134,7 +134,7 @@ def find_proxied(tools: Sequence[ProxiedTool], name: str) -> ProxiedTool | None:
     return next((tool for tool in tools if tool.name == name), None)
 
 
-def missing_tool_notices(
+def word_missing_tool_notices(
     server: str, roles: Mapping[str, Role], offered: Sequence[UpstreamTool]
 ) -> tuple[str, ...]:
     """A notice for each tool one of ``roles`` lists of ``server`` that the server doesn't
@@ -150,12 +150,12 @@ def missing_tool_notices(
 def _listed(server: str, roles: Mapping[str, Role]) -> Iterator[tuple[str, str]]:
     """Each role among ``roles`` that lists tools of ``server``, by name, with each it lists."""
     for name, role in roles.items():
-        grant = grant_for(role, server)
+        grant = find_grant(role, server)
         listed = () if grant is None or grant.tools is None else grant.tools
         yield from ((name, tool) for tool in listed)
 
 
-def variables_in(env: Mapping[str, str]) -> tuple[str, ...]:
+def find_variables(env: Mapping[str, str]) -> tuple[str, ...]:
     """The variables ``env``'s values reference as ``$NAME`` or ``${NAME}``, each once, in
     order."""
     found = (
@@ -166,10 +166,10 @@ def variables_in(env: Mapping[str, str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(found))
 
 
-def filled_env(env: Mapping[str, str], values: Mapping[str, str]) -> dict[str, str] | UnsetVariable:
+def fill_env(env: Mapping[str, str], values: Mapping[str, str]) -> dict[str, str] | UnsetVariable:
     """``env`` with each variable its values reference filled in from ``values``, or the first
     variable ``values`` lacks."""
-    unset = [name for name in variables_in(env) if name not in values]
+    unset = [name for name in find_variables(env) if name not in values]
     if unset:
         return UnsetVariable(unset[0])
     return {
@@ -178,19 +178,19 @@ def filled_env(env: Mapping[str, str], values: Mapping[str, str]) -> dict[str, s
     }
 
 
-def server_variables(server: McpServer) -> tuple[str, ...]:
+def find_server_variables(server: McpServer) -> tuple[str, ...]:
     """The variables ``server``'s ``env``, then its ``headers``, reference, each once, in
     order."""
-    return tuple(dict.fromkeys((*variables_in(server.env), *variables_in(server.headers))))
+    return tuple(dict.fromkeys((*find_variables(server.env), *find_variables(server.headers))))
 
 
-def filled_server(server: McpServer, values: Mapping[str, str]) -> FilledServer | UnsetVariable:
+def fill_server(server: McpServer, values: Mapping[str, str]) -> FilledServer | UnsetVariable:
     """``server``'s ``env`` and ``headers`` with each variable they reference filled in from
     ``values``, or the first variable ``values`` lacks."""
-    env = filled_env(server.env, values)
+    env = fill_env(server.env, values)
     if isinstance(env, UnsetVariable):
         return env
-    headers = filled_env(server.headers, values)
+    headers = fill_env(server.headers, values)
     if isinstance(headers, UnsetVariable):
         return headers
     return FilledServer(env, headers)
@@ -204,23 +204,23 @@ def needs_approval(server: McpServer, tool: str) -> bool:
     )
 
 
-def declined(name: str) -> str:
+def word_declined(name: str) -> str:
     """The answer to a call to the tool ``name`` that the user declined, or that expired."""
     return f"The user declined {name}."
 
 
-def refusal(role: str, name: str) -> str:
+def word_refusal(role: str, name: str) -> str:
     """Why a call from an agent in role ``role`` to the tool ``name`` is refused."""
     return f"roles.{role} doesn't allow {name}."
 
 
-def call_failure(server: str, reason: FailureReason) -> str:
+def word_call_failure(server: str, reason: FailureReason) -> str:
     """The answer to a call to a tool of ``server``, which failed for ``reason``."""
     if isinstance(reason, RefusedCredentials):
         return f"MCP server {server} refused orbit's credentials (HTTP {reason.status})."
     return f"MCP server {server} failed: {reason.rstrip('.')}."
 
 
-def failure_notice(server: str, reason: FailureReason) -> str:
+def word_failure_notice(server: str, reason: FailureReason) -> str:
     """The notice that ``server`` failed, for ``reason``, starting a streak of failures."""
-    return f"{call_failure(server, reason)} Agents' calls to it return errors until it starts."
+    return f"{word_call_failure(server, reason)} Agents' calls to it return errors until it starts."

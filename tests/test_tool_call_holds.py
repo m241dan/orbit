@@ -121,7 +121,7 @@ def held_call(number: int = 1, tool: str = "github__create_issue") -> ToolCallHe
 
 async def test_a_call_to_an_approved_tool_is_held_and_runs_once_allowed() -> None:
     holding = Holding()
-    holding.approvals.viewers(1)
+    holding.approvals.note_viewers(1)
     task = await holding.held()
     assert holding.posted == [held_call()]
     assert (holding.session.calls, task.done()) == ([], False)
@@ -133,7 +133,7 @@ async def test_a_call_to_an_approved_tool_is_held_and_runs_once_allowed() -> Non
 
 async def test_a_declined_call_is_answered_so_and_never_goes_upstream() -> None:
     holding = Holding()
-    holding.approvals.viewers(1)
+    holding.approvals.note_viewers(1)
     task = await holding.held()
     holding.approvals.decide(DecideToolCall(call=1, decision="deny"))
     assert await task == DECLINED
@@ -149,7 +149,7 @@ async def test_a_call_to_a_tool_the_list_doesnt_name_isnt_held() -> None:
 
 async def test_a_server_approving_all_holds_every_tool() -> None:
     holding = Holding()
-    holding.approvals.viewers(1)
+    holding.approvals.note_viewers(1)
     task = await holding.held("everything__get_issue")
     assert holding.approvals.waiting == (held_call(tool="everything__get_issue"),)
     task.cancel()
@@ -165,7 +165,7 @@ async def test_a_call_held_with_no_frontend_connected_expires_as_declined() -> N
 
 async def test_a_call_held_doesnt_expire_while_a_frontend_is_connected() -> None:
     holding = Holding()
-    holding.approvals.viewers(1)
+    holding.approvals.note_viewers(1)
     task = await holding.held()
     await asyncio.sleep(0)
     assert (task.done(), holding.clock.now) == (False, 0.0)
@@ -174,7 +174,7 @@ async def test_a_call_held_doesnt_expire_while_a_frontend_is_connected() -> None
 
 async def test_the_agents_run_ending_while_held_withdraws_and_answers_the_call() -> None:
     holding = Holding()
-    holding.approvals.viewers(1)
+    holding.approvals.note_viewers(1)
     task = await holding.held()
     holding.proxy.release("a1")
     assert await asyncio.wait_for(task, 5) == STOPPED
@@ -184,7 +184,7 @@ async def test_the_agents_run_ending_while_held_withdraws_and_answers_the_call()
 
 async def test_a_call_allowed_after_its_connection_idled_out_connects_again() -> None:
     holding = Holding(idle=instantly)
-    holding.approvals.viewers(1)
+    holding.approvals.note_viewers(1)
     task = await holding.held()
     await eventually(lambda: holding.connector.sessions[0].closed, poll=0)
     holding.approvals.decide(DecideToolCall(call=1, decision="allow"))
@@ -195,7 +195,7 @@ async def test_a_call_allowed_after_its_connection_idled_out_connects_again() ->
 
 async def test_a_call_allowed_once_its_server_cant_be_reached_again_fails() -> None:
     holding = Holding(idle=instantly)
-    holding.approvals.viewers(1)
+    holding.approvals.note_viewers(1)
     task = await holding.held()
     await eventually(lambda: holding.connector.sessions[0].closed, poll=0)
     holding.connector.failure = "it went away"
@@ -218,7 +218,7 @@ async def test_a_held_calls_span_records_how_it_was_settled_and_how_long_it_wait
     decision: str, outcome: str, approval: str
 ) -> None:
     holding = Holding()
-    holding.approvals.viewers(1)
+    holding.approvals.note_viewers(1)
     task = await holding.held()
     holding.clock.now = 90
     holding.approvals.decide(DecideToolCall.model_validate({"call": 1, "decision": decision}))
@@ -232,7 +232,7 @@ async def test_a_held_calls_span_records_how_it_was_settled_and_how_long_it_wait
 
 async def test_a_withdrawn_calls_span_says_so() -> None:
     holding = Holding()
-    holding.approvals.viewers(1)
+    holding.approvals.note_viewers(1)
     task = await holding.held()
     holding.proxy.release("a1")
     await task

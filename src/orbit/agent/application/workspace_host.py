@@ -458,8 +458,8 @@ class WorkspaceHost:
         approval how many frontends view the open session, as connections come, go or move."""
         self._states.check()
         viewers = self._connections.viewed()[self._keeper.id]
-        self._seats.viewers(viewers)
-        self._tool_calls.viewers(viewers)
+        self._seats.note_viewers(viewers)
+        self._tool_calls.note_viewers(viewers)
 
     def _agent_desk(self, agents: Agents | None, parts: HostParts) -> AgentDesk | None:
         """The desk launching ``agents`` for the ``parts``' workspace, in the session open,

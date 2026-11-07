@@ -82,7 +82,7 @@ class Approvals[R, T]:
         self._arm()
         return taken
 
-    def viewers(self, count: int) -> None:
+    def note_viewers(self, count: int) -> None:
         """Note that ``count`` frontends are connected now."""
         if count:
             self._alone_since = None

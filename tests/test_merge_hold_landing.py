@@ -10,7 +10,7 @@ from typing import Any
 from orbit.agent import Verification, WorkspaceHost
 from orbit.agent.application.ports import Merge
 from orbit.agent.domain.commits import Commit
-from orbit.agent.domain.merge_holds import Hold, fix_title
+from orbit.agent.domain.merge_holds import Hold, title_fix
 from orbit.protocol import TaskMerged
 from tests.agent_fakes import (
     LINT,
@@ -152,7 +152,7 @@ async def test_work_waiting_around_a_fix_that_conflicted_lands_with_its_own_comm
     seen = Seen(session)
     _, holds = parts_of(session)
     await eventually(lambda: holds.held)
-    fix = fix_title("stress")
+    fix = title_fix("stress")
     await start(session, "Add A.", fix, "Add B.", fix)
     await eventually(lambda: not holds.held)
     seen.close()

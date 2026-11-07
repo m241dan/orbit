@@ -67,7 +67,7 @@ class Dismissal:
     reason: str
 
 
-def review_suggestion(arguments: Mapping[str, Any]) -> ReviewSuggestion | str:
+def parse_review_suggestion(arguments: Mapping[str, Any]) -> ReviewSuggestion | str:
     """The task a review task suggested with ``arguments``; or why it's refused."""
     suggestion = task_suggestion(arguments)
     if isinstance(suggestion, str):
@@ -94,7 +94,7 @@ def _finding_ids(value: object) -> tuple[str, ...] | None:
     return tuple(dict.fromkeys(item.strip() for item in value))
 
 
-def dismissal(arguments: Mapping[str, Any]) -> Dismissal | str:
+def parse_dismissal(arguments: Mapping[str, Any]) -> Dismissal | str:
     """The dismissal a merge pass made with ``arguments``; or why it's refused."""
     reason = str(arguments.get("reason", "")).strip()
     if not reason:
@@ -107,7 +107,7 @@ def _finding(group: ReviewGroup, finding_id: str) -> Finding | None:
     return next((finding for finding in group.findings if finding.id == finding_id), None)
 
 
-def decision_refusal(group: ReviewGroup, finding_id: str) -> str | None:
+def refuse_decision(group: ReviewGroup, finding_id: str) -> str | None:
     """Why finding ``finding_id`` of ``group`` can't be decided: it isn't one, or it was decided
     already; ``None`` if it can."""
     finding = _finding(group, finding_id)
@@ -118,7 +118,7 @@ def decision_refusal(group: ReviewGroup, finding_id: str) -> str | None:
     return None
 
 
-def filing_refusal(
+def refuse_filing(
     group: ReviewGroup, finding_ids: Sequence[str], severity: Severity = "normal"
 ) -> str | None:
     """Why a merge pass of ``group`` can't file the findings ``finding_ids`` as one task at
@@ -127,24 +127,24 @@ def filing_refusal(
     if not finding_ids:
         return NO_FINDING_NAMED
     named = tuple(finding for finding in group.findings if finding.id in finding_ids)
-    return _undecidable(group, finding_ids) or severity_refusal(named, severity)
+    return _undecidable(group, finding_ids) or refuse_severity(named, severity)
 
 
 def _undecidable(group: ReviewGroup, finding_ids: Sequence[str]) -> str | None:
     """Why the first of the findings ``finding_ids`` of ``group`` that can't be decided can't;
     ``None`` if each can."""
-    refusals = (decision_refusal(group, finding_id) for finding_id in finding_ids)
+    refusals = (refuse_decision(group, finding_id) for finding_id in finding_ids)
     return next((refusal for refusal in refusals if refusal is not None), None)
 
 
-def severity_refusal(findings: Sequence[Finding], severity: Severity) -> str | None:
+def refuse_severity(findings: Sequence[Finding], severity: Severity) -> str | None:
     """Why a task can't be filed at ``severity`` from ``findings``: it's blocking, and none of
     them is; ``None`` if it can."""
     blocking = any(finding.severity == "blocking" for finding in findings)
     return NOT_BLOCKING if severity == "blocking" and not blocking else None
 
 
-def blocking_task(group: ReviewGroup, suggestion: ReviewSuggestion) -> BlockingTask | None:
+def build_blocking_task(group: ReviewGroup, suggestion: ReviewSuggestion) -> BlockingTask | None:
     """The blocking task ``suggestion``, which a merge pass of ``group`` may file, is: raised
     by the lenses of the blocking findings it names, the first named first, in the review of
     ``group``'s last commit; none unless it's blocking and names a blocking finding."""
@@ -193,7 +193,7 @@ def with_dismissed(group: ReviewGroup, dismissed: Dismissal) -> ReviewGroup:
     return replace(group, findings=findings)
 
 
-def undecided(group: ReviewGroup) -> tuple[str, ...]:
+def list_undecided(group: ReviewGroup) -> tuple[str, ...]:
     """The ids of ``group``'s findings that have no outcome yet, in order."""
     return tuple(finding.id for finding in group.findings if finding.outcome == "undecided")
 
@@ -201,7 +201,7 @@ def undecided(group: ReviewGroup) -> tuple[str, ...]:
 def undecided_refusal(group: ReviewGroup) -> str | None:
     """Why a merge pass of ``group`` can't complete yet: some of its findings are undecided;
     ``None`` if every one is decided."""
-    left = undecided(group)
+    left = list_undecided(group)
     if not left:
         return None
     have = "has" if len(left) == 1 else "have"
@@ -211,7 +211,7 @@ def undecided_refusal(group: ReviewGroup) -> str | None:
     )
 
 
-def ended_in(group: ReviewGroup, task_id: str) -> ReviewGroup:
+def end_task_in(group: ReviewGroup, task_id: str) -> ReviewGroup:
     """``group`` with its task ``task_id`` ended, and, once its merge passes have all ended,
     the findings they left undecided ``unanswered``."""
     ended = with_ended(group, task_id)
@@ -228,7 +228,7 @@ def _with_unanswered(group: ReviewGroup) -> ReviewGroup:
     return replace(group, findings=findings)
 
 
-def filed_in(group: ReviewGroup, tasks: Collection[str]) -> tuple[Finding, ...]:
+def find_filed_in(group: ReviewGroup, tasks: Collection[str]) -> tuple[Finding, ...]:
     """``group``'s findings filed, or merged, into one of ``tasks``, awaiting their end."""
     return tuple(
         finding
@@ -240,7 +240,7 @@ def filed_in(group: ReviewGroup, tasks: Collection[str]) -> tuple[Finding, ...]:
 def with_task_ended(group: ReviewGroup, tasks: Collection[str], ending: TaskEnding) -> ReviewGroup:
     """``group`` with its findings filed, or merged, into one of ``tasks`` marked as ``ending``
     says."""
-    ending_ids = {finding.id for finding in filed_in(group, tasks)}
+    ending_ids = {finding.id for finding in find_filed_in(group, tasks)}
     findings = tuple(
         replace(finding, outcome=ending) if finding.id in ending_ids else finding
         for finding in group.findings
@@ -248,7 +248,7 @@ def with_task_ended(group: ReviewGroup, tasks: Collection[str], ending: TaskEndi
     return replace(group, findings=findings)
 
 
-def outcome_counts(group: ReviewGroup) -> dict[str, int]:
+def count_outcomes(group: ReviewGroup) -> dict[str, int]:
     """How many of ``group``'s findings stand at each of :data:`COUNTED_OUTCOMES`."""
     return {
         outcome: sum(finding.outcome == outcome for finding in group.findings)

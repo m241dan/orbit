@@ -38,7 +38,7 @@ from orbit.agent.application.tool_call_approvals import ToolCallApprovals
 from orbit.agent.application.tool_proxy import Caller, McpProxying, ToolProxy
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.agents import Agent, AgentRegistry
-from orbit.agent.domain.mcp_proxy import ProxiedTool, is_proxied, refusal
+from orbit.agent.domain.mcp_proxy import ProxiedTool, is_proxied, word_refusal
 from orbit.agent.domain.merge_pass import Dismissal, ReviewSuggestion
 from orbit.agent.domain.refusals import failed_to
 from orbit.agent.domain.reviews import FindingReport, ReviewLimits
@@ -541,5 +541,5 @@ class AgentDesk:
         if not is_proxied(tool):
             return await run.handle(tool, arguments)
         if self._proxy is None:
-            return Reply(refusal(agent.role, tool), is_error=True)
+            return Reply(word_refusal(agent.role, tool), is_error=True)
         return await self._proxy.call(self._caller(agent), tool, arguments)

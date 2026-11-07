@@ -39,7 +39,7 @@ from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import ChecksProposal, parse_proposal
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.endings import error, task_ending, timeout_ending
-from orbit.agent.domain.merge_pass import dismissal, review_suggestion
+from orbit.agent.domain.merge_pass import parse_dismissal, parse_review_suggestion
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import finding_report
 from orbit.agent.domain.roles import Role
@@ -465,7 +465,7 @@ class AgentRun:
     async def _suggest_task(self, arguments: dict[str, Any]) -> Reply:
         if self._desk.suggest is None:
             return Reply(NO_SUGGESTIONS, is_error=True)
-        suggestion = review_suggestion(arguments)
+        suggestion = parse_review_suggestion(arguments)
         if isinstance(suggestion, str):
             return Reply(suggestion, is_error=True)
         return await self._desk.suggest(self._task_id, suggestion)
@@ -481,7 +481,7 @@ class AgentRun:
     async def _dismiss_finding(self, arguments: dict[str, Any]) -> Reply:
         if self._desk.dismiss_finding is None:
             return Reply(NO_DISMISSALS, is_error=True)
-        dismissed = dismissal(arguments)
+        dismissed = parse_dismissal(arguments)
         if isinstance(dismissed, str):
             return Reply(dismissed, is_error=True)
         return await self._desk.dismiss_finding(self._task_id, dismissed)

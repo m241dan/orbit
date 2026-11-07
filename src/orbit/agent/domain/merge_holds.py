@@ -107,7 +107,7 @@ BLOCKING_REASON = "blocking finding"
 """Why a blocking finding's hold holds merges, as frontends see it."""
 
 
-def held_note(name: str, commit: str) -> str:
+def note_held(name: str, commit: str) -> str:
     """The notice that the set ``name`` failing on ``commit`` holds merges."""
     return f"Merges held: {name} failed on {commit[:SHORT_COMMIT]}. A fix is queued first."
 
@@ -121,14 +121,14 @@ NOT_HELD = "Merges aren't held."
 """Why releasing the holds on merges by hand is refused while none is on."""
 
 
-def unpassed(names: Sequence[str]) -> str:
+def word_unpassed(names: Sequence[str]) -> str:
     """That the sets ``names`` haven't passed: ``stress hasn't passed``, ``stress, soak haven't
     passed``."""
     verb = "hasn't" if len(names) == 1 else "haven't"
     return f"{', '.join(names)} {verb} passed"
 
 
-def unfixed(lenses: Sequence[str]) -> str:
+def word_unfixed(lenses: Sequence[str]) -> str:
     """That the findings the ``lenses`` raised aren't fixed: ``the finding from bugs-reviewer
     isn't fixed``, ``the findings from bugs-reviewer, security-reviewer aren't fixed``."""
     if len(lenses) == 1:
@@ -139,11 +139,14 @@ def unfixed(lenses: Sequence[str]) -> str:
 def released_note(names: Sequence[str], lenses: Sequence[str] = ()) -> str:
     """The notice that the user released the holds of the sets ``names`` and of the findings
     the ``lenses`` raised by hand."""
-    parts = [*([unpassed(names)] if names else []), *([unfixed(lenses)] if lenses else [])]
+    parts = [
+        *([word_unpassed(names)] if names else []),
+        *([word_unfixed(lenses)] if lenses else []),
+    ]
     return f"Merges resumed by hand; {' and '.join(parts)}."
 
 
-def finding_held_note(hold: FindingHold) -> str:
+def note_finding_held(hold: FindingHold) -> str:
     """The notice that the blocking finding ``hold`` is about holds merges."""
     return (
         f"Merges held: a blocking finding from {hold.lens} in {hold.commit[:SHORT_COMMIT]}:"
@@ -208,7 +211,7 @@ def decide_failure(
     held = find_hold(holds, failed.name)
     others = lift_hold(holds, failed.name)
     tried = 0 if held is None else held.fixes
-    notes = () if held is not None else (held_note(failed.name, failed.commit),)
+    notes = () if held is not None else (note_held(failed.name, failed.commit),)
     if fixing:
         return HoldDecision((*others, replace(failed, fixes=tried)), notes)
     if tried >= limit:
@@ -236,7 +239,7 @@ def lift_hold(holds: Sequence[AnyHold], key: str) -> tuple[AnyHold, ...]:
     return tuple(hold for hold in holds if hold.key != key)
 
 
-def refiled_hold(holds: Sequence[AnyHold], filed: BlockingTask) -> FindingHold | None:
+def find_refiled_hold(holds: Sequence[AnyHold], filed: BlockingTask) -> FindingHold | None:
     """The hold among ``holds`` whose latest fix the review that filed ``filed`` checked, if
     the hold's lens raised one of its blocking findings; none if ``filed`` starts a hold of its
     own."""
@@ -252,10 +255,10 @@ def refiled_hold(holds: Sequence[AnyHold], filed: BlockingTask) -> FindingHold |
 
 def decide_filing(holds: Sequence[AnyHold], filed: BlockingTask, limit: int) -> FindingFiling:
     """How ``filed`` is filed, given the ``holds`` on and the ``limit`` of fixes a hold queues:
-    as the next fix of the hold whose fix its review checked, as :func:`refiled_hold` finds it,
+    as the next fix of the hold whose fix its review checked, as :func:`find_refiled_hold` finds it,
     unless that hold queued ``limit`` fixes already; else as the first fix of a hold of its
     own."""
-    held = refiled_hold(holds, filed)
+    held = find_refiled_hold(holds, filed)
     if held is None:
         return "held"
     return "stepped_in" if held.fixes >= limit else "fixed_again"
@@ -268,10 +271,10 @@ def decide_blocking(
     and the ``limit`` of fixes a hold queues, as :func:`decide_filing` says: a new hold is told
     of; a hold fixed again takes the task as its latest fix; one whose fixes ran out stays,
     checked by no review, and the user is asked to step in."""
-    held = refiled_hold(holds, filed)
+    held = find_refiled_hold(holds, filed)
     if held is None:
         new = FindingHold(filed.lens, filed.commit, filed.title, task, batch)
-        return HoldDecision((*holds, new), (finding_held_note(new),))
+        return HoldDecision((*holds, new), (note_finding_held(new),))
     if held.fixes >= limit:
         note = finding_step_in_note(held.lens, held.fixes)
         return HoldDecision(merge_holds(holds, (replace(held, batch=None),)), (note,))
@@ -359,7 +362,7 @@ def held_step(sets: Iterable[CheckSet], hold: Hold) -> VerificationStep | None:
     return next((step for step in steps if step.name == hold.step), None)
 
 
-def kept_holds(holds: Sequence[AnyHold], holding: Collection[str]) -> tuple[AnyHold, ...]:
+def keep_holds(holds: Sequence[AnyHold], holding: Collection[str]) -> tuple[AnyHold, ...]:
     """``holds`` of the sets still ``holding`` merges, by name, and of every finding, as a saved
     hold is restored: those of sets removed, or that only report now, are dropped."""
     return tuple(hold for hold in holds if isinstance(hold, FindingHold) or hold.name in holding)
@@ -405,13 +408,13 @@ def fold_holds(
 ) -> tuple[AnyHold, ...]:
     """The holds to take on from ``loaded``, those kept, read afresh: those not ``lifted``
     since they were last read or saved, of the sets still ``holding`` merges, by name, and of
-    the findings, as :func:`kept_holds` says, with the holds ``started`` since then replacing
+    the findings, as :func:`keep_holds` says, with the holds ``started`` since then replacing
     those of their keys, as :func:`merge_holds` says."""
     unlifted = tuple(hold for hold in loaded if not _is_lifted(hold, lifted))
-    return merge_holds(kept_holds(unlifted, holding), started)
+    return merge_holds(keep_holds(unlifted, holding), started)
 
 
-def hold_view(hold: AnyHold) -> MergeHold:
+def view_hold(hold: AnyHold) -> MergeHold:
     """``hold`` as frontends see it: a set's, the set, the commit it failed on and why; a
     finding's, the lens that raised it as the set, the commit reviewed, and the title of the task
     it was filed as."""
@@ -426,7 +429,7 @@ def hold_view(hold: AnyHold) -> MergeHold:
             assert_never(hold)
 
 
-def fix_title(name: str) -> str:
+def title_fix(name: str) -> str:
     """The title of a task fixing the set ``name``."""
     return f"{FIX_TITLE}{name}"
 
@@ -434,7 +437,7 @@ def fix_title(name: str) -> str:
 def set_fix_prompt(hold: Hold, subjects: Sequence[str] | None, report: str) -> str:
     """A task prompt asking to fix why ``hold``'s set failed, listing the ``subjects`` of the
     commits since it last passed, none if that isn't known, and the failure's ``report``. Its
-    first line is :func:`fix_title`."""
+    first line is :func:`title_fix`."""
     if subjects is None:
         since = "Orbit hasn't seen it pass since it started, so it can't list the commits since."
     elif subjects:
@@ -442,23 +445,23 @@ def set_fix_prompt(hold: Hold, subjects: Sequence[str] | None, report: str) -> s
     else:
         since = "No commit landed since it last passed."
     return (
-        f"{fix_title(hold.name)}\n\n"
+        f"{title_fix(hold.name)}\n\n"
         f"The set {hold.name} failed on {hold.commit[:SHORT_COMMIT]} at its step {hold.step}."
         f" {since}\n\n{report}\n\n{_FIX_INSTRUCTIONS}"
     )
 
 
-def fixed_set(prompt: str) -> str | None:
+def find_fixed_set(prompt: str) -> str | None:
     """The set a task with ``prompt`` fixes, as its title names it; none if it fixes none."""
     title = prompt.partition("\n")[0]
     return title.removeprefix(FIX_TITLE) if title.startswith(FIX_TITLE) else None
 
 
-def fix_root(state: TaskState, find: Callable[[str], TaskState | None]) -> TaskState:
+def find_fix_root(state: TaskState, find: Callable[[str], TaskState | None]) -> TaskState:
     """The task ``state``'s chain of fixes started from: the task it fixes, the one that fixes,
     and so on, as ``find`` finds them by id, up to the first that fixes none or isn't found."""
     found = None if state.fixes is None else find(state.fixes)
-    return state if found is None else fix_root(found, find)
+    return state if found is None else find_fix_root(found, find)
 
 
 def stacked_commits(

@@ -18,18 +18,18 @@ from orbit.agent.domain.merge_holds import (
     decide_fix_review,
     decide_unreviewed,
     find_hold,
-    finding_held_note,
     finding_holds,
     finding_resumed_note,
     finding_step_in_note,
     fold_holds,
-    hold_view,
-    kept_holds,
+    keep_holds,
+    note_finding_held,
     note_lift,
     released_note,
     set_holds,
     unchecked_note,
-    unfixed,
+    view_hold,
+    word_unfixed,
 )
 from orbit.protocol import BUGS_REVIEWER, MergeHold
 
@@ -45,7 +45,7 @@ AGAIN = BlockingTask(BUGS_REVIEWER, "c9", "Fix the crash again", "batch-2")
 
 
 def test_the_notices_name_the_lens_the_short_commit_the_title_and_the_fixes_tried() -> None:
-    assert finding_held_note(HELD) == (
+    assert note_finding_held(HELD) == (
         "Merges held: a blocking finding from bugs-reviewer in 1a2b3c4: Fix the crash. Its fix is"
         " queued first."
     )
@@ -63,7 +63,7 @@ def test_the_notices_name_the_lens_the_short_commit_the_title_and_the_fixes_trie
 
 
 def test_a_release_by_hand_names_the_sets_not_passed_and_the_findings_not_fixed() -> None:
-    assert unfixed(("security-reviewer", BUGS_REVIEWER)) == (
+    assert word_unfixed(("security-reviewer", BUGS_REVIEWER)) == (
         "the findings from security-reviewer, bugs-reviewer aren't fixed"
     )
     assert released_note((), (BUGS_REVIEWER,)) == (
@@ -78,7 +78,7 @@ def test_a_release_by_hand_names_the_sets_not_passed_and_the_findings_not_fixed(
 def test_a_blocking_task_filed_holds_merges_with_its_notice() -> None:
     assert decide_filing((STRESS,), CRASH, 3) == "held"
     assert decide_blocking((STRESS,), CRASH, "9", "batch-2", 3) == HoldDecision(
-        (STRESS, HELD), (finding_held_note(HELD),)
+        (STRESS, HELD), (note_finding_held(HELD),)
     )
 
 
@@ -190,7 +190,7 @@ def test_a_finding_holds_key_stays_through_its_fixes() -> None:
 
 
 def test_restored_finding_holds_are_kept_whichever_sets_hold_merges() -> None:
-    assert kept_holds((STRESS, HELD), set()) == (HELD,)
+    assert keep_holds((STRESS, HELD), set()) == (HELD,)
 
 
 def test_finding_holds_read_drop_those_lifted_since_and_take_on_those_started() -> None:
@@ -202,7 +202,7 @@ def test_finding_holds_read_drop_those_lifted_since_and_take_on_those_started() 
 
 def test_a_finding_hold_shows_its_lens_commit_and_title() -> None:
     assert BLOCKING_REASON == "blocking finding"
-    assert hold_view(HELD) == MergeHold(
+    assert view_hold(HELD) == MergeHold(
         set=BUGS_REVIEWER,
         commit="1a2b3c4d5e",
         reason="blocking finding",
