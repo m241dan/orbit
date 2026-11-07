@@ -964,14 +964,24 @@ def sift_changes(
     return Sifted(fire=[heard for heard in within if heard not in held], held=held)
 
 
-def note_skipped_reviews(held: Sequence[tuple[str, Trigger]], prompts: Sequence[str]) -> str | None:
+def note_skipped_reviews(
+    held: Sequence[tuple[str, Trigger]],
+    prompts: Sequence[str],
+    roles: Collection[str],
+    event: TriggerEvent | None = None,
+    raised: Collection[str] = (),
+) -> str | None:
     """What the conversation says of the triggers ``code-changed`` ``held`` back, by name, on a
-    landing of the tasks with ``prompts``: the reviews of their roles, each without its
-    ``-reviewer`` suffix, of the first task, by its title, its prompt's first line as its row
-    shows it, and how many more; none if they queue for no role, or there's no task."""
+    landing of the tasks with ``prompts``: the reviews of the roles each would have queued for
+    on ``event``, as :func:`firing_roles` says with ``roles``, the enabled roles, and those that
+    ``raised`` the batch's findings, each without its ``-reviewer`` suffix, of the first task,
+    by its title, its prompt's first line as its row shows it, and how many more; none if they
+    would queue for no role, or there's no task."""
     lenses = tuple(
         dict.fromkeys(
-            role.removesuffix(LENS_SUFFIX) for _, trigger in held for role in trigger.roles
+            role.removesuffix(LENS_SUFFIX)
+            for _, trigger in held
+            for role in firing_roles(trigger, roles, event, raised)
         )
     )
     if not lenses or not prompts:

@@ -286,7 +286,7 @@ class TriggerEngine:
         board = self._tasks.board
         found = (board.find(task_id) for task_id in review.job.reviewed)
         prompts = [state.task.prompt for state in found if state is not None]
-        await self._note_skipped(fired.held, prompts)
+        await self._note_skipped(fired, prompts)
         return queued
 
     async def reviewed_quietly(self, review: ReviewRound) -> None:
@@ -361,7 +361,7 @@ class TriggerEngine:
         fired = await self._sift(self._desk.agents.triggers, event, values, review)
         queued = () if fired.firing is None else await self._queue(fired.firing)
         prompts = () if event.cause is None else (event.cause.task.prompt,)
-        await self._note_skipped(fired.held, prompts)
+        await self._note_skipped(fired, prompts)
         return queued
 
     def count(self, state: TaskState, counts: Mapping[str, int]) -> Counted:
@@ -453,7 +453,8 @@ class TriggerEngine:
         sifted = await self._within_paths(listening(triggers, event, roles, job, raised), event)
         given = await values() if sifted.fire else None
         firing = None if given is None else _Firing(sifted.fire, given, review, event=event)
-        return _Fired(await self._shown(firing, event), sifted.held)
+        shown = await self._shown(firing, event)
+        return _Fired(shown, sifted.held, frozenset(roles), event, raised)
 
     async def _shown(self, firing: _Firing | None, event: TriggerEvent) -> _Firing | None:
         """``firing``, if any, on ``event``, with the diff its tasks quote if it's a landing, as
@@ -516,12 +517,11 @@ class TriggerEngine:
             for path in await tree.changed_files(f"{commit}^", commit)
         ]
 
-    async def _note_skipped(
-        self, held: Sequence[tuple[str, Trigger]], prompts: Sequence[str]
-    ) -> None:
-        """Say in the conversation which reviews the triggers ``code-changed`` ``held`` back
-        skipped of the tasks with ``prompts``, if it held any back."""
-        note = note_skipped_reviews(held, prompts)
+    async def _note_skipped(self, fired: _Fired, prompts: Sequence[str]) -> None:
+        """Say in the conversation which reviews the triggers ``code-changed`` held back as
+        ``fired`` says skipped of the tasks with ``prompts``, if it held back any that would
+        have queued a task."""
+        note = note_skipped_reviews(fired.held, prompts, fired.roles, fired.event, fired.raised)
         if note is not None:
             await self._desk.publish(Notice(message=note))
 
@@ -622,10 +622,15 @@ class TriggerEngine:
 @dataclass(frozen=True)
 class _Fired:
     """What an event fires: the ``firing``, if any trigger fires and its values were gathered,
-    and the triggers ``code-changed`` ``held`` back, by name, in order."""
+    and the triggers ``code-changed`` ``held`` back, by name, in order, with what decides the
+    roles each would have queued for: ``roles``, the enabled roles, the ``event`` and the roles
+    that ``raised`` its batch's findings."""
 
     firing: _Firing | None
     held: list[tuple[str, Trigger]]
+    roles: frozenset[str]
+    event: TriggerEvent
+    raised: frozenset[str]
 
 
 @dataclass(frozen=True)

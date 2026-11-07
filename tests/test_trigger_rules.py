@@ -259,6 +259,10 @@ def test_code_changed_holds_nothing_the_paths_held_already() -> None:
     assert (names(sifted.fire), sifted.held) == (["plain"], [])
 
 
+LENSES = ("bugs-reviewer", "tests-reviewer", "logic-reviewer", "style-reviewer", "license-check")
+"""The enabled roles the note of skipped reviews is taken against, unless a case says."""
+
+
 @pytest.mark.parametrize(
     ("roles", "prompts", "note"),
     [
@@ -286,7 +290,51 @@ def test_the_note_of_skipped_reviews_names_the_lenses_and_the_first_task(
     roles: list[list[str]], prompts: list[str], note: str | None
 ) -> None:
     held = [(str(index), trigger(role=role)) for index, role in enumerate(roles)]
-    assert note_skipped_reviews(held, prompts) == note
+    assert note_skipped_reviews(held, prompts, LENSES) == note
+
+
+BATCH_GUARDS = ("review-rounds", "raised-finding", "code-changed")
+"""The guards of a batch's review whose lenses review only the fixes of their own findings."""
+
+
+@pytest.mark.parametrize(
+    ("guards", "enabled", "event", "raised", "note"),
+    [
+        (
+            ("code-changed",),
+            ("bugs-reviewer",),
+            LANDED,
+            (),
+            'Skipped the bugs reviews of "Fix it": it changed no code.',
+        ),
+        (
+            BATCH_GUARDS,
+            LENSES,
+            BATCH_LANDED,
+            ("bugs-reviewer",),
+            'Skipped the bugs reviews of "Fix it": it changed no code.',
+        ),
+        (
+            BATCH_GUARDS,
+            ("tests-reviewer", "style-reviewer"),
+            BATCH_LANDED,
+            ("bugs-reviewer", "style-reviewer"),
+            'Skipped the style reviews of "Fix it": it changed no code.',
+        ),
+        (("code-changed",), ("coder",), LANDED, (), None),
+        (BATCH_GUARDS, LENSES, BATCH_LANDED, (), None),
+    ],
+)
+def test_the_note_of_skipped_reviews_names_only_the_lenses_that_would_have_run(
+    guards: tuple[str, ...],
+    enabled: tuple[str, ...],
+    event: TriggerEvent,
+    raised: tuple[str, ...],
+    note: str | None,
+) -> None:
+    lenses = ["bugs-reviewer", "tests-reviewer", "style-reviewer"]
+    held = [("lenses", trigger(role=lenses, guards=guards))]
+    assert note_skipped_reviews(held, ["Fix it"], enabled, event, raised) == note
 
 
 # Guards held on the board

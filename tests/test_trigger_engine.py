@@ -535,6 +535,14 @@ async def test_two_guarded_triggers_held_back_share_one_note() -> None:
     ]
 
 
+async def test_the_note_names_only_the_enabled_lenses_of_a_guarded_trigger() -> None:
+    lenses = look(role=[BUGS_REVIEWER, TESTS_REVIEWER], guards=("code-changed",))
+    engine = Engine({"lenses": lenses}, roles=disabled(TESTS_REVIEWER))
+    engine.tree.changed[f"{COMMIT}^"] = ["docs/x.md"]
+    assert await engine.engine.landed(ended(), COMMIT) == ()
+    assert engine.notices() == [NO_CODE]
+
+
 @pytest.mark.parametrize("changed", [["src/x.py"], ["uv.lock"], ["src/x.md"]])
 async def test_a_landing_changing_code_fires_a_guarded_trigger_without_a_note(
     changed: list[str],
