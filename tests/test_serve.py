@@ -619,6 +619,28 @@ def test_serve_that_cant_write_the_default_user_config_warns_and_serves(
     assert not config.exists()
 
 
+def test_serve_with_a_user_config_in_a_read_only_dir_says_nothing_of_it_and_serves(
+    state: Path, config_dir: Path, token_file: Path
+) -> None:
+    token_file.chmod(0o600)
+    config = config_dir / USER_CONFIG_FILE
+    config.write_text("")
+    config_dir.chmod(0o500)
+    try:
+        frontend = Frontend(state, config_dir)
+        thread = frontend.start()
+        result = runner.invoke(app, ["serve", *QUIET, "--add", ".", "--port", "0"])
+        thread.join(10)
+    finally:
+        config_dir.chmod(0o700)
+
+    assert result.exit_code == 0, result.output
+    assert [type(e) for e in frontend.events] == ATTACHED
+    assert "Couldn't write" not in result.stderr
+    assert result.stdout.startswith("Serving at ")
+    assert config.read_text() == ""
+
+
 def test_a_second_serve_exits_naming_the_first(state: Path) -> None:
     first = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:

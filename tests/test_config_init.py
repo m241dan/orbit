@@ -775,3 +775,32 @@ def test_create_in_a_read_only_config_dir_raises_os_error(tmp_path: Path) -> Non
             create_user_config(config_dir)
     finally:
         config_dir.chmod(0o700)
+
+
+def test_create_in_a_read_only_config_dir_with_a_user_config_returns_none_and_leaves_it(
+    tmp_path: Path,
+) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    path = config_dir / USER_CONFIG_FILE
+    path.write_text("mine\n")
+    config_dir.chmod(0o500)
+    try:
+        assert create_user_config(config_dir) is None
+    finally:
+        config_dir.chmod(0o700)
+    assert path.read_text() == "mine\n"
+
+
+def test_an_existing_user_config_in_a_read_only_config_dir_is_refused(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    path = config_dir / USER_CONFIG_FILE
+    path.write_text("mine\n")
+    config_dir.chmod(0o500)
+    try:
+        with pytest.raises(ConfigExists):
+            init_user_config(config_dir, force=False)
+    finally:
+        config_dir.chmod(0o700)
+    assert path.read_text() == "mine\n"

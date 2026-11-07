@@ -143,6 +143,10 @@ def _write_reference(path: Path, reference: str, force: bool) -> InitResult:
     as it was, and ``OSError`` when it can't write the file.
     """
     if not force:
+        # create_whole makes its temporary file first, so a read-only directory would hide an
+        # existing file behind a PermissionError.
+        if os.path.lexists(path):
+            raise ConfigExists(path)
         try:
             create_whole(path, reference)
         except FileExistsError:
