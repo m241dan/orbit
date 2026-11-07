@@ -94,17 +94,17 @@ from orbit.agent.domain.reviews import (
     ReviewTemplate,
     Severity,
     blocking_roles,
+    drop_diff,
     fan_in_due,
     fan_in_due_again,
     finding_refusal,
     finished_fields,
     finished_values,
-    held_values,
     kept_bookings,
     kept_groups,
-    kept_values,
     pause_notice,
     pending_titles,
+    quote_diff,
     quotes_diff,
     quotes_messages,
     raised_roles,
@@ -114,7 +114,6 @@ from orbit.agent.domain.reviews import (
     runnable_tasks,
     set_review,
     tell_landed_since,
-    with_diff,
     with_finding,
     with_lens,
     with_task,
@@ -127,6 +126,7 @@ from orbit.agent.domain.triggers import (
     SetOutcome,
     Trigger,
     TriggerEvent,
+    render_held_prompt,
     render_template,
     restart_counts,
 )
@@ -298,7 +298,7 @@ class ReviewLane:
         self.planner.restore(snapshot.planner)
         self._jobs, self._batches = dict(snapshot.jobs), dict(snapshot.batches)
         self._templates = {
-            task_id: replace(template, values=kept_values(template.values))
+            task_id: replace(template, values=drop_diff(template.values))
             for task_id, template in snapshot.templates.items()
         }
         self._groups = dict(snapshot.groups)
@@ -854,26 +854,37 @@ class ReviewLane:
         landed = await self._since_super(since, commit)
         return replace(landed, sampled=await self._sample(commit, landed.files))
 
-    async def _tell_landed(self, task_id: str, job: ReviewJob) -> str:
+    async def _tell_landed(self, task_id: str, job: ReviewJob) -> ReviewTemplate | None:
         """Have review ``task_id``'s task, of ``job``, list the commits on the base after the
         last one it reviews as they stand now, as it starts, rendering it again from its
-        template, which lists them where it says, in place of those it listed as it last ran;
-        returns the prompt its agent gets, the same quoting the diff of ``job``'s commits in
-        place of :data:`~orbit.agent.domain.reviews.DIFF_HELD`, which the board keeps. One with
-        no template kept keeps its prompt, and its agent gets it: a super review, told what
-        landed as it was queued, or one an older orbit saved."""
+        template, which lists them where it says, in place of those it listed as it last ran,
+        and quoting :data:`~orbit.agent.domain.reviews.DIFF_HELD` in place of the diff; returns
+        its template with the values it was told. One with no template kept keeps its
+        prompt, and this returns nothing: a super review, told what landed as it was queued, or
+        one an older orbit saved."""
         template = self._templates.get(task_id)
         if template is None:
-            return self._board.get(task_id).task.prompt
+            return None
         subjects = await self._landed_after(job.commits[-1])
         told = tell_landed_since(template.values, subjects)
-        stored = render_template(template.template, held_values(told))
+        stored = render_held_prompt(template.template, told)
         if stored != self._board.get(task_id).task.prompt:
             await self._tasks.change(lambda board: board.set_prompt(task_id, stored))
-        diff = await self._diff_of(template, job)
-        return render_template(template.template, with_diff(told, diff))
+        return replace(template, values=told)
 
-    async def _diff_of(self, template: ReviewTemplate, job: ReviewJob) -> str:
+    async def _brief_reviewer(self, task_id: str, job: ReviewJob) -> str:
+        """The prompt review ``task_id``'s agent gets as it starts, of ``job``, once told what
+        landed, as :meth:`_tell_landed` says: its template rendered from the values it was told,
+        quoting the diff of ``job``'s commits, as git shows it, in place of
+        :data:`~orbit.agent.domain.reviews.DIFF_HELD`, which the board keeps. One with no
+        template kept gets its prompt as the board has it."""
+        told = await self._tell_landed(task_id, job)
+        if told is None:
+            return self._board.get(task_id).task.prompt
+        diff = await self._show_diff(told, job)
+        return render_template(told.template, quote_diff(told.values, diff))
+
+    async def _show_diff(self, template: ReviewTemplate, job: ReviewJob) -> str:
         """The messages and diffs of ``job``'s commits, if ``template`` quotes them, or what
         says git couldn't show them; nothing if it doesn't quote them."""
         if not quotes_diff(template.template):
@@ -1046,7 +1057,7 @@ class ReviewLane:
         if job is None:
             return await run_in_role_workspace(task_id, self._tasks, self._desk)
         agent_run = AgentRun(task_id, self._tasks, None, self._desk)
-        agent_run.deliver(await self._tell_landed(task_id, job))
+        agent_run.replace_prompt(await self._brief_reviewer(task_id, job))
         async with snapshot_of(self._tree, job.commits[-1], self._publish) as root:
             return await agent_run.run(None, root)
 

@@ -34,7 +34,7 @@ from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.agent.domain.cron import cron_problem
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
 from orbit.agent.domain.path_globs import matchable, matches_path, unmatchable_glob
-from orbit.agent.domain.reviews import ReviewJob, ReviewKind
+from orbit.agent.domain.reviews import ReviewJob, ReviewKind, drop_diff, hold_diff
 from orbit.agent.domain.roles import PLAIN_NAME
 from orbit.agent.domain.verification import VerificationStep, set_report
 from orbit.protocol import TASK_CHECKS, ReportStatus, TaskState, is_orbit_review
@@ -857,6 +857,13 @@ def render_template(template: str, values: Mapping[str, str]) -> str:
         for paragraph in template.split(PARAGRAPH_BREAK)
     )
     return PARAGRAPH_BREAK.join(paragraph for paragraph in paragraphs if paragraph.strip())
+
+
+def render_held_prompt(template: str, values: Mapping[str, str]) -> str:
+    """``template`` rendered from ``values`` as a review task of commits is kept until it
+    starts: ``{diff}`` quoting :data:`~orbit.agent.domain.reviews.DIFF_HELD`, whatever diff
+    ``values`` give."""
+    return render_template(template, hold_diff(drop_diff(values)))
 
 
 @dataclass(frozen=True)

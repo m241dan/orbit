@@ -887,8 +887,8 @@ def review_values(
     :func:`review_prompt` writes it from the same ``cap``, ``pending`` and ``landed_since``,
     each list as its block or, with nothing in it, empty: for a super review, those of
     ``commits``; for a review of commits, those of ``task_landed`` but ``{task}`` and
-    ``{task_skills}``, which come with the landing, and ``{diff}``, which :func:`with_diff`
-    adds, or :func:`held_values` holds back. ``{trigger}`` is the caller's.
+    ``{task_skills}``, which come with the landing, and ``{diff}``, which :func:`quote_diff`
+    adds, or :func:`hold_diff` holds back. ``{trigger}`` is the caller's.
 
     ``{commit}`` is the reviewed commit, the last of a batch's, abbreviated, and ``{title}`` the
     review task's first line.
@@ -942,19 +942,19 @@ DIFF_HELD = "(The diff of the reviewed commits is quoted here as the review star
 from git again then, rather than kept in the task, the session's record and every board sent."""
 
 
-def kept_values(values: Mapping[str, str]) -> dict[str, str]:
+def drop_diff(values: Mapping[str, str]) -> dict[str, str]:
     """``values``, those a review task of commits is rendered from, without ``{diff}``, which is
     read from git again as it starts rather than kept."""
     return {name: value for name, value in values.items() if name != "diff"}
 
 
-def held_values(values: Mapping[str, str]) -> dict[str, str]:
+def hold_diff(values: Mapping[str, str]) -> dict[str, str]:
     """``values`` with ``{diff}`` quoting :data:`DIFF_HELD`, as a review task of commits is
     kept until it starts."""
     return {**values, "diff": DIFF_HELD}
 
 
-def with_diff(values: Mapping[str, str], diff: str) -> dict[str, str]:
+def quote_diff(values: Mapping[str, str], diff: str) -> dict[str, str]:
     """``values`` with ``{diff}`` quoting ``diff``, trimmed as :func:`review_values` trims it,
     as a review task of commits is given to its agent."""
     return {**values, "diff": _trimmed(diff)}
@@ -972,7 +972,7 @@ def quotes_diff(template: str) -> bool:
     return "{diff}" in template
 
 
-def unshown_diff(error: str) -> str:
+def word_unshown_diff(error: str) -> str:
     """What a review task quotes in place of the diff git couldn't show, as ``error`` says."""
     return f"(Git couldn't show the diff of the reviewed commits: {error})"
 

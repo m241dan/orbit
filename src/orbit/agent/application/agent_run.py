@@ -173,7 +173,7 @@ class AgentRun:
         assert self._role is not None  # A run without its role ends before the agent starts.
         return self._role
 
-    def deliver(self, prompt: str) -> None:
+    def replace_prompt(self, prompt: str) -> None:
         """Have the agent get ``prompt`` as its task in place of the one on the board, as a
         review of commits gets the diff its stored prompt leaves out."""
         task = self._work.task.model_copy(update={"prompt": prompt})

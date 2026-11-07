@@ -51,15 +51,15 @@ from orbit.agent.domain.reviews import (
     ReviewJob,
     ReviewTemplate,
     commit_review,
-    held_values,
+    drop_diff,
+    hold_diff,
     holds_diff,
-    kept_values,
     pending_titles,
+    quote_diff,
     quotes_diff,
     review_skills,
     review_values,
-    unshown_diff,
-    with_diff,
+    word_unshown_diff,
 )
 from orbit.agent.domain.roles import Role, enabled_roles, role_task
 from orbit.agent.domain.setup_first import waiting_for_setup, waiting_note
@@ -87,6 +87,7 @@ from orbit.agent.domain.triggers import (
     needs_paths,
     note_skipped_reviews,
     reads_paths,
+    render_held_prompt,
     render_template,
     set_finished_event,
     set_finished_values,
@@ -446,7 +447,7 @@ class TriggerEngine:
         and the roles that raised its batch's findings, and that the paths its commits changed
         let fire, and the ``values`` they render from, gathered only if one may, with those
         ``code-changed`` held back, and, on a landing, the diff its tasks quote, as
-        :meth:`_with_diff` says."""
+        :meth:`_show_firing_diff` says."""
         roles = enabled_roles(self._desk.agents.roles)
         job, raised = (None, frozenset[str]()) if review is None else (review.job, review.raised)
         sifted = await self._within_paths(listening(triggers, event, roles, job, raised), event)
@@ -456,24 +457,24 @@ class TriggerEngine:
 
     async def _shown(self, firing: _Firing | None, event: TriggerEvent) -> _Firing | None:
         """``firing``, if any, on ``event``, with the diff its tasks quote if it's a landing, as
-        :meth:`_with_diff` says."""
+        :meth:`_show_firing_diff` says."""
         if firing is None or event.name != TASK_LANDED:
             return firing
-        return await self._with_diff(firing)
+        return await self._show_firing_diff(firing)
 
-    async def _with_diff(self, firing: _Firing) -> _Firing:
+    async def _show_firing_diff(self, firing: _Firing) -> _Firing:
         """``firing``, on a landing, with ``{diff}`` the diff of its commits, as git shows it,
         if a task it may queue keeps that in its prompt, as :meth:`_keeps_diff` says, else
         quoting :data:`~orbit.agent.domain.reviews.DIFF_HELD`, every task that quotes it
         holding it back for the review lane to read as it starts the task. If git can't show it,
         the tasks are queued all the same, quoting what says so."""
         if not self._keeps_diff(firing):
-            return replace(firing, values=held_values(firing.values))
+            return replace(firing, values=hold_diff(firing.values))
         tree = self._desk.agents.tree
         assert tree is not None  # Only work in a tree lands.
         assert firing.event is not None  # Only a landing's firing shows a diff.
         diff = await show_diff(tree, firing.event.commits)
-        return replace(firing, values=with_diff(firing.values, diff))
+        return replace(firing, values=quote_diff(firing.values, diff))
 
     def _keeps_diff(self, firing: _Firing) -> bool:
         """Whether a task the triggers ``firing`` may queue quotes ``{diff}`` and keeps it in its
@@ -585,9 +586,9 @@ class TriggerEngine:
         enabled = enabled_roles(self._desk.agents.roles)
         raised = () if firing.review is None else firing.review.raised
         roles = firing_roles(trigger, enabled, firing.event, raised)
-        kept = kept_values(values)
-        held = render_template(trigger.prompt, held_values(kept))
-        queued = _Queued(name, trigger, prompt, held, ReviewTemplate(trigger.prompt, kept))
+        held = render_held_prompt(trigger.prompt, values)
+        template = ReviewTemplate(trigger.prompt, drop_diff(values))
+        queued = _Queued(name, trigger, prompt, held, template)
         return tuple(self._add_one(board, queued, role, firing) for role in roles)
 
     def _add_one(self, board: TaskBoard, queued: _Queued, role: str, firing: _Firing) -> str:
@@ -611,7 +612,7 @@ class TriggerEngine:
     async def _values(self, job: ReviewJob, skills: Sequence[str]) -> Mapping[str, str]:
         """The values of ``task_landed`` for ``job``'s commits, landed by the tasks it reviews,
         which name ``skills``, as its review's task renders from them, but ``{diff}``, which
-        :meth:`_with_diff` gives."""
+        :meth:`_show_firing_diff` gives."""
         cap = self._desk.agents.review_limits.suggestions
         pending = pending_titles(self._tasks.board.tasks)
         landing = {"task": ", ".join(job.reviewed), "task_skills": ", ".join(skills)}
@@ -655,7 +656,7 @@ async def show_diff(tree: CoderTree, commits: Sequence[str]) -> str:
     try:
         return await tree.show(commits)
     except TreeFailed as exc:  # The task goes ahead; its agent can read the commits.
-        return unshown_diff(str(exc))
+        return word_unshown_diff(str(exc))
 
 
 def _note_paths_failed(found: Sequence[tuple[str, Trigger]], error: TreeFailed) -> None:

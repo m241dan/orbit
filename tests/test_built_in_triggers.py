@@ -14,10 +14,10 @@ from orbit.agent.domain.reviews import (
     MergeBriefing,
     ReviewJob,
     finished_values,
+    quote_diff,
     review_prompt,
     review_values,
     tell_landed_since,
-    with_diff,
 )
 from orbit.agent.domain.triggers import (
     REVIEWS_FINISHED,
@@ -272,7 +272,7 @@ def test_each_lens_template_renders_todays_review_prompt_without_a_cap(
     lens: str, case: str
 ) -> None:
     job, pending, landed = REVIEWS[case]
-    values = with_diff(review_values(job, 5, pending, landed), DIFF) | {
+    values = quote_diff(review_values(job, 5, pending, landed), DIFF) | {
         "trigger": f"{lens}-review",
         "task": "3",
         "task_skills": "python",
@@ -290,7 +290,7 @@ def test_the_review_template_told_what_landed_as_it_starts_renders_todays_prompt
 ) -> None:
     job, pending, landed = REVIEWS[case]
     queued = review_values(job, 5, pending, LandedSince(listed)) | {"trigger": "fit-review"}
-    values = with_diff(tell_landed_since(queued, landed.subjects), diff)
+    values = quote_diff(tell_landed_since(queued, landed.subjects), diff)
     rendered = render_template(template("fit-review"), values)
     assert rendered == lens_prompt(job, diff, pending, landed)
 

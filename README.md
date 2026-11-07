@@ -2469,12 +2469,13 @@ or reviewed, its first 7 characters; `{task}` the task whose work landed (for a 
 the tasks it reviews), and `{task_skills}` the skills its list names, apart by commas; `{title}`
 the review task's first line (`Review commit 0123abc`, or
 `Review the 2 commits made for review batch-1`); `{diff}` the commits' messages and diffs,
-trimmed past 30000 characters, which a review role's task booked into a review is given as it
-starts, read from git then, while the task list and the saved session keep `(The diff of the
-reviewed commits is quoted here as the review starts.)` in their place; any other task quoting
-it, such as a coder's a review trigger queues, gets it as it's queued, and git is asked for it
-then only if such a task quotes it. If git can't show it, either way, the task goes ahead,
-quoting `(Git couldn't show the diff of the reviewed commits: <why>)` in its place; `{missing}` a line for each task of the reviewed batch that ended
+trimmed past 30000 characters. A review role's task booked into a review gets them as it
+starts: git is asked for them then. Until then, the task list and the saved session show
+`(The diff of the reviewed commits is quoted here as the review starts.)` in their place, and
+they keep showing it after. Any other task quoting `{diff}`, such as a coder's a review trigger
+queues, gets the diff as it's queued; git is asked for it then only if such a task quotes it.
+If git can't show it, the task goes ahead, quoting
+`(Git couldn't show the diff of the reviewed commits: <why>)` in its place; `{missing}` a line for each task of the reviewed batch that ended
 without landing a commit; `{cap}` the suggestions the review may make; `{queued}` the tasks still
 queued or running, `{landed_since}` the commits landed since the reviewed one, as they stand when
 the review starts (its task is rendered again from its template then, the other variables as

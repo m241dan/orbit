@@ -7,6 +7,7 @@ import pytest
 
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
+from orbit.agent.domain.reviews import DIFF_HELD
 from orbit.agent.domain.triggers import (
     EVENT_NAMES,
     EVENTS,
@@ -18,6 +19,7 @@ from orbit.agent.domain.triggers import (
     check_triggers,
     load_built_in_triggers,
     merge_triggers,
+    render_held_prompt,
     render_template,
     set_finished_event,
     set_finished_values,
@@ -708,3 +710,14 @@ def test_a_value_of_several_paragraphs_stays_whole() -> None:
 
 def test_braces_in_values_and_other_braces_are_left_as_they_are() -> None:
     assert render_template("{a} {B} {}", {"a": "{b}"}) == "{b} {B} {}"
+
+
+def test_a_held_prompt_quotes_diff_held_in_place_of_the_diff_its_values_give() -> None:
+    values = {"commit": "abc", "diff": "a changed line"}
+    assert render_held_prompt("Review {commit}.\n\n{diff}", values) == (
+        f"Review abc.\n\n{DIFF_HELD}"
+    )
+
+
+def test_a_held_prompt_quotes_diff_held_when_its_values_give_no_diff() -> None:
+    assert render_held_prompt("{diff}", {}) == DIFF_HELD

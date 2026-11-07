@@ -23,7 +23,7 @@ from orbit.agent.domain.reviews import (
     commit_review,
     review_prompt,
     review_values,
-    unshown_diff,
+    word_unshown_diff,
 )
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.skills import SkillMapping
@@ -203,7 +203,7 @@ async def test_a_diff_git_cannot_show_at_landing_is_quoted_as_unshown_and_the_ta
     engine = Engine({"look": look(prompt="Look at {commit}\n\n{diff}")})
     engine.tree.failures["show"] = TreeFailed("git show failed: bad object")
     [task_id] = await engine.engine.landed(ended(), COMMIT)
-    unshown = unshown_diff("git show failed: bad object")
+    unshown = word_unshown_diff("git show failed: bad object")
     assert engine.board.get(task_id).task.prompt == f"Look at c1abcde\n\n{unshown}"
     assert engine.errors() == []
 

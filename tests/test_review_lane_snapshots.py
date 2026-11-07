@@ -13,7 +13,7 @@ from orbit.agent.domain.reviews import (
     PlannerSnapshot,
     ReviewJob,
     ReviewTemplate,
-    unshown_diff,
+    word_unshown_diff,
 )
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
@@ -316,7 +316,7 @@ async def test_an_opened_sessions_queued_review_whose_diff_git_cant_show_runs_to
     tree.failures["show"] = TreeFailed("git show failed: bad object c1")
     snapshot = queued_review({"2": ReviewTemplate(DIFF_TEMPLATE, KEPT)})
     _, brief = await run_queued_review(snapshot, tree)
-    assert brief == f"Review c1.\n\n{unshown_diff('git show failed: bad object c1')}"
+    assert brief == f"Review c1.\n\n{word_unshown_diff('git show failed: bad object c1')}"
 
 
 async def test_an_older_orbits_review_kept_with_its_diff_drops_it_and_gets_it_afresh() -> None:

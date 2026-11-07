@@ -122,7 +122,7 @@ class LongDiffTree(FakeTree):
         return LONG_DIFF
 
 
-def briefed(briefs: list[str]) -> Script:
+def record_brief(briefs: list[str]) -> Script:
     """A lens that records the task it was given in ``briefs``, then claims done, finding
     nothing."""
 
@@ -134,14 +134,14 @@ def briefed(briefs: list[str]) -> Script:
     return look
 
 
-def quoting_diff(events: list[Event], store: FakeStore) -> list[str]:
+def find_diff_quotes(events: list[Event], store: FakeStore) -> list[str]:
     """The boards published in ``events`` and the records saved in ``store``, as JSON, that
     quote :data:`LONG_DIFF`."""
     boards = [e.model_dump_json() for e in events if isinstance(e, TasksChanged | Snapshot)]
     return [text for text in [*boards, *map(record_json, store.saved)] if "a changed line" in text]
 
 
-def given_diff(brief: str) -> bool:
+def quotes_trimmed_diff(brief: str) -> bool:
     """Whether ``brief``, a lens's task, quotes :data:`LONG_DIFF` trimmed, as its task's diff."""
     trimmed = f"{LONG_DIFF[:DIFF_LIMIT]}\n… (diff trimmed)\n\nWhen you have finished"
     return trimmed in brief and DIFF_HELD not in brief
@@ -150,7 +150,7 @@ def given_diff(brief: str) -> bool:
 async def test_a_lens_tasks_stored_prompt_holds_no_diff_but_its_agent_is_given_it_trimmed() -> None:
     briefs: list[str] = []
     store = FakeStore()
-    lenses = [briefed(briefs) for _ in LENS_REVIEWERS]
+    lenses = [record_brief(briefs) for _ in LENS_REVIEWERS]
     session = shipped(claims_done, *lenses, tree=LongDiffTree(changes=CODE), store=store)
     await start(session)
     events = await asyncio.wait_for(settle(session), 10)
@@ -158,8 +158,8 @@ async def test_a_lens_tasks_stored_prompt_holds_no_diff_but_its_agent_is_given_i
 
     assert [t.task.prompt.endswith(DIFF_HELD) for t in board(events)[1:]] == [True] * 6
     assert any(isinstance(e, TasksChanged) for e in events)
-    assert quoting_diff(events, store) == []
-    assert [given_diff(brief) for brief in briefs] == [True] * len(LENS_REVIEWERS)
+    assert find_diff_quotes(events, store) == []
+    assert [quotes_trimmed_diff(brief) for brief in briefs] == [True] * len(LENS_REVIEWERS)
 
 
 async def test_a_lens_finding_queues_one_merge_pass_that_files_into_the_reviews_batch() -> None:
