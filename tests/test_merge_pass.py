@@ -18,15 +18,15 @@ from orbit.agent.domain.merge_pass import (
     count_outcomes,
     end_task_in,
     list_undecided,
+    mark_dismissed,
+    mark_filed,
+    mark_task_ended,
     parse_dismissal,
     parse_review_suggestion,
     refuse_decision,
     refuse_filing,
     refuse_severity,
-    undecided_refusal,
-    with_dismissed,
-    with_filed,
-    with_task_ended,
+    refuse_undecided,
 )
 from orbit.agent.domain.reviews import Finding, ReviewGroup, ReviewJob, with_task
 from orbit.protocol import TaskSpec
@@ -101,7 +101,7 @@ def test_a_dismissal_without_a_reason_is_refused() -> None:
 
 
 def test_filing_names_the_first_finding_filed_and_the_rest_merged_into_its_task() -> None:
-    assert outcomes(with_filed(GROUP, ("F3", "F1"), "7")) == [
+    assert outcomes(mark_filed(GROUP, ("F3", "F1"), "7")) == [
         ("F1", "merged", "7", None),
         ("F2", "undecided", None, None),
         ("F3", "filed", "7", None),
@@ -109,7 +109,7 @@ def test_filing_names_the_first_finding_filed_and_the_rest_merged_into_its_task(
 
 
 def test_dismissing_records_the_reason() -> None:
-    dismissed = with_dismissed(GROUP, Dismissal("F2", "Covered."))
+    dismissed = mark_dismissed(GROUP, Dismissal("F2", "Covered."))
     assert outcomes(dismissed)[1] == ("F2", "dismissed", None, "Covered.")
 
 
@@ -118,7 +118,7 @@ def test_filing_must_name_a_finding() -> None:
 
 
 def test_filing_refuses_the_first_finding_it_cant_decide() -> None:
-    decided = with_filed(GROUP, ("F1",), "7")
+    decided = mark_filed(GROUP, ("F1",), "7")
     assert refuse_filing(decided, ("F2", "F9", "F1")) == (
         "F9 isn't an undecided finding of this review."
     )
@@ -189,11 +189,11 @@ def test_a_normal_task_or_one_naming_no_blocking_finding_known_is_no_blocking_ta
 @pytest.mark.parametrize(
     ("group", "expected"),
     [
-        (with_filed(GROUP, ("F1",), "7"), "F1 is already filed."),
-        (with_filed(GROUP, ("F3", "F1"), "7"), "F1 is already merged."),
-        (with_task_ended(with_filed(GROUP, ("F1",), "7"), ("7",), "fixed"), "F1 is already fixed."),
+        (mark_filed(GROUP, ("F1",), "7"), "F1 is already filed."),
+        (mark_filed(GROUP, ("F3", "F1"), "7"), "F1 is already merged."),
+        (mark_task_ended(mark_filed(GROUP, ("F1",), "7"), ("7",), "fixed"), "F1 is already fixed."),
         (
-            with_task_ended(with_filed(GROUP, ("F1",), "7"), ("7",), "given_up"),
+            mark_task_ended(mark_filed(GROUP, ("F1",), "7"), ("7",), "given_up"),
             "F1 is already given up.",
         ),
     ],
@@ -204,19 +204,19 @@ def test_a_finding_decided_once_isnt_decided_again(group: ReviewGroup, expected:
 
 def test_completion_waits_for_every_finding() -> None:
     assert list_undecided(GROUP) == ("F1", "F2", "F3")
-    filed = with_filed(GROUP, ("F1", "F3"), "7")
-    assert undecided_refusal(filed) == (
+    filed = mark_filed(GROUP, ("F1", "F3"), "7")
+    assert refuse_undecided(filed) == (
         "Decide every finding first: F2 has no outcome. File them with suggest_task or dismiss"
         " them with dismiss_finding."
     )
-    assert undecided_refusal(with_dismissed(filed, Dismissal("F2", "Covered."))) is None
+    assert refuse_undecided(mark_dismissed(filed, Dismissal("F2", "Covered."))) is None
 
 
 # Ending
 
 
 def test_a_merge_pass_ending_leaves_its_undecided_findings_unanswered() -> None:
-    ended = end_task_in(with_filed(GROUP, ("F1",), "7"), "4")
+    ended = end_task_in(mark_filed(GROUP, ("F1",), "7"), "4")
     assert [f.outcome for f in ended.findings] == ["filed", "unanswered", "unanswered"]
     assert count_outcomes(ended) == {"filed": 1, "merged": 0, "dismissed": 0, "unanswered": 2}
 
@@ -234,8 +234,8 @@ def test_a_lens_ending_decides_nothing() -> None:
 
 
 def test_a_task_ending_marks_only_the_findings_filed_in_it() -> None:
-    filed = with_filed(with_filed(GROUP, ("F1", "F2"), "7"), ("F3",), "8")
-    fixed = with_task_ended(filed, ("7", "9"), "fixed")
+    filed = mark_filed(mark_filed(GROUP, ("F1", "F2"), "7"), ("F3",), "8")
+    fixed = mark_task_ended(filed, ("7", "9"), "fixed")
     assert [f.outcome for f in fixed.findings] == ["fixed", "fixed", "filed"]
 
 

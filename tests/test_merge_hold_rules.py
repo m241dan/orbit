@@ -22,12 +22,12 @@ from orbit.agent.domain.merge_holds import (
     merge_holds,
     note_held,
     note_lift,
-    resumed_note,
     set_fix_prompt,
     stacked_commits,
-    step_in_note,
     title_fix,
     view_hold,
+    word_resumed,
+    word_step_in,
 )
 from orbit.agent.domain.verification import CheckSet, VerificationStep
 from orbit.protocol import MergeHold, TaskSpec, TaskState
@@ -40,12 +40,12 @@ def test_the_notices_name_the_set_its_short_commit_and_the_fixes_tried() -> None
     assert note_held("stress", "1a2b3c4d5e") == (
         "Merges held: stress failed on 1a2b3c4. A fix is queued first."
     )
-    assert resumed_note("stress") == "Merges resumed: stress passed."
-    assert step_in_note("stress", 3) == (
+    assert word_resumed("stress") == "Merges resumed: stress passed."
+    assert word_step_in("stress", 3) == (
         "stress still fails after 3 fixes; merges stay held. Release with ctrl+f or fix it"
         " yourself."
     )
-    assert step_in_note("stress", 1).startswith("stress still fails after 1 fix;")
+    assert word_step_in("stress", 1).startswith("stress still fails after 1 fix;")
 
 
 def test_a_first_failure_holds_merges_with_its_notice_and_queues_the_first_fix() -> None:
@@ -68,7 +68,7 @@ def test_a_failure_once_the_fixes_ran_out_asks_the_user_to_step_in() -> None:
     held = (Hold("stress", "old", "Stress tests", "1 failed", 3),)
     again = Hold("stress", "new", "Stress tests", "3 failed")
     assert decide_failure(held, again, 3, fixing=False) == HoldDecision(
-        (Hold("stress", "new", "Stress tests", "3 failed", 3),), (step_in_note("stress", 3),)
+        (Hold("stress", "new", "Stress tests", "3 failed", 3),), (word_step_in("stress", 3),)
     )
 
 
@@ -89,7 +89,7 @@ def test_a_first_failure_while_its_fix_is_queued_already_holds_without_another()
 def test_with_no_fixes_allowed_a_first_failure_holds_and_asks_the_user_to_step_in() -> None:
     assert decide_failure((), STRESS, 0, fixing=False).notes == (
         note_held("stress", "1a2b3c4d5e"),
-        step_in_note("stress", 0),
+        word_step_in("stress", 0),
     )
 
 
@@ -103,7 +103,7 @@ def test_a_fix_ending_unlanded_is_its_holds_failure_again_queuing_another_fix() 
 def test_a_fix_ending_unlanded_once_the_fixes_ran_out_asks_the_user_to_step_in() -> None:
     held = (Hold("stress", "c4", "Stress tests", "2 failed", 3),)
     assert decide_unlanded_fix(held, "stress", 3, fixing=False) == HoldDecision(
-        held, (step_in_note("stress", 3),)
+        held, (word_step_in("stress", 3),)
     )
 
 

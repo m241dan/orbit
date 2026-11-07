@@ -11,9 +11,9 @@ from orbit.agent.domain.merge_holds import (
     BlockingTask,
     FindingHold,
     FixReview,
-    finding_resumed_note,
     note_finding_held,
-    unchecked_note,
+    word_finding_resumed,
+    word_unchecked,
 )
 from orbit.agent.domain.verification import CheckSet, VerificationStep
 from orbit.protocol import BUGS_REVIEWER, CODER, Event, MergeHold, Notice, TaskSpec
@@ -108,7 +108,7 @@ async def test_its_fixs_review_by_its_lens_lifts_the_hold_with_its_notice_and_re
         FixReview("batch-2", frozenset({BUGS_REVIEWER, "tests-reviewer"}))
     )
     assert not holds.holds.held and store.holds == ()
-    assert holds.notices()[-1] == finding_resumed_note(BUGS_REVIEWER)
+    assert holds.notices()[-1] == word_finding_resumed(BUGS_REVIEWER)
     assert holds.releases == 2  # Once as no hold kept was read.
 
 
@@ -116,7 +116,7 @@ async def test_its_fixs_review_without_its_lens_leaves_the_hold_unchecked() -> N
     holds = await held()
     await holds.holds.hear_fix_review(FixReview("batch-2", frozenset({"tests-reviewer"})))
     assert holds.holds.held and holds.holds.checking == ()
-    assert holds.notices()[-1] == unchecked_note(BUGS_REVIEWER)
+    assert holds.notices()[-1] == word_unchecked(BUGS_REVIEWER)
     assert holds.releases == 0
 
 
@@ -124,7 +124,7 @@ async def test_its_fixs_batch_closing_unreviewed_leaves_the_hold_unchecked() -> 
     holds = await held()
     await holds.holds.hear_unreviewed(holds.holds.checking)
     assert holds.holds.held and holds.holds.checking == ()
-    assert holds.notices()[-1] == unchecked_note(BUGS_REVIEWER)
+    assert holds.notices()[-1] == word_unchecked(BUGS_REVIEWER)
 
 
 async def test_merges_wait_for_a_sets_hold_and_a_findings_and_a_release_lifts_both() -> None:

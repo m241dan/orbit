@@ -20,7 +20,7 @@ from mcp.client.streamable_http import streamable_http_client
 from orbit.agent.application.ports import CredentialsRefused, UpstreamFailed, UpstreamSession
 from orbit.agent.domain.mcp_servers import McpServer
 from orbit.agent.domain.refusals import reason
-from orbit.agent.external.mcp_client import ClientConnection, not_exited
+from orbit.agent.external.mcp_client import ClientConnection, report_not_exited
 
 REFUSING = frozenset({401, 403})
 """The HTTP statuses a server refusing orbit's credentials answers with."""
@@ -81,19 +81,19 @@ class HttpSession(ClientConnection):
                 received, sent, read_timeout_seconds=(self._timeout + BACKSTOP).total_seconds()
             ) as session,
         ):
-            await self._initialise(session, not_exited)
+            await self._initialise(session, report_not_exited)
             return await forever
 
-    def _failed(self, error: BaseException) -> UpstreamFailed:
+    def _explain_failure(self, error: BaseException) -> UpstreamFailed:
         """Why the connection failed on ``error``: an HTTP error status, a timeout, a connection
         that couldn't be made, or as ``error`` says."""
         if isinstance(error, ErrorStatus) and error.status in REFUSING:
             return CredentialsRefused(error.status)
         if isinstance(error, httpx2.TimeoutException):
-            return UpstreamFailed(self._timed_out())
+            return UpstreamFailed(self._word_timed_out())
         if isinstance(error, httpx2.ConnectError):
             return UpstreamFailed(f"orbit couldn't connect to it: {reason(error)}")
-        return super()._failed(error)
+        return super()._explain_failure(error)
 
 
 async def _check_status(response: httpx2.Response) -> None:

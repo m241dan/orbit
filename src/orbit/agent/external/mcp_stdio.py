@@ -37,7 +37,7 @@ LINE_LIMIT = 16 * 1024 * 1024
 """The longest message a server may send, in bytes."""
 
 
-def mcp_folder(state_dir: Path, workspace_id: str) -> Path:
+def find_mcp_folder(state_dir: Path, workspace_id: str) -> Path:
     """The folder the neutral directories of the workspace ``workspace_id``'s shared servers are
     in, one per server, in ``state_dir``."""
     return state_dir / MCP_DIR / workspace_id
@@ -89,11 +89,11 @@ class StdioSession(ClientConnection):
                 stderr=asyncio.subprocess.DEVNULL,
                 limit=LINE_LIMIT,
             ) as process:
-                return await self._connected(process)
+                return await self._speak_with(process)
         except OSError as exc:
             raise UpstreamFailed(start_failure(self._command, self._cwd, exc)) from None
 
-    async def _connected(self, process: asyncio.subprocess.Process) -> str:
+    async def _speak_with(self, process: asyncio.subprocess.Process) -> str:
         """Speak MCP with ``process`` until it exits; returns how it exited."""
         assert process.stdin is not None and process.stdout is not None
         incoming, received = anyio.create_memory_object_stream[SessionMessage | Exception](0)
@@ -112,7 +112,7 @@ class StdioSession(ClientConnection):
             for pipe in pipes:
                 pipe.cancel()
             await asyncio.gather(*pipes, return_exceptions=True)
-        return _exited(status)
+        return _word_exited(status)
 
 
 async def _read(
@@ -122,7 +122,7 @@ async def _read(
     error parsing it, until it ends; ``incoming`` is closed after."""
     async with incoming:
         while line := await stdout.readline():
-            await incoming.send(_parsed(line))
+            await incoming.send(_parse_message(line))
 
 
 async def _write(
@@ -137,7 +137,7 @@ async def _write(
                 await stdin.drain()
 
 
-def _parsed(line: bytes) -> SessionMessage | Exception:
+def _parse_message(line: bytes) -> SessionMessage | Exception:
     """The message ``line`` holds, or why it holds none."""
     try:
         return SessionMessage(jsonrpc_message_adapter.validate_json(line, by_name=False))
@@ -145,7 +145,7 @@ def _parsed(line: bytes) -> SessionMessage | Exception:
         return exc
 
 
-def _exited(status: int) -> str:
+def _word_exited(status: int) -> str:
     """How a server that exited with ``status`` stopped."""
     return f"it exited with status {status}"
 
@@ -156,4 +156,4 @@ async def _exit(process: asyncio.subprocess.Process) -> UpstreamFailed | None:
         status = await asyncio.wait_for(process.wait(), EXIT_GRACE.total_seconds())
     except TimeoutError:
         return None
-    return UpstreamFailed(_exited(status))
+    return UpstreamFailed(_word_exited(status))

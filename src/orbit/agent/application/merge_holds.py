@@ -42,21 +42,21 @@ from orbit.agent.domain.merge_holds import (
     decide_fix_review,
     decide_unlanded_fix,
     decide_unreviewed,
+    filter_finding_holds,
+    filter_set_holds,
     find_fix_root,
     find_fixed_set,
     find_hold,
-    finding_holds,
     fold_holds,
     held_step,
     keep_holds,
     lift_hold,
     note_lift,
-    released_note,
-    resumed_note,
     set_fix_prompt,
-    set_holds,
     unlifted_sets,
     view_hold,
+    word_released,
+    word_resumed,
 )
 from orbit.agent.domain.roles import Role, role_task
 from orbit.agent.domain.storage_halt import FailedWrite
@@ -146,7 +146,7 @@ class MergeHolds:
     def checking(self) -> tuple[FindingHold, ...]:
         """The blocking findings' holds whose latest fix a review is still to check, in the
         order they started."""
-        return tuple(hold for hold in finding_holds(self._holds) if hold.batch is not None)
+        return tuple(hold for hold in filter_finding_holds(self._holds) if hold.batch is not None)
 
     @property
     def views(self) -> tuple[MergeHold, ...]:
@@ -241,7 +241,7 @@ class MergeHolds:
         """Whether the task that is ``state`` is, or carries on from, a fix for a hold on, a
         set's or a blocking finding's latest, whose work lands despite the holds."""
         root = find_fix_root(state, self._board.find).id
-        fixing = any(hold.task == root for hold in finding_holds(self._holds))
+        fixing = any(hold.task == root for hold in filter_finding_holds(self._holds))
         return fixing or self.fix_of(state) is not None
 
     def filing_of(self, filed: BlockingTask) -> FindingFiling:
@@ -278,11 +278,11 @@ class MergeHolds:
         holds = self._holds
         if not holds:
             return
-        names = tuple(hold.name for hold in set_holds(holds))
-        lenses = tuple(hold.lens for hold in finding_holds(holds))
+        names = tuple(hold.name for hold in filter_set_holds(holds))
+        lenses = tuple(hold.lens for hold in filter_finding_holds(holds))
         self._lifted = "every"
         await self._replace(())
-        await self._parts.publish(Notice(message=released_note(names, lenses)))
+        await self._parts.publish(Notice(message=word_released(names, lenses)))
         self.released()
 
     async def retry(self) -> StoreFailed | None:
@@ -302,7 +302,7 @@ class MergeHolds:
             return
         self._lifted = note_lift(self._lifted, name)
         await self._replace(lift_hold(self._holds, name))
-        await self._parts.publish(Notice(message=resumed_note(name)))
+        await self._parts.publish(Notice(message=word_resumed(name)))
         if not self._holds:
             self.released()
 

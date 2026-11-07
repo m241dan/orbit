@@ -112,7 +112,7 @@ def note_held(name: str, commit: str) -> str:
     return f"Merges held: {name} failed on {commit[:SHORT_COMMIT]}. A fix is queued first."
 
 
-def resumed_note(name: str) -> str:
+def word_resumed(name: str) -> str:
     """The notice that the set ``name`` passed, lifting its hold."""
     return f"Merges resumed: {name} passed."
 
@@ -136,7 +136,7 @@ def word_unfixed(lenses: Sequence[str]) -> str:
     return f"the findings from {', '.join(lenses)} aren't fixed"
 
 
-def released_note(names: Sequence[str], lenses: Sequence[str] = ()) -> str:
+def word_released(names: Sequence[str], lenses: Sequence[str] = ()) -> str:
     """The notice that the user released the holds of the sets ``names`` and of the findings
     the ``lenses`` raised by hand."""
     parts = [
@@ -154,12 +154,12 @@ def note_finding_held(hold: FindingHold) -> str:
     )
 
 
-def finding_resumed_note(lens: str) -> str:
+def word_finding_resumed(lens: str) -> str:
     """The notice that the finding the lens ``lens`` raised is fixed, lifting its hold."""
     return f"Merges resumed: the finding from {lens} is fixed."
 
 
-def finding_step_in_note(lens: str, fixes: int) -> str:
+def word_finding_step_in(lens: str, fixes: int) -> str:
     """The notice that the finding the lens ``lens`` raised still holds after ``fixes`` fixes,
     so the user must step in."""
     return (
@@ -168,7 +168,7 @@ def finding_step_in_note(lens: str, fixes: int) -> str:
     )
 
 
-def unchecked_note(lens: str) -> str:
+def word_unchecked(lens: str) -> str:
     """The notice that no review can check the fix of the finding the lens ``lens`` raised, so
     the user must step in."""
     return (
@@ -177,7 +177,7 @@ def unchecked_note(lens: str) -> str:
     )
 
 
-def step_in_note(name: str, fixes: int) -> str:
+def word_step_in(name: str, fixes: int) -> str:
     """The notice that the set ``name`` still fails after ``fixes`` fixes, so the user must step
     in."""
     return (
@@ -188,15 +188,15 @@ def step_in_note(name: str, fixes: int) -> str:
 
 def find_hold(holds: Sequence[AnyHold], name: str) -> Hold | None:
     """The set ``name``'s hold among ``holds``; none if it holds none."""
-    return next((hold for hold in set_holds(holds) if hold.name == name), None)
+    return next((hold for hold in filter_set_holds(holds) if hold.name == name), None)
 
 
-def set_holds(holds: Sequence[AnyHold]) -> tuple[Hold, ...]:
+def filter_set_holds(holds: Sequence[AnyHold]) -> tuple[Hold, ...]:
     """The named sets' holds among ``holds``, in order."""
     return tuple(hold for hold in holds if isinstance(hold, Hold))
 
 
-def finding_holds(holds: Sequence[AnyHold]) -> tuple[FindingHold, ...]:
+def filter_finding_holds(holds: Sequence[AnyHold]) -> tuple[FindingHold, ...]:
     """The blocking findings' holds among ``holds``, in order."""
     return tuple(hold for hold in holds if isinstance(hold, FindingHold))
 
@@ -216,7 +216,7 @@ def decide_failure(
         return HoldDecision((*others, replace(failed, fixes=tried)), notes)
     if tried >= limit:
         return HoldDecision(
-            (*others, replace(failed, fixes=tried)), (*notes, step_in_note(failed.name, tried))
+            (*others, replace(failed, fixes=tried)), (*notes, word_step_in(failed.name, tried))
         )
     return HoldDecision((*others, replace(failed, fixes=tried + 1)), notes, fix=True)
 
@@ -246,7 +246,7 @@ def find_refiled_hold(holds: Sequence[AnyHold], filed: BlockingTask) -> FindingH
     return next(
         (
             hold
-            for hold in finding_holds(holds)
+            for hold in filter_finding_holds(holds)
             if hold.lens in filed.lenses and hold.batch is not None and hold.batch == filed.reviewed
         ),
         None,
@@ -276,7 +276,7 @@ def decide_blocking(
         new = FindingHold(filed.lens, filed.commit, filed.title, task, batch)
         return HoldDecision((*holds, new), (note_finding_held(new),))
     if held.fixes >= limit:
-        note = finding_step_in_note(held.lens, held.fixes)
+        note = word_finding_step_in(held.lens, held.fixes)
         return HoldDecision(merge_holds(holds, (replace(held, batch=None),)), (note,))
     again = replace(held, task=task, batch=batch, fixes=held.fixes + 1)
     return HoldDecision(merge_holds(holds, (again,)))
@@ -307,13 +307,13 @@ def decide_fix_review(holds: Sequence[AnyHold], review: FixReview) -> HoldDecisi
     checked = _fixed_in(holds, review.batch)
     fixed = tuple(hold for hold in checked if _is_cleared(hold, review))
     unchecked = tuple(hold for hold in checked if hold not in fixed)
-    notes = tuple(finding_resumed_note(hold.lens) for hold in fixed)
+    notes = tuple(word_finding_resumed(hold.lens) for hold in fixed)
     return _with_unchecked(HoldDecision(_without(holds, fixed), notes), unchecked)
 
 
 def _fixed_in(holds: Sequence[AnyHold], batch: str) -> tuple[FindingHold, ...]:
     """The findings' holds among ``holds`` whose latest fix is ``batch``'s."""
-    return tuple(hold for hold in finding_holds(holds) if hold.batch == batch)
+    return tuple(hold for hold in filter_finding_holds(holds) if hold.batch == batch)
 
 
 def _is_cleared(hold: FindingHold, review: FixReview) -> bool:
@@ -341,7 +341,7 @@ def _with_unchecked(decision: HoldDecision, unchecked: Collection[FindingHold]) 
     """``decision``, with the ``unchecked`` holds among its holds checked by no review, and
     notes telling the user so after its own."""
     holds = tuple(_unchecked(hold) if hold in unchecked else hold for hold in decision.holds)
-    notes = (*decision.notes, *(unchecked_note(hold.lens) for hold in unchecked))
+    notes = (*decision.notes, *(word_unchecked(hold.lens) for hold in unchecked))
     return replace(decision, holds=holds, notes=notes)
 
 

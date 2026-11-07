@@ -50,8 +50,8 @@ from orbit.agent import (
     WorkspaceUnavailable,
     copies_folder,
     file_names,
+    find_mcp_folder,
     in_git_work_tree,
-    mcp_folder,
     open_workspace,
     read_built_in_triggers,
     read_config,
@@ -387,7 +387,7 @@ def _with_mcp(agents: Agents, opened: OpenedStore, config: OrbitConfig, config_d
     HTTP, their variables and headers filled from orbit's environment, else from
     ``credentials.toml`` in the user config directory ``config_dir``."""
     store = opened.store
-    folder = mcp_folder(store.ledger.state_dir, store.workspace_id)
+    folder = find_mcp_folder(store.ledger.state_dir, store.workspace_id)
     connector = TransportConnector(StdioConnector(), HttpConnector())
     credentials = LayeredCredentials(EnvironmentCredentials(), CredentialsFile(config_dir))
     proxying = McpProxying(config.mcp, connector, credentials, str(folder))

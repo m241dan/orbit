@@ -93,7 +93,7 @@ class ClientConnection(ABC):
             raise await self._failure(exc, self._served) from None
         except ValidationError:
             raise UpstreamFailed(UNREADABLE) from None
-        return Reply(_text(result.content), is_error=bool(result.is_error))
+        return Reply(_join_text(result.content), is_error=bool(result.is_error))
 
     async def close(self) -> None:
         """Stop serving, if it still is, and wait for it to have stopped; why it stopped, if it
@@ -105,9 +105,9 @@ class ClientConnection(ABC):
     async def _serve(self) -> str:
         """Run the transport and a session on it, initialised with :meth:`_initialise`, until
         the server stops serving; returns how it stopped. Raises if it can't be reached or
-        initialised; :meth:`_failed` says why the error means it stopped."""
+        initialised; :meth:`_explain_failure` says why the error means it stopped."""
 
-    def _failed(self, error: BaseException) -> UpstreamFailed:
+    def _explain_failure(self, error: BaseException) -> UpstreamFailed:
         """Why serving stopped on ``error``, as it says."""
         return UpstreamFailed(reason(error))
 
@@ -136,12 +136,12 @@ class ClientConnection(ABC):
         if ended is not None:
             return ended
         if error.code == REQUEST_TIMEOUT:
-            return UpstreamFailed(self._timed_out())
+            return UpstreamFailed(self._word_timed_out())
         if error.code == CONNECTION_CLOSED:
             return UpstreamFailed("the connection to it dropped")
         return UpstreamFailed(error.message)
 
-    def _timed_out(self) -> str:
+    def _word_timed_out(self) -> str:
         """Why a request the server didn't answer in time failed."""
         return f"it didn't answer within {self._timeout.total_seconds():g} seconds"
 
@@ -160,10 +160,10 @@ class ClientConnection(ABC):
         if error is None:
             return UpstreamFailed(self._serving.result())
         cause = _cause(error)
-        return cause if isinstance(cause, UpstreamFailed) else self._failed(cause)
+        return cause if isinstance(cause, UpstreamFailed) else self._explain_failure(cause)
 
 
-async def not_exited() -> UpstreamFailed | None:
+async def report_not_exited() -> UpstreamFailed | None:
     """Nothing: what's known of a server's having stopped serving while it's serving."""
     return None
 
@@ -173,7 +173,7 @@ def _upstream(tool: Tool) -> UpstreamTool:
     return UpstreamTool(tool.name, tool.description, tool.input_schema)
 
 
-def _text(content: Sequence[ContentBlock]) -> str:
+def _join_text(content: Sequence[ContentBlock]) -> str:
     """``content`` as text: each text block's text, and each other block as JSON, a line
     each."""
     return "\n".join(

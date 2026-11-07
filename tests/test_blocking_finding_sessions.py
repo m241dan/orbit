@@ -12,10 +12,10 @@ from orbit.agent import Verification, WorkspaceHost
 from orbit.agent.application.ports import Reply
 from orbit.agent.domain.merge_holds import (
     FindingHold,
-    finding_resumed_note,
-    finding_step_in_note,
     note_finding_held,
-    unchecked_note,
+    word_finding_resumed,
+    word_finding_step_in,
+    word_unchecked,
 )
 from orbit.agent.domain.merge_pass import NOT_BLOCKING
 from orbit.agent.domain.reviews import ReviewLimits, pause_notice
@@ -242,7 +242,7 @@ async def test_a_blocking_task_holds_merges_runs_first_and_its_clean_review_lift
     seen.close()
     await session.close()
     assert seen.merged()[2] == (later.id, "c3")
-    assert seen.notices() == [HELD, finding_resumed_note(BUGS_REVIEWER)]
+    assert seen.notices() == [HELD, word_finding_resumed(BUGS_REVIEWER)]
     assert (shown.merge_holds, shown.waiting_to_merge) == ((), ())
 
 
@@ -260,7 +260,7 @@ async def test_a_blocking_finding_its_fixs_merge_pass_gives_up_on_keeps_merges_h
     session = held_session(cast, merge, gives_up)
     seen = Seen(session)
     await run(session, seen)
-    await eventually(lambda: unchecked_note(BUGS_REVIEWER) in seen.notices())
+    await eventually(lambda: word_unchecked(BUGS_REVIEWER) in seen.notices())
     [fix], [later] = titled(session, "Fix the crash"), titled(session, "Add a test")
     holds = holds_of(session)
     shown = await snapshot_of(session)
@@ -268,7 +268,7 @@ async def test_a_blocking_finding_its_fixs_merge_pass_gives_up_on_keeps_merges_h
     await session.close()
 
     assert holds is not None and holds.held and holds.checking == ()
-    assert seen.notices() == [HELD, unchecked_note(BUGS_REVIEWER)]
+    assert seen.notices() == [HELD, word_unchecked(BUGS_REVIEWER)]
     assert seen.merged() == [("1", "c1"), (fix.id, "c2")]
     assert (shown.merge_holds, shown.waiting_to_merge) == ((VIEW,), (later.id,))
 
@@ -289,7 +289,7 @@ async def test_a_blocking_task_filed_again_is_the_next_fix_then_past_the_limit_a
     session = held_session(cast, *merges, fallback_fixes=2)
     seen = Seen(session)
     await run(session, seen)
-    step_in = finding_step_in_note(BUGS_REVIEWER, 2)
+    step_in = word_finding_step_in(BUGS_REVIEWER, 2)
     await eventually(lambda: step_in in seen.notices())
     [first], [again], [normal] = (titled(session, f"{title}\n") for title in titles)
     await eventually(lambda: waiting(session) == (normal.id,))
@@ -324,14 +324,14 @@ async def test_a_fix_whose_batch_is_at_the_last_round_cant_be_checked_and_stays_
     )
     seen = Seen(session)
     await run(session, seen)
-    await eventually(lambda: unchecked_note(BUGS_REVIEWER) in seen.notices())
+    await eventually(lambda: word_unchecked(BUGS_REVIEWER) in seen.notices())
     holds = holds_of(session)
     [fix] = titled(session, "Fix the crash")
     seen.close()
     await session.close()
 
     assert holds is not None and holds.held
-    assert seen.notices() == [HELD, pause_notice(1), unchecked_note(BUGS_REVIEWER)]
+    assert seen.notices() == [HELD, pause_notice(1), word_unchecked(BUGS_REVIEWER)]
     assert [merged for merged, _ in seen.merged()] == ["1", fix.id]
 
 
@@ -352,11 +352,11 @@ async def test_a_fix_whose_lens_doesnt_review_batches_cant_be_checked_and_stays_
     )
     seen = Seen(session)
     await run(session, seen)
-    await eventually(lambda: unchecked_note(BUGS_REVIEWER) in seen.notices())
+    await eventually(lambda: word_unchecked(BUGS_REVIEWER) in seen.notices())
     seen.close()
     await session.close()
 
-    assert seen.notices() == [HELD, unchecked_note(BUGS_REVIEWER)]
+    assert seen.notices() == [HELD, word_unchecked(BUGS_REVIEWER)]
 
 
 async def test_a_fix_that_gives_up_cant_be_checked_and_stays_held() -> None:
@@ -374,11 +374,11 @@ async def test_a_fix_that_gives_up_cant_be_checked_and_stays_held() -> None:
     session = held_session(cast, files(("Fix the crash", "F1", "blocking")))
     seen = Seen(session)
     await run(session, seen)
-    await eventually(lambda: unchecked_note(BUGS_REVIEWER) in seen.notices())
+    await eventually(lambda: word_unchecked(BUGS_REVIEWER) in seen.notices())
     seen.close()
     await session.close()
 
-    assert seen.notices() == [HELD, unchecked_note(BUGS_REVIEWER)]
+    assert seen.notices() == [HELD, word_unchecked(BUGS_REVIEWER)]
 
 
 async def test_a_blocking_task_whose_findings_are_all_normal_is_refused() -> None:

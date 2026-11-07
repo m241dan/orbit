@@ -74,13 +74,13 @@ from orbit.agent.domain.merge_pass import (
     count_outcomes,
     end_task_in,
     find_filed_in,
+    mark_dismissed,
+    mark_filed,
+    mark_task_ended,
     refuse_decision,
     refuse_filing,
     refuse_severity,
-    undecided_refusal,
-    with_dismissed,
-    with_filed,
-    with_task_ended,
+    refuse_undecided,
 )
 from orbit.agent.domain.reviews import (
     NOT_BOOKED_FOR_FINDINGS,
@@ -480,7 +480,7 @@ class ReviewLane:
         if not count:
             return
         self._groups = {
-            batch: with_task_ended(group, fixed, ending) for batch, group in self._groups.items()
+            batch: mark_task_ended(group, fixed, ending) for batch, group in self._groups.items()
         }
         span.set_attributes({_ENDED_FINDINGS[ending]: count})
 
@@ -648,7 +648,7 @@ class ReviewLane:
         ``task_id``, keeping the ``severity`` it was filed at."""
         if not findings:
             return
-        self._groups[batch] = with_filed(self._groups[batch], findings, task_id)
+        self._groups[batch] = mark_filed(self._groups[batch], findings, task_id)
         self._severities[task_id] = severity
 
     async def dismiss(self, task_id: str, dismissed: Dismissal) -> Reply:
@@ -661,7 +661,7 @@ class ReviewLane:
         refusal = refuse_decision(group, dismissed.finding)
         if refusal is not None:
             return Reply(refusal, is_error=True)
-        self._groups[batch] = with_dismissed(group, dismissed)
+        self._groups[batch] = mark_dismissed(group, dismissed)
         await self._hooks.changed()
         return Reply(f"Dismissed {dismissed.finding}.")
 
@@ -669,7 +669,7 @@ class ReviewLane:
         """Why task ``task_id`` can't complete yet: it's a merge pass whose review has findings
         undecided; ``None`` if it can."""
         batch = self._merging_in(task_id)
-        return None if batch is None else undecided_refusal(self._groups[batch])
+        return None if batch is None else refuse_undecided(self._groups[batch])
 
     def _merging_in(self, task_id: str) -> str | None:
         """The batch of the review whose merge pass task ``task_id`` is, if it hasn't ended

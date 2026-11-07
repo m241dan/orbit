@@ -33,7 +33,7 @@ class CredentialsFile:
         """The value the file gives the variable ``name``; ``None`` if it gives none or there's
         no file. Raises :class:`CredentialsUnreadable` if the file or its directory lets others
         in, or the file can't be read, isn't valid TOML or holds a value that isn't a string."""
-        text = self._text()
+        text = self._read_text()
         if text is None:
             return None
         try:
@@ -45,9 +45,9 @@ class CredentialsFile:
             raise CredentialsUnreadable(word_not_a_string(str(self.path), values))
         return values.get(name)
 
-    def _text(self) -> str | None:
+    def _read_text(self) -> str | None:
         """What the file holds, checked private before it's read; ``None`` if there's none."""
-        data = self._bytes()
+        data = self._read_bytes()
         if data is None:
             return None
         try:
@@ -55,7 +55,7 @@ class CredentialsFile:
         except UnicodeDecodeError:
             raise CredentialsUnreadable(word_unreadable(str(self.path), "it isn't UTF-8")) from None
 
-    def _bytes(self) -> bytes | None:
+    def _read_bytes(self) -> bytes | None:
         """The file's bytes, checked private before they're read; ``None`` if there's no file,
         or no directory to hold it."""
         try:

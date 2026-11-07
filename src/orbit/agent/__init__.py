@@ -125,7 +125,7 @@ from orbit.agent.external.local_zone import LocalZone
 from orbit.agent.external.mcp_connectors import TransportConnector
 from orbit.agent.external.mcp_host import McpHost
 from orbit.agent.external.mcp_http import HttpConnector
-from orbit.agent.external.mcp_stdio import StdioConnector, mcp_folder
+from orbit.agent.external.mcp_stdio import StdioConnector, find_mcp_folder
 from orbit.agent.external.repository import (
     RepositoryUnreadable,
     git_top_level,
@@ -291,6 +291,7 @@ __all__ = [
     "copies_folder",
     "create_user_config",
     "file_names",
+    "find_mcp_folder",
     "fingerprint",
     "forget_workspace",
     "git_top_level",
@@ -308,7 +309,6 @@ __all__ = [
     "knows_runtime",
     "local_tls",
     "make_ca",
-    "mcp_folder",
     "not_on_path",
     "open_workspace",
     "open_workspace_store",

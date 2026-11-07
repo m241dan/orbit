@@ -164,7 +164,7 @@ def _blocking_roles(group: ReviewGroup, finding_ids: Sequence[str]) -> tuple[str
     )
 
 
-def with_filed(group: ReviewGroup, finding_ids: Sequence[str], task_id: str) -> ReviewGroup:
+def mark_filed(group: ReviewGroup, finding_ids: Sequence[str], task_id: str) -> ReviewGroup:
     """``group`` with the findings ``finding_ids`` filed as task ``task_id``: the first
     ``filed``, the rest ``merged`` into it."""
     findings = tuple(
@@ -182,7 +182,7 @@ def _filing(finding_id: str, finding_ids: Sequence[str]) -> FindingOutcome:
     return "filed" if finding_id == finding_ids[0] else "merged"
 
 
-def with_dismissed(group: ReviewGroup, dismissed: Dismissal) -> ReviewGroup:
+def mark_dismissed(group: ReviewGroup, dismissed: Dismissal) -> ReviewGroup:
     """``group`` with the finding ``dismissed`` names dismissed for its reason."""
     findings = tuple(
         replace(finding, outcome="dismissed", reason=dismissed.reason)
@@ -198,7 +198,7 @@ def list_undecided(group: ReviewGroup) -> tuple[str, ...]:
     return tuple(finding.id for finding in group.findings if finding.outcome == "undecided")
 
 
-def undecided_refusal(group: ReviewGroup) -> str | None:
+def refuse_undecided(group: ReviewGroup) -> str | None:
     """Why a merge pass of ``group`` can't complete yet: some of its findings are undecided;
     ``None`` if every one is decided."""
     left = list_undecided(group)
@@ -216,10 +216,10 @@ def end_task_in(group: ReviewGroup, task_id: str) -> ReviewGroup:
     the findings they left undecided ``unanswered``."""
     ended = with_ended(group, task_id)
     merged = task_id in ended.merges and all(task in ended.ended for task in ended.merges)
-    return _with_unanswered(ended) if merged else ended
+    return _mark_unanswered(ended) if merged else ended
 
 
-def _with_unanswered(group: ReviewGroup) -> ReviewGroup:
+def _mark_unanswered(group: ReviewGroup) -> ReviewGroup:
     """``group`` with its undecided findings ``unanswered``."""
     findings = tuple(
         replace(finding, outcome="unanswered") if finding.outcome == "undecided" else finding
@@ -237,7 +237,7 @@ def find_filed_in(group: ReviewGroup, tasks: Collection[str]) -> tuple[Finding, 
     )
 
 
-def with_task_ended(group: ReviewGroup, tasks: Collection[str], ending: TaskEnding) -> ReviewGroup:
+def mark_task_ended(group: ReviewGroup, tasks: Collection[str], ending: TaskEnding) -> ReviewGroup:
     """``group`` with its findings filed, or merged, into one of ``tasks`` marked as ``ending``
     says."""
     ending_ids = {finding.id for finding in find_filed_in(group, tasks)}
