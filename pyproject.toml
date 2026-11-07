@@ -246,6 +246,13 @@ type = "layers"
 containers = ["orbit.agent"]
 layers = ["external", "application", "domain"]
 
+# Schedules need only cron arithmetic, not the triggers whose expressions they read.
+[[tool.importlinter.contracts]]
+name = "Schedules read cron without triggers"
+type = "forbidden"
+source_modules = ["orbit.agent.domain.schedules"]
+forbidden_modules = ["orbit.agent.domain.triggers"]
+
 [[tool.importlinter.contracts]]
 name = "Domain does no I/O"
 type = "forbidden"

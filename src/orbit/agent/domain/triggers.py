@@ -3,7 +3,7 @@ named set: the events and guards orbit knows, a trigger's fields, the package's 
 with a project's and checked against its roles and sets, the reports a configurator proposes
 routing a set's runs to a lens role, the sets no trigger runs, which of them fire on an event
 and which guards hold one back, which of them a landing's changed paths let fire, when one fires
-in words, when a ``schedule`` trigger's cron expression comes due, the tab a task's agent shows
+in words, the cron expressions of the ``schedule`` triggers, the tab a task's agent shows
 under, what a named set's run ending raises, and the rendering of a trigger's prompt template.
 
 The package's triggers aren't kept here: whoever builds them passes in the contents of their
@@ -16,11 +16,8 @@ import re
 from collections import Counter
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, tzinfo
-from fnmatch import fnmatchcase
 from typing import Annotated, Any, Final, Literal, get_args
 
-from cronsim import CronSim, CronSimError
 from pydantic import (
     AfterValidator,
     BaseModel,
@@ -33,7 +30,9 @@ from pydantic_core import PydanticCustomError
 
 from orbit.agent.domain.board import WAITING
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
+from orbit.agent.domain.cron import cron_problem
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
+from orbit.agent.domain.path_globs import matchable, matches_path, unmatchable_glob
 from orbit.agent.domain.reviews import ReviewJob, ReviewKind
 from orbit.agent.domain.roles import PLAIN_NAME
 from orbit.agent.domain.verification import VerificationStep, set_report
@@ -84,13 +83,6 @@ couldn't start, nor the task checks, raise it."""
 SCHEDULE: Final = "schedule"
 """The event of a trigger's ``cron`` expression coming due while its workspace is open, or
 having come due while it was closed, the only event ``cron`` goes with."""
-
-CRON_FIELDS = 5
-"""The fields of a trigger's ``cron``: minute, hour, day of month, month and day of week."""
-
-_ANY_TIME = datetime(2000, 1, 1)
-"""A time to read a cron expression from as it's checked, and to look for its first time after,
-which cronsim gives up on finding after 50 years."""
 
 SetStatus = Literal["passed", "failed"]
 """What ``set_finished``'s ``status`` field says: the set's run passed, or failed."""
@@ -143,9 +135,6 @@ VARIABLE = re.compile(r"\{([a-z_]+)\}")
 
 PARAGRAPH_BREAK = "\n\n"
 """What parts a template's paragraphs."""
-
-ANY_DIRECTORIES = "**"
-"""The part of a ``paths`` glob that stands for any number of directories, none included."""
 
 
 @dataclass(frozen=True)
@@ -767,28 +756,9 @@ def _paths_problems(trigger: Trigger) -> list[tuple[str, str]]:
     event = [] if trigger.on == TASK_LANDED else [("paths", f'paths needs on = "{TASK_LANDED}".')]
     empty = [] if trigger.paths else [("paths", "a list of paths names at least one glob.")]
     unmatchable = [
-        ("paths", _unmatchable_glob(glob)) for glob in trigger.paths if not _matchable(glob)
+        ("paths", unmatchable_glob(glob)) for glob in trigger.paths if not matchable(glob)
     ]
     return [*event, *empty, *unmatchable]
-
-
-_GIT_PATH_NON_PARTS = frozenset({"", ".", ".."})
-"""The parts, between slashes, that a repository-relative git path never has."""
-
-
-def _matchable(glob: str) -> bool:
-    """Whether ``glob`` can match a git path at all: none of its parts, split at its slashes,
-    is one a git path never has, as a leading or trailing ``/``, ``//``, ``.`` or ``..`` make."""
-    return _GIT_PATH_NON_PARTS.isdisjoint(glob.split("/"))
-
-
-def _unmatchable_glob(glob: str) -> str:
-    """Why ``glob``, a ``paths`` glob :func:`_matchable` refuses, is refused, and how to write a
-    directory instead."""
-    return (
-        f'"{glob}" can never match a git path, which neither starts nor ends with "/" and has'
-        ' no empty, "." or ".." part; write a directory as "dir/**".'
-    )
 
 
 def _cron_problems(trigger: Trigger) -> list[tuple[str, str]]:
@@ -800,34 +770,6 @@ def _cron_problems(trigger: Trigger) -> list[tuple[str, str]]:
         return [("cron", f'cron needs on = "{SCHEDULE}".')]
     problem = cron_problem(trigger.cron)
     return [] if problem is None else [("cron", f'cron = "{trigger.cron}" {problem}')]
-
-
-def cron_problem(cron: str) -> str | None:
-    """Why ``cron`` isn't a five-field cron expression that comes due, quoting cronsim's reason,
-    if it isn't; none if it is. Cronsim reads six fields too, the first seconds, which orbit
-    doesn't take. Cronsim refuses a day of month no month it names has, but not every
-    expression that never matches, such as ``0 0 */30 2 1#5``, the 1st or 31st of February
-    that's its fifth Monday; looking for one's next time would end the schedules."""
-    try:
-        times = CronSim(cron, _ANY_TIME)
-    except CronSimError as exc:
-        return f"isn't a cron expression: {exc}."
-    if len(cron.split()) != CRON_FIELDS:
-        return "has six fields; cron takes five: minute, hour, day of month, month, day of week."
-    return None if next(times, None) is not None else "never comes due."
-
-
-def next_due(cron: str, after: datetime, zone: tzinfo) -> datetime:
-    """The first time after ``after`` that ``cron``, a valid cron expression, comes due, read in
-    ``zone``, as cronsim reads it: a time daylight saving skips comes due as the clocks go
-    forward, and one it repeats comes due once."""
-    return next(CronSim(cron, after.astimezone(zone)))
-
-
-def falls_due(cron: str, since: datetime, until: datetime, zone: tzinfo) -> bool:
-    """Whether ``cron``, a valid cron expression read in ``zone``, comes due after ``since`` and
-    by ``until``."""
-    return next_due(cron, since, zone) <= until
 
 
 def scheduled_crons(triggers: Mapping[str, Trigger]) -> dict[str, str]:
@@ -980,24 +922,6 @@ def within_paths(
 def _changes_any(patterns: Sequence[str], changed: Collection[str]) -> bool:
     """Whether one of the paths ``changed`` matches one of the globs ``patterns``."""
     return any(matches_path(pattern, path) for pattern in patterns for path in changed)
-
-
-def matches_path(pattern: str, path: str) -> bool:
-    """Whether ``path``, a repository-relative git path, matches ``pattern``, a glob matched
-    with :func:`~fnmatch.fnmatchcase` directory by directory, so ``*`` stays within one, but for
-    a part that's just ``**``, which stands for any number of directories, none included."""
-    return _matches_parts(tuple(pattern.split("/")), tuple(path.split("/")))
-
-
-def _matches_parts(patterns: tuple[str, ...], parts: tuple[str, ...]) -> bool:
-    """Whether the ``parts`` of a path, split at its slashes, match those of a glob,
-    ``patterns``, as :func:`matches_path` says."""
-    if not patterns:
-        return not parts
-    first, rest = patterns[0], patterns[1:]
-    if first == ANY_DIRECTORIES:
-        return any(_matches_parts(rest, parts[skipped:]) for skipped in range(len(parts) + 1))
-    return bool(parts) and fnmatchcase(parts[0], first) and _matches_parts(rest, parts[1:])
 
 
 def firing_roles(

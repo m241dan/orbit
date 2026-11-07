@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, tzinfo
 from typing import assert_never
 
-from orbit.agent.domain.triggers import falls_due, next_due
+from orbit.agent.domain.cron import falls_due, next_due
 
 LONGEST_WAIT = timedelta(minutes=5)
 """The longest a schedule waits before looking at the time again: a machine asleep doesn't count

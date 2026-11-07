@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from orbit.agent.domain.triggers import next_due
+from orbit.agent.domain.cron import next_due
 from orbit.agent.external.local_zone import LocalZone
 
 NEW_YORK = ZoneInfo("America/New_York")
