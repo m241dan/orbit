@@ -2327,8 +2327,10 @@ A trigger's fields:
   Git is asked what changed only while a trigger with `paths` listens, and if it can't say, the
   trigger fires all the same, the failure an `orbit.trigger.paths_failed` event on the span
   current (see [Telemetry](#telemetry)), so no review is skipped unseen. No shipped trigger sets
-  `paths`: `security-review` reviews every commit until a project narrows it, as this does to
-  commits changing an adapter or the dependencies:
+  `paths`: `security-review` reviews every commit that changes code, as its `code-changed` guard
+  decides, until a project narrows it further. A trigger that sets its own `paths` is decided by
+  `paths` alone and ignores `code-changed`, as this one is, to commits changing an adapter or the
+  dependencies:
 
   ```toml
   [triggers.security-review]
