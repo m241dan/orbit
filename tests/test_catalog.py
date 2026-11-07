@@ -24,7 +24,13 @@ RUNNING = SessionStateChanged(session="now", active=True, state="running", viewe
 SECURITY = AgentEntry(name="security", label="security", conversational=False)
 TWO = Catalog(
     workspaces=(
-        WorkspaceEntry(id="w1", label="one", sessions=(NOW, OLD), agents=(SECURITY,)),
+        WorkspaceEntry(
+            id="w1",
+            label="one",
+            sessions=(NOW, OLD),
+            agents=(SECURITY,),
+            mapped_skills=("python", "layers"),
+        ),
         WorkspaceEntry(id="w2", label="two", sessions=(FAR, NOW)),
     ),
     agents=(SECURITY,),
@@ -54,6 +60,14 @@ def test_each_workspace_keeps_its_own_agents_through_state_changes() -> None:
     assert state.agents("w1") == (SECURITY,)
     assert state.agents("w2") == ()
     assert state.agents("gone") == state.agents(None) == ()
+
+
+def test_each_workspace_gives_the_skills_its_project_maps() -> None:
+    state = CatalogState()
+    state.follow(TWO)
+    assert state.mapped_skills("w1") == ("python", "layers")
+    assert state.mapped_skills("w2") == ()
+    assert state.mapped_skills("gone") == state.mapped_skills(None) == ()
 
 
 def test_a_state_change_applies_to_its_session_in_every_workspace_alone() -> None:

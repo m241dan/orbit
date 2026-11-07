@@ -355,9 +355,13 @@ sessions lets go too, leaving list mode if the list was active.
 [docs/task-list.md](docs/task-list.md) records the requirements.
 
 Under a task's title, its row's dim details line shows its model and workspace level, followed by
-` + web` with web access, then what else applies, and ends with its skills, if it names any, in
-order (`opus · shell + web · skills: python, application`); a task without skills shows nothing for
-them.
+` + web` with web access, then what else applies, and ends with every skill the task's agent gets,
+as it's given them at launch: its role's before a `+`, then the task's own and those the project's
+`[[skills]]` entries map, each once (`read · skills: code-style, review-bugs + python, application,
+layers, orbit`). With no role skills there's no `+` (`opus · shell + web · skills: python,
+application`), and with no skills at all the row says nothing of them. Drafts and pending tasks show
+them too. The skills follow the current configuration: a running or finished task shows what an
+agent started now would get, and a task whose role is gone shows just its own and the mapped ones.
 
 Each task shows its role as a dim tag after its title, then the lane the role runs in when that
 isn't `work` (`2. ⏳ Review the change  bugs-reviewer · review`); a coder task shows `coder`, and a

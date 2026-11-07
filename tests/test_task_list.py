@@ -763,3 +763,37 @@ def test_a_tasks_skills_come_after_the_rest_of_its_details() -> None:
 
 def test_a_task_without_skills_says_nothing_of_them() -> None:
     assert "skills" not in str(task_label(TaskState(id="1", task=TaskSpec(prompt="x")), "1", ""))
+
+
+def skills_of(task_skills: tuple[str, ...], notes: RowNotes) -> str:
+    """What the details line of a task naming ``task_skills`` says of skills, with ``notes``."""
+    task = TaskState(id="1", task=TaskSpec(prompt="x", skills=task_skills))
+    return str(task_label(task, "1", "", notes=notes)).partition("default · read + web")[2]
+
+
+def test_a_rows_skills_are_its_roles_then_its_tasks_then_the_mapped_ones() -> None:
+    notes = RowNotes(
+        role_skills=("code-style", "review-bugs"),
+        mapped_skills=("application", "python", "layers", "orbit"),
+    )
+    assert skills_of(("python",), notes) == (
+        " · skills: code-style, review-bugs + python, application, layers, orbit"
+    )
+
+
+def test_a_skill_the_task_and_its_role_both_name_shows_once_before_the_plus() -> None:
+    notes = RowNotes(role_skills=("code-style",))
+    assert skills_of(("code-style", "python"), notes) == " · skills: code-style + python"
+
+
+def test_without_role_skills_a_rows_skills_have_no_plus() -> None:
+    notes = RowNotes(mapped_skills=("layers",))
+    assert skills_of(("python",), notes) == " · skills: python, layers"
+
+
+def test_with_only_role_skills_a_rows_skills_have_no_plus() -> None:
+    assert skills_of((), RowNotes(role_skills=("code-style",))) == " · skills: code-style"
+
+
+def test_a_row_with_no_skills_anywhere_says_nothing_of_them() -> None:
+    assert skills_of((), RowNotes()) == ""

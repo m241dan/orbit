@@ -8,7 +8,15 @@ from typing import Protocol
 from rich.cells import cell_len
 from rich.text import Text
 
-from orbit.protocol import ACTIVE_STATUSES, WORK_LANE, AgentEntry, MergeHold, TaskState, Usage
+from orbit.protocol import (
+    ACTIVE_STATUSES,
+    WORK_LANE,
+    AgentEntry,
+    MergeHold,
+    TaskState,
+    Usage,
+    given_skills,
+)
 from orbit.protocol import edit_refusal as shared_edit_refusal
 from orbit.tui.view.common import STATUS_ICONS, spinner_frame
 from orbit.tui.view.detail_views import ERROR
@@ -49,13 +57,17 @@ def task_numbers(tasks: Sequence[TaskState]) -> list[str]:
 class RowNotes:
     """What a task's row says that its task doesn't: that it's ``waiting`` for a coder, as
     this note says, the ``lane`` its role runs in, if known, whether what its role's agents
-    spend is unknown (``usage_unknown``), as their runtime doesn't report it, and that its work
-    waits for the holds on merges to lift (``merging``), as this note says."""
+    spend is unknown (``usage_unknown``), as their runtime doesn't report it, that its work
+    waits for the holds on merges to lift (``merging``), as this note says, the skills its role
+    gives its agents (``role_skills``), and those the project's ``[[skills]]`` entries map
+    (``mapped_skills``)."""
 
     waiting: str | None = None
     lane: str | None = None
     usage_unknown: bool = False
     merging: str | None = None
+    role_skills: tuple[str, ...] = ()
+    mapped_skills: tuple[str, ...] = ()
 
 
 NO_NOTES = RowNotes()
@@ -105,6 +117,11 @@ def role_lanes(agents: Iterable[AgentEntry]) -> dict[str, str]:
     return {agent.name: agent.lane for agent in agents}
 
 
+def role_skills(agents: Iterable[AgentEntry]) -> dict[str, tuple[str, ...]]:
+    """Each role among the catalog's ``agents``, with the skills it gives its agents."""
+    return {agent.name: agent.skills for agent in agents}
+
+
 def usage_unknown_roles(agents: Iterable[AgentEntry]) -> frozenset[str]:
     """The roles among the catalog's ``agents`` whose agents' usage is unknown."""
     return frozenset(agent.name for agent in agents if not agent.usage_known)
@@ -139,8 +156,8 @@ def next_lane(lane: str | None, present: Sequence[str]) -> str | None:
 def _details(state: TaskState, notes: RowNotes) -> str:
     """What a row says under its title: the settings, the fix it's on, what it spent, or that
     that's unknown if ``notes`` say so, that it's waiting for a coder, if pending and they say
-    so, that a role edited it, if it's a draft it did, its skills, if it has any, and that its
-    work waits to merge, if they say so."""
+    so, that a role edited it, if it's a draft it did, the skills its agent gets, if any, and
+    that its work waits to merge, if they say so."""
     details = " · ".join(settings_fields(state.task.settings))
     if state.attempt:
         details += f" · fix {state.attempt}/{state.max_attempts}"
@@ -149,7 +166,8 @@ def _details(state: TaskState, notes: RowNotes) -> str:
         details += f" · {notes.waiting}"
     if state.edited and state.status == "draft":
         details += f" · edited by {state.proposed_by}"
-    return details + _skills(state.task.skills) + _merging(notes.merging)
+    skills = _skills(notes.role_skills, state.task.skills, notes.mapped_skills)
+    return details + skills + _merging(notes.merging)
 
 
 def _merging(note: str | None) -> str:
@@ -158,10 +176,14 @@ def _merging(note: str | None) -> str:
     return "" if note is None else f" · {note}"
 
 
-def _skills(skills: Sequence[str]) -> str:
-    """What a row's details end with for its task's ``skills``: ``· skills: python,
-    application``, in their order; nothing for none."""
-    return f" · skills: {skills_text(skills)}" if skills else ""
+def _skills(role: Sequence[str], task: Sequence[str], mapped: Sequence[str]) -> str:
+    """What a row's details end with for the skills its agent gets: its ``role``'s, then, after
+    a ``+``, its ``task``'s and the ``mapped`` ones, each once (``· skills: code-style + python,
+    layers``); just one side when the other has none, and nothing when neither has any."""
+    given = given_skills(role, task, mapped)
+    sides = (given[: len(role)], given[len(role) :])
+    shown = " + ".join(skills_text(side) for side in sides if side)
+    return f" · skills: {shown}" if shown else ""
 
 
 def _spent(usage: Usage, unknown: bool) -> str:
@@ -359,6 +381,8 @@ class TaskBoard:
         self.waiting: tuple[str, str] | None = None  # The task waiting for a coder, and its note.
         self.lanes: dict[str, str] = {}  # Each role's lane, as the catalog lists them.
         self.usage_unknown: frozenset[str] = frozenset()  # Roles whose usage is unknown.
+        self.role_skills: dict[str, tuple[str, ...]] = {}  # Each role's skills, as listed.
+        self.mapped_skills: tuple[str, ...] = ()  # Those the project's [[skills]] map.
         self.lane: str | None = None  # The lane the list is narrowed to, if any.
         self.merge_holds: tuple[MergeHold, ...] = ()  # The sets holding merges, if any.
         self.waiting_to_merge: frozenset[str] = frozenset()  # Tasks whose work waits for them.
@@ -396,6 +420,24 @@ class TaskBoard:
         if roles == self.usage_unknown:
             return
         self.usage_unknown = roles
+        self.redraw()
+
+    def show_role_skills(self, skills: Mapping[str, tuple[str, ...]]) -> None:
+        """Have each task's row show the skills its role gives, as ``skills`` gives each role's;
+        nothing for the skills already known."""
+        skills = dict(skills)
+        if skills == self.role_skills:
+            return
+        self.role_skills = skills
+        self.redraw()
+
+    def show_mapped_skills(self, skills: Sequence[str]) -> None:
+        """Have each task's row show ``skills``, those the project's ``[[skills]]`` entries map,
+        after its own; nothing for the skills already known."""
+        skills = tuple(skills)
+        if skills == self.mapped_skills:
+            return
+        self.mapped_skills = skills
         self.redraw()
 
     def cycle_lane(self) -> None:
@@ -481,13 +523,20 @@ class TaskBoard:
 
     def _notes(self, state: TaskState) -> RowNotes:
         """What ``state``'s row says beyond its task: the wait for a coder, if it's the task
-        waiting, its role's lane, whether its role's usage is unknown, and the wait to merge, if
-        its work waits for the holds on merges."""
+        waiting, its role's lane, whether its role's usage is unknown, the wait to merge, if
+        its work waits for the holds on merges, and its role's and the mapped skills."""
         waiting_id, note = self.waiting or (None, None)
         role = state.task.role
         waiting = note if state.id == waiting_id else None
         merging = WAITING_TO_MERGE if state.id in self.waiting_to_merge else None
-        return RowNotes(waiting, self.lanes.get(role), role in self.usage_unknown, merging)
+        return RowNotes(
+            waiting,
+            self.lanes.get(role),
+            role in self.usage_unknown,
+            merging,
+            self.role_skills.get(role, ()),
+            self.mapped_skills,
+        )
 
     def follow(self) -> None:
         """Scroll just enough to bring the active task shown into view, if following and the

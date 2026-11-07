@@ -72,7 +72,7 @@ from orbit.tui.view.seats import Seats
 from orbit.tui.view.spend import UsageCorner
 from orbit.tui.view.storage import StorageHalt
 from orbit.tui.view.takeover import TakeoverOffer
-from orbit.tui.view.tasks import role_lanes, usage_unknown_roles
+from orbit.tui.view.tasks import role_lanes, role_skills, usage_unknown_roles
 from orbit.tui.view.triggers import trigger_key_labels
 
 
@@ -128,6 +128,10 @@ class TaskListPane(Protocol):
     def show_lanes(self, lanes: Mapping[str, str]) -> None: ...
 
     def show_usage_unknown(self, roles: frozenset[str]) -> None: ...
+
+    def show_role_skills(self, skills: Mapping[str, tuple[str, ...]]) -> None: ...
+
+    def show_mapped_skills(self, skills: Sequence[str]) -> None: ...
 
     @property
     def merge_holds(self) -> tuple[MergeHold, ...]: ...
@@ -254,6 +258,7 @@ class EventRouter:
         self._busy: dict[BusyLane, bool] = {WORK_LANE: False, PLANNER_LANE: False}
         self.seats = Seats(panes.prompt, self.busy)
         self._agents: tuple[AgentEntry, ...] = ()  # The roles shown, those of no workspace.
+        self._mapped_skills: tuple[str, ...] = ()  # The mapped skills shown, likewise.
 
     def busy(self, lane: BusyLane) -> bool:
         """Whether ``lane`` has work in progress, as last reported or set; a lane not reported
@@ -290,18 +295,19 @@ class EventRouter:
         """Mark the prompt while the session viewed isn't the active one, or hide the mark, say
         by it while the session viewed's run is paused, and have the task about to run say when
         the session viewed waits for a coder, and follow the roles of the workspace this
-        frontend is on, if it moved or they changed."""
+        frontend is on, and the skills its project maps, if it moved or they changed."""
         place = self._handlers.navigation.place
         self._panes.viewing.show(place.mark)
         self._panes.paused.show(place.paused)
         self._panes.task_list.show_waiting(place.coder_wait)
         self._follow_roles()
+        self._follow_mapped_skills()
 
     def _follow_roles(self) -> None:
         """Pin a tab for each conversational role of the workspace this frontend is on, which
-        the prompt talks to while its tab is shown, and tag the tasks with their roles' lanes and
-        whether their usage is unknown, once those roles differ from the ones shown; before a
-        workspace is open there's only the planner."""
+        the prompt talks to while its tab is shown, and tag the tasks with their roles' lanes,
+        whether their usage is unknown and their skills, once those roles differ from the ones
+        shown; before a workspace is open there's only the planner."""
         navigation = self._handlers.navigation
         agents = navigation.catalog.agents(navigation.place.workspace)
         if agents == self._agents:
@@ -311,6 +317,17 @@ class EventRouter:
         self._panes.tabs.pin(self.seats.lanes)
         self._panes.task_list.show_lanes(role_lanes(agents))
         self._panes.task_list.show_usage_unknown(usage_unknown_roles(agents))
+        self._panes.task_list.show_role_skills(role_skills(agents))
+
+    def _follow_mapped_skills(self) -> None:
+        """Have the tasks show the skills the project of the workspace this frontend is on maps,
+        once they differ from the ones shown."""
+        navigation = self._handlers.navigation
+        mapped = navigation.catalog.mapped_skills(navigation.place.workspace)
+        if mapped == self._mapped_skills:
+            return
+        self._mapped_skills = mapped
+        self._panes.task_list.show_mapped_skills(mapped)
 
     def _render_answer(self, event: AnswerEvent) -> None:
         """Follow what the backend made of a command, noting the role a message it accepted went

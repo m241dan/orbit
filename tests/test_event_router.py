@@ -43,7 +43,7 @@ def routed(event: Event) -> list[str]:
     """The names of the methods ``event`` calls on the router's widgets, hosts and hooks, in
     the order it calls them, but the usage corner, which every event reaches."""
     calls = calls_of(event).mock_calls
-    skipped = {"navigation.catalog.agents", "corner.track"}
+    skipped = {"navigation.catalog.agents", "navigation.catalog.mapped_skills", "corner.track"}
     return [str(name) for name, _, _ in calls if name not in skipped]
 
 
@@ -51,6 +51,13 @@ def calls_of(event: Event) -> Mock:
     """What ``event`` calls on the router's widgets, hosts and hooks, recorded."""
     calls = Mock()
     calls.navigation.catalog.agents.return_value = ()
+    calls.navigation.catalog.mapped_skills.return_value = ()
+    router_of(calls).render(event)
+    return calls
+
+
+def router_of(calls: Mock) -> EventRouter:
+    """A router whose widgets, hosts and hooks are ``calls``' children."""
     panes = Panes(
         calls.transcript,
         calls.tabs,
@@ -81,8 +88,7 @@ def calls_of(event: Event) -> Mock:
         calls.unfocus_task_list,
         calls.refresh_keys,
     )
-    EventRouter(panes, handlers, hooks).render(event)
-    return calls
+    return EventRouter(panes, handlers, hooks)
 
 
 def test_the_usage_corner_follows_an_event_once_the_feed_has_counted_it() -> None:
@@ -261,3 +267,16 @@ def test_verification_steps_reach_their_panel_with_what_they_check() -> None:
     calls = calls_of(VerificationChanged(steps=steps, title="mutation", output="3 survived"))
 
     calls.verification.show.assert_called_once_with(steps, "mutation", "3 survived")
+
+
+def test_a_catalog_changing_the_mapped_skills_shows_them_on_the_tasks_and_one_alike_doesnt() -> (
+    None
+):
+    calls = Mock()
+    calls.navigation.catalog.agents.return_value = ()
+    calls.navigation.catalog.mapped_skills.return_value = ("python", "layers")
+    router = router_of(calls)
+    catalog = Catalog(workspaces=(), agents=(), triggers=(), lanes=())
+    router.render(catalog)
+    router.render(catalog)
+    calls.task_list.show_mapped_skills.assert_called_once_with(("python", "layers"))

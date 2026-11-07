@@ -777,3 +777,61 @@ def test_a_changed_task_or_width_relabels_its_rows() -> None:
     kept = list(view.labels)
     tasks.redraw()
     assert all(new is not old for new, old in zip(view.labels, kept, strict=True))
+
+
+ROLE_SKILLS = {"reviewer": ("code-style", "review-bugs")}
+
+
+def skilled(*roles: str, status: TaskStatus = "pending") -> tuple[TaskState, ...]:
+    """Tasks in ``roles``, as :func:`in_roles` makes them, each naming the skill ``python``."""
+    return tuple(
+        state.model_copy(update={"task": state.task.model_copy(update={"skills": ("python",)})})
+        for state in in_roles(*roles, status=status)
+    )
+
+
+def test_a_rows_skills_follow_its_roles_and_the_mapped_skills_once_known() -> None:
+    tasks, view = started()
+    tasks.show(skilled("reviewer"))
+    assert view.rows[0].endswith(" · skills: python")
+    tasks.show_role_skills(ROLE_SKILLS)
+    tasks.show_mapped_skills(("application", "python"))
+    assert view.rows[0].endswith(" · skills: code-style, review-bugs + python, application")
+
+
+def test_a_draft_row_shows_the_skills_it_would_once_running() -> None:
+    tasks, view = started()
+    tasks.show_role_skills(ROLE_SKILLS)
+    tasks.show_mapped_skills(("layers",))
+    draft_task, running_task = skilled("reviewer", "reviewer", status="draft")
+    tasks.show((draft_task, running_task.model_copy(update={"status": "running"})))
+    draft, running = (row.partition("\n")[2] for row in view.rows[:2])
+    assert draft == running
+    assert draft.endswith(" · skills: code-style, review-bugs + python, layers")
+
+
+def test_a_task_whose_role_is_gone_shows_its_own_and_the_mapped_skills() -> None:
+    tasks, view = started()
+    tasks.show_role_skills(ROLE_SKILLS)
+    tasks.show_mapped_skills(("layers",))
+    tasks.show(skilled("security"))
+    assert view.rows[0].endswith(" · skills: python, layers")
+
+
+def test_new_mapped_skills_redraw_the_rows_and_the_same_ones_leave_them_alone() -> None:
+    tasks, view = started()
+    tasks.show(skilled("reviewer"))
+    tasks.show_mapped_skills(("layers",))
+    assert view.rows[0].endswith(" · skills: python, layers")
+    redraws = view.redraws
+    tasks.show_mapped_skills(("layers",))
+    assert view.redraws == redraws
+
+
+def test_the_same_role_skills_again_leave_the_board_alone() -> None:
+    tasks, view = started()
+    tasks.show(skilled("reviewer"))
+    tasks.show_role_skills(ROLE_SKILLS)
+    redraws = view.redraws
+    tasks.show_role_skills(dict(ROLE_SKILLS))
+    assert view.redraws == redraws
