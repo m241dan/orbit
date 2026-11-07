@@ -26,6 +26,7 @@ from orbit.agent import (
     instructions_setting,
     resolve_config_dir,
     update_config,
+    update_user_config,
 )
 from orbit.cli.backend import _workspace
 from orbit.cli.errors import _exit_on
@@ -43,13 +44,13 @@ USER_CONFIG_EXISTS = (
 
 WITH_USER = "--user writes your own config.toml, so it can't go with {option}."
 
-USER_UPDATE_LATER = "--user --update isn't available yet."
-
 CONFIG_DIR_WITHOUT_USER = (
     "--config-dir names your own config.toml's directory, so it goes with --user."
 )
 
 USER_WRITE_FAILED = "Couldn't write orbit's user reference config: "
+
+USER_UPDATE_FAILED = "Couldn't update the config from orbit's user reference config: "
 
 WITH_FORCE = "{option} keeps the file and --force replaces it, so they can't go together."
 
@@ -175,7 +176,8 @@ def init(
     --user writes orbit's user reference config to your own config.toml in the config directory
     instead (--config-dir, else as orbit serve resolves it), making the directory if it has to:
     every user setting commented out at its default. An existing file is left as it is, exiting
-    with status 2, unless --force replaces it, keeping it as a numbered backup as above.
+    with status 2, unless --update adds the user settings it doesn't mention, as above, or
+    --force replaces it, keeping it as a numbered backup as above.
     """
     skills = tuple(skill or ())
     if user:
@@ -225,12 +227,17 @@ def _refuse_config_dir(config_dir: Path | None) -> None:
 
 def _init_user(config_dir: Path | None, update: bool, force: bool) -> None:
     """Write the user reference config to the user config in ``config_dir``, resolved as
-    ``orbit serve`` resolves it, replacing a file there if ``force``; exit with status 2 if
-    ``update`` is given, which isn't available yet."""
-    if update:
-        typer.echo(USER_UPDATE_LATER, err=True)
-        raise typer.Exit(2)
+    ``orbit serve`` resolves it, replacing a file there if ``force``, or, with ``update``, add
+    to the file there what the user reference has that it doesn't mention."""
+    _refuse_with_force(force, update=update, roles=False, skills=False)
     directory = resolve_config_dir(config_dir, os.environ)
+    if update:
+        with _exit_on(ConfigError, message=lambda exc: f"{INVALID_CONFIG}{exc}"):
+            _say(
+                USER_UPDATE_FAILED,
+                lambda: _updated(update_user_config(directory), "orbit's user reference config"),
+            )
+        return
     with _exit_on(ConfigExists, message=lambda exc: USER_CONFIG_EXISTS.format(path=exc.path)):
         _say(
             USER_WRITE_FAILED,
@@ -264,11 +271,12 @@ def _written(result: InitResult, what: str = "orbit's reference config") -> str:
     return f"Kept the old file as {result.backup} and wrote {written}\n{WRITTEN}"
 
 
-def _updated(result: UpdateResult) -> str:
+def _updated(result: UpdateResult, what: str = "orbit's reference config") -> str:
     """What's said once ``result`` is done: what was added to the file, and where, or that
-    there was nothing to add; that the reference was written, if there was no file."""
+    there was nothing to add; that ``what``, the reference, was written, if there was no
+    file."""
     if result.additions is None:
-        return _written(InitResult(result.path))
+        return _written(InitResult(result.path), what)
     added = _added(result.additions.keys, result.additions.tables)
     if not added:
         return NOTHING_TO_ADD

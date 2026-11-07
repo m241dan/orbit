@@ -65,6 +65,7 @@ uv run orbit init --force                      # replace it, keeping the old one
 uv run orbit init --roles                      # copy the built-in roles' instructions to edit
 uv run orbit init --skill python               # copy orbit's python skill to .orbit/skills/ to edit
 uv run orbit init --user                       # start your own config.toml from the user reference
+uv run orbit init --user --update              # add the user settings it doesn't mention
 uv run orbit config show                       # every setting in effect here, and where it's from
 uv run orbit config show roles.reviewer --full # one role's, with its instructions whole
 uv run orbit config show --skills              # which agents get each skill, and from where
@@ -2750,8 +2751,14 @@ default as `# clone_dir: unset`), then commented-out examples of a built-in role
 personal role, an alias of a runtime's models, a remote and an MCP server override, as in
 [`reference/user-config.toml`](src/orbit/agent/external/reference/user-config.toml), the copy
 shipped with orbit. It prints where it wrote it. A file that's already there is left as it is,
-and it stops with status 2, naming it; `--user --force` replaces it after keeping it as the next
-free `config.toml.bak.N`, as `--force` does the project file. `--user` can't go with `--roles`,
+and it stops with status 2, naming it. `--user --update` brings it up to date with the user
+reference instead, as `--update` does the project file: it adds the user settings the file
+doesn't mention, commented out, each key after its table's last line and each missing table at
+the end, under the same dated line, without changing, moving or removing any of its lines; it
+prints what it added to which table, or `Nothing to add.`, and without a file it writes the user
+reference as `--user` does. A file that isn't valid TOML is left as it is, and it stops with
+status 2, naming it. `--user --force` replaces it after keeping it as the next free
+`config.toml.bak.N`, as `--force` does the project file, and can't go with `--update`. `--user` can't go with `--roles`,
 `--skill` or `-C`, which work on a project, nor `--config-dir` without `--user`; each stops with
 status 2 before writing anything.
 
@@ -4176,7 +4183,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     (`add_skills`), and for `orbit init --user` writes the user reference config,
     `reference/user-config.toml`, which `user_reference` generates from the user settings'
     models (`user_reference()`) and `uv run python -m orbit.agent.external.user_reference`
-    writes, to your own `config.toml` (`init_user_config`); `checks`
+    writes, to your own `config.toml` (`init_user_config`), and for `orbit init --user --update`
+    adds to that file what the user reference has that it doesn't mention (`update_user_config`); `checks`
     runs a verification step as a process (`run_step`); `processes` runs a program to completion
     without leaving it behind; `workspace`
     fingerprints the git working tree; `usage_api` fetches the Claude subscription's usage

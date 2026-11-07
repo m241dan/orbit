@@ -34,6 +34,7 @@ from orbit.agent.external.config_init import (
     init_config,
     init_user_config,
     update_config,
+    update_user_config,
 )
 from orbit.agent.external.reference_config import LATER_HEADING, reference_config
 from orbit.agent.external.skill_files import SKILL_DIRECTORY, skill_names, skill_paths
@@ -628,3 +629,75 @@ def test_a_config_dir_that_is_a_file_raises_os_error(tmp_path: Path) -> None:
     config_dir.write_text("")
     with pytest.raises(OSError):
         init_user_config(config_dir, force=False)
+
+
+def update_user(config_dir: Path) -> UpdateResult:
+    """The user config in ``config_dir`` updated on :data:`TODAY`."""
+    return update_user_config(config_dir, today=lambda: TODAY)
+
+
+SERVER_PORT = "[server]\nport = 8000\n"
+
+
+def test_user_update_without_a_file_writes_the_user_reference(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    result = update_user(config_dir)
+    path = config_dir / USER_CONFIG_FILE
+    assert result == UpdateResult(path)
+    assert path.read_text(encoding="utf-8") == user_reference()
+    assert stat.S_IMODE(config_dir.stat().st_mode) == 0o700
+
+
+def test_user_update_of_the_reference_adds_nothing_and_leaves_the_file(tmp_path: Path) -> None:
+    path = tmp_path / USER_CONFIG_FILE
+    path.write_text(user_reference(), encoding="utf-8")
+    inode = path.stat().st_ino
+    assert update_user(tmp_path) == UpdateResult(path, Additions())
+    assert path.read_text(encoding="utf-8") == user_reference()
+    assert path.stat().st_ino == inode
+
+
+def test_user_update_adds_a_tables_other_keys_after_it_and_the_other_tables_at_the_end(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / USER_CONFIG_FILE
+    path.write_text(SERVER_PORT)
+    result = update_user(tmp_path)
+    text = path.read_text(encoding="utf-8")
+    server, appended = text.split(f"\n\n{ADDED}\n\n")
+    blocks = user_reference().removesuffix("\n").split("\n\n")
+    reference_server = block_starting(blocks, "# [server]")
+    _, *pairs = reference_server.split("\n")
+    others = [
+        line
+        for description, key in zip(pairs[::2], pairs[1::2], strict=True)
+        if not key.startswith("# port ")
+        for line in (description, key)
+    ]
+    assert server.split("\n") == [*SERVER_PORT.splitlines(), *others]
+    assert reference_server not in appended
+    assert block_starting(blocks, "# [storage]") in appended
+    assert result.additions is not None
+    assert result.additions.keys == {
+        "[server]": tuple(re.split("[ :]", line.removeprefix("# "))[0] for line in others[1::2])
+    }
+    assert result.additions.tables[0] == "[storage]"
+    assert "[server]" not in result.additions.tables
+
+
+def test_user_update_refuses_a_file_that_isnt_toml_naming_it(tmp_path: Path) -> None:
+    path = tmp_path / USER_CONFIG_FILE
+    path.write_text("[server\n")
+    with pytest.raises(ConfigError) as raised:
+        update_user(tmp_path)
+    assert str(raised.value).startswith(f"{path}: ")
+    assert path.read_text() == "[server\n"
+
+
+def test_user_update_refuses_a_file_that_isnt_utf8_naming_it(tmp_path: Path) -> None:
+    path = tmp_path / USER_CONFIG_FILE
+    path.write_bytes(b"\xff\n")
+    with pytest.raises(ConfigError) as raised:
+        update_user(tmp_path)
+    assert str(raised.value).startswith(f"{path}: ")
+    assert path.read_bytes() == b"\xff\n"

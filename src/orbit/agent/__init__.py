@@ -108,6 +108,7 @@ from orbit.agent.external.config_init import (
     init_config,
     init_user_config,
     update_config,
+    update_user_config,
 )
 from orbit.agent.external.control_plane import ControlPlaneServer, ListenFailed
 from orbit.agent.external.credentials_file import CredentialsFile
@@ -332,6 +333,7 @@ __all__ = [
     "tls_warnings",
     "top_level",
     "update_config",
+    "update_user_config",
     "workspace_state",
     "write_bundle",
     "write_checks",

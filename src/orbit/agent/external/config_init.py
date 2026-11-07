@@ -1,6 +1,7 @@
 """A project's ``.orbit/config.toml`` started from the reference config shipped with orbit,
-brought up to date with it, and given copies of the built-in roles' instructions to edit; and the
-project given copies of orbit's skills to edit."""
+brought up to date with it, and given copies of the built-in roles' instructions to edit; the
+user's own config brought up to date with the user reference config; and the project given
+copies of orbit's skills to edit."""
 
 import os
 from collections.abc import Callable, Iterable, Iterator, Mapping
@@ -59,8 +60,9 @@ class InitResult:
 
 @dataclass(frozen=True)
 class UpdateResult:
-    """What :func:`update_config` did to the project file at ``path``: added ``additions`` to
-    it, or, with none, wrote the reference config there, as there was no file."""
+    """What :func:`update_config` or :func:`update_user_config` did to the file at ``path``:
+    added ``additions`` to it, or, with none, wrote the reference config there, as there was no
+    file."""
 
     path: Path
     additions: Additions | None = None
@@ -159,6 +161,26 @@ def update_config(root: Path, today: Callable[[], date] = date.today) -> UpdateR
     return UpdateResult(path, update.additions)
 
 
+def update_user_config(config_dir: Path, today: Callable[[], date] = date.today) -> UpdateResult:
+    """Add to the user config in ``config_dir`` what the user reference config has that it
+    doesn't mention, as :func:`~orbit.agent.domain.config_update.update_text` does on the day
+    ``today`` gives, leaving the file as it was if there's nothing to add; without a file, write
+    the user reference there as :func:`init_user_config` does.
+
+    Raises :class:`ConfigError`, naming the file, if it isn't UTF-8 or valid TOML, leaving it as
+    it was, and ``OSError`` when it can't read the reference or read or write the file.
+    """
+    path = config_dir / USER_CONFIG_FILE
+    text = _read_project(path)
+    if text is None:
+        return UpdateResult(init_user_config(config_dir, force=False).path)
+    with _naming(path):
+        update = update_text(text, USER_REFERENCE.read_text(encoding="utf-8"), today())
+    if update.text != text:
+        write_whole(path, update.text)
+    return UpdateResult(path, update.additions)
+
+
 def add_roles(root: Path, today: Callable[[], date] = date.today) -> RolesResult:
     """Copy each built-in role's instructions beside the project file of the workspace at
     ``root``, where :func:`~orbit.agent.domain.config_update.instructions_copy` puts them,
@@ -210,7 +232,7 @@ def add_skills(
 
 
 def _read_project(path: Path) -> str | None:
-    """The text of the project file at ``path``; none if there's no file.
+    """The text of the config file at ``path``; none if there's no file.
 
     Raises :class:`ConfigError`, naming the file, if it isn't UTF-8, and ``OSError`` when it
     can't read it.

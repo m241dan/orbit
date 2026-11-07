@@ -626,10 +626,72 @@ def test_user_refuses_the_project_options(
     assert not (tmp_path / "config").exists()
 
 
-def test_user_update_is_not_available_yet(tmp_path: Path) -> None:
-    result = init_user("--update", "--config-dir", str(tmp_path / "config"))
+def test_user_update_with_nothing_to_add_says_so_and_leaves_the_file(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(USER_REFERENCE, encoding="utf-8")
+    result = init_user("--update", "--config-dir", str(tmp_path))
+    assert result.exit_code == 0, result.output
+    assert result.stdout == "Nothing to add.\n"
+    assert path.read_bytes() == USER_REFERENCE.encode("utf-8")
+
+
+def test_user_update_adds_what_the_file_doesnt_mention_and_says_what(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("[server]\nport = 8000\n")
+    result = init_user("--update", "--config-dir", str(tmp_path))
+    assert result.exit_code == 0, result.output
+    said = result.stdout.splitlines()
+    assert said[0] == f"Added to {path}, commented out:"
+    assert said[1].startswith("  in [server]: tls, cert, key, ")
+    assert "port" not in said[1]
+    assert said[2].startswith("  at the end: [storage], [telemetry], [roles]")
+    text = path.read_text(encoding="utf-8")
+    assert text.startswith("[server]\nport = 8000\n")
+    added = (
+        r"# Added by orbit init --update on \d{4}-\d{2}-\d{2}: settings this file didn't mention\."
+    )
+    assert re.search(f"^{added}$", text, re.MULTILINE)
+    assert tomllib.loads(text) == {"server": {"port": 8000}}
+
+
+def test_user_update_without_a_file_writes_the_user_reference(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    result = init_user("--update", "--config-dir", str(config_dir))
+    assert result.exit_code == 0, result.output
+    path = config_dir / "config.toml"
+    assert path.read_text(encoding="utf-8") == USER_REFERENCE
+    assert result.stdout.splitlines() == [
+        f"Wrote orbit's user reference config to {path}.",
+        WRITTEN,
+    ]
+
+
+def test_user_update_of_a_file_that_isnt_toml_exits_with_status_2(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("[server\n")
+    result = init_user("--update", "--config-dir", str(tmp_path))
     assert result.exit_code == 2
-    assert result.stderr.strip() == "--user --update isn't available yet."
+    assert result.stderr.startswith(f"Invalid orbit configuration: {path}: ")
+    assert path.read_text() == "[server\n"
+
+
+def test_user_update_of_a_file_that_cant_be_read_exits_with_status_2(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.write_text("")
+    result = init_user("--update", "--config-dir", str(config_dir))
+    assert result.exit_code == 2
+    assert result.stderr.startswith(
+        "Couldn't update the config from orbit's user reference config: "
+    )
+    assert result.stdout == ""
+
+
+def test_user_update_with_force_is_refused(tmp_path: Path) -> None:
+    result = init_user("--update", "--force", "--config-dir", str(tmp_path / "config"))
+    assert result.exit_code == 2
+    assert result.stderr.splitlines() == [
+        "--update keeps the file and --force replaces it, so they can't go together."
+    ]
     assert not (tmp_path / "config").exists()
 
 
