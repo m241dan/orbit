@@ -66,19 +66,19 @@ class ClientConnection(ABC):
             await stop_all([serving])
             raise
         if not self._ready.done():
-            raise self._ended()
+            raise self._explain_stopped()
 
     async def list_tools(self) -> tuple[UpstreamTool, ...]:
         """The tools the server offers, every page of them, up to :data:`PAGE_LIMIT`. Raises
         :class:`UpstreamFailed` if the server fails, answers with an error, or answers with a
         list that can't be read."""
         try:
-            tools = await self._pages(None, PAGE_LIMIT)
+            tools = await self._list_pages(None, PAGE_LIMIT)
         except MCPError as exc:
-            raise await self._failure(exc, self._served) from None
+            raise await self._explain_error(exc, self._await_stopped) from None
         except ValidationError:
             raise UpstreamFailed(UNREADABLE) from None
-        return tuple(_upstream(tool) for tool in tools)
+        return tuple(_convert_tool(tool) for tool in tools)
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Reply:
         """The server's answer to a call to ``name`` with ``arguments``, an error if the tool,
@@ -90,7 +90,7 @@ class ClientConnection(ABC):
         except MCPError as exc:
             if exc.code not in (REQUEST_TIMEOUT, CONNECTION_CLOSED):
                 return Reply(exc.message, is_error=True)
-            raise await self._failure(exc, self._served) from None
+            raise await self._explain_error(exc, self._await_stopped) from None
         except ValidationError:
             raise UpstreamFailed(UNREADABLE) from None
         return Reply(_join_text(result.content), is_error=bool(result.is_error))
@@ -118,18 +118,18 @@ class ClientConnection(ABC):
         try:
             await session.initialize()
         except MCPError as exc:
-            raise await self._failure(exc, exited) from None
+            raise await self._explain_error(exc, exited) from None
         self._ready.set_result(session)
 
-    async def _pages(self, cursor: str | None, left: int) -> list[Tool]:
+    async def _list_pages(self, cursor: str | None, left: int) -> list[Tool]:
         """The tools on the page at ``cursor`` and those after it, at most ``left`` pages."""
         params = PaginatedRequestParams(cursor=cursor)
         page = await self._ready.result().list_tools(params=params)
         if page.next_cursor is None or left == 1:
             return list(page.tools)
-        return [*page.tools, *await self._pages(page.next_cursor, left - 1)]
+        return [*page.tools, *await self._list_pages(page.next_cursor, left - 1)]
 
-    async def _failure(self, error: MCPError, exited: Exited) -> UpstreamFailed:
+    async def _explain_error(self, error: MCPError, exited: Exited) -> UpstreamFailed:
         """Why the server failed, as ``error`` from a request to it says, unless the connection
         dropped as it stopped serving, as ``exited`` says it has, given a moment to."""
         ended = await exited() if error.code == CONNECTION_CLOSED else None
@@ -145,13 +145,13 @@ class ClientConnection(ABC):
         """Why a request the server didn't answer in time failed."""
         return f"it didn't answer within {self._timeout.total_seconds():g} seconds"
 
-    async def _served(self) -> UpstreamFailed | None:
+    async def _await_stopped(self) -> UpstreamFailed | None:
         """Why serving stopped, given a moment to; ``None`` if it hasn't."""
         assert self._serving is not None
         await asyncio.wait({self._serving}, timeout=EXIT_GRACE.total_seconds())
-        return self._ended() if self._serving.done() else None
+        return self._explain_stopped() if self._serving.done() else None
 
-    def _ended(self) -> UpstreamFailed:
+    def _explain_stopped(self) -> UpstreamFailed:
         """Why serving stopped, which it has."""
         assert self._serving is not None
         if self._serving.cancelled():
@@ -159,16 +159,16 @@ class ClientConnection(ABC):
         error = self._serving.exception()
         if error is None:
             return UpstreamFailed(self._serving.result())
-        cause = _cause(error)
+        cause = _find_cause(error)
         return cause if isinstance(cause, UpstreamFailed) else self._explain_failure(cause)
 
 
-async def report_not_exited() -> UpstreamFailed | None:
-    """Nothing: what's known of a server's having stopped serving while it's serving."""
+async def await_no_exit() -> UpstreamFailed | None:
+    """No exit: the ``Exited`` of a transport whose server can't stop on its own."""
     return None
 
 
-def _upstream(tool: Tool) -> UpstreamTool:
+def _convert_tool(tool: Tool) -> UpstreamTool:
     """``tool`` as a server offers it."""
     return UpstreamTool(tool.name, tool.description, tool.input_schema)
 
@@ -182,6 +182,6 @@ def _join_text(content: Sequence[ContentBlock]) -> str:
     )
 
 
-def _cause(error: BaseException) -> BaseException:
+def _find_cause(error: BaseException) -> BaseException:
     """The first error ``error`` groups, if it's a group, else ``error``."""
-    return _cause(error.exceptions[0]) if isinstance(error, BaseExceptionGroup) else error
+    return _find_cause(error.exceptions[0]) if isinstance(error, BaseExceptionGroup) else error

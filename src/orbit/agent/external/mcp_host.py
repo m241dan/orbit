@@ -147,7 +147,9 @@ async def list_every_tool(token: str) -> ToolListing:
 def build_server(handler: CallHandler, lister: ToolLister = list_every_tool) -> MCPServer:
     """An MCP server whose tools pass each call, with the caller's token, to ``handler``, and
     whose ``tools/list`` shows each caller the tools ``lister`` gives for its token."""
-    server = MCPServer("orbit", instructions=INSTRUCTIONS, middleware=[_proxying(handler, lister)])
+    server = MCPServer(
+        "orbit", instructions=INSTRUCTIONS, middleware=[_build_proxy(handler, lister)]
+    )
 
     async def call(ctx: Context, tool: str, arguments: dict[str, Any]) -> str:
         reply = await handler(bearer_token(ctx.headers), tool, arguments)
@@ -318,7 +320,7 @@ def _add_draft_tools(server: MCPServer, call: ToolCall) -> None:
         return await call(ctx, MOVE_DRAFT, {"task_id": task_id, "before": before})
 
 
-def _proxying(handler: CallHandler, lister: ToolLister) -> ServerMiddleware[Any]:
+def _build_proxy(handler: CallHandler, lister: ToolLister) -> ServerMiddleware[Any]:
     """The middleware making each caller's ``tools/list`` what ``lister`` gives for its token,
     and passing its calls to proxied names to ``handler``."""
 
@@ -326,9 +328,9 @@ def _proxying(handler: CallHandler, lister: ToolLister) -> ServerMiddleware[Any]
         token = bearer_token(getattr(ctx.request, "headers", None))
         params = ctx.params or {}
         if ctx.method == "tools/list":
-            return _listed(await call_next(ctx), await lister(token))
+            return _list_tools_reply(await call_next(ctx), await lister(token))
         if ctx.method == "tools/call" and is_proxied(str(params.get("name", ""))):
-            reply = await _proxied(handler, token, params)
+            reply = await _proxy_call(handler, token, params)
             return CallToolResult(
                 content=[TextContent(type="text", text=reply.text)], is_error=reply.is_error
             )
@@ -337,15 +339,15 @@ def _proxying(handler: CallHandler, lister: ToolLister) -> ServerMiddleware[Any]
     return proxy
 
 
-def _listed(result: HandlerResult, listing: ToolListing) -> dict[str, Any]:
+def _list_tools_reply(result: HandlerResult, listing: ToolListing) -> dict[str, Any]:
     """The ``tools/list`` ``result`` with only the orbit tools ``listing`` names, and then its
     proxied tools."""
     listed = ListToolsResult.model_validate(result).model_dump(by_alias=True, exclude_unset=True)
     orbit = [tool for tool in listed["tools"] if tool["name"] in listing.orbit]
-    return {**listed, "tools": [*orbit, *map(_tool_entry, listing.proxied)]}
+    return {**listed, "tools": [*orbit, *map(_describe_tool, listing.proxied)]}
 
 
-def _tool_entry(tool: ProxiedTool) -> dict[str, Any]:
+def _describe_tool(tool: ProxiedTool) -> dict[str, Any]:
     """``tool`` as ``tools/list`` gives it: by its proxied name, with the server's description
     and input schema."""
     entry = McpTool(
@@ -354,7 +356,7 @@ def _tool_entry(tool: ProxiedTool) -> dict[str, Any]:
     return entry.model_dump(by_alias=True, exclude_none=True)
 
 
-async def _proxied(handler: CallHandler, token: str, params: Mapping[str, Any]) -> Reply:
+async def _proxy_call(handler: CallHandler, token: str, params: Mapping[str, Any]) -> Reply:
     """``handler``'s answer to the call ``params`` give, from the agent with ``token``, refused
     if its arguments aren't an object."""
     arguments = params.get("arguments") or {}

@@ -20,7 +20,7 @@ from mcp.client.streamable_http import streamable_http_client
 from orbit.agent.application.ports import CredentialsRefused, UpstreamFailed, UpstreamSession
 from orbit.agent.domain.mcp_servers import McpServer
 from orbit.agent.domain.refusals import reason
-from orbit.agent.external.mcp_client import ClientConnection, report_not_exited
+from orbit.agent.external.mcp_client import ClientConnection, await_no_exit
 
 REFUSING = frozenset({401, 403})
 """The HTTP statuses a server refusing orbit's credentials answers with."""
@@ -81,7 +81,7 @@ class HttpSession(ClientConnection):
                 received, sent, read_timeout_seconds=(self._timeout + BACKSTOP).total_seconds()
             ) as session,
         ):
-            await self._initialise(session, report_not_exited)
+            await self._initialise(session, await_no_exit)
             return await forever
 
     def _explain_failure(self, error: BaseException) -> UpstreamFailed:
