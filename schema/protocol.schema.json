@@ -3528,7 +3528,7 @@
       "type": "object"
     },
     "TaskSpec": {
-      "description": "One queued prompt, run in its own fresh context with its own settings.\n\n``role`` names the kind of agent that takes it, such as ``coder`` or ``reviewer``.\n``skills`` are the skills its agent gets beyond its role's, by name; a task naming none gets\nthe project's mapped skills instead.",
+      "description": "One queued prompt, run in its own fresh context with its own settings.\n\n``role`` names the kind of agent that takes it, such as ``coder`` or ``reviewer``.\n``skills`` are the skills its agent gets after its role's and before the project's mapped\nones, by name; each skill is given once, where first named.",
       "properties": {
         "prompt": {
           "minLength": 1,

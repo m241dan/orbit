@@ -176,8 +176,8 @@ class TaskSpec(_Message):
     """One queued prompt, run in its own fresh context with its own settings.
 
     ``role`` names the kind of agent that takes it, such as ``coder`` or ``reviewer``.
-    ``skills`` are the skills its agent gets beyond its role's, by name; a task naming none gets
-    the project's mapped skills instead.
+    ``skills`` are the skills its agent gets after its role's and before the project's mapped
+    ones, by name; each skill is given once, where first named.
     """
 
     prompt: str = Field(min_length=1)
