@@ -595,6 +595,14 @@ async def test_a_batchs_review_changing_no_code_notes_its_first_task_and_how_man
     ]
 
 
+async def test_a_batchs_review_with_one_commit_changing_code_fires_a_guarded_trigger() -> None:
+    engine = Engine({"bugs-review": lens(guards=("review-rounds", "code-changed"), when={})})
+    engine.tree.changed |= {"c2^": ["docs/plan.md"], "c3^": ["src/x.py"]}
+    queued = await engine.engine.reviewed(ReviewRound(BATCH, unbooked))
+    assert [engine.board.get(task_id).origin for task_id in queued] == ["bugs-review"]
+    assert engine.notices() == []
+
+
 async def test_a_batchs_review_raised_quietly_notes_nothing_it_holds_back() -> None:
     engine = Engine({"bugs-review": lens(guards=("review-rounds", "code-changed"), when={})})
     await engine.engine.reviewed_quietly(ReviewRound(three_tasks(engine), unbooked))
