@@ -609,6 +609,17 @@ async def test_a_batchs_review_changing_no_code_notes_its_first_task_and_how_man
     ]
 
 
+async def test_a_batchs_review_changing_no_code_notes_only_the_lenses_that_raised() -> None:
+    guards = ("review-rounds", "raised-finding", "code-changed")
+    lenses = look(role=[BUGS_REVIEWER, TESTS_REVIEWER], guards=guards, when={})
+    engine = Engine({"lenses": lenses})
+    raised = frozenset({BUGS_REVIEWER})
+    assert await engine.engine.reviewed(ReviewRound(three_tasks(engine), unbooked, raised)) == ()
+    assert engine.notices() == [
+        'Skipped the bugs reviews of "Fix the parser" and 2 more: it changed no code.'
+    ]
+
+
 async def test_a_batchs_review_with_one_commit_changing_code_fires_a_guarded_trigger() -> None:
     engine = Engine({"bugs-review": lens(guards=("review-rounds", "code-changed"), when={})})
     engine.tree.changed |= {"c2^": ["docs/plan.md"], "c3^": ["src/x.py"]}
