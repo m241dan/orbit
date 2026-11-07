@@ -3,6 +3,8 @@
 from collections.abc import Sequence
 from dataclasses import fields
 
+import pytest
+
 from orbit.agent.domain.review_sample import Choose
 from orbit.agent.domain.reviews import (
     DIFF_LIMIT,
@@ -21,12 +23,14 @@ from orbit.agent.domain.reviews import (
     ReviewPlanner,
     SuperReviewCount,
     _Batch,
+    kept_bookings,
     kept_groups,
     pause_notice,
     pending_titles,
     raised_roles,
     review_prompt,
     review_skills,
+    runnable_tasks,
     tell_landed_since,
 )
 from orbit.protocol import (
@@ -1025,3 +1029,38 @@ def test_a_group_is_kept_while_a_task_it_filed_a_finding_into_is_in_an_open_batc
 def test_the_groups_kept_are_those_whose_batch_is_still_open() -> None:
     groups = {"batch-1": RAISED, "batch-2": ReviewGroup(COMMIT_JOB)}
     assert kept_groups(groups, ("batch-2", "batch-3"), {}) == {"batch-2": ReviewGroup(COMMIT_JOB)}
+
+
+FIX_JOB = ReviewJob(commits=("c2",), round=1, batch="batch-3", reviewed=("5",))
+
+
+@pytest.mark.parametrize(
+    ("runnable", "live", "held", "kept"),
+    [
+        ((), (), (), False),  # Its batch closed and nothing refers to it.
+        ((), ("batch-2",), (), True),  # Booked into a batch still open or kept.
+        ((), (), ("batch-3",), True),  # Reviews a held fix's batch.
+        (("6",), (), (), True),  # It could run, so its booking keeps it from running again.
+    ],
+)
+def test_a_booking_is_kept_while_its_batch_lives_a_hold_needs_it_or_its_task_could_run(
+    runnable: tuple[str, ...], live: tuple[str, ...], held: tuple[str, ...], kept: bool
+) -> None:
+    bookings = kept_bookings({"6": "batch-2"}, {"6": FIX_JOB}, runnable, live, held)
+    assert bookings == (frozenset({"6"}) if kept else frozenset())
+
+
+def test_the_tasks_that_could_run_are_those_not_done_for_good() -> None:
+    statuses: tuple[TaskStatus, ...] = (
+        "completed",
+        "gave_up",
+        "unverified",
+        "cancelled",
+        "error",
+        "pending",
+        "running",
+        "verifying",
+        "draft",
+    )
+    tasks = [state(str(i), status) for i, status in enumerate(statuses)]
+    assert runnable_tasks(tasks) == {"3", "4", "5", "6", "7", "8"}

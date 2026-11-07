@@ -191,7 +191,7 @@ async def test_the_review_state_and_the_repositorys_super_count_are_saved() -> N
     assert set(SUPER_LENS_REVIEWERS) <= {t.task.role for t in board(events)}
     assert store.counts == [SuperReviewCount(0, "c1", 1)]
     assert store.last.reviews == lane_of(session).snapshot()
-    assert store.last.reviews is not None and store.last.reviews.jobs
+    assert store.last.reviews is not None and store.last.reviews.planner.next_batch > 1
     await session.close()
 
 
@@ -232,7 +232,7 @@ async def test_a_super_count_that_cannot_be_read_is_not_overwritten_by_a_landing
 
     assert not set(SUPER_LENS_REVIEWERS) & {t.task.role for t in board(events)}
     assert store.counts == [] and store.count == SuperReviewCount(7)
-    assert store.last.reviews is not None and store.last.reviews.jobs
+    assert store.last.reviews is not None and store.last.reviews.planner.next_batch > 1
     await session.close()
 
 

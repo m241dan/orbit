@@ -95,6 +95,7 @@ from orbit.agent.domain.reviews import (
     finished_fields,
     finished_values,
     held_values,
+    kept_bookings,
     kept_groups,
     kept_values,
     pause_notice,
@@ -105,6 +106,7 @@ from orbit.agent.domain.reviews import (
     review_kind,
     review_over,
     review_values,
+    runnable_tasks,
     set_review,
     tell_landed_since,
     unshown_diff,
@@ -215,6 +217,9 @@ class ReviewLane:
         # until it ends.
         self._causes: dict[str, Span] = {}
         self._tallies: dict[str, ReviewTally] = {}  # Review task id -> its suggestions, as it runs.
+        # Review task id -> what it reviews, if the lane booked it, while it runs: shown till it
+        # returns, though its booking may be forgotten as it ends.
+        self._shown: dict[str, ReviewJob | None] = {}
         # Batch -> the review behind it, if it keeps a group, while the batch is open.
         self._groups: dict[str, ReviewGroup] = {}
         # Task id -> the severity a merge pass filed it at, while its findings are kept.
@@ -268,7 +273,7 @@ class ReviewLane:
         review = self.runner.current
         if review is None or not self._is_review(review):
             return None
-        job = self._jobs.get(review)
+        job = self._shown.get(review) or self._jobs.get(review)
         return job.reviewed if job else ()
 
     @property
@@ -477,12 +482,29 @@ class ReviewLane:
 
     def _prune(self) -> None:
         """Forget the groups of the batches that closed, reviewed or not, unless they filed a
-        finding into a batch still open, and the severities of the tasks whose findings they
-        kept."""
+        finding into a batch still open, the severities of the tasks whose findings they kept,
+        and the bookings no longer needed, as :func:`kept_bookings` says."""
         batches = {state.id: state.batch for state in self._board.tasks}
         self._groups = kept_groups(self._groups, self.planner.open_batches, batches)
         filed = self._filed_tasks()
         self._severities = {t: s for t, s in self._severities.items() if t in filed}
+        self._prune_bookings()
+
+    def _prune_bookings(self) -> None:
+        """Forget the bookings no longer needed, as :func:`kept_bookings` says, once the groups
+        of the batches that closed were."""
+        held = self._held_batches()
+        live = {*self.planner.open_batches, *self._groups, *held}
+        runnable = runnable_tasks(self._board.tasks)
+        kept = kept_bookings(self._batches, self._jobs, runnable, live, held)
+        self._batches = {t: b for t, b in self._batches.items() if t in kept}
+        self._jobs = {t: job for t, job in self._jobs.items() if t in kept}
+
+    def _held_batches(self) -> set[str]:
+        """The batches of the latest fixes of the holds a review may still check."""
+        holds = self.holds
+        checking = () if holds is None else holds.checking
+        return {hold.batch for hold in checking if hold.batch is not None}
 
     def _filed_tasks(self) -> set[str | None]:
         """The tasks the findings of the groups kept were filed in."""
@@ -492,6 +514,7 @@ class ReviewLane:
         """Task ``task_id``, which was ``state``, was taken off the board. A review's batch
         ends as if it suggested nothing, or, for a task of a review that keeps a group, the task
         counts as ended; any other task leaves its batch."""
+        self._shown.pop(task_id, None)
         batch = self._batches.pop(task_id, None)
         if batch is None:
             await self._queue(self.planner.removed(state))
@@ -942,8 +965,12 @@ class ReviewLane:
             with self._lens_traced(task_id):
                 await self._run_and_end(task_id, run)
             return
-        with self._traced(task_id):
-            await self._run_and_end(task_id, partial(self._run_review, task_id))
+        self._shown[task_id] = self._jobs.get(task_id)
+        try:
+            with self._traced(task_id):
+                await self._run_and_end(task_id, partial(self._run_review, task_id))
+        finally:
+            self._shown.pop(task_id, None)  # Removing it as it ended forgot it already.
 
     def _lens_traced(self, task_id: str) -> AbstractContextManager[None]:
         """What traces task ``task_id``, on the board, as it runs: a review's span if it's a

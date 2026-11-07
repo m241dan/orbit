@@ -63,6 +63,7 @@ class TaskBoard:
 
     def __init__(self) -> None:
         self._tasks: list[TaskState] = []
+        self._index: dict[str, int] = {}  # Task id -> where it is in ``_tasks``.
         self._ids = itertools.count(1)
 
     @property
@@ -77,7 +78,7 @@ class TaskBoard:
     def restore(self, tasks: Sequence[TaskState]) -> None:
         """Replace the board's tasks with ``tasks``, in order; new ids carry on after the
         highest numeric one among them."""
-        self._tasks = list(tasks)
+        self._replace_all(list(tasks))
         highest = max((int(state.id) for state in tasks if state.id.isdecimal()), default=0)
         self._ids = itertools.count(highest + 1)
 
@@ -89,18 +90,18 @@ class TaskBoard:
         """
         state = self._new(task, fixes=fixes)
         if fixes is None:
-            self._tasks.append(state)
+            self._insert(len(self._tasks), state)
             return state.id
         fixed = self.get(fixes)
         inherited = {"origin": fixed.origin, "batch": fixed.batch, "round": fixed.round}
-        self._tasks.insert(self.position(fixes) + 1, state.model_copy(update=inherited))
+        self._insert(self.position(fixes) + 1, state.model_copy(update=inherited))
         return state.id
 
     def add_first(self, task: TaskSpec, origin: TaskOrigin = MANUAL_ORIGIN) -> str:
         """Add a pending ``task`` at the front, to run next, from ``origin``, the user's unless
         given; returns its id."""
         state = self._new(task, origin=origin)
-        self._tasks.insert(0, state)
+        self._insert(0, state)
         return state.id
 
     def add_suggestion(
@@ -108,7 +109,7 @@ class TaskBoard:
     ) -> str:
         """Add ``task``, suggested by the review behind ``batch``, at the end; returns its id."""
         state = self._new(task, origin=origin, batch=batch, round=round)
-        self._tasks.append(state)
+        self._insert(len(self._tasks), state)
         return state.id
 
     def add_suggestion_first(
@@ -116,7 +117,7 @@ class TaskBoard:
     ) -> str:
         """Add ``task``, suggested into ``batch``, at the front, to run next; returns its id."""
         state = self._new(task, origin=origin, batch=batch, round=round)
-        self._tasks.insert(0, state)
+        self._insert(0, state)
         return state.id
 
     def edit(self, task_id: str, task: TaskSpec) -> None:
@@ -151,10 +152,10 @@ class TaskBoard:
 
     def position(self, task_id: str) -> int:
         """Where task ``task_id`` is in run order. Raises ``Refused`` if there's no such task."""
-        for index, state in enumerate(self._tasks):
-            if state.id == task_id:
-                return index
-        raise Refused(UNKNOWN, f"No task with id {task_id!r}.")
+        index = self._index.get(task_id)
+        if index is None:
+            raise Refused(UNKNOWN, f"No task with id {task_id!r}.")
+        return index
 
     def set_status(self, task_id: str, status: TaskStatus) -> None:
         """Set task ``task_id``'s ``status``; one running again loses its last reason."""
@@ -209,7 +210,8 @@ class TaskBoard:
 
     def find(self, task_id: str | None) -> TaskState | None:
         """Task ``task_id``, or None if there's no such task on the board."""
-        return next((state for state in self._tasks if state.id == task_id), None)
+        index = None if task_id is None else self._index.get(task_id)
+        return None if index is None else self._tasks[index]
 
     def next_runnable(
         self,
@@ -257,7 +259,7 @@ class TaskBoard:
         state = self._new(
             task, status="draft", origin=origin, proposed_by=proposed_by, queued_as=queued_as
         )
-        self._tasks.append(state)
+        self._insert(len(self._tasks), state)
         return state.id
 
     def drafts_of(self, role: str) -> tuple[TaskState, ...]:
@@ -291,7 +293,7 @@ class TaskBoard:
         """Take draft ``task_id``, which ``role`` proposed, off the list. Raises ``Refused`` as
         :meth:`draft_of` does."""
         self.draft_of(task_id, role)
-        del self._tasks[self.position(task_id)]
+        self._delete(self.position(task_id))
 
     def move_draft(self, task_id: str, before: str | None, role: str) -> None:
         """Move draft ``task_id``, which ``role`` proposed, right before ``before``, another of
@@ -302,9 +304,9 @@ class TaskBoard:
             raise Refused(INVALID, "A draft can't move before itself.")
         if before is not None:
             self.draft_of(before, role)
-        del self._tasks[self.position(task_id)]
+        self._delete(self.position(task_id))
         index = len(self._tasks) if before is None else self.position(before)
-        self._tasks.insert(index, state)
+        self._insert(index, state)
 
     def accept(self, task_id: str) -> None:
         """Make draft ``task_id`` pending, no longer marked edited. Raises ``Refused`` if it
@@ -324,7 +326,7 @@ class TaskBoard:
         removed = self.get(task_id)
         if removed.status in ACTIVE_STATUSES:
             raise Refused(BUSY, f"Task {task_id!r} can't be removed while it runs.")
-        del self._tasks[self.position(task_id)]
+        self._delete(self.position(task_id))
         self._tasks = [
             state.model_copy(update={"fixes": removed.fixes}) if state.fixes == task_id else state
             for state in self._tasks
@@ -334,7 +336,7 @@ class TaskBoard:
         """Add ``state``, a task from another board, at the end as it is but with the next id;
         returns that id."""
         new_id = str(next(self._ids))
-        self._tasks.append(state.model_copy(update={"id": new_id}))
+        self._insert(len(self._tasks), state.model_copy(update={"id": new_id}))
         return new_id
 
     def add_triggered(
@@ -344,8 +346,34 @@ class TaskBoard:
         task unless given, from that trigger: a configurator's at the front, to run next, as the
         steps it sets up verify the others, and any other at the end; returns its id."""
         state = self._new(task, origin=trigger, queued_as=queued_as)
-        self._tasks.insert(0 if task.role == CONFIGURATOR else len(self._tasks), state)
+        self._insert(0 if task.role == CONFIGURATOR else len(self._tasks), state)
         return state.id
+
+    def _insert(self, index: int, state: TaskState) -> None:
+        """Put ``state`` at ``index`` in run order, keeping the id lookup in step: at the end in
+        constant time, elsewhere re-indexing the tasks after it, as the list shifts them."""
+        self._tasks.insert(index, state)
+        if index == len(self._tasks) - 1:
+            self._index[state.id] = index
+            return
+        self._reindex(index)
+
+    def _delete(self, index: int) -> None:
+        """Take the task at ``index`` out of run order, keeping the id lookup in step."""
+        del self._index[self._tasks.pop(index).id]
+        self._reindex(index)
+
+    def _replace_all(self, tasks: list[TaskState]) -> None:
+        """Make ``tasks`` the board's, in order, indexing them by id."""
+        self._tasks = tasks
+        self._index = {}
+        self._reindex(0)
+
+    def _reindex(self, start: int) -> None:
+        """Index by id the tasks from ``start`` on, whose places shifted."""
+        self._index.update(
+            (state.id, index) for index, state in enumerate(self._tasks[start:], start)
+        )
 
     def _update(self, task_id: str, update: dict[str, str]) -> None:
         """Change task ``task_id``'s fields as ``update`` says."""

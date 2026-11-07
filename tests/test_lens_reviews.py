@@ -284,7 +284,8 @@ async def test_a_landing_books_both_lenses_into_one_review_that_fans_in_once() -
     assert [t.status for t in first[1:3]] == ["completed", "completed"]
     assert all(len(tasks) <= 4 for tasks in boards(events))
     reviews = reviews_of(store)
-    assert reviews.batches == {"2": "batch-1", "3": "batch-1", "4": "batch-1"}
+    # The batch closed and its tasks completed, so the lane forgot what it booked.
+    assert (reviews.jobs, reviews.batches) == ({}, {})
     assert (reviews.groups, reviews.planner.batches) == ({}, {})
 
 
@@ -530,9 +531,7 @@ async def test_reviews_of_two_commits_side_by_side_each_fan_in_on_their_own_lens
     ]
     assert open_batches(events) == [1, 2, 1, 0]
     reviews = reviews_of(store)
-    c1_review = {"3": "batch-1", "4": "batch-1", "8": "batch-1"}
-    c2_review = {"5": "batch-2", "6": "batch-2", "7": "batch-2"}
-    assert reviews.batches == c1_review | c2_review
+    assert (reviews.jobs, reviews.batches) == ({}, {})  # Both batches closed.
     assert (reviews.groups, reviews.planner.batches) == ({}, {})
 
 

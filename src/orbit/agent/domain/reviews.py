@@ -15,7 +15,7 @@ from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict
 
-from orbit.agent.domain.board import WAITING
+from orbit.agent.domain.board import CUT_SHORT, FINAL, WAITING
 from orbit.agent.domain.review_sample import Choose, Draw, sample_files, with_sample
 from orbit.agent.domain.roles import Role
 from orbit.protocol import (
@@ -27,6 +27,7 @@ from orbit.protocol import (
     SUPER_REVIEW,
     TaskOrigin,
     TaskState,
+    TaskStatus,
 )
 
 # Characters of diff quoted in a review task; a reviewer can read files for more.
@@ -36,6 +37,8 @@ DIFF_LIMIT = 30000
 MESSAGES_LIMIT = 30000
 # Roles of the tasks orbit queues for itself, which no reviewer would suggest.
 _ORBITS_ROLES = REVIEW_ROLES | {CONFIGURATOR}
+# Statuses of a booked task done for good: it can't run again, so the lane need not remember it.
+_DONE: frozenset[TaskStatus] = FINAL - CUT_SHORT
 # Queued tasks named in a review task, so the reviewer doesn't suggest them; the rest are counted.
 PENDING_LIMIT = 40
 # Commits landed since the reviewed one named in a review task, so the reviewer can check its
@@ -351,6 +354,32 @@ def _filed_into(
     return any(batches.get(task) in open_batches for task in tasks)
 
 
+def runnable_tasks(tasks: Iterable[TaskState]) -> set[str]:
+    """The ids of the ``tasks`` that could still run: those not done for good, as a task cut
+    short, still to run or running isn't."""
+    return {state.id for state in tasks if state.status not in _DONE}
+
+
+def kept_bookings(
+    batches: Mapping[str, str],
+    jobs: Mapping[str, ReviewJob],
+    runnable: Collection[str],
+    live: Collection[str],
+    held: Collection[str],
+) -> frozenset[str]:
+    """The tasks booked into reviews, as ``batches`` gives the batch each was booked into by id
+    and ``jobs`` what each reviews, whose booking is still needed: one booked into a batch among
+    ``live``, the batches still open or whose group is kept, one reviewing one of the ``held``
+    batches, a hold's fix's, while that hold may still be checked, or one of the ``runnable``,
+    which could still run, whose booking keeps it from running again once its batch is spent.
+    A task done for good, or taken off the board, whose batch has closed is forgotten."""
+    return frozenset(
+        task
+        for task, batch in batches.items()
+        if batch in live or jobs[task].batch in held or task in runnable
+    )
+
+
 def review_kind(job: ReviewJob) -> ReviewKind:
     """What ``job`` reviews, as ``reviews_finished``'s ``review`` field says."""
     if job.whole:
@@ -510,7 +539,13 @@ class LaneSnapshot(BaseModel):
     task it queued, the ``jobs`` it reviews and the ``batches`` it suggests into, with the
     ``templates`` each review of commits is rendered from, while it may still run, the
     ``groups`` of the reviews that keep one, by batch, while their batch is open, and the
-    ``severities`` merge passes filed tasks at, by task id, while their batch is open."""
+    ``severities`` merge passes filed tasks at, by task id, while their batch is open.
+
+    The ``jobs`` and ``batches`` are bounded: a task's are dropped once its batch has closed and
+    no kept group or merge hold refers to it, unless the task could still run, as one cut short
+    on the board could, which they keep from running again (see :func:`kept_bookings`). So they
+    hold the reviews of the batches still open or kept, and the reviews cut short that the user
+    hasn't removed, rather than every review the session ever queued."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
