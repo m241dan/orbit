@@ -63,7 +63,7 @@ def sample_files(
     doesn't fit whole. All of them when fewer are eligible; none for a size of 0."""
     roots = [posixpath.normpath(path) for path in mapped_paths]
     unchanged = set(tracked) - set(changed)
-    eligible = sorted(path for path in unchanged if _is_code(path) and _under(path, roots))
+    eligible = sorted(path for path in unchanged if is_code_file(path) and is_under(path, roots))
     return tuple(sorted(_drawn(eligible, sampled, draw)))
 
 
@@ -99,12 +99,12 @@ def _standings(eligible: Sequence[str], sampled: Mapping[str, int]) -> list[list
     return [groups[standing] for standing in sorted(groups)]
 
 
-def _is_code(path: str) -> bool:
+def is_code_file(path: str) -> bool:
     """Whether ``path`` is a file of source code, by its extension."""
     return posixpath.splitext(path)[1] in CODE_EXTENSIONS
 
 
-def _under(path: str, roots: Sequence[str]) -> bool:
+def is_under(path: str, roots: Sequence[str]) -> bool:
     """Whether ``path`` is one of the normalised ``roots`` or inside one; any path is when there
     are none."""
     return not roots or any(_inside(path, root) for root in roots)

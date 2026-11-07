@@ -170,6 +170,7 @@ def test_the_guards_are_the_records() -> None:
         "suggestions-pending",
         "not-queued",
         "dedupe",
+        "code-changed",
     )
 
 
@@ -210,7 +211,7 @@ def test_every_field_has_a_description() -> None:
         (
             {"on": "commits", "guards": ["review-rounds", "nightly"]},
             "triggers.x.guards: nightly isn't a guard; the guards are review-rounds,"
-            " raised-finding, suggestions-pending, not-queued, dedupe.",
+            " raised-finding, suggestions-pending, not-queued, dedupe, code-changed.",
         ),
         ({"on": "commits", "every": 0}, "triggers.x.every: Input should be greater than 0"),
         ({"on": "commits", "colour": "red"}, "triggers.x.colour: Extra inputs are not permitted"),
@@ -592,6 +593,15 @@ def test_review_rounds_off_a_landing_is_refused_on_its_line_after_the_when() -> 
         'triggers.x.guards: review-rounds needs on = "task_landed".',
         'triggers.x.every: every = 2 needs on = "commits".',
     ]
+
+
+def test_code_changed_off_a_landing_is_refused() -> None:
+    message = problems(on="commits", role="reviewer", prompt="Go", guards=("code-changed",))
+    assert message == 'triggers.x.guards: code-changed needs on = "task_landed".'
+
+
+def test_code_changed_on_a_landing_is_taken() -> None:
+    check_triggers({"x": REVIEW.model_copy(update={"guards": ("code-changed",)})}, ROLES)
 
 
 def test_review_rounds_on_a_landing_takes_any_role() -> None:

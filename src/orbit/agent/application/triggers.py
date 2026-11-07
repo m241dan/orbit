@@ -15,7 +15,9 @@ by the lenses whose findings it fixes; a trigger listing roles queues only for t
 that raised one. A trigger with ``paths`` fires on a landing only if its commit, or one of the
 batch's, changed a path one of them matches; those paths are asked of git only while such a
 trigger listens, and if git can't list them it fires all the same, the failure on the span
-current.
+current. One ``code-changed`` guards, without ``paths``, fires only if one of those paths is
+code, and those it holds back are noted in the conversation, but as reviews are raised again
+quietly.
 
 The review lane counts each landing toward the ``commits`` triggers too, as their guards see the
 board before the landing's own review is queued, and has those that fire, or one fired by hand,
@@ -70,6 +72,7 @@ from orbit.agent.domain.triggers import (
     TRIGGER_VARIABLE,
     Counted,
     SetOutcome,
+    Sifted,
     Trigger,
     TriggerEvent,
     count_landing,
@@ -78,11 +81,13 @@ from orbit.agent.domain.triggers import (
     held_back,
     listening,
     needs_paths,
+    note_skipped_reviews,
+    reads_paths,
     render_template,
     set_finished_event,
     set_finished_values,
+    sift_changes,
     verification_state,
-    within_paths,
 )
 from orbit.agent.domain.verification import CheckSet, VerificationStep, failure_report
 from orbit.protocol import (
@@ -112,7 +117,7 @@ the background."""
 
 PATHS_FAILED_EVENT = "orbit.trigger.paths_failed"
 """The event on the span current when git can't list the paths a landing changed, for each
-trigger with ``paths`` that fires all the same."""
+trigger with ``paths``, or that ``code-changed`` guards, that fires all the same."""
 
 REVIEW_SKIPPED = "Review skipped"
 TRIGGERS_SKIPPED = "Triggers skipped"
@@ -277,15 +282,21 @@ class TriggerEngine:
     async def reviewed(self, review: ReviewRound) -> tuple[str, ...]:
         """Fire the triggers ``review-rounds`` guards on ``task_landed`` for ``review``, of a
         batch that's done, which no one task caused, as its ``review`` field says, but those
-        ``raised-finding`` guards whose role raised none of its findings. Returns the ids of the
-        tasks queued."""
-        firing = await self._batch_firing(review)
-        return () if firing is None else await self._queue(firing)
+        ``raised-finding`` guards whose role raised none of its findings. Those ``code-changed``
+        held back are noted in the conversation, naming the batch's reviewed tasks. Returns the
+        ids of the tasks queued."""
+        fired = await self._batch_firing(review)
+        queued = () if fired.firing is None else await self._queue(fired.firing)
+        board = self._tasks.board
+        found = (board.find(task_id) for task_id in review.job.reviewed)
+        prompts = [state.task.prompt for state in found if state is not None]
+        await self._note_skipped(fired.held, prompts)
+        return queued
 
     async def reviewed_quietly(self, review: ReviewRound) -> None:
         """Fire the triggers ``review-rounds`` guards for ``review`` as :meth:`reviewed` does,
         their tasks queued on the board without publishing it or running them."""
-        firing = await self._batch_firing(review)
+        firing = (await self._batch_firing(review)).firing
         if firing is not None:
             self._add(self._tasks.board, firing)
 
@@ -348,9 +359,14 @@ class TriggerEngine:
         any, as :func:`~orbit.agent.domain.triggers.listening` says: in their order, each that
         no guard holds back queues its role's task, a draft if it says so, from it, rendered
         from the ``values`` gathered and its name, or runs the checks its ``checks`` names. The
-        board is published if any task was queued. Returns their ids, for :meth:`run`."""
-        firing = await self._firing(self._desk.agents.triggers, event, values, review)
-        return () if firing is None else await self._queue(firing)
+        board is published if any task was queued. Those ``code-changed`` held back on a landing
+        that changed no code are noted in the conversation, naming the task that caused it.
+        Returns their ids, for :meth:`run`."""
+        fired = await self._sift(self._desk.agents.triggers, event, values, review)
+        queued = () if fired.firing is None else await self._queue(fired.firing)
+        prompts = () if event.cause is None else (event.cause.task.prompt,)
+        await self._note_skipped(fired.held, prompts)
+        return queued
 
     def count(self, state: TaskState, counts: Mapping[str, int]) -> Counted:
         """Count the landing of the task that ended as ``state`` toward the ``commits``
@@ -399,9 +415,9 @@ class TriggerEngine:
         for role in roles:
             self._kick(role)
 
-    async def _batch_firing(self, review: ReviewRound) -> _Firing | None:
+    async def _batch_firing(self, review: ReviewRound) -> _Fired:
         """What the triggers ``review-rounds`` guards fire on for ``review``, the review of a
-        batch's coder tasks, from what it reviews; none if none does."""
+        batch's coder tasks, from what it reviews, and those ``code-changed`` held back."""
         job = review.job
         triggers = {
             name: trigger
@@ -411,7 +427,7 @@ class TriggerEngine:
         fields = {"role": CODER, "origin": job.origin, REVIEW_FIELD: "batch"}
         event = TriggerEvent(TASK_LANDED, fields, commits=job.commits)
         skills = review_skills(job, self._tasks.board.tasks)
-        return await self._firing(
+        return await self._sift(
             triggers, event, partial(self._values, job, skills, REVIEW_SKIPPED), review
         )
 
@@ -422,37 +438,63 @@ class TriggerEngine:
         values: Values,
         review: ReviewRound | None,
     ) -> _Firing | None:
+        """What the ``triggers`` that may fire on ``event`` fire on, as :meth:`_sift` says; none
+        if none may, or the values can't be gathered."""
+        return (await self._sift(triggers, event, values, review)).firing
+
+    async def _sift(
+        self,
+        triggers: Mapping[str, Trigger],
+        event: TriggerEvent,
+        values: Values,
+        review: ReviewRound | None,
+    ) -> _Fired:
         """The ``triggers`` that may fire on ``event``, with ``review`` the review due, if any,
         and the roles that raised its batch's findings, and that the paths its commits changed
-        let fire, and the ``values`` they render from, gathered only if one may; none if none
-        may, or the values can't be gathered."""
+        let fire, and the ``values`` they render from, gathered only if one may, with those
+        ``code-changed`` held back."""
         roles = enabled_roles(self._desk.agents.roles)
         job, raised = (None, frozenset[str]()) if review is None else (review.job, review.raised)
-        found = await self._within_paths(listening(triggers, event, roles, job, raised), event)
-        given = await values() if found else None
-        return None if given is None else _Firing(found, given, review, event=event)
+        sifted = await self._within_paths(listening(triggers, event, roles, job, raised), event)
+        given = await values() if sifted.fire else None
+        firing = None if given is None else _Firing(sifted.fire, given, review, event=event)
+        return _Fired(firing, sifted.held)
 
-    async def _within_paths(
-        self, found: list[tuple[str, Trigger]], event: TriggerEvent
-    ) -> list[tuple[str, Trigger]]:
-        """The triggers ``found`` listening for ``event``, by name, in order, that the paths its
-        commits changed let fire, those paths asked of git only if one of them has ``paths``.
-        If git can't list them, every one of them fires, the failure noted on the span current
-        for each with ``paths``."""
+    async def _within_paths(self, found: list[tuple[str, Trigger]], event: TriggerEvent) -> Sifted:
+        """The triggers ``found`` listening for ``event``, by name, in order, sifted by the
+        paths its commits changed, as :func:`~orbit.agent.domain.triggers.sift_changes` says,
+        with the paths of the project's ``[[skills]]``, those changed paths asked of git only
+        if one of them has ``paths`` or ``code-changed`` guards it. If git can't list them,
+        every one of them fires, the failure noted on the span current for each so decided."""
         if not needs_paths(found):
-            return found
-        tree = self._desk.agents.tree
-        assert tree is not None  # Only work in a tree lands, and only a landing takes paths.
+            return Sifted(found, [])
         try:
-            changed = [
-                path
-                for commit in event.commits
-                for path in await tree.changed_files(f"{commit}^", commit)
-            ]
+            changed = await self._changed_paths(event)
         except TreeFailed as exc:  # Git failed; reviews fire rather than be skipped unseen.
             _note_paths_failed(found, exc)
-            return found
-        return within_paths(found, changed)
+            return Sifted(found, [])
+        mapped = [path for mapping in self._desk.agents.skill_mappings for path in mapping.paths]
+        return sift_changes(found, changed, mapped)
+
+    async def _changed_paths(self, event: TriggerEvent) -> list[str]:
+        """The paths ``event``'s commits changed, as git lists them; raises
+        :class:`~orbit.agent.application.ports.TreeFailed` if it can't."""
+        tree = self._desk.agents.tree
+        assert tree is not None  # Only work in a tree lands, and only a landing takes paths.
+        return [
+            path
+            for commit in event.commits
+            for path in await tree.changed_files(f"{commit}^", commit)
+        ]
+
+    async def _note_skipped(
+        self, held: Sequence[tuple[str, Trigger]], prompts: Sequence[str]
+    ) -> None:
+        """Say in the conversation which reviews the triggers ``code-changed`` ``held`` back
+        skipped of the tasks with ``prompts``, if it held any back."""
+        note = note_skipped_reviews(held, prompts)
+        if note is not None:
+            await self._desk.publish(Notice(message=note))
 
     async def _queue(self, firing: _Firing) -> tuple[str, ...]:
         """Queue the tasks of the triggers ``firing`` that no guard holds back, publishing the
@@ -558,6 +600,15 @@ class TriggerEngine:
 
 
 @dataclass(frozen=True)
+class _Fired:
+    """What an event fires: the ``firing``, if any trigger fires and its values were gathered,
+    and the triggers ``code-changed`` ``held`` back, by name, in order."""
+
+    firing: _Firing | None
+    held: list[tuple[str, Trigger]]
+
+
+@dataclass(frozen=True)
 class _Queued:
     """What a trigger fires its tasks from: its ``name``, the ``trigger``, its ``prompt``, as
     rendered, the same ``held`` back, quoting :data:`~orbit.agent.domain.reviews.DIFF_HELD` in
@@ -572,11 +623,12 @@ class _Queued:
 
 
 def _note_paths_failed(found: Sequence[tuple[str, Trigger]], error: TreeFailed) -> None:
-    """Note on the span current, for each of the triggers ``found``, by name, that has
-    ``paths``, that it fires though git failed, as ``error`` says, to list what changed."""
+    """Note on the span current, for each of the triggers ``found``, by name, that the paths a
+    landing changed decide, that it fires though git failed, as ``error`` says, to list what
+    changed."""
     span = current_span()
     for name, trigger in found:
-        if trigger.paths is not None:
+        if reads_paths(trigger):
             span.event(PATHS_FAILED_EVENT, {"orbit.trigger": name, "error": str(error)})
 
 

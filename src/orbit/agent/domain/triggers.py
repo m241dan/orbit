@@ -29,6 +29,7 @@ from pydantic import (
 from pydantic_core import PydanticCustomError
 
 from orbit.agent.domain.board import WAITING
+from orbit.agent.domain.code_changes import changes_code
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.agent.domain.cron import cron_problem
 from orbit.agent.domain.layers import DEFAULT, PACKAGE, Layer
@@ -55,7 +56,7 @@ failing, the user firing it, every finding role's task of a review having ended,
 named set ending, or its ``cron`` expression coming due."""
 
 GuardName = Literal[
-    "review-rounds", "raised-finding", "suggestions-pending", "not-queued", "dedupe"
+    "review-rounds", "raised-finding", "suggestions-pending", "not-queued", "dedupe", "code-changed"
 ]
 """A named rule that may hold a trigger back."""
 
@@ -115,6 +116,11 @@ RAISED_FINDING = "raised-finding"
 """The guard that holds a trigger back on a batch's review unless its role raised a finding
 filed, or merged, into one of the batch's tasks, so a batch of fixes is reviewed by the lenses
 whose findings it fixes (decision 20). It holds nothing back on any other event."""
+
+CODE_CHANGED = "code-changed"
+"""The guard that holds a trigger on ``task_landed`` back when nothing its commits changed is
+code, as :func:`~orbit.agent.domain.code_changes.changes_code` says; a trigger with ``paths`` is
+decided by them alone."""
 
 REVIEW_FIELD = "review"
 """The ``when`` field saying what a review reviews: on ``task_landed``, a landing's own commit
@@ -266,8 +272,8 @@ class Trigger(_Config):
     guards: tuple[GuardName, ...] = Field(
         default=(),
         description=(
-            "What may hold it back: review-rounds, raised-finding, suggestions-pending, not-queued"
-            " or dedupe."
+            "Guards: review-rounds, raised-finding, suggestions-pending, not-queued, dedupe or"
+            " code-changed."
         ),
     )
     every: int | None = Field(
@@ -560,7 +566,8 @@ def check_triggers(
     checks nor one of ``sets``, those a step is in, a role without a prompt or ``checks`` with
     one, a ``when`` field or a template variable its event doesn't give, a ``when`` value its
     field never takes on its event, a role not among ``roles`` or a value :data:`WHEN_VALUES`
-    doesn't give, ``review-rounds`` on a trigger on another event than ``task_landed``,
+    doesn't give, ``review-rounds`` or ``code-changed`` on a trigger on another event than
+    ``task_landed``,
     ``raised-finding`` without ``review-rounds`` and ``task_landed``, or on a trigger running
     checks, ``every`` on another event than ``commits``, ``paths`` on another event than
     ``task_landed``, or naming no glob, ``cron`` missing on ``schedule``, on another event, or
@@ -709,13 +716,18 @@ def _not_values(field: str, values: Sequence[str], known: Sequence[str]) -> list
 
 
 def _guard_problems(trigger: Trigger) -> list[tuple[str, str]]:
-    """Why ``review-rounds`` can't guard ``trigger``, if it does: the review lane books its task
-    into the review it finds due, which only falls due on ``task_landed``. Any number of
-    triggers may take it, whatever their roles, each task they queue for one review booked into
-    it (decision 8)."""
-    if REVIEW_ROUNDS not in trigger.guards or trigger.on == TASK_LANDED:
+    """Why ``review-rounds`` or ``code-changed`` can't guard ``trigger``, if they do: the review
+    lane books its task into the review it finds due, which only falls due on ``task_landed``,
+    and only a landing's commits change paths. Any number of triggers may take
+    ``review-rounds``, whatever their roles, each task they queue for one review booked into it
+    (decision 8)."""
+    if trigger.on == TASK_LANDED:
         return []
-    return [("guards", f'{REVIEW_ROUNDS} needs on = "{TASK_LANDED}".')]
+    return [
+        ("guards", f'{guard} needs on = "{TASK_LANDED}".')
+        for guard in (REVIEW_ROUNDS, CODE_CHANGED)
+        if guard in trigger.guards
+    ]
 
 
 _NEEDS_ROUNDS = f'{RAISED_FINDING} needs {REVIEW_ROUNDS} and on = "{TASK_LANDED}".'
@@ -902,9 +914,73 @@ def _narrowed(trigger: Trigger, event: TriggerEvent | None) -> bool:
 
 
 def needs_paths(found: Iterable[tuple[str, Trigger]]) -> bool:
-    """Whether one of the triggers ``found`` listening, by name, has ``paths``, so the paths
-    their event's commits changed are needed to decide whether it fires."""
-    return any(trigger.paths is not None for _, trigger in found)
+    """Whether one of the triggers ``found`` listening, by name, is decided by the paths their
+    event's commits changed, as :func:`reads_paths` says, so those paths are needed to decide
+    whether it fires."""
+    return any(reads_paths(trigger) for _, trigger in found)
+
+
+def reads_paths(trigger: Trigger) -> bool:
+    """Whether whether ``trigger`` fires on a landing depends on the paths its commits changed:
+    it has ``paths``, or ``code-changed`` guards it."""
+    return trigger.paths is not None or _code_guarded(trigger)
+
+
+def _code_guarded(trigger: Trigger) -> bool:
+    """Whether ``code-changed`` decides ``trigger``: it guards it, and it has no ``paths`` of
+    its own, which would decide it alone."""
+    return trigger.paths is None and CODE_CHANGED in trigger.guards
+
+
+@dataclass(frozen=True)
+class Sifted:
+    """The triggers listening for a landing, by name, in order, sifted by the paths its commits
+    changed: those that ``fire``, and those ``code-changed`` ``held`` back."""
+
+    fire: list[tuple[str, Trigger]]
+    held: list[tuple[str, Trigger]]
+
+
+def sift_changes(
+    found: Sequence[tuple[str, Trigger]], changed: Collection[str], mapped_paths: Sequence[str]
+) -> Sifted:
+    """The triggers ``found`` listening, by name, in order, sifted by the paths ``changed``:
+    those their ``paths`` let fire, as :func:`within_paths` says, but those ``code-changed``
+    holds back, without ``paths`` of their own, when none of the paths ``changed`` is code, with
+    ``mapped_paths`` the paths of the project's ``[[skills]]``."""
+    within = within_paths(found, changed)
+    held = (
+        []
+        if changes_code(changed, mapped_paths)
+        else [(name, trigger) for name, trigger in within if _code_guarded(trigger)]
+    )
+    return Sifted(fire=[heard for heard in within if heard not in held], held=held)
+
+
+def note_skipped_reviews(held: Sequence[tuple[str, Trigger]], prompts: Sequence[str]) -> str | None:
+    """What the conversation says of the triggers ``code-changed`` ``held`` back, by name, on a
+    landing of the tasks with ``prompts``: the reviews of their roles, each without its
+    ``-reviewer`` suffix, of the first task, by its title, its prompt's first line as its row
+    shows it, and how many more; none if they queue for no role, or there's no task."""
+    lenses = tuple(
+        dict.fromkeys(
+            role.removesuffix(LENS_SUFFIX) for _, trigger in held for role in trigger.roles
+        )
+    )
+    if not lenses or not prompts:
+        return None
+    title = prompts[0].partition("\n")[0]
+    more = f" and {len(prompts) - 1} more" if len(prompts) > 1 else ""
+    return f'Skipped the {_joined(lenses)} reviews of "{title}"{more}: it changed no code.'
+
+
+LENS_SUFFIX = "-reviewer"
+"""What a lens role's name ends with, left out where the note of its skipped reviews names it."""
+
+
+def _joined(names: Sequence[str]) -> str:
+    """``names`` in words, as ``a, b and c``."""
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
 
 
 def within_paths(
@@ -997,7 +1073,8 @@ def held_back(trigger: Trigger, prompt: str | None, tasks: Sequence[TaskState]) 
     ``dedupe`` while such a task's prompt has the same first line, and ``suggestions-pending``
     while a task the reviews queued is: a task orbit queued as a review, booked into its review
     lane, whatever its role, or a task in a review's batch. ``review-rounds`` and
-    ``raised-finding`` are decided as it listens. Without a ``prompt``, as a landing is counted
+    ``raised-finding`` are decided as it listens, and ``code-changed`` with the paths a landing
+    changed (see :func:`sift_changes`). Without a ``prompt``, as a landing is counted
     before there's one, ``dedupe`` holds nothing back."""
     waiting = [state for state in tasks if state.status in WAITING]
     return any(_holds(guard, trigger, prompt, waiting) for guard in trigger.guards)

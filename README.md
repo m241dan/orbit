@@ -2427,6 +2427,22 @@ The guards:
   a suggestion or a fix of one; so the super review waits for the work its last suggestions, or
   another trigger's, are about to do. A `reviewer` task that isn't booked, such as one from a
   trigger on `task_finished`, doesn't hold it back.
+- `code-changed`: on `task_landed`, holds the trigger back when nothing the commit changed, or
+  any of a batch's commits did, is code: a file under one of the `[[skills]]` entries' `paths`
+  (see [Skills](#skills); a project without entries uses the other two), a file with a code
+  extension (those a super review samples, `.py`, `.rs`, `.ts` and the like), or a dependency or
+  build manifest, by its name at any depth: `pyproject.toml`, `uv.lock`, `poetry.lock`,
+  `Pipfile`, `Pipfile.lock`, `setup.cfg`, `requirements*.txt`, `package.json`,
+  `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `Cargo.toml`, `Cargo.lock`, `go.mod`,
+  `go.sum`, `CMakeLists.txt`, `CMakePresets.json`, `vcpkg.json`, `conanfile.txt`, `meson.build`,
+  `Makefile`, `pom.xml`, `build.gradle`, `build.gradle.kts`, `Gemfile`, `Gemfile.lock`,
+  `Dockerfile` and `Containerfile`. A deleted or renamed file counts as changed. A trigger that
+  sets its own `paths` is decided by them alone. The conversation says what it held back, once
+  per landing, naming each held trigger's roles, a lens without its `-reviewer` suffix, and the
+  task by its title (`Skipped the bugs and tests reviews of "Fix the parser": it changed no
+  code.`), or a batch's first task and how many more (`… of "Fix the parser" and 2 more: …`);
+  reviews raised again quietly as a session loads say nothing. Git is asked what changed only
+  while a trigger it guards listens, and if it can't say, the trigger fires, as with `paths`.
 
 A `commits` trigger's guards are judged before its task's prompt is rendered, so `dedupe` holds
 none back.
@@ -2492,7 +2508,8 @@ one. A list of roles names each one that isn't a role on a line of its own, once
 it's listed, and refuses a role listed more than once (`triggers.tidy-up.role: style-reviewer is
 listed twice.`); an empty one is refused (`triggers.tidy-up.role: a list of roles names at least
 one.`). So is `review-rounds` on a trigger that isn't on `task_landed`
-(`triggers.tidy-up.guards: review-rounds needs on = "task_landed".`), and `raised-finding` on a
+(`triggers.tidy-up.guards: review-rounds needs on = "task_landed".`), as is `code-changed`
+(`triggers.tidy-up.guards: code-changed needs on = "task_landed".`), and `raised-finding` on a
 trigger that isn't guarded by `review-rounds` and on `task_landed`, since only those hear a batch's
 review (`triggers.tidy-up.guards: raised-finding needs review-rounds and on = "task_landed".`), or
 on one running a set, which has no role to narrow (`triggers.tidy-up.guards: raised-finding needs

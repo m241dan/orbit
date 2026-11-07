@@ -25,9 +25,11 @@ from orbit.agent.domain.reviews import (
     review_values,
 )
 from orbit.agent.domain.roles import Role
+from orbit.agent.domain.skills import SkillMapping
 from orbit.agent.domain.triggers import Trigger, VerificationState, render_template
 from orbit.agent.domain.verification import CheckSet, VerificationStep, startup_fix_prompt
 from orbit.protocol import (
+    BUGS_REVIEWER,
     CODER,
     CONFIGURATOR,
     CONFIGURE_CHECKS,
@@ -40,6 +42,7 @@ from orbit.protocol import (
     SUPER_LENS_REVIEWERS,
     SUPER_REVIEW,
     TASK_CHECKS,
+    TESTS_REVIEWER,
     ErrorOccurred,
     Event,
     Notice,
@@ -65,12 +68,19 @@ class Engine:
         tree: FakeTree | None = None,
         roles: dict[str, Role] | None = None,
         verification: VerificationState = "off",
+        skill_mappings: tuple[SkillMapping, ...] = (),
     ) -> None:
         self.events: list[Event] = []
         self.kicked: list[str] = []
         self.checks_run: list[str] = []  # The checks run, by what each trigger's checks named.
         self.tree = tree or FakeTree()
-        desk = desk_for(self.publish, tree=self.tree, triggers=triggers, roles=roles or ROLES)
+        desk = desk_for(
+            self.publish,
+            tree=self.tree,
+            triggers=triggers,
+            roles=roles or ROLES,
+            skill_mappings=skill_mappings,
+        )
         self.tasks = Tasks(TaskBoard(), self.publish)
         self.board = self.tasks.board
         gate = SessionGate(verification=lambda: verification)
@@ -89,6 +99,9 @@ class Engine:
 
     def errors(self) -> list[ErrorOccurred]:
         return [event for event in self.events if isinstance(event, ErrorOccurred)]
+
+    def notices(self) -> list[str]:
+        return [event.message for event in self.events if isinstance(event, Notice)]
 
 
 def look(**fields: object) -> Trigger:
@@ -440,6 +453,103 @@ async def test_changed_paths_git_cannot_list_fire_the_trigger_and_go_on_its_span
             {"orbit.trigger": "security-review", "error": "git diff failed: bad revision"},
         )
     ]
+
+
+# Landings that change no code, which code-changed holds its triggers back on
+
+
+def lens(role: str = BUGS_REVIEWER, **fields: object) -> Trigger:
+    """``role``'s look at each landed coder commit, ``code-changed`` guarding it, with
+    ``fields`` over that."""
+    return look(**({"role": role, "guards": ("code-changed",)} | fields))
+
+
+NO_CODE = 'Skipped the bugs reviews of "Task 1": it changed no code.'
+"""The note of the bugs review held back on the landing of :func:`ended`'s task."""
+
+
+async def test_a_landing_changing_no_code_holds_back_a_guarded_trigger_with_a_note() -> None:
+    engine = Engine({"bugs-review": lens()})
+    engine.tree.changed[f"{COMMIT}^"] = ["docs/x.md"]
+    assert await engine.engine.landed(ended(), COMMIT) == ()
+    assert engine.board.tasks == ()
+    assert engine.notices() == [NO_CODE]
+
+
+async def test_the_note_names_a_role_without_the_reviewer_suffix_whole() -> None:
+    engine = Engine({"look": lens(REVIEWER)})
+    engine.tree.changed[f"{COMMIT}^"] = ["docs/x.md"]
+    await engine.engine.landed(ended(), COMMIT)
+    assert engine.notices() == ['Skipped the reviewer reviews of "Task 1": it changed no code.']
+
+
+async def test_two_guarded_triggers_held_back_share_one_note() -> None:
+    engine = Engine({"bugs-review": lens(), "tests-review": lens(TESTS_REVIEWER), "look": look()})
+    engine.tree.changed[f"{COMMIT}^"] = ["docs/x.md"]
+    await engine.engine.landed(ended(), COMMIT)
+    assert [origin for _, origin, _, _ in engine.shown()] == ["look"]
+    assert engine.notices() == [
+        'Skipped the bugs and tests reviews of "Task 1": it changed no code.'
+    ]
+
+
+@pytest.mark.parametrize("changed", [["src/x.py"], ["uv.lock"], ["src/x.md"]])
+async def test_a_landing_changing_code_fires_a_guarded_trigger_without_a_note(
+    changed: list[str],
+) -> None:
+    engine = Engine(
+        {"bugs-review": lens()}, skill_mappings=(SkillMapping(paths=("src",), use=("python",)),)
+    )
+    engine.tree.changed[f"{COMMIT}^"] = changed
+    assert len(await engine.engine.landed(ended(), COMMIT)) == 1
+    assert engine.notices() == []
+
+
+async def test_a_guarded_trigger_with_paths_is_decided_by_them_alone() -> None:
+    engine = Engine({"docs-review": lens(paths=("docs/**",))})
+    engine.tree.changed[f"{COMMIT}^"] = ["docs/x.md"]
+    assert len(await engine.engine.landed(ended(), COMMIT)) == 1
+    assert engine.notices() == []
+
+
+async def test_changed_paths_git_cannot_list_fire_a_guarded_trigger_and_go_on_its_span() -> None:
+    traced = Traced()
+    engine = Engine({"bugs-review": lens()})
+    engine.tree.failures["changed_files"] = TreeFailed("git diff failed: bad revision")
+    with traced.telemetry.span("landing"):
+        assert len(await engine.engine.landed(ended(), COMMIT)) == 1
+    [span] = traced.spans("landing")
+    assert [dict(event.attributes or {}) for event in span.events] == [
+        {"orbit.trigger": "bugs-review", "error": "git diff failed: bad revision"}
+    ]
+    assert engine.notices() == []
+
+
+def three_tasks(engine: Engine) -> ReviewJob:
+    """A batch of three tasks added to ``engine``'s board, whose commits change only docs."""
+    reviewed = tuple(
+        engine.board.add(TaskSpec(prompt=prompt))
+        for prompt in ("Fix the parser\n\nIt breaks.", "Two", "Three")
+    )
+    commits = ("c2", "c3", "c4")
+    engine.tree.changed |= {f"{commit}^": ["docs/plan.md"] for commit in commits}
+    return ReviewJob(commits=commits, round=1, batch="batch-1", reviewed=reviewed)
+
+
+async def test_a_batchs_review_changing_no_code_notes_its_first_task_and_how_many_more() -> None:
+    engine = Engine({"bugs-review": lens(guards=("review-rounds", "code-changed"), when={})})
+    job = three_tasks(engine)
+    assert await engine.engine.reviewed(ReviewRound(job, unbooked)) == ()
+    assert engine.notices() == [
+        'Skipped the bugs reviews of "Fix the parser" and 2 more: it changed no code.'
+    ]
+
+
+async def test_a_batchs_review_raised_quietly_notes_nothing_it_holds_back() -> None:
+    engine = Engine({"bugs-review": lens(guards=("review-rounds", "code-changed"), when={})})
+    await engine.engine.reviewed_quietly(ReviewRound(three_tasks(engine), unbooked))
+    assert len(engine.board.tasks) == 3
+    assert engine.events == []
 
 
 # A batch's review

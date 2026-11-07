@@ -17,7 +17,9 @@ from orbit.agent.domain.triggers import (
     held_back,
     listening,
     needs_paths,
+    note_skipped_reviews,
     restart_counts,
+    sift_changes,
     takes,
     verification_state,
     within_paths,
@@ -217,6 +219,74 @@ def test_a_trigger_with_paths_keeps_listening_only_if_a_changed_path_matches_one
     assert within_paths(found, ["README.md", "pyproject.toml"]) == found
     assert within_paths(found, ["README.md"]) == [("plain", trigger())]
     assert within_paths(found, []) == [("plain", trigger())]
+
+
+# code-changed, decided by the paths a landing changed
+
+CODE_GUARDED = trigger(role="bugs-reviewer", guards=("code-changed",))
+"""A lens ``code-changed`` guards, without ``paths`` of its own."""
+
+
+def test_changed_paths_are_needed_while_a_trigger_listening_has_code_changed() -> None:
+    assert needs_paths([("plain", trigger()), ("bugs", CODE_GUARDED)])
+
+
+@pytest.mark.parametrize(
+    ("changed", "fired", "held"),
+    [
+        (["docs/x.md"], ["plain"], ["bugs"]),
+        (["src/x.md"], ["plain", "bugs"], []),
+        (["scripts/x.py"], ["plain", "bugs"], []),
+        (["Makefile"], ["plain", "bugs"], []),
+    ],
+)
+def test_code_changed_holds_back_its_trigger_when_nothing_changed_is_code(
+    changed: list[str], fired: list[str], held: list[str]
+) -> None:
+    sifted = sift_changes([("plain", trigger()), ("bugs", CODE_GUARDED)], changed, ["src"])
+    assert (names(sifted.fire), names(sifted.held)) == (fired, held)
+
+
+def test_a_trigger_with_paths_is_decided_by_them_alone_whatever_code_changed_says() -> None:
+    docs = CODE_GUARDED.model_copy(update={"paths": ("docs/**",)})
+    assert names(sift_changes([("docs", docs)], ["docs/x.md"], []).fire) == ["docs"]
+    assert sift_changes([("docs", docs)], ["src/x.py"], []) == sift_changes([], [], [])
+
+
+def test_code_changed_holds_nothing_the_paths_held_already() -> None:
+    narrowed = CODE_GUARDED.model_copy(update={"paths": ("src/**",)})
+    sifted = sift_changes([("bugs", narrowed), ("plain", trigger())], ["docs/x.md"], [])
+    assert (names(sifted.fire), sifted.held) == (["plain"], [])
+
+
+@pytest.mark.parametrize(
+    ("roles", "prompts", "note"),
+    [
+        (
+            [["bugs-reviewer"]],
+            ["Fix the parser\n\nMore."],
+            'Skipped the bugs reviews of "Fix the parser": it changed no code.',
+        ),
+        (
+            [["license-check"]],
+            ["Fix it"],
+            'Skipped the license-check reviews of "Fix it": it changed no code.',
+        ),
+        (
+            [["bugs-reviewer", "tests-reviewer"], ["logic-reviewer"], ["bugs-reviewer"]],
+            ["Fix the parser", "Two", "Three"],
+            'Skipped the bugs, tests and logic reviews of "Fix the parser" and 2 more:'
+            " it changed no code.",
+        ),
+        ([], ["Fix it"], None),
+        ([["bugs-reviewer"]], [], None),
+    ],
+)
+def test_the_note_of_skipped_reviews_names_the_lenses_and_the_first_task(
+    roles: list[list[str]], prompts: list[str], note: str | None
+) -> None:
+    held = [(str(index), trigger(role=role)) for index, role in enumerate(roles)]
+    assert note_skipped_reviews(held, prompts) == note
 
 
 # Guards held on the board
