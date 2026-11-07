@@ -4,8 +4,11 @@ from datetime import UTC, datetime
 from unittest.mock import Mock
 
 from orbit.protocol import (
+    CODER,
     PLANNER,
+    REVIEWER,
     STORAGE_FAILED,
+    AgentEntry,
     AgentsChanged,
     ApprovalDecided,
     ApprovalRequested,
@@ -280,3 +283,28 @@ def test_a_catalog_changing_the_mapped_skills_shows_them_on_the_tasks_and_one_al
     router.render(catalog)
     router.render(catalog)
     calls.task_list.show_mapped_skills.assert_called_once_with(("python", "layers"))
+
+
+def test_a_catalog_changing_the_roles_tags_the_tasks_with_them_and_one_alike_doesnt() -> None:
+    calls = Mock()
+    calls.navigation.catalog.agents.return_value = (
+        AgentEntry(name=CODER, label="Coder", conversational=False, skills=("code-style",)),
+        AgentEntry(
+            name=REVIEWER,
+            label="Reviewer",
+            conversational=False,
+            lane="review",
+            usage_known=False,
+            skills=("security", "python"),
+        ),
+    )
+    calls.navigation.catalog.mapped_skills.return_value = ()
+    router = router_of(calls)
+    catalog = Catalog(workspaces=(), agents=(), triggers=(), lanes=())
+    router.render(catalog)
+    router.render(catalog)
+    calls.task_list.show_role_skills.assert_called_once_with(
+        {CODER: ("code-style",), REVIEWER: ("security", "python")}
+    )
+    calls.task_list.show_lanes.assert_called_once_with({CODER: "work", REVIEWER: "review"})
+    calls.task_list.show_usage_unknown.assert_called_once_with(frozenset({REVIEWER}))
