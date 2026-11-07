@@ -2548,8 +2548,8 @@ status; its values are passed, failed.`), while `origin`, `step`, `task_finished
 matches.
 A trigger whose role is disabled loads, and never fires; one listing roles fires while any of them
 is enabled. When git can't show the diff of what
-landed, the triggers on the landing are skipped with an error (`Review skipped: …` when a review
-was due, `Triggers skipped: …` otherwise), and the run goes on. The reference config shows each shipped
+landed, the triggers on the landing still fire and queue their tasks, which quote
+`(Git couldn't show the diff of the reviewed commits: <why>)` in place of `{diff}`. The reference config shows each shipped
 trigger's table commented out after the roles, every field under its description, and
 `orbit config show triggers.bugs-review` lists one trigger's fields with their layers (see
 [Seeing the configuration in effect](#seeing-the-configuration-in-effect)).
