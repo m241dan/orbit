@@ -179,9 +179,11 @@ def _merging(note: str | None) -> str:
 def _skills(role: Sequence[str], task: Sequence[str], mapped: Sequence[str]) -> str:
     """What a row's details end with for the skills its agent gets: its ``role``'s, then, after
     a ``+``, its ``task``'s and the ``mapped`` ones, each once (``· skills: code-style + python,
-    layers``); just one side when the other has none, and nothing when neither has any."""
+    layers``), with the role's repeats counted once; just one side when the other has none, and
+    nothing when neither has any."""
     given = given_skills(role, task, mapped)
-    sides = (given[: len(role)], given[len(role) :])
+    split = len(given_skills(role, (), ()))
+    sides = (given[:split], given[split:])
     shown = " + ".join(skills_text(side) for side in sides if side)
     return f" · skills: {shown}" if shown else ""
 

@@ -786,6 +786,16 @@ def test_a_skill_the_task_and_its_role_both_name_shows_once_before_the_plus() ->
     assert skills_of(("code-style", "python"), notes) == " · skills: code-style + python"
 
 
+def test_a_repeated_role_skill_still_puts_the_tasks_skill_after_the_plus() -> None:
+    notes = RowNotes(role_skills=("code-style", "code-style"))
+    assert skills_of(("python",), notes) == " · skills: code-style + python"
+
+
+def test_with_a_repeated_role_skill_each_skill_shows_once_where_first_named() -> None:
+    notes = RowNotes(role_skills=("code-style", "code-style"), mapped_skills=("layers",))
+    assert skills_of(("code-style", "python"), notes) == " · skills: code-style + python, layers"
+
+
 def test_without_role_skills_a_rows_skills_have_no_plus() -> None:
     notes = RowNotes(mapped_skills=("layers",))
     assert skills_of(("python",), notes) == " · skills: python, layers"
