@@ -204,3 +204,10 @@ def test_module_writes_the_packages_copy_under_the_current_directory_by_default(
 
     path = tmp_path / "src" / "orbit" / "agent" / "external" / "reference" / "user-config.toml"
     assert path.read_text(encoding="utf-8") == REFERENCE
+
+
+def test_personal_role_instructions_are_described_as_a_file_in_the_config_directory() -> None:
+    block = table("# [roles.helper]")
+    above = block[block.index('# instructions = "roles/helper.md"') - 1]
+    assert "config directory" in above
+    assert ".orbit/" not in above

@@ -70,7 +70,7 @@
 
 # A personal role, its instructions a file beside this one or the text. For example:
 # [roles.helper]
-# What its agents are told about their job: the text, or a Markdown file under .orbit/ it names.
+# What its agents are told about their job: the text, or a file in the config directory it names.
 # instructions = "roles/helper.md"
 # Whether its agents' claims of being done are verified.
 # verify = false

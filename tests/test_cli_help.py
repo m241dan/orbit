@@ -95,3 +95,10 @@ def test_the_model_option_lists_claudes_aliases_from_the_packages_table() -> Non
     result = runner.invoke(app, ["chat", "--help"], env={"COLUMNS": "200"})
 
     assert "fable, opus, sonnet, haiku" in " ".join(result.output.split())
+
+
+def test_init_help_describes_force_for_the_user_config_as_well_as_the_projects() -> None:
+    result = runner.invoke(app, ["init", "--help"], env={"COLUMNS": "200"})
+
+    text = " ".join(result.output.replace("│", " ").split())
+    assert "Replace an existing .orbit/config.toml, or with --user your own config.toml," in text

@@ -56,6 +56,13 @@ EXAMPLE_PERSONAL_FIELDS = Role(
     verify=False,
 )
 """The example of a personal role: just the fields it sets."""
+PERSONAL_DESCRIPTIONS = {
+    **field_descriptions(Role),
+    "instructions": "What its agents are told about their job: the text, or a file in the config"
+    " directory it names.",
+}
+"""The descriptions of a personal role's fields: a project role's, but its instructions file
+read from the config directory."""
 EXAMPLE_RUNTIME = "claude"
 EXAMPLE_ALIAS = ("fast", "claude-haiku-5-5")
 """The example of an alias added to a runtime's models, and the id it resolves to."""
@@ -84,6 +91,7 @@ def user_reference() -> str:
             "A personal role, its instructions a file beside this one or the text.",
             f"[roles.{EXAMPLE_PERSONAL_ROLE}]",
             EXAMPLE_PERSONAL_FIELDS,
+            PERSONAL_DESCRIPTIONS,
         ),
         _alias_example(),
         example_table(

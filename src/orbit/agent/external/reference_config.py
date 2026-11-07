@@ -192,14 +192,18 @@ def _limits(defaults: OrbitConfig, descriptions: Mapping[str, str]) -> list[str]
 
 
 def example_table(
-    description: str, header: str, example: BaseModel | VerificationStep
+    description: str,
+    header: str,
+    example: BaseModel | VerificationStep,
+    descriptions: Mapping[str, str] | None = None,
 ) -> list[str]:
-    """The table under ``header`` that sets the fields ``example`` does, under ``description``."""
+    """The table under ``header`` that sets the fields ``example`` does, under ``description``,
+    each field under its line of ``descriptions``, by default its model's own."""
     values = TypeAdapter(type(example)).dump_python(example, mode="json", exclude_unset=True)
     return [
         f"# {description} {FOR_EXAMPLE}",
         f"# {header}",
-        *described(values, field_descriptions(type(example))),
+        *described(values, descriptions or field_descriptions(type(example))),
     ]
 
 

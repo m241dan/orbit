@@ -105,8 +105,8 @@ InitForceOption = Annotated[
     bool,
     typer.Option(
         "--force",
-        help="Replace an existing .orbit/config.toml, keeping it as the next free"
-        " config.toml.bak.N beside it.",
+        help="Replace an existing .orbit/config.toml, or with --user your own config.toml,"
+        " keeping it as the next free config.toml.bak.N beside it.",
     ),
 ]
 
