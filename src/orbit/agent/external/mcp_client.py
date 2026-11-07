@@ -10,6 +10,7 @@ its request too, as the server's failure.
 import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Sequence
+from datetime import timedelta
 from typing import Any
 
 from mcp.client.session import ClientSession
@@ -37,7 +38,7 @@ CLOSED = "the connection to it was closed"
 UNREADABLE = "it sent a reply orbit can't read"
 """Why a request whose reply the client can't validate failed."""
 
-EXIT_GRACE_SECONDS = 1.0
+EXIT_GRACE = timedelta(seconds=1)
 """How long a server whose connection dropped has to stop serving, so why it stopped is what's
 reported."""
 
@@ -46,10 +47,10 @@ type Exited = Callable[[], Awaitable[UpstreamFailed | None]]
 
 
 class ClientConnection(ABC):
-    """A connection to an MCP server, each request waiting at most ``timeout`` seconds, once
+    """A connection to an MCP server, each request waiting at most ``timeout``, once
     :meth:`start` has started it; :meth:`_serve` says how the server is reached."""
 
-    def __init__(self, timeout: float) -> None:
+    def __init__(self, timeout: timedelta) -> None:
         self._timeout = timeout
         self._ready: asyncio.Future[ClientSession] = asyncio.get_running_loop().create_future()
         self._serving: asyncio.Task[str] | None = None
@@ -142,12 +143,12 @@ class ClientConnection(ABC):
 
     def _timed_out(self) -> str:
         """Why a request the server didn't answer in time failed."""
-        return f"it didn't answer within {self._timeout:g} seconds"
+        return f"it didn't answer within {self._timeout.total_seconds():g} seconds"
 
     async def _served(self) -> UpstreamFailed | None:
         """Why serving stopped, given a moment to; ``None`` if it hasn't."""
         assert self._serving is not None
-        await asyncio.wait({self._serving}, timeout=EXIT_GRACE_SECONDS)
+        await asyncio.wait({self._serving}, timeout=EXIT_GRACE.total_seconds())
         return self._ended() if self._serving.done() else None
 
     def _ended(self) -> UpstreamFailed:

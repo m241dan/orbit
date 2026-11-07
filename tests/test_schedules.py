@@ -7,6 +7,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 from orbit.agent.application.schedules import FiredTimes, ScheduleClock, ScheduleParts, Schedules
+from orbit.agent.domain.schedules import wait_for_due
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import INTERNAL, ErrorOccurred, Event
 from tests.agent_fakes import FakeHalt, FakeStore
@@ -107,6 +108,16 @@ async def test_triggers_due_together_fire_together_and_waits_last_no_longer_than
     assert scheduled.fired == [(("nightly", "early"), day(3, days=1))]
     assert max(scheduled.clock.sleeps) == timedelta(minutes=5)
     assert scheduled.clock.sleeps[:2] == [timedelta(minutes=5)] * 2
+
+
+async def test_a_wait_reaches_the_clock_as_exactly_the_time_until_the_trigger_is_due() -> None:
+    opening = day(3) - timedelta(minutes=2, microseconds=1500)
+    scheduled = Scheduled(opening)
+    await scheduled.opened()
+    await scheduled.schedules.close()
+
+    expected = wait_for_due(NIGHTLY, {"nightly": opening}, opening, UTC)
+    assert scheduled.clock.sleeps[0] == expected == timedelta(minutes=2, microseconds=1500)
 
 
 async def test_a_trigger_come_due_many_times_in_one_wait_fires_once() -> None:

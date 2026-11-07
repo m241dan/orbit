@@ -22,7 +22,7 @@ settled and how long it was held.
 """
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import PurePath
@@ -65,6 +65,7 @@ from orbit.agent.domain.refusals import failed_to
 from orbit.agent.domain.roles import Role, ServerGrant
 from orbit.execution.background import Background
 from orbit.execution.cancelling import stop_all
+from orbit.execution.sleeping import Sleep, sleep_for
 from orbit.protocol import INTERNAL, ErrorOccurred, Notice, ToolCallDecision
 from orbit.tracing import NoTelemetry, Span, Telemetry, no_span
 
@@ -93,13 +94,13 @@ class McpProxying:
     """What proxies MCP servers' tools to a workspace's agents: the ``servers`` declared, by
     name, the ``connector`` that connects to them, the ``credentials`` their environments are
     filled from, the ``folder`` the shared ones' neutral directories are in, one per server, and
-    how to ``sleep`` a number of seconds while a connection is idle."""
+    how to ``sleep`` while a connection is idle."""
 
     servers: Mapping[str, McpServer]
     connector: McpConnector
     credentials: Credentials
     folder: str
-    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+    sleep: Sleep = sleep_for
 
 
 @dataclass(frozen=True)
@@ -426,15 +427,14 @@ class ToolProxy:
             await self._publish(Notice(message=notice))
 
     def _rest(self, opened: _Opened) -> None:
-        """Have ``opened`` closed once idle for its server's ``idle_minutes``, if no call is in
+        """Have ``opened`` closed once idle for its server's ``idle`` time, if no call is in
         flight on it and it's still kept."""
         if opened.connection.calls == 0 and self._links.get(opened.key) is opened.link:
             opened.connection.idle.start(self._close_idle(opened))
 
     async def _close_idle(self, opened: _Opened) -> None:
-        """Close ``opened`` once its server's ``idle_minutes`` have passed."""
-        minutes = self._proxying.servers[opened.key[0]].idle_minutes
-        await self._proxying.sleep(minutes * 60)
+        """Close ``opened`` once its server's ``idle`` time has passed."""
+        await self._proxying.sleep(self._proxying.servers[opened.key[0]].idle)
         self._forget(opened.key, opened.link)
 
     def _forget(self, key: _Key, link: _Link) -> None:

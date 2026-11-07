@@ -11,6 +11,7 @@ failed, fails it too, as does connecting, or waiting for an answer, past the ser
 
 import asyncio
 from collections.abc import Mapping
+from datetime import timedelta
 
 import httpx2
 from mcp.client.session import ClientSession
@@ -27,7 +28,7 @@ REFUSING = frozenset({401, 403})
 ERROR_STATUS = 400
 """The lowest HTTP status that's an error."""
 
-BACKSTOP_SECONDS = 1.0
+BACKSTOP = timedelta(seconds=1)
 """How much longer than the HTTP client the session waits for an answer, so a server that
 doesn't answer in time is noticed by the client, which ends the connection, and the session's
 timeout is left to catch only an answer that trickles in."""
@@ -52,16 +53,16 @@ class HttpConnector:
         has no URL, or can't be reached or initialised."""
         if server.url is None:
             raise UpstreamFailed("it's started by a command, not reached by a url")
-        session = HttpSession(server.url, headers, server.timeout_seconds)
+        session = HttpSession(server.url, headers, server.timeout)
         await session.start()
         return session
 
 
 class HttpSession(ClientConnection):
     """A connection to the server at ``url``, sending ``headers`` with every request, connecting
-    and each request waiting at most ``timeout`` seconds, once :meth:`start` has started it."""
+    and each request waiting at most ``timeout``, once :meth:`start` has started it."""
 
-    def __init__(self, url: str, headers: Mapping[str, str], timeout: float) -> None:
+    def __init__(self, url: str, headers: Mapping[str, str], timeout: timedelta) -> None:
         super().__init__(timeout)
         self._url = url
         self._headers = dict(headers)
@@ -73,11 +74,11 @@ class HttpSession(ClientConnection):
         hooks = {"response": [_check_status]}
         async with (
             httpx2.AsyncClient(
-                headers=self._headers, timeout=self._timeout, event_hooks=hooks
+                headers=self._headers, timeout=self._timeout.total_seconds(), event_hooks=hooks
             ) as client,
             streamable_http_client(self._url, http_client=client) as (received, sent),
             ClientSession(
-                received, sent, read_timeout_seconds=self._timeout + BACKSTOP_SECONDS
+                received, sent, read_timeout_seconds=(self._timeout + BACKSTOP).total_seconds()
             ) as session,
         ):
             await self._initialise(session, not_exited)

@@ -10,6 +10,7 @@ filled in when the server starts, so the file never holds a secret's value.
 import ipaddress
 from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Annotated, Any, Self
 from urllib.parse import urlsplit
 
@@ -189,6 +190,16 @@ class McpServer(_Config):
             " or a list."
         ),
     )
+
+    @property
+    def idle(self) -> timedelta:
+        """How long a connection it's idle on is kept."""
+        return timedelta(minutes=self.idle_minutes)
+
+    @property
+    def timeout(self) -> timedelta:
+        """How long a call to one of its tools may take."""
+        return timedelta(seconds=self.timeout_seconds)
 
     @model_validator(mode="after")
     def _reached_one_way(self) -> Self:

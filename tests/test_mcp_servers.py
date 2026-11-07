@@ -1,6 +1,8 @@
 """The external MCP servers a project declares: their model, the user config's overrides merged
 over them, and the checks against the roles that name them."""
 
+import tomllib
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -54,6 +56,12 @@ def test_a_server_started_by_a_command_has_the_defaults() -> None:
     assert (server.url, server.headers) == (None, {})
     assert (server.shared, server.idle_minutes, server.timeout_seconds) == (True, 10, 300)
     assert server.approve is False
+
+
+def test_a_server_parsed_from_toml_carries_its_waits_as_durations() -> None:
+    text = 'command = ["semgrep", "mcp"]\nidle_minutes = 3\ntimeout_seconds = 45\n'
+    server = McpServer.model_validate(tomllib.loads(text))
+    assert (server.idle, server.timeout) == (timedelta(minutes=3), timedelta(seconds=45))
 
 
 def test_a_server_at_a_url_takes_headers() -> None:

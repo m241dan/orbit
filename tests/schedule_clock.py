@@ -28,12 +28,12 @@ class FakeScheduleClock:
         """The clock as schedules take it."""
         return ScheduleClock(now=lambda: self.now, sleep=self.sleep, zone=self.zone)
 
-    async def sleep(self, seconds: float) -> None:
-        """Move the time on by ``seconds``, waiting wherever the test hasn't let it go past; a
+    async def sleep(self, duration: timedelta) -> None:
+        """Move the time on by ``duration``, waiting wherever the test hasn't let it go past; a
         test moving :attr:`now` meanwhile, as a machine waking from sleep finds it moved, moves
         the end of the sleep with it."""
-        self.sleeps.append(timedelta(seconds=seconds))
-        remaining = timedelta(seconds=seconds)
+        self.sleeps.append(duration)
+        remaining = duration
         while self.now + remaining > self._limit:
             passed = max(self._limit - self.now, timedelta())
             remaining -= passed

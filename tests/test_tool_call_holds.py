@@ -3,7 +3,7 @@ connector: held before they go upstream, run once allowed, declined, expired or 
 the spans that say so."""
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -16,6 +16,7 @@ from orbit.agent.domain.approvals import EXPIRY
 from orbit.agent.domain.mcp_proxy import UpstreamTool
 from orbit.agent.domain.mcp_servers import McpServer
 from orbit.agent.domain.roles import Role, RoleTools
+from orbit.execution.sleeping import Sleep, sleep_for
 from orbit.protocol import DecideToolCall, Event, ToolCallDecided, ToolCallHeld
 from orbit.tracing import NoSpan
 from tests.mcp_fakes import FakeConnector, FakeCredentials, FakeSession
@@ -53,7 +54,7 @@ class Clock:
         await asyncio.sleep(0)
 
 
-async def instantly(seconds: float) -> None:
+async def instantly(duration: timedelta) -> None:
     """Sleep no time at all."""
     await asyncio.sleep(0)
 
@@ -64,9 +65,7 @@ class Holding:
     ``traced``; ``approving`` false, it holds them in none. Connections idle for as long as
     ``idle`` sleeps, ten minutes unless given."""
 
-    def __init__(
-        self, approving: bool = True, idle: Callable[[float], Awaitable[None]] = asyncio.sleep
-    ) -> None:
+    def __init__(self, approving: bool = True, idle: Sleep = sleep_for) -> None:
         self.connector = FakeConnector(TOOLS)
         self.clock = Clock()
         self.posted: list[Event] = []

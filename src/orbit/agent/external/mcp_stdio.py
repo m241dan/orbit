@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import os
 from collections.abc import Mapping, Sequence
+from datetime import timedelta
 from pathlib import Path
 
 import anyio
@@ -23,7 +24,7 @@ from mcp.types import jsonrpc_message_adapter
 
 from orbit.agent.application.ports import UpstreamFailed, UpstreamSession
 from orbit.agent.domain.mcp_servers import McpServer
-from orbit.agent.external.mcp_client import EXIT_GRACE_SECONDS, ClientConnection
+from orbit.agent.external.mcp_client import EXIT_GRACE, ClientConnection
 from orbit.agent.external.processes import spawned, start_failure
 
 MCP_DIR = "mcp"
@@ -57,19 +58,17 @@ class StdioConnector:
         :class:`UpstreamFailed` if it has no command, or can't be started or initialised."""
         if server.command is None:
             raise UpstreamFailed("it's reached by a url, not a command")
-        session = StdioSession(
-            server.command, cwd, {**self._inherited, **env}, server.timeout_seconds
-        )
+        session = StdioSession(server.command, cwd, {**self._inherited, **env}, server.timeout)
         await session.start()
         return session
 
 
 class StdioSession(ClientConnection):
     """A connection to the server ``command`` starts in ``cwd`` with the environment ``env``,
-    each request waiting at most ``timeout`` seconds, once :meth:`start` has started it."""
+    each request waiting at most ``timeout``, once :meth:`start` has started it."""
 
     def __init__(
-        self, command: Sequence[str], cwd: str, env: Mapping[str, str], timeout: float
+        self, command: Sequence[str], cwd: str, env: Mapping[str, str], timeout: timedelta
     ) -> None:
         super().__init__(timeout)
         self._command = command
@@ -105,7 +104,7 @@ class StdioSession(ClientConnection):
         ]
         try:
             async with ClientSession(
-                received, outgoing, read_timeout_seconds=self._timeout
+                received, outgoing, read_timeout_seconds=self._timeout.total_seconds()
             ) as session:
                 await self._initialise(session, lambda: _exit(process))
                 status = await process.wait()
@@ -154,7 +153,7 @@ def _exited(status: int) -> str:
 async def _exit(process: asyncio.subprocess.Process) -> UpstreamFailed | None:
     """How the server's ``process`` exited, given a moment to; ``None`` if it hasn't."""
     try:
-        status = await asyncio.wait_for(process.wait(), EXIT_GRACE_SECONDS)
+        status = await asyncio.wait_for(process.wait(), EXIT_GRACE.total_seconds())
     except TimeoutError:
         return None
     return UpstreamFailed(_exited(status))

@@ -4,6 +4,7 @@ and the spans of calls."""
 
 import asyncio
 from collections.abc import Mapping
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -31,7 +32,9 @@ SERVERS = {
     "github": GITHUB,
     "own": McpServer(command=("own-server",), shared=False),
     "semgrep": McpServer(
-        url="http://127.0.0.1:3010/mcp", headers={"Authorization": "Bearer ${SEMGREP_TOKEN}"}
+        url="http://127.0.0.1:3010/mcp",
+        headers={"Authorization": "Bearer ${SEMGREP_TOKEN}"},
+        idle_minutes=3,
     ),
 }
 CODER_TOOLS = ["get_issue", "get issue!", "oops", "slow", "fail", "create_isue"]
@@ -60,12 +63,12 @@ class Timers:
     raise it instead."""
 
     def __init__(self) -> None:
-        self.sleeps: list[float] = []
+        self.sleeps: list[timedelta] = []
         self.broken: Exception | None = None
         self._pending: list[asyncio.Future[None]] = []
 
-    async def sleep(self, seconds: float) -> None:
-        self.sleeps.append(seconds)
+    async def sleep(self, duration: timedelta) -> None:
+        self.sleeps.append(duration)
         if self.broken is not None:
             raise self.broken
         pending = asyncio.get_running_loop().create_future()
@@ -397,7 +400,7 @@ async def test_an_unshared_server_gives_each_agent_its_own_closed_as_its_run_end
 async def test_a_connection_idle_for_its_minutes_is_closed_and_reopened_by_a_call() -> None:
     proxied = Proxied()
     await proxied.call("github__get_issue")
-    assert proxied.timers.sleeps[-1] == 600
+    assert proxied.timers.sleeps[-1] == timedelta(minutes=10)
     [first] = proxied.connector.sessions
     proxied.timers.elapse()
     await eventually(lambda: first.closed)
@@ -416,6 +419,16 @@ async def test_a_call_keeps_its_connection_from_idling_out() -> None:
     assert not session.closed
     session.release.set()
     assert await asyncio.wait_for(slow, 5) == Reply("slow, at last")
+
+
+async def test_a_connection_waits_out_its_servers_configured_idle_minutes_before_closing() -> None:
+    proxied = Proxied()
+    await proxied.call("semgrep__get_issue", caller("s1", "scanner"))
+    assert proxied.timers.sleeps == [timedelta(minutes=3)]
+    [session] = proxied.connector.sessions
+    assert not session.closed
+    proxied.timers.elapse()
+    await eventually(lambda: session.closed)
 
 
 async def test_a_failure_waiting_for_a_connection_to_idle_is_reported() -> None:

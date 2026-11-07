@@ -25,6 +25,7 @@ from orbit.agent.domain.schedules import (
     wake_schedules,
 )
 from orbit.agent.domain.storage_halt import FailedWrite
+from orbit.execution.sleeping import Sleep, sleep_for
 from orbit.protocol import INTERNAL
 
 FireScheduled = Callable[[tuple[str, ...]], Awaitable[None]]
@@ -38,12 +39,12 @@ def _utc_now() -> datetime:
 
 @dataclass(frozen=True)
 class ScheduleClock:
-    """How schedules tell the time: ``now`` tells it, ``sleep`` waits a number of seconds, and
+    """How schedules tell the time: ``now`` tells it, ``sleep`` waits a length of time, and
     ``zone`` is the time zone the triggers' cron expressions are read in, the machine's own as
     orbit runs."""
 
     now: Callable[[], datetime] = _utc_now
-    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+    sleep: Sleep = sleep_for
     zone: tzinfo = UTC
 
 
@@ -169,7 +170,7 @@ class Schedules:
         those come due since they last fired, reading the times kept first if they're unread."""
         clock = self._parts.clock
         wait = wait_for_due(crons, self._times.fired, clock.now(), clock.zone)
-        await clock.sleep(wait.total_seconds())
+        await clock.sleep(wait)
         kept = await self._read_unread()
         now = clock.now()  # The time after the wait, which may have ended late, and the read.
         await self._fire(wake_schedules(crons, self._times, kept, now, clock.zone))
