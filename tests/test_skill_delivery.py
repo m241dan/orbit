@@ -1,9 +1,9 @@
 """Skills delivered in agents' instructions: an agent, a task's or a planner turn's, on any
-runtime, is launched with its role's instructions and then the skills it was given, its role's and
-its task's, or the project's mapped ones for a task naming none and a planner turn, and its
-process's span records those skills and the files of them it read. An agent that proposes tasks
-is also told the skills it can give them, and the tasks it proposes carry those it names. The
-delivery is also tested on its own, without a desk."""
+runtime, is launched with its role's instructions and then the skills it was given, its role's,
+its task's and the project's mapped ones, and its process's span records those skills and the
+files of them it read. An agent that proposes tasks is also told the skills it can give them, and
+the tasks it proposes carry those it names. The delivery is also tested on its own, without a
+desk."""
 
 import asyncio
 from collections.abc import Mapping
@@ -135,14 +135,16 @@ async def test_both_runtimes_tell_an_agent_its_skills_after_orbits_rules() -> No
     assert config["prompt"] == f"{kiro_cli.AGENT_RULES}{told}"
 
 
-async def test_a_task_naming_skills_gets_its_roles_then_its_own_without_the_mapped_ones() -> None:
+async def test_a_task_naming_skills_gets_its_roles_then_its_own_then_the_mapped_ones() -> None:
     launch = await coder_launch(task=CHOSEN, skill_library=LIBRARY, skill_mappings=MAPPED)
     assert launch.instructions == (
         f"You are orbit's coder.\n\n## Skills\n\n{READING}\n\n"
         "### code-style\n\nBe code-style.\n\n"
         "### security\n\nBe security.\n\n"
         "### python\n\nBe python.\n\n"
-        "### application\n\nBe application."
+        "### application\n\nBe application.\n\n"
+        "### layers\n\nBe layers.\n\n"
+        "`python`, `layers`, `code-style` apply under `src`, `tests`."
     )
 
 
@@ -153,7 +155,9 @@ async def test_a_skill_both_the_role_and_the_task_name_is_delivered_once() -> No
         f"You are orbit's coder.\n\n## Skills\n\n{READING}\n\n"
         "### code-style\n\nBe code-style.\n\n"
         "### security\n\nBe security.\n\n"
-        "### python\n\nBe python."
+        "### python\n\nBe python.\n\n"
+        "### layers\n\nBe layers.\n\n"
+        "`python`, `layers`, `code-style` apply under `src`, `tests`."
     )
 
 
@@ -321,26 +325,19 @@ async def test_the_process_records_the_skills_delivered_and_each_file_read_once_
     )
 
 
-async def test_a_task_naming_skills_reads_those_delivered_and_no_mapped_one_beyond() -> None:
+async def test_a_task_naming_skills_reads_those_delivered_mapped_ones_included() -> None:
     replies: list[Reply] = []
+    names = ("code-style", "security", "python", "application", "layers")
 
     async def reads_each(call: Call) -> TurnEndReason:
         await call("get_task")
-        for name in ("code-style", "security", "python", "application", "layers"):
+        for name in names:
             replies.append(await call("read_skill", skill=name, file="SKILL.md"))
         await call("complete_task", summary="Read.")
         return "completed"
 
     await coder_launch(reads_each, task=CHOSEN, skill_library=LIBRARY, skill_mappings=MAPPED)
-    *read, refused = replies
-    assert [reply.text for reply in read] == [
-        f"{name}'s SKILL.md" for name in ("code-style", "security", "python", "application")
-    ]
-    assert refused == Reply(
-        "You weren't given the skill layers; your skills are code-style, security, python,"
-        " application.",
-        is_error=True,
-    )
+    assert replies == [Reply(f"{name}'s SKILL.md") for name in names]
 
 
 async def test_the_process_of_a_task_naming_skills_records_those_delivered() -> None:
@@ -354,6 +351,7 @@ async def test_the_process_of_a_task_naming_skills_records_those_delivered() -> 
         "security",
         "python",
         "application",
+        "layers",
     )
 
 
@@ -429,14 +427,22 @@ def test_delivery_tells_an_agent_its_roles_instructions_then_its_roles_and_tasks
         "### code-style\n\nBe code-style.\n\n"
         "### security\n\nBe security.\n\n"
         "### python\n\nBe python.\n\n"
-        "### application\n\nBe application."
+        "### application\n\nBe application.\n\n"
+        "### layers\n\nBe layers.\n\n"
+        "`python`, `layers`, `code-style` apply under `src`, `tests`."
     )
 
 
-def test_delivery_chooses_a_tasks_skills_after_its_roles_each_once() -> None:
+def test_delivery_chooses_a_tasks_skills_after_its_roles_then_the_mapped_ones_each_once() -> None:
     skills = delivering()
     skills.open("agent-1", ("security", "application"))
-    assert skills.delivered(ROLES[CODER], "agent-1") == ("code-style", "security", "application")
+    assert skills.delivered(ROLES[CODER], "agent-1") == (
+        "code-style",
+        "security",
+        "application",
+        "python",
+        "layers",
+    )
 
 
 @pytest.mark.parametrize("agent_id", ["agent-1", None])
@@ -472,10 +478,35 @@ async def test_read_skill_refuses_a_skill_not_given_listing_those_given() -> Non
     skills = delivering()
     skills.open("agent-1", ("python",))
     read_skill = skills.tool(lambda: ROLES[CODER], "agent-1")
-    assert await read_skill({"skill": "layers", "file": "SKILL.md"}) == Reply(
-        "You weren't given the skill layers; your skills are code-style, security, python.",
+    assert await read_skill({"skill": "application", "file": "SKILL.md"}) == Reply(
+        "You weren't given the skill application; your skills are code-style, security, python,"
+        " layers.",
         is_error=True,
     )
+
+
+ORBITS = (SkillMapping(paths=("src", "tests"), use=("application", "python", "layers", "orbit")),)
+"""A project mapping its ``src`` and ``tests`` as orbit's own does."""
+
+
+def orbits_delivery() -> SkillDelivery:
+    """Delivery under :data:`ORBITS` of :data:`LIBRARY`'s skills and ``orbit``, with agent
+    ``agent-1`` opened for a task naming ``python``."""
+    library = SkillLibrary(skills={**LIBRARY.skills, "orbit": skill("orbit")})
+    skills = SkillDelivery(library, ORBITS, lambda agent_id: None)
+    skills.open("agent-1", ("python",))
+    return skills
+
+
+def test_a_task_naming_a_mapped_skill_is_told_the_other_mapped_ones_and_where_they_apply() -> None:
+    told = orbits_delivery().instructions(ROLES[CODER], "agent-1")
+    assert "### layers\n\nBe layers." in told and "### orbit\n\nBe orbit." in told
+    assert told.endswith("`application`, `python`, `layers`, `orbit` apply under `src`, `tests`.")
+
+
+async def test_a_task_naming_a_mapped_skill_reads_the_other_mapped_ones() -> None:
+    read_skill = orbits_delivery().tool(lambda: ROLES[CODER], "agent-1")
+    assert await read_skill({"skill": "layers", "file": "SKILL.md"}) == Reply("layers's SKILL.md")
 
 
 async def test_read_skill_reads_the_skills_the_role_has_at_the_call() -> None:

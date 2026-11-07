@@ -2593,8 +2593,7 @@ A project maps paths in it to the skills for the code there with `[[skills]]` en
 `.orbit/config.toml`, and only there: your user config refuses them, as mappings would differ by
 machine. Each entry's `paths` are files or folders in the project, relative to its root, and its
 `use` the skills that apply there, by name, orbit's or the project's own; each needs at least one.
-Every agent is given every entry's skills along with its role's, unless its task names skills of
-its own:
+Every agent is given every entry's skills along with its role's and its task's:
 
 ```toml
 [[skills]]
@@ -2618,14 +2617,16 @@ and a link to elsewhere in the project are fine), one that isn't a file or folde
 (`skills.2.paths names src/orbt, which isn't in the project.`), or a skill that isn't one
 (`skills.1.use names pyton, which isn't a skill; the skills are application, code-style, …`).
 
-An agent is given its role's `skills`, then every `[[skills]]` entry's, each once, as they were
-read when the workspace opened, and its instructions deliver them, on every runtime: after its
+An agent is given its role's `skills`, then its task's, then every `[[skills]]` entry's, each
+once, where first named, as they were read when the workspace opened, and its instructions deliver
+them, on every runtime: after its
 role's instructions and a blank line comes a `## Skills` section, with a line saying how to read a
 skill's files, then each skill's `SKILL.md` below its front matter, whole, under a `### <name>`
-heading, and last a line for each `[[skills]]` entry saying where its skills apply. A task can
-name skills of its own, its `skills` (see
+heading, and last, whenever the entries give it skills, a line for each `[[skills]]` entry saying
+where its skills apply. A task can name skills of its own, its `skills` (see
 [docs/protocol.md](docs/protocol.md#tasks-settings-and-stopping-work)): its agent is given its
-role's skills, then the task's, each once, in place of the entries', with no lines saying where
+role's skills, then the task's, then the entries', each once, where first named, so a task naming
+`python` under the entries above still gets `application` and `cpp`, with the lines saying where
 they apply; the task editor's **Skills** field sets them (see [Tasks](#tasks)). The tasks orbit
 makes from others take their skills from them as they're made: a review of commits names the
 skills of the tasks that landed them, in task order, each once, none coming from a task taken off
@@ -2843,27 +2844,25 @@ message `orbit chat` gives.
 `--skills` prints the workspace's skill map instead of the settings: a column for each role, in
 the configuration's order, and a row for each skill in name order, each cell saying where that
 role's agents get the skill, then a line saying what each value means. A role's cell is `role`
-when its `skills` names the skill. Otherwise the conversational roles, which have no task, get it
-only from the `[[skills]]` entries, `mapped`, or never, `—`; the `reviewer` and the lens reviewers
-get it from the reviewed task's list, `reviewed task` (a super review, reviewing no particular
-task, gets the mapped skills), and every other role, your own
-task roles included, from its task's list, `task`, each with ` / mapped` added when the entries
-use it, as a task without a list gets every mapped skill. With
-`use = ["python", "application"]`:
+when its `skills` names the skill, and otherwise `mapped` when the `[[skills]]` entries use it, as
+every agent gets the entries' skills after its role's and its task's. Otherwise the
+conversational roles, which have no task, never get it, `—`; the `reviewer` and the lens reviewers
+get it from the reviewed task's list, `reviewed task`, and every other role, your own task roles
+included, from its task's list, `task`. With `use = ["python", "application"]`:
 
 ```
 $ orbit config show --skills
-skill                planner   experimenter   coder           reviewer                 configurator    …
-application          mapped    mapped         task / mapped   reviewed task / mapped   task / mapped   …
-code-style           role      —              role            role                     task            …
-cpp                  —         —              task            reviewed task            role            …
+skill                planner   experimenter   coder    reviewer        configurator   …
+application          mapped    mapped         mapped   mapped          mapped         …
+code-style           role      —              role     role            task           …
+cpp                  —         —              task     reviewed task   role           …
 ...
-review-style         —         —              task            role                     task            …
+review-style         —         —              task     role            task           …
 
 role: in the role's skills.
 task: when the task's list names it.
 reviewed task: when the reviewed task's list names it.
-mapped: in [[skills]]; given when the task has no list, and always to agents without tasks.
+mapped: in [[skills]]; always given, after the task's list.
 —: never given.
 ```
 

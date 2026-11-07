@@ -521,13 +521,30 @@ def test_a_role_without_skills_and_no_mappings_gives_none() -> None:
     assert given_skills((), (), ()) == ()
 
 
-def test_a_tasks_skills_follow_the_roles_in_place_of_the_mapped_ones() -> None:
+def test_a_tasks_skills_follow_the_roles_and_precede_the_mapped_ones() -> None:
     mappings = (mapping("src", use=("python", "application")),)
     assert given_skills(("code-style", "security"), ("cpp", "code-style"), mappings) == (
         "code-style",
         "security",
         "cpp",
+        "python",
+        "application",
     )
+
+
+def test_a_tasks_skill_also_mapped_is_given_once_in_the_tasks_place() -> None:
+    mappings = (mapping("src", use=("application", "python", "layers", "orbit")),)
+    assert given_skills(("code-style",), ("python",), mappings) == (
+        "code-style",
+        "python",
+        "application",
+        "layers",
+        "orbit",
+    )
+
+
+def test_a_tasks_skills_without_mappings_follow_the_roles_alone() -> None:
+    assert given_skills(("code-style",), ("python",), ()) == ("code-style", "python")
 
 
 # Reading a skill's files
@@ -664,12 +681,13 @@ def test_a_roles_skills_alone_have_no_mapping_lines() -> None:
     assert text == f"## Skills\n\n{READING}\n\n### security\n\n# security\n\nBe security."
 
 
-def test_a_tasks_skills_follow_the_roles_with_the_mapping_lines_left_out() -> None:
+def test_a_tasks_skills_follow_the_roles_then_the_mapped_ones_with_the_mapping_lines() -> None:
     mappings = (mapping("src", use=("python",)),)
     text = skill_instructions(("security",), ("cpp",), mappings, DELIVERING)
     assert text == (
         f"## Skills\n\n{READING}\n\n### security\n\n# security\n\nBe security.\n\n"
-        "### cpp\n\n# cpp\n\nBe cpp."
+        "### cpp\n\n# cpp\n\nBe cpp.\n\n### python\n\n# python\n\nBe python.\n\n"
+        "`python` applies under `src`."
     )
 
 

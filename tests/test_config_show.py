@@ -78,7 +78,7 @@ PYTHON_MAPPING = '[[skills]]\npaths = ["src"]\nuse = ["python", "application"]\n
 LEGEND = """role: in the role's skills.
 task: when the task's list names it.
 reviewed task: when the reviewed task's list names it.
-mapped: in [[skills]]; given when the task has no list, and always to agents without tasks.
+mapped: in [[skills]]; always given, after the task's list.
 —: never given."""
 """The lines under the skill map, a line per value of its cells."""
 
@@ -650,11 +650,14 @@ def test_skills_maps_each_skill_to_where_each_role_gets_it(project: Path) -> Non
     assert list(rows["python"].values()) == [
         "mapped",
         "mapped",
-        "task / mapped",
-        "reviewed task / mapped",
+        "mapped",
+        "mapped",
         "role",
-        *["reviewed task / mapped"] * lenses,
+        *["mapped"] * lenses,
     ]
+    assert (rows["python"]["coder"], rows["python"]["bugs-reviewer"]) == ("mapped", "mapped")
+    assert (rows["cpp"]["bugs-reviewer"], rows["cpp"]["planner"]) == ("reviewed task", "—")
+    assert rows["security"]["coder"] == "role"
     assert list(rows["cpp"].values()) == [
         "—",
         "—",
@@ -703,7 +706,7 @@ def test_skills_with_json_gives_each_skills_cells_by_role(project: Path) -> None
         **dict.fromkeys(LENS_REVIEWERS, "reviewed task"),
         **dict.fromkeys(SUPER_LENS_REVIEWERS, "reviewed task"),
     }
-    assert skills["python"]["reviewer"] == "reviewed task / mapped"
+    assert skills["python"]["reviewer"] == "mapped"
 
 
 @pytest.mark.parametrize("args", [["roles"], ["--full"], ["server.port", "--json"]])
@@ -776,7 +779,7 @@ ROLES_MAP = SkillMap(
     roles=("planner", "reviewer"),
     cells={
         "code-style": {"planner": "role", "reviewer": "role"},
-        "python": {"planner": "mapped", "reviewer": "reviewed task / mapped"},
+        "python": {"planner": "mapped", "reviewer": "reviewed task"},
     },
 )
 """A skill map of two roles and two skills."""
@@ -786,7 +789,7 @@ def test_the_skill_map_prints_its_cells_in_columns_under_its_roles() -> None:
     assert skill_map_text(ROLES_MAP).split("\n\n")[0] == (
         "skill        planner   reviewer\n"
         "code-style   role      role\n"
-        "python       mapped    reviewed task / mapped"
+        "python       mapped    reviewed task"
     )
 
 

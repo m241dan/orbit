@@ -28,8 +28,8 @@ REVIEWED_TASK_CELL = "reviewed task"
 MAPPED_CELL = "mapped"
 NEVER_CELL = "—"
 """What a skill map's cell says of a role's agents and a skill: they get it from the role's
-skills, from their task's list, from the reviewed task's list, from the ``[[skills]]`` entries,
-or never."""
+skills, from the ``[[skills]]`` entries, which every agent of a role whose skills don't name it
+gets, from their task's list, from the reviewed task's list, or never."""
 
 
 @dataclass(frozen=True)
@@ -335,19 +335,17 @@ def skill_map(config: OrbitConfig) -> SkillMap:
 
 def skill_cell(name: str, role: Role, skill: str, *, mapped: bool) -> str:
     """Where the agents of ``role``, called ``name``, get ``skill``, which the ``[[skills]]``
-    entries use if ``mapped``: from its skills if they name it; else, for a conversational role,
-    which has no task's list, from the entries, or never; and for the other roles as
-    :func:`_task_cell` says."""
+    entries use if ``mapped``: from its skills if they name it; else from the entries if they use
+    it; else never for a conversational role, which has no task's list, and for the other roles
+    as :func:`_task_cell` says."""
     if skill in role.skills:
         return ROLE_CELL
-    if role.conversation:
-        return MAPPED_CELL if mapped else NEVER_CELL
-    return _task_cell(name, mapped=mapped)
+    if mapped:
+        return MAPPED_CELL
+    return NEVER_CELL if role.conversation else _task_cell(name)
 
 
-def _task_cell(name: str, *, mapped: bool) -> str:
-    """Where the agents of the task role ``name`` get a skill its skills don't name, which the
-    ``[[skills]]`` entries use if ``mapped``: from their task's list, a review role's the reviewed
-    task's, or the entries when it has none."""
-    task = REVIEWED_TASK_CELL if name in REVIEW_ROLES else TASK_CELL
-    return f"{task} / {MAPPED_CELL}" if mapped else task
+def _task_cell(name: str) -> str:
+    """Where the agents of the task role ``name`` get a skill neither its skills nor the
+    ``[[skills]]`` entries name: from their task's list, a review role's the reviewed task's."""
+    return REVIEWED_TASK_CELL if name in REVIEW_ROLES else TASK_CELL

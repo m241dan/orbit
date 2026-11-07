@@ -575,11 +575,11 @@ def test_the_skill_map_has_a_row_per_skill_of_the_library_in_name_order() -> Non
             (
                 "mapped",
                 "mapped",
-                "task / mapped",
-                "reviewed task / mapped",
+                "mapped",
+                "mapped",
                 "role",
-                *lens_cells("reviewed task / mapped"),
-                *super_cells("reviewed task / mapped"),
+                *lens_cells("mapped"),
+                *super_cells("mapped"),
             ),
         ),
         (
@@ -616,9 +616,9 @@ def test_each_built_in_roles_cell_says_where_its_agents_get_the_skill(
     assert mapped().cells[name] == dict(zip(BUILT_IN_ROLE_NAMES, cells, strict=True))
 
 
-def test_a_projects_own_task_role_gets_a_skill_from_its_task_or_the_mapping() -> None:
+def test_a_projects_own_task_role_gets_a_skill_from_the_mapping_or_its_task() -> None:
     cells = mapped({"roles": {"qa": {"instructions": "QA."}}}).cells
-    assert (cells["python"]["qa"], cells["cpp"]["qa"]) == ("task / mapped", "task")
+    assert (cells["python"]["qa"], cells["cpp"]["qa"]) == ("mapped", "task")
 
 
 def test_a_projects_own_conversational_role_gets_only_the_mappings_skills() -> None:

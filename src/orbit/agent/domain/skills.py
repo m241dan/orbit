@@ -18,6 +18,7 @@ from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.layers import Layer
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import UNKNOWN
+from orbit.protocol import given_skills as combined_skills
 
 SKILL_FILE = "SKILL.md"
 """The file in a skill's folder that opens it: its front matter, then its text."""
@@ -292,11 +293,11 @@ def unknown_skill(key: str, name: str, library: SkillLibrary) -> str:
 def given_skills(
     role_skills: Sequence[str], task_skills: Sequence[str], mappings: Sequence[SkillMapping]
 ) -> tuple[str, ...]:
-    """The skills an agent is given, by name: its role's ``role_skills``, then its task's
-    ``task_skills``, or, for a task without any, each skill the project's ``mappings`` use, in
-    order, each once, where it's first named."""
-    added = task_skills or [name for mapping in mappings for name in mapping.use]
-    return tuple(dict.fromkeys((*role_skills, *added)))
+    """The skills an agent is given, by name, as :func:`orbit.protocol.given_skills` combines
+    them: its role's ``role_skills``, then its task's ``task_skills``, then each skill the
+    project's ``mappings`` use, in order, each once, where it's first named."""
+    mapped = [name for mapping in mappings for name in mapping.use]
+    return combined_skills(role_skills, task_skills, mapped)
 
 
 def delivered_skills(
@@ -321,15 +322,14 @@ def skill_instructions(
     """What follows a role's instructions to deliver an agent its skills, those
     :func:`delivered_skills` says from its role's ``role_skills``, its task's ``task_skills``, the
     project's ``mappings`` and the ``library``: under a :data:`SKILLS_HEADING`, the
-    :data:`READING_LINE`, then each skill's body under its name, and, where the mappings gave
-    skills, as they do a task without any of its own, a line for each saying where its skills
-    apply. Empty for an agent delivered none."""
+    :data:`READING_LINE`, then each skill's body under its name, and, where there are mappings,
+    a line for each saying where its skills apply, whether or not the task names skills of its
+    own. Empty for an agent delivered none."""
     delivered = delivered_skills(role_skills, task_skills, mappings, library)
     if not delivered:
         return ""
     sections = (_skill_section(library.skills[name]) for name in delivered)
-    mapped = () if task_skills else _where_mapped(mappings)
-    return "\n\n".join((SKILLS_HEADING, READING_LINE, *sections, *mapped))
+    return "\n\n".join((SKILLS_HEADING, READING_LINE, *sections, *_where_mapped(mappings)))
 
 
 def _skill_section(skill: Skill) -> str:

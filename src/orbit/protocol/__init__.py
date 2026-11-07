@@ -230,6 +230,7 @@ from orbit.protocol.names import (
     TaskOrigin,
 )
 from orbit.protocol.session import Session, SharedSession
+from orbit.protocol.skills import given_skills
 from orbit.protocol.transport import (
     CERTIFICATE_CHALLENGE,
     DEFAULT_MAX_MESSAGE_MB,
@@ -474,6 +475,7 @@ __all__ = [
     "edit_refusal",
     "encode",
     "event_adapter",
+    "given_skills",
     "is_orbit_review",
     "levels_of_tool_access",
     "looks_like_url",

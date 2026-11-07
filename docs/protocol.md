@@ -603,8 +603,9 @@ is refused with `unknown`: `No task with id 't9'.`
   queued itself, a task whose `queued_as` is `review`, whatever its role, whose batch is spent:
   `Reviews can't be edited; remove it instead.`
 - A `TaskSpec`'s `skills` are the skills its agent gets beyond its role's, by name, such as
-  `["python", "application"]`: the agent is given its role's skills, then these, each once, in
-  place of the project's mapped skills, which a task with none gets. It was added to version 2;
+  `["python", "application"]`: the agent is given its role's skills, then these, then the
+  project's mapped skills, each once, where first named (`given_skills` in `orbit.protocol`
+  combines them). It was added to version 2;
   a task without it names none.
 - A `TaskState`'s `proposed_by` names the conversational role that proposed a draft, such as
   `planner` or `architect`, and is `null` for every other task, a draft orbit added itself

@@ -57,9 +57,10 @@ def show(
     the settings under it. Roles' instructions and triggers' prompts show as the file they're in
     and their length, skill files as their length, or any with --full their text; --json prints
     the same as one JSON object. --skills prints the skill map instead: a row for each skill and
-    a column for each role, each cell saying where that role's agents get the skill, role, task,
-    reviewed task, mapped or —, then a line saying what each means; with --json, one JSON
-    object. No orbit serve needs to be running, and nothing is
+    a column for each role, each cell saying where that role's agents get the skill: role, from
+    the role's skills; mapped, from the [[skills]] entries, given along with any task's list;
+    task or reviewed task, only when that list names it; or —, never. A line then says what each
+    means; with --json, one JSON object. No orbit serve needs to be running, and nothing is
     written. Exits with status 2 if the configuration is invalid, KEY names no setting, or
     --skills is given with KEY or --full.
     """

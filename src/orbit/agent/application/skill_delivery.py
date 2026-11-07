@@ -1,6 +1,6 @@
-"""Skill delivery: the skills each agent is given, its role's and its task's, delivered in its
-instructions, read through ``read_skill`` and noted on its process as it reads them (see
-``docs/00037-feature-skill-delivery.md``)."""
+"""Skill delivery: the skills each agent is given, its role's, its task's and those the
+project's ``[[skills]]`` entries map, delivered in its instructions, read through ``read_skill``
+and noted on its process as it reads them (see ``docs/00037-feature-skill-delivery.md``)."""
 
 from collections.abc import Callable, Sequence
 from typing import Any
@@ -22,7 +22,7 @@ from orbit.tracing import current_span
 
 class SkillDelivery:
     """Delivers agents the skills they're given from the ``library``: their role's, then their
-    task's, or, for a task naming none, those the project's ``mappings`` use. The files an agent
+    task's, then those the project's ``mappings`` use. The files an agent
     reads are noted on its process, the one ``process_of`` finds by the agent's id while it's
     traced."""
 

@@ -38,8 +38,7 @@ SKILL_MAP_LEGEND = (
     f"{ROLE_CELL}: in the role's skills.",
     f"{TASK_CELL}: when the task's list names it.",
     f"{REVIEWED_TASK_CELL}: when the reviewed task's list names it.",
-    f"{MAPPED_CELL}: in [[skills]]; given when the task has no list, and always to agents without"
-    " tasks.",
+    f"{MAPPED_CELL}: in [[skills]]; always given, after the task's list.",
     f"{NEVER_CELL}: never given.",
 )
 """The lines under the skill map, saying what each value of its cells means."""
