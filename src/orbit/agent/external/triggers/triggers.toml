@@ -1,11 +1,12 @@
 # The triggers shipped with orbit, each turning an event into a task for a role or a run of
 # checks. A trigger's prompt names its template, a Markdown file beside this one.
 #
-# Every lens reviews each commit; a batch of fixes is reviewed by Bugs and Tests, and by the
-# lenses guarded by raised-finding only if they raised one of its findings. The super review's
-# three lenses review the whole codebase every ten commits, and the fixes of their own findings.
-# The reviews' agents share the review tab, and the super review's, its merge pass included, its
-# own.
+# Every lens reviews each commit, but the five guarded by code-changed (bugs, tests, logic,
+# security and performance) review only landings that change code; a batch of fixes is reviewed
+# by Bugs and Tests, and by the lenses guarded by raised-finding only if they raised one of its
+# findings. The super review's three lenses review the whole codebase every ten commits, and the
+# fixes of their own findings. The reviews' agents share the review tab, and the super review's,
+# its merge pass included, its own.
 
 [triggers.fit-review]
 on = "task_landed"
@@ -18,35 +19,35 @@ tab = "review"
 on = "task_landed"
 role = "bugs-reviewer"
 prompt = "lens-review.md"
-guards = ["review-rounds"]
+guards = ["review-rounds", "code-changed"]
 tab = "review"
 
 [triggers.tests-review]
 on = "task_landed"
 role = "tests-reviewer"
 prompt = "lens-review.md"
-guards = ["review-rounds"]
+guards = ["review-rounds", "code-changed"]
 tab = "review"
 
 [triggers.logic-review]
 on = "task_landed"
 role = "logic-reviewer"
 prompt = "lens-review.md"
-guards = ["review-rounds", "raised-finding"]
+guards = ["review-rounds", "raised-finding", "code-changed"]
 tab = "review"
 
 [triggers.security-review]
 on = "task_landed"
 role = "security-reviewer"
 prompt = "lens-review.md"
-guards = ["review-rounds", "raised-finding"]
+guards = ["review-rounds", "raised-finding", "code-changed"]
 tab = "review"
 
 [triggers.performance-review]
 on = "task_landed"
 role = "performance-reviewer"
 prompt = "lens-review.md"
-guards = ["review-rounds", "raised-finding"]
+guards = ["review-rounds", "raised-finding", "code-changed"]
 tab = "review"
 
 [triggers.merge-pass]

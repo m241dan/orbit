@@ -405,7 +405,7 @@ def test_shipped_trigger_tables_show_shipped_values() -> None:
     review, super_review = trigger_table("bugs-review"), trigger_table("super-review")
 
     assert '# on = "task_landed"' in review
-    assert '# guards = ["review-rounds"]' in review
+    assert '# guards = ["review-rounds", "code-changed"]' in review
     assert "# when = {}" in review
     assert '# when = {origin = ["manual", "planner"]}' in super_review
     assert "# every = 10" in super_review

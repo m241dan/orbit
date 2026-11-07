@@ -34,7 +34,9 @@ from orbit.protocol import (
     CONFIGURATOR,
     CONFIGURE_CHECKS,
     DRIFT_REVIEWER,
+    FIT_REVIEWER,
     GIT_FAILED,
+    LENS_REVIEWERS,
     REVIEWER,
     SCALING_REVIEWER,
     SECURITY_REVIEWER,
@@ -51,7 +53,7 @@ from orbit.protocol import (
     TaskState,
     TaskStatus,
 )
-from tests.agent_fakes import ROLES, TRIGGERS, FakeTree, desk_for
+from tests.agent_fakes import ROLES, SHIPPED_TRIGGERS, TRIGGERS, FakeTree, desk_for
 from tests.telemetry_helpers import Traced
 
 COMMIT = "c1abcdef99"
@@ -550,6 +552,40 @@ async def test_a_batchs_review_raised_quietly_notes_nothing_it_holds_back() -> N
     await engine.engine.reviewed_quietly(ReviewRound(three_tasks(engine), unbooked))
     assert len(engine.board.tasks) == 3
     assert engine.events == []
+
+
+async def shipped_landing(changed: list[str], triggers: dict[str, Trigger]) -> Engine:
+    """An engine firing ``triggers`` after its task's commit, changing ``changed``, landed and
+    came due for review."""
+    engine = Engine(triggers)
+    engine.tree.changed[f"{COMMIT}^"] = changed
+    await engine.engine.landed(ended(), COMMIT, ReviewRound(commit_review("1", COMMIT), unbooked))
+    return engine
+
+
+async def test_the_shipped_triggers_review_a_docs_only_landing_with_the_fit_lens_alone() -> None:
+    engine = await shipped_landing(["docs/x.md"], SHIPPED_TRIGGERS)
+    assert [role for role, _, _, _ in engine.shown()] == [FIT_REVIEWER]
+    assert engine.notices() == [
+        'Skipped the bugs, tests, logic, security and performance reviews of "Task 1":'
+        " it changed no code."
+    ]
+
+
+async def test_the_shipped_triggers_review_a_landing_changing_code_with_every_lens() -> None:
+    engine = await shipped_landing(["src/x.py"], SHIPPED_TRIGGERS)
+    assert [role for role, _, _, _ in engine.shown()] == list(LENS_REVIEWERS)
+    assert engine.notices() == []
+
+
+async def test_a_lens_whose_guards_drop_code_changed_reviews_a_docs_only_landing_too() -> None:
+    bugs = SHIPPED_TRIGGERS["bugs-review"].model_copy(update={"guards": ("review-rounds",)})
+    engine = await shipped_landing(["docs/x.md"], {**SHIPPED_TRIGGERS, "bugs-review": bugs})
+    assert [role for role, _, _, _ in engine.shown()] == [FIT_REVIEWER, BUGS_REVIEWER]
+    assert engine.notices() == [
+        'Skipped the tests, logic, security and performance reviews of "Task 1":'
+        " it changed no code."
+    ]
 
 
 # A batch's review

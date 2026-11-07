@@ -59,6 +59,9 @@ from tests.agent_fakes import (
 )
 from tests.session_builders import last_of, messages, opened, saved, store_with, switching
 
+CODE = ("src/x.py",)
+"""What each commit landed changes: code, so every lens reviews it."""
+
 LENS_TRIGGERS = tuple(f"{role.removesuffix('-reviewer')}-review" for role in LENS_REVIEWERS)
 """The shipped lens triggers, each named for its lens, in the order they fire."""
 
@@ -70,7 +73,7 @@ def shipped(*scripts: Script, reviewers: tuple[Script, ...] = (), **options: Any
     defaults: dict[str, Any] = {
         "triggers": SHIPPED_TRIGGERS,
         "review_limits": ReviewLimits(rounds=1),
-        "tree": FakeTree(),
+        "tree": FakeTree(changes=CODE),
     }
     session, _, _ = session_for(*scripts, reviewers=reviewers, review=True, **(defaults | options))
     return session
@@ -148,7 +151,7 @@ async def test_a_lens_tasks_stored_prompt_holds_no_diff_but_its_agent_is_given_i
     briefs: list[str] = []
     store = FakeStore()
     lenses = [briefed(briefs) for _ in LENS_REVIEWERS]
-    session = shipped(claims_done, *lenses, tree=LongDiffTree(), store=store)
+    session = shipped(claims_done, *lenses, tree=LongDiffTree(changes=CODE), store=store)
     await start(session)
     events = await asyncio.wait_for(settle(session), 10)
     await session.close()
@@ -204,14 +207,14 @@ async def merge_prompt(tree: FakeTree, task: str) -> str:
 
 
 async def test_the_merge_pass_is_given_the_reviewed_commits_message_with_its_plan_line() -> None:
-    merge = await merge_prompt(FakeTree(), "Plan: docs/x.md\n\nRead the flag.")
+    merge = await merge_prompt(FakeTree(changes=CODE), "Plan: docs/x.md\n\nRead the flag.")
     assert "Reviewed commit c1:\n" in merge
     assert "\n    Plan: docs/x.md\n" in merge
     assert "\n    Read the flag." in merge
 
 
 async def test_the_merge_pass_runs_without_messages_git_cannot_show() -> None:
-    tree = FakeTree()
+    tree = FakeTree(changes=CODE)
     tree.failures["messages"] = TreeFailed("git show failed: bad object c1")
     merge = await merge_prompt(tree, "Plan: docs/x.md\n\nRead the flag.")
     assert "Reviewed commit" not in merge and "Plan: docs/x.md" not in merge

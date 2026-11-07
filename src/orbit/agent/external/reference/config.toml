@@ -732,7 +732,7 @@
 # The events it takes, by their fields, each a value or a list of values.
 # when = {}
 # Guards: review-rounds, raised-finding, suggestions-pending, not-queued, dedupe or code-changed.
-# guards = ["review-rounds"]
+# guards = ["review-rounds", "code-changed"]
 # With on = "commits", how many matching landings it fires after.
 # every: unset
 # Whether you can fire it yourself.
@@ -762,7 +762,7 @@
 # The events it takes, by their fields, each a value or a list of values.
 # when = {}
 # Guards: review-rounds, raised-finding, suggestions-pending, not-queued, dedupe or code-changed.
-# guards = ["review-rounds"]
+# guards = ["review-rounds", "code-changed"]
 # With on = "commits", how many matching landings it fires after.
 # every: unset
 # Whether you can fire it yourself.
@@ -792,7 +792,7 @@
 # The events it takes, by their fields, each a value or a list of values.
 # when = {}
 # Guards: review-rounds, raised-finding, suggestions-pending, not-queued, dedupe or code-changed.
-# guards = ["review-rounds", "raised-finding"]
+# guards = ["review-rounds", "raised-finding", "code-changed"]
 # With on = "commits", how many matching landings it fires after.
 # every: unset
 # Whether you can fire it yourself.
@@ -822,7 +822,7 @@
 # The events it takes, by their fields, each a value or a list of values.
 # when = {}
 # Guards: review-rounds, raised-finding, suggestions-pending, not-queued, dedupe or code-changed.
-# guards = ["review-rounds", "raised-finding"]
+# guards = ["review-rounds", "raised-finding", "code-changed"]
 # With on = "commits", how many matching landings it fires after.
 # every: unset
 # Whether you can fire it yourself.
@@ -852,7 +852,7 @@
 # The events it takes, by their fields, each a value or a list of values.
 # when = {}
 # Guards: review-rounds, raised-finding, suggestions-pending, not-queued, dedupe or code-changed.
-# guards = ["review-rounds", "raised-finding"]
+# guards = ["review-rounds", "raised-finding", "code-changed"]
 # With on = "commits", how many matching landings it fires after.
 # every: unset
 # Whether you can fire it yourself.

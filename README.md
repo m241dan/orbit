@@ -1341,8 +1341,24 @@ that finds nothing reports nothing. Only the `bugs-reviewer` and the `security-r
 report a finding as `blocking`, as their lens skills define it (`blocking_findings = true`); the
 others report every finding as `normal`.
 
-Once all six have ended, the `merge-pass` trigger queues the **merge pass**, a `reviewer` task
-handed every finding of the review and the reviewed commits' messages, whose bodies are the
+Only the fit lens reviews every commit. The bugs, tests, logic, security and performance lenses
+review only commits that change code, as the `code-changed` guard on their triggers decides (see
+[Triggers](#triggers)); code is a file under one of the `[[skills]]` entries' `paths`, a file with a
+code extension, or a dependency or build manifest such as `pyproject.toml` or `uv.lock`. A commit
+that changes only a record in `docs/`, the README or `.orbit/` is reviewed by Fit alone, and the
+conversation says so (`Skipped the bugs, tests, logic, security and performance reviews of
+"<title>": it changed no code.`); a commit changing any code is reviewed by all six, its whole diff
+included. The super review's fix review, `super-fix-review`, carries no `code-changed` and reviews
+its fixes whatever they change. To have a lens review every commit again, set its trigger's `guards`
+without `code-changed`:
+
+```toml
+[triggers.bugs-review]
+guards = ["review-rounds"]
+```
+
+Once all its lenses have ended, the `merge-pass` trigger queues the **merge pass**, a `reviewer`
+task handed every finding of the review and the reviewed commits' messages, whose bodies are the
 prompts their coders were given (`merge-pass.md`), but only if they reported at least one
 (`when = { findings = "some", review = ["commit", "batch", "set"] }`): a review whose lenses all came back clean queues no merge pass
 and files nothing. The reviewer checks each finding against the code, what the task asked, the
@@ -2249,11 +2265,11 @@ The shipped triggers are data in
 | Trigger | Event | When | Does | Also |
 |---|---|---|---|---|
 | `fit-review` | `task_landed` | every one | a `fit-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding`, `tab = "review"` |
-| `bugs-review` | `task_landed` | every one | a `bugs-reviewer` task, from `lens-review.md` | guard `review-rounds`, `tab = "review"` |
-| `tests-review` | `task_landed` | every one | a `tests-reviewer` task, from `lens-review.md` | guard `review-rounds`, `tab = "review"` |
-| `logic-review` | `task_landed` | every one | a `logic-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding`, `tab = "review"` |
-| `security-review` | `task_landed` | every one | a `security-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding`, `tab = "review"` |
-| `performance-review` | `task_landed` | every one | a `performance-reviewer` task, from `lens-review.md` | guards `review-rounds` and `raised-finding`, `tab = "review"` |
+| `bugs-review` | `task_landed` | every one | a `bugs-reviewer` task, from `lens-review.md` | guards `review-rounds` and `code-changed`, `tab = "review"` |
+| `tests-review` | `task_landed` | every one | a `tests-reviewer` task, from `lens-review.md` | guards `review-rounds` and `code-changed`, `tab = "review"` |
+| `logic-review` | `task_landed` | every one | a `logic-reviewer` task, from `lens-review.md` | guards `review-rounds`, `raised-finding` and `code-changed`, `tab = "review"` |
+| `security-review` | `task_landed` | every one | a `security-reviewer` task, from `lens-review.md` | guards `review-rounds`, `raised-finding` and `code-changed`, `tab = "review"` |
+| `performance-review` | `task_landed` | every one | a `performance-reviewer` task, from `lens-review.md` | guards `review-rounds`, `raised-finding` and `code-changed`, `tab = "review"` |
 | `merge-pass` | `reviews_finished` | `findings = "some"`, `review = ["commit", "batch", "set"]` | a `reviewer` task, from `merge-pass.md` | `tab = "review"` |
 | `super-merge-pass` | `reviews_finished` | `findings = "some"`, `review = "super"` | a `reviewer` task, from `merge-pass.md` | `tab = "super-review"` |
 | `super-review` | `commits` | `origin = ["manual", "planner"]` | a `style-reviewer`, `drift-reviewer` and `scaling-reviewer` task, from `super-review.md` | `every = 10`, guard `suggestions-pending`, manual as `Super review`, `tab = "super-review"` |

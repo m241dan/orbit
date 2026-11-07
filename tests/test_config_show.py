@@ -309,7 +309,7 @@ def test_a_shipped_triggers_key_lists_its_fields_in_the_package_layer(project: P
         "triggers.bugs-review.checks = null   default",
         f"triggers.bugs-review.prompt = (lens-review.md, {LENS_TEMPLATE_LINES} lines)   package",
         "triggers.bugs-review.when = {}   default",
-        'triggers.bugs-review.guards = ["review-rounds"]   package',
+        'triggers.bugs-review.guards = ["review-rounds", "code-changed"]   package',
         "triggers.bugs-review.every = null   default",
         "triggers.bugs-review.manual = false   default",
         "triggers.bugs-review.label = null   default",

@@ -847,7 +847,12 @@ class FakeTree:
     base = "base"  # The base branch's commit, apart from the tree's own heads.
 
     def __init__(
-        self, *merges: Merge, leftovers: tuple[str, ...] = (), broken: str = "", empty: bool = False
+        self,
+        *merges: Merge,
+        leftovers: tuple[str, ...] = (),
+        broken: str = "",
+        empty: bool = False,
+        changes: tuple[str, ...] = (),
     ) -> None:
         self.empty = empty  # Tasks change nothing, so there's nothing to commit.
         self.agent_commits = 0  # Commits agents made themselves.
@@ -871,6 +876,7 @@ class FakeTree:
         # The (start, end) pairs landed_since() was asked for; no end is the base's head.
         self.asked_since: list[tuple[str, str | None]] = []
         self.changed: dict[str, list[str]] = {}  # Commit -> the files changed after it.
+        self.changes = list(changes)  # The files changed after a commit changed doesn't name.
         self.asked_changed: list[tuple[str, str]] = []  # Those changed_files() was asked for.
         self.tracked: dict[str, list[str]] = {}  # Commit -> the files tracked at it.
 
@@ -926,7 +932,7 @@ class FakeTree:
     async def changed_files(self, start: str, end: str) -> list[str]:
         self.asked_changed.append((start, end))
         self._fail("changed_files")
-        return self.changed.get(start, [])
+        return self.changed.get(start, self.changes)
 
     def move(self, start: str, old: str, new: str) -> None:
         """Have the commits after ``start`` move ``old`` to ``new``: as git lists them, that

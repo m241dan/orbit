@@ -240,7 +240,8 @@ def test_an_override_that_breaks_a_shipped_trigger_is_refused() -> None:
         " variables are {trigger}.\n"
         "triggers.bugs-review.prompt: {diff} isn't a variable of task_finished; its variables are"
         " {trigger}.\n"
-        'triggers.bugs-review.guards: review-rounds needs on = "task_landed".'
+        'triggers.bugs-review.guards: review-rounds needs on = "task_landed".\n'
+        'triggers.bugs-review.guards: code-changed needs on = "task_landed".'
     )
 
 

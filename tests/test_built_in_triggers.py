@@ -68,8 +68,17 @@ EVERY_BATCH = ("bugs", "tests")
 NARROW: tuple[GuardName, ...] = ("review-rounds", "raised-finding")
 """The guards of a lens that reviews only the batches whose findings it raised."""
 
+CODE_LENSES = ("bugs", "tests", "logic", "security", "performance")
+"""The lenses that review only landings that change code, as ``code-changed`` guards them."""
+
 SUPER_LENSES = ("style-reviewer", "drift-reviewer", "scaling-reviewer")
 """The super review's lens reviewers, in the order its triggers list them."""
+
+
+def lens_guards(lens: str) -> tuple[GuardName, ...]:
+    """The guards of ``lens``'s shipped trigger."""
+    rounds: tuple[GuardName, ...] = ("review-rounds",) if lens in EVERY_BATCH else NARROW
+    return (*rounds, "code-changed") if lens in CODE_LENSES else rounds
 
 
 def test_the_shipped_triggers_are_the_records_in_order() -> None:
@@ -81,7 +90,7 @@ def test_the_shipped_triggers_are_the_records_in_order() -> None:
             f"{lens}-review": Trigger(
                 on="task_landed",
                 role=f"{lens}-reviewer",
-                guards=("review-rounds",) if lens in EVERY_BATCH else NARROW,
+                guards=lens_guards(lens),
                 tab="review",
             )
             for lens in LENSES

@@ -222,7 +222,9 @@ def test_each_trigger_field_comes_from_the_layer_that_set_it() -> None:
     settings = report({"triggers": {"bugs-review": {"enabled": False}}})
     assert settings["triggers.bugs-review.enabled"] == Setting(False, PROJECT)
     assert settings["triggers.bugs-review.on"] == Setting("task_landed", PACKAGE)
-    assert settings["triggers.bugs-review.guards"] == Setting(("review-rounds",), PACKAGE)
+    assert settings["triggers.bugs-review.guards"] == Setting(
+        ("review-rounds", "code-changed"), PACKAGE
+    )
     assert settings["triggers.bugs-review.every"] == Setting(None, DEFAULT)
     assert settings["triggers.super-review.when"] == Setting(
         {"origin": ("manual", "planner")}, PACKAGE

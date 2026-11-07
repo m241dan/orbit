@@ -66,7 +66,7 @@ def shipped(*scripts: Script, reviewers: tuple[Script, ...] = (), **options: Any
     session, _, _ = session_for(
         *scripts,
         reviewers=reviewers,
-        tree=FakeTree(),
+        tree=FakeTree(changes=("src/x.py",)),
         review=True,
         triggers=SHIPPED_TRIGGERS,
         **options,
