@@ -108,9 +108,10 @@ def init_config(root: Path, force: bool) -> InitResult:
 
 def init_user_config(config_dir: Path, force: bool) -> InitResult:
     """Write the user reference config to the user config in ``config_dir``, making
-    ``config_dir``, and its parents, if it's missing, readable by its owner alone. With
-    ``force``, a file already there is first kept as the next free ``config.toml.bak.N`` beside
-    it, ``N`` counting from 1, and then replaced.
+    ``config_dir`` and any missing parents, with only ``config_dir`` readable by its owner
+    alone; directories already there keep their modes. With ``force``, a file already there
+    is first kept as the next free ``config.toml.bak.N`` beside it, ``N`` counting from 1, and
+    then replaced.
 
     Raises :class:`ConfigExists` if there's a file already there and not ``force``, leaving it
     as it was, and ``OSError`` when it can't read the reference or write the file.

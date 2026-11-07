@@ -606,6 +606,16 @@ def test_without_a_config_dir_the_user_reference_is_written_in_a_private_new_one
     assert stat.S_IMODE(config_dir.stat().st_mode) == 0o700
 
 
+def test_missing_parents_of_the_config_dir_are_made_and_only_the_config_dir_is_private(
+    tmp_path: Path,
+) -> None:
+    parent = tmp_path / "x" / "cfg"
+    config_dir = parent / "orbit"
+    init_user_config(config_dir, force=False)
+    assert parent.is_dir()
+    assert stat.S_IMODE(config_dir.stat().st_mode) == 0o700
+
+
 def test_an_existing_user_config_is_refused_and_left_as_it_was(tmp_path: Path) -> None:
     path = tmp_path / USER_CONFIG_FILE
     path.write_text("[server]\nport = 8000\n")
