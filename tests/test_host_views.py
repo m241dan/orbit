@@ -24,8 +24,10 @@ from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.catalog import NO_WORKSPACE_LABEL, agent_entries
 from orbit.agent.domain.role_spend import RoleSpend
 from orbit.agent.domain.roles import Role
+from orbit.agent.domain.skills import SkillMapping
 from orbit.agent.domain.verification import StepProgress
 from orbit.protocol import (
+    BUGS_REVIEWER,
     CODER,
     EXPERIMENTER,
     INTERNAL,
@@ -174,6 +176,7 @@ class FakeRoster:
     roles: Mapping[str, Role] = field(default_factory=lambda: ROLES)
     personal: frozenset[str] = frozenset()
     usage_unknown: frozenset[str] = frozenset()
+    skill_mappings: tuple[SkillMapping, ...] = ()
 
 
 async def unpublished(event: Event) -> None:
@@ -410,3 +413,26 @@ def test_the_entry_lists_the_agents_enabled_roles_those_with_a_seat_conversation
     enabled = {name: role for name, role in ROLES.items() if name != "reviewer"}
     expected = agent_entries(enabled, (PLANNER, EXPERIMENTER), {CODER}, {EXPERIMENTER})
     assert entry == entry_of(agents=expected)
+
+
+def test_each_agent_entry_carries_its_roles_skills() -> None:
+    entry = Held(roster=FakeRoster()).entry()
+    [bugs] = [agent for agent in entry.agents if agent.name == BUGS_REVIEWER]
+    assert bugs.skills == ("code-style", "review-bugs")
+
+
+def test_the_entry_carries_the_skills_the_project_maps_in_order_each_once() -> None:
+    mappings = (
+        SkillMapping(paths=("src",), use=("application", "python")),
+        SkillMapping(paths=("native",), use=("python", "cpp")),
+    )
+    entry = Held(roster=FakeRoster(skill_mappings=mappings)).entry()
+    assert entry.mapped_skills == ("application", "python", "cpp")
+
+
+def test_a_project_without_mappings_maps_no_skills() -> None:
+    assert Held(roster=FakeRoster()).entry().mapped_skills == ()
+
+
+def test_a_workspace_without_agents_maps_no_skills() -> None:
+    assert Held().entry().mapped_skills == ()

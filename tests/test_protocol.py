@@ -151,6 +151,22 @@ def test_settings_from_an_older_peer_without_a_role_are_the_planners() -> None:
     assert isinstance(event, SettingsChanged) and event.role == PLANNER
 
 
+def test_a_catalog_from_an_older_peer_has_no_role_or_mapped_skills() -> None:
+    agent = {"name": "coder", "label": "Coder", "conversational": False}
+    workspace = {"id": "w1", "label": "auth", "sessions": [], "agents": [agent]}
+    wire = {
+        "type": "catalog",
+        "workspaces": [workspace],
+        "agents": [agent],
+        "triggers": [],
+        "lanes": [],
+    }
+    catalog = event_adapter.validate_python(wire, context={"wire": True})
+    assert isinstance(catalog, Catalog)
+    [entry] = catalog.workspaces
+    assert (entry.mapped_skills, entry.agents[0].skills, catalog.agents[0].skills) == ((), (), ())
+
+
 def test_rejects_settings_for_no_role() -> None:
     with pytest.raises(ValidationError):
         UpdateSettings(role="", settings=Settings())

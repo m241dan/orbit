@@ -4,6 +4,7 @@ triggers and the lanes."""
 from collections.abc import Collection, Iterable, Mapping, Sequence
 
 from orbit.agent.domain.roles import Role, disabled_roles, enabled_roles
+from orbit.agent.domain.skills import SkillMapping
 from orbit.agent.domain.triggers import Trigger, fires_by_hand
 from orbit.protocol import (
     BUGS_REVIEWER,
@@ -70,8 +71,8 @@ def agent_entry(
 ) -> AgentEntry:
     """The catalog's entry for the agents of ``role``, named ``name``, ``conversational`` if the
     user can message them, ``personal`` if it's defined whole in the user config, with its lane,
-    the defaults of its tasks' settings and its runtime, and whether their usage is known
-    (``usage_known``)."""
+    the defaults of its tasks' settings, its runtime and skills, and whether their usage is
+    known (``usage_known``)."""
     return AgentEntry(
         name=name,
         label=ROLE_LABELS.get(name, name),
@@ -84,6 +85,7 @@ def agent_entry(
         personal=personal,
         runtime=role.runtime,
         usage_known=usage_known,
+        skills=tuple(role.skills),
     )
 
 
@@ -101,6 +103,11 @@ def agent_entries(
         agent_entry(name, role, name in talking, name in own, name not in unknown)
         for name, role in roles.items()
     )
+
+
+def mapped_skills(mappings: Iterable[SkillMapping]) -> tuple[str, ...]:
+    """The skills the ``[[skills]]`` ``mappings`` use, in order, each once."""
+    return tuple(dict.fromkeys(name for mapping in mappings for name in mapping.use))
 
 
 def workspace_entry(

@@ -164,7 +164,7 @@
       "type": "object"
     },
     "AgentEntry": {
-      "description": "An agent role ``name``, shown as ``label``; ``conversational`` if the user can message\nit. It runs in ``lane``, and its ``model``, ``workspace_level``, ``web`` and ``effort`` are\nthe defaults of a task in it, as ``Settings`` hold them, with the ``tool_access`` older\npeers know them by. It's ``personal`` if the user's own config defines it, rather than orbit\nor the project. Its agents run on ``runtime``, such as ``claude``; ``usage_known`` is false\nwhen that runtime doesn't report what their turns cost, so their usage is unknown.",
+      "description": "An agent role ``name``, shown as ``label``; ``conversational`` if the user can message\nit. It runs in ``lane``, and its ``model``, ``workspace_level``, ``web`` and ``effort`` are\nthe defaults of a task in it, as ``Settings`` hold them, with the ``tool_access`` older\npeers know them by. It's ``personal`` if the user's own config defines it, rather than orbit\nor the project. Its agents run on ``runtime``, such as ``claude``; ``usage_known`` is false\nwhen that runtime doesn't report what their turns cost, so their usage is unknown. Its\n``skills`` are those the role gives its agents, by name, in order.",
       "properties": {
         "conversational": {
           "title": "Conversational",
@@ -223,6 +223,14 @@
           "default": "claude",
           "title": "Runtime",
           "type": "string"
+        },
+        "skills": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Skills",
+          "type": "array"
         },
         "tool_access": {
           "default": "restricted",
@@ -4493,7 +4501,7 @@
       "type": "object"
     },
     "WorkspaceEntry": {
-      "description": "Workspace ``id``, shown as ``label``, at ``path`` on the backend's host, if it has one,\nwhether it's ``read_only``, as another orbit owns its repository, whether it's ``managed``,\na clone orbit made at ``path``, which purging it deletes, its ``sessions`` as the list of\nsessions shows them, and the ``agents`` of its enabled roles, with their lanes and\ndefaults.",
+      "description": "Workspace ``id``, shown as ``label``, at ``path`` on the backend's host, if it has one,\nwhether it's ``read_only``, as another orbit owns its repository, whether it's ``managed``,\na clone orbit made at ``path``, which purging it deletes, its ``sessions`` as the list of\nsessions shows them, the ``agents`` of its enabled roles, with their lanes and defaults,\nand its ``mapped_skills``, those its project's ``[[skills]]`` entries use, in order, each\nonce.",
       "properties": {
         "agents": {
           "default": [],
@@ -4515,6 +4523,14 @@
           "default": false,
           "title": "Managed",
           "type": "boolean"
+        },
+        "mapped_skills": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Mapped Skills",
+          "type": "array"
         },
         "path": {
           "anyOf": [

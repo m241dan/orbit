@@ -4,8 +4,10 @@ the events of the workspace it's attached to alone, and its commands go there.""
 import asyncio
 
 from orbit.agent import ControlPlane, HostParts, Verification, WorkspaceHost, WorkspaceOwner
+from orbit.agent.domain.skills import SkillMapping
 from orbit.agent.domain.workspaces import ATTACH_FIRST
 from orbit.protocol import (
+    BUGS_REVIEWER,
     BUILT_IN_ROLE_NAMES,
     CODER,
     INVALID,
@@ -215,12 +217,22 @@ async def test_the_catalogs_agents_carry_the_lane_and_defaults_of_the_first_role
         model="opus",
         tool_access="restricted",
         effort="high",
+        skills=ROLES[REVIEWER].skills,
     )
     assert agents[CODER] == AgentEntry(
-        name=CODER, label="Coder", conversational=False, lane="work", tool_access="full"
+        name=CODER,
+        label="Coder",
+        conversational=False,
+        lane="work",
+        tool_access="full",
+        skills=ROLES[CODER].skills,
     )
     assert agents[PLANNER] == AgentEntry(
-        name=PLANNER, label="Planner", conversational=True, lane="planner"
+        name=PLANNER,
+        label="Planner",
+        conversational=True,
+        lane="planner",
+        skills=ROLES[PLANNER].skills,
     )
 
 
@@ -326,12 +338,23 @@ async def test_each_workspaces_entry_carries_the_lane_and_defaults_of_its_own_ro
 
     in_a, in_b = agents_by_workspace(catalog)
     assert in_a["security"] == AgentEntry(
-        name="security", label="security", conversational=False, lane="security", effort="high"
+        name="security",
+        label="security",
+        conversational=False,
+        lane="security",
+        effort="high",
+        skills=security.skills,
     )
     assert in_b["security"] == in_a["security"].model_copy(
         update={"effort": "low", "personal": True}
     )
-    planner = AgentEntry(name=PLANNER, label="Planner", conversational=True, lane="planner")
+    planner = AgentEntry(
+        name=PLANNER,
+        label="Planner",
+        conversational=True,
+        lane="planner",
+        skills=ROLES[PLANNER].skills,
+    )
     assert in_a[PLANNER] == in_b[PLANNER] == planner
 
 
@@ -484,3 +507,21 @@ async def test_a_workspace_served_at_start_runs_its_startup_check_with_no_fronte
     await plane.start()
     await eventually(lambda: steps.runs == [STEP.name])
     await plane.close()
+
+
+async def test_each_workspaces_entry_carries_its_roles_skills_and_the_skills_it_maps() -> None:
+    mappings = (
+        SkillMapping(paths=("src",), use=("application", "python")),
+        SkillMapping(paths=("native",), use=("python", "cpp")),
+    )
+    first, _ = agent_workspace("a", skill_mappings=mappings)
+    second, _ = agent_workspace("b")
+    catalog = await catalog_served(first, second, workspace("c"))
+
+    assert [entry.mapped_skills for entry in catalog.workspaces] == [
+        ("application", "python", "cpp"),
+        (),
+        (),
+    ]
+    in_a, _, _ = agents_by_workspace(catalog)
+    assert in_a[BUGS_REVIEWER].skills == ("code-style", "review-bugs")

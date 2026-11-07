@@ -14,9 +14,10 @@ from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.views import SessionParts
 from orbit.agent.domain.activity import Activity
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.catalog import agent_entries, workspace_entry
+from orbit.agent.domain.catalog import agent_entries, mapped_skills, workspace_entry
 from orbit.agent.domain.role_spend import RoleSpend
 from orbit.agent.domain.roles import Role, enabled_roles
+from orbit.agent.domain.skills import SkillMapping
 from orbit.agent.domain.verification import StepProgress
 from orbit.protocol import (
     AgentEntry,
@@ -172,6 +173,9 @@ class Roster(Protocol):
 
     @property
     def usage_unknown(self) -> frozenset[str]: ...
+
+    @property
+    def skill_mappings(self) -> tuple[SkillMapping, ...]: ...
 
 
 @dataclass(frozen=True)
@@ -353,7 +357,8 @@ class CatalogEntries:
 
     def entry(self, sessions: tuple[SessionSummary, ...]) -> WorkspaceEntry:
         """The workspace's entry in the catalog, holding ``sessions``, the open one's state as
-        a connection joining would see it, and its agents' enabled roles."""
+        a connection joining would see it, its agents' enabled roles and the skills its
+        project maps; none of either without agents."""
         parts = self._parts
         live = parts.states.current(joining=True).values()
         workspace = (parts.workspace_id, _workspace_label(parts.workspace), parts.workspace)
@@ -364,13 +369,14 @@ class CatalogEntries:
             managed=parts.managed,
             live=live,
         )
-        return entry.model_copy(update={"agents": self._agents()})
-
-    def _agents(self) -> tuple[AgentEntry, ...]:
-        """The entries of the agents' enabled roles, those with a seat ones the user can
-        message; none without agents."""
         agents = self._parts.agents()
         if agents is None:
-            return ()
+            return entry
+        mapped = mapped_skills(agents.skill_mappings)
+        return entry.model_copy(update={"agents": self._agents(agents), "mapped_skills": mapped})
+
+    def _agents(self, agents: Roster) -> tuple[AgentEntry, ...]:
+        """The entries of the ``agents``' enabled roles, those with a seat ones the user can
+        message."""
         roles = enabled_roles(agents.roles)
         return agent_entries(roles, self._parts.seats.names, agents.personal, agents.usage_unknown)

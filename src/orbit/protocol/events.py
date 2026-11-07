@@ -708,7 +708,8 @@ class AgentEntry(_Message):
     the defaults of a task in it, as ``Settings`` hold them, with the ``tool_access`` older
     peers know them by. It's ``personal`` if the user's own config defines it, rather than orbit
     or the project. Its agents run on ``runtime``, such as ``claude``; ``usage_known`` is false
-    when that runtime doesn't report what their turns cost, so their usage is unknown."""
+    when that runtime doesn't report what their turns cost, so their usage is unknown. Its
+    ``skills`` are those the role gives its agents, by name, in order."""
 
     name: str
     label: str
@@ -722,6 +723,7 @@ class AgentEntry(_Message):
     usage_known: bool = True
     workspace_level: WorkspaceLevel = "read"
     web: bool = True
+    skills: tuple[str, ...] = ()
 
     @model_validator(mode="before")
     @classmethod
@@ -737,8 +739,9 @@ class WorkspaceEntry(_Message):
     """Workspace ``id``, shown as ``label``, at ``path`` on the backend's host, if it has one,
     whether it's ``read_only``, as another orbit owns its repository, whether it's ``managed``,
     a clone orbit made at ``path``, which purging it deletes, its ``sessions`` as the list of
-    sessions shows them, and the ``agents`` of its enabled roles, with their lanes and
-    defaults."""
+    sessions shows them, the ``agents`` of its enabled roles, with their lanes and defaults,
+    and its ``mapped_skills``, those its project's ``[[skills]]`` entries use, in order, each
+    once."""
 
     id: str
     label: str
@@ -747,6 +750,7 @@ class WorkspaceEntry(_Message):
     managed: bool = False
     sessions: tuple[SessionSummary, ...]
     agents: tuple[AgentEntry, ...] = ()
+    mapped_skills: tuple[str, ...] = ()
 
 
 class TriggerEntry(_Message):

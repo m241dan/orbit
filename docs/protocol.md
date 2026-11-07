@@ -107,11 +107,17 @@ added to version 2 too, defaulting to false. It carries the `runtime` its agents
 `claude`, in that first workspace; this was added to version 2 too, defaulting to `claude`
 (`DEFAULT_RUNTIME`, the runtime a message naming none means). Its `usage_known` is false when
 that runtime doesn't report what its agents' turns cost, so a frontend shows their usage as
-unknown rather than as nothing spent; this was added to version 2 too, defaulting to true. Each
+unknown rather than as nothing spent; this was added to version 2 too, defaulting to true. Its
+`skills` are those the role gives its agents, by name, in order; this was added to version 2
+too, defaulting to none, so a frontend joined to an older backend shows a task's own skills
+alone. Each
 workspace also carries its own `agents`: the roles enabled there, each with that workspace's lane,
 defaults, runtime, `usage_known` and `conversational` and `personal` flags, so a frontend offers
 the task editor the roles of the workspace it's on, with that workspace's defaults, rather than
-the catalog's merged list; this was added to version 2, defaulting to none. Each session carries
+the catalog's merged list; this was added to version 2, defaulting to none. Each workspace
+also carries its `mapped_skills`: the skills its project's `[[skills]]` entries `use`, in entry
+order, each once, none for a workspace without agents; this was added to version 2 too,
+defaulting to none. Each session carries
 its state (see [Session state](#session-state)).
 
 `Hello` attaches the connection to nothing, and nothing more reaches it until its first
