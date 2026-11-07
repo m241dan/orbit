@@ -3,8 +3,9 @@ none, refused over one, and with ``force`` replacing it after keeping it as a nu
 bringing one up to date with it, adding what it doesn't mention; copying the built-in roles'
 instructions beside it, with a commented-out line pointing each role at its copy; and copying
 orbit's skills into the project's ``.orbit/skills/``; and starting the user's own
-``config.toml`` from the user reference config, likewise."""
+``config.toml`` from the user reference config, likewise, or only where there's none."""
 
+import os
 import re
 import stat
 from datetime import date
@@ -31,6 +32,7 @@ from orbit.agent.external.config_init import (
     UpdateResult,
     add_roles,
     add_skills,
+    create_user_config,
     init_config,
     init_user_config,
     update_config,
@@ -701,3 +703,65 @@ def test_user_update_refuses_a_file_that_isnt_utf8_naming_it(tmp_path: Path) -> 
         update_user(tmp_path)
     assert str(raised.value).startswith(f"{path}: ")
     assert path.read_bytes() == b"\xff\n"
+
+
+def test_create_without_a_user_config_writes_the_user_reference(tmp_path: Path) -> None:
+    path = tmp_path / USER_CONFIG_FILE
+    assert create_user_config(tmp_path) == path
+    assert path.read_text(encoding="utf-8") == user_reference()
+
+
+def test_create_again_returns_none_and_leaves_the_file(tmp_path: Path) -> None:
+    path = create_user_config(tmp_path)
+    assert path is not None
+    inode = path.stat().st_ino
+    assert create_user_config(tmp_path) is None
+    assert path.read_text(encoding="utf-8") == user_reference()
+    assert path.stat().st_ino == inode
+
+
+def test_create_without_a_config_dir_makes_a_private_one(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config" / "orbit"
+    assert create_user_config(config_dir) == config_dir / USER_CONFIG_FILE
+    assert stat.S_IMODE(config_dir.stat().st_mode) == 0o700
+
+
+@pytest.mark.parametrize("data", [b"", b"[server\n", b"\xff\n"])
+def test_create_leaves_an_existing_user_config_as_it_was(tmp_path: Path, data: bytes) -> None:
+    path = tmp_path / USER_CONFIG_FILE
+    path.write_bytes(data)
+    assert create_user_config(tmp_path) is None
+    assert path.read_bytes() == data
+    assert [p.name for p in tmp_path.iterdir()] == [USER_CONFIG_FILE]
+
+
+def test_create_keeps_the_file_a_concurrent_writer_wrote_first(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    path = tmp_path / USER_CONFIG_FILE
+    link = os.link
+
+    def beaten(source: Path, target: Path) -> None:
+        Path(target).write_text("theirs\n")
+        link(source, target)
+
+    monkeypatch.setattr(os, "link", beaten)
+    assert create_user_config(tmp_path) is None
+    assert path.read_text() == "theirs\n"
+    assert [p.name for p in tmp_path.iterdir()] == [USER_CONFIG_FILE]
+
+
+def test_create_under_a_regular_file_raises_os_error(tmp_path: Path) -> None:
+    (tmp_path / "orbit").write_text("")
+    with pytest.raises(OSError):
+        create_user_config(tmp_path / "orbit" / "config")
+
+
+def test_create_in_a_read_only_config_dir_raises_os_error(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(mode=0o500)
+    try:
+        with pytest.raises(OSError):
+            create_user_config(config_dir)
+    finally:
+        config_dir.chmod(0o700)

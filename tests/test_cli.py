@@ -421,6 +421,14 @@ def test_without_a_user_config_chat_keeps_long_text_whole_and_logs_untrimmed(
     assert asyncio.run(log_of(tmp_path / "state", workspace, session_id)) == ([LONG], False)
 
 
+def test_chat_without_a_user_config_writes_none(
+    launched: list[WorkspaceHost], config_dir: Path
+) -> None:
+    assert runner.invoke(app, ["chat", "--no-verify"]).exit_code == 0
+
+    assert not (config_dir / "config.toml").exists()
+
+
 def test_chat_cuts_long_text_as_the_storage_settings_in_the_config_directory_say(
     launched: list[WorkspaceHost], config_dir: Path, state: Path, tmp_path: Path
 ) -> None:

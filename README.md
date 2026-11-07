@@ -1082,10 +1082,13 @@ having imported nothing; fix that and start orbit again. Likewise a database tha
 or whose schema is newer than this orbit, stops it with a message naming the file and the versions.
 
 The config directory is `--config-dir`, else `$ORBIT_CONFIG_DIR`, else `$XDG_CONFIG_HOME/orbit`,
-else `~/.config/orbit`. Its `config.toml` is optional; `orbit init --user` starts one from
+else `~/.config/orbit`. Its `config.toml` is optional, every setting having a default; `orbit
+init --user` starts one from
 [`reference/user-config.toml`](src/orbit/agent/external/reference/user-config.toml), shipped with
 orbit, every setting commented out at its default (see
-[Starting from the reference config](#starting-from-the-reference-config)). Its `[storage]` table
+[Starting from the reference config](#starting-from-the-reference-config)), and `orbit serve`
+writes that one when there's none (see [Serving the control plane](#serving-the-control-plane));
+`orbit chat` never does. Its `[storage]` table
 sets how much of each session the store keeps:
 
 ```toml
@@ -3046,6 +3049,15 @@ again; it's refused while the workspace runs work or another frontend views one 
 sessions, and if the store fails to record that it's removed, it stays served. A plain `orbit
 serve` later serves those added, not those removed. A local `orbit
 chat` works on its own repository alone and refuses both.
+
+**The default user config.** When there's no `config.toml` in the config directory it uses (see
+[Where orbit keeps things](#where-orbit-keeps-things)), `orbit serve` writes the user reference
+config there, as `orbit init --user` does, and says so before its banner: `Wrote a default user
+config to <path>; every setting is commented out at its default, uncomment what you change.` A
+file already there, even an empty or invalid one, is left as it is, and a serve refused because
+another runs on its state directory writes nothing. If it can't write the file, it warns
+`Couldn't write a default user config to <path>: <error>` on stderr and serves with the
+defaults. `orbit chat`, local or joining a server, never writes one.
 
 **Cloning.** A server can also be given a repository by URL, with no one touching its
 filesystem: `orbit serve --add <url>` clones it before serving, and a frontend's `AddWorkspace`

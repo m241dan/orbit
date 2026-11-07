@@ -31,6 +31,7 @@ from websockets.exceptions import ConnectionClosed, InvalidStatus
 
 from orbit.agent import (
     INVALID_CONFIG,
+    USER_CONFIG_FILE,
     ClaudeCliRunner,
     ControlPlane,
     HostParts,
@@ -267,6 +268,23 @@ def served(frontend: Frontend, *args: str, added: tuple[str, ...] = (".",)) -> s
     return result.output
 
 
+def wrote_default(config_dir: Path) -> str:
+    """The line ``orbit serve`` prints once it's written the default user config in
+    ``config_dir``."""
+    return (
+        f"Wrote a default user config to {config_dir / USER_CONFIG_FILE}; every setting is"
+        " commented out at its default, uncomment what you change."
+    )
+
+
+def after_default(output: str) -> list[str]:
+    """The lines of ``output`` after the first, which says ``orbit serve`` wrote the default
+    user config."""
+    first, *rest = output.splitlines()
+    assert first.startswith("Wrote a default user config to ")
+    return rest
+
+
 @pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
 def test_a_frontend_failing_on_its_thread_still_stops_serve(state: Path, config_dir: Path) -> None:
     def breaks(websocket: Client) -> list[Event]:
@@ -294,12 +312,13 @@ def test_serve_welcomes_a_frontend_with_the_token_until_stopped(
     token = config_dir / "token"
     assert stat.S_IMODE(token.stat().st_mode) == 0o600
     lines = output.splitlines()
-    assert lines[0] == (
+    assert lines[0] == wrote_default(config_dir)
+    assert lines[1] == (
         f"Serving at {url}: {project} as its owner. Frontends show the token in {token}."
     )
-    assert lines[1].startswith("orbit-tests connected from 127.0.0.1:")
-    assert lines[2].startswith("orbit-tests disconnected from 127.0.0.1:")
-    assert lines[3:] == ["orbit serve stopped."]
+    assert lines[2].startswith("orbit-tests connected from 127.0.0.1:")
+    assert lines[3].startswith("orbit-tests disconnected from 127.0.0.1:")
+    assert lines[4:] == ["orbit serve stopped."]
     assert token.read_text().strip() not in output
 
 
@@ -315,7 +334,7 @@ def test_serve_names_paths_with_braces_verbatim(
 
     assert [type(e) for e in frontend.events] == ATTACHED
     url = frontend.run_file["url"]
-    assert output.splitlines()[0] == (
+    assert after_default(output)[0] == (
         f"Serving at {url}: {project} as its owner. Frontends show the token in {config / 'token'}."
     )
 
@@ -407,7 +426,7 @@ def test_serve_on_a_repository_another_orbit_owns_is_read_only_naming_it(
     [snapshot] = [e for e in frontend.events if isinstance(e, Snapshot)]
     assert snapshot.read_only
     url, token = frontend.run_file["url"], config_dir / "token"
-    assert output.splitlines()[0] == (
+    assert after_default(output)[0] == (
         f"Serving at {url}: {project} read-only, as an orbit chat, pid {os.getpid()} owns it."
         f" Frontends show the token in {token}."
     )
@@ -550,10 +569,54 @@ def test_serve_with_no_workspace_flagged_starts_empty_and_says_so(
     [catalog] = [e for e in frontend.events if isinstance(e, Catalog)]
     assert catalog.workspaces == ()
     url = frontend.run_file["url"]
-    assert output.splitlines()[0] == (
+    assert after_default(output)[0] == (
         f"Serving at {url}: no workspaces yet; add one with orbit serve --add PATH. Frontends"
         f" show the token in {config_dir / 'token'}."
     )
+
+
+def test_serve_with_an_empty_user_config_leaves_it_and_says_nothing_of_it(
+    state: Path, config_dir: Path
+) -> None:
+    config_dir.mkdir()
+    config = config_dir / USER_CONFIG_FILE
+    config.write_text("")
+    output = served(Frontend(state, config_dir), "--port", "0")
+
+    assert output.startswith("Serving at ")
+    assert config.read_text() == ""
+
+
+def test_serve_with_an_invalid_user_config_exits_and_leaves_it(config_dir: Path) -> None:
+    config_dir.mkdir()
+    config = config_dir / USER_CONFIG_FILE
+    config.write_text("[server\n")
+    result = runner.invoke(app, ["serve", *QUIET, "--port", "0"])
+
+    assert result.exit_code == 2
+    assert "Wrote a default" not in result.output
+    assert config.read_text() == "[server\n"
+
+
+def test_serve_that_cant_write_the_default_user_config_warns_and_serves(
+    state: Path, config_dir: Path, token_file: Path
+) -> None:
+    token_file.chmod(0o600)
+    config_dir.chmod(0o500)
+    try:
+        frontend = Frontend(state, config_dir)
+        thread = frontend.start()
+        result = runner.invoke(app, ["serve", *QUIET, "--add", ".", "--port", "0"])
+        thread.join(10)
+    finally:
+        config_dir.chmod(0o700)
+
+    assert result.exit_code == 0, result.output
+    assert [type(e) for e in frontend.events] == ATTACHED
+    config = config_dir / USER_CONFIG_FILE
+    assert result.stderr.startswith(f"Couldn't write a default user config to {config}: ")
+    assert result.stdout.startswith("Serving at ")
+    assert not config.exists()
 
 
 def test_a_second_serve_exits_naming_the_first(state: Path) -> None:
@@ -573,7 +636,7 @@ def test_a_second_serve_exits_naming_the_first(state: Path) -> None:
 
 
 def test_a_second_serve_exits_while_the_first_holds_the_lock_before_its_run_file(
-    state: Path,
+    state: Path, config_dir: Path
 ) -> None:
     first = ServeLock(state)
     assert first.take()
@@ -587,6 +650,7 @@ def test_a_second_serve_exits_while_the_first_holds_the_lock_before_its_run_file
         f"orbit serve is already running on {state}; use --state-dir for a separate one.\n"
     )
     assert not RunFile(state).path.exists()
+    assert not (config_dir / USER_CONFIG_FILE).exists()
 
 
 def test_a_serve_refused_lets_go_of_the_lock(state: Path) -> None:
@@ -828,7 +892,7 @@ def test_adding_a_url_clones_it_into_the_state_directory_and_serves_it_managed(
     [catalog] = [e for e in frontend.events if isinstance(e, Catalog)]
     assert [w.path for w in catalog.workspaces] == [str(clone)]
     assert (clone / "a.txt").read_text() == "one\n"
-    assert output.splitlines()[:2] == [f"Cloning {url}…", f"Cloned {url} into {clone}."]
+    assert after_default(output)[:2] == [f"Cloning {url}…", f"Cloned {url} into {clone}."]
     with database(state) as connection:
         rows = connection.execute("SELECT path, served, managed FROM workspaces").fetchall()
     assert rows == [(str(clone), 1, 1)]

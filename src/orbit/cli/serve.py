@@ -32,6 +32,7 @@ from orbit.agent import (
     TokenError,
     TokenFile,
     WorkspaceLock,
+    create_user_config,
     local_tls,
     read_server,
     resolve_config_dir,
@@ -110,6 +111,7 @@ def serve(
     user_config = resolve_config_dir(config_dir, os.environ)
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     with _sole_serve(state):
+        _default_user_config(user_config)
         added = [_added(text) for text in add or ()]
         cert, key, client_ca = (_absolute(path) for path in (cert, key, client_ca))
         given = {"host": host, "port": port, "tls": tls, "cert": cert, "key": key}
@@ -143,6 +145,24 @@ def serve(
             )
             _serve_until_stopped(parts, profile, user_config)
     typer.echo("orbit serve stopped.")
+
+
+def _default_user_config(config_dir: Path) -> None:
+    """Write the user reference config to the user config in ``config_dir`` if there's none,
+    saying so; if it can't, warn and go on with the defaults."""
+    try:
+        path = create_user_config(config_dir)
+    except OSError as exc:
+        typer.echo(
+            f"Couldn't write a default user config to {config_dir / USER_CONFIG_FILE}: {exc}",
+            err=True,
+        )
+        return
+    if path is not None:
+        typer.echo(
+            f"Wrote a default user config to {path}; every setting is commented out at its"
+            " default, uncomment what you change."
+        )
 
 
 def _added(text: str) -> Added:

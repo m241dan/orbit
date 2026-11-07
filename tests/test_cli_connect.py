@@ -29,6 +29,12 @@ def test_connect_runs_the_tui_over_the_control_plane_with_the_config_dirs_token(
     assert tui.opening.pick  # The user picks a session once joined.
 
 
+def test_connect_without_a_user_config_writes_none(token_file: Path) -> None:
+    result = runner.invoke(app, ["chat", "--connect", URL])
+    assert result.exit_code == 0, result.output
+    assert not (token_file.parent / "config.toml").exists()
+
+
 @pytest.mark.usefixtures("token_file")
 def test_connect_opens_on_the_workspace_of_the_repository_it_runs_in(tmp_path: Path) -> None:
     project = tmp_path / "project"

@@ -1,7 +1,7 @@
 """A project's ``.orbit/config.toml`` started from the reference config shipped with orbit,
 brought up to date with it, and given copies of the built-in roles' instructions to edit; the
-user's own config brought up to date with the user reference config; and the project given
-copies of orbit's skills to edit."""
+user's own config started from the user reference config where there's none, or brought up to
+date with it; and the project given copies of orbit's skills to edit."""
 
 import os
 from collections.abc import Callable, Iterable, Iterator, Mapping
@@ -119,6 +119,19 @@ def init_user_config(config_dir: Path, force: bool) -> InitResult:
     reference = USER_REFERENCE.read_text(encoding="utf-8")
     config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     return _write_reference(path, reference, force)
+
+
+def create_user_config(config_dir: Path) -> Path | None:
+    """The user config in ``config_dir``, written with the user reference config as
+    :func:`init_user_config` does if there's no file there; ``None`` if there is one, even one
+    another writer made first, which is left as it was.
+
+    Raises ``OSError`` when it can't read the reference or write the file.
+    """
+    try:
+        return init_user_config(config_dir, force=False).path
+    except ConfigExists:
+        return None
 
 
 def _write_reference(path: Path, reference: str, force: bool) -> InitResult:
