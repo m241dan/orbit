@@ -43,7 +43,7 @@ from typing import Literal
 
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import OPEN_GATE, SessionGate
-from orbit.agent.application.ports import TreeFailed
+from orbit.agent.application.ports import CoderTree, TreeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import configured_checks
@@ -52,10 +52,14 @@ from orbit.agent.domain.reviews import (
     ReviewTemplate,
     commit_review,
     held_values,
+    holds_diff,
     kept_values,
     pending_titles,
+    quotes_diff,
     review_skills,
     review_values,
+    unshown_diff,
+    with_diff,
 )
 from orbit.agent.domain.roles import Role, enabled_roles, role_task
 from orbit.agent.domain.setup_first import waiting_for_setup, waiting_note
@@ -92,9 +96,6 @@ from orbit.agent.domain.triggers import (
 from orbit.agent.domain.verification import CheckSet, VerificationStep, failure_report
 from orbit.protocol import (
     CODER,
-    GIT_FAILED,
-    REVIEW_ROLES,
-    ErrorOccurred,
     Notice,
     QueuedAs,
     TaskSpec,
@@ -118,11 +119,6 @@ the background."""
 PATHS_FAILED_EVENT = "orbit.trigger.paths_failed"
 """The event on the span current when git can't list the paths a landing changed, for each
 trigger with ``paths``, or that ``code-changed`` guards, that fires all the same."""
-
-REVIEW_SKIPPED = "Review skipped"
-TRIGGERS_SKIPPED = "Triggers skipped"
-"""What an error says was skipped when git can't show the diff of what landed: a review that
-was due, or the other triggers on the landing."""
 
 
 @dataclass(frozen=True)
@@ -268,9 +264,8 @@ class TriggerEngine:
         review, if due, is ``review``. Returns the ids of the tasks queued."""
         fields = {"role": state.task.role, "origin": state.origin, REVIEW_FIELD: "commit"}
         event = TriggerEvent(TASK_LANDED, fields, state, (commit,))
-        skipped = TRIGGERS_SKIPPED if review is None else REVIEW_SKIPPED
         job = commit_review(state.id, commit)
-        values = partial(self._values, job, state.task.skills, skipped)
+        values = partial(self._values, job, state.task.skills)
         return await self.fire(event, values, review)
 
     async def finished(self, state: TaskState) -> tuple[str, ...]:
@@ -427,9 +422,7 @@ class TriggerEngine:
         fields = {"role": CODER, "origin": job.origin, REVIEW_FIELD: "batch"}
         event = TriggerEvent(TASK_LANDED, fields, commits=job.commits)
         skills = review_skills(job, self._tasks.board.tasks)
-        return await self._sift(
-            triggers, event, partial(self._values, job, skills, REVIEW_SKIPPED), review
-        )
+        return await self._sift(triggers, event, partial(self._values, job, skills), review)
 
     async def _firing(
         self,
@@ -452,13 +445,48 @@ class TriggerEngine:
         """The ``triggers`` that may fire on ``event``, with ``review`` the review due, if any,
         and the roles that raised its batch's findings, and that the paths its commits changed
         let fire, and the ``values`` they render from, gathered only if one may, with those
-        ``code-changed`` held back."""
+        ``code-changed`` held back, and, on a landing, the diff its tasks quote, as
+        :meth:`_with_diff` says."""
         roles = enabled_roles(self._desk.agents.roles)
         job, raised = (None, frozenset[str]()) if review is None else (review.job, review.raised)
         sifted = await self._within_paths(listening(triggers, event, roles, job, raised), event)
         given = await values() if sifted.fire else None
         firing = None if given is None else _Firing(sifted.fire, given, review, event=event)
-        return _Fired(firing, sifted.held)
+        return _Fired(await self._shown(firing, event), sifted.held)
+
+    async def _shown(self, firing: _Firing | None, event: TriggerEvent) -> _Firing | None:
+        """``firing``, if any, on ``event``, with the diff its tasks quote if it's a landing, as
+        :meth:`_with_diff` says."""
+        if firing is None or event.name != TASK_LANDED:
+            return firing
+        return await self._with_diff(firing)
+
+    async def _with_diff(self, firing: _Firing) -> _Firing:
+        """``firing``, on a landing, with ``{diff}`` the diff of its commits, as git shows it,
+        if a task it may queue keeps that in its prompt, as :meth:`_keeps_diff` says, else
+        quoting :data:`~orbit.agent.domain.reviews.DIFF_HELD`, every task that quotes it
+        holding it back for the review lane to read as it starts the task. If git can't show it,
+        the tasks are queued all the same, quoting what says so."""
+        if not self._keeps_diff(firing):
+            return replace(firing, values=held_values(firing.values))
+        tree = self._desk.agents.tree
+        assert tree is not None  # Only work in a tree lands.
+        assert firing.event is not None  # Only a landing's firing shows a diff.
+        diff = await show_diff(tree, firing.event.commits)
+        return replace(firing, values=with_diff(firing.values, diff))
+
+    def _keeps_diff(self, firing: _Firing) -> bool:
+        """Whether a task the triggers ``firing`` may queue quotes ``{diff}`` and keeps it in its
+        prompt, holding none back, as :func:`_holds_diff` says."""
+        specs = self._desk.agents.roles
+        enabled = enabled_roles(specs)
+        raised = () if firing.review is None else firing.review.raised
+        return any(
+            not _holds_diff(firing.review_of(trigger, specs[role]), role)
+            for _, trigger in firing.listening
+            if trigger.prompt is not None and quotes_diff(trigger.prompt)
+            for role in firing_roles(trigger, enabled, firing.event, raised)
+        )
 
     async def _within_paths(self, found: list[tuple[str, Trigger]], event: TriggerEvent) -> Sifted:
         """The triggers ``found`` listening for ``event``, by name, in order, sifted by the
@@ -566,13 +594,13 @@ class TriggerEngine:
         """Add to ``board`` ``role``'s task of the trigger ``queued`` says, as it fires as
         ``firing`` says; returns its id. One reviewing the review due does so with the skills of
         what it reviews, and is queued as a review, booked into its batches with what its
-        prompt was rendered from. A review role's task booked so quotes
-        :data:`~orbit.agent.domain.reviews.DIFF_HELD` in place of the diff, which the review
-        lane reads from git again as it starts it."""
+        prompt was rendered from. One that holds its diff back, as :func:`_holds_diff` says,
+        quotes :data:`~orbit.agent.domain.reviews.DIFF_HELD` in place of the diff, which the
+        review lane reads from git as it starts it."""
         spec = self._desk.agents.roles[role]
         review = firing.review_of(queued.trigger, spec)
         skills = () if review is None else review_skills(review.job, board.tasks)
-        prompt = queued.held if review is not None and role in REVIEW_ROLES else queued.prompt
+        prompt = queued.held if _holds_diff(review, role) else queued.prompt
         task = role_task(role, spec, prompt, skills)
         queued_as: QueuedAs = "task" if review is None else "review"
         task_id = _added(board, task, queued.name, queued.trigger, queued_as)
@@ -580,23 +608,14 @@ class TriggerEngine:
             review.book(task_id, queued.template)
         return task_id
 
-    async def _values(
-        self, job: ReviewJob, skills: Sequence[str], skipped: str
-    ) -> Mapping[str, str] | None:
+    async def _values(self, job: ReviewJob, skills: Sequence[str]) -> Mapping[str, str]:
         """The values of ``task_landed`` for ``job``'s commits, landed by the tasks it reviews,
-        which name ``skills``, as its review's task renders from them; none, with an error
-        published saying what's ``skipped``, if git can't show their diff."""
-        tree = self._desk.agents.tree
-        assert tree is not None  # Only work in a tree lands.
-        try:
-            diff = await tree.show(job.commits)
-        except TreeFailed as exc:  # Git failed; the triggers are skipped rather than the run.
-            await self._desk.publish(ErrorOccurred(code=GIT_FAILED, message=f"{skipped}: {exc}"))
-            return None
+        which name ``skills``, as its review's task renders from them, but ``{diff}``, which
+        :meth:`_with_diff` gives."""
         cap = self._desk.agents.review_limits.suggestions
         pending = pending_titles(self._tasks.board.tasks)
         landing = {"task": ", ".join(job.reviewed), "task_skills": ", ".join(skills)}
-        return review_values(job, diff, cap, pending) | landing
+        return review_values(job, cap, pending) | landing
 
 
 @dataclass(frozen=True)
@@ -620,6 +639,23 @@ class _Queued:
     prompt: str
     held: str
     template: ReviewTemplate
+
+
+def _holds_diff(review: ReviewRound | None, role: str) -> bool:
+    """Whether ``role``'s task, booked into ``review``, if any, holds its diff back for the
+    review lane to read as it starts it, as
+    :func:`~orbit.agent.domain.reviews.holds_diff` says; an unbooked task holds back none."""
+    return review is not None and holds_diff(role)
+
+
+async def show_diff(tree: CoderTree, commits: Sequence[str]) -> str:
+    """The messages and diffs of ``commits``, as ``tree``'s git shows them, or what says git
+    couldn't show them: the tasks quoting them go ahead, as their agents can read the
+    commits."""
+    try:
+        return await tree.show(commits)
+    except TreeFailed as exc:  # The task goes ahead; its agent can read the commits.
+        return unshown_diff(str(exc))
 
 
 def _note_paths_failed(found: Sequence[tuple[str, Trigger]], error: TreeFailed) -> None:

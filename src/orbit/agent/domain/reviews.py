@@ -879,16 +879,16 @@ def review_prompt(
 
 def review_values(
     job: ReviewJob,
-    diff: str,
     cap: int,
     pending: Sequence[str],
     landed_since: LandedSince = _NOTHING_LANDED,
 ) -> dict[str, str]:
     """The variables a trigger's template renders ``job``'s review task from, as
-    :func:`review_prompt` writes it from the same ``diff``, ``cap``, ``pending`` and
-    ``landed_since``, each list as its block or, with nothing in it, empty: for a super review,
-    those of ``commits``; for a review of commits, those of ``task_landed`` but ``{task}`` and
-    ``{task_skills}``, which come with the landing. ``{trigger}`` is the caller's.
+    :func:`review_prompt` writes it from the same ``cap``, ``pending`` and ``landed_since``,
+    each list as its block or, with nothing in it, empty: for a super review, those of
+    ``commits``; for a review of commits, those of ``task_landed`` but ``{task}`` and
+    ``{task_skills}``, which come with the landing, and ``{diff}``, which :func:`with_diff`
+    adds, or :func:`held_values` holds back. ``{trigger}`` is the caller's.
 
     ``{commit}`` is the reviewed commit, the last of a batch's, abbreviated, and ``{title}`` the
     review task's first line.
@@ -908,7 +908,6 @@ def review_values(
         "title": _review_title(job),
         "missing": _paragraphs(_missing(job)),
         "landed_since": _paragraphs(_landed(landed_since.subjects)),
-        "diff": _trimmed(diff),
     }
 
 
@@ -959,6 +958,13 @@ def with_diff(values: Mapping[str, str], diff: str) -> dict[str, str]:
     """``values`` with ``{diff}`` quoting ``diff``, trimmed as :func:`review_values` trims it,
     as a review task of commits is given to its agent."""
     return {**values, "diff": _trimmed(diff)}
+
+
+def holds_diff(role: str) -> bool:
+    """Whether a task of ``role`` booked into a review of commits holds its diff back, quoting
+    :data:`DIFF_HELD` until the review lane starts it and reads the diff from git: a review
+    role's. Any other role's task keeps the diff in its prompt, read as it's queued."""
+    return role in REVIEW_ROLES
 
 
 def quotes_diff(template: str) -> bool:

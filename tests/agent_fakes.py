@@ -878,6 +878,7 @@ class FakeTree:
         self.changed: dict[str, list[str]] = {}  # Commit -> the files changed after it.
         self.changes = list(changes)  # The files changed after a commit changed doesn't name.
         self.asked_changed: list[tuple[str, str]] = []  # Those changed_files() was asked for.
+        self.asked_shown: list[tuple[str, ...]] = []  # The commits show() was asked for.
         self.tracked: dict[str, list[str]] = {}  # Commit -> the files tracked at it.
 
     async def prepare(self, keep: bool) -> str:
@@ -909,6 +910,7 @@ class FakeTree:
         return self.base
 
     async def show(self, commits: Sequence[str]) -> str:
+        self.asked_shown.append(tuple(commits))
         self._fail("show")
         return "\n".join(f"diff of {commit}" for commit in commits)
 

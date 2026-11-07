@@ -24,6 +24,7 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import WAITING, TaskBoard
 from orbit.agent.domain.endings import BUG, CANCELLED
 from orbit.agent.domain.setup_first import SET_UP_MESSAGE
+from orbit.agent.domain.triggers import Trigger
 from orbit.protocol import (
     AGENT_FAILED,
     BUSY,
@@ -67,6 +68,7 @@ from tests.agent_fakes import (
     COMMAND_ID,
     ROLES,
     STEP,
+    TRIGGERS,
     Call,
     FakeStore,
     FakeTree,
@@ -653,7 +655,12 @@ async def test_a_failure_saving_a_change_the_board_made_is_refused_as_internal(
 async def test_an_unexpected_error_in_the_work_lane_is_reported() -> None:
     tree = FakeTree()
     tree.failures["show"] = ValueError("the lane tripped")
-    session, _, launcher = session_for(claims_done, claims_done, tree=tree, review=True)
+    # A coder's task quoting the diff has the work lane ask git for it as the first task lands.
+    notes = Trigger(on="task_landed", role=CODER, prompt="Note {diff}", when={"role": CODER})
+    triggers = {**TRIGGERS, "notes": notes}
+    session, _, launcher = session_for(
+        claims_done, claims_done, tree=tree, review=True, triggers=triggers
+    )
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
     message = "The work lane stopped on an unexpected error: the lane tripped"
     assert ErrorOccurred(code=INTERNAL, message=message) in events

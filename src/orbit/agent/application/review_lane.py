@@ -55,7 +55,12 @@ from orbit.agent.application.review_trace import Queued, ReviewTally, ReviewTrac
 from orbit.agent.application.snapshots import snapshot_of
 from orbit.agent.application.task_trace import FINDINGS_FIXED, FINDINGS_GIVEN_UP
 from orbit.agent.application.tasks import Changed, Tasks
-from orbit.agent.application.triggers import ReviewRound, TriggerEngine, TriggerHooks
+from orbit.agent.application.triggers import (
+    ReviewRound,
+    TriggerEngine,
+    TriggerHooks,
+    show_diff,
+)
 from orbit.agent.domain.board import FINAL, TaskBoard
 from orbit.agent.domain.endings import REVIEW_STOPPED_BY_YOU
 from orbit.agent.domain.merge_holds import BlockingTask, FindingFiling, FixReview, MergePassEnding
@@ -109,7 +114,6 @@ from orbit.agent.domain.reviews import (
     runnable_tasks,
     set_review,
     tell_landed_since,
-    unshown_diff,
     with_diff,
     with_finding,
     with_lens,
@@ -441,7 +445,7 @@ class ReviewLane:
         ``since``, as its task renders from them."""
         landed = await self._landed(job, since)
         pending = pending_titles(self._board.tasks)
-        return review_values(job, "", self.planner.cap(job), pending, landed)
+        return review_values(job, self.planner.cap(job), pending, landed)
 
     async def set_finished(self, outcome: SetOutcome) -> tuple[str, ...]:
         """A named set's run ended as ``outcome`` says: raise ``set_finished``, each task of a
@@ -874,10 +878,7 @@ class ReviewLane:
         says git couldn't show them; nothing if it doesn't quote them."""
         if not quotes_diff(template.template):
             return ""
-        try:
-            return await self._tree.show(job.commits)
-        except TreeFailed as exc:  # The review goes ahead; its agent can read the commits.
-            return unshown_diff(str(exc))
+        return await show_diff(self._tree, job.commits)
 
     async def _landed_after(self, commit: str) -> tuple[str, ...]:
         """The subjects of the commits on the base after ``commit``, oldest first; none if git

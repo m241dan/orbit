@@ -17,6 +17,7 @@ from orbit.agent.domain.reviews import (
     review_prompt,
     review_values,
     tell_landed_since,
+    with_diff,
 )
 from orbit.agent.domain.triggers import (
     REVIEWS_FINISHED,
@@ -271,7 +272,7 @@ def test_each_lens_template_renders_todays_review_prompt_without_a_cap(
     lens: str, case: str
 ) -> None:
     job, pending, landed = REVIEWS[case]
-    values = review_values(job, DIFF, 5, pending, landed) | {
+    values = with_diff(review_values(job, 5, pending, landed), DIFF) | {
         "trigger": f"{lens}-review",
         "task": "3",
         "task_skills": "python",
@@ -288,8 +289,8 @@ def test_the_review_template_told_what_landed_as_it_starts_renders_todays_prompt
     case: str, diff: str, listed: tuple[str, ...]
 ) -> None:
     job, pending, landed = REVIEWS[case]
-    queued = review_values(job, diff, 5, pending, LandedSince(listed)) | {"trigger": "fit-review"}
-    values = tell_landed_since(queued, landed.subjects)
+    queued = review_values(job, 5, pending, LandedSince(listed)) | {"trigger": "fit-review"}
+    values = with_diff(tell_landed_since(queued, landed.subjects), diff)
     rendered = render_template(template("fit-review"), values)
     assert rendered == lens_prompt(job, diff, pending, landed)
 
@@ -352,7 +353,7 @@ def test_the_super_review_template_renders_todays_super_review_prompt_without_a_
     case: str,
 ) -> None:
     pending, landed = SUPER_REVIEWS[case]
-    values = review_values(SUPER, "", 10, pending, landed) | {"trigger": "super-review"}
+    values = review_values(SUPER, 10, pending, landed) | {"trigger": "super-review"}
     rendered = render_template(template("super-review"), values)
     prompt = review_prompt(SUPER, "", 10, pending, landed)
     assert rendered == prompt.replace("\n\nYou may make at most 10 suggestions.", "", 1)

@@ -23,6 +23,7 @@ from orbit.agent.domain.reviews import (
     commit_review,
     review_prompt,
     review_values,
+    unshown_diff,
 )
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.skills import SkillMapping
@@ -35,7 +36,6 @@ from orbit.protocol import (
     CONFIGURE_CHECKS,
     DRIFT_REVIEWER,
     FIT_REVIEWER,
-    GIT_FAILED,
     LENS_REVIEWERS,
     REVIEWER,
     SCALING_REVIEWER,
@@ -199,14 +199,55 @@ async def test_a_landing_gives_its_commit_task_skills_and_its_reviews_values() -
     )
 
 
-async def test_a_diff_git_cannot_show_skips_the_triggers_on_the_landing() -> None:
-    engine = Engine({"look": look()})
+async def test_a_diff_git_cannot_show_at_landing_is_quoted_as_unshown_and_the_task_queued() -> None:
+    engine = Engine({"look": look(prompt="Look at {commit}\n\n{diff}")})
     engine.tree.failures["show"] = TreeFailed("git show failed: bad object")
-    assert await engine.engine.landed(ended(), COMMIT) == ()
-    assert engine.board.tasks == ()
-    assert engine.errors() == [
-        ErrorOccurred(code=GIT_FAILED, message="Triggers skipped: git show failed: bad object")
-    ]
+    [task_id] = await engine.engine.landed(ended(), COMMIT)
+    unshown = unshown_diff("git show failed: bad object")
+    assert engine.board.get(task_id).task.prompt == f"Look at c1abcde\n\n{unshown}"
+    assert engine.errors() == []
+
+
+def fixes(role: str) -> Trigger:
+    """A trigger ``review-rounds`` guards queuing ``role``'s fix of each landed coder commit,
+    quoting its diff."""
+    return look(role=role, guards=["review-rounds"], prompt="Fix {commit}\n\n{diff}")
+
+
+async def test_another_roles_task_booked_into_a_review_keeps_the_diff_in_its_prompt() -> None:
+    booked: dict[str, ReviewTemplate] = {}
+    engine = Engine({"fix": fixes(CODER)})
+    review = ReviewRound(commit_review("1", COMMIT), booked.__setitem__)
+    [task_id] = await engine.engine.landed(ended(), COMMIT, review)
+    state = engine.board.get(task_id)
+    assert (state.task.role, state.queued_as) == (CODER, "review")
+    assert state.task.prompt == f"Fix c1abcde\n\ndiff of {COMMIT}"
+    assert DIFF_HELD not in state.task.prompt
+    assert "diff" not in booked[task_id].values
+
+
+async def test_a_review_roles_task_booked_into_a_review_holds_its_diff_unread() -> None:
+    booked: dict[str, ReviewTemplate] = {}
+    engine = Engine({"fix": fixes(REVIEWER)})
+    review = ReviewRound(commit_review("1", COMMIT), booked.__setitem__)
+    [task_id] = await engine.engine.landed(ended(), COMMIT, review)
+    assert engine.board.get(task_id).task.prompt == f"Fix c1abcde\n\n{DIFF_HELD}"
+    assert "diff" not in booked[task_id].values
+    assert engine.tree.asked_shown == []  # The review lane reads it as the review starts.
+
+
+async def test_a_landing_whose_templates_quote_no_diff_asks_git_for_none() -> None:
+    engine = Engine({"look": look()})
+    await engine.engine.landed(ended(), COMMIT)
+    assert engine.tree.asked_shown == []
+
+
+async def test_a_landing_asks_git_for_the_diff_once_however_many_tasks_quote_it() -> None:
+    engine = Engine({"look": look(prompt="{diff}"), "fix": fixes(CODER)})
+    review = ReviewRound(commit_review("1", COMMIT), unbooked)
+    await engine.engine.landed(ended(), COMMIT, review)
+    assert len(engine.board.tasks) == 2
+    assert engine.tree.asked_shown == [(COMMIT,)]
 
 
 async def test_a_draft_trigger_adds_its_task_as_a_draft_from_it() -> None:
@@ -340,14 +381,13 @@ async def test_a_review_due_is_booked_with_the_template_and_values_its_prompt_re
     assert render_template(kept.template, kept.values) == engine.board.get(task_id).task.prompt
 
 
-async def test_a_diff_git_cannot_show_skips_the_review_due() -> None:
+async def test_a_review_due_whose_diff_git_cannot_show_at_landing_is_queued_all_the_same() -> None:
     engine = Engine({"review": TRIGGERS["review"]})
     engine.tree.failures["show"] = TreeFailed("git show failed: bad object")
     review = ReviewRound(commit_review("1", COMMIT), unbooked)
-    assert await engine.engine.landed(ended(), COMMIT, review) == ()
-    assert [error.message for error in engine.errors()] == [
-        "Review skipped: git show failed: bad object"
-    ]
+    [task_id] = await engine.engine.landed(ended(), COMMIT, review)
+    assert engine.board.get(task_id).task.prompt.endswith(DIFF_HELD)
+    assert engine.errors() == []
 
 
 # Firing on a task's end
@@ -713,7 +753,7 @@ async def test_counted_triggers_queue_their_tasks_reviewing_the_codebase_and_boo
     booked: dict[str, ReviewTemplate] = {}
     engine = Engine({SUPER_REVIEW: SUPER})
     engine.board.add(TaskSpec(prompt="Make it faster.", skills=("python",)))
-    values = review_values(WHOLE, "", 10, ["Make it faster."])
+    values = review_values(WHOLE, 10, ["Make it faster."])
     fired = [(SUPER_REVIEW, SUPER)]
     queued = await engine.engine.fire_counted(fired, values, ReviewRound(WHOLE, booked.__setitem__))
     reviews = [engine.board.get(task_id) for task_id in queued]
@@ -737,7 +777,7 @@ async def test_a_counted_trigger_of_another_role_queues_its_task_as_a_review(dra
     booked: dict[str, ReviewTemplate] = {}
     audit = Trigger(on="commits", role=CODER, prompt="Audit at {commit}.", draft=draft)
     engine = Engine({"audit": audit})
-    values = review_values(WHOLE, "", 10, [])
+    values = review_values(WHOLE, 10, [])
     review = ReviewRound(WHOLE, booked.__setitem__)
     [task_id] = await engine.engine.fire_counted([("audit", audit)], values, review)
     state = engine.board.get(task_id)
@@ -750,7 +790,7 @@ async def test_counted_triggers_are_not_held_back_again_as_they_are_queued() -> 
     engine = Engine({SUPER_REVIEW: SUPER})
     review_task = TaskSpec(prompt="Review commit c0", role=REVIEWER)
     engine.board.add_triggered(review_task, "review", "review")
-    values = review_values(WHOLE, "", 10, [])
+    values = review_values(WHOLE, 10, [])
     review = ReviewRound(WHOLE, unbooked)
     queued = await engine.engine.fire_counted([(SUPER_REVIEW, SUPER)], values, review)
     assert len(queued) == len(SUPER_LENS_REVIEWERS)
@@ -761,7 +801,7 @@ async def test_each_counted_trigger_renders_its_own_name_and_is_booked_apart() -
     other = SUPER.model_copy(update={"prompt": "{trigger} at {commit}", "role": STYLE_REVIEWER})
     engine = Engine({SUPER_REVIEW: SUPER, "drift": other})
     fired = [(SUPER_REVIEW, SUPER), ("drift", other)]
-    values = review_values(WHOLE, "", 10, [])
+    values = review_values(WHOLE, 10, [])
     queued = await engine.engine.fire_counted(fired, values, ReviewRound(WHOLE, booked.__setitem__))
     assert [(origin, prompt.split("\n", 1)[0]) for _, origin, _, prompt in engine.shown()] == [
         *[(SUPER_REVIEW, "Super review of the codebase at c1abcde")] * 3,
