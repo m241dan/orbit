@@ -37,6 +37,7 @@ from typing import Literal
 
 from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.desk import AgentDesk
+from orbit.agent.application.diffs import show_diff
 from orbit.agent.application.lane_runner import (
     LaneParts,
     LaneRunner,
@@ -59,7 +60,6 @@ from orbit.agent.application.triggers import (
     ReviewRound,
     TriggerEngine,
     TriggerHooks,
-    show_diff,
 )
 from orbit.agent.domain.board import FINAL, TaskBoard
 from orbit.agent.domain.endings import REVIEW_STOPPED_BY_YOU
@@ -881,10 +881,10 @@ class ReviewLane:
         told = await self._tell_landed(task_id, job)
         if told is None:
             return self._board.get(task_id).task.prompt
-        diff = await self._show_diff(told, job)
+        diff = await self._show_quoted_diff(told, job)
         return render_template(told.template, quote_diff(told.values, diff))
 
-    async def _show_diff(self, template: ReviewTemplate, job: ReviewJob) -> str:
+    async def _show_quoted_diff(self, template: ReviewTemplate, job: ReviewJob) -> str:
         """The messages and diffs of ``job``'s commits, if ``template`` quotes them, or what
         says git couldn't show them; nothing if it doesn't quote them."""
         if not quotes_diff(template.template):
@@ -964,7 +964,9 @@ class ReviewLane:
         task of another role isn't, even one the lane booked as a review, such as a ``commits``
         trigger's: it runs as any task of its lane does, this lane's or the work lane's, and its
         batch ends as it ends, however it does, as a review's does (see :meth:`_ended`), unless
-        its runtime's limit or an outage leaves it to run again."""
+        its runtime's limit or an outage leaves it to run again. It must agree with
+        :func:`~orbit.agent.domain.reviews.holds_diff`: a review is briefed with the diff its
+        task held back as it was queued, and only a review."""
         state = self._board.find(task_id)
         return state is None or state.task.role in REVIEW_ROLES
 

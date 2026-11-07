@@ -236,6 +236,20 @@ async def test_a_review_roles_task_booked_into_a_review_holds_its_diff_unread() 
     assert engine.tree.asked_shown == []  # The review lane reads it as the review starts.
 
 
+async def test_a_coder_and_a_reviewer_booked_by_one_trigger_keep_and_hold_the_diff() -> None:
+    booked: dict[str, ReviewTemplate] = {}
+    engine = Engine(
+        {"fix": look(role=[CODER, REVIEWER], guards=["review-rounds"], prompt="{diff}")}
+    )
+    review = ReviewRound(commit_review("1", COMMIT), booked.__setitem__)
+    await engine.engine.landed(ended(), COMMIT, review)
+    assert [(role, prompt) for role, _, _, prompt in engine.shown()] == [
+        (CODER, f"diff of {COMMIT}"),
+        (REVIEWER, DIFF_HELD),
+    ]
+    assert engine.tree.asked_shown == [(COMMIT,)]
+
+
 async def test_a_landing_whose_templates_quote_no_diff_asks_git_for_none() -> None:
     engine = Engine({"look": look()})
     await engine.engine.landed(ended(), COMMIT)

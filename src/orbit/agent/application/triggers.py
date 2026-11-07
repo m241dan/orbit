@@ -42,8 +42,9 @@ from functools import partial
 from typing import Literal
 
 from orbit.agent.application.desk import AgentDesk
+from orbit.agent.application.diffs import show_diff
 from orbit.agent.application.lanes import OPEN_GATE, SessionGate
-from orbit.agent.application.ports import CoderTree, TreeFailed
+from orbit.agent.application.ports import TreeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import configured_checks
@@ -59,7 +60,6 @@ from orbit.agent.domain.reviews import (
     quotes_diff,
     review_skills,
     review_values,
-    word_unshown_diff,
 )
 from orbit.agent.domain.roles import Role, enabled_roles, role_task
 from orbit.agent.domain.setup_first import waiting_for_setup, waiting_note
@@ -157,6 +157,18 @@ class _Firing:
         trigger's, on a landing counted, by hand, or once a review's lenses finished, a finding
         role's on a set's report, else only those ``review-rounds`` guards."""
         return self.review if self._books(trigger, role) else None
+
+    def queues(
+        self, trigger: Trigger, specs: Mapping[str, Role]
+    ) -> list[tuple[str, ReviewRound | None]]:
+        """The roles ``trigger`` queues a task for as it fires, in its order, among the enabled
+        roles of ``specs``, as :func:`~orbit.agent.domain.triggers.firing_roles` says, each with
+        the review its task reviews, if any, as :meth:`review_of` says. Both the diff read and
+        the tasks queued ask this, so a task keeping its prompt never quotes
+        :data:`~orbit.agent.domain.reviews.DIFF_HELD`."""
+        raised = () if self.review is None else self.review.raised
+        roles = firing_roles(trigger, enabled_roles(specs), self.event, raised)
+        return [(role, self.review_of(trigger, specs[role])) for role in roles]
 
     def _books(self, trigger: Trigger, role: Role) -> bool:
         """Whether the task of ``role`` that ``trigger`` queues is booked into the review, as
@@ -453,27 +465,22 @@ class TriggerEngine:
         sifted = await self._within_paths(listening(triggers, event, roles, job, raised), event)
         given = await values() if sifted.fire else None
         firing = None if given is None else _Firing(sifted.fire, given, review, event=event)
-        shown = await self._shown(firing, event)
+        shown = await self._show_firing_diff(firing)
         return _Fired(shown, sifted.held, frozenset(roles), event, raised)
 
-    async def _shown(self, firing: _Firing | None, event: TriggerEvent) -> _Firing | None:
-        """``firing``, if any, on ``event``, with the diff its tasks quote if it's a landing, as
-        :meth:`_show_firing_diff` says."""
-        if firing is None or event.name != TASK_LANDED:
+    async def _show_firing_diff(self, firing: _Firing | None) -> _Firing | None:
+        """``firing``, if any, and if it's a landing's, with ``{diff}`` the diff of its commits,
+        as git shows it, if a task it may queue keeps that in its prompt, as
+        :meth:`_keeps_diff` says, else quoting :data:`~orbit.agent.domain.reviews.DIFF_HELD`,
+        every task that quotes it holding it back for the review lane to read as it starts the
+        task. If git can't show it, the tasks are queued all the same, quoting what says so.
+        Any other firing is returned as it is."""
+        if firing is None or firing.event is None or firing.event.name != TASK_LANDED:
             return firing
-        return await self._show_firing_diff(firing)
-
-    async def _show_firing_diff(self, firing: _Firing) -> _Firing:
-        """``firing``, on a landing, with ``{diff}`` the diff of its commits, as git shows it,
-        if a task it may queue keeps that in its prompt, as :meth:`_keeps_diff` says, else
-        quoting :data:`~orbit.agent.domain.reviews.DIFF_HELD`, every task that quotes it
-        holding it back for the review lane to read as it starts the task. If git can't show it,
-        the tasks are queued all the same, quoting what says so."""
         if not self._keeps_diff(firing):
             return replace(firing, values=hold_diff(firing.values))
         tree = self._desk.agents.tree
         assert tree is not None  # Only work in a tree lands.
-        assert firing.event is not None  # Only a landing's firing shows a diff.
         diff = await show_diff(tree, firing.event.commits)
         return replace(firing, values=quote_diff(firing.values, diff))
 
@@ -481,13 +488,11 @@ class TriggerEngine:
         """Whether a task the triggers ``firing`` may queue quotes ``{diff}`` and keeps it in its
         prompt, holding none back, as :func:`_holds_diff` says."""
         specs = self._desk.agents.roles
-        enabled = enabled_roles(specs)
-        raised = () if firing.review is None else firing.review.raised
         return any(
-            not _holds_diff(firing.review_of(trigger, specs[role]), role)
+            not _holds_diff(review, role)
             for _, trigger in firing.listening
             if trigger.prompt is not None and quotes_diff(trigger.prompt)
-            for role in firing_roles(trigger, enabled, firing.event, raised)
+            for role, review in firing.queues(trigger, specs)
         )
 
     async def _within_paths(self, found: list[tuple[str, Trigger]], event: TriggerEvent) -> Sifted:
@@ -583,23 +588,22 @@ class TriggerEngine:
         prompt = render_template(trigger.prompt, values)
         if not firing.counted and held_back(trigger, prompt, board.tasks):
             return ()
-        enabled = enabled_roles(self._desk.agents.roles)
-        raised = () if firing.review is None else firing.review.raised
-        roles = firing_roles(trigger, enabled, firing.event, raised)
         held = render_held_prompt(trigger.prompt, values)
         template = ReviewTemplate(trigger.prompt, drop_diff(values))
         queued = _Queued(name, trigger, prompt, held, template)
-        return tuple(self._add_one(board, queued, role, firing) for role in roles)
+        pairs = firing.queues(trigger, self._desk.agents.roles)
+        return tuple(self._add_one(board, queued, role, review) for role, review in pairs)
 
-    def _add_one(self, board: TaskBoard, queued: _Queued, role: str, firing: _Firing) -> str:
-        """Add to ``board`` ``role``'s task of the trigger ``queued`` says, as it fires as
-        ``firing`` says; returns its id. One reviewing the review due does so with the skills of
-        what it reviews, and is queued as a review, booked into its batches with what its
+    def _add_one(
+        self, board: TaskBoard, queued: _Queued, role: str, review: ReviewRound | None
+    ) -> str:
+        """Add to ``board`` ``role``'s task of the trigger ``queued`` says, reviewing
+        ``review``, if any; returns its id. One reviewing the review due does so with the skills
+        of what it reviews, and is queued as a review, booked into its batches with what its
         prompt was rendered from. One that holds its diff back, as :func:`_holds_diff` says,
         quotes :data:`~orbit.agent.domain.reviews.DIFF_HELD` in place of the diff, which the
         review lane reads from git as it starts it."""
         spec = self._desk.agents.roles[role]
-        review = firing.review_of(queued.trigger, spec)
         skills = () if review is None else review_skills(review.job, board.tasks)
         prompt = queued.held if _holds_diff(review, role) else queued.prompt
         task = role_task(role, spec, prompt, skills)
@@ -652,16 +656,6 @@ def _holds_diff(review: ReviewRound | None, role: str) -> bool:
     review lane to read as it starts it, as
     :func:`~orbit.agent.domain.reviews.holds_diff` says; an unbooked task holds back none."""
     return review is not None and holds_diff(role)
-
-
-async def show_diff(tree: CoderTree, commits: Sequence[str]) -> str:
-    """The messages and diffs of ``commits``, as ``tree``'s git shows them, or what says git
-    couldn't show them: the tasks quoting them go ahead, as their agents can read the
-    commits."""
-    try:
-        return await tree.show(commits)
-    except TreeFailed as exc:  # The task goes ahead; its agent can read the commits.
-        return word_unshown_diff(str(exc))
 
 
 def _note_paths_failed(found: Sequence[tuple[str, Trigger]], error: TreeFailed) -> None:

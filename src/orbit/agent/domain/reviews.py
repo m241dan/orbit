@@ -939,12 +939,12 @@ def tell_landed_since(values: Mapping[str, str], subjects: Sequence[str]) -> dic
 
 DIFF_HELD = "(The diff of the reviewed commits is quoted here as the review starts.)"
 """What a review task of commits quotes in place of its diff until it starts: the diff is read
-from git again then, rather than kept in the task, the session's record and every board sent."""
+from git then, rather than kept in the task, the session's record and every board sent."""
 
 
 def drop_diff(values: Mapping[str, str]) -> dict[str, str]:
     """``values``, those a review task of commits is rendered from, without ``{diff}``, which is
-    read from git again as it starts rather than kept."""
+    read from git as it starts rather than kept."""
     return {name: value for name, value in values.items() if name != "diff"}
 
 
@@ -955,7 +955,7 @@ def hold_diff(values: Mapping[str, str]) -> dict[str, str]:
 
 
 def quote_diff(values: Mapping[str, str], diff: str) -> dict[str, str]:
-    """``values`` with ``{diff}`` quoting ``diff``, trimmed as :func:`review_values` trims it,
+    """``values`` with ``{diff}`` quoting ``diff``, trimmed past :data:`DIFF_LIMIT`,
     as a review task of commits is given to its agent."""
     return {**values, "diff": _trimmed(diff)}
 
@@ -963,7 +963,8 @@ def quote_diff(values: Mapping[str, str], diff: str) -> dict[str, str]:
 def holds_diff(role: str) -> bool:
     """Whether a task of ``role`` booked into a review of commits holds its diff back, quoting
     :data:`DIFF_HELD` until the review lane starts it and reads the diff from git: a review
-    role's. Any other role's task keeps the diff in its prompt, read as it's queued."""
+    role's. Any other role's task keeps the diff in its prompt, read as it's queued. The review
+    lane's ``ReviewLane._is_review`` must agree, as it briefs only a review with the diff."""
     return role in REVIEW_ROLES
 
 
