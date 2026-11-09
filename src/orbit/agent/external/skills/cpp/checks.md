@@ -19,6 +19,10 @@ Suggestions for the project's verification: the configurator proposes these, and
 | Benchmarks | Slowdowns past 10% against the machine's saved baseline | Google Benchmark in the `release` build, compared by its `compare.py` | `compare.py` against `bench-baseline.json`, wrapped as below so a slowdown fails it | set `bench`, every 10 commits, reports to `scaling-reviewer` |
 
 - Run clang-format before the first check run.
+- Every build and parallel run sets its parallelism to fit the machine the task describes,
+  leaving headroom for the sanitizer builds, which take several times the memory of a plain
+  one: `cmake --build` and `run-clang-tidy` take `-j N`, and `cmake --workflow`, which takes no
+  `-j`, runs as `env CMAKE_BUILD_PARALLEL_LEVEL=N cmake --workflow --preset asan`.
 - Coverage leaves out the branches a `throw` adds. Any other line that can't be covered carries
   `GCOVR_EXCL_LINE`, where a reviewer sees it.
 - A sanitizer report fails the check, like a failing assertion.

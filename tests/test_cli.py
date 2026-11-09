@@ -51,6 +51,7 @@ from orbit.agent.domain.sessions import SessionRecord, Unreadable, default_name
 from orbit.agent.domain.skills import SkillMapping
 from orbit.agent.domain.usage import UsageUnavailable
 from orbit.agent.domain.verification import CheckSet
+from orbit.agent.external.machine import read_machine
 from orbit.agent.external.sqlite_schema import MIGRATIONS
 from orbit.cli import app
 from orbit.cli.backend import _Backend, _backend, _Directories, _in_process
@@ -254,6 +255,15 @@ def test_chat_gives_agents_the_workspaces_skills_and_their_mappings(
     assert session.agents.skill_library.skills["house"].body == "Be kind.\n"
     assert "code-style" in session.agents.skill_library.skills
     assert session.agents.skill_mappings == (SkillMapping(paths=("src",), use=("house",)),)
+
+
+def test_chat_tells_agents_this_machines_size(
+    launched: list[WorkspaceHost], tmp_path: Path
+) -> None:
+    assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
+    [session] = launched
+    assert session.agents is not None
+    assert session.agents.machine == read_machine()
 
 
 def test_a_workspace_inside_a_git_repository_is_its_top_level(

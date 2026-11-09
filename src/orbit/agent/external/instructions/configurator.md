@@ -33,6 +33,13 @@ Orbit quotes the start and end of a failed step's output to the coder who fixes 
 flags that keep output short and about what failed: a quiet mode, failure-only summaries, no
 banners or progress bars (such as `pytest -q -rfE --no-header`).
 
+Your task says how many CPUs and how much memory this machine has. Every step that builds or
+runs tests in parallel sets its parallelism explicitly to fit that machine, such as `cmake
+--build build/asan -j 2` or `env CMAKE_BUILD_PARALLEL_LEVEL=2 cmake --workflow --preset asan`
+(with no shell, `env` sets a variable). Leave headroom for sanitizer builds, which take several
+times the memory of a plain one. The user sees your proposal before any of it runs, so they can
+ask for changes first.
+
 ## Task checks and sets
 
 Steps in no set are the task checks: every task runs them before its work lands, so they must

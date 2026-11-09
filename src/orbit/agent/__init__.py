@@ -122,6 +122,7 @@ from orbit.agent.external.file_names import file_names
 from orbit.agent.external.git_tree import GitCoderTree
 from orbit.agent.external.kiro_cli import KiroCliRunner
 from orbit.agent.external.local_zone import LocalZone
+from orbit.agent.external.machine import read_machine
 from orbit.agent.external.mcp_connectors import TransportConnector
 from orbit.agent.external.mcp_host import McpHost
 from orbit.agent.external.mcp_http import HttpConnector
@@ -319,6 +320,7 @@ __all__ = [
     "read_certificate",
     "read_config",
     "read_config_sources",
+    "read_machine",
     "read_package_models",
     "read_remotes",
     "read_server",

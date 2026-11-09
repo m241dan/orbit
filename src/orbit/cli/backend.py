@@ -55,6 +55,7 @@ from orbit.agent import (
     open_workspace,
     read_built_in_triggers,
     read_config,
+    read_machine,
     read_storage,
     run_step,
     top_level,
@@ -338,7 +339,8 @@ def _agents(config: OrbitConfig, root: Path, backend: _Backend, config_dir: Path
     triggers as it says, checking proposed triggers against the built-in ones, in the coder
     tree if ``backend`` asks for a worktree and the workspace is a git work tree, reviewing
     landed work if it asks to, sending their own telemetry to its collector, and reading the
-    planner's role again over the user config in ``config_dir``, with its runtime.
+    planner's role again over the user config in ``config_dir``, with its runtime, and
+    telling them this machine's size.
 
     Raises :class:`WorkspaceUnavailable` if a runtime the enabled roles run on isn't on PATH.
     """
@@ -366,6 +368,7 @@ def _agents(config: OrbitConfig, root: Path, backend: _Backend, config_dir: Path
         skill_mappings=config.skills,
         triggers=config.triggers,
         built_in_triggers=read_built_in_triggers(),
+        machine=read_machine(),
     )
 
 

@@ -898,7 +898,9 @@ sets, each with the triggers that would run it (such as every 10 commits, or by 
 it holds merges when it fails (see [Verification steps](#verification-steps)). With a mutation
 testing or benchmark set it also proposes a report, routing the set's failures to the lens the
 Suggested checks name, `tests-reviewer` or `scaling-reviewer`, with a prompt of its own, unless
-you drop it. It doesn't edit files.
+you drop it. It's told this machine's size, how many CPUs and how much memory, read when orbit
+opens the workspace, and sets each build and test step's parallelism to fit it (such as `cmake
+--build build/asan -j 2`), with headroom for sanitizer builds. It doesn't edit files.
 
 Orbit starts one by itself when it opens a workspace with verification on and no steps, or runs
 the one the session it opens has queued already instead of adding another (see
@@ -2501,7 +2503,10 @@ panel trims it (`Mutation tests failed. Its output:` then the output), empty whe
 its paragraph drops; and `{checks}` the verification steps and setup
 configured now, under `Configured now (build on these):`, or `Nothing is configured yet.`; with
 steps in named sets, the task checks come first, then each set with its steps, whether it holds
-merges and when its triggers run it (`Set slow: every 10 commits, holds merges`). A
+merges and when its triggers run it (`Set slow: every 10 commits, holds merges`); it ends,
+after a blank line, with this machine's size and the advice to fit parallelism to it (`This
+machine: 4 CPUs, 7.6 GiB of memory. Set each build and test step's parallelism to fit it.`),
+either fact left out when it can't be read and the line left out when neither can. A
 list-like variable gives its list under its heading, or nothing when the list is empty, and a
 paragraph left empty is dropped, so the shipped templates read as orbit's tasks do. Braces around
 anything but a variable's name are left as they are.

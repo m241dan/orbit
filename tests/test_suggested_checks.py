@@ -134,3 +134,9 @@ def test_cpp_wraps_compare_py_so_a_slowdown_fails_the_step() -> None:
     text = skill_text("cpp", "checks.md")
     assert "sys.exit(1 if slow else 0)" in text
     assert "exits non-zero when a mutant survives" in suggested("cpp")["Mutation testing"][3]
+
+
+def test_cpp_sizes_each_builds_parallelism_without_a_shell() -> None:
+    text = " ".join(skill_text("cpp", "checks.md").split())
+    assert "`run-clang-tidy` take `-j N`" in text
+    assert "`env CMAKE_BUILD_PARALLEL_LEVEL=N cmake --workflow --preset asan`" in text

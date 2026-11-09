@@ -10,6 +10,7 @@ from orbit.agent import NO_STEPS_NOTE, WorkspaceHost
 from orbit.agent.application.verifier import Verification
 from orbit.agent.application.work_turns import CONFIGURING_NOTE, NO_VERIFY_MESSAGE
 from orbit.agent.domain.checks import Setup, configure_prompt
+from orbit.agent.domain.machine import Bytes, Machine, describe_machine
 from orbit.agent.domain.verification import CheckSet, VerificationStep
 from orbit.protocol import (
     CONFIGURE_CHECKS,
@@ -113,6 +114,18 @@ async def test_the_prompt_names_the_sets_configured() -> None:
     await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
     await until_idle(session)
     assert "Set slow: no trigger, reports\n- mutation: mutmut run" in configurator.tasks[0]
+
+
+async def test_the_prompt_ends_with_the_machines_size() -> None:
+    configurator = Configurator()
+    machine = Machine(cpus=4, memory=Bytes(8 * 2**30))
+    session, _, _ = session_for(configurator, verification=verified(Steps(True)), machine=machine)
+    await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
+    events = await until_idle(session)
+    expected = f"{configure_prompt((STEP,), None)}\n\n{describe_machine(machine)}"
+    assert board(events)[0].task.prompt == expected
+    line = "This machine: 4 CPUs, 8.0 GiB of memory. Set each build and test step's parallelism"
+    assert f"- Unit tests: pytest\n\n{line} to fit it." in configurator.tasks[0]
 
 
 async def test_with_nothing_configured_the_prompt_says_so() -> None:

@@ -48,6 +48,7 @@ from orbit.agent.application.ports import TreeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import configured_checks
+from orbit.agent.domain.machine import describe_machine
 from orbit.agent.domain.reviews import (
     ReviewJob,
     ReviewTemplate,
@@ -257,10 +258,13 @@ class TriggerEngine:
         self, steps: Sequence[VerificationStep], sets: Sequence[CheckSet]
     ) -> Mapping[str, str]:
         """The ``{checks}`` of the task checks ``steps``, the named ``sets`` with the triggers
-        that run them, and the tree's setup configured now, which a configurator is told."""
-        tree = self._desk.agents.tree
-        setup = None if tree is None else tree.setup
-        return {"checks": configured_checks(steps, setup, sets, self._desk.agents.triggers)}
+        that run them, and the tree's setup configured now, which a configurator is told, then,
+        after a blank line, the machine's size, when any of it is known."""
+        agents = self._desk.agents
+        setup = None if agents.tree is None else agents.tree.setup
+        checks = configured_checks(steps, setup, sets, agents.triggers)
+        machine = describe_machine(agents.machine)
+        return {"checks": f"{checks}\n\n{machine}" if machine else checks}
 
     async def check_failed(self, step: VerificationStep, output: str) -> tuple[str, ...]:
         """Raise ``startup_check_failed``: ``step`` of the startup check failed with ``output``,

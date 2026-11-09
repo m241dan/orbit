@@ -38,6 +38,7 @@ from orbit.agent.application.tool_call_approvals import ToolCallApprovals
 from orbit.agent.application.tool_proxy import Caller, McpProxying, ToolProxy
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.agents import Agent, AgentRegistry
+from orbit.agent.domain.machine import Machine
 from orbit.agent.domain.mcp_proxy import ProxiedTool, is_proxied, word_refusal
 from orbit.agent.domain.merge_pass import Dismissal, ReviewSuggestion
 from orbit.agent.domain.refusals import failed_to
@@ -146,7 +147,9 @@ class Agents:
     without them, nothing is queued on events, reviews included. ``built_in_triggers`` are those
     orbit ships, which the project's are merged over, and proposed checks' triggers checked
     against; without them, proposed triggers are checked alone. ``mcp`` proxies the MCP servers
-    roles allow to their agents; without it, agents are offered none.
+    roles allow to their agents; without it, agents are offered none. ``machine`` is the size of
+    the machine orbit runs on, read when the workspace opens, which a configurator is told; its
+    size is unknown unless given.
     """
 
     host: AgentHost
@@ -173,6 +176,7 @@ class Agents:
     triggers: Mapping[str, Trigger] = field(default_factory=dict, kw_only=True)
     built_in_triggers: Mapping[str, Trigger] = field(default_factory=dict, kw_only=True)
     mcp: McpProxying | None = field(default=None, kw_only=True)
+    machine: Machine = field(default_factory=Machine, kw_only=True)
 
     def runtime(self, role: str) -> str | None:
         """The runtime role ``role``'s agents run on; none for a role they don't have."""

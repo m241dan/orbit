@@ -8,6 +8,8 @@ task, a configurator's first; a trigger naming a set runs it, on any event, coun
 a schedule come due fires its trigger alone; and a task queued while verification is missing
 waits, with a notice naming its trigger, but the configurator's."""
 
+from typing import Any
+
 import pytest
 
 from orbit.agent.application.lanes import SessionGate
@@ -16,6 +18,7 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.triggers import ReviewRound, TriggerEngine, TriggerHooks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import Setup, configure_prompt, configured_checks
+from orbit.agent.domain.machine import Bytes, Machine, describe_machine
 from orbit.agent.domain.reviews import (
     DIFF_HELD,
     ReviewJob,
@@ -62,7 +65,8 @@ COMMIT = "c1abcdef99"
 class Engine:
     """A trigger engine firing ``triggers`` over a board of its own, in ``tree``, with
     ``roles`` (:data:`ROLES` unless given) and ``verification`` as its gate says it is (off
-    unless given), recording what it publishes and the roles whose lanes it kicks."""
+    unless given), its ``agent_options`` going to the desk's agents, such as ``skill_mappings``
+    or ``machine``, recording what it publishes and the roles whose lanes it kicks."""
 
     def __init__(
         self,
@@ -70,7 +74,7 @@ class Engine:
         tree: FakeTree | None = None,
         roles: dict[str, Role] | None = None,
         verification: VerificationState = "off",
-        skill_mappings: tuple[SkillMapping, ...] = (),
+        **agent_options: Any,
     ) -> None:
         self.events: list[Event] = []
         self.kicked: list[str] = []
@@ -81,7 +85,7 @@ class Engine:
             tree=self.tree,
             triggers=triggers,
             roles=roles or ROLES,
-            skill_mappings=skill_mappings,
+            **agent_options,
         )
         self.tasks = Tasks(TaskBoard(), self.publish)
         self.board = self.tasks.board
@@ -917,6 +921,14 @@ async def test_opening_with_verification_missing_queues_todays_configurator_firs
     assert (configurator.task.role, configurator.origin) == (CONFIGURATOR, "set-up-verification")
     assert configurator.task.prompt == configure_prompt((), None)
     assert engine.checks_run == []
+
+
+async def test_opening_tells_the_configurator_the_machines_size() -> None:
+    machine = Machine(cpus=4, memory=Bytes(8 * 2**30))
+    engine = Engine(TRIGGERS, verification="missing", machine=machine)
+    await engine.engine.started(())
+    prompt = engine.board.tasks[0].task.prompt
+    assert prompt == f"{configure_prompt((), None)}\n\n{describe_machine(machine)}"
 
 
 async def test_opening_with_steps_queues_no_configurator() -> None:
