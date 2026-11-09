@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import date
 from importlib.resources.abc import Traversable
 from pathlib import Path
+from typing import Literal, assert_never
 
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.config_update import (
@@ -33,7 +34,7 @@ from orbit.agent.external.whole_files import create_whole, write_whole
 
 
 class ConfigExists(Exception):
-    """There's already a config file at ``path``, which only ``force`` replaces."""
+    """There's already a config file at ``path``, which only ``"replace"`` replaces."""
 
     def __init__(self, path: Path) -> None:
         super().__init__(f"{path} already exists.")
@@ -47,6 +48,21 @@ class UnknownSkill(Exception):
         super().__init__(f"No skill named {name}; orbit's skills are {', '.join(skills)}.")
         self.name = name
         self.skills = skills
+
+
+type ExistingFile = Literal["keep", "replace"]
+"""What writing a config does with a file already there: keeps it, refusing to write, or
+replaces it after keeping it as a numbered backup."""
+
+type FileCopy = Literal["copied", "kept"]
+"""What copying a file did: copied it, or kept the file already there."""
+
+type SkillFiles = Literal["some copied", "none copied"]
+"""Whether copying a skill copied any of its files."""
+
+type ConfigFile = Literal["written", "existing"]
+"""Whether the project file was written with the reference config, as there was none, or was
+there already."""
 
 
 @dataclass(frozen=True)
@@ -72,54 +88,69 @@ class UpdateResult:
 class RolesResult:
     """What :func:`add_roles` did: the built-in roles' instructions it ``copied`` to the files
     there, and the files it ``kept``, being there already, by role; and the ``lines`` it added to
-    the project file at ``path``, after writing the reference config there if it ``wrote`` it,
-    as there was no file."""
+    the project file at ``path``, after writing the reference config there if ``config`` says it
+    was ``"written"``, as there was no file."""
 
     path: Path
     copied: dict[str, Path]
     kept: dict[str, Path]
     lines: InstructionLines
-    wrote: bool = False
+    config: ConfigFile = "existing"
 
 
 @dataclass(frozen=True)
 class SkillCopy:
     """What :func:`add_skills` did with one of orbit's skills: copied its files to ``folder``,
-    if it ``copied`` any, and ``kept`` the files already there, in path order."""
+    if ``copied`` says some were, and ``kept`` the files already there, in path order."""
 
     folder: Path
-    copied: bool
+    copied: SkillFiles
     kept: tuple[Path, ...]
 
 
-def init_config(root: Path, force: bool) -> InitResult:
+@dataclass(frozen=True)
+class _ConfigKind:
+    """A kind of config file: started from ``reference``, its directory made with
+    ``directory_mode`` if it's missing, and updated with a later version's settings from
+    ``later_heading`` on, if there's one."""
+
+    reference: Traversable
+    directory_mode: int
+    later_heading: str | None
+
+
+_PROJECT = _ConfigKind(REFERENCE, 0o777, LATER_HEADING)
+"""A project's ``.orbit/config.toml``, its ``.orbit/`` made as the umask allows."""
+
+_USER = _ConfigKind(USER_REFERENCE, 0o700, None)
+"""The user's own ``config.toml``, its directory readable by its owner alone."""
+
+
+def init_config(root: Path, existing: ExistingFile) -> InitResult:
     """Write the reference config to the project file of the workspace at ``root``, making its
-    ``.orbit/`` if it's missing. With ``force``, a file already there is first kept as the next
-    free ``config.toml.bak.N`` beside it, ``N`` counting from 1, and then replaced.
+    ``.orbit/`` if it's missing. With ``existing`` ``"replace"``, a file already there is first
+    kept as the next free ``config.toml.bak.N`` beside it, ``N`` counting from 1, and then
+    replaced.
 
-    Raises :class:`ConfigExists` if there's a file already there and not ``force``, leaving it
-    as it was, and ``OSError`` when it can't read the reference or write the file.
+    Raises :class:`ConfigExists` if there's a file already there and ``existing`` is
+    ``"keep"``, leaving it as it was, and ``OSError`` when it can't read the reference or write
+    the file.
     """
-    path = root / CONFIG_PATH
-    reference = REFERENCE.read_text(encoding="utf-8")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return _write_reference(path, reference, force)
+    return _init(root / CONFIG_PATH, _PROJECT, existing)
 
 
-def init_user_config(config_dir: Path, force: bool) -> InitResult:
+def init_user_config(config_dir: Path, existing: ExistingFile) -> InitResult:
     """Write the user reference config to the user config in ``config_dir``, making
     ``config_dir`` and any missing parents, with only ``config_dir`` readable by its owner
-    alone; directories already there keep their modes. With ``force``, a file already there
-    is first kept as the next free ``config.toml.bak.N`` beside it, ``N`` counting from 1, and
-    then replaced.
+    alone; directories already there keep their modes. With ``existing`` ``"replace"``, a file
+    already there is first kept as the next free ``config.toml.bak.N`` beside it, ``N``
+    counting from 1, and then replaced.
 
-    Raises :class:`ConfigExists` if there's a file already there and not ``force``, leaving it
-    as it was, and ``OSError`` when it can't read the reference or write the file.
+    Raises :class:`ConfigExists` if there's a file already there and ``existing`` is
+    ``"keep"``, leaving it as it was, and ``OSError`` when it can't read the reference or write
+    the file.
     """
-    path = config_dir / USER_CONFIG_FILE
-    reference = USER_REFERENCE.read_text(encoding="utf-8")
-    config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    return _write_reference(path, reference, force)
+    return _init(config_dir / USER_CONFIG_FILE, _USER, existing)
 
 
 def create_user_config(config_dir: Path) -> Path | None:
@@ -130,31 +161,57 @@ def create_user_config(config_dir: Path) -> Path | None:
     Raises ``OSError`` when it can't read the reference or write the file.
     """
     try:
-        return init_user_config(config_dir, force=False).path
+        return init_user_config(config_dir, "keep").path
     except ConfigExists:
         return None
 
 
-def _write_reference(path: Path, reference: str, force: bool) -> InitResult:
-    """Write ``reference`` to ``path``, its directory being there; with ``force``, after keeping
-    a file already there as :func:`_back_up` does.
+def _init(path: Path, kind: _ConfigKind, existing: ExistingFile) -> InitResult:
+    """Write ``kind``'s reference to ``path``, making its directory, and missing parents, if
+    it's missing, as :func:`_write_reference` does with ``existing``.
 
-    Raises :class:`ConfigExists` if there's a file already there and not ``force``, leaving it
-    as it was, and ``OSError`` when it can't write the file.
+    Raises :class:`ConfigExists` if there's a file already there and ``existing`` is
+    ``"keep"``, leaving it as it was, and ``OSError`` when it can't read the reference or write
+    the file.
     """
-    if not force:
-        # create_whole makes its temporary file first, so a read-only directory would hide an
-        # existing file behind a PermissionError.
-        if os.path.lexists(path):
-            raise ConfigExists(path)
-        try:
-            create_whole(path, reference)
-        except FileExistsError:
-            raise ConfigExists(path) from None
-        return InitResult(path)
-    backup = _back_up(path)
-    write_whole(path, reference)
-    return InitResult(path, backup)
+    reference = kind.reference.read_text(encoding="utf-8")
+    path.parent.mkdir(mode=kind.directory_mode, parents=True, exist_ok=True)
+    return _write_reference(path, reference, existing)
+
+
+def _write_reference(path: Path, reference: str, existing: ExistingFile) -> InitResult:
+    """Write ``reference`` to ``path``, its directory being there; with ``existing``
+    ``"replace"``, after keeping a file already there as :func:`_back_up` does.
+
+    Raises :class:`ConfigExists` if there's a file already there and ``existing`` is
+    ``"keep"``, leaving it as it was, and ``OSError`` when it can't write the file.
+    """
+    match existing:
+        case "keep":
+            return _create_reference(path, reference)
+        case "replace":
+            backup = _back_up(path)
+            write_whole(path, reference)
+            return InitResult(path, backup)
+        case _:
+            assert_never(existing)
+
+
+def _create_reference(path: Path, reference: str) -> InitResult:
+    """Write ``reference`` to ``path``, where there's no file.
+
+    Raises :class:`ConfigExists` if there's a file already there, leaving it as it was, and
+    ``OSError`` when it can't write the file.
+    """
+    # create_whole makes its temporary file first, so a read-only directory would hide an
+    # existing file behind a PermissionError.
+    if os.path.lexists(path):
+        raise ConfigExists(path)
+    try:
+        create_whole(path, reference)
+    except FileExistsError:
+        raise ConfigExists(path) from None
+    return InitResult(path)
 
 
 def update_config(root: Path, today: Callable[[], date] = date.today) -> UpdateResult:
@@ -167,16 +224,7 @@ def update_config(root: Path, today: Callable[[], date] = date.today) -> UpdateR
     Raises :class:`ConfigError`, naming the file, if it isn't UTF-8 or valid TOML, leaving it as
     it was, and ``OSError`` when it can't read the reference or read or write the file.
     """
-    path = root / CONFIG_PATH
-    text = _read_project(path)
-    if text is None:
-        return UpdateResult(init_config(root, force=False).path)
-    with _naming(path):
-        reference = REFERENCE.read_text(encoding="utf-8")
-        update = update_text(text, reference, today(), later_heading=LATER_HEADING)
-    if update.text != text:
-        write_whole(path, update.text)
-    return UpdateResult(path, update.additions)
+    return _update(root / CONFIG_PATH, _PROJECT, today)
 
 
 def update_user_config(config_dir: Path, today: Callable[[], date] = date.today) -> UpdateResult:
@@ -188,12 +236,24 @@ def update_user_config(config_dir: Path, today: Callable[[], date] = date.today)
     Raises :class:`ConfigError`, naming the file, if it isn't UTF-8 or valid TOML, leaving it as
     it was, and ``OSError`` when it can't read the reference or read or write the file.
     """
-    path = config_dir / USER_CONFIG_FILE
-    text = _read_project(path)
+    return _update(config_dir / USER_CONFIG_FILE, _USER, today)
+
+
+def _update(path: Path, kind: _ConfigKind, today: Callable[[], date]) -> UpdateResult:
+    """Add to the config file at ``path`` what ``kind``'s reference has that it doesn't
+    mention, as :func:`~orbit.agent.domain.config_update.update_text` does on the day ``today``
+    gives, leaving the file as it was if there's nothing to add; without a file, write the
+    reference there as :func:`_init` does.
+
+    Raises :class:`ConfigError`, naming the file, if it isn't UTF-8 or valid TOML, leaving it as
+    it was, and ``OSError`` when it can't read the reference or read or write the file.
+    """
+    text = _read_config_text(path)
     if text is None:
-        return UpdateResult(init_user_config(config_dir, force=False).path)
+        return UpdateResult(_init(path, kind, "keep").path)
     with _naming(path):
-        update = update_text(text, USER_REFERENCE.read_text(encoding="utf-8"), today())
+        reference = kind.reference.read_text(encoding="utf-8")
+        update = update_text(text, reference, today(), later_heading=kind.later_heading)
     if update.text != text:
         write_whole(path, update.text)
     return UpdateResult(path, update.additions)
@@ -213,20 +273,20 @@ def add_roles(root: Path, today: Callable[[], date] = date.today) -> RolesResult
     """
     path = root / CONFIG_PATH
     reference = REFERENCE.read_text(encoding="utf-8")
-    text = _read_project(path)
-    wrote = text is None
+    text = _read_config_text(path)
+    config: ConfigFile = "written" if text is None else "existing"
     if text is None:
-        text = reference
-        init_config(root, force=False)
+        init_config(root, "keep")
+    current = reference if text is None else text
     built_in = read_instruction_files()
     with _naming(path):
         update = add_instructions(
-            text, reference, tuple(built_in), today(), later_heading=LATER_HEADING
+            current, reference, tuple(built_in), today(), later_heading=LATER_HEADING
         )
     copied, kept = _copy_instructions(path.parent, built_in)
-    if update.text != text:
+    if update.text != current:
         write_whole(path, update.text)
-    return RolesResult(path, copied, kept, update.lines, wrote)
+    return RolesResult(path, copied, kept, update.lines, config)
 
 
 def add_skills(
@@ -249,7 +309,7 @@ def add_skills(
     return {name: _copy_skill(directory / name, root / PROJECT_SKILLS / name) for name in named}
 
 
-def _read_project(path: Path) -> str | None:
+def _read_config_text(path: Path) -> str | None:
     """The text of the config file at ``path``; none if there's no file.
 
     Raises :class:`ConfigError`, naming the file, if it isn't UTF-8, and ``OSError`` when it
@@ -281,18 +341,15 @@ def _copy_instructions(
 
     Raises ``OSError`` when it can't read a role's file or write its copy.
     """
-    copied: dict[str, Path] = {}
-    kept: dict[str, Path] = {}
-    for name, file in built_in.items():
-        target = directory / instructions_copy(name)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            create_whole(target, (ROLE_DIRECTORY / file).read_text(encoding="utf-8"))
-        except FileExistsError:
-            kept[name] = target
-        else:
-            copied[name] = target
-    return copied, kept
+    targets = {name: directory / instructions_copy(name) for name in built_in}
+    outcomes = {
+        name: _copy_file(targets[name], (ROLE_DIRECTORY / file).read_text(encoding="utf-8"))
+        for name, file in built_in.items()
+    }
+    return (
+        {name: targets[name] for name in _having(outcomes, "copied")},
+        {name: targets[name] for name in _having(outcomes, "kept")},
+    )
 
 
 def _copy_skill(source: Traversable, folder: Path) -> SkillCopy:
@@ -303,18 +360,31 @@ def _copy_skill(source: Traversable, folder: Path) -> SkillCopy:
     when it can't read a file or write its copy.
     """
     files = dict(skill_paths(source))
-    copied = False
-    kept: list[Path] = []
-    for path in sorted(files):
-        target = folder / path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            create_whole(target, files[path].read_bytes().decode("utf-8"))
-        except FileExistsError:
-            kept.append(target)
-        else:
-            copied = True
-    return SkillCopy(folder, copied, tuple(kept))
+    outcomes = {
+        folder / path: _copy_file(folder / path, files[path].read_bytes().decode("utf-8"))
+        for path in sorted(files)
+    }
+    copied: SkillFiles = "some copied" if "copied" in outcomes.values() else "none copied"
+    return SkillCopy(folder, copied, _having(outcomes, "kept"))
+
+
+def _having[K](outcomes: Mapping[K, FileCopy], outcome: FileCopy) -> tuple[K, ...]:
+    """The keys of ``outcomes`` whose copy had ``outcome``, in order."""
+    return tuple(key for key, found in outcomes.items() if found == outcome)
+
+
+def _copy_file(target: Path, text: str) -> FileCopy:
+    """Write ``text`` to ``target``, making its folders as needed, unless there's a file there
+    already, which is kept; which was done.
+
+    Raises ``OSError`` when it can't write the file.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        create_whole(target, text)
+    except FileExistsError:
+        return "kept"
+    return "copied"
 
 
 def _back_up(path: Path) -> Path | None:

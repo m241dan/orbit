@@ -13,6 +13,7 @@ from orbit.agent import (
     INVALID_CONFIG,
     ConfigError,
     ConfigExists,
+    ExistingFile,
     InitResult,
     InstructionLines,
     RolesResult,
@@ -206,7 +207,7 @@ def _init_project(
         if skills:
             _say(SKILLS_FAILED, lambda: _skills_copied(add_skills(root, skills), root))
         if not any((update, roles, skills)):
-            _say(WRITE_FAILED, lambda: _written(init_config(root, force)))
+            _say(WRITE_FAILED, lambda: _written(init_config(root, _existing(force))))
 
 
 def _refuse_with_user(roles: bool, skills: bool, workspace: bool) -> None:
@@ -241,7 +242,9 @@ def _init_user(config_dir: Path | None, update: bool, force: bool) -> None:
     with _exit_on(ConfigExists, message=lambda exc: USER_CONFIG_EXISTS.format(path=exc.path)):
         _say(
             USER_WRITE_FAILED,
-            lambda: _written(init_user_config(directory, force), "orbit's user reference config"),
+            lambda: _written(
+                init_user_config(directory, _existing(force)), "orbit's user reference config"
+            ),
         )
 
 
@@ -252,6 +255,12 @@ def _refuse_with_force(force: bool, update: bool, roles: bool, skills: bool) -> 
         if force and given:
             typer.echo(WITH_FORCE.format(option=option), err=True)
             raise typer.Exit(2)
+
+
+def _existing(force: bool) -> ExistingFile:
+    """What writing the config does with a file already there: replaces it with ``force``,
+    else keeps it."""
+    return "replace" if force else "keep"
 
 
 def _say(failed: str, step: Callable[[], str]) -> None:
@@ -297,7 +306,7 @@ def _copied(result: RolesResult, root: Path) -> str:
     written, if it was; each role's instructions copied or file kept; and the lines added to
     the file, and what uncommenting them does, and the roles set inline that were given none,
     or that there were none to add."""
-    said = [_written(InitResult(result.path))] if result.wrote else []
+    said = [_written(InitResult(result.path))] if result.config == "written" else []
     said += [
         f"Copied the {name}'s instructions to {path.relative_to(root)}."
         for name, path in result.copied.items()
@@ -312,7 +321,7 @@ def _skills_copied(result: dict[str, SkillCopy], root: Path) -> str:
     said: list[str] = []
     for name, copy in result.items():
         folder = copy.folder.relative_to(root)
-        said += [f"Copied {name}'s files to {folder}/."] if copy.copied else []
+        said += [f"Copied {name}'s files to {folder}/."] if copy.copied == "some copied" else []
         said += [f"Kept your {path.relative_to(root)}." for path in copy.kept]
     return "\n".join(said)
 

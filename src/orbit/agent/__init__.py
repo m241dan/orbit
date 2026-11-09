@@ -98,6 +98,7 @@ from orbit.agent.external.cloner import Cloner
 from orbit.agent.external.config_file import read_config, read_config_sources, write_checks
 from orbit.agent.external.config_init import (
     ConfigExists,
+    ExistingFile,
     InitResult,
     RolesResult,
     SkillCopy,
@@ -202,6 +203,7 @@ __all__ = [
     "DirectoryCopies",
     "DirectoryLister",
     "EnvironmentCredentials",
+    "ExistingFile",
     "FallbackFiles",
     "GitCoderTree",
     "HostMaker",

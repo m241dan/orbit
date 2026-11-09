@@ -1,5 +1,5 @@
 """Starting a project's ``.orbit/config.toml`` from the reference config: written where there's
-none, refused over one, and with ``force`` replacing it after keeping it as a numbered backup;
+none, refused over one, and with ``"replace"`` replacing it after keeping it as a numbered backup;
 bringing one up to date with it, adding what it doesn't mention; copying the built-in roles'
 instructions beside it, with a commented-out line pointing each role at its copy; and copying
 orbit's skills into the project's ``.orbit/skills/``; and starting the user's own
@@ -89,7 +89,7 @@ def test_the_shipped_reference_is_the_reference_config() -> None:
 
 
 def test_without_a_file_the_reference_is_written_in_a_new_orbit_directory(tmp_path: Path) -> None:
-    result = init_config(tmp_path, force=False)
+    result = init_config(tmp_path, "keep")
     path = tmp_path / CONFIG_PATH
     assert result == InitResult(path)
     assert path.read_text(encoding="utf-8") == reference_config()
@@ -99,25 +99,25 @@ def test_without_a_file_the_reference_is_written_in_a_new_orbit_directory(tmp_pa
 def test_an_existing_file_is_refused_and_left_as_it_was(tmp_path: Path) -> None:
     path = write(tmp_path, "fix_attempts = 3\n")
     with pytest.raises(ConfigExists) as raised:
-        init_config(tmp_path, force=False)
+        init_config(tmp_path, "keep")
     assert raised.value.path == path
     assert path.read_text() == "fix_attempts = 3\n"
     assert [p.name for p in path.parent.iterdir()] == ["config.toml"]
 
 
-def test_force_keeps_the_existing_file_as_the_first_backup(tmp_path: Path) -> None:
+def test_replace_keeps_the_existing_file_as_the_first_backup(tmp_path: Path) -> None:
     path = write(tmp_path, "fix_attempts = 3\n")
-    result = init_config(tmp_path, force=True)
+    result = init_config(tmp_path, "replace")
     backup = path.with_name("config.toml.bak.1")
     assert result == InitResult(path, backup)
     assert backup.read_text() == "fix_attempts = 3\n"
     assert path.read_text(encoding="utf-8") == reference_config()
 
 
-def test_force_twice_keeps_both_earlier_files(tmp_path: Path) -> None:
+def test_replace_twice_keeps_both_earlier_files(tmp_path: Path) -> None:
     path = write(tmp_path, "fix_attempts = 3\n")
-    init_config(tmp_path, force=True)
-    result = init_config(tmp_path, force=True)
+    init_config(tmp_path, "replace")
+    result = init_config(tmp_path, "replace")
     second = path.with_name("config.toml.bak.2")
     assert result == InitResult(path, second)
     assert path.with_name("config.toml.bak.1").read_text() == "fix_attempts = 3\n"
@@ -125,18 +125,18 @@ def test_force_twice_keeps_both_earlier_files(tmp_path: Path) -> None:
     assert path.read_text(encoding="utf-8") == reference_config()
 
 
-def test_force_takes_the_first_backup_number_that_is_free(tmp_path: Path) -> None:
+def test_replace_takes_the_first_backup_number_that_is_free(tmp_path: Path) -> None:
     path = write(tmp_path, "fix_attempts = 3\n")
     path.with_name("config.toml.bak.1").write_text("older\n")
-    result = init_config(tmp_path, force=True)
+    result = init_config(tmp_path, "replace")
     second = path.with_name("config.toml.bak.2")
     assert result == InitResult(path, second)
     assert second.read_text() == "fix_attempts = 3\n"
     assert path.with_name("config.toml.bak.1").read_text() == "older\n"
 
 
-def test_force_without_a_file_writes_the_reference_with_no_backup(tmp_path: Path) -> None:
-    result = init_config(tmp_path, force=True)
+def test_replace_without_a_file_writes_the_reference_with_no_backup(tmp_path: Path) -> None:
+    result = init_config(tmp_path, "replace")
     path = tmp_path / CONFIG_PATH
     assert result == InitResult(path)
     assert path.read_text(encoding="utf-8") == reference_config()
@@ -146,7 +146,7 @@ def test_force_without_a_file_writes_the_reference_with_no_backup(tmp_path: Path
 def test_an_orbit_directory_that_is_a_file_raises(tmp_path: Path) -> None:
     (tmp_path / ".orbit").write_text("")
     with pytest.raises(OSError):
-        init_config(tmp_path, force=False)
+        init_config(tmp_path, "keep")
 
 
 def update(root: Path) -> UpdateResult:
@@ -250,6 +250,16 @@ def test_updating_again_adds_nothing_and_leaves_the_file_alone(tmp_path: Path) -
     assert update(tmp_path) == UpdateResult(path, Additions())
     assert path.read_text(encoding="utf-8") == text
     assert path.stat().st_ino == inode
+
+
+def test_update_with_nothing_to_add_leaves_the_files_contents_and_mtime(tmp_path: Path) -> None:
+    path = write(tmp_path, CODER_OPUS)
+    update(tmp_path)
+    text = path.read_text(encoding="utf-8")
+    os.utime(path, ns=(1_000_000_000, 1_000_000_000))
+    assert update(tmp_path) == UpdateResult(path, Additions())
+    assert path.read_text(encoding="utf-8") == text
+    assert path.stat().st_mtime_ns == 1_000_000_000
 
 
 def test_update_keeps_every_line_of_the_file_unchanged_and_in_order(tmp_path: Path) -> None:
@@ -372,7 +382,7 @@ def test_roles_without_a_file_write_the_reference_with_a_line_in_each_roles_tabl
     result = add(tmp_path)
     path = tmp_path / CONFIG_PATH
     assert result == RolesResult(
-        path, copies(tmp_path), {}, InstructionLines(commented=NAMES), wrote=True
+        path, copies(tmp_path), {}, InstructionLines(commented=NAMES), config="written"
     )
     reference = reference_config()
     expected = add_instructions(reference, reference, NAMES, TODAY).text
@@ -394,6 +404,15 @@ def test_roles_keep_a_copy_already_there_and_name_it(tmp_path: Path) -> None:
     result = add(tmp_path)
     assert (result.copied, result.kept) == (copies(tmp_path, "coder"), {"coder": mine})
     assert mine.read_text() == "My coder.\n"
+
+
+def test_roles_copy_only_the_one_copy_missing_and_keep_the_rest(tmp_path: Path) -> None:
+    add(tmp_path)
+    missing = copies(tmp_path)["coder"]
+    missing.unlink()
+    result = add(tmp_path)
+    assert (result.copied, result.kept) == ({"coder": missing}, copies(tmp_path, "coder"))
+    assert result.config == "existing"
 
 
 def test_roles_append_each_role_table_a_file_lacks_and_roles_load_unchanged(
@@ -492,7 +511,7 @@ def skill_file(directory: Path, path: str, text: str) -> Path:
 def test_a_skill_is_copied_whole_with_the_shipped_text(tmp_path: Path) -> None:
     result = add_skills(tmp_path, ["python"])
     folder = tmp_path / SKILLS / "python"
-    assert result == {"python": SkillCopy(folder, copied=True, kept=())}
+    assert result == {"python": SkillCopy(folder, copied="some copied", kept=())}
     assert copied_files(folder) == shipped_files("python")
 
 
@@ -510,7 +529,7 @@ def test_skills_leave_the_project_file_as_it_was(tmp_path: Path) -> None:
 def test_a_skill_file_already_there_is_kept_and_named(tmp_path: Path) -> None:
     mine = skill_file(tmp_path / SKILLS, "python/tests.md", "# Our tests\n")
     result = add_skills(tmp_path, ["python"])
-    assert result == {"python": SkillCopy(mine.parent, copied=True, kept=(mine,))}
+    assert result == {"python": SkillCopy(mine.parent, copied="some copied", kept=(mine,))}
     assert mine.read_text(encoding="utf-8") == "# Our tests\n"
     others = copied_files(mine.parent)
     del others["tests.md"]
@@ -525,7 +544,18 @@ def test_a_skill_copied_again_copies_nothing_and_keeps_every_file_in_path_order(
     add_skills(tmp_path, ["python"])
     folder = tmp_path / SKILLS / "python"
     kept = tuple(folder / path for path in sorted(shipped_files("python")))
-    assert add_skills(tmp_path, ["python"]) == {"python": SkillCopy(folder, False, kept)}
+    assert add_skills(tmp_path, ["python"]) == {"python": SkillCopy(folder, "none copied", kept)}
+
+
+def test_a_skill_with_one_file_missing_copies_it_and_keeps_the_rest_in_path_order(
+    tmp_path: Path,
+) -> None:
+    add_skills(tmp_path, ["python"])
+    folder = tmp_path / SKILLS / "python"
+    (folder / "tests.md").unlink()
+    kept = tuple(folder / path for path in sorted(shipped_files("python")) if path != "tests.md")
+    assert add_skills(tmp_path, ["python"]) == {"python": SkillCopy(folder, "some copied", kept)}
+    assert (folder / "tests.md").read_text(encoding="utf-8") == shipped_files("python")["tests.md"]
 
 
 def test_skills_are_copied_in_the_order_named(tmp_path: Path) -> None:
@@ -536,7 +566,9 @@ def test_skills_are_copied_in_the_order_named(tmp_path: Path) -> None:
 
 def test_a_skill_named_twice_is_copied_once(tmp_path: Path) -> None:
     result = add_skills(tmp_path, ["python", "python"])
-    assert result == {"python": SkillCopy(tmp_path / SKILLS / "python", copied=True, kept=())}
+    assert result == {
+        "python": SkillCopy(tmp_path / SKILLS / "python", copied="some copied", kept=())
+    }
 
 
 def test_an_unknown_skill_is_refused_naming_every_skill_before_copying_any(
@@ -599,7 +631,7 @@ def test_without_a_config_dir_the_user_reference_is_written_in_a_private_new_one
     tmp_path: Path,
 ) -> None:
     config_dir = tmp_path / "config" / "orbit"
-    result = init_user_config(config_dir, force=False)
+    result = init_user_config(config_dir, "keep")
     path = config_dir / USER_CONFIG_FILE
     assert result == InitResult(path)
     assert path.read_text(encoding="utf-8") == user_reference()
@@ -611,7 +643,7 @@ def test_missing_parents_of_the_config_dir_are_made_and_only_the_config_dir_is_p
 ) -> None:
     parent = tmp_path / "x" / "cfg"
     config_dir = parent / "orbit"
-    init_user_config(config_dir, force=False)
+    init_user_config(config_dir, "keep")
     assert parent.is_dir()
     assert stat.S_IMODE(config_dir.stat().st_mode) == 0o700
 
@@ -620,27 +652,51 @@ def test_an_existing_user_config_is_refused_and_left_as_it_was(tmp_path: Path) -
     path = tmp_path / USER_CONFIG_FILE
     path.write_text("[server]\nport = 8000\n")
     with pytest.raises(ConfigExists) as raised:
-        init_user_config(tmp_path, force=False)
+        init_user_config(tmp_path, "keep")
     assert raised.value.path == path
     assert path.read_text() == "[server]\nport = 8000\n"
     assert [p.name for p in tmp_path.iterdir()] == [USER_CONFIG_FILE]
 
 
-def test_force_keeps_the_existing_user_config_as_the_first_backup(tmp_path: Path) -> None:
+def test_replace_keeps_the_existing_user_config_as_the_first_backup(tmp_path: Path) -> None:
     path = tmp_path / USER_CONFIG_FILE
     path.write_text("[server]\nport = 8000\n")
-    result = init_user_config(tmp_path, force=True)
+    result = init_user_config(tmp_path, "replace")
     backup = path.with_name("config.toml.bak.1")
     assert result == InitResult(path, backup)
     assert backup.read_text() == "[server]\nport = 8000\n"
     assert path.read_text(encoding="utf-8") == user_reference()
 
 
+def test_replace_twice_keeps_both_earlier_user_configs(tmp_path: Path) -> None:
+    path = tmp_path / USER_CONFIG_FILE
+    path.write_text("[server]\nport = 8000\n")
+    init_user_config(tmp_path, "replace")
+    result = init_user_config(tmp_path, "replace")
+    second = path.with_name("config.toml.bak.2")
+    assert result == InitResult(path, second)
+    assert path.with_name("config.toml.bak.1").read_text() == "[server]\nport = 8000\n"
+    assert second.read_text(encoding="utf-8") == user_reference()
+    assert path.read_text(encoding="utf-8") == user_reference()
+
+
+def test_replace_without_a_user_config_writes_the_user_reference_with_no_backup(
+    tmp_path: Path,
+) -> None:
+    config_dir = tmp_path / "config"
+    result = init_user_config(config_dir, "replace")
+    path = config_dir / USER_CONFIG_FILE
+    assert result == InitResult(path)
+    assert path.read_text(encoding="utf-8") == user_reference()
+    assert [p.name for p in config_dir.iterdir()] == [USER_CONFIG_FILE]
+    assert stat.S_IMODE(config_dir.stat().st_mode) == 0o700
+
+
 def test_a_config_dir_that_is_a_file_raises_os_error(tmp_path: Path) -> None:
     config_dir = tmp_path / "orbit"
     config_dir.write_text("")
     with pytest.raises(OSError):
-        init_user_config(config_dir, force=False)
+        init_user_config(config_dir, "keep")
 
 
 def update_user(config_dir: Path) -> UpdateResult:
@@ -667,6 +723,17 @@ def test_user_update_of_the_reference_adds_nothing_and_leaves_the_file(tmp_path:
     assert update_user(tmp_path) == UpdateResult(path, Additions())
     assert path.read_text(encoding="utf-8") == user_reference()
     assert path.stat().st_ino == inode
+
+
+def test_user_update_with_nothing_to_add_leaves_the_files_contents_and_mtime(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / USER_CONFIG_FILE
+    path.write_text(user_reference(), encoding="utf-8")
+    os.utime(path, ns=(1_000_000_000, 1_000_000_000))
+    assert update_user(tmp_path) == UpdateResult(path, Additions())
+    assert path.read_text(encoding="utf-8") == user_reference()
+    assert path.stat().st_mtime_ns == 1_000_000_000
 
 
 def test_user_update_adds_a_tables_other_keys_after_it_and_the_other_tables_at_the_end(
@@ -800,7 +867,7 @@ def test_an_existing_user_config_in_a_read_only_config_dir_is_refused(tmp_path: 
     config_dir.chmod(0o500)
     try:
         with pytest.raises(ConfigExists):
-            init_user_config(config_dir, force=False)
+            init_user_config(config_dir, "keep")
     finally:
         config_dir.chmod(0o700)
     assert path.read_text() == "mine\n"
