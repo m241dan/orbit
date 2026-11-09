@@ -33,10 +33,11 @@ def test_the_release_wording() -> None:
     assert RELEASE_TITLE == "Release the merge hold?"
     assert RELEASE_YES == "release"
     assert release_message(("stress",)) == "stress hasn't passed."
-    assert release_message(("stress", "soak")) == "stress, soak haven't passed."
+    assert release_message(("stress", "soak")) == "stress and soak haven't passed."
     assert release_message((), ("bugs-reviewer",)) == "the finding from bugs-reviewer isn't fixed."
-    assert release_message(("stress",), ("bugs-reviewer", "security-reviewer")) == (
-        "stress hasn't passed and the findings from bugs-reviewer, security-reviewer aren't fixed."
+    assert release_message(("stress",), ("bugs-reviewer", "security-reviewer", "x")) == (
+        "stress hasn't passed and the findings from bugs-reviewer, security-reviewer and x aren't"
+        " fixed."
     )
 
 

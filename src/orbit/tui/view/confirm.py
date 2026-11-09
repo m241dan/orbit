@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from orbit.protocol import PLANNER
+from orbit.wording import word_undone
 
 CONFIGURE_TITLE = "Set up checks?"
 CONFIGURE_MESSAGE = "A configurator task will go to the front of the task list and run now."
@@ -40,20 +41,10 @@ def reset_message(role: str) -> str:
 
 def release_message(sets: Sequence[str], lenses: Sequence[str] = ()) -> str:
     """What releasing the holds on merges of the ``sets`` and of the findings the ``lenses``
-    raised leaves undone, as the confirmation says: ``stress hasn't passed.``, several sets
-    joined with commas, ``the finding from bugs-reviewer isn't fixed.``, or both, joined with
-    ``and``."""
-    verb = "hasn't" if len(sets) == 1 else "haven't"
-    unfixed = (
-        f"the finding from {lenses[0]} isn't fixed"
-        if len(lenses) == 1
-        else f"the findings from {', '.join(lenses)} aren't fixed"
-    )
-    parts = [
-        *([f"{', '.join(sets)} {verb} passed"] if sets else []),
-        *([unfixed] if lenses else []),
-    ]
-    return f"{' and '.join(parts)}."
+    raised leaves undone, as the confirmation says: ``stress hasn't passed.``, ``the finding
+    from bugs-reviewer isn't fixed.``, or both, as :func:`orbit.wording.word_undone` words
+    them."""
+    return f"{word_undone(sets, lenses)}."
 
 
 def confirm_hint(yes: str, no: str = "cancel") -> str:

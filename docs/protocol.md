@@ -702,7 +702,7 @@ other agent's, the task run it's in, as `CancelTurn` does for the `work` lane. I
 `ReleaseHold()` releases every hold on merges into the user's branch by hand, the sets' and the
 blocking findings', though the sets holding them haven't passed: the `merge_holds` in session
 state go empty, a `Notice` says which sets haven't passed and which findings aren't fixed
-(`Merges resumed by hand; stress hasn't passed.`, or `stress, soak haven't passed` for several,
+(`Merges resumed by hand; stress hasn't passed.`, or `stress and soak haven't passed` for several,
 `the finding from bugs-reviewer isn't fixed` for a finding's, joined with `and`), and the work
 waiting (`waiting_to_merge`) lands, in order, as when the last
 hold lifts by itself, a conflict handled as any merge's. A set that fails again afterwards starts

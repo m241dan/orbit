@@ -13,6 +13,7 @@ from orbit.agent.domain.commits import Commit
 from orbit.agent.domain.verification import CheckSet, VerificationStep
 from orbit.agent.domain.wording import counted
 from orbit.protocol import MergeHold, TaskState
+from orbit.wording import word_undone
 
 FIX_TITLE = "Fix the failing set: "
 """What the title of a task fixing a set that holds merges starts with, before the set's name."""
@@ -121,29 +122,11 @@ NOT_HELD = "Merges aren't held."
 """Why releasing the holds on merges by hand is refused while none is on."""
 
 
-def word_unpassed(names: Sequence[str]) -> str:
-    """That the sets ``names`` haven't passed: ``stress hasn't passed``, ``stress, soak haven't
-    passed``."""
-    verb = "hasn't" if len(names) == 1 else "haven't"
-    return f"{', '.join(names)} {verb} passed"
-
-
-def word_unfixed(lenses: Sequence[str]) -> str:
-    """That the findings the ``lenses`` raised aren't fixed: ``the finding from bugs-reviewer
-    isn't fixed``, ``the findings from bugs-reviewer, security-reviewer aren't fixed``."""
-    if len(lenses) == 1:
-        return f"the finding from {lenses[0]} isn't fixed"
-    return f"the findings from {', '.join(lenses)} aren't fixed"
-
-
 def word_released(names: Sequence[str], lenses: Sequence[str] = ()) -> str:
     """The notice that the user released the holds of the sets ``names`` and of the findings
-    the ``lenses`` raised by hand."""
-    parts = [
-        *([word_unpassed(names)] if names else []),
-        *([word_unfixed(lenses)] if lenses else []),
-    ]
-    return f"Merges resumed by hand; {' and '.join(parts)}."
+    the ``lenses`` raised by hand, saying what that leaves undone as
+    :func:`orbit.wording.word_undone` words it."""
+    return f"Merges resumed by hand; {word_undone(names, lenses)}."
 
 
 def note_finding_held(hold: FindingHold) -> str:

@@ -29,7 +29,6 @@ from orbit.agent.domain.merge_holds import (
     word_finding_step_in,
     word_released,
     word_unchecked,
-    word_unfixed,
 )
 from orbit.protocol import BUGS_REVIEWER, MergeHold
 
@@ -63,8 +62,9 @@ def test_the_notices_name_the_lens_the_short_commit_the_title_and_the_fixes_trie
 
 
 def test_a_release_by_hand_names_the_sets_not_passed_and_the_findings_not_fixed() -> None:
-    assert word_unfixed(("security-reviewer", BUGS_REVIEWER)) == (
-        "the findings from security-reviewer, bugs-reviewer aren't fixed"
+    assert word_released((), ("security-reviewer", BUGS_REVIEWER)) == (
+        "Merges resumed by hand; the findings from security-reviewer and bugs-reviewer aren't"
+        " fixed."
     )
     assert word_released((), (BUGS_REVIEWER,)) == (
         "Merges resumed by hand; the finding from bugs-reviewer isn't fixed."

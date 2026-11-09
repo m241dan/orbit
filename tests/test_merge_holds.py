@@ -582,7 +582,7 @@ async def test_releasing_by_hand_lifts_every_hold_with_a_notice_saved_and_told()
     await failed(holds, check_set=SOAK)
     await holds.holds.release()
     assert not holds.holds.held and holds.releases == 2  # Once as no hold kept was read.
-    assert holds.notices()[-1] == "Merges resumed by hand; stress, soak haven't passed."
+    assert holds.notices()[-1] == "Merges resumed by hand; stress and soak haven't passed."
     assert store.holds_saved[-1] == ()
 
 
