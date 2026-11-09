@@ -159,16 +159,35 @@ def _details(state: TaskState, notes: RowNotes) -> str:
     that's unknown if ``notes`` say so, that it's waiting for a coder, if pending and they say
     so, that a role edited it, if it's a draft it did, the skills its agent gets, if any, and
     that its work waits to merge, if they say so."""
-    details = " · ".join(settings_fields(state.task.settings))
-    if state.attempt:
-        details += f" · fix {state.attempt}/{state.max_attempts}"
-    details += _spent(state.usage, notes.usage_unknown)
-    if notes.waiting is not None and state.status == "pending":
-        details += f" · {notes.waiting}"
-    if state.edited and state.status == "draft":
-        details += f" · edited by {state.proposed_by}"
-    skills = _skills(notes.role_skills, state.task.skills, notes.mapped_skills)
-    return details + skills + _merging(notes.merging)
+    return "".join(
+        (
+            " · ".join(settings_fields(state.task.settings)),
+            _fix_part(state),
+            _spent(state.usage, notes.usage_unknown),
+            _waiting_part(state, notes.waiting),
+            _edited_part(state),
+            _skills(notes.role_skills, state.task.skills, notes.mapped_skills),
+            _merging(notes.merging),
+        )
+    )
+
+
+def _fix_part(state: TaskState) -> str:
+    """What a row's details say of the fix ``state`` is on: ``· fix 1/3``; nothing before its
+    first."""
+    return f" · fix {state.attempt}/{state.max_attempts}" if state.attempt else ""
+
+
+def _waiting_part(state: TaskState, note: str | None) -> str:
+    """What a row's details say while ``state`` is pending and waits for a coder, as ``note``
+    says; nothing otherwise."""
+    return f" · {note}" if note is not None and state.status == "pending" else ""
+
+
+def _edited_part(state: TaskState) -> str:
+    """What a row's details say of the role that edited ``state``, if it's a draft that role
+    edited: ``· edited by planner``; nothing otherwise."""
+    return f" · edited by {state.proposed_by}" if state.edited and state.status == "draft" else ""
 
 
 def _merging(note: str | None) -> str:
@@ -433,19 +452,19 @@ class TaskBoard:
     def show_role_skills(self, skills: Mapping[str, tuple[str, ...]]) -> None:
         """Have each task's row show the skills its role gives, as ``skills`` gives each role's;
         nothing for the skills already known."""
-        skills = dict(skills)
-        if skills == self.role_skills:
+        given = dict(skills)
+        if given == self.role_skills:
             return
-        self.role_skills = skills
+        self.role_skills = given
         self.redraw()
 
     def show_mapped_skills(self, skills: Sequence[str]) -> None:
         """Have each task's row show ``skills``, those the project's ``[[skills]]`` entries map,
         after its own; nothing for the skills already known."""
-        skills = tuple(skills)
-        if skills == self.mapped_skills:
+        given = tuple(skills)
+        if given == self.mapped_skills:
             return
-        self.mapped_skills = skills
+        self.mapped_skills = given
         self.redraw()
 
     def cycle_lane(self) -> None:

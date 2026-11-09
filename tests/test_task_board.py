@@ -835,3 +835,23 @@ def test_the_same_role_skills_again_leave_the_board_alone() -> None:
     redraws = view.redraws
     tasks.show_role_skills(dict(ROLE_SKILLS))
     assert view.redraws == redraws
+
+
+def test_changed_role_skills_redraw_the_rows() -> None:
+    tasks, view = started()
+    tasks.show(skilled("reviewer"))
+    tasks.show_role_skills(ROLE_SKILLS)
+    redraws = view.redraws
+    tasks.show_role_skills({"reviewer": ("code-style",)})
+    assert view.redraws == redraws + 1
+    assert view.rows[0].endswith(" · skills: code-style + python")
+
+
+def test_changed_mapped_skills_redraw_the_rows() -> None:
+    tasks, view = started()
+    tasks.show(skilled("reviewer"))
+    tasks.show_mapped_skills(("layers",))
+    redraws = view.redraws
+    tasks.show_mapped_skills(["orbit"])
+    assert view.redraws == redraws + 1
+    assert view.rows[0].endswith(" · skills: python, orbit")

@@ -1,3 +1,4 @@
+import pytest
 from rich.text import Text
 
 from orbit.protocol import (
@@ -23,6 +24,7 @@ from orbit.tui.view.task_editor import (
 )
 from orbit.tui.view.tasks import (
     NEW_TASK_LABEL,
+    RowNotes,
     acceptable,
     active_task,
     edit_refusal,
@@ -35,6 +37,7 @@ from orbit.tui.view.tasks import (
     role_skills,
     role_tag,
     session_usage_subtitle,
+    task_label,
     task_list_title,
     task_numbers,
     ticking,
@@ -423,3 +426,55 @@ def test_the_new_task_row_is_dim_and_italic() -> None:
 def test_the_task_editor_titles_its_text_fields_and_says_how_to_type() -> None:
     assert (TASK_TITLE_TITLE, TASK_PROMPT_TITLE) == ("Title", "Prompt")
     assert TASK_TITLE_PLACEHOLDER == "Press i to type"
+
+
+SETTINGS = "default · read + web"
+"""What a default task's details say of its settings."""
+
+SPENT = Usage(input_tokens=1_000, cost_usd=0.5)
+"""A task's spend, which its details read as ``1k tok · $0.50``."""
+
+
+def details_of(state: TaskState, notes: RowNotes) -> str:
+    """The details line of ``state``'s row, with ``notes``."""
+    return str(task_label(state, "1", "", notes=notes)).partition("\n")[2].strip()
+
+
+def detailed(status: TaskStatus = "pending", **fields: object) -> TaskState:
+    """A task in ``status`` with ``fields`` set, proposed by the planner."""
+    return TaskState(
+        id="1", task=TaskSpec(prompt="x"), status=status, proposed_by="planner"
+    ).model_copy(update=fields)
+
+
+@pytest.mark.parametrize(
+    ("state", "notes", "details"),
+    [
+        (detailed(), RowNotes(), SETTINGS),
+        (detailed(attempt=1, max_attempts=3), RowNotes(), f"{SETTINGS} · fix 1/3"),
+        (detailed(usage=SPENT), RowNotes(), f"{SETTINGS} · 1k tok · $0.50"),
+        (detailed(usage=SPENT), RowNotes(usage_unknown=True), f"{SETTINGS} · usage unknown"),
+        (detailed(), RowNotes(waiting="⏳ waiting"), f"{SETTINGS} · ⏳ waiting"),
+        (detailed("running"), RowNotes(waiting="⏳ waiting"), SETTINGS),
+        (detailed("draft", edited=True), RowNotes(), f"{SETTINGS} · edited by planner"),
+        (detailed("draft"), RowNotes(), SETTINGS),
+        (detailed(edited=True), RowNotes(), SETTINGS),
+        (detailed(), RowNotes(mapped_skills=("layers",)), f"{SETTINGS} · skills: layers"),
+        (detailed(), RowNotes(merging="waiting to merge"), f"{SETTINGS} · waiting to merge"),
+        (
+            detailed(attempt=2, max_attempts=3, usage=SPENT),
+            RowNotes(waiting="⏳ waiting", role_skills=("code-style",), merging="merge held"),
+            f"{SETTINGS} · fix 2/3 · 1k tok · $0.50 · ⏳ waiting · skills: code-style · merge held",
+        ),
+        (
+            detailed("draft", attempt=2, max_attempts=3, usage=SPENT, edited=True),
+            RowNotes(waiting="⏳ waiting", role_skills=("code-style",), merging="merge held"),
+            f"{SETTINGS} · fix 2/3 · 1k tok · $0.50 · edited by planner · skills: code-style"
+            " · merge held",
+        ),
+    ],
+)
+def test_a_rows_details_say_each_part_that_applies_in_order(
+    state: TaskState, notes: RowNotes, details: str
+) -> None:
+    assert details_of(state, notes) == details
