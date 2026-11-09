@@ -5,6 +5,7 @@ whether it holds merges; and when a trigger fires, in words."""
 import pytest
 
 from orbit.agent.domain.checks import Setup, configured_checks, describe_checks
+from orbit.agent.domain.machine import ADVICE, Bytes, Machine
 from orbit.agent.domain.triggers import Trigger, describe_firing
 from orbit.agent.domain.verification import CheckSet, VerificationStep
 from orbit.protocol import TASK_CHECKS
@@ -33,6 +34,33 @@ def test_with_task_checks_only_the_text_is_todays() -> None:
 
 def test_with_nothing_configured_it_says_so() -> None:
     assert configured_checks((), None, (), {}) == "Nothing is configured yet."
+
+
+CONFIGURED = "Configured now (build on these):\n\nSteps:\n- Lint: ruff check"
+
+
+@pytest.mark.parametrize(
+    ("steps", "machine", "checks"),
+    [
+        (
+            (LINT,),
+            Machine(cpus=4, memory=Bytes(8 * 2**30)),
+            f"{CONFIGURED}\n\nThis machine: 4 CPUs, 8.0 GiB of memory. {ADVICE}",
+        ),
+        ((LINT,), Machine(cpus=2), f"{CONFIGURED}\n\nThis machine: 2 CPUs. {ADVICE}"),
+        ((LINT,), Machine(), CONFIGURED),
+        (
+            (),
+            Machine(cpus=1),
+            f"Nothing is configured yet.\n\nThis machine: 1 CPU. {ADVICE}",
+        ),
+        ((), Machine(), "Nothing is configured yet."),
+    ],
+)
+def test_the_machine_line_follows_a_blank_line_when_anything_of_the_machine_is_known(
+    steps: tuple[VerificationStep, ...], machine: Machine, checks: str
+) -> None:
+    assert configured_checks(steps, None, (), {}, machine) == checks
 
 
 def test_with_steps_in_sets_each_set_is_named_with_its_steps_triggers_and_holds() -> None:

@@ -12,6 +12,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
+from orbit.agent.domain.machine import Machine, describe_machine
 from orbit.agent.domain.roles import Role, finding_roles
 from orbit.agent.domain.triggers import (
     SET_FINISHED,
@@ -188,6 +189,7 @@ class ChecksProposal(VerificationConfig):
 
 _NO_TRIGGERS: Mapping[str, Trigger] = MappingProxyType({})
 _NO_ROLES: Mapping[str, Role] = MappingProxyType({})
+_UNKNOWN_MACHINE = Machine()
 
 
 def merge_proposed_sets(
@@ -352,14 +354,15 @@ def configure_prompt(
     setup: Setup | None,
     sets: Sequence[CheckSet] = (),
     triggers: Mapping[str, Trigger] = _NO_TRIGGERS,
+    machine: Machine = _UNKNOWN_MACHINE,
 ) -> str:
-    """The task for a configurator asked for from the frontend, told what's configured now (see
-    :func:`configured_checks`)."""
+    """The task for a configurator asked for from the frontend, told what's configured now and
+    ``machine``'s size (see :func:`configured_checks`)."""
     prompt = (
         "Set up this project's verification steps: work out the checks it uses and propose"
         " them with propose_checks."
     )
-    return f"{prompt} {configured_checks(steps, setup, sets, triggers)}"
+    return f"{prompt} {configured_checks(steps, setup, sets, triggers, machine)}"
 
 
 def configured_checks(
@@ -367,12 +370,21 @@ def configured_checks(
     setup: Setup | None,
     sets: Sequence[CheckSet] = (),
     triggers: Mapping[str, Trigger] = _NO_TRIGGERS,
+    machine: Machine = _UNKNOWN_MACHINE,
 ) -> str:
     """What a configurator is told is configured now, the task checks ``steps``, the named
     ``sets`` with when ``triggers`` run them and those reporting them to lenses, and ``setup``
-    (see :func:`describe_checks`), or that nothing is: the ``{checks}`` a trigger's template
-    uses."""
-    current = describe_checks(steps, setup, sets, triggers)
+    (see :func:`describe_checks`), or that nothing is, then, after a blank line, ``machine``'s
+    size (see :func:`~orbit.agent.domain.machine.describe_machine`), when any of it is known:
+    the ``{checks}`` a trigger's template uses."""
+    machine_line = describe_machine(machine)
+    configured = _describe_configured(describe_checks(steps, setup, sets, triggers))
+    return f"{configured}\n\n{machine_line}" if machine_line else configured
+
+
+def _describe_configured(current: str) -> str:
+    """The ``current`` checks under a line saying to build on them, or that nothing is
+    configured, when there are none."""
     if not current:
         return "Nothing is configured yet."
     return "Configured now (build on these):\n\n" + current

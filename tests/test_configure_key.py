@@ -10,7 +10,7 @@ from orbit.agent import NO_STEPS_NOTE, WorkspaceHost
 from orbit.agent.application.verifier import Verification
 from orbit.agent.application.work_turns import CONFIGURING_NOTE, NO_VERIFY_MESSAGE
 from orbit.agent.domain.checks import Setup, configure_prompt
-from orbit.agent.domain.machine import Bytes, Machine, describe_machine
+from orbit.agent.domain.machine import Bytes, Machine
 from orbit.agent.domain.verification import CheckSet, VerificationStep
 from orbit.protocol import (
     CONFIGURE_CHECKS,
@@ -122,7 +122,7 @@ async def test_the_prompt_ends_with_the_machines_size() -> None:
     session, _, _ = session_for(configurator, verification=verified(Steps(True)), machine=machine)
     await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
     events = await until_idle(session)
-    expected = f"{configure_prompt((STEP,), None)}\n\n{describe_machine(machine)}"
+    expected = configure_prompt((STEP,), None, machine=machine)
     assert board(events)[0].task.prompt == expected
     line = "This machine: 4 CPUs, 8.0 GiB of memory. Set each build and test step's parallelism"
     assert f"- Unit tests: pytest\n\n{line} to fit it." in configurator.tasks[0]

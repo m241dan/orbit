@@ -152,10 +152,18 @@ def begin() -> None:
     if MODE == "hang-up":
         hang_up()
     if MODE == "silent":
-        Path(sys.argv[2]).write_text(str(os.getpid()))
+        write_pid(Path(sys.argv[2]))
         time.sleep(3600)
     if MODE == "garbage":
         print("this isn't a message", flush=True)
+
+
+def write_pid(path: Path) -> None:
+    """Write this process's pid to ``path`` whole, through a file renamed over it, so a reader
+    waiting for it to exist never finds it empty."""
+    partial = path.with_name(f"{path.name}.partial")
+    partial.write_text(str(os.getpid()))
+    partial.replace(path)
 
 
 def reply(line: str) -> None:
