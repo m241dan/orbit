@@ -332,26 +332,26 @@ def _with_fixed(task_id: str, fixes: Mapping[str, str | None]) -> tuple[str, ...
 def kept_groups(
     groups: Mapping[str, ReviewGroup],
     open_batches: Collection[str],
-    batches: Mapping[str, str | None],
+    find: Callable[[str], TaskState | None],
 ) -> dict[str, ReviewGroup]:
     """The ``groups``, by batch, whose batch is among ``open_batches``, or one of whose findings
-    was filed into a task, as ``batches`` gives each task's batch by id, whose batch is: a
-    review's findings are kept until the batches they were filed into, its own and the batch of
-    its own a blocking finding's fix goes into, have been reviewed, closed or dropped."""
+    was filed into a task, as ``find`` finds it on the board by id, whose batch is: a review's
+    findings are kept until the batches they were filed into, its own and the batch of its own
+    a blocking finding's fix goes into, have been reviewed, closed or dropped."""
     return {
         batch: group
         for batch, group in groups.items()
-        if batch in open_batches or _filed_into(group, open_batches, batches)
+        if batch in open_batches or _filed_into(group, open_batches, find)
     }
 
 
 def _filed_into(
-    group: ReviewGroup, open_batches: Collection[str], batches: Mapping[str, str | None]
+    group: ReviewGroup, open_batches: Collection[str], find: Callable[[str], TaskState | None]
 ) -> bool:
-    """Whether one of ``group``'s findings was filed into a task, as ``batches`` gives each
-    task's batch by id, in one of ``open_batches``."""
-    tasks = (finding.task for finding in group.findings if finding.task is not None)
-    return any(batches.get(task) in open_batches for task in tasks)
+    """Whether one of ``group``'s findings was filed into a task, as ``find`` finds it on the
+    board by id, in one of ``open_batches``; one no longer on the board is in none."""
+    found = (find(finding.task) for finding in group.findings if finding.task is not None)
+    return any(state is not None and state.batch in open_batches for state in found)
 
 
 def runnable_tasks(tasks: Iterable[TaskState]) -> set[str]:
@@ -839,12 +839,14 @@ def pending_titles(tasks: Sequence[TaskState]) -> tuple[str, ...]:
     )
 
 
-def review_skills(job: ReviewJob, tasks: Sequence[TaskState]) -> tuple[str, ...]:
+def review_skills(job: ReviewJob, find: Callable[[str], TaskState | None]) -> tuple[str, ...]:
     """The skills ``job``'s review task names: those of the tasks it reviews, in task order,
-    each once, but for any no longer among ``tasks``. None for a super review, which reviews no
-    particular task."""
-    found = {state.id: state.task.skills for state in tasks}
-    return tuple(dict.fromkeys(name for task in job.reviewed for name in found.get(task, ())))
+    each once, but for any ``find`` no longer finds on the board, each looked up once. None for
+    a super review, which reviews no particular task."""
+    found = (find(task_id) for task_id in dict.fromkeys(job.reviewed))
+    return tuple(
+        dict.fromkeys(name for state in found if state is not None for name in state.task.skills)
+    )
 
 
 def pause_notice(rounds: int) -> str:

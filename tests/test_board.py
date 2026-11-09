@@ -71,6 +71,16 @@ def test_pending_counts_the_tasks_waiting_to_run_alone() -> None:
     assert board.pending == 1
 
 
+def test_list_waiting_gives_the_tasks_still_to_run_or_running_in_order() -> None:
+    board = TaskBoard()
+    running, pending, done = board.add(ONE), board.add(TWO), board.add(FIX)
+    board.add_draft(ONE, "planner")
+    board.set_status(running, "running")
+    board.set_status(done, "completed")
+
+    assert [state.id for state in board.list_waiting()] == [running, pending]
+
+
 def test_a_fix_goes_right_behind_the_task_it_fixes() -> None:
     board = TaskBoard()
     first = board.add(ONE)

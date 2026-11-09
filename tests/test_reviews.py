@@ -1,6 +1,6 @@
 """When reviews happen and what they may suggest: rounds, batches, the breaker and caps."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import fields
 
 import pytest
@@ -900,31 +900,54 @@ def skilled(task_id: str, *skills: str) -> TaskState:
     return TaskState(id=task_id, task=TaskSpec(prompt="x", skills=skills), status="completed")
 
 
+def lookup(*tasks: TaskState) -> Callable[[str], TaskState | None]:
+    """What finds each of ``tasks`` by its id, as a board does, and nothing else."""
+    return {state.id: state for state in tasks}.get
+
+
 def test_a_review_names_the_skills_of_the_task_it_reviews() -> None:
     job = ReviewJob(commits=("c1",), round=0, batch=None, reviewed=("1",))
-    tasks = [skilled("1", "python", "application")]
-    assert review_skills(job, tasks) == ("python", "application")
+    find = lookup(skilled("1", "python", "application"))
+    assert review_skills(job, find) == ("python", "application")
 
 
 def test_a_batch_review_names_its_tasks_skills_in_task_order_each_once() -> None:
     job = ReviewJob(commits=("c2", "c3"), round=1, batch="batch-1", reviewed=("2", "3"))
-    tasks = [skilled("1", "rust"), skilled("2", "python"), skilled("3", "cpp", "python")]
-    assert review_skills(job, tasks) == ("python", "cpp")
+    find = lookup(skilled("1", "rust"), skilled("3", "cpp", "python"), skilled("2", "python"))
+    assert review_skills(job, find) == ("python", "cpp")
+
+
+def test_a_task_reviewed_twice_names_its_skills_once() -> None:
+    job = ReviewJob(commits=("c2", "c3"), round=1, batch="batch-1", reviewed=("3", "2", "3"))
+    find = lookup(skilled("2", "python"), skilled("3", "cpp"))
+    assert review_skills(job, find) == ("cpp", "python")
+
+
+def test_review_skills_looks_up_only_the_tasks_reviewed() -> None:
+    asked: list[str] = []
+    job = ReviewJob(commits=("c2", "c3"), round=1, batch="batch-1", reviewed=("2", "3"))
+
+    def find(task_id: str) -> TaskState | None:
+        asked.append(task_id)
+        return skilled(task_id, "python")
+
+    assert review_skills(job, find) == ("python",)
+    assert asked == ["2", "3"]
 
 
 def test_a_reviewed_task_no_longer_on_the_board_adds_no_skills_to_its_review() -> None:
     job = ReviewJob(commits=("c2", "c3"), round=1, batch="batch-1", reviewed=("2", "3"))
-    assert review_skills(job, [skilled("3", "cpp")]) == ("cpp",)
+    assert review_skills(job, lookup(skilled("3", "cpp"))) == ("cpp",)
 
 
 def test_a_review_whose_reviewed_tasks_are_all_gone_names_no_skills() -> None:
     job = ReviewJob(commits=("c1",), round=0, batch=None, reviewed=("1",))
-    assert review_skills(job, [skilled("2", "python")]) == ()
+    assert review_skills(job, lookup(skilled("2", "python"))) == ()
 
 
 def test_a_super_review_names_no_skills() -> None:
     job = ReviewJob(commits=("c1",), round=0, batch=None, whole=True)
-    assert review_skills(job, [skilled("1", "python")]) == ()
+    assert review_skills(job, lookup(skilled("1", "python"))) == ()
 
 
 def test_the_pause_notice_names_the_rounds_limit() -> None:
@@ -1020,15 +1043,22 @@ def test_a_commit_review_has_no_roles_raising_its_findings() -> None:
     assert raised_roles(COMMIT_JOB, [RAISED], []) == frozenset()
 
 
+def batched(task_id: str, batch: str | None) -> TaskState:
+    """Task ``task_id``, pending in ``batch``, if any."""
+    return TaskState(id=task_id, task=TaskSpec(prompt="x"), batch=batch)
+
+
 def test_a_group_is_kept_while_a_task_it_filed_a_finding_into_is_in_an_open_batch() -> None:
     groups = {"batch-1": RAISED}
-    assert kept_groups(groups, ("batch-4",), {"5": "batch-4"}) == groups
-    assert kept_groups(groups, ("batch-4",), {"5": "batch-1", "6": None}) == {}
+    assert kept_groups(groups, ("batch-4",), lookup(batched("5", "batch-4"))) == groups
+    gone = lookup(batched("5", "batch-1"), batched("6", None))
+    assert kept_groups(groups, ("batch-4",), gone) == {}
 
 
 def test_the_groups_kept_are_those_whose_batch_is_still_open() -> None:
     groups = {"batch-1": RAISED, "batch-2": ReviewGroup(COMMIT_JOB)}
-    assert kept_groups(groups, ("batch-2", "batch-3"), {}) == {"batch-2": ReviewGroup(COMMIT_JOB)}
+    kept = kept_groups(groups, ("batch-2", "batch-3"), lookup())
+    assert kept == {"batch-2": ReviewGroup(COMMIT_JOB)}
 
 
 FIX_JOB = ReviewJob(commits=("c2",), round=1, batch="batch-3", reviewed=("5",))

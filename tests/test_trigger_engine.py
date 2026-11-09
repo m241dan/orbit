@@ -326,6 +326,20 @@ async def test_dedupe_holds_a_list_back_by_the_tasks_waiting_before_it_fired() -
     assert await engine.engine.landed(ended("2"), "c2") == ()
 
 
+async def test_a_list_queuing_several_roles_is_guarded_by_the_board_before_the_firing() -> None:
+    engine = Engine({"look": looks(prompt="Look at the code", guards=["not-queued", "dedupe"])})
+    engine.board.add(TaskSpec(prompt="Make it faster."))
+    review = ReviewRound(commit_review("1", COMMIT), unbooked)
+    queued = await engine.engine.landed(ended(skills=("python",)), COMMIT, review)
+    assert [engine.board.get(task_id).task.role for task_id in queued] == list(SUPER_LENS_REVIEWERS)
+
+
+async def test_a_later_trigger_of_a_firing_is_guarded_by_the_tasks_an_earlier_one_queued() -> None:
+    engine = Engine({"look": look(), "again": look(prompt="Again", guards=["not-queued"])})
+    assert len(await engine.engine.landed(ended(), COMMIT)) == 1
+    assert [origin for _, origin, _, _ in engine.shown()] == ["look"]
+
+
 async def test_a_list_reviewing_a_batch_queues_only_the_roles_that_raised_its_findings() -> None:
     booked: dict[str, ReviewTemplate] = {}
     guards = ["review-rounds", "raised-finding"]

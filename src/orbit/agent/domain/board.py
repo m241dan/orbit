@@ -73,7 +73,11 @@ class TaskBoard:
     @property
     def pending(self) -> int:
         """How many tasks are pending, waiting to run."""
-        return sum(state.status == "pending" for state in self.tasks)
+        return sum(state.status == "pending" for state in self._tasks)
+
+    def list_waiting(self) -> tuple[TaskState, ...]:
+        """The tasks still to run or running, in run order."""
+        return tuple(state for state in self._tasks if state.status in WAITING)
 
     def restore(self, tasks: Sequence[TaskState]) -> None:
         """Replace the board's tasks with ``tasks``, in order; new ids carry on after the

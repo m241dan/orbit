@@ -38,7 +38,7 @@ session's gate says, with a notice naming its trigger, but a configurator's, whi
 
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
-from functools import partial
+from functools import partial, reduce
 from typing import Literal
 
 from orbit.agent.application.desk import AgentDesk
@@ -390,8 +390,8 @@ class TriggerEngine:
         fields = {"role": state.task.role, "origin": state.origin}
         event = TriggerEvent(COMMITS, fields, state)
         roles = enabled_roles(self._desk.agents.roles)
-        board = self._tasks.board.tasks
-        return count_landing(self._desk.agents.triggers, event, roles, counts, board)
+        waiting = self._tasks.board.list_waiting()
+        return count_landing(self._desk.agents.triggers, event, roles, counts, waiting)
 
     def fire_checks(self, fired: Sequence[tuple[str, Trigger]]) -> list[tuple[str, Trigger]]:
         """Run the checks of each of the triggers ``fired``, by name, on a landing counted, that
@@ -439,7 +439,7 @@ class TriggerEngine:
         }
         fields = {"role": CODER, "origin": job.origin, REVIEW_FIELD: "batch"}
         event = TriggerEvent(TASK_LANDED, fields, commits=job.commits)
-        skills = review_skills(job, self._tasks.board.tasks)
+        skills = review_skills(job, self._tasks.board.find)
         return await self._sift(triggers, event, partial(self._values, job, skills), review)
 
     async def _firing(
@@ -559,45 +559,49 @@ class TriggerEngine:
     def _add(self, board: TaskBoard, firing: _Firing) -> tuple[str, ...]:
         """Add to ``board`` the tasks of each of the triggers ``firing`` that no guard holds
         back, in order, each seeing those before it, running the checks for each with
-        ``checks``; returns their ids."""
-        return tuple(
-            task_id
-            for name, trigger in firing.listening
-            for task_id in self._fire_one(board, name, trigger, firing)
-        )
+        ``checks``; returns their ids. The tasks waiting are listed once, as the firing starts,
+        each trigger's guards seeing them and the tasks queued before it."""
+        before = board.list_waiting()
+
+        def fire_next(queued: tuple[str, ...], named: tuple[str, Trigger]) -> tuple[str, ...]:
+            adding = _Adding(board, (*before, *(board.get(task_id) for task_id in queued)))
+            return (*queued, *self._fire_one(adding, *named, firing))
+
+        return reduce(fire_next, firing.listening, ())
 
     def _fire_one(
-        self, board: TaskBoard, name: str, trigger: Trigger, firing: _Firing
+        self, adding: _Adding, name: str, trigger: Trigger, firing: _Firing
     ) -> tuple[str, ...]:
         """Fire ``trigger``, named ``name``, as ``firing`` says: with ``checks``, run them
-        unless a guard holds it back, with ``board``'s tasks, if they're still to decide, adding
-        none; otherwise add its tasks to ``board`` as :meth:`_add_tasks` does, returning their
-        ids."""
+        unless a guard holds it back, with the tasks ``adding`` sees, if they're still to
+        decide, adding none; otherwise add its tasks to the board as :meth:`_add_tasks` does,
+        returning their ids."""
         if trigger.checks is None:
-            return self._add_tasks(board, name, trigger, firing)
-        if firing.counted or not held_back(trigger, None, board.tasks):
+            return self._add_tasks(adding, name, trigger, firing)
+        if firing.counted or not held_back(trigger, None, adding.seen):
             self._run_checks(trigger.checks, name)
         return ()
 
     def _add_tasks(
-        self, board: TaskBoard, name: str, trigger: Trigger, firing: _Firing
+        self, adding: _Adding, name: str, trigger: Trigger, firing: _Firing
     ) -> tuple[str, ...]:
-        """Add to ``board`` the tasks ``trigger``, named ``name``, queues as it fires as
-        ``firing`` says, one for each of its roles that fires, from one rendering of its
-        prompt, unless a guard holds it back, if they're still to decide, seeing the board as
-        it was before any of them; returns their ids. Each reviewing the review due does so
-        with the skills of what it reviews, whatever its role, and is queued as a review, booked
-        into its batches with what its prompt was rendered from, but the diff it quotes."""
+        """Add to the board ``adding`` adds to the tasks ``trigger``, named ``name``, queues as
+        it fires as ``firing`` says, one for each of its roles that fires, from one rendering of
+        its prompt, unless a guard holds it back, if they're still to decide, seeing the tasks
+        ``adding`` sees, as the board was before any of them; returns their ids. Each reviewing
+        the review due does so with the skills of what it reviews, whatever its role, and is
+        queued as a review, booked into its batches with what its prompt was rendered from, but
+        the diff it quotes."""
         assert trigger.prompt is not None  # It listened without checks, so it has a prompt.
         values = {**firing.values, TRIGGER_VARIABLE: name}
         prompt = render_template(trigger.prompt, values)
-        if not firing.counted and held_back(trigger, prompt, board.tasks):
+        if not firing.counted and held_back(trigger, prompt, adding.seen):
             return ()
         held = render_held_prompt(trigger.prompt, values)
         template = ReviewTemplate(trigger.prompt, drop_diff(values))
         queued = _Queued(name, trigger, prompt, held, template)
         pairs = firing.queues(trigger, self._desk.agents.roles)
-        return tuple(self._add_one(board, queued, role, review) for role, review in pairs)
+        return tuple(self._add_one(adding.board, queued, role, review) for role, review in pairs)
 
     def _add_one(
         self, board: TaskBoard, queued: _Queued, role: str, review: ReviewRound | None
@@ -609,7 +613,7 @@ class TriggerEngine:
         quotes :data:`~orbit.agent.domain.reviews.DIFF_HELD` in place of the diff, which the
         review lane reads from git as it starts it."""
         spec = self._desk.agents.roles[role]
-        skills = () if review is None else review_skills(review.job, board.tasks)
+        skills = () if review is None else review_skills(review.job, board.find)
         prompt = queued.held if _holds_diff(review, role) else queued.prompt
         task = role_task(role, spec, prompt, skills)
         queued_as: QueuedAs = "task" if review is None else "review"
@@ -623,7 +627,7 @@ class TriggerEngine:
         which name ``skills``, as its review's task renders from them, but ``{diff}``, which
         :meth:`_show_firing_diff` gives."""
         cap = self._desk.agents.review_limits.suggestions
-        pending = pending_titles(self._tasks.board.tasks)
+        pending = pending_titles(self._tasks.board.list_waiting())
         landing = {"task": ", ".join(job.reviewed), "task_skills": ", ".join(skills)}
         return review_values(job, cap, pending) | landing
 
@@ -640,6 +644,16 @@ class _Fired:
     roles: frozenset[str]
     event: TriggerEvent
     raised: frozenset[str]
+
+
+@dataclass(frozen=True)
+class _Adding:
+    """Where a trigger of a firing adds its tasks: the ``board``, and the tasks its guards
+    ``seen`` there, those waiting as the firing started and those it queued before the
+    trigger."""
+
+    board: TaskBoard
+    seen: tuple[TaskState, ...]
 
 
 @dataclass(frozen=True)

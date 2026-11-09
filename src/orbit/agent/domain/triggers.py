@@ -1086,7 +1086,8 @@ def _values(wanted: str | tuple[str, ...]) -> tuple[str, ...]:
 
 def held_back(trigger: Trigger, prompt: str | None, tasks: Sequence[TaskState]) -> bool:
     """Whether a guard of ``trigger`` holds back its task, rendered as ``prompt``, with ``tasks``
-    on the board: ``not-queued`` while a task of one of its roles is still to run or running,
+    on the board, of which only those still to run or running count, so a caller may pass just
+    those: ``not-queued`` while a task of one of its roles is still to run or running,
     ``dedupe`` while such a task's prompt has the same first line, and ``suggestions-pending``
     while a task the reviews queued is: a task orbit queued as a review, booked into its review
     lane, whatever its role, or a task in a review's batch. ``review-rounds`` and
@@ -1158,8 +1159,8 @@ def count_landing(
     :func:`listening` says with ``roles`` the enabled roles, from ``counts``, the landings
     counted toward each since it last fired, by name: its count goes up by one, and once that
     reaches its ``every`` (1 if it sets none) it's due, and fires unless a guard holds it back
-    with ``tasks`` on the board, its count starting again. One held back stays due, and fires
-    on the first landing it hears once none does."""
+    with ``tasks`` on the board, as :func:`held_back` says, its count starting again. One held
+    back stays due, and fires on the first landing it hears once none does."""
     heard = listening(triggers, event, roles, None)
     raised = {**counts, **{name: counts.get(name, 0) + 1 for name, _ in heard}}
     fires = [

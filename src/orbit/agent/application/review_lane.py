@@ -355,9 +355,18 @@ class ReviewLane:
         lane ended it there was not. A task has finished once its status is final, however it
         ended, as the lane ends only a task that ran; a draft still to be accepted hasn't, nor
         has one pending, running or verifying. One taken off the board has ended too."""
-        unfinished = {state.id for state in self._board.tasks if state.status not in FINAL}
-        finished = (t for t in self._members(batch) if t not in unfinished and t not in group.ended)
+        finished = (
+            task_id
+            for task_id in self._members(batch)
+            if task_id not in group.ended and self._finished(task_id)
+        )
         return reduce(end_task_in, finished, group)
+
+    def _finished(self, task_id: str) -> bool:
+        """Whether task ``task_id`` has finished, as :meth:`_with_finished` says: its status is
+        final, or it was taken off the board."""
+        state = self._board.find(task_id)
+        return state is None or state.status in FINAL
 
     async def _end_quietly(self, task_id: str, batch: str) -> None:
         """End task ``task_id``, booked into the review behind open ``batch``, as a crash
@@ -445,7 +454,7 @@ class ReviewLane:
         """The variables of ``commits`` for ``job``, a super review told what landed after
         ``since``, as its task renders from them."""
         landed = await self._landed(job, since)
-        pending = pending_titles(self._board.tasks)
+        pending = pending_titles(self._board.list_waiting())
         return review_values(job, self.planner.cap(job), pending, landed)
 
     async def set_finished(self, outcome: SetOutcome) -> tuple[str, ...]:
@@ -489,8 +498,7 @@ class ReviewLane:
         """Forget the groups of the batches that closed, reviewed or not, unless they filed a
         finding into a batch still open, the severities of the tasks whose findings they kept,
         and the bookings no longer needed, as :func:`kept_bookings` says."""
-        batches = {state.id: state.batch for state in self._board.tasks}
-        self._groups = kept_groups(self._groups, self.planner.open_batches, batches)
+        self._groups = kept_groups(self._groups, self.planner.open_batches, self._board.find)
         filed = self._filed_tasks()
         self._severities = {t: s for t, s in self._severities.items() if t in filed}
         self._prune_bookings()
@@ -631,7 +639,12 @@ class ReviewLane:
         blocking finding's fix goes into a batch of its own: they count toward its cap."""
         group = self._groups.get(batch)
         tasks = {finding.task for finding in group.findings} if group is not None else set()
-        return sum(1 for state in self._board.tasks if state.id in tasks and state.batch != batch)
+        return sum(self._outside(task_id, batch) for task_id in tasks)
+
+    def _outside(self, task_id: str | None, batch: str) -> bool:
+        """Whether task ``task_id`` is on the board, in a batch other than ``batch``."""
+        state = self._board.find(task_id)
+        return state is not None and state.batch != batch
 
     def _filing_refusal(self, task_id: str, batch: str, suggestion: ReviewSuggestion) -> str | None:
         """Why review task ``task_id``, booked into the review behind ``batch``, can't file
@@ -1132,7 +1145,7 @@ class ReviewLane:
         job = group.job
         landed = await self._landed_after(job.commits[-1])
         messages = await self._messages_of(job)
-        pending = pending_titles(self._board.tasks)
+        pending = pending_titles(self._board.list_waiting())
         briefing = MergeBriefing(pending, landed, messages)
         return finished_values(job, group.findings, self.planner.cap_of(batch), briefing)
 
