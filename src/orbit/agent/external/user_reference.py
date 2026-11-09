@@ -20,8 +20,9 @@ from orbit.agent.domain.remotes import RemoteSettings
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.server import ServerSettings
 from orbit.agent.domain.storage import StorageSettings
-from orbit.agent.external.reference_config import (
+from orbit.agent.external.toml_comments import (
     comments,
+    described,
     example_table,
     field_descriptions,
     key_line,
@@ -116,23 +117,9 @@ def write_user_reference(path: Path) -> None:
 
 def _table(header: str, model: type[BaseModel]) -> list[str]:
     """The table under ``header``, each of ``model``'s fields at its default under its
-    description."""
-    descriptions = field_descriptions(model)
+    description, unset if it has none."""
     defaults: Mapping[str, Any] = model().model_dump(mode="json")
-    return [
-        f"# [{header}]",
-        *(
-            line
-            for key, value in defaults.items()
-            for line in (f"# {descriptions[key]}", _setting(key, value))
-        ),
-    ]
-
-
-def _setting(key: str, value: Any) -> str:
-    """The commented-out line giving ``key`` its ``value``; unset, as TOML has no value for
-    that, if it's ``None``."""
-    return f"# {key}: unset" if value is None else key_line(key, value)
+    return [f"# [{header}]", *described(defaults, field_descriptions(model))]
 
 
 def _alias_example() -> list[str]:

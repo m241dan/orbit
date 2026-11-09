@@ -374,6 +374,7 @@ async def test_work_waiting_across_a_restart_into_no_verify_lands_as_the_session
     session = await reopened(store, tree, verification=None)
     seen = Seen(session)
     await eventually(lambda: len(seen.merged()) == 2)
+    await eventually(lambda: store.saved[-1].waiting == ())
     seen.close()
     await session.close()
     assert seen.merged() == [("1", "c1"), ("2", "c2")] and holds_of(session) is None
