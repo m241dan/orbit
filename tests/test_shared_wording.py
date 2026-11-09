@@ -1,5 +1,5 @@
-"""The wording the backend and the frontends share: words joined as `a, b and c`, and what
-releasing merge holds leaves undone."""
+"""The wording the backend and the frontends share: words joined as `a, b and c` or `a, b or c`,
+and what releasing merge holds leaves undone."""
 
 import pytest
 
@@ -22,6 +22,21 @@ def test_join_in_words_joins_the_last_with_and_and_the_rest_with_commas(
     words: tuple[str, ...], joined: str
 ) -> None:
     assert join_in_words(words) == joined
+
+
+@pytest.mark.parametrize(
+    ("words", "joined"),
+    [
+        ((), ""),
+        (("a",), "a"),
+        (("a", "b"), "a or b"),
+        (("a", "b", "c"), "a, b or c"),
+    ],
+)
+def test_join_in_words_with_or_joins_the_last_with_or_and_the_rest_with_commas(
+    words: tuple[str, ...], joined: str
+) -> None:
+    assert join_in_words(words, conjunction="or") == joined
 
 
 @pytest.mark.parametrize(

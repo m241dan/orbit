@@ -204,12 +204,13 @@ def test_shared_wording_imports_no_orbit_package() -> None:
 
 
 SOURCE = Path(orbit.__file__).parent
-HAND_WRITTEN_JOIN = re.compile(r"""['"], ['"]\.join\(.*\} and \{""")
-"""A line that joins words as "a, b and c" by hand, rather than with orbit.wording."""
+HAND_WRITTEN_JOIN = re.compile(r"""['"], ['"]\.join\(.*\} (and|or) \{""")
+"""A line that joins words as "a, b and c" or "a, b or c" by hand, rather than with
+orbit.wording."""
 
 
 def _hand_written_joins(source: str) -> list[int]:
-    """The lines of ``source`` that join words as "a, b and c" by hand."""
+    """The lines of ``source`` that join words as "a, b and c" or "a, b or c" by hand."""
     return [
         number
         for number, line in enumerate(source.splitlines(), start=1)
@@ -236,8 +237,9 @@ def test_hand_written_joins_are_found_however_they_are_quoted() -> None:
         "    return f\"{', '.join(names)}\"\n"
         '    return f"{a} and {b}"\n'
         "    return join_in_words(names)\n"
+        "    return f\"{', '.join(others)} or {last}\"\n"
     )
-    assert _hand_written_joins(source) == [3, 4]
+    assert _hand_written_joins(source) == [3, 4, 8]
 
 
 def test_neither_the_domain_nor_the_protocol_may_import_execution() -> None:

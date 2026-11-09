@@ -1,13 +1,18 @@
 """Wording both the backend and the frontends share, on the standard library alone."""
 
 from collections.abc import Sequence
+from typing import Literal
+
+Conjunction = Literal["and", "or"]
+"""The word that joins the last of a list to the rest: all of them, or any one."""
 
 
-def join_in_words(words: Sequence[str]) -> str:
-    """``words`` joined in English, as ``a``, ``a and b`` or ``a, b and c``; empty for none."""
+def join_in_words(words: Sequence[str], *, conjunction: Conjunction = "and") -> str:
+    """``words`` joined in English with ``conjunction``, as ``a``, ``a and b`` or ``a, b and c``;
+    empty for none."""
     if len(words) <= 1:
         return "".join(words)
-    return f"{', '.join(words[:-1])} and {words[-1]}"
+    return f"{', '.join(words[:-1])} {conjunction} {words[-1]}"
 
 
 def word_unpassed(sets: Sequence[str]) -> str:

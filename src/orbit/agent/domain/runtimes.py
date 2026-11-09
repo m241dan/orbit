@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
 
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.protocol import Effort, WorkspaceLevel
+from orbit.wording import join_in_words
 
 CLAUDE = "claude"
 """Claude Code, the runtime a role runs on unless it says otherwise, as it's the protocol's
@@ -70,8 +71,7 @@ def accepted(setting: str, levels: Sequence[str]) -> str:
     """What says a runtime accepts only ``levels`` of ``setting``, in order, or none."""
     if not levels:
         return f"accepts no {setting} setting"
-    *others, last = [f'"{level}"' for level in levels]
-    listed = f"{', '.join(others)} or {last}" if others else last
+    listed = join_in_words([f'"{level}"' for level in levels], conjunction="or")
     return f"accepts only {setting} {listed}"
 
 

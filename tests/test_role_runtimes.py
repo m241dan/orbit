@@ -14,7 +14,7 @@ from orbit.agent.domain.role_runtimes import (
     runtime_roles,
 )
 from orbit.agent.domain.roles import Role, RoleTools, built_in_roles
-from orbit.agent.domain.runtimes import CLAUDE, RuntimeRules
+from orbit.agent.domain.runtimes import CLAUDE, RuntimeRules, accepted
 from orbit.agent.domain.tools import PROPOSE_TASK
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.protocol import BUILT_IN_ROLE_NAMES, INVALID, Effort, Settings, WorkspaceLevel
@@ -122,6 +122,20 @@ def test_a_role_asking_for_an_effort_its_runtime_doesnt_take_is_refused_listing_
     assert runtime_problems(lite(effort="max"), RuntimeRules(capabilities)) == [
         f'roles.x asks for effort "max", but its runtime lite accepts only effort {accepted}.'
     ]
+
+
+@pytest.mark.parametrize(
+    ("levels", "worded"),
+    [
+        ((), "accepts no effort setting"),
+        (("low",), 'accepts only effort "low"'),
+        (("low", "medium", "high"), 'accepts only effort "low", "medium" or "high"'),
+    ],
+)
+def test_accepted_lists_the_quoted_levels_joined_with_or(
+    levels: tuple[str, ...], worded: str
+) -> None:
+    assert accepted("effort", levels) == worded
 
 
 @pytest.mark.usefixtures("limited_runtime")
