@@ -281,9 +281,9 @@ def _add_checks_tool(server: MCPServer, call: ToolCall) -> None:
         propose the triggers that run sets (by name), and propose reports (by name) that hand
         a set's output to a lens role when it finishes.
 
-        Orbit runs the setup and each step, which can take minutes, then the user decides:
-        wait for the reply. It says what failed, what the user wants changed, or that
-        they accepted or ended it.
+        The user sees the proposal first; if they accept it, orbit runs the setup and each
+        step, which can take minutes: wait for the reply. It says what the user wants
+        changed, that they ended it, what failed, or that it passed and was accepted.
         """
         given = {"sets": sets, "triggers": triggers, "reports": reports}
         extras = {key: value for key, value in given.items() if value is not None}

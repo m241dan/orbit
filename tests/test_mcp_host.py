@@ -139,6 +139,17 @@ async def test_propose_task_says_to_name_the_skills_the_tasks_coder_needs() -> N
     ) in (tools["propose_task"].description or "")
 
 
+async def test_propose_checks_says_the_user_decides_before_orbit_runs_the_steps() -> None:
+    async with serving(RecordingHandler()) as url, connected(url) as client:
+        tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+    description = " ".join((tools["propose_checks"].description or "").split())
+    assert (
+        "The user sees the proposal first; if they accept it, orbit runs the setup and each"
+        " step, which can take minutes: wait for the reply."
+    ) in description
+    assert "then the user decides" not in description
+
+
 async def test_read_skill_says_it_reads_a_file_of_ones_skills_by_their_names() -> None:
     async with serving(RecordingHandler()) as url, connected(url) as client:
         tools = {tool.name: tool for tool in (await client.list_tools()).tools}
