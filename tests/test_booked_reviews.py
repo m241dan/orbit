@@ -7,6 +7,7 @@ does, in the work lane or the review lane, as a review does, unless it's left to
 
 import asyncio
 from collections.abc import Callable
+from datetime import timedelta
 
 import pytest
 
@@ -284,7 +285,7 @@ def auditing(
     return session
 
 
-async def no_wait(seconds: float) -> None:
+async def no_wait(duration: timedelta) -> None:
     """Waits no time at all."""
 
 

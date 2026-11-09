@@ -8,7 +8,7 @@ ports to do it, and reports what happened as events.
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from orbit.agent.application.closing import close_all
 from orbit.agent.application.coder_slots import CoderSeat, CoderSlots
@@ -77,8 +77,8 @@ from orbit.agent.application.switcher import (
     SwitchParts,
 )
 from orbit.agent.application.takeover import (
-    DECLINED_RETRY_SECONDS,
-    RETRY_SECONDS,
+    DECLINED_RETRY,
+    RETRY,
     RetryTimes,
     Takeover,
 )
@@ -118,6 +118,7 @@ from orbit.agent.domain.triggers import (
 )
 from orbit.agent.domain.usage_limits import Outages, RuntimeStop
 from orbit.agent.domain.verification import VerificationStep
+from orbit.execution.sleeping import Sleep, sleep_for
 from orbit.protocol import (
     INVALID,
     REVIEW_ROLES,
@@ -207,8 +208,9 @@ class HostParts:
     the ``clock``, ``new_id``, ``pinned``, ``pick_session``, ``name``, ``startup_notes`` and
     ``storage`` of its sessions, the ``fallback`` and ``recover`` of a halt, the ``owner``,
     ``lock``, ``lock_retry`` and ``lock_declined_retry`` of a takeover, whether it's
-    ``managed``, the ``ledger`` its usage is recorded in, the ``telemetry`` it's traced with
-    and the ``schedule_clock`` its ``schedule`` triggers tell the time by."""
+    ``managed``, the ``ledger`` its usage is recorded in, the ``telemetry`` it's traced with,
+    the ``schedule_clock`` its ``schedule`` triggers tell the time by and what its takeover and
+    its copies' checks ``sleep`` with."""
 
     settings: Settings | None = None
     verification: Verification | None = None
@@ -228,12 +230,13 @@ class HostParts:
     recover: Callable[[], Awaitable[Sequence[str]]] = _nothing_parked
     owner: WorkspaceOwner | None = None
     lock: RepositoryLock | None = None
-    lock_retry: float = RETRY_SECONDS
-    lock_declined_retry: float = DECLINED_RETRY_SECONDS
+    lock_retry: timedelta = RETRY
+    lock_declined_retry: timedelta = DECLINED_RETRY
     managed: bool = False
     ledger: UsageLedger | None = None
     telemetry: Telemetry = _NO_TELEMETRY
     schedule_clock: ScheduleClock = _UTC_SCHEDULES
+    sleep: Sleep = sleep_for
 
 
 _NO_PARTS = HostParts()
@@ -346,7 +349,7 @@ class WorkspaceHost:
     notes no leftovers, since only the owner can tell its own running work from what earlier runs
     left. Given the
     repository's ``lock``, ``Takeover`` offers it once it's free, trying it every ``lock_retry``
-    seconds and after a decline waiting up to ``lock_declined_retry``, and ``Snapshot`` says
+    and after a decline waiting up to ``lock_declined_retry``, and ``Snapshot`` says
     while the offer is open; ``Handover`` answers ``TakeOwnership``, calling ``owned`` first.
     """
 
@@ -365,6 +368,7 @@ class WorkspaceHost:
             parts.lock,
             lambda event: self._events.put(event),
             RetryTimes(parts.lock_retry, parts.lock_declined_retry),
+            parts.sleep,
         )
         settings = parts.settings or Settings()
         self._settings = SessionSettings(settings, parts.pinned, self._model_aliases)
@@ -417,6 +421,7 @@ class WorkspaceHost:
         self._opens = parts.check_at_startup and not self._takeover.read_only
         self._check_asked = False  # Whether a trigger asked for the startup check.
         self._copies = self._role_copies(parts.clock)
+        self._sleep = parts.sleep
         self._copy_keeper = Background("copies", self._events.put)
         self._seats = self._conversation_seats()
         self._triggers = self._trigger_engine()
@@ -515,7 +520,9 @@ class WorkspaceHost:
         assert self._desk is not None  # Only agents make copies.
         desk = self._desk
         await copies.keep(
-            lambda: saved_copies(self._store, self._keeper.id), lambda: copy_ttls(desk.agents.roles)
+            lambda: saved_copies(self._store, self._keeper.id),
+            lambda: copy_ttls(desk.agents.roles),
+            sleep=self._sleep,
         )
 
     def _storage_halt(self) -> StorageHalt:

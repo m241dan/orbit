@@ -20,7 +20,7 @@ for the pause to end."""
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from orbit.agent.application.desk import AgentDesk, Agents
 from orbit.agent.application.lane_runner import Kickable
@@ -419,7 +419,7 @@ class WorkTurns:
             if stopped is not None:
                 await asyncio.wait([stopped])
             pause = self._pause
-            await pause.sleep(max(0.0, (at - pause.now()).total_seconds()))
+            await pause.sleep(max(timedelta(), at - pause.now()))
         except Exception:  # Failed, it no longer keeps work waiting; reported as it goes on.
             self._waiting = False
             self._pause_as(None)

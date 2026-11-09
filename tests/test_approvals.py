@@ -2,6 +2,7 @@
 denied, after an hour with no frontend connected."""
 
 import asyncio
+from datetime import timedelta
 
 from orbit.agent.application.approvals import Approvals, Held, Timer
 from orbit.agent.application.consultations import consultation_of
@@ -21,14 +22,14 @@ class Clock:
 
     def __init__(self) -> None:
         self.now = 0.0
-        self.slept: list[float] = []
+        self.slept: list[timedelta] = []
 
     def __call__(self) -> float:
         return self.now
 
-    async def sleep(self, seconds: float) -> None:
-        self.slept.append(seconds)
-        self.now += seconds
+    async def sleep(self, duration: timedelta) -> None:
+        self.slept.append(duration)
+        self.now += duration.total_seconds()
         await asyncio.sleep(0)
 
 
@@ -100,7 +101,31 @@ async def test_one_held_expires_an_hour_after_the_last_frontend_leaves() -> None
     held.clock.now = 100
     held.approvals.note_viewers(0)
     await eventually(lambda: held.expired, poll=0)
-    assert held.clock.now == 100 + EXPIRY
+    assert held.clock.now == 100 + EXPIRY.total_seconds()
+
+
+async def test_one_held_after_the_last_frontend_left_expires_an_hour_after_its_hold() -> None:
+    held = Holding()
+    held.approvals.note_viewers(1)
+    held.clock.now = 100
+    held.approvals.note_viewers(0)
+    held.clock.now = 250
+    held.approvals.hold(request(1), "work")
+    await eventually(lambda: held.expired, poll=0)
+    assert held.clock.slept == [timedelta(hours=1)]
+    assert held.clock.now == 250 + 3600
+
+
+async def test_one_held_before_the_last_frontend_left_expires_an_hour_after_it_left() -> None:
+    held = Holding()
+    held.approvals.note_viewers(1)
+    held.clock.now = 100
+    held.approvals.hold(request(1), "work")
+    held.clock.now = 250
+    held.approvals.note_viewers(0)
+    await eventually(lambda: held.expired, poll=0)
+    assert held.clock.slept == [timedelta(hours=1)]
+    assert held.clock.now == 250 + 3600
 
 
 async def test_a_frontend_connecting_stops_the_hour_running() -> None:
@@ -132,7 +157,7 @@ async def test_those_held_expire_in_turn_each_an_hour_after_its_hold() -> None:
     held.approvals.note_viewers(0)
     await eventually(lambda: len(held.expired) == 2, poll=0)
     assert [h.work for h in held.expired] == ["first", "second"]
-    assert held.clock.slept == [EXPIRY, 600]
+    assert held.clock.slept == [EXPIRY, timedelta(seconds=600)]
 
 
 async def test_clearing_forgets_those_held_and_stops_their_hour() -> None:
@@ -206,7 +231,7 @@ async def test_those_due_together_expire_and_the_next_is_timed() -> None:
     held.clock.now = 0
     await eventually(lambda: len(held.expired) == 3, poll=0)
     assert [h.work for h in held.expired] == ["first", "second", "third"]
-    assert held.clock.slept == [EXPIRY, 600]
+    assert held.clock.slept == [EXPIRY, timedelta(seconds=600)]
 
 
 async def test_a_failed_expiry_leaves_the_rest_held_and_timed() -> None:

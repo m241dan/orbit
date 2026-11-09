@@ -76,11 +76,11 @@ class Waits:
     """A pause whose clock stands at :data:`START` and whose sleeps last until released."""
 
     def __init__(self) -> None:
-        self.slept: list[float] = []
+        self.slept: list[timedelta] = []
         self.release = asyncio.Event()
 
-    async def sleep(self, seconds: float) -> None:
-        self.slept.append(seconds)
+    async def sleep(self, duration: timedelta) -> None:
+        self.slept.append(duration)
         await self.release.wait()
 
     @property
@@ -181,7 +181,7 @@ async def test_the_run_starts_again_by_itself_at_the_reset_the_usage_shows() -> 
     second = await asyncio.wait_for(resumed(session, waits), 5)
     await session.close()
 
-    assert waits.slept == [(resets + timedelta(minutes=1) - START).total_seconds()]
+    assert waits.slept == [resets + timedelta(minutes=1) - START]
     assert RESUMING_NOTE in notes(second)
     assert [launch.agent.task_id for launch in launcher.launches] == ["1", "1", "2"]
     assert statuses(second) == ["completed", "completed"]
@@ -272,9 +272,9 @@ class SlowWaits(Waits):
         super().__init__()
         self.unwinding = asyncio.Event()
 
-    async def sleep(self, seconds: float) -> None:
+    async def sleep(self, duration: timedelta) -> None:
         try:
-            await super().sleep(seconds)
+            await super().sleep(duration)
         except asyncio.CancelledError:
             self.unwinding.set()
             await asyncio.Event().wait()

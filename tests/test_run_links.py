@@ -4,6 +4,7 @@ after Claude's usage limit or an outage of its API stopped it."""
 
 import asyncio
 from collections.abc import Mapping
+from datetime import timedelta
 from typing import Any
 
 from opentelemetry.sdk.trace import ReadableSpan
@@ -56,7 +57,7 @@ class Waits:
     def __init__(self) -> None:
         self.release = asyncio.Event()
 
-    async def sleep(self, seconds: float) -> None:
+    async def sleep(self, duration: timedelta) -> None:
         await self.release.wait()
 
     @property

@@ -61,8 +61,8 @@ class Waits:
     def __init__(self) -> None:
         self.minutes: list[float] = []
 
-    async def sleep(self, seconds: float) -> None:
-        self.minutes.append(seconds / 60)
+    async def sleep(self, duration: timedelta) -> None:
+        self.minutes.append(duration / timedelta(minutes=1))
         await asyncio.Event().wait()
 
     @property

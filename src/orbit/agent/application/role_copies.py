@@ -3,11 +3,10 @@ after it, and one for each conversational role's conversation, made at its first
 the session across turns, switches and restarts, and removed on a reset or once its role's copy
 TTL has passed since the conversation's last turn."""
 
-import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from orbit.agent.application.ports import (
     CoderTree,
@@ -20,10 +19,11 @@ from orbit.agent.application.ports import (
 from orbit.agent.domain.copies import expired_roles, unrecorded
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.sessions import SavedCopy, SessionRecord, Unreadable
+from orbit.execution.sleeping import Sleep, sleep_for
 from orbit.protocol import GIT_FAILED, ErrorOccurred
 
-CHECK_EVERY = 3600.0
-"""How often, in seconds, the copies are checked for removal while orbit runs."""
+CHECK_EVERY = timedelta(hours=1)
+"""How often the copies are checked for removal while orbit runs."""
 
 Clock = Callable[[], datetime]
 """What tells the time."""
@@ -196,14 +196,15 @@ class RoleCopies:
         self,
         others: Callable[[], Awaitable[OtherCopies]],
         ttls: Callable[[], Mapping[str, float]],
-        every: float = CHECK_EVERY,
+        every: timedelta = CHECK_EVERY,
+        sleep: Sleep = sleep_for,
     ) -> None:
         """Sweep the copies, as :meth:`sweep` does, with the copies of the ``others`` sessions
-        and the ``ttls`` now, then remove this session's past their TTL ``every`` so many
-        seconds, until cancelled."""
+        and the ``ttls`` now, then remove this session's past their TTL ``every`` so long, waited
+        out with ``sleep``, until cancelled."""
         await self.sweep(await others(), ttls())
         while True:
-            await asyncio.sleep(every)
+            await sleep(every)
             await self.expire(ttls())
 
     async def _make(self) -> str:

@@ -84,8 +84,8 @@ class Sleeps:
         self.now = START
         self.until: list[datetime] = []
 
-    async def sleep(self, seconds: float) -> None:
-        self.until.append(self.now + timedelta(seconds=seconds))
+    async def sleep(self, duration: timedelta) -> None:
+        self.until.append(self.now + duration)
         await self.release.wait()
         if self.error is not None:
             raise self.error

@@ -1,19 +1,20 @@
 """Taking over a repository: a read-only orbit waits for the one owning it to go, then offers
 the user to own it in its place."""
 
-import asyncio
 from dataclasses import dataclass
+from datetime import timedelta
 from enum import Enum, auto
 
 from orbit.agent.application.lanes import Background
 from orbit.agent.application.ports import Publish, RepositoryLock
 from orbit.agent.domain.refusals import Refused
+from orbit.execution.sleeping import Sleep, sleep_for
 from orbit.protocol import INVALID, OwnershipOffered
 
-RETRY_SECONDS = 5.0
+RETRY = timedelta(seconds=5)
 """How long a read-only orbit waits between tries of the repository's lock."""
 
-DECLINED_RETRY_SECONDS = 300.0
+DECLINED_RETRY = timedelta(minutes=5)
 """How long a read-only orbit waits after a declined offer before offering a repository that
 has stayed free since."""
 
@@ -22,11 +23,11 @@ NO_OFFER = "No offer of the repository is open: another orbit still owns it."
 
 @dataclass(frozen=True)
 class RetryTimes:
-    """How many seconds to wait between tries of the lock, ``interval``, and after a declined
-    offer before offering a repository that has stayed free since, ``declined``."""
+    """How long to wait between tries of the lock, ``interval``, and after a declined offer
+    before offering a repository that has stayed free since, ``declined``."""
 
-    interval: float = RETRY_SECONDS
-    declined: float = DECLINED_RETRY_SECONDS
+    interval: timedelta = RETRY
+    declined: timedelta = DECLINED_RETRY
 
 
 DEFAULT_TIMES = RetryTimes()
@@ -35,11 +36,11 @@ DEFAULT_TIMES = RetryTimes()
 
 class Takeover:
     """Whether this orbit is read-only, as another orbit owns the repository, until it takes
-    the repository over. While ``read_only``, it tries ``lock`` every ``times.interval``
-    seconds, once started; once it's taken, holds it and publishes ``OwnershipOffered`` with
-    ``publish``, once, until the offer is answered. After a decline, it offers again only once
-    another orbit has held the lock since, or after ``times.declined`` seconds. Without a
-    ``lock``, or once owning, it never offers anything."""
+    the repository over. While ``read_only``, it tries ``lock`` every ``times.interval``,
+    waited out with ``sleep``, once started; once it's taken, holds it and publishes
+    ``OwnershipOffered`` with ``publish``, once, until the offer is answered. After a decline, it
+    offers again only once another orbit has held the lock since, or after ``times.declined``.
+    Without a ``lock``, or once owning, it never offers anything."""
 
     def __init__(
         self,
@@ -47,11 +48,13 @@ class Takeover:
         lock: RepositoryLock | None,
         publish: Publish,
         times: RetryTimes = DEFAULT_TIMES,
+        sleep: Sleep = sleep_for,
     ) -> None:
         self._read_only = read_only
         self._lock = lock if read_only else None
         self._publish = publish
         self._times = times
+        self._sleep = sleep
         self._background = Background("ownership", publish)
         self._offered = False
 
@@ -88,20 +91,21 @@ class Takeover:
         """Stop trying the lock."""
         await self._background.close()
 
-    async def _retry(self, hold_off: float = 0.0) -> None:
-        """Try the lock every interval until it's taken, then offer the repository; for
-        ``hold_off`` seconds, a lock taken is let go again unless another orbit has held it
-        since."""
+    async def _retry(self, hold_off: timedelta = timedelta()) -> None:
+        """Try the lock every interval until it's taken, then offer the repository; until the
+        intervals waited add up to ``hold_off``, a lock taken is let go again unless another
+        orbit has held it since."""
         assert self._lock is not None  # Only started with a lock.
-        loop = asyncio.get_running_loop()
-        offer_from = loop.time() + hold_off
+        interval = self._times.interval
+        left = hold_off
         while True:
-            await asyncio.sleep(self._times.interval)
+            await self._sleep(interval)
+            left -= interval
             attempt = _attempt(self._lock)
             if attempt is _Attempt.HELD:
-                offer_from = loop.time()
+                left = timedelta()
             elif attempt is _Attempt.TAKEN:
-                if loop.time() >= offer_from:
+                if left <= timedelta():
                     break
                 # Still free since the decline: keep watching without holding it.
                 self._lock.close()

@@ -21,6 +21,7 @@ from orbit.agent.application.role_copies import (
 from orbit.agent.domain.sessions import SavedCopy, SessionRecord
 from orbit.protocol import GIT_FAILED, ErrorOccurred, Event
 from tests.agent_fakes import ROLES, FakeCopies, FakeStore, FakeTree
+from tests.naps import Naps
 from tests.waiting import eventually
 
 START = datetime(2026, 10, 25, 12, 0, tzinfo=UTC)
@@ -209,7 +210,7 @@ async def test_a_sweep_says_why_an_expired_recorded_copy_cant_be_removed() -> No
     assert ledger.events == [ErrorOccurred(code=GIT_FAILED, message=message)]
 
 
-async def test_keeping_sweeps_at_once_then_expires_the_sessions_copies_every_period() -> None:
+async def test_keeping_sweeps_at_once_then_expires_the_sessions_copies_every_hour() -> None:
     ledger = Ledger("/stray")
     path = await ledger.copies.enter("experimenter")
     ledger.copies.leave("experimenter")
@@ -220,7 +221,8 @@ async def test_keeping_sweeps_at_once_then_expires_the_sessions_copies_every_per
         return OtherCopies()
 
     ttls: Mapping[str, float] = {"experimenter": 1}
-    keeping = asyncio.create_task(ledger.copies.keep(others, lambda: ttls, every=0.01))
+    naps = Naps()
+    keeping = asyncio.create_task(ledger.copies.keep(others, lambda: ttls, sleep=naps.sleep))
     await swept.wait()
     ledger.clock.move(2)
     await eventually(lambda: path in ledger.made.removed)
@@ -228,6 +230,7 @@ async def test_keeping_sweeps_at_once_then_expires_the_sessions_copies_every_per
     with pytest.raises(asyncio.CancelledError):
         await keeping
     assert ledger.made.removed == ["/stray", path]
+    assert naps.slept and set(naps.slept) == {timedelta(hours=1)}
 
 
 async def test_a_fresh_copy_is_removed_after_its_body_however_it_ends() -> None:

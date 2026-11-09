@@ -40,14 +40,14 @@ class Clock:
 
     def __init__(self) -> None:
         self.now = 0.0
-        self.slept: list[float] = []
+        self.slept: list[timedelta] = []
 
     def __call__(self) -> float:
         return self.now
 
-    async def sleep(self, seconds: float) -> None:
-        self.slept.append(seconds)
-        self.now += seconds
+    async def sleep(self, duration: timedelta) -> None:
+        self.slept.append(duration)
+        self.now += duration.total_seconds()
         await asyncio.sleep(0)
 
 
@@ -133,7 +133,7 @@ async def test_one_held_with_no_frontend_connected_expires_after_an_hour() -> No
     assert await task == "expired"
     assert holding.clock.slept == [EXPIRY]
     assert holding.posted[-1] == ToolCallDecided(call=1, decision="expired")
-    assert holding.rulings == [Ruling("expired", timedelta(seconds=EXPIRY))]
+    assert holding.rulings == [Ruling("expired", EXPIRY)]
 
 
 async def test_one_held_doesnt_expire_while_a_frontend_is_connected() -> None:

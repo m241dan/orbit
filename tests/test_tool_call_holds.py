@@ -49,8 +49,8 @@ class Clock:
     def __call__(self) -> float:
         return self.now
 
-    async def sleep(self, seconds: float) -> None:
-        self.now += seconds
+    async def sleep(self, duration: timedelta) -> None:
+        self.now += duration.total_seconds()
         await asyncio.sleep(0)
 
 
@@ -248,4 +248,4 @@ async def test_an_expired_calls_span_says_so_after_an_hour() -> None:
     [span] = holding.traced.spans(CALL_SPAN)
     assert span.attributes is not None
     assert span.attributes["orbit.mcp.approval"] == "expired"
-    assert span.attributes["orbit.mcp.approval_wait_ms"] == EXPIRY * 1000
+    assert span.attributes["orbit.mcp.approval_wait_ms"] == EXPIRY // timedelta(milliseconds=1)

@@ -4,6 +4,7 @@ name."""
 
 import asyncio
 from collections.abc import Callable
+from datetime import timedelta
 
 import pytest
 
@@ -189,7 +190,7 @@ class Paused:
     def __init__(self) -> None:
         self.released = asyncio.Event()
 
-    async def sleep(self, seconds: float) -> None:
+    async def sleep(self, duration: timedelta) -> None:
         await self.released.wait()
 
     @property

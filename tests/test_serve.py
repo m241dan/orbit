@@ -15,6 +15,7 @@ import threading
 import urllib.request
 from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass, field, replace
+from datetime import timedelta
 from pathlib import Path
 from types import TracebackType
 from typing import Any, cast
@@ -437,7 +438,7 @@ def quick_retries(monkeypatch: pytest.MonkeyPatch) -> None:
     """Have a read-only serve try the repository's lock every 50ms rather than every 5s."""
     defaults = HostParts.__init__.__kwdefaults__
     assert defaults is not None
-    monkeypatch.setitem(defaults, "lock_retry", 0.05)
+    monkeypatch.setitem(defaults, "lock_retry", timedelta(milliseconds=50))
 
 
 @pytest.mark.usefixtures("quick_retries")

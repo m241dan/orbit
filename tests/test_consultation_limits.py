@@ -4,6 +4,7 @@ after an hour with no frontend connected, the asker hears it was interrupted."""
 
 import asyncio
 from collections.abc import Callable
+from datetime import timedelta
 
 import pytest
 
@@ -208,8 +209,8 @@ class Clock:
     def __call__(self) -> float:
         return self.now
 
-    async def sleep(self, seconds: float) -> None:
-        self.now += seconds
+    async def sleep(self, duration: timedelta) -> None:
+        self.now += duration.total_seconds()
         await asyncio.sleep(0)
 
 
@@ -244,7 +245,7 @@ async def test_one_held_with_no_frontend_connected_expires_denied_after_an_hour(
     await seats.close()
 
     assert heard == [Reply(ASKED.format(1)), held(2)]
-    assert clock.now == EXPIRY
+    assert clock.now == EXPIRY.total_seconds()
     assert ApprovalDecided(consultation=2, decision="deny") in taken
     answer = sole([e for e in taken if answering(2)(e)], ConsultationAnswered)
     assert answer.interrupted == "it expired waiting for approval"
@@ -298,7 +299,7 @@ async def test_one_held_as_storage_halts_expires_only_once_the_halt_lifts() -> N
 
     assert not any(isinstance(e, ApprovalDecided) for e in halted)
     assert ApprovalDecided(consultation=2, decision="deny") in taken
-    assert clock.now == EXPIRY
+    assert clock.now == EXPIRY.total_seconds()
 
 
 def asking(heard: list[Reply], consultant: str, *messages: str) -> Script:

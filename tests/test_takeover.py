@@ -2,11 +2,12 @@
 
 import asyncio
 from collections.abc import Sequence
+from datetime import timedelta
 
 from orbit.agent import HostParts, WorkspaceHost
 from orbit.agent.application.ports import StoreFailed
 from orbit.agent.application.recovery import RecoveryFailed
-from orbit.agent.application.takeover import NO_OFFER, RetryTimes, Takeover
+from orbit.agent.application.takeover import NO_OFFER, Takeover
 from orbit.agent.application.work_turns import TASKS_RUNNING_MESSAGE
 from orbit.agent.domain.ownership import OWNED_NOTE, queued_dropped_note
 from orbit.agent.domain.reviews import SuperReviewCount
@@ -69,6 +70,7 @@ from tests.agent_fakes import (
 from tests.attach_fakes import EARLIER, stored
 from tests.connection_helpers import views_on_joining
 from tests.loop_quiet import quiet_within
+from tests.naps import Naps
 from tests.waiting import eventually
 
 
@@ -95,7 +97,7 @@ async def test_a_read_only_session_offers_the_repository_once_its_owner_goes() -
     lock = FakeLock()
     session, _, _ = session_for(owner=OWNER, lock=lock)
     await greeted(session)
-    await eventually(lambda: lock.tries >= 3, poll=LOCK_RETRY)
+    await eventually(lambda: lock.tries >= 3, poll=LOCK_RETRY.total_seconds())
     assert not any(offered(event) for event in queued(session))
 
     lock.free = True
@@ -292,7 +294,7 @@ async def test_a_declined_repository_left_free_is_not_offered_again_soon() -> No
     await declined(session)
     tries = lock.tries
 
-    await eventually(lambda: lock.tries > tries + 5, poll=LOCK_RETRY)
+    await eventually(lambda: lock.tries > tries + 5, poll=LOCK_RETRY.total_seconds())
     assert lock.tries > tries + 5
     assert not any(offered(event) for event in queued(session))
     assert lock.free and not lock.held
@@ -305,11 +307,20 @@ async def test_a_declined_repository_is_offered_again_once_another_orbit_has_hel
     await declined(session)
     lock.free = False
     tries = lock.tries
-    await eventually(lambda: lock.tries >= tries + 2, poll=LOCK_RETRY)
+    await eventually(lambda: lock.tries >= tries + 2, poll=LOCK_RETRY.total_seconds())
 
     lock.free = True
     await events_until(session, offered)
     assert lock.held and session.read_only
+    await session.close()
+
+
+async def test_a_read_only_session_waits_between_tries_with_the_sleep_it_was_given() -> None:
+    naps = Naps()
+    session, _, _ = session_for(owner=OWNER, lock=FakeLock(free=True), sleep=naps.sleep)
+    await greeted(session)
+    await events_until(session, offered)
+    assert naps.slept == [LOCK_RETRY]
     await session.close()
 
 
@@ -328,7 +339,7 @@ async def test_a_lock_that_cant_be_taken_is_tried_again() -> None:
     lock.failing = True
     session, _, _ = session_for(owner=OWNER, lock=lock)
     await greeted(session)
-    await eventually(lambda: lock.tries > 1, poll=LOCK_RETRY)
+    await eventually(lambda: lock.tries > 1, poll=LOCK_RETRY.total_seconds())
     assert lock.tries > 1
 
     lock.failing = False
@@ -357,16 +368,46 @@ async def test_an_owner_never_tries_the_lock_or_offers_it() -> None:
     await session.close()
 
 
-async def offered_takeover(events: list[Event], lock: FakeLock) -> Takeover:
-    """A read-only Takeover of ``lock``, publishing into ``events``, once it has offered it."""
+async def publish_nothing(event: Event) -> None:
+    raise AssertionError(event)
+
+
+async def offered_takeover(
+    events: list[Event], lock: FakeLock, naps: Naps | None = None
+) -> Takeover:
+    """A read-only Takeover of ``lock``, publishing into ``events`` and sleeping with ``naps``,
+    once it has offered it."""
 
     async def publish(event: Event) -> None:
         events.append(event)
 
-    takeover = Takeover(True, lock, publish, RetryTimes(LOCK_RETRY))
+    takeover = Takeover(True, lock, publish, sleep=(naps or Naps()).sleep)
     takeover.start()
-    await eventually(lambda: takeover.offered, poll=LOCK_RETRY)
+    await eventually(lambda: takeover.offered, poll=0)
     return takeover
+
+
+async def test_a_takeover_tries_the_lock_every_five_seconds() -> None:
+    naps = Naps()
+    lock = FakeLock()
+    takeover = Takeover(True, lock, publish_nothing, sleep=naps.sleep)
+    takeover.start()
+    await eventually(lambda: lock.tries >= 3, poll=0)
+    await takeover.close()
+    assert set(naps.slept) == {timedelta(seconds=5)}
+
+
+async def test_a_declined_takeover_offers_again_after_five_minutes_of_the_lock_free() -> None:
+    naps, events = Naps(), list[Event]()
+    takeover = await offered_takeover(events, FakeLock(free=True), naps)
+    assert naps.slept == [timedelta(seconds=5)]
+
+    takeover.answer(False)
+    await eventually(lambda: takeover.offered, poll=0)
+    await takeover.close()
+    assert naps.slept[1:] == [timedelta(seconds=5)] * 60
+    assert sum(naps.slept[1:], timedelta()) == timedelta(minutes=5)
+    assert events == [OwnershipOffered(), OwnershipOffered()]
 
 
 async def test_a_takeover_with_an_owner_is_read_only_until_taken() -> None:
@@ -389,13 +430,10 @@ async def test_a_takeover_declined_stays_read_only() -> None:
 
 
 async def test_a_takeover_without_an_owner_is_not_read_only_and_never_tries_the_lock() -> None:
-    async def publish(event: Event) -> None:
-        raise AssertionError(event)
-
     lock = FakeLock(free=True)
-    takeover = Takeover(False, lock, publish, RetryTimes(LOCK_RETRY))
+    takeover = Takeover(False, lock, publish_nothing, sleep=Naps().sleep)
     takeover.start()
-    await quiet_within(LOCK_RETRY * 5)
+    await quiet_within(0.05)
     assert not takeover.read_only and lock.tries == 0
     await takeover.close()
 

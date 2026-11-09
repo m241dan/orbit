@@ -89,11 +89,11 @@ class Waits:
     released."""
 
     def __init__(self) -> None:
-        self.slept: list[float] = []
+        self.slept: list[timedelta] = []
         self.release = asyncio.Event()
 
-    async def sleep(self, seconds: float) -> None:
-        self.slept.append(seconds)
+    async def sleep(self, duration: timedelta) -> None:
+        self.slept.append(duration)
         await self.release.wait()
 
     @property
@@ -189,7 +189,7 @@ async def test_a_limit_whose_failure_states_its_reset_pauses_the_run_until_then(
     await session.close()
 
     assert notes(events)[-1] == paused_note(stated, CLAUDE)
-    assert waits.slept == [(stated - START).total_seconds()]
+    assert waits.slept == [stated - START]
 
 
 async def test_a_limit_on_another_runtime_isnt_timed_by_claudes_usage() -> None:
@@ -293,7 +293,7 @@ async def test_a_review_finding_claudes_api_down_pauses_claude_for_the_backoff()
     backoff = START + timedelta(minutes=2)
     assert notes(events)[-1] == outage_paused_note(backoff, OVERLOADED, CLAUDE)
     assert last_pause(events).paused_until == backoff
-    assert waits.slept == [120.0]
+    assert waits.slept == [timedelta(minutes=2)]
     assert statuses_of(session) == ["completed"]
 
 
@@ -565,8 +565,11 @@ async def test_a_lanes_outage_backoff_grows_and_starts_over_once_claude_answers(
     await session.close()
 
     assert statuses_of(session) == ["completed", "completed"]
-    assert waits.slept[:3] == [120.0, 300.0, 120.0]  # Claude answered between the two.
-    assert waits.slept[4:] == [120.0]  # The usage limit started the backoff over too.
+    # Claude answered between the two.
+    assert waits.slept[:3] == [timedelta(minutes=minutes) for minutes in (2, 5, 2)]
+    assert waits.slept[4:] == [
+        timedelta(minutes=2)
+    ]  # The usage limit started the backoff over too.
 
 
 async def test_an_orbit_queued_review_hitting_claudes_limit_suggests_into_its_batch_after() -> None:

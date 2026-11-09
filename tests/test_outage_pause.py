@@ -60,11 +60,11 @@ class Clock:
         self.waited: list[timedelta] = []
         self._released = asyncio.Event()
 
-    async def sleep(self, seconds: float) -> None:
-        self.waited.append(timedelta(seconds=seconds))
+    async def sleep(self, duration: timedelta) -> None:
+        self.waited.append(duration)
         await self._released.wait()
         self._released.clear()
-        self.now += timedelta(seconds=seconds)
+        self.now += duration
 
     def release(self) -> None:
         """End the sleep going on, or the next one."""

@@ -5,8 +5,10 @@ connected, it expires."""
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import timedelta
 
 from orbit.agent.domain.approvals import expires_at
+from orbit.execution.sleeping import Sleep, sleep_for
 
 
 @dataclass(frozen=True)
@@ -15,7 +17,7 @@ class Held[R, T]:
     it on once decided (``work``)."""
 
     request: R
-    held: float
+    held: timedelta
     work: T
 
 
@@ -26,10 +28,10 @@ def loop_time() -> float:
 
 @dataclass(frozen=True)
 class Timer:
-    """A ``clock``, in seconds, and what ``sleep``s for so many of them."""
+    """A ``clock``, in seconds, and what ``sleep``s for a length of time."""
 
     clock: Callable[[], float] = loop_time
-    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+    sleep: Sleep = sleep_for
 
 
 class Approvals[R, T]:
@@ -51,7 +53,8 @@ class Approvals[R, T]:
         self._sleep = timer.sleep
         self._number = number
         self._held: dict[int, Held[R, T]] = {}  # By number.
-        self._alone_since: float | None = float("-inf")  # None while a frontend is connected.
+        # None while a frontend is connected.
+        self._alone_since: timedelta | None = timedelta.min
         self._timer: asyncio.Task[None] | None = None
         self._timing = 0  # Bumped by each stop, ending any expiry in flight.
         self._paused = False
@@ -63,7 +66,7 @@ class Approvals[R, T]:
 
     def hold(self, request: R, work: T) -> None:
         """Hold what ``request`` asks about, with its ``work``, and publish ``request``."""
-        self._held[self._number(request)] = Held(request, self._clock(), work)
+        self._held[self._number(request)] = Held(request, self._now(), work)
         self._post(request)
         self._arm()
 
@@ -87,7 +90,7 @@ class Approvals[R, T]:
         if count:
             self._alone_since = None
         elif self._alone_since is None:
-            self._alone_since = self._clock()
+            self._alone_since = self._now()
         self._arm()
 
     def clear(self) -> None:
@@ -123,26 +126,30 @@ class Approvals[R, T]:
         if times:
             self._timer = asyncio.get_running_loop().create_task(self._expiring(min(times)))
 
-    async def _expiring(self, due: float) -> None:
+    async def _expiring(self, due: timedelta) -> None:
         """Expire the requests due by ``due``, once it comes, one at a time, then time the next;
         a stop while one expires ends it there, leaving the rest held."""
-        await self._sleep(max(0.0, due - self._clock()))
+        await self._sleep(max(timedelta(), due - self._now()))
         self._timer = None
         timing = self._timing
         try:
-            while timing == self._timing and (held := self._next_due(self._clock())):
+            while timing == self._timing and (held := self._next_due(self._now())):
                 await self._expire(held)
         finally:
             if timing == self._timing:
                 self._arm()
 
-    def _next_due(self, now: float) -> Held[R, T] | None:
+    def _now(self) -> timedelta:
+        """The time on the clock, as a length of time since its epoch."""
+        return timedelta(seconds=self._clock())
+
+    def _next_due(self, now: timedelta) -> Held[R, T] | None:
         """Stop holding the first request that expires by ``now``, returning it; none if none
         does."""
         due = [number for number, held in self._held.items() if self._expires(held, now)]
         return self._held.pop(due[0]) if due else None
 
-    def _expires(self, held: Held[R, T], now: float) -> bool:
+    def _expires(self, held: Held[R, T], now: timedelta) -> bool:
         """Whether ``held`` expires by ``now``."""
         ends = expires_at(held.held, self._alone_since)
         return ends is not None and ends <= now

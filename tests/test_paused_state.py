@@ -41,7 +41,7 @@ class Waits:
     def __init__(self) -> None:
         self.release = asyncio.Event()
 
-    async def sleep(self, seconds: float) -> None:
+    async def sleep(self, duration: timedelta) -> None:
         await self.release.wait()
 
     @property

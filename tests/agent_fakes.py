@@ -1060,10 +1060,10 @@ def verified(
     return Verification((STEP,), steps, workspace, fallback_fixes)
 
 
-LOCK_RETRY = 0.01
-"""How often a test's read-only session tries the repository's lock, in seconds."""
+LOCK_RETRY = timedelta(milliseconds=10)
+"""How often a test's read-only session tries the repository's lock."""
 
-LOCK_DECLINED_RETRY = 60.0
+LOCK_DECLINED_RETRY = timedelta(minutes=1)
 """How long a test's read-only session holds off offering a repository it was declined: longer
 than any test runs."""
 
@@ -1126,8 +1126,8 @@ def session_for(
     ``options`` naming a field of :class:`HostParts`, as :data:`HOST_OPTIONS` lists them, build
     the host, such as ``verification``, ``store``, ``owner``, ``lock`` or ``telemetry``. Unless
     they say otherwise, it's saved as ``session-1``, on a :class:`Ticks` clock, and, read-only,
-    tries its lock every :data:`LOCK_RETRY` seconds and offers the repository again
-    :data:`LOCK_DECLINED_RETRY` seconds after a decline.
+    tries its lock every :data:`LOCK_RETRY` and offers the repository again
+    :data:`LOCK_DECLINED_RETRY` after a decline.
 
     The other ``options`` go to :func:`agents_for`, and so to :class:`Agents`, such as
     ``limits``, ``tree`` or ``roles`` (:data:`ROLES` unless given).
