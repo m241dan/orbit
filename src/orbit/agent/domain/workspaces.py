@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 from orbit.agent.domain.activity import Activity, doing
-from orbit.agent.domain.refusals import Refused, joined, unknown
+from orbit.agent.domain.refusals import Refused, unknown
 from orbit.protocol import BUSY, INVALID, UNKNOWN, WRONG_SESSION
+from orbit.wording import join_in_words
 
 ATTACH_FIRST = "Attach a session first."
 """Why a command for a workspace is refused from a connection attached to none."""
@@ -82,7 +83,7 @@ def check_removable(workspace: str, activity: Activity, viewed: Sequence[str]) -
         raise Refused(BUSY, f"Can't remove {workspace}: {work}.")
     if viewed:
         sessions = "session" if len(viewed) == 1 else "sessions"
-        views = f"another frontend views its {sessions} {joined(viewed)}"
+        views = f"another frontend views its {sessions} {join_in_words(viewed)}"
         raise Refused(BUSY, f"Can't remove {workspace}: {views}.")
 
 

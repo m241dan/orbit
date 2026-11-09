@@ -203,6 +203,43 @@ def test_shared_wording_imports_no_orbit_package() -> None:
     assert not missing, f"{WORDING_CONTRACT!r} doesn't forbid {', '.join(missing)}"
 
 
+SOURCE = Path(orbit.__file__).parent
+HAND_WRITTEN_JOIN = re.compile(r"""['"], ['"]\.join\(.*\} and \{""")
+"""A line that joins words as "a, b and c" by hand, rather than with orbit.wording."""
+
+
+def _hand_written_joins(source: str) -> list[int]:
+    """The lines of ``source`` that join words as "a, b and c" by hand."""
+    return [
+        number
+        for number, line in enumerate(source.splitlines(), start=1)
+        if HAND_WRITTEN_JOIN.search(line)
+    ]
+
+
+def test_no_module_but_the_shared_wording_joins_words_by_hand() -> None:
+    joining = [
+        f"{path.relative_to(SOURCE)}:{line}"
+        for path in sorted(SOURCE.rglob("*.py"))
+        if path != SOURCE / "wording.py"
+        for line in _hand_written_joins(path.read_text())
+    ]
+    assert not joining, f"{', '.join(joining)} join words by hand; use orbit.wording.join_in_words"
+
+
+def test_hand_written_joins_are_found_however_they_are_quoted() -> None:
+    source = (
+        "def listed(names: list[str]) -> str:\n"
+        "    *rest, last = names\n"
+        "    return f\"{', '.join(rest)} and {last}\"\n"
+        "    return f'{\", \".join(rest)} and {last}'\n"
+        "    return f\"{', '.join(names)}\"\n"
+        '    return f"{a} and {b}"\n'
+        "    return join_in_words(names)\n"
+    )
+    assert _hand_written_joins(source) == [3, 4]
+
+
 def test_neither_the_domain_nor_the_protocol_may_import_execution() -> None:
     contract = _contract("Neither the domain nor the protocol uses execution")
     assert contract["type"] == "forbidden"

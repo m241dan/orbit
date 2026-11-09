@@ -22,6 +22,7 @@ from orbit.agent import (
 from orbit.cli.errors import _exit_on
 from orbit.cli.options import ConfigDirOption, StateDirOption
 from orbit.tui.view.common import counted
+from orbit.wording import join_in_words
 
 
 def version() -> None:
@@ -86,8 +87,7 @@ def _forgotten_note(purged: Purged) -> str:
     ]
     if purged.clone is not None:
         deleted.append(f"its clone {purged.clone}")
-    *rest, last = deleted
-    return f"Forgot {purged.workspace.path}: deleted {', '.join(rest)} and {last}."
+    return f"Forgot {purged.workspace.path}: deleted {join_in_words(deleted)}."
 
 
 def rotate(config_dir: ConfigDirOption = None) -> None:

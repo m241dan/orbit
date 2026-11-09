@@ -4,6 +4,7 @@ happened, and the reports of those nothing expected."""
 from collections.abc import Sequence
 
 from orbit.protocol import UNKNOWN
+from orbit.wording import join_in_words
 
 STOPPING = "Orbit is stopping."
 """Why a command is refused once what would handle it is closing."""
@@ -24,13 +25,7 @@ def unknown(problem: str, listing: str, choices: Sequence[str]) -> Refused:
     ``listing`` (such as "the lanes are") naming the choices, or that there are none."""
     if not choices:
         return Refused(UNKNOWN, f"{problem}; there are none.")
-    return Refused(UNKNOWN, f"{problem}; {listing} {joined(choices)}.")
-
-
-def joined(names: Sequence[str]) -> str:
-    """``names`` in order, as "a, b and c", or just "a" for one."""
-    *rest, last = names
-    return f"{', '.join(rest)} and {last}" if rest else last
+    return Refused(UNKNOWN, f"{problem}; {listing} {join_in_words(choices)}.")
 
 
 def reason(error: BaseException) -> str:

@@ -39,6 +39,7 @@ from orbit.agent import (
 )
 from orbit.cli.errors import _configured, _exit_on
 from orbit.cli.options import ConfigDirOption
+from orbit.wording import join_in_words
 
 CA_EXISTS = (
     "A CA already exists in {directory}; a new one would invalidate every client certificate it"
@@ -341,12 +342,6 @@ def _say_moved(old: Path | None) -> None:
         typer.echo(f"Moved the old files to {old}.")
 
 
-def _listed(names: Sequence[str]) -> str:
-    """``names``, two or more, as a list in prose."""
-    *rest, last = names
-    return f"{', '.join(rest)} and {last}"
-
-
 def _init_files(certs: CertsDir) -> tuple[Path, ...]:
     """The files in ``certs`` that init writes."""
     return (certs.ca, certs.ca_key, certs.server, certs.server_key)
@@ -365,7 +360,7 @@ def _init_note(certs: CertsDir, config: Path, names: tuple[str, ...]) -> str:
     table = tomlkit.dumps({"server": server})
     ca = tomlkit.dumps({"ca": str(certs.ca)}).strip()
     return (
-        f"Wrote a CA and a server certificate for {_listed(names)}:{files}\n\n"
+        f"Wrote a CA and a server certificate for {join_in_words(names)}:{files}\n\n"
         f"To serve mutual TLS with them, put these lines in {config}, in its [server] table if"
         f" it has one:\n\n{table}\n"
         f'For TLS without client certificates, use tls = "tls", with {ca} in place of client_ca.'
@@ -375,7 +370,7 @@ def _init_note(certs: CertsDir, config: Path, names: tuple[str, ...]) -> str:
 def _server_note(certs: CertsDir, names: tuple[str, ...]) -> str:
     """What's said once ``certs`` holds a new server certificate for ``names``."""
     return (
-        f"Wrote a server certificate for {_listed(names)}:\n"
+        f"Wrote a server certificate for {join_in_words(names)}:\n"
         f"  {certs.server}\n  {certs.server_key}\n\n"
         "Restart orbit serve for it to use them."
     )

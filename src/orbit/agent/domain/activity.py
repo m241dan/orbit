@@ -5,9 +5,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from orbit.agent.domain.refusals import joined
 from orbit.protocol import PLANNER
 from orbit.protocol import Activity as Reported
+from orbit.wording import join_in_words
 
 
 class Running(Enum):
@@ -40,7 +40,7 @@ def answering(roles: Sequence[str]) -> str:
     """What the conversational roles ``roles`` are called while they answer: "the planner is
     answering", or "the planner and the architect are answering" for several."""
     verb = "is" if len(roles) == 1 else "are"
-    return f"{joined([f'the {role}' for role in roles])} {verb} answering"
+    return f"{join_in_words([f'the {role}' for role in roles])} {verb} answering"
 
 
 def _stopping(roles: Sequence[str]) -> str:
