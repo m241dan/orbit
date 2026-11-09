@@ -39,6 +39,17 @@ def refusing(_: str) -> int:
     raise ValueError("unrecognized configuration name")
 
 
+def refusing_only(name: str) -> Callable[[str], int]:
+    """A ``sysconf`` that doesn't know ``name`` and gives ``PAGES`` for the others."""
+
+    def sysconf(asked: str) -> int:
+        if asked == name:
+            raise ValueError("unrecognized configuration name")
+        return PAGES[asked]
+
+    return sysconf
+
+
 def test_it_reads_the_cpus_the_process_may_use_and_the_physical_memory() -> None:
     machine = read_machine(affinity_of(3), lambda: 16, sysconf_of(PAGES))
     assert machine == Machine(3, Bytes(2_000_000 * 4096))
@@ -59,6 +70,25 @@ def test_an_unknown_sysconf_name_leaves_the_memory_out() -> None:
 def test_a_non_positive_page_count_leaves_the_memory_out() -> None:
     pages = sysconf_of({"SC_PHYS_PAGES": -1, "SC_PAGE_SIZE": -1})
     assert read_machine(affinity_of(2), lambda: 2, pages).memory is None
+
+
+def test_a_zero_page_size_leaves_the_memory_out() -> None:
+    pages = sysconf_of({"SC_PHYS_PAGES": 2_000_000, "SC_PAGE_SIZE": 0})
+    assert read_machine(affinity_of(2), lambda: 2, pages).memory is None
+
+
+def test_an_unknown_page_size_alone_leaves_the_memory_out() -> None:
+    sysconf = refusing_only("SC_PAGE_SIZE")
+    assert read_machine(affinity_of(2), lambda: 2, sysconf).memory is None
+
+
+def test_an_unknown_page_count_alone_leaves_the_memory_out() -> None:
+    sysconf = refusing_only("SC_PHYS_PAGES")
+    assert read_machine(affinity_of(2), lambda: 2, sysconf).memory is None
+
+
+def test_with_an_empty_affinity_it_counts_the_cpus() -> None:
+    assert read_machine(affinity_of(0), lambda: 8, sysconf_of(PAGES)).cpus == 8
 
 
 def test_with_everything_failing_it_knows_nothing() -> None:
