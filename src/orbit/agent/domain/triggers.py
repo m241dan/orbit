@@ -928,7 +928,7 @@ def needs_paths(found: Iterable[tuple[str, Trigger]]) -> bool:
 
 
 def reads_paths(trigger: Trigger) -> bool:
-    """Whether whether ``trigger`` fires on a landing depends on the paths its commits changed:
+    """Whether ``trigger`` fires on a landing depends on the paths its commits changed:
     it has ``paths``, or ``code-changed`` guards it."""
     return trigger.paths is not None or _code_guarded(trigger)
 

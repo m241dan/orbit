@@ -20,7 +20,7 @@ USER_CONFIG_FILE = "config.toml"
 
 USER_REFERENCE = files(__package__) / "reference" / "user-config.toml"
 """The user reference config shipped with orbit, as
-:func:`~orbit.agent.external.user_reference.user_reference` generates it."""
+:func:`~orbit.agent.external.user_reference.render_user_reference` generates it."""
 
 
 def read_storage(config_dir: Path) -> StorageSettings:
@@ -41,10 +41,10 @@ def read_server(config_dir: Path) -> ServerSettings:
     when the browsable root isn't a directory.
     """
     settings = read_user_config(config_dir, load_server, ServerSettings())
-    return _browsable(_resolved(settings, SERVER_PATHS, config_dir), config_dir)
+    return _resolve_browse_root(_resolve_paths(settings, SERVER_PATHS, config_dir), config_dir)
 
 
-def _browsable(settings: ServerSettings, config_dir: Path) -> ServerSettings:
+def _resolve_browse_root(settings: ServerSettings, config_dir: Path) -> ServerSettings:
     """``settings`` with their browsable root, if any, with its symlinks followed.
 
     Raises :class:`ConfigError`, naming ``config_dir``'s file, unless it's an absolute path to
@@ -67,7 +67,9 @@ def read_remotes(config_dir: Path) -> dict[str, RemoteSettings]:
     Raises :class:`ConfigError`, naming the file, if it can't be read or is invalid.
     """
     remotes: dict[str, RemoteSettings] = read_user_config(config_dir, load_remotes, {})
-    return {name: _resolved(remote, REMOTE_PATHS, config_dir) for name, remote in remotes.items()}
+    return {
+        name: _resolve_paths(remote, REMOTE_PATHS, config_dir) for name, remote in remotes.items()
+    }
 
 
 def read_user_roles(config_dir: Path, built_in: Collection[str]) -> UserRoles:
@@ -80,7 +82,7 @@ def read_user_roles(config_dir: Path, built_in: Collection[str]) -> UserRoles:
     can't be read or is invalid, as it is when it sets a built-in role's field other than its
     model, effort and runtime, or a runtime this version of orbit doesn't know.
     """
-    layer = user_layer(config_dir)
+    layer = read_user_layer(config_dir)
 
     def load(data: dict[str, Any]) -> UserRoles:
         return load_user_roles(with_instructions(data, config_dir, built_in), layer, built_in)
@@ -99,12 +101,12 @@ def read_user_models(config_dir: Path) -> dict[str, dict[str, str]]:
     return read_user_config(config_dir, load_model_tables, {})
 
 
-def user_layer(config_dir: Path) -> Layer:
+def read_user_layer(config_dir: Path) -> Layer:
     """The layer of the user config in ``config_dir``, named by its file."""
     return Layer("user", str(config_dir / USER_CONFIG_FILE))
 
 
-def _resolved[M: BaseModel](settings: M, keys: tuple[str, ...], config_dir: Path) -> M:
+def _resolve_paths[M: BaseModel](settings: M, keys: tuple[str, ...], config_dir: Path) -> M:
     """``settings`` with the path each of its ``keys`` gives taken from ``config_dir`` after
     expanding ``~``."""
     given = {key: getattr(settings, key) for key in keys}

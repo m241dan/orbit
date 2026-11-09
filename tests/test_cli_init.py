@@ -19,7 +19,7 @@ from orbit.agent.external.built_in_roles import read_built_in_roles, read_instru
 from orbit.agent.external.config_file import read_config
 from orbit.agent.external.reference_config import reference_config
 from orbit.agent.external.skill_files import SKILL_DIRECTORY, skill_names, skill_paths
-from orbit.agent.external.user_reference import user_reference
+from orbit.agent.external.user_reference import render_user_reference
 from orbit.cli import app
 from orbit.protocol import BUILT_IN_ROLE_NAMES
 from tests.git_repo import init_repo
@@ -556,7 +556,7 @@ def test_the_written_config_loads_and_a_tools_table_uncommented_changes_only_its
     )
 
 
-USER_REFERENCE = user_reference()
+USER_REFERENCE = render_user_reference()
 
 
 def init_user(*args: str, env: dict[str, str] | None = None) -> Result:

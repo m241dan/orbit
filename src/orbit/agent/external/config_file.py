@@ -26,7 +26,7 @@ from orbit.agent.external.role_instructions import with_instructions, with_promp
 from orbit.agent.external.runtimes import read_runtime_rules
 from orbit.agent.external.skill_files import read_skill_library
 from orbit.agent.external.toml_files import read_toml
-from orbit.agent.external.user_config import read_user_config, read_user_roles, user_layer
+from orbit.agent.external.user_config import read_user_config, read_user_layer, read_user_roles
 from orbit.agent.external.whole_files import write_whole
 
 CONFIG_PATH = ".orbit/config.toml"
@@ -79,7 +79,7 @@ def read_config_sources(root: str, config_dir: Path) -> ConfigSources:
         layered.config,
         layered.role_layers,
         Written(Layer("project", str(path)), project),
-        Written(user_layer(config_dir), read_user_config(config_dir, dict, {})),
+        Written(read_user_layer(config_dir), read_user_config(config_dir, dict, {})),
         read_instruction_files(),
         layered.trigger_layers,
         read_template_files(),

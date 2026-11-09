@@ -31,10 +31,10 @@ from orbit.tui.view.tasks import (
     follow_top,
     in_lane,
     lanes_present,
+    map_role_skills,
     new_task_row,
     next_lane,
     role_lanes,
-    role_skills,
     role_tag,
     session_usage_subtitle,
     task_label,
@@ -237,7 +237,7 @@ def test_each_roles_skills_come_from_the_catalogs_agents() -> None:
         AgentEntry(name=CODER, label="Coder", conversational=False),
         AgentEntry(name=REVIEWER, label="Reviewer", conversational=False, skills=("code-style",)),
     )
-    assert role_skills(agents) == {CODER: (), REVIEWER: ("code-style",)}
+    assert map_role_skills(agents) == {CODER: (), REVIEWER: ("code-style",)}
 
 
 def test_the_roles_whose_usage_is_unknown_come_from_the_catalogs_agents() -> None:

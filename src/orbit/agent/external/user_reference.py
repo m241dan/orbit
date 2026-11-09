@@ -73,7 +73,7 @@ EXAMPLE_SERVER = McpServer(command=("/opt/bin/github-mcp", "stdio"))
 """The example of a project's MCP server pointed at this machine's copy."""
 
 
-def user_reference() -> str:
+def render_user_reference() -> str:
     """The user reference config: a short header; the ``[storage]``, ``[server]``,
     ``[telemetry]`` and ``[roles]`` tables with each field at its default, unset if it has
     none; then examples of a built-in role's model, a personal role, an alias of a runtime's
@@ -82,7 +82,7 @@ def user_reference() -> str:
     """
     sections = [
         comments(USER_HEADER),
-        *(_table(header, model) for header, model in TABLES),
+        *(_render_table(header, model) for header, model in TABLES),
         example_table(
             "A built-in role's model, effort or runtime, for that role alone.",
             "[roles.planner]",
@@ -94,7 +94,7 @@ def user_reference() -> str:
             EXAMPLE_PERSONAL_FIELDS,
             PERSONAL_DESCRIPTIONS,
         ),
-        _alias_example(),
+        _render_alias_example(),
         example_table(
             "A control plane orbit chat --remote work joins.",
             "[remotes.work]",
@@ -112,17 +112,17 @@ def user_reference() -> str:
 def write_user_reference(path: Path) -> None:
     """Writes the user reference config to ``path``."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(user_reference(), encoding="utf-8")
+    path.write_text(render_user_reference(), encoding="utf-8")
 
 
-def _table(header: str, model: type[BaseModel]) -> list[str]:
+def _render_table(header: str, model: type[BaseModel]) -> list[str]:
     """The table under ``header``, each of ``model``'s fields at its default under its
     description, unset if it has none."""
     defaults: Mapping[str, Any] = model().model_dump(mode="json")
     return [f"# [{header}]", *described(defaults, field_descriptions(model))]
 
 
-def _alias_example() -> list[str]:
+def _render_alias_example() -> list[str]:
     """The example of an alias added to a runtime's models, under its description."""
     alias, model = EXAMPLE_ALIAS
     return [

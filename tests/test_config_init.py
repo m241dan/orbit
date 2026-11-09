@@ -41,7 +41,7 @@ from orbit.agent.external.config_init import (
 from orbit.agent.external.reference_config import LATER_HEADING, reference_config
 from orbit.agent.external.skill_files import SKILL_DIRECTORY, skill_names, skill_paths
 from orbit.agent.external.user_config import USER_CONFIG_FILE, USER_REFERENCE
-from orbit.agent.external.user_reference import user_reference
+from orbit.agent.external.user_reference import render_user_reference
 from orbit.protocol import BUILT_IN_ROLE_NAMES
 
 TODAY = date(2026, 10, 25)
@@ -624,7 +624,7 @@ def test_skills_raise_when_they_cant_be_copied(tmp_path: Path) -> None:
 
 
 def test_the_shipped_user_reference_is_the_user_reference_config() -> None:
-    assert USER_REFERENCE.read_text(encoding="utf-8") == user_reference()
+    assert USER_REFERENCE.read_text(encoding="utf-8") == render_user_reference()
 
 
 def test_without_a_config_dir_the_user_reference_is_written_in_a_private_new_one(
@@ -634,7 +634,7 @@ def test_without_a_config_dir_the_user_reference_is_written_in_a_private_new_one
     result = init_user_config(config_dir, "keep")
     path = config_dir / USER_CONFIG_FILE
     assert result == InitResult(path)
-    assert path.read_text(encoding="utf-8") == user_reference()
+    assert path.read_text(encoding="utf-8") == render_user_reference()
     assert stat.S_IMODE(config_dir.stat().st_mode) == 0o700
 
 
@@ -665,7 +665,7 @@ def test_replace_keeps_the_existing_user_config_as_the_first_backup(tmp_path: Pa
     backup = path.with_name("config.toml.bak.1")
     assert result == InitResult(path, backup)
     assert backup.read_text() == "[server]\nport = 8000\n"
-    assert path.read_text(encoding="utf-8") == user_reference()
+    assert path.read_text(encoding="utf-8") == render_user_reference()
 
 
 def test_replace_twice_keeps_both_earlier_user_configs(tmp_path: Path) -> None:
@@ -676,8 +676,8 @@ def test_replace_twice_keeps_both_earlier_user_configs(tmp_path: Path) -> None:
     second = path.with_name("config.toml.bak.2")
     assert result == InitResult(path, second)
     assert path.with_name("config.toml.bak.1").read_text() == "[server]\nport = 8000\n"
-    assert second.read_text(encoding="utf-8") == user_reference()
-    assert path.read_text(encoding="utf-8") == user_reference()
+    assert second.read_text(encoding="utf-8") == render_user_reference()
+    assert path.read_text(encoding="utf-8") == render_user_reference()
 
 
 def test_replace_without_a_user_config_writes_the_user_reference_with_no_backup(
@@ -687,7 +687,7 @@ def test_replace_without_a_user_config_writes_the_user_reference_with_no_backup(
     result = init_user_config(config_dir, "replace")
     path = config_dir / USER_CONFIG_FILE
     assert result == InitResult(path)
-    assert path.read_text(encoding="utf-8") == user_reference()
+    assert path.read_text(encoding="utf-8") == render_user_reference()
     assert [p.name for p in config_dir.iterdir()] == [USER_CONFIG_FILE]
     assert stat.S_IMODE(config_dir.stat().st_mode) == 0o700
 
@@ -712,16 +712,16 @@ def test_user_update_without_a_file_writes_the_user_reference(tmp_path: Path) ->
     result = update_user(config_dir)
     path = config_dir / USER_CONFIG_FILE
     assert result == UpdateResult(path)
-    assert path.read_text(encoding="utf-8") == user_reference()
+    assert path.read_text(encoding="utf-8") == render_user_reference()
     assert stat.S_IMODE(config_dir.stat().st_mode) == 0o700
 
 
 def test_user_update_of_the_reference_adds_nothing_and_leaves_the_file(tmp_path: Path) -> None:
     path = tmp_path / USER_CONFIG_FILE
-    path.write_text(user_reference(), encoding="utf-8")
+    path.write_text(render_user_reference(), encoding="utf-8")
     inode = path.stat().st_ino
     assert update_user(tmp_path) == UpdateResult(path, Additions())
-    assert path.read_text(encoding="utf-8") == user_reference()
+    assert path.read_text(encoding="utf-8") == render_user_reference()
     assert path.stat().st_ino == inode
 
 
@@ -729,10 +729,10 @@ def test_user_update_with_nothing_to_add_leaves_the_files_contents_and_mtime(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / USER_CONFIG_FILE
-    path.write_text(user_reference(), encoding="utf-8")
+    path.write_text(render_user_reference(), encoding="utf-8")
     os.utime(path, ns=(1_000_000_000, 1_000_000_000))
     assert update_user(tmp_path) == UpdateResult(path, Additions())
-    assert path.read_text(encoding="utf-8") == user_reference()
+    assert path.read_text(encoding="utf-8") == render_user_reference()
     assert path.stat().st_mtime_ns == 1_000_000_000
 
 
@@ -744,7 +744,7 @@ def test_user_update_adds_a_tables_other_keys_after_it_and_the_other_tables_at_t
     result = update_user(tmp_path)
     text = path.read_text(encoding="utf-8")
     server, appended = text.split(f"\n\n{ADDED}\n\n")
-    blocks = user_reference().removesuffix("\n").split("\n\n")
+    blocks = render_user_reference().removesuffix("\n").split("\n\n")
     reference_server = block_starting(blocks, "# [server]")
     _, *pairs = reference_server.split("\n")
     others = [
@@ -785,7 +785,7 @@ def test_user_update_refuses_a_file_that_isnt_utf8_naming_it(tmp_path: Path) -> 
 def test_create_without_a_user_config_writes_the_user_reference(tmp_path: Path) -> None:
     path = tmp_path / USER_CONFIG_FILE
     assert create_user_config(tmp_path) == path
-    assert path.read_text(encoding="utf-8") == user_reference()
+    assert path.read_text(encoding="utf-8") == render_user_reference()
 
 
 def test_create_again_returns_none_and_leaves_the_file(tmp_path: Path) -> None:
@@ -793,7 +793,7 @@ def test_create_again_returns_none_and_leaves_the_file(tmp_path: Path) -> None:
     assert path is not None
     inode = path.stat().st_ino
     assert create_user_config(tmp_path) is None
-    assert path.read_text(encoding="utf-8") == user_reference()
+    assert path.read_text(encoding="utf-8") == render_user_reference()
     assert path.stat().st_ino == inode
 
 

@@ -118,7 +118,7 @@ def role_lanes(agents: Iterable[AgentEntry]) -> dict[str, str]:
     return {agent.name: agent.lane for agent in agents}
 
 
-def role_skills(agents: Iterable[AgentEntry]) -> dict[str, tuple[str, ...]]:
+def map_role_skills(agents: Iterable[AgentEntry]) -> dict[str, tuple[str, ...]]:
     """Each role among the catalog's ``agents``, with the skills it gives its agents."""
     return {agent.name: agent.skills for agent in agents}
 
@@ -166,8 +166,8 @@ def _details(state: TaskState, notes: RowNotes) -> str:
             _spent(state.usage, notes.usage_unknown),
             _waiting_part(state, notes.waiting),
             _edited_part(state),
-            _skills(notes.role_skills, state.task.skills, notes.mapped_skills),
-            _merging(notes.merging),
+            _describe_skills(notes.role_skills, state.task.skills, notes.mapped_skills),
+            _describe_merging(notes.merging),
         )
     )
 
@@ -190,13 +190,13 @@ def _edited_part(state: TaskState) -> str:
     return f" · edited by {state.proposed_by}" if state.edited and state.status == "draft" else ""
 
 
-def _merging(note: str | None) -> str:
+def _describe_merging(note: str | None) -> str:
     """What a row's details end with while its task's work waits to merge, as ``note`` says:
     ``· waiting to merge``; nothing while it doesn't."""
     return "" if note is None else f" · {note}"
 
 
-def _skills(role: Sequence[str], task: Sequence[str], mapped: Sequence[str]) -> str:
+def _describe_skills(role: Sequence[str], task: Sequence[str], mapped: Sequence[str]) -> str:
     """What a row's details end with for the skills its agent gets: its ``role``'s, then, after
     a ``+``, its ``task``'s and the ``mapped`` ones, each once (``· skills: code-style + python,
     layers``), with the role's repeats counted once; just one side when the other has none, and

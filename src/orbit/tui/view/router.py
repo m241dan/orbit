@@ -73,7 +73,7 @@ from orbit.tui.view.seats import Seats
 from orbit.tui.view.spend import UsageCorner
 from orbit.tui.view.storage import StorageHalt
 from orbit.tui.view.takeover import TakeoverOffer
-from orbit.tui.view.tasks import role_lanes, role_skills, usage_unknown_roles
+from orbit.tui.view.tasks import map_role_skills, role_lanes, usage_unknown_roles
 from orbit.tui.view.triggers import trigger_key_labels
 
 
@@ -320,7 +320,7 @@ class EventRouter:
         self._panes.tabs.pin(self.seats.lanes)
         self._panes.task_list.show_lanes(role_lanes(agents))
         self._panes.task_list.show_usage_unknown(usage_unknown_roles(agents))
-        self._panes.task_list.show_role_skills(role_skills(agents))
+        self._panes.task_list.show_role_skills(map_role_skills(agents))
 
     def _follow_mapped_skills(self) -> None:
         """Have the tasks show the skills the project of the workspace this frontend is on maps,

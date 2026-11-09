@@ -25,14 +25,14 @@ from orbit.agent.external.user_config import (
     read_user_models,
     read_user_roles,
 )
-from orbit.agent.external.user_reference import user_reference
+from orbit.agent.external.user_reference import render_user_reference
 from orbit.protocol import BUILT_IN_ROLE_NAMES
 from orbit.telemetry.settings import TelemetrySettings, load_telemetry
 
 MODULE = "orbit.agent.external.user_reference"
 KEY_LINE = re.compile(r"# (\[|[a-z_]+ = )")
 NAMED_KEY = re.compile(r"# ([a-z_]+)(?: = |: )")
-REFERENCE = user_reference()
+REFERENCE = render_user_reference()
 TABLES: dict[str, type[BaseModel]] = {
     "storage": StorageSettings,
     "server": ServerSettings,

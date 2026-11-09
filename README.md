@@ -4246,8 +4246,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     commented-out lines that switch the roles to their copies (`add_roles`), and for
     `orbit init --skill` copies orbit's skills into the project's `.orbit/skills/`
     (`add_skills`), and for `orbit init --user` writes the user reference config,
-    `reference/user-config.toml`, which `user_reference` generates from the user settings'
-    models (`user_reference()`) and `uv run python -m orbit.agent.external.user_reference`
+    `reference/user-config.toml`, which `render_user_reference` generates from the user settings'
+    models (`render_user_reference()`) and `uv run python -m orbit.agent.external.user_reference`
     writes, to your own `config.toml` (`init_user_config`), and for `orbit init --user --update`
     adds to that file what the user reference has that it doesn't mention (`update_user_config`); `checks`
     runs a verification step as a process (`run_step`); `processes` runs a program to completion
