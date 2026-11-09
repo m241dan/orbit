@@ -32,6 +32,7 @@ from orbit.tui.view.common import (
 )
 from orbit.tui.view.usage import usage_label
 from orbit.tui.view.workspaces import workspace_at
+from orbit.wording import join_in_words
 
 SESSIONS_TITLE = "Sessions"
 NEW_SESSION_LABEL = "New session"
@@ -383,11 +384,7 @@ def activity_words(activity: Sequence[Activity]) -> str:
     none. Tasks go unnumbered: their ids are the active session's, and the task list numbers
     the session viewed's."""
     words = [_activity_word(each) for each in activity]
-    if not words:
-        return "work"
-    if len(words) == 1:
-        return words[0]
-    return f"{', '.join(words[:-1])} and {words[-1]}"
+    return join_in_words(words) if words else "work"
 
 
 def state_words(activity: Sequence[Activity]) -> str:

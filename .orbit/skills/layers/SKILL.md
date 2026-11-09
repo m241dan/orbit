@@ -13,6 +13,7 @@ description: Orbit's map of code types — which packages hold Domain, Applicati
 | Execution | `orbit.execution`: cancelling and shielding, `Background`, `SideBySide`, `TurnSlot` and `ThreadedSession`. It imports no orbit package; a new generic helper goes here. |
 | Entry | `orbit.cli` and `orbit.__main__` |
 | Ports and tools | `orbit.tracing` (the tracing port, standard library only) and `orbit.profiling` (wired in by the CLI) |
+| Shared wording | `orbit.wording`: pure helpers for words both the backend's domain and the TUI's view use, such as `join_in_words`. Standard library only. |
 
 ## What the import contracts hold
 
@@ -26,6 +27,7 @@ description: Orbit's map of code types — which packages hold Domain, Applicati
 - The domain and the protocol record no telemetry. Tracing goes through `orbit.tracing`, and only
   the CLI uses `orbit.telemetry`, `orbit.profiling` and `orbit.client`.
 - `orbit.execution` imports no orbit package, and neither the domain nor the protocol imports it.
+- `orbit.wording` imports no orbit package, so the domain and the view may both use it.
 
 A change that adds a package or an outside dependency adds its contract.
 

@@ -160,6 +160,7 @@ forbidden_modules = [
     "orbit.profiling",
     "orbit.telemetry",
     "orbit.execution",
+    "orbit.wording",
     "orbit.__main__",
     "pydantic",
     # Cron expressions are read by the domain, with cronsim, which has neither effects nor
@@ -186,7 +187,26 @@ forbidden_modules = [
     "orbit.client",
     "orbit.telemetry",
     "orbit.profiling",
+    "orbit.tracing",    "orbit.wording",
+]
+
+# The wording the backend and the frontends share is plain text on the standard library.
+[[tool.importlinter.contracts]]
+name = "Shared wording imports no orbit package"
+type = "forbidden"
+source_modules = ["orbit.wording"]
+forbidden_modules = [
+    "orbit.agent",
+    "orbit.tui",
+    "orbit.protocol",
+    "orbit.cli",
+    "orbit.client",
+    "orbit.telemetry",
+    "orbit.profiling",
     "orbit.tracing",
+    "orbit.execution",
+    "orbit.__main__",
+    "pydantic",
 ]
 
 # The domain's pure rules and the wire contract run no work of their own.
@@ -209,6 +229,7 @@ source_modules = [
     "orbit.tracing",
     "orbit.profiling",
     "orbit.execution",
+    "orbit.wording",
 ]
 forbidden_modules = ["orbit.telemetry"]
 # The user reference generator describes [telemetry] from its model; settings.py is plain
@@ -232,6 +253,7 @@ source_modules = [
     "orbit.tracing",
     "orbit.profiling",
     "orbit.execution",
+    "orbit.wording",
     "orbit.cli",
 ]
 forbidden_modules = ["opentelemetry"]

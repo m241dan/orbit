@@ -13,6 +13,7 @@ PYPROJECT = TESTS.parent / "pyproject.toml"
 VIEW_CONTRACT = "TUI view is independent of Textual"
 TRACING_CONTRACT = "Tracing imports no orbit package"
 EXECUTION_CONTRACT = "Execution imports no orbit package"
+WORDING_CONTRACT = "Shared wording imports no orbit package"
 
 
 def _contract(name: str) -> dict[str, Any]:
@@ -192,6 +193,14 @@ def test_execution_imports_no_orbit_package() -> None:
     others = sorted(_top_level() - {"orbit.execution"})
     missing = [module for module in others if not _forbids(contract["forbidden_modules"], module)]
     assert not missing, f"{EXECUTION_CONTRACT!r} doesn't forbid {', '.join(missing)}"
+
+
+def test_shared_wording_imports_no_orbit_package() -> None:
+    contract = _contract(WORDING_CONTRACT)
+    assert contract["source_modules"] == ["orbit.wording"]
+    others = sorted(_top_level() - {"orbit.wording"})
+    missing = [module for module in others if not _forbids(contract["forbidden_modules"], module)]
+    assert not missing, f"{WORDING_CONTRACT!r} doesn't forbid {', '.join(missing)}"
 
 
 def test_neither_the_domain_nor_the_protocol_may_import_execution() -> None:

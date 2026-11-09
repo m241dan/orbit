@@ -4202,6 +4202,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   `orbit.protocol` nor the backend's domain imports it. Trace context crosses the wire in the
   envelopes' `traceparent` and `tracestate`, which `orbit.protocol`'s `trace_carrier` and
   `with_trace_carrier` read and set.
+- `orbit.wording`: wording the backend's domain and the frontend's view share, standard library
+  only: `join_in_words` joins words as `a, b and c`. It imports no orbit package.
 - `orbit.telemetry`: the tracing port over the OpenTelemetry SDK, the only package that imports
   `opentelemetry`, and only `orbit.cli` imports it. `TelemetrySettings` is the user config's
   `[telemetry]`; `start_telemetry` gives `Off`, importing nothing of OpenTelemetry, or an

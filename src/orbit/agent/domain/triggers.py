@@ -38,6 +38,7 @@ from orbit.agent.domain.reviews import ReviewJob, ReviewKind, drop_diff, hold_di
 from orbit.agent.domain.roles import PLAIN_NAME
 from orbit.agent.domain.verification import VerificationStep, set_report
 from orbit.protocol import TASK_CHECKS, ReportStatus, TaskState, is_orbit_review
+from orbit.wording import join_in_words
 
 EventName = Literal[
     "session_started",
@@ -554,7 +555,7 @@ def _tasks_of(roles: Sequence[str]) -> str:
     for style-reviewer, drift-reviewer and scaling-reviewer``."""
     if len(roles) == 1:
         return f"a {roles[0]}'s task"
-    return f"tasks for {', '.join(roles[:-1])} and {roles[-1]}"
+    return f"tasks for {join_in_words(roles)}"
 
 
 def check_triggers(
@@ -988,16 +989,11 @@ def note_skipped_reviews(
         return None
     title = prompts[0].partition("\n")[0]
     more = f" and {len(prompts) - 1} more" if len(prompts) > 1 else ""
-    return f'Skipped the {_joined(lenses)} reviews of "{title}"{more}: it changed no code.'
+    return f'Skipped the {join_in_words(lenses)} reviews of "{title}"{more}: it changed no code.'
 
 
 LENS_SUFFIX = "-reviewer"
 """What a lens role's name ends with, left out where the note of its skipped reviews names it."""
-
-
-def _joined(names: Sequence[str]) -> str:
-    """``names`` in words, as ``a, b and c``."""
-    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
 
 
 def within_paths(
