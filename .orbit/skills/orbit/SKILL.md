@@ -68,5 +68,5 @@ enumerations and its unit-suffixed numbers into unit types.
 ## Languages
 
 Super reviews sample code files by their extension, from `CODE_EXTENSIONS` in
-`orbit.agent.domain.review_sample`. When a plan brings in a language whose extension isn't on that
+`orbit.agent.domain.mapped_paths`. When a plan brings in a language whose extension isn't on that
 list, add the extension in the same plan.

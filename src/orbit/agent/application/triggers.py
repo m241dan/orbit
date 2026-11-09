@@ -49,6 +49,7 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import configured_checks
 from orbit.agent.domain.machine import describe_machine
+from orbit.agent.domain.mapped_paths import list_mapped_paths
 from orbit.agent.domain.reviews import (
     ReviewJob,
     ReviewTemplate,
@@ -512,7 +513,7 @@ class TriggerEngine:
         except TreeFailed as exc:  # Git failed; reviews fire rather than be skipped unseen.
             _note_paths_failed(found, exc)
             return Sifted(found, [])
-        mapped = [path for mapping in self._desk.agents.skill_mappings for path in mapping.paths]
+        mapped = list_mapped_paths(self._desk.agents.skill_mappings)
         return sift_changes(found, changed, mapped)
 
     async def _changed_paths(self, event: TriggerEvent) -> list[str]:

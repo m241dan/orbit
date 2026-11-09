@@ -13,6 +13,7 @@ from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.config_report import ConfigSources, Written
 from orbit.agent.domain.config_update import reference_with_checks, with_checks
 from orbit.agent.domain.layers import Layer, SharedRuntimeError, UserConfigError, with_runtime
+from orbit.agent.domain.mapped_paths import list_mapped_paths
 from orbit.agent.domain.skills import (
     SkillMapping,
     check_role_skills,
@@ -131,7 +132,7 @@ def _check_skill_mappings(root: str, config: OrbitConfig) -> None:
 def _looked_for(mappings: Iterable[SkillMapping]) -> set[str]:
     """The paths the ``mappings`` name, as written, but those that are empty, hold a NUL byte,
     aren't relative or leave the project by their ``..``, which aren't looked for."""
-    return {path for mapping in mappings for path in mapping.paths if inside_project(path)}
+    return {path for path in list_mapped_paths(mappings) if inside_project(path)}
 
 
 def _present(root: str, paths: Iterable[str]) -> set[str]:

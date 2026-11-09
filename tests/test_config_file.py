@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from orbit.agent.application.ports import ConfigWriteFailed
-from orbit.agent.domain import review_sample
+from orbit.agent.domain import mapped_paths
 from orbit.agent.domain.checks import ChecksProposal, Setup, VerificationSet
 from orbit.agent.domain.config import SUPER_REVIEW_EVERY_MOVING, OrbitConfig
 from orbit.agent.domain.config_errors import ConfigError
@@ -1145,7 +1145,7 @@ def test_orbits_own_skill_ends_by_naming_the_module_of_the_code_extensions(
     body = read_config(str(root), config_dir).skill_library.skills["orbit"].body
     section = " ".join(body[body.rindex("\n## ") :].split())
     assert section.startswith("## Languages ")
-    assert f"`CODE_EXTENSIONS` in `{review_sample.__name__}`" in section
+    assert f"`CODE_EXTENSIONS` in `{mapped_paths.__name__}`" in section
 
 
 def test_orbits_own_file_mentions_every_setting_of_the_reference() -> None:

@@ -3,7 +3,8 @@
 import random
 from collections.abc import Mapping, Sequence
 
-from orbit.agent.domain.review_sample import CODE_EXTENSIONS, Draw, sample_files, with_sample
+from orbit.agent.domain.mapped_paths import CODE_EXTENSIONS
+from orbit.agent.domain.review_sample import Draw, sample_files, with_sample
 
 TRACKED = ("src/a.py", "src/b.cpp", "docs/x.md", "uv.lock", "tests/t.py")
 NEVER: Mapping[str, int] = {}
@@ -88,31 +89,6 @@ def test_a_size_of_zero_samples_nothing() -> None:
 
 def test_nothing_eligible_samples_nothing() -> None:
     assert sample_files(("docs/x.md", "uv.lock"), [], (), NEVER, Draw(10, random.sample)) == ()
-
-
-def test_the_code_extensions_are_the_built_in_source_ones() -> None:
-    assert set(CODE_EXTENSIONS) == {
-        ".py",
-        ".pyi",
-        ".c",
-        ".cc",
-        ".cpp",
-        ".cxx",
-        ".h",
-        ".hh",
-        ".hpp",
-        ".rs",
-        ".go",
-        ".java",
-        ".kt",
-        ".js",
-        ".jsx",
-        ".ts",
-        ".tsx",
-        ".cs",
-        ".swift",
-        ".rb",
-    }
 
 
 def test_each_code_extension_is_sampled() -> None:

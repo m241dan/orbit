@@ -5,35 +5,10 @@ comes up again.
 Which super review last sampled each file is kept by its number, counting the repository's super
 reviews from 1, so the rotation needs no clock."""
 
-import posixpath
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 
-CODE_EXTENSIONS = frozenset(
-    {
-        ".py",
-        ".pyi",
-        ".c",
-        ".cc",
-        ".cpp",
-        ".cxx",
-        ".h",
-        ".hh",
-        ".hpp",
-        ".rs",
-        ".go",
-        ".java",
-        ".kt",
-        ".js",
-        ".jsx",
-        ".ts",
-        ".tsx",
-        ".cs",
-        ".swift",
-        ".rb",
-    }
-)
-"""The extensions of the files a super review may sample: those of source code."""
+from orbit.agent.domain.mapped_paths import is_mapped_code
 
 type Choose = Callable[[Sequence[str], int], Sequence[str]]
 """Chooses so many of the paths given, each once, at random, as :func:`random.sample` does."""
@@ -55,15 +30,15 @@ def sample_files(
     sampled: Mapping[str, int],
     draw: Draw,
 ) -> tuple[str, ...]:
-    """Up to ``draw.size`` of the eligible ``tracked`` files, sorted: those with an extension in
-    :data:`CODE_EXTENSIONS`, under one of ``mapped_paths`` when any are given (a mapped file
-    itself, or a file inside a mapped folder) and not among the files ``changed``. Files never
-    sampled come first, then those ``sampled`` longest ago (by the number of the super review
-    that last sampled each), ``draw.choose`` picking among the files of the standing that
-    doesn't fit whole. All of them when fewer are eligible; none for a size of 0."""
-    roots = [posixpath.normpath(path) for path in mapped_paths]
+    """Up to ``draw.size`` of the eligible ``tracked`` files, sorted: those that are code under
+    one of ``mapped_paths`` when any are given (a mapped file itself, or a file inside a mapped
+    folder), as :func:`~orbit.agent.domain.mapped_paths.is_mapped_code` says, and not among the
+    files ``changed``. Files never sampled come first, then those ``sampled`` longest ago (by
+    the number of the super review that last sampled each), ``draw.choose`` picking among the
+    files of the standing that doesn't fit whole. All of them when fewer are eligible; none for
+    a size of 0."""
     unchanged = set(tracked) - set(changed)
-    eligible = sorted(path for path in unchanged if is_code_file(path) and is_under(path, roots))
+    eligible = sorted(path for path in unchanged if is_mapped_code(path, mapped_paths))
     return tuple(sorted(_drawn(eligible, sampled, draw)))
 
 
@@ -97,20 +72,3 @@ def _standings(eligible: Sequence[str], sampled: Mapping[str, int]) -> list[list
     for path in eligible:
         groups.setdefault((path in sampled, sampled.get(path, 0)), []).append(path)
     return [groups[standing] for standing in sorted(groups)]
-
-
-def is_code_file(path: str) -> bool:
-    """Whether ``path`` is a file of source code, by its extension."""
-    return posixpath.splitext(path)[1] in CODE_EXTENSIONS
-
-
-def is_under(path: str, roots: Sequence[str]) -> bool:
-    """Whether ``path`` is one of the normalised ``roots`` or inside one; any path is when there
-    are none."""
-    return not roots or any(_inside(path, root) for root in roots)
-
-
-def _inside(path: str, root: str) -> bool:
-    """Whether ``path`` is the normalised ``root``, or inside it: the project's root, ``.``,
-    holds every path."""
-    return root in (".", path) or path.startswith(f"{root}/")

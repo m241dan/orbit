@@ -63,6 +63,7 @@ from orbit.agent.application.triggers import (
 )
 from orbit.agent.domain.board import FINAL, TaskBoard
 from orbit.agent.domain.endings import REVIEW_STOPPED_BY_YOU
+from orbit.agent.domain.mapped_paths import list_mapped_paths
 from orbit.agent.domain.merge_holds import BlockingTask, FindingFiling, FixReview, MergePassEnding
 from orbit.agent.domain.merge_pass import (
     NOT_A_MERGE_PASS,
@@ -921,7 +922,7 @@ class ReviewLane:
             tracked = await self._tree.tracked_files(commit)
         except TreeFailed:
             return ()
-        mapped = [path for mapping in self._desk.agents.skill_mappings for path in mapping.paths]
+        mapped = list_mapped_paths(self._desk.agents.skill_mappings)
         return self.planner.sample(tracked, mapped, changed, random.sample)
 
     @property

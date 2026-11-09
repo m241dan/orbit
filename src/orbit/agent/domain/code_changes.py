@@ -6,7 +6,7 @@ import posixpath
 from collections.abc import Collection, Sequence
 from fnmatch import fnmatchcase
 
-from orbit.agent.domain.review_sample import is_code_file, is_under
+from orbit.agent.domain.mapped_paths import is_code_file, is_mapped
 
 MANIFEST_NAMES = frozenset(
     {
@@ -46,14 +46,13 @@ MANIFEST_NAMES = frozenset(
 def changes_code(changed: Collection[str], mapped_paths: Sequence[str]) -> bool:
     """Whether one of the paths ``changed`` is code: under one of ``mapped_paths``, when there
     are any, a file with an extension of code, or a manifest, by its name."""
-    roots = [posixpath.normpath(path) for path in mapped_paths]
-    return any(_is_code(path, roots) for path in changed)
+    return any(_is_code(path, mapped_paths) for path in changed)
 
 
-def _is_code(path: str, roots: Sequence[str]) -> bool:
-    """Whether ``path`` is code: under one of the normalised ``roots``, if there are any, a file
-    with an extension of code, or a manifest."""
-    mapped = bool(roots) and is_under(path, roots)
+def _is_code(path: str, mapped_paths: Sequence[str]) -> bool:
+    """Whether ``path`` is code: under one of ``mapped_paths``, if there are any, a file with an
+    extension of code, or a manifest."""
+    mapped = bool(mapped_paths) and is_mapped(path, mapped_paths)
     return mapped or is_code_file(path) or _is_manifest(path)
 
 
