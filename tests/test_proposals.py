@@ -102,8 +102,8 @@ async def test_an_accepted_proposal_runs_setup_then_each_step_in_the_tree_and_co
     assert status(events) == "completed"
 
 
-async def test_a_failing_step_is_reported_for_revision_without_asking_the_user() -> None:
-    review = Review(ProposalDecision("accept"))
+async def test_a_failing_step_once_accepted_is_reported_for_revision() -> None:
+    review = Review(ProposalDecision("accept"), ProposalDecision("accept"))
     steps = Steps(True, False, True)
     events, replies = await configure(
         {"steps": [LINT, TESTS]}, {"steps": [LINT]}, review=review, steps=steps
@@ -113,7 +113,8 @@ async def test_a_failing_step_is_reported_for_revision_without_asking_the_user()
     assert "'Tests'" in failure and "pytest" in failure and "1 test failed" in failure
     assert "propose_checks again" in failure and "(Revision 1 of 5.)" in failure
     assert [proposal.steps for _, proposal in review.proposals] == [
-        (VerificationStep("Lint", ("ruff", "check")),)
+        (VerificationStep("Lint", ("ruff", "check")), VerificationStep("Tests", ("pytest",))),
+        (VerificationStep("Lint", ("ruff", "check")),),
     ]
     assert status(events) == "completed"
 
@@ -121,7 +122,10 @@ async def test_a_failing_step_is_reported_for_revision_without_asking_the_user()
 async def test_a_failing_setup_is_reported_by_name() -> None:
     steps = Steps(False)
     _, replies = await configure(
-        {"steps": [LINT], "setup": SETUP}, review=Review(), steps=steps, limits=Limits(1)
+        {"steps": [LINT], "setup": SETUP},
+        review=Review(ProposalDecision("accept")),
+        steps=steps,
+        limits=Limits(1),
     )
     assert steps.runs == ["setup"]
     assert "'setup'" in replies[0] and "uv sync" in replies[0]
@@ -148,12 +152,12 @@ async def test_the_user_can_end_it_which_cancels_the_task() -> None:
 
 
 async def test_revisions_are_capped_and_the_reply_says_so() -> None:
-    review = Review(ProposalDecision("revise", "Faster, please."))
+    review = Review(ProposalDecision("accept"), ProposalDecision("revise", "Faster, please."))
     events, replies = await configure(
         {"steps": [LINT]},
         {"steps": [LINT]},
         review=review,
-        steps=Steps(False, True),
+        steps=Steps(False),
         limits=Limits(max_attempts=1),
     )
     assert "(Revision 1 of 1.)" in replies[0]
@@ -166,7 +170,7 @@ async def test_a_proposal_failing_when_revisions_run_out_says_so_without_a_fix_t
     events, replies = await configure(
         {"steps": [LINT]},
         {"steps": [LINT]},
-        review=Review(),
+        review=Review(ProposalDecision("accept"), ProposalDecision("accept")),
         steps=Steps(False, False),
         limits=Limits(max_attempts=1),
     )
@@ -229,7 +233,7 @@ async def test_a_task_cancelled_while_its_proposal_runs_answers_the_agent() -> N
     session, _, _ = session_for(
         proposes({"steps": [LINT]}, replies=replies),
         verification=verified(steps),
-        proposal_review=Review(),
+        proposal_review=Review(ProposalDecision("accept")),
     )
     running = asyncio.create_task(run(session, CONFIGURE))
     await eventually(lambda: steps.runs)
@@ -443,14 +447,17 @@ async def test_a_configurator_that_exits_without_proposing_is_unverified() -> No
 
 async def test_a_configurator_that_exits_after_a_failure_or_revise_reply_is_unverified() -> None:
     events, replies = await configure(
-        {"steps": [LINT]}, review=Review(), steps=Steps(False), tree=FakeTree()
+        {"steps": [LINT]},
+        review=Review(ProposalDecision("accept")),
+        steps=Steps(False),
+        tree=FakeTree(),
     )
     assert "propose_checks again" in replies[0]
     assert why(events) == LINT_FAILED
     events, replies = await configure(
         {"steps": [LINT]},
         review=Review(ProposalDecision("revise", "Add mypy.")),
-        steps=Steps(True),
+        steps=Steps(),
         tree=FakeTree(),
     )
     assert "> Add mypy." in replies[0]

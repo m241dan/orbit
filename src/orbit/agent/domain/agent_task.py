@@ -25,8 +25,8 @@ it's done, and the checks are running. ``done``: the checks passed. ``fallback``
 no fixes left to ask of this agent, so another one takes over. ``gave_up``: the agent said it can't.
 ``ended``: the user ended it while deciding on the agent's proposal.
 
-A proposal goes through the same phases: ``verifying`` while orbit tries it and the user
-decides, ``done`` once accepted, and ``fallback`` when revisions run out or the agent exits
+A proposal goes through the same phases: ``verifying`` while the user decides and orbit tries it
+once accepted, ``done`` once it passes, and ``fallback`` when revisions run out or the agent exits
 without an accepted proposal (so the task ends ``unverified``, never ``completed``).
 """
 

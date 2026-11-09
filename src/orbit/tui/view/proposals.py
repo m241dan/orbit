@@ -18,7 +18,11 @@ from orbit.protocol import (
 )
 from orbit.tui.view.common import EntryKind
 
-PROPOSAL_KEYS_HINT = "a accept · r revise · x end"
+PROPOSAL_KEYS_HINT = "a accept and try · r revise · x end"
+NOT_RUN_YET = (
+    "Nothing has run yet: accepting tries the setup and each step here, "
+    "then saves them if all pass."
+)
 FEEDBACK_HINT = "enter send · esc back"
 FEEDBACK_PLACEHOLDER = "What should change?"
 
@@ -49,7 +53,7 @@ def proposal_title(agent_id: str) -> str:
 
 
 def proposal_text(event: ChecksProposed) -> str:
-    """The proposed setup, then each step in order, and that they all passed. With steps in
+    """The proposed setup, then each step in order, and that none has run yet. With steps in
     named sets, sets' tables, any triggers or reports, the steps come as the task checks, then
     each set, each step keeping its number, each group saying when it runs and each set whether
     it holds merges, followed by the lens each of its reports queues; a set none of the steps is
@@ -62,7 +66,7 @@ def proposal_text(event: ChecksProposed) -> str:
         lines += _grouped_steps(event)
     else:
         lines += ["", "Steps:", *_step_lines(event, None)]
-    lines += ["", "✅ All passed on the current code."]
+    lines += ["", NOT_RUN_YET]
     return "\n".join(lines)
 
 

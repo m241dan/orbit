@@ -377,7 +377,7 @@ class AgentRun:
         board.set_status(self._task_id, "running")
 
     async def _consider(self, proposal: _Proposal) -> None:
-        """Try ``proposal``, have the user decide on it if it works, and answer the agent."""
+        """Have the user decide on ``proposal``, try it if they accept it, and answer the agent."""
         try:
             verdict = await self._trial().decide(proposal.checks)
         except BaseException as exc:

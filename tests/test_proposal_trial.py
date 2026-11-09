@@ -1,4 +1,4 @@
-"""Trying a proposal of checks: run its steps, then have the user decide while the agent waits."""
+"""Trying a proposal of checks: have the user decide while the agent waits, then run its steps."""
 
 import asyncio
 from collections.abc import Sequence
@@ -77,7 +77,7 @@ async def decide(
     return await ProposalTrial(work, steps, user, exited or alive()).decide(CHECKS), work
 
 
-async def test_accepted_checks_end_the_task_and_come_back() -> None:
+async def test_accepted_checks_that_pass_end_the_task_and_come_back() -> None:
     verdict, work = await decide(Steps(), User(ProposalDecision("accept")))
     assert verdict.accepted == CHECKS
     assert verdict.reply.startswith("The user accepted your proposal.")
@@ -85,55 +85,69 @@ async def test_accepted_checks_end_the_task_and_come_back() -> None:
     assert work.phase == "done"
 
 
-async def test_runs_the_proposed_steps_before_asking() -> None:
-    steps, user = Steps(), User(ProposalDecision("accept"))
-    await decide(steps, user)
-    assert steps.ran == [(LINT, TESTS)]
-    assert user.shown == [CHECKS]
-
-
-async def test_runs_the_setup_first() -> None:
+async def test_asks_the_user_before_running_any_step() -> None:
     steps = Steps()
-    checks = CHECKS.model_copy(update={"setup": Setup(command=("uv", "sync"))})
+    ran_when_asked: list[list[Sequence[VerificationStep]]] = []
+
+    async def ask(checks: ChecksProposal) -> ProposalDecision:
+        ran_when_asked.append(list(steps.ran))
+        return ProposalDecision("accept")
+
+    await ProposalTrial(proposing(), steps, ask, alive()).decide(CHECKS)
+    assert ran_when_asked == [[]]
+    assert steps.ran == [(LINT, TESTS)]
+
+
+async def test_accepting_runs_the_setup_then_each_step_sets_included() -> None:
+    steps = Steps()
+    mutation = VerificationStep(name="Mutation", command=("mutmut", "run"), set="mutation")
+    checks = ChecksProposal(steps=(LINT, TESTS, mutation), setup=Setup(command=("uv", "sync")))
     trial = ProposalTrial(proposing(), steps, User(ProposalDecision("accept")), alive())
-    await trial.decide(checks)
-    assert [step.name for step in steps.ran[0]] == ["setup", "Lint", "Tests"]
+    verdict = await trial.decide(checks)
+    assert [step.name for step in steps.ran[0]] == ["setup", "Lint", "Tests", "Mutation"]
+    assert len(steps.ran) == 1
+    assert verdict.accepted == checks
 
 
-async def test_a_failing_step_asks_for_a_revision_without_asking_the_user() -> None:
+async def test_an_accepted_proposal_with_a_failing_step_asks_for_a_revision() -> None:
     user = User(ProposalDecision("accept"))
     verdict, work = await decide(Steps(failing="Tests"), user)
     assert verdict.accepted is None
     assert "Your proposed step 'Tests' failed." in verdict.reply
     assert verdict.failure == (TESTS, "1 error")
-    assert user.shown == []
+    assert user.shown == [CHECKS]
     assert work.phase == "working"
 
 
-async def test_a_revision_passes_on_the_users_feedback() -> None:
-    verdict, work = await decide(Steps(), User(ProposalDecision("revise", "Add mypy.")))
+async def test_a_revision_passes_on_the_users_feedback_without_running_anything() -> None:
+    steps = Steps()
+    verdict, work = await decide(steps, User(ProposalDecision("revise", "Add mypy.")))
     assert verdict.accepted is None
     assert "> Add mypy." in verdict.reply
     assert verdict.failure is None
     assert work.phase == "working"
+    assert steps.ran == []
 
 
-async def test_the_user_can_end_the_task() -> None:
-    verdict, work = await decide(Steps(), User(ProposalDecision("end")))
+async def test_the_user_can_end_the_task_without_running_anything() -> None:
+    steps = Steps()
+    verdict, work = await decide(steps, User(ProposalDecision("end")))
     assert verdict.accepted is None
     assert verdict.reply.startswith("The user ended this task.")
     assert verdict.failure is None
     assert work.phase == "ended"
+    assert steps.ran == []
 
 
 async def test_the_agent_exiting_while_the_user_decides_ends_the_task() -> None:
-    user = User()
+    user, steps = User(), Steps()
     exited = alive()
     exited.set_result(None)
-    verdict, work = await decide(Steps(), user, exited)
+    verdict, work = await decide(steps, user, exited)
     assert verdict.accepted is None
     assert verdict.reply.startswith("The user ended this task.")
     assert work.phase == "ended"
+    assert steps.ran == []
     await asyncio.sleep(0)
     assert user.cancelled
 

@@ -1,4 +1,5 @@
-"""Trying the checks an agent proposed: run them in its tree, then have the user decide on them."""
+"""Trying the checks an agent proposed: have the user decide on them, then run those they accept
+in its tree."""
 
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
@@ -16,13 +17,13 @@ RunSteps = Callable[[Sequence[VerificationStep]], Awaitable[Failure | None]]
 """Runs steps in order in the agent's tree until one fails; returns that failure."""
 
 Ask = Callable[[ChecksProposal], Awaitable[ProposalDecision]]
-"""Shows the user checks that passed; returns their decision."""
+"""Shows the user proposed checks, none of which has run; returns their decision."""
 
 
 @dataclass(frozen=True)
 class Verdict:
-    """What to reply to the agent about its proposal, the checks if the user accepted them, and
-    how they failed if they did when tried."""
+    """What to reply to the agent about its proposal, the checks if the user accepted them and
+    they passed, and how they failed if they did when tried."""
 
     reply: str
     accepted: ChecksProposal | None = None
@@ -42,18 +43,19 @@ class ProposalTrial:
         self._exited = exited
 
     async def decide(self, checks: ChecksProposal) -> Verdict:
-        """Try ``checks`` and, if they pass, have the user decide on them; returns the verdict."""
-        failure = await self._try(checks)
-        if failure is not None:
-            return Verdict(self._work.proposal_failed(*failure), failure=failure)
+        """Have the user decide on ``checks`` and, if they accept them, try them; returns the
+        verdict."""
         decision = await self._review(checks)
         if decision is None:
             return Verdict(self._work.ended())
-        if decision.action == "accept":
-            return Verdict(self._work.accepted(), checks)
         if decision.action == "revise":
             return Verdict(self._work.revise(decision.feedback))
-        return Verdict(self._work.ended())
+        if decision.action == "end":
+            return Verdict(self._work.ended())
+        failure = await self._try(checks)
+        if failure is not None:
+            return Verdict(self._work.proposal_failed(*failure), failure=failure)
+        return Verdict(self._work.accepted(), checks)
 
     async def _review(self, checks: ChecksProposal) -> ProposalDecision | None:
         """The user's decision on ``checks``; ``None`` if the agent exits before they decide, once
@@ -66,7 +68,7 @@ class ProposalTrial:
         return None if decision.cancelled() else decision.result()
 
     async def _try(self, checks: ChecksProposal) -> Failure | None:
-        """Run ``checks``' setup, then each step; returns the first failure."""
+        """Run the accepted ``checks``' setup, then each step; returns the first failure."""
         steps = checks.steps
         if checks.setup is not None:
             steps = (setup_step(checks.setup), *steps)

@@ -916,11 +916,9 @@ the trigger leaves the Catalog, hiding `ctrl+e`, and firing it is refused as an 
 With `--no-verify` there's nothing to set up checks for, so a confirmed `ctrl+e` adds no task and
 the conversation says `Setting up checks needs verification on; orbit was started with --no-verify.`
 
-Orbit tries each proposal in the agent's working directory first: the setup, then each step in
-order, those in sets included. If one fails, the agent gets the step's name and its output and is asked to revise,
-without bothering you. Once everything passes, a window shows the proposal: the setup
-command and the files it watches, then the steps in order, each with its name and command, and a
-line saying they all passed on the current code. A proposal with sets shows the task checks
+A window shows each proposal before any of it runs: the setup command and the files it watches,
+then the steps in order, each with its name and command, and the line `Nothing has run yet:
+accepting tries the setup and each step here, then saves them if all pass.` A proposal with sets shows the task checks
 first, under `Task checks: every task`, then each set under a line saying when its triggers run
 it and whether it holds merges, such as `Set mutation: every 10 commits, reports` (or `by hand`,
 `no trigger`, `holds merges`), each step keeping its number, and after its steps the lens each of
@@ -929,14 +927,17 @@ Then:
 
 | Key | Action |
 |---|---|
-| `a` | Accept the proposal; the task completes |
+| `a` | Accept the proposal and try it: the setup, then each step in order, those in sets included, in the agent's working directory; if all pass, the checks are saved and the task completes |
 | `r` | Ask for changes: type what should change, `enter` sends it to the agent, `esc` goes back to the proposal |
 | `x` | End the task; it's marked 🛑 cancelled |
 
 Your decision is noted in the conversation (`orbit → agent-3: proposal accepted`, `… changes
 asked for: add mypy`, `… task ended`), and orbit's reply to the agent completes its request's
 line above. A decision that's refused, or can't be sent, leaves the conversation and its proposal's
-window comes back, next if another is showing, so you can decide again. The agent revises up to `fix_attempts` times. If it's cancelled or exits while its proposal is showing, the window
+window comes back, next if another is showing, so you can decide again. If a step fails when
+tried, the agent gets the step's name and its output and is asked to revise; its revision opens a
+new window, again before anything runs. `ctrl+s` during the trial stops it, killing the running
+step, and nothing is saved. The agent revises up to `fix_attempts` times. If it's cancelled or exits while its proposal is showing, the window
 closes and the task is cancelled. When several agents propose checks, their windows come one at a
 time, in the order they proposed.
 
@@ -4298,8 +4299,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `TaskTracing` (in `task_trace`), current while it runs so what runs it records on it, and
     linked to the span that started its run, which `WorkTurns` keeps for the run.
     `AgentRun` (in `agent_run`) sees one task through one agent, and a
-    `ProposalTrial` (in `proposal_trial`) tries the checks a configurator proposes and has the
-    user decide on them; `AgentDesk` (in `desk`) launches agents and routes their calls by token,
+    `ProposalTrial` (in `proposal_trial`) has the user decide on the checks a configurator
+    proposes and tries those they accept; `AgentDesk` (in `desk`) launches agents and routes their calls by token,
     delivering each the skills it's given, in its instructions and through `read_skill`, with
     `SkillDelivery` (in `skill_delivery`), tracing each agent's process as an `orbit.agent.process` span and each of its calls as an
     `orbit.agent.request` child of it with `AgentTracing` (in `agent_trace`), and passing calls

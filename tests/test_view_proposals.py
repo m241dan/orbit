@@ -30,7 +30,7 @@ def test_proposal_title_names_the_proposing_agent() -> None:
 
 
 def test_proposal_hints_name_the_keys() -> None:
-    assert PROPOSAL_KEYS_HINT == "a accept · r revise · x end"
+    assert PROPOSAL_KEYS_HINT == "a accept and try · r revise · x end"
     assert FEEDBACK_HINT == "enter send · esc back"
 
 
@@ -95,7 +95,8 @@ def test_a_proposal_with_a_set_shows_the_task_checks_then_each_set_and_when_it_r
         "Set mutation: every 10 commits, reports\n"
         "  3. C: c\n"
         "\n"
-        "✅ All passed on the current code."
+        "Nothing has run yet: accepting tries the setup and each step here, "
+        "then saves them if all pass."
     )
 
 
@@ -114,7 +115,8 @@ def test_steps_keep_their_numbers_under_their_sets() -> None:
         "Set stress: no trigger, holds merges\n"
         "  1. Slow: s\n"
         "\n"
-        "✅ All passed on the current code."
+        "Nothing has run yet: accepting tries the setup and each step here, "
+        "then saves them if all pass."
     )
 
 
@@ -178,13 +180,16 @@ def test_task_checks_with_a_trigger_show_when_they_run() -> None:
         "Task checks: every task, every 5 commits\n"
         "  1. Lint: ruff\n"
         "\n"
-        "✅ All passed on the current code."
+        "Nothing has run yet: accepting tries the setup and each step here, "
+        "then saves them if all pass."
     )
 
 
 def test_a_proposal_with_no_sets_or_triggers_lists_its_steps() -> None:
     assert proposal_text(PROPOSAL) == (
-        "Setup: none\n\nSteps:\n  1. Lint: ruff\n\n✅ All passed on the current code."
+        "Setup: none\n\nSteps:\n  1. Lint: ruff\n\n"
+        "Nothing has run yet: accepting tries the setup and each step here, "
+        "then saves them if all pass."
     )
 
 
@@ -207,7 +212,8 @@ def test_a_kept_set_given_a_table_shows_whether_it_holds_merges_and_keeps_its_st
         "Set mutation: no trigger, holds merges\n"
         "  steps kept as configured\n"
         "\n"
-        "✅ All passed on the current code."
+        "Nothing has run yet: accepting tries the setup and each step here, "
+        "then saves them if all pass."
     )
 
 
@@ -222,7 +228,8 @@ def test_a_kept_set_only_a_trigger_runs_keeps_its_steps_and_effect() -> None:
         "Set mutation: by hand\n"
         "  steps and whether it holds merges kept as configured\n"
         "\n"
-        "✅ All passed on the current code."
+        "Nothing has run yet: accepting tries the setup and each step here, "
+        "then saves them if all pass."
     )
 
 
@@ -236,7 +243,8 @@ def test_a_report_is_listed_under_its_set_saying_when_it_queues_its_lens() -> No
         "  3. C: c\n"
         "  mutation → tests-reviewer when it fails\n"
         "\n"
-        "✅ All passed on the current code."
+        "Nothing has run yet: accepting tries the setup and each step here, "
+        "then saves them if all pass."
     )
 
 
@@ -258,5 +266,6 @@ def test_a_report_on_a_kept_set_groups_the_steps_and_shows_the_set() -> None:
         "  steps and whether it holds merges kept as configured\n"
         "  mutation → tests-reviewer when it fails\n"
         "\n"
-        "✅ All passed on the current code."
+        "Nothing has run yet: accepting tries the setup and each step here, "
+        "then saves them if all pass."
     )

@@ -37,7 +37,7 @@ def entries(app: OrbitApp) -> list[str]:
     return [entry.text for entry in app.query_one(Transcript).entries(None)]
 
 
-def test_the_proposal_reads_setup_then_each_step_and_that_they_passed() -> None:
+def test_the_proposal_reads_setup_then_each_step_and_that_none_has_run() -> None:
     assert proposal_text(PROPOSAL) == (
         "Setup: uv sync\n"
         "  reruns when these change: uv.lock, pyproject.toml\n"
@@ -46,7 +46,8 @@ def test_the_proposal_reads_setup_then_each_step_and_that_they_passed() -> None:
         "  1. Lint: ruff check\n"
         "  2. Tests: uv run pytest -k 'not slow'\n"
         "\n"
-        "✅ All passed on the current code."
+        "Nothing has run yet: accepting tries the setup and each step here, "
+        "then saves them if all pass."
     )
     bare = PROPOSAL.model_copy(
         update={"setup": ProposedSetup(command=("make",)), "steps": PROPOSAL.steps[:1]}
@@ -65,6 +66,8 @@ async def test_a_proposal_opens_a_modal_showing_it() -> None:
         assert isinstance(screen, ProposalScreen)
         body = screen.query_one("#proposal-body", Static)
         assert str(body.render()) == proposal_text(PROPOSAL)
+        assert "passed" not in proposal_text(PROPOSAL)
+        assert screen.query_one(Vertical).border_subtitle == "a accept and try · r revise · x end"
         assert not screen.query_one(Input).display
         assert session.commands == []
 

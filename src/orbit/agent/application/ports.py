@@ -441,8 +441,8 @@ class ProposalReview(Protocol):
     """Where the user decides on the checks an agent proposed."""
 
     async def review(self, task_id: str, proposal: ChecksProposal) -> ProposalDecision:
-        """Show the user ``proposal``, which task ``task_id``'s agent made and orbit tried;
-        returns their decision."""
+        """Show the user ``proposal``, which task ``task_id``'s agent made and none of which has
+        run yet; returns their decision."""
         ...
 
 

@@ -81,6 +81,7 @@ from tests.agent_fakes import (
     session_for,
     verified,
 )
+from tests.proposal_fakes import Review
 from tests.waiting import eventually
 
 
@@ -1037,8 +1038,9 @@ async def test_a_claim_whose_failure_cannot_be_recorded_gets_an_error_reply() ->
 async def test_a_proposal_whose_trial_breaks_gets_an_error_reply() -> None:
     events: list[Event] = []
     verification = Verification((STEP,), breaking_step)
+    review = Review(ProposalDecision("accept"))
     reply = await held_reply(
-        "propose_checks", events, verification=verification, proposal_review=Undecided()
+        "propose_checks", events, verification=verification, proposal_review=review
     )
     assert reply == Reply("Orbit couldn't check your work: git status failed", is_error=True)
     assert [t.status for t in board(events)] == ["error"]
