@@ -200,6 +200,8 @@ carries on across sessions and restarts.
 Orbit saves the open session after every change to its store, a SQLite database in the state
 directory (see [Where orbit keeps things](#where-orbit-keeps-things)), where each repository has
 its own sessions. Each save is one transaction, so a crash or `ctrl+c` leaves the last save whole.
+What an agent's turn cost is saved with its task's next change, such as its end, rather than at
+once, so a crash can lose what a running task's latest turns cost.
 A new session is saved once you add a task or prompt the planner; quitting before that leaves
 nothing behind. Sessions are kept until you delete them: orbit never prunes them, and never
 overwrites a saved session it can't read. The design, and what is deliberately left for later, is in

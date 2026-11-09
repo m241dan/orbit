@@ -16,6 +16,7 @@ from orbit.protocol import (
     TaskState,
     Usage,
     given_skills,
+    replace_task,
 )
 from orbit.protocol import edit_refusal as shared_edit_refusal
 from orbit.tui.view.common import STATUS_ICONS, spinner_frame
@@ -406,6 +407,11 @@ class TaskBoard:
         self.numbers_by_id = dict(zip((t.id for t in tasks), self.numbers, strict=True))
         self._narrow()
         self._view.keep_ticking(ticking(tasks))
+
+    def show_task(self, task: TaskState) -> None:
+        """Show ``task`` in place of the task with its id, the rest as they are, relabelling
+        only its row; nothing for a task not on the list."""
+        self.show(replace_task(self.tasks, task))
 
     def show_lanes(self, lanes: Mapping[str, str]) -> None:
         """Tag each task with its role's lane as ``lanes`` gives it, and narrow the list by

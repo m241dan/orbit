@@ -35,6 +35,7 @@ from orbit.protocol import (
     SettingsChanged,
     Snapshot,
     StepState,
+    TaskChanged,
     TasksChanged,
     TaskState,
     ToolCallDecided,
@@ -124,6 +125,8 @@ class TaskListPane(Protocol):
     def numbers_by_id(self) -> Mapping[str, str]: ...
 
     def show(self, tasks: Sequence[TaskState]) -> None: ...
+
+    def show_task(self, task: TaskState) -> None: ...
 
     def show_lanes(self, lanes: Mapping[str, str]) -> None: ...
 
@@ -439,8 +442,8 @@ class EventRouter:
                 self._follow_settings(event)
             case BusyChanged(busy=busy, lane=lane):
                 self.set_busy(lane, busy)
-            case TasksChanged(tasks=tasks):
-                self._show_tasks(tasks)
+            case TasksChanged() | TaskChanged():
+                self._show_board(event)
             case (
                 AgentsChanged()
                 | UsageTotals()
@@ -517,6 +520,16 @@ class EventRouter:
     def _show_tasks(self, tasks: tuple[TaskState, ...]) -> None:
         task_list = self._panes.task_list
         task_list.show(tasks)
+        self._panes.agents.number_tasks(task_list.numbers_by_id)
+
+    def _show_board(self, event: TasksChanged | TaskChanged) -> None:
+        """Show the tasks ``event`` publishes: the whole list, or one task in place of the task
+        with its id, the rest of the list as it is."""
+        if isinstance(event, TasksChanged):
+            self._show_tasks(event.tasks)
+            return
+        task_list = self._panes.task_list
+        task_list.show_task(event.task)
         self._panes.agents.number_tasks(task_list.numbers_by_id)
 
     def _show_progress(self, event: ProgressEvent) -> None:

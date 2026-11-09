@@ -869,7 +869,7 @@ class ReviewLane:
         told = tell_landed_since(template.values, subjects)
         stored = render_held_prompt(template.template, told)
         if stored != self._board.get(task_id).task.prompt:
-            await self._tasks.change(lambda board: board.set_prompt(task_id, stored))
+            await self._tasks.change_task(task_id, lambda board: board.set_prompt(task_id, stored))
         return replace(template, values=told)
 
     async def _brief_reviewer(self, task_id: str, job: ReviewJob) -> str:

@@ -278,11 +278,10 @@ class AgentRun:
         return process.reason
 
     async def _count(self, usage: Usage) -> None:
-        """Add what one of the agent's turns cost to its task's total, unless the task was
-        removed once it finished: its last turn's usage arrives after it's completed."""
-        await self._tasks.change(
-            lambda board: board.add_usage(self._task_id, usage), refused=self._uncounted
-        )
+        """Add what one of the agent's turns cost to its task's total, saved with the task's next
+        change, unless the task was removed once it finished: its last turn's usage arrives
+        after it's completed."""
+        await self._tasks.add_usage(self._task_id, usage, self._uncounted)
 
     async def _uncounted(self, error: Refused) -> None:
         """Act on a turn's usage the board refused for a removed task: what the session spent
@@ -368,7 +367,7 @@ class AgentRun:
             assert self._verifier is not None  # Only verification fails.
             self._span.set_attributes({FIX_ATTEMPTS: self._work.attempt})
             self._failed_state = await self._verifier.fingerprint(self._root)
-            await self._tasks.change(self._retry)
+            await self._tasks.change_task(self._task_id, self._retry)
         return reply
 
     def _retry(self, board: TaskBoard) -> None:

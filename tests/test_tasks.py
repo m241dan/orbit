@@ -1,4 +1,5 @@
-"""The task board as the application changes it: each change through it is published whole."""
+"""The task board as the application changes it: each change through it is published, whole or
+as the one task it changed, and acted on, but for a turn's usage."""
 
 import asyncio
 
@@ -7,16 +8,24 @@ import pytest
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.refusals import Refused
-from orbit.protocol import Event, TasksChanged, TaskSpec
+from orbit.protocol import Event, TaskChanged, TasksChanged, TaskSpec, Usage
 
 
-def tasks_on(published: list[Event]) -> Tasks:
-    """Tasks on a new board, publishing to ``published``."""
+def tasks_on(published: list[Event], acted: list[str] | None = None) -> Tasks:
+    """Tasks on a new board, publishing to ``published`` and noting in ``acted``, if given, each
+    change acted on."""
 
     async def publish(event: Event) -> None:
         published.append(event)
 
-    return Tasks(TaskBoard(), publish)
+    async def changed() -> None:
+        if acted is not None:
+            acted.append("changed")
+
+    return Tasks(TaskBoard(), publish, changed)
+
+
+USAGE = Usage(input_tokens=10)
 
 
 async def test_publish_publishes_the_board_whole() -> None:
@@ -29,15 +38,16 @@ async def test_publish_publishes_the_board_whole() -> None:
     assert published == [TasksChanged(tasks=tasks.board.tasks)]
 
 
-async def test_start_marks_the_task_running_and_publishes_it() -> None:
+async def test_start_marks_the_task_running_and_publishes_that_task_alone() -> None:
     published: list[Event] = []
     tasks = tasks_on(published)
     task_id = tasks.board.add(TaskSpec(prompt="a"))
+    tasks.board.add(TaskSpec(prompt="b"))
 
     await tasks.start(task_id)
 
     assert tasks.board.get(task_id).status == "running"
-    assert published == [TasksChanged(tasks=tasks.board.tasks)]
+    assert published == [TaskChanged(task=tasks.board.get(task_id))]
 
 
 async def test_finish_ends_the_task_and_publishes_it() -> None:
@@ -183,3 +193,83 @@ async def test_a_wait_begun_after_a_change_waits_for_the_next() -> None:
 
     assert not waits.done()
     waits.cancel()
+
+
+async def test_a_change_to_one_task_publishes_that_task_alone_and_is_acted_on() -> None:
+    published: list[Event] = []
+    acted: list[str] = []
+    tasks = tasks_on(published, acted)
+    tasks.board.add(TaskSpec(prompt="a"))
+    task_id = tasks.board.add(TaskSpec(prompt="b"))
+
+    await tasks.change_task(task_id, lambda board: board.set_prompt(task_id, "b!"))
+
+    assert published == [TaskChanged(task=tasks.board.get(task_id))]
+    assert tasks.board.get(task_id).task.prompt == "b!"
+    assert acted == ["changed"]
+
+
+async def test_a_change_to_one_task_the_board_refuses_is_handed_to_refused_unpublished() -> None:
+    published: list[Event] = []
+    acted: list[str] = []
+    tasks = tasks_on(published, acted)
+
+    async def refused(error: Refused) -> str:
+        return error.message
+
+    def edits(board: TaskBoard) -> str:
+        board.set_status("missing", "running")
+        return "edited"
+
+    assert await tasks.change_task("missing", edits, refused) == "No task with id 'missing'."
+    assert (published, acted) == ([], [])
+
+
+async def test_a_turns_usage_publishes_its_task_alone_and_is_not_acted_on() -> None:
+    published: list[Event] = []
+    acted: list[str] = []
+    tasks = tasks_on(published, acted)
+    task_id = tasks.board.add(TaskSpec(prompt="a"))
+    tasks.board.add(TaskSpec(prompt="b"))
+
+    await tasks.add_usage(task_id, USAGE, ignored)
+
+    assert tasks.board.get(task_id).usage == USAGE
+    assert published == [TaskChanged(task=tasks.board.get(task_id))]
+    assert acted == []
+
+
+async def test_a_change_of_status_after_a_turns_usage_is_acted_on() -> None:
+    acted: list[str] = []
+    tasks = tasks_on([], acted)
+    task_id = tasks.board.add(TaskSpec(prompt="a"))
+    await tasks.add_usage(task_id, USAGE, ignored)
+
+    await tasks.start(task_id)
+
+    assert acted == ["changed"]
+
+
+async def test_a_removed_tasks_usage_is_handed_to_refused_unpublished() -> None:
+    published: list[Event] = []
+    tasks = tasks_on(published)
+    errors: list[Refused] = []
+
+    async def refused(error: Refused) -> None:
+        errors.append(error)
+
+    await tasks.add_usage("missing", USAGE, refused)
+
+    assert [error.message for error in errors] == ["No task with id 'missing'."]
+    assert published == []
+
+
+async def test_a_wait_for_a_change_ends_once_a_task_of_the_board_is_published() -> None:
+    tasks = tasks_on([])
+    task_id = tasks.board.add(TaskSpec(prompt="a"))
+    waits = asyncio.create_task(tasks.moved())
+    await asyncio.sleep(0)
+
+    await tasks.add_usage(task_id, USAGE, ignored)
+
+    await asyncio.wait_for(waits, 1)

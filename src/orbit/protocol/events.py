@@ -117,10 +117,20 @@ class BusyChanged(_Message):
 
 
 class TasksChanged(_Message):
-    """The whole task list, sent after every change to it."""
+    """The whole task list, sent after every change to which tasks it holds or their order, and
+    after a change to several of its tasks at once."""
 
     type: Literal["tasks_changed"] = "tasks_changed"
     tasks: tuple[TaskState, ...]
+
+
+class TaskChanged(_Message):
+    """One ``task`` of the task list as it is now, sent after a change to it alone, such as to its
+    status, prompt, attempt or usage; it takes the place of the task with its id, and the rest of
+    the list stays as it is."""
+
+    type: Literal["task_changed"] = "task_changed"
+    task: TaskState
 
 
 class TaskStarted(_Message):
@@ -888,6 +898,7 @@ Event = Annotated[
     | TurnFinished
     | BusyChanged
     | TasksChanged
+    | TaskChanged
     | TaskStarted
     | VerificationChanged
     | StartupChecked

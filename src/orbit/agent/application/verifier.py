@@ -167,7 +167,7 @@ class Verifier:
             await self._publish(VerificationSkipped(task_id=task_id, reason=reason))
             current_span().set_attributes({VERIFY_RESULT: "skipped"})
             return None
-        await self._tasks.change(lambda board: board.set_status(task_id, "verifying"))
+        await self._tasks.change_task(task_id, lambda board: board.set_status(task_id, "verifying"))
         failure = await self._tidily(self._verify(task_id, root, self._runner(request)))
         record_result(failure)
         return failure

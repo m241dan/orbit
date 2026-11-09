@@ -48,7 +48,6 @@ from orbit.protocol import (
     RunTasks,
     Settings,
     TaskGaveUp,
-    TasksChanged,
     TaskSpec,
     TurnEndReason,
     TurnFinished,
@@ -67,6 +66,7 @@ from tests.agent_fakes import (
     GatedHost,
     Steps,
     board,
+    boards,
     chats,
     desk_for,
     ended_unverified,
@@ -144,12 +144,7 @@ async def test_failed_checks_go_back_to_the_same_agent_to_fix() -> None:
     events = await asyncio.wait_for(run(session), 5)
 
     assert len(launcher.launches) == 1
-    shown = [
-        (t.status, t.attempt, t.max_attempts)
-        for e in events
-        if isinstance(e, TasksChanged)
-        for t in e.tasks
-    ]
+    shown = [(t.status, t.attempt, t.max_attempts) for tasks in boards(events) for t in tasks]
     assert ("running", 1, 5) in shown
     assert [t.status for t in board(events)] == ["completed"]
 

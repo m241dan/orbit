@@ -62,8 +62,8 @@ class UsageAccounting:
         """Publish ``event``, from the agents; one that ends a turn adds what the turn cost to
         what the session spent, in all and by role, and records it in the background, then
         publishes the session's state, its spend by role changed. Publishing never suspends,
-        so a turn is not cancelled between its TurnFinished and its own bookkeeping, which saves
-        the session after it."""
+        so a turn is not cancelled between its TurnFinished and its own bookkeeping, which counts
+        it towards its task after it."""
         if isinstance(event, TurnFinished) and event.usage is not None:
             self._charge(event.agent_id, event.usage)
         await self._parts.publish(event)

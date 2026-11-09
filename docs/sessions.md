@@ -49,6 +49,10 @@ startup as before.
 - **Writes.** Each save is one SQLite transaction, so a crash leaves the old record or the new one,
   never half of either. One connection serves the database, in WAL mode, owned by a single thread
   that runs every call. Saves run one at a time, the newest last, and only when something changed.
+  A turn's usage alone isn't saved: it's saved with its task's next change, such as its status's
+  or its end, or with any other change to the session (version 30), so that a turn costs the
+  same however long the task list grows; a crash loses at most what a running task's turns cost
+  since its last change.
   A failed write to the store, whether the record, the event log or the review count, halts the
   session rather than carrying on: events that couldn't be saved are parked in a fallback file
   until "Try again" (`ResumeStorage`) succeeds and appends them to the log (see README's

@@ -50,6 +50,7 @@ from orbit.protocol import (
     SkipReason,
     Snapshot,
     StepState,
+    TaskChanged,
     TasksChanged,
     TaskSpec,
     TaskStarted,
@@ -117,9 +118,7 @@ async def test_each_task_gets_its_own_agent_with_its_settings() -> None:
         ("agent-1", "1", first.settings),
         ("agent-2", "2", second.settings),
     ]
-    running = TasksChanged(
-        tasks=(TaskState(id="1", task=first, status="running"), TaskState(id="2", task=second))
-    )
+    running = TaskChanged(task=TaskState(id="1", task=first, status="running"))
     assert events.index(running) < events.index(TaskStarted(task_id="1"))
     assert statuses(events) == ["completed", "completed"]
     assert session.settings == Settings()
@@ -257,9 +256,8 @@ async def test_verification_progress_is_reported_step_by_step() -> None:
     def steps(status: str) -> VerificationChanged:
         return VerificationChanged(steps=(StepState(name="Unit tests", status=status),))  # type: ignore[arg-type]
 
-    def task(status: str) -> TasksChanged:
-        state = TaskState(id="1", task=TaskSpec(prompt="one"), status=status)  # type: ignore[arg-type]
-        return TasksChanged(tasks=(state,))
+    def state(status: str) -> TaskState:
+        return TaskState(id="1", task=TaskSpec(prompt="one"), status=status)  # type: ignore[arg-type]
 
     run_events = events[events.index(BusyChanged(busy=True)) :]
     shown = [
@@ -268,6 +266,7 @@ async def test_verification_progress_is_reported_step_by_step() -> None:
         if isinstance(
             e,
             TasksChanged
+            | TaskChanged
             | VerificationChanged
             | TaskStarted
             | VerificationStarted
@@ -275,15 +274,15 @@ async def test_verification_progress_is_reported_step_by_step() -> None:
         )
     ]
     assert shown == [
-        task("running"),
+        TaskChanged(task=state("running")),
         steps("pending"),
         TaskStarted(task_id="1"),
-        task("verifying"),
+        TaskChanged(task=state("verifying")),
         steps("running"),
         VerificationStarted(task_id="1", step=0),
         steps("passed"),
         VerificationFinished(task_id="1", step=0, passed=True),
-        task("completed"),
+        TasksChanged(tasks=(state("completed"),)),
     ]
 
 
@@ -608,26 +607,28 @@ async def test_usage_arriving_after_the_task_was_removed_is_saved_in_what_the_se
     await session.close()
 
 
-async def test_a_failure_saving_usage_is_reported_not_taken_for_a_removed_task() -> None:
+async def test_a_turns_usage_publishes_its_task_alone_and_saves_nothing() -> None:
     tasks = TaskBoard()
     task_id = tasks.add(TaskSpec(prompt="a"))
+    tasks.add(TaskSpec(prompt="b"))
     agents, launcher = agents_for(claims_done)
     launcher.usages = [(Usage(input_tokens=10),)]
-
     events: list[Event] = []
+    saves: list[Usage] = []
 
     async def publish(event: Event) -> None:
         events.append(event)
 
     async def changed() -> None:
-        if tasks.get(task_id).usage != Usage():
-            raise ValueError("saving tripped")
+        saves.append(tasks.get(task_id).usage)
 
     desk = AgentDesk(agents, publish)
     run = AgentRun(task_id, Tasks(tasks, publish, changed), None, desk)
     await asyncio.wait_for(run.run(None, "."), 5)
     assert tasks.get(task_id).usage == Usage(input_tokens=10)
-    assert ErrorOccurred(agent_id="agent-1", code=AGENT_FAILED, message="saving tripped") in events
+    assert TaskChanged(task=tasks.get(task_id)) in events
+    assert not any(isinstance(event, TasksChanged) for event in events)
+    assert saves == []
 
 
 async def test_a_failure_saving_a_change_the_board_made_is_refused_as_internal(

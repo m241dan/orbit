@@ -387,6 +387,26 @@ async def test_spinning_and_relabelling_redraw_only_their_rows() -> None:
         assert shown_rows(task_list)[2] == str(task_label(done, "3", spinner_frame(0.25)))
 
 
+async def test_a_changed_task_redraws_only_its_row_and_keeps_the_numbering() -> None:
+    app = TaskListApp()
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        task_list.clock = lambda: 0.0
+        one, two, three = board("one", "two", "three").tasks
+        fix = TaskState(id="4", task=TaskSpec(prompt="fix one"), fixes="1")
+        await show(pilot, TasksChanged(tasks=(one, fix, two, three)))
+        before = cached_rows(task_list)
+        assert {0, 1, 2, 3} <= before
+        spent = two.model_copy(update={"usage": Usage(input_tokens=512)})
+        task_list.board.show_task(spent)
+        assert cached_rows(task_list) == before - {2}
+        frame = spinner_frame(0.0)
+        assert shown_rows(task_list)[:4] == [
+            str(task_label(state, number, frame))
+            for state, number in zip((one, fix, spent, three), ("1", "1.1", "2", "3"), strict=True)
+        ]
+
+
 async def test_task_list_ticks_only_while_a_task_runs() -> None:
     app = TaskListApp()
     async with app.run_test() as pilot:

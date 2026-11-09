@@ -27,7 +27,7 @@ from orbit.protocol import (
     TurnEndReason,
 )
 from tests.agent_fakes import Call, FakeTree, Script, chats, claims_done, desk_for, gives_up
-from tests.lane_fakes import Gate, Hearing, no_work
+from tests.lane_fakes import Gate, Hearing, no_work, running
 from tests.waiting import eventually
 
 OTHERS_SLOT = ("other", "s")  # Another workspace's session, which holds the only coder's slot.
@@ -364,11 +364,6 @@ class NotingStart:
     async def __call__(self, event: Event) -> None:
         if self.pending is None and running(event):
             self.pending = {t for t in asyncio.all_tasks() if not t.done()}
-
-
-def running(event: Event) -> bool:
-    """Whether ``event`` publishes a board with a task running."""
-    return isinstance(event, TasksChanged) and any(t.status == "running" for t in event.tasks)
 
 
 async def waiting_lane_for(

@@ -34,6 +34,7 @@ from orbit.protocol import (
     SessionStateChanged,
     SettingsChanged,
     Snapshot,
+    TaskChanged,
     TaskMerged,
     TasksChanged,
     TaskStarted,
@@ -86,6 +87,7 @@ StateEvent = (
     SettingsChanged
     | BusyChanged
     | TasksChanged
+    | TaskChanged
     | ProgressEvent
     | StreamEvent
     | ReportEvent

@@ -48,7 +48,7 @@ from orbit.protocol import (
     levels_of_tool_access,
 )
 
-FORMAT_VERSION = 29
+FORMAT_VERSION = 30
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _OLD_SUPER_REVIEW_ORIGIN = "super_review"
@@ -335,7 +335,9 @@ def _leveled(settings: object) -> object:
 # Version 28 added the workspace level and web access of each setting, in place of the tool
 # access it keeps for older peers: its migration gives each the level and web access its tool
 # access maps to. Version 29 added the number of the last agent's call held for approval, which
-# an older record held none of.
+# an older record held none of. Version 30 changed nothing in the record but when it's saved:
+# with the protocol's ``TaskChanged``, a turn's usage is saved with its task's next change rather
+# than at once, so a record may count a running task's latest turns short.
 _MIGRATIONS: dict[int, Migration] = {
     1: _spent_by_tasks,
     2: _without_rounds,
@@ -365,6 +367,7 @@ _MIGRATIONS: dict[int, Migration] = {
     26: _unchanged,
     27: _levels_from_tool_access,
     28: _unchanged,
+    29: _unchanged,
 }
 
 EMPTY_NAME = "A session needs a name."

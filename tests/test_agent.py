@@ -38,7 +38,7 @@ from orbit.protocol import (
     SettingsChanged,
     Snapshot,
     StepState,
-    TasksChanged,
+    TaskChanged,
     TaskSpec,
     TaskState,
     TurnEndReason,
@@ -195,7 +195,7 @@ async def test_the_planner_takes_the_model_from_updated_settings() -> None:
     assert session.settings == new
 
 
-async def test_add_and_edit_tasks_publish_the_board() -> None:
+async def test_adding_a_task_publishes_the_board_and_editing_it_publishes_the_task() -> None:
     session = WorkspaceHost()
     stream = payloads(session)
     assert isinstance(await anext(stream), Snapshot)
@@ -207,7 +207,7 @@ async def test_add_and_edit_tasks_publish_the_board() -> None:
 
     edited = TaskSpec(prompt="one!", settings=Settings(tool_access="off"))
     await send(session, EditTask(task_id=added.id, task=edited))
-    assert await anext(stream) == TasksChanged(tasks=(TaskState(id=added.id, task=edited),))
+    assert await anext(stream) == TaskChanged(task=TaskState(id=added.id, task=edited))
     assert await anext(stream) == ACCEPTED
 
     await send(session, EditTask(task_id="nope", task=edited))

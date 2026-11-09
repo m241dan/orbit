@@ -354,7 +354,7 @@ class WorkCommands:
             board.accept(task_id)
             return board.get(task_id)
 
-        state = await self._parts.tasks.change(accept)
+        state = await self._parts.tasks.change_task(task_id, accept)
         self._parts.lanes.kick_for(state.task.role)
 
     async def _edit(self, task_id: str, task: TaskSpec) -> None:
@@ -372,7 +372,7 @@ class WorkCommands:
             return board.get(task_id)
 
         # The edited task is taken from the change: it may be removed while the save is awaited.
-        state = await self._parts.tasks.change(edit)
+        state = await self._parts.tasks.change_task(task_id, edit)
         self._parts.lanes.kick_for(state.task.role)
         if lane is not None:
             lane.edited(state)

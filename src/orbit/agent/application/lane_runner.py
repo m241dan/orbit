@@ -234,7 +234,7 @@ class LaneRunner:
             self._heard_from(state.task.role)
         if stop is None:
             return False
-        await self._tasks.change(lambda board: board.set_status(task_id, "pending"))
+        await self._tasks.change_task(task_id, lambda board: board.set_status(task_id, "pending"))
         self._again.add(task_id)
         if not self._parts.pauses.pause_for(stop, outcome.detail):
             self._held[stop.runtime] = self._parts.paused()

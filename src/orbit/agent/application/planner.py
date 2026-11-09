@@ -431,7 +431,7 @@ class PlannerChat:
             board.edit_draft(task_id, task, self._role)
             return Reply(f"Edited draft task {task_id}.")
 
-        return await self._tasks.change(edit, _refusal)
+        return await self._tasks.change_task(task_id, edit, _refusal)
 
     async def _remove_draft(self, arguments: dict[str, Any]) -> Reply:
         task_id = str(arguments.get("task_id", ""))

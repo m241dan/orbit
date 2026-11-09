@@ -587,8 +587,14 @@ the agent's tab, the decision as orbit's note to the agent that proposed.
 
 ## Tasks, settings and stopping work
 
-The task list is the session's, and every change to it publishes the whole list again in a
-`TasksChanged`, before the command's `CommandAccepted`. A command naming a task there's none of
+The task list is the session's. A change to which tasks it holds, or their order, or to several of
+them at once publishes the whole list again in a `TasksChanged`; a change to one task alone, such
+as to its status, prompt, attempt or what a turn cost, publishes just that task in a
+`TaskChanged`, which takes the place of the task with its id, the rest of the list staying as it
+is. Either comes before the command's `CommandAccepted`. Both are logged, so a frontend catching
+up on what it missed applies them in order; the Snapshot carries the whole list. An older frontend
+skips `TaskChanged`, as an event it doesn't know, and shows a task as the last `TasksChanged` left
+it until the next. A command naming a task there's none of
 is refused with `unknown`: `No task with id 't9'.`
 
 - `AddTask(task)` appends `task`, a `TaskSpec` with its `prompt`, `settings`, `role` and

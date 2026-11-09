@@ -19,6 +19,7 @@ from orbit.protocol import (
     SessionSummary,
     Settings,
     SettingsChanged,
+    TaskChanged,
     TasksChanged,
     TaskSpec,
     TaskStarted,
@@ -45,6 +46,33 @@ async def test_the_list_shows_the_board_the_backend_reports() -> None:
         "2. ✅ two  coder\n      default · read + web",
         "+ new task",
     ]
+
+
+async def test_a_changed_task_replaces_its_row_and_leaves_the_others_and_their_numbers() -> None:
+    shell = Shell()
+    one, two = board("one", "two", status="completed").tasks
+    fix = TaskState(id="3", task=TaskSpec(prompt="fix one"), fixes="1")
+    await shell.feed(TasksChanged(tasks=(one, fix, two)))
+    running = fix.model_copy(update={"status": "running", "attempt": 1, "max_attempts": 5})
+    await shell.feed(TaskChanged(task=running))
+    assert shell.task_view.rows[0] == "1. ✅ one  coder\n      default · read + web"
+    assert shell.task_view.rows[1].startswith("   1.1 ")
+    assert "fix one" in shell.task_view.rows[1] and "⏳" not in shell.task_view.rows[1]
+    assert shell.task_view.rows[2:] == [
+        "2. ✅ two  coder\n      default · read + web",
+        "+ new task",
+    ]
+    await shell.feed(TaskStarted(task_id="3"))
+    assert shell.entries() == [("Task 1.1: fix one", "user")]
+
+
+async def test_a_change_to_a_task_not_on_the_list_leaves_the_list_as_it_is() -> None:
+    shell = Shell()
+    await shell.feed(board("one"))
+    rows = shell.task_view.rows
+    gone = TaskState(id="9", task=TaskSpec(prompt="gone"), status="completed")
+    await shell.feed(TaskChanged(task=gone))
+    assert shell.task_view.rows == rows
 
 
 async def test_a_started_task_is_announced_by_its_number_in_the_list() -> None:

@@ -44,6 +44,7 @@ from orbit.protocol import (
     SendMessage,
     Settings,
     SettingsChanged,
+    TaskChanged,
     TasksChanged,
     TaskSpec,
     ToolCallDecided,
@@ -79,7 +80,7 @@ class Recorded:
 
     async def put(self, event: Event) -> None:
         self.effects.append(event)
-        if isinstance(event, TasksChanged) and self.meanwhile is not None:
+        if isinstance(event, TasksChanged | TaskChanged) and self.meanwhile is not None:
             meanwhile, self.meanwhile = self.meanwhile, None
             meanwhile()
 

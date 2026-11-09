@@ -5,7 +5,15 @@ import asyncio
 import itertools
 import logging
 import sys
-from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Mapping, Sequence
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Collection,
+    Iterable,
+    Mapping,
+    Sequence,
+)
 from dataclasses import dataclass, fields
 from datetime import UTC, datetime, timedelta
 from typing import Any, get_args
@@ -118,6 +126,7 @@ from orbit.protocol import (
     Settings,
     SettingsChanged,
     Snapshot,
+    TaskChanged,
     TasksChanged,
     TaskSpec,
     TaskState,
@@ -131,6 +140,7 @@ from orbit.protocol import (
     Welcome,
     WorkspaceLevel,
     encode,
+    replace_task,
 )
 from tests.loop_quiet import quiet_within
 from tests.waiting import eventually
@@ -1321,18 +1331,34 @@ def sole[E: Event](events: list[Event], kind: type[E]) -> E:
     return found
 
 
+def next_board(tasks: tuple[TaskState, ...], event: Event) -> tuple[TaskState, ...]:
+    """The board ``tasks`` as ``event`` leaves it: replaced by a ``TasksChanged``, with one
+    task replaced by a ``TaskChanged``, and as it is after any other event."""
+    match event:
+        case TasksChanged(tasks=whole):
+            return whole
+        case TaskChanged(task=task):
+            return replace_task(tasks, task)
+        case _:
+            return tasks
+
+
+def boards(events: Iterable[Event]) -> list[tuple[TaskState, ...]]:
+    """The board as each ``TasksChanged`` and ``TaskChanged`` in ``events`` leaves it, in
+    order, as a frontend following them shows it."""
+    published = [e for e in events if isinstance(e, TasksChanged | TaskChanged)]
+    empty: tuple[TaskState, ...] = ()
+    return list(itertools.accumulate(published, next_board, initial=empty))[1:]
+
+
 def board(events: list[Event]) -> tuple[TaskState, ...]:
-    return [e for e in events if isinstance(e, TasksChanged)][-1].tasks
+    return boards(events)[-1]
 
 
 def ended_unverified(events: list[Event], task_id: str) -> TaskState:
     """Task ``task_id`` as the board first showed it ended unverified."""
     return next(
-        t
-        for e in events
-        if isinstance(e, TasksChanged)
-        for t in e.tasks
-        if t.id == task_id and t.status == "unverified"
+        t for tasks in boards(events) for t in tasks if t.id == task_id and t.status == "unverified"
     )
 
 
@@ -1827,8 +1853,8 @@ async def _quiet(events: list[Event], done: Callable[[list[Event]], bool]) -> No
 
 
 def _finished(events: list[Event]) -> bool:
-    tasks = [e for e in events if isinstance(e, TasksChanged)]
-    return bool(tasks) and all(t.status in SETTLED for t in tasks[-1].tasks)
+    published = boards(events)
+    return bool(published) and all(t.status in SETTLED for t in published[-1])
 
 
 async def start(session: WorkspaceHost, *prompts: str) -> None:

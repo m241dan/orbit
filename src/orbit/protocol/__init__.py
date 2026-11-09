@@ -1,5 +1,6 @@
 """Shared contract between the frontend and the backend."""
 
+from orbit.protocol.boards import replace_task
 from orbit.protocol.clones import (
     clone_failure_message,
     clone_name,
@@ -119,6 +120,7 @@ from orbit.protocol.events import (
     SkipReason,
     Snapshot,
     StartupChecked,
+    TaskChanged,
     TaskGaveUp,
     TaskMerged,
     TasksChanged,
@@ -428,6 +430,7 @@ __all__ = [
     "StepStatus",
     "Stopped",
     "TakeOwnership",
+    "TaskChanged",
     "TaskGaveUp",
     "TaskMerged",
     "TaskOrigin",
@@ -480,6 +483,7 @@ __all__ = [
     "levels_of_tool_access",
     "looks_like_url",
     "output_tail",
+    "replace_task",
     "text_lines",
     "trace_carrier",
     "with_state",

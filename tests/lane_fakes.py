@@ -12,7 +12,7 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.reviews import ReviewLimits, ReviewPlanner
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.usage_limits import RuntimeStop
-from orbit.protocol import Event, TasksChanged, TaskSpec, TaskState
+from orbit.protocol import Event, TaskChanged, TasksChanged, TaskSpec, TaskState
 from orbit.tracing import Span
 from tests.agent_fakes import ROLES
 
@@ -27,8 +27,14 @@ def audit(prompt: str = "Audit it.") -> TaskSpec:
 
 
 def running(event: Event) -> bool:
-    """Whether ``event`` publishes a board with a task running."""
-    return isinstance(event, TasksChanged) and any(t.status == "running" for t in event.tasks)
+    """Whether ``event`` publishes a board, or a task of it, with a task running."""
+    match event:
+        case TasksChanged(tasks=tasks):
+            return any(t.status == "running" for t in tasks)
+        case TaskChanged(task=task):
+            return task.status == "running"
+        case _:
+            return False
 
 
 async def no_work() -> None:

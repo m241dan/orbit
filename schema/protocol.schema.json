@@ -1531,6 +1531,7 @@
               "settings_changed": "#/$defs/SettingsChanged",
               "snapshot": "#/$defs/Snapshot",
               "startup_checked": "#/$defs/StartupChecked",
+              "task_changed": "#/$defs/TaskChanged",
               "task_gave_up": "#/$defs/TaskGaveUp",
               "task_merged": "#/$defs/TaskMerged",
               "task_started": "#/$defs/TaskStarted",
@@ -1576,6 +1577,9 @@
             },
             {
               "$ref": "#/$defs/TasksChanged"
+            },
+            {
+              "$ref": "#/$defs/TaskChanged"
             },
             {
               "$ref": "#/$defs/TaskStarted"
@@ -3453,6 +3457,26 @@
       "title": "TakeOwnership",
       "type": "object"
     },
+    "TaskChanged": {
+      "description": "One ``task`` of the task list as it is now, sent after a change to it alone, such as to its\nstatus, prompt, attempt or usage; it takes the place of the task with its id, and the rest of\nthe list stays as it is.",
+      "properties": {
+        "task": {
+          "$ref": "#/$defs/TaskState"
+        },
+        "type": {
+          "const": "task_changed",
+          "default": "task_changed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task",
+        "type"
+      ],
+      "title": "TaskChanged",
+      "type": "object"
+    },
     "TaskGaveUp": {
       "description": "The agent working on task ``task_id`` reported it can't do it, and why.",
       "properties": {
@@ -3718,7 +3742,7 @@
       "type": "object"
     },
     "TasksChanged": {
-      "description": "The whole task list, sent after every change to it.",
+      "description": "The whole task list, sent after every change to which tasks it holds or their order, and\nafter a change to several of its tasks at once.",
       "properties": {
         "tasks": {
           "items": {
